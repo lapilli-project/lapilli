@@ -735,18 +735,23 @@ func TestSecrets(t *testing.T) {
 	c.Serve.TasksToken = file("tasks", "shared-token-0123456789")
 	c.Serve.ChangesToken = file("changes", "shared-token-0123456789\n")
 	c.Serve.Slack = file("slack", "http://hooks.example/x")
+	// 31 bytes and a line break, which isn't of the key.
+	c.Serve.NotifyWebhookSecret = file("signing", "signing-key-0123456789abcdefghi\n")
 	p := newRun(c)
 	p.secrets()
 	it := itemOf(p, "secrets.files")
 	if it == nil || it.State != Problem || !strings.Contains(it.Why, "holds the same token as --tasks-token-file") ||
-		!strings.Contains(it.Why, "doesn't hold an https URL") || strings.Contains(it.What+it.Why, "shared-token") || strings.Contains(it.What+it.Why, "hooks.example") {
+		!strings.Contains(it.Why, "doesn't hold an https URL") || strings.Contains(it.What+it.Why, "shared-token") || strings.Contains(it.What+it.Why, "hooks.example") ||
+		!strings.Contains(it.Why, "--notify-webhook-secret-file "+c.Serve.NotifyWebhookSecret+": 31 characters, under 32") || strings.Contains(it.What+it.Why, "signing-key") {
 		t.Fatalf("%+v", it)
 	}
 	c.Serve.ChangesToken = file("changes", "another-token-0123456789")
 	c.Serve.Slack = file("slack", "https://hooks.example/x")
+	c.Serve.NotifyWebhookSecret = file("signing", "signing-key-0123456789abcdefghij\n")
 	p = newRun(c)
 	p.secrets()
-	if it := itemOf(p, "secrets.files"); it == nil || it.State != OK || !strings.Contains(it.What, "23 characters") {
+	if it := itemOf(p, "secrets.files"); it == nil || it.State != OK || !strings.Contains(it.What, "23 characters") ||
+		!strings.Contains(it.What, "--notify-webhook-secret-file "+c.Serve.NotifyWebhookSecret+": 32 characters") {
 		t.Fatalf("%+v", it)
 	}
 }

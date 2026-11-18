@@ -2253,5 +2253,8 @@
  "running": "실행 중",
  "superseded by a newer commit": "새 커밋으로 대체됨",
  "cancelled": "취소됨",
- "under a second": "1초 미만"
+ "under a second": "1초 미만",
+ "No firing started in the span.": "이 기간에 시작된 발화가 없어요.",
+ "Firings that started in the span: %d; the JSON lists the first %d.": "이 기간에 시작된 발화는 %d건이고, JSON에는 앞의 %d건만 있어요.",
+ "Firings that started in the span: %d, each listed in the JSON.": "이 기간에 시작된 발화는 %d건이고, JSON에 하나씩 모두 있어요."
 }

@@ -2253,5 +2253,8 @@
  "running": "en curso",
  "superseded by a newer commit": "reemplazado por un commit más nuevo",
  "cancelled": "cancelado",
- "under a second": "menos de un segundo"
+ "under a second": "menos de un segundo",
+ "No firing started in the span.": "Ningún disparo empezó en el periodo.",
+ "Firings that started in the span: %d; the JSON lists the first %d.": "Disparos que empezaron en el periodo: %d; el JSON lista los primeros %d.",
+ "Firings that started in the span: %d, each listed in the JSON.": "Disparos que empezaron en el periodo: %d, cada uno en el JSON."
 }

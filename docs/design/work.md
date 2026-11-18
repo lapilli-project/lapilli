@@ -147,7 +147,10 @@ empty the cache: the Administration and Settings pages, which say where notices 
 when the outbox last sent and how many of the last day's failed, are worked
 out for each request instead ([ui.md](ui.md), "First use"). `/metrics` gives `lapilli_serve_notices_total{to,result}` and
 `lapilli_serve_notices_unsent`. The webhook's and Slack's URLs are read
-from files, never shown, and no redirect is followed.
+from files, never shown, and no redirect is followed. With
+`--notify-webhook-secret-file`, each post to the webhook is signed, each
+try at its own time, with `X-Lapilli-Timestamp` and `X-Lapilli-Signature`
+([Signed posts to the webhook](../serve.md#signed-posts-to-the-webhook)).
 
 ## A tracker
 

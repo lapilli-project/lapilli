@@ -764,7 +764,12 @@ Local`). Each cloud, alike:
 `serve.notify` tells what happens to a webhook, whose URL is kept in a
 Secret, and to Slack. The events are tasks made, assigned, done or overdue,
 incidents written down, quiet windows kept, and comments. Links point under
-`serve.externalURL`.
+`serve.externalURL`. `serve.notify.webhookSecret.signingKey` names a key of
+the same Secret holding a key of 32 bytes or more: each post to the webhook
+is then signed with it, `X-Lapilli-Timestamp` and `X-Lapilli-Signature`, for
+the receiver to check that it came from Lapilli, as
+[Signed posts to the webhook](https://github.com/lapilli-project/lapilli/blob/main/docs/serve.md#signed-posts-to-the-webhook)
+says.
 
 Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they

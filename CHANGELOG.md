@@ -72,6 +72,38 @@
   `serve-url`, `audience`, `audience-any` and `serve-wait`, with
   `permissions: id-token: write`; without `serve-url`, the action is as it
   was.
+- **A report's `firings` section: the span's firings one by one**, for a
+  receiver that makes something of its own of each, a review item for each
+  alert that keeps coming back, say. It is picked as the others are: on the
+  Reports page, in `/api/v1/reports` and in `serve.config`'s `reports:`.
+  `report.ready`'s `numbers.firings` is `items`, each firing that started in
+  the span as `/api/v1/report`'s `firings[]` has it, with its rule's
+  `severity` and `team` as the CSV's columns have them, in order of their
+  start, then of their rule; `total`; and `truncated`, true when it was cut:
+  at 5,000, which are all it reads whole (the rest are counted), or at 1
+  MiB of `items`, whichever comes first, as receivers often cap a post at
+  a few MiB and one refused is tried again for about eight hours, then
+  dropped. A team's
+  report lists its rules' firings alone, judged by the incidents it owns.
+  Its line in the text says how many, and that they were cut; the names and
+  labels in `items` are as written, as every field that names a thing is.
+  No schema change: a report's sections are kept as a list already.
+- **The posts to the webhook, signed**, with `--notify-webhook-secret-file
+  FILE` beside `--notify-webhook-file` (the chart's
+  `serve.notify.webhookSecret.signingKey`, a key of the same Secret): every
+  event, each try signed again at its own time, with `X-Lapilli-Timestamp`,
+  the Unix seconds it is sent at, and `X-Lapilli-Signature`, `sha256=` and
+  the HMAC-SHA256 of the timestamp, a `.` and the bytes sent, in lowercase
+  hex. The key is what the file holds less one line break at its end, 32
+  bytes at least, read for each post so that it can be rotated, and never
+  shown or logged, nor are the signatures. `serve` refuses to start with a
+  key shorter, one it can't read, or no webhook to sign for; a post whose
+  key can't be read later fails, and is tried again, never sent unsigned.
+  `lapilli preflight` reads it with the other secrets. docs/serve.md,
+  "Signed posts to the webhook", says how a receiver checks a post: the
+  HMAC worked out again over the body as it came, compared in constant
+  time, and a timestamp more than five minutes off refused, as Lapilli
+  takes Grafana's. Without the flag, a post is as it was.
 
 ### Changed
 

@@ -1,10 +1,14 @@
 // Package report sends a verdict on: its metrics to a Pushgateway, its text
-// to a Slack incoming webhook.
+// to a Slack incoming webhook; and what lapilli serve tells of, to a
+// webhook, signed when it is given a key.
 package report
 
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,8 +116,9 @@ func SlackMessage(ctx context.Context, file, text string) error {
 
 // Webhook posts body, as JSON, to the URL in file, with key as its
 // Idempotency-Key. The URL is a secret, as a Slack webhook's is: read from
-// a file, never shown.
-func Webhook(ctx context.Context, file string, body []byte, key string) error {
+// a file, never shown. With keyFile, the post is signed with the key in it,
+// at the time at (Sign), read for each post so that it can be rotated.
+func Webhook(ctx context.Context, file string, body []byte, key, keyFile string, at time.Time) error {
 	hook, err := secretURL(file, "--notify-webhook-file")
 	if err != nil {
 		return err
@@ -124,7 +130,59 @@ func Webhook(ctx context.Context, file string, body []byte, key string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "lapilli")
 	req.Header.Set("Idempotency-Key", key)
+	if keyFile != "" {
+		// Never sent unsigned: a key that can't be read fails the post,
+		// which is tried again.
+		k, err := SigningKey(keyFile)
+		if err != nil {
+			return err
+		}
+		Sign(req.Header, k, body, at)
+	}
 	return send(req, "the webhook")
+}
+
+// SigningKeyLeast is how long a webhook's signing key is, in bytes, at
+// least: as long as the HMAC-SHA256 it keys.
+const SigningKeyLeast = 32
+
+// SigningKey is the key in a file that a webhook's posts are signed with:
+// what it holds, less one line break at its end (a file written with echo
+// has one), 32 bytes at least. Its errors never hold the key.
+func SigningKey(file string) ([]byte, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("--notify-webhook-secret-file: %w", err)
+	}
+	k := TrimKey(b)
+	if len(k) < SigningKeyLeast {
+		return nil, fmt.Errorf("--notify-webhook-secret-file: want a key of %d bytes at least, not %d", SigningKeyLeast, len(k))
+	}
+	return k, nil
+}
+
+// TrimKey is a key file's bytes less one line break at their end, \n or
+// \r\n: the rest, spaces and all, is the key.
+func TrimKey(b []byte) []byte {
+	if k, ok := bytes.CutSuffix(b, []byte("\n")); ok {
+		k, _ = bytes.CutSuffix(k, []byte("\r"))
+		return k
+	}
+	return b
+}
+
+// Sign signs a post to a webhook, so that whoever takes it can tell it came
+// from whoever holds key, as it was sent: X-Lapilli-Timestamp is at, in
+// Unix seconds, and X-Lapilli-Signature is sha256= and the HMAC-SHA256,
+// with key, of the timestamp, a dot and body, the bytes sent, in lowercase
+// hex. Each try is signed again, at its own time.
+func Sign(h http.Header, key, body []byte, at time.Time) {
+	ts := strconv.FormatInt(at.Unix(), 10)
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(ts + "."))
+	mac.Write(body)
+	h.Set("X-Lapilli-Timestamp", ts)
+	h.Set("X-Lapilli-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 }
 
 // secretURL reads an http or https URL from a file.
