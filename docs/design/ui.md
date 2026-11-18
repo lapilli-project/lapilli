@@ -661,7 +661,12 @@ none of whose firings caught nothing. The firings asleep and off hours
 of those that caught nothing count the ones not judged too, so a row
 with some not judged says "caught nothing or not judged: 1 asleep, 0 off
 hours". The sum's notes are a line under it alike, in the line's weight,
-with no edge between them and the sum.
+with no edge between them and the sum. The line is as wide as the row
+and no wider (`width: 0; min-width: 100%`): on the deployment, a long
+line widened the columns it spans, the numbers' among them, and left the
+rule's at its floor (the demo at 1280 px: 323 px, 396 with the line out
+of the sizing). A label chip breaks after its "=" (`<wbr>`), not inside a
+word ("category=availabilit / y").
 
 ### The search box
 
@@ -1903,6 +1908,13 @@ would read worse than either. What to look at's lines, and the lines
 that ask whether a feed still runs, say what to check, not ask it ("중요했다면
 기록하세요", "기록이 이어지는지 확인하세요"). `TestKoreanTerms` fails on the
 words it replaced.
+
+After 0.60.0 on the same deployment, Korean says 규칙 for a rule
+everywhere, not 룰 (the digests and the reports said both); 룰러 stays, the
+ruler's name. 자는 시간 오탐 for what woke people for nothing, in the
+digests too, not 자는 동안 깨운 or 헛알림. What to look at's line for no
+record says when and what to do, not why again: the notice above it says
+why.
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

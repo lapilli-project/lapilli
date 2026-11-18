@@ -67,7 +67,7 @@ func TestWokenNoRecord(t *testing.T) {
 		t.Errorf("no record: %q %v", line, nums)
 	}
 	s.cfg.Lang = "ko"
-	if line, _ := woken(none); line != "자는 동안 울린 발화 (판정할 기록된 인시던트 없음): 8건. 룰별: Errors (8)." || strings.Contains(line, "오탐") {
+	if line, _ := woken(none); line != "자는 동안 울린 발화 (판정할 기록된 인시던트 없음): 8건. 규칙별: Errors (8)." || strings.Contains(line, "오탐") {
 		t.Errorf("in Korean: %q", line)
 	}
 	s.cfg.Lang = ""

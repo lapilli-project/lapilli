@@ -1531,7 +1531,6 @@
  "the time for one request was up: %d not tried; pick them again": "se acabó el tiempo de una petición: %d sin intentar; elígelas de nuevo",
  "None of the proposals picked is here.": "Ninguna de las propuestas elegidas está aquí.",
  "No incident written down to judge the firings by": "Ningún incidente registrado con el que juzgar los disparos",
- "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.": "en las últimas cuatro semanas ni en las dos anteriores: un disparo que no detectó nada no se distingue de uno que nadie registró, así que ninguna regla se considera ruidosa. Registra los incidentes, o marca los disparos que fueron reales.",
  "not known: no incident written down to judge the firings by": "desconocida: ningún incidente registrado con el que juzgar los disparos",
  "No incident written down from %s, or in the two weeks before: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.": "Ningún incidente registrado desde el %s, ni en las dos semanas anteriores: un disparo que no detectó nada no se distingue de uno que nadie registró, así que ninguna regla se considera ruidosa. Registra los incidentes, o marca los disparos que fueron reales.",
  "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known.": "Se disparó a menudo en las semanas mostradas, sin ningún incidente registrado con el que juzgarla: no se sabe si sus disparos importaban.",
@@ -2240,5 +2239,6 @@
  "No firing in these weeks, so there is no precision to draw.": "No hubo disparos en estas semanas: no hay precisión que dibujar.",
  "Pick rules to act on several at once.": "Elige reglas para actuar sobre varias a la vez.",
  "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "Como mucho %d reglas a la vez, %d para propuestas, y solo las que puedes cambiar; cada propuesta se prueba con un backtest y espera a que una persona la apruebe.",
- "caught nothing or not judged: %d asleep, %d off hours": "sin detectar nada o sin juzgar: %d en horas de sueño, %d fuera de horario"
+ "caught nothing or not judged: %d asleep, %d off hours": "sin detectar nada o sin juzgar: %d en horas de sueño, %d fuera de horario",
+ "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "en las últimas cuatro semanas o las dos anteriores: anota los incidentes, o marca los disparos que fueron reales."
 }

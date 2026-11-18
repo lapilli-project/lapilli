@@ -258,3 +258,26 @@ func TestRefiredToldNotJudged(t *testing.T) {
 	}
 	t.Fatal("no Refired tile")
 }
+
+// TestRuleColumnRoom: a rule's label chip breaks after its "=", not inside
+// a word, and the line of notes under a row doesn't widen the columns it
+// spans (docs/design/ui.md, "The table fits a laptop's screen").
+func TestRuleColumnRoom(t *testing.T) {
+	s := pagesServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+	if !regexp.MustCompile(`<a class="chip label" href="[^"]*"><span class="vh">Only those with the label </span><bdi>[^<=]+=<wbr>[^<]+</bdi></a>`).MatchString(body) {
+		t.Error("a label chip doesn't break after its =")
+	}
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+	i := strings.Index(css, "\np.row-notes {")
+	if i < 0 {
+		t.Fatal("no rule for p.row-notes")
+	}
+	if r := css[i : i+strings.Index(css[i:], "}")]; !strings.Contains(r, "width: 0;") || !strings.Contains(r, "min-width: 100%") {
+		t.Errorf("the notes widen the columns: %s", r)
+	}
+}

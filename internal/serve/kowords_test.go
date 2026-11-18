@@ -101,15 +101,19 @@ func TestKoreanSaysNoStones(t *testing.T) {
 }
 
 // TestKoreanTerms: Korean says 정탐 and 오탐, not 무언가를 잡음 and 아무것도
-// 못 잡음; 백테스트, not 재생, for a replay; and doesn't say a person was
-// woken in vain (괜히) where only the hours are known (docs/design/ui.md,
-// "Times, and Korean").
+// 못 잡음; 백테스트, not 재생, for a replay; 규칙, not 룰, for a rule; and
+// doesn't say a person was woken (깨운), or woken in vain (괜히, 헛알림),
+// where only the hours are known (docs/design/ui.md, "Times, and Korean").
 func TestKoreanTerms(t *testing.T) {
 	for en, ko := range catalogs["ko"] {
-		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히"} {
+		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운"} {
 			if strings.Contains(ko, w) && !strings.Contains(en, "returned anything") {
 				t.Errorf("%q says %s: %q", en, w, ko)
 			}
+		}
+		// A rule is 규칙; 룰러 is the ruler, Prometheus's and Loki's.
+		if strings.Contains(strings.ReplaceAll(ko, "룰러", ""), "룰") {
+			t.Errorf("%q says 룰 for a rule: %q", en, ko)
 		}
 	}
 }

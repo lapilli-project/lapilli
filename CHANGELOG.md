@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The rules list and the Korean, as 0.60.0 read on a real deployment** (docs/design/ui.md,
+  bundle 59): the rules list's line of notes under a row no longer widens
+  the columns it spans, so the rule's column keeps its room (at 1280 px,
+  on the demo ledger, 396 px for 323); a label chip breaks after its
+  "=", not inside a word. Korean says 규칙 for a rule everywhere, not 룰
+  (룰러 stays), and 자는 시간 오탐 in the digests, not 자는 동안 깨운 or
+  헛알림. What to look at's line for no record no longer says why again,
+  as the notice above it does.
+
 ## [0.60.0] - 2026-11-18
 
 Two security fixes, `lapilli preflight` asking what the credentials that
