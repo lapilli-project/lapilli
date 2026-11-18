@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -172,8 +173,8 @@ func TestPreflightBacktests(t *testing.T) {
 // What lapilli preflight says of a trust file is what serve does with it
 // at start, read by the same reader (serve.ReadTrust, as readServe reads
 // the flags): serve refuses it, and stops, exactly when preflight says it
-// is a problem, saying the same why; serve takes it exactly when
-// preflight says so. And the port's flags that serve.New refuses beside
+// is a problem, saying the same refusal (serve.TrustRefused) in Lapilli's
+// words; serve takes it exactly when preflight says so. And the port's flags that serve.New refuses beside
 // the file (rules to replay) are said alike.
 func TestPreflightTrustAsServe(t *testing.T) {
 	dir := t.TempDir()
@@ -225,7 +226,14 @@ func TestPreflightTrustAsServe(t *testing.T) {
 		if (serveErr != nil) != (code == 2) || serveErr != nil && !strings.Contains(errOut.String(), verdict.Clean(serveErr.Error())) {
 			t.Errorf("%s: serve exits %d, %v:\n%s", x.name, code, serveErr, errOut.String())
 		}
-		said := func(err error) string { return verdict.Clean(strings.Join(strings.Fields(err.Error()), " ")) }
+		// Said in Lapilli's words, from serve's own refusal: where, and why.
+		said := func(err error) string {
+			var tr *serve.TrustRefused
+			if !errors.As(err, &tr) {
+				return "not serve's refusal: " + err.Error()
+			}
+			return verdict.Clean(tr.Said())
+		}
 		rep, code, _ := pfReport(t, args...)
 		it := pfItems(rep)["backtest.trust"]
 		switch {

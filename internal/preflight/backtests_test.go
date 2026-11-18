@@ -376,10 +376,11 @@ func TestBacktestOffline(t *testing.T) {
 // to replay, is a problem, as serve stops at start.
 func TestBacktestTrustRefused(t *testing.T) {
 	c := backtestConfig()
+	// An error that isn't serve's refusal is said by none of its words.
 	c.TrustErr = fmt.Errorf("--backtest-trust trust.yaml: alerts: claims: pin repository_id")
 	p := newRun(c)
 	p.backtest(context.Background())
-	if it := itemOf(p, "backtest.trust"); it == nil || it.State != Problem || !strings.Contains(it.Why, "pin repository_id") {
+	if it := itemOf(p, "backtest.trust"); it == nil || it.State != Problem || it.Why != "it can't be used" {
 		t.Errorf("%+v", it)
 	}
 	if it := itemOf(p, "backtest.issuers"); it == nil || it.State != Unknown {
@@ -401,24 +402,34 @@ func TestBacktestTrustRefused(t *testing.T) {
 	}
 }
 
-// What the trust file pins, and the audience its tokens are for, are
-// never printed: not as Lapilli says the entries, nor in what ReadTrust
-// said refusing it, which names a value it can't take; the events pinned
-// are, which are one of a few words.
+// Nothing a trust file holds reaches the report, however it is written:
+// why serve refuses it is said in Lapilli's words alone, from the refusal
+// serve.ReadTrust gives (its line, its entry, its field), never serve's
+// message, which quotes what it can't take; and Lapilli's words aren't
+// changed by a value that is one of them (days: 30 beside a pin of "1").
 func TestBacktestTrustHidden(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "trust.yaml")
 	gh := "trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: %s\n    claims:\n%s"
 	for _, x := range []struct {
-		file, hidden, as, shown string
+		file, says string
+		hidden     []string
 	}{
 		{fmt.Sprintf(gh, "https://lapilli-ci.example.com", "      repository_id: [\"123456789\", 0x75bcd15]\n      event_name: pull_request\n"),
-			"0x75bcd15", "[--backtest-trust's repository_id]", ""},
-		{fmt.Sprintf(gh, "https://github.com/example-owner", "      repository_id: \"123456789\"\n      event_name: pull_request\n"),
-			"example-owner", "[--backtest-trust's audience]", "GitHub's default"},
+			"line 6, entry 1, claims: a claim's value that isn't a string or an integer written in decimal", []string{"0x75bcd15", "123456789"}},
+		{fmt.Sprintf(gh, "\"https://github.com/example-owner   \"", "      repository_id: \"123456789\"\n      event_name: pull_request\n"),
+			"line 4, entry 1: audience is GitHub's default", []string{"example-owner"}},
 		{"trust:\n  - name: generic\n    issuer: https://ci.example.com\n    audience: https://lapilli-ci.example.com\n    claims:\n      sub: 0x2f3a\n      event_name: push\n",
-			"0x2f3a", "[--backtest-trust's sub]", ""},
-		{fmt.Sprintf(gh, "https://lapilli-ci.example.com", "      repository_id: \"123456789\"\n      repository_owner_id: 4200\n      event_name: pull_request_target\n"),
-			"123456789", "", "pull_request_target"},
+			"claims: a claim's value", []string{"0x2f3a"}},
+		{"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n    claims: {repository_id:987650001, event_name: pull_request}\n",
+			"a claim pinned to no value", []string{"987650001"}},
+		{fmt.Sprintf(gh, "https://lapilli-ci.example.com", "      \"987650002\": repository_id\n      event_name: pull_request\n"),
+			"a claim's name that isn't one", []string{"987650002"}},
+		{"ids: &ids [\"987650003\", 0x3ade]\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims:\n      repository_id: *ids\n      event_name: pull_request\n", "decimal", []string{"987650003", "0x3ade"}},
+		{fmt.Sprintf(gh, "https://lapilli-ci.example.com", "      repository_id: \"123456789\"\n      repository_owner_id: 4200917\n      event_name: pull_request_target\n"),
+			"event_name: want pull_request or push", []string{"123456789", "4200917", "pull_request_target"}},
+		{"trust:\n  - {name: alerts, issuer: 'https://token.actions.githubusercontent.com', audience: x, claims: {repository_id: '1', event_name: push}, days: 30}\n",
+			"line 2, entry 1: days is 1 to 14", []string{"30"}},
 	} {
 		os.WriteFile(file, []byte(x.file), 0o600)
 		_, err := serve.ReadTrust(file, nil, true)
@@ -426,15 +437,19 @@ func TestBacktestTrustHidden(t *testing.T) {
 			t.Fatalf("taken: %s", x.file)
 		}
 		c := backtestConfig()
-		c.TrustFile, c.TrustErr, c.Scrubber = file, err, byFlag
+		c.TrustFile, c.TrustErr = file, err
 		p := newRun(c)
-		p.hideTrust()
 		p.backtest(context.Background())
 		p.redact()
 		it := itemOf(p, "backtest.trust")
-		if strings.Contains(it.What+it.Why+it.Fix, x.hidden) || !strings.Contains(it.Why, x.as) || !strings.Contains(it.Why, x.shown) ||
-			strings.Contains(it.Why, "4200") {
-			t.Errorf("%v\n%+v", err, it)
+		all := it.What + " " + it.Why + " " + it.Fix
+		if !strings.Contains(it.Why, x.says) {
+			t.Errorf("%v\n%+v, want it to say %q", err, it, x.says)
+		}
+		for _, h := range x.hidden {
+			if strings.Contains(all, h) {
+				t.Errorf("says %q: %+v", h, it)
+			}
 		}
 	}
 	// Taken, its entries are said by their claims' names.

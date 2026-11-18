@@ -2,16 +2,12 @@ package preflight
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"maps"
-	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-
-	"go.yaml.in/yaml/v3"
 
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
@@ -90,105 +86,15 @@ func (p *run) allowIssuers() {
 	}
 }
 
-// hideTrust has what is printed redact the values --backtest-trust pins
-// and the audience its tokens are for: a repository's id, sub, an owner's
-// id, the backtest port's own URL. Lapilli's words name the claims, never
-// their values; what serve.ReadTrust said in refusing the file may hold
-// them, so they are hidden in what was said, as a short name a server
-// says is. They are read from the file as YAML, whatever serve made of
-// it, so that those of a file it refuses are hidden too. The event a job
-// runs for (event_name, pipeline_source) is one of a few words, which the
-// refusal names, and isn't hidden.
-func (p *run) hideTrust() {
-	if !p.backtesting() || p.c.TrustFile == "" {
-		return
-	}
-	f, err := os.Open(p.c.TrustFile)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, 1<<20))
-	if err != nil {
-		return
-	}
-	var doc yaml.Node
-	if yaml.Unmarshal(b, &doc) != nil {
-		return
-	}
-	hide := func(what string, n *yaml.Node) {
-		var vs []*yaml.Node
-		switch n.Kind {
-		case yaml.ScalarNode:
-			vs = []*yaml.Node{n}
-		case yaml.SequenceNode:
-			vs = n.Content
-		}
-		for _, v := range vs {
-			if v.Kind == yaml.ScalarNode && v.Value != "" {
-				// As written, and as ReadTrust quotes it (%q).
-				for _, as := range []string{v.Value, strings.Trim(strconv.Quote(v.Value), `"`)} {
-					p.hideSaid("--backtest-trust's "+what, as)
-					p.trustHidden = append(p.trustHidden, [2]string{"--backtest-trust's " + what, as})
-				}
-			}
-		}
-	}
-	for _, entry := range yamlEntries(&doc) {
-		for i := 0; i+1 < len(entry.Content); i += 2 {
-			k, v := entry.Content[i], entry.Content[i+1]
-			switch {
-			case k.Value == "audience":
-				hide("audience", v)
-			case k.Value == "claims" && v.Kind == yaml.MappingNode:
-				for j := 0; j+1 < len(v.Content); j += 2 {
-					if name := v.Content[j].Value; name != "event_name" && name != "pipeline_source" {
-						hide(name, v.Content[j+1])
-					}
-				}
-			}
-		}
-	}
-}
-
-// yamlEntries are the mappings under a trust file's trust:, as the YAML
-// reads, whatever else it holds.
-func yamlEntries(doc *yaml.Node) []*yaml.Node {
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 {
-		doc = doc.Content[0]
-	}
-	if doc.Kind != yaml.MappingNode {
-		return nil
-	}
-	var out []*yaml.Node
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		if doc.Content[i].Value != "trust" || doc.Content[i+1].Kind != yaml.SequenceNode {
-			continue
-		}
-		for _, e := range doc.Content[i+1].Content {
-			if e.Kind == yaml.MappingNode {
-				out = append(out, e)
-			}
-		}
-	}
-	return out
-}
-
-// trustSaidMost is how much of why serve refuses a trust file is said, in
-// bytes: ReadTrust's own words, the file's path and an entry's name among
-// them, and what YAML says of each line it can't read.
-const trustSaidMost = 600
-
-// trustSaid is why serve.ReadTrust refused the trust file, as serve says
-// it, on one line: its own words, not a server's, so not cut as one is,
-// once what the file pins is taken out of it (hideTrust), which a value
-// it can't take is said by.
+// trustSaid is why serve refuses the trust file, in Lapilli's words
+// alone (serve.TrustRefused's Said): where in the file, and what is wrong,
+// never a value the file holds, which serve's own message may quote.
 func (p *run) trustSaid(err error) string {
-	why := strings.Join(strings.Fields(err.Error()), " ")
-	if p.c.Scrubber != nil {
-		why = p.c.Scrubber(p.trustHidden...)(why)
+	var tr *serve.TrustRefused
+	if errors.As(err, &tr) {
+		return tr.Said()
 	}
-	return clip(why, trustSaidMost)
+	return "it can't be used"
 }
 
 // backtest says what serve does with the backtest port's flags and trust

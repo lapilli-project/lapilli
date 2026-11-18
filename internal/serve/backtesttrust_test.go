@@ -1,10 +1,15 @@
 package serve
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // A trust file is read strictly, and one that can't be used, or would trust
@@ -77,6 +82,106 @@ func TestReadTrustRefused(t *testing.T) {
 		_, err := ReadTrust(f, []string{incidents}, false)
 		if err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%s: %v, want it to say %q", name, err, c.says)
+		}
+		// And the same refusal in Lapilli's words, with nothing of the file.
+		var tr *TrustRefused
+		if !errors.As(err, &tr) || tr.Why == "" {
+			t.Errorf("%s: %T %v", name, err, err)
+		} else if what := leaked(c.file, tr.Said()); what != "" {
+			t.Errorf("%s: %q says %q of the file", name, tr.Said(), what)
+		}
+	}
+}
+
+// trustWords are the words of Lapilli's own a trust file holds too, which
+// a refusal may say: its keys, the claims and events it names, its CIs.
+var trustWords = append(append([]string{"trust", "true", "false", "repository_id", "project_id", "event_name", "pipeline_source", "sub",
+	"repository", "project_path", "pull_request", "push", "merge_request_event", "github", "gitlab", "forgejo", "https", "http", "sigstore"}, trustFields...), checkedClaims...)
+
+// leaked is a word of the file's that said says, "" for none: every
+// scalar of the file, keys among them, outside trust: too, and every run
+// of letters and digits in each, of four characters or more, but
+// Lapilli's own words.
+func leaked(file, said string) string {
+	var doc yaml.Node
+	yaml.Unmarshal([]byte(file), &doc)
+	var scalars []string
+	var walk func(*yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n.Kind == yaml.ScalarNode {
+			scalars = append(scalars, n.Value)
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(&doc)
+	// What a value the YAML doesn't read holds, by line, as yaml.v3 can't
+	// make it a node: every run of the file's.
+	whole := regexp.MustCompile(`[A-Za-z0-9_]+(?:[._:/@-]+[A-Za-z0-9_]+)*`)
+	// But a file's path, the token's, which no refusal says either.
+	paths := regexp.MustCompile(`(^|[\s{,])/[^\s,}]*`)
+	scalars = append(scalars, whole.FindAllString(paths.ReplaceAllString(file, " "), -1)...)
+	part := regexp.MustCompile(`[A-Za-z0-9_.@-]+|[0-9]{4,}`)
+	for _, sc := range scalars {
+		if strings.HasPrefix(sc, "/") {
+			continue // a file's path, the token's: said by no refusal
+		}
+		for _, w := range append(append([]string{sc}, whole.FindAllString(sc, -1)...), part.FindAllString(sc, -1)...) {
+			if len(w) < 4 || slices.Contains(trustWords, w) || strings.HasPrefix(w, "/") {
+				continue
+			}
+			if regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(w) + `($|[^A-Za-z0-9_])`).MatchString(said) {
+				return w
+			}
+		}
+	}
+	return ""
+}
+
+// What a trust file holds never reaches what a refusal says in Lapilli's
+// words, however the file is written: a key that holds the value (no space
+// after its colon), a key and a value the other way about, aliases and
+// merge keys from outside trust:, an audience with spaces after it. Nor
+// does a value change Lapilli's own words.
+func TestReadTrustSaid(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "trust.yaml")
+	for name, c := range map[string]struct {
+		file, says string
+		line       int
+		field      string
+	}{
+		"no space after the colon": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims: {repository_id:987650001, event_name: pull_request}\n", "no value", 5, "claims"},
+		"a key and a value the other way": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims:\n      \"987650002\": repository_id\n      event_name: pull_request\n", "a claim's name that isn't one", 5, "claims"},
+		"an alias from outside trust:": {"ids: &ids [\"987650003\", 0x3ade]\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims:\n      repository_id: *ids\n      event_name: pull_request\n", "decimal", 1, ""},
+		"a merge key from outside trust:": {"base: &base\n  repository_id: \"987650004\"\n  event_name: workflow_run\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n" +
+			"    audience: https://lapilli-ci.example.com\n    claims:\n      <<: *base\n", "a key other than trust:", 1, ""},
+		"an audience with spaces after it": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n" +
+			"    audience: \"https://github.com/example-owner-987650005   \"\n    claims: {repository_id: \"987650006\", event_name: push}\n", "GitHub's default", 4, "audience"},
+		"a value Lapilli's words hold": {"trust:\n  - {name: plain, token_file: /x, days: 30, hourly: 1}\n  - {name: alerts, issuer: 'https://token.actions.githubusercontent.com', audience: x, claims: {repository_id: '1', event_name: push}, days: 30}\n",
+			"days is 1 to 14", 2, "days"},
+		"an unknown ci":  {"trust:\n  - {name: a, ci: jenkins-987650007, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", "github, gitlab or forgejo", 2, "ci"},
+		"an unknown key": {"trust:\n  - name: a\n    token_file: /x\n    weekly_987650008: 3\n", "isn't one of an entry's", 4, ""},
+		"a merge key in an entry": {"base: &base\n  repository_id: \"987650011\"\n  event_name: workflow_run\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n" +
+			"    audience: https://lapilli-ci.example.com\n    claims: {event_name: push}\n    <<: *base\n", "a key other than trust:", 1, ""},
+		"YAML that doesn't read":  {"trust:\n  - name: a\n   issuer: \"https://ci-987650009.example.com\n", "doesn't read as YAML", 0, ""},
+		"an issuer of plain http": {"trust:\n  - {name: a, issuer: 'http://ci-987650010.example.com', audience: x, claims: {sub: y}}\n", "want https", 2, "issuer"},
+	} {
+		os.WriteFile(f, []byte(c.file), 0o600)
+		_, err := ReadTrust(f, nil, true)
+		var tr *TrustRefused
+		if !errors.As(err, &tr) {
+			t.Errorf("%s: %T %v", name, err, err)
+			continue
+		}
+		said := tr.Said()
+		if what := leaked(c.file, said); what != "" || strings.Contains(said, "98765") || !strings.Contains(said, c.says) ||
+			c.line > 0 && tr.Line != c.line || tr.Field != c.field {
+			t.Errorf("%s: %q (line %d, field %q), leaks %q; serve says %v", name, said, tr.Line, tr.Field, what, err)
 		}
 	}
 }

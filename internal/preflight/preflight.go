@@ -124,7 +124,6 @@ func Run(ctx context.Context, c Config) *Report {
 	p := &run{c: c, al: al, r: &Report{Version: 1, Lapilli: c.Version}, now: c.Now().UTC()}
 	p.allowAll()
 	p.hideScopes()
-	p.hideTrust()
 	read := p.rules(ctx)
 	p.expressions()
 	p.history(ctx, read)
@@ -163,9 +162,6 @@ type run struct {
 	// docs are the documents the rules were read from, by where
 	// (ruler, alarms:SOURCE): the alarms and the namespaces there are.
 	docs map[string][]rules.Doc
-	// trustHidden are what --backtest-trust pins, and its audience, by
-	// what each is: taken out of why serve refuses the file (trustSaid).
-	trustHidden [][2]string
 	// runsBy are the requests of each of a day's hourly runs, by API, as
 	// the estimate counted them: timed again at what the runs have while
 	// the backtest lane runs (whileBacktest).
