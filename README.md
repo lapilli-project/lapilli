@@ -112,7 +112,11 @@ Lapilli has one maintainer and is looking for more, from more than one
 organisation. [ROADMAP.md](ROADMAP.md) lists what it doesn't do yet, area by
 area, with where each lives in the code. Several areas need what the current
 maintainer doesn't have: an AWS or Azure workspace, Loki alerts, an incident
-tool. [MAINTAINERS.md](MAINTAINERS.md) says how contributing in an area leads
+tool. To start small, an issue labelled
+[good first issue](https://github.com/lapilli-project/lapilli/labels/good%20first%20issue) says where its change goes
+and when it's done; one labelled
+[help wanted](https://github.com/lapilli-project/lapilli/labels/help%20wanted) needs an account or a language
+the maintainer doesn't have. [MAINTAINERS.md](MAINTAINERS.md) says how contributing in an area leads
 to reviewing and maintaining it, [GOVERNANCE.md](GOVERNANCE.md) how decisions
 are made, and [CONTRIBUTING.md](CONTRIBUTING.md) how to build, test and send a
 change. The most useful report there is: a rule that replays differently from
