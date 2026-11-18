@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-11-19
+
+Pull request backtests through `lapilli serve`: a CI job sends a pull
+request's rules to serve, which replays them with its own access to the
+history and judges them by its record, so CI holds no metric credentials;
+the backtest recipes and the action send them so. The rules list and the
+Korean as 0.60.0 read on a real deployment. **Ledger schema 023**, after
+022, even without `--backtest-listen`: keep a copy of the ledger's disk,
+or of its database, before upgrading
+([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+
 ### Added
 
 - **Pull request backtests through serve, by the CI's ID token**
