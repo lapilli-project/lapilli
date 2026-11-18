@@ -184,6 +184,18 @@ func (s *Server) matchOf(set map[string]ledger.Setting) []string {
 	return o.Match
 }
 
+// leadOf is --lead in effect, by the settings set: the command line's, or
+// the UI's, as options reads it, the command line's when it doesn't parse.
+func (s *Server) leadOf(set map[string]ledger.Setting) time.Duration {
+	o := s.cfg.Options
+	if v, ok := set["lead"]; ok {
+		if err := apply(&o, "lead", v.Value); err != nil {
+			return s.cfg.Options.Lead
+		}
+	}
+	return o.Lead
+}
+
 // withSettings are the settings set with values changed, as saving them
 // would leave them: "" deletes one; who set them and when, by and at.
 func withSettings(set map[string]ledger.Setting, values map[string]string, by string, at time.Time) map[string]ledger.Setting {

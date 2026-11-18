@@ -223,6 +223,31 @@ Before upgrading:
   `--expect-before`): its values and what its aliases expand to bounded
   before it is decoded, in time linear in it. One denser than a rule
   file may be is refused, saying so.
+- **Serve started again with named impact signals kept the windows of the
+  one with no name as incidents with no signal** (docs/design/signals.md,
+  "Step 3, as built"; docs/upgrading.md, "From `--impact` to named
+  signals"). From 0.55.0 to 0.60.0, `lapilli serve` started with `--impact
+  NAME=PROMQL` or `--impact-file` in place of `--impact PROMQL` left the
+  windows `--impact` had found with no name: each kept every rule's
+  record, as an incident written down does, so in their weeks and the two
+  after each a rule an entry ties only to a signal with `record: false`
+  was judged, and its firings black, where `lapilli verdict` with the
+  same rules and file leaves them unjudged. The leader's first round now
+  ties them to the name `impact`, once, as the Settings page does when the
+  first named signal is saved there: with a signal named `impact` in
+  effect they are its windows, their keys, decisions, tasks and comments
+  kept, matched on its labels, and, when the ledger kept no `impact` yet,
+  it is made of the one with no name, its record kept and nothing read
+  again when its expression and `for` are the same; with none named
+  `impact`, they are the windows of a signal no longer read, kept as
+  those of a signal taken away are, which keep every rule's record still
+  (give the file the old expression as `impact` to have them judged as
+  its windows). The firings that could catch them are judged again; the
+  log says how many windows were tied, and to what, in one line, and the
+  Run history notes it (`lapilli: impact windows of the signal with no
+  name tied to the signal impact`). With no named signal, or no window of
+  the one with no name, nothing changes; the next start does nothing
+  more. No schema change.
 
 ## [0.60.0] - 2026-11-18
 
