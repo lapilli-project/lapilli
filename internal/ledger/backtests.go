@@ -90,7 +90,7 @@ var (
 // ErrBacktestsFull, and nothing is kept.
 func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) (b Backtest, again bool, superseded int, err error) {
 	if len(a.Body) > MaxBacktestBody {
-		return Backtest{}, false, 0, invalid("a backtest's request is %d MiB at most", MaxBacktestBody>>20)
+		return Backtest{}, false, 0, fmt.Errorf("a backtest's request is %d MiB at most", MaxBacktestBody>>20)
 	}
 	body, err := gzBytes(a.Body)
 	if err != nil {
@@ -332,7 +332,7 @@ func (l *Ledger) BacktestMade(ctx context.Context, id string, made int) (cancel 
 // go. One no longer running, or no longer kept, is left as it is.
 func (l *Ledger) EndBacktest(ctx context.Context, id, state, why string, made int, result []byte, now time.Time) error {
 	if len(result) > MaxBacktestResult {
-		return invalid("a backtest's result is %d MiB at most", MaxBacktestResult>>20)
+		return fmt.Errorf("a backtest's result is %d MiB at most", MaxBacktestResult>>20)
 	}
 	var z any // NULL for none
 	if result != nil {

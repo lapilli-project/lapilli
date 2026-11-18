@@ -112,6 +112,24 @@ func NewPace(rate float64) *Pace {
 	return &Pace{every: time.Duration(float64(time.Second) / max(rate, MinRate))}
 }
 
+// Rate is how many requests a second p lets through at most, 0 for a nil
+// Pace, which is no rate.
+func (p *Pace) Rate() float64 {
+	if p == nil {
+		return 0
+	}
+	return float64(time.Second) / float64(p.every)
+}
+
+// Share is a Pace of f of p's rate, nil for a nil Pace or an f of 0 or
+// less: the lane's own pace, which AlsoPaced holds to p too.
+func (p *Pace) Share(f float64) *Pace {
+	if p == nil || !(f > 0) {
+		return nil
+	}
+	return NewPace(p.Rate() * f)
+}
+
 // NewLimiter is a Limiter of rate requests a second at most; 0 for no rate.
 func NewLimiter(rate float64) *Limiter {
 	return NewLimiterPaced(NewPace(rate))
@@ -136,6 +154,10 @@ func (l *Limiter) AlsoPaced(p *Pace) *Limiter {
 
 // Pace is the pace l's requests are spaced by, nil for none.
 func (l *Limiter) Pace() *Pace { return l.pace }
+
+// AlsoPace is the pace AlsoPaced spaces l's requests by too, nil for
+// none.
+func (l *Limiter) AlsoPace() *Pace { return l.also }
 
 // NewCap is a Limiter of n requests in flight at most, and no rate, which
 // no answer changes: a parent (Within) for the Limiters of the data sources

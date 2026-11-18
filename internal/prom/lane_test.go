@@ -111,3 +111,18 @@ func TestLaneClient(t *testing.T) {
 		t.Errorf("timeouts sent: %q, want none from the client, 120s from its lane", timeouts)
 	}
 }
+
+// A Pace's rate, and its share, as made.
+func TestPaceShare(t *testing.T) {
+	p := NewPace(0.5)
+	if r := p.Rate(); r != 0.5 {
+		t.Errorf("rate %g", r)
+	}
+	if q := p.Share(0.25); q.Rate() != 0.125 {
+		t.Errorf("a quarter of 0.5: %g", q.Rate())
+	}
+	var none *Pace
+	if none.Rate() != 0 || none.Share(0.25) != nil || p.Share(0) != nil {
+		t.Error("no rate has a share")
+	}
+}

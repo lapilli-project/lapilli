@@ -541,6 +541,113 @@ own, which every pod mounts. From 0.35 or before, upgrade with one
 replica first: its pod holds the ledger alone, and refuses new ones until
 it stops.
 
+## Pull request backtests
+
+A CI job can backtest a pull request's rules through serve, with serve's
+access to the history and its record, and post the same comment
+`lapilli verdict --compare --changed-only --markdown` writes: no metric
+credential in CI, the incidents and impact windows serve keeps judging the
+firings, and one quota for both (docs/design/backtests.md). Off unless
+given:
+
+```sh
+lapilli serve --rules rules/ --prometheus http://prometheus:9090 --max-rate 2 \
+  --backtest-listen :8084 --backtest-trust /etc/lapilli/backtest/trust.yaml
+```
+
+The port takes `POST /v1/backtests`, and `GET` and `DELETE
+/v1/backtests/{id}`, and nothing else (the API is in
+[docs/design/backtests.md](design/backtests.md), "Flags and API"). The trust
+file says who may ask, each entry
+a CI's issuer of ID tokens or a plain token, and is read at start: one
+that can't be used stops serve from starting.
+
+```yaml
+trust:
+  - name: alerts                 # what the log, /metrics and Run history call it
+    issuer: https://token.actions.githubusercontent.com
+    audience: https://lapilli-ci.example.com
+    claims:                      # each exactly this, as a string
+      repository_id: ["123456789"]
+      event_name: pull_request
+    days: 14                     # the most one of its backtests replays
+    hourly: 30                   # backtests it may start in an hour
+  - name: monitoring-gitlab
+    issuer: https://gitlab.example.com
+    ci: gitlab                   # known from the issuer for gitlab.com
+    audience: https://lapilli-ci.example.com
+    claims:
+      project_id: "42"
+      pipeline_source: merge_request_event
+  - name: monitoring-azure
+    token_file: /etc/lapilli/backtest/azure-token   # 32 characters at least
+```
+
+- **An ID token** is checked as a bearer token of `--oidc-issuer` is: its
+  signature, by a key of the issuer's (from its discovery document's JWKS
+  at the issuer's own origin, or `jwks_url`), by an algorithm of a key
+  pair, never `none` or HMAC, and an RSA key of 2048 to 4096 bits; `aud`
+  the entry's `audience` and nothing beside it; `exp` and `nbf`; `iat`
+  within the last hour, whatever `exp` says; each claim pinned exactly,
+  a string as it is, an integer by its decimal. `jti`, or the token's hash,
+  starts one backtest, with the body it first came with: sent again with
+  it, the same backtest (200, without its key); with another, 409.
+- **The audience** is required, and should be the port's URL. GitHub's
+  default (the repository owner's URL), one at the issuer's own origin,
+  `sigstore`, and the audiences of AWS STS, Microsoft Entra's token
+  exchange and Google Cloud's workload identity federation are refused:
+  a token made for one of them could be sent here, or one made here sent
+  there.
+- **Pins.** For GitHub Actions (`ci: github`, known from its issuer),
+  Forgejo Actions (`ci: forgejo`, known from an issuer ending in
+  `/api/actions`) and GitLab CI (`ci: gitlab`), the entry must pin the
+  repository's id (`repository_id`, or GitLab's `project_id`), which may be
+  a list, one of them enough; and the event, `event_name` (GitLab's
+  `pipeline_source`), to `pull_request` or `push` (`merge_request_event`
+  or `push`): another can run a fork's pull request in the repository's
+  own context. Every other pin is one value, `repository_owner_id` among
+  them, which narrows, never replaces, the repository's. Another issuer's
+  entry pins `sub` or another claim, one value each. A fork's pull request
+  is never backtested: GitHub gives a fork's `pull_request` run no ID
+  token, and GitLab names a fork's merge request by its own project.
+- **A plain token**, for a CI with no ID token (Azure Pipelines, Gitea,
+  Jenkins), is read for each request, and refused while it is the same as
+  another token serve takes. It is a long-lived secret: whoever holds it
+  backtests as that entry until it is rotated.
+
+The replica that leads runs the queue, one backtest at a time, beside the
+runs and not in them. It asks the history through a lane of its own, at
+`--backtest-share` of `--max-rate` (a quarter by default) and within the
+runs' pace too, so that together they never pass it, and the runs always
+have the rest; without `--max-rate`, a quarter of `--parallel` at once,
+one at least. A backtest that couldn't finish within `--backtest-timeout`
+at the lane's rate is refused before it waits, saying how many requests it
+needs and what period would fit. 20 wait at most (`--backtest-queue`), 3
+of an entry, one of a pull request (a newer commit's takes the place of the
+one waiting); past them, and past an entry's `hourly`, 429 with
+`Retry-After`. With replicas, the queue and each entry's hour are the
+ledger's: any replica takes a backtest and answers for it.
+
+What the pull request's PromQL can do: it runs as range queries, with
+serve's access, so it can read whatever that access reads, a count at a
+time in the firings the comment says. Give serve's history credential what
+the rules need and no more. The port takes rules in Prometheus's format
+alone; 50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
+a group interval of an hour at most; each selector one metric's, by its
+name (`{job="api"}` and `{__name__=~"..."}` are refused); each range query
+with a timeout of a minute; days 1 to 14, and the entry's `days`.
+
+The comment's heading says lapilli serve's record judged it. It holds the
+rules' names and labels as the pull request wrote them, the counts, and
+the incidents' ids and titles: no label of a series a rule read, no word
+of what the history answered, nothing of where it is. The Run history page
+lists each backtest (when, the entry, the repository, the rules that
+differ, the requests, how long, how it ended; no rule's name), and
+`/metrics` has `lapilli_serve_backtests_total{trust,result}` and
+`lapilli_serve_backtests_waiting{trust}`. A backtest is kept a day after it
+ends, 200 at most. In the chart, `serve.backtest`
+([its README](../charts/lapilli/README.md)).
+
 ## Firings recorded elsewhere
 
 A cloud's own alarms that aren't written in PromQL can't be replayed, but

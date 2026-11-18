@@ -193,14 +193,25 @@ func TestCIFetchesSparingly(t *testing.T) {
 		t.Errorf("a minute on, %d fetches, want 2", n)
 	}
 
-	down := &CI{Issuer: "http://127.0.0.1:1", Client: Client(nil), Now: clk.now}
+	var asked int
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer failing.Close()
+	down := &CI{Issuer: failing.URL, Client: Client(nil), Now: clk.now}
 	for range 20 {
 		if _, err := down.Verify(context.Background(), "x.y.z", ciAudience); !errors.Is(err, ErrUnreachable) {
 			t.Fatalf("an issuer out of reach: %v", err)
 		}
 	}
-	if !down.tried.Equal(clk.now()) {
-		t.Error("discovery was tried again within the minute")
+	if asked != 1 {
+		t.Errorf("20 tokens of an issuer out of reach asked it %d times within the minute, want once", asked)
+	}
+	clk.move(time.Minute)
+	down.Verify(context.Background(), "x.y.z", ciAudience)
+	if asked != 2 {
+		t.Errorf("a minute on, asked %d times, want 2", asked)
 	}
 }
 

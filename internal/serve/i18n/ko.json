@@ -2240,5 +2240,17 @@
  "Pick rules to act on several at once.": "규칙을 골라 한 번에 처리할 수 있어요.",
  "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "한 번에 규칙 %d개까지, 변경 제안은 %d개까지이고, 바꿀 권한이 있는 규칙만 바뀌어요. 제안마다 백테스트를 하고 사람의 승인을 기다려요.",
  "caught nothing or not judged: %d asleep, %d off hours": "인시던트를 잡지 못했거나 판정 안 된 발화 중 자는 시간 %d, 업무 외 %d",
- "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "지난 4주와 그 전 2주. 인시던트를 기록하거나, 실제 문제였던 발화를 표시하세요."
+ "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "지난 4주와 그 전 2주. 인시던트를 기록하거나, 실제 문제였던 발화를 표시하세요.",
+ "Pull request backtests": "PR 백테스트",
+ "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request.": "CI 작업이 --backtest-listen 으로 요청하고, 리더 레플리카가 한 번에 하나씩 실행해요. 끝난 뒤 하루 동안 보관해요. 백테스트 코멘트는 해당 PR 에 있어요.",
+ "Asked": "요청 시각",
+ "Entry": "항목",
+ "Repository": "저장소",
+ "Rules that differ": "달라진 규칙",
+ "Requests": "요청 수",
+ "Took": "걸린 시간",
+ "How it ended": "결과",
+ "running": "실행 중",
+ "superseded by a newer commit": "새 커밋으로 대체됨",
+ "cancelled": "취소됨"
 }

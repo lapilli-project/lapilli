@@ -1,0 +1,88 @@
+{{- include "lapilli.defaults" . }}
+{{- $b := .Values.serve.backtest }}
+{{- if and (eq .Values.mode "serve") $b.enabled }}
+{{- $svc := $b.service }}
+{{- $type := $svc.type | default "ClusterIP" }}
+# Pull request backtests from CI jobs, alone (serve.backtest): a ClusterIP
+# for runners inside the cluster, or a load balancer's or a node's port,
+# with TLS ended in front, for a CI provider's runners.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lapilli.fullname" . }}-backtest
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $type }}
+  {{- if eq $type "LoadBalancer" }}
+  {{- with $svc.loadBalancerClass }}
+  loadBalancerClass: {{ . | quote }}
+  {{- end }}
+  {{- with $svc.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- if ne $type "ClusterIP" }}
+  {{- with $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- end }}
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include "lapilli.selector" . | nindent 4 }}
+  ports:
+    - name: backtest
+      port: {{ int ($svc.port | default $b.port) }}
+      targetPort: backtest
+      {{- if ne $type "ClusterIP" }}
+      {{- with $svc.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+      {{- end }}
+{{- if $b.ingress.enabled }}
+{{- $i := $b.ingress }}
+---
+# Pull request backtests through an ingress controller, apart from the UI,
+# over TLS: its API's paths alone. With serve.networkPolicy,
+# serve.backtest.from must let the controller's pods in.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "lapilli.fullname" . }}-backtest
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+  {{- with $i.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $i.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with $i.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range ($i.hosts | default (list "")) }}
+    - http:
+        paths:
+          - path: /v1/backtests
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lapilli.fullname" $ }}-backtest
+                port:
+                  name: backtest
+      {{- with . }}
+      host: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

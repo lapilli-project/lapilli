@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Pull request backtests through serve, by the CI's ID token**
+  (docs/design/backtests.md, step 1; docs/serve.md, "Pull request
+  backtests"). `--backtest-listen ADDR` is a port of its own: a CI job
+  sends a pull request's rules before and after, and the replica that
+  leads replays them with serve's access to the history, judged by its
+  record, and gives back the Markdown and JSON `lapilli verdict --compare
+  --changed-only --markdown` and `--json` write, the same summary line,
+  its heading saying serve's record judged it; the job posts it. No
+  metric credential in CI. Who may ask is `--backtest-trust`, read at
+  start, serve refusing to start on a file it can't use: GitHub Actions',
+  GitLab CI's and Forgejo Actions' ID tokens, each by its issuer's keys,
+  by an algorithm of a key pair, for the entry's audience alone (a CI's
+  default audience and the clouds' token exchanges' refused), issued
+  within the hour, with the repository's id pinned (a list of them, one
+  enough, never an owner whole) and the event (`pull_request` or `push`,
+  never one a fork runs in the repository's context); or a plain token,
+  32 characters at least. A token starts one backtest, with the body it
+  came with. Prometheus-format rules alone, 50 that differ at most, each
+  selector of one metric by its name; the request 4 MiB at most, read
+  only once its token verified. The lane asks through a Limiter of its
+  own, at `--backtest-share` of `--max-rate` (0.25 by default, 0.05 to
+  0.75) and within the runs' pace, so that the two never pass the rate
+  together; `--backtest-queue` (20), 3 of an entry, one of a pull
+  request, a newer commit's superseding the one waiting; an entry's
+  `hourly` from a bucket the replicas share; `--backtest-timeout` (15m),
+  one that couldn't finish in it refused before it waits, saying what
+  period would fit. The comment holds no label of a series a rule read,
+  no word of what the history answered, nothing of where it is; the log
+  a line a backtest, with counts. The Run history lists each, and
+  `/metrics` has `lapilli_serve_backtests_total{trust,result}` and
+  `lapilli_serve_backtests_waiting{trust}`. Without `--backtest-listen`,
+  nothing of it. The chart's `serve.backtest`. **Ledger schema 023**,
+  after 022: `backtests`, a row a backtest asked, kept a day after it
+  ends and 200 at most, and `backtest_tokens`, the tokens that started
+  one, kept past their hour. A lapilli before this one doesn't open a
+  ledger it has migrated: keep a copy of its disk, or of its database,
+  first ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+
 ### Changed
 
 - **The rules list and the Korean, as 0.60.0 read on a real deployment** (docs/design/ui.md,

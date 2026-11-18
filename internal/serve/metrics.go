@@ -296,6 +296,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	// What lapilli serve asked of the history: counters, not kept with
 	// the pages.
 	s.historyMetrics(w)
+	// Pull request backtests, with --backtest-listen: they change with
+	// the queue, not the pages.
+	s.backtestMetrics(ctx, w)
 	// The goals, as the leader worked them out after its last round: read,
 	// not worked out, and not kept with the pages, as the leader says them.
 	s.goalMetrics(ctx, w)

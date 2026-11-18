@@ -560,6 +560,45 @@ Agents, over MCP at /mcp:
                       rule (the propose tool), kept as an agent's for a
                       person to approve. An agent never approves or applies
 
+Pull request backtests, from CI jobs (off by default; docs/serve.md, "Pull
+request backtests"):
+  --backtest-listen ADDR
+                      take pull request backtests here, and nothing else:
+                      POST /v1/backtests from a CI job, with the rules before
+                      and after (recipes/backtest's serve mode), replayed by
+                      the replica that leads, one at a time, with this
+                      serve's access to the history and judged by its
+                      record; GET /v1/backtests/ID, with the key given, says
+                      where it is and, once done, gives the comment lapilli
+                      verdict --compare --changed-only --markdown writes;
+                      DELETE cancels it. Prometheus-format rules only, 50
+                      that differ at most, each selector of one metric by its
+                      name. It runs PromQL the pull request writes, with this
+                      serve's access: give that access what the rules need
+                      and no more. Needs --backtest-trust
+  --backtest-trust FILE
+                      who may ask, read at start: a YAML file of entries
+                      under trust:, each a CI's issuer of ID tokens (issuer,
+                      audience, the claims each token must hold: the
+                      repository's id, as one or a list, and the event, for
+                      GitHub Actions, GitLab CI and Forgejo Actions) or a
+                      plain token (token_file, 32 characters at least, read
+                      for each request), with days (14) and hourly (30). One
+                      that can't be used stops serve from starting
+  --backtest-share F  of --max-rate, the share the backtests ask the history
+                      at, besides the runs' own pace, so that together they
+                      never pass it (default 0.25; 0.05 to 0.75). Without
+                      --max-rate, a quarter of --parallel at once, one at
+                      least
+  --backtest-queue N  backtests waiting at most, 3 of an entry and one of a
+                      pull request, a newer commit's taking the place of the
+                      one waiting (default 20; 1 to 1000)
+  --backtest-timeout DUR
+                      one backtest's time, from its start (default 15m; 1m
+                      to 2h): one that couldn't finish in it at the lane's
+                      rate is refused before it is queued, saying what
+                      period would fit
+
 Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
 /windows, /tasks, /proposals, /outcomes. API: /api/v1/report?from=&to=
 (&format=csv: the firings a row each, docs/numbers.md; &redact=true: every
@@ -623,6 +662,10 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		return err
 	}
 	var slackLater string
+	// trustFile is --backtest-trust; backtestSet, that another
+	// --backtest-* was given.
+	var trustFile string
+	var backtestSet bool
 	takes := func(name, val string) (bool, error) {
 		dur := func(min time.Duration) (time.Duration, error) {
 			d, err := serve.ParseDuration(val)
@@ -984,6 +1027,27 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 				cfg.ReportDests = map[string]string{}
 			}
 			cfg.ReportDests[name] = file
+		case "--backtest-listen":
+			cfg.BacktestListen = val
+		case "--backtest-trust":
+			trustFile = val
+		case "--backtest-share":
+			cfg.BacktestShare, err = strconv.ParseFloat(val, 64)
+			if err != nil || !(cfg.BacktestShare >= 0.05 && cfg.BacktestShare <= 0.75) {
+				return true, fmt.Errorf("--backtest-share %s: want the lane's share of --max-rate, 0.05 to 0.75", val)
+			}
+			backtestSet = true
+		case "--backtest-queue":
+			cfg.BacktestQueue, err = strconv.Atoi(val)
+			if err != nil || cfg.BacktestQueue < 1 || cfg.BacktestQueue > 1000 {
+				return true, fmt.Errorf("--backtest-queue %s: want backtests waiting at most, 1 to 1000", val)
+			}
+			backtestSet = true
+		case "--backtest-timeout":
+			if cfg.BacktestTimeout, err = dur(time.Minute); err == nil && cfg.BacktestTimeout > 2*time.Hour {
+				err = fmt.Errorf("--backtest-timeout %s: 2h at most", val)
+			}
+			backtestSet = true
 		case "--mcp-compare":
 			if val != "editors" && val != "admins" {
 				return true, fmt.Errorf("--mcp-compare %s: want editors or admins", val)
@@ -1140,6 +1204,19 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		err = fmt.Errorf("--guard is asked of the history: add --prometheus URL or --gcp-project ID")
 	case cfg.CatchUpHours != nil && cfg.CatchUpHours.Len() < cfg.Every:
 		err = fmt.Errorf("--catch-up-hours %s is shorter than --every %s: a run might never fall in it", cfg.CatchUpHours, time.Duration(cfg.Every))
+	case cfg.BacktestListen != "" && trustFile == "":
+		err = fmt.Errorf("--backtest-listen needs --backtest-trust: who may ask")
+	case cfg.BacktestListen == "" && (trustFile != "" || backtestSet):
+		err = fmt.Errorf("--backtest-trust, --backtest-share, --backtest-queue and --backtest-timeout go with --backtest-listen, the port backtests are taken on")
+	case cfg.BacktestListen != "" && cfg.ReadOnly:
+		err = fmt.Errorf("--backtest-listen queues backtests in the ledger, and --read-only refuses writes")
+	case cfg.BacktestListen != "" && f.alerts:
+		err = fmt.Errorf("--backtest-listen replays a pull request's rules, and --alerts judges the ALERTS series, not rules")
+	case cfg.BacktestListen != "" && f.promURL == "" && f.gcpProj == "":
+		err = fmt.Errorf("--backtest-listen replays a pull request's rules against the history: add --prometheus URL or --gcp-project ID")
+	}
+	if err == nil && trustFile != "" {
+		cfg.Trust, err = serve.ReadTrust(trustFile, []string{cfg.IncidentsToken, cfg.FiringsToken, cfg.NotifyToken, cfg.TasksToken, cfg.ChangesToken}, secretsLater)
 	}
 	if err == nil {
 		cfg.Marks, err = serve.ParseMarks(marks, markMatches)
