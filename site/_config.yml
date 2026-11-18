@@ -7,7 +7,7 @@ description: Which of your alerts are worth their page? Lapilli judges alert rul
 url: https://lapilli.dev
 theme: null
 plugins: []
-exclude: [README.md]
+exclude: [README.md, docs.sh]
 kramdown:
   input: GFM
   hard_wrap: false
