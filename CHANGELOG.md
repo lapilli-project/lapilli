@@ -39,9 +39,12 @@ the ledger stays at 022.
     writes of the alert rule types that may be named there; the deny
     assignments at or above it, any that may refuse a write unknown; and
     the locks there and on the subscription, a `ReadOnly` one a problem, a
-    `CanNotDelete` one where a metric alert may be deleted a problem; and
-    read on what each alert rule read names (its targets, its action
-    groups), which Azure Monitor asks for as a metric alert is written.
+    `CanNotDelete` one where a metric alert may be deleted a problem; the
+    deny assignments at each alert rule read, below the group (a
+    deployment stack's); and read on what each alert rule read names (its
+    targets, its action groups), which Azure Monitor asks for as a metric
+    alert is written. What it doesn't take, a subscription-wide target
+    say, is unknown.
   - `changes.google` asks Cloud Resource Manager's `testIamPermissions` on
     each project `--changes-in` names a policy of, as the service account,
     or as the pod's own identity without one, for the alerting policies'
@@ -115,8 +118,10 @@ the ledger stays at 022.
   name inside them**: an OCI compartment's OCID, an Azure subscription and
   resource group, an Amazon workspace, a Google project, where an error
   repeats the URL with more beside it, which 0.53.0 to 0.58.0 printed;
-  and, in what a cloud says, any other GUID or run of ten digits or more
-  (an Azure object id, a Google project's number).
+  and, in what a cloud says, an identity's that couldn't be taken among
+  it, any other ARN of an account, GUID, or number of ten digits or more,
+  or written `1234-5678-9012` (the pod's own role, an Azure object id, a
+  Google project's number).
 - **`lapilli preflight`'s allowlist refuses a form or a query that
   doesn't read whole** (a `;` between its pairs), which was read without
   the pair, and the rest judged.

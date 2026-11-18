@@ -585,6 +585,9 @@ func azDoc(typ, name string, names ...string) rules.Doc {
 	return rules.Doc{Source: id, Data: b}
 }
 
+// checkoutA is a metric alert under checkout-, as --alarms read it.
+var checkoutA = []rules.Doc{azDoc("metricAlerts", "checkout-a")}
+
 // azureRun is changes.azure for --alarms az and entries, against a.
 func azureRun(t *testing.T, a *arm, docs []rules.Doc, entries ...string) (*run, Item) {
 	standIns(t, map[string]http.Handler{"management.azure.com": a})
@@ -619,15 +622,21 @@ func TestAzureWrites(t *testing.T) {
 		{"a wildcard in the middle", `{"value":[{"actions":["Microsoft.Insights/*Alerts/*","Microsoft.Insights/scheduledQueryRules/write"]}]}`, OK, ""},
 	} {
 		a := newARM(t, map[string]string{azRG: x.perms})
-		p, it := azureRun(t, a, nil, "az:shop-rg/checkout-*")
+		p, it := azureRun(t, a, checkoutA, "az:shop-rg/checkout-*")
 		if it.State != x.state || !strings.Contains(it.What+" "+it.Why, x.says) {
 			t.Errorf("%s: %+v", x.name, it)
 		}
-		// The group's permissions, deny assignments and locks, and the
-		// subscription's locks.
-		if got := p.al.asked(); len(a.asked) != 4 || got.Refused != 0 || got.By["iam:azure"] != 4 {
+		// The group's permissions, deny assignments and locks, the
+		// subscription's locks, and the deny assignments at the rule read.
+		if got := p.al.asked(); len(a.asked) != 5 || got.Refused != 0 || got.By["iam:azure"] != 5 {
 			t.Errorf("%s: asked %v, %+v", x.name, a.asked, got)
 		}
+	}
+	// A prefix with nothing read under it: a deny on a rule itself, below
+	// the group, can't be asked, so it is unknown, never ok.
+	if _, it := azureRun(t, newARM(t, map[string]string{azRG: `{"value":[{"actions":["*"]}]}`}), nil, "az:shop-rg/checkout-*"); it.State != Unknown ||
+		!strings.Contains(it.Why, "names no alert rule this run read there, so a deny assignment on one itself, below the group, isn't asked") {
+		t.Errorf("nothing read: %+v", it)
 	}
 	// A name given whole, read as a scheduled query rule, needs its write
 	// alone, no metric alert's delete; read as a metric alert, its delete,
@@ -685,6 +694,7 @@ func TestAzureAllowedAsAsked(t *testing.T) {
 	c := writesConfig(t)
 	c.Serve.Alarms, c.Serve.ChangesIn = c.Serve.Alarms[1:2], []string{"az:shop-rg/checkout-*"}
 	p := newRun(c)
+	p.read("alarms:az", checkoutA)
 	t.Cleanup(egress.Guard(p.al.check))
 	if it := p.azureWrites(context.Background(), writer{id: "changes.azure", flag: "--changes-azure-client-id", sign: signed}); it.State != OK {
 		t.Fatalf("%+v", it)
@@ -698,6 +708,8 @@ func TestAzureAllowedAsAsked(t *testing.T) {
 		{"GET", base + "/providers/Microsoft.Authorization/denyAssignments?%24filter=atScope%28%29&api-version=2022-04-01", true},
 		{"GET", base + "/providers/Microsoft.Authorization/locks?api-version=2016-09-01", true},
 		{"GET", "https://management.azure.com" + azSub + "/providers/Microsoft.Authorization/locks?api-version=2016-09-01", true},
+		{"GET", "https://management.azure.com" + checkoutA[0].Source + "/providers/Microsoft.Authorization/denyAssignments?%24filter=atScope%28%29&api-version=2022-04-01", true},
+		{"GET", "https://management.azure.com" + checkoutA[0].Source + "/providers/Microsoft.Authorization/permissions?api-version=2022-04-01", false}, // not asked
 		{"GET", strings.Replace(base, "shop-rg", "other-rg", 1) + "/providers/Microsoft.Authorization/permissions?api-version=2022-04-01", false},
 		{"GET", base + "/providers/Microsoft.Authorization/permissions?api-version=2022-04-01&$filter=x", false},
 		{"GET", base + "/providers/Microsoft.Authorization/permissions?api-version=2015-07-01", false},
@@ -757,15 +769,36 @@ func TestAzureLocksAndDenies(t *testing.T) {
 		for k, v := range x.denies {
 			a.denies[k] = v
 		}
-		_, it := azureRun(t, a, x.docs, x.entry)
+		docs := x.docs
+		if docs == nil {
+			docs = checkoutA
+		}
+		_, it := azureRun(t, a, docs, x.entry)
 		if it.State != x.state || !strings.Contains(it.Why, x.says) {
 			t.Errorf("%s: %+v", x.name, it)
 		}
 	}
-	// A lock both lists give is judged once.
+	// A deny assignment on the rule itself, below the group, as a
+	// deployment stack puts one on what it manages: asked at the rule.
 	a := newARM(t, map[string]string{azRG: all})
+	a.denies[checkoutA[0].Source] = deny("Stack deny", checkoutA[0].Source, false, `"*/write"`, "")
+	if _, it := azureRun(t, a, checkoutA, "az:shop-rg/checkout-*"); it.State != Unknown ||
+		!strings.Contains(it.Why, "on an alert rule --changes-in names: a deny assignment, Stack deny, may refuse Microsoft.Insights/metricAlerts/write") {
+		t.Errorf("a deny on the rule: %+v", it)
+	}
+	// Past ten rules read, the rest's own deny assignments aren't asked.
+	var many []rules.Doc
+	for i := range 12 {
+		many = append(many, azDoc("metricAlerts", fmt.Sprintf("checkout-%02d", i)))
+	}
+	if _, it := azureRun(t, newARM(t, map[string]string{azRG: all}), many, "az:shop-rg/checkout-*"); it.State != Unknown ||
+		!strings.Contains(it.Why, "2 more alert rules named, past the first 10, whose own deny assignments aren't asked") {
+		t.Errorf("many rules: %+v", it)
+	}
+	// A lock both lists give is judged once.
+	a = newARM(t, map[string]string{azRG: all})
 	a.locks[azRG], a.locks[azSub] = lock(azRG, "freeze", "ReadOnly"), lock(azRG, "freeze", "ReadOnly")
-	if _, it := azureRun(t, a, nil, "az:shop-rg/checkout-*"); it.State != Problem || strings.Count(it.Why, "freeze") != 1 {
+	if _, it := azureRun(t, a, checkoutA, "az:shop-rg/checkout-*"); it.State != Problem || strings.Count(it.Why, "freeze") != 1 {
 		t.Errorf("once: %+v", it)
 	}
 }
@@ -803,6 +836,39 @@ func TestAzureLinkedReads(t *testing.T) {
 			return strings.Contains(s, "virtualMachines/web-1/providers/Microsoft.Authorization/permissions")
 		}) {
 			t.Errorf("%s: asked %v", x.name, a.asked)
+		}
+	}
+	// Each resource, and each rule, once: two rules naming the same
+	// target, a rule named by two entries.
+	a := newARM(t, map[string]string{azRG: `{"value":[{"actions":["*"]}]}`, vm: `{"value":[{"actions":["*/read"]}]}`})
+	if _, it := azureRun(t, a, []rules.Doc{azDoc("metricAlerts", "checkout-a", vm, vm), azDoc("metricAlerts", "checkout-b", vm)},
+		"az:shop-rg/checkout-*", "az:shop-rg/checkout-a"); it.State != OK {
+		t.Errorf("twice: %+v", it)
+	}
+	count := func(sub string) int {
+		n := 0
+		for _, x := range a.asked {
+			if strings.Contains(x, sub) {
+				n++
+			}
+		}
+		return n
+	}
+	if count("web-1/providers/Microsoft.Authorization/permissions") != 1 || count("metricAlerts/checkout-a/providers/Microsoft.Authorization/denyAssignments") != 1 {
+		t.Errorf("asked %v", a.asked)
+	}
+	// A target that isn't a resource under a resource group (the
+	// subscription itself), or an id past 1 KB, isn't asked, and is
+	// unknown, never passed over.
+	long := azRG + "/providers/Microsoft.Compute/virtualMachines/" + strings.Repeat("v", 1100)
+	for _, target := range []string{azSub, "/providers/Microsoft.Management/managementGroups/example", long} {
+		a := newARM(t, map[string]string{azRG: `{"value":[{"actions":["*"]}]}`})
+		_, it := azureRun(t, a, []rules.Doc{azDoc("metricAlerts", "checkout-a", target)}, "az:shop-rg/checkout-*")
+		if it.State != Unknown || !strings.Contains(it.Why, "1 resource the alert rules name that isn't one under a resource group") ||
+			slices.ContainsFunc(a.asked, func(x string) bool {
+				return strings.Contains(x, "vvvv") || strings.HasPrefix(x, "GET "+azSub+"/providers/Microsoft.Authorization/permissions")
+			}) {
+			t.Errorf("%.80s: %+v %v", target, it, a.asked)
 		}
 	}
 	if got := readAction("/subscriptions/x/resourceGroups/y/providers/Microsoft.Monitor/accounts/z"); got != "Microsoft.Monitor/accounts/read" {
@@ -1374,5 +1440,60 @@ func TestTakeWrites(t *testing.T) {
 	if _, _, err := take(context.Background(), "google", "https://monitoring.googleapis.com/v3/projects/example-project/alertPolicies", ""); err != nil ||
 		len(asked) != 1 || asked[0] != "google|" {
 		t.Errorf("%v %v", err, asked)
+	}
+}
+
+// An identity that can't be taken is said by what the cloud answered,
+// redacted as a cloud's text is: the pod's own role, of another account,
+// an account written with dashes or glued to a word, none printed; the
+// role serve writes as, by its flag.
+func TestTakeErrorRedacted(t *testing.T) {
+	was := take
+	t.Cleanup(func() { take = was })
+	take = func(context.Context, string, string, string) (func(*http.Request) error, func(*http.Request) error, error) {
+		return nil, nil, errors.New("operation error STS: AssumeRole, api error AccessDenied: User: arn:aws:sts::210987654321:assumed-role/pod-role/i-0abc " +
+			"is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::123456789012:role/example-writer (account 2109-8765-4321, acct_210987654321)")
+	}
+	c := writesConfig(t)
+	c.Serve.Alarms, c.Serve.ChangesIn = c.Serve.Alarms[:1], []string{"cw:QueueDepth"}
+	c.Serve.ChangesAzureClientID, c.Serve.ChangesGoogleServiceAccount, c.Serve.ChangesOCIConfig = "", "", ""
+	p := guarded(t, c)
+	p.changes(context.Background())
+	p.redact()
+	it := itemOf(p, "changes.cloud")
+	if it == nil || it.State != Problem {
+		t.Fatalf("%+v", it)
+	}
+	for _, hidden := range []string{"210987654321", "pod-role", "2109-8765-4321", "123456789012", "example-writer"} {
+		if strings.Contains(it.Why, hidden) {
+			t.Errorf("the report says %q: %s", hidden, it.Why)
+		}
+	}
+	if !strings.Contains(it.Why, "[an ARN]") || strings.Count(it.Why, "[a number]") != 2 || !strings.Contains(it.Why, "[--changes-aws-role]") {
+		t.Errorf("%s", it.Why)
+	}
+}
+
+// What a cloud said loses its ids; Lapilli's own words keep theirs.
+func TestCloudIDs(t *testing.T) {
+	for in, want := range map[string]string{
+		"account 123456789012.":                       "account [a number].",
+		"acct_123456789012 and x123456789012y":        "acct_[a number] and x[a number]y",
+		"1234-5678-9012 or 12345-6789-0123":           "[a number] or 12345-6789-0123",
+		"a time 1762000000, a count 999999999":        "a time [a number], a count 999999999",
+		"arn:aws:iam::123456789012:role/x/y, then":    "[an ARN], then",
+		"arn:aws:s3:::bucket stays":                   "arn:aws:s3:::bucket stays",
+		"object 00000000-0000-0000-0000-00000000000d": "object [an id]",
+	} {
+		if got := cloudIDs(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	c := writesConfig(t)
+	p := newRun(c)
+	p.add(Item{ID: "changes.aws", State: Unknown, What: "past 1234567890 names", Why: p.cloudSaidText("project 1234567890")})
+	p.redact()
+	if it := p.r.Items[0]; it.What != "past 1234567890 names" || it.Why != "project [a number]" {
+		t.Errorf("%+v", it)
 	}
 }

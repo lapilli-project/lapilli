@@ -437,8 +437,12 @@ type azureScope struct {
 	// of says what is written there, for the item; named, that a name
 	// --changes-in gives whole is among what is written there, which may
 	// be given on each of it alone: not allowed on the group is unknown.
-	of    string
-	named bool
+	// unread, that an entry of --changes-in names nothing this run read
+	// there: a deny on such a rule itself, below the group, can't be
+	// asked.
+	of     string
+	named  bool
+	unread bool
 	// none is why no scope could be said, for an entry whose resource
 	// group isn't named.
 	none string
@@ -462,6 +466,7 @@ func (sc azureScope) actions() []string {
 const (
 	mostScopes = 10
 	mostLinked = 10
+	mostNamed  = 10
 )
 
 var (
@@ -505,6 +510,7 @@ func (p *run) azureScopes() (out []azureScope, named []azureNamed) {
 				slices.Sort(out[i].types)
 				out[i].deletes = out[i].deletes || sc.deletes
 				out[i].named = out[i].named || sc.named
+				out[i].unread = out[i].unread || sc.unread
 				out[i].pats = append(out[i].pats, sc.pats...)
 				if !strings.Contains(out[i].of, sc.of) {
 					out[i].of += ", " + sc.of
@@ -514,8 +520,10 @@ func (p *run) azureScopes() (out []azureScope, named []azureNamed) {
 		}
 		out = append(out, sc)
 	}
+	seen := map[string]bool{}
 	addNamed := func(n azureNamed) {
-		if !slices.ContainsFunc(named, func(x azureNamed) bool { return strings.EqualFold(x.id, n.id) }) {
+		if k := strings.ToLower(n.id); !seen[k] {
+			seen[k] = true
 			named = append(named, n)
 		}
 	}
@@ -538,13 +546,16 @@ func (p *run) azureScopes() (out []azureScope, named []azureNamed) {
 				put(azureScope{of: "--ruler's rule groups", none: "a resource group --changes-in doesn't name whole"})
 				continue
 			}
+			read := 0
 			for _, d := range p.docs["ruler"] {
 				if x := azureAlertID.FindStringSubmatch(d.Source); x != nil && namedFold(pat, d.Namespace+"/"+d.Source[strings.LastIndex(d.Source, "/")+1:]) {
 					addNamed(azureNamed{d.Source, "prometheusRuleGroups", d.Data})
+					read++
 				}
 			}
 			base := "/subscriptions/" + m[1] + "/resourceGroups/" + rg
-			sc := azureScope{host: host, path: base, sub: m[1], types: []string{"prometheusRuleGroups"}, pats: []string{pat}, of: "--ruler's rule groups"}
+			sc := azureScope{host: host, path: base, sub: m[1], types: []string{"prometheusRuleGroups"}, pats: []string{pat}, of: "--ruler's rule groups",
+				unread: read == 0}
 			if name != "" && !strings.HasSuffix(name, "*") && !strings.Contains(name, "/") {
 				sc.path = base + "/providers/Microsoft.AlertsManagement/prometheusRuleGroups/" + name
 			}
@@ -584,11 +595,12 @@ func (p *run) azureScopes() (out []azureScope, named []azureNamed) {
 				}
 			}
 			whole := rest != "" && !strings.HasSuffix(rest, "*")
+			unread := len(types) == 0
 			if !whole || len(types) == 0 {
 				types = slices.Clone(azureAlarmTypes)
 			}
 			slices.Sort(types)
-			sc := azureScope{host: host, sub: m[1], types: types, deletes: slices.Contains(types, "metricAlerts"), of: of}
+			sc := azureScope{host: host, sub: m[1], types: types, deletes: slices.Contains(types, "metricAlerts"), of: of, unread: unread}
 			rg, name, slash := strings.Cut(rest, "/")
 			switch {
 			case slash && azureRG.MatchString(rg) && (m[2] == "" || strings.EqualFold(m[2], rg)):
@@ -668,6 +680,7 @@ type azureLock struct {
 
 // azureDeny is a deny assignment.
 type azureDeny struct {
+	ID         string `json:"id"`
 	Properties struct {
 		Name        string            `json:"denyAssignmentName"`
 		Permissions []azurePermission `json:"permissions"`
@@ -734,15 +747,21 @@ func readAction(id string) string {
 	return out + "/read"
 }
 
+// mostIDBytes is the longest id of a resource an alert rule names that is
+// asked about; a longer one is unknown, and isn't sent.
+const mostIDBytes = 1024
+
 // linkedOf are the resources an alert rule's document names beside itself:
-// its targets (scopes), its action groups, a workspace; each a resource's
-// id under a resource group.
-func linkedOf(n azureNamed) []string {
+// its targets (scopes), its action groups, a workspace, each a resource's
+// id under a resource group; and odd, how many it names that aren't (a
+// subscription, a management group, an id past mostIDBytes), which aren't
+// asked and are unknown, never passed over.
+func linkedOf(n azureNamed) (out []string, odd int) {
 	var v any
 	if json.Unmarshal(n.data, &v) != nil {
-		return nil
+		return nil, 1
 	}
-	var out []string
+	seen := map[string]bool{strings.ToLower(n.id): true}
 	var walk func(any, int)
 	walk = func(x any, depth int) {
 		if depth > 32 || len(out) > 50 {
@@ -758,14 +777,21 @@ func linkedOf(n azureNamed) []string {
 				walk(z, depth+1)
 			}
 		case string:
-			if azureResource.MatchString(y) && !strings.EqualFold(y, n.id) && !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, y) }) {
-				out = append(out, y)
+			low := strings.ToLower(y)
+			if !strings.HasPrefix(low, "/subscriptions/") && !strings.HasPrefix(low, "/providers/") || seen[low] {
+				return
 			}
+			seen[low] = true
+			if len(y) > mostIDBytes || !azureResource.MatchString(y) {
+				odd++
+				return
+			}
+			out = append(out, y)
 		}
 	}
 	walk(v, 0)
 	slices.Sort(out)
-	return out
+	return out, odd
 }
 
 // azureWrites asks Azure, as the identity, on each scope of what serve
@@ -785,8 +811,9 @@ func (p *run) azureWrites(ctx context.Context, w writer) Item {
 	defer cancel()
 	asked := 0
 	subs := map[string][]azureScope{}
-	// Each lock is judged once for a scope, from whichever list gives it.
-	seenLocks := map[string]bool{}
+	// Each lock is judged once for a scope, from whichever list gives it;
+	// each deny assignment once.
+	seenLocks, seenDenies := map[string]bool{}, map[string]bool{}
 	for _, sc := range scopes {
 		if sc.none != "" {
 			unknowns = append(unknowns, sc.of+": "+sc.none+", so where it writes isn't asked")
@@ -825,35 +852,16 @@ func (p *run) azureWrites(ctx context.Context, w writer) Item {
 		default:
 			problems = append(problems, where+": not given "+strings.Join(lacks, ", "))
 		}
-		// The deny assignments at or above it.
-		var denies []azureDeny
-		if err := p.azureList(each, w, sc.host, sc.path+azureDenyPath, azureDenyQuery, func(b []byte) error {
-			var page struct {
-				Value []azureDeny `json:"value"`
-			}
-			err := json.Unmarshal(b, &page)
-			denies = append(denies, page.Value...)
-			return err
-		}); err != nil {
-			unknowns = append(unknowns, where+": Azure didn't say its deny assignments (Microsoft.Authorization/denyAssignments/read): "+p.cloudSaid(err))
-		}
-		for _, d := range denies {
-			if d.Properties.NotChildren && !strings.EqualFold(strings.TrimRight(d.Properties.Scope, "/"), sc.path) {
-				continue
-			}
-			var hits []string
-			for _, a := range sc.actions() {
-				if slices.ContainsFunc(d.Properties.Permissions, func(x azurePermission) bool { return azureMay([]azurePermission{x}, a) }) {
-					hits = append(hits, a)
-				}
-			}
-			if len(hits) > 0 {
-				unknowns = append(unknowns, where+": a deny assignment, "+p.cloudSaidText(d.Properties.Name)+", may refuse "+strings.Join(hits, ", ")+
-					" (whom it applies to isn't read)")
-			}
+		// The deny assignments at or above it; one on an alert rule
+		// itself, below the group, is asked at the rule (below).
+		pr, un := p.azureDenies(each, w, sc.host, sc.path, sc.actions(), where, seenDenies)
+		problems, unknowns = append(problems, pr...), append(unknowns, un...)
+		if sc.unread && !strings.Contains(sc.path, "/providers/") {
+			unknowns = append(unknowns, where+": an entry of --changes-in names no alert rule this run read there, so a deny assignment on one itself, "+
+				"below the group, isn't asked")
 		}
 		// The locks on it, and on what is under it.
-		pr, un := p.azureLocks(each, w, sc.host, sc.path, []azureScope{sc}, where, seenLocks)
+		pr, un = p.azureLocks(each, w, sc.host, sc.path, []azureScope{sc}, where, seenLocks)
 		problems, unknowns = append(problems, pr...), append(unknowns, un...)
 	}
 	// A subscription's locks, which its resource groups' lists may not
@@ -864,18 +872,46 @@ func (p *run) azureWrites(ctx context.Context, w writer) Item {
 		pr, un := p.azureLocks(each, w, h.Scheme+"://"+h.Host, h.Path, scs, "in the subscription's locks", seenLocks)
 		problems, unknowns = append(problems, pr...), append(unknowns, un...)
 	}
+	// The deny assignments at each alert rule and rule group named and
+	// read, below the group asked (a deployment stack's deny is on the
+	// resources it manages), mostNamed at most.
+	for i, n := range named {
+		if i >= mostNamed {
+			unknowns = append(unknowns, fmt.Sprintf("%d more alert rules named, past the first %d, whose own deny assignments aren't asked", len(named)-mostNamed, mostNamed))
+			break
+		}
+		if len(n.id) > mostIDBytes || !azureResource.MatchString(n.id) {
+			unknowns = append(unknowns, "an alert rule named whose id isn't one of a resource under a resource group: its own deny assignments aren't asked")
+			continue
+		}
+		actions := []string{azureWriteOf[n.typ]}
+		if n.typ == "metricAlerts" {
+			actions = append(actions, azureMetricDelete)
+		}
+		p.hide("an alert rule --changes-in names", n.id)
+		pr, un := p.azureDenies(each, w, "https://"+strings.ToLower(hostOf(scopes)), n.id, actions, "on an alert rule --changes-in names", seenDenies)
+		problems, unknowns = append(problems, pr...), append(unknowns, un...)
+	}
 	// The resources the alert rules named name: read on each, asked on it.
 	var linked []string
+	seenLinked := map[string]bool{}
 	metricLinks := map[string]bool{}
+	odd := 0
 	for _, n := range named {
-		for _, l := range linkedOf(n) {
-			if !slices.ContainsFunc(linked, func(x string) bool { return strings.EqualFold(x, l) }) {
+		ls, o := linkedOf(n)
+		odd += o
+		for _, l := range ls {
+			if k := strings.ToLower(l); !seenLinked[k] {
+				seenLinked[k] = true
 				linked = append(linked, l)
 			}
 			if n.typ == "metricAlerts" {
 				metricLinks[strings.ToLower(l)] = true
 			}
 		}
+	}
+	if odd > 0 {
+		unknowns = append(unknowns, plural(odd, "resource")+" the alert rules name that isn't one under a resource group (a subscription, say), whose read isn't asked")
 	}
 	slices.Sort(linked)
 	for i, l := range linked {
@@ -916,6 +952,44 @@ func hostOf(scopes []azureScope) string {
 		}
 	}
 	return "management.azure.com"
+}
+
+// azureDenies reads the deny assignments at or above a scope, and says of
+// each that may refuse one of actions (its actions less its notActions),
+// once (seen), that it is unknown, naming it: whom it applies to isn't
+// read. One that doesn't apply below its own scope is passed over below
+// it.
+func (p *run) azureDenies(ctx context.Context, w writer, host, path string, actions []string, where string, seen map[string]bool) (problems, unknowns []string) {
+	var denies []azureDeny
+	if err := p.azureList(ctx, w, host, path+azureDenyPath, azureDenyQuery, func(b []byte) error {
+		var page struct {
+			Value []azureDeny `json:"value"`
+		}
+		err := json.Unmarshal(b, &page)
+		denies = append(denies, page.Value...)
+		return err
+	}); err != nil {
+		return nil, []string{where + ": Azure didn't say its deny assignments (Microsoft.Authorization/denyAssignments/read): " + p.cloudSaid(err)}
+	}
+	for _, d := range denies {
+		if d.Properties.NotChildren && !strings.EqualFold(strings.TrimRight(d.Properties.Scope, "/"), path) {
+			continue
+		}
+		var hits []string
+		for _, a := range actions {
+			if slices.ContainsFunc(d.Properties.Permissions, func(x azurePermission) bool { return azureMay([]azurePermission{x}, a) }) {
+				hits = append(hits, a)
+			}
+		}
+		key := strings.ToLower(d.ID + "|" + d.Properties.Name)
+		if len(hits) == 0 || seen[key] {
+			continue
+		}
+		seen[key] = true
+		unknowns = append(unknowns, where+": a deny assignment, "+p.cloudSaidText(d.Properties.Name)+", may refuse "+strings.Join(hits, ", ")+
+			" (whom it applies to isn't read)")
+	}
+	return nil, unknowns
 }
 
 // azureLocks reads the locks at a scope, a resource group's or a

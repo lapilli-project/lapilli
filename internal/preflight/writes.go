@@ -84,9 +84,10 @@ func ask(req *http.Request) (http.Header, []byte, error) {
 
 // cloudSaid is said for what a cloud answered, or an error in asking it:
 // redacted first as the run redacts, so that what it knows is said by
-// what it is, then without any other GUID or run of ten digits or more,
-// which a cloud's error names beside what was asked (an object's id, a
-// project's number). Lapilli's own words aren't so read.
+// what it is, then without any other ARN of an account, GUID, or number
+// of ten digits or more (or 1234-5678-9012), which a cloud's error names
+// beside what was asked (the pod's own role, an object's id, a project's
+// number). Lapilli's own words aren't so read.
 func (p *run) cloudSaid(err error) string {
 	if err == nil {
 		return ""
@@ -102,13 +103,33 @@ func (p *run) cloudSaidText(s string) string {
 }
 
 var (
-	guidText   = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	digitsText = regexp.MustCompile(`\b[0-9]{10,}\b`)
+	guidText = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	// arnText is an AWS ARN that names an account: the pod's own role's,
+	// another account's, whose name is the role's.
+	arnText = regexp.MustCompile(`arn:aws(?:-cn|-us-gov)?:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:[^\s"'<>,;()\[\]{}]+`)
+	// numberText is what may be an account's or a project's number: ten
+	// digits or more, or 1234-5678-9012 as AWS writes an account, whatever
+	// is beside it but another digit (acct_123456789012).
+	numberText = regexp.MustCompile(`[0-9]{4}-[0-9]{4}-[0-9]{4}|[0-9]{10,}`)
 )
 
-// cloudIDs is s without a GUID or a run of ten digits or more.
+// cloudIDs is s without an ARN of an account, a GUID, or a number of ten
+// digits or more, or one written 1234-5678-9012, not part of a longer run
+// of digits.
 func cloudIDs(s string) string {
-	return digitsText.ReplaceAllString(guidText.ReplaceAllString(s, "[an id]"), "[a number]")
+	s = guidText.ReplaceAllString(arnText.ReplaceAllString(s, "[an ARN]"), "[an id]")
+	var b strings.Builder
+	last := 0
+	for _, m := range numberText.FindAllStringIndex(s, -1) {
+		i, j := m[0], m[1]
+		if i > 0 && s[i-1] >= '0' && s[i-1] <= '9' || j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			continue
+		}
+		b.WriteString(s[last:i] + "[a number]")
+		last = j
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 // errorText is what an API's error says, its code and message, as the

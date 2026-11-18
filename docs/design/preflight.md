@@ -419,8 +419,9 @@ each cloud's chain, each on-call feed; and, with `--changes`, what each
 identity may write: one simulation of IAM's a region named, and one for
 Amazon's namespaces; one `testIamPermissions` a Google project named;
 Azure's permissions, deny assignments and locks at ten scopes at most,
-each subscription's locks once, and the permissions at ten resources the
-alert rules name at most, five pages each; and OCI's memberships (a
+each subscription's locks once, the deny assignments at ten alert rules
+named at most, and the permissions at ten resources the alert rules name
+at most, five pages each; and OCI's memberships (a
 thousand at most), twenty groups, and for ten compartments at most their
 chains up to the tenancy (eight at most) and the policies of each, read
 once each (five pages each, 5,000 statements all told). Each is counted in
@@ -695,6 +696,14 @@ that says so without anything being written (`internal/preflight`,
   alert may be named. Reading the three lists takes
   `Microsoft.Authorization/permissions/read`, `denyAssignments/read` and
   `locks/read`; without one, unknown.
+- **A deny assignment below the group.** `atScope()` gives those at or
+  above the scope asked, and a deployment stack puts its deny on the
+  resources it manages: one on an alert rule itself is never in its
+  resource group's list. So each alert rule and rule group `--changes-in`
+  names that this run read is asked too, its own `atScope()`, ten at
+  most; past ten, or where an entry names nothing this run read (a
+  prefix with nothing under it, a name not read), unknown. Each deny is
+  said once, whichever list gives it.
 - **Azure's linked reads.** "Read permission on the target resource of
   the alert rule" and "on any action group associated to the alert rule"
   (alerts-create-metric-alert-rule): for each alert rule and rule group
@@ -702,8 +711,13 @@ that says so without anything being written (`internal/preflight`,
   names beside itself (a resource id under a resource group) is asked
   at itself, ten at most, for its provider's `.../read`. Not given there
   is a problem for a metric alert's; for another kind's, whose
-  documentation says nothing of it, unknown. One that can't be asked, a
-  subscription, or past ten, unknown.
+  documentation says nothing of it, unknown. An id it names that isn't a
+  resource under a resource group (the subscription itself, a
+  management group) or is past 1 KB isn't asked, and is unknown, never
+  passed over; past ten, unknown. Azure Monitor may also ask for
+  `Microsoft.Insights/metricDefinitions/read` on a metric alert's target,
+  which its documentation doesn't settle: not asked, so an ok doesn't
+  cover it.
 - **Google Cloud: one `testIamPermissions` a project named**, with a
   token of the `cloud-platform.read-only` scope, impersonated as serve's
   is, or the pod's own without a service account; it needs no permission
@@ -748,13 +762,18 @@ that says so without anything being written (`internal/preflight`,
   policy for OCI has a condition, so it reads as unknown.
 - **What is asked is allowed as it is learned, and counted by its own
   API.** The asks the flags say (Grafana's list, each project's, the
-  role's) are allowed as `allowAll` starts; each of Azure's, a path and a
-  query exactly, as it is asked, and its next page and OCI's
-  compartments, groups and policies when learned: each before the wider
-  reads that hold some of them too (Azure's are under the subscription
-  `--alarms` reads), so it is counted by its own API. The resources an
-  Azure alert rule names come from Azure's own answer, and are asked only
-  as a resource's id under a resource group, on Resource Manager's host.
+  role's) are allowed as `allowAll` starts; each of Azure's as it is
+  asked, and its next page and OCI's compartments, groups and policies
+  when learned: each before the wider reads that hold some of them too,
+  so it is counted by its own API. For Azure, that allow is made from the
+  same URL just before it is sent, and step 1's read of a subscription's
+  `--alarms` already lets any GET under the subscription through: it
+  counts, and doesn't guard. What guards Azure's asks is that each is a
+  GET, to Resource Manager's host as `--alarms` or `--ruler` gives it, of
+  a path that ends in one of the three `Microsoft.Authorization` lists
+  (`permissions`, `denyAssignments`, `locks`), built here; the resources
+  an alert rule names come from Azure's own answer, and are asked only as
+  a resource's id under a resource group, 1 KB at most.
 - **Bounded, by count.** Grafana's folders are counted once each, ten
   thousand at most (a list of 4 MB is some 190,000); OCI's memberships
   once each, a thousand at most, and only the twenty groups read are
@@ -771,10 +790,14 @@ that says so without anything being written (`internal/preflight`,
   1 printed them where an error repeated the URL with more beside it. An
   API's error is said by its code and message, before the 200 bytes cut.
   What a cloud says is redacted as the run redacts first, so that what it
-  knows is said by what it is, then without any other GUID (an Azure
-  object id) or run of ten digits or more (a Google project's number):
-  a cloud's error names those beside what was asked. Lapilli's own words
-  aren't so read.
+  knows is said by what it is, then without any other ARN that names an
+  account (the pod's own role, another account's), GUID (an Azure object
+  id), or number of ten digits or more, or written `1234-5678-9012`,
+  whatever is beside it but another digit (`acct_123456789012`, a Google
+  project's number): a cloud's error names those beside what was asked.
+  So is an identity that couldn't be taken (STS's `AssumeRole`, Microsoft
+  Entra, IAM Credentials, in `changes.cloud`). Lapilli's own words aren't
+  so read.
 - **`changes.cloud` is ok once the identity is taken**: what it may
   write is each cloud's item. `--offline` takes no identity, reads no
   config file of OCI's, and says each item unknown.

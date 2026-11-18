@@ -101,7 +101,7 @@ func (p *run) changes(ctx context.Context) {
 		var err error
 		ids = append(ids, w.id)
 		if w.sign, w.iam, err = take(ctx, w.cloud, w.endpoint, w.who); err != nil {
-			failed = append(failed, w.flag+": "+said(err))
+			failed = append(failed, w.flag+": "+p.cloudSaid(err))
 			untaken = append(untaken, w)
 			continue
 		}
