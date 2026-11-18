@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-11-18
+
+Two security fixes, `lapilli preflight` asking what the credentials that
+write may write, and the pages of `lapilli serve` plainer. A backslash
+before a `|` in a rule's name could end a cell of the pull request
+comment's tables, on a host whose Markdown reads it so; and an RSA key
+under 2048 bits verified a sign-in's or an SNS message's signature. No
+schema change: the ledger stays at 022.
+
 ### Fixed (security)
 
 - **A backslash before a `|` in a rule's name could end a cell of the pull
@@ -177,6 +186,16 @@
   refused with, since 0.24.0, whose help says "without it, the pod's
   identity writes". serve now makes the pod's write credential of its
   own, of the `monitoring` scope.
+
+### Before you upgrade
+
+- An identity provider (`--oidc-issuer`, `--proxy-jwt-jwks`) whose JWKS
+  holds only RSA keys under 2048 bits is refused, saying so, and no one
+  signs in; one with a longer key beside them signs in with that one.
+  Google's, Microsoft Entra's and Google IAP's keys, read on 2026-11-18,
+  are RSA of 2048 bits or P-256.
+- An SNS signing certificate whose RSA key is under 2048 bits proves no
+  message (403).
 
 ## [0.59.0] - 2026-11-18
 
