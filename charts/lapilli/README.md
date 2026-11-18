@@ -529,9 +529,12 @@ which `serve.backtest.service` and `serve.backtest.ingress` serve as
 
 1. **Runners inside the cluster or the network.** `FULLNAME-backtest` is a
    ClusterIP by default: runners in the cluster reach it at
-   `FULLNAME-backtest.NAMESPACE:8084`, in plain http, and nothing new is
-   exposed. With `serve.networkPolicy`, `serve.backtest.from` names them,
-   as NetworkPolicy peers, and lets them in to this port alone.
+   `http://FULLNAME-backtest.NAMESPACE.svc:8084`, in plain http, and nothing
+   new is exposed (the recipes take plain http to a name with no dot, or
+   under `.svc` or `.cluster.local`: `NAME.NAMESPACE` alone could be a name
+   on the internet, a namespace named as a top-level domain is). With
+   `serve.networkPolicy`, `serve.backtest.from` names them, as
+   NetworkPolicy peers, and lets them in to this port alone.
 2. **A CI provider's own runners**, with the port exposed on its own,
    apart from the UI and whatever signs people in to it, and only over
    TLS, which lapilli doesn't serve: the chart refuses it otherwise.

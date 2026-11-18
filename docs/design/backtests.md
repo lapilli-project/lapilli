@@ -1,6 +1,6 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted; step 1 built in serve, its recipes' serve mode next.
+Status: accepted; step 1 built.
 Merged on 2026-11-18, before its week was out, by the maintainer's
 decision, with open questions 1, 5 and 6 decided ("Open questions"
 below); 2, 3 and 4 wait for the steps that need them. Under
@@ -13,9 +13,11 @@ companion to [expectations.md](expectations.md) (#81), whose first step
 (#86, `--expect`) it carries as it is, and to
 [recipes/backtest](../../recipes/backtest).
 
-Step 1 is built in serve: the port, the trust file, the lane and schema
-023, and the chart's `serve.backtest`. Where the code had to do otherwise
-than this note says, "As built (step 1)" below says so.
+Step 1 is built: in serve, the port, the trust file, the lane and schema
+023, and the chart's `serve.backtest`; in the recipes, their serve mode
+(`LAPILLI_SERVE`) and the action's inputs (`serve-url`, `audience`,
+`serve-wait`). Where the code had to do otherwise than this note says, "As
+built (step 1)" below says so.
 
 ## Why
 
@@ -837,6 +839,34 @@ Where step 1 does otherwise than the sections above say, or says more:
   front holds; a `LoadBalancer` or `NodePort` Service needs
   `service.loadBalancerEndsTLS`, an internal load balancer's too, as the
   port is plain http. No HTTPRoute of its own.
+- **The recipe takes plain http to a name inside a cluster too**, where
+  "Flags and API" says to the machine itself: `LAPILLI_SERVE` is https, or
+  http to this machine or to a name with no dot, or ending in `.svc` or
+  `.cluster.local`, as serve takes an identity provider's URL
+  (`signin.SafeURL`), so that a runner in the cluster reaches
+  `FULLNAME-backtest.NAMESPACE.svc:8084`. `NAME.NAMESPACE` alone isn't
+  taken: a namespace may be named as a top-level domain. A host's API and
+  a release are taken as before.
+- **The recipe's serve mode, as built.** The files are named by their path
+  under what `PATHS` names, as `--rules` reads a directory (a file it holds
+  is the directory's, and what doesn't read in it is said, not passed
+  over), and what `RENDER` wrote as `rules.yaml`; files whose names begin
+  with a dot are passed over, as `--rules` passes them over. Two of `PATHS`
+  holding a file of one name, a file that isn't UTF-8 text, and a body past
+  4 MiB are said in the comment before anything is sent. `--since` is
+  taken in whole days, `1d` to `14d`; every argument but it, `--tz` and
+  `--rules-select` is refused, as are `INCIDENTS`, `IMPACT`, `IMPACT_FOR`
+  and `MATCH`. `LAPILLI_VERSION` and the other settings of the install are
+  passed over, the job's log saying so. The token is one of
+  `LAPILLI_ID_TOKEN`, `LAPILLI_SERVE_TOKEN_FILE` (read for each request),
+  or `LAPILLI_SERVE_AUDIENCE`, for which `github.sh`, and `gitea.sh` in
+  Forgejo Actions, ask Actions for an ID token right before each request;
+  it is kept in a variable of the recipe's own, out of what it runs, and
+  given to curl on stdin, as the key is. `Retry-After` is waited, 5 minutes
+  at most and never past `SERVE_WAIT`; a read that fails is asked again,
+  five times in a row at most; past `SERVE_WAIT`, and when the job ends
+  first, the backtest is cancelled. `SERVE_POLL` (10 seconds) is how often
+  it is read.
 
 ## Steps
 

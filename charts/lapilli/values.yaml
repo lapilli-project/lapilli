@@ -616,7 +616,7 @@ serve:
     from: []
     # The port on a Service of its own, FULLNAME-backtest, this port alone:
     # a ClusterIP for runners inside the cluster or the network, which reach
-    # it at http://FULLNAME-backtest.NAMESPACE:port; or a LoadBalancer or a
+    # it at http://FULLNAME-backtest.NAMESPACE.svc:port; or a LoadBalancer or a
     # NodePort, for a CI provider's runners. FULLNAME has the port too, as
     # it has every port.
     service:

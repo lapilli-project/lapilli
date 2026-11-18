@@ -176,3 +176,51 @@ the period, `Asia/Seoul (+09:00)`, `Europe/Berlin (+01:00 → +02:00)`, or
 it, the machine's own is named as `TZ` or `/etc/localtime` says, through
 every link. A zone file copied rather than linked has no name: its
 abbreviations are said, `CEST (+02:00) → CET (+01:00)`.
+
+## Through lapilli serve
+
+A CI job can send a pull request's rules to `lapilli serve` instead of
+running Lapilli itself: serve replays them with its own access to the
+history, at its share of the rate, judges them by its record, and gives
+back the same report, summary line and all, which the job posts as it
+would its own ([serve.md](serve.md#pull-request-backtests); the design,
+[design/backtests.md](design/backtests.md)). The job holds no credential
+for the metrics, only a token that says which repository it runs for: the
+CI's own ID token where it has one (GitHub Actions, GitLab CI, Forgejo
+Actions), a plain token elsewhere. In the recipes, it is `LAPILLI_SERVE`,
+and on GitHub Actions the action's `serve-url` and `audience`, with
+`id-token: write`:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+jobs:
+  backtest:
+    if: github.event.pull_request.head.repo.full_name == github.repository # never a fork's
+    runs-on: ubuntu-latest # needs no access to the metrics
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2, persist-credentials: false}
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          paths: alerts
+          serve-url: https://lapilli-ci.example.com
+          audience: https://lapilli-ci.example.com
+          since: 14d
+```
+
+The rules are read from git, and `render` run, in the job as before;
+`expect` is read from both commits and held by serve, and the job's gate
+(`fail-on-expectations`, `expect-required`) reads the summary line as it
+reads Lapilli's. Serve decides where the history is and what judges the
+firings, so the settings for those (`prometheus-url`, `incidents`,
+`impact`, `match`, `--lead`, `--from`, ...) are refused with it: of the
+arguments, `--since` (whole days, 1 to 14), `--tz` and `--rules-select`
+are sent. The comment's heading says it was judged by lapilli serve's
+record, and reads differently where that record does: catches judged
+against the incidents and impact windows serve keeps, firings by its weeks
+and settings. The recipes' README has each CI's token, what is sent, and
+what is refused ([Through lapilli
+serve](../recipes/backtest/README.md#through-lapilli-serve)).

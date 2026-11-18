@@ -47,6 +47,23 @@
   one, kept past their hour. A lapilli before this one doesn't open a
   ledger it has migrated: keep a copy of its disk, or of its database,
   first ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+- **The backtest recipes through lapilli serve** (docs/design/backtests.md,
+  step 1; recipes/backtest/README.md, "Through lapilli serve"). With
+  `LAPILLI_SERVE`, the URL of serve's backtest port, a recipe installs and
+  runs nothing: it reads both commits' rules from git as before (`RENDER`
+  run in the job), sends them and the expectations to serve, waits for
+  its report (`SERVE_WAIT`, 30 minutes; cancelled past it), and posts it
+  as its own, the gates reading its summary line as they read Lapilli's.
+  The token is the CI's ID token (`LAPILLI_ID_TOKEN`: GitLab's
+  `id_tokens:`), one `github.sh` and `gitea.sh` ask GitHub's or Forgejo's
+  Actions for (`LAPILLI_SERVE_AUDIENCE`), or a plain token
+  (`LAPILLI_SERVE_TOKEN_FILE`), each given to curl on stdin. What serve
+  decides is refused with it: `INCIDENTS`, `IMPACT`, `MATCH`, and every
+  argument but `--since` (whole days, 1 to 14), `--tz` and
+  `--rules-select`. The URL is https, or plain http to this machine or to
+  a name inside a cluster (`FULLNAME-backtest.NAMESPACE.svc`). The action's
+  `serve-url`, `audience` and `serve-wait`, with `permissions: id-token:
+  write`; without `serve-url`, the action is as it was.
 
 ### Changed
 
