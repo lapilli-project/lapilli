@@ -15,7 +15,7 @@ a few pages said more than they needed to. No schema change.
   first that isn't noisy that week; a noisy rule that fired before it is
   said apart, beneath. An incident's page marks each rule that caught it
   and was noisy that week, and a rule's page lists the incidents it caught
-  first by the same rule.
+  by the same rule, a team picked or not.
 - **Korean and Japanese said the rules list's refired weeks backwards**
   (0.31.0 to 0.58.0): "of 0 whole weeks, 3" for 3 of them, where 0 had one.
 - **The overview's table of the weeks was wider than its box** in Spanish
@@ -44,9 +44,9 @@ a few pages said more than they needed to. No schema change.
   record for the weeks it fired, a notice above its numbers says why, with
   where to write incidents down, and the card says only "not known: no
   record", as the overview has it.
-- **Proposals.** With none, the page offers no filters; with none waiting
-  or under way, it says so, with a link to the closed ones and nothing to
-  clear.
+- **Proposals.** With none, the page offers no filters; a team with none
+  says so, with a link to every team's. With none waiting or under way, it
+  says so, with a link to the closed ones and nothing to clear.
 - **Goals.** The page no longer names the API it reads; with no goal
   declared, it shows two as an example, with a link to every number a goal
   can be held to.

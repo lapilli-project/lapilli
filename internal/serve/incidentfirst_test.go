@@ -39,6 +39,9 @@ func TestIncidentFirstNotNoisy(t *testing.T) {
 	if err := s.l.Record(ctx, ledger.Found{From: week.Add(-14 * 24 * time.Hour), To: now, Firings: fs, Run: ledger.Run{Kind: "backfill", Started: week, Finished: week}}, s.cfg.Options); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "steady", Rules: "^Steady"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.l.Put(ctx, incident.Incident{ID: "I-1", Start: start, End: start.Add(time.Hour), Labels: incident.Labels{"service": {"pay"}}}, "ana", s.cfg.Options); err != nil {
 		t.Fatal(err)
 	}
@@ -74,5 +77,15 @@ func TestIncidentFirstNotNoisy(t *testing.T) {
 	_, caught, _ := strings.Cut(html.UnescapeString(body), ">Caught by</h2>")
 	if code != 200 || strings.Count(body, "(noisy that week)") != 1 || !strings.Contains(caught, "Chatty</bdi></a> +2m <span class=\"quiet\">(noisy that week)</span>") {
 		t.Errorf("I-1's page (%d) doesn't mark Chatty, and only Chatty, noisy that week", code)
+	}
+	// A rule's page lists it by the same rule, a team picked or not (its
+	// tallies kept to the team's rules know nothing of Chatty's noise),
+	// and says the noisy one apart, on the noisy rule's own page too.
+	for _, path := range []string{"/rules/Steady", "/rules/Steady?team=steady", "/rules/Chatty"} {
+		_, body, _ := get(t, s.Handler(), path)
+		_, caught, _ := strings.Cut(html.UnescapeString(body), ">First caught by</th>")
+		if !strings.Contains(caught, "<td>Steady +5m<br><span class=\"quiet\">Chatty +2m caught it first, noisy that week</span></td>") {
+			t.Errorf("%s doesn't list I-1 by Steady, Chatty apart", path)
+		}
 	}
 }

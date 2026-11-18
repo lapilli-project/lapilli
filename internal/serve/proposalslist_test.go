@@ -194,8 +194,8 @@ func TestProposalsFacets(t *testing.T) {
 	if v := proposalsFor(t, s, "team=payments"); v.Total != 0 {
 		t.Fatalf("payments has %d proposals: the rules aren't known to the ledger, so none", v.Total)
 	}
-	if strings.Contains(body, `class="facets pick"`) || !strings.Contains(body, "No proposals yet.") {
-		t.Error("a team with no proposal is offered filters, or isn't told why there are none")
+	if strings.Contains(body, `class="facets pick"`) || !strings.Contains(body, "No proposals of this team yet.") || !strings.Contains(body, `href="/proposals?team=">Every team&#39;s</a>`) {
+		t.Error("a team with no proposal is offered filters, or isn't told why there are none and where every team's are")
 	}
 	if !strings.Contains(body, `<label>Team <select name="team">`) {
 		t.Error("no team in the bar")

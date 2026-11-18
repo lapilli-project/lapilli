@@ -1549,10 +1549,12 @@ type catchLine struct {
 }
 
 // incidentLine is an incident as it is listed, judged by t as of the week
-// it started in.
+// it started in, against everyone's rules, as the incidents page judges
+// it: a rule's page kept to a team's tallies (tallies.only) says the same
+// of it.
 func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incidentLine {
 	w := ledger.Week(s.l.Day(in.Start))
-	state := t.state(in, w)
+	state := t.stateAll(in, w)
 	in = shown(lang, in)
 	l := incidentLine{Incident: in, Status: state, Mine: in.Origin == "ui"}
 	if in.Origin == "impact" && !in.Counts {
@@ -1565,7 +1567,7 @@ func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incid
 	}
 	first := -1
 	for i, c := range in.CaughtBy {
-		noisy := t.noisy(w, t.id(c.Rule))
+		noisy := t.noisyAll(w, t.id(c.Rule))
 		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy})
 		if first < 0 && (!noisy || state != "caught") {
 			first = i

@@ -419,10 +419,18 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	case v.Total == 0 && len(pickedIDs(p)) > 0:
 		// Those the URL names aren't there, or not the team's.
 		v.Empty = &emptyView{Kind: "notfound", Title: "None of the proposals picked is here.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
+	case v.Total == 0 && c.Team != "":
+		// The filters, and the team's chip with them, aren't offered:
+		// the way to every team's is here.
+		all := c
+		all.Team, all.TeamSet = "", true
+		v.Empty = &emptyView{Kind: "done", Title: "No proposals of this team yet.",
+			Text:  "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest.",
+			Links: []emptyLink{{"Every team's", pickURL("/proposals", all, proposalFacets, p)}}}
 	case v.Total == 0:
 		v.Empty = &emptyView{Kind: "done", Title: "No proposals yet.",
 			Text: "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."}
-	case len(v.Lines) == 0 && !pick.Active && !staleOnly:
+	case len(v.Lines) == 0 && !pick.Active && !staleOnly && !p.none("state"):
 		// None open, as the list is unless asked: nothing to clear, the
 		// closed ones a link away.
 		q := maps.Clone(p)

@@ -68,8 +68,10 @@ func TestProposalsNoneOpen(t *testing.T) {
 	if !strings.Contains(body, `class="facets pick"`) || strings.Count(body, ">Clear filters<") != 1 {
 		t.Error("with one closed: the filters, with their one Clear filters")
 	}
-	if v := proposalsFor(t, s, "state=refused"); v.Empty == nil || v.Empty.Title != "No proposal matches these filters." {
-		t.Errorf("a filter asked for: %+v", v.Empty)
+	for _, q := range []string{"state=refused", "state=nosuch"} {
+		if v := proposalsFor(t, s, q); v.Empty == nil || v.Empty.Title != "No proposal matches these filters." {
+			t.Errorf("%s: %+v", q, v.Empty)
+		}
 	}
 }
 
@@ -83,9 +85,17 @@ func TestMatchInEffectSaid(t *testing.T) {
 				c.Options.Match = []string{match}
 			}
 		})
+		said := `> the match in effect <span class="quiet">(` + want + `)</span></label>`
 		code, body := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-		if code != http.StatusOK || !strings.Contains(body, `> the match in effect <span class="quiet">(`+want+`)</span></label>`) {
+		if code != http.StatusOK || !strings.Contains(body, said) {
 			t.Errorf("--match %q: %d, the match in effect isn't said as %s", match, code, want)
+		}
+		// A form tried comes back as typed, saying it still.
+		q := signalPost("", "pods", "pods_down > 0", "5m", "", true)
+		q.Set("signal-try", "1")
+		code, body = askAs(t, s.Handler(), http.MethodGet, "/settings?"+q.Encode(), nil, "ana@example.com", "same-origin")
+		if add := between(body, `id="add-signal"`, "</details>"); code != http.StatusOK || !strings.Contains(add, "pods_down") || !strings.Contains(add, said) {
+			t.Errorf("--match %q, tried: %d, the form kept doesn't say the match in effect as %s", match, code, want)
 		}
 	}
 }

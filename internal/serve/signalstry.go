@@ -61,6 +61,7 @@ type signalTried struct {
 // keepForm keeps a form tried as typed on the page: the form of the
 // signal it changes, open, or the one that adds one.
 func keepForm(v *criteriaView, f signalForm) {
+	f.InEffect = v.Add.InEffect // what a form posted doesn't give
 	if f.Was == "" {
 		v.Add, v.AddOpen = f, true
 		return
