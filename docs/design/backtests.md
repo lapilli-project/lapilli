@@ -1,6 +1,9 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: proposed. Under [GOVERNANCE.md](../../GOVERNANCE.md) this is a new
+Status: accepted. Merged on 2026-11-18, before its week was out, by the
+maintainer's decision, with open questions 1, 5 and 6 decided ("Open
+questions" below); 2, 3 and 4 wait for the steps that need them. Under
+[GOVERNANCE.md](../../GOVERNANCE.md) this is a new
 kind of data in the ledger (the backtests CI jobs ask for, kept a day), and
 a port that takes input from outside with a token of a new kind, so it is
 designed first, as a pull request, and reviewed as an attacker would
@@ -169,6 +172,13 @@ its id, or serve refuses to start; a generic issuer must pin `sub` or
 another claim. Ids, not names: a repository deleted and made again under
 its name keeps the name, not the id, and a renamed one keeps its id
 (Forgejo's documentation says so of its id claims).
+
+The claim that names the repository may be a list, for an entry that
+trusts several repositories of the same CI alike: `repository_id: ["123",
+"456"]`, each compared exactly, one of them enough. There are no patterns,
+and no entry trusts an organization whole: `repository_owner_id` may be
+pinned beside the repository's id, to narrow it, never instead of it (open
+question 6, decided). Every other pinned claim is one value.
 
 **By CI**, as their documentation says:
 
@@ -386,7 +396,8 @@ credential in CI, and the job's log says where it is in the queue.
 
 ## What is kept
 
-- **A table, `backtests`** (schema 021: 020 is expectations.md's). A row is
+- **A table, `backtests`** (schema 023, the next after 022 when this was
+  merged; whichever pull request merges first takes a number). A row is
   a backtest asked: its id (random, so that ids don't count backtests), the
   trust entry, the repository as the token's claim names it (the entry's
   name for a plain token), the pull request's number from GitHub's `ref`
@@ -499,7 +510,8 @@ heading ("judged by lapilli serve's record"):
   once step 2 makes it so, the rule's team's own hours), not the job's
   flags.
 
-**Step 2** (serve's checks after deploy, `expectation_checks`, schema 020)
+**Step 2** (serve's checks after deploy, `expectation_checks`, a schema of
+its own)
 answers another question: whether a deployed rule keeps to what is expected
 of it, week by week. A backtest through this port writes no
 `expectation_checks`, and doesn't read serve's own expectations
@@ -518,7 +530,7 @@ and passes nothing: a rewrite an agent suggests is backtested the same way,
 and the recipe's gate still decides.
 
 **Order.** It is built once step 1 is merged, and needs nothing from steps
-2 and 3; its schema comes after 020.
+2 and 3; its schema is the next free one when its pull request opens.
 
 ## Security: as an attacker reviews it
 
@@ -630,7 +642,9 @@ on stdin).
 ## Open questions
 
 1. **Forks.** Never; or a maintainer's label, with `pull_request_target`
-   reading the fork's files as data and no `RENDER`?
+   reading the fork's files as data and no `RENDER`? **Decided on
+   2026-11-18, by the maintainer: never.** A fork's pull request is not
+   backtested through serve; the pins keep it out ("Forks" above).
 2. **Grafana and Loki rules.** Taken only on the data sources the rules in
    effect already use, by uid?
 3. **Azure Pipelines' ID token.** Take it, for a service connection made
@@ -640,14 +654,19 @@ on stdin).
    read says nothing of forks: take its token from the first step, or once
    checked against an account?
 5. **The share.** A quarter of `--max-rate`, or what is left after the runs
-   need it, as [preflight.md](preflight.md) counts it?
+   need it, as [preflight.md](preflight.md) counts it? **Decided on
+   2026-11-18, by the maintainer: a quarter**, `--backtest-share` 0.25 by
+   default, 0.05 to 0.75; the hourly runs keep the rest.
 6. **Pins by pattern.** A whole organization (`repository_owner_id`), or a
-   list of repositories, in one entry?
+   list of repositories, in one entry? **Decided on 2026-11-18, by the
+   maintainer: a list of repositories**, each by its id; an entry never
+   trusts an organization whole, so a repository made in it later is not
+   trusted until it is named.
 
 ## Steps
 
 1. The port, ID tokens of GitHub, GitLab and Forgejo, and the plain token;
-   Prometheus-format rules; the lane and its share; schema 021; the
+   Prometheus-format rules; the lane and its share; schema 023; the
    recipes' serve mode and the action's inputs.
 2. Bitbucket's token, and Azure Pipelines' if decided.
 3. Grafana and Loki rules, if decided.
