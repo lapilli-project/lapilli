@@ -10,6 +10,7 @@ other:
 | `--metrics-listen` | `/metrics`, `/healthz` and `/readyz`, nothing else | anyone who reaches it: no sign-in |
 | `--incidents-listen` | what jobs write: incidents, firings recorded elsewhere, tasks kept in step with a tracker, what became of a change's pull request | a bearer token for each kind of job ([The incidents port](#the-incidents-port)) |
 | `--notify-listen` | notifications from alert managers, a path for each | each path's own proof ([The notifications port](#the-notifications-port)) |
+| `--backtest-listen` | pull request backtests from CI jobs | a CI's ID token or a plain token an entry of `--backtest-trust` takes, then the backtest's key ([The backtest port](#the-backtest-port)) |
 
 A path below is on `--listen` unless it says otherwise.
 
@@ -383,6 +384,25 @@ bursts of 100, and up to 200,000 alerts a day (UTC). It answers
 kept. Host names aren't checked here: each request carries its own proof.
 [Notifications as they were sent](notifications.md) says what each
 source sends and how.
+
+## The backtest port
+
+`--backtest-listen` takes pull request backtests from CI jobs, and nothing
+else ([serve.md](serve.md#pull-request-backtests),
+[design/backtests.md](design/backtests.md)):
+
+| Route | Who may call it |
+|---|---|
+| `POST /v1/backtests` | a job holding a token an entry of `--backtest-trust` takes, as a bearer token: a CI's ID token for the entry's audience, with its pins, or the entry's plain token |
+| `GET /v1/backtests/{id}` | whoever holds the backtest's key, given once in the POST's answer, as a bearer token |
+| `DELETE /v1/backtests/{id}` | the same |
+
+A body is JSON of 4 MiB at most, read strictly, only once the token
+verified and its entry's hour taken. The POST answers 202 with the id, the
+key, the place in the queue and the requests it will ask; the GET 202
+while it waits or runs, 200 with the comment and its JSON once done.
+Host names aren't checked here, and a request with an `Origin` is
+refused.
 
 ## Health, metrics and the rest
 
