@@ -163,7 +163,8 @@ Chart colours are checked for colour blindness and contrast; keep text at
 structure in every language (`TestPagesAccessible`: one h1, landmarks, a
 skip link, a name for every control, headers with scope, a text for every
 chart, which has its numbers in a table too); `test/a11y/axe.sh` runs
-axe-core over them in a browser.
+axe-core over them in a browser. [ACCESSIBILITY.md](ACCESSIBILITY.md) says what
+the pages aim for, and what a change to them should check.
 
 ## Releases
 
