@@ -79,6 +79,12 @@ the ledger stays at 022.
   (0.31.0 to 0.58.0): "of 0 whole weeks, 3" for 3 of them, where 0 had one.
 - **The overview's table of the weeks was wider than its box** in Spanish
   on a laptop's screen: a long tag in its first column now wraps.
+- **Google Cloud's alerting policies written as the pod's own identity**
+  (`--changes` without `--changes-google-service-account`) were sent with
+  the reads' token, of the `monitoring.read` scope, which every write is
+  refused with, since 0.24.0, whose help says "without it, the pod's
+  identity writes". serve now makes the pod's write credential of its
+  own, of the `monitoring` scope.
 
 ### Changed
 
@@ -130,15 +136,6 @@ the ledger stays at 022.
   `locks/read`) and `Microsoft.Insights/actionGroups/read`, with read on
   each alert rule's targets, which Azure Monitor asks for as one is
   written.
-
-### Fixed
-
-- **Google Cloud's alerting policies written as the pod's own identity**
-  (`--changes` without `--changes-google-service-account`) were sent with
-  the reads' token, of the `monitoring.read` scope, which every write is
-  refused with, since 0.24.0, whose help says "without it, the pod's
-  identity writes". serve now makes the pod's write credential of its
-  own, of the `monitoring` scope.
 
 ## [0.58.0] - 2026-11-18
 
