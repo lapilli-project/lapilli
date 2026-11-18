@@ -2244,13 +2244,14 @@
  "Pull request backtests": "プルリクエストのバックテスト",
  "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request.": "CI ジョブが --backtest-listen に依頼し、リーダーのレプリカが一度に一つずつ実行します。終わってから一日保管します。バックテストのコメントはそのプルリクエストにあります。",
  "Asked": "依頼",
- "Entry": "エントリ",
+ "Trust entry": "信頼エントリ",
  "Repository": "リポジトリ",
  "Rules that differ": "違うルール",
- "Requests": "リクエスト",
+ "Queries": "クエリ数",
  "Took": "所要時間",
  "How it ended": "結果",
  "running": "実行中",
  "superseded by a newer commit": "新しいコミットに置き換え",
- "cancelled": "取り消し"
+ "cancelled": "取り消し",
+ "under a second": "1秒未満"
 }

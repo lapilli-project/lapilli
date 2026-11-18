@@ -1,0 +1,99 @@
+---
+# Source: lapilli/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-lapilli
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+automountServiceAccountToken: false
+---
+# Source: lapilli/templates/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ops-lapilli
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+spec:
+  schedule: "0 9 * * 1"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # --timeout, and ten minutes to report and send
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: cronjob
+            app.kubernetes.io/name: lapilli
+            app.kubernetes.io/instance: ops
+            app.kubernetes.io/version: "dev"
+            app.kubernetes.io/managed-by: Helm
+            helm.sh/chart: lapilli-0.0.0
+        spec:
+          restartPolicy: Never
+          serviceAccountName: ops-lapilli
+          # Mounted in lapilli's container, when a cloud's identity may need
+          # it (lapilli.saToken).
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: lapilli
+              image: "ghcr.io/lapilli-project/lapilli:dev"
+              imagePullPolicy: IfNotPresent
+              args:
+                - verdict
+                - "--since=7d"
+                - "--timeout=50m"
+                - "--tz=Etc/UTC"
+                - "--prometheus=http://prometheus:9090"
+                - "--rules=/etc/lapilli/rules/0"
+                - "--impact=up"
+              env:
+                # Keep the Go heap under the container's memory limit.
+                - name: GOMEMLIMIT
+                  valueFrom:
+                    resourceFieldRef:
+                      resource: limits.memory
+                      # Said, not left to the API server's default ("0"): resourceFieldRef
+                      # is atomic, so a GitOps diff of the applied fields sees the default
+                      # as a change. "1" is the same value, in bytes.
+                      divisor: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                limits:
+                  memory: 1Gi
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+              volumeMounts:
+                - name: rules-0
+                  mountPath: /etc/lapilli/rules/0
+                  readOnly: true
+          volumes:
+            - name: rules-0
+              configMap:
+                name: rules

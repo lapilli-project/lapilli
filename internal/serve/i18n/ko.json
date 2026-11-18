@@ -2244,13 +2244,14 @@
  "Pull request backtests": "PR 백테스트",
  "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request.": "CI 작업이 --backtest-listen 으로 요청하고, 리더 레플리카가 한 번에 하나씩 실행해요. 끝난 뒤 하루 동안 보관해요. 백테스트 코멘트는 해당 PR 에 있어요.",
  "Asked": "요청 시각",
- "Entry": "항목",
+ "Trust entry": "신뢰 항목",
  "Repository": "저장소",
  "Rules that differ": "달라진 규칙",
- "Requests": "요청 수",
+ "Queries": "쿼리 수",
  "Took": "걸린 시간",
  "How it ended": "결과",
  "running": "실행 중",
  "superseded by a newer commit": "새 커밋으로 대체됨",
- "cancelled": "취소됨"
+ "cancelled": "취소됨",
+ "under a second": "1초 미만"
 }

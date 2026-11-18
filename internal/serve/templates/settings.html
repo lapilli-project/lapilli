@@ -98,9 +98,9 @@
 {{define "backtests"}}{{$loc := .P.Loc}}<h2 id="backtests">{{t "Pull request backtests"}}</h2>
 <p class="quiet">{{t "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request."}}</p>
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Pull request backtests"}}"><table>
-<thead><tr><th scope="col">{{t "Asked"}}</th><th scope="col">{{t "Entry"}}</th><th scope="col">{{t "Repository"}}</th><th scope="col" class="n">{{t "Rules that differ"}}</th><th scope="col" class="n">{{t "Requests"}}</th><th scope="col">{{t "Took"}}</th><th scope="col">{{t "How it ended"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Asked"}}</th><th scope="col">{{t "Trust entry"}}</th><th scope="col">{{t "Repository"}}</th><th scope="col" class="n">{{t "Rules that differ"}}</th><th scope="col" class="n">{{t "Queries"}}</th><th scope="col">{{t "Took"}}</th><th scope="col">{{t "How it ended"}}</th></tr></thead>
 <tbody>{{range .V.Rows}}
-<tr><td class="t">{{at $loc .Asked}}</td><td>{{.Trust}}</td><td>{{with .Repository}}<bdi>{{.}}</bdi>{{else}}<span class="quiet">–</span>{{end}}</td><td class="n">{{.Rules}}</td><td class="n">{{.Requests}}</td><td>{{if .Took}}{{dur .Took}}{{end}}</td>
+<tr><td class="t">{{at $loc .Asked}}</td><td>{{.Trust}}</td><td>{{with .Repository}}<bdi>{{.}}</bdi>{{else}}<span class="quiet">–</span>{{end}}</td><td class="n">{{.Rules}}</td><td class="n">{{.Queries}}</td><td>{{if .Instant}}{{t "under a second"}}{{else if .Took}}{{dur .Took}}{{end}}</td>
 <td>{{if eq .State "done"}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t "done"}}</span>{{else if eq .State "failed"}}<span class="status-bad"><span aria-hidden="true">✕</span> {{t "failed"}}</span>{{else if eq .State "waiting"}}<span class="status-info">{{t "waiting"}}</span>{{else if eq .State "running"}}<span class="status-info"><span aria-hidden="true">↻</span> {{t "running"}}</span>{{else if eq .State "superseded"}}<span class="quiet">{{t "superseded by a newer commit"}}</span>{{else}}<span class="quiet">{{t "cancelled"}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="7" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>{{end}}
 

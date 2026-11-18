@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historial de ejecuciones · Lapilli</title>
+<link rel="icon" href="/static/icon.svg?v=ace9ecbdd9ee" type="image/svg+xml">
+<link rel="stylesheet" href="/static/lapilli.css?v=ace9ecbdd9ee">
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/icon.svg?v=ace9ecbdd9ee" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>Menú<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Historial de ejecuciones</span></summary>
+  <nav class="nav-menu" aria-label="Menú">
+  <p class="nav-group" id="menu-see">Supervisión</p>
+  <ul aria-labelledby="menu-see"><li><a href="/">Resumen general</a></li><li><a href="/rules">Reglas</a></li><li><a href="/incidents">Incidentes</a></li><li><a href="/marked">Ventanas marcadas</a></li><li><a href="/firings">Historial de alertas</a></li></ul>
+  <p class="nav-group" id="menu-fix">Mejoras</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">Tareas <span class="count" aria-hidden="true">1</span><span class="vh">, 1 abiertas</span></a></li><li><a href="/proposals">Propuestas</a></li><li><a href="/windows">Ventanas de mantenimiento</a></li></ul>
+  <p class="nav-group" id="menu-report">Informes</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">Informes</a></li><li><a href="/outcomes">Resultados</a></li><li><a href="/goals">Objetivos</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">Administración</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Equipos</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Ajustes</a></li><li><a href="/runs" aria-current="page">Historial de ejecuciones</a></li><li><a href="/orphans">Limpieza</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="Páginas">
+  <p class="nav-group" id="side-see">Supervisión</p>
+  <ul aria-labelledby="side-see"><li><a href="/">Resumen general</a></li><li><a href="/rules">Reglas</a></li><li><a href="/incidents">Incidentes</a></li><li><a href="/marked">Ventanas marcadas</a></li><li><a href="/firings">Historial de alertas</a></li></ul>
+  <p class="nav-group" id="side-fix">Mejoras</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">Tareas <span class="count" aria-hidden="true">1</span><span class="vh">, 1 abiertas</span></a></li><li><a href="/proposals">Propuestas</a></li><li><a href="/windows">Ventanas de mantenimiento</a></li></ul>
+  <p class="nav-group" id="side-report">Informes</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">Informes</a></li><li><a href="/outcomes">Resultados</a></li><li><a href="/goals">Objetivos</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">Administración</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Equipos</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Ajustes</a></li><li><a href="/runs" aria-current="page">Historial de ejecuciones</a></li><li><a href="/orphans">Limpieza</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="Idioma"><a href="/lang?to=en&amp;back=%2Fruns" lang="en" hreflang="en">English</a><span aria-hidden="true"> · </span><strong lang="es" aria-current="true">Español</strong><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Fruns" lang="ko" hreflang="ko">한국어</a></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="Estado">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> backtest de a → b</p><p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> una ejecución: boom</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="Ruta de navegación"><ol><li><a href="/manage">Administración</a></li><li><span aria-current="page">Historial de ejecuciones</span></li></ol></nav>
+<div class="bar">
+
+<form method="get" action="/search" role="search" class="find" aria-label="Buscar">
+  <label>Buscar <input type="search" name="q" value="" maxlength="500" placeholder="Reglas, incidentes, equipos"></label>
+  <button class="quiet-button">Buscar</button>
+</form>
+</div>
+
+<h1>Historial de ejecuciones</h1>
+<p class="lede">Hay disparos hasta 2026-11-03 12:00.</p>
+
+<div class="scroll"><table>
+<thead><tr><th scope="col">Tipo</th><th scope="col">Iniciado</th><th scope="col">Periodo</th><th scope="col" class="n">Disparos</th><th scope="col">Sin backtest</th><th scope="col">Error</th></tr></thead>
+<tbody>
+<tr><td>resumen</td><td class="t">2026-11-03 12:00</td><td class="t">2026-10-26 00:00 → 2026-11-02 00:00</td><td class="n">0</td>
+<td></td><td></td></tr>
+<tr><td>cada hora</td><td class="t">2026-11-03 12:00</td><td class="t">2026-11-02 11:00 → 2026-11-03 12:00</td><td class="n">0</td>
+<td></td><td></td></tr>
+<tr><td>backfill</td><td class="t">2026-11-03 12:00</td><td class="t">2026-11-01 11:00 → 2026-11-02 12:00</td><td class="n">40</td>
+<td></td><td></td></tr>
+<tr><td>backfill</td><td class="t">2026-11-03 12:00</td><td class="t">2026-10-31 12:00 → 2026-11-01 12:00</td><td class="n">5</td>
+<td></td><td></td></tr></tbody>
+</table></div>
+<h2>Disparos copiados</h2>
+<div class="scroll"><table>
+<thead><tr><th scope="col">Fuente</th><th scope="col">Última escritura</th><th scope="col">Periodo</th><th scope="col" class="n">Disparos</th><th scope="col" class="n">Reglas</th><th scope="col">Último cambio</th></tr></thead>
+<tbody>
+<tr><td>test-src</td><td class="t"><clock></td><td class="t">2026-11-02 00:00 → 2026-11-03 00:00</td><td class="n">4</td><td class="n">1</td><td class="t"><clock></td></tr></tbody>
+</table></div>
+<h2>El backtest frente a lo que realmente se disparó</h2>
+<p>Contrastado con ALERTS{alertstate=&#34;firing&#34;}, GRAFANA_ALERTS{alertstate=&#34;firing&#34;,grafana_alertstate!=&#34;error&#34;} hasta 2026-11-03 00:00.
+
+<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> GRAFANA_ALERTS{alertstate=&#34;firing&#34;,grafana_alertstate!=&#34;error&#34;} no tenía nada durante 2026-11-02: las reglas a las que corresponde no se comprobaron ese día. Puede que un almacén no lo guarde; --check-series nombra otra.</strong>
+
+
+
+
+<br>Se dispararon realmente en la última semana, sin ninguna regla con ese nombre: Watchdog.</p>
+<h2>Calendarios de guardia</h2>
+<div class="scroll"><table><thead><tr><th scope="col">Calendario</th><th scope="col">Leído</th><th scope="col">Turnos guardados</th><th scope="col">Desde y hasta</th></tr></thead>
+<tbody><tr><td>primary</td><td class="t">2026-11-03 12:00</td><td class="n">3</td><td class="t">2026-10-31 12:00 → 2026-11-06 12:00</td></tr>
+
+<tr><td colspan="4">Sus turnos nombran a personas que --on-call no tiene, cuyos turnos se cuentan con el horario del equipo: pat.</td></tr>
+<tr><td colspan="4" class="quiet">Omitido en su feed: an event with no one in it</td></tr><tr><td>secondary</td><td class="t">todavía no</td><td class="n">0</td><td class="t"></td></tr>
+<tr><td colspan="4"><strong class="status-bad"><span aria-hidden="true">✕</span> La última lectura falló y se mantienen los turnos guardados: feed.example.com: 503</strong></td></tr>
+
+</tbody>
+</table></div>
+
+<h2>Informes detenidos</h2>
+<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> Se eliminó su equipo, así que no se envían hasta que nombren otro: gone daily. <a href="/reports">Informes</a></p>
+<h2>Cambios hechos aquí</h2>
+<ul class="plain"><li><clock> config: goal launch-missed kept</li><li><clock> config: goal sale-no-worse kept</li><li><clock> config: goal no-refire kept</li><li><clock> config: goal paged kept</li><li><clock> config: goal precise kept</li><li><clock> ana: marked window Newsletter kept</li><li><clock> ana: marked window Autumn sale kept</li><li><clock> firings-token: firings</li><li><clock> tasks-token: comment on task 1 copied in from its issue</li><li><clock> anonymous: comment on incident INC-1</li><li><clock> anonymous: comment on task 1</li><li><clock> anonymous: comment on rule Errors</li><li><clock> ana: team gone deleted</li><li><clock> ana: report gone daily kept</li><li><clock> ana: team gone kept</li><li><clock> ana: report payments weekly kept</li><li><clock> ana: the weekly digest kept</li><li><clock> ana: role given to group:sre</li><li><clock> ana: role given to user:pat</li><li><clock> ana: quiet window cron kept</li><li><clock> ana: quiet window monthly kept</li><li><clock> ana: task 1 made</li><li><clock> ana: quiet window w kept</li><li><clock> ana: note on Errors kept</li><li><clock> ana: team payments kept</li></ul>
+
+</main>
+<footer>lapilli test · horas en UTC</footer>
+</div>
+</body>
+</html>

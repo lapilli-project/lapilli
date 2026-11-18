@@ -1,0 +1,3 @@
+Error: execution error at (lapilli/templates/cronjob.yaml:2:4): give one of prometheus.url and gcpProject
+
+Use --debug flag to render out invalid YAML

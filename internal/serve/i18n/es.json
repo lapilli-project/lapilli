@@ -2244,13 +2244,14 @@
  "Pull request backtests": "Backtests de pull requests",
  "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request.": "Los piden trabajos de CI en --backtest-listen y los ejecuta la réplica líder, de uno en uno; cada uno se guarda un día después de terminar. El comentario de un backtest está en su pull request.",
  "Asked": "Pedido",
- "Entry": "Entrada",
+ "Trust entry": "Entrada de confianza",
  "Repository": "Repositorio",
  "Rules that differ": "Reglas que difieren",
- "Requests": "Peticiones",
+ "Queries": "Consultas",
  "Took": "Duración",
  "How it ended": "Cómo terminó",
  "running": "en curso",
  "superseded by a newer commit": "reemplazado por un commit más nuevo",
- "cancelled": "cancelado"
+ "cancelled": "cancelado",
+ "under a second": "menos de un segundo"
 }

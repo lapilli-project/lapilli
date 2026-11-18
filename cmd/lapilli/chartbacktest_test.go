@@ -1,11 +1,18 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 var backtestValues = []string{"--set", "serve.backtest.enabled=true", "--set", "serve.backtest.trust.configMap.name=lapilli-backtest-trust"}
@@ -185,4 +192,154 @@ func TestChartBacktest(t *testing.T) {
 			t.Errorf("%s: %v\n%s", name, err, out)
 		}
 	}
+}
+
+// updateChartBacktestOff writes testdata/chartbacktest afresh. It was run
+// once, on main as it was before the backtest port (ab023bd1, taken out
+// with git archive, what follows here dropped in), so that the chart with
+// serve.backtest off is held to the release before it.
+var updateChartBacktestOff = flag.Bool("update-chart-backtest-off", false, "write testdata/chartbacktest afresh")
+
+// chartBacktestOff are value sets the chart tests render, none naming
+// serve.backtest: the chart's defaults alone (refused, with no history),
+// the CronJob, lapilli serve (TestChartEveryoneAdmin's), serve exposed on
+// a load balancer with the trackers job, a NetworkPolicy both ways and the
+// notifications port (TestChartService's and TestChartEgress's), and
+// replicas on Postgres signing people in (TestChartReplicas').
+var chartBacktestOff = []struct {
+	name string
+	args []string
+}{
+	{"defaults", nil},
+	{"cronjob", []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}},
+	{"serve", []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}"}},
+	{"serve-exposed", []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}",
+		"--set", "serve.trackers.tokenSecret.name=tasks", "--set", "serve.trackers.tracker=github",
+		"--set", "serve.trackers.image=example/tools@sha256:" + strings.Repeat("ab", 32), "--set", "serve.trackers.trackerTokenSecret.name=gh",
+		"--set", "serve.service.type=LoadBalancer", "--set", "serve.exposeWithoutSignIn=true",
+		"--set", "serve.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme=internal",
+		"--set", "serve.service.loadBalancerSourceRanges={203.0.113.0/24}", "--set", "serve.service.loadBalancerClass=example.com/lb",
+		"--set", "serve.service.externalTrafficPolicy=Local", "--set", "serve.service.nodePort=30080", "--set", "serve.service.port=8443",
+		"--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy",
+		"--set", "serve.networkPolicy.egress.enabled=true", "--set", "serve.networkPolicy.egress.to[0].to[0].ipBlock.cidr=0.0.0.0/0",
+		"--set", "serve.networkPolicy.egress.to[0].to[0].ipBlock.except[0]=169.254.169.254/32", "--set", "serve.networkPolicy.egress.to[0].ports[0].port=443",
+		"--set", "serve.notificationsAPI.tokenSecret.name=notify", "--set", "serve.notificationsAPI.from[0].podSelector.matchLabels.app=alertmanager"}},
+	{"serve-replicas", []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}",
+		"--set", "serve.ledger.postgres.secret.name=ledger-db", "--set", "serve.replicas=2", "--set", "serve.podDisruptionBudget.maxUnavailable=50%",
+		"--set", "serve.signIn.oidc.issuer=https://idp.example.com", "--set", "serve.signIn.oidc.clientId=lapilli",
+		"--set", "serve.externalURL=https://lapilli.example.com", "--set", "serve.roles.viewers={ana@example.com}",
+		"--set", "serve.signIn.sessionKeySecret.name=lapilli-key"}},
+}
+
+// With serve.backtest off, the chart renders what the release before did,
+// for each of chartBacktestOff: to the byte, by the helm the goldens were
+// written with (testdata/chartbacktest/helm-version); by another, which
+// may lay the same out otherwise, document by document as data, or the
+// same reason refused.
+func TestChartBacktestOffGolden(t *testing.T) {
+	dir := filepath.Join("testdata", "chartbacktest")
+	version := helmVersion(t)
+	if *updateChartBacktestOff {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "helm-version"), []byte(version+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	was, err := os.ReadFile(filepath.Join(dir, "helm-version"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact, how := strings.TrimSpace(string(was)) == version, "to the byte"
+	if !exact {
+		how = "as data"
+	}
+	for _, c := range chartBacktestOff {
+		got, err := helmTemplate(t, c.args...)
+		if refused := c.name == "defaults"; (err != nil) != refused {
+			t.Fatalf("%s (%v): refused %t, not %t\n%s", c.name, c.args, err != nil, refused, got)
+		}
+		path := filepath.Join(dir, c.name+".txt")
+		if *updateChartBacktestOff {
+			if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := string(b)
+		if !exact {
+			want, got = chartData(t, want), chartData(t, got)
+		}
+		if got != want {
+			t.Errorf("%s: helm %s renders it otherwise than the release before, %s, at %s", c.name, version, how, chartFirstDiff(want, got))
+		}
+	}
+}
+
+// helmVersion is the helm's version, as helm version --short says it; it
+// skips the test without helm.
+func helmVersion(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	out, err := exec.Command("helm", "version", "--short").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// chartData is a rendering as data: each document as JSON, its keys in
+// order, a value a line; or, refused, why.
+func chartData(t *testing.T, out string) string {
+	t.Helper()
+	if first, _, _ := strings.Cut(out, "\n"); strings.HasPrefix(first, "Error:") {
+		if _, why, ok := strings.Cut(first, "): "); ok {
+			return "refused: " + why
+		}
+		return "refused: " + first
+	}
+	var b strings.Builder
+	dec := yaml.NewDecoder(strings.NewReader(out))
+	for {
+		var d any
+		if err := dec.Decode(&d); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if d == nil {
+			continue
+		}
+		j, err := json.MarshalIndent(d, "", " ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(j)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// chartFirstDiff is the first line two renderings differ at, of each.
+func chartFirstDiff(want, got string) string {
+	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for i := range max(len(w), len(g)) {
+		if i >= len(w) || i >= len(g) || w[i] != g[i] {
+			line := func(l []string) string {
+				if i < len(l) {
+					return l[i]
+				}
+				return "(none)"
+			}
+			return fmt.Sprintf("line %d\n  was: %s\n  now: %s", i+1, line(w), line(g))
+		}
+	}
+	return "the same lines"
 }
