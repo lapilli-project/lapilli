@@ -648,7 +648,8 @@ metrics of `lapilli serve` about itself that aren't below) may change in a
 minor release, said in the changelog.
 
 `/api/v1/summary` keeps its own `schema` (docs/design/noc.md); the summary
-of `--compare` its own too (README, "What a tool reads is stable").
+of `--compare` its own too ([Pull request backtests in CI](pr-backtests.md), "What a tool reads is
+stable").
 
 ### The report's fields
 

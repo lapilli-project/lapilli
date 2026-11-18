@@ -3,3 +3,5 @@
 /dist/
 
 .DS_Store
+site/docs/
+site/_data/

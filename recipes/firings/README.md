@@ -21,8 +21,9 @@ They need `sh` and `jq` besides, and only read: each script's header says
 which permissions. Where an alarm is written in PromQL (a CloudWatch PromQL
 alarm, a Google Cloud policy with a PromQL condition, an Azure Prometheus rule
 group), `--rules` replays it instead, which gives more: change reviews,
-longer `for`s, near misses. See the README's "How it judges". Its history
-from these scripts then checks the replay: `lapilli verdict --check-replay
+longer `for`s, near misses. See
+[How it judges](../../docs/how-it-judges.md). Its history from these
+scripts then checks the replay: `lapilli verdict --check-replay
 --check-firings FILE`, or, copied into `lapilli serve` under the source
 `--alarms` reads it as, the check `serve` runs each day.
 
@@ -122,4 +123,5 @@ Sent again as they are, they change nothing. Every hour over the last day
 keeps the ledger close behind; every week over what the cloud keeps ends
 the alarms that were still on. A period with no firings takes away what the
 ledger had from the source then, so send a file only when the script
-worked, as above. The README's "Firings recorded elsewhere" has the rest.
+worked, as above. [Firings recorded elsewhere](../../docs/serve.md#firings-recorded-elsewhere)
+has the rest.

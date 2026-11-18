@@ -3,20 +3,23 @@ name: pages
 # lapilli.dev. site/CNAME must keep saying lapilli.dev: deploy-pages publishes
 # whatever is in site/, so deleting it drops the custom domain. DNS is at
 # Cloudflare with the proxy off; with the proxy on, GitHub can't issue the
-# certificate.
+# certificate. docs/ is published at /docs/ (site/docs.sh). A pull request
+# that changes any of it builds the site and deploys nothing.
 
 on:
   push:
     branches: [main]
-    paths: ["site/**", "assets/**", "internal/serve/static/heebo-*", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", ".github/workflows/pages.yml"]
+  pull_request:
+    paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('pages-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -26,8 +29,9 @@ jobs:
         with:
           persist-credentials: false
       - id: pages
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
-      - name: Copy the brand images and the font in, and set baseurl
+      - name: Copy the brand images, the font and docs/ in, and set baseurl
         env:
           BASE: ${{ steps.pages.outputs.base_path }}
         run: |
@@ -35,6 +39,7 @@ jobs:
           cp assets/*.png site/
           cp internal/serve/static/heebo-*.woff2 internal/serve/static/OFL-Heebo.txt site/
           [ "$BASE" = "/" ] && BASE=""
+          sh site/docs.sh "$BASE"
           echo "baseurl: \"$BASE\"" >> site/_config.yml
       - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
         with:
@@ -43,6 +48,7 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     permissions:
       pages: write

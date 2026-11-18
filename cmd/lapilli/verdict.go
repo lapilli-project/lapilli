@@ -128,7 +128,8 @@ Before a change to the rules:
                       characters, and what comes from the rules written so
                       that it can't format, link or mention anything. Its
                       first line, and --json's "summary", say whether
-                      anything changed, and how much (see the README)
+                      anything changed, and how much (see
+                      lapilli.dev/docs/pr-backtests)
   --expect FILE       with --compare, hold the rules that differ to what
                       FILE expects of them: a budget of firings a week and
                       while people slept, each whole week of the period,
@@ -304,7 +305,8 @@ Judging:
   --on-call FILE      on-call schedules, read from the iCalendar feeds on-call
                       tools export, and the people in them with their hours:
                       --shifts on-call=NAME then takes turns by the schedule
-                      NAME, each by its person's hours (see the README)
+                      NAME, each by its person's hours (see
+                      lapilli.dev/docs/how-it-judges)
   --shifts SHIFTS     hours that take turns instead, for a team on call in
                       shifts, or by turns across time zones: how long each
                       turn is, when the first starts, and each turn's hours,

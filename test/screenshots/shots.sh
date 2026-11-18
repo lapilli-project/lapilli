@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Takes the README's screenshots of lapilli serve, assets/serve-*.png, from
+# Takes the docs' screenshots of lapilli serve, assets/serve-*.png, from
 # the demo ledger TestDemoServe serves (internal/serve/demo_test.go): the
 # overview, the noisy rules and a noisy rule's page, 1240×980 (the rules
 # 1240×1600), in English, light and dark.

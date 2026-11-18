@@ -86,17 +86,35 @@
   .grid h3 { margin: 0 0 .3rem; font-size: 1.02rem; }
   .grid p { margin: 0; color: var(--dim); font-size: .95rem; }
   footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--dim); }
+  /* docs/ pages (site/_layouts/docs.html): the page, and the pages beside
+     it on the right, as a wiki's; under the page on a narrow screen. */
+  body.docs-page .wrap { max-width: 74rem; }
+  .docs { display: grid; grid-template-columns: minmax(0, 1fr) 15rem; gap: 3rem; align-items: start; }
+  .doc { min-width: 0; max-width: 50rem; }
+  .side { position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow-y: auto; margin-top: 2.4rem; font-size: .92rem; line-height: 1.4; }
+  .side p { margin: 1.1rem 0 .3rem .6rem; color: var(--dim); font-size: .82rem; font-weight: 500; }
+  .side ul { list-style: none; padding: 0; margin: 0; }
+  .side li { margin: 0; }
+  .side a { display: block; padding: .3rem .6rem; border-radius: 8px; color: var(--ink); text-decoration: none; }
+  .side a:hover { background: var(--panel); }
+  .side a.here { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .side a.home { font-weight: 600; }
+  .edit { margin-top: 3rem; font-size: .9rem; }
+  @media (max-width: 900px) {
+    .docs { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .side { position: static; max-height: none; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  }
   @media (max-width: 640px) {
     nav.top { position: static; border-radius: 18px; }
     h1 { font-size: 1.9rem; }
   }
 </style>
 </head>
-<body>
+<body{% if page.layout == "docs" %} class="docs-page"{% endif %}>
 <div class="wrap">
 <nav class="top">
   <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/favicon-32.png' | relative_url }}" alt="">Lapilli</a>
-  <a href="https://github.com/lapilli-project/lapilli#readme">Docs</a>
+  <a href="{{ '/docs/' | relative_url }}">Docs</a>
   <a href="https://github.com/lapilli-project/lapilli/blob/main/ROADMAP.md">Roadmap</a>
   <a href="https://github.com/lapilli-project/lapilli/blob/main/MAINTAINERS.md">Maintain</a>
   <a href="https://github.com/lapilli-project/lapilli/discussions">Discuss</a>

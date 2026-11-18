@@ -428,8 +428,8 @@ release whose files were replaced later.
 
 ## The comment
 
-Lapilli writes it (`lapilli verdict --compare --markdown`, see the
-[README](../../README.md#pull-request-backtests-in-ci)): the period and its
+Lapilli writes it (`lapilli verdict --compare --markdown`, see
+[Pull request backtests in CI](../../docs/pr-backtests.md)): the period and its
 time zone, how many of the rules that differ couldn't be replayed, if any,
 the totals before and after, the rules that differ as a table, the
 recording rules that differ, those that couldn't be replayed, with why,

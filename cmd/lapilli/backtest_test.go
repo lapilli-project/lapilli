@@ -1149,16 +1149,15 @@ func must[T any](v T, err error) T {
 	return v
 }
 
-// The summary is a contract with the tools that read it: the README names
-// each of its fields, and the form of a comparison with nothing changed.
+// The summary is a contract with the tools that read it: the docs' page
+// on pull request backtests names each of its fields, and the form of a
+// comparison with nothing changed.
 func TestSummaryDocumented(t *testing.T) {
-	b, err := os.ReadFile("../../README.md")
+	b, err := os.ReadFile("../../docs/pr-backtests.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	readme := string(b)
-	_, section, _ := strings.Cut(readme, "## Pull request backtests in CI")
-	section, _, _ = strings.Cut(section, "\n## ")
+	section := string(b)
 	ty := reflect.TypeOf(verdict.Summary{})
 	for i := range ty.NumField() {
 		tag := strings.Split(ty.Field(i).Tag.Get("json"), ",")
@@ -1167,14 +1166,14 @@ func TestSummaryDocumented(t *testing.T) {
 			continue
 		}
 		if !strings.Contains(section, "`"+tag[0]+"`") {
-			t.Errorf("the README's \"Pull request backtests in CI\" doesn't name %s", tag[0])
+			t.Errorf("docs/pr-backtests.md doesn't name %s", tag[0])
 		}
 	}
 	if !strings.Contains(section, "  "+verdict.NothingChangedHeading+"\n\n  Nothing that decides when the 42 rules fire has changed: nothing to replay.\n") {
-		t.Error("the README doesn't show the form of nothing changed")
+		t.Error("docs/pr-backtests.md doesn't show the form of nothing changed")
 	}
 	if !strings.Contains(section, verdict.SummaryLine) {
-		t.Error("the README doesn't show the summary line")
+		t.Error("docs/pr-backtests.md doesn't show the summary line")
 	}
 }
 

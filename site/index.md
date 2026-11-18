@@ -13,7 +13,7 @@ incident with no stone is one your alerts missed.</p>
 
 <div class="cta">
   <a class="primary" href="#install">Install</a>
-  <a href="https://github.com/lapilli-project/lapilli#readme">Read the docs</a>
+  <a href="{{ '/docs/' | relative_url }}">Read the docs</a>
   <a href="#help-build-it">Help build it</a>
 </div>
 
@@ -141,6 +141,9 @@ dashboard of them. The UI runs no scripts.
 - **A firing catches an incident** when it starts shortly before or during it
   and agrees on the labels you name. One already firing before caught
   nothing: it was on anyway.
+
+The rest, the noisy rules, what to change and the near misses, is in
+[How it judges]({{ '/docs/how-it-judges/' | relative_url }}).
 
 ## Works where your alerts are
 

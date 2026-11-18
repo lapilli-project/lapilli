@@ -1,6 +1,6 @@
 package serve
 
-// A demo ledger for the README's screenshots (test/screenshots): twelve
+// A demo ledger for the docs' screenshots (test/screenshots): twelve
 // weeks of three teams' alerts, with names anyone might give them, made
 // the same each time from a fixed clock and seed. TestDemoServe serves it.
 
