@@ -148,10 +148,13 @@ the ledger stays at 022.
   back, and the plain way doesn't work: the release before refuses the
   upgraded ledger, and a claim deleted to be made from the snapshot under
   its own name comes back empty from a GitOps tool that heals. The steps:
-  the copy as a claim (or a database) of its own name, then the release
-  before and `serve.ledger.existingClaim` (or
+  the copy, waited for (a `VolumeSnapshot`, the cloud's snapshot, or the
+  files with serve stopped; a database backup); the upgraded claim's disk
+  kept with `Retain` first; the copy as a claim (or a database) of its
+  own name; then the release before and `serve.ledger.existingClaim` (or
   `serve.ledger.postgres.secret.name` with one replica) in one change,
-  and what is lost and kept. docs/serve.md points to it, and CONTRIBUTING
+  never `helm rollback`, whose old values mount the upgraded ledger; and
+  what is lost and kept. docs/serve.md points to it, and CONTRIBUTING
   says a schema change's entry does.
 
 ## [0.58.0] - 2026-11-18
