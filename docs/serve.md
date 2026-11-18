@@ -406,6 +406,11 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 kubectl -n monitoring port-forward svc/lapilli 8080
 ```
 
+A release that changes the ledger's schema upgrades the ledger as it
+starts, and the releases before can't open it after: keep a copy of the
+ledger before such an upgrade, to go back to
+([Going back after a schema upgrade](../charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+
 ## Before it is deployed
 
 `lapilli preflight` takes serve's flags, as serve reads them, and says

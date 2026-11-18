@@ -246,6 +246,114 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   the ServiceMonitor scrapes each pod. What the leader's work counts
   (`lapilli_serve_runs_total`, notices sent) is in its pod's alone.
 
+### Going back after a schema upgrade
+
+A release that changes the ledger's schema says so in the changelog
+(**Ledger schema 022**, after 021), and from 0.53 on the new release's
+`lapilli preflight` says so beforehand: `serve upgrades the ledger from
+021 to 022 as it starts, and a release before 022 can't open it after`.
+serve upgrades the ledger as it starts, and a release before can't open
+it: it stops as it starts, saying `--ledger: the ledger was written by a
+newer lapilli (schema 22; this one knows 21)` (on Postgres,
+`--ledger-url-file: ...`), and its pod restarts over and over. So going
+back is going back to the ledger as it was, and only a copy taken before
+the upgrade gives that.
+
+Before upgrading, take the copy, and upgrade only once it is taken:
+
+- **SQLite, with CSI snapshots**: a `VolumeSnapshot` whose
+  `source.persistentVolumeClaimName` is `FULLNAME-ledger`. It is taken in
+  the background: upgrade once its `status.readyToUse` is true.
+- **SQLite, on a cloud's disk without them**: the cloud's own snapshot of
+  the disk behind the claim's PersistentVolume (`kubectl get pv NAME -o
+  jsonpath='{.spec.csi.volumeHandle}'`), done before upgrading.
+- **SQLite, with neither** (local-path, hostPath): with serve stopped
+  (`kubectl -n NAMESPACE scale deploy/FULLNAME --replicas=0`, with a
+  GitOps tool kept from scaling it back meanwhile), every file of the
+  claim (`ledger.db`, and `ledger.db-wal` and `ledger.db-shm` if there),
+  copied out through a pod with a shell that mounts it (`kubectl cp`),
+  and that pod deleted before upgrading. Not with `lapilli ledger copy`
+  of the new release: it brings the ledger it copies from to its own
+  schema first.
+- **Postgres**: a backup of the database, or the time to restore it to.
+
+A snapshot of a running disk is to SQLite as a power cut, which it
+recovers from; what serve writes between the copy and the upgrade isn't in
+the copy, unless serve is stopped for it.
+
+To go back:
+
+1. **Not with `helm rollback`, nor a GitOps tool's history.** They take
+   the old revision's values, which have no `existingClaim`: the release
+   before mounts the upgraded ledger, and its pod restarts over and over.
+   Go back with `helm upgrade --version BEFORE` and the values below, or
+   by changing the chart's version and the values together in Git.
+2. **SQLite: keep the upgraded claim's disk first.** Once
+   `FULLNAME-ledger` isn't rendered, Helm leaves it
+   (`helm.sh/resource-policy: keep`), but a GitOps tool that prunes deletes
+   it (Argo CD reads `keep` as no more than `Delete=false`; Flux's
+   kustomize-controller prunes too), and a reclaim policy of `Delete`
+   takes the disk with it. Before anything else, `kubectl patch pv
+   "$(kubectl -n NAMESPACE get pvc FULLNAME-ledger -o
+   jsonpath='{.spec.volumeName}')" -p
+   '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'`.
+3. **SQLite: a claim of a name of its own from the copy**, such as
+   `lapilli-ledger-restore`, never `FULLNAME-ledger` made again: a GitOps
+   tool that heals makes a deleted `FULLNAME-ledger` again, empty, before
+   the copy is in.
+   - From a `VolumeSnapshot`: a claim whose `dataSource` is the snapshot,
+     with its `storageClassName`, of at least the snapshot's
+     `status.restoreSize` (the old claim's capacity, more than
+     `serve.ledger.size` if it was expanded).
+   - From the cloud's snapshot: a disk made from it in the zone of the old
+     one (a ReadWriteOnce disk attaches to a node in its zone); a
+     PersistentVolume of a new name, written from the old one's (`kubectl
+     get pv NAME -o yaml`), keeping its CSI driver, capacity,
+     `storageClassName` and node affinity, with the new disk's volume
+     handle and `persistentVolumeReclaimPolicy: Retain`, and without its
+     `claimRef`, `uid`, `resourceVersion`, `creationTimestamp` and
+     `status`: a PersistentVolume that keeps the old `claimRef` is held
+     for the old claim, and the new one stays Pending. Then a claim that
+     names it in `volumeName`, with the same `storageClassName`.
+   - From files: a new claim, the files copied in through a pod that
+     mounts it and runs as serve does (`runAsUser` and `runAsGroup`
+     65532), or `chown -R 65532:65532` them there, and that pod deleted.
+     serve runs as 65532, and a hostPath volume, as local-path's are,
+     doesn't take `fsGroup`: files `kubectl cp` wrote as another user
+     can't be written, and serve stops as it starts.
+4. **One change: the release before, and `serve.ledger.existingClaim:
+   lapilli-ledger-restore`.** Every chart that runs serve, from 0.6.0,
+   takes `existingClaim`, and with it renders no `FULLNAME-ledger`. One
+   replica is `Recreate`: the upgraded pod stops before the one before
+   starts.
+5. **Postgres: the copy restored into a new database**, and a Secret of
+   its own (such as `lapilli-ledger-restore`) holding all the old one
+   holds, for the new database: its connection string under the same key,
+   and the CA the string's `sslrootcert` names. With
+   `serve.networkPolicy.egress`, `serve.ledger.postgres.to` and `port` name
+   where it is. Then one change: the release before,
+   `serve.ledger.postgres.secret.name` naming that Secret, and
+   `serve.replicas: 1`, so no pod of the upgraded release still runs beside
+   it (one replica is `Recreate`). Raise `serve.replicas` again once it
+   runs.
+6. **Check it**: the pod is ready, and its log has no `--ledger:` (or
+   `--ledger-url-file:`) error; from 0.53 on, `lapilli preflight` with
+   serve's flags, where serve runs, says `schema 021, this release's`. The
+   first runs replay the hours since the copy, catching up as after any
+   stop. What came in after the copy and can't be replayed isn't there:
+   incidents, tasks, comments, proposals and settings written in the UI or
+   the API, and what was sent to its ports.
+7. **The upgraded ledger** is kept: `FULLNAME-ledger` by Helm, its disk by
+   `Retain` if a GitOps tool prunes the claim (with prune off, Argo CD
+   shows the application OutOfSync while the claim is there). Keep it for
+   an upgrade tried again, or, once the release before runs, delete the
+   claim and the PersistentVolume, then the disk by hand (under `Retain`
+   it outlives them; on local-path, its directory). The upgraded database
+   is yours to drop.
+
+Upgrading again later keeps `existingClaim`, or the Secret: that is the
+ledger now.
+
 ### Teams, quiet windows, reports and roles in Git
 
 ```yaml
