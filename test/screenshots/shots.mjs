@@ -1,4 +1,4 @@
-// Takes the README's screenshots of lapilli serve from the demo ledger
+// Takes the docs' screenshots of lapilli serve from the demo ledger
 // TestDemoServe serves: the overview, the noisy rules and a noisy rule's
 // page, 1240×980 (the rules, 1240×1600: their filters are above the table
 // on a screen of that width), in English, light and dark. Run by shots.sh.

@@ -1,0 +1,24 @@
+---
+layout: default
+---
+{%- comment -%}
+A page of docs/, put here by site/docs.sh: the pages beside it, from
+site/_data/docs.yml (docs/README.md's lists), and the page.
+{%- endcomment -%}
+<div class="docs">
+<article class="doc">
+{{ content }}
+<p class="edit"><a href="https://github.com/lapilli-project/lapilli/blob/main/{{ page.source }}">Edit this page on GitHub</a></p>
+</article>
+<nav class="side" aria-label="Docs">
+  <a class="home{% if page.url == '/docs/' %} here{% endif %}" href="{{ '/docs/' | relative_url }}"{% if page.url == '/docs/' %} aria-current="page"{% endif %}>Docs</a>
+  {%- for g in site.data.docs %}
+  <p>{{ g.group | markdownify | remove: '<p>' | remove: '</p>' | strip }}</p>
+  <ul>
+    {%- for p in g.pages %}
+    <li><a href="{{ p.url | relative_url }}"{% if p.url == page.url %} class="here" aria-current="page"{% endif %}>{{ p.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}</a></li>
+    {%- endfor %}
+  </ul>
+  {%- endfor %}
+</nav>
+</div>

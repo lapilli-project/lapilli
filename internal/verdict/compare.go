@@ -86,7 +86,7 @@ type RecordingChange struct {
 // Summary is a comparison in numbers, for a tool to read: lapilli verdict
 // --compare --json gives it as "summary", and --markdown on its first
 // line. Every field is always there, and its meaning doesn't change
-// (README, "Pull request backtests in CI").
+// (docs/pr-backtests.md).
 type Summary struct {
 	// NothingChanged says nothing that decides when a rule fires differs
 	// between the two sets of rules, a recording rule included: nothing

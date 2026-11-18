@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The docs are pages of their own**, in docs/ and at
+  [lapilli.dev/docs](https://lapilli.dev/docs/). The README's long
+  sections, "How it judges" to "What it doesn't do yet", are a page each
+  in docs/, beside docs/numbers.md, listed in docs/README.md; the README
+  keeps what Lapilli is, the list of the pages, and how to install it.
+  Nothing in them was rewritten but the few words that leaned on the
+  README's order ("below", "the tables above"), now links. lapilli.dev
+  publishes the same pages, with the pages beside each, and a pull request
+  that changes them builds the site before it is merged. A test holds
+  every page to both lists, and every link of the README, the docs, the
+  chart's README and the recipes' to a file or a heading that is there.
+  The help of `--markdown` and `--on-call` names the page instead of the
+  README.
+
 ## [0.58.0] - 2026-11-18
 
 Named impact signals on the Settings page, step 3 of
