@@ -75,6 +75,9 @@ type Keys struct {
 	client *http.Client
 	algs   []jose.SignatureAlgorithm
 	now    func() time.Time
+	// maxRSA, when set, is the most bits an RSA key may have to be taken,
+	// beside MinRSABits, the fewest: a CI's keys (CI).
+	maxRSA int
 
 	mu    sync.Mutex
 	keys  []jose.JSONWebKey
@@ -261,6 +264,9 @@ func (k *Keys) fetchSet(ctx context.Context) ([]jose.JSONWebKey, []string, error
 					shortKids = append(shortKids, key.KeyID)
 				}
 				continue
+			}
+			if k.maxRSA > 0 && pub.N.BitLen() > k.maxRSA {
+				continue // too costly to check: a CI's (CI)
 			}
 		case *ecdsa.PublicKey, ed25519.PublicKey:
 		default:

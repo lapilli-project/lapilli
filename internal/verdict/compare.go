@@ -50,7 +50,16 @@ type Comparison struct {
 	// Expectations are the rules the change touches held to what they are
 	// expected to do (--expect): set by Expect.
 	Expectations *Checked `json:"expectations,omitempty"`
+	// JudgedBy names whose record judged the firings, when it isn't the
+	// incidents the comparison was given: lapilli serve's, for a pull
+	// request backtested through it (JudgedByServe). CompareMarkdown's
+	// heading says so.
+	JudgedBy string `json:"judged_by,omitempty"`
 }
+
+// JudgedByServe is Comparison.JudgedBy of a backtest lapilli serve ran: its
+// incidents, impact windows and weeks judged the firings.
+const JudgedByServe = "lapilli serve"
 
 // Expect holds the rules the change touches to after's expectations, and
 // the side before to before's when it is given; it counts on the summary

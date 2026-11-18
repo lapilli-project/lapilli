@@ -30,8 +30,9 @@ type Limiter struct {
 	// cut is when limit was last halved, changed when it last changed.
 	cut, changed time.Time
 	// pace spaces the requests out, nil for no rate; several Limiters may
-	// share one.
-	pace *Pace
+	// share one. also, when set, spaces them too: a request goes once both
+	// have its turn (AlsoPaced).
+	pace, also *Pace
 	// parent, when set, holds a place for each request in flight too.
 	parent *Limiter
 	// fair, for a cap (NewCap), shares its places among its children.
@@ -121,6 +122,20 @@ func NewLimiter(rate float64) *Limiter {
 func NewLimiterPaced(p *Pace) *Limiter {
 	return &Limiter{limit: maxInFlight, most: maxInFlight, pace: p, now: func() time.Time { return clock() }}
 }
+
+// AlsoPaced spaces l's requests by p too, besides its own pace: a request
+// goes once each has its turn, and takes a turn of each. A Limiter paced by
+// a share of a rate and by the whole rate that others are paced by asks no
+// more than its share, and, with the others, no more than the rate: so
+// pull request backtests are held to their share of --max-rate, and the
+// runs keep the rest. It returns l.
+func (l *Limiter) AlsoPaced(p *Pace) *Limiter {
+	l.also = p
+	return l
+}
+
+// Pace is the pace l's requests are spaced by, nil for none.
+func (l *Limiter) Pace() *Pace { return l.pace }
 
 // NewCap is a Limiter of n requests in flight at most, and no rate, which
 // no answer changes: a parent (Within) for the Limiters of the data sources
@@ -276,7 +291,7 @@ func (l *Limiter) take(ctx context.Context) error {
 		}
 		if !at.After(now) {
 			var ok bool
-			if at, ok = l.pace.take(now); ok {
+			if at, ok = takeBoth(now, l.pace, l.also); ok {
 				l.mu.Unlock()
 				return l.inParent(ctx)
 			}
@@ -425,6 +440,35 @@ func (p *Pace) take(now time.Time) (time.Time, bool) {
 	}
 	p.next = now.Add(p.every)
 	return now, true
+}
+
+// takeBoth takes the next turn of a and of b, either of them nil for no
+// pace, once both have come by now; otherwise it takes neither, and says
+// when the later of them comes. a is locked before b, and a Limiter with
+// one pace locks it alone, so no two lock them in the other order.
+func takeBoth(now time.Time, a, b *Pace) (time.Time, bool) {
+	switch {
+	case b == nil || b == a:
+		return a.take(now)
+	case a == nil:
+		return b.take(now)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if at := later(a.next, b.next); at.After(now) {
+		return at, false
+	}
+	a.next, b.next = now.Add(a.every), now.Add(b.every)
+	return now, true
+}
+
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 // recover lets one more in at once for each recoverEvery since the limit

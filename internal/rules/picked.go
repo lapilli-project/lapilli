@@ -334,6 +334,52 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	return out, docs, picked, nil
 }
 
+// File is a file of rules given as it is, not read from a disk: a pull
+// request's, as a CI job sends it to lapilli serve's backtest port. Path
+// is its name, said in what is read of it and nothing else: never a path
+// on this machine's disk.
+type File struct {
+	Path string
+	Data []byte
+}
+
+// PickedFiles reads files as ReadPicked reads a directory holding them,
+// each at its Path under the directory: of each, the documents of rules,
+// and with a selector the labelled ones; a file that holds none, or none
+// the selector keeps, passed over; one in a directory below (a Path with
+// a slash) that doesn't read passed over too, as ReadPicked passes it
+// over, but one Lapilli's reader refuses. What aliases expand to, and what
+// the rules make, is counted for them all, as of one input. None of them
+// is read from, or written to, a disk.
+func PickedFiles(files []File, p Picking) ([]Rule, []Doc, Picked, error) {
+	var picked Picked
+	in := reading{pick: OneInput(Together(context.Background())), parse: OneInput(Together(context.Background()))}
+	var out []Rule
+	var docs []Doc
+	for _, f := range files {
+		if len(f.Data) > MaxFile {
+			return nil, nil, picked, fmt.Errorf("%s: more than %d MiB: a file of rules is less", f.Path, MaxFile>>20)
+		}
+		pickAt, parseAt := inputOf(in.pick).mark(), inputOf(in.parse).mark()
+		rs, d, err := in.loadBytes(f.Path, f.Data, p, &picked)
+		switch {
+		case errors.Is(err, errNoRules), errors.Is(err, ErrNoneSelected),
+			err != nil && strings.Contains(f.Path, "/") && !refused(err) && !unreadRules(err):
+			inputOf(in.pick).undo(pickAt)
+			inputOf(in.parse).undo(parseAt)
+			continue
+		case err != nil:
+			return nil, nil, picked, err
+		}
+		out = append(out, rs...)
+		docs = append(docs, d)
+	}
+	if len(out) == 0 && picked.Unselected > 0 {
+		return nil, nil, picked, fmt.Errorf("%w (%s): %d documents of rules have other labels", ErrNoneSelected, p.Select, picked.Unselected)
+	}
+	return out, docs, picked, nil
+}
+
 // unreadRules reports whether err is a document in the shape of rules
 // that Lapilli's own reader refuses (unread): said, never passed over.
 func unreadRules(err error) bool {
@@ -352,6 +398,11 @@ func (in reading) load(path string, p Picking, picked *Picked) ([]Rule, Doc, err
 	if err != nil {
 		return nil, Doc{}, err
 	}
+	return in.loadBytes(path, b, p, picked)
+}
+
+// loadBytes reads a file's bytes, b, as load reads the file at path.
+func (in reading) loadBytes(path string, b []byte, p Picking, picked *Picked) ([]Rule, Doc, error) {
 	kept, q, err := pick(in.pick, b, p.Select)
 	if err != nil {
 		return nil, Doc{}, fmt.Errorf("%s: %w", path, err)

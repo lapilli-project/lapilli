@@ -48,6 +48,9 @@ type Client struct {
 	maxSamples int
 	// api is which of APIs its requests are counted under (CountedAs).
 	api string
+	// queryTimeout, when set, is sent with each range query as its
+	// timeout, so that the API gives up on one sooner than it would (Lane).
+	queryTimeout time.Duration
 }
 
 // Option configures a Client.
@@ -104,6 +107,23 @@ func WithMaxSamples(n int) Option {
 			c.maxSamples = n
 		}
 	}
+}
+
+// Limiter is the Limiter c's requests are shared out by.
+func (c *Client) Limiter() *Limiter { return c.limit }
+
+// Lane is a copy of c that asks through l in place of c's Limiter, with
+// timeout sent with each range query (Prometheus's timeout parameter, 0
+// for none): a lane of its own, such as pull request backtests', paced by
+// a share of the rate c keeps (Limiter.AlsoPaced), whose queries a shared
+// Prometheus gives up on before its own default. c is left as it is.
+func (c *Client) Lane(l *Limiter, timeout time.Duration) *Client {
+	cc := *c
+	cc.limit, cc.queryTimeout = l, timeout
+	if cc.limit == nil {
+		cc.limit = NewLimiter(0)
+	}
+	return &cc
 }
 
 // Loki says the API is Loki's: a range query is asked of
@@ -811,6 +831,9 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		"start": {strconv.FormatInt(start.Unix(), 10)},
 		"end":   {strconv.FormatInt(end.Unix(), 10)},
 		"step":  {strconv.FormatFloat(ask.Seconds(), 'f', -1, 64)},
+	}
+	if c.queryTimeout > 0 && !c.loki {
+		q.Set("timeout", strconv.FormatFloat(c.queryTimeout.Seconds(), 'f', -1, 64)+"s")
 	}
 	var req *http.Request
 	var err error
