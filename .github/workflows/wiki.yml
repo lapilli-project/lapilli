@@ -1,0 +1,67 @@
+name: wiki
+
+# The GitHub wiki is a copy of docs/, written again by .github/wiki.sh on
+# every change to main, so the pages are read on GitHub too and still
+# changed in one place. A pull request that changes them writes the pages
+# and pushes nothing; only main's own code runs with the token that may
+# push to the wiki.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/*.md", ".github/wiki.sh", ".github/workflows/wiki.yml"]
+  pull_request:
+    paths: ["docs/*.md", ".github/wiki.sh", ".github/workflows/wiki.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('wiki-{0}', github.ref) || 'wiki' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  write:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the pages
+        run: |
+          set -eu
+          mkdir "$RUNNER_TEMP/wiki"
+          sh .github/wiki.sh "$RUNNER_TEMP/wiki"
+          ls "$RUNNER_TEMP/wiki"
+
+  push:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the wiki is the repository's, and so is its token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the pages into the wiki, and push them if they changed
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c http.extraheader="$auth" clone -q --depth 1 \
+            "https://github.com/$GITHUB_REPOSITORY.wiki.git" "$RUNNER_TEMP/wiki"
+          sh .github/wiki.sh "$RUNNER_TEMP/wiki"
+          cd "$RUNNER_TEMP/wiki"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The wiki already has docs/ as it is."
+            exit 0
+          fi
+          git diff --cached --stat
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Copy docs/ from $GITHUB_SHA"
+          git -c http.extraheader="$auth" push -q origin HEAD

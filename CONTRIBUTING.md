@@ -52,7 +52,13 @@ A statement that Postgres takes otherwise than SQLite is given for both
 migration comes in a pair: `schema/NNN.sql` and `schema/postgres/NNN.sql`.
 Its changelog entry says **Ledger schema NNN**, which release can't open
 the ledger after, and to keep a copy first, pointing to the chart's
-README, "Going back after a schema upgrade".
+README, "Going back after a schema upgrade"; and it gets a row in
+[docs/upgrading.md](docs/upgrading.md)'s table, as `TestSchemasDocumented`
+holds. So do a route of `/api/v1` in [docs/api.md](docs/api.md), a metric
+in [docs/metrics.md](docs/metrics.md), and an option in
+[docs/commands.md](docs/commands.md), which is the help itself:
+`go test ./cmd/lapilli -run TestCommandsDocumented -write-docs` writes it
+again.
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
 and the pages over a busy ledger: two million firings in the ledger, 200,000

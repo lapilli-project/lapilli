@@ -86,8 +86,11 @@ week and the stones are counted.
 ## Docs
 
 Each subject has a page in [docs/](docs/README.md), the same pages as
-[lapilli.dev/docs](https://lapilli.dev/docs/):
+[lapilli.dev/docs](https://lapilli.dev/docs/) and the
+[wiki](https://github.com/lapilli-project/lapilli/wiki):
 
+- Start here: [Getting started](docs/getting-started.md),
+  [Words](docs/glossary.md), [Questions](docs/faq.md)
 - Judging a period: [How it judges](docs/how-it-judges.md),
   [Use `lapilli verdict`](docs/verdict.md), [The numbers](docs/numbers.md),
   [A cloud's own alarms](docs/cloud-alarms.md),
@@ -104,7 +107,10 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
   [Notifications as they were sent](docs/notifications.md),
   [Changing rules](docs/changing-rules.md),
   [Ask it from an agent](docs/mcp.md)
-- [What it doesn't do yet](docs/limits.md)
+- Reference: [Commands](docs/commands.md), [The HTTP API](docs/api.md),
+  [Metrics](docs/metrics.md), [Upgrading](docs/upgrading.md)
+- [When something goes wrong](docs/troubleshooting.md),
+  [What it doesn't do yet](docs/limits.md)
 
 ## Help build it
 

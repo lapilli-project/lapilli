@@ -2,8 +2,20 @@
 
 How Lapilli judges alert rules, and how to run it: once over a period with
 `lapilli verdict`, or every hour with `lapilli serve`. The same pages are at
-[lapilli.dev/docs](https://lapilli.dev/docs/); the
-[README](../README.md) says what Lapilli is, and how to install it.
+[lapilli.dev/docs](https://lapilli.dev/docs/) and in the
+[wiki](https://github.com/lapilli-project/lapilli/wiki), a copy of
+docs/ written again on each change; the [README](../README.md) says what
+Lapilli is, and how to install it.
+
+## Start here
+
+- [Getting started](getting-started.md): install it, write down an incident
+  or two, and read a first report on your own alerts; then keep judging with
+  `lapilli serve`
+- [Words](glossary.md): stones, firings, incidents, the ledger, and the
+  rest of the words these pages use
+- [Questions](faq.md): what it needs, what it writes, and what it sends
+  anywhere
 
 ## Judging a period
 
@@ -54,8 +66,20 @@ How Lapilli judges alert rules, and how to run it: once over a period with
   made where the rule is kept
 - [Ask it from an agent](mcp.md): MCP at `/mcp`
 
+## Reference
+
+- [Commands](commands.md): every option of `lapilli verdict`, `serve`,
+  `preflight` and `ledger`, as `-h` prints it
+- [The HTTP API](api.md): every endpoint `lapilli serve` answers on, and the
+  role each needs
+- [Metrics](metrics.md): every metric `lapilli serve` exposes at `/metrics`
+- [Upgrading](upgrading.md): which version changed the ledger, and going
+  back
+
 ## And
 
+- [When something goes wrong](troubleshooting.md): what an error or an odd
+  number means, and what to do
 - [What it doesn't do yet](limits.md)
 - The Helm chart: [charts/lapilli](../charts/lapilli/README.md)
 - Scripts that copy in incidents, firings, tasks and earlier versions of the
