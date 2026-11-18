@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func TestPreflightBacktests(t *testing.T) {
     audience: https://lapilli-ci.example.com
     claims:
       repository_id: ["123456789", "987654321"]
-      repository_owner_id: "4200"
+      repository_owner_id: "4200917"
       event_name: pull_request
   - name: alerts-push
     issuer: `+github.Issuer+`
@@ -146,10 +147,15 @@ func TestPreflightBacktests(t *testing.T) {
 	if !strings.Contains(out, "/api/actions") {
 		t.Errorf("the issuers aren't said:\n%s", out)
 	}
-	for _, hidden := range []string{"123456789", "987654321", "4200", "lapilli-ci.example.com", plainToken, "40 characters", fmt.Sprint(len(plainToken))} {
+	for _, hidden := range []string{"123456789", "987654321", "4200917", "lapilli-ci.example.com", plainToken} {
 		if strings.Contains(out, hidden) {
 			t.Errorf("the report says %q:\n%s", hidden, out)
 		}
+	}
+	// Nor how long the token is, in any unit: the report's other numbers
+	// (a time taken, the free space) may be 40 all the same.
+	if length := regexp.MustCompile(fmt.Sprintf(`\b%d (characters|bytes|chars)\b`, len(plainToken))); length.MatchString(out) {
+		t.Errorf("the report says the token's length:\n%s", out)
 	}
 
 	// --offline: the trust file is read all the same, no issuer is asked,
