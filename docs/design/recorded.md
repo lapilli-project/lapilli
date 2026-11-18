@@ -177,3 +177,10 @@ with the recipes' fixtures sent through the port, and a budget: a week of
 - `recipes/firings/put.sh` checks each line is a firing before sending, and
   takes `SINCE` and `UNTIL` both, as the script that wrote the firings was
   given them.
+- The budget is held by what a write does, not by the clock of the machine
+  the tests run on (`TestRecordedScale`): a week of 100,000 firings is each
+  firing's row, its alert's and its stones once, its rules' days and weeks
+  counted again, and one judging of the period; sent again unchanged, the
+  source's own rows and nothing judged. Postgres counts statements: a few
+  for each rule, and a thousand rows a statement. On a laptop the two take
+  2 s and 0.3 s, in SQLite and in Postgres alike.
