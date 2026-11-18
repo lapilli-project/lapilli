@@ -1477,13 +1477,24 @@ func TestTakeErrorRedacted(t *testing.T) {
 // What a cloud said loses its ids; Lapilli's own words keep theirs.
 func TestCloudIDs(t *testing.T) {
 	for in, want := range map[string]string{
-		"account 123456789012.":                       "account [a number].",
-		"acct_123456789012 and x123456789012y":        "acct_[a number] and x[a number]y",
-		"1234-5678-9012 or 12345-6789-0123":           "[a number] or 12345-6789-0123",
-		"a time 1762000000, a count 999999999":        "a time [a number], a count 999999999",
-		"arn:aws:iam::123456789012:role/x/y, then":    "[an ARN], then",
-		"arn:aws:s3:::bucket stays":                   "arn:aws:s3:::bucket stays",
-		"object 00000000-0000-0000-0000-00000000000d": "object [an id]",
+		"account 123456789012.":                                                    "account [a number].",
+		"acct_123456789012 and x123456789012y":                                     "acct_[a number] and x[a number]y",
+		"1234-5678-9012 or 12345-6789-0123":                                        "[a number] or 12345-6789-0123",
+		"a time 1762000000, a count 999999999":                                     "a time [a number], a count 999999999",
+		"arn:aws:iam::123456789012:role/x/y, then":                                 "[an ARN], then",
+		"arn:aws-cn:iam::123456789012:role/cn-role":                                "[an ARN]",
+		"arn:aws-us-gov:sts::123456789012:assumed-role/gov/s":                      "[an ARN]",
+		"arn:aws-iso:iam::123456789012:role/iso-role":                              "[an ARN]",
+		"arn:aws-iso-b:iam::123456789012:role/isob-role, then":                     "[an ARN], then",
+		"arn:aws-iso-e:iam::123456789012:role/isoe-role":                           "[an ARN]",
+		"arn:aws-iso-f:sts::123456789012:assumed-role/f/s":                         "[an ARN]",
+		"arn:aws-eusc:iam::123456789012:role/eusc-role":                            "[an ARN]",
+		"arn:aws:iam::aws:policy/ReadOnlyAccess stays":                             "arn:aws:iam::aws:policy/ReadOnlyAccess stays",
+		"arn:aws:iam::123456789012:role/a,b,c=d@e then":                            "[an ARN] then",
+		"roles arn:aws:iam::123456789012:role/a,arn:aws:iam::123456789012:role/b.": "roles [an ARN]",
+		"arn:aws:iam::123456789012:role/x,":                                        "[an ARN],",
+		"arn:aws:s3:::bucket stays":                                                "arn:aws:s3:::bucket stays",
+		"object 00000000-0000-0000-0000-00000000000d":                              "object [an id]",
 	} {
 		if got := cloudIDs(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)

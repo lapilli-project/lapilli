@@ -146,6 +146,12 @@ Before upgrading:
 
 ### Fixed
 
+- **`lapilli preflight` hides an ARN of any AWS partition in what a cloud
+  says** (0.60.0): only `aws`, `aws-cn` and `aws-us-gov`'s were, so in
+  one of `aws-iso`, `aws-iso-b` or `aws-eusc` the account's number was
+  hidden and the role's name shown. A role's name with a comma in it
+  (`role/a,b`) is hidden whole too; before, what followed the comma was
+  shown.
 - **`lapilli verdict --compare` with `--rules-select` keeping nothing on
   one side** exited 1, `no document of rules has the labels asked for`.
   That side is now one with no rules, as an empty directory is: the rules

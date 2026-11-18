@@ -105,8 +105,12 @@ func (p *run) cloudSaidText(s string) string {
 var (
 	guidText = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 	// arnText is an AWS ARN that names an account: the pod's own role's,
-	// another account's, whose name is the role's.
-	arnText = regexp.MustCompile(`arn:aws(?:-cn|-us-gov)?:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:[^\s"'<>,;()\[\]{}]+`)
+	// another account's, whose name is the role's. In any partition, not
+	// only those Lapilli writes to (aws-iso, aws-iso-b, aws-eusc, and any
+	// to come): an error may name an ARN of one. A comma is the ARN's when
+	// what follows it is too (a role's name may hold one, role/a,b), the
+	// sentence's when a space or the end does.
+	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:(?:[^\s"'<>,;()\[\]{}]|,[^\s"'<>,;()\[\]{}])+`)
 	// numberText is what may be an account's or a project's number: ten
 	// digits or more, or 1234-5678-9012 as AWS writes an account, whatever
 	// is beside it but another digit (acct_123456789012).
