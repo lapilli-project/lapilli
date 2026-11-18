@@ -15,7 +15,8 @@ import (
 // README and in docs/README.md, whose lists are the site's sidebar, and
 // every link in them, to a page, a heading or a file of the repository,
 // goes somewhere. The recipes' and the chart's READMEs link into the docs,
-// so their links are held too.
+// so their links are held too, and so is every lapilli.dev/docs/NAME the
+// code, the help and the site name.
 func TestDocsLinks(t *testing.T) {
 	root := filepath.Join("..", "..")
 	pages, err := filepath.Glob(filepath.Join(root, "docs", "*.md"))
@@ -57,19 +58,50 @@ func TestDocsLinks(t *testing.T) {
 		}
 	}
 
-	readme := readDoc(t, filepath.Join(root, "README.md"))
+	_, list, _ := strings.Cut(readDoc(t, filepath.Join(root, "README.md")), "\n## Docs\n")
+	list, _, _ = strings.Cut(list, "\n## ")
 	home := readDoc(t, filepath.Join(root, "docs", "README.md"))
 	for _, p := range pages {
 		n := filepath.Base(p)
 		if n == "README.md" {
 			continue
 		}
-		if !strings.Contains(readme, "](docs/"+n+")") {
+		if !strings.Contains(list, "](docs/"+n+")") {
 			t.Errorf("the README's Docs doesn't list docs/%s", n)
 		}
-		if !regexp.MustCompile(`(?m)^- \[[^\n]*\]\(` + regexp.QuoteMeta(n) + `\)`).MatchString(home) {
+		// An item whose first link is to the page, as site/docs.sh reads it.
+		if !regexp.MustCompile(`(?m)^- \[[^\]\n]*\]\(` + regexp.QuoteMeta(n) + `\)`).MatchString(home) {
 			t.Errorf("docs/README.md doesn't list %s as an item of its own: site/docs.sh wouldn't publish it", n)
 		}
+	}
+
+	// The pages' addresses on lapilli.dev, as the help and the site give them.
+	site := regexp.MustCompile(`lapilli\.dev/docs/([a-z0-9-]+)|'/docs/([a-z0-9-]+)/'`)
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		name, _ := filepath.Rel(root, path)
+		if d.IsDir() {
+			if name == ".git" || name == filepath.Join("site", "docs") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if name == "CHANGELOG.md" || !(strings.HasSuffix(name, ".go") || strings.HasPrefix(name, "site"+string(filepath.Separator))) {
+			return nil
+		}
+		for i, line := range strings.Split(readDoc(t, path), "\n") {
+			for _, m := range site.FindAllStringSubmatch(line, -1) {
+				if _, err := os.Stat(filepath.Join(root, "docs", m[1]+m[2]+".md")); err != nil {
+					t.Errorf("%s:%d: %s isn't a page of docs/", name, i+1, m[0])
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

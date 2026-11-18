@@ -5,18 +5,19 @@
 # in assets/ to the copy at the site's root, anything else in the
 # repository's to GitHub. The sidebar, site/_data/docs.yml, is read from
 # docs/README.md's headings and lists, so the pages are listed in one place.
-# Run by .github/workflows/pages.yml before Jekyll, with the site's base
-# path ("" for lapilli.dev); site/docs/ and site/_data/ aren't kept in git.
+# A page is a list item whose first link is to docs/NAME.md. Run by
+# .github/workflows/pages.yml before Jekyll, with the site's base path (""
+# for lapilli.dev); site/docs/ and site/_data/docs.yml aren't kept in git.
 set -eu
 base=${1-}
 cd "$(dirname "$0")/.."
 blob=https://github.com/lapilli-project/lapilli/blob/main
 out=site/docs
-rm -rf "$out" site/_data
+rm -rf "$out" site/_data/docs.yml
 mkdir -p "$out" site/_data
 
 # The pages, in docs/README.md's order.
-pages=$(sed -nE 's/^- \[.*\]\(([a-z0-9-]+)\.md\).*/\1/p' docs/README.md)
+pages=$(sed -nE 's/^- \[[^]]*\]\(([a-z0-9-]+)\.md\).*/\1/p' docs/README.md)
 for f in docs/*.md; do
   n=$(basename "$f" .md)
   [ "$n" = README ] && continue
@@ -29,6 +30,11 @@ done
 page() { # page SOURCE NAME URL
   if grep -q 'endraw' "$1"; then
     echo "$1 has endraw, which would end the page's raw block early" >&2
+    exit 1
+  fi
+  # pages.yml copies assets/*.png to the site's root, and nothing else.
+  if grep -Eo '\.\./assets/[^)" ]+' "$1" | grep -Ev '^\.\./assets/[^/]+\.png$'; then
+    echo "$1: only a .png at the top of assets/ is on the site" >&2
     exit 1
   fi
   title=$(sed -n 's/^# //p' "$1" | head -n 1 | tr -d '`')
@@ -59,9 +65,9 @@ done
 awk -v base="$base" '
   function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
   /^## / { sub(/^## /, ""); print "- group: " q($0); print "  pages:"; next }
-  /^- \[.*\]\([a-z0-9-]+\.md\)/ {
-    t = $0; sub(/^- \[/, "", t); sub(/\]\(.*/, "", t)
-    u = $0; sub(/^[^(]*\(/, "", u); sub(/\.md\).*/, "", u)
+  /^- \[[^]]*\]\([a-z0-9-]+\.md\)/ {
+    match($0, /^- \[[^]]*\]/); t = substr($0, 4, RLENGTH - 4)
+    u = substr($0, RLENGTH + 2); sub(/\.md\).*/, "", u)
     print "    - title: " q(t); print "      url: " q("/docs/" u "/")
   }
 ' docs/README.md >site/_data/docs.yml

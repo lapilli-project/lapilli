@@ -58,12 +58,14 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
   Each is read with its cloud's credentials, whatever `--auth` says.
   `SOURCE` names them, as their history is copied in; an alarm and a rule of
   one name are told apart by it: `HighCPU [cloudwatch-prod]`. PromQL
-  alarms are replayed, the others listed (see "A cloud's own alarms").
+  alarms are replayed, the others listed (see
+  [A cloud's own alarms](cloud-alarms.md)).
   `lapilli serve` reads them every `--alarms-every` (10m).
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`), such as the
-  history of a cloud's own alarms (see [A cloud's own alarms](cloud-alarms.md)), or a
+  history of a cloud's own alarms (see
+  [A cloud's own alarms](cloud-alarms.md)), or a
   report's own `firings`, judged again: their `held_from` says when their
   condition held (see "An alert after the incident").
 
