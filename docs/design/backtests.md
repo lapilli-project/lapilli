@@ -684,9 +684,10 @@ Where step 1 does otherwise than the sections above say, or says more:
   one value each.
 - **Keys at the issuer's own origin.** The JWKS a discovery document names
   is taken only when it is https at the issuer's origin; `jwks_url` names
-  it otherwise. A CI's RSA keys are taken at 2048 to 4096 bits, and a
-  failed discovery is asked again once a minute at most, not every ten
-  seconds as a sign-in's is.
+  it otherwise. A CI's RSA keys are taken at 4096 bits at most, beside
+  the 2048 bits at least every identity provider's are held to (#136),
+  and a failed discovery is asked again once a minute at most, not every
+  ten seconds as a sign-in's is.
 - **One audience.** A token naming several audiences is refused, even with
   the entry's among them: it was made for others too. `iat` may be up to
   five minutes ahead, the leeway `Bearer` gives.
