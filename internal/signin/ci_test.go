@@ -126,6 +126,17 @@ func TestCITokenAlgorithms(t *testing.T) {
 	if _, err := ci.Verify(context.Background(), none, ciAudience); err == nil {
 		t.Error("a token with alg none was taken")
 	}
+	// 4096 bits, the most a CI's key is taken at, verifies.
+	big, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp.Key = big
+	fresh := &CI{Issuer: idp.Issuer, Client: Client(nil), Now: idp.Now}
+	if _, err := fresh.Verify(context.Background(), idp.Token(ciAudience, nil), ciAudience); err != nil {
+		t.Errorf("a token signed by an RSA key of 4096 bits: %v", err)
+	}
+	// Under MinRSABits, or past 4096 (which go-jose doesn't take either).
 	for _, bits := range []int{1024, 4096 + 1024} {
 		weak, err := rsa.GenerateKey(rand.Reader, bits)
 		if err != nil {
