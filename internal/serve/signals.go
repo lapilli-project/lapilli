@@ -119,16 +119,27 @@ func (s *Server) signalsOf(ctx context.Context, match []string, n signalsNow, sg
 // in the ledger (ledger.SyncSignalSet): when a signal was added or taken
 // away, or its match or record changed, or the entries, every firing is
 // judged again, as a change to --match judges it.
+//
+// With named signals, the windows of the impact signal with no name the
+// ledger keeps from before (serve started with them in place of --impact
+// PROMQL) are tied to the signal impact, as the Settings page ties them,
+// once, said in one line of the log.
 func (s *Server) syncSignals(ctx context.Context) (bool, error) {
 	synced, err := s.l.SyncSignalSet(ctx, s.signalsFrom)
+	if err == nil && synced.Tied > 0 {
+		s.log.Info("windows of the impact signal with no name tied to a named signal, as the Settings page ties them",
+			"windows", synced.Tied, "signal", ledger.UnnamedTiedTo, "read", synced.TiedRead)
+	}
 	return synced.Set || synced.Entries, err
 }
 
 // signalsFrom are the named signals in effect, the rule entries and the
 // match in effect, of the settings as the ledger's write reads them
-// (ledger.SignalsFrom).
+// (ledger.SignalsFrom), with --lead in effect.
 func (s *Server) signalsFrom(set map[string]ledger.Setting) (ledger.SignalSet, []string) {
-	return s.signalsIn(set).set(), s.matchOf(set)
+	n := s.signalsIn(set).set()
+	n.Lead = s.leadOf(set)
+	return n, s.matchOf(set)
 }
 
 // signalsRead reads each named signal for a run over [from, to] (Found's
