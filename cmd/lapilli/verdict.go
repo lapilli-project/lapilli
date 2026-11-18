@@ -1357,15 +1357,17 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			f.replaying().Apply(rs)
 			was = append(was, rs...)
 		}
-		// Neither side kept by the selector: a selector that matches
-		// nothing (a label's name mistyped), said as ever, not taken for
-		// two sets alike.
+		// No rule left on either side, and the selector kept nothing of a
+		// side it was given documents of: a selector that matches nothing
+		// (a label's name mistyped), said as ever, not taken for two sets
+		// alike, the other side empty or not (a pull request's first
+		// rules).
 		held := len(was)
 		for _, v := range versions {
 			held += len(v.Rules)
 		}
-		if held == 0 && noneSelected != nil && f.noneSelected != nil {
-			return fail(fmt.Errorf("--rules-select %s keeps no document of rules of --rules or of --compare: %w", f.rulesSelect, noneSelected))
+		if held == 0 && (noneSelected != nil || f.noneSelected != nil) {
+			return fail(fmt.Errorf("--rules-select %s keeps no document of rules of --rules or of --compare: %w", f.rulesSelect, cmp.Or(noneSelected, f.noneSelected)))
 		}
 		f.sayPicked(stderr, "--compare")
 	}

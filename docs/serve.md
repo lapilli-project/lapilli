@@ -592,8 +592,9 @@ trust:
   a string as it is, an integer by its decimal. `jti`, or with none (as
   Forgejo's) the hash of what it says as it was signed, never how it was
   written, starts one backtest, with the body it first came with: sent
-  again with it, the same backtest (200, without its key); with another,
-  409.
+  again, with that body or another, 409, its body unread and no key given
+  again (two at once, the first not yet kept when the second was read: the
+  same body is answered with the same backtest, 200, without its key).
 - **The audience** is required, and should be the port's URL. GitHub's
   default (the repository owner's URL), one at the issuer's own origin,
   `sigstore`, and the audiences of AWS STS, Microsoft Entra's token
@@ -642,9 +643,13 @@ whole rate again. Without `--max-rate`, a quarter of `--parallel` at once,
 one at least. A backtest that couldn't finish within `--backtest-timeout`
 at its share is refused before it waits, saying how many requests it needs
 and what period would fit. An entry's `hourly` is taken before the body
-is read, and stays taken for one refused as it was sent; an entry has one
-body read at a time, two of all entries at once, each within 5 seconds of
-its headers. 20 wait at most (`--backtest-queue`), 3 of an
+is read. What can be told without the body is refused before it is read,
+and its hour given back: a token that started a backtest already (409,
+whatever body it comes with: no key is given twice), the queue with no
+room for the entry, the reads full, the ledger not ready. Once the body
+is read, a request refused keeps its hour: what it cost to read and check
+is what `hourly` bounds. An entry has one body read at a time, two of all
+entries at once, each within 5 seconds of its headers. 20 wait at most (`--backtest-queue`), 3 of an
 entry, one of a pull request the token's `ref` names (a newer commit's
 takes the place of the one waiting; a number the job said takes none's:
 GitLab's ID token names a merge request's source branch, not its number,
@@ -662,9 +667,14 @@ time in the firings the comment says. Give serve's history credential what
 the rules need and no more. The port takes rules in Prometheus's format
 alone; 50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
 a group interval of an hour at most; each selector one metric's, by its
-name (`{job="api"}` and `{__name__=~"..."}` are refused); a range, a
-subquery or an offset a week back at most, a subquery of 11,000 points at
-most, and no `@`; each range query with a timeout of a minute; days 1 to
+name (`{job="api"}` and `{__name__=~"..."}` are refused); what a rule
+reads back, its range and offset added to those of every subquery around
+them, 8 days at most in all (`rate(x[1d] offset 7d)` fits,
+`rate(x[7d] offset 7d)` doesn't); a subquery of 11,000 points at most, its
+step written in it (`[1d:1m]`, not `[1d:]`: without one, Prometheus steps
+at its evaluation interval, which Lapilli doesn't know, so the points
+can't be counted; add the step); ranges and offsets written as durations;
+and no `@`; comments read past, as Prometheus does; each range query with a timeout of a minute; days 1 to
 14, and the entry's `days`. What it learns comes a bit at a time, as a rule
 fires or doesn't: an entry's `hourly` is what bounds how fast. Keep it as
 low as the pull requests need; a day's cap, of the rules that differ

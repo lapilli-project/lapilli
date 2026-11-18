@@ -67,8 +67,10 @@ func unquoteLabel(label string) (string, bool) {
 // offset or a range written other than as a duration (Prometheus's
 // duration expressions, offset (700d)); an @, which reads a time of its
 // own choosing. "" when there is none. An expression that doesn't read is
-// said so.
+// said so. Comments are read past, as Prometheus does: what a # starts, to
+// the line's end, outside a string, reaches nothing, and hides nothing.
 func Reach(expr string, most time.Duration, points int) string {
+	expr = blankComments(expr)
 	type subquery struct {
 		open, close int // the parentheses it ranges over
 		reach       time.Duration
@@ -238,6 +240,34 @@ func reachOf(d time.Duration) string {
 		return strconv.FormatInt(int64(d/(24*time.Hour)), 10) + "d"
 	}
 	return promDuration(d)
+}
+
+// blankComments is expr with each comment, from a # outside a string to
+// the line's end, written as spaces, so that what is left is where it was
+// and no quote in a comment starts a string: strings read as scopeScan
+// reads them, \ escaping in "..." and '...', nothing in `...`.
+func blankComments(expr string) string {
+	if !strings.Contains(expr, "#") {
+		return expr
+	}
+	b := []byte(expr)
+	var quote byte
+	for i := 0; i < len(b); i++ {
+		switch c := b[i]; {
+		case quote != 0 && c == '\\' && quote != '`':
+			i++
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '#':
+			for ; i < len(b) && b[i] != '\n'; i++ {
+				b[i] = ' '
+			}
+		}
+	}
+	return string(b)
 }
 
 func absDuration(d time.Duration) time.Duration {

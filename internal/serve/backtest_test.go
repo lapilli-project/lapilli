@@ -330,6 +330,20 @@ func TestBacktestTokensRefused(t *testing.T) {
 	}
 }
 
+// btPostCounting posts body with token, answering what btAsk does and
+// how many of its bytes the port read.
+func btPostCounting(t *testing.T, b *btSet, token string, body []byte) (int, map[string]any, int) {
+	t.Helper()
+	read := &countingReader{r: bytes.NewReader(body)}
+	r := httptest.NewRequest("POST", "/v1/backtests", read)
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	b.h.ServeHTTP(w, r)
+	var m map[string]any
+	json.Unmarshal(w.Body.Bytes(), &m)
+	return w.Code, m, read.n
+}
+
 type countingReader struct {
 	r io.Reader
 	n int
@@ -368,13 +382,13 @@ func TestBacktestTokenOnce(t *testing.T) {
 	if code != http.StatusAccepted || first["key"] == nil {
 		t.Fatalf("%d %v", code, first)
 	}
-	code, again, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, body)
-	if code != http.StatusOK || again["id"] != first["id"] || again["key"] != nil {
-		t.Errorf("the same body again: %d %v", code, again)
-	}
-	code, other, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, map[string]any{"days": 2}))
-	if code != http.StatusConflict {
-		t.Errorf("another body: %d %v", code, other)
+	// Again, with the same body or another: refused before it is read,
+	// no key given.
+	for _, again := range [][]byte{body, btBody(ruleFile, changedRules, map[string]any{"days": 2})} {
+		code, m, n := btPostCounting(t, b, tok, again)
+		if code != http.StatusConflict || m["key"] != nil || m["id"] != nil || n != 0 {
+			t.Errorf("the token again: %d %v, %d bytes read", code, m, n)
+		}
 	}
 	for range 2 {
 		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, map[string]any{"pull_request": 5})); code != http.StatusAccepted {
@@ -400,28 +414,33 @@ func TestBacktestRequestsRefused(t *testing.T) {
 		code int
 		says string
 	}{
-		"past 4 MiB":         {btBody(ruleFile, strings.Repeat("#", 4<<20), nil), 413, "4 MiB"},
-		"a field unknown":    {btBody(ruleFile, changedRules, map[string]any{"prometheus": "http://elsewhere"}), 400, "unknown field"},
-		"two objects":        {append(btBody(ruleFile, changedRules, nil), []byte(`{}`)...), 400, "one JSON object"},
-		"15 days":            {btBody(ruleFile, changedRules, map[string]any{"days": 15}), 400, "1 to 14"},
-		"Local":              {btBody(ruleFile, changedRules, map[string]any{"tz": "Local"}), 400, "zone"},
-		"a zone made up":     {btBody(ruleFile, changedRules, map[string]any{"tz": "Mars/Olympus"}), 400, "zone"},
-		"a long zone":        {btBody(ruleFile, changedRules, map[string]any{"tz": strings.Repeat("A", 65)}), 400, "zone"},
-		"a commit":           {btBody(ruleFile, changedRules, map[string]any{"commit": "main; rm -rf"}), 400, "commit"},
-		"another PR":         {btBody(ruleFile, changedRules, map[string]any{"pull_request": 41}), 400, "ref"},
-		"a Grafana rule":     {btBody(ruleFile, grafana, nil), 400, "Prometheus's format"},
-		"51 rules":           {btBody(ruleFile, many, nil), 400, "50 rules"},
-		"for 49h":            {btBody(ruleFile, strings.Replace(changedRules, "for: 10m", "for: 49h", 1), nil), 400, "48h"},
-		"interval 2h":        {btBody(ruleFile, strings.Replace(changedRules, "- name: shop\n", "- name: shop\n    interval: 2h\n", 1), nil), 400, "interval"},
-		"no metric":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{job="api"} > 1'`, 1), nil), 400, `{job="api"}`},
-		"__name__ =~":        {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{__name__=~"secret_.+"} > 41'`, 1), nil), 400, "names no metric"},
-		"a subquery of 1s":   {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `max_over_time(errors[30d:1s]) > 1`, 1), nil), 400, "points"},
-		"offset 5y":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors offset 5y > 1`, 1), nil), 400, "1825d"},
-		"@ 0":                {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors @ 0 > 1`, 1), nil), 400, "no @"},
-		"expect_before only": {btBody(ruleFile, changedRules, map[string]any{"expect_before": "expectations: []"}), 400, "expect_before goes with expect"},
-		"expect broken":      {btBody(ruleFile, changedRules, map[string]any{"expect": "expectations: [{rule: Errors, nope: 1}]"}), 400, "expect"},
-		"a path control":     {[]byte(`{"before":[],"after":[{"path":"a\u0007b.yaml","content":"groups: []"}]}`), 400, "path"},
-		"nothing":            {[]byte(`{}`), 400, "before, after"},
+		"past 4 MiB":       {btBody(ruleFile, strings.Repeat("#", 4<<20), nil), 413, "4 MiB"},
+		"a field unknown":  {btBody(ruleFile, changedRules, map[string]any{"prometheus": "http://elsewhere"}), 400, "unknown field"},
+		"two objects":      {append(btBody(ruleFile, changedRules, nil), []byte(`{}`)...), 400, "one JSON object"},
+		"15 days":          {btBody(ruleFile, changedRules, map[string]any{"days": 15}), 400, "1 to 14"},
+		"Local":            {btBody(ruleFile, changedRules, map[string]any{"tz": "Local"}), 400, "zone"},
+		"a zone made up":   {btBody(ruleFile, changedRules, map[string]any{"tz": "Mars/Olympus"}), 400, "zone"},
+		"a long zone":      {btBody(ruleFile, changedRules, map[string]any{"tz": strings.Repeat("A", 65)}), 400, "zone"},
+		"a commit":         {btBody(ruleFile, changedRules, map[string]any{"commit": "main; rm -rf"}), 400, "commit"},
+		"another PR":       {btBody(ruleFile, changedRules, map[string]any{"pull_request": 41}), 400, "ref"},
+		"a Grafana rule":   {btBody(ruleFile, grafana, nil), 400, "Prometheus's format"},
+		"51 rules":         {btBody(ruleFile, many, nil), 400, "50 rules"},
+		"for 49h":          {btBody(ruleFile, strings.Replace(changedRules, "for: 10m", "for: 49h", 1), nil), 400, "48h"},
+		"interval 2h":      {btBody(ruleFile, strings.Replace(changedRules, "- name: shop\n", "- name: shop\n    interval: 2h\n", 1), nil), 400, "interval"},
+		"no metric":        {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{job="api"} > 1'`, 1), nil), 400, `{job="api"}`},
+		"__name__ =~":      {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{__name__=~"secret_.+"} > 41'`, 1), nil), 400, "names no metric"},
+		"a subquery of 1s": {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `max_over_time(errors[30d:1s]) > 1`, 1), nil), 400, "points"},
+		"offset 5y":        {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors offset 5y > 1`, 1), nil), 400, "1825d"},
+		// A comment hides nothing from the bounds: the offset on the line
+		// after one, and what a quote in one would have kept from being
+		// read.
+		"an offset past a comment":    {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `"rate(errors[5m] #\n offset 30d) > 1"`, 1), nil), 400, "past 8d"},
+		"@ past a quote in a comment": {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `"rate(errors[5m]) # \"\n + errors @ 0 > 1"`, 1), nil), 400, "@"},
+		"@ 0":                         {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors @ 0 > 1`, 1), nil), 400, "no @"},
+		"expect_before only":          {btBody(ruleFile, changedRules, map[string]any{"expect_before": "expectations: []"}), 400, "expect_before goes with expect"},
+		"expect broken":               {btBody(ruleFile, changedRules, map[string]any{"expect": "expectations: [{rule: Errors, nope: 1}]"}), 400, "expect"},
+		"a path control":              {[]byte(`{"before":[],"after":[{"path":"a\u0007b.yaml","content":"groups: []"}]}`), 400, "path"},
+		"nothing":                     {[]byte(`{}`), 400, "before, after"},
 	} {
 		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), c.body)
 		why, _ := m["error"].(string)
@@ -570,6 +589,97 @@ func TestBacktestQueueBounds(t *testing.T) {
 	b3.h.ServeHTTP(w, r)
 	if w.Code != 429 || read.n != 0 {
 		t.Errorf("the reads full: %d, %d bytes read", w.Code, read.n)
+	}
+}
+
+// What can be told without the body is refused before it is read, and
+// its hour given back: an entry with its three waiting, sending heavy
+// bodies, has none read, none checked, and its hour left as it was; a
+// token that started one; a newer commit of the token's pull request is
+// let through, as it would supersede the one waiting. Once a body is read,
+// what is refused keeps its hour: the queue filled, or the token kept,
+// between the checks before it and after.
+func TestBacktestRefusedBeforeBody(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	plain := b.s.trustNamed("plain")
+	plain.hourly, plain.Hourly = &limiter{rate: 4.0 / 3600, burst: 4}, 4
+	for pr := 1; pr <= 3; pr++ {
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, map[string]any{"pull_request": pr})); code != 202 {
+			t.Fatalf("%d: %d %v", pr, code, m)
+		}
+	}
+	heavy := "groups:\n  - name: heavy\n    rules:\n"
+	for i := range 50 {
+		heavy += fmt.Sprintf("      - {alert: H%d, expr: 'sum by (a, b, c) (rate(errors{x=~\"%s\"}[5m])) > %d'}\n", i, strings.Repeat("y", 2000), i)
+	}
+	for i := range 10 {
+		code, m, n := btPostCounting(t, b, b.plain, btBody(ruleFile, heavy, map[string]any{"pull_request": 10 + i}))
+		if code != 429 || n != 0 || !strings.Contains(fmt.Sprint(m["error"]), "queue") {
+			t.Fatalf("a heavy body past the entry's three: %d %v, %d bytes read", code, m, n)
+		}
+	}
+	if !plain.hourly.allow(b.s.now()) {
+		t.Error("the hour was taken by the bodies refused unread")
+	}
+	plain.hourly.give()
+	// A newer commit of the token's pull request supersedes the one
+	// waiting, an entry's three waiting or not; another pull request's
+	// doesn't fit, unread.
+	for i := range 3 {
+		tok := b.github(map[string]any{"jti": fmt.Sprint("w", i), "ref": fmt.Sprintf("refs/pull/%d/merge", 71+i)})
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 {
+			t.Fatalf("pull request %d: %d %v", 71+i, code, m)
+		}
+	}
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(map[string]any{"jti": "w9", "ref": "refs/pull/72/merge"}), btBody(ruleFile, changedRules, nil)); code != 202 {
+		t.Errorf("a newer commit of 72: %d %v", code, m)
+	}
+	if code, m, n := btPostCounting(t, b, b.github(map[string]any{"jti": "w8", "ref": "refs/pull/79/merge"}), btBody(ruleFile, changedRules, nil)); code != 429 || n != 0 {
+		t.Errorf("pull request 79, the entry's three waiting: %d %v, %d bytes read", code, m, n)
+	}
+
+	// After the body: the queue filled, or the token kept, by another
+	// replica between the checks before it and after. Refused, the hour
+	// kept: an hour of one, the next is past it.
+	for _, c := range []struct {
+		name, code string
+		fill       func(b *btSet, a asker)
+	}{
+		{"the queue filled", "429", func(b *btSet, _ asker) {
+			for i := range 3 {
+				ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: randomHex(16), Trust: "monitoring-gitlab", Repository: "example/monitoring",
+					PullRequest: int64(90 + i), Rules: 1, Requests: 1, KeyHash: "k"}, Body: []byte("{}"), Queue: 20, PerTrust: backtestsOfEntry}
+				if _, _, _, err := b.s.l.AskBacktest(context.Background(), ask, b.s.now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
+		{"the token kept", "409", func(b *btSet, a asker) {
+			ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: randomHex(16), Trust: "monitoring-gitlab", Repository: "example/monitoring",
+				PullRequest: 99, Rules: 1, Requests: 1, KeyHash: "k"}, Body: []byte("{}"), Token: a.token, BodyHash: "another",
+				Until: b.s.now().Add(time.Hour), Queue: 20, PerTrust: backtestsOfEntry}
+			if _, _, _, err := b.s.l.AskBacktest(context.Background(), ask, b.s.now()); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := btServer(t, nil, "", nil)
+			gl := b.s.trustNamed("monitoring-gitlab")
+			gl.hourly, gl.Hourly = &limiter{rate: 1.0 / 3600, burst: 1}, 1
+			tok := b.gl.Token(btAudience, idptest.GitLab("42"))
+			body := btBody(ruleFile, changedRules, nil)
+			bodyHook = func(a asker) { c.fill(b, a) }
+			defer func() { bodyHook = nil }()
+			if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, body); fmt.Sprint(code) != c.code {
+				t.Fatalf("%d %v, want %s", code, m, c.code)
+			}
+			bodyHook = nil
+			code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.gl.Token(btAudience, idptest.GitLab("42")), body)
+			if code != 429 || !strings.Contains(fmt.Sprint(m["error"]), "an hour") {
+				t.Errorf("after a refusal past the body: %d %v, want the hour taken", code, m)
+			}
+		})
 	}
 }
 
@@ -1166,9 +1276,21 @@ func TestBacktestNoneSelected(t *testing.T) {
 	if why, _ := m["error"].(string); code != 400 || !strings.Contains(why, "either side") {
 		t.Errorf("neither side: %d %v", code, m)
 	}
+	// One side with no documents of rules, a pull request's first rules,
+	// and the other's selector keeping nothing: a 400 too.
+	for _, side := range []string{"before", "after"} {
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(doc("shop"), doc("shop"), map[string]any{"rules_select": "tem=shop", side: []any{}}))
+		if why, _ := m["error"].(string); code != 400 || !strings.Contains(why, "either side") {
+			t.Errorf("%s empty, the other kept nothing: %d %v", side, code, m)
+		}
+	}
 	md, _ := b.done(t, b.plain, btBody(doc("other"), doc("shop"), map[string]any{"rules_select": "team=shop"}))
 	if !strings.Contains(md, "1 added") {
 		t.Errorf("one side: %s", md)
+	}
+	md, _ = b.done(t, b.plain, btBody(doc("shop"), doc("shop"), map[string]any{"rules_select": "team=shop", "before": []any{}}))
+	if !strings.Contains(md, "1 added") {
+		t.Errorf("a pull request's first rules: %s", md)
 	}
 }
 

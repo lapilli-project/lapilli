@@ -643,9 +643,11 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 	if why != "" {
 		return nil, why
 	}
-	// Neither side kept by the selector: a selector that matches nothing,
-	// as lapilli verdict refuses it, never two sets alike.
-	if len(before)+len(after) == 0 && noneSelected["before"] && noneSelected["after"] {
+	// No rule left on either side, and the selector kept nothing of a side
+	// it was given documents of: a selector that matches nothing, as
+	// lapilli verdict refuses it, never two sets alike, the other side
+	// empty or not (a pull request's first rules).
+	if len(before)+len(after) == 0 && (noneSelected["before"] || noneSelected["after"]) {
 		return nil, fmt.Sprintf("rules_select %s keeps no document of rules on either side", clip(verdict.Clean(req.RulesSelect), 200))
 	}
 	for _, rs := range [][]rules.Rule{before, after} {
@@ -849,28 +851,58 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, code, why)
 	}
 	// The entry's hour is taken before the body is read, so that past it a
-	// body costs nothing to send. It stays taken for a request refused as
-	// it was sent (a 400, a body too slow or too large): given back only
-	// when the port couldn't take one it could have (the reads or the
-	// queue full, the ledger out of reach, the same request again, a
-	// token's once).
+	// body costs nothing to send. What can be told without the body is
+	// asked first, each refused cheaply and its hour given back: the
+	// ledger not ready, a token that started a backtest already, no room
+	// in the queue for the entry, the reads full. Once the body is read,
+	// whatever is refused keeps the hour: a request refused after its
+	// rules were read and checked costs the port what it cost, and the
+	// hour bounds how often.
 	if !a.t.hourly.allow(s.now()) {
 		w.Header().Set("Retry-After", strconv.Itoa(a.t.hourly.wait()))
 		refused(http.StatusTooManyRequests, fmt.Sprintf("this entry starts %d backtests an hour at most", a.t.Hourly))
 		return
 	}
-	refund := false
+	refund := true
 	defer func() {
 		if refund {
 			a.t.hourly.give()
 		}
 	}()
+	if why, err := s.backtestReady(ctx); why != "" {
+		if err != nil {
+			s.log.Error("backtest port: reading the ledger", "err", err)
+		}
+		w.Header().Set("Retry-After", "60")
+		backtestError(w, http.StatusServiceUnavailable, why)
+		return
+	}
+	// The pull request a newer commit of would supersede the one waiting:
+	// the token's own, as the body can't say otherwise.
+	supersedes := int64(-1)
+	if n, byToken, ok := a.pullRequest(0); ok && byToken {
+		supersedes = n
+	}
+	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repository(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
+	switch {
+	case err != nil:
+		s.log.Error("backtest port: reading the queue", "trust", a.t.Name, "err", err)
+		w.Header().Set("Retry-After", "60")
+		backtestError(w, http.StatusServiceUnavailable, "the queue couldn't be read: try again in a minute")
+		return
+	case used:
+		refused(http.StatusConflict, "this token started a backtest already: a job asks once, with a token of its own")
+		return
+	case full:
+		w.Header().Set("Retry-After", "60")
+		refused(http.StatusTooManyRequests, "as many backtests wait as the queue takes: try again in a minute")
+		return
+	}
 	// One body of an entry read at a time, and two of all of them: one
 	// entry's slow bodies hold its own turn, not every entry's.
 	select {
 	case a.t.reading <- struct{}{}:
 	default:
-		refund = true
 		w.Header().Set("Retry-After", "1")
 		refused(http.StatusTooManyRequests, "another request of this entry is being read: one at a time")
 		return
@@ -879,11 +911,11 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	select {
 	case s.btPort.reading <- struct{}{}:
 	default:
-		refund = true
 		w.Header().Set("Retry-After", "1")
 		refused(http.StatusTooManyRequests, "as many requests are being read as the port reads at once: try again in a second")
 		return
 	}
+	refund = false
 	reading := true
 	done := func() {
 		if reading {
@@ -900,14 +932,8 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		refused(code, why)
 		return
 	}
-	if why, err := s.backtestReady(ctx); why != "" {
-		if err != nil {
-			s.log.Error("backtest port: reading the ledger", "err", err)
-		}
-		refund = true
-		w.Header().Set("Retry-After", "60")
-		backtestError(w, http.StatusServiceUnavailable, why)
-		return
+	if bodyHook != nil {
+		bodyHook(a)
 	}
 	pr, byToken, ok := a.pullRequest(req.PullRequest)
 	if !ok {
@@ -934,16 +960,13 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):
-		refund = true
 		refused(http.StatusConflict, "this token started another backtest: a job asks once, with a token of its own")
 		return
 	case errors.Is(err, ledger.ErrBacktestsFull):
-		refund = true
 		w.Header().Set("Retry-After", "60")
 		refused(http.StatusTooManyRequests, "as many backtests wait as the queue takes: try again in a minute")
 		return
 	case err != nil:
-		refund = true
 		s.log.Error("backtest port: queueing a backtest", "trust", a.t.Name, "err", err)
 		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be queued: try again in a minute")
 		return
@@ -952,9 +975,9 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		s.backtestEnded(a.t.Name, ledger.BacktestSuperseded)
 	}
 	if again {
-		// The same job asked twice: its backtest, without its key, which
-		// was given once.
-		refund = true
+		// The same job asked twice at once, its first not yet kept when the
+		// second was let read: its backtest, without its key, which was
+		// given once.
 		backtestJSON(w, http.StatusOK, map[string]any{"id": b.ID, "state": b.State, "position": b.Position})
 		return
 	}
@@ -965,6 +988,11 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("backtest queued", "id", b.ID, "trust", a.t.Name, "rules", ask.Rules, "requests", requests, "position", b.Position)
 	backtestJSON(w, http.StatusAccepted, map[string]any{"id": b.ID, "key": key, "position": b.Position, "requests": requests})
 }
+
+// bodyHook is called with the asker once a request's body is read: nil
+// but in tests, which change the ledger between the checks before it and
+// after.
+var bodyHook func(asker)
 
 var backtestID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 

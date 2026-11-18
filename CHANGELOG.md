@@ -23,9 +23,10 @@
   32 characters at least. A token starts one backtest, with the body it
   came with. Prometheus-format rules alone, 50 that differ at most, each
   selector of one metric by its name; the request 4 MiB at most, read
-  only once its token verified and its entry's hour taken; what a rule
+  only once its token verified, its entry's hour taken and the queue's
+  room for it seen, a token that started one refused unread; what a rule
   reads back, its ranges, subqueries and offsets added up, 8 days at most,
-  and no `@`. While the lane runs
+  a subquery's step written in it, and no `@`. While the lane runs
   a backtest, its share of `--max-rate` (`--backtest-share`, 0.25 by
   default, 0.05 to 0.75) is kept for it, the runs asking at the rest, so
   that the two never pass the rate together; `--backtest-queue` (20), 3
@@ -64,8 +65,9 @@
   one side** exited 1, `no document of rules has the labels asked for`.
   That side is now one with no rules, as an empty directory is: the rules
   the other holds are added, or taken away. lapilli serve's backtests take
-  it so. A selector that keeps nothing on either side, as a label's name
-  mistyped makes it, is an error still.
+  it so. A selector that keeps nothing, with no rule left on either side,
+  as a label's name mistyped makes it, is an error still, the other side
+  empty or not.
 - **An expectations file is read as a rule file is** (`--expect`,
   `--expect-before`): its values and what its aliases expand to bounded
   before it is decoded, in time linear in it. One denser than a rule

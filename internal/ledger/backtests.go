@@ -92,6 +92,29 @@ var (
 	ErrBacktestsFull = errors.New("the backtests' queue is full")
 )
 
+// BacktestRoom says at now, before a request's body is read, whether
+// trust's token started a backtest already (used; never, for a plain
+// token's "") and whether the queue has no room for one more of trust
+// (full): those waiting, in all against queue and trust's against
+// perTrust, less those of repository's pull request a newer commit would
+// supersede (pullRequest, -1 for none). AskBacktest decides again, at the
+// token's key, once the body is read.
+func (l *Ledger) BacktestRoom(ctx context.Context, trust, token, repository string, pullRequest int64, queue, perTrust int, now time.Time) (used, full bool, err error) {
+	if token != "" {
+		if err := l.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM backtest_tokens WHERE trust = ? AND token = ? AND until_at >= ?)",
+			trust, token, now.Unix()).Scan(&used); err != nil || used {
+			return used, false, err
+		}
+	}
+	var all, theirs int
+	if err := l.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(CASE WHEN trust = ? THEN 1 ELSE 0 END), 0) FROM backtests
+		WHERE state = ? AND NOT (trust = ? AND repository = ? AND pull_request = ?)`,
+		trust, BacktestWaiting, trust, repository, pullRequest).Scan(&all, &theirs); err != nil {
+		return false, false, err
+	}
+	return false, all >= queue || theirs >= perTrust, nil
+}
+
 // AskBacktest queues a backtest at now: its row, and the token tied to its
 // body, both or neither. A token that started one already gives that one
 // back, again true, for the same body, and ErrBacktestToken for another:

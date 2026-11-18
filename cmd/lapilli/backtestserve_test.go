@@ -114,4 +114,16 @@ func TestCompareNoneSelectedEither(t *testing.T) {
 	if code != 1 || !strings.Contains(errs.String(), "keeps no document of rules") {
 		t.Errorf("exit %d: %s\n%s", code, out.String(), errs.String())
 	}
+	// One side with no documents of rules at all, a pull request's first
+	// rules, and the other's selector keeping nothing: an error too, not
+	// nothing changed.
+	empty := t.TempDir()
+	for _, c := range [][]string{{"--rules", head, "--compare", empty}, {"--rules", empty, "--compare", base}} {
+		out.Reset()
+		errs.Reset()
+		code := run(append(append([]string{"verdict"}, c...), "--rules-select", "tem=shop", "--changed-only", "--markdown", "--prometheus", "http://x"), &out, &errs)
+		if code != 1 || !strings.Contains(errs.String(), "keeps no document of rules") {
+			t.Errorf("%v: exit %d: %s\n%s", c, code, out.String(), errs.String())
+		}
+	}
 }

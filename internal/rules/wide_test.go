@@ -64,6 +64,18 @@ func TestReach(t *testing.T) {
 		`max_over_time(rate(x[5m] offset 7d)[2d:1m]) > 0`:                                           "past 8d",
 		`up @ start() == 0`:                                                                         "@",
 		`max_over_time(rate(x[5m])[2h:1m] offset 9d) > 0`:                                           "past",
+		// Comments, read past as Prometheus reads them: what follows one
+		// on the next line counts, a quote in one starts no string, and
+		// a # in a string starts no comment.
+		"rate(errors[5m] #\n offset 30d) > 0":                   "past",
+		"rate(errors[5m]) # \"\n + up @ 0 > 0":                  "@",
+		"rate(errors[5m]) # \"\n + rate(up[30d]) > 0":           "30d",
+		"rate(errors[5m]) # '\n + max_over_time(up[1d:1s]) > 0": "points",
+		"rate(errors[5m] # @ and [30d] and offset 1y\n) > 0":    "",
+		"# @ 0\nrate(errors[5m]) > 0":                           "",
+		`rate(errors{a="#"}[5m] offset 30d) > 0`:                "past",
+		"rate(errors{a=\"x\\\"#\"}[5m] offset 30d) > 0":         "past",
+		"rate(errors{a=`#\\`}[5m] offset 30d) # `\n > 0":        "past",
 	} {
 		got := Reach(expr, most, 11000)
 		if (want == "") != (got == "") || !strings.Contains(got, want) {

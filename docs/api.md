@@ -398,7 +398,9 @@ else ([serve.md](serve.md#pull-request-backtests),
 | `DELETE /v1/backtests/{id}` | the same |
 
 A body is JSON of 4 MiB at most, read strictly, only once the token
-verified and its entry's hour taken. The POST answers 202 with the id, the
+verified, its entry's hour taken, and the queue's room for the entry and
+the token's once seen (409 for a token that started one, 429 with
+`Retry-After` for no room, the body unread). The POST answers 202 with the id, the
 key, the place in the queue and the requests it will ask; the GET 202
 while it waits or runs, 200 with the comment and its JSON once done.
 Host names aren't checked here, and a request with an `Origin` is

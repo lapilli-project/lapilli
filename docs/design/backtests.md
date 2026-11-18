@@ -703,10 +703,13 @@ Where step 1 does otherwise than the sections above say, or says more:
   its entry and its `jti` (or its hash), with the body's hash. Its key is
   the check, so replicas given one token at once start one backtest; the
   row is kept an hour and ten minutes past `iat`, past the hour a token is
-  taken for, whatever becomes of the backtest's own row. The same body
-  again is answered 200 with the id and the state, without the key, which
-  is given once: a token stolen from a job's log gets no key to read or
-  cancel with. A plain token's requests aren't tied to a body: its hash is
+  taken for, whatever becomes of the backtest's own row. A token that
+  started one is refused (409) before its body is read, whatever the body
+  (the third round, below); two of one token at once, the first not yet
+  kept when the second was read, are told apart by the body's hash, the
+  same body answered 200 with the id and the state, without the key,
+  which is given once: a token stolen from a job's log gets no key to read
+  or cancel with. A plain token's requests aren't tied to a body: its hash is
   the same for every request, and would start one backtest ever.
 - **The comment holds nothing a rule read.** An alert's labels are its
   series', which a rule can make of any value serve's access reads
@@ -775,7 +778,7 @@ Where step 1 does otherwise than the sections above say, or says more:
   `workflow_run` or `schedule`.
 - **What a rule reads back.** Beside `for`, a range, a subquery or an
   offset a week back at most, a subquery of 11,000 points at most, and no
-  `@` (`rules.Reach`).
+  `@` (`rules.Reach`; added up, 8 days, from the second round).
 - **A pull request superseded by its token's word alone.** Only a number
   the token names (GitHub's and Forgejo's `ref`) supersedes the backtest
   waiting for it; one the job said (GitLab, a plain token, a `push`)
@@ -798,7 +801,8 @@ Where step 1 does otherwise than the sections above say, or says more:
   duration expressions, refused). A rule whose expression doesn't read as
   PromQL is refused as written, alone, as lapilli verdict says it, asking
   nothing; a `rules_select` that keeps nothing on either side is refused,
-  as lapilli verdict refuses it. The planner's refusal says no rate.
+  as lapilli verdict refuses it (the third round takes in a side with no
+  documents). The planner's refusal says no rate.
   GitLab's ID token names a merge request's source branch (`ref`,
   `ref_path`), not its number, so a GitLab merge request's backtests don't
   supersede each other. The lane asks a quarter of `--parallel` at once,
@@ -809,6 +813,17 @@ Where step 1 does otherwise than the sections above say, or says more:
   own `repository_id`. GitHub's "Send write tokens to workflows from pull
   requests" kept off, and Forgejo's reference says its OpenID Connect is
   off for a fork's `pull_request`; GitLab's `project_id` is a fork's own.
+- **The third round.** What can be told without the body is asked before
+  it is read (`ledger.BacktestRoom`): a token that started a backtest, and
+  the queue's room for the entry, less a newer commit's pull request's
+  waiting one; each refused cheaply, its hour given back. Once the body is
+  read, a request refused keeps its hour, the queue's and the token's own
+  checks at `AskBacktest` among them: an entry keeping its three waiting
+  can't send heavy bodies to be read and checked, refused, again and
+  again. `rules.Reach` reads past comments as Prometheus does, a quote in
+  one starting no string. `rules_select` keeping nothing of a side it was
+  given documents of, with no rule left on either side, is refused, the
+  other side empty or not: a pull request's first rules.
 - **`expect` given when it is there**, however empty, as `--expect` takes an
   empty file; read, as every expectations file is now, by the rules'
   bounded YAML reader first.

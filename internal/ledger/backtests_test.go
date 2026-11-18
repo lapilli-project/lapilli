@@ -143,6 +143,59 @@ func TestBacktestTokenOnce(t *testing.T) {
 // The queue holds Queue at most, PerTrust of an entry, and one of a pull
 // request: a newer commit's supersedes the one waiting. Past them nothing
 // is kept, and the token that asked is free to ask again.
+// BacktestRoom says before a body is read what AskBacktest would say of
+// the token and the queue: a token that started one, an entry with as many
+// waiting as it may have, less those a newer commit of the pull request
+// would supersede, and the queue full in all.
+func TestBacktestRoom(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	room := func(trust, token string, pr int64, queue int, at time.Time) (bool, bool) {
+		t.Helper()
+		used, full, err := l.BacktestRoom(ctx, trust, token, "example/alerts", pr, queue, 3, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return used, full
+	}
+	if used, full := room("alerts", "t0", -1, 20, t0); used || full {
+		t.Errorf("an empty queue: used %v, full %v", used, full)
+	}
+	for i := range 3 {
+		if _, _, _, err := l.AskBacktest(ctx, ask(fmt.Sprint("a", i), "alerts", int64(i+1), fmt.Sprint("t", i)), t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		trust, token string
+		pr           int64
+		queue        int
+		at           time.Time
+		used, full   bool
+	}{
+		{"alerts", "t1", -1, 20, t0, true, false},                    // its token started one
+		{"alerts", "t1", -1, 20, t0.Add(3 * time.Hour), false, true}, // kept no longer, and the entry's three wait
+		{"alerts", "t9", -1, 20, t0, false, true},                    // the entry's three wait
+		{"alerts", "t9", 2, 20, t0, false, false},                    // a newer commit of 2 would supersede it
+		{"alerts", "t9", 7, 20, t0, false, true},                     // of another pull request
+		{"gitlab", "t1", -1, 20, t0, false, false},                   // another entry's token, and room
+		{"gitlab", "g1", -1, 3, t0, false, true},                     // the queue full in all
+		{"plain", "", -1, 20, t0, false, false},                      // a plain token
+	} {
+		if used, full := room(c.trust, c.token, c.pr, c.queue, c.at); used != c.used || full != c.full {
+			t.Errorf("%+v: used %v, full %v", c, used, full)
+		}
+	}
+	// As AskBacktest says.
+	if _, _, _, err := l.AskBacktest(ctx, ask("a9", "alerts", 7, "t9"), t0); !errors.Is(err, ErrBacktestsFull) {
+		t.Errorf("AskBacktest of the entry's fourth: %v", err)
+	}
+}
+
 func TestBacktestQueue(t *testing.T) {
 	ctx := context.Background()
 	l, err := openAt(ctx, place(t), time.UTC)
