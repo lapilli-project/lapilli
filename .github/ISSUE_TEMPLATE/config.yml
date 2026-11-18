@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A question
+    url: https://github.com/lapilli-project/lapilli/discussions/categories/q-a
+    about: How to point Lapilli at your rules and history, read a verdict, run serve. Ask in Discussions.
+  - name: An idea
+    url: https://github.com/lapilli-project/lapilli/discussions/categories/ideas
+    about: Something Lapilli should judge, read or do. Larger changes start there, then as a design note.
+  - name: A vulnerability
+    url: https://github.com/lapilli-project/lapilli/security/advisories/new
+    about: Report it privately, not in an issue (SECURITY.md).

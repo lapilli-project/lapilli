@@ -3,9 +3,16 @@
 Thank you for looking. The most useful contribution of all is a report of a
 rule that Lapilli can't replay, or replays differently from how it really
 fired, which `lapilli verdict --check-replay` finds. Include the rule, with names and thresholds changed if you like, and,
-if you can, what really fired. After that, see [ROADMAP.md](ROADMAP.md) for
-areas that need someone, and [MAINTAINERS.md](MAINTAINERS.md) for how
-contributing leads to maintaining.
+if you can, what really fired; the issue form "A replay that differs" asks
+for each. After that, see [ROADMAP.md](ROADMAP.md) for areas that need
+someone, and [MAINTAINERS.md](MAINTAINERS.md) for how contributing leads to
+maintaining.
+
+Questions and ideas are welcome in
+[Discussions](https://github.com/lapilli-project/lapilli/discussions), and
+an idea for a larger change is best talked over there before its design
+note. Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Build and test
 

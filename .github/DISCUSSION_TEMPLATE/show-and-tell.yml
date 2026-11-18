@@ -1,0 +1,25 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        What did Lapilli find in your alerts? A noisy rule you dropped, an incident no rule caught,
+        a `for` that would have paged less. `--redact` gives every name in a report an alias, so it
+        can be shown outside: run `lapilli verdict ... --redact --markdown` and paste what it prints.
+  - type: textarea
+    id: found
+    attributes:
+      label: What you found
+      description: And what you changed because of it, if you did.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: The report
+      description: The redacted report, or the part of it that matters.
+      render: markdown
+  - type: input
+    id: stack
+    attributes:
+      label: What it ran against
+      description: The history and where the rules are kept, for example "Mimir, rules in Grafana".

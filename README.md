@@ -2571,6 +2571,15 @@ are made, and [CONTRIBUTING.md](CONTRIBUTING.md) how to build, test and send a
 change. The most useful report there is: a rule that replays differently from
 how it really fired, which `--check-replay` finds.
 
+Questions, ideas and what Lapilli found in your alerts go to
+[Discussions](https://github.com/lapilli-project/lapilli/discussions): Q&A
+for how to point it at your rules or read a verdict, Ideas for what it
+should judge or read next, Show and tell for a report, which `--redact`
+makes safe to show. A replay that differs, or anything else wrong, is an
+[issue](https://github.com/lapilli-project/lapilli/issues/new/choose), with
+a form for each; a vulnerability is reported privately (SECURITY.md).
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Install
 
 ```sh
