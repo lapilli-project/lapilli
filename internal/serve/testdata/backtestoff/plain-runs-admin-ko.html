@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>실행 이력 · Lapilli</title>
-<link rel="icon" href="/static/icon.svg?v=ace9ecbdd9ee" type="image/svg+xml">
-<link rel="stylesheet" href="/static/lapilli.css?v=ace9ecbdd9ee">
+<link rel="icon" href="/static/mark-32.png?v=f9602dd71b35" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=f9602dd71b35" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=f9602dd71b35">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/icon.svg?v=ace9ecbdd9ee" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=f9602dd71b35" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>메뉴<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>실행 이력</span></summary>
   <nav class="nav-menu" aria-label="메뉴">
   <p class="nav-group" id="menu-see">모니터링</p>
@@ -20,7 +21,7 @@
   <p class="nav-group" id="menu-report">리포트</p>
   <ul aria-labelledby="menu-report"><li><a href="/reports">리포트</a></li><li><a href="/outcomes">변경 효과</a></li><li><a href="/goals">목표</a></li></ul>
   <p class="nav-group" id="menu-manage"><a href="/manage">관리</a></p>
-  <ul aria-labelledby="menu-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">정리 대상</a></li></ul>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">남은 기록 정리</a></li></ul>
 </nav>
   </details>
   <nav class="nav-side" aria-label="페이지">
@@ -31,7 +32,7 @@
   <p class="nav-group" id="side-report">리포트</p>
   <ul aria-labelledby="side-report"><li><a href="/reports">리포트</a></li><li><a href="/outcomes">변경 효과</a></li><li><a href="/goals">목표</a></li></ul>
   <p class="nav-group" id="side-manage"><a href="/manage">관리</a></p>
-  <ul aria-labelledby="side-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">정리 대상</a></li></ul>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">남은 기록 정리</a></li></ul>
 </nav>
   <nav class="langs" aria-label="언어"><a href="/lang?to=en&amp;back=%2Fruns" lang="en" hreflang="en">English</a><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Fruns" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><strong lang="ko" aria-current="true">한국어</strong></nav>
 </header>
@@ -45,7 +46,7 @@
 <div class="bar">
 
 <form method="get" action="/search" role="search" class="find" aria-label="검색">
-  <label>검색 <input type="search" name="q" value="" maxlength="500" placeholder="규칙, 인시던트, 팀"></label>
+  <label><span class="vh">검색</span> <input type="search" name="q" value="" maxlength="500" placeholder="규칙, 인시던트, 팀"></label>
   <button class="quiet-button">검색</button>
 </form>
 </div>

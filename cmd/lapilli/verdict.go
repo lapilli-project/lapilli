@@ -429,10 +429,10 @@ type verdictFlags struct {
 	picked       rules.Picked // what reading the rule files passed over
 	// recorded are, with --compare, the recording rules the files read
 	// held; passedOver what each set's files passed over, as said.
-	recorded           []rules.Recording
+	recorded []rules.Recording
 	// noneSelected is what --rules-select keeping no rule of --rules
 	// said, nil when it kept some or none was asked.
-	noneSelected error
+	noneSelected       error
 	passedOver         map[string]string
 	loadedRules        bool
 	grafana, grafanaTk string
