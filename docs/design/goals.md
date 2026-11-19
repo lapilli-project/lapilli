@@ -185,7 +185,10 @@ summary's rows:
   turns the week's stones.
 - **After each run, by the leader**, for what is told and done: once the
   cursor passes a week's end (or the end of an occurrence of a kind some
-  goal is `each:` of), and then after each run, it works out only the last
+  goal is `each:` of) by the longest lead and a signal's `for`, and
+  `--settle` after that ([judging.md](judging.md), "`--settle`, a signal's
+  `for`, a rule's `for`"; until then its goals are `open`), and then after
+  each run, it works out only the last
   whole week, the weeks of the goals with an open task (twelve weeks
   back at most), and the occurrences that ended since. That is where
   `goal.missed`, a task made, "missed again" and "no longer missed" come

@@ -96,6 +96,7 @@ turn.
 | 021 | 0.53.0 | Marked windows: their kinds, the windows, the kinds each firing is marked with, and tallies of them by day and week |
 | 022 | 0.55.0 | Named impact signals and the rule entries in effect; an incident's signal and match labels; the signals each alert is tied to; and the tallies by day and week keyed by them too, every row copied in once |
 | 023 | 0.61.0 | Pull request backtests (`--backtest-listen`): a row each backtest asked for, kept a day after it ends, and the tokens that started one, kept past their hour |
+| 024 | unreleased | A lead of a named signal's or a rule entry's own (`lead_ns`, NULL to follow), and the labels a rule entry requires (`require_labels`) |
 
 The image has no shell and no `sqlite3`, so the schema a ledger is at is
 read where its data can be reached: `sqlite3 COPY/ledger.db 'PRAGMA

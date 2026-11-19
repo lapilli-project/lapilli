@@ -2256,5 +2256,12 @@
  "under a second": "1초 미만",
  "No firing started in the span.": "이 기간에 시작된 발화가 없어요.",
  "Firings that started in the span: %d; the JSON lists the first %d.": "이 기간에 시작된 발화는 %d건이고, JSON에는 앞의 %d건만 있어요.",
- "Firings that started in the span: %d, each listed in the JSON.": "이 기간에 시작된 발화는 %d건이고, JSON에 하나씩 모두 있어요."
+ "Firings that started in the span: %d, each listed in the JSON.": "이 기간에 시작된 발화는 %d건이고, JSON에 하나씩 모두 있어요.",
+ "lead %s": "선행 시간 %s",
+ "both carry": "둘 다 있어야 하는 라벨",
+ "Each may give lead, how long before its signals' windows a firing of its rules still catches them, from 0 to 1d, in place of each signal's; and require, labels a firing of its rules and a window of its signals must both carry for the one to catch the other.": "항목마다 lead 로 그 지표의 영향 구간 시작보다 얼마나 먼저 울린 발화까지 잡은 것으로 볼지 정할 수 있어요 (0 ~ 1d, 지표마다의 값 대신). require 로는 발화와 영향 구간에 둘 다 있어야 잡은 것으로 보는 라벨을 정해요.",
+ "%s, the lead above": "%s (위의 선행 시간)",
+ "how long before one of its windows' start a firing still catches it, from 0 to 1d; empty follows the lead above": "영향 구간 시작보다 얼마나 먼저 울린 발화까지 잡은 것으로 볼지예요 (0 ~ 1d). 비우면 위의 선행 시간을 따라요",
+ "a lead of %s: want a duration from 0 to %s, such as 1h, or none to follow the lead above": "선행 시간 %s: 0부터 %s까지의 기간(예: 1h)을 넣거나, 위의 선행 시간을 따르려면 비워 주세요",
+ "rule entry %d: require: %s": "규칙 항목 %d: require: %s"
 }

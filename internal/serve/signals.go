@@ -89,7 +89,7 @@ func (s *Server) signalsOf(ctx context.Context, match []string, n signalsNow, sg
 	}
 	list := make([]verdict.Signal, 0, len(n.Defs))
 	for _, d := range n.Defs {
-		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Bit: -1}
+		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Lead: d.Lead, Bit: -1}
 		if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
 			x.Bit, x.Start = rows[i].Bit, rows[i].Kept.From()
 		}
@@ -697,10 +697,14 @@ func heldDigest(defs []ledger.SignalDef, entries []verdict.RuleEntry, held map[s
 		Name, Held string
 		Match      []string
 		Record     bool
+		// A lead of its own (docs/design/judging.md, "Proposals"): left
+		// out to follow, so that the digest of signals with none is as it
+		// was.
+		Lead *time.Duration `json:",omitempty"`
 	}
 	var hs []kept
 	for _, d := range defs {
-		hs = append(hs, kept{Name: d.Name, Held: held[d.Name], Match: d.Match, Record: d.Record})
+		hs = append(hs, kept{Name: d.Name, Held: held[d.Name], Match: d.Match, Record: d.Record, Lead: d.Lead})
 	}
 	slices.SortFunc(hs, func(a, b kept) int { return cmp.Compare(a.Name, b.Name) })
 	b, _ := json.Marshal(struct {

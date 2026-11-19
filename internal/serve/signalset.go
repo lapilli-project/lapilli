@@ -35,17 +35,51 @@ const (
 func signalSetting(key string) bool { return strings.HasPrefix(key, signalKey) || key == rulesKey }
 
 // uiSignal is a named signal as the Settings page keeps it: Match nil for
-// the match in effect, empty for none.
+// the match in effect, empty for none; Lead "" to follow the lead in
+// effect (docs/design/judging.md, item 1).
 type uiSignal struct {
 	Expr   string   `json:"expr"`
 	For    string   `json:"for"`
 	Match  []string `json:"match"`
 	Record bool     `json:"record"`
+	Lead   string   `json:"lead,omitempty"`
 }
 
 // uiSignalOf is a signal as the Settings page keeps it.
 func uiSignalOf(d ledger.SignalDef) uiSignal {
-	return uiSignal{Expr: d.Expr, For: verdict.Duration(d.For), Match: d.Match, Record: d.Record}
+	return uiSignal{Expr: d.Expr, For: verdict.Duration(d.For), Match: d.Match, Record: d.Record, Lead: leadShown(d.Lead)}
+}
+
+// leadShown is a lead of a signal's or a rule entry's own as the Settings
+// page, /settings.yaml and the summary say it: "" to follow.
+func leadShown(d *time.Duration) string {
+	if d == nil {
+		return ""
+	}
+	return verdict.Duration(*d)
+}
+
+// leadOfText reads a lead of a signal's or a rule entry's own, as the
+// Settings page takes one: "" to follow, else a duration from 0 to
+// verdict.LeadBound.
+func leadOfText(v string) (*time.Duration, error) {
+	d, ok := parseLead(v)
+	if !ok {
+		return nil, bad("a lead of %s: want a duration from 0 to %s, such as 1h, or none to follow the lead above", nameCut(v), verdict.Duration(verdict.LeadBound))
+	}
+	return d, nil
+}
+
+// parseLead is leadOfText, ok false for a lead it refuses.
+func parseLead(v string) (*time.Duration, bool) {
+	if v == "" {
+		return nil, true
+	}
+	d, err := ParseDuration(v)
+	if err != nil || d < 0 || d > verdict.LeadBound {
+		return nil, false
+	}
+	return &d, true
 }
 
 // text is the setting it is kept as.
@@ -65,7 +99,11 @@ func defOf(name string, set ledger.Setting) (ledger.SignalDef, bool) {
 	if err != nil || d <= 0 {
 		return ledger.SignalDef{}, false
 	}
-	return ledger.SignalDef{Name: name, Expr: u.Expr, For: d, Match: u.Match, Record: u.Record, SetBy: set.By, SetAt: set.Updated}, true
+	lead, ok := parseLead(u.Lead)
+	if !ok {
+		return ledger.SignalDef{}, false
+	}
+	return ledger.SignalDef{Name: name, Expr: u.Expr, For: d, Match: u.Match, Record: u.Record, Lead: lead, SetBy: set.By, SetAt: set.Updated}, true
 }
 
 // signalsNow are the named impact signals in effect, and the rule

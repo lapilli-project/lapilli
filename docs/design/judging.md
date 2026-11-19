@@ -1,6 +1,7 @@
 # Judging refined: a lead per signal, episodes beside firings, a person's verdict on one firing, and rows by label
 
-Status: accepted. Merged on 2026-11-19, before its week was out, by the
+Status: accepted; step 1 (leads and `require:`, schema 024, "As built
+(step 1)") built. Merged on 2026-11-19, before its week was out, by the
 maintainer's decision, its open questions decided ("Open questions").
 Under [GOVERNANCE.md](../../GOVERNANCE.md) this changes how a firing is
 judged (a lead of a signal's or a rule entry's own, a person's word that
@@ -1571,6 +1572,83 @@ maintainer, as its review recommended:
    confirms the windows that were real outages, as a confirmed window is
    an incident written down (item 5).
 
+## As built (step 1)
+
+Leads and `require:`, as above, and what building them settled:
+
+- **Judging.** `verdict.Options.LeadFor(rule, in)`, in the order of
+  "Which lead a firing is judged by", and `MaxLead()`, the longest of
+  `--lead`, each signal's and each entry's, worked out once in
+  `NewSignals`. `Catches` rejects a firing outside `MaxLead` first, then
+  looks the rule's entry up once for the lead and the labels alike, so a
+  firing costs no more entries looked up (`Signals.Looked`) than before.
+  `LongestLeadFor(in)`, the longest lead any rule is judged by against an
+  incident, draws its timeline; `Reach()` is the wait below. The near
+  misses' judging (`Nearly`, `NearlyBy`, `FiringDuring`) is by `LeadFor`,
+  their replay from `MaxLead` before each incident, a day at most.
+- **Every site that reached back by `o.Lead`** now reaches by `MaxLead`:
+  those the design lists, as they are in the code, and one it couldn't:
+  #153's tie of the unnamed signal's windows to `impact` (`tieUnnamed`),
+  which pends their spans from the longer of `--lead` and the longest
+  lead against `impact`'s windows.
+- **`require:`** is kept with its entry and compared with it (`entryKey`):
+  changed, it judges every firing again, as an entry's `match` does. Held
+  as `match` is: 16 label names, each Prometheus's, none twice.
+- **A lead changed alone.** `sameDef` and `entryKey` leave leads out;
+  `SyncSignalSet` keeps them, sets `SignalsSynced.Leads`, and pends
+  (`pendLeads`), of each signal one of whose leads in effect changed (its
+  own, or an entry's naming it, each following the one above it, `--lead`
+  last, which `SignalSet.Lead` carries), its windows and the incidents
+  its confirmations wrote (`incidents.signal`), from the longer of the old
+  and the new longest lead against it before each start to its end; and
+  counts a generation of the signals in the same write. Options read
+  before it are stale by their leads too (`staleSignals`). A lead changed
+  with anything that pends every firing judges as that does.
+- **Schema 024**: `impact_signals.lead_ns`, `impact_rules.lead_ns` and,
+  beside them, `impact_rules.require_labels`, NULL to follow and for none,
+  which the design's schema list leaves out: the ledger holds the entries
+  its options are judged by, and compares them with the options read.
+- **Where.** `--impact-lead NAME=DUR`, refused with no name, for a name no
+  `--impact` gives, twice, beside `--impact-file`, and outside 0 to 24h;
+  `lead:` on a signal and an entry and `require:` on an entry in
+  `--impact-file`, read strictly. The Settings page: a signal's form has
+  Lead, empty to follow, its placeholder the lead above; its row says a
+  lead of its own; the rule entries' YAML takes `lead:` and `require:`,
+  and their table says them. Kept in `settings`: `impact-signal/NAME`'s
+  `lead` (left out to follow), each entry of `impact-rules` with its
+  `lead_ns` and `require`; the activity log's before and after say them.
+  A change that gives a signal another lead counts among the admin's
+  twelve saves an hour, as saving the entries does. `/settings.yaml` gives
+  `lead:` and `require:`; nothing in `--config`.
+- **The try** judges a change of leads in memory, with the leads, as it
+  judges a match changed: its rows with the change and without.
+- **The report** gives `settings.impact_signals[].lead_ns`,
+  `settings.impact_rules[].lead_ns` and `settings.impact_rules[].require`,
+  each left out when it follows or for none; `/api/v1/summary` the same as
+  `lead` (a time) and `require`, its rule entries in a shape of their own
+  with the same fields as before. `lapilli verdict`'s text says each
+  signal's lead beside its `for`, each entry's that gives one, and the
+  lead of incidents written down, only when a lead is given: with none,
+  its text is as it was. numbers.md's "A white or a black stone" and its
+  "incidents caught: counted again" read them, and a test counts them
+  again from reports judged by an entry's lead and by a signal's.
+- **The wait** (`wholeAfter`): `Reach()`, of the named signals in effect;
+  else `--lead` and the criterion's `--impact-for`, with the signal with no
+  name; else `--lead`; and `--settle` after that. The digest waits on the
+  run cursor for it; a week's goals in the summary are open until the run
+  cursor passes it (`settling`, beside `partial`, which stays what the
+  ledger holds), and so are an occurrence's of `each: KIND`, so
+  `goal.missed`, the goals' tasks, the Goals page and the goals'
+  `/metrics` follow. A ledger with no runs waits on `copiedTo` for the
+  span's end and `--lead`.
+- **Proposals.** Each signal's lead joins the digest a backtest keeps
+  (`signalsHeld`), left out when it follows, and the entries' leads and
+  `require` with the entries, each left out when there is none, so a
+  digest of signals and entries with none is as it was.
+- **Not in step 1**, left for when a step needs it: the count of catches
+  that agreed on no label ("Coincidences"), on the try, a rule's page and
+  MCP's `rule`; and the try's rule-by-rule catches gained and lost.
+
 ## Steps
 
 1. **Leads.** `verdict.Options.LeadFor` and `MaxLead`, and every place
@@ -1581,7 +1659,8 @@ maintainer, as its review recommended:
    change, leads compared apart from the rest of a signal or an entry; the
    digest's and goals' wait, for weeks and occurrences; the report's and
    the summary's settings; numbers.md's stone section; signals.md's open
-   question 4 closed there; and `require:` on an entry, opt-in.
+   question 4 closed there; and `require:` on an entry, opt-in. (Built:
+   "As built (step 1)".)
 2. **A signal taken away** (item 5), on #151, with no schema. `RecordOf`
    leaving a window of a signal not in effect out of the record, and
    `Agrees` reading entries for it, with named signals in effect or none;

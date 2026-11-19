@@ -99,24 +99,62 @@ func sigMetaSet(t *txn, name string, keys ...string) (int, error) {
 // SignalDef is a signal as serve was started with it, or an admin set it:
 // what it reads, for how long a series returns something before it is a
 // window, the labels its windows are matched on (nil for the match in
-// effect), and whether reading it keeps the record; and, of one an admin
-// set on the Settings page, who and when (SetBy "" for the command
-// line's or the file's).
+// effect), whether reading it keeps the record, and its lead (nil to
+// follow --lead); and, of one an admin set on the Settings page, who and
+// when (SetBy "" for the command line's or the file's).
 type SignalDef struct {
 	Name   string
 	Expr   string
 	For    time.Duration
 	Match  []string
 	Record bool
+	Lead   *time.Duration
 	SetBy  string
 	SetAt  time.Time
 }
 
 // sameDef reports whether a signal's row keeps def as given: its
 // expression, "for", match and record, and who set it in the UI and when.
+// Its lead is compared apart (sameLead): a change to it alone judges only
+// the spans of its windows again (docs/design/judging.md, "Judged again
+// when a lead changes").
 func sameDef(r SignalRow, d SignalDef) bool {
 	return r.Expr == d.Expr && r.For == d.For && sameMatch(r.Match, d.Match) && r.Record == d.Record &&
 		r.SetBy == d.SetBy && unixOr0(r.SetAt) == unixOr0(d.SetAt)
+}
+
+// sameLead reports whether two leads are the same: nil, to follow, is not
+// a lead of 0.
+func sameLead(a, b *time.Duration) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+// leadText is a lead as a column keeps it: NULL to follow, else
+// nanoseconds.
+func leadText(d *time.Duration) any {
+	if d == nil {
+		return nil
+	}
+	return int64(*d)
+}
+
+// leadOf reads a lead as leadText kept it.
+func leadOf(v sql.NullInt64) *time.Duration {
+	if !v.Valid {
+		return nil
+	}
+	d := time.Duration(v.Int64)
+	return &d
+}
+
+// requireText is the labels a rule entry requires as a column keeps them:
+// NULL for none.
+func requireText(r []string) any {
+	if len(r) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(r)
+	return string(b)
 }
 
 // sameMatch reports whether two matches are the same: nil, the match in
@@ -170,7 +208,7 @@ func (l *Ledger) SignalRows(ctx context.Context) ([]SignalRow, error) { return l
 
 func (l *Ledger) signalRows(ctx context.Context, q reader) ([]SignalRow, error) {
 	rows, err := q.QueryContext(ctx, `SELECT name, bit, expr, for_ns, match_labels, keeps_record, since, criterion, again, data, last_read, floor_at, missed_at,
-		set_by, set_at FROM impact_signals ORDER BY bit, name`)
+		set_by, set_at, lead_ns FROM impact_signals ORDER BY bit, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -180,11 +218,12 @@ func (l *Ledger) signalRows(ctx context.Context, q reader) ([]SignalRow, error) 
 		var r SignalRow
 		var forNS, missed, setAt int64
 		var match sql.NullString
+		var lead sql.NullInt64
 		var since, crit, again, data, read, floor string
-		if err := rows.Scan(&r.Name, &r.Bit, &r.Expr, &forNS, &match, &r.Record, &since, &crit, &again, &data, &read, &floor, &missed, &r.SetBy, &setAt); err != nil {
+		if err := rows.Scan(&r.Name, &r.Bit, &r.Expr, &forNS, &match, &r.Record, &since, &crit, &again, &data, &read, &floor, &missed, &r.SetBy, &setAt, &lead); err != nil {
 			return nil, err
 		}
-		r.For, r.Match = time.Duration(forNS), matchOf(match)
+		r.For, r.Match, r.Lead = time.Duration(forNS), matchOf(match), leadOf(lead)
 		if setAt > 0 {
 			r.SetAt = unix(setAt)
 		}
@@ -237,7 +276,7 @@ func (l *Ledger) RuleEntries(ctx context.Context) ([]verdict.RuleEntry, error) {
 }
 
 func ruleEntries(ctx context.Context, q reader) ([]verdict.RuleEntry, error) {
-	rows, err := q.QueryContext(ctx, "SELECT pattern, labels, signals, match_labels FROM impact_rules ORDER BY pos")
+	rows, err := q.QueryContext(ctx, "SELECT pattern, labels, signals, match_labels, lead_ns, require_labels FROM impact_rules ORDER BY pos")
 	if err != nil {
 		return nil, err
 	}
@@ -246,9 +285,16 @@ func ruleEntries(ctx context.Context, q reader) ([]verdict.RuleEntry, error) {
 	for rows.Next() {
 		var e verdict.RuleEntry
 		var labels, signals string
-		var match sql.NullString
-		if err := rows.Scan(&e.Rules, &labels, &signals, &match); err != nil {
+		var match, require sql.NullString
+		var lead sql.NullInt64
+		if err := rows.Scan(&e.Rules, &labels, &signals, &match, &lead, &require); err != nil {
 			return nil, err
+		}
+		e.Lead = leadOf(lead)
+		if require.Valid {
+			if err := json.Unmarshal([]byte(require.String), &e.Require); err != nil {
+				return nil, err
+			}
 		}
 		if err := json.Unmarshal([]byte(labels), &e.Labels); err != nil {
 			return nil, err
@@ -274,12 +320,14 @@ func ruleEntries(ctx context.Context, q reader) ([]verdict.RuleEntry, error) {
 // Tied is how many windows of the impact signal with no name were tied to
 // the signal impact (tieUnnamed), TiedRead whether impact is among the
 // signals in effect, which reads it on; TieErr, why they couldn't be, the
-// signals kept all the same (SyncSignalSet).
+// signals kept all the same (SyncSignalSet). Leads, a signal's or an
+// entry's lead: alone, only the spans of the windows whose catches it
+// changes are judged again (pendLeads).
 type SignalsSynced struct {
-	Set, Entries bool
-	Tied         int
-	TiedRead     bool
-	TieErr       error
+	Set, Entries, Leads bool
+	Tied                int
+	TiedRead            bool
+	TieErr              error
 }
 
 // metaUnnamedTied is "1" once the round found no window of the impact
@@ -341,7 +389,8 @@ type SignalsFrom func(set map[string]Setting) (SignalSet, []string)
 // they are the UI's, in place of the start's (docs/design/signals.md,
 // step 3). Lead is --lead in effect, which is not kept: a firing up to it
 // before a window may catch it, so the windows tieUnnamed ties are judged
-// again from it.
+// again from it; and a signal with no lead of its own follows it, so a
+// change to the leads alone judges again from as long before each window.
 type SignalSet struct {
 	Defs      []SignalDef
 	Entries   []verdict.RuleEntry
@@ -502,8 +551,8 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string, tie bool) (S
 					return fmt.Errorf("more than %d named signals", verdict.MaxSignals)
 				}
 				used[bit] = true
-				if _, err := t.ExecContext(t.ctx, `INSERT INTO impact_signals (name, bit, expr, for_ns, match_labels, keeps_record, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-					d.Name, bit, d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt)); err != nil {
+				if _, err := t.ExecContext(t.ctx, `INSERT INTO impact_signals (name, bit, expr, for_ns, match_labels, keeps_record, set_by, set_at, lead_ns) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					d.Name, bit, d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt), leadText(d.Lead)); err != nil {
 					return err
 				}
 				// The windows kept of its name (one taken away and given
@@ -516,14 +565,17 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string, tie bool) (S
 				out.Set = true
 				continue
 			}
-			if sameDef(r, d) {
+			if sameDef(r, d) && sameLead(r.Lead, d.Lead) {
 				continue
 			}
 			if !sameMatch(r.Match, d.Match) || r.Record != d.Record {
 				out.Set = true
 			}
-			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET expr = ?, for_ns = ?, match_labels = ?, keeps_record = ?, set_by = ?, set_at = ? WHERE name = ?",
-				d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt), d.Name); err != nil {
+			if !sameLead(r.Lead, d.Lead) {
+				out.Leads = true
+			}
+			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET expr = ?, for_ns = ?, match_labels = ?, keeps_record = ?, set_by = ?, set_at = ?, lead_ns = ? WHERE name = ?",
+				d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt), leadText(d.Lead), d.Name); err != nil {
 				return err
 			}
 			if !sameMatch(r.Match, d.Match) {
@@ -562,16 +614,29 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string, tie bool) (S
 				if err != nil {
 					return err
 				}
-				if _, err := t.ExecContext(t.ctx, "INSERT INTO impact_rules (pos, pattern, labels, signals, match_labels, ui) VALUES (?, ?, ?, ?, ?, ?)",
-					i+1, e.Rules, string(labels), string(signals), matchText(e.Match), set.EntriesUI); err != nil {
+				if _, err := t.ExecContext(t.ctx, "INSERT INTO impact_rules (pos, pattern, labels, signals, match_labels, ui, lead_ns, require_labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+					i+1, e.Rules, string(labels), string(signals), matchText(e.Match), set.EntriesUI, leadText(e.Lead), requireText(e.Require)); err != nil {
 					return err
 				}
 			}
-		case len(entries) > 0 && wasUI != set.EntriesUI:
-			// The same entries, the UI's now or the start's again:
-			// nothing is judged otherwise.
-			if _, err := t.ExecContext(t.ctx, "UPDATE impact_rules SET ui = ?", set.EntriesUI); err != nil {
-				return err
+		default:
+			if len(entries) > 0 && wasUI != set.EntriesUI {
+				// The same entries, the UI's now or the start's again:
+				// nothing is judged otherwise.
+				if _, err := t.ExecContext(t.ctx, "UPDATE impact_rules SET ui = ?", set.EntriesUI); err != nil {
+					return err
+				}
+			}
+			// The same entries but for their leads: those kept, and the
+			// spans their windows' catches change judged again, no more.
+			for i, e := range entries {
+				if sameLead(was[i].Lead, e.Lead) {
+					continue
+				}
+				out.Leads = true
+				if _, err := t.ExecContext(t.ctx, "UPDATE impact_rules SET lead_ns = ? WHERE pos = ?", leadText(e.Lead), i+1); err != nil {
+					return err
+				}
 			}
 		}
 		// The match in effect, which the signals with none of their own
@@ -614,10 +679,93 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string, tie bool) (S
 			}
 			return pendAll(t)
 		}
+		if out.Leads {
+			// A lead alone: the spans of the windows whose catches it
+			// changes, by options read after this write too.
+			if err := bumpSignalsGen(t); err != nil {
+				return err
+			}
+			return pendLeads(t, have, was, set)
+		}
 		return nil
 	}()
 	return out, err
 }
+
+// pendLeads pends, of a change to the leads alone (the signals and the
+// rule entries otherwise as they were: have and was, before it), the spans
+// whose stones it can change (docs/design/judging.md, "Judged again when a
+// lead changes"): of each signal one of whose leads in effect changed (its
+// own, or that of an entry naming it, each following the one above it,
+// set.Lead last), its windows and the incidents its confirmations wrote,
+// each from the longer of the longest lead against it before and after
+// the change before its start to its end. A lead changes only which
+// firings that started before an incident catch it; nothing is read from
+// Prometheus.
+func pendLeads(t *txn, have []SignalRow, was []verdict.RuleEntry, set SignalSet) error {
+	leads := func(name string, own *time.Duration, es []verdict.RuleEntry) []time.Duration {
+		return leadsAgainst(name, own, es, set.Lead)
+	}
+	var spans [][2]int64
+	for _, d := range set.Defs {
+		i := slices.IndexFunc(have, func(r SignalRow) bool { return r.Name == d.Name })
+		if d.Name == "" || i < 0 {
+			continue
+		}
+		before, after := leads(d.Name, have[i].Lead, was), leads(d.Name, d.Lead, set.Entries)
+		if slices.Equal(before, after) {
+			continue
+		}
+		reach := int64(max(slices.Max(before), slices.Max(after)) / time.Second)
+		rows, err := t.QueryContext(t.ctx, "SELECT start_at, coalesce(end_at, start_at) FROM incidents WHERE signal = ? ORDER BY start_at", d.Name)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var start, end int64
+			if err := rows.Scan(&start, &end); err != nil {
+				rows.Close()
+				return err
+			}
+			spans = append(spans, [2]int64{start - reach, max(start, end)})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	if pendedLeads != nil {
+		pendedLeads(spans)
+	}
+	if len(spans) == 0 {
+		return nil
+	}
+	return pend(t, spans)
+}
+
+// leadsAgainst are the leads rules are judged by against the windows of
+// the signal name, whose own is own: its own, following lead, then each of
+// entries' naming it, following its own, in order (verdict.Options.LeadFor).
+func leadsAgainst(name string, own *time.Duration, entries []verdict.RuleEntry, lead time.Duration) []time.Duration {
+	or := func(d *time.Duration, then time.Duration) time.Duration {
+		if d != nil {
+			return *d
+		}
+		return then
+	}
+	sig := or(own, lead)
+	out := []time.Duration{sig}
+	for _, e := range entries {
+		if slices.Contains(e.Signals, name) {
+			out = append(out, or(e.Lead, sig))
+		}
+	}
+	return out
+}
+
+// pendedLeads, when set, is told the spans a change to the leads alone
+// pends: for tests of how far it reaches.
+var pendedLeads func(spans [][2]int64)
 
 // entriesUI reports whether the rule entries the ledger keeps are the
 // UI's: none kept says no.
@@ -755,7 +903,7 @@ func (l *Ledger) signalsAre(ctx context.Context, set SignalSet, match []string) 
 		if i < 0 {
 			return false, nil
 		}
-		if !sameDef(r, defs[i]) {
+		if !sameDef(r, defs[i]) || !sameLead(r.Lead, defs[i].Lead) {
 			return false, nil
 		}
 	}
@@ -763,7 +911,7 @@ func (l *Ledger) signalsAre(ctx context.Context, set SignalSet, match []string) 
 		return false, nil
 	}
 	was, err := ruleEntries(ctx, l.r)
-	if err != nil || !sameEntries(was, entries) {
+	if err != nil || !SameEntries(was, entries) {
 		return false, err
 	}
 	ui, err := entriesUI(ctx, l.r)
@@ -783,9 +931,13 @@ func (l *Ledger) SignalWindowsBetween(ctx context.Context, name string, from, to
 // impact_rules keeps them: each as the JSON it is kept as, so that one a
 // write keeps and reads back otherwise (a value that isn't UTF-8, kept
 // with U+FFFD) is the same, and a round that keeps the start's never
-// writes them again, and judges every firing again, for nothing.
-func SameEntries(a, b []verdict.RuleEntry) bool { return sameEntries(a, b) }
+// writes them again, and judges every firing again, for nothing; and each
+// with the same lead.
+func SameEntries(a, b []verdict.RuleEntry) bool { return sameEntries(a, b) && sameEntryLeads(a, b) }
 
+// sameEntries reports whether two lists of rule entries say the same but
+// for their leads, which are compared apart (sameEntryLeads): a change to
+// a lead alone judges only the spans of its signals' windows again.
 func sameEntries(a, b []verdict.RuleEntry) bool {
 	if len(a) != len(b) {
 		return false
@@ -798,15 +950,31 @@ func sameEntries(a, b []verdict.RuleEntry) bool {
 	return true
 }
 
-// entryKey is a rule entry as impact_rules keeps it: its pattern, labels,
-// signals and match (null for each signal's own), as JSON.
+// sameEntryLeads reports whether two lists of rule entries as long give
+// the same leads, entry by entry.
+func sameEntryLeads(a, b []verdict.RuleEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !sameLead(a[i].Lead, b[i].Lead) {
+			return false
+		}
+	}
+	return true
+}
+
+// entryKey is a rule entry as impact_rules keeps it, but for its lead: its
+// pattern, labels, signals, match (null for each signal's own) and the
+// labels it requires (null for none), as JSON.
 func entryKey(e verdict.RuleEntry) string {
 	b, _ := json.Marshal(struct {
 		Rules   string
 		Labels  incident.Labels
 		Signals []string
 		Match   any
-	}{e.Rules, orEmpty(e.Labels), orNone(e.Signals), matchText(e.Match)})
+		Require any `json:",omitempty"`
+	}{e.Rules, orEmpty(e.Labels), orNone(e.Signals), matchText(e.Match), requireText(e.Require)})
 	// As read back: the bytes JSON keeps as U+FFFD are that, written out.
 	var v any
 	if json.Unmarshal(b, &v) == nil {

@@ -34,6 +34,58 @@
   exit 1, where serve exits 2. Without `--backtest-listen`, the report is
   what it was, to the byte.
 
+- **A lead of a signal's or a rule entry's own, and `require:` on an
+  entry** (docs/design/judging.md, step 1; signals.md's open question 4
+  closed). A named signal may give a `lead`, how long before one of its
+  windows' start a firing still catches it, for every rule judged against
+  it, and a rule entry one for its rules against its signals' windows, in
+  place of each signal's: from 0 to 24h, each following the one above it
+  (an entry its signal's, a signal `--lead`). A cause that fires before
+  its incident, memory pressure an hour before the errors, can be white
+  without raising `--lead` for every rule. Incidents written down, copied
+  in or read from a file, the windows of the signal with no name and those
+  of a signal no longer read keep `--lead`. Set by `--impact-lead
+  NAME=DUR` in `lapilli verdict` and `serve`, `lead:` on a signal and on a
+  rule entry in `--impact-file`, the Lead field of a signal's form on the
+  Settings page and `lead:` in its rule entries' YAML, all given back by
+  `/settings.yaml`; nothing in `--config`. `require: [LABEL, ...]` on an
+  entry, opt-in, are labels a firing of its rules and a window of its
+  signals must both carry for the one to catch the other, so that a node's
+  alert with no `service` catches no service's window. `lapilli verdict
+  --impact` judges by them as serve does; its text says each signal's lead
+  beside its `for` when one is given. The report's
+  `settings.impact_signals[].lead_ns` and `settings.impact_rules[].lead_ns`
+  and `require` (each left out when it follows, or for none),
+  `/api/v1/summary`'s `settings.impact_signals[].lead` and
+  `settings.impact_rules[].lead` and `require`; numbers.md's "incidents
+  caught: counted again" reads them. Everything that reaches back from an
+  incident to the firings it can catch reaches by the longest lead in
+  effect (the incidents a span reads, the spans a run, a read again, a copy
+  and a tie of the unnamed signal's windows judge, the near misses' replay,
+  an incident's timeline). A lead changed alone, on the command line or the
+  Settings page, judges again only the spans of the windows it touches,
+  from the longer of the old and the new lead before each to its end,
+  reading nothing from Prometheus, in the write that keeps it; `require:`
+  changed judges every firing again, as an entry's match does; either
+  holds waiting proposals until they are backtested again. **Changed with
+  the defaults:** what is worked out once a week is whole, `goal.missed`,
+  the goals' tasks and their `/metrics`, and the digest, wait for the runs
+  to pass the week's end (or an occurrence's) by the most, over each
+  signal and the rules judged against it, of its lead and its `for`
+  (`--lead` and `--impact-for` of the signal with no name, `--lead` with
+  written incidents alone), and `--settle` after that, so that no stone
+  of the week turns after it was told: with the defaults and an impact
+  signal, from about 00:00 on Monday to about 01:20; the digest, at Monday
+  09:00, isn't later. A ledger with no runs, whose firings are copied in,
+  waits for its sources to have written through the week's end and
+  `--lead` past it. With no lead set anywhere and no `require:`, every
+  stone and number is as it was. **Ledger schema 024**, after 023:
+  `impact_signals.lead_ns`, `impact_rules.lead_ns` and
+  `impact_rules.require_labels`, NULL for every signal and entry kept
+  before. A lapilli before this one doesn't open a ledger it has migrated:
+  keep a copy of its disk, or of its database, first ([Going back after a
+  schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+
 ### Fixed
 
 - **Serve started again with named impact signals kept the windows of the

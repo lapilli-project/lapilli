@@ -2256,5 +2256,12 @@
  "under a second": "1秒未満",
  "No firing started in the span.": "この期間に始まった発火はありません。",
  "Firings that started in the span: %d; the JSON lists the first %d.": "この期間に始まった発火は %d 件で、JSON には最初の %d 件を載せています。",
- "Firings that started in the span: %d, each listed in the JSON.": "この期間に始まった発火は %d 件で、JSON にすべてを 1 件ずつ載せています。"
+ "Firings that started in the span: %d, each listed in the JSON.": "この期間に始まった発火は %d 件で、JSON にすべてを 1 件ずつ載せています。",
+ "lead %s": "先行時間 %s",
+ "both carry": "両方に必要なラベル",
+ "Each may give lead, how long before its signals' windows a firing of its rules still catches them, from 0 to 1d, in place of each signal's; and require, labels a firing of its rules and a window of its signals must both carry for the one to catch the other.": "それぞれ lead で、その指標のウィンドウ開始のどれだけ前の発火まで検知したとみなすかを指定できます (0 〜 1d、指標ごとの値の代わり)。require では、発火とウィンドウの両方にないと検知とみなさないラベルを指定します。",
+ "%s, the lead above": "%s (上の先行時間)",
+ "how long before one of its windows' start a firing still catches it, from 0 to 1d; empty follows the lead above": "ウィンドウ開始のどれだけ前の発火まで検知したとみなすかです (0 〜 1d)。空なら上の先行時間に従います",
+ "a lead of %s: want a duration from 0 to %s, such as 1h, or none to follow the lead above": "先行時間 %s: 0 から %s までの期間 (例: 1h) を入れるか、上の先行時間に従うなら空にしてください",
+ "rule entry %d: require: %s": "ルールエントリ %d: require: %s"
 }

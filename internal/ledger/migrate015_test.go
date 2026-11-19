@@ -71,7 +71,7 @@ func TestMigrate015(t *testing.T) {
 	if _, err := l.PutComment(ctx, Comment{On: "task", Key: "1", Body: "Raised it."}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(append(append(slices.Concat(undo023, undo022, undo021, undo020, undo019, undo018, undo017), undo016...), undo015...), "PRAGMA user_version = 14") {
+	for _, q := range append(append(append(slices.Concat(undo024, undo023, undo022, undo021, undo020, undo019, undo018, undo017), undo016...), undo015...), "PRAGMA user_version = 14") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}

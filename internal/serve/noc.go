@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
@@ -59,20 +60,36 @@ type summarySettings struct {
 	Deploys bool `json:"deploys"`
 	// ImpactSignals are the named impact signals, each with its "for",
 	// its match (null for the match in effect), whether it keeps the
-	// record and from when it does; ImpactRules the rule entries, in
-	// order (docs/design/signals.md). None with no named signal.
-	ImpactSignals []summarySignal     `json:"impact_signals,omitempty"`
-	ImpactRules   []verdict.RuleEntry `json:"impact_rules,omitempty"`
+	// record and from when it does, and its lead when it gives one;
+	// ImpactRules the rule entries, in order (docs/design/signals.md).
+	// None with no named signal.
+	ImpactSignals []summarySignal `json:"impact_signals,omitempty"`
+	ImpactRules   []summaryEntry  `json:"impact_rules,omitempty"`
 }
 
 // summarySignal is a named impact signal, as the summary says it: not its
-// expression, which the Settings page and /settings.yaml give.
+// expression, which the Settings page and /settings.yaml give. Lead is
+// left out when it follows settings.lead (docs/design/judging.md, "In the
+// numbers").
 type summarySignal struct {
 	Name   string     `json:"name"`
 	For    string     `json:"for"`
 	Match  []string   `json:"match"`
 	Record bool       `json:"record"`
 	Start  *time.Time `json:"start"`
+	Lead   string     `json:"lead,omitempty"`
+}
+
+// summaryEntry is a rule entry, as the summary says it: as the report has
+// it (verdict.RuleEntry), its lead as a time, left out when it follows
+// each signal's, and the labels it requires, left out for none.
+type summaryEntry struct {
+	Rules   string          `json:"rules,omitempty"`
+	Labels  incident.Labels `json:"labels,omitempty"`
+	Signals []string        `json:"signals"`
+	Match   []string        `json:"match"`
+	Lead    string          `json:"lead,omitempty"`
+	Require []string        `json:"require,omitempty"`
 }
 
 // summaryRow is a week, for everyone (Team "") or for one team: its rules'
@@ -115,11 +132,14 @@ type summaryRow struct {
 	Goals []summaryGoal `json:"goals,omitempty"`
 	// crit are the critical firings by each list of severities a goal
 	// counts as critical (ledger.CriticalKey); whole says the ledger holds
-	// the week whole, after the one its first firing fell in; byCatching,
-	// of a team's row, that the team has no labels, and so owns only the
+	// the week whole, after the one its first firing fell in; settling,
+	// that the runs haven't gone past its end by what a week waits for
+	// before its goals are met or missed (wholeAfter); byCatching, of a
+	// team's row, that the team has no labels, and so owns only the
 	// incidents its rules caught.
 	crit       map[string]summaryCount
 	whole      bool
+	settling   bool
 	byCatching bool
 	// Marked holds each kind of marked window with an occurrence in the
 	// week (docs/design/marked.md), deploys left out: they are
@@ -203,6 +223,11 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
+	// What a week's goals wait for past its end, as the digest does.
+	wait, err := s.wholeAfterNow(ctx, o)
+	if err != nil {
+		return nil, err
+	}
 	deploys, err := s.l.HasDeploys(ctx)
 	if err != nil {
 		return nil, err
@@ -243,14 +268,17 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			Match: match, NoisyAt: at, Critical: critical, Deploys: deploys}, Rows: []summaryRow{}}
 	if o.Signals.Named() {
 		for _, x := range o.Signals.List {
-			sg := summarySignal{Name: x.Name, For: verdict.Duration(x.For), Match: x.Match, Record: x.Record}
+			sg := summarySignal{Name: x.Name, For: verdict.Duration(x.For), Match: x.Match, Record: x.Record, Lead: leadShown(x.Lead)}
 			if !x.Start.IsZero() {
 				at := x.Start.UTC()
 				sg.Start = &at
 			}
 			out.Settings.ImpactSignals = append(out.Settings.ImpactSignals, sg)
 		}
-		out.Settings.ImpactRules = o.Signals.Entries
+		for _, e := range o.Signals.Entries {
+			out.Settings.ImpactRules = append(out.Settings.ImpactRules, summaryEntry{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Match: e.Match,
+				Lead: leadShown(e.Lead), Require: e.Require})
+		}
 	}
 	t := &tallies{by: map[int64]map[int64]ledger.Tally{}, o: o}
 	for w := w1; w <= w2; w += 7 {
@@ -287,7 +315,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	}
 	// The goals over a period, each occurrence in the row of the week it
 	// ended in (goalsperiod.go): none without such a goal.
-	periods, err := s.periodGoals(ctx, w1, w2, who, gs, own, cursor, firstWeek, firstOK)
+	periods, err := s.periodGoals(ctx, w1, w2, who, gs, own, cursor.Add(-wait), firstWeek, firstOK)
 	if err != nil {
 		return nil, err
 	}
@@ -457,6 +485,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					row.crit[ledger.CriticalKey(cs)] = c
 				}
 				row.whole = firstOK && w > firstWeek && !row.Partial
+				row.settling = cursor.Add(-wait).Before(to)
 				row.byCatching = team != nil && len(team.Labels) == 0
 				for _, g := range mine {
 					row.Goals = append(row.Goals, goalOn(g, &row))

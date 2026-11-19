@@ -417,7 +417,7 @@ func windows(incs []incident.Incident, margin, step time.Duration, o verdict.Opt
 		// Within the period, whatever the incident's end: a firing after it
 		// isn't judged. And from a day before the incident at most, whatever
 		// the lead.
-		w := window{onStep(in.Start.Add(-min(o.Lead, 24*time.Hour) - margin)), in.EndOr(o.UnknownLen).Add(margin), []incident.Incident{in}}
+		w := window{onStep(in.Start.Add(-min(o.MaxLead(), 24*time.Hour) - margin)), in.EndOr(o.UnknownLen).Add(margin), []incident.Incident{in}}
 		if w.to.After(o.To) {
 			w.to = o.To
 		}

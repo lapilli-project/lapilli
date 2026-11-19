@@ -100,9 +100,10 @@ type signalRun struct {
 	from      time.Time
 	criterion string
 	assumed   string
-	// lead is the lead firings are judged with (verdict.Options): of a
-	// named signal's window going on with other labels, its firings before
-	// from are pended to be judged again from its start less it.
+	// lead is the longest lead firings are judged with
+	// (verdict.Options.MaxLead): of a named signal's window going on with
+	// other labels, its firings before from are pended to be judged again
+	// from its start less it.
 	lead time.Duration
 }
 
@@ -381,7 +382,7 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 			lo = min(lo, ilo)
 		}
-		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
+		if err := l.judge(t, lo-int64(o.MaxLead()/time.Second), to, o); err != nil {
 			return err
 		}
 		if err := l.miss(t, f); err != nil {
@@ -547,7 +548,7 @@ func (l *Ledger) signalRecord(t *txn, f Found, r SignalRead, o verdict.Options) 
 		}
 		return f.From.Unix(), nil
 	}
-	run := signalRun{name: r.Name, match: r.Match, on: true, since: r.Since, from: r.From, criterion: r.Criterion, lead: o.Lead}
+	run := signalRun{name: r.Name, match: r.Match, on: true, since: r.Since, from: r.From, criterion: r.Criterion, lead: o.MaxLead()}
 	if missed != 0 && r.From.Unix() > missed {
 		// Given up on: turned off, and on again by this read.
 		if err := l.impactSince(t, signalRun{name: r.Name}); err != nil {

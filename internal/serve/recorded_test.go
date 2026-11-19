@@ -308,7 +308,10 @@ func TestServeWithoutRules(t *testing.T) {
 	if _, err := s.l.Put(ctx, incidentAt(from.Add(26*time.Hour+5*time.Minute)), "ana", o); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.l.PutFirings(ctx, "cw", from, from.Add(7*24*time.Hour), firingsAt(from), ledger.FiringsCopier, o); err != nil {
+	// Copied through the week and --lead past it, in which a firing of its
+	// last minutes may catch an incident (docs/design/judging.md, "--settle,
+	// a signal's for, a rule's for").
+	if _, err := s.l.PutFirings(ctx, "cw", from, from.Add(7*24*time.Hour+o.Lead), firingsAt(from), ledger.FiringsCopier, o); err != nil {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
@@ -512,7 +515,10 @@ func TestCopiedTo(t *testing.T) {
 }
 
 // With no runs, the weekly digest waits for every source not gone quiet to
-// have written through the week, so it isn't made without its firings.
+// have written through the week, and --lead past it, so it isn't made
+// without its firings, nor before an incident a firing of its last minutes
+// catches: not at the week's end alone (docs/design/judging.md, "--settle,
+// a signal's for, a rule's for").
 func TestDigestWaitsForSources(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
@@ -547,8 +553,15 @@ func TestDigestWaitsForSources(t *testing.T) {
 	if _, err := s.digest(ctx, cfg.Options); err != nil {
 		t.Fatal(err)
 	}
+	if done, _ := s.l.Meta(ctx, "digest"); done != "" {
+		t.Errorf("a digest made with the source at the week's end, within --lead of it: %q", done)
+	}
+	put(week.Add(7*24*time.Hour + cfg.Options.Lead))
+	if _, err := s.digest(ctx, cfg.Options); err != nil {
+		t.Fatal(err)
+	}
 	if done, _ := s.l.Meta(ctx, "digest"); done == "" {
-		t.Errorf("no digest once the source wrote the week through")
+		t.Errorf("no digest once the source wrote the week through, and --lead past it")
 	}
 }
 

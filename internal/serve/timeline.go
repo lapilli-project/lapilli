@@ -81,8 +81,9 @@ type timelineView struct {
 // the tallies, to say whether a rule that caught it was noisy that week;
 // near, the rules that nearly caught it.
 func (s *Server) timeline(ctx context.Context, lg string, in ledger.Incident, t *tallies, near []verdict.NearMiss) (*timelineView, error) {
-	// The span the verdict judges it over, as verdict.Judge has it.
-	lead, end := t.o.Lead, in.EndOr(t.o.UnknownLen)
+	// The span the verdict judges it over, as verdict.Judge has it: from
+	// the longest lead any rule is judged by against it.
+	lead, end := t.o.LongestLeadFor(in.Incident), in.EndOr(t.o.UnknownLen)
 	if end.Before(in.Start) {
 		end = in.Start
 	}

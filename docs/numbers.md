@@ -80,6 +80,16 @@ from 1) catches only the windows of the entry's `signals`, on the entry's
 weren't there. An incident written down has no signal, and every rule is
 matched against it on `match`.
 
+A signal may give a lead of its own, `lead_ns`† in
+`settings.impact_signals`†, and a rule entry one for its rules against its
+signals' windows, `lead_ns`† in `settings.impact_rules`†
+([design/judging.md](design/judging.md), item 1): a firing catches a window
+of a signal (or the incident a confirmation of one wrote, which carries
+its `signal`) from its entry's lead before it, else its signal's, else
+`lead`. Every other incident, and every incident written down, is caught
+from `lead`. An entry's `require`† are labels a firing of its rules and a
+window of its signals must both carry, or it doesn't catch that window.
+
 ```jq
 # incidents caught: as the report has it
 [.firings[] | .incidents // []]
@@ -99,9 +109,15 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
        | (if $in.signal == null then $s.match
           elif $e != null and $e.match != null then $e.match
           else $sig[$in.signal].match // $s.match end) as $match
+       | ($in.signal != null and $sig[$in.signal] != null) as $named
+       | (if $named and $e != null and $e.lead_ns != null then $e.lead_ns
+          elif $named then $sig[$in.signal].lead_ns // $s.lead_ns
+          else $s.lead_ns end) as $lead
+       | (if $named and $e != null then $e.require // [] else [] end) as $require
        | select(($in.signal == null or $e == null or any($e.signals[]; . == $in.signal))
-         and $at >= ($in.start | epoch) - $s.lead_ns / 1e9
+         and $at >= ($in.start | epoch) - $lead / 1e9
          and $at <= (if $in.end then $in.end | epoch else ($in.start | epoch) + $s.unknown_length_ns / 1e9 end)
+         and all($require[]; ($f.labels // {})[.] != null and ($in.labels // {})[.] != null)
          and all($match[]; ($f.labels // {})[.] as $v | ($in.labels // {})[.] as $vs
                | $v == null or $vs == null or any($vs[]; . == $v)))
        | .id]]
@@ -109,7 +125,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 In `lapilli serve`, a firing near the start of the period may have caught
 an incident that started before it, which the report's `incidents` leave
-out: count again over a period that starts `lead` earlier.
+out: count again over a period that starts the longest lead earlier.
 
 A rule's stones, as `rules[]` counts them:
 
@@ -661,8 +677,8 @@ holds them, and this list.
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
 | `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
-| `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`† |
-| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match` |
+| `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
+| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`† |

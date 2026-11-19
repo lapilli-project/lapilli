@@ -39,7 +39,13 @@ on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,
 which are judged again, and keeps the record from then on, not of the
 weeks it wasn't read over, nor of those before every metric it reads had
-data. Beside it, Incident sources says where
+data. A named signal may give a lead of its own there, as
+`--impact-lead NAME=DUR` and `lead:` in `--impact-file` do, and a rule
+entry one for its rules, with `require:`, labels its rules' firings and
+its signals' windows must both carry: a cause that fires an hour before
+the errors is caught by them without a longer `--lead` for every rule,
+and incidents written down keep `--lead` (docs/design/judging.md, item
+1). Beside it, Incident sources says where
 incidents come from (written in Lapilli, each tool a job copies them in
 from, the incidents file, the impact signal) and whether each is alive.
 `/settings.yaml` gives the changes as Helm values to commit. Teams, quiet windows, reports and roles
@@ -157,7 +163,12 @@ goals:
 
 Each whole week is met, missed or not known (with why: no record, nothing
 to divide, a week the ledger holds only part of), never met for a week
-nobody wrote anything down. The Goals page shows each goal's twelve weeks;
+nobody wrote anything down. It stays open until the runs are past its end
+by the longest lead and a signal's `for`, and `--settle` after that, so
+that no window a firing of its last minutes catches comes after it was
+told: with the defaults and an impact signal, `goal.missed`, the tasks and
+`/metrics` come at about 01:20 on Monday, and the digest, at 09:00, isn't
+later. The Goals page shows each goal's twelve weeks;
 the overview, the digest, reports and `/api/v1/summary` (`goals`) the
 results; `/metrics` the last whole week's (`lapilli_goal_met`,
 `lapilli_goal_known`, `lapilli_goal_value`, `lapilli_goal_weeks_met`), for

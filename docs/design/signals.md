@@ -725,7 +725,6 @@ As counts and bytes, which the tests hold, not times:
 
 ## Not in this design
 
-- **A `--lead` for each signal.** `--lead` stays one, for every incident.
 - **Signals that must agree.** A window only when two signals are on at
   once. An expression joining them with `and` does it today.
 - **A signal's weight or severity.** Every window is an incident.
@@ -821,7 +820,10 @@ Open:
    `kind: latency` could be held to the entries as a window is.
 4. **`--lead` by signal.** A probe fails before users write in; an error
    share rises with them. Whether alerts may come earlier before one than
-   the other.
+   the other. Closed by [judging.md](judging.md), item 1, built in its
+   step 1 ("As built (step 1)"): a signal may give a `lead` of its own, and
+   a rule entry one for its rules against its signals' windows, from 0 to
+   a day, `--lead` for the rest and for every incident written down.
 5. **Expectations naming an impact window.** [expectations.md](expectations.md)
    holds a rule to catching an incident by its id. An impact window's key
    can change when its signal is read again; an expectation should name the

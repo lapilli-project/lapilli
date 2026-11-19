@@ -2256,5 +2256,12 @@
  "under a second": "menos de un segundo",
  "No firing started in the span.": "Ningún disparo empezó en el periodo.",
  "Firings that started in the span: %d; the JSON lists the first %d.": "Disparos que empezaron en el periodo: %d; el JSON lista los primeros %d.",
- "Firings that started in the span: %d, each listed in the JSON.": "Disparos que empezaron en el periodo: %d, cada uno en el JSON."
+ "Firings that started in the span: %d, each listed in the JSON.": "Disparos que empezaron en el periodo: %d, cada uno en el JSON.",
+ "lead %s": "antelación %s",
+ "both carry": "ambos llevan",
+ "Each may give lead, how long before its signals' windows a firing of its rules still catches them, from 0 to 1d, in place of each signal's; and require, labels a firing of its rules and a window of its signals must both carry for the one to catch the other.": "Cada una puede dar lead, cuánto antes de las ventanas de sus señales un disparo de sus reglas aún las detecta, de 0 a 1d, en lugar de la de cada señal; y require, etiquetas que un disparo de sus reglas y una ventana de sus señales deben llevar ambos para que el uno detecte la otra.",
+ "%s, the lead above": "%s, la antelación de arriba",
+ "how long before one of its windows' start a firing still catches it, from 0 to 1d; empty follows the lead above": "cuánto antes del inicio de una de sus ventanas un disparo aún la detecta, de 0 a 1d; vacía sigue la antelación de arriba",
+ "a lead of %s: want a duration from 0 to %s, such as 1h, or none to follow the lead above": "una antelación de %s: se espera una duración de 0 a %s, como 1h, o ninguna para seguir la antelación de arriba",
+ "rule entry %d: require: %s": "entrada de reglas %d: require: %s"
 }

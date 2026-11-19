@@ -1450,6 +1450,38 @@ func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel 
 	return cmp, nil
 }
 
+// wholeAfter is how far past a span's end the run cursor must be before
+// what is worked out once the span is whole is worked out of it: the
+// digest, goal.missed, the goals' tasks and their /metrics, for a week and
+// for an occurrence of each: KIND (docs/design/judging.md, "--settle, a
+// signal's for, a rule's for"). It is the most, over each named signal and
+// the rules judged against it, of the lead and the signal's "for" (of the
+// signal with no name, the lead in effect and --impact-for; of incidents
+// written down alone, the lead), and --settle after that: every window a
+// firing of the span can catch has been found, and a run has read again
+// the samples that came late, so that no stone of the span turns after it
+// was told. set are the settings in effect, for the signal with no name.
+func (s *Server) wholeAfter(o verdict.Options, set map[string]ledger.Setting) time.Duration {
+	reach, named := o.Reach()
+	switch c := s.criterionOf(set); {
+	case named:
+	case c.Expr != "":
+		reach = o.Lead + c.For
+	default:
+		reach = o.Lead
+	}
+	return reach + s.cfg.Settle
+}
+
+// wholeAfterNow is wholeAfter of the settings as they are.
+func (s *Server) wholeAfterNow(ctx context.Context, o verdict.Options) (time.Duration, error) {
+	set, err := s.l.Settings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.wholeAfter(o, set), nil
+}
+
 // digest judges the week before, suggests longer "for"s for its noisy
 // rules, and keeps them, once a week at --digest, or as soon as it can when
 // that time was missed; then tells of it and posts it. fresh says it was
@@ -1463,13 +1495,22 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	}
 	week, from, to := s.digestWeek(in.When)
 	cursor, err := s.l.Cursor(ctx)
+	if err != nil {
+		return false, err
+	}
+	// Past the week's end by what a firing of it can catch after it, and
+	// --settle after that (wholeAfter).
+	wait, err := s.wholeAfterNow(ctx, o)
 	if !s.running(ctx) && err == nil {
 		// No runs: the ledger has what was copied in, up to where each
 		// source that isn't quiet has written. One gone quiet doesn't hold
-		// the digest up: the digest says it is quiet.
+		// the digest up: the digest says it is quiet. Nothing is read
+		// again, and no signal: copied firings are judged against
+		// incidents written down, by --lead.
 		cursor, err = s.copiedTo(ctx)
+		wait = o.Lead
 	}
-	if err != nil || cursor.Before(to) {
+	if err != nil || cursor.Before(to.Add(wait)) {
 		return false, err // the week isn't all in the ledger yet
 	}
 	done, err := s.l.Meta(ctx, "digest")

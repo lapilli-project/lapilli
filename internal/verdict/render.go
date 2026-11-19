@@ -48,6 +48,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	}
 	fmt.Fprintln(w)
 	signalsKept(w, r, loc)
+	signalLeads(w, r)
 	if len(r.RulesChanged) > 0 {
 		var at []string
 		for _, t := range r.RulesChanged {
@@ -243,6 +244,32 @@ func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 		}
 	}
 	fmt.Fprintf(w, "Impact signals keep the record of the firings they could have seen: %s\n", strings.Join(parts, ", "))
+}
+
+// signalLeads writes, of named impact signals when one of them or a rule
+// entry gives a lead of its own (docs/design/judging.md, item 1), each
+// signal's lead beside its "for", each entry's that gives one, and the
+// lead incidents written down are caught by: nothing when none gives one.
+func signalLeads(w io.Writer, r *Report) {
+	s := r.Settings
+	if s == nil || !slices.ContainsFunc(s.ImpactSignals, func(x Signal) bool { return x.Lead != nil }) &&
+		!slices.ContainsFunc(s.ImpactRules, func(e RuleEntry) bool { return e.Lead != nil }) {
+		return
+	}
+	var parts []string
+	for _, x := range s.ImpactSignals {
+		lead := s.Lead
+		if x.Lead != nil {
+			lead = *x.Lead
+		}
+		parts = append(parts, fmt.Sprintf("%s %s (for %s)", x.Name, Duration(lead), Duration(x.For)))
+	}
+	for i, e := range s.ImpactRules {
+		if e.Lead != nil {
+			parts = append(parts, fmt.Sprintf("rule entry %d %s", i+1, Duration(*e.Lead)))
+		}
+	}
+	fmt.Fprintf(w, "Leads: %s; incidents written down %s\n", strings.Join(parts, ", "), Duration(s.Lead))
 }
 
 // impactKept writes, of an impact signal with no name, from when it keeps

@@ -147,7 +147,7 @@ entries. */}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals"}}"><table id="impact-signals">
 <caption>{{t "Impact signals"}}</caption>
 <thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col">{{t "How long it must last"}}</th><th scope="col">{{t "Matched on"}}</th><th scope="col">{{t "Keeps the record"}}</th><th scope="col">{{t "Started with"}}</th></tr></thead>
-<tbody>{{range .Named}}<tr id="signal-{{.Name}}"><th scope="row"><a href="#signal-{{.Name}}-h"><code><bdi>{{.Name}}</bdi></code></a></th><td>{{.For}}</td><td>{{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td>
+<tbody>{{range .Named}}<tr id="signal-{{.Name}}"><th scope="row"><a href="#signal-{{.Name}}-h"><code><bdi>{{.Name}}</bdi></code></a></th><td>{{.For}}{{with .Lead}}<br><span class="quiet">{{t "lead %s" .}}</span>{{end}}</td><td>{{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td>
 <td>{{if not .Record}}{{t "no"}}{{else if .Start.IsZero}}{{t "not yet"}}{{else}}{{t "yes, since %s" (at $loc .Start)}}{{end}}</td>
 <td>{{if not .Started}}{{t "not started with: added here"}}{{else if .Changed}}{{t "changed here"}}{{else}}{{t "as in effect"}}{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" (who .By) (at $loc .Updated)}}</span>{{end}}</td></tr>{{end}}
 {{range .Removed}}<tr id="signal-{{.Name}}"><th scope="row"><code><bdi>{{.Name}}</bdi></code></th><td colspan="3">{{t "taken away here"}}</td><td>{{t "changed by %s, %s" (who .By) (at $loc .Updated)}}</td></tr>{{end}}</tbody>
@@ -176,13 +176,14 @@ entries. */}}
 <p>{{t "Which rules are judged against which signals' windows, and on which labels: a rule's entry is the first whose pattern matches its name, else the first whose labels it has. A rule no entry names is judged against every signal, each on its own match."}}</p>
 {{if .List}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Rule entries"}}"><table>
 <thead><tr><th scope="col" class="n">#</th><th scope="col">{{t "Rules"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Signals"}}</th><th scope="col">{{t "Matched on"}}</th></tr></thead>
-<tbody>{{range .List}}<tr><td class="n">{{.N}}</td><td>{{with .Rules}}<code><bdi>{{.}}</bdi></code>{{else}}–{{end}}</td><td>{{range $k, $vs := .Labels}}<code><bdi>{{$k}}={{join $vs "|"}}</bdi></code> {{else}}–{{end}}</td><td><code><bdi>{{join .Signals ", "}}</bdi></code></td><td>{{if .Follows}}{{t "each signal's own"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td></tr>{{end}}</tbody>
+<tbody>{{range .List}}<tr><td class="n">{{.N}}</td><td>{{with .Rules}}<code><bdi>{{.}}</bdi></code>{{else}}–{{end}}</td><td>{{range $k, $vs := .Labels}}<code><bdi>{{$k}}={{join $vs "|"}}</bdi></code> {{else}}–{{end}}</td><td><code><bdi>{{join .Signals ", "}}</bdi></code></td><td>{{if .Follows}}{{t "each signal's own"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}{{with .Lead}}<br><span class="quiet">{{t "lead %s" .}}</span>{{end}}{{with .Require}}<br><span class="quiet">{{t "both carry"}} <code><bdi>{{join . ", "}}</bdi></code></span>{{end}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None: every rule is judged against every signal."}}</p>{{end}}
 <p class="quiet">{{if .Changed}}{{t "Set here in place of the %d serve was started with, changed by %s, %s." .Started (who .By) (at $loc .Updated)}}{{else}}{{t "As serve was started with them."}}{{end}}</p>
 {{if $edit}}<details{{if .Open}} open{{end}}><summary>{{t "Change them"}}</summary>
 <form method="post" action="/settings/impact-rules" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
 <div class="field"><label for="impact-rules-text">{{t "Rule entries, as --impact-file's rules: a YAML list, each with rules or labels, signals, and match if not each signal's own"}}</label>
-<textarea id="impact-rules-text" name="rules" rows="8" spellcheck="false" maxlength="32768">{{.Text}}</textarea></div>
+<textarea id="impact-rules-text" name="rules" rows="8" spellcheck="false" maxlength="32768" aria-describedby="impact-rules-more">{{.Text}}</textarea>
+<p class="quiet" id="impact-rules-more">{{t "Each may give lead, how long before its signals' windows a firing of its rules still catches them, from 0 to 1d, in place of each signal's; and require, labels a firing of its rules and a window of its signals must both carry for the one to catch the other."}}</p></div>
 <p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#signals-tried" name="rules-try" value="1" class="quiet-button">{{t "Try them on the last four weeks"}}</button>{{if .Changed}} <button name="reset" value="1" class="quiet-button">{{t "back to the start"}}</button>{{end}}</p>
 </form></details>{{end}}{{end}}
 {{with .SignalsTried}}{{template "signalstried" (on $p .)}}{{end}}
@@ -193,6 +194,8 @@ entries. */}}
 <div class="field"><label for="signal-{{.Was}}-expr">{{t "Impact signal (PromQL)"}}</label>
 <textarea id="signal-{{.Was}}-expr" name="expr" rows="3" maxlength="4096" spellcheck="false" required>{{$f.Expr}}</textarea></div>
 <div class="field"><label for="signal-{{.Was}}-for">{{t "How long it must last"}}</label> <input id="signal-{{.Was}}-for" name="for" value="{{.For}}" size="10"></div>
+<div class="field"><label for="signal-{{.Was}}-lead">{{t "Lead"}}</label> <input id="signal-{{.Was}}-lead" name="lead" value="{{.Lead}}" size="10" placeholder="{{t "%s, the lead above" .LeadAbove}}" aria-describedby="signal-{{.Was}}-lead-about">
+<span class="quiet" id="signal-{{.Was}}-lead-about">{{t "how long before one of its windows' start a firing still catches it, from 0 to 1d; empty follows the lead above"}}</span></div>
 <fieldset class="field"><legend>{{t "Matched on"}}</legend>
 <label class="check"><input type="radio" name="match-mode" value="effect"{{if .Follows}} checked{{end}}> {{t "the match in effect"}} <span class="quiet">({{with .InEffect}}<code><bdi>{{.}}</bdi></code>{{else}}{{t "no label"}}{{end}})</span></label>
 <label class="check"><input type="radio" name="match-mode" value="labels"{{if not .Follows}} checked{{end}}> {{t "these labels, comma-separated, none for no label"}}</label>

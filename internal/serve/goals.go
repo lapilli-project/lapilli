@@ -161,7 +161,9 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 }
 
 // goalOn works a goal out for a row. A week under way is open, with its
-// value so far. A whole week is not known, with why, before it is met or
+// value so far, and so is one the runs haven't gone past by what a week
+// waits for before it is told (wholeAfter). A whole week is not known,
+// with why, before it is met or
 // missed: the week isn't whole in the ledger (the one its first firing
 // fell in); a goal on incidents of a team with no labels, which owns only
 // what its rules caught and so has never missed one; a measure that needs
@@ -183,7 +185,7 @@ func goalOn(g ledger.Goal, row *summaryRow) summaryGoal {
 		out.Result, out.Why, out.Value = goalUnknown, why, nil
 	}
 	switch {
-	case row.Partial:
+	case row.Partial, row.settling:
 		out.Result = goalOpen
 		out.Over = kind == "at_most" && !m.Share && !m.Seconds && !m.Higher && v != nil && *v > target
 	case !row.whole:

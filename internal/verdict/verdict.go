@@ -22,7 +22,8 @@ import (
 type Options struct {
 	From, To time.Time
 	// Lead is how long before an incident starts a firing still counts as
-	// catching it.
+	// catching it: of every incident but a window of a named signal whose
+	// signal, or the rule's entry, gives a lead of its own (LeadFor).
 	Lead time.Duration
 	// Match are labels a firing and an incident must agree on, when both
 	// have them, for the firing to catch the incident: service, team. An
@@ -648,16 +649,21 @@ func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches
 }
 
 // Catches reports whether a firing catches an incident: it started between
-// Lead before the incident and its end, and their labels agree on the
+// the lead it is judged by before the incident (Options.LeadFor: Lead, or
+// a signal's or a rule entry's) and its end, and their labels agree on the
 // labels it is matched on (Options.Agrees: Match, or a signal's or a rule
 // entry's). One already firing before that caught nothing: it was on
 // anyway.
 func Catches(f firing.Firing, in incident.Incident, o Options) bool {
-	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
-	if f.Start.Before(from) || f.Start.After(to) {
+	to := in.EndOr(o.UnknownLen)
+	if f.Start.After(to) || f.Start.Before(in.Start.Add(-o.MaxLead())) {
 		return false
 	}
-	return o.Agrees(f.Rule, f.Labels, in)
+	j := o.judgingOf(f.Rule, in)
+	if f.Start.Before(in.Start.Add(-o.leadOf(j, in))) {
+		return false
+	}
+	return o.agrees(j, f.Labels, in)
 }
 
 // Refired reports whether a firing that started at start came within

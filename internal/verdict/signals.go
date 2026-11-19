@@ -32,6 +32,9 @@ const (
 	MaxSeenValues     = 1000
 	MaxSeenBytes      = 256 << 10
 	MaxSignalNameSize = 32
+	// LeadBound is the longest lead a signal or a rule entry may give of
+	// its own (docs/design/judging.md, item 1): from 0 to a day.
+	LeadBound = 24 * time.Hour
 )
 
 // SignalName is what a signal may be named: a lowercase letter, then
@@ -52,6 +55,11 @@ type Signal struct {
 	// one that says only that users weren't hurt in one way, such as
 	// payments failing, not that nothing was.
 	Record bool `json:"record"`
+	// Lead, when not nil, is how long before one of its windows' start a
+	// firing still catches it, for every rule judged against it, in place
+	// of Options.Lead (docs/design/judging.md, item 1): from 0 to
+	// LeadBound. Nil follows Options.Lead.
+	Lead *time.Duration `json:"lead_ns,omitempty"`
 	// Start is from when it keeps the record: where it was first read,
 	// with data, or later, where the data of every selector it reads
 	// begins. Zero for never: a selector it reads has no data.
@@ -306,8 +314,18 @@ type RuleEntry struct {
 	// Match, when not nil, are the labels its rules' firings are matched
 	// on against those windows, in place of each signal's; empty for none.
 	Match []string `json:"match"`
-	re    *regexp.Regexp
-	idx   []int
+	// Lead, when not nil, is how long before a window of its signals a
+	// firing of its rules still catches it, in place of each signal's
+	// (docs/design/judging.md, item 1): from 0 to LeadBound. Nil follows
+	// each signal's.
+	Lead *time.Duration `json:"lead_ns,omitempty"`
+	// Require are labels a firing of its rules and a window of its signals
+	// must both carry for the one to catch the other (docs/design/judging.md,
+	// "Coincidences"): against those windows, a firing that lacks one, or
+	// whose window lacks it, agrees with none. None, they agree as ever.
+	Require []string `json:"require,omitempty"`
+	re      *regexp.Regexp
+	idx     []int
 }
 
 // Signals are the named signals a report's firings are judged against, and
@@ -321,6 +339,9 @@ type Signals struct {
 	// looked counts the entries looked for, a rule each: what judging with
 	// entries costs.
 	looked *atomic.Int64
+	// maxLead is the longest lead a signal or an entry gives of its own,
+	// 0 for none: worked out once, as every catch looks at it.
+	maxLead time.Duration
 }
 
 // NewSignals are signals and rule entries to judge by, the entries' rule
@@ -328,8 +349,16 @@ type Signals struct {
 // Their rules' entries are looked for once Index says the rules' labels.
 func NewSignals(list []Signal, entries []RuleEntry) *Signals {
 	s := &Signals{List: list, Entries: slices.Clone(entries), looked: &atomic.Int64{}}
+	for _, x := range list {
+		if x.Lead != nil {
+			s.maxLead = max(s.maxLead, *x.Lead)
+		}
+	}
 	for i := range s.Entries {
 		e := &s.Entries[i]
+		if e.Lead != nil {
+			s.maxLead = max(s.maxLead, *e.Lead)
+		}
 		if e.Rules != "" {
 			e.re, _ = regexp.Compile(e.Rules)
 		}
@@ -550,28 +579,149 @@ func (s *Signals) Names(idx []int) []string {
 	return out
 }
 
+// judging is what judges a firing of a rule against an incident, looked
+// up once: the incident's signal, by its place in Signals.List, when it is
+// a window of a signal in effect or a confirmation of one, which carries
+// its window's signal (-1 for none); and then the rule's entry, nil for
+// none.
+type judging struct {
+	sig   int
+	entry *RuleEntry
+}
+
+// judgingOf looks up what judges a firing of rule against in.
+func (o Options) judgingOf(rule string, in incident.Incident) judging {
+	j := judging{sig: -1}
+	// A rule entry keeps its rules from the windows of signals in use; a
+	// window of a signal no longer read is an incident, as the record
+	// takes it, anyone's to catch.
+	if in.Signal != "" && o.Signals.Named() {
+		if j.sig = o.Signals.signal(in.Signal); j.sig >= 0 {
+			j.entry = o.Signals.Entry(rule)
+		}
+	}
+	return j
+}
+
+// leadOf is the lead j judges by against in (LeadFor).
+func (o Options) leadOf(j judging, in incident.Incident) time.Duration {
+	if j.sig < 0 {
+		return o.Lead
+	}
+	if e := j.entry; e != nil && e.Lead != nil && slices.Contains(e.Signals, in.Signal) {
+		return *e.Lead
+	}
+	if l := o.Signals.List[j.sig].Lead; l != nil {
+		return *l
+	}
+	return o.Lead
+}
+
+// LeadFor is how long before in's start a firing of rule still catches it
+// (docs/design/judging.md, "Which lead a firing is judged by"): of a
+// window of a signal in effect, or the incident a confirmation of one
+// wrote, the lead of the rule's entry when it names that signal and gives
+// one; else the signal's own, when it gives one; else Options.Lead, as of
+// every incident written down, copied in or read from a file, a window of
+// the signal with no name, and one of a signal no longer in effect.
+func (o Options) LeadFor(rule string, in incident.Incident) time.Duration {
+	return o.leadOf(o.judgingOf(rule, in), in)
+}
+
+// MaxLead is the longest lead in effect: Options.Lead, each signal's and
+// each rule entry's. What reaches back from an incident to the firings it
+// can catch reaches by it.
+func (o Options) MaxLead() time.Duration {
+	if o.Signals.Named() {
+		return max(o.Lead, o.Signals.maxLead)
+	}
+	return o.Lead
+}
+
+// LongestLeadFor is the longest lead any rule is judged by against in: of a
+// window of a signal in effect (or a confirmation of one), its signal's
+// and that of each entry naming it that gives one; else Options.Lead.
+func (o Options) LongestLeadFor(in incident.Incident) time.Duration {
+	if in.Signal == "" || !o.Signals.Named() {
+		return o.Lead
+	}
+	i := o.Signals.signal(in.Signal)
+	if i < 0 {
+		return o.Lead
+	}
+	return o.Signals.longestLead(i, o.Lead)
+}
+
+// longestLead is the longest lead any rule is judged by against the windows
+// of the signal at i, lead the one in effect.
+func (s *Signals) longestLead(i int, lead time.Duration) time.Duration {
+	out := lead
+	if l := s.List[i].Lead; l != nil {
+		out = *l
+	}
+	for _, e := range s.Entries {
+		if e.Lead != nil && slices.Contains(e.Signals, s.List[i].Name) {
+			out = max(out, *e.Lead)
+		}
+	}
+	return out
+}
+
+// Reach is, with named signals, the most over each signal of the longest
+// lead any rule is judged by against its windows (LongestLeadFor) and its
+// "for": how long after a firing's start a window it catches may still be
+// found, its start up to that lead later and found once it was on for its
+// "for". ok is false with no named signal.
+func (o Options) Reach() (time.Duration, bool) {
+	if !o.Signals.Named() {
+		return 0, false
+	}
+	var out time.Duration
+	for i, x := range o.Signals.List {
+		out = max(out, o.Signals.longestLead(i, o.Lead)+x.For)
+	}
+	return out, true
+}
+
+// Leads reports whether a signal or a rule entry gives a lead of its own.
+func (s *Signals) Leads() bool {
+	if !s.Named() {
+		return false
+	}
+	return slices.ContainsFunc(s.List, func(x Signal) bool { return x.Lead != nil }) ||
+		slices.ContainsFunc(s.Entries, func(e RuleEntry) bool { return e.Lead != nil })
+}
+
 // Agrees reports whether a firing of rule with labels agrees with an
 // incident on the labels it is matched on, and may catch it at all
 // (docs/design/signals.md, "Judged by its own match"): of a signal's
-// window, a rule entry for rule must name that signal, and its match, when
-// it gives one, is the one; else the incident's own (Incident.Match); else
-// the match in effect. An incident written down has no signal, and is
-// matched on the match in effect, for every rule alike.
+// window, a rule entry for rule must name that signal, its match, when it
+// gives one, is the one, and the labels it requires both must carry; else
+// the incident's own (Incident.Match); else the match in effect. An
+// incident written down has no signal, and is matched on the match in
+// effect, for every rule alike.
 func (o Options) Agrees(rule string, labels map[string]string, in incident.Incident) bool {
+	return o.agrees(o.judgingOf(rule, in), labels, in)
+}
+
+// agrees is Agrees, of what judges looked up (judgingOf).
+func (o Options) agrees(j judging, labels map[string]string, in incident.Incident) bool {
 	match := o.Match
 	if in.Match != nil {
 		match = in.Match
 	}
-	// A rule entry keeps its rules from the windows of signals in use; a
-	// window of a signal no longer read is an incident, as the record
-	// takes it, anyone's to catch.
-	if in.Signal != "" && o.Signals.Named() && o.Signals.signal(in.Signal) >= 0 {
-		if e := o.Signals.Entry(rule); e != nil {
-			if !slices.Contains(e.Signals, in.Signal) {
+	if e := j.entry; e != nil {
+		if !slices.Contains(e.Signals, in.Signal) {
+			return false
+		}
+		if e.Match != nil {
+			match = e.Match
+		}
+		// Labels both must carry (docs/design/judging.md, "Coincidences"):
+		// a node's alert with no service catches no service's window.
+		for _, k := range e.Require {
+			if _, ok := labels[k]; !ok || len(in.Labels[k]) == 0 {
 				return false
-			}
-			if e.Match != nil {
-				match = e.Match
 			}
 		}
 	}

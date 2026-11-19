@@ -237,9 +237,11 @@ type counted struct {
 	incident.Incident
 }
 
-// window is the span of firing starts an incident can be caught in.
+// window is the span of firing starts an incident can be caught in: from
+// the longest lead in effect before it (verdict.Options.MaxLead), each
+// firing's own judged as it is looked at (verdict.Catches).
 func window(in incident.Incident, o verdict.Options) (int64, int64) {
-	return in.Start.Add(-o.Lead).Unix(), in.EndOr(o.UnknownLen).Unix()
+	return in.Start.Add(-o.MaxLead()).Unix(), in.EndOr(o.UnknownLen).Unix()
 }
 
 // counting reads the incidents judged against whose windows meet [lo, hi].
@@ -252,7 +254,7 @@ type queryer interface {
 }
 
 func (l *Ledger) incidentsMeeting(ctx context.Context, q queryer, lo, hi int64, o verdict.Options, where string) ([]counted, error) {
-	lead, unknown := int64(o.Lead/time.Second), int64(o.UnknownLen/time.Second)
+	lead, unknown := int64(o.MaxLead()/time.Second), int64(o.UnknownLen/time.Second)
 	rows, err := q.QueryContext(ctx, `SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents
 		WHERE `+where+` AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ? ORDER BY start_at, key`,
 		hi+lead, unknown, lo)
@@ -553,7 +555,7 @@ func (l *Ledger) endsBefore(t *txn, ids []int64, before int64) (map[int64]sql.Nu
 // meets [lo, hi], from every firing in its window, and drops the catches of
 // incidents there that no longer count.
 func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options) error {
-	lead, unknown := int64(o.Lead/time.Second), int64(o.UnknownLen/time.Second)
+	lead, unknown := int64(o.MaxLead()/time.Second), int64(o.UnknownLen/time.Second)
 	if _, err := t.ExecContext(t.ctx, `DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents
 		WHERE counts = 0 AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ?)`, hi+lead, unknown, lo); err != nil {
 		return err

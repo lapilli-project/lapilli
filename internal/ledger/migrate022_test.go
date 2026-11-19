@@ -21,6 +21,7 @@ var (
 	undo022   = ledgertest.Undo022SQLite
 	undo022pg = ledgertest.Undo022Postgres
 	undo023   = ledgertest.Undo023
+	undo024   = ledgertest.Undo024
 )
 
 // A ledger at 021 with one impact signal with no name, in SQLite or, with
@@ -100,7 +101,7 @@ func TestMigrate022(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo023, undo022pg), "UPDATE schema_version SET version = 21") {
+		for _, q := range append(slices.Concat(undo024, undo023, undo022pg), "UPDATE schema_version SET version = 21") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -111,7 +112,7 @@ func TestMigrate022(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo023, undo022), "PRAGMA user_version = 21") {
+		for _, q := range append(slices.Concat(undo024, undo023, undo022), "PRAGMA user_version = 21") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}

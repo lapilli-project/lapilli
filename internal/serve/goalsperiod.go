@@ -231,7 +231,8 @@ func occPlaced(o ledger.Occurrence, now time.Time) time.Time {
 // weeks of weekly tallies before it, and the incidents of those weeks.
 // A team's is judged by everyone's record, as the summary's row of a team
 // is (the design's decision on a team's record); cursor says which have
-// ended, first which the ledger holds whole.
+// ended, as far as the runs have gone less what a span waits for before
+// it is told (wholeAfter), first which the ledger holds whole.
 func (s *Server) periodGoals(ctx context.Context, w1, w2 int64, who []*ledger.Team, gs []ledger.Goal, own *owners, cursor time.Time,
 	firstWeek int64, firstOK bool) (map[periodAt][]summaryGoal, error) {
 	if !hasPeriodGoals(gs, who) {
