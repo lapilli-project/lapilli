@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
+  step 3). With `--backtest-listen`: `backtest.trust` says what serve does
+  with `--backtest-trust` at start, read by serve's own reader: it takes
+  the file, naming each entry, its CI and the claims it pins, never what a
+  claim is pinned to, a plain token's file read as serve reads it and said
+  long enough, never its text or length; or it stops, a problem saying
+  where (the line, the entry, the key) and why in Lapilli's words, never a
+  value the file holds: `serve.ReadTrust` refuses a file as a
+  `TrustRefused`, its message to serve's log as it was. The file needs no
+  credential, and is read with `--offline` too. `backtest.issuers` asks each
+  issuer the file names for its discovery document and keys, once, four
+  at a time, as a token's first check does (its issuer to the byte, its
+  keys at its own origin or `jwks_url`, no redirect, 1 MB and 100 keys),
+  GETs of exactly those through the allowlist, counted as `backtest` in
+  `asked.by`: ok when a key verifies a token of an algorithm it names. An
+  issuer of no public CI's, and a `jwks_url`, are said as
+  `[--backtest-trust's issuer N]` and hidden wherever the report would say
+  them. `estimate.backtests` says how many requests a backtest fits in
+  `--backtest-timeout` at the lane's share of `--max-rate`, and how many
+  days of ten of the rules changed fit, their expressions or their `for`
+  alone, counted by the count the port refuses one by
+  (`serve.BacktestRequests`); a problem only when one rule added, taken
+  away or its `for` changed over a day doesn't fit; the hourly runs
+  are timed at `--max-rate` less `--backtest-share` too, as while a
+  backtest runs the whole hour (`while_backtest`), a run past `--every`
+  only then unknown; and memory says the lane's reads beside the runs'
+  (`backtest_bytes`). A trust file serve refuses is the item's problem,
+  exit 1, where serve exits 2. Without `--backtest-listen`, the report is
+  what it was, to the byte.
+
+### Fixed
+
+- **A sign-in's or a CI issuer's fetch that got no answer names no other
+  host.** A discovery document or a key set that redirected was said, in
+  serve's log and `lapilli preflight`'s report, with where the redirect
+  led, its query too; a certificate not for the host asked, with the
+  names it is for, and one of an authority not trusted, with that
+  authority. Each is now said by the URL asked alone: "it redirected, and
+  redirects aren't followed", "its certificate isn't for the host asked",
+  "its certificate is of an authority this machine doesn't trust".
+
 ## [0.61.1] - 2026-11-19
 
 A security fix to what `lapilli preflight` hides of a cloud's errors:
@@ -35,17 +78,6 @@ stays at 023.
   sitemap lists, light and dark, and at 320px (`test/a11y/site.mjs`); its
   first run found code blocks and tables that scroll sideways and couldn't
   be reached by the keyboard (16 pages), and each now takes the focus.
-
-### Fixed
-
-- **A sign-in's or a CI issuer's fetch that got no answer names no other
-  host.** A discovery document or a key set that redirected was said, in
-  serve's log and `lapilli preflight`'s report, with where the redirect
-  led, its query too; a certificate not for the host asked, with the
-  names it is for, and one of an authority not trusted, with that
-  authority. Each is now said by the URL asked alone: "it redirected, and
-  redirects aren't followed", "its certificate isn't for the host asked",
-  "its certificate is of an authority this machine doesn't trust".
 
 ## [0.61.0] - 2026-11-19
 
@@ -166,35 +198,6 @@ Before upgrading:
   HMAC worked out again over the body as it came, compared in constant
   time, and a timestamp more than five minutes off refused, as Lapilli
   takes Grafana's. Without the flag, a post is as it was.
-- **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
-  step 3). With `--backtest-listen`: `backtest.trust` says what serve does
-  with `--backtest-trust` at start, read by serve's own reader: it takes
-  the file, naming each entry, its CI and the claims it pins, never what a
-  claim is pinned to, a plain token's file read as serve reads it and said
-  long enough, never its text or length; or it stops, a problem saying
-  where (the line, the entry, the key) and why in Lapilli's words, never a
-  value the file holds: `serve.ReadTrust` refuses a file as a
-  `TrustRefused`, its message to serve's log as it was. The file needs no
-  credential, and is read with `--offline` too. `backtest.issuers` asks each
-  issuer the file names for its discovery document and keys, once, four
-  at a time, as a token's first check does (its issuer to the byte, its
-  keys at its own origin or `jwks_url`, no redirect, 1 MB and 100 keys),
-  GETs of exactly those through the allowlist, counted as `backtest` in
-  `asked.by`: ok when a key verifies a token of an algorithm it names. An
-  issuer of no public CI's, and a `jwks_url`, are said as
-  `[--backtest-trust's issuer N]` and hidden wherever the report would say
-  them. `estimate.backtests` says how many requests a backtest fits in
-  `--backtest-timeout` at the lane's share of `--max-rate`, and how many
-  days of ten of the rules changed fit, their expressions or their `for`
-  alone, counted by the count the port refuses one by
-  (`serve.BacktestRequests`); a problem only when one rule added, taken
-  away or its `for` changed over a day doesn't fit; the hourly runs
-  are timed at `--max-rate` less `--backtest-share` too, as while a
-  backtest runs the whole hour (`while_backtest`), a run past `--every`
-  only then unknown; and memory says the lane's reads beside the runs'
-  (`backtest_bytes`). A trust file serve refuses is the item's problem,
-  exit 1, where serve exits 2. Without `--backtest-listen`, the report is
-  what it was, to the byte.
 
 ### Changed
 
