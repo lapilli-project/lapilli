@@ -81,10 +81,6 @@ change: the ledger stays at 023.
     command line's report is as it was. A sentence that tells whoever runs
     serve what to set keeps its flag's name.
   - lapilli.dev's icon is serve's mark, on a light round plate in the dark.
-  - CI no longer fails on how long a page or a ledger run took on a shared
-    runner: each time is logged beside its budget, and fails the test only
-    with `LAPILLI_SCALE` set, on a machine kept for measuring
-    (CONTRIBUTING.md).
 
 ### Fixed
 

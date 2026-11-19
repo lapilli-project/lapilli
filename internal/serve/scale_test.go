@@ -23,29 +23,9 @@ import (
 // SQLite many times over (race_test.go).
 var slow = 1.0
 
-// timed says whether the budgets fail the test: only when LAPILLI_SCALE is
-// set, on a machine kept for measuring. A shared runner's clock is no
-// measure: a slow minute there has failed a pull request's run. Otherwise
-// each time is logged, and a page that fails to answer still fails.
-var timed = os.Getenv("LAPILLI_SCALE") != ""
-
-// over reports a time over its budget, as an error when timed.
-func over(t *testing.T, took, budget time.Duration, format string, args ...any) {
-	t.Helper()
-	if took <= budget {
-		return
-	}
-	if timed {
-		t.Errorf(format, args...)
-		return
-	}
-	t.Logf("over budget, not timed: "+format, args...)
-}
-
 // TestPagesScale fills a ledger with twelve weeks of a busy set of rules
 // and holds each page, worked out afresh, to a budget. LAPILLI_SCALE
-// multiplies the firings (default 1: about 200,000) and makes the budgets
-// fail the test; without it they are logged.
+// multiplies the firings (default 1: about 200,000).
 func TestPagesScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -118,8 +98,9 @@ func TestPagesScale(t *testing.T) {
 	}
 	took := time.Since(began) / 20
 	t.Logf("%-32s %s", "a quiet window, judged again", took.Round(time.Microsecond))
-	budget := time.Duration(float64(2*time.Second) * max(1, k) * slow)
-	over(t, took, budget, "a quiet window took %s, over %s", took, budget)
+	if budget := time.Duration(float64(2*time.Second) * max(1, k) * slow); took > budget {
+		t.Errorf("a quiet window took %s, over %s", took, budget)
+	}
 	// A deploy of each service every few hours, read from the deploys
 	// file all at once, the firings they meet marked (docs/design/noc.md).
 	var deploys []ledger.Deploy
@@ -136,8 +117,9 @@ func TestPagesScale(t *testing.T) {
 	}
 	took = time.Since(began)
 	t.Logf("%-32s %s", fmt.Sprintf("%d deploys, marked", len(deploys)), took.Round(time.Microsecond))
-	budget = time.Duration(float64(5*time.Second) * max(1, k) * slow)
-	over(t, took, budget, "deploys took %s, over %s", took, budget)
+	if budget := time.Duration(float64(5*time.Second) * max(1, k) * slow); took > budget {
+		t.Errorf("deploys took %s, over %s", took, budget)
+	}
 	// Windows every month, by cron, and a team's, each judged again over the
 	// twelve weeks, to the end (docs/design/serveops.md).
 	labelled, err := s.l.PutTeam(ctx, ledger.Team{Name: "billing", Labels: incident.Labels{"service": {"billing"}}}, "ana")
@@ -163,8 +145,9 @@ func TestPagesScale(t *testing.T) {
 		}
 		took := time.Since(began)
 		t.Logf("%-32s %s", w.Title+", judged again", took.Round(time.Microsecond))
-		budget := time.Duration(float64(10*time.Second) * max(1, k) * slow)
-		over(t, took, budget, "%s took %s, over %s", w.Title, took, budget)
+		if budget := time.Duration(float64(10*time.Second) * max(1, k) * slow); took > budget {
+			t.Errorf("%s took %s, over %s", w.Title, took, budget)
+		}
 	}
 	for i := 0; i < 300; i++ {
 		id, err := s.l.PutTask(ctx, ledger.Task{Title: fmt.Sprint("task ", i), Kind: "tune", Rule: fmt.Sprintf("Rule%03d", r.IntN(400)),
@@ -272,8 +255,9 @@ func TestPagesScale(t *testing.T) {
 		}
 		took := time.Since(began)
 		t.Logf("%-32s %s", c.name, took.Round(time.Microsecond))
-		budget := time.Duration(float64(c.budget) * max(1, k) * slow)
-		over(t, took, budget, "%s took %s, over %s", c.name, took, budget)
+		if budget := time.Duration(float64(c.budget) * max(1, k) * slow); took > budget {
+			t.Errorf("%s took %s, over %s", c.name, took, budget)
+		}
 	}
 	h := s.Handler()
 	for _, path := range []string{"/", "/?team=team3", "/rules", "/rules?weeks=12", "/rules?team=team3", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
@@ -297,10 +281,9 @@ func TestPagesScale(t *testing.T) {
 		if path == "/api/v1/report" {
 			budget *= 4 // every firing of the week, as JSON
 		}
-		if w.Code != 200 {
-			t.Errorf("%s: %d", path, w.Code)
+		if w.Code != 200 || took > budget {
+			t.Errorf("%s: %d in %s, over %s", path, w.Code, took, budget)
 		}
-		over(t, took, budget, "%s: %d in %s, over %s", path, w.Code, took, budget)
 	}
 	goalsScale(t, s, h)
 }

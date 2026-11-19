@@ -67,10 +67,8 @@ again.
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
 and the pages over a busy ledger: two million firings in the ledger, 200,000
-for the pages. Each time is logged beside its budget. With `LAPILLI_SCALE`
-set (`1` as it is, `10` busier) a time over its budget fails the test: run
-it so on your own machine before and after a change that may slow a run or
-a page. CI doesn't, as a shared runner's clock is no measure.
+for the pages. `LAPILLI_SCALE=10` makes it busier. The budgets are part of the
+tests, so a change that slows a run or a page fails.
 
 ## Pull requests
 
