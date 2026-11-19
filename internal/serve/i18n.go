@@ -128,6 +128,12 @@ func trIn(lang, ctx, msg string) string {
 // translation's and each argument's. A number is as its verb (%d) has it:
 // digits, nothing to set apart. One given as asCode is set in <code> too.
 func trBDI(lang, msg string, args ...any) template.HTML {
+	// Without arguments, the translation as it is, its verbs too, as tr
+	// gives it: a why of a team not found ("Only %s's editors") is said as
+	// t said it, not as Sprintf's %!s(MISSING).
+	if len(args) == 0 {
+		return template.HTML(codeFlags(template.HTMLEscapeString(tr(lang, msg))))
+	}
 	set := make([]any, len(args))
 	for i, a := range args {
 		switch a := a.(type) {
@@ -139,7 +145,6 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 			set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
 		}
 	}
-	// tr without arguments is the translation as it is, its verbs too.
 	return template.HTML(fmt.Sprintf(codeFlags(template.HTMLEscapeString(tr(lang, msg))), set...))
 }
 

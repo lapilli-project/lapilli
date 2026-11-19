@@ -1581,7 +1581,7 @@
  "stale: backtest it again": "古い: バックテストのやり直しが必要",
  "It is stale, so it isn't approved until it is backtested again: %s.": "古い提案のため、バックテストをやり直すまで承認できません: %s。",
  "Backtest it again": "バックテストをやり直す",
- "No incident was written down, or found from user impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden.": "この期間とその前の 2 週間に、記録されたインシデントも ユーザー影響から見つかったものもありません。発火は数えるだけで判定しません。発火が減っても改善ではなく、増えても悪化ではありません。減った分は、実際に起きたイベントが隠れただけかもしれません。",
+ "No incident was written down, or found from user impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden.": "この期間とその前の 2 週間に、記録されたインシデントもユーザー影響から見つかったものもありません。発火は数えるだけで判定しません。発火が減っても改善ではなく、増えても悪化ではありません。減った分は、実際に起きたイベントが隠れただけかもしれません。",
  "Backtesting it again replays the change with this lapilli, against the rule in effect, over the twelve weeks to now. The backtest it replaces is kept in its history, and any approval given to that one is taken back.": "バックテストをやり直すと、この lapilli で、現在有効なルールに対して、今日までの 12 週間で変更を再生します。置き換えたバックテストは履歴に残り、それに対する承認は取り消されます。",
  "Backtest again": "バックテストをやり直す",
  "Backtested again by %s, with lapilli %s": "%s さんが lapilli %s でバックテストをやり直しました",

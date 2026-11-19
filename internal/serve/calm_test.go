@@ -507,20 +507,30 @@ func TestFlagsAsCode(t *testing.T) {
 	}
 }
 
-// plainMarks takes out what a page adds around the words it says: <bdi>
-// around a value, <code> around a flag's name (codeFlags).
-var plainMarks = regexp.MustCompile(`</?bdi>|<code>(--[a-z][a-z0-9-]*)</code>`)
+// plainMarks is the <code> a page adds around a flag's name (codeFlags);
+// a value's <bdi> is left, to be checked as it was.
+var plainMarks = regexp.MustCompile(`<code>(--[a-z][a-z0-9-]*)</code>`)
 
 // containsPlain is strings.Contains of a page and the words it should say,
-// with neither's marks (plainMarks).
+// a flag's name plain in each (plainMarks).
 func containsPlain(s, sub string) bool {
 	plain := func(x string) string {
-		return plainMarks.ReplaceAllStringFunc(x, func(m string) string {
-			if strings.HasPrefix(m, "<code>") {
-				return strings.TrimSuffix(strings.TrimPrefix(m, "<code>"), "</code>")
-			}
-			return ""
-		})
+		return plainMarks.ReplaceAllString(x, "$1")
 	}
 	return strings.Contains(plain(s), plain(sub))
+}
+
+// TestTbdiWithoutArguments: tbdi with no arguments gives the translation
+// as t does, its verbs as they are, its flags as code: a disabled
+// button's why of a team not found isn't Sprintf's %!s(MISSING).
+func TestTbdiWithoutArguments(t *testing.T) {
+	if got := string(trBDI("en", "Only %s's editors")); got != "Only %s&#39;s editors" {
+		t.Errorf("no arguments: %q", got)
+	}
+	if got := string(trBDI("en", "Read-only: lapilli serve was started with --read-only")); got != "Read-only: lapilli serve was started with <code>--read-only</code>" {
+		t.Errorf("a flag: %q", got)
+	}
+	if got := string(trBDI("en", "Those --approvers names: %s.", "a@example.com")); got != "Those <code>--approvers</code> names: <bdi>a@example.com</bdi>." {
+		t.Errorf("a flag and an argument: %q", got)
+	}
 }

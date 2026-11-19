@@ -8,7 +8,7 @@
 {{else}}
 <p class="quiet">{{t "%d to %d of %d names no rule in effect has" .From .Upto .Total}}</p>
 <p class="quiet">{{tbdi "The rules in effect are the latest version lapilli serve read, as --rules-select and --rule narrow it: a rule they leave out is listed here too."}}</p>
-{{if not $may}}<p id="orphan-why" class="why">{{t (or $.Status.Why "Editors only")}}</p>{{end}}
+{{if not $may}}<p id="orphan-why" class="why">{{tbdi (or $.Status.Why "Editors only")}}</p>{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Name no longer in effect"}}</th><th scope="col">{{t "Note"}}</th><th scope="col" class="n">{{t "Tasks"}}</th><th scope="col" class="n">{{t "Comments"}}</th><th scope="col">{{t "Proposals not finished with"}}</th><th scope="col">{{t "What to do"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr>

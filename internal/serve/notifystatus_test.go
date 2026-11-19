@@ -19,7 +19,7 @@ import (
 func TestNotifyStatusNowhere(t *testing.T) {
 	s, _ := server(t, nil)
 	h := s.Handler()
-	nowhere := "The weekly digest is worked out Mondays 09:00 and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page"
+	nowhere := "The weekly digest is worked out <bdi>Mondays 09:00</bdi> and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page"
 	_, body, _ := get(t, h, "/settings")
 	for _, x := range []string{`<h2 id="notifications">Notifications</h2>`, nowhere, "What happens isn&#39;t told anywhere",
 		"Nothing goes out: no webhook, Slack or place for reports is given.", "The weekly digest: Mondays 09:00, to 0 places, as the flags set it."} {

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.62.1] - 2026-11-19
+
+The pages in words a person reads: Korean without the ledger's name and
+with one name for each thing, a flag's name in a sentence set as code,
+three forms' syntax behind "How to write it", and what the review of
+0.62.0 left. No schema change: the ledger stays at 023.
+
 ### Changed
 
 - **Words a person reads, not Lapilli's own** (docs/design/ui.md, bundle
@@ -9,11 +16,12 @@
   - Korean doesn't name the ledger (원장): "아직 기록된 발화가 없어요", a
     limit as the reader's ("메인터넌스 윈도우는 %d개까지 둘 수 있어요"), 기준
     시간대 for its time zone. A marked window is 이벤트 구간 everywhere, a
-    rule retired 폐기, a report's section of the hours asleep 자는 시간 오탐
+    rule retired 폐기 (not 은퇴 or 없애기), a report's section of the hours asleep 자는 시간 오탐
     as the overview's tile, not 자는 중 깨움; Outcomes' lede says what it
     checks, not that Lapilli asks itself.
-  - A flag's name in a sentence is set as code, in every language: in the
-    pages' font two hyphens read as one dash.
+  - A flag's name in a page's sentences is set as code, in every language:
+    in the pages' font two hyphens read as one dash. (A form's refusal,
+    when one names a flag, says it plain still.)
   - A repeating window's, a report schedule's and a marked window's kind's
     syntax is behind "How to write it" under its form.
   - A proposal with no record says "or found from user impact", and search

@@ -1324,7 +1324,7 @@ func TestConfigFileAnAdminsAlone(t *testing.T) {
 	s, path := configServer(t, configFile, nil)
 	h := s.Handler()
 	for _, who := range []string{"ed@example.com", "viewer@example.com"} {
-		if _, body := callAs(t, h, http.MethodGet, "/settings", who, "", "", "same-origin"); strings.Contains(body, path) || !strings.Contains(body, "declared in <bdi>--config</bdi>") {
+		if _, body := callAs(t, h, http.MethodGet, "/settings", who, "", "", "same-origin"); strings.Contains(body, path) || !strings.Contains(body, "declared in <code><bdi>--config</bdi></code>") {
 			t.Errorf("%s, the Settings page: the path shown %v", who, strings.Contains(body, path))
 		}
 		if _, body := callAs(t, h, http.MethodGet, "/api/v1/settings", who, "", "", "same-origin"); strings.Contains(body, path) {

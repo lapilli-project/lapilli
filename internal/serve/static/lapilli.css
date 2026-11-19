@@ -694,12 +694,12 @@ details.badge-legend dd { font-size: .9rem; }
 .notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { color: var(--ink); background: var(--s-wash); border-left-color: var(--s-line); }
 .notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) .sign { color: var(--s); }
 div.notice p, div.notice ul { margin: .3rem 0; }
-/* Why, under a notice that says what in a line. */
 /* A form's syntax, behind a summary under it: read once, then in the way
    (docs/design/ui.md, bundle 64). */
 details.howto { margin: .4rem 0 1rem; }
 details.howto summary { font-size: .9rem; color: var(--dim); }
 details.howto p { margin: .3rem 0 0; max-width: 46rem; }
+/* Why, under a notice that says what in a line. */
 .notice details.why { margin: 0 0 .2rem; }
 .notice details.why summary { font-size: .9rem; }
 .notice details.why p { margin: .25rem 0 .1rem; font-size: .9rem; max-width: 46rem; }

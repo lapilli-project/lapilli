@@ -112,7 +112,7 @@ func TestAlarmCloudWatch(t *testing.T) {
 	if !strings.Contains(p.Diff, `"PendingPeriod": 900,`) || changedLines(p.Diff) != 2 {
 		t.Errorf("the diff:\n%s", p.Diff)
 	}
-	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), ana, "", nil); !containsPlain(body, "A cloud&#39;s alarm, read with --alarms cw:") {
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), ana, "", nil); !containsPlain(body, "A cloud&#39;s alarm, read with --alarms <bdi>cw</bdi>:") {
 		t.Error("the page doesn't say it is a cloud's alarm")
 	}
 	if len(cw.Took()) != 0 {

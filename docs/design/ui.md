@@ -1971,7 +1971,8 @@ and the stones: docs/glossary.md defines replay (the rules run over
 history) apart from backtest (a replay of a change), and the flags and
 the docs say them so; Korean, by its readers' usage, says 백테스트 for both.
 
-A flag's name in a sentence is code (`codeFlags`, in `tbdi`): in Heebo two
+A flag's name in a sentence is code (`codeFlags`, in `tbdi`, which with no
+arguments gives the translation as `t` does, its verbs as they are): in Heebo two
 hyphens read as one dash, and `--config` is typed as it is. A template's
 sentence with a flag is `tbdi`, as are the texts a page gets from Go (an
 empty list's, Administration's cards', a feed's, a disabled button's
