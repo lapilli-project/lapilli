@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-11-19
+
+`lapilli preflight` reads the backtest lane: its trust file as serve
+reads it, its issuers' keys, and its share of the rate. And the pages as
+0.61 read on a real deployment: one line for whoever may not change
+things, the rules list on a laptop, a rule's team said, the pages saying
+what to check, and Safari's fields and the firings list fixed. No schema
+change: the ledger stays at 023.
+
 ### Added
 
 - **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
@@ -59,9 +68,40 @@
     fire more.
   - The tile of firings while people slept, when it can't say whether they
     caught anything, says when people sleep, not that they caught nothing.
+- **The pages say what to check, and name a flag only where it is to be
+  set** (docs/design/ui.md, bundle 63):
+  - What to look at's lines and a feed's line say what to check in
+    English, Japanese and Spanish, as Korean has since 0.60.0: "if they
+    mattered, write them down; if not, fix what fires them", "check its job
+    is still running", "Check X still earns its place", not a question; a
+    task made of a spare rule's line is "Consider retiring X".
+  - An impact window of the unnamed signal is "user impact" on the pages
+    (the incidents, an incident's page, search, What to look at, a rule's
+    changes reviewed, a marked window's incidents, the Settings trial), and
+    "found from user impact" in the incidents list, not "(--impact)" and
+    "found by --impact". The MCP tools, which read what the pages show,
+    say it so too; the API gives the title as it was kept, and the command
+    line's report is as it was. A sentence that tells whoever runs serve
+    what to set keeps its flag's name.
+  - An impact window confirmed with the title its form was filled with is
+    written down with the window's own title, not the page's words in the
+    reader's language (a named signal's window confirmed in Korean was
+    "사용자 영향 (NAME)"); a title written in its place is kept. The
+    incident confirmed is shown as the window was, and an incident's
+    "Change it" form, saved with its title unchanged, keeps its own.
+  - lapilli.dev's icon is serve's mark, on a light round plate in the dark.
 
 ### Fixed
 
+- **Safari and the firings list** (docs/design/ui.md, "In other
+  browsers"). Safari kept a select at 27 px beside 36 px buttons, and a
+  field's padding put it at 37.5 px in every browser: a one-line field and
+  a select are now as tall as a button in Chromium, Firefox and Safari,
+  the select still the browser's own. The firings list gave a label's
+  chips the least width it could beside a rule's long name, a chip one
+  letter a line and a row 1,129 px tall; its labels column is now at least
+  12 rem, a rule's name breaks where it must and a chip may break after
+  its `=`, and a Korean button breaks between its words: the row is 91 px.
 - **Serve started again with named impact signals kept the windows of the
   one with no name as incidents with no signal** (docs/design/signals.md,
   "Step 3, as built"; docs/upgrading.md, "From `--impact` to named

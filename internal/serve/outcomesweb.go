@@ -297,7 +297,7 @@ func (s *Server) outcomesLine(ctx context.Context) (string, error) {
 		parts = append(parts, tr(l, "%d of %d changes measured came out as predicted.", e.AsPredicted, e.Measured))
 	}
 	if out.Record.Quiet {
-		parts = append(parts, tr(l, "No incident written down in two weeks or more: are they still being written down?"))
+		parts = append(parts, tr(l, "No incident written down in two weeks or more: check they are still being written down."))
 	}
 	return strings.Join(parts, " "), nil
 }

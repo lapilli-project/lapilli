@@ -7,6 +7,8 @@ package serve
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -319,5 +321,149 @@ func TestNarrowRulesTable(t *testing.T) {
 	rows := strings.Count(body, `<td class="wk12"><svg class="spark"`)
 	if !strings.Contains(body, `<th scope="col" class="wk12">12 weeks</th>`) || rows == 0 || !strings.Contains(body, `<td></td><td class="wk12"></td></tr>`) {
 		t.Errorf("the 12 weeks' column isn't marked: %d rows", rows)
+	}
+}
+
+// TestLookSaysWhatToCheck: What to look at's lines say what to check, not
+// ask it, in every language (docs/design/ui.md, "Times, and Korean").
+func TestLookSaysWhatToCheck(t *testing.T) {
+	first, _ := firstUseServer(t)
+	// A rule another catches each incident of as soon: the spare rule's
+	// line (TestSpareOnlyOfWhatCanFire's ledger).
+	spare, rules := server(t, func(c *Config) {
+		c.Backfill = 28 * 24 * time.Hour
+		c.Options.NoisyFirings = 1000
+	})
+	os.WriteFile(filepath.Join(rules, "more.yaml"), []byte("groups:\n  - name: more\n    rules:\n      - {alert: Errors2, expr: errors > 1, for: 2m, labels: {severity: page}}\n"), 0o644)
+	ctx := context.Background()
+	raw := ""
+	if err := spare.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	spare.jobs(ctx, true)
+	for _, in := range []string{"I-1", "I-2"} {
+		if code, body := api(t, spare.Handler(), "PUT", "/api/v1/incidents/"+in, `{"title": "x", "start": "2026-11-02T06:01:00Z", "labels": {"service": ["checkout"]}}`); code != http.StatusOK {
+			t.Fatalf("incident: %d %s", code, body)
+		}
+	}
+	line := regexp.MustCompile(`(?s)<span class="look-what">(.*?)</span></span>`)
+	tags := regexp.MustCompile(`<[^>]*>`)
+	for name, s := range map[string]*Server{"first use": first, "a spare rule": spare} {
+		for _, n := range names {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Accept-Language", n.Code)
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			body := w.Body.String()
+			ms := line.FindAllStringSubmatch(body, -1)
+			if len(ms) == 0 {
+				t.Fatalf("%s, %s: nothing to look at", name, n.Code)
+			}
+			if name == "a spare rule" && !strings.Contains(body, `href="/rules/Errors2`) {
+				t.Fatalf("%s: no line for the spare rule", n.Code)
+			}
+			for _, m := range ms {
+				// The words read, not a link's query.
+				if words := tags.ReplaceAllString(m[1], ""); strings.ContainsAny(words, "?？¿") {
+					t.Errorf("%s, %s: asks: %s", name, n.Code, words)
+				}
+			}
+		}
+	}
+}
+
+// TestImpactTitleSaid: an impact window of the unnamed signal is "user
+// impact" on the pages, its flag left out; the API gives its title as it
+// was kept.
+func TestImpactTitleSaid(t *testing.T) {
+	s := pagesServer(t)
+	_, page, _ := get(t, s.Handler(), "/incidents")
+	if !strings.Contains(page, "user impact") || strings.Contains(page, "(--impact)") {
+		t.Error("the incidents page names the flag")
+	}
+	_, api, _ := get(t, s.Handler(), "/api/v1/incidents")
+	if !strings.Contains(api, "user impact (--impact)") {
+		t.Error("the API changed the title kept")
+	}
+}
+
+// TestConfirmKeepsTitle: an impact window confirmed with the title its form
+// was filled with, the page's words in the reader's language, is written
+// down with the window's own; one written in its place is kept as written.
+func TestConfirmKeepsTitle(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) {
+		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"bo@example.com"}
+		c.Impact = "impact > 1"
+	})
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	s.ready.Store(true)
+	ws, err := s.l.ImpactWindows(ctx, now.Add(-30*24*time.Hour), now)
+	if err != nil || len(ws) < 2 {
+		t.Fatalf("windows: %v %v", ws, err)
+	}
+	confirm := func(id, lang, title string) {
+		t.Helper()
+		form := url.Values{"state": {"confirmed"}, "title": {title}}
+		r := httptest.NewRequest(http.MethodPost, "/incidents/"+id+"/decide", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		r.Header.Set("X-Forwarded-Email", "bo@example.com")
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("confirm %s: %d %s", id, w.Code, w.Body.String())
+		}
+	}
+	confirm(ws[0].ID, "ko", tr("ko", "user impact"))
+	confirm(ws[1].ID, "en", "Checkout down")
+	all, err := s.l.Incidents(ctx, now.Add(-30*24*time.Hour), now, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := map[string]bool{}
+	for _, in := range all {
+		if in.Origin != "impact" {
+			titles[in.Title] = true
+		}
+	}
+	if !titles[impactTitle] || !titles["Checkout down"] || titles[tr("ko", "user impact")] {
+		t.Errorf("written down as %v", titles)
+	}
+	// The incident confirmed is shown as the window was, and saved from
+	// its form unchanged but for a label, keeps its title.
+	var made ledger.Incident
+	for _, in := range all {
+		if in.Origin != "impact" && in.Title == impactTitle {
+			made = in
+		}
+	}
+	for _, lang := range []string{"en", "ko"} {
+		r := httptest.NewRequest(http.MethodGet, "/incidents/"+made.ID, nil)
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if body := w.Body.String(); w.Code != http.StatusOK || strings.Contains(body, "(--impact)") || !strings.Contains(body, tr(lang, "user impact")) {
+			t.Errorf("%s: %s, %d, says the flag or not its title", made.ID, lang, w.Code)
+		}
+	}
+	form := url.Values{"id": {made.ID}, "title": {tr("ko", "user impact")}, "start": {made.Start.UTC().Format("2006-01-02T15:04")}, "labels": {"service=search"}}
+	r := httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("X-Forwarded-Email", "bo@example.com")
+	r.Header.Set("Accept-Language", "ko")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("save %s: %d %s", made.ID, w.Code, w.Body.String())
+	}
+	if in, err := s.l.IncidentByID(ctx, made.ID); err != nil || in.Title != impactTitle || in.Labels["service"][0] != "search" {
+		t.Errorf("saved as %+v %v", in, err)
 	}
 }

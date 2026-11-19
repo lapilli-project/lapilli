@@ -78,7 +78,7 @@ func TestSourcesIntake(t *testing.T) {
 	s.now = func() time.Time { return now.Add(49 * time.Hour) }
 	putAs(t, s, token, "OPS-3", "2026-11-02T00:00:00Z")
 	_, body = askAs(t, h, http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if pd := sourceRowOf(body, "PD-"); !strings.Contains(pd, "⚠&#xFE0E; quiet") && !strings.Contains(pd, "⚠︎ quiet") || !strings.Contains(pd, "is its job still running?") {
+	if pd := sourceRowOf(body, "PD-"); !strings.Contains(pd, "⚠&#xFE0E; quiet") && !strings.Contains(pd, "⚠︎ quiet") || !strings.Contains(pd, "check its job is still running.") {
 		t.Errorf("PD, two days on:\n%s", pd)
 	}
 	if ops := sourceRowOf(body, "OPS-"); !strings.Contains(ops, "✓ working") || !strings.Contains(ops, "last received 2026-11-05 13:00") {

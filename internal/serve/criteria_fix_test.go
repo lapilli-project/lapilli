@@ -660,7 +660,7 @@ func TestSourcesImpactRead(t *testing.T) {
 	s.jobs(ctx, false)
 	runDue(s, 12)
 	_, body = askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if row := sourceRowOf(body, "Impact signal"); !strings.Contains(row, "quiet") || !strings.Contains(row, "are the runs running?") {
+	if row := sourceRowOf(body, "Impact signal"); !strings.Contains(row, "quiet") || !strings.Contains(row, "check the runs are running.") {
 		t.Errorf("read long ago:\n%s", row)
 	}
 }

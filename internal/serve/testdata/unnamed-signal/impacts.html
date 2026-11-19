@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Incidents · Lapilli</title>
-<link rel="icon" href="/static/mark-32.png?v=b66c56572bbd" sizes="32x32" type="image/png">
-<link rel="icon" href="/static/mark-16.png?v=b66c56572bbd" sizes="16x16" type="image/png">
-<link rel="stylesheet" href="/static/lapilli.css?v=b66c56572bbd">
+<link rel="icon" href="/static/mark-32.png?v=4c20ecb7a423" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=4c20ecb7a423" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=4c20ecb7a423">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/mark-48.png?v=b66c56572bbd" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=4c20ecb7a423" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Incidents</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -58,7 +58,7 @@
 <div class="head"><h1>Incidents</h1><span class="action-off"><button type="button" disabled aria-describedby="action-why">Write one down</button> <span id="action-why" class="why">Editors only</span></span></div>
 <p class="lede">What went wrong in the last 4 weeks, and what caught it. <span class="tabs"><a href="/incidents?source=impact&amp;weeks=1">1 week</a> <a href="/incidents?source=impact&amp;weeks=4" aria-current="page">4 weeks</a> <a href="/incidents?source=impact&amp;weeks=12">12 weeks</a></span></p>
 
-<p class="tabs">Of: <a href="/incidents?weeks=4">all</a> <a href="/incidents?source=written&amp;weeks=4">written down</a> <a href="/incidents?source=impact&amp;weeks=4" aria-current="page">user impact (--impact)</a></p>
+<p class="tabs">Of: <a href="/incidents?weeks=4">all</a> <a href="/incidents?source=written&amp;weeks=4">written down</a> <a href="/incidents?source=impact&amp;weeks=4" aria-current="page">user impact</a></p>
 <p class="quiet"><a href="/settings#incident-sources">Where incidents come from, and whether each is alive</a></p>
 <p class="tabs">How they were caught: <a href="/incidents?source=impact&amp;weeks=4" aria-current="page">all <span class="quiet">(1)</span></a> <a href="/incidents?source=impact&amp;state=caught&amp;weeks=4">✓ caught <span class="quiet">(0)</span></a> <a href="/incidents?source=impact&amp;state=noisy&amp;weeks=4">◐ only noisy rules caught it <span class="quiet">(0)</span></a> <a href="/incidents?source=impact&amp;state=missed&amp;weeks=4">✗ missed <span class="quiet">(1)</span></a></p>
 <p>Of the 1 judged against: 0 caught, 0 caught only by noisy rules, 1 missed.</p>
@@ -66,23 +66,23 @@
 <thead><tr><th scope="col">Incident</th><th scope="col">Start</th><th scope="col">End</th><th scope="col">From</th><th scope="col">Caught</th><th scope="col">Lead</th></tr></thead>
 <tbody>
 <tr class="missed">
-  <td><a href="/incidents/impact-20261103T0600Z">impact-20261103T0600Z</a> user impact (--impact)</td>
+  <td><a href="/incidents/impact-20261103T0600Z">impact-20261103T0600Z</a> user impact</td>
   <td class="t">2026-11-03 06:00</td><td class="t">2026-11-03 06:11</td>
-  <td>found by --impact</td>
+  <td>found from user impact</td>
   <td><span class="status-bad">✗ nothing fired</span></td>
   <td class="t">–</td>
 </tr>
 <tr class="covered">
-  <td><a href="/incidents/impact-20261102T0600Z">impact-20261102T0600Z</a> user impact (--impact)</td>
+  <td><a href="/incidents/impact-20261102T0600Z">impact-20261102T0600Z</a> user impact</td>
   <td class="t">2026-11-02 06:00</td><td class="t">2026-11-02 06:21</td>
-  <td>found by --impact</td>
+  <td>found from user impact</td>
   <td>covered by one written down</td>
   <td class="t">–</td>
 </tr>
 <tr class="dismissed">
-  <td><a href="/incidents/impact-20261101T2000Z">impact-20261101T2000Z</a> user impact (--impact)</td>
+  <td><a href="/incidents/impact-20261101T2000Z">impact-20261101T2000Z</a> user impact</td>
   <td class="t">2026-11-01 20:00</td><td class="t">2026-11-01 21:01</td>
-  <td>found by --impact</td>
+  <td>found from user impact</td>
   <td>dismissed</td>
   <td class="t">–</td>
 </tr></tbody>

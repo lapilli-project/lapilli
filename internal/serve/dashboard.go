@@ -572,7 +572,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d changes measured came out as predicted", e.AsPredicted, e.Measured)})
 	}
 	if out.Record.Quiet {
-		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: are they still being written down?"), Warn: true})
+		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: check they are still being written down."), Warn: true})
 	}
 	if u.Suggested > 0 {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d suggestions acted on", u.ActedOn, u.Suggested)})
@@ -981,12 +981,12 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		return strings.Compare(a.Rule, b.Rule)
 	})
 	for _, u := range unrec[:min(len(unrec), unrecordedShown)] {
-		d := tr(l, "did they matter? Write it down, or fix what fires them")
+		d := tr(l, "if they mattered, write them down; if not, fix what fires them")
 		switch {
 		case u.Events:
-			d = tr(l, "each is an event its condition counts: did they matter? A longer for would hide them.")
+			d = tr(l, "each is an event its condition counts: if they mattered, write them down. A longer for would hide them.")
 		case u.Clear > 0:
-			d = tr(l, "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.", u.Clear)
+			d = tr(l, "%d went well past its bound, not a flicker at its edge: if they mattered, write them down. A longer for would hide them.", u.Clear)
 		}
 		out = append(out, action{Text: tr(l, "%s fired %d times with no incident written down", u.Rule, u.Firings), Detail: d, Href: path(u.Rule),
 			Kind: "tune", Rule: u.Rule, Title: tr(l, "Find out why %s fires", u.Rule)})
@@ -1026,7 +1026,7 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		if in.Title != "" {
 			name += " " + in.Title
 		}
-		out = append(out, action{Text: tr(l, "No alert caught %s", name), Detail: tr(l, "%s: a rule for it, or a lower threshold?", in.Start.In(s.cfg.Loc).Format("2006-01-02 15:04")),
+		out = append(out, action{Text: tr(l, "No alert caught %s", name), Detail: tr(l, "%s: whether to add a rule that catches it, or lower a threshold", in.Start.In(s.cfg.Loc).Format("2006-01-02 15:04")),
 			Href: "/incidents/" + url.PathEscape(in.ID), Kind: "write", Incident: in.ID, Title: tr(l, "A rule for %s", in.ID)})
 	}
 	if undecided > 0 {
@@ -1034,13 +1034,13 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 	}
 	for _, x := range lines {
 		if x.Spare {
-			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
+			out = append(out, action{Text: tr(l, "Check %s still earns its place", x.Name),
 				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
-				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
+				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Consider retiring %s", x.Name)})
 		}
 	}
 	if len(silent) > 0 {
-		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "still needed, or do they watch something gone?"), Href: "/rules?weeks=12"})
+		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "check they are still needed and still watch something that is there"), Href: "/rules?weeks=12"})
 	}
 	if len(out) > actionsShown {
 		out = out[:actionsShown]

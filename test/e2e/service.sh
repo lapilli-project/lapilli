@@ -342,7 +342,7 @@ check "the incidents API: the incident written down caught by ShopErrors, with t
 incidents_page=$(page /incidents)
 check "/incidents: both judged against, both caught" "$incidents_page" 'Of the 2 judged against: 2 caught, 0 caught only by noisy rules, 0 missed'
 check "/incidents: the user impact, caught, and its lead" "$incidents_page" \
-  "impact-[0-9T]+Z user impact \(--impact\) [-0-9: ]+ found by --impact ○ ShopErrors [-+0-9ms]+ $(lead_text "$impact_lead")"
+  "impact-[0-9T]+Z user impact [-0-9: ]+ found from user impact ○ ShopErrors [-+0-9ms]+ $(lead_text "$impact_lead")"
 check "/incidents: the incident written down, caught, and its lead" "$incidents_page" \
   "$written_id Checkout fails for some customers after the v2 deploy [-0-9: ]+ .* ○ ShopErrors [-+0-9ms]+ $(lead_text "$written_lead")"
 

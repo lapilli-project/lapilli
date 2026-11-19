@@ -275,7 +275,7 @@ var statusWant = []struct {
 	{regexp.MustCompile(`No one (can|may) approve`), "warn", []string{"/first/proposals/1"}},
 	{regexp.MustCompile(`goes nowhere|nowhere to go`), "warn", []string{"/first/manage", "/first/settings"}},
 	{regexp.MustCompile(`notices? failed in the last day|wasn't sent: its last try failed`), "warn", []string{"/notify/manage", "/notify/settings"}},
-	{regexp.MustCompile(`No incident written down has started|are they still being written down`), "warn", []string{"/facet/", "/facet/outcomes"}},
+	{regexp.MustCompile(`No incident written down has started|check they are still being written down`), "warn", []string{"/facet/", "/facet/outcomes"}},
 	{regexp.MustCompile(`^⊘ closed \(expired\)$`), "warn", []string{"/proposals?state=all", "@proposal:expired"}},
 	{regexp.MustCompile(`^not as predicted$|^no longer replayed$`), "warn", []string{"/outcomes/outcomes"}},
 	// bad
