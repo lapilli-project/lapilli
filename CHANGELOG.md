@@ -13,9 +13,9 @@
   what followed in another role's ARN that begins with the role's
   (`role/example-writer/other`). So were the names in an ARN of a
   partition but `aws`, `aws-cn` and `aws-us-gov` (`aws-iso`, `aws-iso-b`,
-  `aws-eusc`), and what followed a comma in a role's name (`role/a,b`).
-  Each ARN is hidden whole now, before the scrubber, the role's own named
-  `[--changes-aws-role]`.
+  `aws-eusc`), and what followed a comma in a role's name (`role/a,b`) or
+  a bracket in its path (`role/team(a)/name`). Each ARN is hidden whole
+  now, before the scrubber, the role's own named `[--changes-aws-role]`.
 
 ### Changed
 

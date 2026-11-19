@@ -1520,6 +1520,13 @@ func TestCloudSaidARNsWhole(t *testing.T) {
 		// is written into another's.
 		{"account", "arn:aws:iam::123456789012:role/other-name"},
 		{"name", "arn:aws:sts::123456789012:assumed-role/name/session-name"},
+		// An IAM path may hold brackets, parentheses and braces.
+		{"example-writer", "arn:aws:iam::123456789012:role/p[q]/other-name is"},
+		{"example-writer", "arn:aws:iam::123456789012:role/team(a)/other-name is"},
+		{"example-writer", "arn:aws:iam::123456789012:role/{x}/other-name is"},
+		// In an error's XML and JSON, the ARN ends at the markup.
+		{"example-writer", `arn:aws:iam::123456789012:role/other-name</Message>`},
+		{"example-writer", `arn:aws:iam::123456789012:role/other-name","Code":"AccessDenied"`},
 	} {
 		cfg := writesConfig(t)
 		cfg.Serve.ChangesAWSRole = "arn:aws:iam::123456789012:role/" + c.role
@@ -1539,8 +1546,18 @@ func TestCloudSaidARNsWhole(t *testing.T) {
 	cfg := writesConfig(t)
 	p := newRun(cfg)
 	p.hideWho("aws", "--changes-aws-role", cfg.Serve.ChangesAWSRole)
-	if got := p.cloudSaidText("on resource: " + cfg.Serve.ChangesAWSRole + ", then"); !strings.Contains(got, "on resource: [--changes-aws-role], then") {
-		t.Errorf("%q", got)
+	for said, want := range map[string]string{
+		"on resource: " + cfg.Serve.ChangesAWSRole + ", then":   "on resource: [--changes-aws-role], then",
+		"on resource: " + cfg.Serve.ChangesAWSRole + ".":        "on resource: [--changes-aws-role].",
+		"on resource: " + cfg.Serve.ChangesAWSRole + ": denied": "on resource: [--changes-aws-role]: denied",
+		"<Arn>" + cfg.Serve.ChangesAWSRole + "</Arn>":           "<Arn>[--changes-aws-role]</Arn>",
+		`"` + cfg.Serve.ChangesAWSRole + `"`:                    `"[--changes-aws-role]"`,
+		"by arn:aws:iam::210987654321:role/other-name.":         "by [an ARN].",
+		"(arn:aws:iam::210987654321:role/other-name), then":     "([an ARN], then",
+	} {
+		if got := p.cloudSaidText(said); !strings.Contains(got, want) {
+			t.Errorf("%q: %q, want %q", said, got, want)
+		}
 	}
 }
 

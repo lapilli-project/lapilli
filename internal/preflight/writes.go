@@ -103,12 +103,14 @@ func (p *run) cloudSaidText(s string) string {
 	// follows (role/example-writer/other). One that is a value hidden by
 	// flag is named as the scrubber names it.
 	s = arnText.ReplaceAllStringFunc(s, func(arn string) string {
+		// A sentence's . or : after it is the sentence's.
+		end := strings.TrimRight(arn, ".:")
 		for _, h := range p.hidden {
-			if h[1] == arn {
-				return "[" + h[0] + "]"
+			if h[1] == end {
+				return "[" + h[0] + "]" + arn[len(end):]
 			}
 		}
-		return "[an ARN]"
+		return "[an ARN]" + arn[len(end):]
 	})
 	if p.c.Scrubber != nil {
 		s = p.c.Scrubber(p.hiddenSaid...)(p.c.Scrubber(p.hidden...)(s))
@@ -132,8 +134,11 @@ var (
 	numberText = regexp.MustCompile(`[0-9]{4}-[0-9]{4}-[0-9]{4}|[0-9]{10,}`)
 )
 
-// arnPart is a character of an ARN after its account.
-const arnPart = `[^\s"'<>,;()\[\]{}]`
+// arnPart is a character of an ARN after its account: any but a space, a
+// quote, < or > (an error's JSON or XML around it), ; and a comma (read
+// apart). An IAM path may hold brackets, parentheses and braces
+// (role/team(a)/name), so they are the ARN's.
+const arnPart = `[^\s"'<>,;]`
 
 // cloudIDs is s without an ARN of an account, a GUID, or a number of ten
 // digits or more, or one written 1234-5678-9012, not part of a longer run
