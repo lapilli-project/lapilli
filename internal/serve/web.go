@@ -144,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /incidents/{id}/decide", s.write(s.decide))
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
 	s.bulkRoutes(mux)
+	s.verdictRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("POST /settings/impact", s.admin(s.postImpact))
 	mux.HandleFunc("POST /settings/signals", s.admin(s.postSignal))
@@ -1204,6 +1205,10 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, errPagesBusy) {
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(renderWait/time.Second))))
 	}
+	var many ledger.TooManyVerdicts
+	if errors.As(err, &many) {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int((many.Retry+time.Second-1)/time.Second))))
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
@@ -1437,12 +1442,12 @@ func (s *Server) dismissWith(r *http.Request, o verdict.Options) error {
 // real writes an incident from a black stone: the firing caught something
 // nobody wrote down.
 func (s *Server) real(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	k, err := formFiring(r, r.PathValue("id"))
 	if err != nil {
-		s.oops(w, r, bad("no such firing"))
+		s.oops(w, r, err)
 		return
 	}
-	made, f, err := s.realOne(r, id)
+	made, f, err := s.realOne(r, k)
 	switch {
 	case err != nil:
 		s.oops(w, r, err)
@@ -1454,16 +1459,59 @@ func (s *Server) real(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// realOne writes the firing id down as an incident, from its start and end,
-// with the labels --match matches on: the incident's id, or "" when the
-// firing has caught something, or one was written from it already. The
-// ledger does it in one write (ledger.Real): two at once write one.
-func (s *Server) realOne(r *http.Request, id int64) (string, ledger.Firing, error) {
+// formFiring is the firing a form is about: its id, from the path, with
+// the series and start of its alert the page was read with, which the
+// ledger holds to the firing's own (ledger.ErrFiringChanged): a run gives
+// its firings again, and SQLite a gone row's id to another.
+func formFiring(r *http.Request, id string) (ledger.FiringKey, error) {
+	if err := form(r); err != nil {
+		return ledger.FiringKey{}, err
+	}
+	return firingRef(id + ":" + r.PostFormValue("series") + ":" + r.PostFormValue("start"))
+}
+
+// firingRef reads a firing as a form picks it: ID:SERIES:START, the
+// start in Unix seconds, as the pages write it (pickRef).
+func firingRef(v string) (ledger.FiringKey, error) {
+	parts := strings.Split(v, ":")
+	if len(parts) != 3 {
+		return ledger.FiringKey{}, bad("no such firing")
+	}
+	var n [3]int64
+	for i, p := range parts {
+		x, err := strconv.ParseInt(p, 10, 64)
+		if err != nil || x <= 0 && i < 2 {
+			if i == 0 {
+				return ledger.FiringKey{}, bad("no such firing")
+			}
+			return ledger.FiringKey{}, ledger.ErrFiringChanged
+		}
+		n[i] = x
+	}
+	return ledger.FiringKey{ID: n[0], Series: n[1], Start: time.Unix(n[2], 0).UTC()}, nil
+}
+
+// verdictBy is who writes about a firing (a verdict, or "This was real"),
+// and when: an admin's reaches any firing kept, an editor's the last 14
+// days'.
+func (s *Server) verdictBy(r *http.Request) ledger.VerdictBy {
+	return ledger.VerdictBy{By: s.user(r), Admin: s.role(r) == admin, Now: s.now()}
+}
+
+// pickRef is a firing as a form picks it (firingRef).
+func pickRef(f ledger.Firing) string { return fmt.Sprintf("%d:%d:%d", f.ID, f.Series, f.Start.Unix()) }
+
+// realOne writes the firing k picks down as an incident, from its start and
+// end, with the labels --match matches on: the incident's id, or "" when
+// the firing has caught something, or one was written from it already. The
+// ledger does it in one write (ledger.Real): two at once write one. An
+// editor writes one from the last 14 days' firings, an admin from any.
+func (s *Server) realOne(r *http.Request, k ledger.FiringKey) (string, ledger.Firing, error) {
 	o, err := s.options(r.Context())
 	if err != nil {
 		return "", ledger.Firing{}, err
 	}
-	return s.l.Real(r.Context(), id, s.user(r), o)
+	return s.l.Real(r.Context(), k, s.verdictBy(r), o)
 }
 
 func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {

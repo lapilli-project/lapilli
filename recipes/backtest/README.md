@@ -494,14 +494,54 @@ By CI:
       - sh ci/backtest/gitlab.sh --since 14d
   ```
 
+- **Bitbucket Pipelines.** The step asks for an ID token with serve's
+  audience under `oidc: audiences:`, and gives the job's
+  `BITBUCKET_STEP_OIDC_TOKEN` as `LAPILLI_ID_TOKEN`:
+
+  ```yaml
+  pipelines:
+    pull-requests:
+      '**':
+        - step:
+            name: Backtest the alert rules
+            image: alpine:3.20
+            clone:
+              depth: full
+            oidc:
+              audiences:
+                - https://lapilli-ci.example.com
+            script:
+              - apk add --no-cache git curl jq
+              - export BITBUCKET_TOKEN_FILE=$(mktemp)
+              - printf '%s' "$BACKTEST_TOKEN" > "$BITBUCKET_TOKEN_FILE"
+              - export BITBUCKET_USER_UUID='{...}'
+              - LAPILLI_SERVE=https://lapilli-ci.example.com LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN PATHS=alerts sh ci/backtest/bitbucket.sh --since 14d
+  ```
+
+  The trust entry pins the repository's and the workspace's UUIDs, as
+  the repository's OpenID Connect settings show them (in braces). Bitbucket
+  writes its workspace's own audience in every token, beside the step's:
+  a token sent to serve is then one that whatever trusts the workspace's
+  own audience (an AWS role set up as Bitbucket's guide sets it) takes
+  too. Ask for serve's audience alone, in this step alone, and reach serve
+  over https; and have those other services trust an audience of their
+  own, which the steps that need them ask for under `oidc: audiences:`,
+  rather than the workspace's, so that a token serve is sent is of no use
+  to them. The token names no pull request: a newer commit's backtest
+  waits behind the older one, as on GitLab. The recipe doesn't send
+  `BITBUCKET_STEP_OIDC_TOKEN` of itself, and refuses at once a
+  `LAPILLI_ID_TOKEN` whose `aud` names Bitbucket's workspace audience
+  alone (`ari:cloud:bitbucket:...`, its payload read, not verified), from
+  a step that asked for no audience of serve's: serve would refuse it,
+  and sending it would hand it over for nothing.
 - **Forgejo Actions.** The workflow sets `enable-openid-connect: true`,
   and `gitea.sh` asks for the token with `LAPILLI_SERVE_AUDIENCE`.
-- **Gitea Actions, Azure Pipelines and Bitbucket Pipelines.** A plain
-  token, in `LAPILLI_SERVE_TOKEN_FILE`, from a secret, as the host's own
-  token is kept: Gitea gives no ID token; Azure Pipelines' is for a
-  service connection, made for Microsoft Entra; and serve doesn't take
-  Bitbucket's yet. It is a long-lived secret: whoever holds it backtests as
-  that entry until it is rotated.
+- **Gitea Actions and Azure Pipelines.** A plain token, in
+  `LAPILLI_SERVE_TOKEN_FILE`, from a secret, as the host's own token is
+  kept: Gitea gives no ID token, and Azure Pipelines' is Microsoft
+  Entra's, for a service connection, which serve doesn't take. It is a
+  long-lived secret: whoever holds it backtests as that entry until it is
+  rotated.
 
 **What is sent**, as `POST /v1/backtests`, a JSON body jq writes: each
 commit's files, as `--rules` would read them, named by their path under
@@ -515,6 +555,21 @@ number and the commit checked out. Its files are sent as text, so a rule
 file that isn't UTF-8 isn't sent, and two of `PATHS` holding a file of one
 name can't be: each is said in the comment, which file in the job's log.
 A request past the 4 MiB serve takes is said before anything is sent.
+
+**Grafana and Loki rules.** Serve backtests rules in Prometheus's format,
+and a Grafana-managed rule in `PATHS` (a provisioning file, as `--rules`
+reads one) only when each of its queries names, by its uid, a data source
+the rules serve runs read already, and asks it as they do. A Loki ruler's
+rules come from `LOKI_PATHS` (the action's `loki-paths`): directories or
+files in the repository, as `PATHS` names them, none of `PATHS`, with
+`PATHS` and not `RENDER`, sent marked as a Loki ruler's, as `--loki-rules`
+reads them; serve backtests them where its own rules hold a Loki ruler's,
+against its `--loki`, with its tenant. Any other is refused, the comment
+saying the rule reads "a data source no rule in effect reads", naming none
+of serve's
+([docs/serve.md](../../docs/serve.md#pull-request-backtests)).
+`LOKI_PATHS` is refused without `LAPILLI_SERVE`: `lapilli verdict
+--compare` takes no Loki ruler's files.
 
 **Waiting.** Serve answers with an id and a key, and the recipe asks
 where its backtest is every `SERVE_POLL` seconds (10), the job's log
@@ -573,10 +628,11 @@ finish within its `--backtest-timeout`; one that didn't come back within
 **A newer commit takes the place** of a backtest of the same pull request
 still waiting only on GitHub and Forgejo, whose ID token names the pull
 request (`ref`, `refs/pull/N/merge`). GitLab's names a merge request's
-source branch, not its number, so a GitLab merge request's older
-backtests aren't superseded: each waits its turn and is posted, the
-newest last, and the entry's three waiting at most bound how many; nor
-are those of a plain token, or of a `push`.
+source branch, not its number, and Bitbucket's names no pull request, so
+a GitLab merge request's or a Bitbucket pull request's older backtests
+aren't superseded: each waits its turn and is posted, the newest last,
+and the entry's three waiting at most bound how many; nor are those of a
+plain token, or of a `push`.
 
 ## The release the action installs
 
@@ -702,8 +758,11 @@ runner inside your network:
   backtest's variables unprotected and masked, the project's merge
   requests to its members, and runners that reach your Prometheus off
   pipelines of forks.
-- **Bitbucket.** Keep secured variables and self-hosted runners from
-  pipelines of forks.
+- **Bitbucket.** "Pull requests from a forked repository don't trigger
+  the pipeline", Atlassian says; a fork's own pipelines run in the fork,
+  whose ID token names the fork's repository (and, in another workspace,
+  comes from another issuer), which the trust entry doesn't pin. Keep
+  secured variables and self-hosted runners from pipelines of forks.
 - **Azure Pipelines.** Keep secrets and the self-hosted agents that reach
   your Prometheus from builds of forks.
 - **Gitea and Forgejo.** A fork's pull request gets no secrets; keep it

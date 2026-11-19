@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
@@ -59,20 +60,36 @@ type summarySettings struct {
 	Deploys bool `json:"deploys"`
 	// ImpactSignals are the named impact signals, each with its "for",
 	// its match (null for the match in effect), whether it keeps the
-	// record and from when it does; ImpactRules the rule entries, in
-	// order (docs/design/signals.md). None with no named signal.
-	ImpactSignals []summarySignal     `json:"impact_signals,omitempty"`
-	ImpactRules   []verdict.RuleEntry `json:"impact_rules,omitempty"`
+	// record and from when it does, and its lead when it gives one;
+	// ImpactRules the rule entries, in order (docs/design/signals.md).
+	// None with no named signal.
+	ImpactSignals []summarySignal `json:"impact_signals,omitempty"`
+	ImpactRules   []summaryEntry  `json:"impact_rules,omitempty"`
 }
 
 // summarySignal is a named impact signal, as the summary says it: not its
-// expression, which the Settings page and /settings.yaml give.
+// expression, which the Settings page and /settings.yaml give. Lead is
+// left out when it follows settings.lead (docs/design/judging.md, "In the
+// numbers").
 type summarySignal struct {
 	Name   string     `json:"name"`
 	For    string     `json:"for"`
 	Match  []string   `json:"match"`
 	Record bool       `json:"record"`
 	Start  *time.Time `json:"start"`
+	Lead   string     `json:"lead,omitempty"`
+}
+
+// summaryEntry is a rule entry, as the summary says it: as the report has
+// it (verdict.RuleEntry), its lead as a time, left out when it follows
+// each signal's, and the labels it requires, left out for none.
+type summaryEntry struct {
+	Rules   string          `json:"rules,omitempty"`
+	Labels  incident.Labels `json:"labels,omitempty"`
+	Signals []string        `json:"signals"`
+	Match   []string        `json:"match"`
+	Lead    string          `json:"lead,omitempty"`
+	Require []string        `json:"require,omitempty"`
 }
 
 // summaryRow is a week, for everyone (Team "") or for one team: its rules'
@@ -95,8 +112,11 @@ type summaryRow struct {
 	NoRecord bool `json:"no_record"`
 	// Unjudged are its firings that caught nothing and had no record:
 	// counted, not judged, and in no precision, as the report counts them
-	// (docs/design/signals.md, "How they are counted").
-	Unjudged int `json:"unjudged"`
+	// (docs/design/signals.md, "How they are counted"). NotJudged are of
+	// them those of rules an entry says are judged by nothing (judged:
+	// false, docs/design/judging.md, "Rules judged by nothing").
+	Unjudged  int `json:"unjudged"`
+	NotJudged int `json:"not_judged"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`
 	Critical   summaryCount            `json:"critical"`
@@ -108,6 +128,15 @@ type summaryRow struct {
 	DuringDeploys summaryDeploys   `json:"during_deploys"`
 	Incidents     summaryIncidents `json:"incidents"`
 	Impacts       summaryImpacts   `json:"impacts"`
+	// Episodes are the week's firings counted as episodes
+	// (docs/design/judging.md, item 2), beside them, changing none of
+	// them: null until the ledger has counted the week's (after an
+	// upgrade, or a change of zone).
+	Episodes *summaryEpisodes `json:"episodes"`
+	// People are people's verdicts on the week's firings
+	// (docs/design/judging.md, item 3), and the numbers as Lapilli's own
+	// judging would have them.
+	People summaryPeople `json:"people"`
 	// Goals are the goals --config declares of the row's team (everyone's,
 	// in a row for everyone; the team's own and each team's, in a team's),
 	// each with its value and the week's result (docs/design/goals.md); left
@@ -115,11 +144,14 @@ type summaryRow struct {
 	Goals []summaryGoal `json:"goals,omitempty"`
 	// crit are the critical firings by each list of severities a goal
 	// counts as critical (ledger.CriticalKey); whole says the ledger holds
-	// the week whole, after the one its first firing fell in; byCatching,
-	// of a team's row, that the team has no labels, and so owns only the
+	// the week whole, after the one its first firing fell in; settling,
+	// that the runs haven't gone past its end by what a week waits for
+	// before its goals are met or missed (wholeAfter); byCatching, of a
+	// team's row, that the team has no labels, and so owns only the
 	// incidents its rules caught.
 	crit       map[string]summaryCount
 	whole      bool
+	settling   bool
 	byCatching bool
 	// Marked holds each kind of marked window with an occurrence in the
 	// week (docs/design/marked.md), deploys left out: they are
@@ -141,6 +173,74 @@ type summaryMarked struct {
 	Refired          int              `json:"refired"`
 	Incidents        summaryIncidents `json:"incidents"`
 	Impacts          summaryIncidents `json:"impacts"`
+	// Episodes are those whose first firing is marked with the kind, and
+	// EpisodesCaught those of them with a white firing; null, with
+	// EpisodesPrecision, until the ledger has counted the week's.
+	Episodes          *int     `json:"episodes"`
+	EpisodesCaught    *int     `json:"episodes_caught"`
+	EpisodesPrecision *float64 `json:"episodes_precision"`
+}
+
+// summaryEpisodes are a row's episodes: Total, Caught those with a white
+// firing, Unjudged those not judged (no white firing, and no record at
+// their first firing's), Precision Caught over those judged (null as the
+// row's is), and NoisyRules how many of the row's rules are noisy by
+// their episodes in the week, by the same thresholds as by firings
+// (noisy_at), which decides nothing.
+type summaryEpisodes struct {
+	Total      int      `json:"total"`
+	Caught     int      `json:"caught"`
+	Unjudged   int      `json:"unjudged"`
+	Precision  *float64 `json:"precision"`
+	NoisyRules int      `json:"noisy_rules"`
+}
+
+// summaryPeople are a row's people's verdicts: Unrelated, its firings
+// white as Lapilli judged them and black by a person's word, and
+// UnrelatedExcused those of them a quiet window then excused; Real, the
+// incidents "This was real" wrote from a firing of its rules that started
+// in the week, RealWhite its firings white only by such incidents, and
+// RealExcused those of them a quiet window that matches them would have
+// excused as Lapilli judged them; CaughtByLapilli and PrecisionByLapilli,
+// what caught something and the precision as Lapilli's own judging would
+// have them; Action, the answers to "needed action".
+type summaryPeople struct {
+	Unrelated          int           `json:"unrelated"`
+	UnrelatedExcused   int           `json:"unrelated_excused"`
+	Real               int           `json:"real"`
+	RealWhite          int           `json:"real_white"`
+	RealExcused        int           `json:"real_excused"`
+	CaughtByLapilli    int           `json:"caught_by_lapilli"`
+	PrecisionByLapilli *float64      `json:"precision_by_lapilli"`
+	Action             summaryAction `json:"action"`
+}
+
+// summaryAction are a row's answers to whether a firing needed someone to
+// act: of its Firings, those Answered, Yes and No; Share, yes over those
+// answered, given only once ActionAnsweredShare of the firings are
+// answered (null below); YesBlack, needed action and caught nothing;
+// NoWhite, needed none and caught something.
+type summaryAction struct {
+	Firings  int      `json:"firings"`
+	Answered int      `json:"answered"`
+	Yes      int      `json:"yes"`
+	No       int      `json:"no"`
+	Share    *float64 `json:"share"`
+	YesBlack int      `json:"yes_black"`
+	NoWhite  int      `json:"no_white"`
+}
+
+// ActionAnsweredShare is the share of a row's firings that must be
+// answered before action.share is given: below it, the share would follow
+// how much was answered, not the alerts.
+const ActionAnsweredShare = 0.8
+
+// actionShare is yes over those answered, once enough of the firings are.
+func actionShare(a summaryAction) *float64 {
+	if a.Answered == 0 || float64(a.Answered) < ActionAnsweredShare*float64(a.Firings) {
+		return nil
+	}
+	return share(a.Yes, a.Answered)
 }
 
 type summaryCount struct {
@@ -203,6 +303,11 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
+	// What a week's goals wait for past its end, as the digest does.
+	wait, err := s.wholeAfterNow(ctx, o)
+	if err != nil {
+		return nil, err
+	}
 	deploys, err := s.l.HasDeploys(ctx)
 	if err != nil {
 		return nil, err
@@ -243,14 +348,17 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			Match: match, NoisyAt: at, Critical: critical, Deploys: deploys}, Rows: []summaryRow{}}
 	if o.Signals.Named() {
 		for _, x := range o.Signals.List {
-			sg := summarySignal{Name: x.Name, For: verdict.Duration(x.For), Match: x.Match, Record: x.Record}
+			sg := summarySignal{Name: x.Name, For: verdict.Duration(x.For), Match: x.Match, Record: x.Record, Lead: leadShown(x.Lead)}
 			if !x.Start.IsZero() {
 				at := x.Start.UTC()
 				sg.Start = &at
 			}
 			out.Settings.ImpactSignals = append(out.Settings.ImpactSignals, sg)
 		}
-		out.Settings.ImpactRules = o.Signals.Entries
+		for _, e := range o.Signals.Entries {
+			out.Settings.ImpactRules = append(out.Settings.ImpactRules, summaryEntry{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Match: e.Match,
+				Lead: leadShown(e.Lead), Require: e.Require})
+		}
 	}
 	t := &tallies{by: map[int64]map[int64]ledger.Tally{}, o: o}
 	for w := w1; w <= w2; w += 7 {
@@ -275,11 +383,20 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
-	// Each week's own, read once for every team's row.
+	// Each week's own, read once for every team's row; and the rules "This
+	// was real" wrote any of them from.
 	weekOf := map[int64][]ledger.Incident{}
+	var realSeries []int64
 	for _, in := range incs {
 		w := ledger.Week(s.l.Day(in.Start))
 		weekOf[w] = append(weekOf[w], in)
+		if in.Real {
+			realSeries = append(realSeries, in.RealSeries())
+		}
+	}
+	realRule, err := s.l.RulesOfSeries(ctx, realSeries)
+	if err != nil {
+		return nil, err
 	}
 	marked, err := s.markedWeeks(ctx, w1, w2, own)
 	if err != nil {
@@ -287,7 +404,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	}
 	// The goals over a period, each occurrence in the row of the week it
 	// ended in (goalsperiod.go): none without such a goal.
-	periods, err := s.periodGoals(ctx, w1, w2, who, gs, own, cursor, firstWeek, firstOK)
+	periods, err := s.periodGoals(ctx, w1, w2, who, gs, own, cursor.Add(-wait), firstWeek, firstOK)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +437,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			var unjudgedDeploys, unjudgedCrit int
 			unjudgedSev := map[string]int{}
 			unjudgedCrits := make([]int, len(lists))
+			var ep summaryEpisodes
 			for id, x := range t.by[w] {
 				rule := t.rules[id]
 				if !mine(rule.Name) {
@@ -327,9 +445,18 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				}
 				u := t.unjudged(w, id)
 				ub := u.Firings - u.White
+				ep.Total += x.Episodes
+				ep.Caught += x.EpisodesWhite
+				ep.Unjudged += u.Episodes - u.EpisodesWhite
+				if j := t.judged(w, id); noisy(j.Episodes, j.EpisodesWhite, t.o) {
+					ep.NoisyRules++
+				}
 				row.Firings += x.Firings
 				row.Caught += x.White
 				row.Unjudged += ub
+				if t.o.NotJudged(rule.Name) {
+					row.NotJudged += x.Firings
+				}
 				unjudgedDeploys += u.Deploy - u.DeployWhite
 				row.Excused += x.Excused
 				row.Refired.Firings += x.Refired
@@ -378,7 +505,12 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			crit.Share = judged(crit.Caught, crit.Firings, unjudgedCrit)
 			row.Critical = crit
 			row.Precision = judged(row.Caught, row.Firings, row.Unjudged)
+			if t.episodesCounted(w) {
+				ep.Precision = judged(ep.Caught, ep.Total, ep.Unjudged)
+				row.Episodes = &ep
+			}
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
+			row.People = t.people(w, mine, row, weekOf[w], realRule)
 			for i, x := range refired {
 				if mine(x.Rule) {
 					row.Refired.Worst = &refired[i]
@@ -457,6 +589,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					row.crit[ledger.CriticalKey(cs)] = c
 				}
 				row.whole = firstOK && w > firstWeek && !row.Partial
+				row.settling = cursor.Add(-wait).Before(to)
 				row.byCatching = team != nil && len(team.Labels) == 0
 				for _, g := range mine {
 					row.Goals = append(row.Goals, goalOn(g, &row))
@@ -732,4 +865,42 @@ func labelsLine(m map[string]string) string {
 		parts = append(parts, k+"="+m[k])
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// people works out a row's people's verdicts (summaryPeople) from the
+// week's tallies by the signals its firings are tied to, of the rules
+// mine says are the row's, its incidents and the rules "This was real"
+// wrote them from.
+func (t *tallies) people(w int64, mine func(string) bool, row summaryRow, incs []ledger.Incident, realRule map[int64]string) summaryPeople {
+	var p summaryPeople
+	var judgedL, judgedWhiteL int
+	for _, x := range t.parts {
+		if x.At != w || !mine(t.rules[x.Rule].Name) {
+			continue
+		}
+		p.Unrelated += x.Unrelated
+		p.UnrelatedExcused += x.UnrelatedExcused
+		p.RealWhite += x.RealWhite
+		p.RealExcused += x.RealExcused
+		p.Action.Yes += x.ActionYes
+		p.Action.No += x.ActionNo
+		p.Action.YesBlack += x.ActionYesBlack
+		p.Action.NoWhite += x.ActionNoWhite
+		_, white, judged := t.byLapilli(x)
+		p.CaughtByLapilli += white
+		judgedL += judged
+		judgedWhiteL += min(white, judged)
+	}
+	for _, in := range incs {
+		if rule, ok := realRule[in.RealSeries()]; ok && in.Real && mine(rule) {
+			p.Real++
+		}
+	}
+	if judgedL > 0 {
+		p.PrecisionByLapilli = share(judgedWhiteL, judgedL)
+	}
+	p.Action.Firings = row.Firings
+	p.Action.Answered = p.Action.Yes + p.Action.No
+	p.Action.Share = actionShare(p.Action)
+	return p
 }

@@ -254,6 +254,9 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 	at := before.Unix()
 	steps := []string{
 		"DELETE FROM firings WHERE id IN (SELECT id FROM firings WHERE start_at < ? LIMIT 5000)",
+		// People's verdicts with their firings, and those on no firing
+		// once their start is as old.
+		"DELETE FROM verdicts WHERE id IN (SELECT id FROM verdicts WHERE start_at < ? LIMIT 5000)",
 		"DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? LIMIT 5000)",
 		"DELETE FROM incidents WHERE id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? AND id NOT IN (SELECT incident_id FROM catches) LIMIT 5000)",
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
@@ -332,7 +335,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 			return err
 		}
 		// Alerts with no firing left: their labels go too.
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM series WHERE id NOT IN (SELECT DISTINCT series_id FROM firings)"); err != nil {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM series WHERE id NOT IN (SELECT DISTINCT series_id FROM firings) AND id NOT IN (SELECT series_id FROM verdicts)"); err != nil {
 			return err
 		}
 		t.recorded, t.idsChanged = true, true

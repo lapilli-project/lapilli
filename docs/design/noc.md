@@ -227,13 +227,17 @@ signals tied to each, so part of a row can be judged and part not: each
 share is of the firings judged, `no_record` says none of the row's was,
 `impacts.by_signal` counts each signal's windows apart (`{}` with no
 named signal), and `settings` gains `impact_signals` (each signal's name,
-`for`, `match`, `record` and `start`) and `impact_rules`, the rule
-entries, both left out with no named signal.
+`for`, `match`, `record` and `start`, and its `lead` when it gives one)
+and `impact_rules`, the rule entries (with each one's `lead` and
+`require` when it gives them, [judging.md](judging.md), item 1), both left
+out with no named signal.
 `off_hours` and `asleep` are null with
 no hours given, a median null with nothing caught. With goals declared in
 `--config` ([goals.md](goals.md)), each row gains `goals`, the goals of its
 team, each with its value and the week's `result` (`met`, `missed`,
-`unknown` with `why`, or `open` in a row that is partial): a field added,
+`unknown` with `why`, or `open` in a row that is partial, or whose end
+the runs haven't passed by the longest lead, a signal's `for` and
+`--settle`, judging.md's wait): a field added,
 left out with none declared. `TestSummaryAPI` holds
 the fields by name. [docs/numbers.md](../numbers.md) defines each number and
 counts the week's again from `/api/v1/report` over the same week.

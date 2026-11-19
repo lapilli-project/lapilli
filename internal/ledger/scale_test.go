@@ -259,21 +259,22 @@ func TestRecordedScale(t *testing.T) {
 		t.Errorf("judged %v, want once, within [%d, %d]", spans, lo.Unix(), hi.Unix())
 	}
 	// Each firing its row, its alert's when it is new (nearly every one
-	// here: 300 rules on 2,000 instances), and its stones once; each rule
-	// its row, and its days and weeks counted again, deleted and written
-	// (16 at most). Writing the firings twice, or judging them twice, is
-	// past it.
+	// here: 300 rules on 2,000 instances), its stones once and its episode
+	// once (docs/design/judging.md, item 2); each rule its row, and its
+	// days and weeks counted again, deleted and written (16 at most).
+	// Writing the firings twice, or judging them twice, is past it.
 	rules := map[string]bool{}
 	for _, f := range fs {
 		rules[f.Rule] = true
 	}
-	if most := 3*int64(got.Added) + 16*int64(len(rules)); l.d != postgres && d.rows > most {
+	if most := 4*int64(got.Added) + 16*int64(len(rules)); l.d != postgres && d.rows > most {
 		t.Errorf("written: %d rows, want %d at most", d.rows, most)
 	}
 	// In Postgres, a few statements for each rule made (looked up, its name
-	// checked, made: 4), and the firings, their alerts and stones a
-	// thousand rows a statement. One for each firing is past it.
-	if most := 4*int64(len(rules)) + 4*int64(got.Added)/1000 + 50; l.d == postgres && d.statements > most {
+	// checked, made: 4), and the firings, their alerts, stones and
+	// episodes a thousand rows a statement. One for each firing is past
+	// it.
+	if most := 4*int64(len(rules)) + 5*int64(got.Added)/1000 + 50; l.d == postgres && d.statements > most {
 		t.Errorf("written: %d statements, want %d at most: a few for each rule, a thousand rows each", d.statements, most)
 	}
 

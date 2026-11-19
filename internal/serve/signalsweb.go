@@ -137,26 +137,31 @@ func splitLabels(v string) []string {
 // signalForm is a named signal as the Settings page's form gives it: Was,
 // its name as it is ("" to add one); its name, expression, "for" (empty for
 // --impact-for's), whether it follows the match in effect, the labels it is
-// matched on otherwise, and whether it keeps the record.
+// matched on otherwise, whether it keeps the record, and its lead (empty to
+// follow the lead in effect).
 type signalForm struct {
 	Was, Name, Expr, For string
 	Follows              bool
 	Match                string
 	Record               bool
+	Lead                 string
 	// InEffect is the match in effect, --match's, said beside the choice
-	// to follow it: "" for no label.
-	InEffect string
+	// to follow it: "" for no label; LeadAbove, the lead in effect, said
+	// where its lead is left empty to follow it.
+	InEffect, LeadAbove string
 }
 
 // signalFormOf reads a signal's form, posted or tried.
 func signalFormOf(get func(string) string) signalForm {
 	return signalForm{Was: strings.TrimSpace(get("was")), Name: strings.TrimSpace(get("name")), Expr: impactText(get("expr")),
-		For: strings.TrimSpace(get("for")), Follows: get("match-mode") != "labels", Match: strings.TrimSpace(get("match")), Record: get("record") != ""}
+		For: strings.TrimSpace(get("for")), Follows: get("match-mode") != "labels", Match: strings.TrimSpace(get("match")), Record: get("record") != "",
+		Lead: strings.TrimSpace(get("lead"))}
 }
 
 // formOfDef is a signal's form as the page fills it in.
 func formOfDef(d ledger.SignalDef) signalForm {
-	return signalForm{Was: d.Name, Name: d.Name, Expr: d.Expr, For: verdict.Duration(d.For), Follows: d.Match == nil, Match: strings.Join(d.Match, ", "), Record: d.Record}
+	return signalForm{Was: d.Name, Name: d.Name, Expr: d.Expr, For: verdict.Duration(d.For), Follows: d.Match == nil, Match: strings.Join(d.Match, ", "), Record: d.Record,
+		Lead: leadShown(d.Lead)}
 }
 
 // defOfForm checks a signal's form as the Settings page refuses one: its
@@ -190,12 +195,17 @@ func (s *Server) defOfForm(f signalForm, started string) (ledger.SignalDef, erro
 			return ledger.SignalDef{}, err
 		}
 	}
+	var err error
+	if d.Lead, err = leadOfText(f.Lead); err != nil {
+		return ledger.SignalDef{}, err
+	}
 	return d, nil
 }
 
 // sameSignal reports whether two signals say the same, who set them aside.
 func sameSignal(a, b ledger.SignalDef) bool {
-	return a.Name == b.Name && a.Expr == b.Expr && a.For == b.For && a.Record == b.Record && slices.Equal(a.Match, b.Match) && (a.Match == nil) == (b.Match == nil)
+	return a.Name == b.Name && a.Expr == b.Expr && a.For == b.For && a.Record == b.Record && slices.Equal(a.Match, b.Match) && (a.Match == nil) == (b.Match == nil) &&
+		(a.Lead == nil) == (b.Lead == nil) && (a.Lead == nil || *a.Lead == *b.Lead)
 }
 
 // loggedSignal is a signal as the activity log notes it: Match null for
@@ -206,13 +216,14 @@ type loggedSignal struct {
 	For    string   `json:"for"`
 	Match  []string `json:"match"`
 	Record bool     `json:"record"`
+	Lead   string   `json:"lead,omitempty"`
 }
 
 func logged(d ledger.SignalDef, ok bool) any {
 	if !ok {
 		return nil
 	}
-	return loggedSignal{d.Name, d.Expr, verdict.Duration(d.For), d.Match, d.Record}
+	return loggedSignal{d.Name, d.Expr, verdict.Duration(d.For), d.Match, d.Record, leadShown(d.Lead)}
 }
 
 // signalPlan is a change to the named signals as saving it makes it: what
@@ -229,6 +240,10 @@ type signalPlan struct {
 	// ("" for the impact signal with no name, the first named one saved
 	// makes a named one).
 	Renamed map[string]string
+	// Lead says the change gives a signal in effect another lead, which
+	// judges its windows' spans again: among an admin's saves an hour, as
+	// the entries' are (docs/design/judging.md, "Cost and bounds").
+	Lead bool
 }
 
 // planSignal works out a change to a signal from its form (f), by action:
@@ -330,6 +345,7 @@ func (s *Server) planSignal(ctx context.Context, set map[string]ledger.Setting, 
 		}
 		c.Settings[signalKey+d.Name] = value
 		newCriterion := !had || old.Expr != d.Expr || old.For != d.For
+		p.Lead = had && ((old.Lead == nil) != (d.Lead == nil) || old.Lead != nil && *old.Lead != *d.Lead)
 		if f.Was == "" && len(n.Defs) >= verdict.MaxSignals {
 			return p, bad("%d named signals at most: take one away first", verdict.MaxSignals)
 		}
@@ -423,7 +439,7 @@ func renamedEntries(es []verdict.RuleEntry, from, to string) ([]verdict.RuleEntr
 	out := make([]verdict.RuleEntry, 0, len(es))
 	changed := false
 	for _, e := range es {
-		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Match: e.Match}
+		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Match: e.Match, Lead: e.Lead, Require: e.Require}
 		for _, name := range e.Signals {
 			if name == from {
 				name, changed = to, true
@@ -450,12 +466,29 @@ func entriesJSON(es []verdict.RuleEntry) string {
 }
 
 // entryDoc is a rule entry as the Settings page's YAML gives it, as
-// --impact-file's rules do: match not given (nil) for each signal's own.
+// --impact-file's rules do: match not given (nil) for each signal's own,
+// lead not given to follow each signal's, require for labels its rules'
+// firings and its signals' windows must both carry.
 type entryDoc struct {
 	Rules   string          `yaml:"rules,omitempty"`
 	Labels  incident.Labels `yaml:"labels,omitempty"`
-	Signals []string        `yaml:"signals,flow"`
+	Signals []string        `yaml:"signals,omitempty,flow"`
 	Match   *[]string       `yaml:"match,omitempty,flow"`
+	Lead    string          `yaml:"lead,omitempty"`
+	Require []string        `yaml:"require,omitempty,flow"`
+	// Judged false judges its rules by nothing (docs/design/judging.md,
+	// "Rules judged by nothing"), in place of signals.
+	Judged *bool `yaml:"judged,omitempty"`
+}
+
+// docOfEntry is a rule entry as its YAML gives it.
+func docOfEntry(e verdict.RuleEntry) entryDoc {
+	x := entryDoc{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Lead: leadShown(e.Lead), Require: e.Require, Judged: e.Judged}
+	if e.Match != nil {
+		m := slices.Clone(e.Match)
+		x.Match = &m
+	}
+	return x
 }
 
 // entriesYAML is the rule entries as the Settings page's form gives them.
@@ -465,12 +498,7 @@ func entriesYAML(es []verdict.RuleEntry) string {
 	}
 	docs := make([]entryDoc, 0, len(es))
 	for _, e := range es {
-		x := entryDoc{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals}
-		if e.Match != nil {
-			m := slices.Clone(e.Match)
-			x.Match = &m
-		}
-		docs = append(docs, x)
+		docs = append(docs, docOfEntry(e))
 	}
 	b, err := yaml.Marshal(docs)
 	if err != nil {
@@ -515,8 +543,12 @@ func readEntries(text string, n signalsNow) ([]verdict.RuleEntry, error) {
 			return nil, bad("rule entry %d names no rule: give rules, a pattern of their names, or labels they have", at)
 		case len(e.Labels) > verdict.MaxEntryLabels:
 			return nil, bad("rule entry %d: %d labels: %d at most", at, len(e.Labels), verdict.MaxEntryLabels)
-		case len(e.Signals) == 0:
-			return nil, bad("rule entry %d: no signals: name the signals its rules are judged against", at)
+		case e.Judged != nil && *e.Judged:
+			return nil, bad("rule entry %d: judged: true is what naming its signals says: give signals, or judged: false", at)
+		case e.Judged != nil && (len(e.Signals) > 0 || e.Match != nil || e.Lead != "" || len(e.Require) > 0):
+			return nil, bad("rule entry %d: judged: false judges its rules by nothing: give it, or signals, match, lead and require, not both", at)
+		case e.Judged == nil && len(e.Signals) == 0:
+			return nil, bad("rule entry %d: no signals: name the signals its rules are judged against, or say judged: false for none", at)
 		case len(e.Signals) > verdict.MaxEntrySignals:
 			return nil, bad("rule entry %d: %d signals: %d at most", at, len(e.Signals), verdict.MaxEntrySignals)
 		}
@@ -540,11 +572,26 @@ func readEntries(text string, n signalsNow) ([]verdict.RuleEntry, error) {
 			}
 		}
 		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals}
+		if e.Judged != nil {
+			no := false
+			x.Judged = &no
+		}
 		if e.Match != nil {
 			x.Match = append([]string{}, *e.Match...)
 			if err := checkMatch(x.Match); err != nil {
 				return nil, bad("rule entry %d: %s", at, message("en", err))
 			}
+		}
+		var err error
+		if x.Lead, err = leadOfText(e.Lead); err != nil {
+			return nil, bad("rule entry %d: %s", at, message("en", err))
+		}
+		// The labels both must carry, held as match is.
+		if len(e.Require) > 0 {
+			if err := checkMatch(e.Require); err != nil {
+				return nil, bad("rule entry %d: require: %s", at, message("en", err))
+			}
+			x.Require = slices.Clone(e.Require)
 		}
 		out = append(out, x)
 	}
@@ -563,9 +610,6 @@ func sameEntries(a, b []verdict.RuleEntry) bool { return ledger.SameEntries(a, b
 func (s *Server) planEntries(set map[string]ledger.Setting, text string, reset bool, who string, at time.Time) (signalPlan, error) {
 	n := s.signalsIn(set)
 	p := signalPlan{Change: ledger.SignalsChange{Settings: map[string]string{}}, Anchor: "impact-rule-entries", Renamed: map[string]string{}}
-	if !n.named() {
-		return p, bad("rule entries say which rules are judged against which named signals: add a named signal first")
-	}
 	var es []verdict.RuleEntry
 	switch {
 	case reset:
@@ -586,6 +630,11 @@ func (s *Server) planEntries(set map[string]ledger.Setting, text string, reset b
 		var err error
 		if es, err = readEntries(text, n); err != nil {
 			return p, err
+		}
+		// With no named signal, entries that judge their rules by nothing
+		// alone (docs/design/judging.md, "Rules judged by nothing").
+		if !n.named() && slices.ContainsFunc(es, func(e verdict.RuleEntry) bool { return !e.NotJudged() }) {
+			return p, bad("rule entries say which rules are judged against which named signals: add a named signal first, or say judged: false of each")
 		}
 		p.Change.Settings[rulesKey] = entriesJSON(es)
 		if sameEntries(es, s.cfg.ImpactRules) {
@@ -642,8 +691,9 @@ func (s *Server) postSignal(w http.ResponseWriter, r *http.Request) {
 	// A rename reads nothing, but renames every window of the signal,
 	// judges every firing again, and notes the rule entries that name it,
 	// before and after: among the reads and saves an admin may ask for in
-	// an hour, as saving the entries is.
-	if err == nil && p.Change.Rename && !s.takeTry(ctx, who) {
+	// an hour, as saving the entries is; and so is another lead, which
+	// judges the spans of its windows again.
+	if err == nil && (p.Change.Rename || p.Lead && len(p.Change.Settings) > 0) && !s.takeTry(ctx, who) {
 		err = errImpactTries
 	}
 	if err == nil {
@@ -793,7 +843,7 @@ func (s *Server) namedViews(ctx context.Context, v *criteriaView, n signalsNow) 
 	}
 	seen := s.shownSources()
 	for _, d := range n.Defs {
-		x := namedView{Name: d.Name, Expr: d.Expr, For: verdict.Duration(d.For), Match: d.Match, Follows: d.Match == nil, Record: d.Record, Form: formOfDef(d)}
+		x := namedView{Name: d.Name, Expr: d.Expr, For: verdict.Duration(d.For), Match: d.Match, Follows: d.Match == nil, Record: d.Record, Lead: leadShown(d.Lead), Form: formOfDef(d)}
 		if st, ok := n.started(d.Name); ok {
 			x.Started = startedOf(st)
 		}
@@ -830,7 +880,8 @@ func (s *Server) namedViews(ctx context.Context, v *criteriaView, n signalsNow) 
 	v.Aside = n.Aside
 	e := &entriesView{List: []entryView{}, Started: len(s.cfg.ImpactRules), Text: entriesYAML(n.Entries)}
 	for i, x := range n.Entries {
-		e.List = append(e.List, entryView{N: i + 1, Rules: x.Rules, Labels: x.Labels, Signals: x.Signals, Match: x.Match, Follows: x.Match == nil})
+		e.List = append(e.List, entryView{N: i + 1, Rules: x.Rules, Labels: x.Labels, Signals: x.Signals, Match: x.Match, Follows: x.Match == nil,
+			Lead: leadShown(x.Lead), Require: x.Require, NotJudged: x.NotJudged()})
 	}
 	if n.EntriesUI != nil {
 		e.Changed, e.By, e.Updated = true, n.EntriesUI.By, n.EntriesUI.Updated
@@ -849,6 +900,7 @@ func impactYAML(n signalsNow) string {
 		For    string    `yaml:"for"`
 		Match  *[]string `yaml:"match,omitempty,flow"`
 		Record *bool     `yaml:"record,omitempty"`
+		Lead   string    `yaml:"lead,omitempty"`
 	}
 	type doc struct {
 		Signals []signal   `yaml:"signals"`
@@ -856,7 +908,7 @@ func impactYAML(n signalsNow) string {
 	}
 	var d doc
 	for _, x := range n.Defs {
-		y := signal{Name: x.Name, Expr: x.Expr, For: verdict.Duration(x.For)}
+		y := signal{Name: x.Name, Expr: x.Expr, For: verdict.Duration(x.For), Lead: leadShown(x.Lead)}
 		if x.Match != nil {
 			m := slices.Clone(x.Match)
 			y.Match = &m
@@ -868,12 +920,7 @@ func impactYAML(n signalsNow) string {
 		d.Signals = append(d.Signals, y)
 	}
 	for _, e := range n.Entries {
-		x := entryDoc{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals}
-		if e.Match != nil {
-			m := slices.Clone(e.Match)
-			x.Match = &m
-		}
-		d.Rules = append(d.Rules, x)
+		d.Rules = append(d.Rules, docOfEntry(e))
 	}
 	b, err := yaml.Marshal(map[string]doc{"impact": d})
 	if err != nil {
@@ -897,6 +944,12 @@ type entryView struct {
 	Signals []string        `json:"signals"`
 	Match   []string        `json:"match"`
 	Follows bool            `json:"follows,omitempty"`
+	// Lead is its lead of its own, "" to follow each signal's; Require the
+	// labels its rules' firings and its signals' windows must both carry.
+	Lead    string   `json:"lead,omitempty"`
+	Require []string `json:"require,omitempty"`
+	// NotJudged says it judges its rules by nothing (judged: false).
+	NotJudged bool `json:"not_judged,omitempty"`
 }
 
 // plannedOn says whether the settings a change to the named signals reads

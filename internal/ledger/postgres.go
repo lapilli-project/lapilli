@@ -697,6 +697,11 @@ func (c *pgConn) PrepareContext(ctx context.Context, q string) (driver.Stmt, err
 // round trips a read takes.
 var sent atomic.Int64
 
+// StatementsSent is how many statements the Postgres connections of every
+// ledger open have sent: for tests, outside this package, of how many a
+// page or a write takes (counted, not timed).
+func StatementsSent() int64 { return sent.Load() }
+
 func (c *pgConn) ExecContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Result, error) {
 	sent.Add(1)
 	if len(args) == 0 {

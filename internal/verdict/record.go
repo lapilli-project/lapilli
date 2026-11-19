@@ -60,22 +60,32 @@ type Record struct {
 // o.UnknownLen, an impact signal read from o.ImpactFrom on (zero for none),
 // and judged by o.RecordWeek's weeks, when it has them; with named signals,
 // each signal's windows apart from the rest, and each signal read from its
-// start.
+// start. A window of a signal not in effect (Options.NotInEffect) keeps no
+// rule's record, with named signals in effect or none.
 func RecordOf(incs []incident.Incident, o Options) Record {
+	kept := make([]incident.Incident, 0, len(incs))
+	for _, in := range incs {
+		// A window of a signal taken away, dropped by a start or set aside
+		// past eight (lapilli serve) keeps no rule's record, as lapilli
+		// verdict, which never read it, judges them (docs/design/judging.md,
+		// item 5): confirmed, it is written down, and keeps everyone's.
+		if o.NotInEffect(in) {
+			continue
+		}
+		kept = append(kept, in)
+	}
 	if !o.Signals.Named() {
-		return recordOf(incs, o, o.ImpactFrom)
+		return recordOf(kept, o, o.ImpactFrom)
 	}
 	var written []incident.Incident
 	by := make([][]incident.Incident, len(o.Signals.List))
-	for _, in := range incs {
+	for _, in := range kept {
 		// A window confirmed is written down, with its signal: it keeps
-		// everyone's record, as an incident written down does; so does a
-		// window of a signal no longer read, which stays as an incident
-		// (lapilli serve).
-		i := o.Signals.signal(in.Signal)
-		if in.Signal == "" || !in.Candidate || i < 0 {
+		// everyone's record, as an incident written down does.
+		if in.Signal == "" || !in.Candidate {
 			written = append(written, in)
 		} else {
+			i := o.Signals.signal(in.Signal)
 			by[i] = append(by[i], in)
 		}
 	}

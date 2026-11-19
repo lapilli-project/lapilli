@@ -109,6 +109,14 @@ func periodValue(measure string, c markedCount) *float64 {
 			f := float64(*m)
 			return &f
 		}
+	case "episodes.total":
+		if c.episodesCounted {
+			return n(c.Episodes)
+		}
+	case "episodes.precision":
+		if c.episodesCounted {
+			return share(c.EpisodesCaught, c.episodesJudged)
+		}
 	}
 	return nil
 }
@@ -168,6 +176,8 @@ func periodOn(g ledger.Goal, byCatching bool, o markedOcc, in, before markedCoun
 		unknown(whyByCatching)
 	case m.Record && when.noRecord:
 		unknown(whyNoRecord)
+	case episodesMeasure(g.Measure) && (!in.episodesCounted || kind == "no_worse_than" && !before.episodesCounted):
+		unknown(whyNoEpisodes)
 	case v == nil:
 		unknown(whyNoValue)
 	case kind == "no_worse_than" && b == nil:
@@ -231,7 +241,8 @@ func occPlaced(o ledger.Occurrence, now time.Time) time.Time {
 // weeks of weekly tallies before it, and the incidents of those weeks.
 // A team's is judged by everyone's record, as the summary's row of a team
 // is (the design's decision on a team's record); cursor says which have
-// ended, first which the ledger holds whole.
+// ended, as far as the runs have gone less what a span waits for before
+// it is told (wholeAfter), first which the ledger holds whole.
 func (s *Server) periodGoals(ctx context.Context, w1, w2 int64, who []*ledger.Team, gs []ledger.Goal, own *owners, cursor time.Time,
 	firstWeek int64, firstOK bool) (map[periodAt][]summaryGoal, error) {
 	if !hasPeriodGoals(gs, who) {

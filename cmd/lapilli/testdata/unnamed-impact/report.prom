@@ -33,6 +33,20 @@ lapilli_rule_incidents{rule="CartSlow",severity="warning"} 1
 lapilli_rule_incidents{rule="BackendMissing",severity="warning"} 0
 lapilli_rule_incidents{rule="PayQueue"} 0
 lapilli_rule_incidents{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_rule_episodes Episodes of the rule's firings: one problem, its alerts of the same match labels overlapping or re-firing within a day.
+# TYPE lapilli_rule_episodes gauge
+lapilli_rule_episodes{rule="ApiErrors",severity="critical"} 3
+lapilli_rule_episodes{rule="CartSlow",severity="warning"} 2
+lapilli_rule_episodes{rule="BackendMissing",severity="warning"} 1
+lapilli_rule_episodes{rule="PayQueue"} 1
+lapilli_rule_episodes{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_rule_episodes_caught Episodes of which a firing caught an incident.
+# TYPE lapilli_rule_episodes_caught gauge
+lapilli_rule_episodes_caught{rule="ApiErrors",severity="critical"} 2
+lapilli_rule_episodes_caught{rule="CartSlow",severity="warning"} 1
+lapilli_rule_episodes_caught{rule="BackendMissing",severity="warning"} 0
+lapilli_rule_episodes_caught{rule="PayQueue"} 0
+lapilli_rule_episodes_caught{rule="SearchDown",severity="critical"} 1
 # HELP lapilli_rule_nothing_by_hours Firings with no incident, by when they came: asleep, off hours or at work.
 # TYPE lapilli_rule_nothing_by_hours gauge
 lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="asleep"} 0

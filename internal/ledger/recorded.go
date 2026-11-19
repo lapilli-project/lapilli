@@ -360,7 +360,7 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			// again, each time. The next firing of an alert that ran on
 			// longer is judged again when a write or a run reaches it.
 			hi = min(hi, to.Unix()+int64(MaxRecordedPeriod/time.Second))
-			lead, refire := int64(o.Lead/time.Second), int64(o.RefireWithin/time.Second)
+			lead, refire := int64(o.MaxLead()/time.Second), int64(o.RefireWithin/time.Second)
 			if err := l.judge(t, from.Unix()-lead, hi+refire, o); err != nil {
 				return err
 			}

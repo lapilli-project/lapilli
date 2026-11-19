@@ -109,6 +109,29 @@ func GitLab(projectID string) map[string]any {
 	}
 }
 
+// BitbucketAudience is the audience Bitbucket Pipelines puts in every
+// token of a workspace's, its default: the workspace's UUID, without its
+// braces, under ari:cloud:bitbucket::workspace/.
+func BitbucketAudience(workspaceUUID string) string {
+	return "ari:cloud:bitbucket::workspace/" + strings.TrimSuffix(strings.TrimPrefix(workspaceUUID, "{"), "}")
+}
+
+// Bitbucket are the claims of a Bitbucket Pipelines step's token, a step
+// with oidc: audiences: [audience], as the workspace's discovery document
+// lists them (claims_supported) and Atlassian's examples write them: the
+// UUIDs in braces; the workspace's default audience beside the one the
+// step asked for; no jti and no nbf; nothing that says a pull request.
+func Bitbucket(repoUUID, workspaceUUID, audience string) map[string]any {
+	step := "{8f2c4a1e-5b7d-4e3a-9c6f-1a2b3c4d5e6f}"
+	return map[string]any{
+		"aud": []string{BitbucketAudience(workspaceUUID), audience}, "sub": repoUUID + ":" + step, "stepUuid": step,
+		"repositoryUuid": repoUUID, "workspaceUuid": workspaceUUID, "branchName": "raise-threshold",
+		"pipelineUuid": "{2d4e6f80-1a3c-4b5d-8e7f-9a0b1c2d3e4f}", "pipelineRunUuid": "{5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d}",
+		"commitSha": "0123456789abcdef0123456789abcdef01234567", "isPrivateRepository": true, "isInternalWorkspace": false, "compliant": false,
+		"jti": nil, "nbf": nil,
+	}
+}
+
 // Forgejo are the claims of a Forgejo Actions job's token for a pull
 // request: GitHub's names, the repository's id as a number, as Forgejo
 // writes it.

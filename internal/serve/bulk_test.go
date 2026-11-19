@@ -390,24 +390,31 @@ func TestBulkPartial(t *testing.T) {
 	if err != nil || len(long) != 1 {
 		t.Fatalf("%d long firings: %v", len(long), err)
 	}
-	if code, body, _ := postAs(t, h, fmt.Sprintf("/firings/%d/real", long[0].ID), nil, "ana@example.com", "same-origin"); code != http.StatusBadRequest ||
-		!strings.Contains(body, "an incident lasts 31 days at most") {
-		t.Errorf("a firing of 40 days: %d %s", code, body)
+	// Older than an editor's 14 days: an admin's (docs/design/judging.md,
+	// "Who, when, and the trail"), who is refused it for what it is.
+	if code, body, _ := postAs(t, h, realPathOf(pickRef(long[0])), realFormOf(pickRef(long[0])), "ana@example.com", "same-origin"); code != http.StatusForbidden ||
+		!strings.Contains(body, "only an admin changes what is said of a firing that started more than 14 days ago") {
+		t.Errorf("a firing of 40 days, by an editor: %d %s", code, body)
 	}
-	f1, err := s.l.FiringByID(ctx, mustInt(t, ids[1]))
+	s.cfg.Admins = []string{"root@example.com"}
+	if code, body, _ := postAs(t, h, realPathOf(pickRef(long[0])), realFormOf(pickRef(long[0])), "root@example.com", "same-origin"); code != http.StatusBadRequest ||
+		!strings.Contains(body, "an incident lasts 31 days at most") {
+		t.Errorf("a firing of 40 days, by an admin: %d %s", code, body)
+	}
+	f1, err := s.l.FiringByID(ctx, mustInt(t, idOf(ids[1])))
 	if err != nil {
 		t.Fatal(err)
 	}
 	failOn(t, s, "incidents", "title", "caught by "+f1.Rule)
 	var logged bytes.Buffer
 	s.log = slog.New(slog.NewTextHandler(&logged, nil))
-	code, body, hd := postAs(t, h, "/firings/real", url.Values{"firing": {fmt.Sprint(long[0].ID), ids[2], ids[1], ids[0], ids[3]},
+	code, body, hd := postAs(t, h, "/firings/real", url.Values{"firing": {pickRef(long[0]), ids[2], ids[1], ids[0], ids[3]},
 		"back": {"/firings?day=2026-11-01"}}, "ana@example.com", "same-origin")
 	if want := "/firings?bulk=real&day=2026-11-01&done=1&failed=1&refused=1&untried=2"; code != http.StatusSeeOther || hd.Get("Location") != want {
 		t.Errorf("firings: %d to %q, not %q: %s", code, hd.Get("Location"), want, body)
 	}
 	for i, white := range []bool{true, false, false, false} {
-		if f, err := s.l.FiringByID(ctx, mustInt(t, ids[[]int{2, 1, 0, 3}[i]])); err != nil || f.White != white {
+		if f, err := s.l.FiringByID(ctx, mustInt(t, idOf(ids[[]int{2, 1, 0, 3}[i]]))); err != nil || f.White != white {
 			t.Errorf("firing %d written down %v, not %v: %v", i, f.White, white, err)
 		}
 	}

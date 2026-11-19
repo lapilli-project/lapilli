@@ -41,7 +41,8 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†):
+`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
+and the zone days are counted in (`zone`†, which parts episodes, below):
 the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
 everywhere in the report.
@@ -78,7 +79,24 @@ a rule entry (`rules[].impact_rule`†, its place in `settings.impact_rules`†
 from 1) catches only the windows of the entry's `signals`, on the entry's
 `match` when it gives one: another signal's windows are, to it, as if they
 weren't there. An incident written down has no signal, and every rule is
-matched against it on `match`.
+matched against it on `match`. A window of a signal not in effect, its
+`signal` none of the names in `settings.impact_signals` (a signal taken
+away on the Settings page, dropped by a start without it, or set aside at
+a start past eight; [design/judging.md](design/judging.md), item 5), and
+the incident a confirmation of one wrote, which is caught as its window
+was, are caught only by the rules no entry names, on the labels the
+window was found with: its signal's `match` then, which the report
+doesn't give, so the block below counts such a window on `match`.
+
+A signal may give a lead of its own, `lead_ns`† in
+`settings.impact_signals`†, and a rule entry one for its rules against its
+signals' windows, `lead_ns`† in `settings.impact_rules`†
+([design/judging.md](design/judging.md), item 1): a firing catches a window
+of a signal (or the incident a confirmation of one wrote, which carries
+its `signal`) from its entry's lead before it, else its signal's, else
+`lead`. Every other incident, and every incident written down, is caught
+from `lead`. An entry's `require`† are labels a firing of its rules and a
+window of its signals must both carry, or it doesn't catch that window.
 
 ```jq
 # incidents caught: as the report has it
@@ -99,9 +117,15 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
        | (if $in.signal == null then $s.match
           elif $e != null and $e.match != null then $e.match
           else $sig[$in.signal].match // $s.match end) as $match
-       | select(($in.signal == null or $e == null or any($e.signals[]; . == $in.signal))
-         and $at >= ($in.start | epoch) - $s.lead_ns / 1e9
+       | ($in.signal != null and $sig[$in.signal] != null) as $named
+       | (if $named and $e != null and $e.lead_ns != null then $e.lead_ns
+          elif $named then $sig[$in.signal].lead_ns // $s.lead_ns
+          else $s.lead_ns end) as $lead
+       | (if $named and $e != null then $e.require // [] else [] end) as $require
+       | select(($in.signal == null or $e == null or ($named and any($e.signals[]; . == $in.signal)))
+         and $at >= ($in.start | epoch) - $lead / 1e9
          and $at <= (if $in.end then $in.end | epoch else ($in.start | epoch) + $s.unknown_length_ns / 1e9 end)
+         and all($require[]; ($f.labels // {})[.] != null and ($in.labels // {})[.] != null)
          and all($match[]; ($f.labels // {})[.] as $v | ($in.labels // {})[.] as $vs
                | $v == null or $vs == null or any($vs[]; . == $v)))
        | .id]]
@@ -109,7 +133,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 In `lapilli serve`, a firing near the start of the period may have caught
 an incident that started before it, which the report's `incidents` leave
-out: count again over a period that starts `lead` earlier.
+out: count again over a period that starts the longest lead earlier.
 
 A rule's stones, as `rules[]` counts them:
 
@@ -123,6 +147,16 @@ A rule's stones, as `rules[]` counts them:
 [.firings | group_by(.rule)[] | {rule: .[0].rule, firings: length, white: map(select(.white)) | length,
    black: map(select(.white | not)) | length, unjudged: map(select(.no_record)) | length}]
 ```
+
+A firing a person said is **unrelated** to what it caught (`firings[].unrelated`†,
+the incidents it caught as Lapilli judged it that they named; lapilli
+serve, [design/judging.md](design/judging.md), item 3) doesn't catch
+those: it is a black stone when it caught nothing else, and what caught
+each of them is worked out from the other firings. A rule entry may say
+`judged: false`† (`settings.impact_rules[].judged`): its rules' firings
+catch nothing, written incidents included, and are counted, not judged
+(`firings[].not_judged`†, `no_record`†). "A person's verdict", below,
+counts both again.
 
 ## No record
 
@@ -216,7 +250,15 @@ a week tied to the same signals, of a rule no entry names, or of the same
 rule entry, is judged, or none; with no named signal, every firing of the
 week. A window keeps the record of the firings tied to its signal alone;
 an incident written down, or written by confirming a window, keeps
-everyone's. With named signals, a signal's start is the first whole week
+everyone's. A window of a signal not in effect (its `signal` none of the
+names in `settings.impact_signals`: taken away, dropped by a start, or set
+aside past eight; [design/judging.md](design/judging.md), item 5) keeps no
+rule's record, with named signals in effect or none, as no firing is
+tied to its signal: a rule's record in its weeks is what the signals in
+effect and the incidents written down keep, as `lapilli verdict`, which
+never read that signal, judges it, and the block below leaves it out.
+Confirmed, it is written down, and keeps everyone's. With named signals,
+a signal's start is the first whole week
 after where its data begins (`settings.impact_signals[].start`), and a
 firing is read as judged when each of its `signals` that keeps the record
 had started by its week's Monday. Give the time zone's offset from UTC, in
@@ -307,6 +349,58 @@ first(.rows[] | select(.team == "")) | .precision
 `/api/v1/summary`'s `precision` is a week's, over the firings of the week:
 count it again from `/api/v1/report` over the same week.
 
+## A person's verdict (lapilli serve)
+
+On Alert history, and through `/api/v1/verdicts`, a person says of one
+firing that it is **unrelated** to the incidents it caught, which turns
+that firing alone black (its `unrelated`† names them, and its
+`incidents`† are those it still catches), and whether it **needed
+action**, `yes` or `no` (`action`†), which changes no stone
+([design/judging.md](design/judging.md), item 3). An incident "This was
+real" wrote from a firing is `real`†. The report's stones, and every number
+here, keep people's word in them; the summary's `people` says it apart:
+
+- `unrelated`, the row's firings white as Lapilli judged them and black by
+  a person's word, and `unrelated_excused`, those of them a quiet window
+  then excused, which are in no other count, as every excused firing. As
+  Lapilli judged it, a firing is white when it caught an incident "This
+  was real" didn't write, whatever it was said unrelated to: one said
+  unrelated to such an incident alone isn't among them;
+- `real`, the incidents "This was real" wrote from a firing of the row's
+  rules that started in the week; `real_white`, the row's firings white
+  only by such incidents, and `real_excused`, those of them a quiet window
+  that matches them would have excused as Lapilli judged them;
+- `caught_by_lapilli` and `precision_by_lapilli`, as Lapilli's own
+  judging would have them: every "unrelated" white, those excused for it
+  counted again, the incidents "This was real" wrote left out (their
+  firings black, excused, or not judged where only such an incident kept
+  the record);
+- `action`: the row's `firings`, those `answered`, `yes` and `no`,
+  `yes_black` (needed action, caught nothing) and `no_white` (needed none,
+  caught something), and `share`, yes over those answered, given only once
+  80% of the row's firings are answered, `null` below it.
+
+A rule's `unrelated`†, `action_yes`† and `action_no`† count its firings so;
+`not_judged`† those its entry judges by nothing, of its `unjudged`†.
+
+```jq
+# people (lapilli serve): as the summary has it
+first(.rows[] | select(.team == "")) | .people
+| {unrelated: (.unrelated - .unrelated_excused), caught_by_lapilli: (.caught_by_lapilli - .unrelated_excused), yes: .action.yes, no: .action.no}
+```
+
+```jq
+# people (lapilli serve): counted again
+([.incidents[] | select(.real) | .id]) as $real
+| {unrelated: ([.firings[] | select((.white | not) and (((.unrelated // []) - $real) != []))] | length),
+   caught_by_lapilli: ([.firings[] | select((((.incidents // []) + (.unrelated // [])) - $real) != [])] | length),
+   yes: ([.firings[] | select(.action == "yes")] | length),
+   no: ([.firings[] | select(.action == "no")] | length)}
+```
+
+Counted again from `/api/v1/report` over the same week, of the firings it
+gives, which a quiet window didn't excuse.
+
 ## Noisy
 
 A rule is **noisy** when at least `noisy_at.firings` (10) of its firings
@@ -374,6 +468,108 @@ first(.rows[] | select(.team == "")) | {firings: .refired.firings, share: .refir
 (.firings | length) as $all | [.firings[] | select(.refired)] | length
 | {firings: ., share: (if $all > 0 then . / $all else null end)}
 ```
+
+## Episodes
+
+An **episode** is one problem however many alerts it is
+(docs/design/judging.md, item 2): the firings of one rule with the same
+values of the match labels (`settings.match`, a label a firing doesn't
+carry counted as none), each starting while another of them is on, or
+within `refire` of the latest end among them so far. The first such
+firing of a day starts a new one: a firing's `day`† is the day its start
+falls on in `settings.zone`† (`lapilli verdict`'s `--tz`, the machine's,
+`Local`, when it isn't given; `lapilli serve`'s `--tz`). The labels that
+tell alerts apart and aren't matched on, a `pod`, an `instance`, don't
+part them; with no match, every overlapping firing of a rule is one.
+`lapilli serve` leaves out the firings a quiet window excused, which are
+in no number.
+
+An episode is **white** when any of its firings is white; else judged,
+and black, when its first firing was judged, and not judged
+(`unjudged`†) when it wasn't. Its day, its week, its marks and its record
+are its first firing's. A rule's `episodes`† are `total`, `white`,
+`unjudged`† and `noisy`: noisy by its episodes, by the same thresholds as
+by its firings (`noisy_at`). Episodes are counted beside the firings and
+change no other number: `noisy` stays by firings, and decides what it
+decides; `episodes.noisy` is shown, and decides nothing. Each firing's
+`episode`† numbers the episode it is of, from 1 in the report, in order
+of their first firing.
+
+```jq
+# episodes: as the report has it
+[.rules[] | select(.episodes) | {rule, total: .episodes.total, white: .episodes.white, unjudged: (.episodes.unjudged // 0), noisy: .episodes.noisy}]
+| sort_by(.rule)
+```
+
+```jq
+# episodes: counted again
+.noisy_at as $at
+| [.firings | map(select(.episode)) | group_by(.episode)[] | sort_by(.start)
+   | {rule: .[0].rule, white: any(.white), judged: (any(.white) or (.[0].no_record | not))}]
+| group_by(.rule)
+| map({rule: .[0].rule, total: length, white: map(select(.white)) | length, unjudged: map(select(.judged | not)) | length}
+      | (.total - .unjudged) as $j | . + {noisy: ($j > 0 and $j >= $at.firings and .white / $j < $at.precision)})
+| sort_by(.rule)
+```
+
+Which firings make one, from each firing's rule, labels, start, end and
+`day`, with `settings.match` and `settings.refire_ns`:
+
+```jq
+# which firings make an episode: as the report has it
+[.firings[] | .episode]
+```
+
+```jq
+# which firings make an episode: counted again
+def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
+  | (.t + "Z" | fromdateiso8601) + ((.f // "0") | tonumber)
+    - (if .z == "Z" then 0 else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end);
+.settings.match as $m | (.settings.refire_ns / 1e9) as $refire
+| reduce .firings[] as $f ({walks: {}, n: 0, out: []};
+    ([$f.rule, ($m[] as $k | if ($f.labels // {}) | has($k) then "=" + $f.labels[$k] else null end)] | tojson) as $key
+    | ($f.start | epoch) as $s | (if $f.end then $f.end | epoch else null end) as $e
+    | .walks[$key] as $w
+    | if $w == null or $w.day != $f.day or (($w.on | not) and $s - $w.until > $refire)
+      then .n += 1 | .walks[$key] = {n: .n, day: $f.day, until: $e, on: ($e == null)}
+      else .walks[$key] |= (if $e == null then .on = true elif $e > .until then .until = $e else . end)
+      end
+    | .out += [.walks[$key].n])
+| .out
+```
+
+`lapilli verdict` sees the firings of the period alone, so an episode it
+counts begins in it. `lapilli serve` keeps each firing's episode, walked
+over whole days: a period that begins inside a day may begin inside an
+episode, which the report numbers from its first firing in the period and
+leaves out of `rules[].episodes`, counted where its first firing is; count
+from a period of whole days. A ledger upgraded to this release, or opened
+in another `--tz`, counts its episodes again a week at a time, the newest
+first: until it has, a report of those weeks has no `episodes` and no
+`episode`, the summary's rows `"episodes": null`.
+
+`/api/v1/summary`'s `episodes` is a week's: `total`, `caught` (white),
+`unjudged`, `precision` (null as the row's is) and `noisy_rules`, how many
+of the row's rules are noisy by their episodes. Count it again from
+`/api/v1/report` over the same week:
+
+```jq
+# episodes in a week: as the summary has it
+first(.rows[] | select(.team == "")) | .episodes | {total, caught, unjudged, precision}
+```
+
+```jq
+# episodes in a week: counted again
+[.firings | map(select(.episode)) | group_by(.episode)[] | sort_by(.start)
+ | {white: any(.white), judged: (any(.white) or (.[0].no_record | not))}]
+| {total: length, caught: map(select(.white)) | length, unjudged: map(select(.judged | not)) | length}
+| (.total - .unjudged) as $j | . + {precision: (if $j > 0 then .caught / $j else null end)}
+```
+
+`/metrics` gives each rule's episodes over the last seven days, and those
+caught (`lapilli_rule_episodes`, `lapilli_rule_episodes_caught`), as
+`lapilli verdict --metrics` over its period; the CSV each firing's
+`episode`.
 
 ## Incidents missed, and caught only by noisy rules
 
@@ -603,6 +799,7 @@ row each, for a spreadsheet or a script:
 | `during_deploy` | `true` when it came during a deploy (`lapilli serve`) |
 | `excused` | `true` for a firing a quiet window excused (`lapilli serve`): in none of the numbers |
 | `marked` | the kinds of marked window it came during (`lapilli serve`), a JSON array, `[]` for none |
+| `episode` | the episode it is of, as `firings[].episode`; empty for an excused firing, or with episodes not counted |
 
 The firings are in order of their start, then of their rule. The file is
 UTF-8 with no byte order mark: open it in a spreadsheet as UTF-8 (Excel's
@@ -660,14 +857,15 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
-| `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`† |
-| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match` |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`† |
+| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
+| `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
+| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
-| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`† |
+| `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
+| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`†, `real`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy` |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`† |
 
 ### The metrics
 
@@ -690,6 +888,9 @@ it, which only `lapilli serve` says.
 | `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`), `source` (`written`, `impact`) |
 | `lapilli_incident_detection_delay_seconds` | `incident` |
 | `lapilli_last_run_timestamp_seconds` | |
+| `lapilli_rule_episodes` | `rule`, [`severity`], [`team`] |
+| `lapilli_rule_episodes_caught` | `rule`, [`severity`], [`team`] |
+| `lapilli_rule_action` | `rule`, [`severity`], [`team`], `answer` (`yes`, `no`): `lapilli serve` alone |
 | `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
 | `lapilli_rule_firings_during_deploys` | `rule`, [`severity`], [`team`] |
@@ -726,7 +927,7 @@ it, which only `lapilli serve` says.
 | `lapilli_marked_on` | `kind` |
 | `lapilli_serve_marked_read_timestamp_seconds` | |
 
-The first eleven are `--metrics`' too. The next two are there with named
+The first thirteen are `--metrics`' too. The next two are there with named
 impact signals, in `--metrics` and in `lapilli serve`'s `/metrics` (over
 its last seven days): each signal's windows by state, and from when it
 keeps the record (none for a signal that doesn't, or whose data a
@@ -750,8 +951,11 @@ adds to the others can't be said there.
 ### The CSV's columns
 
 `rule`, `severity`, `team`, `labels`, `start`, `end`, `stone`, `no_record`,
-`incidents`, `refired`, `during_deploy`, `excused`, `marked`, in that order.
-`TestCSVColumns` holds them.
+`incidents`, `refired`, `during_deploy`, `excused`, `marked`, `episode`,
+`unrelated`, `action`, in that order. `TestCSVColumns` holds them.
+`unrelated` is the JSON list of the incidents a person said the firing is
+unrelated to (`firings[].unrelated`), `action` their answer to whether it
+needed someone to act (`yes`, `no`, or empty).
 
 ### lapilli preflight's report
 

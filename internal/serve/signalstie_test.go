@@ -334,7 +334,10 @@ func TestUnnamedWindowsTiedToImpact(t *testing.T) {
 // Started again with signals in a file and none named impact: the windows
 // of the signal with no name are impact's, a signal no longer read, kept
 // as the Settings page keeps the windows of one it took away (incidents
-// with its name), and the log says so.
+// with its name), and the log says so. They keep no rule's record
+// (docs/design/judging.md, item 5): Errors, tied by an entry to payments
+// alone, is unjudged in their weeks too, and catches none of them, as
+// lapilli verdict judges it with the same file.
 func TestUnnamedWindowsTiedToNoneRead(t *testing.T) {
 	ctx := context.Background()
 	dir, file := unnamedFirst(t)
@@ -353,6 +356,13 @@ func TestUnnamedWindowsTiedToNoneRead(t *testing.T) {
 	if !strings.Contains(logs.String(), tiedLine) || !strings.Contains(logs.String(), "windows=3 signal=impact read=false") {
 		t.Errorf("the log:\n%s", logs.String())
 	}
+	rep, fs := errorsFirings(t, s)
+	for _, f := range fs {
+		if !f.NoRecord || f.White {
+			t.Errorf("a firing of Errors at %v: no record %v, white %v; want unjudged", f.Start, f.NoRecord, f.White)
+		}
+	}
+	agreesWithVerdict(t, s, rep)
 }
 
 // With the signal with no name still given (no named signal), nothing is

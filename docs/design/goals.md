@@ -138,6 +138,34 @@ thresholds for `noisy_only`, the hours for asleep and off hours):
 | `incidents.noisy_only` | `incidents.noisy_only` | lower | yes | yes |
 | `incidents.median_lead_seconds` | `incidents.median_lead_seconds` | higher | yes | yes, and `no_worse_than` |
 | `during_deploys.precision_without` | `during_deploys.precision_without` | higher | yes | no |
+| `episodes.total` | `episodes.total` | lower | no | yes |
+| `episodes.precision` | `episodes.precision` | higher | yes | yes, and `no_worse_than` |
+| `action.share` | `people.action.share` | higher | no | no |
+
+The two `episodes.*` measures ([judging.md](judging.md), item 2) are not
+known in a week whose episodes the ledger hasn't counted yet, after an
+upgrade or a change of zone (`episodes: null`); with `each: KIND`, an
+episode is during a kind when its first firing is marked with it.
+
+`action.share` ([judging.md](judging.md), item 3) is the share of the
+firings people answered that needed someone to act, given once 80% of the
+row's firings are answered: a whole week under 80% answered is **missed**,
+`under_answered`, not unknown, so that a team about to miss can't stop
+answering at 79% and never be missed; a week with no firing is not known
+(`no_value`).
+
+**On Lapilli's stones alone.** A goal may say `stones: lapilli`, and is
+then checked against the numbers as Lapilli judged them, people's verdicts
+and the incidents "This was real" wrote both left out: `precision` reads
+`people.precision_by_lapilli`. A goal of a measure the summary doesn't
+give so, or with `each: KIND`, is refused with its line. Every other goal
+reads the stones as they are, with people's word in them, and its row's
+`people` says what moved its measure in the week: people's "unrelated",
+"This was real", the firings an entry judges by nothing, and the answers
+to needed action; the Goals page says it beside the goal, the
+`goal.missed` notice gives it (`people`), and a task's "no longer
+missed" says how many verdicts were said on the week's firings since it
+was told.
 
 "With `each: KIND`" is what [marked.md](marked.md) counts inside an
 occurrence of a kind (`marked` in the summary: firings, caught, precision,
@@ -185,7 +213,10 @@ summary's rows:
   turns the week's stones.
 - **After each run, by the leader**, for what is told and done: once the
   cursor passes a week's end (or the end of an occurrence of a kind some
-  goal is `each:` of), and then after each run, it works out only the last
+  goal is `each:` of) by the longest lead and a signal's `for`, and
+  `--settle` after that ([judging.md](judging.md), "`--settle`, a signal's
+  `for`, a rule's `for`"; until then its goals are `open`), and then after
+  each run, it works out only the last
   whole week, the weeks of the goals with an open task (twelve weeks
   back at most), and the occurrences that ended since. That is where
   `goal.missed`, a task made, "missed again" and "no longer missed" come
@@ -463,9 +494,11 @@ Small things the design left open, settled as they were built:
   given. The whys are tried in order: `not_whole`, `team_owns_by_catching`
   (a team with no labels, for `incidents.missed`, `impacts.missed`,
   `incidents.noisy_only` and `incidents.median_lead_seconds`), `no_record`
-  (a measure that needs it, in a row whose `no_record` is true), then
-  `no_value`. `not_whole` is a week at or before the one the ledger's first
-  firing fell in, or with none.
+  (a measure that needs it, in a row whose `no_record` is true),
+  `episodes_not_counted` (an `episodes.*` measure in a week whose episodes
+  the ledger hasn't counted yet: [judging.md](judging.md), "As built (step
+  3)"), then `no_value`. `not_whole` is a week at or before the one the
+  ledger's first firing fell in, or with none.
 - **The week under way** is `open`, its value so far, and `over: true`
   for a count whose `at_most` it is past already (a measure lower is
   better, neither a share nor a time).

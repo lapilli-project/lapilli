@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -88,6 +89,15 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.fail("settings", err)
 		return
 	}
+	// Once, on the upgrade to this release: the windows of signals not in
+	// effect kept from before, which rules with an entry may have caught,
+	// pended to be judged again with the rest (docs/design/judging.md,
+	// item 5).
+	if n, err := s.l.PendNotInEffect(ctx, o); err != nil {
+		s.fail("judging again the windows of impact signals not in effect", err)
+	} else if n > 0 {
+		s.log.Info("windows of impact signals not in effect judged again, once: they keep no rule's record, and only rules with no rule entry catch them", "windows", n)
+	}
 	// Spans a quiet window left to judge again, should its write have been
 	// cut short.
 	if !s.still(ctx) {
@@ -102,6 +112,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	} else if err != nil {
 		s.fail("judging again", err)
 		pended = false
+	}
+	// The episodes of the weeks not counted yet, after an upgrade or a
+	// change of zone, a week a write from the newest back
+	// (docs/design/judging.md, item 2): no stone changes.
+	if n, err := s.l.CountEpisodes(ctx, o, func() bool { return s.still(ctx) }); err != nil {
+		s.fail("counting the episodes", err)
+	} else if n > 0 {
+		s.log.Info("episodes counted, from the newest week back", "weeks", n)
 	}
 	switch {
 	case rejudge && pended && s.still(ctx):
@@ -1441,6 +1459,12 @@ func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel 
 		plain = append(plain, in.Incident)
 	}
 	o.From, o.To, o.SomeRules = from, to, true
+	// People's verdicts, on both sides alike (docs/design/judging.md,
+	// "Through judging again"): a change mustn't look better on the
+	// firings people called coincidences.
+	if o.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
+		return nil, err
+	}
 	var changed []string
 	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
@@ -1448,6 +1472,38 @@ func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel 
 	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, same)
 	cmp.ChangedOnly = true
 	return cmp, nil
+}
+
+// wholeAfter is how far past a span's end the run cursor must be before
+// what is worked out once the span is whole is worked out of it: the
+// digest, goal.missed, the goals' tasks and their /metrics, for a week and
+// for an occurrence of each: KIND (docs/design/judging.md, "--settle, a
+// signal's for, a rule's for"). It is the most, over each named signal and
+// the rules judged against it, of the lead and the signal's "for" (of the
+// signal with no name, the lead in effect and --impact-for; of incidents
+// written down alone, the lead), and --settle after that: every window a
+// firing of the span can catch has been found, and a run has read again
+// the samples that came late, so that no stone of the span turns after it
+// was told. set are the settings in effect, for the signal with no name.
+func (s *Server) wholeAfter(o verdict.Options, set map[string]ledger.Setting) time.Duration {
+	reach, named := o.Reach()
+	switch c := s.criterionOf(set); {
+	case named:
+	case c.Expr != "":
+		reach = o.Lead + c.For
+	default:
+		reach = o.Lead
+	}
+	return reach + s.cfg.Settle
+}
+
+// wholeAfterNow is wholeAfter of the settings as they are.
+func (s *Server) wholeAfterNow(ctx context.Context, o verdict.Options) (time.Duration, error) {
+	set, err := s.l.Settings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.wholeAfter(o, set), nil
 }
 
 // digest judges the week before, suggests longer "for"s for its noisy
@@ -1463,13 +1519,22 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	}
 	week, from, to := s.digestWeek(in.When)
 	cursor, err := s.l.Cursor(ctx)
+	if err != nil {
+		return false, err
+	}
+	// Past the week's end by what a firing of it can catch after it, and
+	// --settle after that (wholeAfter).
+	wait, err := s.wholeAfterNow(ctx, o)
 	if !s.running(ctx) && err == nil {
 		// No runs: the ledger has what was copied in, up to where each
 		// source that isn't quiet has written. One gone quiet doesn't hold
-		// the digest up: the digest says it is quiet.
+		// the digest up: the digest says it is quiet. Nothing is read
+		// again, and no signal: copied firings are judged against
+		// incidents written down, by --lead.
 		cursor, err = s.copiedTo(ctx)
+		wait = o.Lead
 	}
-	if err != nil || cursor.Before(to) {
+	if err != nil || cursor.Before(to.Add(wait)) {
 		return false, err // the week isn't all in the ledger yet
 	}
 	done, err := s.l.Meta(ctx, "digest")
@@ -1619,6 +1684,12 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 		in.incs = append(in.incs, x.Incident)
 	}
 	in.o.From, in.o.To = from, to
+	// People's verdicts, which a replay with another "for" or number
+	// finds its firings again by (docs/design/judging.md, "Through judging
+	// again").
+	if in.o.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
+		return replayInput{}, err
+	}
 	// What a replay with another "for" or number fires is excused by the
 	// quiet windows as the ledger's firings are.
 	quiet, err := s.l.Windows(ctx, from, to)
@@ -2151,7 +2222,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{goals, onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, onLine, episodesLine(s.cfg.Lang, rep), peopleLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2165,6 +2236,64 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 // digestAbout is what is told of a digest: its numbers, for a receiver to
 // use as it likes, and the report as text, for one to pass on to a chat:
 // as written, and escaped for Slack.
+//
+// episodesLine is what the digest says of the noisy rules' episodes
+// (docs/design/judging.md, item 2): each one's firings in its episodes, and
+// those caught, the most firings that caught nothing first; and of a rule
+// noisy by firings and not by episodes, that it isn't. "" with none, or
+// with the week's episodes not counted yet.
+func episodesLine(l string, rep *verdict.Report) string {
+	if rep.EpisodesNotCounted {
+		return ""
+	}
+	var noisy []verdict.RuleResult
+	for _, r := range rep.Rules {
+		if r.Noisy && r.Episodes.Total > 0 {
+			noisy = append(noisy, r)
+		}
+	}
+	if len(noisy) == 0 {
+		return ""
+	}
+	slices.SortStableFunc(noisy, func(a, b verdict.RuleResult) int {
+		return cmp.Or(cmp.Compare(b.Black-b.Unjudged, a.Black-a.Unjudged), strings.Compare(a.Rule, b.Rule))
+	})
+	items := make([]string, 0, 10)
+	for _, r := range noisy[:min(len(noisy), 10)] {
+		if r.Episodes.Noisy {
+			items = append(items, tr(l, "%s, %d firings in %d episodes, %d caught", verdict.Clean(r.Rule), r.Firings, r.Episodes.Total, r.Episodes.White))
+		} else {
+			items = append(items, tr(l, "%s, %d firings in %d episodes, %d caught: noisy by firings, not by episodes", verdict.Clean(r.Rule), r.Firings, r.Episodes.Total, r.Episodes.White))
+		}
+	}
+	line := tr(l, "The noisy rules' episodes, one problem each however many alerts: %s.", strings.Join(items, "; "))
+	if n := len(noisy) - len(items); n > 0 {
+		line += " " + tr(l, "And %d more.", n)
+	}
+	return line
+}
+
+// peopleLine is what the digest says of people's verdicts on the week's
+// firings (docs/design/judging.md, item 3): how many they said were
+// unrelated, and of how many they answered whether they needed action,
+// how many did. Never their notes. "" when nothing was said.
+func peopleLine(l string, rep *verdict.Report) string {
+	var unrelated, yes, no, firings int
+	for _, r := range rep.Rules {
+		unrelated += r.Unrelated
+		yes += r.ActionYes
+		no += r.ActionNo
+		firings += r.Firings
+	}
+	switch {
+	case unrelated == 0 && yes+no == 0:
+		return ""
+	case yes+no == 0:
+		return tr(l, "People said %d firings were unrelated to what they caught.", unrelated)
+	}
+	return tr(l, "People said %d firings were unrelated, and answered %d of %d firings: %d needed action.", unrelated, yes+no, firings, yes)
+}
+
 func digestAbout(rep *verdict.Report, text, team string, spare []string) map[string]any {
 	firings, white := 0, 0
 	noisy, silent := []string{}, 0

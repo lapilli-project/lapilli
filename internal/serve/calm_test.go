@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -479,13 +480,16 @@ func TestConfirmKeepsTitle(t *testing.T) {
 // the pages' font two hyphens read as one dash (docs/design/ui.md).
 func TestFlagsAsCode(t *testing.T) {
 	first, firstPaths := firstUseServer(t)
+	// With people's verdicts, one to look at again on the Cleanup page.
+	pages := pagesServer(t)
+	peopleSay(t, pages)
 	skip := regexp.MustCompile(`(?s)<code[^>]*>.*?</code>|<pre[^>]*>.*?</pre>|<textarea[^>]*>.*?</textarea>|<title>.*?</title>|<style[^>]*>.*?</style>|<[^>]*>`)
 	flag := regexp.MustCompile(`(^|[^\w-])--[a-z][a-z0-9-]*`)
 	seen := map[string]bool{}
 	for _, c := range []struct {
 		s     *Server
 		paths []string
-	}{{pagesServer(t), pagePaths}, {first, firstPaths}} {
+	}{{pages, append(slices.Clone(pagePaths), "/orphans")}, {first, firstPaths}} {
 		for _, n := range names {
 			for _, p := range c.paths {
 				r := httptest.NewRequest(http.MethodGet, p, nil)

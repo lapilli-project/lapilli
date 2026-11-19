@@ -634,6 +634,47 @@ func TestBacktestTrustHidden(t *testing.T) {
 	}
 }
 
+// A Bitbucket entry is read as serve reads it (serve.ReadTrust, the CI
+// known from the workspace's issuer) and said by its claims' names; its
+// issuer, which names the workspace, is the trust file's issuer N, and
+// neither the workspace nor a UUID it pins is said. One that pins no
+// workspace is refused, as serve refuses it.
+func TestBacktestTrustBitbucket(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "trust.yaml")
+	entry := `trust:
+  - name: monitoring-bitbucket
+    issuer: https://api.bitbucket.org/2.0/workspaces/example-987650020/pipelines-config/identity/oidc
+    audience: https://lapilli-ci.example.com
+    claims:
+      repositoryUuid: ["{1a2b3c4d-2222-4333-8444-987650021aaa}", "{1a2b3c4d-2222-4333-8444-987650022bbb}"]
+`
+	os.WriteFile(file, []byte(entry+"      workspaceUuid: \"{4b1d9c2e-7a3f-4e5b-8c6d-987650023ccc}\"\n"), 0o600)
+	ts, err := serve.ReadTrust(file, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := backtestConfig(ts...)
+	c.TrustFile = file
+	c.Offline = true
+	rep := Run(context.Background(), c)
+	b, _ := json.Marshal(rep)
+	if it := reportItem(rep, "backtest.trust"); it.State != OK || !strings.Contains(it.What, "monitoring-bitbucket: bitbucket, pins repositoryUuid (any of 2) and workspaceUuid") ||
+		strings.Contains(string(b), "98765002") {
+		t.Errorf("%s", b)
+	}
+	os.WriteFile(file, []byte(entry), 0o600)
+	_, err = serve.ReadTrust(file, nil, true)
+	c = backtestConfig()
+	c.TrustFile, c.TrustErr = file, err
+	p := newRun(c)
+	p.backtest(context.Background())
+	p.redact()
+	if it := itemOf(p, "backtest.trust"); it == nil || it.State != Problem || !strings.Contains(it.Why, "entry 1: claims: pin workspaceUuid beside repositoryUuid") ||
+		strings.Contains(it.What+it.Why+it.Fix, "98765002") {
+		t.Errorf("%v: %+v", err, it)
+	}
+}
+
 // A backtest's requests are counted as serve's port counts them before it
 // is queued (serve.BacktestRequests, which fits calls): the design's case,
 // ten rules that differ over seven days at --max-rate 0.5 with a quarter
@@ -777,6 +818,65 @@ func TestEstimateHourlyWhileBacktest(t *testing.T) {
 	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 0)})
 	if it, h := itemOf(p, "estimate.hourly"), p.r.Estimates.Hourly; h.WhileBacktest != nil || it.State != OK || strings.Contains(it.What, "backtest") {
 		t.Errorf("%+v %+v", h, it)
+	}
+}
+
+// A Loki's requests, and a Grafana data source's, are timed at the runs'
+// rate less the lane's share too, as a backtest of the rules in effect may
+// ask them; the estimate's backtest changes Grafana and Loki rules
+// replayed as well, each of queries of its own.
+func TestEstimateBacktestsLokiGrafana(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("groups:\n  - name: logs\n    interval: 1m\n    rules:\n")
+	for i := range 200 {
+		fmt.Fprintf(&b, "      - alert: LogErrors%d\n        expr: sum(count_over_time({app=\"svc%d\"} |= \"error\" [5m])) > 1\n", i, i)
+	}
+	rs, err := rules.Parse([]byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rs {
+		rs[i].Logs = rules.LokiRuler
+	}
+	c := backtestConfig()
+	c.MaxRate, c.Serve.Loki = 0.5, "http://loki:3100"
+	p := newRun(c)
+	p.estimate(context.Background(), &read{all: rs})
+	h := p.r.Estimates.Hourly
+	if h == nil || h.By["loki"] == 0 || h.WhileBacktest == nil || math.Abs(h.WhileBacktest.Seconds-float64(h.Most)/0.375) > 1e-6 {
+		t.Errorf("%+v %+v", h, h.WhileBacktest)
+	}
+	if bt := p.r.Estimates.Backtests; bt == nil || bt.Rules != 10 || bt.Changed == 0 {
+		t.Errorf("%+v", bt)
+	}
+	grafana, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: a
+        title: A
+        condition: A
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'up == 0'}}
+      - uid: b
+        title: B
+        condition: A
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'up == 0'}}
+      - uid: c
+        title: C
+        condition: A
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'errors > 1'}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changedRules(slices.Concat(grafana, rs[:2], rulesOf(t, 1, 0))); len(got) != 5 || got[0].Name != "A" || got[1].Name != "C" {
+		t.Errorf("%d: %v", len(got), got)
 	}
 }
 

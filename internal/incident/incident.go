@@ -40,6 +40,9 @@ type Incident struct {
 	// signal's window: its signal's. Nil for the match in effect
 	// (verdict.Options.Match), as for every other incident; empty for none.
 	Match []string `yaml:"-" json:"-"`
+	// Real says, in lapilli serve, that a person's "This was real" wrote it
+	// from a firing (docs/design/judging.md, item 3).
+	Real bool `yaml:"-" json:"-"`
 }
 
 // Span is one series' window of impact, by its labels.

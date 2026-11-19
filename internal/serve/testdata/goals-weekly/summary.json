@@ -33,6 +33,7 @@
       "precision": null,
       "no_record": true,
       "unjudged": 1,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 1,
@@ -73,6 +74,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 1,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 1,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -104,6 +130,7 @@
       "precision": null,
       "no_record": true,
       "unjudged": 1,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 1,
@@ -144,6 +171,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 1,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 1,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -187,6 +239,7 @@
       "precision": null,
       "no_record": true,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -222,6 +275,31 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -252,6 +330,7 @@
       "precision": null,
       "no_record": true,
       "unjudged": 2,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 2,
@@ -292,6 +371,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 2,
+        "caught": 0,
+        "unjudged": 2,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 2,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -323,6 +427,7 @@
       "precision": null,
       "no_record": true,
       "unjudged": 2,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 2,
@@ -363,6 +468,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 2,
+        "caught": 0,
+        "unjudged": 2,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 2,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -404,6 +534,7 @@
       "precision": null,
       "no_record": true,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -439,6 +570,31 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -468,6 +624,7 @@
       "precision": 0.2,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 5,
@@ -508,6 +665,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 1,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 1,
+        "precision_by_lapilli": 0.2,
+        "action": {
+          "firings": 5,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -537,6 +719,7 @@
       "precision": 0.2,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 5,
@@ -577,6 +760,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 1,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 1,
+        "precision_by_lapilli": 0.2,
+        "action": {
+          "firings": 5,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -617,6 +825,7 @@
       "precision": null,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -652,6 +861,31 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -681,6 +915,7 @@
       "precision": 0.5,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 2,
@@ -733,6 +968,31 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 2,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 0.5,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 2,
+        "precision_by_lapilli": 0.5,
+        "action": {
+          "firings": 4,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "goals": [
         {
           "name": "critical-caught",
@@ -761,6 +1021,7 @@
       "precision": 1,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 2,
@@ -802,6 +1063,31 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 1,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 2,
+        "precision_by_lapilli": 1,
+        "action": {
+          "firings": 2,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -841,6 +1127,7 @@
       "precision": 0,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -888,6 +1175,31 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": 0,
+        "action": {
+          "firings": 2,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -917,6 +1229,7 @@
       "precision": 0,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 41,
@@ -957,6 +1270,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": 0,
+        "action": {
+          "firings": 41,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -986,6 +1324,7 @@
       "precision": 0,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 41,
@@ -1026,6 +1365,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": 0,
+        "action": {
+          "firings": 41,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {
@@ -1067,6 +1431,7 @@
       "precision": null,
       "no_record": false,
       "unjudged": 0,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -1101,6 +1466,31 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "goals": [
         {

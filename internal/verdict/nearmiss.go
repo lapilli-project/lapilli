@@ -102,13 +102,15 @@ func (nm NearMiss) Kept() float64 {
 func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Duration, o Options) (NearMiss, bool) {
 	var best NearMiss
 	found := false
-	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
+	to := in.EndOr(o.UnknownLen)
 	// The longest "for" short of the rule's own, in whole evaluations.
 	longest := (ruleFor - 1) / every * every
 	for _, f := range held {
 		if f.End.IsZero() || !o.Agrees(f.Rule, f.Labels, in) {
 			continue
 		}
+		// From the rule's own lead for the incident.
+		from := in.Start.Add(-o.LeadFor(f.Rule, in))
 		// With a "for" of d it fires at Start+d, if it still held then, and
 		// catches the incident if that is in [from, to].
 		length := f.End.Sub(f.Start)
@@ -151,7 +153,7 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 	if b.Value == 0 || math.IsNaN(b.Value) || math.IsInf(b.Value, 0) || every <= 0 || r.For < 0 {
 		return NearMiss{}, false // nothing is within a share of nothing
 	}
-	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
+	from, to := in.Start.Add(-o.LeadFor(r.Name, in)), in.EndOr(o.UnknownLen)
 	n := int((r.For + every - 1) / every) // evaluations after the first, to fire
 	span := time.Duration(n)*every + every/2
 	var best NearMiss
@@ -260,8 +262,9 @@ func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules
 // further may fire before the incident instead, and one further still fire
 // again within it.
 func FiringDuring(in incident.Incident, fired []firing.Firing, o Options) bool {
-	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
+	to := in.EndOr(o.UnknownLen)
 	for _, f := range fired {
+		from := in.Start.Add(-o.LeadFor(f.Rule, in))
 		if !f.Start.After(to) && (f.End.IsZero() || f.End.After(from)) && o.Agrees(f.Rule, f.Labels, in) {
 			return true
 		}

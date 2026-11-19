@@ -237,9 +237,11 @@ type counted struct {
 	incident.Incident
 }
 
-// window is the span of firing starts an incident can be caught in.
+// window is the span of firing starts an incident can be caught in: from
+// the longest lead in effect before it (verdict.Options.MaxLead), each
+// firing's own judged as it is looked at (verdict.Catches).
 func window(in incident.Incident, o verdict.Options) (int64, int64) {
-	return in.Start.Add(-o.Lead).Unix(), in.EndOr(o.UnknownLen).Unix()
+	return in.Start.Add(-o.MaxLead()).Unix(), in.EndOr(o.UnknownLen).Unix()
 }
 
 // counting reads the incidents judged against whose windows meet [lo, hi].
@@ -252,8 +254,8 @@ type queryer interface {
 }
 
 func (l *Ledger) incidentsMeeting(ctx context.Context, q queryer, lo, hi int64, o verdict.Options, where string) ([]counted, error) {
-	lead, unknown := int64(o.Lead/time.Second), int64(o.UnknownLen/time.Second)
-	rows, err := q.QueryContext(ctx, `SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents
+	lead, unknown := int64(o.MaxLead()/time.Second), int64(o.UnknownLen/time.Second)
+	rows, err := q.QueryContext(ctx, `SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of FROM incidents
 		WHERE `+where+` AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ? ORDER BY start_at, key`,
 		hi+lead, unknown, lo)
 	if err != nil {
@@ -276,6 +278,9 @@ type scanner interface{ Scan(...any) error }
 type incidentRow struct {
 	row    int64
 	origin string
+	// realOf is the alert and start "This was real" wrote it from
+	// (realKey), "" for none.
+	realOf string
 	incident.Incident
 }
 
@@ -285,10 +290,10 @@ func scanIncident(s scanner) (incidentRow, error) {
 	var end sql.NullInt64
 	var labels string
 	var match sql.NullString
-	if err := s.Scan(&r.row, &r.ID, &r.origin, &r.Title, &start, &end, &labels, &r.Signal, &match); err != nil {
+	if err := s.Scan(&r.row, &r.ID, &r.origin, &r.Title, &start, &end, &labels, &r.Signal, &match, &r.realOf); err != nil {
 		return r, err
 	}
-	r.Start, r.End, r.Match = unix(start), fromNull(end), matchOf(match)
+	r.Start, r.End, r.Match, r.Real = unix(start), fromNull(end), matchOf(match), r.realOf != ""
 	r.Candidate = r.origin == "impact"
 	if err := json.Unmarshal([]byte(labels), &r.Labels); err != nil {
 		return r, err
@@ -318,6 +323,12 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 		return err
 	}
 	lo, hi = min(lo, flo), max(hi, fhi)
+	// People's verdicts on firings no longer there, each to the firing it
+	// finds again, which is judged with the rest (docs/design/judging.md,
+	// item 3).
+	if lo, hi, err = l.moveVerdicts(t, lo, hi, o); err != nil {
+		return err
+	}
 	if stale, err := l.staleSignals(t, o); err != nil {
 		return err
 	} else if stale {
@@ -338,6 +349,11 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	// The alerts new since, tied to the signals that could have seen
 	// them, before their firings are counted.
 	if err := l.tieUntied(t, o); err != nil {
+		return err
+	}
+	// The episodes of the days the tally counts, from the stones just
+	// given (docs/design/judging.md, item 2).
+	if err := l.walkEpisodes(t, lo, hi, o); err != nil {
 		return err
 	}
 	return l.tally(t, lo, hi)
@@ -424,7 +440,13 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		return err
 	}
 	marks := marking(ms, unix(lo), unix(hi), func(at int64) int64 { return Week(l.day(at)) })
-	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked, s.labels
+	// People's verdicts on the firings judged (docs/design/judging.md,
+	// item 3), by alert and start.
+	said, err := l.verdictsNear(t, lo, hi)
+	if err != nil {
+		return err
+	}
+	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked, s.labels, f.person, f.unrelated
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at <= ? ORDER BY f.series_id, f.start_at, f.id`, lo, hi)
 	if err != nil {
@@ -434,7 +456,8 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		id, series                    int64
 		f                             firing.Firing
 		white, again, excused, deploy bool
-		marked                        int64
+		marked, person                int64
+		unrelated                     string
 	}
 	var fs []row
 	for rows.Next() {
@@ -442,7 +465,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		var start int64
 		var end sql.NullInt64
 		var text string
-		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &r.marked, &text); err != nil {
+		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &r.marked, &text, &r.person, &r.unrelated); err != nil {
 			rows.Close()
 			return err
 		}
@@ -476,12 +499,13 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			return err
 		}
 	}
-	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy", "marked"})
+	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy", "marked", "person"})
 	if err != nil {
 		return err
 	}
 	defer up.close()
-	var last time.Time // when the series' previous firing resolved
+	moved := map[int64]string{} // verdicts to be looked at again, by id, and why
+	var last time.Time          // when the series' previous firing resolved
 	for i, r := range fs {
 		if i == 0 || r.series != fs[i-1].series {
 			var end sql.NullInt64
@@ -492,10 +516,33 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			}
 			last = fromNull(end)
 		}
-		white := slices.ContainsFunc(incs, func(in counted) bool { return verdict.Catches(r.f, in.Incident, o) })
+		var caught []counted
+		for _, in := range incs {
+			if verdict.Catches(r.f, in.Incident, o) {
+				caught = append(caught, in)
+			}
+		}
+		// People's word on it: an incident it was said to be unrelated to
+		// it doesn't catch; and whether it needed action.
+		k := [2]int64{r.series, r.f.Start.Unix()}
+		v := said.at[k]
+		white, person, unrelated, why := personOf(caught, v, said.held[k])
+		if why != "" && v.ID != 0 && v.Moved == "" {
+			moved[v.ID] = why
+		}
 		again := verdict.Refired(last, r.f.Start, o)
 		// A firing that caught something counts, quiet window or not.
 		excused := !white && excuses(r.f)
+		// White only by what "This was real" wrote, in a quiet window
+		// that matches it: as Lapilli judged it, excused.
+		if person&personRealWhite != 0 && excuses(r.f) {
+			person |= personRealQuiet
+		}
+		if text := unrelatedText(unrelated); text != r.unrelated {
+			if _, err := t.ExecContext(t.ctx, "UPDATE firings SET unrelated = ? WHERE id = ?", text, r.id); err != nil {
+				return err
+			}
+		}
 		// During a deploy is a mark beside the stones, of what is judged.
 		deploy := !excused && deploying(r.f)
 		// And the kinds of marked window it came during: marks, which
@@ -505,14 +552,22 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			marked = marks(r.f)
 		}
 		last = r.f.End
-		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy && marked == r.marked {
+		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy && marked == r.marked && person == r.person {
 			continue
 		}
-		if err := up.add(white, again, excused, deploy, marked, r.id); err != nil {
+		if err := up.add(white, again, excused, deploy, marked, person, r.id); err != nil {
 			return err
 		}
 	}
-	return up.close()
+	if err := up.close(); err != nil {
+		return err
+	}
+	for id, why := range moved {
+		if _, err := t.ExecContext(t.ctx, "UPDATE verdicts SET moved = ? WHERE id = ? AND moved = ''", why, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // endsBefore is, for each series, when its last firing to start before a
@@ -553,12 +608,12 @@ func (l *Ledger) endsBefore(t *txn, ids []int64, before int64) (map[int64]sql.Nu
 // meets [lo, hi], from every firing in its window, and drops the catches of
 // incidents there that no longer count.
 func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options) error {
-	lead, unknown := int64(o.Lead/time.Second), int64(o.UnknownLen/time.Second)
+	lead, unknown := int64(o.MaxLead()/time.Second), int64(o.UnknownLen/time.Second)
 	if _, err := t.ExecContext(t.ctx, `DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents
 		WHERE counts = 0 AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ?)`, hi+lead, unknown, lo); err != nil {
 		return err
 	}
-	q, err := t.PrepareContext(t.ctx, `SELECT f.rule_id, f.series_id, f.start_at, s.labels, r.name FROM firings f JOIN series s ON s.id = f.series_id
+	q, err := t.PrepareContext(t.ctx, `SELECT f.rule_id, f.series_id, f.start_at, s.labels, r.name, f.unrelated FROM firings f JOIN series s ON s.id = f.series_id
 		JOIN rules r ON r.id = f.rule_id WHERE f.start_at >= ? AND f.start_at <= ?`)
 	if err != nil {
 		return err
@@ -583,10 +638,15 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		first := map[int64]int64{}
 		for rows.Next() {
 			var rule, sid, start int64
-			var text, name string
-			if err := rows.Scan(&rule, &sid, &start, &text, &name); err != nil {
+			var text, name, unrelated string
+			if err := rows.Scan(&rule, &sid, &start, &text, &name, &unrelated); err != nil {
 				rows.Close()
 				return err
+			}
+			// A firing a person said is unrelated to it didn't catch it:
+			// what caught it is worked out from the others.
+			if unrelated != "" && slices.Contains(unrelatedKeys(unrelated), in.ID) {
+				continue
 			}
 			labels, err := l.labels(sid, text)
 			if err != nil {
@@ -619,6 +679,16 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 	return nil
 }
 
+// personSums are, of the firings a tally counts, the people's bits
+// (firings.person): those said unrelated, and of them those excused;
+// those white only by "This was real", and of them those a quiet window
+// would have excused; and, of those not excused, the answers to needed
+// action, and of them those that needed action and caught nothing, and
+// those that needed none and caught something.
+const personSums = `sum((f.person & 1)), sum((f.person & 1) * f.excused), sum((f.person & 8) / 8), sum((f.person & 16) / 16),
+	sum(((f.person & 2) / 2) * (1 - f.excused)), sum(((f.person & 4) / 4) * (1 - f.excused)),
+	sum(((f.person & 2) / 2) * (1 - f.excused) * (1 - f.white)), sum(((f.person & 4) / 4) * f.white)`
+
 // tally counts each rule's stones again for the days and weeks [lo, hi]
 // falls in.
 func (l *Ledger) tally(t *txn, lo, hi int64) error {
@@ -629,8 +699,10 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	// An excused firing is counted apart: neither white nor black. By
 	// the signals its alert is tied to, too, so that a rule's firings are
 	// judged by them apart (docs/design/signals.md, "In the ledger").
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white)
-		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white)
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white,
+			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white)
+		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white),
+			`+firstFirings+`, sum(f.episode_white), `+personSums+`
 		FROM firings f JOIN series s ON s.id = f.series_id
 		WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.day, f.rule_id, s.signals`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
@@ -646,8 +718,10 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week >= ? AND week <= ?", w1, w2); err != nil {
 		return err
 	}
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white)
-		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white,
+			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white)
+		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), sum(episodes), sum(episodes_white),
+			sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY 1, 2, 3`, w1, w2+6); err != nil {
 		return err
 	}

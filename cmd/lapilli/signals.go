@@ -27,29 +27,42 @@ import (
 )
 
 // Named impact signals (docs/design/signals.md): --impact NAME=PROMQL, each
-// with its own --impact-for NAME=DUR, --impact-match NAME=LABELS and
-// --impact-record NAME=no, or all of them, and the rule entries, in
-// --impact-file.
+// with its own --impact-for NAME=DUR, --impact-match NAME=LABELS,
+// --impact-record NAME=no and --impact-lead NAME=DUR, or all of them, and
+// the rule entries, in --impact-file.
 
 // impactSignal is a named impact signal, as the flags or --impact-file
 // give it.
 type impactSignal struct {
 	name, expr string
 	// dur is its "for", 0 for --impact-for's; match its labels, nil for the
-	// match in effect; record whether it keeps the record.
+	// match in effect; record whether it keeps the record; lead its own,
+	// nil to follow --lead (docs/design/judging.md, item 1).
 	dur    time.Duration
 	match  []string
 	record bool
+	lead   *time.Duration
 }
 
-// impactSet is what --impact-for NAME=DUR, --impact-match NAME=LABELS and
-// --impact-record NAME=... said of a signal, given before or after its
-// --impact.
+// impactSet is what --impact-for NAME=DUR, --impact-match NAME=LABELS,
+// --impact-record NAME=... and --impact-lead NAME=DUR said of a signal,
+// given before or after its --impact.
 type impactSet struct {
 	dur      time.Duration
 	match    []string
 	matchSet bool
 	record   *bool
+	lead     *time.Duration
+}
+
+// leadOf reads a lead of a signal's or a rule entry's own: a duration from
+// 0 to a day (verdict.LeadBound).
+func leadOf(v string) (time.Duration, error) {
+	d, err := parseDuration(v)
+	if err != nil || d < 0 || d > verdict.LeadBound {
+		return 0, fmt.Errorf("want a duration from 0 to %s, such as 1h", verdict.Duration(verdict.LeadBound))
+	}
+	return d, nil
 }
 
 // signalHead is how a named --impact starts: a name and a = that isn't
@@ -107,8 +120,8 @@ func matchList(at string, labels []string) error {
 	return nil
 }
 
-// impactBy is the --impact-for NAME=DUR, --impact-match or --impact-record
-// of a signal, kept until every flag is read.
+// impactBy is the --impact-for NAME=DUR, --impact-match, --impact-record or
+// --impact-lead of a signal, kept until every flag is read.
 func (f *verdictFlags) impactBy(name string) *impactSet {
 	if f.impactSets == nil {
 		f.impactSets = map[string]*impactSet{}
@@ -119,8 +132,8 @@ func (f *verdictFlags) impactBy(name string) *impactSet {
 	return f.impactSets[name]
 }
 
-// impactFlag reads --impact, --impact-for, --impact-match and
-// --impact-record; ok is false for another flag.
+// impactFlag reads --impact, --impact-for, --impact-match, --impact-record
+// and --impact-lead; ok is false for another flag.
 func (f *verdictFlags) impactFlag(name, val string) (ok bool, err error) {
 	switch name {
 	case "--impact":
@@ -189,6 +202,22 @@ func (f *verdictFlags) impactFlag(name, val string) (ok bool, err error) {
 			return true, fmt.Errorf("--impact-record %s=...: given twice", n)
 		}
 		s.record = &b
+	case "--impact-lead":
+		// A named signal's alone: the signal with no name is judged by
+		// --lead, as every incident is.
+		n, v, err := signalFlag(name, val)
+		if err != nil {
+			return true, err
+		}
+		s := f.impactBy(n)
+		if s.lead != nil {
+			return true, fmt.Errorf("--impact-lead %s=...: given twice", n)
+		}
+		d, err := leadOf(v)
+		if err != nil {
+			return true, fmt.Errorf("--impact-lead %s: %w", val, err)
+		}
+		s.lead = &d
 	case "--impact-file":
 		if f.impactFile != "" {
 			return true, errors.New("--impact-file is given twice: give every signal in one file")
@@ -212,25 +241,31 @@ func (f *verdictFlags) anyImpact() bool { return f.impact != "" || len(f.signals
 func (f *verdictFlags) signalsRead() error {
 	perName := len(f.impactSets) > 0
 	switch {
-	case f.impactFile != "" && f.anyImpact():
+	case f.impactFile != "" && len(f.signals) > 0:
 		return errors.New("--impact-file gives the impact signals: leave out --impact")
 	case f.impactFile != "" && perName:
-		return errors.New("--impact-file says each signal's for, match and record: leave out --impact-for NAME=DUR, --impact-match and --impact-record")
+		return errors.New("--impact-file says each signal's for, match, record and lead: leave out --impact-for NAME=DUR, --impact-match, --impact-record and --impact-lead")
 	case len(f.signals) > 0 && f.impact != "":
 		return errors.New("--impact: give every impact signal a name, --impact NAME=PROMQL, or give one alone without: a signal with no name and named ones don't go together")
 	}
 	var entries []verdict.RuleEntry
 	if f.impactFile != "" {
-		var err error
-		if f.signals, entries, err = readImpactFile(f.impactFile); err != nil {
+		signals, es, err := readImpactFile(f.impactFile)
+		if err != nil {
 			return fmt.Errorf("--impact-file %s: %w", f.impactFile, err)
 		}
+		// A file of rule entries that judge their rules by nothing alone
+		// goes with --impact PROMQL, the signal with no name, or none.
+		if len(signals) > 0 && f.impact != "" {
+			return errors.New("--impact-file gives the impact signals: leave out --impact")
+		}
+		f.signals, entries = signals, es
 	}
 	for _, n := range slices.Sorted(maps.Keys(f.impactSets)) {
 		set := f.impactSets[n]
 		i := slices.IndexFunc(f.signals, func(s impactSignal) bool { return s.name == n })
 		if i < 0 {
-			return fmt.Errorf("--impact-for, --impact-match or --impact-record name %s, which no --impact NAME=PROMQL gives", n)
+			return fmt.Errorf("--impact-for, --impact-match, --impact-record or --impact-lead name %s, which no --impact NAME=PROMQL gives", n)
 		}
 		s := &f.signals[i]
 		if set.dur != 0 {
@@ -242,8 +277,17 @@ func (f *verdictFlags) signalsRead() error {
 		if set.record != nil {
 			s.record = *set.record
 		}
+		if set.lead != nil {
+			s.lead = set.lead
+		}
 	}
 	if len(f.signals) == 0 {
+		if len(entries) > 0 {
+			// Rule entries that judge their rules by nothing, with no
+			// named signal (docs/design/judging.md, "Rules judged by
+			// nothing").
+			f.opts.Signals = verdict.NewSignals(nil, entries)
+		}
 		return nil
 	}
 	if len(f.signals) > verdict.MaxSignals {
@@ -261,7 +305,7 @@ func (f *verdictFlags) signalsRead() error {
 		if d < f.step || d > 24*time.Hour {
 			return fmt.Errorf("--impact-for %s: %s: want from --step (%s) to 1d", s.name, verdict.Duration(d), verdict.Duration(f.step))
 		}
-		list = append(list, verdict.Signal{Name: s.name, For: d, Match: s.match, Record: s.record})
+		list = append(list, verdict.Signal{Name: s.name, For: d, Match: s.match, Record: s.record, Lead: s.lead})
 	}
 	f.opts.Signals = verdict.NewSignals(list, entries)
 	return nil
@@ -271,11 +315,15 @@ func (f *verdictFlags) signalsRead() error {
 // its "for", --impact-for's when it gives none; and the rule entries.
 func (f *verdictFlags) signalDefs() ([]ledger.SignalDef, []verdict.RuleEntry) {
 	if !f.opts.Signals.Named() {
+		// Rule entries alone: those that judge their rules by nothing.
+		if f.opts.Signals != nil {
+			return nil, slices.Clone(f.opts.Signals.Entries)
+		}
 		return nil, nil
 	}
 	var out []ledger.SignalDef
 	for i, s := range f.signals {
-		out = append(out, ledger.SignalDef{Name: s.name, Expr: s.expr, For: f.opts.Signals.List[i].For, Match: s.match, Record: s.record})
+		out = append(out, ledger.SignalDef{Name: s.name, Expr: s.expr, For: f.opts.Signals.List[i].For, Match: s.match, Record: s.record, Lead: s.lead})
 	}
 	return out, slices.Clone(f.opts.Signals.Entries)
 }
@@ -305,13 +353,17 @@ type impactFileSignal struct {
 	For    string   `yaml:"for"`
 	Match  []string `yaml:"match"`
 	Record *bool    `yaml:"record"`
+	Lead   *string  `yaml:"lead"`
 }
 
 type impactFileEntry struct {
 	Rules   string          `yaml:"rules"`
 	Labels  incident.Labels `yaml:"labels"`
-	Signals []string        `yaml:"signals"`
+	Signals *[]string       `yaml:"signals"`
 	Match   []string        `yaml:"match"`
+	Lead    *string         `yaml:"lead"`
+	Require []string        `yaml:"require"`
+	Judged  *bool           `yaml:"judged"`
 }
 
 // readImpactFile reads --impact-file strictly, as --config is read: a key
@@ -356,8 +408,10 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 		}
 		doc = *doc.Impact
 	}
-	if len(doc.Signals) == 0 {
-		return nil, nil, errors.New("no signals: want signals:, with a list of them under it")
+	// A file whose rule entries all judge their rules by nothing needs no
+	// signal (docs/design/judging.md, "Rules judged by nothing").
+	if len(doc.Signals) == 0 && (len(doc.Rules) == 0 || slices.ContainsFunc(doc.Rules, func(e impactFileEntry) bool { return e.Judged == nil || *e.Judged })) {
+		return nil, nil, errors.New("no signals: want signals:, with a list of them under it, or rule entries that all say judged: false")
 	}
 	if len(doc.Signals) > verdict.MaxSignals {
 		return nil, nil, fmt.Errorf("%d signals: %d at most", len(doc.Signals), verdict.MaxSignals)
@@ -382,6 +436,13 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 		if err := matchList(at+" ("+s.Name+")", s.Match); err != nil {
 			return nil, nil, err
 		}
+		if s.Lead != nil {
+			d, err := leadOf(*s.Lead)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s (%s): lead %s: %w", at, s.Name, *s.Lead, err)
+			}
+			x.lead = &d
+		}
 		out = append(out, x)
 	}
 	if len(doc.Rules) > verdict.MaxRuleEntries {
@@ -390,15 +451,26 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 	var entries []verdict.RuleEntry
 	for i, e := range doc.Rules {
 		at := fmt.Sprintf("rule entry %d", i+1)
+		var signals []string
+		if e.Signals != nil {
+			signals = *e.Signals
+		}
+		notJudged := e.Judged != nil && !*e.Judged
 		switch {
 		case e.Rules == "" && len(e.Labels) == 0:
 			return nil, nil, fmt.Errorf("%s names no rule: give rules, a pattern of their names, or labels they have", at)
 		case len(e.Labels) > verdict.MaxEntryLabels:
 			return nil, nil, fmt.Errorf("%s: %d labels: %d at most", at, len(e.Labels), verdict.MaxEntryLabels)
-		case len(e.Signals) == 0:
-			return nil, nil, fmt.Errorf("%s: no signals: name the signals its rules are judged against", at)
-		case len(e.Signals) > verdict.MaxEntrySignals:
-			return nil, nil, fmt.Errorf("%s: %d signals: %d at most", at, len(e.Signals), verdict.MaxEntrySignals)
+		case e.Judged != nil && *e.Judged:
+			return nil, nil, fmt.Errorf("%s: judged: true is what naming its signals says: give signals, or judged: false", at)
+		case notJudged && e.Signals != nil:
+			return nil, nil, fmt.Errorf("%s: judged: false judges its rules by nothing: give it or signals, not both", at)
+		case notJudged && (e.Match != nil || e.Lead != nil || e.Require != nil):
+			return nil, nil, fmt.Errorf("%s: judged: false judges its rules by nothing: match, lead and require say how they are judged", at)
+		case !notJudged && len(signals) == 0:
+			return nil, nil, fmt.Errorf("%s: no signals: name the signals its rules are judged against, or say judged: false for none", at)
+		case len(signals) > verdict.MaxEntrySignals:
+			return nil, nil, fmt.Errorf("%s: %d signals: %d at most", at, len(signals), verdict.MaxEntrySignals)
 		}
 		if _, err := ledger.CheckRE(e.Rules); err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", at, err)
@@ -411,18 +483,37 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 		if err := ledger.CheckLabels(e.Labels); err != nil {
 			return nil, nil, fmt.Errorf("%s: labels: %w", at, err)
 		}
-		for j, name := range e.Signals {
+		for j, name := range signals {
 			switch {
 			case !slices.ContainsFunc(out, func(x impactSignal) bool { return x.name == name }):
 				return nil, nil, fmt.Errorf("%s: the signal %q isn't one the file declares", at, nameText(name))
-			case slices.Contains(e.Signals[:j], name):
+			case slices.Contains(signals[:j], name):
 				return nil, nil, fmt.Errorf("%s: the signal %s is there twice", at, name)
 			}
 		}
 		if err := matchList(at, e.Match); err != nil {
 			return nil, nil, err
 		}
-		entries = append(entries, verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Match: e.Match})
+		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Signals: signals, Match: e.Match}
+		if notJudged {
+			no := false
+			x.Judged = &no
+		}
+		if e.Lead != nil {
+			d, err := leadOf(*e.Lead)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%s: lead %s: %w", at, *e.Lead, err)
+			}
+			x.Lead = &d
+		}
+		// The labels both must carry, held as match is.
+		if err := matchList(at+": require", e.Require); err != nil {
+			return nil, nil, err
+		}
+		if len(e.Require) > 0 {
+			x.Require = e.Require
+		}
+		entries = append(entries, x)
 	}
 	return out, entries, nil
 }

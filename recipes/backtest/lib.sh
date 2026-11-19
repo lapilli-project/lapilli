@@ -117,9 +117,17 @@
 #                    is: INCIDENTS, IMPACT, IMPACT_FOR and MATCH are refused,
 #                    and of the arguments only --since (whole days, 1d to
 #                    14d), --tz and --rules-select are taken
+#   LOKI_PATHS       optional, with PATHS: where a Loki ruler's rule files
+#                    are, directories or files in the repository as PATHS
+#                    names them, none of PATHS: sent as a Loki ruler's, as
+#                    --loki-rules reads them, their queries LogQL. Serve
+#                    backtests them where its own rules hold a Loki
+#                    ruler's, against its --loki
 #   LAPILLI_ID_TOKEN the CI's ID token for the audience serve's trust file
 #                    names (GitLab's id_tokens:, Bitbucket's
-#                    BITBUCKET_STEP_OIDC_TOKEN once serve takes it); or
+#                    BITBUCKET_STEP_OIDC_TOKEN from a step whose oidc:
+#                    asks for serve's audience alone: one whose aud names
+#                    Bitbucket's workspace audience alone isn't sent); or
 #   LAPILLI_SERVE_TOKEN_FILE
 #                    a file holding the plain token serve's trust file
 #                    names, for a CI with no ID token; or
@@ -269,6 +277,20 @@ token_ok() {
   [ -n "$1" ] && [ "${#1}" -le 8192 ] && [ -z "$(printf '%s' "$1" | tr -d '\041-\176')" ]
 }
 
+# id_token_audience reads an ID token on stdin, its payload decoded and
+# not verified, and writes bitbucket-default when its aud names Bitbucket's
+# workspace audiences alone (ari:cloud:bitbucket:...), ok when it names
+# another, unknown when it can't be read: serve decides the rest.
+id_token_audience() {
+  jq -Rr 'def b64url: gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - (length % 4)) % 4));
+    (split(".") | if length == 3 then .[1] else "" end) as $p
+    | (try ($p | b64url | @base64d | fromjson) catch null) as $c
+    | if ($c | type) != "object" then "unknown"
+      else ($c.aud | if type == "string" then [.] elif type == "array" then map(strings) else [] end) as $aud
+        | if ($aud | length) > 0 and ($aud | all(ascii_downcase | startswith("ari:cloud:bitbucket:"))) then "bitbucket-default" else "ok" end
+      end' 2>/dev/null || echo unknown
+}
+
 # The settings, checked before anything runs.
 case ${PR:-} in
   '' | *[!0-9]* | 0*) say "PR ${PR:-}: want the pull request's number"; exit 1 ;;
@@ -339,7 +361,20 @@ set -f
 for p in ${PATHS:-}; do
   in_repo "$p" || { say "PATHS: $p isn't a path in the repository"; exit 1; }
 done
+for p in ${LOKI_PATHS:-}; do
+  in_repo "$p" || { say "LOKI_PATHS: $p isn't a path in the repository"; exit 1; }
+  for q in ${PATHS:-}; do
+    if [ "${p%/}" = "${q%/}" ]; then
+      say "LOKI_PATHS: $p is in PATHS too: a Loki ruler's files are named in LOKI_PATHS alone"
+      exit 1
+    fi
+  done
+done
 set +f
+if [ -n "$(printf '%s' "${LOKI_PATHS:-}" | tr -d ' ')" ] && [ -n "${RENDER:-}" ]; then
+  say "LOKI_PATHS goes with PATHS: RENDER writes one file of rules, read as --rules reads it"
+  exit 1
+fi
 # Through lapilli serve, serve judges the firings: by the incidents and the
 # impact windows it keeps, and its own settings, which a pull request
 # doesn't choose. What only serve mode reads is refused without it.
@@ -353,7 +388,7 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
   done
 else
   for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "SERVE_RETRY_MIN ${SERVE_RETRY_MIN:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
-    "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY:-}" \
+    "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY:-}" "LOKI_PATHS $(printf '%s' "${LOKI_PATHS:-}" | tr -d ' ')" \
     "LAPILLI_SERVE_TOKEN_FILE ${LAPILLI_SERVE_TOKEN_FILE:-}" "LAPILLI_ID_TOKEN ${LAPILLI_ID_TOKEN:+x}"; do
     if [ -n "${v#* }" ]; then
       say "${v%% *} is for a backtest through lapilli serve: give LAPILLI_SERVE, its backtest port, too"
@@ -459,8 +494,18 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
       say "LAPILLI_ID_TOKEN: want an ID token, visible characters and no space, 8 KiB at most"
       exit 1
     fi
+    # A Bitbucket step's token that names its workspace's audience alone
+    # (a step whose oidc: names none of serve's) is refused by serve, and
+    # taken by whatever trusts the workspace's audience: it isn't sent.
+    # Its payload is read, not verified, for its aud alone; on stdin.
+    if [ "$(printf '%s' "$serve_token" | id_token_audience)" = bitbucket-default ]; then
+      say "LAPILLI_ID_TOKEN names Bitbucket's workspace audience alone (ari:cloud:bitbucket:...), which lapilli serve refuses and other services that trust the workspace take: give the step oidc: audiences: with serve's audience, its port's URL"
+      exit 1
+    fi
   fi
-  unset LAPILLI_ID_TOKEN
+  # Bitbucket's step token, which the job gives as LAPILLI_ID_TOKEN, is
+  # in the step's environment too: nothing the recipe runs here needs it.
+  unset LAPILLI_ID_TOKEN BITBUCKET_STEP_OIDC_TOKEN
   one="give lapilli serve one token: LAPILLI_ID_TOKEN, LAPILLI_SERVE_TOKEN_FILE or LAPILLI_SERVE_AUDIENCE"
   if [ -n "${LAPILLI_SERVE_TOKEN_FILE:-}" ]; then
     [ -z "$token_from" ] || { say "$one"; exit 1; }
@@ -473,7 +518,7 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
   if [ -n "${LAPILLI_SERVE_AUDIENCE:-}" ]; then
     [ -z "$token_from" ] || { say "$one"; exit 1; }
     if [ "${ci_tokens:-}" != actions ]; then
-      say "LAPILLI_SERVE_AUDIENCE: ${recipe:-lib.sh} asks its CI for no ID token: give LAPILLI_ID_TOKEN, the one the CI gives the job for serve's audience (GitLab's id_tokens:), or LAPILLI_SERVE_TOKEN_FILE"
+      say "LAPILLI_SERVE_AUDIENCE: ${recipe:-lib.sh} asks its CI for no ID token: give LAPILLI_ID_TOKEN, the one the CI gives the job for serve's audience (GitLab's id_tokens:, Bitbucket's BITBUCKET_STEP_OIDC_TOKEN), or LAPILLI_SERVE_TOKEN_FILE"
       exit 1
     fi
     if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
@@ -628,7 +673,7 @@ while [ "$n" -gt 0 ]; do
         exit 1
         ;;
       --loki | --loki=* | --loki-* | --grafana | --grafana=* | --grafana-* | --ruler | --ruler=* | --ruler-* | --alarms | --alarms=*)
-        say "${a%%=*}: lapilli serve backtests rules in Prometheus's format, read from PATHS or RENDER, against its own history: leave it out with LAPILLI_SERVE"
+        say "${a%%=*}: lapilli serve backtests the rules read from PATHS, LOKI_PATHS or RENDER against its own history, its Loki and its Grafana's data sources: leave it out with LAPILLI_SERVE"
         exit 1
         ;;
     esac
@@ -853,21 +898,24 @@ commits() {
   fi
   say "the rules of $head, beside those of $base"
   if [ -z "${RENDER:-}" ]; then
-    # A path neither commit has is a mistake in PATHS: its rules, if it
-    # has any, would never be compared, and nothing would say so.
-    missing=
+    # A path neither commit has is a mistake in PATHS (or LOKI_PATHS): its
+    # rules, if it has any, would never be compared, and nothing would say
+    # so.
     set -f
-    for p in $PATHS; do
-      p=${p%/}
-      if ! git -C "$repo" cat-file -e "$head:$p" 2>/dev/null && ! git -C "$repo" cat-file -e "$base:$p" 2>/dev/null; then
-        missing="$missing $p"
+    for list in "PATHS $PATHS" "LOKI_PATHS ${LOKI_PATHS:-}"; do
+      missing=
+      for p in ${list#* }; do
+        p=${p%/}
+        if ! git -C "$repo" cat-file -e "$head:$p" 2>/dev/null && ! git -C "$repo" cat-file -e "$base:$p" 2>/dev/null; then
+          missing="$missing $p"
+        fi
+      done
+      if [ -n "$missing" ]; then
+        say "${list%% *}:$missing: in neither commit: say where the rules are"
+        exit 1
       fi
     done
     set +f
-    if [ -n "$missing" ]; then
-      say "PATHS:$missing: in neither commit: say where the rules are"
-      exit 1
-    fi
   fi
 }
 
@@ -883,7 +931,7 @@ files() {
   set -f
   set --
   if [ -z "${RENDER:-}" ]; then
-    for p in $PATHS; do
+    for p in $PATHS ${LOKI_PATHS:-}; do
       p=${p%/}
       if git -C "$repo" cat-file -e "$c:$p" 2>/dev/null; then
         set -- "$@" "$p"
@@ -1213,7 +1261,8 @@ text() { jq -Rsj . "$1" | cmp -s - "$1"; }
 # reads a directory (a file it holds is the directory's, one below it a
 # directory's below), a file PATHS names by its own name, and what RENDER
 # wrote as rules.yaml; files and directories whose names begin with a dot
-# passed over, as --rules passes them over. WHAT names the commit.
+# passed over, as --rules passes them over. LOKI_PATHS's alike, each with
+# "loki": true, a Loki ruler's. WHAT names the commit.
 side() {
   s=$1 what=$2
   : >"$tmp/$s.jsonl"
@@ -1227,21 +1276,32 @@ side() {
       set -- "$@" "$tmp/$s/${p%/}"
     done
   fi
+  # LOKI_PATHS's after a mark, which no path under $tmp is.
+  set -- "$@" -loki
+  for p in ${LOKI_PATHS:-}; do
+    set -- "$@" "$tmp/$s/${p%/}"
+  done
   set +f
+  loki=false
   for root; do
+    if [ "$root" = -loki ]; then
+      loki=true
+      continue
+    fi
     [ -e "$root" ] || continue
     # shellcheck disable=SC2016
     if ! find "$root" ! -path "$root" -name '.*' -prune -o -type f -exec sh -c '
-      root=$1 out=$2
-      shift 2
+      root=$1 out=$2 loki=$3
+      shift 3
       for f; do
         if [ -d "$root" ]; then rel=${f#"$root"/}; else rel=${f##*/}; fi
         if ! jq -Rsj . "$f" | cmp -s - "$f"; then
           printf "%s" "$rel" >"$out.unsent"
           exit 1
         fi
-        jq -nc --arg path "$rel" --rawfile content "$f" "{path: \$path, content: \$content}" >>"$out.jsonl" || exit 1
-      done' sh "$root" "$tmp/$s" {} + 2>"$tmp/find.log"; then
+        jq -nc --arg path "$rel" --rawfile content "$f" --argjson loki "$loki" \
+          "{path: \$path, content: \$content} | if \$loki then .loki = true else . end" >>"$out.jsonl" || exit 1
+      done' sh "$root" "$tmp/$s" "$loki" {} + 2>"$tmp/find.log"; then
       if [ -e "$tmp/$s.unsent" ]; then
         # Its path is the pull request's: in the job's log, not the comment.
         say "not UTF-8 text, in $what: $(cat "$tmp/$s.unsent")"

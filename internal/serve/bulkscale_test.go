@@ -24,13 +24,17 @@ import (
 // marks, an incident's page with its timeline, and bulk writes of a
 // hundred, each within its budget; the rules list with each rule's labels
 // as chips, six a rule; and a proposal for twenty rules, each read again
-// and backtested.
+// and backtested. The budgets are what the ledger does, not how long it
+// takes (ledgerWork), so that a slow runner fails none: a page sends a
+// few statements, not one for each rule or firing, and a write of a
+// hundred a few for each of them, writing no more rows than the firings
+// kept. The time each took is logged.
 func TestManyAtOnceScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
 	ctx := context.Background()
-	s, rules := server(t, nil)
+	s, rules := server(t, counting)
 	const n = 2000
 	var b strings.Builder
 	b.WriteString("groups:\n")
@@ -77,11 +81,14 @@ func TestManyAtOnceScale(t *testing.T) {
 	}
 	h := s.Handler()
 	// Once before the budgets, its answer thrown away: what a process does
-	// only the first time it answers is not what a page costs (on Postgres
-	// in CI the first /rules took 1.05 s, the same page by 12 weeks after
-	// it 0.77 s). Each page below is still worked out afresh.
+	// only the first time it answers is not what a page costs (the hours,
+	// read once and kept). Each page below is still worked out afresh.
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/rules", nil))
-	budget := time.Duration(float64(time.Second) * slow)
+	// A page reads the tallies, the rules and what people keep a statement
+	// or a few each: a tenth of the rules is past any of them (104 for the
+	// overview on SQLite), and one for each rule, or each firing, far past.
+	const kept = weeks * 7 * 3000
+	pageMost := int64(n / 10)
 	for _, path := range []string{"/rules", "/rules?weeks=12", "/rules?week=2026-10-26", "/rules?week=2026-10-26&perf=noisy&team=team3",
 		"/firings?day=2026-11-02", "/firings?day=2026-11-02&label=service%3Ds3", "/firings?day=2026-11-02&label=service%3Ds3&label=pod%3D7",
 		"/", "/?team=team2", "/?marks=none", "/incidents?week=2026-10-26&state=missed", "/incidents/T-1"} {
@@ -90,14 +97,14 @@ func TestManyAtOnceScale(t *testing.T) {
 		s.cache.Unlock()
 		began := time.Now()
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		did := ledgerDid(t, s, func() { h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil)) })
 		took := time.Since(began)
-		t.Logf("%-70s %d %8d bytes  %s", path, w.Code, w.Body.Len(), took.Round(time.Microsecond))
+		t.Logf("%-70s %d %8d bytes  %d statements %d rows  %s", path, w.Code, w.Body.Len(), did.statements, did.rows, took.Round(time.Microsecond))
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d", path, w.Code)
 		}
-		if took > budget {
-			t.Errorf("%s took %s, over %s", path, took, budget)
+		if did.statements > pageMost {
+			t.Errorf("%s: %d statements, over %d: one for each rule or firing?", path, did.statements, pageMost)
 		}
 	}
 	// A hundred at once, each its own write.
@@ -111,7 +118,7 @@ func TestManyAtOnceScale(t *testing.T) {
 	}
 	var ids []string
 	for _, f := range day {
-		ids = append(ids, fmt.Sprint(f.ID))
+		ids = append(ids, pickRef(f))
 	}
 	for _, c := range []struct {
 		path string
@@ -123,14 +130,25 @@ func TestManyAtOnceScale(t *testing.T) {
 		{"/rules/bulk", url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"15m"}, "rule": picks[:maxPropose], "back": {"/rules"}}},
 	} {
 		began := time.Now()
-		code, body, hd := post(t, h, c.path, c.form, "same-origin")
+		var code int
+		var body string
+		var hd http.Header
+		did := ledgerDid(t, s, func() { code, body, hd = post(t, h, c.path, c.form, "same-origin") })
 		took := time.Since(began)
-		t.Logf("POST %-65s %d %s  %s", c.path+" "+c.form.Get("do"), code, hd.Get("Location"), took.Round(time.Microsecond))
+		t.Logf("POST %-65s %d %s  %d statements %d rows  %s", c.path+" "+c.form.Get("do"), code, hd.Get("Location"), did.statements, did.rows, took.Round(time.Microsecond))
 		if code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), "done=") {
 			t.Errorf("%s: %d %s", c.path, code, body)
 		}
-		if took > 10*budget {
-			t.Errorf("%s took %s, over %s", c.path, took, 10*budget)
+		// A few dozen statements for each of the hundred at most (on
+		// SQLite, 10 for each status set, 13 for each firing "This was
+		// real"), and the rows of judging again what they changed: fewer
+		// than the firings kept. Every firing written for each would be
+		// past both.
+		if most := int64(30 * len(picks)); did.statements > most {
+			t.Errorf("POST %s %s: %d statements, over %d", c.path, c.form.Get("do"), did.statements, most)
+		}
+		if did.rows > kept {
+			t.Errorf("POST %s %s: %d rows written, over the %d firings kept", c.path, c.form.Get("do"), did.rows, kept)
 		}
 	}
 }

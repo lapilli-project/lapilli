@@ -442,7 +442,14 @@ from the span it reads.
   begins looked for again. The other signals aren't read, and keep their
   starts.
 - **removed:** turned off, as v0.49.0 turns off its one: its windows stay,
-  as incidents, it no longer keeps the record, and no firing waits for it.
+  with its name, it no longer keeps the record, and no firing waits for it.
+  Its windows keep no rule's record, and only the rules no rule entry
+  names catch them, on the labels they were found with; confirmed, one is
+  written down, and keeps everyone's (decided on 2026-11-19,
+  [judging.md](judging.md), item 5, built as its step 2: until then they
+  stayed as incidents, which kept every rule's record and any rule
+  caught). The same holds of one dropped by a start, or set aside past
+  eight.
 - **`match`, `record` or the rule entries changed:** nothing is read.
   `match` and the entries judge their windows' spans again (above); which
   firings are tied to which signals is worked out again, a week at a time
@@ -725,7 +732,6 @@ As counts and bytes, which the tests hold, not times:
 
 ## Not in this design
 
-- **A `--lead` for each signal.** `--lead` stays one, for every incident.
 - **Signals that must agree.** A window only when two signals are on at
   once. An expression joining them with `and` does it today.
 - **A signal's weight or severity.** Every window is an incident.
@@ -821,7 +827,10 @@ Open:
    `kind: latency` could be held to the entries as a window is.
 4. **`--lead` by signal.** A probe fails before users write in; an error
    share rises with them. Whether alerts may come earlier before one than
-   the other.
+   the other. Closed by [judging.md](judging.md), item 1, built in its
+   step 1 ("As built (step 1)"): a signal may give a `lead` of its own, and
+   a rule entry one for its rules against its signals' windows, from 0 to
+   a day, `--lead` for the rest and for every incident written down.
 5. **Expectations naming an impact window.** [expectations.md](expectations.md)
    holds a rule to catching an incident by its id. An impact window's key
    can change when its signal is read again; an expectation should name the
@@ -896,7 +905,8 @@ What building the first settled:
   no signal has, every alert tied again and every firing judged again in
   the same write; no two signals ever share one (a unique index). One
   taken away is turned off, its row gone and its windows kept, with its
-  name; one whose match or record changed, or the entries, judges every
+  name (which keep no rule's record since [judging.md](judging.md)'s step
+  2); one whose match or record changed, or the entries, judges every
   firing again, as `--match` does. A signal renamed on the command line is
   one taken away and one added, read again; renaming in place is step 3's,
   in the UI. Only this keeps a named signal's row: a run, or a read
@@ -1121,11 +1131,12 @@ settled:
   take its name and its match, beside those it found; the row with no
   name stays, turned off. With no `impact` in effect, they are the
   windows of a signal no longer read, kept with its name as the page
-  leaves the windows of a signal it took away; such windows are
-  incidents, which keep every rule's record and which any rule may catch
-  ("Step 2, as built"), so with no signal named `impact` in the file the
-  rules an entry ties only to a signal with `record: false` are judged
-  in their weeks still. Either way the firings that could catch them,
+  leaves the windows of a signal it took away; such windows keep no
+  rule's record, and only the rules no entry names catch them
+  ([judging.md](judging.md), item 5, its step 2), so with no signal named
+  `impact` in the file the rules an entry ties only to a signal with
+  `record: false` are left unjudged in their weeks, as `lapilli verdict`
+  leaves them. Either way the firings that could catch them,
   from `--lead` before each to its end, are pended to be judged again,
   the activity log notes it (`lapilli`: `impact windows of the signal
   with no name tied to the signal impact`, with how many, which the Run

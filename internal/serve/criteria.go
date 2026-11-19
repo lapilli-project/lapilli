@@ -409,7 +409,8 @@ type criteriaView struct {
 // changed here (Changed), by whom and when; Off, one serve was started with
 // taken away here. Since, Floor, Data and Again are what keeps the record
 // by it, as the criterion with no name's are; Form, its form, as typed when
-// tried (Open).
+// tried (Open); Lead, its lead of its own, "" to follow the lead in effect
+// (docs/design/judging.md, item 1).
 type namedView struct {
 	Name    string       `json:"name"`
 	Expr    string       `json:"expr"`
@@ -417,6 +418,7 @@ type namedView struct {
 	Match   []string     `json:"match"`
 	Follows bool         `json:"follows,omitempty"`
 	Record  bool         `json:"record"`
+	Lead    string       `json:"lead,omitempty"`
 	Start   time.Time    `json:"start,omitzero"`
 	Started *startedView `json:"-"`
 	Off     bool         `json:"off,omitempty"`
@@ -529,12 +531,12 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 	if x, ok := set["match"]; ok {
 		_ = apply(&o, "match", x.Value) // one that doesn't parse leaves the command line's, as options does
 	}
-	inEffect := strings.Join(o.Match, ", ")
-	v.Add = signalForm{For: verdict.Duration(s.cfg.ImpactFor), Follows: true, Record: true, InEffect: inEffect}
+	inEffect, above := strings.Join(o.Match, ", "), verdict.Duration(s.leadOf(set))
+	v.Add = signalForm{For: verdict.Duration(s.cfg.ImpactFor), Follows: true, Record: true, InEffect: inEffect, LeadAbove: above}
 	if n := s.signalsIn(set); n.named() {
 		err := s.namedViews(ctx, v, n)
 		for i := range v.Named {
-			v.Named[i].Form.InEffect = inEffect
+			v.Named[i].Form.InEffect, v.Named[i].Form.LeadAbove = inEffect, above
 		}
 		return v, err
 	}
@@ -1413,6 +1415,12 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 			plain = append(plain, f.Firing)
 		}
 	}
+	// People's verdicts, on both sides (docs/design/judging.md, item 3).
+	said, err := s.l.ReplayVerdicts(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	o.Verdicts, with.Verdicts = said, said
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
 	weeks := s.l.SpanWeeks(from, to)

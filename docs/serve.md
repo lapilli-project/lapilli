@@ -39,7 +39,16 @@ on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,
 which are judged again, and keeps the record from then on, not of the
 weeks it wasn't read over, nor of those before every metric it reads had
-data. Beside it, Incident sources says where
+data. A named signal may give a lead of its own there, as
+`--impact-lead NAME=DUR` and `lead:` in `--impact-file` do, and a rule
+entry one for its rules, with `require:`, labels its rules' firings and
+its signals' windows must both carry: a cause that fires an hour before
+the errors is caught by them without a longer `--lead` for every rule,
+and incidents written down keep `--lead` (docs/design/judging.md, item
+1). A named signal taken away there, or left out by a start, judges no
+one: its windows keep no rule's record, and only the rules no rule entry
+names catch them; confirming one that was a real outage keeps the record
+of its weeks (item 5). Beside it, Incident sources says where
 incidents come from (written in Lapilli, each tool a job copies them in
 from, the incidents file, the impact signal) and whether each is alive.
 `/settings.yaml` gives the changes as Helm values to commit. Teams, quiet windows, reports and roles
@@ -72,11 +81,64 @@ it first. The bar's search finds rules, incidents and teams, and opens the
 one it finds. The rules list gives each rule a badge on three axes (Noisy,
 No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
-name and `is:noisy`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
+name and `is:noisy`, `noisy:episodes`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all; each rule's own labels
 are chips too, each picking the rules with it
 ([docs/design/ui.md](design/ui.md)).
+
+Beside its firings, each rule's are counted as **episodes**, one problem
+however many alerts it is: its firings with the same values of the match
+labels, overlapping or re-firing within `--refire`, parted at midnight in
+`--tz` ([The numbers](numbers.md#episodes)). The rules list has an
+Episodes column, and `noisy:episodes` picks the rules noisy by their
+episodes, by the same thresholds as by firings; a rule's page says its
+episodes, their precision, and when it is noisy by one and not the other
+("Noisy by firings, not by episodes: 41 firings in 17 episodes"), and of
+each of its latest firings the episode it is of; the overview's noisiest
+rules their episodes; the digest each noisy rule's; `/api/v1/summary`,
+MCP, the report, the CSV and `/metrics` theirs. Noisy by episodes decides
+nothing: the badge, the suggestions and what a catch counts for stay by
+firings. A ledger upgraded to this release, or opened in another `--tz`,
+counts its episodes again a week at a time, the newest first, in the
+leader's round: until it has, those weeks say their episodes aren't
+counted yet. Goals take `episodes.total` and `episodes.precision`
+([docs/design/goals.md](design/goals.md)).
+
+A person may say what Lapilli can't see (docs/design/judging.md, item 3).
+On Alert history, a rule's latest firings and, through a link from each
+rule that caught it, an incident's page: that a white firing is
+**unrelated** to what it caught, a log rotation during an outage, which
+turns that firing alone black, the incident caught by the other firings
+alone or missed; and whether a firing **needed action**, yes or no, which
+changes no stone and is counted. "Unrelated" is an editor's of every team
+and an admin's, as it takes a catch from what may be another team's
+incident; "needed action" a team's editor's too, of their team's rules,
+whose write leaves "unrelated" as it is. Each part keeps who said it,
+when, and a note. One who isn't an admin speaks of the last 14 days'
+firings alone, and presses "This was real" on them alone; each person
+makes 30 verdict writes an hour, a bulk answer of 100 firings counted as
+one. A verdict is kept by its firing's alert and start, so a run that
+starts the firing a step later, or a window read again under another key,
+takes it along, marked to look at again: the overview counts those, and
+the Cleanup page lists them. The summary gives each row's `people`, its
+precision as Lapilli judged it among them, and `action.share` once 80%
+of its firings are answered; goals take `action.share`, a week under 80%
+answered missed, and `stones: lapilli` on a precision goal to hold it to
+Lapilli's own stones; `/metrics` gives `lapilli_rule_action`; the digest
+a line; `/api/v1/verdicts` reads and writes them, MCP reads them. Every
+replay, a proposal's backtest, `compare`, a pull request's backtest, the
+Settings page's tries and the digest's suggestions, carries them on both
+sides, so a change can't look better on the firings people called
+coincidences.
+
+A rule entry may say `judged: false` in place of signals, in
+`--impact-file` or on the Settings page: a watchdog, a capacity forecast,
+a reminder. Its rules' firings are counted, never white nor black, in no
+precision, never noisy, and catch nothing; the summary says them
+`not_judged`, the rules list and the rule's page "Not judged", and the
+Goals page beside each goal how many firings an entry kept from being
+judged. A file whose entries all say so needs no signal.
 
 With no incident written down over the weeks shown, or the two before
 their end, the pages call no rule noisy and show no precision, and say why
@@ -157,7 +219,12 @@ goals:
 
 Each whole week is met, missed or not known (with why: no record, nothing
 to divide, a week the ledger holds only part of), never met for a week
-nobody wrote anything down. The Goals page shows each goal's twelve weeks;
+nobody wrote anything down. It stays open until the runs are past its end
+by the longest lead and a signal's `for`, and `--settle` after that, so
+that no window a firing of its last minutes catches comes after it was
+told: with the defaults and an impact signal, `goal.missed`, the tasks and
+`/metrics` come at about 01:20 on Monday, and the digest, at 09:00, isn't
+later. The Goals page shows each goal's twelve weeks;
 the overview, the digest, reports and `/api/v1/summary` (`goals`) the
 results; `/metrics` the last whole week's (`lapilli_goal_met`,
 `lapilli_goal_known`, `lapilli_goal_value`, `lapilli_goal_weeks_met`), for
@@ -613,6 +680,12 @@ trust:
     claims:
       project_id: "42"
       pipeline_source: merge_request_event
+  - name: monitoring-bitbucket
+    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc
+    audience: https://lapilli-ci.example.com
+    claims:                      # as Bitbucket writes them, in braces
+      repositoryUuid: "{1a2b3c4d-2222-4333-8444-5555555555ee}"
+      workspaceUuid: "{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}"
   - name: monitoring-azure
     token_file: /etc/lapilli/backtest/azure-token   # 32 characters at least
 ```
@@ -621,7 +694,8 @@ trust:
   signature, by a key of the issuer's (from its discovery document's JWKS
   at the issuer's own origin, or `jwks_url`), by an algorithm of a key
   pair, never `none` or HMAC, and an RSA key of 2048 to 4096 bits; `aud`
-  the entry's `audience` and nothing beside it; `exp` and `nbf`; `iat`
+  the entry's `audience` and nothing beside it (but, of a Bitbucket
+  entry's, its workspace's own, below); `exp` and `nbf`; `iat`
   within the last hour, whatever `exp` says; each claim pinned exactly,
   a string as it is, an integer by its decimal. `jti`, or with none (as
   Forgejo's) the hash of what it says as it was signed, never how it was
@@ -630,11 +704,11 @@ trust:
   again (two at once, the first not yet kept when the second was read: the
   same body is answered with the same backtest, 200, without its key).
 - **The audience** is required, and should be the port's URL. GitHub's
-  default (the repository owner's URL), one at the issuer's own origin,
-  `sigstore`, and the audiences of AWS STS, Microsoft Entra's token
-  exchange and Google Cloud's workload identity federation are refused:
-  a token made for one of them could be sent here, or one made here sent
-  there.
+  default (the repository owner's URL), Bitbucket's (a workspace's,
+  `ari:cloud:bitbucket:...`), one at the issuer's own origin, `sigstore`,
+  and the audiences of AWS STS, Microsoft Entra's token exchange and
+  Google Cloud's workload identity federation are refused: a token made
+  for one of them could be sent here, or one made here sent there.
 - **Pins.** For GitHub Actions (`ci: github`, known from its issuer, an
   enterprise's on GitHub Enterprise Cloud, `.../<slug>`, and GitHub
   Enterprise Server's, `https://HOST/_services/token`), Forgejo Actions 16
@@ -645,8 +719,14 @@ trust:
   a list, one of them enough; and the event, `event_name` (GitLab's
   `pipeline_source`), to `pull_request` or `push` (`merge_request_event`
   or `push`): another can run a fork's pull request in the repository's
-  own context. Every other pin is one value, `repository_owner_id` among
-  them, which narrows, never replaces, the repository's. An issuer known
+  own context. For Bitbucket Pipelines (`ci: bitbucket`, known from its
+  issuer, a workspace's,
+  `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`),
+  the entry pins `repositoryUuid`, which may be a list, and
+  `workspaceUuid`, each lowercase in braces as Bitbucket writes them, and
+  no event, as its tokens say none. Every other pin is one value,
+  `repository_owner_id` among them, which narrows, never replaces, the
+  repository's. An issuer known
   neither by its URL nor by `ci:` must pin `sub` and the event, one value
   each, or serve doesn't start; and under every issuer, an event pinned
   is one of those, never `pull_request_target`, `workflow_run` or
@@ -662,8 +742,28 @@ trust:
   reference says `enable-openid-connect` "is disabled for `pull_request`
   events from forked repositories". GitLab names a fork's merge request by
   the fork's own project (`project_id`), which the entry doesn't pin.
-- **A plain token**, for a CI with no ID token (Azure Pipelines, Gitea,
-  Jenkins), is read for each request, and refused while it is the same as
+  Bitbucket says "Pull requests from a forked repository don't trigger the
+  pipeline"; a fork's own pipelines run in the fork, another
+  `repositoryUuid`, and, in another workspace, under another issuer.
+- **Bitbucket's audiences.** Bitbucket puts its workspace's own audience
+  (`ari:cloud:bitbucket::workspace/UUID`) in every token, beside what the
+  step asks for under `oidc: audiences:`. A Bitbucket entry takes a token
+  naming its `audience` alone or beside that of the workspace it pins,
+  and nothing else: never a third. Such a token is one any service that
+  trusts the workspace's own audience takes too, so the step that asks
+  for serve's audience asks for no other, and serve is reached over TLS;
+  and the other services that trust the workspace (an AWS role made as
+  Bitbucket's guide makes it, and the like) should trust an audience of
+  their own, which the steps that need them ask for under `oidc:
+  audiences:`, rather than the workspace's: a token serve is sent is then
+  of no use to them.
+  Its token has no `jti`: it is known by what it says, as Forgejo's is.
+  It names no pull request, so a Bitbucket backtest takes no other's
+  place.
+- **A plain token**, for a CI with no ID token serve takes (Azure
+  Pipelines, whose token is issued by the Microsoft Entra tenant, an
+  issuer every app of it shares; Gitea; Jenkins), is read
+  for each request, and refused while it is the same as
   another token serve takes. It is a long-lived secret: whoever holds it
   backtests as that entry until it is rotated.
 
@@ -687,7 +787,8 @@ entries at once, each within 5 seconds of its headers. 20 wait at most (`--backt
 entry, one of a pull request the token's `ref` names (a newer commit's
 takes the place of the one waiting; a number the job said takes none's:
 GitLab's ID token names a merge request's source branch, not its number,
-so a GitLab merge request's backtests don't take each other's place);
+and Bitbucket's no pull request, so their backtests don't take each
+other's place);
 past them, 429 with `Retry-After`. One the leader stopped while running is
 run again by the next, twice at most. A job reads its backtest by its key:
 each read is charged to the address it comes from before anything is
@@ -698,18 +799,39 @@ ledger's: any replica takes a backtest and answers for it.
 What the pull request's PromQL can do: it runs as range queries, with
 serve's access, so it can read whatever that access reads, a count at a
 time in the firings the comment says. Give serve's history credential what
-the rules need and no more. The port takes rules in Prometheus's format
-alone; 50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
+the rules need and no more. The port takes rules in Prometheus's format;
+Grafana-managed rules, as `--rules` reads a provisioning file, only on the
+data sources the rules serve runs read already: each of a rule's queries
+names, by its uid exactly, a data source whose queries a rule in effect's
+replay asks, and asks it as that rule does (PromQL of `--prometheus`, or
+LogQL through `--grafana`'s data source proxy, or `--loki` without it),
+never one of Grafana's own (`grafana`, `-- Mixed --`, `-- Dashboard --`),
+so that a pull request makes serve read nothing with its credentials that
+it doesn't read for its own rules; and a Loki ruler's rules, from a file
+the job marks as one (`"loki": true`, the recipes' `LOKI_PATHS`), only
+where serve has `--loki` and its rules in effect hold one, asked with
+serve's tenant. A rule refused for what it reads is said to read "a data
+source no rule in effect reads", whatever why, naming nothing of serve's.
+50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
 a group interval of an hour at most; each selector one metric's, by its
 name (`{job="api"}` and `{__name__=~"..."}` are refused); what a rule
 reads back, its range and offset added to those of every subquery around
-them, 8 days at most in all (`rate(x[1d] offset 7d)` fits,
+them and its group's `query_offset`, 8 days at most in all (`rate(x[1d] offset 7d)` fits,
 `rate(x[7d] offset 7d)` doesn't); a subquery of 11,000 points at most, its
 step written in it (`[1d:1m]`, not `[1d:]`: without one, Prometheus steps
 at its evaluation interval, which Lapilli doesn't know, so the points
 can't be counted; add the step); ranges and offsets written as durations;
 and no `@`; comments read past, as Prometheus does; each range query with a timeout of a minute; days 1 to
-14, and the entry's `days`. What it learns comes a bit at a time, as a rule
+14, and the entry's `days`. A Grafana rule has 8 queries of data sources
+and 16 queries and expressions at most, each query's `relativeTimeRange`
+8 days back at most, and each query the replay asks held as a rule's, its
+relativeTimeRange's end added to what it reads back. A query in LogQL is
+a metric query, never one of log lines; each stream selector names its
+streams by a label matched with `=` to a value (`{app=~".+"}` alone is
+refused); a range with its offset reaches 8 days back at most, with no
+subquery and no `@`. The lane asks a Loki through a client of its own, at
+its share of that Loki's rate, kept for it while a backtest asking that
+Loki runs. What it learns comes a bit at a time, as a rule
 fires or doesn't: an entry's `hourly` is what bounds how fast. Keep it as
 low as the pull requests need; a day's cap, of the rules that differ
 times the backtests, is the `hourly` times 24 times 50 at most. `hourly`

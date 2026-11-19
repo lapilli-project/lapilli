@@ -1041,8 +1041,10 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	if o.ImpactFrom, err = s.impactFrom(ctx, s.criterionOf(set)); err != nil {
 		return o, err
 	}
-	// What it replays is judged by the weeks it keeps its stones by.
+	// What it replays is judged by the weeks it keeps its stones by, and
+	// its episodes parted by the ledger's days.
 	o.RecordWeek = s.l.WeekOf
+	o.Zone = s.l.Location()
 	for k, v := range set {
 		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) {
 			continue // the incident criteria's, above and below
@@ -1051,7 +1053,10 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)
 		}
 	}
-	if n := s.signalsIn(set); n.named() {
+	// The rule entries are read with no named signal in effect too: they
+	// keep their rules from the windows of a signal not in effect
+	// (docs/design/judging.md, item 5).
+	if n := s.signalsIn(set); n.named() || len(n.Entries) > 0 {
 		if o.Signals, err = s.signalsOf(ctx, o.Match, n, gen); err != nil {
 			return o, err
 		}

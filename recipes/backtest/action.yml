@@ -59,6 +59,9 @@ inputs:
   paths:
     description: Where the rules are, files or directories in the repository, space-separated. Or render.
     default: ""
+  loki-paths:
+    description: With serve-url and paths, where a Loki ruler's rule files are, files or directories in the repository, space-separated, none of paths; sent as a Loki ruler's, which serve backtests where its own rules hold one.
+    default: ""
   render:
     description: A command that writes the rules on its stdout, run in each commit's files, such as "helm template monitoring charts/monitoring". Or paths.
     default: ""
@@ -141,6 +144,7 @@ runs:
         LAPILLI_VERSION: ${{ inputs.version }}
         LAPILLI_SHA256: ${{ inputs.sha256 }}
         PATHS: ${{ inputs.paths }}
+        LOKI_PATHS: ${{ inputs.loki-paths }}
         RENDER: ${{ inputs.render }}
         RENDER_PREPARE: ${{ inputs.render-prepare }}
         INCIDENTS: ${{ inputs.incidents }}

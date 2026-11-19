@@ -105,11 +105,27 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 		fail("its entry is no longer in --backtest-trust")
 		return
 	}
-	pr, why := s.prepare(req, t.Trust)
+	// Held to what the rules in effect read now, which may have changed
+	// since it was queued.
+	eff, err := s.readsInEffect(ctx)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return // no longer leading: the next leader runs it again
+	case err != nil:
+		s.log.Error("backtest lane: reading the rules in effect", "err", err)
+		fail("lapilli serve's rules in effect couldn't be read: try again")
+		return
+	}
+	pr, why := s.prepare(req, t.Trust, eff)
 	if why != "" {
 		fail(why)
 		return
 	}
+	// The Lokis it asks keep the lane's share while it runs, as
+	// --prometheus does.
+	asking := p.pacesOf(pr.gone, pr.came)
+	p.asking.Store(&asking)
+	defer p.asking.Store(nil)
 	o, err := s.options(ctx)
 	if err != nil {
 		s.log.Error("backtest lane: reading the settings", "err", err)

@@ -48,6 +48,14 @@ const (
 	whyNoValue    = "no_value"
 	whyNotWhole   = "not_whole"
 	whyByCatching = "team_owns_by_catching"
+	// whyNoEpisodes: the ledger hasn't counted the episodes of the week,
+	// or the occurrence's, yet (after an upgrade, or a change of zone).
+	whyNoEpisodes = "episodes_not_counted"
+	// whyUnderAnswered is why a week's action.share goal was missed: under
+	// ActionAnsweredShare of its firings answered (docs/design/judging.md,
+	// "How reports count them"), not unknown, so that answering less can't
+	// move a missed week to not known.
+	whyUnderAnswered = "under_answered"
 )
 
 // summaryGoal is a goal in a summary row: its bound, the row's value of
@@ -72,6 +80,13 @@ type summaryGoal struct {
 	Result   string   `json:"result"`
 	Why      string   `json:"why,omitempty"`
 	Over     bool     `json:"over,omitempty"`
+
+	// Stones is "lapilli" for a goal checked against the numbers as
+	// Lapilli judged them; People, what moved its measure in the week that
+	// isn't Lapilli's own judging (docs/design/judging.md, item 3), left
+	// out with nothing.
+	Stones string      `json:"stones,omitempty"`
+	People *goalPeople `json:"people,omitempty"`
 
 	Each        string     `json:"each,omitempty"`
 	NoWorseThan string     `json:"no_worse_than,omitempty"`
@@ -125,7 +140,12 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 	case "firings":
 		return n(row.Firings)
 	case "precision":
+		if g.Stones == ledger.StonesLapilli {
+			return row.People.PrecisionByLapilli
+		}
 		return row.Precision
+	case "action.share":
+		return row.People.Action.Share
 	case "critical.firings":
 		return n(crit.Firings)
 	case "critical.share_caught":
@@ -156,12 +176,24 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 		return &f
 	case "during_deploys.precision_without":
 		return row.DuringDeploys.PrecisionWithout
+	case "episodes.total":
+		if row.Episodes == nil {
+			return nil
+		}
+		return n(row.Episodes.Total)
+	case "episodes.precision":
+		if row.Episodes == nil {
+			return nil
+		}
+		return row.Episodes.Precision
 	}
 	return nil
 }
 
 // goalOn works a goal out for a row. A week under way is open, with its
-// value so far. A whole week is not known, with why, before it is met or
+// value so far, and so is one the runs haven't gone past by what a week
+// waits for before it is told (wholeAfter). A whole week is not known,
+// with why, before it is met or
 // missed: the week isn't whole in the ledger (the one its first firing
 // fell in); a goal on incidents of a team with no labels, which owns only
 // what its rules caught and so has never missed one; a measure that needs
@@ -169,7 +201,7 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 // known isn't given: it would read as one.
 func goalOn(g ledger.Goal, row *summaryRow) summaryGoal {
 	m := ledger.GoalMeasures[g.Measure]
-	out := summaryGoal{Name: g.Name, Measure: g.Measure, Critical: g.Critical}
+	out := summaryGoal{Name: g.Name, Measure: g.Measure, Critical: g.Critical, Stones: g.Stones, People: peopleMoved(g, row)}
 	kind, target := g.Bound()
 	switch kind {
 	case "at_least":
@@ -183,7 +215,7 @@ func goalOn(g ledger.Goal, row *summaryRow) summaryGoal {
 		out.Result, out.Why, out.Value = goalUnknown, why, nil
 	}
 	switch {
-	case row.Partial:
+	case row.Partial, row.settling:
 		out.Result = goalOpen
 		out.Over = kind == "at_most" && !m.Share && !m.Seconds && !m.Higher && v != nil && *v > target
 	case !row.whole:
@@ -192,6 +224,11 @@ func goalOn(g ledger.Goal, row *summaryRow) summaryGoal {
 		unknown(whyByCatching)
 	case m.Record && row.NoRecord:
 		unknown(whyNoRecord)
+	case episodesMeasure(g.Measure) && row.Episodes == nil:
+		unknown(whyNoEpisodes)
+	case g.Measure == "action.share" && row.Firings > 0 && v == nil:
+		// Under 80% answered: missed, whatever share those answered give.
+		out.Result, out.Why = goalMissed, whyUnderAnswered
 	case v == nil:
 		unknown(whyNoValue)
 	case kind == "at_least" && *v >= target, kind == "at_most" && *v <= target:
@@ -200,6 +237,46 @@ func goalOn(g ledger.Goal, row *summaryRow) summaryGoal {
 		out.Result = goalMissed
 	}
 	return out
+}
+
+// goalPeople are what moved a goal's measure in a week besides Lapilli's
+// own judging: people's verdicts of "unrelated", the incidents "This was
+// real" wrote, the firings of rules an entry judges by nothing, and
+// answers to "needed action", each counted when it moves the measure.
+type goalPeople struct {
+	Unrelated int `json:"unrelated,omitempty"`
+	Real      int `json:"real,omitempty"`
+	NotJudged int `json:"not_judged,omitempty"`
+	Answered  int `json:"answered,omitempty"`
+}
+
+// movedByPeople are the measures people's word moves, as
+// docs/design/judging.md says: "unrelated" and "This was real" move the
+// stones, and with them these; "needed action" moves action.share alone.
+var movedByPeople = []string{"precision", "critical.share_caught", "incidents.missed", "incidents.noisy_only", "incidents.median_lead_seconds",
+	"impacts.missed", "during_deploys.precision_without", "episodes.precision", "firings", "refired.firings", "refired.share",
+	"critical.firings", "asleep.firings", "asleep.nothing", "off_hours.firings", "off_hours.nothing", "episodes.total"}
+
+// peopleMoved is what moved g's measure in row besides Lapilli's own
+// judging, nil for nothing: a goal on Lapilli's stones alone, none of
+// people's word, only the firings not judged.
+func peopleMoved(g ledger.Goal, row *summaryRow) *goalPeople {
+	var p goalPeople
+	switch {
+	case g.Measure == "action.share":
+		p.Answered = row.People.Action.Answered
+	case slices.Contains(movedByPeople, g.Measure):
+		if g.Stones != ledger.StonesLapilli {
+			p.Unrelated, p.Real = row.People.Unrelated, row.People.Real
+		}
+		if ledger.GoalMeasures[g.Measure].Record {
+			p.NotJudged = row.NotJudged
+		}
+	}
+	if p == (goalPeople{}) {
+		return nil
+	}
+	return &p
 }
 
 // goalsCache keeps the goals the ledger holds until it changes: every
@@ -410,12 +487,21 @@ var goalMeasureNames = map[string]string{
 	"incidents.noisy_only":             "incidents caught only by noisy rules",
 	"incidents.median_lead_seconds":    "the median lead",
 	"during_deploys.precision_without": "precision without the firings during deploys",
+	"episodes.total":                   "episodes",
+	"episodes.precision":               "precision by episodes",
+	"action.share":                     "the share that needed action",
 }
+
+// episodesMeasure reports whether a measure is of the episodes, which the
+// ledger may not have counted yet.
+func episodesMeasure(measure string) bool { return strings.HasPrefix(measure, "episodes.") }
 
 // goalWhys are why a week's goal isn't known, as a person reads it.
 var goalWhys = map[string]string{
-	whyNoRecord:   "not known: no incident written down to judge the firings by",
-	whyNoValue:    "not known: nothing to count it of that week",
+	whyNoRecord: "not known: no incident written down to judge the firings by",
+	whyNoValue:  "not known: nothing to count it of that week",
+
+	whyNoEpisodes: "not known: the ledger hasn't counted that week's episodes yet",
 	whyNotWhole:   "not known: the ledger holds only part of the week",
 	whyByCatching: "not known: the team has no labels, so it owns only the incidents its rules caught: give it labels",
 	whyNoBefore:   "not known: nothing to set it beside in the four weeks before",
@@ -424,9 +510,10 @@ var goalWhys = map[string]string{
 // goalPeriodWhys are why an occurrence's goal isn't known, where a week's
 // would say the week.
 var goalPeriodWhys = map[string]string{
-	whyNoRecord: "not known: no incident written down to judge the firings during it by",
-	whyNoValue:  "not known: nothing to count it of during it",
-	whyNotWhole: "not known: the ledger holds only part of the week it started in",
+	whyNoRecord:   "not known: no incident written down to judge the firings during it by",
+	whyNoValue:    "not known: nothing to count it of during it",
+	whyNoEpisodes: "not known: the ledger hasn't counted the episodes during it yet",
+	whyNotWhole:   "not known: the ledger holds only part of the week it started in",
 }
 
 // goalMeasureText is a measure as a person reads it, in l.
@@ -533,6 +620,9 @@ func goalResultText(l string, w summaryGoal) string {
 	case goalMet:
 		return tr(l, "met")
 	case goalMissed:
+		if w.Why == whyUnderAnswered {
+			return tr(l, "not met: under %d%% answered", int(100*ActionAnsweredShare))
+		}
 		return tr(l, "not met")
 	case goalOpen:
 		if w.Over {
@@ -914,6 +1004,10 @@ type goalNotice struct {
 	NoWorseThan string   `json:"no_worse_than,omitempty"`
 	By          *float64 `json:"by,omitempty"`
 	Before      *float64 `json:"before,omitempty"`
+	// People is what moved its measure in the week besides Lapilli's own
+	// judging (docs/design/judging.md, item 3), of everyone's or a team's:
+	// people's verdicts, This was real, firings not judged.
+	People *goalPeople `json:"people,omitempty"`
 }
 
 // goalNoticeTeam is a team that missed a goal of each team's, and its
@@ -960,9 +1054,9 @@ func (s *Server) tellGoals(ctx context.Context, lines []goalLine, last int64) er
 		n := byGoal[gl.Goal.Name]
 		if n == nil {
 			n = &notice{about: goalNotice{Name: gl.Goal.Name, Team: gl.TeamName(), Measure: gl.Goal.Measure, Critical: gl.Goal.Critical,
-				AtLeast: w.AtLeast, AtMost: w.AtMost, Value: w.Value, From: w.From.UTC(), To: w.To.UTC()}}
+				AtLeast: w.AtLeast, AtMost: w.AtMost, Value: w.Value, From: w.From.UTC(), To: w.To.UTC(), People: w.People}}
 			if gl.Goal.EveryTeam {
-				n.about.Team, n.about.Value = "*", nil
+				n.about.Team, n.about.Value, n.about.People = "*", nil, nil
 			}
 			byGoal[gl.Goal.Name] = n
 			order = append(order, n)
@@ -1159,8 +1253,10 @@ func (s *Server) sayOnGoalTasks(ctx context.Context, lines []goalLine, this int6
 				body, now = tr(l, "Missed again, week of %s: %s.", day, goalMissedValue(gl.Goal, w.Value)), goalMissed
 			case was == goalMissed && w.Result == goalMet:
 				body, now = tr(l, "No longer missed, week of %s: %s.", day, goalValueText(gl.Goal.Measure, w.Value)), goalNoLonger
+				body += s.saidSince(ctx, l, w)
 			case was == goalMissed:
 				body, now = tr(l, "No longer missed, week of %s: %s.", day, goalResultText(l, w.summaryGoal)), goalNoLonger
+				body += s.saidSince(ctx, l, w)
 			case w.Result == goalMet && was == "":
 				body, now = tr(l, "Met, week of %s: %s.", day, goalValueText(gl.Goal.Measure, w.Value)), goalMet
 			default:
@@ -1175,6 +1271,22 @@ func (s *Server) sayOnGoalTasks(ctx context.Context, lines []goalLine, this int6
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// saidSince says, of a week no longer missed, how many people's verdicts
+// on its firings were said since it was told, which moved it
+// (docs/design/judging.md, "Who, when, and the trail"): "" for none, or
+// a goal on Lapilli's stones alone. A week is told once it is whole, after
+// its end: since then.
+func (s *Server) saidSince(ctx context.Context, l string, w goalWeek) string {
+	if w.Stones == ledger.StonesLapilli {
+		return ""
+	}
+	n, err := s.l.VerdictsSince(ctx, w.To, w.From, w.To)
+	if err != nil || n == 0 {
+		return ""
+	}
+	return " " + tr(l, "With %d people's verdicts since it was told.", n)
 }
 
 // goalMetrics writes the goals' series, as the leader worked them out after

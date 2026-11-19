@@ -38,21 +38,22 @@
 </table></div></details>
 </figure>{{end}}
 
-<p class="quiet">{{t "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}}</p>
+<p class="quiet">{{t "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}} {{t "A firing that caught something it had nothing to do with: say it is unrelated, and that firing alone turns black. Whether a firing needed someone to act changes no stone; it is counted."}}</p>
 {{if .Lines}}<form method="post" action="/firings/real" id="real-picked" class="bulk"><input type="hidden" name="back" value="{{$.Link $b.Back}}">{{template "noenter"}}
 <fieldset class="bulk-bar"><legend>{{t "With the firings picked"}}</legend>
 {{if $b.May}}<button>{{t "These were real"}}</button>{{else}}{{template "off" (offOf $ "These were real" "editor" "real-why")}}{{end}}
 <p class="quiet">{{t "Each one picked that caught nothing is written down as an incident, as its own button does: at most %d at a time." 100}}</p>
+{{if $b.May}}<label>{{t "Needed action"}} <select name="action"><option value="yes">{{t "yes"}}</option><option value="no">{{t "no"}}</option><option value="none">{{t "none"}}</option></select></label> <button formaction="/firings/verdict">{{t "Answer for those picked"}}</button>{{end}}
 </fieldset></form>{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Firings"}}"><table>
 <thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
-<tr><td class="pick">{{if not .White}}<input type="checkbox" form="real-picked" name="firing" value="{{.ID}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
+<tr><td class="pick">{{if or (not .White) (and $b.May (not .Excused))}}<input type="checkbox" form="real-picked" name="firing" value="{{.Ref}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
 <td>{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td>
 <td class="rule"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
 <td class="n">{{template "notified" .}}</td><td class="labels">{{range .Chips}}{{if .Href}}<a class="chip label" href="{{$.Link .Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{template "chiptext" .Parts}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{template "chiptext" .Parts}}</bdi></span> {{end}}{{end}}</td>
-<td>{{if not .White}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{else}}{{template "off" (again (quiet (offOf $ "This was real" "editor" "real-why")))}}{{end}}{{end}}</td></tr>
+<td>{{if and (not .White) (not .SaidUnrelated)}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real">{{template "firingref" .}}<button class="quiet-button">{{t "This was real"}}</button></form>{{else}}{{template "off" (again (quiet (offOf $ "This was real" "editor" "real-why")))}}{{end}}{{end}}{{template "verdict" (verdictOf $ . $b.Back)}}</td></tr>
 {{else}}<tr><td colspan="8" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Next}}<p><a href="{{$.Link .}}">{{t "Earlier →"}}</a></p>{{end}}
@@ -64,6 +65,24 @@ to say. */}}
 {{/* A firing's stone: ○ caught something, ● caught nothing, judged; one
 that caught nothing with no record to judge it by is neither, as the
 weeks and the summary count it. */}}
-{{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .Unjudged}}<span class="unjudged" title="{{t "no record to judge it by: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
+{{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .SaidUnrelated}}● <span class="quiet">{{t "said unrelated"}}</span>{{else if .Unjudged}}<span class="unjudged" title="{{t "no record to judge it by: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
+
+{{/* What people said of a firing (docs/design/judging.md, item 3): that
+it was unrelated to what it caught, with who and when, and Undo; or, on a
+white one, a form to say so; and whether it needed action. A team's editor
+answers whether it needed action alone. */}}
+{{define "verdict"}}{{$f := .F}}{{$loc := .Loc}}{{$back := .Back}}
+{{- with $f.Said}}{{if .Unrelated}}<p class="said">{{if $f.White}}{{tbdi "Unrelated to %s, by %s on %s" $f.UnrelatedTo .UnrelatedBy (at $loc .UnrelatedAt)}}{{else}}{{tbdi "Black: unrelated to %s, by %s on %s" $f.UnrelatedTo .UnrelatedBy (at $loc .UnrelatedAt)}}{{end}}{{with .UnrelatedNote}}: <bdi>{{.}}</bdi>{{end}}</p>
+{{- if $f.MayUnrelated}}<form method="post" action="/firings/{{$f.ID}}/verdict">{{template "firingref" $f}}<input type="hidden" name="back" value="{{$back}}"><button class="quiet-button" name="undo" value="unrelated">{{t "Undo"}}</button></form>{{end}}{{end}}{{end}}
+{{- if and $f.White $f.MayUnrelated (not $f.HasUnrelated)}}<details class="unrelated"><summary>{{t "Unrelated"}}</summary><form method="post" action="/firings/{{$f.ID}}/verdict">{{template "firingref" $f}}<input type="hidden" name="back" value="{{$back}}"><input type="hidden" name="unrelated" value="yes"><label>{{t "Why, for those who look again"}} <input name="unrelated_note" maxlength="500"></label> <button class="quiet-button">{{t "Unrelated to what it caught"}}</button></form></details>{{end}}
+{{- with $f.MovedFormat}}<p class="said status-warn">{{if $f.MovedArg}}{{tbdi . $f.MovedArg}}{{else}}{{t .}}{{end}}</p>{{end}}
+{{- if $f.MayAction}}<form method="post" action="/firings/{{$f.ID}}/verdict" class="row">{{template "firingref" $f}}<input type="hidden" name="back" value="{{$back}}"><label>{{t "Needed action"}} <select name="action">{{$a := $f.Action}}<option value="none"{{if eq $a ""}} selected{{end}}>–</option><option value="yes"{{if eq $a "yes"}} selected{{end}}>{{t "yes"}}</option><option value="no"{{if eq $a "no"}} selected{{end}}>{{t "no"}}</option></select></label> <button class="quiet-button">{{t "Answer"}}</button></form>
+{{- else if $f.Action}}<p class="said">{{if eq $f.Action "yes"}}{{t "Needed action"}}{{else}}{{t "Needed no action"}}{{end}}</p>{{end}}
+{{- end}}
+
+{{/* The alert and start of the firing a form is about, which the write
+holds to the firing's own: a run gives its firings again, and an id to
+another. */}}
+{{define "firingref"}}<input type="hidden" name="series" value="{{.Series}}"><input type="hidden" name="start" value="{{.Start.Unix}}">{{end}}
 
 {{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}

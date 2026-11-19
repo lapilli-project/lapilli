@@ -127,10 +127,10 @@ type rulesList struct {
 }
 
 // Cols are how many columns the list has after the one to pick a rule
-// by: what the line of notes under a row spans. Ten, and a column each
+// by: what the line of notes under a row spans. Eleven, and a column each
 // for the firings not judged and those during deploys, when shown.
 func (v rulesList) Cols() int {
-	n := 10 // rule, team, severity, fired, ○, ●, precision, refired, incidents, 12 weeks
+	n := 11 // rule, team, severity, fired, episodes, ○, ●, precision, refired, incidents, 12 weeks
 	if v.Sum.Unjudged > 0 {
 		n++
 	}
@@ -148,6 +148,10 @@ type ruleSum struct {
 	Unjudged                   int
 	AsleepBlack, OffHoursBlack int
 	Precision                  string
+	// Episodes are the rules' firings counted as episodes; EpisodesCounted,
+	// that the ledger has counted every week's shown.
+	Episodes        int
+	EpisodesCounted bool
 	// Notified says notifications are kept: Notifications, Repeats; and
 	// Woken, those for firings that caught nothing while people slept,
 	// as the overview counts them (woken), WokenUnjudged those of them in
@@ -280,7 +284,7 @@ var facetsOf = []struct {
 	values      []string
 	labels      []string
 }{
-	{"perf", "Performance", perfValues, []string{"Noisy", "No record", "OK", "Silent", "Spare"}},
+	{"perf", "Performance", perfValues, []string{"Noisy", "Noisy by episodes", "No record", "OK", "Silent", "Spare"}},
 	{"severity", "Severity", nil, nil},
 	{"trust", "Trust", trustValues, []string{"Differs", "Not replayed", "Recorded only"}},
 	{"status", "Disposition", statusValues, []string{"keep", "tune", "retire", "Undecided"}},
@@ -291,6 +295,11 @@ var facetsOf = []struct {
 func (r ruleRow) values(param string) []string {
 	switch param {
 	case "perf":
+		// Noisy by its episodes beside its one judgment by firings: a
+		// facet value of its own, picked with noisy:episodes.
+		if r.NoisyEpisodes {
+			return []string{r.Perf, "noisy-episodes"}
+		}
 		return []string{r.Perf}
 	case "severity":
 		return []string{cmpOr(r.sev, "none")}
@@ -508,7 +517,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	var tf textFilter
 	for _, t := range st.Words {
 		switch {
-		case t.Bad != "" || t.Key == "team" || t.Key == "severity" || t.Key == "is" || t.Key == "status" || t.Key == "has" || t.Key == "during" || t.Key == "outside":
+		case t.Bad != "" || t.Key == "team" || t.Key == "severity" || t.Key == "is" || t.Key == "noisy" || t.Key == "status" || t.Key == "has" || t.Key == "during" || t.Key == "outside":
 			// Understood tokens of these keys are parameters by now: what
 			// is left wasn't understood.
 			v.Bad = append(v.Bad, t.String())
@@ -553,6 +562,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		}
 	}
 	v.Shown = len(v.Rows)
+	v.Sum.EpisodesCounted = true
 	// How each row's team was found, under its name (docs/design/ui.md,
 	// "Why a rule is a team's").
 	if len(v.Rows) > 0 {
@@ -565,6 +575,9 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	for _, row := range v.Rows {
 		x := &v.Sum
+		x.Episodes += row.Episodes
+		// A rule that didn't fire is counted as nothing either way.
+		x.EpisodesCounted = x.EpisodesCounted && (row.EpisodesCounted || row.Firings == 0)
 		x.Firings += row.Firings
 		x.White += row.White
 		x.Unjudged += row.Unjudged

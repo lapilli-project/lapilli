@@ -60,6 +60,16 @@ func Base(h History) History {
 	return h
 }
 
+// LogsOf is the Logs WithLogs put beside h, nil for none: what a lane of
+// its own, pull request backtests', asks its Lokis through, each by a
+// Limiter of the lane's.
+func LogsOf(h History) Logs {
+	if w, ok := h.(*withLogs); ok {
+		return w.logs
+	}
+	return nil
+}
+
 // historyFor is the history r is replayed against: h for PromQL; for LogQL,
 // the Loki WithLogs gives for it. An asker already asks its rule's.
 func historyFor(h History, r rules.Rule) (History, error) {

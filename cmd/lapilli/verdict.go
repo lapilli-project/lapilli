@@ -240,6 +240,11 @@ What went wrong (with --compare, if you have them):
                       reading the signal over a time doesn't keep its record:
                       it says users weren't hurt in one way, not that nothing
                       was. Its windows still keep the record near them
+  --impact-lead NAME=DUR
+                      how long before one of the signal's windows starts a
+                      firing still catches it, in place of --lead, from 0 to
+                      1d: a probe that fails as users are hurt, 5m. Incidents
+                      written down keep --lead
   --impact-file FILE  the named signals in a file, and which rules are judged
                       against which (see below), in place of the flags above
 
@@ -414,6 +419,14 @@ The impact file:
     - rules: ^BackendMissing$
       signals: [errors, probe]
       match: [backend]            # and matched on these labels alone
+    - rules: ^(MemoryPressure|PodRestarting)$
+      signals: [errors]           # causes, which fire before the errors:
+      lead: 1h                    # caught from 1h before a window, in place
+      require: [service]          # of each signal's lead (lead: on a signal
+                                  # too), and only when both carry service
+    - rules: ^Watchdog$
+      judged: false               # judged by nothing: counted, never white
+                                  # nor black (entries all so need no signals)
 
 lapilli only reads history and files. It sends the report nowhere but to
 --push and --slack-webhook-file.
@@ -785,7 +798,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.redact, f.redactKey = true, key
 		case "--incidents":
 			f.incidents = val
-		case "--impact", "--impact-for", "--impact-match", "--impact-record", "--impact-file":
+		case "--impact", "--impact-for", "--impact-match", "--impact-record", "--impact-lead", "--impact-file":
 			_, err = f.impactFlag(name, val)
 		case "--prometheus":
 			f.promURL = val
@@ -912,8 +925,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	if err := f.signalsRead(); err != nil {
 		return nil, err
 	}
-	// The hours are read once the zone is known, wherever --tz came.
+	// The hours are read once the zone is known, wherever --tz came; and
+	// the days episodes are parted by.
 	f.opts.Hours = verdict.DefaultHours(f.loc)
+	f.opts.Zone = f.loc
 	if f.work != "" {
 		if err := f.opts.Hours.ParseWork(f.work); err != nil {
 			return nil, fmt.Errorf("--work-hours %v", err)

@@ -490,7 +490,7 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 				return err
 			}
 		}
-		return pend(t, [][2]int64{{min(lo, from) - int64(o.Lead/time.Second), r.To.Unix()}})
+		return pend(t, [][2]int64{{min(lo, from) - int64(o.MaxLead()/time.Second), r.To.Unix()}})
 	})
 }
 

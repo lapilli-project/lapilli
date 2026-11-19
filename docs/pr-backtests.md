@@ -226,7 +226,10 @@ reads Lapilli's. Serve decides where the history is and what judges the
 firings, so the settings for those (`prometheus-url`, `incidents`,
 `impact`, `match`, `--lead`, `--from`, ...) are refused with it: of the
 arguments, `--since` (whole days, 1 to 14), `--tz` and `--rules-select`
-are sent. The comment's heading says it was judged by lapilli serve's
+are sent. Grafana-managed rules in `paths`, and a Loki ruler's in
+`loki-paths` (`LOKI_PATHS`), are backtested only on the data sources the
+rules serve runs read already: any other is refused, naming none of
+serve's. The comment's heading says it was judged by lapilli serve's
 record, and reads differently where that record does: catches judged
 against the incidents and impact windows serve keeps, firings by its weeks
 and settings. The recipes' README has each CI's token, what is sent, and

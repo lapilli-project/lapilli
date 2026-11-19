@@ -1,6 +1,10 @@
 # Judging refined: a lead per signal, episodes beside firings, a person's verdict on one firing, and rows by label
 
-Status: accepted. Merged on 2026-11-19, before its week was out, by the
+Status: accepted; step 1 (leads and `require:`, schema 024, "As built
+(step 1)"), step 2 (a signal taken away judging no one, no schema, "As
+built (step 2)"), step 3 (episodes beside firings, schema 025, "As
+built (step 3)") and step 4 (a person's verdict on one firing and rules
+judged by nothing, schema 026, "As built (step 4)") built. Merged on 2026-11-19, before its week was out, by the
 maintainer's decision, its open questions decided ("Open questions").
 Under [GOVERNANCE.md](../../GOVERNANCE.md) this changes how a firing is
 judged (a lead of a signal's or a rule entry's own, a person's word that
@@ -1571,6 +1575,390 @@ maintainer, as its review recommended:
    confirms the windows that were real outages, as a confirmed window is
    an incident written down (item 5).
 
+## As built (step 1)
+
+Leads and `require:`, as above, and what building them settled:
+
+- **Judging.** `verdict.Options.LeadFor(rule, in)`, in the order of
+  "Which lead a firing is judged by", and `MaxLead()`, the longest of
+  `--lead`, each signal's and each entry's, worked out once in
+  `NewSignals`. `Catches` rejects a firing outside `MaxLead` first, then
+  looks the rule's entry up once for the lead and the labels alike, so a
+  firing costs no more entries looked up (`Signals.Looked`) than before.
+  `LongestLeadFor(in)`, the longest lead any rule is judged by against an
+  incident, draws its timeline; `Reach()` is the wait below. The near
+  misses' judging (`Nearly`, `NearlyBy`, `FiringDuring`) is by `LeadFor`,
+  their replay from `MaxLead` before each incident, a day at most.
+- **Every site that reached back by `o.Lead`** now reaches by `MaxLead`:
+  those the design lists, as they are in the code, and one it couldn't:
+  #153's tie of the unnamed signal's windows to `impact` (`tieUnnamed`),
+  which pends their spans from the longer of `--lead` and the longest
+  lead against `impact`'s windows.
+- **`require:`** is kept with its entry and compared with it (`entryKey`):
+  changed, it judges every firing again, as an entry's `match` does. Held
+  as `match` is: 16 label names, each Prometheus's, none twice.
+- **A lead changed alone.** `sameDef` and `entryKey` leave leads out;
+  `SyncSignalSet` keeps them, sets `SignalsSynced.Leads`, and pends
+  (`pendLeads`), of each signal one of whose leads in effect changed (its
+  own, or an entry's naming it, each following the one above it, `--lead`
+  last, which `SignalSet.Lead` carries), its windows and the incidents
+  its confirmations wrote (`incidents.signal`), from the longer of the old
+  and the new longest lead against it before each start to its end; and
+  counts a generation of the signals in the same write. Options read
+  before it are stale by their leads too (`staleSignals`). A lead changed
+  with anything that pends every firing judges as that does.
+- **Schema 024**: `impact_signals.lead_ns`, `impact_rules.lead_ns` and,
+  beside them, `impact_rules.require_labels`, NULL to follow and for none,
+  which the design's schema list leaves out: the ledger holds the entries
+  its options are judged by, and compares them with the options read.
+- **Where.** `--impact-lead NAME=DUR`, refused with no name, for a name no
+  `--impact` gives, twice, beside `--impact-file`, and outside 0 to 24h;
+  `lead:` on a signal and an entry and `require:` on an entry in
+  `--impact-file`, read strictly. The Settings page: a signal's form has
+  Lead, empty to follow, its placeholder the lead above; its row says a
+  lead of its own; the rule entries' YAML takes `lead:` and `require:`,
+  and their table says them. Kept in `settings`: `impact-signal/NAME`'s
+  `lead` (left out to follow), each entry of `impact-rules` with its
+  `lead_ns` and `require`; the activity log's before and after say them.
+  A change that gives a signal another lead counts among the admin's
+  twelve saves an hour, as saving the entries does. `/settings.yaml` gives
+  `lead:` and `require:`; nothing in `--config`.
+- **The try** judges a change of leads in memory, with the leads, as it
+  judges a match changed: its rows with the change and without.
+- **The report** gives `settings.impact_signals[].lead_ns`,
+  `settings.impact_rules[].lead_ns` and `settings.impact_rules[].require`,
+  each left out when it follows or for none; `/api/v1/summary` the same as
+  `lead` (a time) and `require`, its rule entries in a shape of their own
+  with the same fields as before. `lapilli verdict`'s text says each
+  signal's lead beside its `for`, each entry's that gives one, and the
+  lead of incidents written down, only when a lead is given: with none,
+  its text is as it was. numbers.md's "A white or a black stone" and its
+  "incidents caught: counted again" read them, and a test counts them
+  again from reports judged by an entry's lead and by a signal's.
+- **The wait** (`wholeAfter`): `Reach()`, of the named signals in effect;
+  else `--lead` and the criterion's `--impact-for`, with the signal with no
+  name; else `--lead`; and `--settle` after that. The digest waits on the
+  run cursor for it; a week's goals in the summary are open until the run
+  cursor passes it (`settling`, beside `partial`, which stays what the
+  ledger holds), and so are an occurrence's of `each: KIND`, so
+  `goal.missed`, the goals' tasks, the Goals page and the goals'
+  `/metrics` follow. A ledger with no runs waits on `copiedTo` for the
+  span's end and `--lead`.
+- **Proposals.** Each signal's lead joins the digest a backtest keeps
+  (`signalsHeld`), left out when it follows, and the entries' leads and
+  `require` with the entries, each left out when there is none, so a
+  digest of signals and entries with none is as it was.
+- **Not in step 1**, left for when a step needs it: the count of catches
+  that agreed on no label ("Coincidences"), on the try, a rule's page and
+  MCP's `rule`; and the try's rule-by-rule catches gained and lost.
+
+## As built (step 2)
+
+A signal taken away judging no one, as item 5 says, with no schema, and
+what building it settled:
+
+- **Which windows.** `verdict.Options.NotInEffect(in)`: a window (an
+  incident with `Candidate`) of a named signal, its `signal` none of those
+  the options judge by (`Options.InEffect`), however it left: taken away
+  on the Settings page, dropped by a start, set aside past eight, or the
+  windows #153 tied to `impact` with no `impact` in effect. The windows of
+  the signal with no name carry no signal and are none of them: serve
+  started with no `--impact` at all keeps them as v0.49.0 kept them, as
+  incidents, as before this step.
+- **The record.** `RecordOf` leaves such a window out first, with named
+  signals in effect or none, so every record follows it (`JudgesTied`,
+  `JudgesAny`, the tallies, a page's `firingJudge`, a backtest's replay).
+  The one place the ledger worked the record out in SQL,
+  `Ledger.RecordKept` with no named signal, leaves out every window with a
+  signal (`AND (i.origin <> 'impact' OR i.signal = '')`), as all of them
+  are then a signal's not in effect.
+- **The catches.** `judgingOf` marks an incident with a signal not in
+  effect, a window or the incident a confirmation of one wrote, and reads
+  the rule's entry for it (`Signals.entryAt`) whether named signals are
+  in effect or not; `agrees` lets only a rule with no entry catch it
+  (`catchesGone`, where step 4's `judged: false`, a field of an entry,
+  needs nothing more), on the incident's own match
+  (`incidents.match_labels`), else the match in effect. It is caught from
+  `--lead`, as before (`LeadFor`). So a confirmation of such a window is
+  caught as its window was, and keeps everyone's record, as every
+  confirmation does: an editor or an admin confirming it keeps the record
+  of its weeks.
+- **Entries with no named signal in effect.** Serve's options carry the
+  rule entries kept (the UI's `impact-rules`, which a start with no named
+  signal leaves) as a `verdict.Signals` with no signal (`Named` false),
+  indexed by the rules' labels as ever: they keep their rules from the
+  windows of signals not in effect and judge nothing else, the record by
+  the signal with no name and the report's settings as they were. The
+  rest of item 3's "entries apart from named signals" is step 4's.
+- **An entry naming no signal in effect** was already judged as item 5
+  says, tied to none (`Signals.Ties`, `TiedOf`); with the catches above,
+  its rules catch neither the windows of the signals in effect nor those
+  of the one it names.
+- **The upgrade.** `Ledger.PendNotInEffect`, in the leader's round after
+  the signals are kept and the options read, before `JudgePending`: once,
+  noted in `meta` (`not_in_effect_pended`) in the write that pends, which
+  reads the note again first, so whatever replica leads next, or two at
+  once, pends it once; it pends the span of each incident that counts with
+  a signal the options don't judge by (windows and confirmations alike),
+  from `MaxLead` before its start to its end (`UnknownLen` for none), and
+  the log says how many in one line (`windows of impact signals not in
+  effect judged again, once`). With none, the note alone, in a write that
+  changes no page's generation. The incidents' `signal` has no index: it
+  reads them all, once.
+- **Where it shows.** A window's page: "Found by probe, a signal no longer
+  read: it keeps no rule's record, and is caught by the rules with no rule
+  entry alone, on service. Confirm it, if it was a real outage, to keep
+  the record of its weeks.", and every entry among those that keep their
+  rules from it; the page of what a confirmation of one wrote says so too.
+  Not "not read since": nothing keeps when a signal left (the activity log
+  notes a change on the page, not a start's). A rule's page, of a rule
+  whose entry names no signal in effect: "Rule entry #1 names probe, not
+  read: judged by incidents written down alone." The Incident sources
+  panel: a row, "Impact signals no longer read", its windows in four weeks
+  and the signals' names, when there are any. MCP: `incidents[]`
+  `signal_not_in_effect`, and `rule`'s `impact_signals`
+  `entry_signals_not_read`.
+- **numbers.md.** "A white or a black stone" says who catches such a
+  window. Its "incidents caught: counted again" needed one change the note
+  didn't foresee: of a rule whose entry names the signal not in effect, it
+  counted the catch, so it reads an entry's signals now only of a signal in
+  effect (`$named and any($e.signals[]; ...)`); and it counts such a window
+  on `match`, as the report doesn't give the labels the window was found
+  with. "No record" says it keeps no rule's record; its serve block left it
+  out already (no firing is tied to its signal), as the code now does.
+- **Serve and `lapilli verdict`.** The tests hold serve's record, firing by
+  firing and rule by rule, to `verdict.Judge` given the same options and
+  every incident but those windows, which a fresh `lapilli verdict` never
+  reads; their stones differ only where a rule with no entry caught one, a
+  white stone in serve, judged, and in `lapilli verdict` black and maybe
+  unjudged.
+- **Tests.** `TestSignalRemovedWindowsCaughtByAnyRule` is turned round as
+  `TestSignalRemovedWindowsCaughtByRulesWithNoEntry`
+  (`internal/serve/notineffect_test.go`), beside the same for a signal
+  taken away on the page and one set aside past eight, a confirmation, an
+  entry naming no signal in effect, no named signal left, and numbers.md's
+  recount; `TestUnnamedWindowsTiedToNoneRead` holds #153's case with no
+  `impact` (Errors, tied only to a `record: false` signal, unjudged);
+  `internal/verdict/notineffect_test.go` and
+  `internal/ledger/notineffect_test.go` (the upgrade, once, from two
+  ledgers at once). `TestUnnamedSignalUnchanged`'s goldens are as they
+  were.
+
+## As built (step 3)
+
+Episodes beside firings, as item 2 says, with schema 025, and what
+building them settled:
+
+- **Grouping.** `verdict.EpisodeKey` (the rule, and of each label of the
+  match in effect the firing's value, or none for a label it doesn't
+  carry) and `verdict.EpisodeWalk`, which `verdict.Judge` and the ledger's
+  walk share: a firing starts a new episode when it is its key's first,
+  the first of its day, or starts more than `--refire` after every firing
+  of the episode so far ended (one still on holds it open), as `Refired`
+  measures a re-fire. Days are numbered as the ledger numbers them
+  (`verdict.DayIn`), in `verdict.Options.Zone`: `lapilli verdict`'s `--tz`,
+  the machine's (`Local`) when it isn't given; serve's, its ledger's zone.
+- **Judged.** White when any firing is; else by its first firing's record
+  (`no_record`). `noisy_at` gives noisy by episodes; nothing reads it but
+  where it is shown.
+- **The report.** `rules[].episodes` (`total`, `white`, `unjudged`,
+  `noisy`, left out with none: `omitzero`), `firings[].episode` and `day`,
+  and `settings.zone`; numbered in the report in order of first firing.
+  A redacted report says the zone `[redacted]`, keeps the days, and numbers
+  the episodes again in its own order of firings, which no name decides.
+  `lapilli verdict`'s text says nothing of them; its `--metrics`, `--csv`
+  and `--json` do.
+- **The ledger (schema 025).** `firings.episode` (the id of the first
+  firing, 0 for an excused one) and `episode_white` (on a first firing);
+  `episodes` and `episodes_white` on `days`, `weeks`, `marked_days` and
+  `marked_weeks`, counted from the first firings (`firstFirings`). Each
+  judge walks the firings of the whole days its tally counts
+  (`walkEpisodes`), one read and the changed rows written, before the
+  tally; a write that judged a span inside a day reaches no further than
+  that day. A firing's labels are its alert's, as `stones` reads them.
+- **The upgrade and a change of zone.** The migration notes
+  `episodes_from`, the week after the newest firing's, in `meta`; a ledger
+  opened in another `--tz` sets every `episode` to 0 and the same note in
+  the write that counts the days again. `Ledger.CountEpisodes`, in the
+  leader's round after `JudgePending`, walks the next week back with a
+  firing in it, a write each, reading the note again in the write, until
+  none is left, and takes the note away. Weeks before the note say their
+  episodes aren't counted: the summary's `episodes: null`, a report with
+  no `episodes` and no `episode` (`Report.EpisodesNotCounted`), no
+  `lapilli_rule_episodes` series, "not counted yet" on a rule's page, "–"
+  in the rules list and the overview, no digest line, and a goal on them
+  not known (`episodes_not_counted`).
+- **Where it shows.** The summary's `episodes` (`total`, `caught`,
+  `unjudged`, `precision`, `noisy_rules`) and each marked kind's
+  `episodes`, `episodes_caught` and `episodes_precision`, null until
+  counted; the goals' `episodes.total` and `episodes.precision`, weekly and
+  `each: KIND`, the latter with `no_worse_than: before`; the rules list's
+  Episodes column and `noisy:episodes` (`perf=noisy-episodes`, a value of
+  the Performance facet beside Noisy); a rule's page, a line under its
+  numbers ("Noisy by firings, not by episodes: 41 firings in 17 episodes."
+  when they differ), and of its latest firings, those of an episode that
+  held more than one, the episode's start and size; the overview's noisiest
+  rules' table, an Episodes column; the digest, a line of the noisy rules'
+  episodes; MCP's `rules` and `rule` (`episodes`, `noisy_episodes`), its
+  `summary`, and its `firings` and a rule's latest (`episode`: its first
+  firing's start and how many it held, looked up by `Ledger.Episodes`
+  along the index of a rule's firings); the CSV's `episode`; `/metrics`'
+  and `--metrics`' `lapilli_rule_episodes` and
+  `lapilli_rule_episodes_caught`.
+- **Kept, not as designed.** The digest's line is one line of the noisy
+  rules' episodes beside the report, not a change to each rule's line, as
+  the digest has no line of each noisy rule but the report's table. A
+  firing's episode on MCP is its first firing's start and size, not the
+  report's number, which a list of the latest firings can't give.
+- **numbers.md.** "Episodes": the rules' counts and each week's in the
+  summary, counted again from `firings[].episode`, and which firings make
+  one, from each firing's rule, labels, start, end and `day`, with
+  `settings.match` and `settings.refire_ns`. In `lapilli serve` a period
+  beginning inside a day may begin inside an episode: count from whole
+  days.
+- **Cost.** A write reads the firings of its days once more (a run's,
+  a day or two); `TestRecordedScale` allows each firing one more row
+  written, its episode, and a thousand episodes a Postgres statement. The
+  pages read the tallies' two columns more, and the meta note once.
+- **Tests.** `internal/verdict/episodes_test.go` (overlap, `--refire`, the
+  latest end, one still on, midnight, the zone's midnight, labels not
+  carried, no match, judging, noisy, and today's numbers unchanged);
+  `internal/ledger/episodes_test.go` (the ledger's episodes as
+  `verdict.Judge`'s through two runs, an incident written down and a
+  match changed; a quiet window's firing; midnight and how far a write
+  walks; a change of zone walked back a week a write, newest first, once,
+  as a ledger kept in that zone; the upgrade walked once by two at a time,
+  every number as before); `internal/serve/episodes_test.go` (every place
+  it shows, and not counted). The goldens that capture a report, a
+  summary, `/metrics` or the pages that now show episodes gained them,
+  and nothing else.
+
+## As built (step 4)
+
+A person's verdict on one firing, and rules judged by nothing, as item 3
+says, with schema 026, and what building them settled:
+
+- **Finding a firing again** (`verdict.Place`), in the ledger and in
+  every replay alike: its own alert's firing that starts at its start;
+  else, of its rule's firings with the same values of the match labels,
+  its own alert's on at its start, then its own alert's first that starts
+  within the span it was said of, then the same two of the other alerts'.
+  Its own alert's comes first across both, so that a pod's verdict stays
+  on that pod when a run starts its firing a step later, though another
+  pod's was on at its start. Two that come to one firing: the one said of
+  that alert and start holds it, then of that alert, then the latest said;
+  the firing keeps the union of their "unrelated".
+- **In the ledger.** `verdicts`, unique by `(series_id, start_at)`. A
+  verdict whose firing a run took away finds it again before the stones
+  (`moveVerdicts`), which widens the span judged to it: kept by it,
+  marked `start` (or `alert`, another alert's); found but kept by another
+  verdict, it stays where it was, marked `held SERIES START`, and adds its
+  "unrelated" to that firing; found nowhere, `gone`. One held whose own
+  firing a later run gives back (two merged, then parted again) is its
+  own firing's once more, unmarked, as `Place` has it, and the firing
+  that held it is judged again without it. `stones` keeps on each
+  firing the incidents it is said unrelated to (`firings.unrelated`, not
+  in the design's list), which `catches`, the report's firings and a
+  key's move read, besides the bits of `firings.person`; and marks a
+  verdict `span KEY` or `catches KEY`. As Lapilli judged it, a firing is
+  white when it caught an incident "This was real" didn't write, whatever
+  it was said unrelated to: bit 1 is white so and black by people's word,
+  bit 8 black so and white by it, so that one that caught a window and a
+  real incident, said unrelated to the window, has neither, and one said
+  unrelated to a real incident alone has neither. The bits add 16 (white
+  only by "This was real" and in a quiet window that matches it) as the
+  design says, and the tallies `real_excused`, `action_yes_black` and
+  `action_no_white` beside those it lists, for `real_excused`, `yes_black`
+  and `no_white`. A judge reads the verdicts of a day around its span by
+  their start, along an index on `start_at`.
+- **The write** goes part by part in the ledger (`changeVerdict`): a
+  team's editor is told by the write's context (`WithTeams`), as every
+  team-scoped write is, so the ledger, not the handler, keeps "unrelated"
+  from them. A part's who and when are its answer's or its note's last
+  writer's: a note rewritten is the rewriter's, and another answer given
+  with no note drops the note of the one before. A verdict's change rows
+  are noted at the write's time (`VerdictBy.Now`, serve's clock), and the
+  hour's thirty are counted by them, under `verdict…` by the writer's
+  name, folded as proposals fold names; a write that says what is kept
+  writes nothing, and isn't counted. Writing or undoing "unrelated" takes
+  away the verdicts another held of that firing, each noted as `verdict
+  on RULE {labels} at START taken away` with what it said, by the writer,
+  and not counted among the thirty: what a person says of it now is what
+  it is. A note rewritten alone, by whoever, takes none away. A bulk
+  answer's firings are each checked as one alone, and one
+  refused refuses all.
+- **Keys moved.** `Decide` passes a window's key to the incident a
+  confirmation writes, unmarked; `remapImpact` counts the verdicts naming
+  a window no longer there (from a day before its start to its end), and
+  moves them to the window it gives its tasks to, marked `span`; the two
+  renames of signals move them unmarked. A firing's kept "unrelated" moves
+  with them, only where a verdict named the key.
+- **"This was real"** (`Ledger.Real`) takes the firing as a form picks it
+  and who and when (`VerdictBy`), and keeps `real_of` as `SERIES START`;
+  a white firing writes nothing, as before, so "unrelated" is refused only
+  on one it made black.
+- **Replays.** `ReplayVerdicts` gives the verdicts of a period;
+  `replayCompared` (a proposal's backtest and `backtest_again`, `compare`,
+  a pull request's backtest, a change reviewed), `replayInput` (the
+  digest's suggestions and near misses), and the Settings page's three
+  tries carry them on both sides. A backtest keeps when it ran (`at`);
+  "unrelated" said, or undone, on a firing of its rule in its period since
+  makes it stale (`SaidSince`), read from the change rows the writes noted
+  (`verdict on RULE {labels} at START`, their before and after), so that
+  an undoing, which may keep no verdict, and a held verdict taken away
+  count as a saying does.
+- **The summary.** `people` from the tallies, by the parts the record
+  judges: Lapilli's own judging reads the record again without the
+  incidents "This was real" wrote (`tallies.recL`); `real` counts by the
+  rule of the alert each was written from. `not_judged` beside
+  `unjudged`. A goal's `people` says what moved its measure, and the
+  `goal.missed` notice carries it. A task's "no longer missed" counts the
+  week's firings whose verdicts were said or undone since it was told
+  (`VerdictsSince`), from the change rows, a bulk answer's each firing.
+- **Reading them.** `GET /api/v1/verdicts` is heavy, as a report with its
+  firings is: 20,000 verdicts at most (`verdictsAtOnce`), counted before
+  any is read and refused past it, to be asked a shorter period; read
+  with a `LIMIT` all the same, in the one turn there is for a heavy
+  request, its answer given 30 seconds to be written. A page's firings'
+  verdicts are read by their alerts and starts (`VerdictsOf`), and the
+  verdicts to look at again by the latest, `LIMIT` in SQL, counted apart.
+- **`judged: false`.** `verdict.Options.NotJudged`, looked up only when
+  an entry says it; `Catches` refuses first. `lapilli verdict` and serve
+  take a file of such entries with no signal. The Settings page's entries
+  take it, and its table says "judged by nothing"; the page shows the
+  entries only once a named signal is in effect, as before, so entries
+  judged by nothing with no named signal come from `--impact-file` (not
+  done: the entries' form without named signals). The report's
+  `settings.impact_rules[].judged`†, not in the design's list, says it.
+  `impact_rules.judged`, which schema 026 adds, is reserved, and nothing
+  writes or reads it: an entry's `judged: false` is read from where the
+  entries are given.
+- **Where it shows**, as item 3 says, but: the incident's page links each
+  rule that caught it to its firings of that day, where they are said
+  unrelated, rather than taking the form itself; the Cleanup page lists
+  the verdicts to look at again without an Undo of its own (one on no
+  firing is undone through the API, or pruned by `--keep`); the activity
+  log groups each person's verdict rows of an hour by the exact name
+  noted.
+- **numbers.md**: "A person's verdict (lapilli serve)", its block counted
+  again from a week's report (`TestVerdictsInTheSummary`), and the
+  stones' section.
+- **Tests.** `internal/verdict/person_test.go`;
+  `internal/ledger/verdicts_test.go` (roles part by part, 14 days, the
+  hour's 30 across every kind, the 409s, the exclusivity, moves, a window
+  confirmed, pruning, `judged: false`, the ledger as `verdict.Judge` with
+  the same verdicts; notes credited to their writers, a firing that caught
+  a window and a real incident and one that caught a real incident alone,
+  a held verdict given its firing back, held verdicts taken away noted,
+  what was said or undone since, the reads bounded);
+  `internal/serve/verdicts_test.go` (the same through
+  the forms and the API, cross-origin, `GET /api/v1/verdicts`, MCP reading
+  and setting none, the summary's `people` and its recount, `/metrics`,
+  `action.share`'s bar, `stones: lapilli`, `judged: false`, `GET`'s most
+  and its turn); `internal/serve/verdictreplay_test.go` (a proposal's
+  backtest with a longer `for` keeps a person's "unrelated" black, and goes
+  stale when one is said or undone since).
+
 ## Steps
 
 1. **Leads.** `verdict.Options.LeadFor` and `MaxLead`, and every place
@@ -1581,7 +1969,8 @@ maintainer, as its review recommended:
    change, leads compared apart from the rest of a signal or an entry; the
    digest's and goals' wait, for weeks and occurrences; the report's and
    the summary's settings; numbers.md's stone section; signals.md's open
-   question 4 closed there; and `require:` on an entry, opt-in.
+   question 4 closed there; and `require:` on an entry, opt-in. (Built:
+   "As built (step 1)".)
 2. **A signal taken away** (item 5), on #151, with no schema. `RecordOf`
    leaving a window of a signal not in effect out of the record, and
    `Agrees` reading entries for it, with named signals in effect or none;
@@ -1590,13 +1979,14 @@ maintainer, as its review recommended:
    `TestSignalRemovedWindowsCaughtByAnyRule` turned round; #151's case
    with no `impact` in the file judged as `lapilli verdict` judges it,
    and the docs' way round it ("give the file the old expression as
-   `impact`") taken out.
+   `impact`") taken out. (Built: "As built (step 2)".)
 3. **Episodes.** `verdict.Judge`'s episodes; the next schema; the tally's
    walk, and the walk from the newest week back on an upgrade or a change
    of zone; the summary's `episodes`, a rule's page, the rules list's
    column and facet, the digest's noisy line, MCP, the report (with its
    zone and each firing's day), the CSV and `/metrics`; the marked counts
-   and the two goal measures; numbers.md's "Episodes".
+   and the two goal measures; numbers.md's "Episodes". (Built: "As built
+   (step 3)".)
 4. **People's verdicts.** The next schema; the ledger's write, part by
    part, and `stones`; verdicts in every replay, on both sides; the keys
    moved with incidents' keys; the forms (with series and start, "This
@@ -1609,5 +1999,5 @@ maintainer, as its review recommended:
    what the Goals page says beside each goal; numbers.md's "A person's
    verdict". It may be two pull
    requests, as signals' step 2 was: the ledger, judging, the API and the
-   numbers first, the pages after.
+   numbers first, the pages after. (Built: "As built (step 4)".)
 5. **Rows by label**: not now, as decided (open question 8).

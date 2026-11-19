@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -327,39 +328,101 @@ func TestBacktestServeRecipe(t *testing.T) {
 	}
 }
 
-// LAPILLI_ID_TOKEN, the CI's ID token (GitLab's id_tokens:), is sent as
-// the bearer token, kept out of what the recipe runs: neither curl's
-// command line nor its environment has it, nor RENDER's.
+// LAPILLI_ID_TOKEN, the CI's ID token (GitLab's id_tokens:, Bitbucket's
+// BITBUCKET_STEP_OIDC_TOKEN as the step gives it), is sent as the bearer
+// token, kept out of what the recipe runs: neither curl's command line nor
+// its environment has it, nor RENDER's, under either name.
 func TestBacktestServeRecipeIDToken(t *testing.T) {
 	needRecipeTools(t)
-	repo := newPRRepo(t, map[string]string{"chart/out.yaml": shopRules("5m")})
-	repo.pullRequest(map[string]string{"chart/out.yaml": shopRules("2h")})
+	for _, h := range []backtestHost{backtestHosts[2], backtestHosts[3]} {
+		t.Run(h.kind, func(t *testing.T) {
+			repo := newPRRepo(t, map[string]string{"chart/out.yaml": shopRules("5m")})
+			repo.pullRequest(map[string]string{"chart/out.yaml": shopRules("2h")})
+			srv := newServeStandIn(t)
+			srv.token = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2dpdGxhYi5leGFtcGxlLmNvbSJ9.c2lnbmF0dXJl"
+			srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+			rr := newRecipeRun(t, h, repo)
+			var argv, envs string
+			rr.env, argv, envs = curlShim(t, rr.env)
+			seen := filepath.Join(t.TempDir(), "render-saw")
+			env := []string{"LAPILLI_SERVE=" + srv.url, "LAPILLI_ID_TOKEN=" + srv.token, "SERVE_POLL=0",
+				"RENDER=printf '%s' \"${LAPILLI_ID_TOKEN:-none}${BITBUCKET_STEP_OIDC_TOKEN:-none}\" >" + seen + "; cat chart/out.yaml"}
+			if h.kind == "bitbucket" {
+				env = append(env, "BITBUCKET_STEP_OIDC_TOKEN="+srv.token, "PR=7")
+			}
+			out, err := rr.run(env)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if body := srv.sent(); !maps.Equal(sentFiles(t, body["after"]), map[string]string{"rules.yaml": shopRules("2h")}) ||
+				!maps.Equal(sentFiles(t, body["before"]), map[string]string{"rules.yaml": shopRules("5m")}) {
+				t.Errorf("what RENDER wrote isn't sent as rules.yaml: %v", body)
+			}
+			if b, _ := os.ReadFile(seen); string(b) != "nonenone" {
+				t.Errorf("RENDER saw the ID token: %q", b)
+			}
+			args, _ := os.ReadFile(argv)
+			e, _ := os.ReadFile(envs)
+			if strings.Contains(string(args), srv.token) || strings.Contains(string(e), srv.token) {
+				t.Error("the ID token on curl's command line, or in its environment")
+			}
+			if !strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0 |") {
+				t.Errorf("the comment:\n%s", rr.body())
+			}
+		})
+	}
+}
+
+// A Bitbucket step's token that names its workspace's audience alone, from
+// a step whose oidc: asks for none of serve's, isn't sent: serve would
+// refuse it, and whatever trusts the workspace's audience takes it. Its
+// payload is read, not verified, as base64url without padding, its aud a
+// string or a list; capitals are the same. One with serve's audience
+// beside the workspace's is sent.
+func TestBacktestServeRecipeBitbucketDefaultAudience(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	def := "ari:cloud:bitbucket::workspace/4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d"
+	// jwt is a token of aud whose payload, encoded, has both of
+	// base64url's own characters and no padding.
+	jwt := func(aud any) string {
+		for i := range 12 {
+			for j := range 12 {
+				x := strings.Repeat("?", i) + strings.Repeat("~", j)
+				b, _ := json.Marshal(map[string]any{"iss": "https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc", "aud": aud, "x": x})
+				if p := base64.RawURLEncoding.EncodeToString(b); strings.Contains(p, "-") && strings.Contains(p, "_") && len(p)%4 != 0 {
+					return "eyJhbGciOiJSUzI1NiJ9." + p + ".c2lnbmF0dXJl"
+				}
+			}
+		}
+		t.Fatal("no payload with - and _ and no padding")
+		return ""
+	}
 	srv := newServeStandIn(t)
-	srv.token = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2dpdGxhYi5leGFtcGxlLmNvbSJ9.c2lnbmF0dXJl"
+	for name, aud := range map[string]any{
+		"a string":        def,
+		"a list":          []string{def},
+		"two workspaces'": []string{def, "ari:cloud:bitbucket::workspace/0e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b"},
+		"in capitals":     strings.ToUpper(def),
+	} {
+		rr := serveRun(t, backtestHosts[3], repo, srv)
+		out, err := rr.run([]string{"PATHS=alerts", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_ID_TOKEN=" + jwt(aud)})
+		if err == nil || !strings.Contains(out, "LAPILLI_ID_TOKEN names Bitbucket's workspace audience alone") {
+			t.Errorf("%s: %v\n%s", name, err, out)
+		}
+	}
+	if posts, gets, _ := srv.counts(); posts+gets != 0 {
+		t.Errorf("sent: %d POSTs, %d GETs", posts, gets)
+	}
+	srv.token = jwt([]string{def, "https://lapilli-ci.example.com"})
 	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
-	rr := newRecipeRun(t, backtestHosts[2], repo)
-	var argv, envs string
-	rr.env, argv, envs = curlShim(t, rr.env)
-	seen := filepath.Join(t.TempDir(), "render-saw")
-	out, err := rr.run([]string{"LAPILLI_SERVE=" + srv.url, "LAPILLI_ID_TOKEN=" + srv.token, "SERVE_POLL=0",
-		"RENDER=printf '%s' \"${LAPILLI_ID_TOKEN:-none}\" >" + seen + "; cat chart/out.yaml"})
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	rr := serveRun(t, backtestHosts[3], repo, srv)
+	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_ID_TOKEN=" + srv.token}); err != nil {
+		t.Fatalf("beside serve's: %v\n%s", err, out)
 	}
-	if body := srv.sent(); !maps.Equal(sentFiles(t, body["after"]), map[string]string{"rules.yaml": shopRules("2h")}) ||
-		!maps.Equal(sentFiles(t, body["before"]), map[string]string{"rules.yaml": shopRules("5m")}) {
-		t.Errorf("what RENDER wrote isn't sent as rules.yaml: %v", body)
-	}
-	if b, _ := os.ReadFile(seen); string(b) != "none" {
-		t.Errorf("RENDER saw LAPILLI_ID_TOKEN: %q", b)
-	}
-	args, _ := os.ReadFile(argv)
-	e, _ := os.ReadFile(envs)
-	if strings.Contains(string(args), srv.token) || strings.Contains(string(e), srv.token) {
-		t.Error("the ID token on curl's command line, or in its environment")
-	}
-	if !strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0 |") {
-		t.Errorf("the comment:\n%s", rr.body())
+	if posts, _, _ := srv.counts(); posts != 1 {
+		t.Errorf("beside serve's: %d POSTs", posts)
 	}
 }
 
@@ -849,8 +912,8 @@ func TestBacktestServeRecipeSettings(t *testing.T) {
 		{nil, []string{"--incidents", "/tmp/incidents.yaml"}, "--incidents: " + judging},
 		{nil, []string{"--from", "2026-11-01T00:00:00Z"}, "--from: lapilli serve replays only what has settled"},
 		{nil, []string{"--to=2026-11-01T00:00:00Z"}, "--to: lapilli serve replays only what has settled"},
-		{nil, []string{"--grafana", "https://grafana.example.com"}, "--grafana: lapilli serve backtests rules in Prometheus's format"},
-		{nil, []string{"--loki-tenant", "a"}, "--loki-tenant: lapilli serve backtests rules in Prometheus's format"},
+		{nil, []string{"--grafana", "https://grafana.example.com"}, "--grafana: lapilli serve backtests the rules read from PATHS, LOKI_PATHS or RENDER against its own history"},
+		{nil, []string{"--loki-tenant", "a"}, "--loki-tenant: lapilli serve backtests the rules read from PATHS, LOKI_PATHS or RENDER against its own history"},
 		{nil, []string{"--ruler=https://ruler.example.com"}, "--ruler: lapilli serve backtests"},
 		{nil, []string{"--alarms", "cloudwatch"}, "--alarms: lapilli serve backtests"},
 		{nil, []string{"--max-rate", "2"}, "--max-rate: through lapilli serve, the recipe sends it --since, --tz and --rules-select alone"},
@@ -904,6 +967,12 @@ func TestBacktestServeRecipeSettings(t *testing.T) {
 		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_ID_TOKEN=eyJ.a.b"}, nil, "LAPILLI_ID_TOKEN is for a backtest through lapilli serve"},
 		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_SERVE_AUDIENCE=https://lapilli-ci.example.com"}, nil,
 			"LAPILLI_SERVE_AUDIENCE is for a backtest through lapilli serve"},
+		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "LAPILLI_SERVE_TOKEN_FILE=", "LOKI_PATHS=loki"}, nil, "LOKI_PATHS is for a backtest through lapilli serve"},
+		// A Loki ruler's files: in the repository, none of PATHS, not with
+		// RENDER.
+		{[]string{"LOKI_PATHS=../loki"}, nil, "LOKI_PATHS: ../loki isn't a path in the repository"},
+		{[]string{"LOKI_PATHS=alerts/"}, nil, "LOKI_PATHS: alerts/ is in PATHS too"},
+		{[]string{"PATHS=", "RENDER=cat alerts/shop.yaml", "LOKI_PATHS=loki"}, nil, "LOKI_PATHS goes with PATHS"},
 	} {
 		out, err := rr.run(append([]string{"PATHS=alerts"}, c.settings...), c.args...)
 		if err == nil || !strings.Contains(out, c.want) {
@@ -918,6 +987,41 @@ func TestBacktestServeRecipeSettings(t *testing.T) {
 	if out, err := gl.run([]string{"PATHS=alerts", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_SERVE_AUDIENCE=https://lapilli-ci.example.com"}); err == nil ||
 		!strings.Contains(out, "LAPILLI_SERVE_AUDIENCE: gitlab.sh asks its CI for no ID token") {
 		t.Errorf("gitlab.sh: %v\n%s", err, out)
+	}
+}
+
+// LOKI_PATHS's files are sent beside PATHS's, each marked a Loki ruler's,
+// as --loki-rules would read them; a path of it in neither commit is said.
+func TestBacktestServeRecipeLokiPaths(t *testing.T) {
+	needRecipeTools(t)
+	logs := "groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"x\"}[5m])) > %d\n"
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "loki/logs.yaml": fmt.Sprintf(logs, 1)})
+	repo.pullRequest(map[string]string{"loki/logs.yaml": fmt.Sprintf(logs, 2)})
+	srv := newServeStandIn(t)
+	srv.answers(nil, serveWaitsRunsDone(serveMarkdown(changedSummary)))
+	rr := serveRun(t, backtestHosts[0], repo, srv)
+	if out, err := rr.run([]string{"PATHS=alerts", "LOKI_PATHS=loki"}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	body := srv.sent()
+	for side, want := range map[string]string{"before": fmt.Sprintf(logs, 1), "after": fmt.Sprintf(logs, 2)} {
+		var lokis []string
+		list, _ := body[side].([]any)
+		for _, f := range list {
+			m, _ := f.(map[string]any)
+			switch {
+			case m["loki"] == true && m["path"] == "logs.yaml" && m["content"] == want:
+				lokis = append(lokis, "logs.yaml")
+			case m["loki"] != nil:
+				t.Errorf("%s: %v", side, m)
+			}
+		}
+		if len(lokis) != 1 || len(list) != 2 {
+			t.Errorf("%s: %v", side, list)
+		}
+	}
+	if out, err := serveRun(t, backtestHosts[0], repo, srv).run([]string{"PATHS=alerts", "LOKI_PATHS=lokki"}); err == nil || !strings.Contains(out, "LOKI_PATHS: lokki: in neither commit") {
+		t.Errorf("%v\n%s", err, out)
 	}
 }
 

@@ -22,6 +22,18 @@ var offFuncs = template.FuncMap{
 		p.Title, p.Short = title, short
 		return p
 	},
+	// verdictOf is what a firing's verdict forms take (firings.html,
+	// "verdict"): the page, the firing, and where its forms go back to.
+	"verdictOf": func(p page, f any, back string) verdictArgs {
+		v := verdictArgs{P: p, Back: p.Link(back), Loc: p.Loc}
+		switch f := f.(type) {
+		case firingLine:
+			v.F = f
+		case firingRow:
+			v.F = f.firingLine
+		}
+		return v
+	},
 	// offOf is an action a reader may not take for their role: need is
 	// "admin", or else an editor's.
 	"offOf": func(p page, label, need, id string) pageAction {

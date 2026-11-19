@@ -24,6 +24,14 @@
 {{if $may}}{{with .Rules}}<datalist id="rules-now">{{range .}}<option value="{{.}}"></option>{{end}}</datalist>{{end}}{{end}}
 <p class="row">{{if gt .From 1}}<a href="{{$.Link "/orphans"}}">{{t "The first"}}</a>{{end}}{{with .Next}} <a href="{{$.Link "/orphans" "after" .}}">{{t "The next"}}</a>{{end}}</p>
 {{end}}
+{{with .Verdicts}}<h2 id="verdicts">{{t "People's verdicts to look at again"}}</h2>
+<p>{{tbdi "Their firing, or an incident, moved under them since they were said: say each again on its firing, or undo it. One on no firing is pruned with its start, by --keep."}}</p>
+<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "What was said"}}</th><th scope="col">{{t "Why to look again"}}</th></tr></thead>
+<tbody>{{range .}}<tr><td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td><td class="t"><a href="{{$.Link "/firings" "day" (day $.Loc .Start) "rule" .Rule}}">{{at $.Loc .Start}}</a></td>
+<td>{{if .Unrelated}}{{tbdi "unrelated to %s, by %s" (joinKeys .) .UnrelatedBy}}{{end}}{{if and .Unrelated .Action}}; {{end}}{{if eq .Action "yes"}}{{tbdi "needed action, by %s" .ActionBy}}{{else if eq .Action "no"}}{{tbdi "needed no action, by %s" .ActionBy}}{{end}}</td>
+<td>{{movedText .Moved}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
 {{with .ImpactNotes}}<h2 id="impact-notes">{{t "Tasks and comments on impact windows read again"}}</h2>
 <p>{{t "The impact signal was read again with another criterion, and nothing it found covers these windows any more: their tasks and comments are kept on them, listed here."}}</p>
 <ul class="plain">{{range .}}<li><code><bdi>{{.Key}}</bdi></code>:{{range .Tasks}} <a href="{{$.Link (printf "/tasks/%d" .)}}">{{t "Task #%d" .}}</a>{{end}}{{with .Comments}} {{t "%d comments" .}}{{end}}</li>{{end}}</ul>{{end}}

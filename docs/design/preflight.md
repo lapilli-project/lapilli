@@ -176,7 +176,7 @@ built (step 3)").
 
 | Id | Read | Says |
 |---|---|---|
-| `backtest.trust` | nothing more: `--backtest-trust` as serve read it in reading the flags (`serve.ReadTrust`, with the other token files serve takes), and the port's flags as `serve.New` holds them (`serve.BacktestRefused`) | what serve does at start: it takes the file, naming each entry, its CI (`github`, `gitlab`, `forgejo` or `generic`) and the claims it pins, never what a claim is pinned to; or it stops, a problem, saying why from serve's own refusal (`serve.TrustRefused`: the line, the entry, the field, what is wrong) in Lapilli's words, nothing the file holds. A plain token's file is read as serve reads it (there, 32 characters at least, no other token file's), and said to be long enough, never its text or its length. No credential is needed: with `--offline` the file is read all the same, the plain tokens' files not, and with one the item is unknown |
+| `backtest.trust` | nothing more: `--backtest-trust` as serve read it in reading the flags (`serve.ReadTrust`, with the other token files serve takes), and the port's flags as `serve.New` holds them (`serve.BacktestRefused`) | what serve does at start: it takes the file, naming each entry, its CI (`github`, `gitlab`, `forgejo`, `bitbucket` or `generic`) and the claims it pins, never what a claim is pinned to; or it stops, a problem, saying why from serve's own refusal (`serve.TrustRefused`: the line, the entry, the field, what is wrong) in Lapilli's words, nothing the file holds. A plain token's file is read as serve reads it (there, 32 characters at least, no other token file's), and said to be long enough, never its text or its length. No credential is needed: with `--offline` the file is read all the same, the plain tokens' files not, and with one the item is unknown |
 | `backtest.issuers` | for each issuer the file names (with its `jwks_url`, as serve asks it, once for all its entries), its discovery document, then its keys, as `signin.CI` asks them at a token's first check: its issuer to the byte, its keys at its own origin or the entry's `jwks_url`, no redirect, 1 MB and 100 keys, ten seconds; four at a time, 20 at most | said as it is when it is a public CI's (GitHub's, gitlab.com, codeberg.org), otherwise as `[--backtest-trust's issuer N]`, hidden wherever the report would say it, as a `jwks_url` is; ok when a key it holds verifies a token of an algorithm its discovery document names; a problem when either can't be read, or no key does: serve starts, and refuses those entries' tokens (401) until it does; unknown with `--offline`, past 20 issuers, or once `--preflight-timeout` is up |
 
 ## Estimates
@@ -233,7 +233,10 @@ range read's.
 
 **The backtest lane.** While the lane runs a backtest, its share of
 `--max-rate` (`--backtest-share`) is kept for it, and the runs' requests
-to `--prometheus` are spaced by the rest (`prom.Pace.Reserve`). So, with
+to `--prometheus` are spaced by the rest (`prom.Pace.Reserve`); to a Loki
+and Grafana's data source proxy too, while it asks them
+([backtests.md](backtests.md), "As built (step 3)"), so each API the runs
+ask is timed so. So, with
 `--backtest-listen`, the hourly runs are timed twice: at `--max-rate`, and
 in the worst case, a backtest running the whole hour, at `--max-rate` less
 the share. A run that takes longer than `--every` only then is unknown,
@@ -901,8 +904,9 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   only so (`keysAllowed`), once read, so a discovery document can't have
   preflight fetch from anywhere else even if signin's check went.
 - **What a typical pull request is.** Ten of the rules read that the
-  port takes (Prometheus's format, replayed), each of an expression of
-  its own, the first ten in the order read, each with its own `for` and
+  port takes (replayed: from backtests' step 3, a Grafana rule's and a
+  Loki ruler's too, whose data sources are the rules in effect's), each
+  of queries of its own, the first ten in the order read, each with its own `for` and
   `keep_firing_for`: a rule in Prometheus's format asks one query a day
   its reads touch, and its `for` starts them earlier, so one whose `for`
   reaches back past midnight UTC asks a day more (`for: 2h` at 02:30 UTC:

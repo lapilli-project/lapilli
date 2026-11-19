@@ -61,7 +61,7 @@ type signalTried struct {
 // keepForm keeps a form tried as typed on the page: the form of the
 // signal it changes, open, or the one that adds one.
 func keepForm(v *criteriaView, f signalForm) {
-	f.InEffect = v.Add.InEffect // what a form posted doesn't give
+	f.InEffect, f.LeadAbove = v.Add.InEffect, v.Add.LeadAbove // what a form posted doesn't give
 	if f.Was == "" {
 		v.Add, v.AddOpen = f, true
 		return
@@ -234,7 +234,7 @@ func (s *Server) judgeSignalsTried(ctx context.Context, l, who string, try *sign
 	}
 	for _, d := range p.After.Defs {
 		w := was(d.Name)
-		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Bit: -1}
+		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Lead: d.Lead, Bit: -1}
 		t := signalTried{Name: d.Name, Now: len(windowsOf[w])}
 		prev, had := inEffect[w]
 		switch _, renamed := p.Renamed[d.Name]; {
@@ -381,6 +381,12 @@ func (s *Server) judgeSignalsTried(ctx context.Context, l, who string, try *sign
 			plain = append(plain, f.Firing)
 		}
 	}
+	// People's verdicts, on both sides (docs/design/judging.md, item 3).
+	said, err := s.l.ReplayVerdicts(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	o.Verdicts, with.Verdicts = said, said
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
 	weeks := s.l.SpanWeeks(from, to)

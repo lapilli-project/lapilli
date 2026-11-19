@@ -30,7 +30,8 @@
     {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
     {{else if and .Kind (not $.View.TaskOff)}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
   {{with .TaskOff}}<p class="quiet look-off">{{t "Make it a task"}} — {{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{tbdi .Why}}{{end}}</p>{{end}}
-  {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}
+  {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}{{with .MovedVerdicts}}
+  <p class="note"><a href="{{$.Link "/orphans"}}#verdicts">{{if .Recent}}{{t "%d people's verdicts to look at again" .Recent}}{{end}}{{if and .Recent .Old}}; {{end}}{{if .Old}}{{t "%d people's verdicts older than 14 days to look at again" .Old}}{{end}}</a></p>{{end}}
   {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
   {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
 </section>
@@ -111,8 +112,8 @@
   <span class="heat-scale" aria-hidden="true">{{t "fewer"}} <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> {{t "more"}}</span></p>
   {{if .HeatLeft}}<p class="quiet">{{t "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known."}}</p>{{end}}
   <div class="scroll"><table class="heat">
-    <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th></tr></thead>
-    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
+    <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th><th scope="col" class="n">{{t "Episodes"}}</th></tr></thead>
+    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td><td class="n">{{if .Counted}}{{.Episodes}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}

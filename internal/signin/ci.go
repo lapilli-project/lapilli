@@ -17,13 +17,15 @@ import (
 
 // CI is a CI provider's issuer of ID tokens, with which a job proves which
 // repository it runs for (docs/design/backtests.md): GitHub Actions', a
-// GitLab's, a Forgejo's. A token is checked as Bearer checks one, by the
-// issuer's keys, found through its discovery document, never a URL a
-// token names: its signature by an algorithm of a key pair (Asymmetric),
-// its issuer to the byte, its audience, exp and nbf; and, besides, that it
-// names one audience alone, and was issued (iat) within the last hour,
-// whatever its exp says. What the token says beyond that (its repository,
-// its event) is for its caller to hold to what it trusts.
+// GitLab's, a Forgejo's, a Bitbucket workspace's. A token is checked as
+// Bearer checks one, by the issuer's keys, found through its discovery
+// document, never a URL a token names: its signature by an algorithm of a
+// key pair (Asymmetric), its issuer to the byte, its audience, exp and nbf;
+// and, besides, that it names one audience alone (For), or one beside the
+// one its CI always adds (ForBeside: Bitbucket's), and was issued (iat)
+// within the last hour, whatever its exp says. What the token says beyond
+// that (its repository, its event) is for its caller to hold to what it
+// trusts.
 type CI struct {
 	Issuer string
 	// JWKS, when set, is where the keys are, in place of the URL the
@@ -94,9 +96,25 @@ func (t CIToken) For(audience string) bool {
 	return len(t.Audience) == 1 && t.Audience[0] == audience
 }
 
+// ForBeside reports whether the token was made for audience alone, or for
+// audience and beside, the one its CI adds to every token whatever the job
+// asks (Bitbucket's default, its workspace's), and no other: never for a
+// third service, nor for beside alone.
+func (t CIToken) ForBeside(audience, beside string) bool {
+	switch {
+	case t.For(audience):
+		return true
+	case beside == "" || beside == audience || len(t.Audience) != 2:
+		return false
+	}
+	return t.Audience[0] == audience && t.Audience[1] == beside || t.Audience[0] == beside && t.Audience[1] == audience
+}
+
 // VerifyToken checks raw as Verify does, but for its audience, which it
-// gives for its caller to hold to its own (For): one check of the
-// signature for every entry of the issuer's.
+// gives for its caller to hold to its own (For, ForBeside): one check of
+// the signature for every entry of the issuer's. A token naming more than
+// two audiences is refused here: made for several services, any of which
+// could send it on.
 func (c *CI) VerifyToken(ctx context.Context, raw string) (CIToken, error) {
 	keys, err := c.keysOf(ctx)
 	if err != nil {
@@ -107,8 +125,9 @@ func (c *CI) VerifyToken(ctx context.Context, raw string) (CIToken, error) {
 	if err != nil {
 		return CIToken{}, fmt.Errorf("%w: %v", ErrCIToken, err)
 	}
-	if len(t.Audience) != 1 {
-		// Made for several services, any of which could send it on.
+	if len(t.Audience) == 0 || len(t.Audience) > 2 {
+		// Made for several services, any of which could send it on; two
+		// only as For and ForBeside take them.
 		return CIToken{}, fmt.Errorf("%w: it names %d audiences, not one", ErrCIToken, len(t.Audience))
 	}
 	var payload json.RawMessage

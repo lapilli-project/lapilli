@@ -58,6 +58,13 @@ type markedCount struct {
 	Incidents, Impacts              markedIncidents
 	// judged are the firings judged, of Firings.
 	judged int
+	// Episodes are those whose first firing is counted here, by its
+	// marks (docs/design/judging.md, item 2), EpisodesCaught those with a
+	// white firing, episodesJudged those judged; episodesCounted, that the
+	// ledger has counted the episodes of every week they are of.
+	Episodes, EpisodesCaught int
+	episodesJudged           int
+	episodesCounted          bool
 }
 
 type markedIncidents struct {
@@ -147,8 +154,11 @@ type markedData struct {
 	// caught nothing and had no record by the signals tied to them.
 	byWeek   map[int64]map[int64]map[string]ledger.MarkedTally
 	unjudged map[int64]map[int64]map[string]int
-	incs     map[int64][]ledger.Incident
-	at       verdict.NoisyAt
+	// unjudgedEp is unjudged, of the episodes whose first firing is
+	// marked with the kind.
+	unjudgedEp map[int64]map[int64]map[string]int
+	incs       map[int64][]ledger.Incident
+	at         verdict.NoisyAt
 	// ex are every window meeting the weeks read, whichever its caller
 	// lists; all, their occurrences, by kind, of everyone's (0) and each
 	// team's windows, worked out as first asked: what "outside its kind"
@@ -183,7 +193,8 @@ func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, on
 		return nil, err
 	}
 	d := &markedData{x: x, t: t, w1: w1, w2: w2, byDay: map[int64][]ledger.MarkedTally{}, byWeek: map[int64]map[int64]map[string]ledger.MarkedTally{},
-		unjudged: map[int64]map[int64]map[string]int{}, incs: map[int64][]ledger.Incident{}, at: noisyAt(t.o), all: map[int64]map[string][]markedOcc{},
+		unjudged: map[int64]map[int64]map[string]int{}, unjudgedEp: map[int64]map[int64]map[string]int{}, incs: map[int64][]ledger.Incident{},
+		at: noisyAt(t.o), all: map[int64]map[string][]markedOcc{},
 		ex: &markedSpan{s: s, own: x.own, ms: ms}}
 	for _, m := range days {
 		d.byDay[m.At] = append(d.byDay[m.At], m)
@@ -194,19 +205,22 @@ func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, on
 	}
 	for _, m := range weeks {
 		if d.byWeek[m.At] == nil {
-			d.byWeek[m.At], d.unjudged[m.At] = map[int64]map[string]ledger.MarkedTally{}, map[int64]map[string]int{}
+			d.byWeek[m.At], d.unjudged[m.At], d.unjudgedEp[m.At] = map[int64]map[string]ledger.MarkedTally{}, map[int64]map[string]int{}, map[int64]map[string]int{}
 		}
 		if d.byWeek[m.At][m.Rule] == nil {
-			d.byWeek[m.At][m.Rule], d.unjudged[m.At][m.Rule] = map[string]ledger.MarkedTally{}, map[string]int{}
+			d.byWeek[m.At][m.Rule], d.unjudged[m.At][m.Rule], d.unjudgedEp[m.At][m.Rule] = map[string]ledger.MarkedTally{}, map[string]int{}, map[string]int{}
 		}
 		k := d.byWeek[m.At][m.Rule][m.Kind]
 		k.At, k.Rule, k.Kind = m.At, m.Rule, m.Kind
 		k.Firings += m.Firings
 		k.White += m.White
 		k.Refired += m.Refired
+		k.Episodes += m.Episodes
+		k.EpisodesWhite += m.EpisodesWhite
 		d.byWeek[m.At][m.Rule][m.Kind] = k
 		if !t.judgedPart(m.At, m.Rule, m.Signals) {
 			d.unjudged[m.At][m.Rule][m.Kind] += m.Firings - m.White
+			d.unjudgedEp[m.At][m.Rule][m.Kind] += m.Episodes - m.EpisodesWhite
 		}
 	}
 	incs, err := s.l.Incidents(ctx, s.l.Midnight(w1), s.l.Midnight(w2+7), false)
@@ -246,6 +260,7 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 	// Inside: the kind's firings on the days it covers, by rule.
 	inRules := map[int64][3]int{}
 	judged := 0
+	var ep [3]int // episodes, caught, judged
 	for day := s.l.Day(o.Start); day <= s.l.Day(o.End); day++ {
 		for _, m := range d.byDay[day] {
 			if m.Kind != o.M.Kind || !mine(m.Rule) {
@@ -253,14 +268,19 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 			}
 			c := inRules[m.Rule]
 			inRules[m.Rule] = [3]int{c[0] + m.Firings, c[1] + m.White, c[2] + m.Refired}
+			ep[0], ep[1] = ep[0]+m.Episodes, ep[1]+m.EpisodesWhite
 			if t.judgedPart(ledger.Week(day), m.Rule, m.Signals) {
 				judged += m.Firings
+				ep[2] += m.Episodes
 			} else {
 				judged += m.White
+				ep[2] += m.EpisodesWhite
 			}
 		}
 	}
 	inside = markedTotals(inRules, judged, d.at)
+	inside.Episodes, inside.EpisodesCaught, inside.episodesJudged = ep[0], ep[1], ep[2]
+	inside.episodesCounted = t.episodesCounted(ledger.Week(s.l.Day(o.Start)))
 	// Another of its kind on one of its days is counted with it.
 	all := d.occs(team)[o.M.Kind]
 	for _, p := range all {
@@ -272,6 +292,7 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 	first := ledger.Week(s.l.Day(o.Start))
 	beRules := map[int64][3]int{}
 	judged = 0
+	ep = [3]int{}
 	for w := first - 7*markedBefore; w < first; w += 7 {
 		for id, x := range t.by[w] {
 			if !mine(id) {
@@ -285,9 +306,15 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 			// of the kind.
 			u := t.unjudged(w, id)
 			judged += n - (u.Firings - u.White - d.unjudged[w][id][o.M.Kind])
+			// And its episodes, by their first firings' marks.
+			en := x.Episodes - m.Episodes
+			ep[0], ep[1] = ep[0]+en, ep[1]+x.EpisodesWhite-m.EpisodesWhite
+			ep[2] += en - (u.Episodes - u.EpisodesWhite - d.unjudgedEp[w][id][o.M.Kind])
 		}
 	}
 	before = markedTotals(beRules, judged, d.at)
+	before.Episodes, before.EpisodesCaught, before.episodesJudged = ep[0], ep[1], ep[2]
+	before.episodesCounted = t.episodesCounted(first - 7*markedBefore)
 	// The incidents: those during it, and those of the weeks before
 	// during none of its kind.
 	bFrom, bTo := s.l.Midnight(first-7*markedBefore), s.l.Midnight(first)

@@ -177,7 +177,8 @@ Bounds:
 
 - A write takes a body of 1 MB at most on `--listen`.
 - `/api/v1/report` is 31 days and 100,000 firings at most, or 366 days
-  with `firings=false`; `/api/v1/incidents` 366 days;
+  with `firings=false`; `GET /api/v1/verdicts` 31 days and 20,000
+  verdicts; `/api/v1/incidents` 366 days;
   `/api/v1/windows` and `/api/v1/marked` 400 days; `/api/v1/summary` 53
   weeks.
 - `GET /api/v1/tasks` gives 500 tasks at most, the latest changed first;
@@ -185,9 +186,9 @@ Bounds:
   tracker job's `GET /api/v1/tasks` goes on from where it stopped
   (`after`, `next`).
 - A heavy request takes the one turn there is for one: a report with its
-  firings, a summary of every team or of more than 53 rows. Another waits
-  up to 30 seconds for it, then gets 503; the answer has 30 seconds to be
-  written.
+  firings, a summary of every team or of more than 53 rows, and
+  `GET /api/v1/verdicts`. Another waits up to 30 seconds for it, then gets
+  503; the answer has 30 seconds to be written.
 - `--listen` reads a request in 30 seconds and its headers up to 64 KB,
   and writes an answer in two minutes; the other ports, in 30 seconds,
   16 KB and one minute.
@@ -197,7 +198,7 @@ Bounds:
 | Route | Role | Takes | Gives |
 |---|---|---|---|
 | `GET /api/v1/report` | viewer | `from`, `to`; `firings=false`; `format=csv`; `redact=true` | `lapilli verdict --json`'s report for the period ([fields](numbers.md#the-reports-fields)); with `format=csv`, its firings a row each ([columns](numbers.md#the-csvs-columns)), those quiet windows excused among them; with `redact=true`, every name an alias, as `--redact` gives ([redact.md](redact.md)) |
-| `GET /api/v1/summary` | viewer | `from`, `to` (a day, `2026-11-02`, or an RFC 3339 time; the last four whole weeks and this one by default), `team` (repeatable, or `*` alone for everyone and every team), `critical` (the severities counted as critical, comma-separated) | each week, for everyone or each team: precision, critical firings caught, re-fires, firings off hours and during deploys, incidents and impact windows caught and missed, and `goals` with goals declared; with `schema` 1 ([docs/design/noc.md](design/noc.md)) |
+| `GET /api/v1/summary` | viewer | `from`, `to` (a day, `2026-11-02`, or an RFC 3339 time; the last four whole weeks and this one by default), `team` (repeatable, or `*` alone for everyone and every team), `critical` (the severities counted as critical, comma-separated) | each week, for everyone or each team: precision, critical firings caught, re-fires, firings off hours and during deploys, incidents and impact windows caught and missed, the firings counted as `episodes` ([numbers.md](numbers.md#episodes); `null` until the ledger has counted the week's), `people`'s verdicts and `not_judged` ([numbers.md](numbers.md#a-persons-verdict-lapilli-serve)), and `goals` with goals declared; with `schema` 1 ([docs/design/noc.md](design/noc.md)) |
 | `GET /api/v1/outcomes` | viewer | | what the Outcomes page shows: `effect` (what the rule changes did, beside what their backtests said), `record` (whether incidents are being written down), `use` |
 | `GET /api/v1/rules` | viewer | `weeks` (`1`, `4` or `12`; 4 by default), `team`, `sort` (`refired`, `deploys`), `during` or `outside` (a marked window's kind) | the rules list: `Lines`, a rule each, with `Firings`, `White`, `Black`, `Precision`, `Noisy`, `Team`, `Suggestion`, ...; `Silent`, the rules that didn't fire in the twelve weeks kept |
 | `GET /api/v1/runs` | viewer | | the last 100 runs, the latest first: `Kind`, `From`, `To`, `Firings`, `Error`, `Failed`; to anyone but an admin, without the paths of serve's files |
@@ -219,6 +220,45 @@ once; one written again as it was changes nothing. An incident from the
 incidents file, one a job copied in, or an impact window is changed where
 it comes from: 409. Deciding an impact window is a form of the UI's
 ([The pages](#the-pages)).
+
+## People's verdicts on firings
+
+What a person says of one firing ([docs/design/judging.md](design/judging.md),
+item 3): that it is **unrelated** to the incidents it caught, which turns
+that firing alone black, and whether it **needed action**, which changes no
+stone. A firing is picked by its alert and start, as a report gives it
+(`rule`, `labels`, `start`): a report's firings have no id.
+
+| Route | Role | Takes | Gives |
+|---|---|---|---|
+| `GET /api/v1/verdicts` | viewer | `from`, `to` (RFC 3339; the last seven days by default; 31 days and 20,000 verdicts at most: past them, 400, to ask a shorter period) | `verdicts`, those of the firings that started in the period, each with its firing (`rule`, `labels`, `start`, `end` as it was when said), `unrelated` (`incidents`, each `{key, start, end}` as it was then, `by`, `at`, `note`) and `action` (`answer`, `by`, `at`, `note`), each `null` when not said; `moved`, why it is to be looked at again, and `on_firing` |
+| `PUT /api/v1/verdicts` | editor; a team's editor, `action` and `action_note` of the rules it owns | `rule`, `labels`, `start`; `unrelated` (`true` or `false`), `unrelated_note`, `action` (`yes`, `no`, or `""` for none), `action_note`: a part left out is left as it is | the verdict |
+| `PUT /api/v1/verdicts/bulk` | editor; a team's editor, of the rules it owns | `firings` (each `rule`, `labels`, `start`; 100 at most), `action`, `action_note` | `firings`, `changed` |
+| `DELETE /api/v1/verdicts` | editor; a team's editor, `action` of the rules it owns | `rule`, `labels`, `start`, `part` (`unrelated`, `action`, or both when left out) | 204 |
+
+- **Part by part.** A team's editor's write leaves `unrelated` as it is
+  stored: a `PUT` that gives it otherwise, or its note, is 403, and their
+  `DELETE` of both undoes `action` alone. `unrelated` is an editor's of
+  every team and an admin's: the incident it takes a catch from may be
+  another team's.
+- **The last 14 days.** One who isn't an admin writes of firings that
+  started in the last 14 days alone: an older one is 403, an admin's.
+- **What it needs.** `unrelated` keeps the incidents the firing catches
+  now, 16 at most: 409 on a firing that caught nothing, or one "This was
+  real" wrote an incident from. 404 with no such firing.
+- **30 an hour.** Each person writes 30 verdicts an hour, a `PUT`, a bulk
+  `PUT` (one, however many firings) and a `DELETE` alike, the forms
+  among them: past them, 429 with `Retry-After`, and nothing written.
+- **Who wrote it.** A part's `by` and `at` are of whoever last wrote its
+  answer or its note; another answer given with no note drops the note of
+  the one before.
+- **All or nothing.** A bulk `PUT` with a firing not found, of another
+  team's for a team's editor, or older than 14 days for one who isn't an
+  admin refuses all of it, saying which; `unrelated` isn't taken in bulk.
+- Every write is noted in the activity log, with its before and after; a
+  bulk one as one change; and each person's verdicts of an hour shown as
+  one line. MCP reads verdicts (`firings`, `rule`, `summary`) and sets
+  none.
 
 ## Teams, notes and roles
 
@@ -438,7 +478,11 @@ forms post to paths of their own (`POST /incidents`, `POST /rules/bulk`,
 things do. Some writes are there alone, with no route of the API:
 changing the settings, proposing a change, approving one, deciding an
 impact window, writing a firing down as real, and the changes to many
-rules or firings at once.
+rules or firings at once. A form about a firing (`POST /firings/{id}/real`,
+`POST /firings/{id}/verdict`, and their bulk `POST /firings/real` and
+`POST /firings/verdict`) carries the firing's series and start beside its
+id, and is refused, 409, when the firing is another by then: a run gives
+its firings again, and an id with them.
 
 ## What stays the same
 

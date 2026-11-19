@@ -339,6 +339,11 @@ func (l *Ledger) zone(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM days; DELETE FROM weeks; DELETE FROM marked_days; DELETE FROM marked_weeks"); err != nil {
 			return err
 		}
+		// Episodes are parted by the days, which changed: counted again a
+		// week a write, not in this one (docs/design/judging.md, item 2).
+		if err := l.uncountEpisodes(tx); err != nil {
+			return err
+		}
 		var lo, hi sql.NullInt64
 		if err := tx.QueryRowContext(ctx, "SELECT min(start_at), max(start_at) FROM firings").Scan(&lo, &hi); err != nil {
 			return err
@@ -386,6 +391,10 @@ type txn struct {
 	// named signals last changed: 0 not read yet, 1 they were, 2 not
 	// (staleSignals).
 	stale int
+	// realOf is, in "This was real"'s write, the alert and start of the
+	// firing the incident it writes is from (realKey): kept as its
+	// real_of.
+	realOf string
 }
 
 // versionNames are the names any version of the rules holds, read the

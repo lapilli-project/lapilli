@@ -2,6 +2,302 @@
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-11-20
+
+Judging, steps 1 to 4 (docs/design/judging.md): a lead and `require:` of
+a signal's or a rule entry's own, a signal taken away judging no one,
+episodes beside firings, and a person's verdict on one firing, kept apart
+from Lapilli's own stones. Backtests, steps 2 and 3
+(docs/design/backtests.md): Bitbucket Pipelines' ID token, and
+Grafana-managed and Loki rules on the data sources the rules in effect
+read already, at the backtest port. And a pull request's rule there read
+back no further than its group's `query_offset` and 8 days allow.
+
+Before upgrading:
+- **Ledger schemas 024, 025 and 026**, after 023, in one start: keep a
+  copy of the ledger's disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger.
+- After the upgrade, the leader counts the episodes again a week at a
+  time, the newest first; until then those weeks say their episodes
+  aren't counted yet. No stone changes.
+
+### Added
+
+- **Grafana-managed and Loki rules at the backtest port**
+  (docs/design/backtests.md, step 3; open question 2 decided), on the data
+  sources the rules serve runs read already, so that a pull request makes
+  serve read nothing with its credentials that it doesn't read for its own
+  rules. A Grafana rule is taken only when each of its queries names, by
+  its uid exactly (its case, its spaces, its length), a data source whose
+  queries the replay of a rule in effect asks, and asks it as that rule
+  does: PromQL of `--prometheus`, or LogQL through `--grafana`'s data
+  source proxy (`--loki` without it). A uid serve's Grafana token can read
+  but no rule in effect asks, one only a query beside a condition or a
+  paused rule names, Grafana's own (`grafana`, `-- Mixed --`,
+  `-- Dashboard --`) and a uid Grafana makes none of are refused; an
+  expression's model (`__expr__`) reads nothing. A Loki ruler's rule comes
+  from a file the job marks `"loki": true`, read as `--loki-rules` reads
+  one, and is taken only where serve has `--loki` and its rules in effect
+  hold one, asked with serve's tenant. A rule refused for what it reads is
+  said to read "a data source no rule in effect reads", whatever why,
+  naming no uid or data source of serve's; a Grafana rule's query held to
+  a bound below is said by its refId, nothing of it quoted, as what the
+  replay asks has serve's data source's scrape interval put in for
+  `$__rate_interval`. Beside every bound the Prometheus path has: a
+  Grafana rule has 8 queries of data sources and 16 queries and
+  expressions at most, each query's `relativeTimeRange` 8 days back at
+  most, and each query asked held as a rule's, the end of its
+  relativeTimeRange added to what it reads back; a LogQL query is a metric
+  query, each stream selector naming its streams by a label matched with
+  `=` to a value, its range and offset 8 days back at most, with no
+  subquery and no `@`, its comments in `#` alone and no `'` outside a
+  string (Loki also reads `//` and `/* */` as comments, and a quote in one
+  would hide the rest from these checks). The lane asks a Loki through a
+  client of its own at its share of that Loki's rate, kept for it while a
+  backtest asking that Loki runs, and all its requests within a quarter of
+  `--parallel` at once. The recipes send `LOKI_PATHS` (the action's
+  `loki-paths`) so, with `PATHS`, in serve mode. `lapilli preflight` times
+  the runs at `--max-rate` less the lane's share for every API they ask, a
+  Loki and Grafana's data source proxy too, and its estimate's backtest
+  changes Grafana and Loki rules as well. MCP's `compare` is as it was: no
+  Grafana rule, and LogQL only as a change to a Loki ruler's rule in effect.
+
+- **Bitbucket Pipelines' ID token at the backtest port**
+  (docs/design/backtests.md, step 2; open questions 3 and 4 decided). A
+  trust entry with `ci: bitbucket`, or known from a workspace's issuer,
+  `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`,
+  must pin `repositoryUuid` (a list allowed) and `workspaceUuid`, each
+  lowercase in braces as Bitbucket writes them, or serve doesn't start.
+  Bitbucket writes the workspace's own audience
+  (`ari:cloud:bitbucket::workspace/UUID`) in every token beside the step's:
+  a Bitbucket entry takes its audience alone or beside the pinned
+  workspace's, never a third, and every other entry still one alone;
+  `ari:cloud:bitbucket:...` is refused as an entry's audience. Its token
+  has no `jti` and names no pull request: known by what it says, it
+  supersedes no backtest. The Run history shows the repository by its
+  UUID. `bitbucket.sh` sends the step's token given as `LAPILLI_ID_TOKEN`
+  (`LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN`, from a step whose
+  `oidc: audiences:` names serve's alone), refuses at once to send one
+  whose `aud` (its payload read, not verified) names Bitbucket's
+  workspace audience alone, which serve would refuse and whatever trusts
+  the workspace takes, and keeps `BITBUCKET_STEP_OIDC_TOKEN` out of what
+  it runs in serve mode; `lapilli preflight` says such an entry's CI as
+  `bitbucket`. A token serve takes is one whatever trusts the workspace's
+  own audience takes too: the docs say to have those services (an AWS
+  role made by Bitbucket's guide) trust an audience of their own instead.
+  Azure Pipelines stays on the plain token (open question 3 decided): new
+  service connections' tokens are issued by the Microsoft Entra tenant,
+  an issuer every app of it shares, for an audience the job can't choose,
+  and the Azure DevOps issuer retires on 2027-07-01.
+
+- **A lead of a signal's or a rule entry's own, and `require:` on an
+  entry** (docs/design/judging.md, step 1; signals.md's open question 4
+  closed). A named signal may give a `lead`, how long before one of its
+  windows' start a firing still catches it, for every rule judged against
+  it, and a rule entry one for its rules against its signals' windows, in
+  place of each signal's: from 0 to 24h, each following the one above it
+  (an entry its signal's, a signal `--lead`). A cause that fires before
+  its incident, memory pressure an hour before the errors, can be white
+  without raising `--lead` for every rule. Incidents written down, copied
+  in or read from a file, the windows of the signal with no name and those
+  of a signal no longer read keep `--lead`. Set by `--impact-lead
+  NAME=DUR` in `lapilli verdict` and `serve`, `lead:` on a signal and on a
+  rule entry in `--impact-file`, the Lead field of a signal's form on the
+  Settings page and `lead:` in its rule entries' YAML, all given back by
+  `/settings.yaml`; nothing in `--config`. `require: [LABEL, ...]` on an
+  entry, opt-in, are labels a firing of its rules and a window of its
+  signals must both carry for the one to catch the other, so that a node's
+  alert with no `service` catches no service's window. `lapilli verdict
+  --impact` judges by them as serve does; its text says each signal's lead
+  beside its `for` when one is given. The report's
+  `settings.impact_signals[].lead_ns` and `settings.impact_rules[].lead_ns`
+  and `require` (each left out when it follows, or for none),
+  `/api/v1/summary`'s `settings.impact_signals[].lead` and
+  `settings.impact_rules[].lead` and `require`; numbers.md's "incidents
+  caught: counted again" reads them. Everything that reaches back from an
+  incident to the firings it can catch reaches by the longest lead in
+  effect (the incidents a span reads, the spans a run, a read again, a copy
+  and a tie of the unnamed signal's windows judge, the near misses' replay,
+  an incident's timeline). A lead changed alone, on the command line or the
+  Settings page, judges again only the spans of the windows it touches,
+  from the longer of the old and the new lead before each to its end,
+  reading nothing from Prometheus, in the write that keeps it; `require:`
+  changed judges every firing again, as an entry's match does; either
+  holds waiting proposals until they are backtested again. **Changed with
+  the defaults:** what is worked out once a week is whole, `goal.missed`,
+  the goals' tasks and their `/metrics`, and the digest, wait for the runs
+  to pass the week's end (or an occurrence's) by the most, over each
+  signal and the rules judged against it, of its lead and its `for`
+  (`--lead` and `--impact-for` of the signal with no name, `--lead` with
+  written incidents alone), and `--settle` after that, so that no stone
+  of the week turns after it was told: with the defaults and an impact
+  signal, from about 00:00 on Monday to about 01:20; the digest, at Monday
+  09:00, isn't later. A ledger with no runs, whose firings are copied in,
+  waits for its sources to have written through the week's end and
+  `--lead` past it. With no lead set anywhere and no `require:`, every
+  stone and number is as it was. **Ledger schema 024**, after 023:
+  `impact_signals.lead_ns`, `impact_rules.lead_ns` and
+  `impact_rules.require_labels`, NULL for every signal and entry kept
+  before. A lapilli before this one doesn't open a ledger it has migrated:
+  keep a copy of its disk, or of its database, first ([Going back after a
+  schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+
+- **Episodes beside firings** (docs/design/judging.md, step 3). A rule's
+  firings are counted as episodes too, one problem however many alerts it
+  is: its firings with the same values of the match labels in effect,
+  each starting while another is on or within `--refire` of the latest end
+  among them so far, parted at midnight in `--tz`, so that an alert on
+  twelve pods, or one that flaps, is one episode a day, not twelve or
+  twenty stones. An episode is white when any of its firings is white, and
+  judged by its first firing's record. They change no number of today's:
+  precision, noisy, the badge, the suggestions and what a catch counts for
+  stay by firings, and noisy by episodes, by the same thresholds, is shown
+  and decides nothing. The report (`lapilli verdict --json`,
+  `/api/v1/report`) gives `rules[].episodes` (`total`, `white`,
+  `unjudged`, `noisy`), each firing's `episode` (numbered in the report)
+  and `day`, and `settings.zone`, so that numbers.md's new "Episodes"
+  counts them again; the CSV an `episode` column, at the end; `/metrics`
+  and `--metrics` `lapilli_rule_episodes` and
+  `lapilli_rule_episodes_caught`; `/api/v1/summary` each row's `episodes`
+  (`total`, `caught`, `unjudged`, `precision`, `noisy_rules`) and each
+  marked kind's `episodes`, `episodes_caught` and `episodes_precision`;
+  MCP each rule's `episodes` and `noisy_episodes`, and each firing's
+  episode. The rules list has an Episodes column and `noisy:episodes`; a
+  rule's page its episodes, their precision, and "Noisy by firings, not by
+  episodes" when the two differ, and of its latest firings the episode
+  each is of; the overview's noisiest rules their episodes; the digest a
+  line of the noisy rules' episodes. Goals take `episodes.total` and
+  `episodes.precision`, each with `each: KIND` (an episode during a kind
+  when its first firing is), the latter with `no_worse_than: before`. **Ledger
+  schema 025**, after 024: `firings.episode` and `episode_white`, and
+  `episodes` and `episodes_white` on `days`, `weeks`, `marked_days` and
+  `marked_weeks`. Each write walks the firings of the days it counts once
+  more; the upgrade, and a ledger opened in another `--tz`, count the
+  episodes again a week at a time, the newest first, in the leader's
+  round, and until then those weeks say their episodes aren't counted yet
+  (`episodes: null`). No stone changes. A lapilli before this one doesn't
+  open a ledger it has migrated: keep a copy of its disk, or of its
+  database, first.
+
+- **A person's verdict on one firing** (docs/design/judging.md, step 4,
+  item 3). On Alert history, a rule's latest firings, and from each rule
+  an incident's timeline shows, a person may say a white firing is
+  **unrelated** to what it caught, a disk alert during another service's
+  outage, which turns that firing alone black: the incident is caught by
+  the other firings alone, or missed. And whether a firing **needed
+  action**, yes or no, which changes no stone and is counted. "Unrelated"
+  is an editor's of every team and an admin's; "needed action" a team's
+  editor's too, of their team's rules, whose write leaves "unrelated" as
+  stored (changing it is 403). Each part keeps who last wrote its answer
+  or its note, when, and a note (500 characters, one line); another answer
+  with no note given drops the note of the one before. One who isn't an
+  admin speaks of the last 14 days' firings alone; each person makes 30
+  verdict writes an hour, forms, a bulk answer of 100 firings and the API
+  alike, past which 429 with `Retry-After` and nothing written; the activity
+  log shows each person's verdicts of an hour as one line. A verdict is kept
+  by its firing's alert and start, so a run that starts the firing a step
+  later, or a window read again or confirmed, takes it along, marked to look
+  at again when what it was said of moved: the overview counts those, the
+  Cleanup page lists them. Every replay carries the verdicts of its
+  period on both sides, a proposal's backtest and `backtest_again`,
+  `compare`, a pull request's backtest, the Settings page's tries and the
+  digest's suggestions and near misses, so a longer `for` can't look
+  better on the firings people called coincidences; a verdict said, or
+  undone, in a proposal's period since its backtest makes it stale. `GET`,
+  `PUT` and `DELETE /api/v1/verdicts` and `PUT /api/v1/verdicts/bulk`,
+  `GET` 31 days and 20,000 verdicts at most, one such request at a time,
+  as a report with its firings is; MCP's `firings` and `rule` read them, and
+  no tool sets one. The report gives `rules[].unrelated`, `action_yes`,
+  `action_no`, `firings[].unrelated`, `action` and `incidents[].real`; the
+  CSV `unrelated` and `action` at its end; `/api/v1/summary` each row's
+  `people` (`unrelated`, `unrelated_excused`, `real`, `real_white`,
+  `real_excused`, `caught_by_lapilli`, `precision_by_lapilli`, and `action`
+  with its `share` once 80% of the row's firings are answered); `/metrics`
+  `lapilli_rule_action`; the digest a line. Goals take `action.share`, a
+  week under 80% answered missed, not unknown, and `stones: lapilli` on a
+  precision goal to hold it to Lapilli's stones alone; the Goals page, a
+  goal's `goal.missed` notice and its task's "no longer missed" say what
+  people's word moved.
+
+- **Rules judged by nothing** (docs/design/judging.md, step 4). A rule
+  entry may say `judged: false` in place of signals, in `--impact-file` or
+  on the Settings page: a watchdog, a forecast. Its rules' firings are
+  counted, never white nor black, in no precision, never noisy, and catch
+  nothing, written incidents included; the report says them `not_judged`
+  (`rules[]`, `firings[]`), the summary `not_judged` beside `unjudged`,
+  the rules list and the rule's page "Not judged". A file whose entries all
+  say it needs no signal, and goes with `--impact PROMQL` or none.
+  **Ledger schema 026**, after 025: `verdicts`; `firings.person` and
+  `unrelated`; `unrelated`, `unrelated_excused`, `real_white`,
+  `real_excused`, `action_yes`, `action_no`, `action_yes_black` and
+  `action_no_white` on `days` and `weeks`; `incidents.real_of`;
+  `impact_rules.judged`, reserved and unused; `goals.stones`. No stone
+  changes until a person says something. A lapilli before this one doesn't
+  open a ledger it has migrated: keep a copy of its disk, or of its
+  database, first.
+
+### Changed
+
+- **"This was real" is held to its firing, and to 14 days** (docs/design/
+  judging.md, item 3). Its forms, one firing's and the firings picked,
+  carry the firing's series and start beside its id, and are refused, 409
+  ("this firing changed since the page was read: look again"), when the
+  id is another alert's firing by then: a run gives its firings again,
+  and SQLite a gone row's id to another, so a page read before a run could
+  write down another alert's firing. A post without them is refused so
+  too. One who isn't an admin presses it on the last 14 days' firings
+  alone (403 beyond, an admin's); writing an incident down by hand stays
+  an editor's at any age. It refuses a firing a person said is unrelated
+  (409): undo that first. The incident it writes notes the firing it was
+  written from.
+
+- **A signal taken away judges no one** (docs/design/judging.md, step 2,
+  item 5; docs/upgrading.md, "Windows of a signal no longer in effect").
+  A named impact signal no longer in effect, taken away on the Settings
+  page, dropped by a start without it, or set aside at a start past
+  eight, keeps its windows, with its name. They kept every rule's record,
+  as incidents written down, and any rule caught them: in their weeks and
+  the two after each, a rule an entry ties only to a signal with `record:
+  false` was judged, its firings black, where `lapilli verdict` with the
+  same rules and file, which never read that signal, leaves it unjudged.
+  Now such a window keeps no rule's record, with named signals in effect
+  or none, and only the rules no rule entry names catch it, on the labels
+  it was found with, from `--lead` before it (the rule entries are read
+  for it with no named signal in effect too); a rule whose entry names no
+  signal in effect is judged by incidents written down alone. An editor
+  or an admin who confirms one that was a real outage writes it down, as
+  ever: it keeps everyone's record, and is caught as its window was.
+  **Changed on upgrading:** the weeks a window of a signal no longer in
+  effect was on in, and the two after each, may show firings counted and
+  not judged where they were black, so a precision, a noisy badge, a
+  suggestion or a goal that needed that record is not known there; and a
+  rule an entry names no longer catches such a window, its firing black,
+  or not judged, where it was white. The leader's first round after the
+  upgrade judges their spans again, once, whatever replica leads, and
+  logs it (`windows of impact signals not in effect judged again, once`,
+  with `windows`). Serve agrees with a fresh `lapilli verdict` on every
+  rule's record; their stones differ only where a rule with no entry
+  catches such a window, which serve keeps and `lapilli verdict` can't
+  read. A window's page and the page of a confirmation of one say it, a
+  rule's page says of an entry naming no signal in effect that its rules
+  are judged by incidents written down alone, the Incident sources panel
+  has a row of such windows in four weeks and of which signals, and MCP
+  gives `incidents[].signal_not_in_effect` and `rule`'s
+  `impact_signals.entry_signals_not_read`; numbers.md's "A white or a
+  black stone", "incidents caught: counted again" and "No record" count
+  them. A ledger that never kept a window of a signal no longer in effect
+  judges as before, and the windows of the signal with no name are as
+  they were. No schema change: the ledger stays at 024.
+
+### Fixed
+
+- **A pull request's rule at the backtest port read back as far as its
+  group's `query_offset` said** (docs/design/backtests.md, "As built (step
+  3)"). From 0.61.0, a group's `query_offset` moved each of the rule's
+  queries back by that much, past the 8 days the port holds what a rule
+  reads back to: it is added to them now, and 8 days at most.
+
 ## [0.62.1] - 2026-11-19
 
 The pages in words a person reads: Korean without the ledger's name and

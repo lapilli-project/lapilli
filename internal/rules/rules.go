@@ -2087,6 +2087,41 @@ func (g *Graph) UIDs() []string {
 	return out
 }
 
+// Nodes are how many of the rule's data, as written, are queries of data
+// sources, and how many queries and expressions it has in all.
+func (g *Graph) Nodes() (queries, all int) {
+	if g == nil {
+		return 0, 0
+	}
+	for _, d := range list(g.src["data"]) {
+		dm, _ := d.(map[string]any)
+		all++
+		if str(dm["datasourceUid"]) != "__expr__" {
+			queries++
+		}
+	}
+	return queries, all
+}
+
+// Furthest is how far before each evaluation a query of the rule's asks
+// from, at the most, as its relativeTimeRange's from says: its window and
+// how long before the evaluation it ends, together.
+func (g *Graph) Furthest() time.Duration {
+	if g == nil {
+		return 0
+	}
+	var most float64
+	for _, d := range list(g.src["data"]) {
+		dm, _ := d.(map[string]any)
+		if rt, ok := dm["relativeTimeRange"].(map[string]any); ok {
+			if f, ok := toFloat(rt["from"]); ok {
+				most = max(most, f)
+			}
+		}
+	}
+	return time.Duration(most) * time.Second
+}
+
 // The types of Grafana's data sources whose queries are PromQL, asked of
 // --prometheus: Prometheus's own (Prometheus, Thanos, Mimir, Cortex,
 // Google Cloud's managed Prometheus), Amazon's and Azure's managed

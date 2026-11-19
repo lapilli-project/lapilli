@@ -93,8 +93,9 @@ func (l *Ledger) ChangeSignals(ctx context.Context, c SignalsChange, from Signal
 }
 
 // metaSignalsGen counts the writes that changed how the named signals
-// judge (SyncSignalSet's that pend every firing, renames): options read
-// before one judge nothing it pended (staleSignals).
+// judge (SyncSignalSet's that pend every firing, or the spans a lead
+// changes, renames): options read before one judge nothing it pended
+// (staleSignals).
 const metaSignalsGen = "signals_gen"
 
 // SignalsGen is the generation of the named signals, for
@@ -160,7 +161,7 @@ func (l *Ledger) staleSignals(t *txn, o verdict.Options) (bool, error) {
 				break
 			}
 			x := o.Signals.List[i]
-			if x.Bit != r.Bit || x.Record != r.Record || !sameMatch(x.Match, r.Match) {
+			if x.Bit != r.Bit || x.Record != r.Record || !sameMatch(x.Match, r.Match) || !sameLead(x.Lead, r.Lead) {
 				stale = true
 				break
 			}
@@ -173,7 +174,7 @@ func (l *Ledger) staleSignals(t *txn, o verdict.Options) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			stale = !sameEntries(es, o.Signals.Entries)
+			stale = !SameEntries(es, o.Signals.Entries)
 		}
 	}
 	t.stale = 2
@@ -253,21 +254,8 @@ func (l *Ledger) renameSignal(t *txn, from, to string) error {
 	if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET name = ? WHERE name = ?", to, from); err != nil {
 		return err
 	}
-	rows, err := t.QueryContext(t.ctx, "SELECT key FROM incidents WHERE origin = 'impact' AND signal = ? ORDER BY start_at, key", from)
+	keys, spans, err := windowKeys(t, from)
 	if err != nil {
-		return err
-	}
-	var keys []string
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			rows.Close()
-			return err
-		}
-		keys = append(keys, k)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 	reserved := map[string]bool{}
@@ -284,6 +272,9 @@ func (l *Ledger) renameSignal(t *txn, from, to string) error {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET on_key = ? WHERE on_kind = 'incident' AND on_key = ?", key, old); err != nil {
+			return err
+		}
+		if err := l.moveVerdictKeys(t, []keyMove{{from: old, to: key, lo: spans[old][0] - verdictReach, hi: spans[old][1]}}); err != nil {
 			return err
 		}
 	}
@@ -322,14 +313,20 @@ const (
 // windows alone take the name, their keys kept: impact's in effect,
 // matched on its labels, or a signal's no longer read, as the windows of
 // one taken away are kept, with its name; the firings that could catch
-// them, from --lead before them (set.Lead) to their end, are pended to be
-// judged again. Either way the activity log notes it, and out says how
-// many.
+// them, from --lead before them (set.Lead), or the longest lead against
+// impact's windows when it is longer (docs/design/judging.md, item 1), to
+// their end, are pended to be judged again. Either way the activity log
+// notes it, and out says how many.
 func (l *Ledger) tieUnnamed(t *txn, set SignalSet, out *SignalsSynced) (bool, error) {
 	rows, err := t.QueryContext(t.ctx, "SELECT start_at, end_at FROM incidents WHERE origin = 'impact' AND signal = '' ORDER BY start_at")
 	if err != nil {
 		return false, err
 	}
+	var own *time.Duration
+	if i := slices.IndexFunc(set.Defs, func(d SignalDef) bool { return d.Name == UnnamedTiedTo }); i >= 0 {
+		own = set.Defs[i].Lead
+	}
+	reach := int64(max(set.Lead, slices.Max(leadsAgainst(UnnamedTiedTo, own, set.Entries, set.Lead))) / time.Second)
 	var spans [][2]int64
 	for rows.Next() {
 		var start, end int64
@@ -337,7 +334,7 @@ func (l *Ledger) tieUnnamed(t *txn, set SignalSet, out *SignalsSynced) (bool, er
 			rows.Close()
 			return false, err
 		}
-		spans = append(spans, [2]int64{start - int64(set.Lead/time.Second), end})
+		spans = append(spans, [2]int64{start - reach, end})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil || len(spans) == 0 {
@@ -369,6 +366,28 @@ func (l *Ledger) tieUnnamed(t *txn, set SignalSet, out *SignalsSynced) (bool, er
 	out.Tied, out.TiedRead = len(spans), i >= 0
 	return made, change(t, TiedBy, TiedWhat, map[string]any{"signal": "", "windows": len(spans)},
 		map[string]any{"signal": UnnamedTiedTo, "windows": len(spans), "read": i >= 0})
+}
+
+// windowKeys are the keys of a signal's windows, in order of their start,
+// and each one's span, from its start to its end (its start when on).
+func windowKeys(t *txn, signal string) ([]string, map[string][2]int64, error) {
+	rows, err := t.QueryContext(t.ctx, "SELECT key, start_at, coalesce(end_at, start_at) FROM incidents WHERE origin = 'impact' AND signal = ? ORDER BY start_at, key", signal)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	spans := map[string][2]int64{}
+	for rows.Next() {
+		var k string
+		var a, b int64
+		if err := rows.Scan(&k, &a, &b); err != nil {
+			return nil, nil, err
+		}
+		keys = append(keys, k)
+		spans[k] = [2]int64{a, b}
+	}
+	return keys, spans, rows.Err()
 }
 
 // renamedKey is a window's key, of a signal renamed from to to: impact-TO-
@@ -473,7 +492,7 @@ func (l *Ledger) unnameSignal(t *txn, from string) error {
 		return err
 	}
 	if _, err := t.ExecContext(t.ctx, `UPDATE impact_signals SET name = '', bit = 0, expr = '', for_ns = 0, match_labels = NULL, keeps_record = 1,
-		set_by = '', set_at = 0, seen = '', seen_to = 0, missed_at = 0 WHERE name = ?`, from); err != nil {
+		set_by = '', set_at = 0, seen = '', seen_to = 0, missed_at = 0, lead_ns = NULL WHERE name = ?`, from); err != nil {
 		return err
 	}
 	// Missed before where the runs have got to: behind, hours no run read.
@@ -488,21 +507,8 @@ func (l *Ledger) unnameSignal(t *txn, from string) error {
 			return err
 		}
 	}
-	rows, err := t.QueryContext(t.ctx, "SELECT key FROM incidents WHERE origin = 'impact' AND signal = ? ORDER BY start_at, key", from)
+	keys, spans, err := windowKeys(t, from)
 	if err != nil {
-		return err
-	}
-	var keys []string
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			rows.Close()
-			return err
-		}
-		keys = append(keys, k)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 	reserved := map[string]bool{}
@@ -522,6 +528,9 @@ func (l *Ledger) unnameSignal(t *txn, from string) error {
 				return err
 			}
 			if _, err := t.ExecContext(t.ctx, "UPDATE comments SET on_key = ? WHERE on_kind = 'incident' AND on_key = ?", key, old); err != nil {
+				return err
+			}
+			if err := l.moveVerdictKeys(t, []keyMove{{from: old, to: key, lo: spans[old][0] - verdictReach, hi: spans[old][1]}}); err != nil {
 				return err
 			}
 		}
@@ -568,7 +577,7 @@ func (l *Ledger) adoptRead(t *txn, f Found, o verdict.Options) (int64, bool, err
 		}
 		return lo, true, setSigMeta(t, "", metaImpactFloor, strconv.FormatInt(r.From.Unix(), 10))
 	}
-	run := signalRun{on: true, since: r.Since, from: r.From, criterion: r.Criterion, lead: o.Lead}
+	run := signalRun{on: true, since: r.Since, from: r.From, criterion: r.Criterion, lead: o.MaxLead()}
 	ws := make([]incident.Incident, 0, len(r.Windows))
 	for _, w := range r.Windows {
 		w.Signal, w.Match = "", nil

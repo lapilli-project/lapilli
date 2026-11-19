@@ -40,8 +40,17 @@ type Goal struct {
 	By          string   `json:"by,omitempty"`
 	Critical    []string `json:"critical,omitempty"`
 	Each        string   `json:"each,omitempty"`
-	Declared    bool     `json:"declared,omitempty"`
+	// Stones is "lapilli" for a goal checked against the numbers as
+	// Lapilli judged them, people's verdicts and the incidents "This was
+	// real" wrote left out (docs/design/judging.md, open question 5); ""
+	// for the stones as they are.
+	Stones   string `json:"stones,omitempty"`
+	Declared bool   `json:"declared,omitempty"`
 }
+
+// StonesLapilli is what a goal checked against Lapilli's stones alone says
+// (Goal.Stones).
+const StonesLapilli = "lapilli"
 
 // Bound is a goal's bound: at_least, at_most or no_worse_than, and the
 // number it holds the measure to (0 for no_worse_than).
@@ -95,12 +104,23 @@ var GoalMeasures = map[string]GoalMeasure{
 	"incidents.noisy_only":             {Record: true, Incidents: true, Each: true},
 	"incidents.median_lead_seconds":    {Higher: true, Record: true, Incidents: true, Seconds: true, Each: true, NoWorse: true},
 	"during_deploys.precision_without": {Higher: true, Record: true, Share: true},
+	// The firings counted as episodes (docs/design/judging.md, item 2):
+	// how many, and their precision.
+	"episodes.total":     {Each: true},
+	"episodes.precision": {Higher: true, Record: true, Share: true, Each: true, NoWorse: true},
+	// The share of the firings people answered that needed action
+	// (docs/design/judging.md, item 3): of a row with 80% answered.
+	"action.share": {Higher: true, Share: true},
 }
+
+// ByLapilli are the measures the summary gives as Lapilli judged them,
+// which a goal with stones: lapilli may name.
+var ByLapilli = []string{"precision"}
 
 // GoalMeasureNames are the measures, in the order the design lists them.
 var GoalMeasureNames = []string{"firings", "precision", "critical.firings", "critical.share_caught", "refired.firings", "refired.share",
 	"asleep.firings", "off_hours.firings", "asleep.nothing", "off_hours.nothing", "incidents.missed", "impacts.missed",
-	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without"}
+	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without", "episodes.total", "episodes.precision", "action.share"}
 
 // Bounds on what --config declares of goals: 50 goals, and four lists of
 // severities counted as critical among them, as each is a count of its own
@@ -231,11 +251,20 @@ func CheckGoal(g *Goal) error {
 	case g.Each != goalWeek && !markedKind.MatchString(g.Each):
 		return invalid("each is week, or a kind of marked window, such as sale")
 	case g.Each != goalWeek && !m.Each:
-		return invalid("%s isn't counted inside a marked window: with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only or incidents.median_lead_seconds", g.Measure)
+		return invalid("%s isn't counted inside a marked window: with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only, incidents.median_lead_seconds, episodes.total or episodes.precision", g.Measure)
 	case g.NoWorseThan != "" && !m.NoWorse:
-		return invalid("no_worse_than sets %s beside the weeks before, which only precision and incidents.median_lead_seconds can be", g.Measure)
+		return invalid("no_worse_than sets %s beside the weeks before, which only precision, incidents.median_lead_seconds and episodes.precision can be", g.Measure)
 	case g.NoWorseThan != "" && g.Each == goalWeek:
 		return invalid("no_worse_than holds over a period: give each, a kind of marked window")
+	}
+	g.Stones = strings.TrimSpace(g.Stones)
+	switch {
+	case g.Stones != "" && g.Stones != StonesLapilli:
+		return invalid("stones is lapilli, to check a goal against Lapilli's stones alone, or left out")
+	case g.Stones == StonesLapilli && !slices.Contains(ByLapilli, g.Measure):
+		return invalid("stones: lapilli checks a goal against the numbers as Lapilli judged them, which the summary gives of %s alone", strings.Join(ByLapilli, ", "))
+	case g.Stones == StonesLapilli && g.Each != goalWeek:
+		return invalid("stones: lapilli is of a week's goal: give it without each")
 	}
 	return nil
 }
@@ -297,12 +326,12 @@ type DeclaredGoal struct {
 // KindGoal is a goal, as a DeclaredError names it.
 const KindGoal = "goal"
 
-const goalCols = "id, name, team_id, every_team, measure, at_least, at_most, no_worse_than, slack, critical, each, declared"
+const goalCols = "id, name, team_id, every_team, measure, at_least, at_most, no_worse_than, slack, critical, each, declared, stones"
 
 func scanGoal(s scanner) (Goal, error) {
 	var g Goal
 	var critical string
-	if err := s.Scan(&g.ID, &g.Name, &g.TeamID, &g.EveryTeam, &g.Measure, &g.AtLeast, &g.AtMost, &g.NoWorseThan, &g.By, &critical, &g.Each, &g.Declared); err != nil {
+	if err := s.Scan(&g.ID, &g.Name, &g.TeamID, &g.EveryTeam, &g.Measure, &g.AtLeast, &g.AtMost, &g.NoWorseThan, &g.By, &critical, &g.Each, &g.Declared, &g.Stones); err != nil {
 		return g, err
 	}
 	if err := json.Unmarshal([]byte(critical), &g.Critical); err != nil {
@@ -337,7 +366,8 @@ func goals(ctx context.Context, q queryer) ([]Goal, error) {
 // sameGoal says two goals are kept alike.
 func sameGoal(a, b Goal) bool {
 	return a.Name == b.Name && a.TeamID == b.TeamID && a.EveryTeam == b.EveryTeam && a.Measure == b.Measure && a.AtLeast == b.AtLeast &&
-		a.AtMost == b.AtMost && a.NoWorseThan == b.NoWorseThan && a.By == b.By && slices.Equal(a.Critical, b.Critical) && a.Each == b.Each
+		a.AtMost == b.AtMost && a.NoWorseThan == b.NoWorseThan && a.By == b.By && slices.Equal(a.Critical, b.Critical) && a.Each == b.Each &&
+		a.Stones == b.Stones
 }
 
 // PruneGoalMarks lets go of what was told of goals, and what tasks were
@@ -459,9 +489,9 @@ func (l *Ledger) declareGoals(t *txn, want []DeclaredGoal, team resolver, r *Rec
 		g := td.g
 		critical, _ := json.Marshal(orNoStrings(g.Critical))
 		if td.i < 0 {
-			if _, err := t.ExecContext(t.ctx, `INSERT INTO goals (name, team_id, every_team, measure, at_least, at_most, no_worse_than, slack, critical, each, declared, updated)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-				g.Name, g.TeamID, g.EveryTeam, g.Measure, g.AtLeast, g.AtMost, g.NoWorseThan, g.By, string(critical), g.Each, now); err != nil {
+			if _, err := t.ExecContext(t.ctx, `INSERT INTO goals (name, team_id, every_team, measure, at_least, at_most, no_worse_than, slack, critical, each, declared, updated, stones)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+				g.Name, g.TeamID, g.EveryTeam, g.Measure, g.AtLeast, g.AtMost, g.NoWorseThan, g.By, string(critical), g.Each, now, g.Stones); err != nil {
 				return err
 			}
 			if err := change(t, ConfigBy, "goal "+g.Name+" kept", nil, g); err != nil {
@@ -475,8 +505,8 @@ func (l *Ledger) declareGoals(t *txn, want []DeclaredGoal, team resolver, r *Rec
 			continue
 		}
 		if _, err := t.ExecContext(t.ctx, `UPDATE goals SET team_id = ?, every_team = ?, measure = ?, at_least = ?, at_most = ?, no_worse_than = ?, slack = ?,
-			critical = ?, each = ?, declared = 1, updated = ? WHERE id = ?`,
-			g.TeamID, g.EveryTeam, g.Measure, g.AtLeast, g.AtMost, g.NoWorseThan, g.By, string(critical), g.Each, now, h.ID); err != nil {
+			critical = ?, each = ?, declared = 1, updated = ?, stones = ? WHERE id = ?`,
+			g.TeamID, g.EveryTeam, g.Measure, g.AtLeast, g.AtMost, g.NoWorseThan, g.By, string(critical), g.Each, now, g.Stones, h.ID); err != nil {
 			return err
 		}
 		if err := change(t, ConfigBy, "goal "+g.Name+" kept", h, g); err != nil {

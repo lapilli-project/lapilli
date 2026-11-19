@@ -29,6 +29,10 @@ func TestReadTrustRefused(t *testing.T) {
 	gh := func(claims string) string {
 		return "trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n    claims:\n" + claims
 	}
+	bb := func(claims string) string {
+		return "trust:\n  - name: bb\n    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc\n    audience: https://lapilli-ci.example.com\n    claims:\n" + claims
+	}
+	repo, ws := "      repositoryUuid: \"{11111111-2222-4333-8444-555555555555}\"\n", "      workspaceUuid: \"{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}\"\n"
 	for name, c := range map[string]struct{ file, says string }{
 		"an unknown key":                 {gh("      repository_id: \"1\"\n      event_name: pull_request\n    hourlyy: 3\n"), "hourlyy"},
 		"no entry":                       {"trust: []\n", "1 to 100"},
@@ -67,7 +71,7 @@ func TestReadTrustRefused(t *testing.T) {
 		"a hex pin":                      {gh("      repository_id: 0x1F\n      event_name: pull_request\n"), "decimal"},
 		"a map pin":                      {gh("      repository_id: {id: 1}\n      event_name: pull_request\n"), "string or an integer"},
 		"aud pinned":                     {gh("      repository_id: \"1\"\n      event_name: pull_request\n      aud: x\n"), "checked as the token is"},
-		"an unknown ci":                  {"trust:\n  - {name: a, ci: jenkins, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", "github, gitlab or forgejo"},
+		"an unknown ci":                  {"trust:\n  - {name: a, ci: jenkins, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", ciNames},
 		"15 days":                        {"trust:\n  - {name: a, token_file: " + good + ", days: 15}\n", "days is 1 to 14"},
 		"an unknown issuer, no sub":      {"trust:\n  - {name: a, issuer: 'https://ci.example.com', audience: x, claims: {project_id: '42', event_name: push}}\n", "needs ci:"},
 		"an unknown issuer, no event":    {"trust:\n  - {name: a, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", "pin the event"},
@@ -76,6 +80,19 @@ func TestReadTrustRefused(t *testing.T) {
 		"a GitLab of its own, no ci:":    {"trust:\n  - name: g\n    issuer: https://gitlab.example.com\n    audience: https://lapilli-ci.example.com\n    claims: {project_id: '42', pipeline_source: merge_request_event}\n", "needs ci:"},
 		"GHEC's, owner alone":            {"trust:\n  - name: g\n    issuer: https://token.actions.githubusercontent.com/example\n    audience: https://lapilli-ci.example.com\n    claims: {repository_owner_id: '4200', event_name: pull_request}\n", "pin repository_id"},
 		"GHES's, a fork event":           {"trust:\n  - name: g\n    issuer: https://github.example.com/_services/token\n    audience: https://lapilli-ci.example.com\n    claims: {repository_id: '1', event_name: pull_request_target}\n", "fork"},
+		"Bitbucket, no repository":       {bb(ws), "pin repositoryUuid"},
+		"Bitbucket, no workspace":        {bb(repo), "pin workspaceUuid"},
+		"Bitbucket, sub alone":           {bb("      sub: \"{11111111-2222-4333-8444-555555555555}:{8f2c4a1e-5b7d-4e3a-9c6f-1a2b3c4d5e6f}\"\n"), "pin repositoryUuid"},
+		"Bitbucket, a list of workspaces": {bb(repo + "      workspaceUuid: [\"{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}\", \"{00000000-0000-4000-8000-000000000000}\"]\n"),
+			"only repositoryUuid may be one"},
+		"Bitbucket, no braces":         {bb("      repositoryUuid: 11111111-2222-4333-8444-555555555555\n" + ws), "in braces"},
+		"Bitbucket, in capitals":       {bb(repo + "      workspaceUuid: \"{4B1D9C2E-7A3F-4E5B-8C6D-0E1F2A3B4C5D}\"\n"), "lowercase"},
+		"Bitbucket, a slug for the id": {bb("      repositoryUuid: alerts\n" + ws), "in braces"},
+		"Bitbucket's default audience": {strings.Replace(bb(repo+ws), "https://lapilli-ci.example.com", "ari:cloud:bitbucket::workspace/4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d", 1), "Bitbucket's default"},
+		"Bitbucket, Entra's audience":  {strings.Replace(bb(repo+ws), "https://lapilli-ci.example.com", "api://AzureADTokenExchange", 1), "Entra"},
+		"a generic entry, Entra's":     {"trust:\n  - {name: a, issuer: 'https://vstoken.dev.azure.com/0e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b', audience: 'api://AzureADTokenExchange', claims: {sub: 'sc://example/monitoring/lapilli', event_name: push}}\n", "Entra"},
+		"a ci: azure":                  {"trust:\n  - {name: a, ci: azure, issuer: 'https://vstoken.dev.azure.com/0e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b', audience: x, claims: {sub: 'sc://example/monitoring/lapilli'}}\n", ciNames},
+		"Bitbucket of its own, no ci:": {"trust:\n  - name: b\n    issuer: https://bitbucket.example.com/2.0/workspaces/example/pipelines-config/identity/oidc\n    audience: https://lapilli-ci.example.com\n    claims:\n" + repo + ws, "needs ci:"},
 	} {
 		f := filepath.Join(dir, "trust.yaml")
 		os.WriteFile(f, []byte(c.file), 0o600)
@@ -96,7 +113,7 @@ func TestReadTrustRefused(t *testing.T) {
 // trustWords are the words of Lapilli's own a trust file holds too, which
 // a refusal may say: its keys, the claims and events it names, its CIs.
 var trustWords = append(append(append([]string{}, knownClaims...), []string{"trust", "true", "false", "repository_id", "project_id", "event_name", "pipeline_source", "sub",
-	"repository", "project_path", "pull_request", "push", "merge_request_event", "github", "gitlab", "forgejo", "https", "http", "sigstore"}...), append(trustFields, checkedClaims...)...)
+	"repository", "project_path", "pull_request", "push", "merge_request_event", "github", "gitlab", "forgejo", "bitbucket", "workspace", "https", "http", "sigstore"}...), append(trustFields, checkedClaims...)...)
 
 // leaked is a word of the file's that said says, "" for none: every
 // scalar of the file, keys among them, outside trust: too, and every run
@@ -164,7 +181,9 @@ func TestReadTrustSaid(t *testing.T) {
 			"    audience: \"https://github.com/example-owner-987650005   \"\n    claims: {repository_id: \"987650006\", event_name: push}\n", "GitHub's default", 4, "audience"},
 		"a value Lapilli's words hold": {"trust:\n  - {name: plain, token_file: /x, days: 30, hourly: 1}\n  - {name: alerts, issuer: 'https://token.actions.githubusercontent.com', audience: x, claims: {repository_id: '1', event_name: push}, days: 30}\n",
 			"days is 1 to 14", 2, "days"},
-		"an unknown ci":  {"trust:\n  - {name: a, ci: jenkins-987650007, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", "github, gitlab or forgejo", 2, "ci"},
+		"an unknown ci": {"trust:\n  - {name: a, ci: jenkins-987650007, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", ciNames, 2, "ci"},
+		"a Bitbucket UUID of the file's, at its line": {"trust:\n  - name: bb\n    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims:\n      repositoryUuid: \"{11111111-2222-4333-8444-555555555555}\"\n      workspaceUuid: \"987650017\"\n", "workspaceUuid: want a UUID", 7, "claims"},
 		"an unknown key": {"trust:\n  - name: a\n    token_file: /x\n    weekly_987650008: 3\n", "isn't one of an entry's", 4, ""},
 		"a list of events, at its line": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
 			"    claims:\n      repository_id: \"987650014\"\n      event_name: [pull_request, push]\n", "event_name is a list: only repository_id", 7, "claims"},
@@ -236,13 +255,23 @@ func TestReadTrust(t *testing.T) {
     claims: {repository_id: "6", event_name: pull_request}
   - name: monitoring-azure
     token_file: `+tok+`
+  - name: monitoring-bitbucket
+    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc
+    audience: https://lapilli-ci.example.com
+    claims:
+      repositoryUuid: ["{11111111-2222-4333-8444-555555555555}", "{66666666-7777-4888-8999-aaaaaaaaaaaa}"]
+      workspaceUuid: "{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}"
+      branchName: main
 `), 0o600)
 	trust, err := ReadTrust(f, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(trust) != 7 || trust[4].CI != "github" || trust[5].CI != "github" {
+	if len(trust) != 8 || trust[4].CI != "github" || trust[5].CI != "github" {
 		t.Fatalf("%+v", trust)
+	}
+	if b := trust[7]; b.CI != "bitbucket" || !b.Claims["repositoryUuid"].List || len(b.Claims["repositoryUuid"].Values) != 2 || b.Claims["workspaceUuid"].List {
+		t.Errorf("%+v", b)
 	}
 	if a := trust[0]; a.CI != "github" || !a.Claims["repository_id"].List || strings.Join(a.Claims["repository_id"].Values, ",") != "123456789,987654321" || a.Claims["repository_owner_id"].List {
 		t.Errorf("%+v", a)

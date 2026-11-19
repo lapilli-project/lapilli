@@ -22,7 +22,8 @@ import (
 type Options struct {
 	From, To time.Time
 	// Lead is how long before an incident starts a firing still counts as
-	// catching it.
+	// catching it: of every incident but a window of a named signal whose
+	// signal, or the rule's entry, gives a lead of its own (LeadFor).
 	Lead time.Duration
 	// Match are labels a firing and an incident must agree on, when both
 	// have them, for the firing to catch the incident: service, team. An
@@ -81,6 +82,17 @@ type Options struct {
 	// changed no more (docs/design/signals.md, "Step 3, as built"). Zero,
 	// not said: then Signals are held to what the ledger keeps.
 	SignalsGen int64 `json:"-"`
+	// Zone is the zone days are counted in, which parts episodes at
+	// midnight (countEpisodes): --tz, or lapilli serve's ledger's; the
+	// machine's when nil.
+	Zone *time.Location `json:"-"`
+	// Verdicts are people's verdicts on firings of the period
+	// (docs/design/judging.md, item 3), each given to the firing it finds
+	// again by the rule of a move (Place): a firing said to be unrelated
+	// to what it caught doesn't catch it. A replay of a change judges both
+	// of its sides with them, so that neither looks better on the firings
+	// people called coincidences.
+	Verdicts []Verdict `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -137,6 +149,25 @@ type Judged struct {
 	// neither white nor black, and in none of the numbers. A report's
 	// Firings leave such firings out.
 	Excused bool `json:"-"`
+	// Episode is the episode it is of (docs/design/judging.md, item 2),
+	// numbered from 1 in the report in order of their first firing: 0
+	// when the report's episodes aren't counted (lapilli serve, before
+	// its ledger has counted the weeks). Day is the day its start falls
+	// on in the zone days are counted in (Settings.Zone), 2026-11-19:
+	// what parts an episode at midnight.
+	Episode int    `json:"episode,omitempty"`
+	Day     string `json:"day,omitempty"`
+	// Unrelated are, of the incidents it catches as Lapilli judges it,
+	// those a person said it is unrelated to (docs/design/judging.md,
+	// item 3), which it doesn't catch: white as Lapilli judged it is White,
+	// or Unrelated not empty. Action is a person's answer to whether it
+	// needed someone to act: ActionYes, ActionNo or none.
+	Unrelated []string `json:"unrelated,omitempty"`
+	Action    string   `json:"action,omitempty"`
+	// NotJudged says its rule's entry says it is judged by nothing
+	// (judged: false): it catches nothing, and is counted, not judged, as
+	// NoRecord says too.
+	NotJudged bool `json:"not_judged,omitempty"`
 }
 
 // RuleResult is one rule's stones.
@@ -209,6 +240,19 @@ type RuleResult struct {
 	// that came during one of the kind (docs/design/marked.md): in
 	// Firings and White as any other, and counted apart.
 	Marked map[string]MarkedCount `json:"marked,omitempty"`
+	// Episodes are its firings counted as episodes (EpisodeCount), beside
+	// them: left out with none, or not counted.
+	Episodes EpisodeCount `json:"episodes,omitzero"`
+	// Unrelated are its firings white as Lapilli judged them that a person
+	// said were unrelated to all they caught, black by a person's word;
+	// ActionYes and ActionNo its firings people said needed someone to
+	// act, and didn't (docs/design/judging.md, item 3).
+	Unrelated int `json:"unrelated,omitempty"`
+	ActionYes int `json:"action_yes,omitempty"`
+	ActionNo  int `json:"action_no,omitempty"`
+	// NotJudged are its firings its rule entry says are judged by nothing
+	// (judged: false): of Unjudged, which counts them too.
+	NotJudged int `json:"not_judged,omitempty"`
 }
 
 // MarkedCount is a rule's firings during the windows of one kind: those
@@ -268,6 +312,9 @@ func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White,
 // IncidentResult is one incident and the rules that caught it.
 type IncidentResult struct {
 	incident.Incident
+	// Real says it was written from a firing, by a person's "This was
+	// real" (docs/design/judging.md, item 3).
+	Real     bool    `json:"real,omitempty"`
 	CaughtBy []Catch `json:"caught_by"`
 	// FiredAfter are the rules that didn't catch it but fired once it was
 	// over, their condition having held in it (Judged.After), each by its
@@ -372,6 +419,14 @@ type Report struct {
 	// read back from lapilli serve's ledger has none: its numbers keep
 	// what a rule fired before its last replay failed.
 	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
+	// EpisodesNotCounted says, in lapilli serve, that its ledger hasn't
+	// counted the episodes of all of the period yet (after an upgrade, or
+	// a change of zone): its rules' and firings' are left out.
+	EpisodesNotCounted bool `json:"-"`
+	// People says, in lapilli serve, that people's verdicts on its firings
+	// are kept (docs/design/judging.md, item 3): its metrics give each
+	// rule's answers to "needed action".
+	People bool `json:"-"`
 }
 
 // Settings are what a report's firings were judged by, as Options has
@@ -405,6 +460,10 @@ type Settings struct {
 	// with an impact signal that has no name.
 	ImpactSignals []Signal    `json:"impact_signals,omitempty"`
 	ImpactRules   []RuleEntry `json:"impact_rules,omitempty"`
+	// Zone is the zone days are counted in, an IANA name: what each
+	// firing's day (Judged.Day) is of, and what parts episodes at
+	// midnight.
+	Zone string `json:"zone,omitempty"`
 }
 
 // NoRecordOf is, with named signals, whether a period, or a row, has no
@@ -425,7 +484,8 @@ func (o Options) Settings() *Settings {
 		match = []string{}
 	}
 	s := &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
-		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil}
+		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil,
+		Zone: o.zone().String()}
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
 	}
@@ -514,7 +574,16 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 
 	last := map[string]time.Time{} // rule and labels to when it last resolved
 	firing.Sort(fs)
-	for _, f := range fs {
+	// People's verdicts, each on the firing it finds again (Place): a
+	// replay judged in memory writes nothing, so a verdict that finds no
+	// firing, or that another holds, is dropped here, not marked.
+	forOf := map[string]time.Duration{}
+	for _, k := range known {
+		forOf[k.Name] = max(forOf[k.Name], k.For)
+	}
+	_, people := Place(o.Verdicts, fs, o.Match, o.VerdictReach(func(rule string) time.Duration { return forOf[rule] }))
+	notJudged := map[string]bool{}
+	for fi, f := range fs {
 		if !f.Active(o.From, o.To) {
 			continue
 		}
@@ -524,20 +593,38 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			ties = o.Signals.Ties(f.Rule, f.Labels, o.Match)
 			j.Signals = o.Signals.Names(ties)
 		}
+		said := people[fi]
+		if said != nil {
+			j.Action = said.Action
+		}
+		nj, ok := notJudged[f.Rule]
+		if !ok {
+			nj = o.NotJudged(f.Rule)
+			notJudged[f.Rule] = nj
+		}
+		j.NotJudged = nj
+		lapilli := false // white as Lapilli judged it: caught an incident "This was real" didn't write
 		for i, in := range inPeriod {
-			if Catches(f, in, o) {
-				j.White = true
-				j.Incidents = append(j.Incidents, in.ID)
-				d := f.Start.Sub(in.Start)
-				if have, ok := catches[i][f.Rule]; !ok || d < have {
-					catches[i][f.Rule] = d
-				}
+			if nj || !Catches(f, in, o) {
+				continue
+			}
+			lapilli = lapilli || !in.Real
+			// Said by a person to be unrelated to it: it doesn't catch it.
+			if said != nil && slices.Contains(said.Unrelated, in.ID) {
+				j.Unrelated = append(j.Unrelated, in.ID)
+				continue
+			}
+			j.White = true
+			j.Incidents = append(j.Incidents, in.ID)
+			d := f.Start.Sub(in.Start)
+			if have, ok := catches[i][f.Rule]; !ok || d < have {
+				catches[i][f.Rule] = d
 			}
 		}
 		if j.Held.IsZero() && held[f.Rule] > 0 {
 			j.Held = f.Start.Add(-held[f.Rule])
 		}
-		if !j.White {
+		if !j.White && !nj {
 			j.After = cameAfter(f, j.Held, inPeriod, catches, after, o)
 		}
 		r := result(f.Rule, "")
@@ -545,6 +632,12 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			addSeverity(f.Rule, f.Labels["severity"])
 		}
 		r.Firings++
+		switch j.Action {
+		case ActionYes:
+			r.ActionYes++
+		case ActionNo:
+			r.ActionNo++
+		}
 		if j.White {
 			r.White++
 		} else {
@@ -552,10 +645,17 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if len(j.After) > 0 {
 				r.Late++
 			}
-			if named && !rec.JudgesTied(f.Start, ties) || !named && !rec.Judges(f.Start) {
+			// White as Lapilli judged it, black by people's word.
+			if len(j.Unrelated) > 0 && lapilli {
+				r.Unrelated++
+			}
+			if nj || named && !rec.JudgesTied(f.Start, ties) || !named && !rec.Judges(f.Start) {
 				j.NoRecord = true
 				r.Unjudged++
 				rep.Unjudged++
+			}
+			if nj {
+				r.NotJudged++
 			}
 		}
 		o.Hours.Count(r, f.Start, j.White)
@@ -581,7 +681,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		r.Severity = strings.Join(severities[name], "/")
 	}
 	for i, in := range inPeriod {
-		ir := IncidentResult{Incident: in, CaughtBy: []Catch{}}
+		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
 			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy})
 		}
@@ -607,6 +707,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		return x.Rule < y.Rule
 	})
+	rep.countEpisodes(o, at)
 	rep.Credit(nil)
 	return rep
 }
@@ -648,16 +749,26 @@ func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches
 }
 
 // Catches reports whether a firing catches an incident: it started between
-// Lead before the incident and its end, and their labels agree on the
+// the lead it is judged by before the incident (Options.LeadFor: Lead, or
+// a signal's or a rule entry's) and its end, and their labels agree on the
 // labels it is matched on (Options.Agrees: Match, or a signal's or a rule
 // entry's). One already firing before that caught nothing: it was on
 // anyway.
 func Catches(f firing.Firing, in incident.Incident, o Options) bool {
-	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
-	if f.Start.Before(from) || f.Start.After(to) {
+	to := in.EndOr(o.UnknownLen)
+	// A rule judged by nothing catches nothing, written incidents
+	// included (docs/design/judging.md, "Rules judged by nothing").
+	if o.Signals.NotJudgedRules() && o.NotJudged(f.Rule) {
 		return false
 	}
-	return o.Agrees(f.Rule, f.Labels, in)
+	if f.Start.After(to) || f.Start.Before(in.Start.Add(-o.MaxLead())) {
+		return false
+	}
+	j := o.judgingOf(f.Rule, in)
+	if f.Start.Before(in.Start.Add(-o.leadOf(j, in))) {
+		return false
+	}
+	return o.agrees(j, f.Labels, in)
 }
 
 // Refired reports whether a firing that started at start came within

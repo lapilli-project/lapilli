@@ -1,10 +1,10 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted; step 1 built.
+Status: accepted; steps 1, 2 and 3 built.
 Merged on 2026-11-18, before its week was out, by the maintainer's
-decision, with open questions 1, 5 and 6 decided ("Open questions"
-below); 2, 3 and 4 wait for the steps that need them. Under
-[GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
+decision, with open questions 1, 5 and 6 decided, and 2, 3 and 4 on
+2026-11-19 ("Open questions" below).
+Under [GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
 ledger (the backtests CI jobs ask for, kept a day), and a port that takes
 input from outside with a token of a new kind, so it is designed first,
 as a pull request, and reviewed as an attacker would
@@ -16,8 +16,12 @@ companion to [expectations.md](expectations.md) (#81), whose first step
 Step 1 is built: in serve, the port, the trust file, the lane and schema
 023, and the chart's `serve.backtest`; in the recipes, their serve mode
 (`LAPILLI_SERVE`) and the action's inputs (`serve-url`, `audience`,
-`serve-wait`). Where the code had to do otherwise than this note says, "As
-built (step 1)" below says so.
+`serve-wait`). Step 2 is built: Bitbucket Pipelines' ID token; Azure
+Pipelines stays on the plain token. Step 3 is built: Grafana-managed rules
+and a Loki ruler's, on the data sources the rules in effect read
+already. Where the code had to do otherwise than this note says,
+"As built (step 1)", "As built (step 2)" and "As built (step 3)" below
+say so.
 
 ## Why
 
@@ -148,6 +152,12 @@ trust:
     claims:
       project_id: "42"
       pipeline_source: merge_request_event
+  - name: monitoring-bitbucket
+    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc
+    audience: https://lapilli-ci.example.com
+    claims:                      # UUIDs as Bitbucket writes them
+      repositoryUuid: "{1a2b3c4d-2222-4333-8444-5555555555ee}"
+      workspaceUuid: "{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}"
   - name: monitoring-azure
     token_file: /etc/lapilli/backtest/azure-token   # a plain token
 ```
@@ -209,10 +219,13 @@ question 6, decided). Every other pinned claim is one value.
   so it isn't the one to pin.
 - **Bitbucket Pipelines.** One issuer for each workspace,
   `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`,
-  as the repository's OpenID Connect settings show it. The step has `oidc:
-  true` and a custom audience under `oidc: audiences:`, and the token is
-  `BITBUCKET_STEP_OIDC_TOKEN`. Pin `repositoryUuid`, and `workspaceUuid`.
-  No claim says the step is a pull request's.
+  WORKSPACE its slug, as the repository's OpenID Connect settings show it;
+  its keys at the same origin, each workspace's its own. The step has
+  `oidc:` with serve's audience under `audiences:`, and the token is
+  `BITBUCKET_STEP_OIDC_TOKEN`. Pin `repositoryUuid`, and `workspaceUuid`,
+  each as Bitbucket writes it, lowercase in braces. No claim says the step
+  is a pull request's, nor which; the token names the workspace's own
+  audience beside the step's ("As built (step 2)").
 - **Forgejo Actions.** Issuer `URL/api/actions`. The workflow sets
   `enable-openid-connect: true`, and asks with
   `ACTIONS_ID_TOKEN_REQUEST_URL` and an audience. Pin `repository_id` and
@@ -220,13 +233,15 @@ question 6, decided). Every other pinned claim is one value.
   of it would break.
 - **Gitea Actions.** No ID token in the documentation read for this note
   (a proposal, go-gitea/gitea#33681): a plain token.
-- **Azure Pipelines.** A job's ID token is for a service connection
-  (issuer `https://vstoken.dev.azure.com/ORGANIZATION-ID`, subject
-  `sc://ORG/PROJECT/CONNECTION`), made for Microsoft Entra's token
-  exchange, `api://AzureADTokenExchange` in the federations documented:
-  serve could check it, but a token of that audience is one Entra would
-  take too, for whatever identity trusts that connection. A plain token in
-  the first step (open questions).
+- **Azure Pipelines.** A job's ID token is for a service connection,
+  made for Microsoft Entra's token exchange, its audience
+  `api://AzureADTokenExchange`, which the job doesn't choose. A new
+  service connection's is issued by Entra itself, the tenant's
+  `https://login.microsoftonline.com/TENANT/v2.0`, an issuer every app of
+  the tenant shares; the older Azure DevOps issuer,
+  `https://vstoken.dev.azure.com/ORGANIZATION-ID` (subject
+  `sc://ORG/PROJECT/CONNECTION`), retires on 2027-07-01. A plain token
+  (open question 3).
 
 The keys are fetched as `signin.Keys` fetches them ([signin.md](signin.md),
 "Keys, fetched sparingly"): from the discovery document's JWKS alone,
@@ -293,9 +308,11 @@ Where it doesn't:
 ## What the pull request's PromQL can do
 
 What runs is the expressions of the rules that differ, as range queries,
-with serve's access to `--prometheus`, not the job's. They can read any
-series that access can, and the firing counts in the comment say what they
-read, a count at a time (a rule `secret_series > 41` fires or doesn't).
+with serve's access to `--prometheus` (and, of a Grafana rule on a Loki
+data source or a Loki ruler's rule, to the Loki the rules in effect read,
+"As built (step 3)"), not the job's. They can read any series that access
+can, and the firing counts in the comment say what they read, a count at
+a time (a rule `secret_series > 41` fires or doesn't).
 That is what `--mcp-compare` lets an agent do ([serve.md](serve.md), "That
 PromQL can learn, a count at a time, whatever that access can read"), and
 why both are off unless given: no `--backtest-trust`, no port. Give serve's
@@ -304,11 +321,15 @@ metrics' project).
 
 Bounded, as MCP's `compare` is where it has a bound:
 
-- **Prometheus-format rules only**, replayed against `--prometheus`.
-  Grafana-managed rules and Loki's are refused in the first step: Grafana's
-  are asked through Grafana's data source proxy with serve's Grafana
-  token, of any data source that token reads; Loki's with serve's Loki
-  token (open questions).
+- **Prometheus-format rules**, replayed against `--prometheus`; and, from
+  step 3, Grafana-managed rules and a Loki ruler's, only on the data
+  sources the rules in effect read already (open question 2, decided): a
+  Grafana rule each of whose queries names, by its uid exactly, a data
+  source a rule in effect's replay asks, and as it asks it; a Loki
+  ruler's rule only where serve has `--loki` and its rules in effect hold
+  one. In the first step they were refused: Grafana's Loki queries are
+  asked through Grafana's data source proxy with serve's Grafana token, of
+  any data source that token reads, and Loki's with serve's Loki token.
 - **50 rules that differ**, on either side; a `for` or `keep_firing_for` of
   48 hours at most and a group interval of an hour (`compareFor`,
   `compareEvery`); 1 to 14 days, and the entry's `days`.
@@ -335,9 +356,19 @@ the event pinned, and the pins keep forks out:
 - GitLab names a merge request pipeline's source project in `project_id`,
   so a fork's merge request carries the fork's, and is refused, run in the
   parent project too (its `job_project_id` would be the parent's).
-- Bitbucket and Forgejo say nothing of forks in what was read; pin the
-  repository, and keep OpenID Connect from forks' pipelines as the recipes'
-  README keeps secrets from them.
+- Bitbucket says "Pull requests from a forked repository don't trigger the
+  pipeline" (its pipeline start conditions): a fork's pipelines run in the
+  fork, another repository (`repositoryUuid`) and, in another workspace,
+  another issuer with keys of its own, which the entry's issuer and pins
+  refuse.
+- Forgejo's reference says its OpenID Connect is off for a fork's
+  `pull_request` ("As built (step 1)"); pin the repository, and keep
+  OpenID Connect from forks' pipelines as the recipes' README keeps
+  secrets from them.
+- Azure Pipelines, not taken (open question 3), doesn't give a build of a
+  pull request from a fork a service connection's credentials, unless
+  "Make secrets available to builds of forks" is on, as it is by default
+  for GitHub Enterprise Server's pipelines.
 
 A contributor from outside is backtested once a maintainer, having read the
 rules, pushes the branch into the repository, as with any job that holds a
@@ -449,7 +480,8 @@ at most, read strictly:
 ```json
 {
   "before": [{"path": "alerts/api.yaml", "content": "groups: ..."}],
-  "after":  [{"path": "alerts/api.yaml", "content": "groups: ..."}],
+  "after":  [{"path": "alerts/api.yaml", "content": "groups: ..."},
+             {"path": "logs.yaml", "content": "groups: ...", "loki": true}],
   "expect": "expectations: ...",
   "expect_before": "expectations: ...",
   "rules_select": "grafana_alert!=1",
@@ -563,7 +595,11 @@ How much can a holder make Lapilli read, fetch, keep or judge?
 - **Read**: 4 MiB a request, its rules read within the bounds
   `internal/rules` holds a rules input to (0.44.1).
 - **Fetch**: the range queries above, in the lane's share of the rate, one
-  backtest at a time; nothing from a URL in the body, no Grafana, no Loki.
+  backtest at a time; nothing from a URL in the body. Of Grafana, only the
+  Loki data sources the rules in effect read through its data source proxy,
+  by uid, and of Loki only `--loki`, with serve's tenant, where the rules
+  in effect read it ("As built (step 3)"); never Grafana's API for what a
+  data source is.
 - **Keep**: a row a backtest, a day; the queue's and the hour's bounds.
 - **Judge**: nothing in the ledger again.
 - **A token stolen** from a job's log can start backtests until it is an
@@ -592,7 +628,10 @@ The paths for the review: the port's handler (`backtestHandler`), the
 token's check (`internal/signin`, `Keys`, the claims' pins), the body's
 read, the planner's refusal, the lane's Limiter, the queue's writes, and
 the recipe's serve mode in `lib.sh` (what it sends, and that the token goes
-on stdin).
+on stdin). From step 3: what the rules in effect read (`readsInEffect`),
+what a pull request's Grafana and Loki rules are held to (`taken`,
+`checkGraph`, `checkLogQL`, `rules.LogQLText`, `rules.LogQLWide`,
+`rules.LogQLReach`), and the lane's Lokis (`laneLogs`).
 
 ## Alternatives
 
@@ -624,7 +663,7 @@ on stdin).
 
 ## Not in this design
 
-- Grafana-managed rules and Loki's.
+- A data source no rule in effect reads, of Grafana's or a Loki's.
 - Forks' pull requests.
 - A check run or commit status of the pull request's own (ROADMAP.md, "Pull
   request backtests").
@@ -655,13 +694,66 @@ on stdin).
    2026-11-18, by the maintainer: never.** A fork's pull request is not
    backtested through serve; the pins keep it out ("Forks" above).
 2. **Grafana and Loki rules.** Taken only on the data sources the rules in
-   effect already use, by uid?
+   effect already use, by uid? **Decided on 2026-11-19, by the
+   maintainer: take them, on those data sources alone.** A pull request
+   must not have serve read, with serve's credentials, anything serve
+   doesn't read already for the rules it runs. A Grafana rule is taken
+   only when every data source its queries name (by `datasourceUid`, its
+   expressions, `__expr__`, aside) is one a Grafana rule in effect asks
+   through serve, matched by uid exactly, never by name or type: a uid
+   serve's Grafana token can read but no rule in effect asks is refused. A
+   Loki ruler's rule is taken only where serve has `--loki` and its rules
+   in effect hold one, read with serve's tenant, never the pull request's.
+   Every bound the Prometheus path has applies alike, and the refusals
+   name nothing of serve's: a data source refused is one no rule in effect
+   reads. Built in step 3 ("As built (step 3)").
 3. **Azure Pipelines' ID token.** Take it, for a service connection made
    for Lapilli alone and trusted by no identity in Entra; or keep the plain
-   token?
+   token? **Decided on 2026-11-19, by the maintainer: the plain token.**
+   A service connection made now has its token issued by the Microsoft
+   Entra tenant, an issuer every app of the tenant shares, so only `sub`
+   would tie it to the connection; its audience is Entra's token exchange,
+   which the job can't choose; the older Azure DevOps issuer retires on
+   2027-07-01; and there is no account to check any of it against. To
+   look at again once it can be checked against a real account. (A first
+   decision the same day, to take it unless its issuer were one a whole
+   tenant shares, met that condition.)
+   Microsoft's documentation, read on 2026-11-19:
+   - New workload identity service connections use the Microsoft Entra
+     issuer by default, `https://login.microsoftonline.com/TENANT/v2.0`,
+     their subject `<Microsoft Entra prefix>/sc/ORGANIZATION-ID/CONNECTION-ID`
+     (an `/eid1/...` form, in what others have shown of it), and a token
+     that "can only be exchanged for Microsoft Entra access tokens". The
+     Azure DevOps issuer, `https://vstoken.dev.azure.com/ORGANIZATION-ID`
+     with `sc://ORG/PROJECT/CONNECTION`, was deprecated on 2026-07-01 and
+     retires on 2027-07-01, for single-tenant apps and managed identities
+     in Azure's public cloud; it stays for multitenant apps and other
+     clouds.
+   - The Entra issuer is the tenant's: a v2.0 token's `iss` "identifies the
+     STS that constructs and returns the token, and the Microsoft Entra
+     tenant", whatever the app. A managed identity of the tenant gets a
+     token of that issuer for `api://AzureADTokenExchange` too, its own
+     object id as `sub`. Issuer and audience would tie a token to the
+     tenant; only `sub` would tie it to one service connection.
+   - The audience is Entra's token exchange, not the job's to choose: the
+     `oidctoken` API (`POST .../jobs/JOB/oidctoken?serviceConnectionId=ID`,
+     with `System.AccessToken`, as `System.OidcRequestUri` names it) takes
+     a service connection, and no audience. A post outside Microsoft says
+     an Entra-issued token names the exchange by its application id,
+     `fb60f99c-7a34-4190-8149-302f77469936`; Microsoft's documentation
+     read doesn't, and that audience isn't refused as an entry's (a
+     follow-up, once Microsoft says it).
+
+   Built on the Azure DevOps issuer alone, it would end with it, within
+   the year.
 4. **Bitbucket.** No claim says a step is a pull request's, and what was
    read says nothing of forks: take its token from the first step, or once
-   checked against an account?
+   checked against an account? **Decided on 2026-11-19, by the maintainer:
+   take it**, an entry with `ci: bitbucket`, or known from its issuer,
+   pinning `repositoryUuid` (a list allowed) and `workspaceUuid`, or serve
+   doesn't start. A Bitbucket backtest supersedes none, as a GitLab one
+   doesn't: the token carries no pull request's number. Built in step 2,
+   not yet checked against an account ("As built (step 2)").
 5. **The share.** A quarter of `--max-rate`, or what is left after the runs
    need it, as [preflight.md](preflight.md) counts it? **Decided on
    2026-11-18, by the maintainer: a quarter**, `--backtest-share` 0.25 by
@@ -903,10 +995,228 @@ Where step 1 does otherwise than the sections above say, or says more:
   for byte. A comment past 65,000 bytes even without a log is cut to the
   report's first lines, within 60,000 bytes, saying so.
 
+## As built (step 2)
+
+Bitbucket Pipelines' ID token, as open question 4 decided it; Azure
+Pipelines stays on the plain token, as open question 3 decided. Where step
+2 does otherwise
+than the sections above say, or says more:
+
+- **Known by its issuer.** `ci: bitbucket`, or an issuer
+  `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`.
+  An entry pins `repositoryUuid`, which may be a list, and
+  `workspaceUuid`, one value, each a UUID lowercase in braces as
+  Bitbucket's tokens write them (a slug, a UUID without braces or in
+  capitals, which no token would match, stops serve at start); no event,
+  as its tokens say none. Every other pin is one value. No schema.
+- **Two audiences, of Bitbucket's alone.** Bitbucket puts the workspace's
+  own audience, `ari:cloud:bitbucket::workspace/UUID` (its UUID without
+  braces), in every token, and a step's `audiences:` beside it, in one
+  `aud` list. A Bitbucket entry's token may name its `audience` alone, or
+  beside that of the workspace the entry pins: nothing else, no third,
+  never the workspace's alone. Every other entry's names one, as before.
+  The cost: a token taken here is one any service that trusts the
+  workspace's own audience takes too (Bitbucket's AWS setup trusts it), so
+  whoever reads it on its way to serve, or in serve, could use it there
+  until it expires; serve keeps none, only its hash. Accepted on
+  2026-11-19 by the maintainer, with what keeps it small: the step that
+  asks for serve's audience asks for no other, and runs the recipe alone;
+  and the other services that trust the workspace (an AWS role made as
+  Bitbucket's guide makes it, and the like) trust an audience of their
+  own, asked for under `oidc: audiences:` by the steps that need them,
+  rather than the workspace's, so that a token serve is sent is of no use
+  to them. An entry's `audience` under `ari:cloud:bitbucket:` is refused,
+  a CI's default.
+- **No `jti`, no `nbf`.** Bitbucket's discovery document lists neither:
+  a token is known by the hash of its payload, as Forgejo's is, and held
+  to the hour from its `iat`. Each step's token is its own (`stepUuid`).
+- **No pull request.** The number is the job's word
+  (`BITBUCKET_PR_ID`), so a Bitbucket backtest supersedes none. The Run
+  history shows the repository by its `repositoryUuid`: the token names it
+  by nothing else.
+- **lapilli preflight** reads the file with `serve.ReadTrust`, as serve
+  does, and says such an entry's CI as `bitbucket`; a Bitbucket issuer,
+  which names the workspace, is said as the trust file's issuer N.
+- **The recipe.** `bitbucket.sh` sends the step's token as
+  `LAPILLI_ID_TOKEN`, the job writing
+  `LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN`: the recipe doesn't take
+  the step's token of itself, which, from a step that asked for no
+  audience of serve's, would name the workspace's alone. `lib.sh` reads a
+  `LAPILLI_ID_TOKEN`'s payload, not verified, for its `aud` alone, and
+  refuses at once to send one that names Bitbucket's workspace audiences
+  and nothing else (`ari:cloud:bitbucket:...`): serve would refuse it,
+  and sending it would hand it over for nothing. It keeps
+  `BITBUCKET_STEP_OIDC_TOKEN` out of what it runs in serve mode. The plain
+  token stays.
+- **What was read.** Atlassian's documentation shows a token's claims as a
+  picture, and doesn't say how `aud` reads with `audiences:`; its own
+  example payload, and a workspace's discovery document, say the rest:
+  - <https://support.atlassian.com/bitbucket-cloud/docs/integrate-pipelines-with-resource-servers-using-oidc/>
+    (the identity provider URL and audience from the repository's
+    settings; `audiences:` under `oidc`, 10 at most, 150 characters each);
+  - <https://support.atlassian.com/bitbucket-cloud/docs/deploy-on-aws-using-bitbucket-pipelines-openid-connect/>
+    (`oidc: true`, `BITBUCKET_STEP_OIDC_TOKEN`, `sub` as
+    `{REPOSITORY_UUID}[:{ENVIRONMENT_UUID}]:{STEP_UUID}`, a payload with
+    `repositoryUuid` in braces and `aud` the workspace's ARI);
+  - <https://www.atlassian.com/blog/bitbucket/bitbucket-pipelines-oidc-now-supports-multiple-audiences>
+    (2026-02-03: audiences are a list a resource server finds its own in);
+  - <https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/>
+    ("Pull requests from a forked repository don't trigger the pipeline");
+  - <https://docs.openfaas.com/openfaas-pro/iam/bitbucket-federation/>
+    (a payload whose `aud` is the workspace's ARI and the step's
+    audience, the UUIDs in braces, no `jti`);
+  - a workspace's
+    `.../pipelines-config/identity/oidc/.well-known/openid-configuration`
+    (`claims_supported`: `sub`, `iss`, `aud`, `exp`, `iat`,
+    `branchName`, `compliant`, `deploymentEnvironmentUuid`,
+    `pipelineUuid`, `repositoryUuid`, `stepUuid`, `commitSha`,
+    `pipelineRunUuid`, `workspaceUuid`, `isPrivateRepository`,
+    `isInternalWorkspace`; RS256; `jwks_uri` `.../keys.json` at the same
+    origin), and two workspaces' keys, which differ.
+
+  And Microsoft's, for open question 3:
+  - <https://learn.microsoft.com/en-us/azure/devops/pipelines/release/troubleshoot-workload-identity>
+    (the two issuers and subjects side by side);
+  - <https://learn.microsoft.com/en-us/azure/devops/pipelines/release/convert-service-connections>
+    and
+    <https://learn.microsoft.com/en-us/azure/devops/pipelines/release/configure-workload-identity>
+    (the Azure DevOps issuer retired on 2027-07-01; new connections on
+    Entra's);
+  - <https://devblogs.microsoft.com/devops/?p=72939> (2026-06-22: the
+    retirement; "an OIDC token minted by Microsoft Entra");
+  - <https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-config-app-trust-managed-identity>
+    (a managed identity's token: the tenant's issuer,
+    `api://AzureADTokenExchange`, its principal id as `sub`);
+  - <https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference>
+    (`iss`, the tenant's STS);
+  - <https://learn.microsoft.com/en-us/rest/api/azure/devops/distributedtask/oidctoken/create>
+    (`serviceConnectionId`, no audience);
+  - <https://learn.microsoft.com/en-us/azure/devops/pipelines/repos/github>
+    (forks and service connections).
+
+## As built (step 3)
+
+Grafana-managed rules and a Loki ruler's, as open question 2 decided. Where
+step 3 does otherwise than the sections above say, or says more:
+
+- **The rules in effect** are the version of the rules serve runs now (the
+  ledger's latest), read as its runs replay it (`parse`): every rule it
+  replays, of every source, whichever team it is of (the port has no team:
+  an entry is a repository's). A rule it can't replay (paused, unsupported
+  as read, a Loki's with no Loki to ask) reads nothing. Of a Grafana rule,
+  the data sources its condition reads, which the replay asks
+  (`Graph.Data`), each as it asks them: PromQL, of `--prometheus`, or
+  LogQL, through `--grafana`'s data source proxy (of `--loki`, without
+  `--grafana`); a query beside the condition, which isn't asked, counts
+  for none. They are read when a backtest is asked, and again before the
+  lane runs it: one whose data source the rules stopped reading in between
+  fails, saying why.
+- **By uid exactly, and asked alike.** A uid is matched as written, its
+  case, its spaces and its length; and asked as the rules in effect ask
+  it: a uid they read as PromQL is refused to a rule that would read it as
+  LogQL, and the reverse (the type a rule writes in its model counts only
+  where serve's Grafana didn't say the data source's). Grafana's own data
+  sources (`grafana`, `-- Grafana --`, `-- Mixed --`, `-- Dashboard --`)
+  and a uid Grafana makes none of (letters, digits, `-` and `_`, 40 at
+  most, as `source.Logs` puts one in the proxy's path) are refused even
+  where a rule in effect names one. A rule unsupported as read (a SQL
+  expression, a data source of a type not replayed) is held to its uids
+  all the same, and then asks nothing, as any unsupported rule. An
+  expression's model (`__expr__`) names no data source to Lapilli, which
+  works expressions out itself, and asks nothing for them; a node whose
+  `datasourceUid` is `__EXPR__`, or written any other way, is a query of a
+  data source, and refused.
+- **One refusal.** "X reads a data source no rule in effect reads", the
+  rule's name alone, whatever why: a uid no rule in effect reads, one
+  read the other way, Grafana's own. Nothing of serve's is said, no uid
+  and no data source. A refusal still tells, a uid at a time, whether one
+  is in effect, as taking it would: the price of the decision, each
+  refusal costing the entry an hour. A Loki ruler's rule is refused the
+  same way whether serve has no `--loki` or no Loki ruler's rule in effect.
+  A Grafana rule's query held to a bound below (a selector, what it reads
+  back, LogQL's) is said by its refId, "X's query A", and nothing of it is
+  quoted: what the replay asks has the macros put in, `$__rate_interval`
+  with the scrape interval serve read of the data source among them, so a
+  refusal that quoted it, or what it reads back worked out from it, would
+  tell a pull request that interval. A Prometheus or a Loki ruler's rule,
+  which has no macros, is quoted as before.
+- **Nothing more of Grafana is asked.** A pull request's Grafana rule is
+  read with the types and scrape intervals of its data sources serve read
+  for its own rules (`replayedAs`); Grafana's API isn't asked of any uid
+  for it.
+- **Grafana's bounds**, beside a rule's (`for`, `keep_firing_for`, its
+  group's interval, 50 rules that differ, the period, `--max-samples`, the
+  series and the bytes): 8 queries of data sources and 16 queries and
+  expressions in all, a rule; each query's `relativeTimeRange` from 8 days
+  before the evaluation at most; each query the replay asks held as a
+  rule's expression is, one metric a selector, and what it reads back,
+  with the relativeTimeRange's end, or a reduce's window over LogQL, added
+  up within 8 days.
+- **LogQL's bounds**, of a Loki ruler's rule and a Grafana rule's on a
+  Loki data source: a metric query, never one of log lines; each stream
+  selector naming its streams by a label matched with `=` to a value that
+  isn't empty (`{app=~".+"}` and `{app!="x"}` alone are refused, as
+  `{__name__=~"..."}` is); a range with its offset 8 days back at most,
+  with a Grafana query's relativeTimeRange, each written as a duration, no
+  subquery, no `@`, no offset after no range; `#` comments read past as
+  Loki reads them. Loki's lexer is a copy of Go's `text/scanner`: beside
+  `#`, it skips `//` and `/* */` comments outside a string and reads a `'`
+  as a character, so a `#` or a quote inside one would hide what follows
+  from every check (`/* # */ sum(count_over_time({app=~".+"}[30d]))`
+  passed them all). A query with a `//` or a `/*` outside a string, or a
+  `'` outside one, is refused as a whole (`rules.LogQLText`: "has a // or
+  /* comment, or a ' outside a string"), before the rest, which read the
+  same text, its `#` comments blanked; whether it is a log query is read
+  past comments of every kind, opening brackets and a byte order mark, as
+  Loki's lexer and grammar read past them. No metric query needs them. What Loki
+  answers is held as `--loki`'s always is: 256 MiB, `--max-samples`, the
+  series, and a log query's lines refused.
+- **A Loki ruler's files**, from the job: `"loki": true` on a file of the
+  body, read as `--loki-rules` reads one (its queries LogQL, its
+  `keep_firing_for` and its group's `query_offset` dropped, as Loki 3.7.9
+  runs a file); a Grafana rule, or a cloud's, in such a file is refused.
+  The recipes send `LOKI_PATHS`'s files so (the action's `loki-paths`),
+  beside `PATHS`, and not with `RENDER`.
+- **The lane's Lokis.** The lane asks a Loki through a client of its own,
+  a copy of the runs' (`prom.Client.Lane`): serve's URL, token and tenant
+  (`X-Scope-OrgID`), never the request's, whose body has no field for
+  one; at its share of that Loki's pace (a Grafana data source's at its
+  share of the Grafana's), which the runs keep for it only while a
+  backtest asking that Loki runs, as `--prometheus`'s; and every request
+  of the lane, of every API, within a quarter of `--parallel` at once, as
+  the memory estimate counts them.
+- **`query_offset` is a read back.** A group's `query_offset` asks each
+  query that long before its evaluation, so it is added to what a rule
+  reads back, 8 days at most in all. Step 1 didn't count it: a pull
+  request's Prometheus rule could read as far back as its `query_offset`
+  said. Found in this step's review, and fixed with it.
+- **What the port counts.** `fits` counts a backtest's requests of every
+  API by the same planner, at the lane's rate. What only a Grafana rule's
+  answers can say (whether a query that returned nothing returned anything
+  the day before, the first numbers of a classic condition's window, a
+  reduce over LogQL asked a batch of evaluations at a time) isn't counted,
+  as the hourly runs' estimate doesn't count it (`replay.Planned.Unsure`):
+  `--backtest-timeout` ends one that asks more.
+- **What shows.** The comment, the JSON, the Run history and `/metrics` say
+  a Grafana rule and a Loki ruler's as they say a Prometheus rule: by its
+  name (a Grafana rule's title), its labels and its counts.
+- **lapilli preflight** times the runs, while a backtest runs the whole
+  hour, at `--max-rate` less the lane's share for every API they ask, a
+  Loki and Grafana's data source proxy as `--prometheus`; and its
+  estimate's backtest changes ten of the rules replayed, Grafana's and
+  Loki's among them, each of queries of its own.
+- **MCP's `compare`** takes no Grafana rule, and a rule in LogQL only as a
+  change to a Loki ruler's rule in effect, asked of `--loki` in its
+  namespace (`proposed`): no data source the rules in effect don't read.
+  Left as it is: it holds a rule to none of the port's bounds, LogQL's
+  among them, so a comment has no check of its to hide anything from.
+
 ## Steps
 
 1. The port, ID tokens of GitHub, GitLab and Forgejo, and the plain token;
    Prometheus-format rules; the lane and its share; schema 023; the
    recipes' serve mode and the action's inputs.
-2. Bitbucket's token, and Azure Pipelines' if decided.
-3. Grafana and Loki rules, if decided.
+2. Bitbucket's token: built. Azure Pipelines stays on the plain token
+   (open question 3).
+3. Grafana and Loki rules: built, on the data sources the rules in effect
+   read (open question 2).

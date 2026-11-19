@@ -60,6 +60,9 @@ const (
 	// in a week the period has some of, or the two weeks before, keeps it.
 	staleRecorded   = "an incident was written down in its period's weeks since it was backtested"
 	staleUnrecorded = "no incident keeps the record of its period's weeks any more"
+	// A person's "unrelated" said of a firing of its rule in its period
+	// since it was backtested, as an incident written there does.
+	staleSaid = "a person said a firing of its rule was unrelated in its period since it was backtested"
 	// The impact signal read again with another criterion, or turned off,
 	// since it was backtested: the windows it was judged against are gone.
 	staleImpact = "the incidents found by --impact were read again with another criterion, or turned off, since it was backtested"
@@ -485,6 +488,15 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 			l.StaleWhy = &staleWhy{Format: staleRecorded}
 		case bt.NoRecord != nil && !*bt.NoRecord && now:
 			l.StaleWhy = &staleWhy{Format: staleUnrecorded}
+		case !bt.At.IsZero():
+			rule := l.Rule
+			said, err := s.l.SaidSince(ctx, bt.From, bt.To, bt.At, func(r string) bool { return r == rule })
+			if err != nil {
+				return err
+			}
+			if said {
+				l.StaleWhy = &staleWhy{Format: staleSaid}
+			}
 		}
 	}
 	return nil

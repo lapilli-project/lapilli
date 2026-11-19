@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/text/language"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // The UI is written in English; i18n/LANG.json gives, for each English
@@ -70,6 +72,9 @@ func init() {
 			"tbdi":     func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
 			"tin":      func(ctx, msg string) string { return trIn(lang, ctx, msg) },
 			"incTitle": func(title string) string { return shownTitle(lang, title) },
+			// movedText is why a person's verdict is to be looked at
+			// again (ledger.MovedText), its incident set apart.
+			"movedText": func(moved string) template.HTML { return movedText(lang, moved) },
 			// who is who did something; "anonymous" in the reader's
 			// language when no sign-in proxy said.
 			"who": func(by string) string {
@@ -120,6 +125,15 @@ func trIn(lang, ctx, msg string) string {
 		missing.Unlock()
 	}
 	return msg
+}
+
+// movedText is why a person's verdict is to be looked at again, in lang.
+func movedText(lang, moved string) template.HTML {
+	format, args := ledger.MovedText(moved)
+	if format == "" {
+		return ""
+	}
+	return trBDI(lang, format, args...)
 }
 
 // trBDI is tr with each argument set apart in <bdi>, as a name within a

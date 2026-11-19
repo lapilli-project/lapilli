@@ -60,14 +60,16 @@ type signalsCache struct {
 // (o.Signals): each with its bit, its start and what it has seen, on match
 // (the match in effect), as the ledger keeps them, and the rule entries,
 // each rule's found once by its name or labels (owners); what replays
-// judge in memory ties a firing as the ledger ties its alert. Nil with
-// none named. Kept while the ledger is as it was: of this replica's
+// judge in memory ties a firing as the ledger ties its alert. With none
+// named, the rule entries alone (verdict.Signals.Named is false), which
+// keep their rules from the windows of a signal not in effect; nil with no
+// entry either. Kept while the ledger is as it was: of this replica's
 // generation, of the signals' generation sgen (ledger.SignalsGen, read
 // before), and of the signals and entries n itself, so that options that
 // claim a generation never carry the signals of one before, a change
 // another replica saved among them, whatever this one refreshed.
 func (s *Server) signalsOf(ctx context.Context, match []string, n signalsNow, sgen int64) (*verdict.Signals, error) {
-	if !n.named() {
+	if !n.named() && len(n.Entries) == 0 {
 		return nil, nil
 	}
 	of, _ := json.Marshal(n.set())
@@ -89,7 +91,7 @@ func (s *Server) signalsOf(ctx context.Context, match []string, n signalsNow, sg
 	}
 	list := make([]verdict.Signal, 0, len(n.Defs))
 	for _, d := range n.Defs {
-		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Bit: -1}
+		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Lead: d.Lead, Bit: -1}
 		if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
 			x.Bit, x.Start = rows[i].Bit, rows[i].Kept.From()
 		}
@@ -697,10 +699,14 @@ func heldDigest(defs []ledger.SignalDef, entries []verdict.RuleEntry, held map[s
 		Name, Held string
 		Match      []string
 		Record     bool
+		// A lead of its own (docs/design/judging.md, "Proposals"): left
+		// out to follow, so that the digest of signals with none is as it
+		// was.
+		Lead *time.Duration `json:",omitempty"`
 	}
 	var hs []kept
 	for _, d := range defs {
-		hs = append(hs, kept{Name: d.Name, Held: held[d.Name], Match: d.Match, Record: d.Record})
+		hs = append(hs, kept{Name: d.Name, Held: held[d.Name], Match: d.Match, Record: d.Record, Lead: d.Lead})
 	}
 	slices.SortFunc(hs, func(a, b kept) int { return cmp.Compare(a.Name, b.Name) })
 	b, _ := json.Marshal(struct {
@@ -722,7 +728,11 @@ func heldDigest(defs []ledger.SignalDef, entries []verdict.RuleEntry, held map[s
 type ruleSignals struct {
 	Entry   int            `json:"rule_entry,omitempty"`
 	Against []ruleSignalOn `json:"judged_against"`
-	Waits   []string       `json:"waits_for"`
+	// NotRead are the signals its entry names that aren't in effect: their
+	// windows it doesn't catch, and with none in effect, it is judged by
+	// incidents written down alone (docs/design/judging.md, item 5).
+	NotRead []string `json:"entry_signals_not_read,omitempty"`
+	Waits   []string `json:"waits_for"`
 	// NoAlert says no rule entry names it and it has no alert yet: which
 	// signals its record waits for comes with each alert, by its labels.
 	NoAlert bool       `json:"no_alert_yet,omitempty"`
@@ -745,6 +755,13 @@ func (s *Server) ruleSignalsOf(ctx context.Context, o verdict.Options, rule stri
 	}
 	out := &ruleSignals{Entry: sig.EntryNumber(rule), Against: []ruleSignalOn{}, Waits: []string{}}
 	e := sig.Entry(rule)
+	if e != nil {
+		for _, name := range e.Signals {
+			if !o.InEffect(name) {
+				out.NotRead = append(out.NotRead, name)
+			}
+		}
+	}
 	for i, x := range sig.List {
 		if e != nil && !slices.Contains(e.Signals, x.Name) {
 			continue

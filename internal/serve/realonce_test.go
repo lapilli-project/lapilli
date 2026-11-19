@@ -37,10 +37,24 @@ func realServer(t *testing.T) (*Server, []string) {
 	}
 	var ids []string
 	for _, f := range got {
-		ids = append(ids, fmt.Sprint(f.ID))
+		ids = append(ids, pickRef(f))
 	}
 	return s, ids
 }
+
+// realPost is a firing's own "This was real", as its form posts it: to its
+// id, with its alert's series and start (firingRef).
+func realPost(ref string) (string, url.Values) {
+	id, rest, _ := strings.Cut(ref, ":")
+	series, start, _ := strings.Cut(rest, ":")
+	return "/firings/" + id + "/real", url.Values{"series": {series}, "start": {start}}
+}
+
+func realPathOf(ref string) string     { p, _ := realPost(ref); return p }
+func realFormOf(ref string) url.Values { _, v := realPost(ref); return v }
+
+// idOf is a firing's id, of its ref.
+func idOf(ref string) string { id, _, _ := strings.Cut(ref, ":"); return id }
 
 // writtenOnce checks that each firing is written down once: an incident
 // from each, and a notice of each, told once.
@@ -117,7 +131,7 @@ func TestRealOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			code, _, _ := postAs(t, h, "/firings/"+id+"/real", nil, []string{"ana@example.com", "bo@example.com"}[i%2], "same-origin")
+			code, _, _ := postAs(t, h, realPathOf(id), realFormOf(id), []string{"ana@example.com", "bo@example.com"}[i%2], "same-origin")
 			codes <- code
 		}()
 	}
@@ -137,11 +151,11 @@ func TestRealOnce(t *testing.T) {
 func TestRealWrittenFrom(t *testing.T) {
 	s, ids := realServer(t)
 	h := s.Handler()
-	if code, _, hd := postAs(t, h, "/firings/"+ids[0]+"/real", nil, "ana@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") == "" {
+	if code, _, hd := postAs(t, h, realPathOf(ids[0]), realFormOf(ids[0]), "ana@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") == "" {
 		t.Fatalf("%d", code)
 	}
-	ledgerExec(t, s, "UPDATE firings SET white = 0 WHERE id = ?", ids[0])
-	if code, _, hd := postAs(t, h, "/firings/"+ids[0]+"/real", nil, "bo@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") != "/firings?day=2026-11-01" {
+	ledgerExec(t, s, "UPDATE firings SET white = 0 WHERE id = ?", idOf(ids[0]))
+	if code, _, hd := postAs(t, h, realPathOf(ids[0]), realFormOf(ids[0]), "bo@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") != "/firings?day=2026-11-01" {
 		t.Errorf("again: %d to %q", code, hd.Get("Location"))
 	}
 	if code, _, hd := postAs(t, h, "/firings/real", url.Values{"firing": ids[:2], "back": {"/firings?day=2026-11-01"}}, "bo@example.com", "same-origin"); code != http.StatusSeeOther ||
@@ -177,18 +191,18 @@ func TestRealBack(t *testing.T) {
 func TestRealNothingCounted(t *testing.T) {
 	s, ids := realServer(t)
 	h := s.Handler()
-	if code, _, _ := postAs(t, h, "/firings/"+ids[0]+"/real", nil, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+	if code, _, _ := postAs(t, h, realPathOf(ids[0]), realFormOf(ids[0]), "ana@example.com", "same-origin"); code != http.StatusSeeOther {
 		t.Fatal(code)
 	}
 	gen := s.l.Gen()
-	if code, _, hd := postAs(t, h, "/firings/"+ids[0]+"/real", nil, "bo@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") != "/firings?day=2026-11-01" {
+	if code, _, hd := postAs(t, h, realPathOf(ids[0]), realFormOf(ids[0]), "bo@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") != "/firings?day=2026-11-01" {
 		t.Fatalf("again: %d to %q", code, hd.Get("Location"))
 	}
 	if g := s.l.Gen(); g != gen {
 		t.Errorf("a second press: generation %d, not %d", g, gen)
 	}
 	// Written down already, though the ledger has it black still.
-	ledgerExec(t, s, "UPDATE firings SET white = 0 WHERE id = ?", ids[0])
+	ledgerExec(t, s, "UPDATE firings SET white = 0 WHERE id = ?", idOf(ids[0]))
 	gen = s.l.Gen()
 	if code, _, hd := postAs(t, h, "/firings/real", url.Values{"firing": ids[:1], "back": {"/firings?day=2026-11-01"}}, "bo@example.com", "same-origin"); code != http.StatusSeeOther ||
 		hd.Get("Location") != "/firings?already=1&bulk=real&day=2026-11-01" {

@@ -103,6 +103,7 @@ type yGoal struct {
 	By          yNumber  `yaml:"by,omitempty"`
 	Critical    []string `yaml:"critical,flow,omitempty"`
 	Each        string   `yaml:"each,omitempty"`
+	Stones      string   `yaml:"stones,omitempty"`
 }
 
 // yNumber is a goal's number as the file wrote it, written back as a
@@ -217,7 +218,7 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 			continue
 		}
 		y := yGoal{Name: g.Name, Team: team, Measure: g.Measure, AtLeast: yNumber(g.AtLeast), AtMost: yNumber(g.AtMost),
-			NoWorseThan: g.NoWorseThan, By: yNumber(g.By), Critical: g.Critical}
+			NoWorseThan: g.NoWorseThan, By: yNumber(g.By), Critical: g.Critical, Stones: g.Stones}
 		if g.Each != "week" {
 			y.Each = g.Each
 		}
