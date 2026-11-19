@@ -198,3 +198,4 @@ build, test and send a change. There is no paid support: answers come as
 time allows.
 
 <!-- a scratch line: a pull request of docs alone, to see CI skip the end-to-end jobs; never merged -->
+<!-- a second scratch line: the next push cancels the run in progress -->
