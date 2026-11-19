@@ -196,3 +196,5 @@ a form for each. A vulnerability is reported privately, as
 to keep out of a post, and [CONTRIBUTING.md](../CONTRIBUTING.md) how to
 build, test and send a change. There is no paid support: answers come as
 time allows.
+
+<!-- a scratch line: a pull request of docs alone, to see CI skip the end-to-end jobs; never merged -->
