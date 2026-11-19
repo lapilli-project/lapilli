@@ -45,7 +45,10 @@ entry one for its rules, with `require:`, labels its rules' firings and
 its signals' windows must both carry: a cause that fires an hour before
 the errors is caught by them without a longer `--lead` for every rule,
 and incidents written down keep `--lead` (docs/design/judging.md, item
-1). Beside it, Incident sources says where
+1). A named signal taken away there, or left out by a start, judges no
+one: its windows keep no rule's record, and only the rules no rule entry
+names catch them; confirming one that was a real outage keeps the record
+of its weeks (item 5). Beside it, Incident sources says where
 incidents come from (written in Lapilli, each tool a job copies them in
 from, the incidents file, the impact signal) and whether each is alive.
 `/settings.yaml` gives the changes as Helm values to commit. Teams, quiet windows, reports and roles

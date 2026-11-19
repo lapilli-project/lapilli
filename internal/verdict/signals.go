@@ -383,16 +383,39 @@ func (s *Signals) Looked() int64 {
 	return s.looked.Load()
 }
 
+// signal is the place in List of the signal named name, -1 for none: of
+// none named, or of nil, none.
 func (s *Signals) signal(name string) int {
+	if s == nil {
+		return -1
+	}
 	return slices.IndexFunc(s.List, func(x Signal) bool { return x.Name == name })
 }
+
+// NotInEffect reports whether in is a window of a signal not in effect
+// (docs/design/judging.md, item 5): of a named signal, found, and not among
+// those o judges by, whether it was taken away on the Settings page,
+// dropped by a start without it, or set aside at a start past eight. It
+// keeps no rule's record (RecordOf), and only the rules with no entry may
+// catch it (Agrees). A window of the impact signal with no name has no
+// signal, and is none.
+func (o Options) NotInEffect(in incident.Incident) bool {
+	return in.Signal != "" && in.Candidate && !o.InEffect(in.Signal)
+}
+
+// InEffect reports whether o judges by the named signal name: a window of
+// one it doesn't, or the incident a confirmation of one wrote, is caught by
+// the rules with no entry alone.
+func (o Options) InEffect(name string) bool { return o.Signals.signal(name) >= 0 }
 
 // Index is s with each rule's entry found once, by the rules' labels: the
 // first entry, in order, whose pattern matches the rule's name; else the
 // first whose labels the rule has. The name decides before any label, as
-// it does for a team.
+// it does for a team. Entries with no named signal in effect are indexed
+// too: they keep their rules from the windows of signals not in effect
+// (Agrees).
 func (s *Signals) Index(labels map[string]map[string]string) *Signals {
-	if !s.Named() {
+	if !s.Named() && (s == nil || len(s.Entries) == 0) {
 		return s
 	}
 	out := *s
@@ -445,7 +468,17 @@ func (s *Signals) Entry(rule string) *RuleEntry {
 func (s *Signals) EntryNumber(rule string) int { return s.entryIndex(rule) + 1 }
 
 func (s *Signals) entryIndex(rule string) int {
-	if !s.Named() || len(s.Entries) == 0 {
+	if !s.Named() {
+		return -1
+	}
+	return s.entryAt(rule)
+}
+
+// entryAt is the rule's entry's place in Entries, -1 for none, named
+// signals in effect or none: what keeps a rule from the windows of a
+// signal not in effect (judgingOf).
+func (s *Signals) entryAt(rule string) int {
+	if s == nil || len(s.Entries) == 0 {
 		return -1
 	}
 	i, ok := s.entryOf[rule]
@@ -582,26 +615,43 @@ func (s *Signals) Names(idx []int) []string {
 // judging is what judges a firing of a rule against an incident, looked
 // up once: the incident's signal, by its place in Signals.List, when it is
 // a window of a signal in effect or a confirmation of one, which carries
-// its window's signal (-1 for none); and then the rule's entry, nil for
-// none.
+// its window's signal (-1 for none); gone, when it is a window of a signal
+// not in effect, or a confirmation of one; and then, of either, the rule's
+// entry, nil for none.
 type judging struct {
 	sig   int
+	gone  bool
 	entry *RuleEntry
 }
 
 // judgingOf looks up what judges a firing of rule against in.
 func (o Options) judgingOf(rule string, in incident.Incident) judging {
 	j := judging{sig: -1}
-	// A rule entry keeps its rules from the windows of signals in use; a
-	// window of a signal no longer read is an incident, as the record
-	// takes it, anyone's to catch.
-	if in.Signal != "" && o.Signals.Named() {
-		if j.sig = o.Signals.signal(in.Signal); j.sig >= 0 {
-			j.entry = o.Signals.Entry(rule)
-		}
+	if in.Signal == "" {
+		return j // written down, copied in, or the signal with no name's
 	}
+	// A rule entry keeps its rules from the windows of signals in use; and
+	// from those of a signal not in effect, which only the rules with no
+	// entry catch (docs/design/judging.md, item 5): its entries are read
+	// for it with no named signal in effect too.
+	if j.sig = o.Signals.signal(in.Signal); j.sig < 0 {
+		j.gone = true
+		if i := o.Signals.entryAt(rule); i >= 0 {
+			j.entry = &o.Signals.Entries[i]
+		}
+		return j
+	}
+	j.entry = o.Signals.Entry(rule)
 	return j
 }
+
+// catchesGone reports whether a rule judged by j may catch a window of a
+// signal not in effect, or the incident a confirmation of one wrote, which
+// is caught as its window was: a rule with no entry alone, the entries
+// read as they are while their signals are. A rule an entry says is judged
+// by nothing (judged: false, docs/design/judging.md, item 3) has an entry,
+// and so never catches one either.
+func catchesGone(j judging) bool { return j.entry == nil }
 
 // leadOf is the lead j judges by against in (LeadFor).
 func (o Options) leadOf(j judging, in incident.Incident) time.Duration {
@@ -697,8 +747,10 @@ func (s *Signals) Leads() bool {
 // (docs/design/signals.md, "Judged by its own match"): of a signal's
 // window, a rule entry for rule must name that signal, its match, when it
 // gives one, is the one, and the labels it requires both must carry; else
-// the incident's own (Incident.Match); else the match in effect. An
-// incident written down has no signal, and is matched on the match in
+// the incident's own (Incident.Match); else the match in effect. A window
+// of a signal not in effect (NotInEffect), and the incident a confirmation
+// of one wrote, agree only with a rule with no entry, on their own match.
+// An incident written down has no signal, and is matched on the match in
 // effect, for every rule alike.
 func (o Options) Agrees(rule string, labels map[string]string, in incident.Incident) bool {
 	return o.agrees(o.judgingOf(rule, in), labels, in)
@@ -709,6 +761,11 @@ func (o Options) agrees(j judging, labels map[string]string, in incident.Inciden
 	match := o.Match
 	if in.Match != nil {
 		match = in.Match
+	}
+	if j.gone {
+		// On the labels it was found with (incidents.match_labels), by a
+		// rule with no entry alone.
+		return catchesGone(j) && in.Labels.Agree(labels, match)
 	}
 	if e := j.entry; e != nil {
 		if !slices.Contains(e.Signals, in.Signal) {

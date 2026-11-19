@@ -86,6 +86,46 @@
   keep a copy of its disk, or of its database, first ([Going back after a
   schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
 
+### Changed
+
+- **A signal taken away judges no one** (docs/design/judging.md, step 2,
+  item 5; docs/upgrading.md, "Windows of a signal no longer in effect").
+  A named impact signal no longer in effect, taken away on the Settings
+  page, dropped by a start without it, or set aside at a start past
+  eight, keeps its windows, with its name. They kept every rule's record,
+  as incidents written down, and any rule caught them: in their weeks and
+  the two after each, a rule an entry ties only to a signal with `record:
+  false` was judged, its firings black, where `lapilli verdict` with the
+  same rules and file, which never read that signal, leaves it unjudged.
+  Now such a window keeps no rule's record, with named signals in effect
+  or none, and only the rules no rule entry names catch it, on the labels
+  it was found with, from `--lead` before it (the rule entries are read
+  for it with no named signal in effect too); a rule whose entry names no
+  signal in effect is judged by incidents written down alone. An editor
+  or an admin who confirms one that was a real outage writes it down, as
+  ever: it keeps everyone's record, and is caught as its window was.
+  **Changed on upgrading:** the weeks a window of a signal no longer in
+  effect was on in, and the two after each, may show firings counted and
+  not judged where they were black, so a precision, a noisy badge, a
+  suggestion or a goal that needed that record is not known there; and a
+  rule an entry names no longer catches such a window, its firing black,
+  or not judged, where it was white. The leader's first round after the
+  upgrade judges their spans again, once, whatever replica leads, and
+  logs it (`windows of impact signals not in effect judged again, once`,
+  with `windows`). Serve agrees with a fresh `lapilli verdict` on every
+  rule's record; their stones differ only where a rule with no entry
+  catches such a window, which serve keeps and `lapilli verdict` can't
+  read. A window's page and the page of a confirmation of one say it, a
+  rule's page says of an entry naming no signal in effect that its rules
+  are judged by incidents written down alone, the Incident sources panel
+  has a row of such windows in four weeks and of which signals, and MCP
+  gives `incidents[].signal_not_in_effect` and `rule`'s
+  `impact_signals.entry_signals_not_read`; numbers.md's "A white or a
+  black stone", "incidents caught: counted again" and "No record" count
+  them. A ledger that never kept a window of a signal no longer in effect
+  judges as before, and the windows of the signal with no name are as
+  they were. No schema change: the ledger stays at 024.
+
 ### Fixed
 
 - **Serve started again with named impact signals kept the windows of the
@@ -105,9 +145,11 @@
   it is made of the one with no name, its record kept and nothing read
   again when its expression and `for` are the same; with none named
   `impact`, they are the windows of a signal no longer read, kept as
-  those of a signal taken away are, which keep every rule's record still
-  (give the file the old expression as `impact`, before the first start
-  with this release, to have them judged as its windows, its record
+  those of a signal taken away are, which from this release judge no one
+  (Changed, above): the rules an entry ties only to a signal with
+  `record: false` are left unjudged in their weeks, as `lapilli verdict`
+  leaves them (give the file the old expression as `impact`, before the
+  first start with named signals, to keep them as its windows, its record
   kept). The firings that could catch them are judged again; the log says
   how many windows were tied, and to what, in one line, and the Run
   history notes it (`lapilli: impact windows of the signal with no name

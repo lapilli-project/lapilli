@@ -1,7 +1,8 @@
 # Judging refined: a lead per signal, episodes beside firings, a person's verdict on one firing, and rows by label
 
 Status: accepted; step 1 (leads and `require:`, schema 024, "As built
-(step 1)") built. Merged on 2026-11-19, before its week was out, by the
+(step 1)") and step 2 (a signal taken away judging no one, no schema, "As
+built (step 2)") built. Merged on 2026-11-19, before its week was out, by the
 maintainer's decision, its open questions decided ("Open questions").
 Under [GOVERNANCE.md](../../GOVERNANCE.md) this changes how a firing is
 judged (a lead of a signal's or a rule entry's own, a person's word that
@@ -1649,6 +1650,98 @@ Leads and `require:`, as above, and what building them settled:
   that agreed on no label ("Coincidences"), on the try, a rule's page and
   MCP's `rule`; and the try's rule-by-rule catches gained and lost.
 
+## As built (step 2)
+
+A signal taken away judging no one, as item 5 says, with no schema, and
+what building it settled:
+
+- **Which windows.** `verdict.Options.NotInEffect(in)`: a window (an
+  incident with `Candidate`) of a named signal, its `signal` none of those
+  the options judge by (`Options.InEffect`), however it left: taken away
+  on the Settings page, dropped by a start, set aside past eight, or the
+  windows #153 tied to `impact` with no `impact` in effect. The windows of
+  the signal with no name carry no signal and are none of them: serve
+  started with no `--impact` at all keeps them as v0.49.0 kept them, as
+  incidents, as before this step.
+- **The record.** `RecordOf` leaves such a window out first, with named
+  signals in effect or none, so every record follows it (`JudgesTied`,
+  `JudgesAny`, the tallies, a page's `firingJudge`, a backtest's replay).
+  The one place the ledger worked the record out in SQL,
+  `Ledger.RecordKept` with no named signal, leaves out every window with a
+  signal (`AND (i.origin <> 'impact' OR i.signal = '')`), as all of them
+  are then a signal's not in effect.
+- **The catches.** `judgingOf` marks an incident with a signal not in
+  effect, a window or the incident a confirmation of one wrote, and reads
+  the rule's entry for it (`Signals.entryAt`) whether named signals are
+  in effect or not; `agrees` lets only a rule with no entry catch it
+  (`catchesGone`, where step 4's `judged: false`, a field of an entry,
+  needs nothing more), on the incident's own match
+  (`incidents.match_labels`), else the match in effect. It is caught from
+  `--lead`, as before (`LeadFor`). So a confirmation of such a window is
+  caught as its window was, and keeps everyone's record, as every
+  confirmation does: an editor or an admin confirming it keeps the record
+  of its weeks.
+- **Entries with no named signal in effect.** Serve's options carry the
+  rule entries kept (the UI's `impact-rules`, which a start with no named
+  signal leaves) as a `verdict.Signals` with no signal (`Named` false),
+  indexed by the rules' labels as ever: they keep their rules from the
+  windows of signals not in effect and judge nothing else, the record by
+  the signal with no name and the report's settings as they were. The
+  rest of item 3's "entries apart from named signals" is step 4's.
+- **An entry naming no signal in effect** was already judged as item 5
+  says, tied to none (`Signals.Ties`, `TiedOf`); with the catches above,
+  its rules catch neither the windows of the signals in effect nor those
+  of the one it names.
+- **The upgrade.** `Ledger.PendNotInEffect`, in the leader's round after
+  the signals are kept and the options read, before `JudgePending`: once,
+  noted in `meta` (`not_in_effect_pended`) in the write that pends, which
+  reads the note again first, so whatever replica leads next, or two at
+  once, pends it once; it pends the span of each incident that counts with
+  a signal the options don't judge by (windows and confirmations alike),
+  from `MaxLead` before its start to its end (`UnknownLen` for none), and
+  the log says how many in one line (`windows of impact signals not in
+  effect judged again, once`). With none, the note alone, in a write that
+  changes no page's generation. The incidents' `signal` has no index: it
+  reads them all, once.
+- **Where it shows.** A window's page: "Found by probe, a signal no longer
+  read: it keeps no rule's record, and is caught by the rules with no rule
+  entry alone, on service. Confirm it, if it was a real outage, to keep
+  the record of its weeks.", and every entry among those that keep their
+  rules from it; the page of what a confirmation of one wrote says so too.
+  Not "not read since": nothing keeps when a signal left (the activity log
+  notes a change on the page, not a start's). A rule's page, of a rule
+  whose entry names no signal in effect: "Rule entry #1 names probe, not
+  read: judged by incidents written down alone." The Incident sources
+  panel: a row, "Impact signals no longer read", its windows in four weeks
+  and the signals' names, when there are any. MCP: `incidents[]`
+  `signal_not_in_effect`, and `rule`'s `impact_signals`
+  `entry_signals_not_read`.
+- **numbers.md.** "A white or a black stone" says who catches such a
+  window. Its "incidents caught: counted again" needed one change the note
+  didn't foresee: of a rule whose entry names the signal not in effect, it
+  counted the catch, so it reads an entry's signals now only of a signal in
+  effect (`$named and any($e.signals[]; ...)`); and it counts such a window
+  on `match`, as the report doesn't give the labels the window was found
+  with. "No record" says it keeps no rule's record; its serve block left it
+  out already (no firing is tied to its signal), as the code now does.
+- **Serve and `lapilli verdict`.** The tests hold serve's record, firing by
+  firing and rule by rule, to `verdict.Judge` given the same options and
+  every incident but those windows, which a fresh `lapilli verdict` never
+  reads; their stones differ only where a rule with no entry caught one, a
+  white stone in serve, judged, and in `lapilli verdict` black and maybe
+  unjudged.
+- **Tests.** `TestSignalRemovedWindowsCaughtByAnyRule` is turned round as
+  `TestSignalRemovedWindowsCaughtByRulesWithNoEntry`
+  (`internal/serve/notineffect_test.go`), beside the same for a signal
+  taken away on the page and one set aside past eight, a confirmation, an
+  entry naming no signal in effect, no named signal left, and numbers.md's
+  recount; `TestUnnamedWindowsTiedToNoneRead` holds #153's case with no
+  `impact` (Errors, tied only to a `record: false` signal, unjudged);
+  `internal/verdict/notineffect_test.go` and
+  `internal/ledger/notineffect_test.go` (the upgrade, once, from two
+  ledgers at once). `TestUnnamedSignalUnchanged`'s goldens are as they
+  were.
+
 ## Steps
 
 1. **Leads.** `verdict.Options.LeadFor` and `MaxLead`, and every place
@@ -1669,7 +1762,7 @@ Leads and `require:`, as above, and what building them settled:
    `TestSignalRemovedWindowsCaughtByAnyRule` turned round; #151's case
    with no `impact` in the file judged as `lapilli verdict` judges it,
    and the docs' way round it ("give the file the old expression as
-   `impact`") taken out.
+   `impact`") taken out. (Built: "As built (step 2)".)
 3. **Episodes.** `verdict.Judge`'s episodes; the next schema; the tally's
    walk, and the walk from the newest week back on an upgrade or a change
    of zone; the summary's `episodes`, a rule's page, the rules list's

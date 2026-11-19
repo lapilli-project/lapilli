@@ -567,17 +567,18 @@ type catchOut struct {
 }
 
 type incidentOut struct {
-	ID       string              `json:"id"`
-	Title    string              `json:"title,omitempty"`
-	Start    time.Time           `json:"start"`
-	End      time.Time           `json:"end,omitzero"`
-	Labels   map[string][]string `json:"labels,omitempty"`
-	Origin   string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --incidents-listen) or impact (found by --impact)"`
-	Status   string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
-	ToDecide bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
-	Signal   string              `json:"signal,omitempty" jsonschema:"of an impact window a named impact signal found, the signal's name; of an incident written down by confirming one, the window's"`
-	CaughtBy []catchOut          `json:"caught_by"`
-	Nearly   []nearOut           `json:"nearly_caught_by,omitempty" jsonschema:"rules whose condition held about then, but not for their for, or whose value came close to their threshold; worked out with the weekly digest, and when an incident is written down later"`
+	ID          string              `json:"id"`
+	Title       string              `json:"title,omitempty"`
+	Start       time.Time           `json:"start"`
+	End         time.Time           `json:"end,omitzero"`
+	Labels      map[string][]string `json:"labels,omitempty"`
+	Origin      string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --incidents-listen) or impact (found by --impact)"`
+	Status      string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
+	ToDecide    bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
+	Signal      string              `json:"signal,omitempty" jsonschema:"of an impact window a named impact signal found, the signal's name; of an incident written down by confirming one, the window's"`
+	NotInEffect bool                `json:"signal_not_in_effect,omitempty" jsonschema:"its signal is no longer read (taken away, dropped by a start, or set aside past eight): only the rules with no rule entry catch it, and, as a window, it keeps no rule's record; confirmed, it keeps everyone's"`
+	CaughtBy    []catchOut          `json:"caught_by"`
+	Nearly      []nearOut           `json:"nearly_caught_by,omitempty" jsonschema:"rules whose condition held about then, but not for their for, or whose value came close to their threshold; worked out with the weekly digest, and when an incident is written down later"`
 }
 
 type nearOut struct {
@@ -917,11 +918,11 @@ func (s *Server) toolIncidents(ctx context.Context, _ *mcp.CallToolRequest, in i
 	}
 	iv := v.(incidentsView)
 	out.Weeks = iv.Weeks
-	if o, err := s.options(ctx); err != nil {
+	o, err := s.options(ctx)
+	if err != nil {
 		return nil, out, err
-	} else {
-		out.Match = append(out.Match, o.Match...)
 	}
+	out.Match = append(out.Match, o.Match...)
 	near, err := s.nearMisses(ctx)
 	if err != nil {
 		return nil, out, err
@@ -933,6 +934,7 @@ func (s *Server) toolIncidents(ctx context.Context, _ *mcp.CallToolRequest, in i
 		out.Total++
 		if len(out.Incidents) < limit {
 			x := incidentOutOf(l)
+			x.NotInEffect = l.Signal != "" && !o.InEffect(l.Signal)
 			if l.Status != "caught" {
 				for _, nm := range near[l.ID] {
 					x.Nearly = append(x.Nearly, nearOutOf(nm))

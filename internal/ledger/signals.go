@@ -471,6 +471,84 @@ func unnamedWindows(ctx context.Context, q reader) (bool, error) {
 	return n > 0, err
 }
 
+// metaNotInEffectPended is "1" once the ledger pended, on the upgrade to a
+// release in which a window of a signal not in effect keeps no rule's
+// record and only the rules with no entry catch it (docs/design/judging.md,
+// item 5), the spans of those it kept from before (PendNotInEffect). The
+// record is worked out when it is read, and needs nothing judged again;
+// the catches are kept, and do. From then on, taking a signal away pends
+// every firing, as it did.
+const metaNotInEffectPended = "not_in_effect_pended"
+
+// PendNotInEffect pends, once, to be judged again (JudgePending), the
+// spans of the windows of signals not in effect the ledger keeps, and of
+// the incidents confirmations of them wrote, which are caught as their
+// windows are: each from o's longest lead before its start to its end (one
+// with none lasting o.UnknownLen), so that a rule with an entry no longer
+// catches them. A signal is in effect when o judges by it. It says how many
+// it pended. The spans are read and pended, and the ledger notes it is
+// done, in one write, the note read again in it: whatever replica leads
+// next does nothing more. With none to pend, the note alone, in a write
+// that changes no page.
+func (l *Ledger) PendNotInEffect(ctx context.Context, o verdict.Options) (int, error) {
+	if done, err := l.meta(ctx, l.r, metaNotInEffectPended); err != nil || done != "" {
+		return 0, err
+	}
+	spans, err := notInEffectSpans(ctx, l.r, o)
+	if err != nil {
+		return 0, err
+	}
+	if len(spans) == 0 {
+		return 0, l.writeAside(ctx, func(t *txn) error { return setMeta(t.ctx, t, metaNotInEffectPended, "1") })
+	}
+	n := 0
+	err = l.write(ctx, func(t *txn) error {
+		n = 0
+		if done, err := l.meta(t.ctx, t, metaNotInEffectPended); err != nil || done != "" {
+			return err
+		}
+		spans, err := notInEffectSpans(t.ctx, t, o)
+		if err != nil {
+			return err
+		}
+		if n = len(spans); n > 0 {
+			if err := pend(t, spans); err != nil {
+				return err
+			}
+		}
+		return setMeta(t.ctx, t, metaNotInEffectPended, "1")
+	})
+	return n, err
+}
+
+// notInEffectSpans are the spans PendNotInEffect pends: of each incident
+// that counts with a named signal o doesn't judge by, a window or the
+// incident a confirmation of one wrote, from o's longest lead before its
+// start to its end.
+func notInEffectSpans(ctx context.Context, q reader, o verdict.Options) ([][2]int64, error) {
+	rows, err := q.QueryContext(ctx, "SELECT start_at, end_at, signal FROM incidents WHERE counts = 1 AND signal <> '' ORDER BY start_at")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var spans [][2]int64
+	for rows.Next() {
+		var start int64
+		var end sql.NullInt64
+		var in incident.Incident
+		if err := rows.Scan(&start, &end, &in.Signal); err != nil {
+			return nil, err
+		}
+		if o.InEffect(in.Signal) {
+			continue
+		}
+		in.Start, in.End = unix(start), fromNull(end)
+		lo, hi := window(in, o)
+		spans = append(spans, [2]int64{lo, hi})
+	}
+	return spans, rows.Err()
+}
+
 // syncSignals is SyncSignalSet within a write; tie, its round's, ties the
 // windows of the signal with no name (tieUnnamed), once the signals no
 // longer given are taken away, so that their bits are free.

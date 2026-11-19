@@ -1744,7 +1744,8 @@ type incidentView struct {
 // the labels its windows are matched on, the rule entries that keep their
 // rules from its windows, and the other signals' windows at the time, each
 // with what caught it; Together, that some of those are undecided, to be
-// dismissed with it.
+// dismissed with it. Gone, a signal not in effect: its windows keep no
+// rule's record, and only the rules with no entry catch them.
 type signalOfView struct {
 	Name, For, Match string
 	Gone             bool
@@ -1869,14 +1870,16 @@ func (s *Server) signalOf(ctx context.Context, t *tallies, in ledger.Incident) (
 	if in.Match == nil {
 		v.Match = strings.Join(o.Match, ", ")
 	}
-	if o.Signals.Named() {
+	if o.Signals != nil {
 		for _, x := range o.Signals.List {
 			if x.Name == in.Signal {
 				v.Gone, v.For = false, verdict.Duration(x.For)
 			}
 		}
+		// Of a signal not in effect, every entry keeps its rules from its
+		// windows, those naming it too (docs/design/judging.md, item 5).
 		for i, e := range o.Signals.Entries {
-			if !slices.Contains(e.Signals, in.Signal) {
+			if v.Gone || !slices.Contains(e.Signals, in.Signal) {
 				what := e.Rules
 				if what == "" {
 					what = labelText(e.Labels)

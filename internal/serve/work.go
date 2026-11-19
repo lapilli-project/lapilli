@@ -88,6 +88,15 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.fail("settings", err)
 		return
 	}
+	// Once, on the upgrade to this release: the windows of signals not in
+	// effect kept from before, which rules with an entry may have caught,
+	// pended to be judged again with the rest (docs/design/judging.md,
+	// item 5).
+	if n, err := s.l.PendNotInEffect(ctx, o); err != nil {
+		s.fail("judging again the windows of impact signals not in effect", err)
+	} else if n > 0 {
+		s.log.Info("windows of impact signals not in effect judged again, once: they keep no rule's record, and only rules with no rule entry catch them", "windows", n)
+	}
 	// Spans a quiet window left to judge again, should its write have been
 	// cut short.
 	if !s.still(ctx) {

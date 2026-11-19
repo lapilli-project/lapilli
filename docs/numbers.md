@@ -78,7 +78,14 @@ a rule entry (`rules[].impact_rule`†, its place in `settings.impact_rules`†
 from 1) catches only the windows of the entry's `signals`, on the entry's
 `match` when it gives one: another signal's windows are, to it, as if they
 weren't there. An incident written down has no signal, and every rule is
-matched against it on `match`.
+matched against it on `match`. A window of a signal not in effect, its
+`signal` none of the names in `settings.impact_signals` (a signal taken
+away on the Settings page, dropped by a start without it, or set aside at
+a start past eight; [design/judging.md](design/judging.md), item 5), and
+the incident a confirmation of one wrote, which is caught as its window
+was, are caught only by the rules no entry names, on the labels the
+window was found with: its signal's `match` then, which the report
+doesn't give, so the block below counts such a window on `match`.
 
 A signal may give a lead of its own, `lead_ns`† in
 `settings.impact_signals`†, and a rule entry one for its rules against its
@@ -114,7 +121,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
           elif $named then $sig[$in.signal].lead_ns // $s.lead_ns
           else $s.lead_ns end) as $lead
        | (if $named and $e != null then $e.require // [] else [] end) as $require
-       | select(($in.signal == null or $e == null or any($e.signals[]; . == $in.signal))
+       | select(($in.signal == null or $e == null or ($named and any($e.signals[]; . == $in.signal)))
          and $at >= ($in.start | epoch) - $lead / 1e9
          and $at <= (if $in.end then $in.end | epoch else ($in.start | epoch) + $s.unknown_length_ns / 1e9 end)
          and all($require[]; ($f.labels // {})[.] != null and ($in.labels // {})[.] != null)
@@ -232,7 +239,15 @@ a week tied to the same signals, of a rule no entry names, or of the same
 rule entry, is judged, or none; with no named signal, every firing of the
 week. A window keeps the record of the firings tied to its signal alone;
 an incident written down, or written by confirming a window, keeps
-everyone's. With named signals, a signal's start is the first whole week
+everyone's. A window of a signal not in effect (its `signal` none of the
+names in `settings.impact_signals`: taken away, dropped by a start, or set
+aside past eight; [design/judging.md](design/judging.md), item 5) keeps no
+rule's record, with named signals in effect or none, as no firing is
+tied to its signal: a rule's record in its weeks is what the signals in
+effect and the incidents written down keep, as `lapilli verdict`, which
+never read that signal, judges it, and the block below leaves it out.
+Confirmed, it is written down, and keeps everyone's. With named signals,
+a signal's start is the first whole week
 after where its data begins (`settings.impact_signals[].start`), and a
 firing is read as judged when each of its `signals` that keeps the record
 had started by its week's Monday. Give the time zone's offset from UTC, in

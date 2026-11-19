@@ -164,21 +164,52 @@ whichever way the switch is made
   those `--impact` and `--impact-for` were, it is read on from where the
   one with no name was, nothing read again. With none named `impact`
   (`read=false`), they are the windows of a signal no longer read, kept
-  as those of a signal taken away are: incidents, which keep every
-  rule's record still. To have rules that an entry ties only to signals
-  with `record: false` left unjudged, as `lapilli verdict` leaves them,
-  give the file the old expression as a signal named `impact`, before the
-  first start with this release: `impact` is then made of the one with
-  no name, its record kept. Added later, the windows are its own, matched
-  on its labels, but it keeps the record only from its own start, as
-  does an `impact` a release before this one made: a firing tied to it in
-  a week before that, with no window there, is not judged, where `lapilli
-  verdict` judges it. The firings that could catch the windows are
-  judged again in the same round. A tie the database refuses is logged
+  as those of a signal taken away are, which judge no one (below): they
+  keep no rule's record, and only the rules no rule entry names catch
+  them, so rules that an entry ties only to signals with `record: false`
+  are left unjudged in their weeks, as `lapilli verdict` leaves them. To
+  keep those weeks' record, confirm the windows that were real outages;
+  or give the file the old expression as a signal named `impact`, before
+  the first start with named signals: `impact` is then made of the one
+  with no name, its windows its own and its record kept. Added later, the
+  windows are its own, matched on its labels, but it keeps the record
+  only from its own start, as does an `impact` a release before this one
+  made: a firing tied to it in a week before that, with no window there,
+  is not judged, where `lapilli verdict` judges it. The firings that
+  could catch the windows are judged again in the same round. A tie the
+  database refuses is logged
   (`the windows of the impact signal with no name weren't tied to a named
   signal`), the windows judged as they are, and tried again at the next
   round. From 0.55.0 to 0.61.1 the windows were left with no name, and
   kept every rule's record in their weeks and the two after each.
+
+## Windows of a signal no longer in effect
+
+A named signal no longer in effect, taken away on the Settings page,
+dropped by a start without it, or set aside at a start past eight (and
+`impact` above, with none of that name in the file), keeps its windows,
+with its name. From this release they judge no one
+([design/judging.md](design/judging.md), item 5): they keep no rule's
+record, and only the rules no rule entry names catch them, on the labels
+they were found with. Before it they kept every rule's record, as
+incidents written down, and any rule caught them.
+
+On the upgrade the leader's first round judges their spans again, once,
+and logs it:
+
+```
+time=TIME level=INFO msg="windows of impact signals not in effect judged again, once: they keep no rule's record, and only rules with no rule entry catch them" windows=N
+```
+
+So the weeks such a window kept, and the two after each, may show firings
+counted and not judged where they were black before (a rule whose
+precision, noisy badge or goal needed that record has none there), and a
+rule an entry names may no longer have caught such a window, its firing
+black or not judged where it was white. To keep a week's record, an
+editor or an admin confirms the windows that were real outages: a
+confirmed window is an incident written down, which keeps everyone's
+record. A ledger that never kept a window of a signal no longer in effect
+judges as before.
 
 ## The Helm chart
 

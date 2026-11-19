@@ -851,7 +851,8 @@ func (l *Ledger) WeekOf(t time.Time) (time.Time, time.Time) {
 
 // RecordKept reports whether the record of one of [from, to)'s weeks is
 // kept (WeekKept): the impact signal read over all of one, or an incident
-// on from two weeks before the first to the end of the last.
+// on from two weeks before the first to the end of the last, a window of
+// a signal not in effect none of them (verdict.Options.NotInEffect).
 //
 // With named signals, a week's firings are judged by the signals tied to
 // them: one of the weeks is kept when any firing of it would be judged
@@ -869,8 +870,10 @@ func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.O
 	if last, _ := l.WeekOf(wt.Add(-time.Second)); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
 		return true, nil
 	}
+	// With no named signal in effect, a named signal's window is one of a
+	// signal not in effect: it keeps no record.
 	var n int
-	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE "+recordOn+" LIMIT 1) x",
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE "+recordOn+" AND (i.origin <> 'impact' OR i.signal = '') LIMIT 1) x",
 		recordArgs(verdict.RecordFrom(wf, wt), wt, o.UnknownLen)...).Scan(&n)
 	return n > 0, err
 }

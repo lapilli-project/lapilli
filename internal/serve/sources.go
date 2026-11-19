@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -289,6 +290,9 @@ type sourceRow struct {
 	Signal   string
 	Since    time.Time
 	NoRecord bool
+	// Gone are, of the row of the windows of signals not in effect, those
+	// signals (docs/design/judging.md, item 5).
+	Gone []string
 }
 
 // sourcesView is the incident sources: the rows, whether no incident was
@@ -428,8 +432,13 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 	}
 	v.Rows = append(v.Rows, file)
 
-	// The impact signal; with named ones, a row each.
+	// The impact signal; with named ones, a row each; and the windows of
+	// those not in effect.
 	n, set, err := s.signalsNowOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gone, err := s.goneSource(ctx, n, now)
 	if err != nil {
 		return nil, err
 	}
@@ -439,6 +448,9 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 			return nil, err
 		}
 		v.Rows = append(v.Rows, rows...)
+		if gone != nil {
+			v.Rows = append(v.Rows, *gone)
+		}
 		out, err := s.outcomes(ctx)
 		if err != nil {
 			return nil, err
@@ -472,6 +484,9 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 		}
 	}
 	v.Rows = append(v.Rows, imp)
+	if gone != nil {
+		v.Rows = append(v.Rows, *gone)
+	}
 
 	out, err := s.outcomes(ctx)
 	if err != nil {
@@ -479,6 +494,30 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 	}
 	v.Quiet = out.Record.Quiet
 	return v, nil
+}
+
+// goneSource is the Incident sources panel's row of the windows of named
+// signals not in effect, n those that are, found in the last four weeks:
+// how many, and of which signals (docs/design/judging.md, item 5). Nil
+// with none.
+func (s *Server) goneSource(ctx context.Context, n signalsNow, now time.Time) (*sourceRow, error) {
+	counts, err := s.l.SignalWindowsSince(ctx, now.Add(-sourcesSpan))
+	if err != nil {
+		return nil, err
+	}
+	row := sourceRow{Name: "Impact signals no longer read", State: "unread", Counts: true,
+		About: "Windows of signals taken away, dropped by a start, or set aside past eight: they keep no rule's record, and only the rules with no rule entry catch them. Confirm those that were real outages to keep the record of their weeks."}
+	for _, name := range slices.Sorted(maps.Keys(counts)) {
+		if _, ok := n.def(name); name == "" || ok || counts[name] == 0 {
+			continue
+		}
+		row.N += counts[name]
+		row.Gone = append(row.Gone, name)
+	}
+	if len(row.Gone) == 0 {
+		return nil, nil
+	}
+	return &row, nil
 }
 
 // signalSources are the named impact signals in effect, n, as the
