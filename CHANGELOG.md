@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed (security)
+
+- **`lapilli preflight` hides each ARN of an account in what a cloud
+  says** (0.60.0 to 0.61.0). The report's scrubber ran first, and wrote
+  what it had learned into an ARN's parts: one in the account of
+  `--changes-aws-role`, as the pod's own role often is, then read
+  `[--changes-aws-role's account]` and was no longer an ARN, so its role's
+  name and a session's (`assumed-role/pod-role/i-0abc`) were shown, as was
+  what followed in another role's ARN that begins with the role's
+  (`role/example-writer/other`). So were the names in an ARN of a
+  partition but `aws`, `aws-cn` and `aws-us-gov` (`aws-iso`, `aws-iso-b`,
+  `aws-eusc`), and what followed a comma in a role's name (`role/a,b`) or
+  a bracket in its path (`role/team(a)/name`). Each ARN is hidden whole
+  now, before the scrubber, the role's own named `[--changes-aws-role]`.
+
 ### Changed
 
 - **lapilli.dev can be found, and is checked like serve's pages.** It has a

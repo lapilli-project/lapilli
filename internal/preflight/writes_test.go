@@ -1385,9 +1385,11 @@ func TestWritesNothingWrittenAndRedacted(t *testing.T) {
 		states["changes.azure"] != Unknown || states["changes.oci"] != Unknown {
 		t.Errorf("%v\n%s", states, all.String())
 	}
-	// Each by what it is: the whole identity, not only its parts.
+	// Each by what it is: the whole identity, not only its parts. The
+	// role's session ARN, in the role's own account, is hidden whole, not
+	// as its account and name with the session's beside them.
 	for _, as := range []string{"[--changes-google-service-account]", "[--changes-azure-client-id]", "[--changes-oci-config's user]", "[--changes-in's resource group]",
-		"[--changes-aws-role's account]", "[--changes-aws-role's name]", "[--alarms gcp's project]", "[--alarms oci's compartment]", "[an id]", "[a number]"} {
+		"User: [an ARN] is not authorized", "[--changes-aws-role's name]", "[--alarms gcp's project]", "[--alarms oci's compartment]", "[an id]", "[a number]"} {
 		if !strings.Contains(all.String(), as) {
 			t.Errorf("the report doesn't say %s:\n%s", as, all.String())
 		}
@@ -1448,6 +1450,35 @@ func TestTakeWrites(t *testing.T) {
 // an account written with dashes or glued to a word, none printed; the
 // role serve writes as, by its flag.
 func TestTakeErrorRedacted(t *testing.T) {
+	t.Run("same account", func(t *testing.T) {
+		// The pod's role in the role's own account, whose number the
+		// scrubber hides first: each ARN of it is hidden whole still.
+		was := take
+		t.Cleanup(func() { take = was })
+		take = func(context.Context, string, string, string) (func(*http.Request) error, func(*http.Request) error, error) {
+			return nil, nil, errors.New("api error AccessDenied: User: arn:aws:sts::123456789012:assumed-role/pod-role/i-0abc " +
+				"is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::123456789012:role/example-writer, " +
+				"as arn:aws:iam::123456789012:role/other-role is, nor arn:aws:sts::123456789012:assumed-role/example-writer/s-1")
+		}
+		c := writesConfig(t)
+		c.Serve.Alarms, c.Serve.ChangesIn = c.Serve.Alarms[:1], []string{"cw:QueueDepth"}
+		c.Serve.ChangesAzureClientID, c.Serve.ChangesGoogleServiceAccount, c.Serve.ChangesOCIConfig = "", "", ""
+		p := guarded(t, c)
+		p.changes(context.Background())
+		p.redact()
+		it := itemOf(p, "changes.cloud")
+		if it == nil || it.State != Problem {
+			t.Fatalf("%+v", it)
+		}
+		for _, hidden := range []string{"123456789012", "pod-role", "i-0abc", "other-role", "example-writer", "s-1", "assumed-role"} {
+			if strings.Contains(it.Why, hidden) {
+				t.Errorf("the report says %q: %s", hidden, it.Why)
+			}
+		}
+		if !strings.Contains(it.Why, "[--changes-aws-role]") || strings.Count(it.Why, "[an ARN]") != 3 {
+			t.Errorf("%s", it.Why)
+		}
+	})
 	was := take
 	t.Cleanup(func() { take = was })
 	take = func(context.Context, string, string, string) (func(*http.Request) error, func(*http.Request) error, error) {
@@ -1474,16 +1505,84 @@ func TestTakeErrorRedacted(t *testing.T) {
 	}
 }
 
+// Each ARN of an account in what a cloud said is hidden whole, whatever the
+// scrubber would make of its parts: the role's own named as the role, any
+// other an ARN, its account and names never said.
+func TestCloudSaidARNsWhole(t *testing.T) {
+	for _, c := range []struct{ role, said string }{
+		{"example-writer", "arn:aws:sts::123456789012:assumed-role/ci,example-writer/session-name"},
+		{"example-writer", "arn:aws:iam::999999999999:role/a,,example-writer,pod-name and"},
+		{"example-writer", "arn:aws:iam::123456789012:role/example-writer/other-name"},
+		{"example-writer", "arn:aws:iam::123456789012:role/example-writer+other-name"},
+		{"example-writer", "arn:aws:sts::123456789012:assumed-role/example-writer/session-name"},
+		{"example-writer", "arn:aws:iam::123456789012:role/other-name, then"},
+		// A role named as a word of the scrubber's own: no placeholder
+		// is written into another's.
+		{"account", "arn:aws:iam::123456789012:role/other-name"},
+		{"name", "arn:aws:sts::123456789012:assumed-role/name/session-name"},
+		// An IAM path may hold brackets, parentheses and braces.
+		{"example-writer", "arn:aws:iam::123456789012:role/p[q]/other-name is"},
+		{"example-writer", "arn:aws:iam::123456789012:role/team(a)/other-name is"},
+		{"example-writer", "arn:aws:iam::123456789012:role/{x}/other-name is"},
+		// In an error's XML and JSON, the ARN ends at the markup.
+		{"example-writer", `arn:aws:iam::123456789012:role/other-name</Message>`},
+		{"example-writer", `arn:aws:iam::123456789012:role/other-name","Code":"AccessDenied"`},
+	} {
+		cfg := writesConfig(t)
+		cfg.Serve.ChangesAWSRole = "arn:aws:iam::123456789012:role/" + c.role
+		p := newRun(cfg)
+		p.hideWho("aws", "--changes-aws-role", cfg.Serve.ChangesAWSRole)
+		got := p.cloudSaidText("User: " + c.said)
+		for _, hidden := range []string{"123456789012", "999999999999", "other-name", "session-name", "pod-name", "assumed-role", c.role + "/"} {
+			if strings.Contains(got, hidden) {
+				t.Errorf("role %s, %q: %q says %q", c.role, c.said, got, hidden)
+			}
+		}
+		if !strings.Contains(got, "User: [an ARN]") {
+			t.Errorf("role %s, %q: %q", c.role, c.said, got)
+		}
+	}
+	// The role's own ARN, alone, is named as the role.
+	cfg := writesConfig(t)
+	p := newRun(cfg)
+	p.hideWho("aws", "--changes-aws-role", cfg.Serve.ChangesAWSRole)
+	for said, want := range map[string]string{
+		"on resource: " + cfg.Serve.ChangesAWSRole + ", then":   "on resource: [--changes-aws-role], then",
+		"on resource: " + cfg.Serve.ChangesAWSRole + ".":        "on resource: [--changes-aws-role].",
+		"on resource: " + cfg.Serve.ChangesAWSRole + ": denied": "on resource: [--changes-aws-role]: denied",
+		"<Arn>" + cfg.Serve.ChangesAWSRole + "</Arn>":           "<Arn>[--changes-aws-role]</Arn>",
+		`"` + cfg.Serve.ChangesAWSRole + `"`:                    `"[--changes-aws-role]"`,
+		"by arn:aws:iam::210987654321:role/other-name.":         "by [an ARN].",
+		"(arn:aws:iam::210987654321:role/other-name), then":     "([an ARN], then",
+	} {
+		if got := p.cloudSaidText(said); !strings.Contains(got, want) {
+			t.Errorf("%q: %q, want %q", said, got, want)
+		}
+	}
+}
+
 // What a cloud said loses its ids; Lapilli's own words keep theirs.
 func TestCloudIDs(t *testing.T) {
 	for in, want := range map[string]string{
-		"account 123456789012.":                       "account [a number].",
-		"acct_123456789012 and x123456789012y":        "acct_[a number] and x[a number]y",
-		"1234-5678-9012 or 12345-6789-0123":           "[a number] or 12345-6789-0123",
-		"a time 1762000000, a count 999999999":        "a time [a number], a count 999999999",
-		"arn:aws:iam::123456789012:role/x/y, then":    "[an ARN], then",
-		"arn:aws:s3:::bucket stays":                   "arn:aws:s3:::bucket stays",
-		"object 00000000-0000-0000-0000-00000000000d": "object [an id]",
+		"account 123456789012.":                                                    "account [a number].",
+		"acct_123456789012 and x123456789012y":                                     "acct_[a number] and x[a number]y",
+		"1234-5678-9012 or 12345-6789-0123":                                        "[a number] or 12345-6789-0123",
+		"a time 1762000000, a count 999999999":                                     "a time [a number], a count 999999999",
+		"arn:aws:iam::123456789012:role/x/y, then":                                 "[an ARN], then",
+		"arn:aws-cn:iam::123456789012:role/cn-role":                                "[an ARN]",
+		"arn:aws-us-gov:sts::123456789012:assumed-role/gov/s":                      "[an ARN]",
+		"arn:aws-iso:iam::123456789012:role/iso-role":                              "[an ARN]",
+		"arn:aws-iso-b:iam::123456789012:role/isob-role, then":                     "[an ARN], then",
+		"arn:aws-iso-e:iam::123456789012:role/isoe-role":                           "[an ARN]",
+		"arn:aws-iso-f:sts::123456789012:assumed-role/f/s":                         "[an ARN]",
+		"arn:aws-eusc:iam::123456789012:role/eusc-role":                            "[an ARN]",
+		"arn:aws:iam::aws:policy/ReadOnlyAccess stays":                             "arn:aws:iam::aws:policy/ReadOnlyAccess stays",
+		"arn:aws:iam::123456789012:role/a,b,c=d@e then":                            "[an ARN] then",
+		"roles arn:aws:iam::123456789012:role/a,arn:aws:iam::123456789012:role/b.": "roles [an ARN]",
+		"arn:aws:iam::123456789012:role/x,":                                        "[an ARN],",
+		"arn:aws:iam::123456789012:role/a,,b then":                                 "[an ARN] then",
+		"arn:aws:s3:::bucket stays":                                                "arn:aws:s3:::bucket stays",
+		"object 00000000-0000-0000-0000-00000000000d":                              "object [an id]",
 	} {
 		if got := cloudIDs(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
