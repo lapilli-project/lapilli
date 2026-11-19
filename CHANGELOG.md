@@ -36,6 +36,11 @@
 
 ### Changed
 
+- CI on a pull request: a new push cancels the run in progress, the tests
+  on Postgres run in two shards each (`test/shard.sh`), each in half the
+  time, and an end-to-end job runs only when the changes reach it
+  (`test/e2e/reached.sh`), none for the docs alone. On main every job
+  runs, as before (CONTRIBUTING.md).
 - **The pages for whoever may not change things, the rules list on a
   laptop, and a rule's team said** (docs/design/ui.md, bundle 62), from
   0.61 read on a real deployment:
