@@ -1368,7 +1368,15 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	made, err := s.l.Decide(r.Context(), r.PathValue("id"), r.PostFormValue("state"), strings.TrimSpace(r.PostFormValue("title")), s.user(r), o)
+	// The form holds the title as the page shows it (shown): sent back
+	// unchanged, the window's own title is kept, not the page's words.
+	title := strings.TrimSpace(r.PostFormValue("title"))
+	if title != "" {
+		if in, err := s.l.IncidentByID(r.Context(), r.PathValue("id")); err == nil && title == shown(lang(r), in).Title {
+			title = ""
+		}
+	}
+	made, err := s.l.Decide(r.Context(), r.PathValue("id"), r.PostFormValue("state"), title, s.user(r), o)
 	if err != nil {
 		s.oops(w, r, wrapBad(err))
 		return

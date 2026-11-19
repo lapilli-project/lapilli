@@ -65,9 +65,10 @@ func init() {
 		lang := n.Code
 		t := template.Must(pages.Clone())
 		pagesIn[lang] = t.Funcs(template.FuncMap{
-			"t":    func(msg string, args ...any) string { return tr(lang, msg, args...) },
-			"tbdi": func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
-			"tin":  func(ctx, msg string) string { return trIn(lang, ctx, msg) },
+			"t":        func(msg string, args ...any) string { return tr(lang, msg, args...) },
+			"tbdi":     func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
+			"tin":      func(ctx, msg string) string { return trIn(lang, ctx, msg) },
+			"incTitle": func(title string) string { return shownTitle(lang, title) },
 			// who is who did something; "anonymous" in the reader's
 			// language when no sign-in proxy said.
 			"who": func(by string) string {

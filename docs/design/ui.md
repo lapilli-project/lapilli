@@ -1952,7 +1952,10 @@ an impact window of the unnamed signal is "user impact" on the pages and
 in the MCP tools, which read what the pages show, and "found from user
 impact" in the incidents list, not "(--impact)" and "found by --impact";
 the API gives the title as it was kept ("user impact (--impact)"), the
-command line's report as it was.
+command line's report as it was. Where a page has only the title at hand
+(a rule's changes reviewed, a marked window's incidents, the Settings
+trial), `incTitle` says it so. The confirm form is filled with the shown
+title; sent back unchanged, the window keeps its own (`decide`).
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

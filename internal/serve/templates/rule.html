@@ -136,7 +136,7 @@
 {{if .Reviews}}{{range .Reviews}}
 <p class="quiet">{{t "Replayed over the week before %s, as it was and as it is:" (at $loc .At)}}</p>
 <ul class="plain">{{range .Rules}}<li><bdi>{{.Rule}}</bdi>: {{t "fired %d → %d, caught %d → %d, precision %s → %s" (fired .Before) (fired .After) (caught .Before) (caught .After) (pct .Before) (pct .After)}}</li>{{end}}</ul>
-{{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{.Title}}: {{catches .Before}} → {{catches .After}}</li>{{end}}</ul>{{end}}
+{{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{incTitle .Title}}: {{catches .Before}} → {{catches .After}}</li>{{end}}</ul>{{end}}
 {{end}}{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>
 

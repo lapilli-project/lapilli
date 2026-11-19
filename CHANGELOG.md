@@ -73,13 +73,20 @@ change: the ledger stays at 023.
   - What to look at's lines and a feed's line say what to check in
     English, Japanese and Spanish, as Korean has since 0.60.0: "if they
     mattered, write them down; if not, fix what fires them", "check its job
-    is still running", not a question.
-  - An impact window of the unnamed signal is "user impact" on the pages,
-    and "found from user impact" in the incidents list, not "(--impact)"
-    and "found by --impact". The MCP tools, which read what the pages
-    show, say it so too; the API gives the title as it was kept, and the
-    command line's report is as it was. A sentence that tells whoever runs
-    serve what to set keeps its flag's name.
+    is still running", "Check X still earns its place", not a question; a
+    task made of a spare rule's line is "Consider retiring X".
+  - An impact window of the unnamed signal is "user impact" on the pages
+    (the incidents, an incident's page, search, What to look at, a rule's
+    changes reviewed, a marked window's incidents, the Settings trial), and
+    "found from user impact" in the incidents list, not "(--impact)" and
+    "found by --impact". The MCP tools, which read what the pages show,
+    say it so too; the API gives the title as it was kept, and the command
+    line's report is as it was. A sentence that tells whoever runs serve
+    what to set keeps its flag's name.
+  - An impact window confirmed with the title its form was filled with is
+    written down with the window's own title, not the page's words in the
+    reader's language (a named signal's window confirmed in Korean was
+    "사용자 영향 (NAME)"); a title written in its place is kept.
   - lapilli.dev's icon is serve's mark, on a light round plate in the dark.
 
 ### Fixed

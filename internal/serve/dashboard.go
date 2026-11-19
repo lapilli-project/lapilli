@@ -1034,13 +1034,13 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 	}
 	for _, x := range lines {
 		if x.Spare {
-			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
+			out = append(out, action{Text: tr(l, "Check %s still earns its place", x.Name),
 				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
-				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
+				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Consider retiring %s", x.Name)})
 		}
 	}
 	if len(silent) > 0 {
-		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "check they are still needed, and don't watch something gone"), Href: "/rules?weeks=12"})
+		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "check they are still needed and still watch something that is there"), Href: "/rules?weeks=12"})
 	}
 	if len(out) > actionsShown {
 		out = out[:actionsShown]

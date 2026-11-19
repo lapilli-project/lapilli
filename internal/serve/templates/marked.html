@@ -64,7 +64,7 @@ weeks before it, outside its kind. */}}
 <h2>{{t "Its occurrences"}}</h2>
 {{if .Lines}}{{template "occurrences" (on $ .Lines)}}{{if .Cut}}<p class="quiet">{{t "The latest %d occurrences are listed." 100}}</p>{{end}}{{else}}<p class="quiet">{{t "None in the last twelve weeks, or in the next four."}}</p>{{end}}
 <h2>{{t "Incidents during it"}}</h2>
-{{if .Incidents}}<ul class="plain">{{range .Incidents}}<li><a href="{{$.Incident .ID}}"><bdi>{{.ID}}</bdi></a>{{with .Title}} <bdi>{{.}}</bdi>{{end}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+{{if .Incidents}}<ul class="plain">{{range .Incidents}}<li><a href="{{$.Incident .ID}}"><bdi>{{.ID}}</bdi></a>{{with .Title}} <bdi>{{incTitle .}}</bdi>{{end}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{if .Declared}}
 <h2>{{t "Change it"}}</h2>
 <p>{{template "off" (offDeclared "Change it" "marked-why")}}</p>
