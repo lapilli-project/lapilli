@@ -428,6 +428,9 @@ The impact file:
       lead: 1h                    # caught from 1h before a window, in place
       require: [service]          # of each signal's lead (lead: on a signal
                                   # too), and only when both carry service
+    - rules: ^Watchdog$
+      judged: false               # judged by nothing: counted, never white
+                                  # nor black (entries all so need no signals)
 
 lapilli only reads history and files. It sends the report nowhere but to
 --push and --slack-webhook-file.

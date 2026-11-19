@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/verdict"
@@ -68,7 +69,7 @@ func TestCatalogs(t *testing.T) {
 // pagePaths are every page, with something on each once pagesServer has
 // written it.
 var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
-	"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
+	"/firings?day=2026-11-02", "/firings?day=2026-11-01", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
 	// The incident criteria tried: another expression, off, and one that
 	// doesn't read.
 	"/settings?impact-try=1&impact=impact+%3E+1&impact-for=10m", "/settings?impact-try=1&impact=off", "/settings?impact-try=1&impact=sum%28",
@@ -228,10 +229,53 @@ func pagesServer(t *testing.T) *Server {
 	return s
 }
 
+// peopleSay gives pagesServer's s people's verdicts (docs/design/judging.md,
+// item 3), apart from it, as the goldens made of it hold it as it was: an
+// Errors firing on search said unrelated to INC-V, written over it, and
+// needing no action; another answered yes, its verdict to look at again.
+func peopleSay(t *testing.T, s *Server) {
+	t.Helper()
+	ctx := context.Background()
+	o := s.cfg.Options
+	if _, err := s.l.Put(ctx, incident.Incident{ID: "INC-V", Title: "search", Start: now.Add(-40 * time.Hour), End: now.Add(-40*time.Hour + 15*time.Minute),
+		Labels: incident.Labels{"service": {"search"}}}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	errs, err := s.l.Firings(ctx, ledger.FiringQuery{From: now.Add(-51 * time.Hour), To: now, Rule: "Errors"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := 0
+	for _, f := range errs {
+		if f.Labels["service"] != "search" {
+			continue
+		}
+		k := ledger.FiringKey{ID: f.ID, Series: f.Series, Start: f.Start}
+		by := ledger.VerdictBy{By: "ana", Admin: true, Now: now}
+		switch {
+		case f.White:
+			yes, no := true, "no"
+			if _, err := s.l.SetVerdict(ctx, k, ledger.VerdictChange{Unrelated: &yes, Action: &no}, by, o); err != nil {
+				t.Fatal(err)
+			}
+			said++
+		case said < 2 && f.Start.Before(now.Add(-45*time.Hour)):
+			yes := "yes"
+			if _, err := s.l.SetVerdict(ctx, k, ledger.VerdictChange{Action: &yes}, by, o); err != nil {
+				t.Fatal(err)
+			}
+			ledgerExec(t, s, "UPDATE verdicts SET moved = 'gone' WHERE start_at = ?", f.Start.Unix())
+			said = 2
+		}
+	}
+}
+
 // Every page in each language finds a translation for every text it
 // shows, says which language it is in, and offers the others.
 func TestPagesInEachLanguage(t *testing.T) {
-	h := pagesServer(t).Handler()
+	s := pagesServer(t)
+	peopleSay(t, s)
+	h := s.Handler()
 	missing.Lock()
 	clear(missing.m)
 	missing.Unlock()

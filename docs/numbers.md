@@ -148,6 +148,16 @@ A rule's stones, as `rules[]` counts them:
    black: map(select(.white | not)) | length, unjudged: map(select(.no_record)) | length}]
 ```
 
+A firing a person said is **unrelated** to what it caught (`firings[].unrelated`†,
+the incidents it caught as Lapilli judged it that they named; lapilli
+serve, [design/judging.md](design/judging.md), item 3) doesn't catch
+those: it is a black stone when it caught nothing else, and what caught
+each of them is worked out from the other firings. A rule entry may say
+`judged: false`† (`settings.impact_rules[].judged`): its rules' firings
+catch nothing, written incidents included, and are counted, not judged
+(`firings[].not_judged`†, `no_record`†). "A person's verdict", below,
+counts both again.
+
 ## No record
 
 A black stone says nothing was wrong, which is only so if someone was
@@ -338,6 +348,55 @@ first(.rows[] | select(.team == "")) | .precision
 
 `/api/v1/summary`'s `precision` is a week's, over the firings of the week:
 count it again from `/api/v1/report` over the same week.
+
+## A person's verdict (lapilli serve)
+
+On Alert history, and through `/api/v1/verdicts`, a person says of one
+firing that it is **unrelated** to the incidents it caught, which turns
+that firing alone black (its `unrelated`† names them, and its
+`incidents`† are those it still catches), and whether it **needed
+action**, `yes` or `no` (`action`†), which changes no stone
+([design/judging.md](design/judging.md), item 3). An incident "This was
+real" wrote from a firing is `real`†. The report's stones, and every number
+here, keep people's word in them; the summary's `people` says it apart:
+
+- `unrelated`, the row's firings white as Lapilli judged them and black by
+  a person's word, and `unrelated_excused`, those of them a quiet window
+  then excused, which are in no other count, as every excused firing;
+- `real`, the incidents "This was real" wrote from a firing of the row's
+  rules that started in the week; `real_white`, the row's firings white
+  only by such incidents, and `real_excused`, those of them a quiet window
+  that matches them would have excused as Lapilli judged them;
+- `caught_by_lapilli` and `precision_by_lapilli`, as Lapilli's own
+  judging would have them: every "unrelated" white, those excused for it
+  counted again, the incidents "This was real" wrote left out (their
+  firings black, excused, or not judged where only such an incident kept
+  the record);
+- `action`: the row's `firings`, those `answered`, `yes` and `no`,
+  `yes_black` (needed action, caught nothing) and `no_white` (needed none,
+  caught something), and `share`, yes over those answered, given only once
+  80% of the row's firings are answered, `null` below it.
+
+A rule's `unrelated`†, `action_yes`† and `action_no`† count its firings so;
+`not_judged`† those its entry judges by nothing, of its `unjudged`†.
+
+```jq
+# people (lapilli serve): as the summary has it
+first(.rows[] | select(.team == "")) | .people
+| {unrelated: (.unrelated - .unrelated_excused), caught_by_lapilli: (.caught_by_lapilli - .unrelated_excused), yes: .action.yes, no: .action.no}
+```
+
+```jq
+# people (lapilli serve): counted again
+([.incidents[] | select(.real) | .id]) as $real
+| {unrelated: ([.firings[] | select((.white | not) and ((.unrelated // []) != []))] | length),
+   caught_by_lapilli: ([.firings[] | select((((.incidents // []) - $real) + (.unrelated // [])) != [])] | length),
+   yes: ([.firings[] | select(.action == "yes")] | length),
+   no: ([.firings[] | select(.action == "no")] | length)}
+```
+
+Counted again from `/api/v1/report` over the same week, of the firings it
+gives, which a quiet window didn't excuse.
 
 ## Noisy
 
@@ -828,6 +887,7 @@ it, which only `lapilli serve` says.
 | `lapilli_last_run_timestamp_seconds` | |
 | `lapilli_rule_episodes` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_episodes_caught` | `rule`, [`severity`], [`team`] |
+| `lapilli_rule_action` | `rule`, [`severity`], [`team`], `answer` (`yes`, `no`): `lapilli serve` alone |
 | `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
 | `lapilli_rule_firings_during_deploys` | `rule`, [`severity`], [`team`] |

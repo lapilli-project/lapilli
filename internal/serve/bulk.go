@@ -29,8 +29,9 @@ func (s *Server) bulkRoutes(mux *http.ServeMux) {
 
 // bulkKinds are what a bulk write does, as its result says: a task for
 // each rule, a team for each, a disposition for each, an incident from
-// each firing, a proposal for each rule.
-var bulkKinds = []string{"task", "team", "status", "real", "propose"}
+// each firing, a proposal for each rule, an answer to "needed action" of
+// each firing.
+var bulkKinds = []string{"task", "team", "status", "real", "propose", "action"}
 
 // bulkResult is what a bulk write did, as the page it goes back to says it
 // once: how many were done; of the rest, how many weren't the reader's

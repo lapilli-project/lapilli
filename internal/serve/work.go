@@ -2222,7 +2222,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{goals, onLine, episodesLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, onLine, episodesLine(s.cfg.Lang, rep), peopleLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2271,6 +2271,27 @@ func episodesLine(l string, rep *verdict.Report) string {
 		line += " " + tr(l, "And %d more.", n)
 	}
 	return line
+}
+
+// peopleLine is what the digest says of people's verdicts on the week's
+// firings (docs/design/judging.md, item 3): how many they said were
+// unrelated, and of how many they answered whether they needed action,
+// how many did. Never their notes. "" when nothing was said.
+func peopleLine(l string, rep *verdict.Report) string {
+	var unrelated, yes, no, firings int
+	for _, r := range rep.Rules {
+		unrelated += r.Unrelated
+		yes += r.ActionYes
+		no += r.ActionNo
+		firings += r.Firings
+	}
+	switch {
+	case unrelated == 0 && yes+no == 0:
+		return ""
+	case yes+no == 0:
+		return tr(l, "People said %d firings were unrelated to what they caught.", unrelated)
+	}
+	return tr(l, "People said %d firings were unrelated, and answered %d of %d firings: %d needed action.", unrelated, yes+no, firings, yes)
 }
 
 func digestAbout(rep *verdict.Report, text, team string, spare []string) map[string]any {

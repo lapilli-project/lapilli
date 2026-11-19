@@ -19,6 +19,10 @@ lapilli_rule_episodes{rule="Errors",severity="page"} 3
 # HELP lapilli_rule_episodes_caught Episodes of which a firing caught an incident.
 # TYPE lapilli_rule_episodes_caught gauge
 lapilli_rule_episodes_caught{rule="Errors",severity="page"} 1
+# HELP lapilli_rule_action Firings people said needed someone to act (yes), or didn't (no).
+# TYPE lapilli_rule_action gauge
+lapilli_rule_action{rule="Errors",severity="page",answer="yes"} 0
+lapilli_rule_action{rule="Errors",severity="page",answer="no"} 0
 # HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
 # TYPE lapilli_rule_incidents_first gauge
 lapilli_rule_incidents_first{rule="Errors",severity="page"} 1

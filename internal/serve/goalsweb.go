@@ -54,7 +54,11 @@ type goalRowView struct {
 	EveryTeam                                 bool
 	Last                                      goalCell
 	LastWhy                                   string
-	Cells                                     []goalCell
+	// Moved says what moved its last whole week's measure besides
+	// Lapilli's own judging (docs/design/judging.md, item 3), "" for
+	// nothing.
+	Moved string
+	Cells []goalCell
 	// Task is its open task, 0 for none.
 	Task int64
 }
@@ -215,9 +219,12 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 		}
 		if w, ok := gl.week(v.Last); ok {
 			row.Last = goalCellOf(l, w, s.cfg.Loc)
-			if w.Result == goalUnknown {
+			if w.Result == goalUnknown || w.Why == whyUnderAnswered {
 				row.LastWhy = goalResultText(l, w.summaryGoal)
 				v.ByCatching = v.ByCatching || w.Why == whyByCatching
+			}
+			if p := w.People; p != nil {
+				row.Moved = tr(l, "Moved by people: %d said unrelated, %d This was real, %d firings not judged, %d answered", p.Unrelated, p.Real, p.NotJudged, p.Answered)
 			}
 		}
 		v.Rows = append(v.Rows, row)

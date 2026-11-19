@@ -52,7 +52,7 @@ var configKeys = map[string][]string{
 	"grant":  {"user", "group", "team"},
 	// A goal's bound is one of at_least, at_most and no_worse_than; by goes
 	// with no_worse_than (docs/design/goals.md).
-	"goal": {"name", "team", "measure", "at_least", "at_most", "no_worse_than", "by", "critical", "each"},
+	"goal": {"name", "team", "measure", "at_least", "at_most", "no_worse_than", "by", "critical", "each", "stones"},
 	// A marked window (docs/design/marked.md): a kind and a title, its
 	// times as a quiet window's, and labels of one value each.
 	"marked": {"kind", "title", "team", "start", "end", "every", "repeat_on", "until", "labels"},
@@ -669,6 +669,8 @@ func parseGoal(n *yaml.Node, d *ledger.Declared) error {
 			g.Critical, err = texts(key, v)
 		case "each":
 			g.Each, err = text(key, v)
+		case "stones":
+			g.Stones, err = text(key, v)
 		}
 		return err
 	})

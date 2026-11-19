@@ -53,7 +53,7 @@
 <p class="quiet">{{t "From %s before it started to %s after it ended, %s to %s; the incident is the shaded span." .Lead .Lead (at $loc .From) (at $loc .To)}}</p>
 <div class="scroll"><table class="timeline">
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "What it did"}}</th><th scope="col" class="tl"><span class="strip-ends"><span>{{at $loc .From}}</span> <span>{{at $loc .To}}</span></span></th></tr></thead>
-<tbody>{{range .Rows}}<tr class="tl-{{.Kind}}"><th scope="row"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></th><td>{{.Did}}</td>
+<tbody>{{range .Rows}}<tr class="tl-{{.Kind}}"><th scope="row"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></th><td>{{.Did}}{{if .White}} <a href="{{$.Link "/firings" "day" (day $loc $.View.Timeline.From) "rule" .Rule}}">{{t "Its firings: say one was unrelated"}}</a>{{end}}</td>
 <td class="tl"><svg class="tl" viewBox="0 0 {{$.View.Timeline.Width}} 16" role="img" aria-label="{{t "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below" .Firings .White .Black .Excused}}"><rect class="span" x="{{$.View.Timeline.SpanX}}" y="0" width="{{$.View.Timeline.SpanW}}" height="16"/>
 {{- range .Marks}}<g><title>{{.Title}}</title>{{if eq .Kind "near"}}<path class="near" d="{{.Diamond}}"/>{{else}}{{if .Line}}<line class="{{.Kind}}" x1="{{.X}}" x2="{{.To}}" y1="8" y2="8"/>{{end}}<circle class="{{.Kind}}" cx="{{.X}}" cy="8" r="4"/>{{end}}</g>{{end}}</svg></td></tr>{{end}}</tbody>
 </table></div>

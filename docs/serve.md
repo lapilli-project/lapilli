@@ -105,6 +105,41 @@ leader's round: until it has, those weeks say their episodes aren't
 counted yet. Goals take `episodes.total` and `episodes.precision`
 ([docs/design/goals.md](design/goals.md)).
 
+A person may say what Lapilli can't see (docs/design/judging.md, item 3).
+On Alert history, a rule's latest firings and, through a link from each
+rule that caught it, an incident's page: that a white firing is
+**unrelated** to what it caught, a log rotation during an outage, which
+turns that firing alone black, the incident caught by the other firings
+alone or missed; and whether a firing **needed action**, yes or no, which
+changes no stone and is counted. "Unrelated" is an editor's of every team
+and an admin's, as it takes a catch from what may be another team's
+incident; "needed action" a team's editor's too, of their team's rules,
+whose write leaves "unrelated" as it is. Each part keeps who said it,
+when, and a note. One who isn't an admin speaks of the last 14 days'
+firings alone, and presses "This was real" on them alone; each person
+makes 30 verdict writes an hour, a bulk answer of 100 firings counted as
+one. A verdict is kept by its firing's alert and start, so a run that
+starts the firing a step later, or a window read again under another key,
+takes it along, marked to look at again: the overview counts those, and
+the Cleanup page lists them. The summary gives each row's `people`, its
+precision as Lapilli judged it among them, and `action.share` once 80%
+of its firings are answered; goals take `action.share`, a week under 80%
+answered missed, and `stones: lapilli` on a precision goal to hold it to
+Lapilli's own stones; `/metrics` gives `lapilli_rule_action`; the digest
+a line; `/api/v1/verdicts` reads and writes them, MCP reads them. Every
+replay, a proposal's backtest, `compare`, a pull request's backtest, the
+Settings page's tries and the digest's suggestions, carries them on both
+sides, so a change can't look better on the firings people called
+coincidences.
+
+A rule entry may say `judged: false` in place of signals, in
+`--impact-file` or on the Settings page: a watchdog, a capacity forecast,
+a reminder. Its rules' firings are counted, never white nor black, in no
+precision, never noisy, and catch nothing; the summary says them
+`not_judged`, the rules list and the rule's page "Not judged", and the
+Goals page beside each goal how many firings an entry kept from being
+judged. A file whose entries all say so needs no signal.
+
 With no incident written down over the weeks shown, or the two before
 their end, the pages call no rule noisy and show no precision, and say why
 once. For a week like that, the weekly digest says, of each rule replayed

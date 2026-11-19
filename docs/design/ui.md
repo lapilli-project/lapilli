@@ -524,7 +524,7 @@ Each rule has a badge on each of three axes, and what is under way:
 
 | Axis | Badges |
 |---|---|
-| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (none of its firings judged, or as many unjudged as a noisy rule fires: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own; the overview's panel lists only those firing as often as a noisy rule), `○ OK` (judged, and not noisy), `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
+| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (none of its firings judged, or as many unjudged as a noisy rule fires: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own; the overview's panel lists only those firing as often as a noisy rule); `? Not judged` in its place for a rule its entry judges by nothing, `judged: false`, [judging.md](judging.md), item 3), `○ OK` (judged, and not noisy), `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
 | Its backtest, only when it can't be taken for granted | `≠ Differs` (its replay differed from what really fired over the last week checked), `◌ Not replayed`, `⇣ Recorded only` (copied in from where it fired; its condition unknown) |
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |
@@ -825,6 +825,28 @@ reads the rest, and says what it said. The page is cached by what it
 reads of its query, `tab`, `weeks`, `team` and `edit`, in one order
 (`ruleQuery`): another parameter, or another order, is the same page, not
 worked out again, and isn't said back on it.
+
+### People's verdicts
+
+A firing's line on Alert history, and on a rule's latest firings (a
+column, "What people said"), says what people said of it
+([judging.md](judging.md), item 3): a white one has "Unrelated" behind a
+disclosure, with a note, for an editor of every team or an admin; one so
+made black says "Black: unrelated to INC-12, by NAME on DATE", the note
+after it in `<bdi>`, with Undo; one whose verdict moved says why, as a
+warning; and "Needed action", a select of none, yes and no with Answer,
+for whoever may answer it (a team's editor of its rule's team too), its
+answer shown to everyone else. Its stone says `● said unrelated`. "This
+was real" isn't offered on a firing said unrelated. The bulk bar answers
+needed action for the firings picked, white ones among them. Every form
+carries the firing's series and start. An incident's timeline links each
+rule that caught it to its firings that day. The overview's "What to look
+at" counts the verdicts to look at again, and links the Cleanup page,
+which lists them. A rule's panel says, beside its precision, the
+precision as Lapilli judged it when people's word moved it, and its
+answers; a rule judged by nothing says "Not judged: rule entry #N" in
+place of "No record". The Goals page says beside a goal what people moved
+of its last whole week.
 
 ### The tabs
 

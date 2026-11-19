@@ -423,6 +423,10 @@ type Report struct {
 	// counted the episodes of all of the period yet (after an upgrade, or
 	// a change of zone): its rules' and firings' are left out.
 	EpisodesNotCounted bool `json:"-"`
+	// People says, in lapilli serve, that people's verdicts on its firings
+	// are kept (docs/design/judging.md, item 3): its metrics give each
+	// rule's answers to "needed action".
+	People bool `json:"-"`
 }
 
 // Settings are what a report's firings were judged by, as Options has

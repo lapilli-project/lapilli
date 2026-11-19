@@ -123,7 +123,73 @@
   open a ledger it has migrated: keep a copy of its disk, or of its
   database, first.
 
+- **A person's verdict on one firing** (docs/design/judging.md, step 4,
+  item 3). On Alert history, a rule's latest firings, and from each rule
+  an incident's timeline shows, a person may say a white firing is
+  **unrelated** to what it caught, a disk alert during another service's
+  outage, which turns that firing alone black: the incident is caught by
+  the other firings alone, or missed. And whether a firing **needed
+  action**, yes or no, which changes no stone and is counted. "Unrelated"
+  is an editor's of every team and an admin's; "needed action" a team's
+  editor's too, of their team's rules, whose write leaves "unrelated" as
+  stored (changing it is 403). Each part keeps who said it, when and a
+  note (500 characters, one line). One who isn't an admin speaks of the
+  last 14 days' firings alone; each person makes 30 verdict writes an
+  hour, forms, a bulk answer of 100 firings and the API alike, past which
+  429 with `Retry-After` and nothing written; the activity log shows each
+  person's verdicts of an hour as one line. A verdict is kept by its
+  firing's alert and start, so a run that starts the firing a step later,
+  or a window read again or confirmed, takes it along, marked to look at
+  again when what it was said of moved: the overview counts those, the
+  Cleanup page lists them. Every replay carries the verdicts of its
+  period on both sides, a proposal's backtest and `backtest_again`,
+  `compare`, a pull request's backtest, the Settings page's tries and the
+  digest's suggestions and near misses, so a longer `for` can't look
+  better on the firings people called coincidences; a verdict said in a
+  proposal's period since its backtest makes it stale. `GET`, `PUT` and
+  `DELETE /api/v1/verdicts` and `PUT /api/v1/verdicts/bulk`; MCP's
+  `firings` and `rule` read them, and no tool sets one. The report gives
+  `rules[].unrelated`, `action_yes`, `action_no`, `firings[].unrelated`,
+  `action` and `incidents[].real`; the CSV `unrelated` and `action` at its
+  end; `/api/v1/summary` each row's `people` (`unrelated`,
+  `unrelated_excused`, `real`, `real_white`, `real_excused`,
+  `caught_by_lapilli`, `precision_by_lapilli`, and `action` with its
+  `share` once 80% of the row's firings are answered); `/metrics`
+  `lapilli_rule_action`; the digest a line. Goals take `action.share`, a
+  week under 80% answered missed, not unknown, and `stones: lapilli` on a
+  precision goal to hold it to Lapilli's stones alone; the Goals page, a
+  goal's `goal.missed` notice and its task's "no longer missed" say what
+  people's word moved.
+- **Rules judged by nothing** (docs/design/judging.md, step 4). A rule
+  entry may say `judged: false` in place of signals, in `--impact-file` or
+  on the Settings page: a watchdog, a forecast. Its rules' firings are
+  counted, never white nor black, in no precision, never noisy, and catch
+  nothing, written incidents included; the report says them `not_judged`
+  (`rules[]`, `firings[]`), the summary `not_judged` beside `unjudged`,
+  the rules list and the rule's page "Not judged". A file whose entries all
+  say it needs no signal, and goes with `--impact PROMQL` or none.
+  **Ledger schema 026**, after 025: `verdicts`; `firings.person` and
+  `unrelated`; `unrelated`, `unrelated_excused`, `real_white`,
+  `real_excused`, `action_yes`, `action_no`, `action_yes_black` and
+  `action_no_white` on `days` and `weeks`; `incidents.real_of`;
+  `impact_rules.judged`; `goals.stones`. No stone changes until a person
+  says something. A lapilli before this one doesn't open a ledger it has
+  migrated: keep a copy of its disk, or of its database, first.
+
 ### Changed
+
+- **"This was real" is held to its firing, and to 14 days** (docs/design/
+  judging.md, item 3). Its forms, one firing's and the firings picked,
+  carry the firing's series and start beside its id, and are refused, 409
+  ("this firing changed since the page was read: look again"), when the
+  id is another alert's firing by then: a run gives its firings again,
+  and SQLite a gone row's id to another, so a page read before a run could
+  write down another alert's firing. A post without them is refused so
+  too. One who isn't an admin presses it on the last 14 days' firings
+  alone (403 beyond, an admin's); writing an incident down by hand stays
+  an editor's at any age. It refuses a firing a person said is unrelated
+  (409): undo that first. The incident it writes notes the firing it was
+  written from.
 
 - **A signal taken away judges no one** (docs/design/judging.md, step 2,
   item 5; docs/upgrading.md, "Windows of a signal no longer in effect").

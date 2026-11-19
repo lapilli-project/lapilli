@@ -47,6 +47,9 @@ type orphansView struct {
 	// criterion, and covered by nothing found now, that tasks or comments
 	// are kept on (ledger.OrphanedImpact).
 	ImpactNotes []ledger.ImpactOrphan
+	// Verdicts are people's verdicts to look at again
+	// (docs/design/judging.md, "Through judging again"): the latest first.
+	Verdicts []ledger.Verdict
 }
 
 // inEffectNames are the names of the rules in effect, as the latest
@@ -74,6 +77,9 @@ func (s *Server) orphansPage(r *http.Request) (any, error) {
 	v := orphansView{Moved: q.Get("moved"), To: q.Get("to"), Deleted: q.Get("deleted")}
 	var err error
 	if v.ImpactNotes, err = s.l.OrphanedImpact(ctx); err != nil {
+		return v, err
+	}
+	if v.Verdicts, _, err = s.l.MovedVerdicts(ctx, ledger.MaxMovedShown, s.now()); err != nil {
 		return v, err
 	}
 	set, names, ok, err := s.inEffectNames(r)

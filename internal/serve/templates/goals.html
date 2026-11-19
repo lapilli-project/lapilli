@@ -21,7 +21,7 @@
   <th scope="row"><code>{{.Name}}</code> {{template "declared"}}</th>
   <td>{{if .Team}}<bdi>{{.Team}}</bdi>{{if .EveryTeam}} <span class="quiet">{{t "(each team)"}}</span>{{end}}{{else}}{{t "everyone"}}{{end}}</td>
   <td>{{.Measure}}: {{.Target}}{{with .Critical}}<br><span class="quiet">{{t "counted as critical: %s" .}}</span>{{end}}</td>
-  <td class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}} {{.Last.Value}}</span><span class="vh">{{.Last.Text}}</span>{{with .LastWhy}}<br><span class="quiet">{{.}}</span>{{end}}</td>
+  <td class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}} {{.Last.Value}}</span><span class="vh">{{.Last.Text}}</span>{{with .LastWhy}}<br><span class="quiet">{{.}}</span>{{end}}{{with .Moved}}<br><span class="quiet">{{.}}</span>{{end}}</td>
   {{range .Cells}}<td class="gw {{.Class}}" title="{{.Text}}"><span aria-hidden="true">{{.Sign}}<span class="v">{{.Value}}</span></span><span class="vh">{{.Text}}</span></td>{{end}}
   <td>{{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>{{else}}–{{end}}</td>
 </tr>{{end}}</tbody>

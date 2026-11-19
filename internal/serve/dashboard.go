@@ -240,6 +240,10 @@ func (a action) Off() pageAction {
 }
 
 type dashboard struct {
+	// MovedVerdicts are people's verdicts to look at again: those the
+	// reader may say again, and, to an admin, how many of them are older
+	// than 14 days (docs/design/judging.md, "Through judging again").
+	MovedVerdicts  *movedCount
 	Empty, Backlog bool
 	Cursor         time.Time
 	Run            *ledger.Run
@@ -534,7 +538,35 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Outcomes, v.OutcomesAll = outcomeLines(l, out), team != nil
+	if v.MovedVerdicts, err = s.movedCount(r); err != nil {
+		return nil, err
+	}
 	return v, nil
+}
+
+// movedCount is how many of people's verdicts are to be looked at again,
+// as the reader of r may say them again: an admin, every one, and how
+// many of them are older than 14 days; an editor, those of the last 14
+// days'; anyone else, none. Nil for none.
+type movedCount struct{ Recent, Old int }
+
+func (s *Server) movedCount(r *http.Request) (*movedCount, error) {
+	role := s.role(r)
+	if role < editor && len(s.editsTeams(r)) == 0 {
+		return nil, nil
+	}
+	vs, old, err := s.l.MovedVerdicts(r.Context(), ledger.MaxMovedShown, s.now().Add(-ledger.VerdictAge))
+	if err != nil {
+		return nil, err
+	}
+	c := movedCount{Recent: len(vs) - old}
+	if role == admin {
+		c.Old = old
+	}
+	if c.Recent+c.Old == 0 {
+		return nil, nil
+	}
+	return &c, nil
 }
 
 // outcomeLines are the outcomes in short, for the overview.

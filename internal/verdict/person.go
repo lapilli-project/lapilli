@@ -210,3 +210,7 @@ func (e RuleEntry) NotJudged() bool { return e.Judged != nil && !*e.Judged }
 // NotJudgedRules reports whether any entry says its rules are judged by
 // nothing.
 func (s *Signals) NotJudgedRules() bool { return s != nil && s.unjudged }
+
+// EntryNumberAny is the rule's entry's place in Entries, from 1, named
+// signals in effect or none; 0 for none.
+func (s *Signals) EntryNumberAny(rule string) int { return s.entryAt(rule) + 1 }

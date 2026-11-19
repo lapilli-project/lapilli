@@ -140,11 +140,32 @@ thresholds for `noisy_only`, the hours for asleep and off hours):
 | `during_deploys.precision_without` | `during_deploys.precision_without` | higher | yes | no |
 | `episodes.total` | `episodes.total` | lower | no | yes |
 | `episodes.precision` | `episodes.precision` | higher | yes | yes, and `no_worse_than` |
+| `action.share` | `people.action.share` | higher | no | no |
 
 The two `episodes.*` measures ([judging.md](judging.md), item 2) are not
 known in a week whose episodes the ledger hasn't counted yet, after an
 upgrade or a change of zone (`episodes: null`); with `each: KIND`, an
 episode is during a kind when its first firing is marked with it.
+
+`action.share` ([judging.md](judging.md), item 3) is the share of the
+firings people answered that needed someone to act, given once 80% of the
+row's firings are answered: a whole week under 80% answered is **missed**,
+`under_answered`, not unknown, so that a team about to miss can't stop
+answering at 79% and never be missed; a week with no firing is not known
+(`no_value`).
+
+**On Lapilli's stones alone.** A goal may say `stones: lapilli`, and is
+then checked against the numbers as Lapilli judged them, people's verdicts
+and the incidents "This was real" wrote both left out: `precision` reads
+`people.precision_by_lapilli`. A goal of a measure the summary doesn't
+give so, or with `each: KIND`, is refused with its line. Every other goal
+reads the stones as they are, with people's word in them, and its row's
+`people` says what moved its measure in the week: people's "unrelated",
+"This was real", the firings an entry judges by nothing, and the answers
+to needed action; the Goals page says it beside the goal, the
+`goal.missed` notice gives it (`people`), and a task's "no longer
+missed" says how many verdicts were said on the week's firings since it
+was told.
 
 "With `each: KIND`" is what [marked.md](marked.md) counts inside an
 occurrence of a kind (`marked` in the summary: firings, caught, precision,

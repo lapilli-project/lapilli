@@ -472,15 +472,18 @@ func entriesJSON(es []verdict.RuleEntry) string {
 type entryDoc struct {
 	Rules   string          `yaml:"rules,omitempty"`
 	Labels  incident.Labels `yaml:"labels,omitempty"`
-	Signals []string        `yaml:"signals,flow"`
+	Signals []string        `yaml:"signals,omitempty,flow"`
 	Match   *[]string       `yaml:"match,omitempty,flow"`
 	Lead    string          `yaml:"lead,omitempty"`
 	Require []string        `yaml:"require,omitempty,flow"`
+	// Judged false judges its rules by nothing (docs/design/judging.md,
+	// "Rules judged by nothing"), in place of signals.
+	Judged *bool `yaml:"judged,omitempty"`
 }
 
 // docOfEntry is a rule entry as its YAML gives it.
 func docOfEntry(e verdict.RuleEntry) entryDoc {
-	x := entryDoc{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Lead: leadShown(e.Lead), Require: e.Require}
+	x := entryDoc{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Lead: leadShown(e.Lead), Require: e.Require, Judged: e.Judged}
 	if e.Match != nil {
 		m := slices.Clone(e.Match)
 		x.Match = &m
@@ -540,8 +543,12 @@ func readEntries(text string, n signalsNow) ([]verdict.RuleEntry, error) {
 			return nil, bad("rule entry %d names no rule: give rules, a pattern of their names, or labels they have", at)
 		case len(e.Labels) > verdict.MaxEntryLabels:
 			return nil, bad("rule entry %d: %d labels: %d at most", at, len(e.Labels), verdict.MaxEntryLabels)
-		case len(e.Signals) == 0:
-			return nil, bad("rule entry %d: no signals: name the signals its rules are judged against", at)
+		case e.Judged != nil && *e.Judged:
+			return nil, bad("rule entry %d: judged: true is what naming its signals says: give signals, or judged: false", at)
+		case e.Judged != nil && (len(e.Signals) > 0 || e.Match != nil || e.Lead != "" || len(e.Require) > 0):
+			return nil, bad("rule entry %d: judged: false judges its rules by nothing: give it, or signals, match, lead and require, not both", at)
+		case e.Judged == nil && len(e.Signals) == 0:
+			return nil, bad("rule entry %d: no signals: name the signals its rules are judged against, or say judged: false for none", at)
 		case len(e.Signals) > verdict.MaxEntrySignals:
 			return nil, bad("rule entry %d: %d signals: %d at most", at, len(e.Signals), verdict.MaxEntrySignals)
 		}
@@ -565,6 +572,10 @@ func readEntries(text string, n signalsNow) ([]verdict.RuleEntry, error) {
 			}
 		}
 		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals}
+		if e.Judged != nil {
+			no := false
+			x.Judged = &no
+		}
 		if e.Match != nil {
 			x.Match = append([]string{}, *e.Match...)
 			if err := checkMatch(x.Match); err != nil {
@@ -599,9 +610,6 @@ func sameEntries(a, b []verdict.RuleEntry) bool { return ledger.SameEntries(a, b
 func (s *Server) planEntries(set map[string]ledger.Setting, text string, reset bool, who string, at time.Time) (signalPlan, error) {
 	n := s.signalsIn(set)
 	p := signalPlan{Change: ledger.SignalsChange{Settings: map[string]string{}}, Anchor: "impact-rule-entries", Renamed: map[string]string{}}
-	if !n.named() {
-		return p, bad("rule entries say which rules are judged against which named signals: add a named signal first")
-	}
 	var es []verdict.RuleEntry
 	switch {
 	case reset:
@@ -622,6 +630,11 @@ func (s *Server) planEntries(set map[string]ledger.Setting, text string, reset b
 		var err error
 		if es, err = readEntries(text, n); err != nil {
 			return p, err
+		}
+		// With no named signal, entries that judge their rules by nothing
+		// alone (docs/design/judging.md, "Rules judged by nothing").
+		if !n.named() && slices.ContainsFunc(es, func(e verdict.RuleEntry) bool { return !e.NotJudged() }) {
+			return p, bad("rule entries say which rules are judged against which named signals: add a named signal first, or say judged: false of each")
 		}
 		p.Change.Settings[rulesKey] = entriesJSON(es)
 		if sameEntries(es, s.cfg.ImpactRules) {
@@ -868,7 +881,7 @@ func (s *Server) namedViews(ctx context.Context, v *criteriaView, n signalsNow) 
 	e := &entriesView{List: []entryView{}, Started: len(s.cfg.ImpactRules), Text: entriesYAML(n.Entries)}
 	for i, x := range n.Entries {
 		e.List = append(e.List, entryView{N: i + 1, Rules: x.Rules, Labels: x.Labels, Signals: x.Signals, Match: x.Match, Follows: x.Match == nil,
-			Lead: leadShown(x.Lead), Require: x.Require})
+			Lead: leadShown(x.Lead), Require: x.Require, NotJudged: x.NotJudged()})
 	}
 	if n.EntriesUI != nil {
 		e.Changed, e.By, e.Updated = true, n.EntriesUI.By, n.EntriesUI.Updated
@@ -935,6 +948,8 @@ type entryView struct {
 	// labels its rules' firings and its signals' windows must both carry.
 	Lead    string   `json:"lead,omitempty"`
 	Require []string `json:"require,omitempty"`
+	// NotJudged says it judges its rules by nothing (judged: false).
+	NotJudged bool `json:"not_judged,omitempty"`
 }
 
 // plannedOn says whether the settings a change to the named signals reads

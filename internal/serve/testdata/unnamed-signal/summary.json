@@ -32,6 +32,7 @@
       "caught": 0,
       "precision": null,
       "no_record": true,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -71,6 +72,24 @@
         "caught": 0,
         "precision": null,
         "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "marked": {}
     },
@@ -83,6 +102,7 @@
       "caught": 0,
       "precision": null,
       "no_record": true,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -122,6 +142,24 @@
         "caught": 0,
         "precision": null,
         "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "marked": {}
     },
@@ -134,6 +172,7 @@
       "caught": 0,
       "precision": null,
       "no_record": true,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -174,6 +213,24 @@
         "precision": null,
         "noisy_rules": 0
       },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 0,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "marked": {}
     },
     {
@@ -185,6 +242,7 @@
       "caught": 0,
       "precision": null,
       "no_record": true,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -238,6 +296,24 @@
         "precision": null,
         "noisy_rules": 0
       },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 0,
+        "precision_by_lapilli": null,
+        "action": {
+          "firings": 14,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
+      },
       "marked": {}
     },
     {
@@ -249,6 +325,7 @@
       "caught": 1,
       "precision": 0.14285714285714285,
       "no_record": false,
+      "not_judged": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -301,6 +378,24 @@
         "caught": 1,
         "precision": 0.5,
         "noisy_rules": 0
+      },
+      "people": {
+        "unrelated": 0,
+        "unrelated_excused": 0,
+        "real": 0,
+        "real_white": 0,
+        "real_excused": 0,
+        "caught_by_lapilli": 1,
+        "precision_by_lapilli": 0.14285714285714285,
+        "action": {
+          "firings": 7,
+          "answered": 0,
+          "yes": 0,
+          "no": 0,
+          "share": null,
+          "yes_black": 0,
+          "no_white": 0
+        }
       },
       "marked": {}
     }

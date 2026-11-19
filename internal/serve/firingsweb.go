@@ -307,6 +307,9 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	if err := s.notifiedFirings(ctx, lines); err != nil {
 		return nil, err
 	}
+	if err := s.saidOn(r, lines); err != nil {
+		return nil, err
+	}
 	for _, l := range lines {
 		row := firingRow{firingLine: l}
 		for _, k := range slices.Sorted(maps.Keys(l.Firing.Labels)) {

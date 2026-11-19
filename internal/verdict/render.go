@@ -751,7 +751,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			b.WriteString(l + "\n")
 		}
 	}
-	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught []string
+	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught, action []string
 	for _, rr := range r.Rules {
 		if rr.Unsupported != "" {
 			continue
@@ -775,6 +775,14 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			episodes = append(episodes, fmt.Sprintf("lapilli_rule_episodes%s %d", l, rr.Episodes.Total))
 			episodesCaught = append(episodesCaught, fmt.Sprintf("lapilli_rule_episodes_caught%s %d", l, rr.Episodes.White))
 		}
+		if r.People {
+			for _, x := range []struct {
+				answer string
+				n      int
+			}{{ActionYes, rr.ActionYes}, {ActionNo, rr.ActionNo}} {
+				action = append(action, fmt.Sprintf(`lapilli_rule_action%s,answer="%s"} %d`, strings.TrimSuffix(l, "}"), x.answer, x.n))
+			}
+		}
 		if r.Hours != nil {
 			for _, x := range []struct {
 				name string
@@ -791,6 +799,9 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	family("lapilli_rule_incidents", "Incidents the rule caught.", incidents)
 	family("lapilli_rule_episodes", "Episodes of the rule's firings: one problem, its alerts of the same match labels overlapping or re-firing within a day.", episodes)
 	family("lapilli_rule_episodes_caught", "Episodes of which a firing caught an incident.", episodesCaught)
+	if r.People {
+		family("lapilli_rule_action", "Firings people said needed someone to act (yes), or didn't (no).", action)
+	}
 	if r.Hours != nil {
 		family("lapilli_rule_nothing_by_hours", "Firings with no incident, by when they came: asleep, off hours or at work.", hours)
 	}

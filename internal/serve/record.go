@@ -43,13 +43,20 @@ func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 // week may be judged and part not: kept says only that an incident
 // written down keeps the week's record.
 func (t *tallies) keep(keeps func(ledger.Incident) bool) {
-	var plain []incident.Incident
+	var plain, lapilli []incident.Incident
 	for _, in := range t.recs {
 		if keeps == nil || keeps(in) {
 			plain = append(plain, in.Incident)
+			if !in.Real {
+				lapilli = append(lapilli, in.Incident)
+			}
 		}
 	}
 	t.rec, t.keeps = verdict.RecordOf(plain, t.o), keeps
+	t.recL = t.rec
+	if len(lapilli) < len(plain) {
+		t.recL = verdict.RecordOf(lapilli, t.o)
+	}
 	t.kept = make(map[int64]bool, len(t.weeks))
 	for _, w := range t.weeks {
 		t.kept[w] = t.rec.Kept(t.mid(w), t.mid(w+7))
@@ -60,10 +67,11 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 	}
 	if t.parts == nil {
 		// Read whole, as before tallies were kept by signals: a week's
-		// all judged, or none.
+		// all judged, or none; a rule an entry judges by nothing, none.
 		for w, rows := range t.by {
 			if t.kept[w] {
 				t.jby[w] = maps.Clone(rows)
+				maps.DeleteFunc(t.jby[w], func(id int64, _ ledger.Tally) bool { return t.o.NotJudged(t.rules[id].Name) })
 			}
 		}
 		return
@@ -95,10 +103,38 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 // with no named signal; else by the signals tied to them, the rule's
 // entry's or else its alerts' (verdict.Record.JudgesTied).
 func (t *tallies) judgedPart(w, id int64, signals int64) bool {
-	if !t.o.Signals.Named() {
-		return t.kept[w]
+	return t.judgedBy(t.rec, w, id, signals)
+}
+
+// judgedBy is judgedPart by the record rec: a rule an entry judges by
+// nothing (judged: false) is never judged.
+func (t *tallies) judgedBy(rec verdict.Record, w, id int64, signals int64) bool {
+	if t.o.NotJudged(t.rules[id].Name) {
+		return false
 	}
-	return t.rec.JudgesTied(t.mid(w), t.o.Signals.TiedOf(t.rules[id].Name, signals))
+	if !t.o.Signals.Named() {
+		return rec.Kept(t.mid(w), t.mid(w+7))
+	}
+	return rec.JudgesTied(t.mid(w), t.o.Signals.TiedOf(t.rules[id].Name, signals))
+}
+
+// byLapilli is, of the firings of rule id in week w tied to signals, a
+// part as tallied, those Lapilli's own judging would count, catch and
+// judge (docs/design/judging.md, "How reports count them"): every
+// "unrelated" white, those excused for it counted again; the incidents
+// "This was real" wrote left out, their firings black, or excused where a
+// quiet window matches them, or not judged where only such an incident
+// kept the record.
+func (t *tallies) byLapilli(x ledger.Tally) (firings, white, judged int) {
+	firings = x.Firings + x.UnrelatedExcused - x.RealExcused
+	white = x.White + x.Unrelated - x.RealWhite
+	switch {
+	case t.judgedBy(t.recL, x.At, x.Rule, x.Signals):
+		judged = firings
+	case t.o.Signals.Named() && !t.o.NotJudged(t.rules[x.Rule].Name):
+		judged = white // what caught something is judged, whatever its signals
+	}
+	return firings, white, judged
 }
 
 // judged are, of rule id's firings in week w, those judged; unjudged, the

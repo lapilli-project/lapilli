@@ -112,8 +112,11 @@ type summaryRow struct {
 	NoRecord bool `json:"no_record"`
 	// Unjudged are its firings that caught nothing and had no record:
 	// counted, not judged, and in no precision, as the report counts them
-	// (docs/design/signals.md, "How they are counted").
-	Unjudged int `json:"unjudged"`
+	// (docs/design/signals.md, "How they are counted"). NotJudged are of
+	// them those of rules an entry says are judged by nothing (judged:
+	// false, docs/design/judging.md, "Rules judged by nothing").
+	Unjudged  int `json:"unjudged"`
+	NotJudged int `json:"not_judged"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`
 	Critical   summaryCount            `json:"critical"`
@@ -130,6 +133,10 @@ type summaryRow struct {
 	// them: null until the ledger has counted the week's (after an
 	// upgrade, or a change of zone).
 	Episodes *summaryEpisodes `json:"episodes"`
+	// People are people's verdicts on the week's firings
+	// (docs/design/judging.md, item 3), and the numbers as Lapilli's own
+	// judging would have them.
+	People summaryPeople `json:"people"`
 	// Goals are the goals --config declares of the row's team (everyone's,
 	// in a row for everyone; the team's own and each team's, in a team's),
 	// each with its value and the week's result (docs/design/goals.md); left
@@ -186,6 +193,54 @@ type summaryEpisodes struct {
 	Unjudged   int      `json:"unjudged"`
 	Precision  *float64 `json:"precision"`
 	NoisyRules int      `json:"noisy_rules"`
+}
+
+// summaryPeople are a row's people's verdicts: Unrelated, its firings
+// white as Lapilli judged them and black by a person's word, and
+// UnrelatedExcused those of them a quiet window then excused; Real, the
+// incidents "This was real" wrote from a firing of its rules that started
+// in the week, RealWhite its firings white only by such incidents, and
+// RealExcused those of them a quiet window that matches them would have
+// excused as Lapilli judged them; CaughtByLapilli and PrecisionByLapilli,
+// what caught something and the precision as Lapilli's own judging would
+// have them; Action, the answers to "needed action".
+type summaryPeople struct {
+	Unrelated          int           `json:"unrelated"`
+	UnrelatedExcused   int           `json:"unrelated_excused"`
+	Real               int           `json:"real"`
+	RealWhite          int           `json:"real_white"`
+	RealExcused        int           `json:"real_excused"`
+	CaughtByLapilli    int           `json:"caught_by_lapilli"`
+	PrecisionByLapilli *float64      `json:"precision_by_lapilli"`
+	Action             summaryAction `json:"action"`
+}
+
+// summaryAction are a row's answers to whether a firing needed someone to
+// act: of its Firings, those Answered, Yes and No; Share, yes over those
+// answered, given only once ActionAnsweredShare of the firings are
+// answered (null below); YesBlack, needed action and caught nothing;
+// NoWhite, needed none and caught something.
+type summaryAction struct {
+	Firings  int      `json:"firings"`
+	Answered int      `json:"answered"`
+	Yes      int      `json:"yes"`
+	No       int      `json:"no"`
+	Share    *float64 `json:"share"`
+	YesBlack int      `json:"yes_black"`
+	NoWhite  int      `json:"no_white"`
+}
+
+// ActionAnsweredShare is the share of a row's firings that must be
+// answered before action.share is given: below it, the share would follow
+// how much was answered, not the alerts.
+const ActionAnsweredShare = 0.8
+
+// actionShare is yes over those answered, once enough of the firings are.
+func actionShare(a summaryAction) *float64 {
+	if a.Answered == 0 || float64(a.Answered) < ActionAnsweredShare*float64(a.Firings) {
+		return nil
+	}
+	return share(a.Yes, a.Answered)
 }
 
 type summaryCount struct {
@@ -328,11 +383,20 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
-	// Each week's own, read once for every team's row.
+	// Each week's own, read once for every team's row; and the rules "This
+	// was real" wrote any of them from.
 	weekOf := map[int64][]ledger.Incident{}
+	var realSeries []int64
 	for _, in := range incs {
 		w := ledger.Week(s.l.Day(in.Start))
 		weekOf[w] = append(weekOf[w], in)
+		if in.Real {
+			realSeries = append(realSeries, in.RealSeries())
+		}
+	}
+	realRule, err := s.l.RulesOfSeries(ctx, realSeries)
+	if err != nil {
+		return nil, err
 	}
 	marked, err := s.markedWeeks(ctx, w1, w2, own)
 	if err != nil {
@@ -390,6 +454,9 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				row.Firings += x.Firings
 				row.Caught += x.White
 				row.Unjudged += ub
+				if t.o.NotJudged(rule.Name) {
+					row.NotJudged += x.Firings
+				}
 				unjudgedDeploys += u.Deploy - u.DeployWhite
 				row.Excused += x.Excused
 				row.Refired.Firings += x.Refired
@@ -443,6 +510,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				row.Episodes = &ep
 			}
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
+			row.People = t.people(w, mine, row, weekOf[w], realRule)
 			for i, x := range refired {
 				if mine(x.Rule) {
 					row.Refired.Worst = &refired[i]
@@ -797,4 +865,42 @@ func labelsLine(m map[string]string) string {
 		parts = append(parts, k+"="+m[k])
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// people works out a row's people's verdicts (summaryPeople) from the
+// week's tallies by the signals its firings are tied to, of the rules
+// mine says are the row's, its incidents and the rules "This was real"
+// wrote them from.
+func (t *tallies) people(w int64, mine func(string) bool, row summaryRow, incs []ledger.Incident, realRule map[int64]string) summaryPeople {
+	var p summaryPeople
+	var judgedL, judgedWhiteL int
+	for _, x := range t.parts {
+		if x.At != w || !mine(t.rules[x.Rule].Name) {
+			continue
+		}
+		p.Unrelated += x.Unrelated
+		p.UnrelatedExcused += x.UnrelatedExcused
+		p.RealWhite += x.RealWhite
+		p.RealExcused += x.RealExcused
+		p.Action.Yes += x.ActionYes
+		p.Action.No += x.ActionNo
+		p.Action.YesBlack += x.ActionYesBlack
+		p.Action.NoWhite += x.ActionNoWhite
+		_, white, judged := t.byLapilli(x)
+		p.CaughtByLapilli += white
+		judgedL += judged
+		judgedWhiteL += min(white, judged)
+	}
+	for _, in := range incs {
+		if rule, ok := realRule[in.RealSeries()]; ok && in.Real && mine(rule) {
+			p.Real++
+		}
+	}
+	if judgedL > 0 {
+		p.PrecisionByLapilli = share(judgedWhiteL, judgedL)
+	}
+	p.Action.Firings = row.Firings
+	p.Action.Answered = p.Action.Yes + p.Action.No
+	p.Action.Share = actionShare(p.Action)
+	return p
 }

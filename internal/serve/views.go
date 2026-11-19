@@ -79,6 +79,10 @@ type tallies struct {
 	// counted them all (episodesCounted).
 	epFrom int64
 	epSome bool
+	// recL is rec without the incidents "This was real" wrote, which
+	// judge the record as Lapilli would have (docs/design/judging.md,
+	// "How reports count them"); rec itself with none.
+	recL verdict.Record
 }
 
 // episodesCounted reports whether the ledger has counted the episodes of
@@ -322,6 +326,18 @@ type ruleLine struct {
 	Episodes, EpisodesWhite, EpisodesUnjudged int
 	EpisodesPrecision                         string
 	NoisyEpisodes, EpisodesCounted            bool
+	// People's verdicts on its firings over the weeks shown
+	// (docs/design/judging.md, item 3): Unrelated, those white as Lapilli
+	// judged them that a person said were unrelated; ActionYes and
+	// ActionNo, the answers to needed action; Real, those white only by
+	// what "This was real" wrote; PrecisionByLapilli, its precision as
+	// Lapilli's own judging would have it, "" when people's word didn't
+	// move it. NotJudged says its rule entry judges it by nothing
+	// (judged: false), and NotJudgedEntry which entry, from 1.
+	Unrelated, ActionYes, ActionNo, Real int
+	PrecisionByLapilli                   string
+	NotJudged                            bool
+	NotJudgedEntry                       int
 }
 
 // NoisyApart reports whether it is noisy by its firings and not by its
@@ -585,6 +601,23 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	sum := map[int64]*ruleLine{}
 	recent := t.weeks[len(t.weeks)-n:]
 	counted := t.episodesCounted(recent[0])
+	// As Lapilli's own judging would have them, by the parts the record
+	// judges: each rule's caught and judged.
+	type byLapilli struct{ white, judged int }
+	lapilli := map[int64]*byLapilli{}
+	for _, x := range t.parts {
+		if x.At < recent[0] || x.At > recent[len(recent)-1] {
+			continue
+		}
+		_, white, judged := t.byLapilli(x)
+		b := lapilli[x.Rule]
+		if b == nil {
+			b = &byLapilli{}
+			lapilli[x.Rule] = b
+		}
+		b.white += min(white, judged)
+		b.judged += judged
+	}
 	for _, w := range recent {
 		for id, x := range t.by[w] {
 			l := sum[id]
@@ -606,6 +639,10 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Episodes += x.Episodes
 			l.EpisodesWhite += x.EpisodesWhite
 			l.EpisodesUnjudged += u.Episodes - u.EpisodesWhite
+			l.Unrelated += x.Unrelated
+			l.Real += x.RealWhite
+			l.ActionYes += x.ActionYes
+			l.ActionNo += x.ActionNo
 		}
 	}
 	credit, err := s.credit(ctx, t, n)
@@ -645,6 +682,14 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			}
 		}
 		l.Without = pct(l.White-l.DeploysCaught, judged-(l.Deploys-l.deploysUnjudged))
+		if l.Unrelated+l.Real > 0 {
+			if b := lapilli[id]; b != nil {
+				l.PrecisionByLapilli = pct(b.white, b.judged)
+			}
+		}
+		if l.NotJudged = t.o.NotJudged(l.Name); l.NotJudged {
+			l.NotJudgedEntry = notJudgedEntry(t.o, l.Name)
+		}
 		// Its episodes beside its firings, once counted: noisy by them
 		// is shown, and decides nothing.
 		if l.EpisodesCounted = counted; counted {
@@ -1232,6 +1277,11 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		v.Latest = append(v.Latest, s.firingLine(f))
 	}
 	if err := s.episodesOf(ctx, v.Latest); err != nil {
+		return ruleView{}, err
+	}
+	// What people said of them, and may say (docs/design/judging.md,
+	// item 3).
+	if err := s.saidOn(r, v.Latest); err != nil {
 		return ruleView{}, err
 	}
 	if n := len(fs); n > 0 {
@@ -1975,6 +2025,90 @@ type firingLine struct {
 	// how many firings it held; 0 firings when not counted (episodesOf).
 	EpisodeStart   time.Time
 	EpisodeFirings int
+	// Said is what people said of it (docs/design/judging.md, item 3), nil
+	// for nothing; MayUnrelated, that the reader may say it is unrelated
+	// (an editor of every team, or an admin), MayAction, that they may
+	// answer whether it needed action (a team's editor of its rule's team
+	// too); Old, that it started more than 14 days ago, an admin's alone.
+	Said                         *ledger.Verdict
+	MayUnrelated, MayAction, Old bool
+}
+
+// MovedFormat is why what people said of it is to be looked at again, in
+// English, "" for nothing: what the page translates, with MovedArg.
+func (l firingLine) MovedFormat() string {
+	if l.Said == nil {
+		return ""
+	}
+	f, _ := ledger.MovedText(l.Said.Moved)
+	return f
+}
+
+// MovedArg is MovedFormat's incident, "" for none.
+func (l firingLine) MovedArg() string {
+	if l.Said == nil {
+		return ""
+	}
+	if _, args := ledger.MovedText(l.Said.Moved); len(args) > 0 {
+		return fmt.Sprint(args[0])
+	}
+	return ""
+}
+
+// UnrelatedTo are the incidents it was said to be unrelated to, as a
+// page lists them.
+func (l firingLine) UnrelatedTo() string {
+	if l.Said == nil {
+		return ""
+	}
+	return strings.Join(l.Said.Keys(), ", ")
+}
+
+// HasUnrelated says a person said it is unrelated to something.
+func (l firingLine) HasUnrelated() bool { return l.Said != nil && len(l.Said.Unrelated) > 0 }
+
+// verdictArgs are what the verdict template takes: the page, and a line.
+type verdictArgs struct {
+	P    any
+	F    firingLine
+	Back string
+	Loc  *time.Location
+}
+
+// saidOn gives each of lines what people said of it, and what the reader
+// of r may say.
+func (s *Server) saidOn(r *http.Request, lines []firingLine) error {
+	ctx := r.Context()
+	fs := make([]ledger.Firing, len(lines))
+	for i, l := range lines {
+		fs[i] = l.Firing
+	}
+	vs, err := s.l.VerdictsOf(ctx, fs)
+	if err != nil {
+		return err
+	}
+	role := s.role(r)
+	teams := s.editsTeams(r)
+	var own *owners
+	if role < editor && len(teams) > 0 && !s.cfg.ReadOnly {
+		if own, err = s.owners(ctx); err != nil {
+			return err
+		}
+	}
+	old := s.now().Add(-ledger.VerdictAge)
+	for i := range lines {
+		l := &lines[i]
+		if v, ok := vs[l.ID]; ok {
+			l.Said = &v
+		}
+		l.Old = l.Start.Before(old)
+		if s.cfg.ReadOnly || l.Excused || l.Old && role != admin {
+			continue
+		}
+		l.MayUnrelated = role >= editor
+		l.MayAction = role >= editor || own != nil && slices.Contains(teams, own.rule[l.Rule])
+	}
+	return nil
 }
 
 // Ref is the firing as a form picks it: its id, its alert's series and its
@@ -2356,7 +2490,9 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	runs = s.runsFor(runs, s.role(r) == admin, lang(r))
-	cs, err := s.l.Changes(r.Context(), 100)
+	// Each person's verdicts of an hour as one line (docs/design/judging.md,
+	// "Who, when, and the trail").
+	cs, err := s.l.ChangesGrouped(r.Context(), 100)
 	if err != nil {
 		return nil, err
 	}
@@ -2444,6 +2580,9 @@ var funcs = template.FuncMap{
 	"delay": verdict.Delay,
 	"path":  url.PathEscape,
 	"join":  strings.Join,
+	// joinKeys are the incidents a verdict was said to be unrelated to.
+	"joinKeys":  func(v ledger.Verdict) string { return strings.Join(v.Keys(), ", ") },
+	"movedText": func(moved string) template.HTML { return movedText("en", moved) },
 	// signalsOn says the signals a rule is judged against, each with the
 	// labels it is matched on: probe (service).
 	"signalsOn": func(on []ruleSignalOn) string {
@@ -2626,3 +2765,7 @@ var funcs = template.FuncMap{
 		return e
 	},
 }
+
+// notJudgedEntry is the place, from 1, of the rule entry that says rule is
+// judged by nothing.
+func notJudgedEntry(o verdict.Options, rule string) int { return o.Signals.EntryNumberAny(rule) }

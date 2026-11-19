@@ -804,8 +804,12 @@ func (l *Ledger) VerdictsOf(ctx context.Context, fs []Firing) (map[int64]Verdict
 	return out, nil
 }
 
+// MaxMovedShown is how many verdicts to look at again a page lists.
+const MaxMovedShown = 100
+
 // MovedVerdicts are the verdicts to be looked at again (Verdict.Moved), the
-// latest first, most at most; and how many of them started before since.
+// latest first, most at most; and how many of all of them started before
+// since.
 func (l *Ledger) MovedVerdicts(ctx context.Context, most int, since time.Time) ([]Verdict, int, error) {
 	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.moved != ''")
 	if err != nil {
@@ -1221,4 +1225,71 @@ func (l *Ledger) RulesOfSeries(ctx context.Context, ids []int64) (map[int64]stri
 		out[id] = name
 	}
 	return out, rows.Err()
+}
+
+// ChangesGrouped are the latest changes, as the activity log shows them:
+// limit lines of the changes but people's verdicts, and beside them each
+// person's verdicts of an hour as one line ("N verdicts on firings"), so
+// that neither a bulk post nor a script holding a token pushes the rest
+// off it; the latest first. A person's one verdict of an hour is its own
+// line. changes keeps every row.
+func (l *Ledger) ChangesGrouped(ctx context.Context, limit int) ([]Change, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT at, by, what, before, after FROM changes WHERE what NOT LIKE 'verdict%' ORDER BY at DESC, id DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []Change
+	for rows.Next() {
+		var c Change
+		var at int64
+		if err := rows.Scan(&at, &c.By, &c.What, &c.Before, &c.After); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		c.At = unix(at)
+		out = append(out, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = l.r.QueryContext(ctx, `SELECT by, at / 3600, count(*), max(at), min(what), max(id) FROM changes WHERE what LIKE 'verdict%'
+		GROUP BY by, at / 3600 ORDER BY max(at) DESC, max(id) DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	type group struct {
+		by, what  string
+		hour, at  int64
+		n, lastID int64
+	}
+	var gs []group
+	for rows.Next() {
+		var g group
+		if err := rows.Scan(&g.by, &g.hour, &g.n, &g.at, &g.what, &g.lastID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		gs = append(gs, g)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, g := range gs {
+		if g.n == 1 {
+			c := Change{At: unix(g.at), By: g.by}
+			if err := l.r.QueryRowContext(ctx, "SELECT what, before, after FROM changes WHERE id = ?", g.lastID).Scan(&c.What, &c.Before, &c.After); err != nil {
+				return nil, err
+			}
+			out = append(out, c)
+			continue
+		}
+		out = append(out, Change{At: unix(g.at), By: g.by, What: fmt.Sprintf("%d verdicts on firings", g.n)})
+	}
+	slices.SortStableFunc(out, func(a, b Change) int { return b.At.Compare(a.At) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }

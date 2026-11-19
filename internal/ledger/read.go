@@ -438,7 +438,8 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 	if at.Precision == 0 {
 		at.Precision = verdict.NoisyPrecision
 	}
-	rep := &verdict.Report{From: from, To: to, NoisyAt: at, Rules: []verdict.RuleResult{}, Incidents: []verdict.IncidentResult{}, Firings: []verdict.Judged{}, SomeRules: o.SomeRules}
+	rep := &verdict.Report{From: from, To: to, NoisyAt: at, Rules: []verdict.RuleResult{}, Incidents: []verdict.IncidentResult{}, Firings: []verdict.Judged{}, SomeRules: o.SomeRules,
+		People: true}
 	table, err := l.RuleTable(ctx)
 	if err != nil {
 		return nil, err

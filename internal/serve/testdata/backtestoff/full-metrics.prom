@@ -33,6 +33,14 @@ lapilli_rule_episodes{rule="Limited"} 1
 lapilli_rule_episodes_caught{rule="Flapping"} 0
 lapilli_rule_episodes_caught{rule="Errors",severity="page",team="payments"} 1
 lapilli_rule_episodes_caught{rule="Limited"} 1
+# HELP lapilli_rule_action Firings people said needed someone to act (yes), or didn't (no).
+# TYPE lapilli_rule_action gauge
+lapilli_rule_action{rule="Flapping",answer="yes"} 0
+lapilli_rule_action{rule="Flapping",answer="no"} 0
+lapilli_rule_action{rule="Errors",severity="page",team="payments",answer="yes"} 0
+lapilli_rule_action{rule="Errors",severity="page",team="payments",answer="no"} 0
+lapilli_rule_action{rule="Limited",answer="yes"} 0
+lapilli_rule_action{rule="Limited",answer="no"} 0
 # HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
 # TYPE lapilli_rule_incidents_first gauge
 lapilli_rule_incidents_first{rule="Flapping"} 0

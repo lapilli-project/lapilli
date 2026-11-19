@@ -71,6 +71,8 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.DeploysCaught += d.DeployWhite
 			rr.Episodes.Total += d.Episodes
 			rr.Episodes.White += d.EpisodesWhite
+			rr.ActionYes += d.ActionYes
+			rr.ActionNo += d.ActionNo
 			if !t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals) {
 				rr.Unjudged += d.Firings - d.White
 				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
@@ -78,7 +80,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		// By the weeks the seven days have some of, as their firings are.
 		rep := &verdict.Report{NoRecord: !t.rec.JudgesAny(s.l.Midnight(today-6), s.now()),
-			EpisodesNotCounted: !t.episodesCounted(ledger.Week(today - 6))}
+			EpisodesNotCounted: !t.episodesCounted(ledger.Week(today - 6)), People: true}
 		at := noisyAt(o)
 		total := 0
 		for _, rr := range sum {
