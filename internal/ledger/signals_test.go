@@ -33,23 +33,23 @@ func seenOfValues(labels []string, values ...string) *verdict.Seen {
 func TestSyncSignals(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	got, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match)
+	got, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead)
 	if err != nil || !got.Set || got.Entries {
 		t.Fatalf("%+v %v", got, err)
 	}
 	gen := l.Gen()
-	if got, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil || got.Set || got.Entries || l.Gen() != gen {
+	if got, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil || got.Set || got.Entries || l.Gen() != gen {
 		t.Errorf("unchanged: %+v %v, gen %d → %d", got, err, gen, l.Gen())
 	}
 	entries := []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}, Match: []string{}}}
-	if got, err := l.SyncSignals(ctx, signalDefs, entries, opts.Match); err != nil || got.Set || !got.Entries {
+	if got, err := l.SyncSignals(ctx, signalDefs, entries, opts.Match, opts.Lead); err != nil || got.Set || !got.Entries {
 		t.Errorf("entries: %+v %v", got, err)
 	}
 	if es, err := l.RuleEntries(ctx); err != nil || len(es) != 1 || es[0].Match == nil || len(es[0].Match) != 0 {
 		t.Errorf("entries kept: %+v %v", es, err)
 	}
 	defs := []SignalDef{signalDefs[1], {Name: "latency", Expr: "latency > 1", For: 10 * time.Minute, Record: true}}
-	if got, err := l.SyncSignals(ctx, defs, entries, opts.Match); err != nil || !got.Set {
+	if got, err := l.SyncSignals(ctx, defs, entries, opts.Match, opts.Lead); err != nil || !got.Set {
 		t.Fatalf("%+v %v", got, err)
 	}
 	rows, err := l.SignalRows(ctx)
@@ -73,7 +73,7 @@ func TestSyncSignals(t *testing.T) {
 func TestSignalTies(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	const n = 1000
@@ -157,7 +157,7 @@ func TestSignalTies(t *testing.T) {
 func TestSignalWithNoRowKeepsNothing(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	at := t0.Add(10 * time.Minute)
@@ -201,7 +201,7 @@ func TestSignalWithNoRowKeepsNothing(t *testing.T) {
 func TestReadAgainWithNoRowKeepsNothing(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	record(t, l, t0, t0.Add(time.Hour), nil)
@@ -225,7 +225,7 @@ func TestReadAgainWithNoRowKeepsNothing(t *testing.T) {
 func TestSignalReadInPieces(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	run := func(from, to time.Time, r SignalRead) {

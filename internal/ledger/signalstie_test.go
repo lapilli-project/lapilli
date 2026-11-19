@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -372,5 +373,203 @@ func TestTieUnnamedOnce(t *testing.T) {
 	}
 	if ws, _ := l.ImpactWindows(ctx, t0.Add(-time.Hour), t0.Add(30*24*time.Hour)); slices.ContainsFunc(ws, func(w Incident) bool { return w.Signal != "impact" }) {
 		t.Errorf("windows: %+v", ws)
+	}
+}
+
+// eightNamed are eight named signals, s0 to s7, as many as there may be.
+func eightNamed() []SignalDef {
+	var out []SignalDef
+	for i := range verdict.MaxSignals {
+		out = append(out, SignalDef{Name: "s" + strconv.Itoa(i), Expr: "s" + strconv.Itoa(i) + "_total > 0", For: time.Minute, Record: true})
+	}
+	return out
+}
+
+// Of a ledger a release before this one kept eight named signals in, s0 to
+// s7, beside the windows of the one with no name, started with impact in
+// place of s7: s7 is taken away first, so that its bit is free, and impact
+// is made of the one with no name with it, as the Settings page would. The
+// round keeps the signals given, and fails no more than ChangeSignals does
+// of the same set.
+func TestTieUnnamedBesideEight(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	ws := recordUnnamed(t, l)
+	eight := eightNamed()
+	startedBefore(t, l, eight, nil)
+	s7, _ := rowOf(t, l, "s7")
+	impact := tieImpact
+	impact.Match = nil
+	defs := append(slices.Clone(eight[:7]), impact)
+	got, err := l.SyncSignalSet(ctx, fixed(SignalSet{Defs: defs, Lead: opts.Lead}, opts.Match))
+	if err != nil || got.TieErr != nil || got.Tied != 2 || !got.Set {
+		t.Fatalf("%+v %v", got, err)
+	}
+	r, ok := rowOf(t, l, "impact")
+	if _, still := rowOf(t, l, "s7"); !ok || still || r.Bit != s7.Bit || r.Kept.Criterion != "5m impact > 1" {
+		t.Errorf("impact's row %+v, in place of s7 (bit %d)", r, s7.Bit)
+	}
+	if after, _ := l.ImpactWindows(ctx, t0.Add(-time.Hour), t0.Add(30*24*time.Hour)); len(after) != 2 || after[0].ID != ws[0].ID || after[0].Signal != "impact" || after[1].Signal != "impact" {
+		t.Errorf("windows: %+v", after)
+	}
+	if err := l.JudgePending(ctx, namedOpts(t, l, nil)); err != nil {
+		t.Errorf("judged by options of the signals given: %v", err)
+	}
+}
+
+// refuseTie makes the ledger refuse to give a window of the signal with no
+// name a signal's name, as a write that fails would.
+func refuseTie(t *testing.T, l *Ledger) {
+	t.Helper()
+	qs := []string{`CREATE TRIGGER refuse_tie BEFORE UPDATE OF signal ON incidents
+		WHEN OLD.signal = '' AND NEW.signal != '' BEGIN SELECT RAISE(ABORT, 'refused'); END`}
+	if l.pg != nil {
+		qs = []string{`CREATE FUNCTION refuse_tie() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$`,
+			`CREATE TRIGGER refuse_tie BEFORE UPDATE OF signal ON incidents FOR EACH ROW
+			WHEN (OLD.signal = '' AND NEW.signal <> '') EXECUTE FUNCTION refuse_tie()`}
+	}
+	for _, q := range qs {
+		if _, err := l.w.ExecContext(context.Background(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A tie that fails leaves the windows as they are, and keeps the signals
+// given all the same, in a write of their own: options read after it are
+// of the signals the ledger keeps, and judge (no ErrSignalsMoved, which
+// would wake the next round at once). The next round tries again.
+func TestTieUnnamedFails(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	recordUnnamed(t, l)
+	refuseTie(t, l)
+	defs := []SignalDef{tieImpact, tiePayments}
+	set := fixed(SignalSet{Defs: defs, Entries: paymentsOnly, Lead: opts.Lead}, opts.Match)
+	got, err := l.SyncSignalSet(ctx, set)
+	if err != nil || got.TieErr == nil || got.Tied != 0 || !got.Set || !got.Entries {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for _, name := range []string{"impact", "payments"} {
+		if _, ok := rowOf(t, l, name); !ok {
+			t.Errorf("no row of %s", name)
+		}
+	}
+	if ws, _ := l.ImpactWindows(ctx, t0.Add(-time.Hour), t0.Add(30*24*time.Hour)); len(ws) != 2 || ws[0].Signal != "" || ws[1].Signal != "" {
+		t.Errorf("windows: %+v", ws)
+	}
+	if err := l.JudgePending(ctx, namedOpts(t, l, paymentsOnly)); err != nil {
+		t.Errorf("judged: %v", err)
+	}
+	if n := len(tiedNotes(t, l)); n != 0 {
+		t.Errorf("%d notes of a tie that failed", n)
+	}
+	// Again, refused still: said again, the signals as they are.
+	if got, err := l.SyncSignalSet(ctx, set); err != nil || got.TieErr == nil || got.Set {
+		t.Errorf("again: %+v %v", got, err)
+	}
+	q := "DROP TRIGGER refuse_tie"
+	if l.pg != nil {
+		q += " ON incidents"
+	}
+	if _, err := l.w.ExecContext(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.SyncSignalSet(ctx, set); err != nil || got.TieErr != nil || got.Tied != 2 {
+		t.Errorf("no longer refused: %+v %v", got, err)
+	}
+}
+
+// Started first with no impact, the windows tied to impact, a signal no
+// longer read; then with impact added: its windows are its own, matched on
+// its labels, and judged by them.
+func TestTieUnnamedThenImpactAdded(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	recordUnnamed(t, l)
+	if got, err := l.SyncSignalSet(ctx, fixed(SignalSet{Defs: []SignalDef{tiePayments}, Entries: paymentsOnly, Lead: opts.Lead}, opts.Match)); err != nil || got.Tied != 2 || got.TiedRead {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got, err := l.SyncSignalSet(ctx, fixed(SignalSet{Defs: []SignalDef{tieImpact, tiePayments}, Entries: paymentsOnly, Lead: opts.Lead}, opts.Match)); err != nil || !got.Set || got.Tied != 0 {
+		t.Fatalf("impact added: %+v %v", got, err)
+	}
+	ws, _ := l.ImpactWindows(ctx, t0.Add(-time.Hour), t0.Add(30*24*time.Hour))
+	for _, w := range ws {
+		if w.Signal != "impact" || !slices.Equal(w.Match, tieImpact.Match) {
+			t.Errorf("window %s: of %q, matched on %v", w.ID, w.Signal, w.Match)
+		}
+	}
+	o := namedOpts(t, l, paymentsOnly)
+	if err := l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range judged(t, l, o) {
+		if f.White || !f.NoRecord {
+			t.Errorf("the firing at %v: white %v, no record %v; want unjudged", f.Start, f.White, f.NoRecord)
+		}
+	}
+}
+
+// Once a round found no window of the signal with no name left, named
+// signals in effect, the rounds after don't look for one again; with no
+// named signal, they may be found again, and are looked for when signals
+// are named again.
+func TestTieUnnamedLooksOnce(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	ws := recordUnnamed(t, l)
+	named := fixed(SignalSet{Defs: []SignalDef{tieImpact, tiePayments}, Entries: paymentsOnly, Lead: opts.Lead}, opts.Match)
+	if got, err := l.SyncSignalSet(ctx, named); err != nil || got.Tied != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// One with no name again, which no round of named signals could keep:
+	// not looked for.
+	if _, err := l.w.ExecContext(ctx, "UPDATE incidents SET signal = '' WHERE key = ?", ws[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.SyncSignalSet(ctx, named); err != nil || got.Tied != 0 {
+		t.Errorf("looked again: %+v %v", got, err)
+	}
+	// No signal named (the Settings page took the last away), then named
+	// again there, which ties nothing: the round looks again, and ties it.
+	if _, err := l.ChangeSignals(ctx, SignalsChange{}, fixed(SignalSet{Lead: opts.Lead}, opts.Match), "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.ChangeSignals(ctx, SignalsChange{}, named, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.SyncSignalSet(ctx, named); err != nil || got.Tied != 1 {
+		t.Errorf("named again: %+v %v", got, err)
+	}
+	// A ledger a release before this one kept named signals in, with no
+	// window of the one with no name: looked for once, in a write that
+	// changes no generation, and not again.
+	fresh := open(t, time.UTC)
+	startedBefore(t, fresh, []SignalDef{tieImpact, tiePayments}, paymentsOnly)
+	gen := fresh.Gen()
+	if got, err := fresh.SyncSignalSet(ctx, named); err != nil || got.Tied != 0 || fresh.Gen() != gen {
+		t.Errorf("%+v %v, gen %d → %d", got, err, gen, fresh.Gen())
+	}
+	if v, err := fresh.meta(ctx, fresh.r, metaUnnamedTied); err != nil || v == "" {
+		t.Errorf("not noted: %q %v", v, err)
+	}
+}
+
+// SyncSignals ties with the lead it is given: the firings from it before
+// each window are judged again.
+func TestSyncSignalsLead(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	ws := recordUnnamed(t, l)
+	defs := []SignalDef{tieImpact, tiePayments}
+	startedBefore(t, l, defs, paymentsOnly)
+	lead := 40 * time.Minute
+	if got, err := l.SyncSignals(ctx, defs, paymentsOnly, opts.Match, lead); err != nil || got.Tied != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	v, _ := l.meta(ctx, l.r, "pending")
+	var pending [][2]int64
+	if json.Unmarshal([]byte(v), &pending) != nil || len(pending) != 2 || pending[1][0] != ws[1].Start.Add(-lead).Unix() {
+		t.Errorf("pended %s: want the second from %v", v, ws[1].Start.Add(-lead))
 	}
 }

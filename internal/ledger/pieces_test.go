@@ -139,7 +139,7 @@ func TestPiecesEqualWhole(t *testing.T) {
 				l := open(t, time.UTC)
 				defs := slices.Clone(signalDefs)
 				defs[0].For = c.for_
-				if _, err := l.SyncSignals(ctx, defs, nil, opts.Match); err != nil {
+				if _, err := l.SyncSignals(ctx, defs, nil, opts.Match, opts.Lead); err != nil {
 					t.Fatal(err)
 				}
 				// The run that missed it, with the firings.
@@ -235,7 +235,7 @@ func longOn(t *testing.T, labels incident.Labels) (*Ledger, int64, time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	win := incident.Incident{ID: "impact-errors-1", Start: t0, End: t0.Add(time.Hour), Signal: "errors", Candidate: true, Labels: labels}
