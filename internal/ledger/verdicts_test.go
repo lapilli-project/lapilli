@@ -132,8 +132,10 @@ func TestVerdictUnrelated(t *testing.T) {
 	if unrelated != 1 {
 		t.Errorf("the week's tallies say %d unrelated, want 1", unrelated)
 	}
+	// Noted at the write's time (vNow), by its writer.
 	cs, err := l.Changes(ctx, 10)
-	if err != nil || !strings.HasPrefix(cs[0].What, "verdict on Disk ") || !strings.Contains(cs[0].After, "INC-12") || cs[0].Before != "" {
+	i := slices.IndexFunc(cs, func(c Change) bool { return strings.HasPrefix(c.What, "verdict on Disk ") })
+	if err != nil || i < 0 || !strings.Contains(cs[i].After, "INC-12") || cs[i].Before != "" || cs[i].By != "ed" || !cs[i].At.Equal(vNow) {
 		t.Errorf("the change noted: %+v %v", cs, err)
 	}
 	// Undone, white again.
@@ -337,6 +339,132 @@ func TestVerdictsAnHour(t *testing.T) {
 	}
 }
 
+// The reads a page or a call makes of verdicts take what they give from
+// the ledger, no more: the first most of a period, counted apart; a page's
+// firings' own, by alert; the latest moved, most at most, and how many of
+// them all started before a time.
+func TestVerdictReadsBounded(t *testing.T) {
+	ctx := context.Background()
+	l, fs := verdictLedger(t)
+	if _, err := l.SetVerdict(ctx, keyOfFiring(fs["Disk"]), VerdictChange{Unrelated: yes()}, editorBy(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(fs["Search"]), VerdictChange{Action: text("yes")}, editorBy(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := l.CountVerdicts(ctx, t0, t0.Add(24*time.Hour)); err != nil || n != 2 {
+		t.Errorf("counted %d %v", n, err)
+	}
+	if vs, err := l.VerdictsFirst(ctx, t0, t0.Add(24*time.Hour), 1); err != nil || len(vs) != 1 || vs[0].Rule != "Disk" {
+		t.Errorf("the first: %+v %v", vs, err)
+	}
+	if got, err := l.VerdictsOf(ctx, []Firing{fs["Search"]}); err != nil || len(got) != 1 || got[fs["Search"].ID].Action != "yes" {
+		t.Errorf("of Search's firing: %+v %v", got, err)
+	}
+	if _, err := l.w.ExecContext(ctx, "UPDATE verdicts SET moved = ?", movedGone); err != nil {
+		t.Fatal(err)
+	}
+	moved, old, err := l.MovedVerdicts(ctx, 1, vNow)
+	if err != nil || len(moved) != 1 || moved[0].Rule != "Search" || old != 2 {
+		t.Errorf("moved: %+v, %d before, %v", moved, old, err)
+	}
+}
+
+// A note is its writer's: a part whose note another rewrites is theirs,
+// and an answer changed with no note given leaves none of the one before.
+func TestVerdictNotesCredited(t *testing.T) {
+	ctx := context.Background()
+	l, fs := verdictLedger(t)
+	disk := keyOfFiring(fs["Disk"])
+	shop := teamCtx(l, t, "shop")
+	pat := VerdictBy{By: "pat", Now: vNow.Add(time.Minute)}
+	if _, err := l.SetVerdict(ctx, disk, VerdictChange{Unrelated: yes(), UnrelatedNote: text("a log rotation"), Action: text("yes"), ActionNote: text("paged")}, adminBy(), opts); err != nil {
+		t.Fatal(err)
+	}
+	// An editor rewrites the admin's note on "unrelated".
+	v, err := l.SetVerdict(ctx, disk, VerdictChange{UnrelatedNote: text("a cron job")}, editorBy(), opts)
+	if err != nil || v.UnrelatedBy != "ed" || v.UnrelatedNote != "a cron job" || len(v.Unrelated) != 1 {
+		t.Errorf("an editor's note on unrelated: %+v %v", v, err)
+	}
+	// A team's editor flips the admin's yes to no, giving no note.
+	v, err = l.SetVerdict(shop, disk, VerdictChange{Action: text("no")}, pat, opts)
+	if err != nil || v.Action != "no" || v.ActionBy != "pat" || v.ActionNote != "" || !v.ActionAt.Equal(pat.Now) {
+		t.Errorf("a team's editor's no: %+v %v", v, err)
+	}
+	// The admin's note on it, then a team's editor's in its place.
+	if v, err = l.SetVerdict(ctx, disk, VerdictChange{ActionNote: text("it healed")}, adminBy(), opts); err != nil || v.ActionBy != "root" || v.ActionNote != "it healed" {
+		t.Errorf("the admin's note on needed action: %+v %v", v, err)
+	}
+	if v, err = l.SetVerdict(shop, disk, VerdictChange{ActionNote: text("restarted it")}, pat, opts); err != nil || v.ActionBy != "pat" || v.ActionNote != "restarted it" {
+		t.Errorf("a team's editor's note on needed action: %+v %v", v, err)
+	}
+	// The same answer again, with no note: nothing changes.
+	if v, err = l.SetVerdict(ctx, disk, VerdictChange{Action: text("no")}, adminBy(), opts); err != nil || v.ActionBy != "pat" || v.ActionNote != "restarted it" {
+		t.Errorf("the same answer again: %+v %v", v, err)
+	}
+}
+
+// What people said, or undid, since a time, of a period's firings: an
+// undoing that keeps no verdict counts as a saying does. SaidSince (a
+// proposal's backtest gone stale) is "unrelated" set or undone of the
+// rules asked; VerdictsSince (a goal's "no longer missed") every firing
+// whose verdict changed, in bulk too.
+func TestVerdictsSinceUndone(t *testing.T) {
+	ctx := context.Background()
+	l, fs := verdictLedger(t)
+	at := func(h time.Duration) VerdictBy { return VerdictBy{By: "ed", Now: vNow.Add(h)} }
+	day, week := t0.Add(24*time.Hour), t0.Add(7*24*time.Hour)
+	said := func(since time.Time, rule string) bool {
+		t.Helper()
+		ok, err := l.SaidSince(ctx, t0, day, since, func(r string) bool { return r == rule })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	count := func(since, from, to time.Time) int {
+		t.Helper()
+		n, err := l.VerdictsSince(ctx, since, from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(fs["Disk"]), VerdictChange{Unrelated: yes()}, at(0), opts); err != nil {
+		t.Fatal(err)
+	}
+	if !said(vNow.Add(-time.Second), "Disk") || said(vNow, "Disk") || said(vNow.Add(-time.Second), "Search") {
+		t.Error("said unrelated")
+	}
+	if err := l.DeleteVerdict(ctx, keyOfFiring(fs["Disk"]), "unrelated", at(time.Hour), opts); err != nil {
+		t.Fatal(err)
+	}
+	if !said(vNow.Add(30*time.Minute), "Disk") {
+		t.Error("undone after the backtest: not stale")
+	}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(fs["Search"]), VerdictChange{Action: text("yes")}, at(2*time.Hour), opts); err != nil {
+		t.Fatal(err)
+	}
+	if said(vNow.Add(90*time.Minute), "Search") {
+		t.Error("needed action, which changes no stone, made it stale")
+	}
+	if n := count(vNow.Add(30*time.Minute), t0, week); n != 2 {
+		t.Errorf("since the undoing: %d verdicts, want 2", n)
+	}
+	if _, err := l.SetVerdicts(ctx, []FiringKey{keyOfFiring(fs["Disk"]), keyOfFiring(fs["Errors"])}, "no", nil, at(3*time.Hour), opts); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(vNow.Add(150*time.Minute), t0, week); n != 2 {
+		t.Errorf("since the bulk answer: %d verdicts, want 2", n)
+	}
+	if n := count(vNow.Add(-time.Hour), t0, week); n != 3 {
+		t.Errorf("since before them all: %d firings, want 3", n)
+	}
+	if n := count(vNow.Add(-time.Hour), week, week.Add(7*24*time.Hour)); n != 0 {
+		t.Errorf("of another week: %d", n)
+	}
+}
+
 // A form's firing is held to the series and start the page read it with:
 // another alert's, or another start's, or an id gone, is refused, nothing
 // written. "This was real" alike.
@@ -409,6 +537,82 @@ func TestVerdictRealExclusive(t *testing.T) {
 	}
 }
 
+// As Lapilli judged it, a firing is white when it catches any incident but
+// one "This was real" wrote, said unrelated to it or not; bit 1 is a
+// firing white so and black by people's word, bit 8 one white by people's
+// word alone. Disk catches INC-A, said unrelated to it, and R, which "This
+// was real" wrote afterwards: white both ways, neither bit. Cpu catches R
+// alone, said unrelated to it: black both ways, neither bit. Probe, which
+// R was written from, is white by it alone: bit 8. The tallies count so,
+// and the report agrees with verdict.Judge given the same verdicts.
+func TestVerdictsAsLapilliJudged(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	a := incident.Incident{ID: "INC-A", Title: "checkout 5xx", Start: vAt(14, 10), End: vAt(14, 40), Labels: incident.Labels{"service": {"checkout"}}}
+	if _, err := l.Put(ctx, a, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	fs := []firing.Firing{
+		{Rule: "Disk", Labels: map[string]string{"service": "checkout", "instance": "db"}, Start: vAt(14, 5), End: vAt(14, 20)},
+		{Rule: "Probe", Labels: map[string]string{"service": "checkout"}, Start: vAt(13, 0), End: vAt(14, 6)},
+		{Rule: "Cpu", Labels: map[string]string{"service": "checkout", "instance": "cpu"}, Start: vAt(13, 30), End: vAt(13, 40)},
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), fs)
+	by := firingsByRule(t, l)
+	if !by["Disk"].White || by["Probe"].White || by["Cpu"].White {
+		t.Fatalf("before: %+v", by)
+	}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(by["Disk"]), VerdictChange{Unrelated: yes()}, editorBy(), opts); err != nil {
+		t.Fatal(err)
+	}
+	made, _, err := l.Real(ctx, keyOfFiring(by["Probe"]), editorBy(), opts)
+	if err != nil || made == "" {
+		t.Fatalf("This was real: %q %v", made, err)
+	}
+	by = firingsByRule(t, l)
+	if _, err := l.SetVerdict(ctx, keyOfFiring(by["Cpu"]), VerdictChange{Unrelated: yes()}, editorBy(), opts); err != nil {
+		t.Fatal(err)
+	}
+	by = firingsByRule(t, l)
+	for rule, want := range map[string][3]bool{"Disk": {true, false, false}, "Cpu": {false, false, false}, "Probe": {true, false, true}} {
+		f := by[rule]
+		if f.White != want[0] || f.SaidUnrelated() != want[1] || f.RealOnly() != want[2] {
+			t.Errorf("%s: white %t, bit 1 %t, bit 8 %t; want %v (%+v)", rule, f.White, f.SaidUnrelated(), f.RealOnly(), want, f)
+		}
+	}
+	weeks, err := l.WeeksBy(ctx, Week(l.Day(t0)), Week(l.Day(t0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var white, unrelated, real int
+	for _, w := range weeks {
+		white, unrelated, real = white+w.White, unrelated+w.Unrelated, real+w.RealWhite
+	}
+	// As Lapilli judged it, Disk alone is white.
+	if unrelated != 0 || real != 1 || white+unrelated-real != 1 {
+		t.Errorf("the week: white %d, unrelated %d, real_white %d", white, unrelated, real)
+	}
+	r, err := l.IncidentByID(ctx, made)
+	if err != nil || !r.Real {
+		t.Fatalf("%s: %+v %v", made, r, err)
+	}
+	o := opts
+	o.From, o.To = t0, t0.Add(7*24*time.Hour)
+	if o.Verdicts, err = l.ReplayVerdicts(ctx, o.From, o.To); err != nil {
+		t.Fatal(err)
+	}
+	want := verdict.Judge(nil, slices.Clone(fs), []incident.Incident{a, r.Incident}, o)
+	rep, err := l.Report(ctx, o.From, o.To, o, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, w := norm(rep.Rules), norm(want.Rules); !slices.EqualFunc(g, w, func(a, b verdict.RuleResult) bool {
+		return a.Rule == b.Rule && a.Firings == b.Firings && a.White == b.White && a.Unrelated == b.Unrelated && a.Unrelated == 0
+	}) {
+		t.Errorf("rules\n got %+v\nwant %+v", g, w)
+	}
+}
+
 // A bulk answer is one write, one change and one count, all or nothing.
 func TestVerdictsBulk(t *testing.T) {
 	ctx := context.Background()
@@ -420,8 +624,10 @@ func TestVerdictsBulk(t *testing.T) {
 		t.Fatalf("%d %v", n, err)
 	}
 	after, _ := l.Changes(ctx, 100)
-	if len(after) != len(cs)+1 || !strings.HasPrefix(after[0].What, "verdicts: needed action yes, on 3 firings of 3 rules") {
-		t.Errorf("changes: %+v", after[:1])
+	if len(after) != len(cs)+1 || !slices.ContainsFunc(after, func(c Change) bool {
+		return strings.HasPrefix(c.What, "verdicts: needed action yes, on 3 firings of 3 rules") && c.At.Equal(vNow)
+	}) {
+		t.Errorf("changes: %+v", after)
 	}
 	// One of another team's for a team's editor refuses it all.
 	shop := teamCtx(l, t, "shop")
@@ -502,6 +708,173 @@ func TestVerdictsMove(t *testing.T) {
 	moved, old, err := l.MovedVerdicts(ctx, 10, vNow.Add(-VerdictAge))
 	if err != nil || len(moved) != 1 || old != 0 {
 		t.Errorf("moved: %+v %d %v", moved, old, err)
+	}
+}
+
+// Two firings of one alert, each said unrelated, one answered: a run that
+// merges them leaves the later one's verdict held by the earlier's firing;
+// a run that parts them again gives it its own firing back, not held, its
+// answer counted, and the earlier firing no longer has its word. A replay
+// judged in memory agrees at each step.
+func TestVerdictHeldThenOwnAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.Put(ctx, incident.Incident{ID: "INC-12", Title: "checkout 5xx", Start: vAt(14, 10), End: vAt(14, 40),
+		Labels: incident.Labels{"service": {"checkout"}}}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "INC-13", Title: "checkout db", Start: vAt(14, 15), End: vAt(14, 40),
+		Labels: incident.Labels{"service": {"checkout"}}}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	lab := map[string]string{"service": "checkout", "instance": "db"}
+	two := []firing.Firing{
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 8)},
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 12), End: vAt(14, 20)},
+	}
+	one := []firing.Firing{{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 20)}}
+	record(t, l, t0, t0.Add(24*time.Hour), two)
+	fs, err := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour)})
+	if err != nil || len(fs) != 2 {
+		t.Fatalf("%+v %v", fs, err)
+	}
+	for _, f := range fs {
+		c := VerdictChange{Unrelated: yes()}
+		if f.Start.Equal(vAt(14, 12)) {
+			c.Action = text("no")
+		}
+		if _, err := l.SetVerdict(ctx, keyOfFiring(f), c, editorBy(), opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agrees := func(step string) {
+		t.Helper()
+		o := opts
+		o.From, o.To = t0, t0.Add(7*24*time.Hour)
+		var err error
+		if o.Verdicts, err = l.ReplayVerdicts(ctx, o.From, o.To); err != nil {
+			t.Fatal(err)
+		}
+		incs, err := l.Incidents(ctx, o.From, o.To, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var in []incident.Incident
+		for _, x := range incs {
+			in = append(in, x.Incident)
+		}
+		got, err := l.Firings(ctx, FiringQuery{From: o.From, To: o.To})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var replayed []firing.Firing
+		for _, f := range got {
+			replayed = append(replayed, f.Firing)
+		}
+		want := verdict.Judge(nil, replayed, in, o)
+		rep, err := l.Report(ctx, o.From, o.To, o, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stones := func(js []verdict.Judged) []string {
+			var out []string
+			for _, j := range js {
+				out = append(out, j.Start.Format("15:04")+" "+strings.Join(j.Incidents, ",")+"|"+strings.Join(j.Unrelated, ",")+"|"+j.Action)
+			}
+			slices.Sort(out)
+			return out
+		}
+		if g, w := stones(rep.Firings), stones(want.Firings); !slices.Equal(g, w) {
+			t.Errorf("%s: the ledger's stones %v, a replay's %v", step, g, w)
+		}
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), one)
+	vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil)
+	if len(vs) != 2 || !strings.HasPrefix(vs[1].Moved, movedHeld+" ") {
+		t.Fatalf("merged: %+v", vs)
+	}
+	agrees("merged")
+	record(t, l, t0, t0.Add(24*time.Hour), two)
+	vs, _ = l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil)
+	if len(vs) != 2 || vs[0].Moved != "" || vs[1].Moved != "" || vs[1].Firing == 0 {
+		t.Errorf("parted again: %+v", vs)
+	}
+	fs, _ = l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour)})
+	for _, f := range fs {
+		action := ""
+		if f.Start.Equal(vAt(14, 12)) {
+			action = "no"
+		}
+		if f.White || !f.SaidUnrelated() || f.Action() != action {
+			t.Errorf("parted again, %s: white %t, unrelated %v, action %q", f.Start.Format("15:04"), f.White, f.Unrelated, f.Action())
+		}
+	}
+	agrees("parted again")
+}
+
+// A change of one verdict gives back the firing it was noted of, whatever
+// its rule's name and labels hold: braces, quotes, " at ".
+func TestVerdictOnRoundTrip(t *testing.T) {
+	for _, f := range []Firing{
+		{Firing: firing.Firing{Rule: "Disk", Labels: map[string]string{"service": "checkout"}, Start: vAt(14, 5)}},
+		{Firing: firing.Firing{Rule: "A {b}", Start: vAt(1, 0)}},
+		{Firing: firing.Firing{Rule: `X {"a":"b"}`, Labels: map[string]string{"a": " {}", "b": "at 2026-11-02T14:05:00Z"}, Start: vAt(2, 0)}},
+		{Firing: firing.Firing{Rule: "high at night", Labels: map[string]string{"x": `"} {"`}, Start: vAt(23, 59)}},
+	} {
+		for _, what := range []string{"verdict on " + firingName(f), "verdict on " + firingName(f) + verdictUndone, "verdict on " + firingName(f) + verdictTakenAway} {
+			rule, alert, start, ok := verdictOn(what)
+			if !ok || rule != f.Rule || alert != alertName(f.Rule, f.Labels) || !start.Equal(f.Start) {
+				t.Errorf("%q: %q %q %s %t", what, rule, alert, start, ok)
+			}
+		}
+	}
+	for _, what := range []string{"verdicts: needed action yes, on 3 firings of 3 rules", "verdict on Disk at 2026-11-02T14:05:00Z", "team shop kept"} {
+		if _, _, _, ok := verdictOn(what); ok {
+			t.Errorf("%q read as one verdict's", what)
+		}
+	}
+}
+
+// Writing "unrelated", or undoing it, takes away the verdicts another held
+// of that firing: each is noted in the changes as taken away, with what it
+// said, by the writer; SaidSince sees it.
+func TestVerdictHeldTakenAwayNoted(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.Put(ctx, incident.Incident{ID: "INC-12", Title: "checkout 5xx", Start: vAt(14, 10), End: vAt(14, 40),
+		Labels: incident.Labels{"service": {"checkout"}}}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	lab := map[string]string{"service": "checkout", "instance": "db"}
+	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 8)},
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 12), End: vAt(14, 20)},
+	})
+	fs, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour)})
+	for _, f := range fs {
+		if _, err := l.SetVerdict(ctx, keyOfFiring(f), VerdictChange{Unrelated: yes(), UnrelatedNote: text("rotation")}, editorBy(), opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 20)}})
+	merged := firingsByRule(t, l)["Disk"]
+	undo := VerdictBy{By: "root", Admin: true, Now: vNow.Add(time.Hour)}
+	if err := l.DeleteVerdict(ctx, keyOfFiring(merged), "unrelated", undo, opts); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil); len(vs) != 0 {
+		t.Errorf("left: %+v", vs)
+	}
+	cs, err := l.Changes(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(cs, func(c Change) bool { return strings.HasSuffix(c.What, "at 2026-11-02T14:12:00Z taken away") })
+	if i < 0 || cs[i].By != "root" || !strings.Contains(cs[i].Before, `"unrelated":["INC-12"]`) || !strings.Contains(cs[i].Before, "rotation") || cs[i].After != "" {
+		t.Errorf("the changes: %+v", cs)
+	}
+	if ok, err := l.SaidSince(ctx, vAt(14, 10), vAt(14, 15), vNow.Add(30*time.Minute), nil); err != nil || !ok {
+		t.Errorf("the one taken away, since: %t %v", ok, err)
 	}
 }
 

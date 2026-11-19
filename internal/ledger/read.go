@@ -289,7 +289,7 @@ func (f Firing) Action() string {
 }
 
 // RealOnly reports whether it is white only by incidents "This was real"
-// wrote.
+// wrote: black as Lapilli judged it, white by people's word.
 func (f Firing) RealOnly() bool { return f.Person&personRealWhite != 0 }
 
 // FiringQuery picks firings: those that started in [From, To), of one rule

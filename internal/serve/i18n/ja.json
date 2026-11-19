@@ -2,6 +2,7 @@
  "\"for\" %s → %s: fired %d → %d, still catching %d": "\"for\" %s → %s: 発火 %d → %d、%d 件は引き続き検知",
  "%d approvals each; at most %d deletions a day and %d changes an hour.": "変更ごとに %d 人の承認が必要です。削除は 1 日 %d 件まで、変更は 1 時間 %d 件までです。",
  "%d done": "%d 件完了",
+ "%d verdicts in that period, more than %d at a time: ask for a shorter period": "その期間の判定は %d 件で、一度に返せる %d 件を超えています。期間を短くしてください",
  "%d written down": "%d 件をインシデントとして記録",
  "%d had caught something already": "%d 件はすでに何かを検知済み",
  "%d had an open task to tune them already": "%d 件はすでにチューニングのタスクが未完了",

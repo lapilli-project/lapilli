@@ -160,6 +160,11 @@ func (l *Ledger) EpisodesCounted(ctx context.Context, from time.Time) (bool, err
 	return Week(l.Day(from)) >= w, nil
 }
 
+// newestBefore is the latest start of a firing before a time, which the
+// walk of CountEpisodes reads in the ledger's one write, a week a write:
+// along firings_start, never a scan of every firing.
+const newestBefore = "SELECT max(start_at) FROM firings WHERE start_at < ?"
+
 // CountEpisodes counts the episodes of the weeks not counted yet (after an
 // upgrade to schema 025, or a change of zone), a week a write, from the
 // newest back, so that the weeks people read first are counted first,
@@ -184,9 +189,11 @@ func (l *Ledger) CountEpisodes(ctx context.Context, o verdict.Options, still fun
 				return err
 			}
 			// The next week back with a firing: those with none have
-			// nothing to count.
+			// nothing to count. By its start, along firings_start, not
+			// by its day, which no index has: the day of the latest
+			// start before the week's midnight.
 			var newest sql.NullInt64
-			if err := t.QueryRowContext(t.ctx, "SELECT max(day) FROM firings WHERE day < ?", from).Scan(&newest); err != nil {
+			if err := t.QueryRowContext(t.ctx, newestBefore, l.midnight(from)).Scan(&newest); err != nil {
 				return err
 			}
 			if !newest.Valid {
@@ -194,7 +201,7 @@ func (l *Ledger) CountEpisodes(ctx context.Context, o verdict.Options, still fun
 				_, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaEpisodesFrom)
 				return err
 			}
-			w := Week(newest.Int64)
+			w := Week(l.day(newest.Int64))
 			lo, hi := l.midnight(w), l.midnight(w+7)-1
 			if err := l.walkEpisodes(t, lo, hi, o); err != nil {
 				return err
@@ -224,14 +231,14 @@ func (l *Ledger) uncountEpisodes(t *txn) error {
 		return err
 	}
 	var newest sql.NullInt64
-	if err := t.QueryRowContext(t.ctx, "SELECT max(day) FROM firings").Scan(&newest); err != nil {
+	if err := t.QueryRowContext(t.ctx, "SELECT max(start_at) FROM firings").Scan(&newest); err != nil {
 		return err
 	}
 	if !newest.Valid {
 		_, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaEpisodesFrom)
 		return err
 	}
-	return setMeta(t.ctx, t, metaEpisodesFrom, strconv.FormatInt(Week(newest.Int64)+7, 10))
+	return setMeta(t.ctx, t, metaEpisodesFrom, strconv.FormatInt(Week(l.day(newest.Int64))+7, 10))
 }
 
 // Episode is an episode as a firing's line says it: when its first firing

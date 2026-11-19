@@ -359,16 +359,39 @@ func (s *Server) apiDeleteVerdict(w http.ResponseWriter, r *http.Request) {
 // verdictsLongest is how long a period GET /api/v1/verdicts gives at most.
 const verdictsLongest = 31 * 24 * time.Hour
 
+// verdictsAtOnce is how many verdicts GET /api/v1/verdicts gives at most:
+// a period with more is refused, to be asked a shorter one at a time.
+var verdictsAtOnce = 20_000
+
 // apiVerdicts is GET /api/v1/verdicts?from=&to=: the verdicts of the
 // firings that started in the period, 31 days at most, the last seven when
-// not given; a viewer's.
+// not given; a viewer's. It is heavy, as a report with its firings is:
+// verdictsAtOnce at most, counted before any is read, one such request at
+// a time, its turn held until the answer is written, and the writing
+// given 30 seconds.
 func (s *Server) apiVerdicts(w http.ResponseWriter, r *http.Request) {
 	from, to, err := s.period(r, verdictsLongest)
 	if err != nil {
 		s.oops(w, r, err)
 		return
 	}
-	vs, err := s.l.VerdictsIn(r.Context(), from, to, nil)
+	n, err := s.l.CountVerdicts(r.Context(), from, to)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if n > verdictsAtOnce {
+		s.oops(w, r, bad("%d verdicts in that period, more than %d at a time: ask for a shorter period", n, verdictsAtOnce))
+		return
+	}
+	done, err := s.busy(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer done()
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(30 * time.Second))
+	vs, err := s.l.VerdictsFirst(r.Context(), from, to, verdictsAtOnce)
 	if err != nil {
 		s.oops(w, r, err)
 		return

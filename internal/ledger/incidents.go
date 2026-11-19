@@ -519,6 +519,13 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 
 // change notes a change made through the UI or API.
 func change(t *txn, by, what string, before, after any) error {
+	return changeAt(t, time.Now(), by, what, before, after)
+}
+
+// changeAt notes a change made at a time: a person's verdict at its
+// write's (VerdictBy), which the hour's writes and what was said since a
+// time are read by.
+func changeAt(t *txn, at time.Time, by, what string, before, after any) error {
 	text := func(v any) string {
 		if v == nil {
 			return ""
@@ -527,6 +534,6 @@ func change(t *txn, by, what string, before, after any) error {
 		return string(b)
 	}
 	_, err := t.ExecContext(t.ctx, "INSERT INTO changes (at, by, what, before, after) VALUES (?, ?, ?, ?, ?)",
-		time.Now().Unix(), by, what, t.d.kept(text(before)), t.d.kept(text(after)))
+		at.Unix(), by, what, t.d.kept(text(before)), t.d.kept(text(after)))
 	return err
 }

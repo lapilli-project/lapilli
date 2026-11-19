@@ -177,7 +177,8 @@ Bounds:
 
 - A write takes a body of 1 MB at most on `--listen`.
 - `/api/v1/report` is 31 days and 100,000 firings at most, or 366 days
-  with `firings=false`; `/api/v1/incidents` 366 days;
+  with `firings=false`; `GET /api/v1/verdicts` 31 days and 20,000
+  verdicts; `/api/v1/incidents` 366 days;
   `/api/v1/windows` and `/api/v1/marked` 400 days; `/api/v1/summary` 53
   weeks.
 - `GET /api/v1/tasks` gives 500 tasks at most, the latest changed first;
@@ -185,9 +186,9 @@ Bounds:
   tracker job's `GET /api/v1/tasks` goes on from where it stopped
   (`after`, `next`).
 - A heavy request takes the one turn there is for one: a report with its
-  firings, a summary of every team or of more than 53 rows. Another waits
-  up to 30 seconds for it, then gets 503; the answer has 30 seconds to be
-  written.
+  firings, a summary of every team or of more than 53 rows, and
+  `GET /api/v1/verdicts`. Another waits up to 30 seconds for it, then gets
+  503; the answer has 30 seconds to be written.
 - `--listen` reads a request in 30 seconds and its headers up to 64 KB,
   and writes an answer in two minutes; the other ports, in 30 seconds,
   16 KB and one minute.
@@ -230,7 +231,7 @@ stone. A firing is picked by its alert and start, as a report gives it
 
 | Route | Role | Takes | Gives |
 |---|---|---|---|
-| `GET /api/v1/verdicts` | viewer | `from`, `to` (RFC 3339; the last seven days by default; 31 days at most) | `verdicts`, those of the firings that started in the period, each with its firing (`rule`, `labels`, `start`, `end` as it was when said), `unrelated` (`incidents`, each `{key, start, end}` as it was then, `by`, `at`, `note`) and `action` (`answer`, `by`, `at`, `note`), each `null` when not said; `moved`, why it is to be looked at again, and `on_firing` |
+| `GET /api/v1/verdicts` | viewer | `from`, `to` (RFC 3339; the last seven days by default; 31 days and 20,000 verdicts at most: past them, 400, to ask a shorter period) | `verdicts`, those of the firings that started in the period, each with its firing (`rule`, `labels`, `start`, `end` as it was when said), `unrelated` (`incidents`, each `{key, start, end}` as it was then, `by`, `at`, `note`) and `action` (`answer`, `by`, `at`, `note`), each `null` when not said; `moved`, why it is to be looked at again, and `on_firing` |
 | `PUT /api/v1/verdicts` | editor; a team's editor, `action` and `action_note` of the rules it owns | `rule`, `labels`, `start`; `unrelated` (`true` or `false`), `unrelated_note`, `action` (`yes`, `no`, or `""` for none), `action_note`: a part left out is left as it is | the verdict |
 | `PUT /api/v1/verdicts/bulk` | editor; a team's editor, of the rules it owns | `firings` (each `rule`, `labels`, `start`; 100 at most), `action`, `action_note` | `firings`, `changed` |
 | `DELETE /api/v1/verdicts` | editor; a team's editor, `action` of the rules it owns | `rule`, `labels`, `start`, `part` (`unrelated`, `action`, or both when left out) | 204 |
@@ -248,6 +249,9 @@ stone. A firing is picked by its alert and start, as a report gives it
 - **30 an hour.** Each person writes 30 verdicts an hour, a `PUT`, a bulk
   `PUT` (one, however many firings) and a `DELETE` alike, the forms
   among them: past them, 429 with `Retry-After`, and nothing written.
+- **Who wrote it.** A part's `by` and `at` are of whoever last wrote its
+  answer or its note; another answer given with no note drops the note of
+  the one before.
 - **All or nothing.** A bulk `PUT` with a firing not found, of another
   team's for a team's editor, or older than 14 days for one who isn't an
   admin refuses all of it, saying which; `unrelated` isn't taken in bulk.

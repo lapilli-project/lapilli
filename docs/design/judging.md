@@ -1853,25 +1853,38 @@ says, with schema 026, and what building them settled:
   (`moveVerdicts`), which widens the span judged to it: kept by it,
   marked `start` (or `alert`, another alert's); found but kept by another
   verdict, it stays where it was, marked `held SERIES START`, and adds its
-  "unrelated" to that firing; found nowhere, `gone`. `stones` keeps on each
+  "unrelated" to that firing; found nowhere, `gone`. One held whose own
+  firing a later run gives back (two merged, then parted again) is its
+  own firing's once more, unmarked, as `Place` has it, and the firing
+  that held it is judged again without it. `stones` keeps on each
   firing the incidents it is said unrelated to (`firings.unrelated`, not
   in the design's list), which `catches`, the report's firings and a
   key's move read, besides the bits of `firings.person`; and marks a
-  verdict `span KEY` or `catches KEY`. The bits add 16 (white only by
-  "This was real" and in a quiet window that matches it) as the design
-  says, and the tallies `real_excused`, `action_yes_black` and
+  verdict `span KEY` or `catches KEY`. As Lapilli judged it, a firing is
+  white when it caught an incident "This was real" didn't write, whatever
+  it was said unrelated to: bit 1 is white so and black by people's word,
+  bit 8 black so and white by it, so that one that caught a window and a
+  real incident, said unrelated to the window, has neither, and one said
+  unrelated to a real incident alone has neither. The bits add 16 (white
+  only by "This was real" and in a quiet window that matches it) as the
+  design says, and the tallies `real_excused`, `action_yes_black` and
   `action_no_white` beside those it lists, for `real_excused`, `yes_black`
   and `no_white`. A judge reads the verdicts of a day around its span by
   their start, along an index on `start_at`.
 - **The write** goes part by part in the ledger (`changeVerdict`): a
   team's editor is told by the write's context (`WithTeams`), as every
   team-scoped write is, so the ledger, not the handler, keeps "unrelated"
-  from them. The hour's thirty are counted by the change rows noted under
-  `verdict…` by the writer's name, folded as proposals fold names, by the
-  changes' own clock; a write that says what is kept writes nothing, and
-  isn't counted. Writing or undoing "unrelated" takes away the verdicts
-  another held of that firing: what a person says of it now is what it
-  is. A bulk answer's firings are each checked as one alone, and one
+  from them. A part's who and when are its answer's or its note's last
+  writer's: a note rewritten is the rewriter's, and another answer given
+  with no note drops the note of the one before. A verdict's change rows
+  are noted at the write's time (`VerdictBy.Now`, serve's clock), and the
+  hour's thirty are counted by them, under `verdict…` by the writer's
+  name, folded as proposals fold names; a write that says what is kept
+  writes nothing, and isn't counted. Writing or undoing "unrelated" takes
+  away the verdicts another held of that firing, each noted as `verdict
+  on RULE {labels} at START taken away` with what it said, by the writer,
+  and not counted among the thirty: what a person says of it now is what
+  it is. A bulk answer's firings are each checked as one alone, and one
   refused refuses all.
 - **Keys moved.** `Decide` passes a window's key to the incident a
   confirmation writes, unmarked; `remapImpact` counts the verdicts naming
@@ -1887,15 +1900,27 @@ says, with schema 026, and what building them settled:
   `replayCompared` (a proposal's backtest and `backtest_again`, `compare`,
   a pull request's backtest, a change reviewed), `replayInput` (the
   digest's suggestions and near misses), and the Settings page's three
-  tries carry them on both sides. A backtest keeps when it ran (`at`); a
-  verdict of "unrelated" on a firing of its rule in its period since makes
-  it stale.
+  tries carry them on both sides. A backtest keeps when it ran (`at`);
+  "unrelated" said, or undone, on a firing of its rule in its period since
+  makes it stale (`SaidSince`), read from the change rows the writes noted
+  (`verdict on RULE {labels} at START`, their before and after), so that
+  an undoing, which may keep no verdict, and a held verdict taken away
+  count as a saying does.
 - **The summary.** `people` from the tallies, by the parts the record
   judges: Lapilli's own judging reads the record again without the
   incidents "This was real" wrote (`tallies.recL`); `real` counts by the
   rule of the alert each was written from. `not_judged` beside
   `unjudged`. A goal's `people` says what moved its measure, and the
-  `goal.missed` notice carries it.
+  `goal.missed` notice carries it. A task's "no longer missed" counts the
+  week's firings whose verdicts were said or undone since it was told
+  (`VerdictsSince`), from the change rows, a bulk answer's each firing.
+- **Reading them.** `GET /api/v1/verdicts` is heavy, as a report with its
+  firings is: 20,000 verdicts at most (`verdictsAtOnce`), counted before
+  any is read and refused past it, to be asked a shorter period; read
+  with a `LIMIT` all the same, in the one turn there is for a heavy
+  request, its answer given 30 seconds to be written. A page's firings'
+  verdicts are read by their alerts and starts (`VerdictsOf`), and the
+  verdicts to look at again by the latest, `LIMIT` in SQL, counted apart.
 - **`judged: false`.** `verdict.Options.NotJudged`, looked up only when
   an entry says it; `Catches` refuses first. `lapilli verdict` and serve
   take a file of such entries with no signal. The Settings page's entries
@@ -1904,6 +1929,9 @@ says, with schema 026, and what building them settled:
   judged by nothing with no named signal come from `--impact-file` (not
   done: the entries' form without named signals). The report's
   `settings.impact_rules[].judged`†, not in the design's list, says it.
+  `impact_rules.judged`, which schema 026 adds, is reserved, and nothing
+  writes or reads it: an entry's `judged: false` is read from where the
+  entries are given.
 - **Where it shows**, as item 3 says, but: the incident's page links each
   rule that caught it to its firings of that day, where they are said
   unrelated, rather than taking the form itself; the Cleanup page lists
@@ -1918,12 +1946,17 @@ says, with schema 026, and what building them settled:
   `internal/ledger/verdicts_test.go` (roles part by part, 14 days, the
   hour's 30 across every kind, the 409s, the exclusivity, moves, a window
   confirmed, pruning, `judged: false`, the ledger as `verdict.Judge` with
-  the same verdicts); `internal/serve/verdicts_test.go` (the same through
+  the same verdicts; notes credited to their writers, a firing that caught
+  a window and a real incident and one that caught a real incident alone,
+  a held verdict given its firing back, held verdicts taken away noted,
+  what was said or undone since, the reads bounded);
+  `internal/serve/verdicts_test.go` (the same through
   the forms and the API, cross-origin, `GET /api/v1/verdicts`, MCP reading
   and setting none, the summary's `people` and its recount, `/metrics`,
-  `action.share`'s bar, `stones: lapilli`, `judged: false`);
-  `internal/serve/verdictreplay_test.go` (a proposal's backtest with a
-  longer `for` keeps a person's "unrelated" black, and goes stale).
+  `action.share`'s bar, `stones: lapilli`, `judged: false`, `GET`'s most
+  and its turn); `internal/serve/verdictreplay_test.go` (a proposal's
+  backtest with a longer `for` keeps a person's "unrelated" black, and goes
+  stale when one is said or undone since).
 
 ## Steps
 

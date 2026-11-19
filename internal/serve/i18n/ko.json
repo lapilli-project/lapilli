@@ -2,6 +2,7 @@
  "\"for\" %s → %s: fired %d → %d, still catching %d": "\"for\" %s → %s: 발화 %d → %d, 잡던 %d건은 그대로",
  "%d approvals each; at most %d deletions a day and %d changes an hour.": "변경마다 승인 %d명, 삭제는 하루 %d건, 변경은 한 시간 %d건까지예요.",
  "%d done": "%d건 완료",
+ "%d verdicts in that period, more than %d at a time: ask for a shorter period": "그 기간의 판정이 %d건으로, 한 번에 줄 수 있는 %d건보다 많아요. 기간을 줄여 주세요",
  "%d written down": "%d건 인시던트로 기록",
  "%d had caught something already": "%d건은 이미 정탐이었음",
  "%d had an open task to tune them already": "%d건은 이미 열린 튜닝 태스크가 있음",

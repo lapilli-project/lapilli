@@ -41,7 +41,7 @@ func backtestOf(t *testing.T, s *Server, id int64) *backtest {
 // Errors' firing over INC-9 starts later, finds the person's "unrelated"
 // again, and stays black, as the rule as it is has it; without the
 // verdict it is white on both. A verdict said in its period since it was
-// backtested makes it stale.
+// backtested makes it stale, and so does one undone.
 func TestBacktestCarriesVerdicts(t *testing.T) {
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
@@ -86,8 +86,21 @@ func TestBacktestCarriesVerdicts(t *testing.T) {
 	if _, err := s.l.Move(ctx, first, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{}); err != nil {
 		t.Fatal(err)
 	}
-	with := backtestOf(t, s, proposeFor(t, h, "10m"))
+	s.now = func() time.Time { return now.Add(10 * time.Minute) }
+	second := proposeFor(t, h, "10m")
+	with := backtestOf(t, s, second)
 	if with.Before.White != without.Before.White-1 || with.After.White != with.Before.White || len(with.Gained) != 0 {
 		t.Errorf("with the verdict: before %+v after %+v gained %v; want both one white fewer, nothing gained", with.Before, with.After, with.Gained)
+	}
+	if why := staleWhy(second); why != nil {
+		t.Errorf("backtested after the verdict: stale %+v", why)
+	}
+	// Undone since: stale, though no verdict is kept.
+	if err := s.l.DeleteVerdict(ctx, ledger.FiringKey{ID: f.ID, Series: f.Series, Start: f.Start}, "unrelated",
+		ledger.VerdictBy{By: bo, Now: now.Add(20 * time.Minute)}, o); err != nil {
+		t.Fatal(err)
+	}
+	if why := staleWhy(second); why == nil || why.Format != staleSaid {
+		t.Errorf("undone after the backtest: stale %+v", why)
 	}
 }

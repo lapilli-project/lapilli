@@ -25,7 +25,7 @@
 <p class="row">{{if gt .From 1}}<a href="{{$.Link "/orphans"}}">{{t "The first"}}</a>{{end}}{{with .Next}} <a href="{{$.Link "/orphans" "after" .}}">{{t "The next"}}</a>{{end}}</p>
 {{end}}
 {{with .Verdicts}}<h2 id="verdicts">{{t "People's verdicts to look at again"}}</h2>
-<p>{{t "Their firing, or an incident, moved under them since they were said: say each again on its firing, or undo it. One on no firing is pruned with its start, by --keep."}}</p>
+<p>{{tbdi "Their firing, or an incident, moved under them since they were said: say each again on its firing, or undo it. One on no firing is pruned with its start, by --keep."}}</p>
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "What was said"}}</th><th scope="col">{{t "Why to look again"}}</th></tr></thead>
 <tbody>{{range .}}<tr><td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td><td class="t"><a href="{{$.Link "/firings" "day" (day $.Loc .Start) "rule" .Rule}}">{{at $.Loc .Start}}</a></td>

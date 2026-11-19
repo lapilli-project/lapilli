@@ -441,6 +441,51 @@ func TestVerdictsAPI(t *testing.T) {
 	}
 }
 
+// GET /api/v1/verdicts is a heavy request: past verdictsAtOnce verdicts in
+// the period it is refused, saying to ask for a shorter one, before
+// anything is read; and it takes the one turn there is for one, so that a
+// viewer can't keep many such answers in memory at once.
+func TestVerdictsAPIBounded(t *testing.T) {
+	ctx := context.Background()
+	s := verdictServer(t, nil)
+	h := s.Handler()
+	by := ledger.VerdictBy{By: vAdmin, Admin: true, Now: now}
+	o := mustOptions(t, s)
+	said := true
+	f, other := errorsFiring(t, s), searchFiring(t, s)
+	if _, err := s.l.SetVerdict(ctx, ledger.FiringKey{ID: f.ID, Series: f.Series, Start: f.Start}, ledger.VerdictChange{Unrelated: &said}, by, o); err != nil {
+		t.Fatal(err)
+	}
+	yes := "yes"
+	if _, err := s.l.SetVerdict(ctx, ledger.FiringKey{ID: other.ID, Series: other.Series, Start: other.Start}, ledger.VerdictChange{Action: &yes}, by, o); err != nil {
+		t.Fatal(err)
+	}
+	was, wait := verdictsAtOnce, busyWait
+	defer func() { verdictsAtOnce, busyWait = was, wait }()
+	verdictsAtOnce, busyWait = 1, 0
+	if code, body, _ := apiAs(t, h, http.MethodGet, "/api/v1/verdicts", nil, vViewer, "", ""); code != http.StatusBadRequest || !strings.Contains(body, "2 verdicts in that period, more than 1 at a time: ask for a shorter period") {
+		t.Errorf("past the most: %d %s", code, body)
+	}
+	verdictsAtOnce = 2
+	s.heavy <- struct{}{} // another heavy request holds the turn
+	if code, body, _ := apiAs(t, h, http.MethodGet, "/api/v1/verdicts", nil, vViewer, "", ""); code != http.StatusServiceUnavailable || !strings.Contains(body, "busy") {
+		t.Errorf("while another holds the turn: %d %s", code, body)
+	}
+	<-s.heavy
+	code, body, _ := apiAs(t, h, http.MethodGet, "/api/v1/verdicts", nil, vViewer, "", "")
+	var got struct{ Verdicts []apiVerdict }
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &got) != nil || len(got.Verdicts) != 2 {
+		t.Errorf("once the turn is free: %d %s", code, body)
+	}
+	// The turn is given back.
+	select {
+	case s.heavy <- struct{}{}:
+		<-s.heavy
+	default:
+		t.Error("the turn is still held")
+	}
+}
+
 // MCP reads people's verdicts and sets none: no tool writes one, and the
 // firings it gives say what was said.
 func TestMCPReadsVerdicts(t *testing.T) {

@@ -33,8 +33,11 @@ CREATE INDEX verdicts_start ON verdicts (start_at);
 -- person on firings: bits judging writes from the verdicts and the
 -- incidents, for the tallies: 1, unrelated (white as Lapilli judged it,
 -- black by a person's word); 2, a person said it needed action; 4, that
--- it didn't; 8, white only by incidents "This was real" wrote; 16, of
--- those, in a quiet window that matches it, which would have excused it.
+-- it didn't; 8, white only by incidents "This was real" wrote (black as
+-- Lapilli judged it, white by people's word); 16, of those, in a quiet
+-- window that matches it, which would have excused it. As Lapilli judged
+-- it, a firing is white when it caught an incident "This was real"
+-- didn't write, whatever a person said it is unrelated to.
 -- unrelated on firings: the keys of the incidents it catches as Lapilli
 -- judges it that its verdicts say it is unrelated to, a JSON list, '' for
 -- none: what the catches and the reports read.
@@ -69,8 +72,10 @@ ALTER TABLE weeks ADD COLUMN action_no_white INTEGER NOT NULL DEFAULT 0;
 -- other; one written so before this schema is '', and counted as none.
 ALTER TABLE incidents ADD COLUMN real_of TEXT NOT NULL DEFAULT '';
 
--- judged on impact_rules: 0 for an entry that says its rules are judged
--- by nothing (judged: false), NULL for one judged by its signals.
+-- judged on impact_rules: reserved, and unused: nothing writes or reads
+-- it, and it is NULL in every row. Whether an entry's rules are judged by
+-- nothing (judged: false) is read from where the entries are given, as
+-- the rest of an entry is.
 ALTER TABLE impact_rules ADD COLUMN judged INTEGER;
 
 -- stones on goals: 'lapilli' for a goal checked against the numbers as

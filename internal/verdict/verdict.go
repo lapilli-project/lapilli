@@ -603,10 +603,12 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			notJudged[f.Rule] = nj
 		}
 		j.NotJudged = nj
+		lapilli := false // white as Lapilli judged it: caught an incident "This was real" didn't write
 		for i, in := range inPeriod {
 			if nj || !Catches(f, in, o) {
 				continue
 			}
+			lapilli = lapilli || !in.Real
 			// Said by a person to be unrelated to it: it doesn't catch it.
 			if said != nil && slices.Contains(said.Unrelated, in.ID) {
 				j.Unrelated = append(j.Unrelated, in.ID)
@@ -643,7 +645,8 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if len(j.After) > 0 {
 				r.Late++
 			}
-			if len(j.Unrelated) > 0 {
+			// White as Lapilli judged it, black by people's word.
+			if len(j.Unrelated) > 0 && lapilli {
 				r.Unrelated++
 			}
 			if nj || named && !rec.JudgesTied(f.Start, ties) || !named && !rec.Judges(f.Start) {

@@ -362,7 +362,10 @@ here, keep people's word in them; the summary's `people` says it apart:
 
 - `unrelated`, the row's firings white as Lapilli judged them and black by
   a person's word, and `unrelated_excused`, those of them a quiet window
-  then excused, which are in no other count, as every excused firing;
+  then excused, which are in no other count, as every excused firing. As
+  Lapilli judged it, a firing is white when it caught an incident "This
+  was real" didn't write, whatever it was said unrelated to: one said
+  unrelated to such an incident alone isn't among them;
 - `real`, the incidents "This was real" wrote from a firing of the row's
   rules that started in the week; `real_white`, the row's firings white
   only by such incidents, and `real_excused`, those of them a quiet window
@@ -389,8 +392,8 @@ first(.rows[] | select(.team == "")) | .people
 ```jq
 # people (lapilli serve): counted again
 ([.incidents[] | select(.real) | .id]) as $real
-| {unrelated: ([.firings[] | select((.white | not) and ((.unrelated // []) != []))] | length),
-   caught_by_lapilli: ([.firings[] | select((((.incidents // []) - $real) + (.unrelated // [])) != [])] | length),
+| {unrelated: ([.firings[] | select((.white | not) and (((.unrelated // []) - $real) != []))] | length),
+   caught_by_lapilli: ([.firings[] | select((((.incidents // []) + (.unrelated // [])) - $real) != [])] | length),
    yes: ([.firings[] | select(.action == "yes")] | length),
    no: ([.firings[] | select(.action == "no")] | length)}
 ```

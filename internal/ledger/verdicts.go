@@ -252,7 +252,7 @@ func (l *Ledger) SetVerdict(ctx context.Context, k FiringKey, c VerdictChange, w
 			return err
 		}
 		out = now
-		return l.keepVerdict(t, f, was, now, w.By, "verdict on "+firingName(f), o)
+		return l.keepVerdict(t, f, was, now, w, "verdict on "+firingName(f), o)
 	})
 	if errors.Is(err, errNothing) {
 		err = nil
@@ -263,8 +263,51 @@ func (l *Ledger) SetVerdict(ctx context.Context, k FiringKey, c VerdictChange, w
 // firingName is a firing as the changes name it: its rule, labels and
 // start.
 func firingName(f Firing) string {
-	b, _ := json.Marshal(orEmptyMap(f.Labels))
-	return fmt.Sprintf("%s %s at %s", f.Rule, b, f.Start.UTC().Format(time.RFC3339))
+	return alertName(f.Rule, f.Labels) + " at " + f.Start.UTC().Format(time.RFC3339)
+}
+
+// alertName is an alert as firingName names it: its rule and labels.
+func alertName(rule string, labels map[string]string) string {
+	b, _ := json.Marshal(orEmptyMap(labels))
+	return rule + " " + string(b)
+}
+
+// What a change of one verdict is noted as, after "verdict on " and the
+// firing's name: a write, an undoing, or one another held taken away.
+const (
+	verdictUndone    = " undone"
+	verdictTakenAway = " taken away"
+)
+
+// verdictOn reads back the firing a change of one verdict was noted of
+// ("verdict on RULE {labels} at START", and what it was): its rule, its
+// alert as alertName names it, and its start; false for a change that
+// isn't of one verdict. The rule is what comes before the labels, the
+// first " {" whose rest is a whole JSON object of them.
+func verdictOn(what string) (rule, alert string, start time.Time, ok bool) {
+	rest, ok := strings.CutPrefix(what, "verdict on ")
+	if !ok {
+		return "", "", time.Time{}, false
+	}
+	rest = strings.TrimSuffix(strings.TrimSuffix(rest, verdictUndone), verdictTakenAway)
+	i := strings.LastIndex(rest, " at ")
+	if i < 0 {
+		return "", "", time.Time{}, false
+	}
+	start, err := time.Parse(time.RFC3339, rest[i+4:])
+	if err != nil {
+		return "", "", time.Time{}, false
+	}
+	alert = rest[:i]
+	for j := 0; j < len(alert); j++ {
+		if j > 0 && alert[j] == '{' && alert[j-1] == ' ' {
+			var labels map[string]string
+			if json.Unmarshal([]byte(alert[j:]), &labels) == nil && labels != nil {
+				return alert[:j-1], alert, start, true
+			}
+		}
+	}
+	return "", "", time.Time{}, false
 }
 
 // changeVerdict is was with c said of f by w, as a person's write gives
@@ -296,6 +339,11 @@ func (l *Ledger) changeVerdict(t *txn, f Firing, was Verdict, c VerdictChange, w
 			case len(caught) > verdict.MaxUnrelated:
 				return now, invalid("this firing caught %d incidents: one that caught more than %d can't be said unrelated", len(caught), verdict.MaxUnrelated)
 			}
+			// A note is its writer's: said of other incidents, or by
+			// another, with no note given, the one before goes.
+			if c.UnrelatedNote == nil && (!sameKeys(was.Unrelated, caught) || FoldName(was.UnrelatedBy) != FoldName(w.By)) {
+				now.UnrelatedNote = ""
+			}
 			now.Unrelated, now.UnrelatedBy, now.UnrelatedAt = caught, w.By, at
 		} else {
 			now.Unrelated, now.UnrelatedBy, now.UnrelatedAt, now.UnrelatedNote = nil, "", time.Time{}, ""
@@ -303,17 +351,23 @@ func (l *Ledger) changeVerdict(t *txn, f Firing, was Verdict, c VerdictChange, w
 		// Said again, or undone: not to be looked at again.
 		now.Moved = ""
 	}
-	if c.UnrelatedNote != nil && !limited {
-		now.UnrelatedNote = *c.UnrelatedNote
+	// A part's who and when are of its answer's or its note's last writer:
+	// a note rewritten is the rewriter's.
+	if c.UnrelatedNote != nil && !limited && *c.UnrelatedNote != now.UnrelatedNote {
+		now.UnrelatedNote, now.UnrelatedBy, now.UnrelatedAt = *c.UnrelatedNote, w.By, at
 	}
 	if len(now.Unrelated) == 0 {
-		now.UnrelatedNote = ""
+		now.UnrelatedBy, now.UnrelatedAt, now.UnrelatedNote = "", time.Time{}, ""
 	}
 	if c.Action != nil && *c.Action != was.Action {
 		now.Action, now.ActionBy, now.ActionAt = *c.Action, w.By, at
+		// Another answer with no note: the note of the one before goes.
+		if c.ActionNote == nil {
+			now.ActionNote = ""
+		}
 	}
-	if c.ActionNote != nil {
-		now.ActionNote = *c.ActionNote
+	if c.ActionNote != nil && *c.ActionNote != now.ActionNote {
+		now.ActionNote, now.ActionBy, now.ActionAt = *c.ActionNote, w.By, at
 	}
 	if now.Action == "" {
 		now.ActionBy, now.ActionAt, now.ActionNote = "", time.Time{}, ""
@@ -322,6 +376,11 @@ func (l *Ledger) changeVerdict(t *txn, f Firing, was Verdict, c VerdictChange, w
 		now.Moved = "" // nothing it said is about what moved
 	}
 	return now, nil
+}
+
+// sameKeys reports whether a and b name the same incidents, in order.
+func sameKeys(a, b []UnrelatedTo) bool {
+	return slices.EqualFunc(a, b, func(x, y UnrelatedTo) bool { return x.Key == y.Key })
 }
 
 // sameVerdict reports whether a and b say the same: a write of b over a
@@ -333,11 +392,11 @@ func sameVerdict(a, b Verdict) bool {
 }
 
 // keepVerdict writes now in place of was (none when was.ID is 0), notes the
-// change as what, by by, and judges f's span again. A verdict that says
-// nothing is taken away. Writing "unrelated", or undoing it, takes away the
-// verdicts another held of f (movedHeld): what a person says of f now is
-// what it is.
-func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, by, what string, o verdict.Options) error {
+// change as what, by w at its time, and judges f's span again. A verdict
+// that says nothing is taken away. Writing "unrelated", or undoing it,
+// takes away the verdicts another held of f (movedHeld), each noted as
+// taken away by w: what a person says of f now is what it is.
+func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, w VerdictBy, what string, o verdict.Options) error {
 	if was.ID != 0 && sameVerdict(was, now) {
 		return errNothing
 	}
@@ -347,12 +406,22 @@ func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, by, what string
 	if err := writeVerdict(t, was, now); err != nil {
 		return err
 	}
-	if !slices.EqualFunc(was.Unrelated, now.Unrelated, func(x, y UnrelatedTo) bool { return x.Key == y.Key }) || was.UnrelatedBy != now.UnrelatedBy {
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM verdicts WHERE moved = ?", heldAt(f.Series, f.Start)); err != nil {
+	if !sameKeys(was.Unrelated, now.Unrelated) || was.UnrelatedBy != now.UnrelatedBy {
+		held, err := l.readVerdicts(t.ctx, t, "WHERE v.moved = ?", heldAt(f.Series, f.Start))
+		if err != nil {
 			return err
 		}
+		for _, h := range held {
+			if _, err := t.ExecContext(t.ctx, "DELETE FROM verdicts WHERE id = ?", h.ID); err != nil {
+				return err
+			}
+			on := Firing{Firing: firing.Firing{Rule: h.Rule, Labels: h.Labels, Start: h.Start}}
+			if err := changeAt(t, w.now(), w.By, "verdict on "+firingName(on)+verdictTakenAway, verdictShown(h), nil); err != nil {
+				return err
+			}
+		}
 	}
-	if err := change(t, by, what, verdictShown(was), verdictShown(now)); err != nil {
+	if err := changeAt(t, w.now(), w.By, what, verdictShown(was), verdictShown(now)); err != nil {
 		return err
 	}
 	return l.judge(t, f.Start.Unix(), f.Start.Unix(), o)
@@ -415,11 +484,12 @@ func verdictShown(v Verdict) any {
 // verdictsLeft refuses a verdict write past VerdictsAnHour of the writer's
 // in the hour before now: one change noted a write, as each is (a bulk
 // post or call is one), by the name it is noted under, on every replica
-// alike.
+// alike. The verdicts a write took away, noted beside it, aren't counted.
 func verdictsLeft(t *txn, w VerdictBy) error {
-	// By the clock the changes are noted by (change).
-	now := time.Now()
-	rows, err := t.QueryContext(t.ctx, "SELECT by, at FROM changes WHERE at > ? AND what LIKE 'verdict%'", now.Add(-time.Hour).Unix())
+	// By the clock the verdicts' changes are noted by (keepVerdict).
+	now := w.now()
+	rows, err := t.QueryContext(t.ctx, "SELECT by, at FROM changes WHERE at > ? AND what LIKE 'verdict%' AND what NOT LIKE ?",
+		now.Add(-time.Hour).Unix(), "%"+verdictTakenAway)
 	if err != nil {
 		return err
 	}
@@ -551,8 +621,14 @@ const verdictCols = `v.id, v.series_id, s.labels, r.name, v.start_at, v.end_at, 
 
 // readVerdicts reads the verdicts where says, in order of their start.
 func (l *Ledger) readVerdicts(ctx context.Context, q queryer, where string, args ...any) ([]Verdict, error) {
+	return l.readVerdictsOrdered(ctx, q, where+` ORDER BY v.start_at, v.id`, args...)
+}
+
+// readVerdictsOrdered reads the verdicts where says, its order and limit
+// with it.
+func (l *Ledger) readVerdictsOrdered(ctx context.Context, q queryer, where string, args ...any) ([]Verdict, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+verdictCols+` FROM verdicts v JOIN series s ON s.id = v.series_id JOIN rules r ON r.id = s.rule_id
-		`+where+` ORDER BY v.start_at, v.id`, args...)
+		`+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +766,7 @@ func (l *Ledger) SetVerdicts(ctx context.Context, ks []FiringKey, action string,
 			answer = "none"
 		}
 		what := fmt.Sprintf("verdicts: needed action %s, on %d firings of %d rules", answer, changed, len(rules))
-		if err := change(t, w.By, what, nil, map[string]any{"action": action, "firings": said}); err != nil {
+		if err := changeAt(t, w.now(), w.By, what, nil, map[string]any{"action": action, "firings": said}); err != nil {
 			return err
 		}
 		return l.judgeSpans(t, spans, o)
@@ -763,7 +839,7 @@ func (l *Ledger) DeleteVerdict(ctx context.Context, k FiringKey, part string, w 
 		if sameVerdict(was, now) {
 			return ErrNoVerdict
 		}
-		return l.keepVerdict(t, f, was, now, w.By, "verdict on "+firingName(f)+" undone", o)
+		return l.keepVerdict(t, f, was, now, w, "verdict on "+firingName(f)+verdictUndone, o)
 	})
 	return err
 }
@@ -778,17 +854,41 @@ func (l *Ledger) VerdictsIn(ctx context.Context, from, to time.Time, in func(rul
 	return slices.DeleteFunc(vs, func(v Verdict) bool { return !in(v.Rule) }), nil
 }
 
-// VerdictsOf are the verdicts kept by the firings fs, by firing id.
+// VerdictsFirst are the verdicts kept by firings that started in [from,
+// to), of every rule, the first most by their start: what GET
+// /api/v1/verdicts gives, once it has counted them (CountVerdicts).
+func (l *Ledger) VerdictsFirst(ctx context.Context, from, to time.Time, most int) ([]Verdict, error) {
+	return l.readVerdictsOrdered(ctx, l.r, "WHERE v.start_at >= ? AND v.start_at < ? ORDER BY v.start_at, v.id LIMIT ?", from.Unix(), to.Unix(), most)
+}
+
+// CountVerdicts counts the verdicts kept by firings that started in [from,
+// to).
+func (l *Ledger) CountVerdicts(ctx context.Context, from, to time.Time) (int, error) {
+	var n int
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM verdicts WHERE start_at >= ? AND start_at < ?", from.Unix(), to.Unix()).Scan(&n)
+	return n, err
+}
+
+// VerdictsOf are the verdicts kept by the firings fs, by firing id: those
+// of their alerts that started when they did, read by alert and start.
 func (l *Ledger) VerdictsOf(ctx context.Context, fs []Firing) (map[int64]Verdict, error) {
 	out := map[int64]Verdict{}
 	if len(fs) == 0 {
 		return out, nil
 	}
 	lo, hi := fs[0].Start.Unix(), fs[0].Start.Unix()
+	var series []int64
 	for _, f := range fs {
 		lo, hi = min(lo, f.Start.Unix()), max(hi, f.Start.Unix())
+		if !slices.Contains(series, f.Series) {
+			series = append(series, f.Series)
+		}
 	}
-	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.start_at >= ? AND v.start_at <= ?", lo, hi)
+	ids, err := json.Marshal(series)
+	if err != nil {
+		return nil, err
+	}
+	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.series_id IN ("+l.d.ints("?")+") AND v.start_at >= ? AND v.start_at <= ?", string(ids), lo, hi)
 	if err != nil {
 		return nil, err
 	}
@@ -811,42 +911,97 @@ const MaxMovedShown = 100
 // latest first, most at most; and how many of all of them started before
 // since.
 func (l *Ledger) MovedVerdicts(ctx context.Context, most int, since time.Time) ([]Verdict, int, error) {
-	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.moved != ''")
-	if err != nil {
+	var old int
+	if err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM verdicts WHERE moved != '' AND start_at < ?", since.Unix()).Scan(&old); err != nil {
 		return nil, 0, err
 	}
-	old := 0
-	for _, v := range vs {
-		if v.Start.Before(since) {
-			old++
-		}
-	}
-	slices.Reverse(vs)
-	if len(vs) > most {
-		vs = vs[:most]
+	vs, err := l.readVerdictsOrdered(ctx, l.r, "WHERE v.moved != '' ORDER BY v.start_at DESC, v.id DESC LIMIT ?", most)
+	if err != nil {
+		return nil, 0, err
 	}
 	return vs, old, nil
 }
 
-// VerdictsSince counts the verdicts said, or undone, in [from, to) of
-// firings that started in [wFrom, wTo): what moved a week's goals since
-// they were told (docs/design/judging.md, "Who, when, and the trail").
+// VerdictsSince counts the firings that started in [wFrom, wTo) whose
+// verdicts people said, or undid, since a time: what moved a week's goals
+// since they were told (docs/design/judging.md, "Who, when, and the
+// trail"). Read from the changes the writes noted, a bulk answer's each
+// firing among them, so that an undoing, which may keep no verdict, counts
+// as a saying does.
 func (l *Ledger) VerdictsSince(ctx context.Context, since time.Time, wFrom, wTo time.Time) (int, error) {
-	var n int
-	err := l.r.QueryRowContext(ctx, `SELECT count(*) FROM verdicts WHERE start_at >= ? AND start_at < ? AND (unrelated_at >= ? OR action_at >= ?)`,
-		wFrom.Unix(), wTo.Unix(), since.Unix(), since.Unix()).Scan(&n)
-	return n, err
+	rows, err := l.r.QueryContext(ctx, "SELECT what, after FROM changes WHERE at >= ? AND what LIKE 'verdict%'", since.Unix())
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	in := func(alert string, start time.Time) {
+		if !start.Before(wFrom) && start.Before(wTo) {
+			seen[alert+" at "+start.UTC().Format(time.RFC3339)] = true
+		}
+	}
+	for rows.Next() {
+		var what, after string
+		if err := rows.Scan(&what, &after); err != nil {
+			return 0, err
+		}
+		if _, alert, start, ok := verdictOn(what); ok {
+			in(alert, start)
+			continue
+		}
+		// A bulk answer: its firings in its after.
+		var bulk struct {
+			Firings []struct {
+				Rule   string            `json:"rule"`
+				Labels map[string]string `json:"labels"`
+				Start  time.Time         `json:"start"`
+			} `json:"firings"`
+		}
+		if after == "" || json.Unmarshal([]byte(after), &bulk) != nil {
+			continue
+		}
+		for _, f := range bulk.Firings {
+			in(alertName(f.Rule, f.Labels), f.Start)
+		}
+	}
+	return len(seen), rows.Err()
 }
 
-// SaidSince reports whether a person said a firing unrelated, of the rules
-// in says, that started in [from, to), since a time: what makes a
-// proposal's backtest stale, as an incident written there does.
+// SaidSince reports whether a person said a firing unrelated, or undid
+// that, of the rules in says, that started in [from, to), since a time:
+// what makes a proposal's backtest stale, as an incident written there
+// does. Read from the changes the writes noted, so that an undoing, which
+// may keep no verdict, is seen as a saying is, and a verdict another held
+// taken away too; "needed action" changes no stone, and isn't.
 func (l *Ledger) SaidSince(ctx context.Context, from, to, since time.Time, in func(rule string) bool) (bool, error) {
-	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.start_at >= ? AND v.start_at < ? AND v.unrelated_at > ?", from.Unix(), to.Unix(), since.Unix())
+	rows, err := l.r.QueryContext(ctx, "SELECT what, before, after FROM changes WHERE at > ? AND what LIKE 'verdict on %'", since.Unix())
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(vs, func(v Verdict) bool { return in == nil || in(v.Rule) }), nil
+	defer rows.Close()
+	unrelated := func(shown string) []string {
+		var v struct {
+			Unrelated []string `json:"unrelated"`
+		}
+		if shown != "" {
+			json.Unmarshal([]byte(shown), &v)
+		}
+		return v.Unrelated
+	}
+	for rows.Next() {
+		var what, before, after string
+		if err := rows.Scan(&what, &before, &after); err != nil {
+			return false, err
+		}
+		rule, _, start, ok := verdictOn(what)
+		if !ok || start.Before(from) || !start.Before(to) || in != nil && !in(rule) {
+			continue
+		}
+		if !slices.Equal(unrelated(before), unrelated(after)) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // ReplayVerdicts are the verdicts kept by firings that started in [from,
@@ -994,9 +1149,24 @@ const verdictReach = 86400
 // "Through judging again"). Found (verdict.Place), the verdict is kept by
 // it, marked moved; found but held by another verdict, it is marked so,
 // and adds its "unrelated" to the firing (stones); not found, marked gone.
-// It returns the span widened to the firings found, which are judged with
-// the rest.
+// One held whose own firing is there again (a run merged two, and the
+// next parted them again) is its own firing's once more, as Place has it:
+// no longer held. It returns the span widened to the firings found, and
+// to those that held one, which are judged with the rest.
 func (l *Ledger) moveVerdicts(t *txn, lo, hi int64, o verdict.Options) (int64, int64, error) {
+	back, err := l.readVerdicts(t.ctx, t, `WHERE v.start_at >= ? AND v.start_at <= ? AND v.moved LIKE 'held %'
+		AND EXISTS (SELECT 1 FROM firings f WHERE f.series_id = v.series_id AND f.start_at = v.start_at)`, lo, hi)
+	if err != nil {
+		return lo, hi, err
+	}
+	for _, v := range back {
+		if _, at, ok := heldOf(v.Moved); ok {
+			lo, hi = min(lo, at), max(hi, at)
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE verdicts SET moved = '' WHERE id = ?", v.ID); err != nil {
+			return lo, hi, err
+		}
+	}
 	vs, err := l.readVerdicts(t.ctx, t, `WHERE v.start_at >= ? AND v.start_at <= ?
 		AND NOT EXISTS (SELECT 1 FROM firings f WHERE f.series_id = v.series_id AND f.start_at = v.start_at)`, lo, hi)
 	if err != nil || len(vs) == 0 {
@@ -1102,8 +1272,22 @@ type saidOf struct {
 	held map[[2]int64][]Verdict
 }
 
+// heldOf reads the firing a verdict marked held is held by (heldAt): its
+// series and start.
+func heldOf(moved string) (series, start int64, ok bool) {
+	rest, ok := strings.CutPrefix(moved, movedHeld+" ")
+	if !ok {
+		return 0, 0, false
+	}
+	a, b, _ := strings.Cut(rest, " ")
+	series, err1 := strconv.ParseInt(a, 10, 64)
+	start, err2 := strconv.ParseInt(b, 10, 64)
+	return series, start, err1 == nil && err2 == nil
+}
+
 // verdictsNear reads, for stones over [lo, hi], the verdicts kept there and
-// those held around it.
+// those held around it. One marked held whose own firing is there again
+// is its own firing's, as Place has it, held by none.
 func (l *Ledger) verdictsNear(t *txn, lo, hi int64) (saidOf, error) {
 	s := saidOf{at: map[[2]int64]Verdict{}, held: map[[2]int64][]Verdict{}}
 	vs, err := l.readVerdicts(t.ctx, t, "WHERE v.start_at >= ? AND v.start_at <= ?", lo-verdictReach, hi+verdictReach)
@@ -1111,11 +1295,8 @@ func (l *Ledger) verdictsNear(t *txn, lo, hi int64) (saidOf, error) {
 		return s, err
 	}
 	for _, v := range vs {
-		if rest, ok := strings.CutPrefix(v.Moved, movedHeld+" "); ok {
-			a, b, _ := strings.Cut(rest, " ")
-			series, err1 := strconv.ParseInt(a, 10, 64)
-			start, err2 := strconv.ParseInt(b, 10, 64)
-			if err1 == nil && err2 == nil {
+		if strings.HasPrefix(v.Moved, movedHeld+" ") && v.Firing == 0 {
+			if series, start, ok := heldOf(v.Moved); ok {
 				k := [2]int64{series, start}
 				s.held[k] = append(s.held[k], v)
 			}
@@ -1128,12 +1309,16 @@ func (l *Ledger) verdictsNear(t *txn, lo, hi int64) (saidOf, error) {
 	return s, nil
 }
 
-// The bits stones keeps in firings.person.
+// The bits stones keeps in firings.person. As Lapilli judged it, a firing
+// is white when it catches an incident "This was real" didn't write,
+// whatever people said it is unrelated to: bit 1 is white so and black by
+// people's word, bit 8 black so and white by it, so that Lapilli's own
+// stones are the white ones, and bit 1's, less bit 8's.
 const (
 	personUnrelated  = 1  // white as Lapilli judged it, black by a person
 	personYes        = 2  // a person said it needed action
 	personNo         = 4  // that it didn't
-	personRealWhite  = 8  // white only by incidents "This was real" wrote
+	personRealWhite  = 8  // black as Lapilli judged it, white by incidents "This was real" wrote
 	personRealQuiet  = 16 // of those, in a quiet window that matches it
 	personActionBits = personYes | personNo
 )
@@ -1152,8 +1337,9 @@ func personOf(caught []counted, v Verdict, held []Verdict) (white bool, bits int
 			}
 		}
 	}
-	realOnly := true
+	lapilli := false // white as Lapilli judged it
 	for _, in := range caught {
+		lapilli = lapilli || !in.Real
 		if u, ok := said[in.ID]; ok {
 			unrelated = append(unrelated, in.ID)
 			if moved == "" && slices.ContainsFunc(v.Unrelated, func(x UnrelatedTo) bool { return x.Key == in.ID }) &&
@@ -1163,16 +1349,15 @@ func personOf(caught []counted, v Verdict, held []Verdict) (white bool, bits int
 			continue
 		}
 		white = true
-		realOnly = realOnly && in.Real
 		if len(v.Unrelated) > 0 && moved == "" {
 			moved = movedCatches + " " + in.ID
 		}
 	}
 	slices.Sort(unrelated)
 	switch {
-	case !white && len(unrelated) > 0:
+	case lapilli && !white:
 		bits |= personUnrelated
-	case white && realOnly:
+	case white && !lapilli:
 		bits |= personRealWhite
 	}
 	switch v.Action {
