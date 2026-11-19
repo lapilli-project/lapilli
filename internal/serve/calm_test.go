@@ -7,6 +7,7 @@ package serve
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -319,5 +320,42 @@ func TestNarrowRulesTable(t *testing.T) {
 	rows := strings.Count(body, `<td class="wk12"><svg class="spark"`)
 	if !strings.Contains(body, `<th scope="col" class="wk12">12 weeks</th>`) || rows == 0 || !strings.Contains(body, `<td></td><td class="wk12"></td></tr>`) {
 		t.Errorf("the 12 weeks' column isn't marked: %d rows", rows)
+	}
+}
+
+// TestLookSaysWhatToCheck: What to look at's lines say what to check, not
+// ask it, in every language (docs/design/ui.md, "Times, and Korean").
+func TestLookSaysWhatToCheck(t *testing.T) {
+	s, _ := firstUseServer(t)
+	detail := regexp.MustCompile(`(?s)<span class="look-what">.*?<span class="quiet">(.*?)</span></span>`)
+	for _, n := range names {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", n.Code)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		ms := detail.FindAllStringSubmatch(w.Body.String(), -1)
+		if len(ms) == 0 {
+			t.Fatalf("%s: nothing to look at", n.Code)
+		}
+		for _, m := range ms {
+			if strings.ContainsAny(m[1], "?？¿") {
+				t.Errorf("%s: asks: %s", n.Code, m[1])
+			}
+		}
+	}
+}
+
+// TestImpactTitleSaid: an impact window of the unnamed signal is "user
+// impact" on the pages, its flag left out; the API gives its title as it
+// was kept.
+func TestImpactTitleSaid(t *testing.T) {
+	s := pagesServer(t)
+	_, page, _ := get(t, s.Handler(), "/incidents")
+	if !strings.Contains(page, "user impact") || strings.Contains(page, "(--impact)") {
+		t.Error("the incidents page names the flag")
+	}
+	_, api, _ := get(t, s.Handler(), "/api/v1/incidents")
+	if !strings.Contains(api, "user impact (--impact)") {
+		t.Error("the API changed the title kept")
 	}
 }

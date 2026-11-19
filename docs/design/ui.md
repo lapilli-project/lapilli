@@ -1939,6 +1939,21 @@ digests too, not 자는 동안 깨운 or 헛알림. What to look at's line for n
 record says when and what to do, not why again: the notice above it says
 why.
 
+Since bundle 63 English, Japanese and Spanish say it so too: What to
+look at's lines and a feed's line say what to check ("if they mattered,
+write them down; if not, fix what fires them", "check its job is still
+running"), not ask it; `TestLookSaysWhatToCheck` fails on a question
+mark in any language.
+
+A flag's name stays in a sentence that tells whoever runs serve what to
+set (why changes are off, where a notice is set up, what the trust file
+is): there the flag is what they will type. It leaves a label of the data:
+an impact window of the unnamed signal is "user impact" on the pages and
+in the MCP tools, which read what the pages show, and "found from user
+impact" in the incidents list, not "(--impact)" and "found by --impact";
+the API gives the title as it was kept ("user impact (--impact)"), the
+command line's report as it was.
+
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only
 admin's proposal waiting, nowhere to send a notice, a report going
@@ -1966,6 +1981,26 @@ every page to.
 | a toast saying what was done | the page gone back to says it once, from its query |
 | annotations toggled on a chart | a link to the same page with `marks=` |
 
+### In other browsers
+
+`test/a11y/axe.mjs` reads every page in Chromium. Bundle 63 read the
+pages that have fields in WebKit (Safari's engine) and Firefox too, light
+and dark, at 1,280, 1,070 and 320 CSS px: no page wider than the screen in
+any. Two differences were fixed:
+
+- Safari keeps a native select at 27 px whatever its `min-height`, beside
+  36 px buttons, and a field's padding put it at 37.5 px in every engine.
+  A one-line field and a select are now `height: var(--control-h)`,
+  borders in, so the bar's controls are one height in all three, the
+  select still the browser's own, its one arrow.
+- In the firings list, a label's chips break anywhere, so the table gave
+  them the least width it could beside a rule's long name: 47 px, a chip
+  one letter a line, a row 1,129 px tall. The labels column is now at
+  least 12 rem, a rule's name breaks where it must as the rules list's
+  does, and a chip's value may start a line after its `=`; and a Korean
+  button breaks between its words, where Safari broke "실제 문제였음" a
+  syllable a line. The row is 91 px in each.
+
 ## What is left
 
 Nothing of what the phases set out: the last two (the overview's table of
@@ -1973,3 +2008,19 @@ the weeks on a laptop's screen, a rule's header drawn by the `off`
 template) went out in 0.40.1. The rules list's Team cell, the last of first
 use, says how its team was found since bundle 62. New work starts from
 ROADMAP.md.
+
+Weighed and not done, in bundle 63:
+
+- **Choosing the rules list's columns.** Without a script it is a form
+  and a parameter on every link the list makes, for a list whose rows are
+  71 to 97 px at 1,070 px since bundle 62; each rule's page has every
+  number. It waits for someone who asks for it.
+- **A register other than 해요체 in Korean.** As "Times, and Korean" says:
+  a page in another register beside the rest would read worse than
+  either, and the whole UI in another is a change for its readers to ask
+  for.
+- **Listening with a screen reader.** axe and the tests hold the pages to
+  what a screen reader needs (a name for each control, a caption or a
+  heading for each table, `aria-current`, text for each state); a person
+  listening is still the check left to do, and the accessibility statement
+  asks whoever meets a barrier to say so.

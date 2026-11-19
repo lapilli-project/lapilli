@@ -1365,7 +1365,8 @@ const impactTitle = "user impact (--impact)"
 func shown(lang string, in ledger.Incident) ledger.Incident {
 	switch {
 	case in.Origin == "impact" && in.Title == impactTitle:
-		in.Title = tr(lang, impactTitle)
+		// Kept as it was found; said without the flag (docs/design/ui.md).
+		in.Title = tr(lang, "user impact")
 	case in.Origin == "impact" && in.Signal != "" && in.Title == "user impact ("+in.Signal+")":
 		in.Title = tr(lang, "user impact (%s)", in.Signal)
 	}

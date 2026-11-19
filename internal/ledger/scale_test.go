@@ -38,7 +38,8 @@ func init() {
 // backfill and hourly runs would, and holds what a person waits on to a
 // budget: an hourly run, writing an incident, reading twelve weeks, a
 // week's report. LAPILLI_SCALE multiplies the firings (default 1: about
-// 100,000); budgets are generous, for a slow CI runner.
+// 100,000) and makes the budgets fail the test; without it they are
+// logged.
 func TestScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -99,7 +100,14 @@ func TestScale(t *testing.T) {
 		took := time.Since(began)
 		t.Logf("%s: %s", what, took.Round(time.Microsecond))
 		if max = time.Duration(float64(max) * slow); took > max {
-			t.Errorf("%s took %s, over %s", what, took, max)
+			// A shared runner's clock is no measure: the budget fails
+			// the test only when LAPILLI_SCALE is set, on a machine kept
+			// for measuring; otherwise it is logged.
+			if os.Getenv("LAPILLI_SCALE") != "" {
+				t.Errorf("%s took %s, over %s", what, took, max)
+			} else {
+				t.Logf("over budget, not timed: %s took %s, over %s", what, took, max)
+			}
 		}
 	}
 	budget("an hourly run", 2*time.Second, func() {

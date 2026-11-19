@@ -64,8 +64,11 @@ found, and what it fixed.
 - The Spanish and Japanese were written with a machine's help and want a
   native speaker's review ([#131](https://github.com/lapilli-project/lapilli/issues/131),
   [#130](https://github.com/lapilli-project/lapilli/issues/130)).
-- The pages are checked in Chromium, by tools; not yet with VoiceOver, NVDA,
-  JAWS or TalkBack, nor in Firefox or Safari.
+- The pages are checked in Chromium, by tools, on every change. The pages
+  with fields were read once in WebKit (Safari's engine) and Firefox too,
+  light and dark, from 1,280 to 320 CSS px (0.62.0); they are not checked
+  there on every change, and not yet with VoiceOver, NVDA, JAWS or
+  TalkBack.
 
 ## Telling us about a barrier
 

@@ -267,7 +267,7 @@ over the last four weeks, and what that would do to the verdict. */}}
 {{define "sources"}}{{$loc := .P.Loc}}{{with .V}}
 <h2 id="incident-sources">{{t "Incident sources"}}</h2>
 <p>{{t "Where the incidents firings are judged against come from, and whether each is alive, over the last four weeks."}}</p>
-{{if .Quiet}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "No incident written down in two weeks or more: are they still being written down?"}}</p>{{end}}
+{{if .Quiet}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "No incident written down in two weeks or more: check they are still being written down."}}</p>{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Incident sources"}}"><table class="sources">
 <thead><tr><th scope="col">{{t "Source"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Last"}}</th><th scope="col" class="n">{{t "In four weeks"}}</th><th scope="col">{{t "What it is"}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{if .Raw}}<bdi>{{.Name}}</bdi>{{with .Tool}} ({{.}}){{end}}{{else}}{{t .Name}}{{end}}{{with .Signal}} <code><bdi>{{.}}</bdi></code>{{end}}</th>

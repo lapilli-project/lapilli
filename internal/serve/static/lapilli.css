@@ -150,6 +150,9 @@ a.button:hover { filter: brightness(1.1); }
 .action-off { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 button:disabled, button:disabled:hover { cursor: not-allowed; filter: none; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
 /* A field of a form no one may send now, as a disabled button is drawn. */
+/* A Korean button breaks between its words, not inside one: Safari put
+   "실제 문제였음" one syllable a line in a table's narrow column. */
+button:lang(ko), a.button:lang(ko) { word-break: keep-all; }
 input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
 .why { font-size: .9rem; color: var(--dim); }
 /* Nothing to show: nothing judged yet, nothing matching, nothing to do. */
@@ -183,7 +186,10 @@ th, td { border-bottom: 1px solid var(--line); padding: .55rem .65rem; text-alig
 th { font-weight: 500; font-size: .9rem; color: var(--dim); white-space: nowrap; border-bottom-color: var(--line-strong); }
 tbody tr:hover td { background: color-mix(in srgb, var(--panel) 55%, transparent); }
 td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-td.labels { font-family: var(--mono); font-size: .875rem; overflow-wrap: anywhere; }
+/* A label's chips break anywhere, so the table would give them the least
+   width it can: a rule's long name beside them left 47 px, a chip one
+   letter a line, a row 1,100 px tall. */
+td.labels { font-family: var(--mono); font-size: .875rem; overflow-wrap: anywhere; min-width: 12rem; }
 tr.current td { color: var(--dim); }
 tr.noisy td:first-child a, tr.missed td:first-child a { font-weight: 600; }
 tr.covered, tr.dismissed, tr.confirmed { color: var(--dim); }
@@ -217,7 +223,11 @@ input, select, textarea {
   font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line-ui); border-radius: var(--control-r);
   padding: .35rem .55rem; max-width: 100%;
 }
-input:not([type=checkbox], [type=radio]), select { min-height: var(--control-h); }
+/* A one-line field is as tall as a button, borders in: Safari keeps a
+   native select at 27 px with only a min-height, and padding put a field
+   at 37.5 px beside a 36 px button. */
+input:not([type=checkbox], [type=radio]), select:not([multiple], [size]) { box-sizing: border-box; height: var(--control-h); padding-block: .2rem; }
+select[multiple], select[size] { min-height: var(--control-h); }
 button {
   font: inherit; font-size: .95rem; font-weight: 500; line-height: 1.2; color: var(--on-accent); background: var(--accent); border: 1px solid transparent; border-radius: var(--control-r);
   min-height: var(--control-h); padding: .35rem 1rem; cursor: pointer; justify-self: start;
@@ -390,7 +400,7 @@ textarea { width: 100%; padding: .45rem .6rem; }
 #impact-tried caption { caption-side: top; text-align: start; font-weight: 600; padding: .9rem 0 .4rem; }
 td.state { white-space: nowrap; }
 table.sources .where { overflow-wrap: anywhere; }
-select { padding: .35rem .45rem; }
+select { padding-inline: .45rem; }
 .comment-head { font-size: .95rem; }
 .comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; }
 details.inline summary { font-size: .875rem; }
