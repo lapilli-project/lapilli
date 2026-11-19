@@ -86,7 +86,7 @@ func (l *Ledger) ChangeSignals(ctx context.Context, c SignalsChange, from Signal
 			return err
 		}
 		set, match := from(settings)
-		out, err = l.syncSignals(t, set, match)
+		out, err = l.syncSignals(t, set, match, false)
 		return err
 	})
 	return out, err
@@ -290,6 +290,85 @@ func (l *Ledger) renameSignal(t *txn, from, to string) error {
 	// What a confirmation of one of its windows wrote carries its signal.
 	_, err = t.ExecContext(t.ctx, "UPDATE incidents SET signal = ? WHERE origin != 'impact' AND signal = ?", to, from)
 	return err
+}
+
+// UnnamedTiedTo is the name the windows of the impact signal with no name
+// are given once named signals are in effect: the name the Settings page
+// gives the one with no name when the first named signal is saved there
+// (docs/design/signals.md, "Open questions").
+const UnnamedTiedTo = "impact"
+
+// TiedBy and TiedWhat are how the activity log notes the windows
+// tieUnnamed tied.
+const (
+	TiedBy   = "lapilli"
+	TiedWhat = "impact windows of the signal with no name tied to the signal " + UnnamedTiedTo
+)
+
+// tieUnnamed ties the windows of the impact signal with no name the ledger
+// keeps to the signal impact, within the leader's write that keeps the
+// named signals in effect (set), once any is: serve started with named
+// signals on a ledger that holds windows the one with no name found
+// before. Left so, each would be an incident with no signal, which keeps
+// every rule's record, a rule's an entry ties to a signal that keeps none
+// among them, as lapilli verdict, reading the same signals afresh, doesn't
+// (docs/design/signals.md, "Step 3, as built").
+//
+// With impact among the signals in effect, and no row or window of that
+// name kept, it is the Settings page's rename (renameSignal from ""), as
+// when the first named signal is saved there: the row, with what keeps its
+// record, and the windows, keys and all, given the lowest bit free; it
+// reports the signal so made, which no alert is tied to yet. Else the
+// windows alone take the name, their keys kept: impact's in effect,
+// matched on its labels, or a signal's no longer read, as the windows of
+// one taken away are kept, with its name; the firings that could catch
+// them, from --lead before them (set.Lead) to their end, are pended to be
+// judged again. Either way the activity log notes it, and out says how
+// many.
+func (l *Ledger) tieUnnamed(t *txn, set SignalSet, out *SignalsSynced) (bool, error) {
+	rows, err := t.QueryContext(t.ctx, "SELECT start_at, end_at FROM incidents WHERE origin = 'impact' AND signal = '' ORDER BY start_at")
+	if err != nil {
+		return false, err
+	}
+	var spans [][2]int64
+	for rows.Next() {
+		var start, end int64
+		if err := rows.Scan(&start, &end); err != nil {
+			rows.Close()
+			return false, err
+		}
+		spans = append(spans, [2]int64{start - int64(set.Lead/time.Second), end})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(spans) == 0 {
+		return false, err
+	}
+	i := slices.IndexFunc(set.Defs, func(d SignalDef) bool { return d.Name == UnnamedTiedTo })
+	var kept int
+	if err := t.QueryRowContext(t.ctx, `SELECT (SELECT count(*) FROM impact_signals WHERE name = ?1)
+		+ (SELECT count(*) FROM incidents WHERE signal = ?1)`, UnnamedTiedTo).Scan(&kept); err != nil {
+		return false, err
+	}
+	made := i >= 0 && kept == 0
+	if made {
+		if err := l.renameSignal(t, "", UnnamedTiedTo); err != nil {
+			return false, err
+		}
+	} else {
+		var match []string
+		if i >= 0 {
+			match = set.Defs[i].Match
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET signal = ?, match_labels = ? WHERE origin = 'impact' AND signal = ''", UnnamedTiedTo, matchText(match)); err != nil {
+			return false, err
+		}
+		if err := pend(t, spans); err != nil {
+			return false, err
+		}
+	}
+	out.Tied, out.TiedRead = len(spans), i >= 0
+	return made, change(t, TiedBy, TiedWhat, map[string]any{"signal": "", "windows": len(spans)},
+		map[string]any{"signal": UnnamedTiedTo, "windows": len(spans), "read": i >= 0})
 }
 
 // renamedKey is a window's key, of a signal renamed from to to: impact-TO-

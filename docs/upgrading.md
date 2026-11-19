@@ -133,6 +133,52 @@ with the release before. Not with `helm rollback`; the steps are in [the
 chart's README](../charts/lapilli/README.md#going-back-after-a-schema-upgrade).
 What came in after the copy that can't be replayed isn't in it.
 
+## From `--impact` to named signals
+
+A ledger `lapilli serve` kept with `--impact PROMQL` holds the windows
+that signal found, with no name. With named signals (`--impact
+NAME=PROMQL`, `--impact-file`, or the Settings page; see [How it
+judges](how-it-judges.md)), a firing is judged by the signals tied to it,
+and a window with no signal would be an incident written down, which
+keeps every rule's record. So the windows are given the name `impact`,
+whichever way the switch is made
+([design/signals.md](design/signals.md), "Step 3, as built"):
+
+- **On the Settings page**, the first named signal saved makes the one
+  with no name the signal `impact` (`impact-2` when the ledger keeps
+  windows of an `impact`), read on beside it with what keeps its record,
+  its windows' keys, decisions, tasks and comments kept.
+- **On the command line**, serve started again with `--impact
+  NAME=PROMQL` or `--impact-file` in place of `--impact PROMQL` ties
+  them as its leader's first round begins, once, and logs it:
+
+  ```
+  time=TIME level=INFO msg="windows of the impact signal with no name tied to a named signal, as the Settings page ties them" windows=N signal=impact read=true
+  ```
+
+  The Run history notes it among the changes (`lapilli: impact windows
+  of the signal with no name tied to the signal impact`). With a signal
+  named `impact` in the file, they are its windows, keys and all; when
+  the ledger keeps no `impact` yet and its expression and `for` are
+  those `--impact` and `--impact-for` were, it is read on from where the
+  one with no name was, nothing read again. With none named `impact`
+  (`read=false`), they are the windows of a signal no longer read, kept
+  as those of a signal taken away are: incidents, which keep every
+  rule's record still. To have rules that an entry ties only to signals
+  with `record: false` left unjudged, as `lapilli verdict` leaves them,
+  give the file the old expression as a signal named `impact`, before the
+  first start with this release: `impact` is then made of the one with
+  no name, its record kept. Added later, the windows are its own, matched
+  on its labels, but it keeps the record only from its own start, as
+  does an `impact` a release before this one made: a firing tied to it in
+  a week before that, with no window there, is not judged, where `lapilli
+  verdict` judges it. The firings that could catch the windows are
+  judged again in the same round. A tie the database refuses is logged
+  (`the windows of the impact signal with no name weren't tied to a named
+  signal`), the windows judged as they are, and tried again at the next
+  round. From 0.55.0 to 0.61.1 the windows were left with no name, and
+  kept every rule's record in their weeks and the two after each.
+
 ## The Helm chart
 
 A release's chart has the release's version without the `v` (`0.59.0` for

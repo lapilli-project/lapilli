@@ -271,9 +271,32 @@ func ruleEntries(ctx context.Context, q reader) ([]verdict.RuleEntry, error) {
 // their own follow; Entries, the rule entries. Either judges every firing
 // again (pended, in the same write: whichever replica leads next judges
 // them), and Set works out again which signals each alert is tied to.
+// Tied is how many windows of the impact signal with no name were tied to
+// the signal impact (tieUnnamed), TiedRead whether impact is among the
+// signals in effect, which reads it on; TieErr, why they couldn't be, the
+// signals kept all the same (SyncSignalSet).
 type SignalsSynced struct {
 	Set, Entries bool
+	Tied         int
+	TiedRead     bool
+	TieErr       error
 }
+
+// metaUnnamedTied is "1" once the round found no window of the impact
+// signal with no name left to tie, named signals in effect (tieUnnamed): the
+// rounds after don't look for them again, as incidents.signal has no
+// index. Forgotten when no signal is named, as the one with no name may be
+// read again, and find windows.
+const metaUnnamedTied = "unnamed_tied"
+
+// tieError is an error tieUnnamed gave: SyncSignalSet keeps the signals
+// without the tie.
+type tieError struct{ err error }
+
+func (e tieError) Error() string {
+	return "tying the windows of the impact signal with no name: " + e.err.Error()
+}
+func (e tieError) Unwrap() error { return e.err }
 
 // metaSignalsMatch is the match in effect alerts were last tied on, as
 // JSON: a change to it ties every alert again, and what the signals that
@@ -290,7 +313,8 @@ func matchKey(m []string) string {
 }
 
 // SyncSignals keeps the named signals in effect and the rule entries, as
-// serve was started with them: each signal's row made, or its expression,
+// serve was started with them, with --lead in effect (lead): each signal's
+// row made, or its expression,
 // "for", match and whether it keeps the record kept as given, a bit given
 // to each new one, the lowest free; a named signal no longer given taken
 // away, its windows kept, as incidents, with its name; and the entries put
@@ -299,8 +323,10 @@ func matchKey(m []string) string {
 // runs' to keep (Record). When the set changed, which signals each alert
 // is tied to is worked out again at once, on match, the match in effect;
 // its tallies are counted again by the judging a change asks for.
-func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []verdict.RuleEntry, match []string) (SignalsSynced, error) {
-	return l.SyncSignalSet(ctx, func(map[string]Setting) (SignalSet, []string) { return SignalSet{Defs: defs, Entries: entries}, match })
+func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []verdict.RuleEntry, match []string, lead time.Duration) (SignalsSynced, error) {
+	return l.SyncSignalSet(ctx, func(map[string]Setting) (SignalSet, []string) {
+		return SignalSet{Defs: defs, Entries: entries, Lead: lead}, match
+	})
 }
 
 // SignalsFrom works out, from the settings the UI changed as a write reads
@@ -313,18 +339,27 @@ type SignalsFrom func(set map[string]Setting) (SignalSet, []string)
 // SignalSet is what SyncSignalSet keeps: the named signals in effect, each
 // with who set it in the UI and when, and the rule entries, EntriesUI when
 // they are the UI's, in place of the start's (docs/design/signals.md,
-// step 3).
+// step 3). Lead is --lead in effect, which is not kept: a firing up to it
+// before a window may catch it, so the windows tieUnnamed ties are judged
+// again from it.
 type SignalSet struct {
 	Defs      []SignalDef
 	Entries   []verdict.RuleEntry
 	EntriesUI bool
+	Lead      time.Duration
 }
 
 // SyncSignalSet is SyncSignals of the signals in effect, the start's and
 // the UI's, worked out from the settings as its write reads them (from):
 // who set each in the UI and when, and whether the entries are the UI's,
 // kept beside them (impact_signals.set_by and set_at, impact_rules.ui),
-// changing no judging.
+// changing no judging. With named signals in effect, the windows of the
+// impact signal with no name the ledger keeps from before are tied to
+// the signal impact in the same write (tieUnnamed), once: the leader's
+// first round after serve was started with named signals. A tie that
+// fails leaves them as they are, the signals kept all the same in a write
+// of their own, and says why (TieErr): the round judges on, and the next
+// tries again, nothing pended or woken for it.
 func (l *Ledger) SyncSignalSet(ctx context.Context, from SignalsFrom) (SignalsSynced, error) {
 	var out SignalsSynced
 	// Read first: a round that changes nothing writes nothing, and keeps
@@ -334,29 +369,108 @@ func (l *Ledger) SyncSignalSet(ctx context.Context, from SignalsFrom) (SignalsSy
 		return out, err
 	}
 	set, match := from(settings)
-	if same, err := l.signalsAre(ctx, set, match); err != nil || same {
+	same, err := l.signalsAre(ctx, set, match)
+	if err != nil {
 		return out, err
 	}
-	err = l.write(ctx, func(t *txn) error {
-		settings, err := settingsOf(t.ctx, t)
-		if err != nil {
-			return err
+	if same {
+		if !namedIn(set.Defs) {
+			return out, nil
 		}
-		set, match := from(settings)
-		out, err = l.syncSignals(t, set, match)
-		return err
-	})
+		if done, err := l.meta(ctx, l.r, metaUnnamedTied); err != nil || done != "" {
+			return out, err
+		}
+		some, err := unnamedWindows(ctx, l.r)
+		if err != nil {
+			return out, err
+		}
+		if !some {
+			// None left: noted, in a write that changes nothing a page
+			// shows, so that the rounds after don't look again.
+			return out, l.writeAside(ctx, func(t *txn) error { return setMeta(t.ctx, t, metaUnnamedTied, "1") })
+		}
+	}
+	sync := func(tie bool) error {
+		return l.write(ctx, func(t *txn) error {
+			settings, err := settingsOf(t.ctx, t)
+			if err != nil {
+				return err
+			}
+			set, match := from(settings)
+			out, err = l.syncSignals(t, set, match, tie)
+			return err
+		})
+	}
+	err = sync(true)
+	if te := (tieError{}); errors.As(err, &te) {
+		err = sync(false)
+		out.TieErr = te.err
+	}
 	return out, err
 }
 
-// syncSignals is SyncSignalSet within a write.
-func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string) (SignalsSynced, error) {
+// namedIn reports whether defs name a signal.
+func namedIn(defs []SignalDef) bool {
+	return slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" })
+}
+
+// unnamedWindows reports whether the ledger keeps a window of the impact
+// signal with no name.
+func unnamedWindows(ctx context.Context, q reader) (bool, error) {
+	var n int
+	err := q.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents WHERE origin = 'impact' AND signal = '' LIMIT 1) AS one").Scan(&n)
+	return n > 0, err
+}
+
+// syncSignals is SyncSignalSet within a write; tie, its round's, ties the
+// windows of the signal with no name (tieUnnamed), once the signals no
+// longer given are taken away, so that their bits are free.
+func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string, tie bool) (SignalsSynced, error) {
 	defs, entries := set.Defs, set.Entries
 	out := SignalsSynced{}
 	err := func() error {
 		t.naming = 0 // read again after this write's own
 		have, err := l.signalRows(t.ctx, t)
 		if err != nil {
+			return err
+		}
+		for _, r := range have {
+			if r.Name == "" || slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name == r.Name }) {
+				continue
+			}
+			if _, err := t.ExecContext(t.ctx, "DELETE FROM impact_signals WHERE name = ?", r.Name); err != nil {
+				return err
+			}
+			out.Set = true
+		}
+		named := namedIn(defs)
+		done, err := l.meta(t.ctx, t, metaUnnamedTied)
+		if err != nil {
+			return err
+		}
+		switch {
+		case tie && named:
+			made, err := l.tieUnnamed(t, set, &out)
+			if err != nil {
+				return tieError{err}
+			}
+			if made {
+				// The signal impact made of the one with no name is one no
+				// alert is tied to yet: tied, and judged, as one added.
+				out.Set = true
+			}
+			if done == "" {
+				if err := setMeta(t.ctx, t, metaUnnamedTied, "1"); err != nil {
+					return err
+				}
+			}
+		case !named && done != "":
+			if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaUnnamedTied); err != nil {
+				return err
+			}
+		}
+		// Read again: what was taken away, and what the tie made.
+		if have, err = l.signalRows(t.ctx, t); err != nil {
 			return err
 		}
 		used := map[int]bool{}
@@ -377,16 +491,6 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string) (SignalsSync
 		if err != nil {
 			return err
 		}
-		for _, r := range have {
-			if r.Name == "" || slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name == r.Name }) {
-				continue
-			}
-			if _, err := t.ExecContext(t.ctx, "DELETE FROM impact_signals WHERE name = ?", r.Name); err != nil {
-				return err
-			}
-			delete(used, r.Bit)
-			out.Set = true
-		}
 		for _, d := range defs {
 			if d.Name == "" {
 				continue
@@ -400,6 +504,13 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string) (SignalsSync
 				used[bit] = true
 				if _, err := t.ExecContext(t.ctx, `INSERT INTO impact_signals (name, bit, expr, for_ns, match_labels, keeps_record, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 					d.Name, bit, d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt)); err != nil {
+					return err
+				}
+				// The windows kept of its name (one taken away and given
+				// back, or those tied to impact while it wasn't in effect)
+				// are its own again, matched on its labels, as the judging
+				// again this asks for judges them.
+				if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET match_labels = ? WHERE origin = 'impact' AND signal = ?", matchText(d.Match), d.Name); err != nil {
 					return err
 				}
 				out.Set = true
@@ -469,7 +580,7 @@ func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string) (SignalsSync
 		if err != nil {
 			return err
 		}
-		if named := slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" }); named && was2 != matchKey(match) {
+		if named := namedIn(defs); named && was2 != matchKey(match) {
 			if was2 != "" {
 				out.Set = true
 				for _, d := range defs {
@@ -625,7 +736,7 @@ func (l *Ledger) retieSignal(t *txn, name string, match []string) error {
 // entries given, as given.
 func (l *Ledger) signalsAre(ctx context.Context, set SignalSet, match []string) (bool, error) {
 	defs, entries := set.Defs, set.Entries
-	if slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" }) {
+	if namedIn(defs) {
 		if was, err := l.meta(ctx, l.r, metaSignalsMatch); err != nil || was != matchKey(match) {
 			return false, err
 		}
