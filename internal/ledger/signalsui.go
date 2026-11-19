@@ -326,9 +326,6 @@ const (
 // judged again. Either way the activity log notes it, and out says how
 // many.
 func (l *Ledger) tieUnnamed(t *txn, set SignalSet, out *SignalsSynced) (bool, error) {
-	if !namedIn(set.Defs) {
-		return false, nil
-	}
 	rows, err := t.QueryContext(t.ctx, "SELECT start_at, end_at FROM incidents WHERE origin = 'impact' AND signal = '' ORDER BY start_at")
 	if err != nil {
 		return false, err

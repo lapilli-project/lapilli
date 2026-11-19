@@ -33,13 +33,18 @@
   again when its expression and `for` are the same; with none named
   `impact`, they are the windows of a signal no longer read, kept as
   those of a signal taken away are, which keep every rule's record still
-  (give the file the old expression as `impact` to have them judged as
-  its windows). The firings that could catch them are judged again; the
-  log says how many windows were tied, and to what, in one line, and the
-  Run history notes it (`lapilli: impact windows of the signal with no
-  name tied to the signal impact`). With no named signal, or no window of
-  the one with no name, nothing changes; the next start does nothing
-  more. No schema change.
+  (give the file the old expression as `impact`, before the first start
+  with this release, to have them judged as its windows, its record
+  kept). The firings that could catch them are judged again; the log says
+  how many windows were tied, and to what, in one line, and the Run
+  history notes it (`lapilli: impact windows of the signal with no name
+  tied to the signal impact`). A tie the database refuses is logged, the
+  signals kept all the same and the windows judged as they are, and is
+  tried again at the next round. A signal added whose name the ledger
+  keeps windows of has them matched on its labels, as one whose match
+  changed has. With no named signal, or no window of the one with no
+  name, nothing changes; the next start does nothing more. No schema
+  change.
 
 ## [0.61.0] - 2026-11-19
 

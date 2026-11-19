@@ -118,7 +118,7 @@ func TestSignalsUnnamedReadAgainAfterNamedKeepsNothing(t *testing.T) {
 func TestSignalsLeaderKeepsRename(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	probeWindows(t, l)
@@ -170,7 +170,7 @@ func TestSignalsLeaderKeepsRename(t *testing.T) {
 func TestSignalsChangePlannedOnStaleSettings(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.SetSettings(ctx, map[string]string{"impact-signal/a": "{}"}, "bo"); err != nil {
@@ -218,7 +218,7 @@ func searchWhite(t *testing.T, l *Ledger) bool {
 func TestSignalMatchChangeJudgesWindows(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	probeOverSearch(t, l, opts, []string{"service"})
@@ -251,7 +251,7 @@ func TestSignalMatchChangeJudgesWindows(t *testing.T) {
 func TestSignalsStaleOptionsLeavePending(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, []string{}); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, []string{}, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	o := opts
@@ -298,7 +298,7 @@ func TestSignalsStaleOptionsLeavePending(t *testing.T) {
 func TestSignalRenameDuringRunMissed(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	probeWindows(t, l) // a run to t0+1h
@@ -357,7 +357,7 @@ func TestSignalUnnamedGivenBack(t *testing.T) {
 func TestSignalsStaleRunJudgedAgain(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, []string{}); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, []string{}, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	stale := opts
@@ -396,7 +396,7 @@ func TestSignalsStaleRunJudgedAgain(t *testing.T) {
 func TestSignalsSyncWorkedOutInWrite(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	probeWindows(t, l)
@@ -553,7 +553,7 @@ func TestSignalUnnameKeysAndConfirmations(t *testing.T) {
 func TestSignalsStaleSignalsOfTheGeneration(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	entries := []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"errors"}}}

@@ -166,8 +166,16 @@ whichever way the switch is made
   as those of a signal taken away are: incidents, which keep every
   rule's record still. To have rules that an entry ties only to signals
   with `record: false` left unjudged, as `lapilli verdict` leaves them,
-  give the file the old expression as a signal named `impact`. The
-  firings that could catch the windows are judged again in the same
+  give the file the old expression as a signal named `impact`, before the
+  first start with this release: `impact` is then made of the one with
+  no name, its record kept. Added later, the windows are its own, matched
+  on its labels, but it keeps the record only from its own start, as
+  does an `impact` a release before this one made: a firing tied to it in
+  a week before that, with no window there, is not judged, where `lapilli
+  verdict` judges it. The firings that could catch the windows are
+  judged again in the same round. A tie the database refuses is logged
+  (`the windows of the impact signal with no name weren't tied to a named
+  signal`), the windows judged as they are, and tried again at the next
   round. From 0.55.0 to 0.61.0 the windows were left with no name, and
   kept every rule's record in their weeks and the two after each.
 

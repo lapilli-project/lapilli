@@ -56,7 +56,7 @@ func probeWindows(t *testing.T, l *Ledger) string {
 func TestRenameSignal(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	key := probeWindows(t, l)
@@ -148,11 +148,11 @@ func TestRenameSignal(t *testing.T) {
 func TestRenameSignalToKeptWindows(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	probeWindows(t, l)
-	if _, err := l.SyncSignals(ctx, signalDefs[:1], nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs[:1], nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	if kept, err := l.SignalNamesKept(ctx); err != nil || !kept["probe"] || !kept["errors"] {
@@ -253,7 +253,7 @@ func TestSignalSetUI(t *testing.T) {
 func TestSignalWindowsSince(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	probeWindows(t, l)
@@ -270,7 +270,7 @@ func TestSignalWindowsSince(t *testing.T) {
 func TestRenameUnnamedBesideNamed(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	if _, err := l.SyncSignals(ctx, signalDefs[:1], nil, opts.Match); err != nil {
+	if _, err := l.SyncSignals(ctx, signalDefs[:1], nil, opts.Match, opts.Lead); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.write(ctx, func(t *txn) error { return setSigMeta(t, "", metaImpactCriterion, "5m impact > 1") }); err != nil {

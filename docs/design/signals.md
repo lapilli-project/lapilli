@@ -1108,7 +1108,9 @@ settled:
   The leader's round that keeps the signals in effect
   (`ledger.SyncSignalSet`) ties the windows of the one with no name the
   ledger keeps to the name `impact`, in the same write, as the Settings
-  page names it. With `impact` in effect and no row or window of that
+  page names it, once the signals no longer given are taken away, so that
+  their bits are free (eight kept, `impact` given in place of one, takes
+  its bit). With `impact` in effect and no row or window of that
   name kept, it is the page's rename (`renameSignal` from ""): the row,
   its bit the lowest free, what keeps its record and the windows' keys
   kept, so that a signal `impact` of the criterion the one with no name
@@ -1132,8 +1134,20 @@ settled:
   `signal` and `read`). The write is the leader's, under the writers'
   turn, and reads the windows again in it: a round that finds none ties
   nothing and writes nothing, so it is done once, whatever replica leads
-  next. With no named signal, or no window of the one with no name, the
-  round is as before.
+  next. Found none, the ledger notes it (`meta` `unnamed_tied`, in a write
+  that changes no page), and the rounds after don't look again, as
+  `incidents.signal` has no index; a round with no signal named forgets
+  it, as the one with no name may be read again. A tie that fails (the
+  database refusing the write) leaves the windows as they are: the
+  signals are kept without it in a write of their own, so that options
+  read after it are of the signals the ledger keeps and judge, the log
+  says why (`the windows of the impact signal with no name weren't tied
+  to a named signal`), and the next round, at its time, tries again;
+  nothing is pended or woken for it. With no named signal, or no window
+  of the one with no name, the round is as before. A signal added whose
+  name the ledger keeps windows of (one taken away and given back, or
+  `impact` after its windows were tied to it while it wasn't in effect)
+  has them matched on its labels, as one whose match changed has.
 - **Reading one again**, an admin's: the request reads it over the last
   four weeks, in the heavy turn, within `--timeout` (90 seconds at most)
   and `--max-samples`, counted among the twelve reads an hour, and puts
@@ -1188,6 +1202,21 @@ settled:
   weeks before it kept only by incidents and windows, and the windows
   `impact` found in those weeks stay beside those read again, an outage
   two windows until one is dismissed.
+- With `impact` kept already when the windows are tied (a release before
+  this one made its row), or added after they were tied to it while it
+  wasn't in effect, it keeps the record from its own start only, where
+  its own read began: the row with no name, turned off by the first run
+  of named signals, keeps no start to hand it. A firing tied to `impact`
+  in a week before that start, with no window there, is not judged,
+  where `lapilli verdict`, reading `impact` from two weeks before the
+  period, judges it. Give `impact` in the file before the first start
+  with named signals, so that it is made of the one with no name, its
+  record kept.
+- With `impact` kept already, the windows its read again over four weeks
+  found when the release before added it stay beside the windows tied to
+  it, with keys of their own (`impact-impact-` and the minute): one
+  outage may show as two windows of `impact` until one is dismissed, as
+  above.
 - The windows tied to `impact` when serve was started with named signals
   aren't given back when it is started with `--impact PROMQL` again: they
   stay `impact`'s, a signal no longer read, and the one with no name may

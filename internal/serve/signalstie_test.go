@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -94,18 +95,131 @@ func restarted(t *testing.T, ledgerDir, ledgerFile string, h *sigHistory, logs i
 
 // unnamedFirst is a server reading the impact signal with no name
 // (--impact "impact > 1": search's window, checkout's, and cart's), its
-// windows and the firings of Errors recorded, then stopped: the ledger a
-// lapilli serve before named signals leaves, to start again on.
-func unnamedFirst(t *testing.T) (string, string) {
+// windows and the firings of Errors recorded, then (then, when given)
+// stopped: the ledger a lapilli serve before named signals leaves, to
+// start again on.
+func unnamedFirst(t *testing.T, then ...func(*Server)) (string, string) {
 	t.Helper()
 	s := restarted(t, "", "", &sigHistory{}, io.Discard, func(c *Config) { c.Impact, c.ImpactFor = "impact > 1", 5*time.Minute })
 	ws, err := s.l.ImpactWindows(context.Background(), now.Add(-30*24*time.Hour), now)
 	if err != nil || len(ws) != 3 || slices.ContainsFunc(ws, func(w ledger.Incident) bool { return w.Signal != "" }) {
 		t.Fatalf("the windows of the signal with no name: %+v %v", ws, err)
 	}
+	for _, f := range then {
+		f(s)
+	}
 	dir, file := s.cfg.Ledger, s.cfg.LedgerURLFile
 	s.Close()
 	return dir, file
+}
+
+// woken reports whether a round of s woke the next at once (poke), and
+// takes the wake.
+func woken(s *Server) bool {
+	select {
+	case <-s.wake:
+		return true
+	default:
+		return false
+	}
+}
+
+// eightNamed are eight named signals, s0 to s7, as many as there may be:
+// s0 keeps no record, and an entry ties Errors to it alone.
+func eightNamed() []ledger.SignalDef {
+	var out []ledger.SignalDef
+	for i := range verdict.MaxSignals {
+		out = append(out, ledger.SignalDef{Name: fmt.Sprintf("s%d", i), Expr: fmt.Sprintf("s%d_total > 0", i), For: time.Minute, Record: i > 0})
+	}
+	return out
+}
+
+// Of a ledger a release before this one kept eight named signals in
+// (s0 to s7) beside the windows of the one with no name, started with
+// impact in place of s7: s7 is taken away first, impact made of the one
+// with no name in its bit, and the windows tied. The rounds judge, and
+// none wakes the next at once.
+func TestUnnamedWindowsTiedBesideEight(t *testing.T) {
+	ctx := context.Background()
+	eight := eightNamed()
+	entries := []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"s0"}}}
+	dir, file := unnamedFirst(t, func(s *Server) {
+		// As the release before kept them as it started: no tie.
+		if _, err := s.l.ChangeSignals(ctx, ledger.SignalsChange{}, func(map[string]ledger.Setting) (ledger.SignalSet, []string) {
+			return ledger.SignalSet{Defs: eight, Entries: entries}, s.cfg.Options.Match
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var logs logBuffer
+	s := restarted(t, dir, file, &sigHistory{}, &logs, func(c *Config) {
+		c.Signals = append(slices.Clone(eight[:7]), ledger.SignalDef{Name: "impact", Expr: "impact > 1", For: 5 * time.Minute, Record: true})
+		c.ImpactRules = entries
+	})
+	woken(s)
+	s.jobs(ctx, false)
+	if woken(s) {
+		t.Error("a round woke the next at once")
+	}
+	if st := s.shownStatus(); st.Err != "" {
+		t.Errorf("the status: %s: %s", st.ErrWhat, st.Err)
+	}
+	rows, err := s.l.SignalRows(ctx)
+	if err != nil || slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == "s7" }) || !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == "impact" && r.Bit >= 0 }) {
+		t.Errorf("rows: %+v %v", rows, err)
+	}
+	if !strings.Contains(logs.String(), "windows=3 signal=impact read=true") {
+		t.Errorf("the log:\n%s", logs.String())
+	}
+	for _, f := range func() []verdict.Judged { _, fs := errorsFirings(t, s); return fs }() {
+		if !f.NoRecord {
+			t.Errorf("a firing of Errors at %v judged", f.Start)
+		}
+	}
+}
+
+// A tie the ledger refuses is said in the log; the signals are kept all
+// the same, the windows judged as they are, and no round wakes the next at
+// once: the next round, at its time, tries again.
+func TestUnnamedWindowsTieRefused(t *testing.T) {
+	ctx := context.Background()
+	refused := func(s *Server) {
+		if s.cfg.LedgerURLFile == "" {
+			ledgerExec(t, s, `CREATE TRIGGER refuse_tie BEFORE UPDATE OF signal ON incidents
+				WHEN OLD.signal = '' AND NEW.signal != '' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+			return
+		}
+		ledgerExec(t, s, `CREATE FUNCTION refuse_tie() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$`)
+		ledgerExec(t, s, `CREATE TRIGGER refuse_tie BEFORE UPDATE OF signal ON incidents FOR EACH ROW
+			WHEN (OLD.signal = '' AND NEW.signal <> '') EXECUTE FUNCTION refuse_tie()`)
+	}
+	dir, file := unnamedFirst(t, refused)
+	var logs logBuffer
+	s := restarted(t, dir, file, &sigHistory{}, &logs, func(c *Config) {
+		c.Signals = []ledger.SignalDef{{Name: "impact", Expr: "impact > 1", For: 5 * time.Minute, Record: true}, paymentsSignal}
+		c.ImpactRules = paymentsOnly
+	})
+	woken(s)
+	s.jobs(ctx, false)
+	if woken(s) {
+		t.Error("a round woke the next at once")
+	}
+	if n := strings.Count(logs.String(), "weren't tied to a named signal"); n != 2 || strings.Contains(logs.String(), tiedLine) {
+		t.Errorf("the log, %d warnings:\n%s", n, logs.String())
+	}
+	rows, err := s.l.SignalRows(ctx)
+	if err != nil || !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == "impact" }) || !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == "payments" }) {
+		t.Errorf("rows: %+v %v", rows, err)
+	}
+	ws, err := s.l.ImpactWindows(ctx, now.Add(-30*24*time.Hour), now)
+	if err != nil || slices.ContainsFunc(ws, func(w ledger.Incident) bool {
+		return w.Signal == "impact" && !strings.HasPrefix(w.ID, "impact-impact-")
+	}) {
+		t.Errorf("windows: %+v %v", ws, err)
+	}
+	if st := s.shownStatus(); st.Err != "" {
+		t.Errorf("the status: %s: %s", st.ErrWhat, st.Err)
+	}
 }
 
 // payments keeps no record (record: false), and an entry ties Errors to it

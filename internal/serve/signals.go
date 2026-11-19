@@ -123,10 +123,17 @@ func (s *Server) signalsOf(ctx context.Context, match []string, n signalsNow, sg
 // With named signals, the windows of the impact signal with no name the
 // ledger keeps from before (serve started with them in place of --impact
 // PROMQL) are tied to the signal impact, as the Settings page ties them,
-// once, said in one line of the log.
+// once, said in one line of the log. A tie that fails is said too: the
+// signals are kept without it, the windows judged as they are, and the
+// next round tries again.
 func (s *Server) syncSignals(ctx context.Context) (bool, error) {
 	synced, err := s.l.SyncSignalSet(ctx, s.signalsFrom)
-	if err == nil && synced.Tied > 0 {
+	switch {
+	case err != nil:
+	case synced.TieErr != nil:
+		s.log.Warn("the windows of the impact signal with no name weren't tied to a named signal: they are judged as they are, and tied at a later round",
+			"signal", ledger.UnnamedTiedTo, "err", synced.TieErr)
+	case synced.Tied > 0:
 		s.log.Info("windows of the impact signal with no name tied to a named signal, as the Settings page ties them",
 			"windows", synced.Tied, "signal", ledger.UnnamedTiedTo, "read", synced.TiedRead)
 	}
