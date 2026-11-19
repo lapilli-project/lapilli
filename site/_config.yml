@@ -6,7 +6,8 @@ title: Lapilli
 description: Which of your alerts are worth their page? Lapilli judges alert rules against what actually went wrong, once with lapilli verdict or every hour with lapilli serve.
 url: https://lapilli.dev
 theme: null
-plugins: []
+# jekyll-sitemap writes /sitemap.xml of every page, and /robots.txt naming it.
+plugins: [jekyll-sitemap]
 exclude: [README.md, docs.sh]
 kramdown:
   input: GFM

@@ -1,7 +1,7 @@
 {
   "name": "lapilli-a11y",
   "private": true,
-  "description": "axe-core over the pages of lapilli serve, run by axe.sh in the Playwright image of the same version",
+  "description": "axe-core over the pages of lapilli serve (axe.sh, in the Playwright image of the same version) and of lapilli.dev (site.mjs)",
   "type": "module",
   "dependencies": {
     "@axe-core/playwright": "4.14.0",

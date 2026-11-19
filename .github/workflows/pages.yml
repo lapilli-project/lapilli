@@ -4,14 +4,15 @@ name: pages
 # whatever is in site/, so deleting it drops the custom domain. DNS is at
 # Cloudflare with the proxy off; with the proxy on, GitHub can't issue the
 # certificate. docs/ is published at /docs/ (site/docs.sh). A pull request
-# that changes any of it builds the site and deploys nothing.
+# that changes any of it builds the site, checks it with axe, and deploys
+# nothing.
 
 on:
   push:
     branches: [main]
-    paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
   pull_request:
-    paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -46,6 +47,31 @@ jobs:
           source: ./site
           destination: ./_site
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+
+  # Every page the site's sitemap lists, as built, with axe-core against
+  # WCAG 2.2 AA, light and dark, and at 320 CSS px (test/a11y/site.mjs), in
+  # the Playwright image test/a11y/axe.sh runs serve's pages in.
+  a11y:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages
+      - name: Check every page with axe, in light and dark, and at 320 CSS px
+        run: |
+          set -eu
+          mkdir "$RUNNER_TEMP/site"
+          tar -xf "$RUNNER_TEMP/pages/artifact.tar" -C "$RUNNER_TEMP/site"
+          cd test/a11y
+          npm ci --no-audit --no-fund
+          SITE_DIR="$RUNNER_TEMP/site" node site.mjs
 
   deploy:
     if: github.event_name != 'pull_request'
