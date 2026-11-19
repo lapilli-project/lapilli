@@ -1,9 +1,9 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted; steps 1 and 2 built.
+Status: accepted; steps 1, 2 and 3 built.
 Merged on 2026-11-18, before its week was out, by the maintainer's
-decision, with open questions 1, 5 and 6 decided, and 3 and 4 on
-2026-11-19 ("Open questions" below); 2 waits for the step that needs it.
+decision, with open questions 1, 5 and 6 decided, and 2, 3 and 4 on
+2026-11-19 ("Open questions" below).
 Under [GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
 ledger (the backtests CI jobs ask for, kept a day), and a port that takes
 input from outside with a token of a new kind, so it is designed first,
@@ -17,9 +17,11 @@ Step 1 is built: in serve, the port, the trust file, the lane and schema
 023, and the chart's `serve.backtest`; in the recipes, their serve mode
 (`LAPILLI_SERVE`) and the action's inputs (`serve-url`, `audience`,
 `serve-wait`). Step 2 is built: Bitbucket Pipelines' ID token; Azure
-Pipelines stays on the plain token. Where the code had to do otherwise
-than this note says,
-"As built (step 1)" and "As built (step 2)" below say so.
+Pipelines stays on the plain token. Step 3 is built: Grafana-managed rules
+and a Loki ruler's, on the data sources the rules in effect read
+already. Where the code had to do otherwise than this note says,
+"As built (step 1)", "As built (step 2)" and "As built (step 3)" below
+say so.
 
 ## Why
 
@@ -306,9 +308,11 @@ Where it doesn't:
 ## What the pull request's PromQL can do
 
 What runs is the expressions of the rules that differ, as range queries,
-with serve's access to `--prometheus`, not the job's. They can read any
-series that access can, and the firing counts in the comment say what they
-read, a count at a time (a rule `secret_series > 41` fires or doesn't).
+with serve's access to `--prometheus` (and, of a Grafana rule on a Loki
+data source or a Loki ruler's rule, to the Loki the rules in effect read,
+"As built (step 3)"), not the job's. They can read any series that access
+can, and the firing counts in the comment say what they read, a count at
+a time (a rule `secret_series > 41` fires or doesn't).
 That is what `--mcp-compare` lets an agent do ([serve.md](serve.md), "That
 PromQL can learn, a count at a time, whatever that access can read"), and
 why both are off unless given: no `--backtest-trust`, no port. Give serve's
@@ -317,11 +321,15 @@ metrics' project).
 
 Bounded, as MCP's `compare` is where it has a bound:
 
-- **Prometheus-format rules only**, replayed against `--prometheus`.
-  Grafana-managed rules and Loki's are refused in the first step: Grafana's
-  are asked through Grafana's data source proxy with serve's Grafana
-  token, of any data source that token reads; Loki's with serve's Loki
-  token (open questions).
+- **Prometheus-format rules**, replayed against `--prometheus`; and, from
+  step 3, Grafana-managed rules and a Loki ruler's, only on the data
+  sources the rules in effect read already (open question 2, decided): a
+  Grafana rule each of whose queries names, by its uid exactly, a data
+  source a rule in effect's replay asks, and as it asks it; a Loki
+  ruler's rule only where serve has `--loki` and its rules in effect hold
+  one. In the first step they were refused: Grafana's Loki queries are
+  asked through Grafana's data source proxy with serve's Grafana token, of
+  any data source that token reads, and Loki's with serve's Loki token.
 - **50 rules that differ**, on either side; a `for` or `keep_firing_for` of
   48 hours at most and a group interval of an hour (`compareFor`,
   `compareEvery`); 1 to 14 days, and the entry's `days`.
@@ -472,7 +480,8 @@ at most, read strictly:
 ```json
 {
   "before": [{"path": "alerts/api.yaml", "content": "groups: ..."}],
-  "after":  [{"path": "alerts/api.yaml", "content": "groups: ..."}],
+  "after":  [{"path": "alerts/api.yaml", "content": "groups: ..."},
+             {"path": "logs.yaml", "content": "groups: ...", "loki": true}],
   "expect": "expectations: ...",
   "expect_before": "expectations: ...",
   "rules_select": "grafana_alert!=1",
@@ -586,7 +595,11 @@ How much can a holder make Lapilli read, fetch, keep or judge?
 - **Read**: 4 MiB a request, its rules read within the bounds
   `internal/rules` holds a rules input to (0.44.1).
 - **Fetch**: the range queries above, in the lane's share of the rate, one
-  backtest at a time; nothing from a URL in the body, no Grafana, no Loki.
+  backtest at a time; nothing from a URL in the body. Of Grafana, only the
+  Loki data sources the rules in effect read through its data source proxy,
+  by uid, and of Loki only `--loki`, with serve's tenant, where the rules
+  in effect read it ("As built (step 3)"); never Grafana's API for what a
+  data source is.
 - **Keep**: a row a backtest, a day; the queue's and the hour's bounds.
 - **Judge**: nothing in the ledger again.
 - **A token stolen** from a job's log can start backtests until it is an
@@ -615,7 +628,10 @@ The paths for the review: the port's handler (`backtestHandler`), the
 token's check (`internal/signin`, `Keys`, the claims' pins), the body's
 read, the planner's refusal, the lane's Limiter, the queue's writes, and
 the recipe's serve mode in `lib.sh` (what it sends, and that the token goes
-on stdin).
+on stdin). From step 3: what the rules in effect read (`readsInEffect`),
+what a pull request's Grafana and Loki rules are held to (`taken`,
+`checkGraph`, `checkLogQL`, `rules.LogQLWide`, `rules.LogQLReach`), and the
+lane's Lokis (`laneLogs`).
 
 ## Alternatives
 
@@ -647,7 +663,7 @@ on stdin).
 
 ## Not in this design
 
-- Grafana-managed rules and Loki's.
+- A data source no rule in effect reads, of Grafana's or a Loki's.
 - Forks' pull requests.
 - A check run or commit status of the pull request's own (ROADMAP.md, "Pull
   request backtests").
@@ -678,7 +694,19 @@ on stdin).
    2026-11-18, by the maintainer: never.** A fork's pull request is not
    backtested through serve; the pins keep it out ("Forks" above).
 2. **Grafana and Loki rules.** Taken only on the data sources the rules in
-   effect already use, by uid?
+   effect already use, by uid? **Decided on 2026-11-19, by the
+   maintainer: take them, on those data sources alone.** A pull request
+   must not have serve read, with serve's credentials, anything serve
+   doesn't read already for the rules it runs. A Grafana rule is taken
+   only when every data source its queries name (by `datasourceUid`, its
+   expressions, `__expr__`, aside) is one a Grafana rule in effect asks
+   through serve, matched by uid exactly, never by name or type: a uid
+   serve's Grafana token can read but no rule in effect asks is refused. A
+   Loki ruler's rule is taken only where serve has `--loki` and its rules
+   in effect hold one, read with serve's tenant, never the pull request's.
+   Every bound the Prometheus path has applies alike, and the refusals
+   name nothing of serve's: a data source refused is one no rule in effect
+   reads. Built in step 3 ("As built (step 3)").
 3. **Azure Pipelines' ID token.** Take it, for a service connection made
    for Lapilli alone and trusted by no identity in Entra; or keep the plain
    token? **Decided on 2026-11-19, by the maintainer: the plain token.**
@@ -1066,6 +1094,105 @@ than the sections above say, or says more:
   - <https://learn.microsoft.com/en-us/azure/devops/pipelines/repos/github>
     (forks and service connections).
 
+## As built (step 3)
+
+Grafana-managed rules and a Loki ruler's, as open question 2 decided. Where
+step 3 does otherwise than the sections above say, or says more:
+
+- **The rules in effect** are the version of the rules serve runs now (the
+  ledger's latest), read as its runs replay it (`parse`): every rule it
+  replays, of every source, whichever team it is of (the port has no team:
+  an entry is a repository's). A rule it can't replay (paused, unsupported
+  as read, a Loki's with no Loki to ask) reads nothing. Of a Grafana rule,
+  the data sources its condition reads, which the replay asks
+  (`Graph.Data`), each as it asks them: PromQL, of `--prometheus`, or
+  LogQL, through `--grafana`'s data source proxy (of `--loki`, without
+  `--grafana`); a query beside the condition, which isn't asked, counts
+  for none. They are read when a backtest is asked, and again before the
+  lane runs it: one whose data source the rules stopped reading in between
+  fails, saying why.
+- **By uid exactly, and asked alike.** A uid is matched as written, its
+  case, its spaces and its length; and asked as the rules in effect ask
+  it: a uid they read as PromQL is refused to a rule that would read it as
+  LogQL, and the reverse (the type a rule writes in its model counts only
+  where serve's Grafana didn't say the data source's). Grafana's own data
+  sources (`grafana`, `-- Grafana --`, `-- Mixed --`, `-- Dashboard --`)
+  and a uid Grafana makes none of (letters, digits, `-` and `_`, 40 at
+  most, as `source.Logs` puts one in the proxy's path) are refused even
+  where a rule in effect names one. A rule unsupported as read (a SQL
+  expression, a data source of a type not replayed) is held to its uids
+  all the same, and then asks nothing, as any unsupported rule. An
+  expression's model (`__expr__`) names no data source to Lapilli, which
+  works expressions out itself, and asks nothing for them; a node whose
+  `datasourceUid` is `__EXPR__`, or written any other way, is a query of a
+  data source, and refused.
+- **One refusal.** "X reads a data source no rule in effect reads", the
+  rule's name alone, whatever why: a uid no rule in effect reads, one
+  read the other way, Grafana's own. Nothing of serve's is said, no uid
+  and no data source. A refusal still tells, a uid at a time, whether one
+  is in effect, as taking it would: the price of the decision, each
+  refusal costing the entry an hour. A Loki ruler's rule is refused the
+  same way whether serve has no `--loki` or no Loki ruler's rule in effect.
+- **Nothing more of Grafana is asked.** A pull request's Grafana rule is
+  read with the types and scrape intervals of its data sources serve read
+  for its own rules (`replayedAs`); Grafana's API isn't asked of any uid
+  for it.
+- **Grafana's bounds**, beside a rule's (`for`, `keep_firing_for`, its
+  group's interval, 50 rules that differ, the period, `--max-samples`, the
+  series and the bytes): 8 queries of data sources and 16 queries and
+  expressions in all, a rule; each query's `relativeTimeRange` from 8 days
+  before the evaluation at most; each query the replay asks held as a
+  rule's expression is, one metric a selector, and what it reads back,
+  with the relativeTimeRange's end, or a reduce's window over LogQL, added
+  up within 8 days.
+- **LogQL's bounds**, of a Loki ruler's rule and a Grafana rule's on a
+  Loki data source: a metric query, never one of log lines; each stream
+  selector naming its streams by a label matched with `=` to a value that
+  isn't empty (`{app=~".+"}` and `{app!="x"}` alone are refused, as
+  `{__name__=~"..."}` is); a range with its offset 8 days back at most,
+  with a Grafana query's relativeTimeRange, each written as a duration, no
+  subquery, no `@`, no offset after no range; comments read past as Loki
+  reads them. What Loki answers is held as `--loki`'s always is: 256 MiB,
+  `--max-samples`, the series, and a log query's lines refused.
+- **A Loki ruler's files**, from the job: `"loki": true` on a file of the
+  body, read as `--loki-rules` reads one (its queries LogQL, its
+  `keep_firing_for` and its group's `query_offset` dropped, as Loki 3.7.9
+  runs a file); a Grafana rule, or a cloud's, in such a file is refused.
+  The recipes send `LOKI_PATHS`'s files so (the action's `loki-paths`),
+  beside `PATHS`, and not with `RENDER`.
+- **The lane's Lokis.** The lane asks a Loki through a client of its own,
+  a copy of the runs' (`prom.Client.Lane`): serve's URL, token and tenant
+  (`X-Scope-OrgID`), never the request's, whose body has no field for
+  one; at its share of that Loki's pace (a Grafana data source's at its
+  share of the Grafana's), which the runs keep for it only while a
+  backtest asking that Loki runs, as `--prometheus`'s; and every request
+  of the lane, of every API, within a quarter of `--parallel` at once, as
+  the memory estimate counts them.
+- **`query_offset` is a read back.** A group's `query_offset` asks each
+  query that long before its evaluation, so it is added to what a rule
+  reads back, 8 days at most in all. Step 1 didn't count it: a pull
+  request's Prometheus rule could read as far back as its `query_offset`
+  said. Found in this step's review, and fixed with it.
+- **What the port counts.** `fits` counts a backtest's requests of every
+  API by the same planner, at the lane's rate. What only a Grafana rule's
+  answers can say (whether a query that returned nothing returned anything
+  the day before, the first numbers of a classic condition's window, a
+  reduce over LogQL asked a batch of evaluations at a time) isn't counted,
+  as the hourly runs' estimate doesn't count it (`replay.Planned.Unsure`):
+  `--backtest-timeout` ends one that asks more.
+- **What shows.** The comment, the JSON, the Run history and `/metrics` say
+  a Grafana rule and a Loki ruler's as they say a Prometheus rule: by its
+  name (a Grafana rule's title), its labels and its counts.
+- **lapilli preflight** times the runs, while a backtest runs the whole
+  hour, at `--max-rate` less the lane's share for every API they ask, a
+  Loki and Grafana's data source proxy as `--prometheus`; and its
+  estimate's backtest changes ten of the rules replayed, Grafana's and
+  Loki's among them, each of queries of its own.
+- **MCP's `compare`** takes no Grafana rule, and a rule in LogQL only as a
+  change to a Loki ruler's rule in effect, asked of `--loki` in its
+  namespace (`proposed`): no data source the rules in effect don't read.
+  Left as it is.
+
 ## Steps
 
 1. The port, ID tokens of GitHub, GitLab and Forgejo, and the plain token;
@@ -1073,4 +1200,5 @@ than the sections above say, or says more:
    recipes' serve mode and the action's inputs.
 2. Bitbucket's token: built. Azure Pipelines stays on the plain token
    (open question 3).
-3. Grafana and Loki rules, if decided.
+3. Grafana and Loki rules: built, on the data sources the rules in effect
+   read (open question 2).

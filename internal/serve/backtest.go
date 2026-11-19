@@ -61,6 +61,10 @@ const (
 	// comparison of a day's range; backtestPoints, the most points a
 	// subquery has, as Prometheus holds a range query to.
 	backtestReach, backtestPoints = 8 * 24 * time.Hour, 11000
+	// backtestGrafanaQueries are the most queries of data sources a
+	// Grafana rule that differs has, backtestGrafanaNodes its queries and
+	// expressions in all: each query is asked a day at a time.
+	backtestGrafanaQueries, backtestGrafanaNodes = 8, 16
 	// backtestQueryTimeout is sent with each range query the lane asks, so
 	// that a shared Prometheus gives up on a pull request's query before
 	// its own default does.
@@ -90,6 +94,20 @@ type backtestPort struct {
 	lane     replay.History
 	rate     float64
 	parallel int
+	// laneCap holds the lane's requests in flight to parallel at once, of
+	// every API it asks; share is its share of each API's rate.
+	laneCap *prom.Limiter
+	share   float64
+	// logs are the runs' Lokis (replay.WithLogs): the lane asks each
+	// through a Limiter of its own (laneLogs), kept by the runs' client in
+	// lanes, its pace at the lane's share of the runs' pace, in paces.
+	logs    replay.Logs
+	lanesMu sync.Mutex
+	lanes   map[*prom.Client]*prom.Client
+	paces   map[*prom.Pace]*prom.Pace
+	// asking are the paces of the Lokis the backtest running asks: the
+	// runs keep the lane's share of those alone while it runs.
+	asking atomic.Pointer[map[*prom.Pace]bool]
 	// asked counts what the lane asked of the history; progress, the rules
 	// it replayed.
 	asked    prom.Counts
@@ -154,6 +172,7 @@ func (s *Server) newBacktestPort() *backtestPort {
 		parallel = 8
 	}
 	p.parallel = max(1, parallel/4)
+	p.share, p.laneCap = s.share(), prom.NewCap(p.parallel)
 	base := replay.Base(s.h)
 	if c, ok := base.(*prom.Client); ok {
 		// The lane's share of --max-rate is kept for it while it runs a
@@ -163,11 +182,75 @@ func (s *Server) newBacktestPort() *backtestPort {
 		own := runs.Pace().Share(s.share())
 		runs.Pace().Reserve(s.share(), p.busy.Load)
 		p.rate = own.Rate()
-		p.lane = c.Lane(prom.NewLimiterPaced(own), backtestQueryTimeout)
+		p.lane = c.Lane(prom.NewLimiterPaced(own).Within(p.laneCap), backtestQueryTimeout)
 	} else {
 		p.lane = base
 	}
+	// A pull request's rules in LogQL (a Loki ruler's, a Grafana rule's
+	// on a Loki data source) are asked of the runs' Lokis, each at the
+	// lane's share as --prometheus is.
+	if p.logs = replay.LogsOf(s.h); p.logs != nil {
+		p.lanes, p.paces = map[*prom.Client]*prom.Client{}, map[*prom.Pace]*prom.Pace{}
+		p.lane = replay.WithLogs(p.lane, p.laneLogs)
+	}
 	return p
+}
+
+// laneLogs is the history a rule in LogQL is replayed against in the lane:
+// the Loki the runs ask for it (--loki, or a Grafana Loki data source
+// through --grafana's data source proxy, as source.Logs gives them, with
+// serve's token and tenant), through a Limiter of the lane's own, at its
+// share of that API's pace, which the runs keep for it while a backtest
+// asking it runs, and within the lane's cap.
+func (p *backtestPort) laneLogs(r rules.Rule) (replay.History, error) {
+	h, err := p.logs(r)
+	if err != nil {
+		return nil, err
+	}
+	c, ok := h.(*prom.Client)
+	if !ok {
+		return h, nil
+	}
+	p.lanesMu.Lock()
+	defer p.lanesMu.Unlock()
+	if l := p.lanes[c]; l != nil {
+		return l, nil
+	}
+	var own *prom.Pace
+	if pace := c.Limiter().Pace(); pace != nil {
+		if own = p.paces[pace]; own == nil {
+			own = pace.Share(p.share)
+			pace.Reserve(p.share, func() bool { return p.busy.Load() && p.asks(pace) })
+			p.paces[pace] = own
+		}
+	}
+	l := c.Lane(prom.NewLimiterPaced(own).Within(p.laneCap), backtestQueryTimeout)
+	p.lanes[c] = l
+	return l, nil
+}
+
+// asks says whether the backtest running asks a Loki of this pace.
+func (p *backtestPort) asks(pace *prom.Pace) bool {
+	m := p.asking.Load()
+	return m != nil && (*m)[pace]
+}
+
+// pacesOf are the paces of the Lokis rules in LogQL are asked of, of those
+// replayed: the runs' Limiters' own.
+func (p *backtestPort) pacesOf(sides ...[]rules.Rule) map[*prom.Pace]bool {
+	out := map[*prom.Pace]bool{}
+	for _, rs := range sides {
+		for _, r := range rs {
+			if r.Logs == "" || r.Unsupported != "" || p.logs == nil {
+				continue
+			}
+			h, err := p.logs(r)
+			if c, ok := h.(*prom.Client); err == nil && ok && c.Limiter().Pace() != nil {
+				out[c.Limiter().Pace()] = true
+			}
+		}
+	}
+	return out
 }
 
 // share is the lane's share of --max-rate.
@@ -539,6 +622,9 @@ type backtestRequest struct {
 type backtestFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	// Loki says it is a Loki ruler's rule file, read as --loki-rules reads
+	// one: its rules' queries are LogQL, asked of --loki.
+	Loki bool `json:"loki,omitempty"`
 }
 
 var commitSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
@@ -583,9 +669,10 @@ type prepared struct {
 }
 
 // prepare reads and checks a backtest's request, as the port does before
-// it is queued and the lane does again before it is run: 400's reason
+// it is queued and the lane does again before it is run, its Grafana and
+// Loki rules held to what the rules in effect read (eff): 400's reason
 // when it can't be, in Lapilli's words and the request's own.
-func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
+func (s *Server) prepare(req backtestRequest, t Trust, eff inEffectReads) (*prepared, string) {
 	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}}
 	if p.days == 0 {
 		p.days = backtestDefaultDays
@@ -629,18 +716,31 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 			return nil, fmt.Sprintf("%s: %d files at most", side, backtestFiles)
 		}
 		in := make([]rules.File, 0, len(files))
-		seen := map[string]bool{}
+		seen, loki := map[string]bool{}, map[string]bool{}
 		for _, f := range files {
 			if f.Path == "" || len(f.Path) > backtestPath || !utf8.ValidString(f.Path) || strings.ContainsFunc(f.Path, isControl) || seen[f.Path] {
 				return nil, fmt.Sprintf("%s: each file has a path of its own, %d bytes at most, with nothing that doesn't show", side, backtestPath)
 			}
-			seen[f.Path] = true
+			seen[f.Path], loki[f.Path] = true, f.Loki
 			in = append(in, rules.File{Path: f.Path, Data: []byte(f.Content)})
 		}
 		rs, _, picked, err := rules.PickedFiles(in, rules.Picking{Select: sel, Trim: true, Recordings: rec})
 		noneSelected[side] = errors.Is(err, rules.ErrNoneSelected)
 		if err != nil && !errors.Is(err, rules.ErrNoneSelected) {
 			return nil, fmt.Sprintf("the rules %s: %s", side, clip(verdict.Clean(err.Error()), 600))
+		}
+		// A Loki ruler's file, read as --loki-rules reads one, as
+		// rules.FromDocs reads a document of rules.LokiFile: its queries
+		// LogQL, without keep_firing_for and query_offset, which Loki
+		// 3.7.9 drops from a file and runs the rule without.
+		for i := range rs {
+			switch r := &rs[i]; {
+			case !loki[r.Source]:
+			case r.Graph != nil || r.UID != "" || r.Cloud != "":
+				return nil, fmt.Sprintf("%s: %s isn't a Loki ruler's rule, in a file sent as one", side, verdict.Clean(r.Name))
+			default:
+				r.Logs, r.LokiFile, r.KeepFiringFor, r.QueryOffset = rules.LokiRuler, true, 0, 0
+			}
 		}
 		if said := picked.String(); said != "" {
 			key := "rules"
@@ -666,26 +766,22 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 	if len(before)+len(after) == 0 && (noneSelected["before"] || noneSelected["after"]) {
 		return nil, fmt.Sprintf("rules_select %s keeps no document of rules on either side", clip(verdict.Clean(req.RulesSelect), 200))
 	}
-	for _, rs := range [][]rules.Rule{before, after} {
-		for _, r := range rs {
-			switch {
-			case r.Graph != nil:
-				return nil, fmt.Sprintf("%s is a Grafana rule: this port takes rules in Prometheus's format", verdict.Clean(r.Name))
-			case r.Logs != "":
-				return nil, fmt.Sprintf("%s is a Loki rule: this port takes rules in Prometheus's format", verdict.Clean(r.Name))
-			}
-		}
-	}
 	source.TellApart(before, after)
 	p.same, p.gone, p.came = source.Split(before, after)
 	if len(p.gone) > backtestRules || len(p.came) > backtestRules {
 		return nil, fmt.Sprintf("%d rules that differ at most, on either side: backtest a change a few rules at a time", backtestRules)
 	}
-	// Replayed as the rules in effect are: --late, --scrape-interval.
+	// Replayed as the rules in effect are: --late, --scrape-interval, the
+	// scrape intervals and types of Grafana's data sources as serve read
+	// them for its own rules, where a Loki's ruler runs its groups.
 	s.replayedAs().Apply(p.gone)
 	s.replayedAs().Apply(p.came)
 	for _, side := range [][]rules.Rule{p.gone, p.came} {
 		for i := range side {
+			// What it reads first, before anything it says is taken.
+			if why := taken(side[i], eff); why != "" {
+				return nil, why
+			}
 			if why := p.checkRule(&side[i]); why != "" {
 				return nil, why
 			}
@@ -712,35 +808,201 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 }
 
 // checkRule holds a rule that differs to what the port takes: its for,
-// keep_firing_for and interval; each selector one metric's, by its name;
-// what it reads back. One whose expression doesn't read as PromQL asks
-// nothing, and is said refused as written, as lapilli verdict says it, the
-// rest backtested; one already unsupported as read is said in its own
-// words.
+// keep_firing_for and interval; its group's query_offset; each selector one
+// metric's, by its name; what it reads back. A Grafana rule is held so in
+// each query it asks, and to its own bounds (checkGraph); a rule in LogQL
+// to LogQL's (checkLogQL). One whose expression doesn't read as PromQL
+// asks nothing, and is said refused as written, as lapilli verdict says
+// it, the rest backtested; one already unsupported as read is said in its
+// own words.
 func (p *prepared) checkRule(r *rules.Rule) string {
 	name := verdict.Clean(r.Name)
 	switch {
-	case r.For < 0 || r.KeepFiringFor < 0 || r.Interval < 0:
+	case r.For < 0 || r.KeepFiringFor < 0 || r.Interval < 0 || r.QueryOffset < 0:
 		return name + ": a duration is negative"
 	case r.For > compareFor || r.KeepFiringFor > compareFor:
 		return fmt.Sprintf("%s: for and keep_firing_for are %s at most here", name, verdict.Duration(compareFor))
 	case r.Interval > compareEvery:
 		return fmt.Sprintf("%s: its group's interval is %s at most here", name, verdict.Duration(compareEvery))
+	case r.QueryOffset > backtestReach:
+		// Each query asked that long before its evaluation: a read back,
+		// as an offset is.
+		return fmt.Sprintf("%s: its group's query_offset is %d days at most here", name, int(backtestReach/(24*time.Hour)))
 	case r.Unsupported != "":
 		p.reasons[r.Unsupported] = true
 		return ""
+	case r.Graph != nil:
+		return p.checkGraph(r)
+	case r.Logs != "":
+		return checkLogQL(name, r.Expr, r.QueryOffset)
 	}
-	if _, err := rules.Selectors(r.Expr); err != nil {
+	return p.checkPromQL(r, r.Expr, r.QueryOffset)
+}
+
+// checkPromQL holds a PromQL query a rule asks, read back before from each
+// evaluation, to what the port takes: one that doesn't read leaves the
+// rule unsupported, refused as written.
+func (p *prepared) checkPromQL(r *rules.Rule, expr string, before time.Duration) string {
+	name := verdict.Clean(r.Name)
+	if _, err := rules.Selectors(expr); err != nil {
 		r.Unsupported = refusedAsWritten
 		p.reasons[r.Unsupported] = true
 		return ""
 	}
-	if sel, wide := rules.Wide(r.Expr); wide {
+	if sel, wide := rules.Wide(expr); wide {
 		return fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
 	}
-	if what := rules.Reach(r.Expr, backtestReach, backtestPoints); what != "" {
-		return fmt.Sprintf("%s reads %s: here what a rule reads, its ranges and offsets and its subqueries' added up, reaches %d days back at most, a subquery %d points with a step of its own, each written as a duration, and no @",
+	if what := rules.Reach(expr, backtestReach-before, backtestPoints); what != "" {
+		return fmt.Sprintf("%s reads %s: here what a rule reads, its ranges and offsets and its subqueries' added up, with its group's query_offset or its query's relativeTimeRange, reaches %d days back at most, a subquery %d points with a step of its own, each written as a duration, and no @",
 			name, clip(verdict.Clean(what), 300), int(backtestReach/(24*time.Hour)), backtestPoints)
+	}
+	return ""
+}
+
+// checkGraph holds a Grafana rule that differs to what the port takes:
+// backtestGrafanaQueries queries of data sources and backtestGrafanaNodes
+// queries and expressions at most; each query's relativeTimeRange within
+// backtestReach; and each query the replay asks, PromQL or LogQL, as a
+// rule's query is held, read back as far again as its relativeTimeRange
+// ends before the evaluation, and, of a reduce over LogQL, as its window.
+// Its expressions are worked out by Lapilli, and read nothing.
+func (p *prepared) checkGraph(r *rules.Rule) string {
+	name := verdict.Clean(r.Name)
+	g := r.Graph
+	queries, all := g.Nodes()
+	switch far := g.Furthest(); {
+	case queries > backtestGrafanaQueries || all > backtestGrafanaNodes:
+		return fmt.Sprintf("%s has %d queries of data sources, and %d queries and expressions in all: here a Grafana rule has %d and %d at most",
+			name, queries, all, backtestGrafanaQueries, backtestGrafanaNodes)
+	case far > backtestReach:
+		return fmt.Sprintf("%s asks a query from %s before each evaluation (its relativeTimeRange): here %d days at most", name, verdict.Duration(far), int(backtestReach/(24*time.Hour)))
+	}
+	refs := slices.Collect(maps.Keys(g.Queries))
+	for ref := range g.Asks {
+		if !slices.Contains(refs, ref) {
+			refs = append(refs, ref)
+		}
+	}
+	slices.Sort(refs)
+	for _, ref := range refs {
+		expr, _ := g.Expr(ref, r.AskStep(ref))
+		before := g.Shift[ref]
+		if g.Logs != "" {
+			if a, ok := g.Asks[ref]; ok && a.Logs {
+				before += a.Window
+			}
+			if why := checkLogQL(name, expr, before); why != "" {
+				return why
+			}
+			continue
+		}
+		if why := p.checkPromQL(r, expr, before); why != "" || r.Unsupported != "" {
+			return why
+		}
+	}
+	return ""
+}
+
+// checkLogQL holds a LogQL query a rule asks, read back before from each
+// evaluation, to what the port takes: a metric query, never one of log
+// lines; each stream selector naming its streams by a label's value; its
+// ranges with their offsets within backtestReach, with no subquery and no
+// @.
+func checkLogQL(name, expr string, before time.Duration) string {
+	if rules.LogQuery(expr) {
+		return name + " asks Loki for log lines: here a rule in LogQL is a metric query, such as count_over_time"
+	}
+	if sel, wide := rules.LogQLWide(expr); wide {
+		return fmt.Sprintf("%s reads %s, which names no stream by a label's value: here each stream selector has a label matched with = to a value", name, clip(verdict.Clean(sel), 200))
+	}
+	if what := rules.LogQLReach(expr, backtestReach-before); what != "" {
+		return fmt.Sprintf("%s reads %s: here what a rule in LogQL reads, a range and its offset, with its query's relativeTimeRange, reaches %d days back at most, each written as a duration, with no subquery and no @",
+			name, clip(verdict.Clean(what), 300), int(backtestReach/(24*time.Hour)))
+	}
+	return ""
+}
+
+// inEffectReads is what the rules lapilli serve runs read, by which a pull
+// request's Grafana and Loki rules are taken (docs/design/backtests.md,
+// open question 2): the Grafana data sources whose queries the replay of a
+// rule in effect asks, by uid, as it asks them (promql, of --prometheus;
+// logql, through --grafana's data source proxy, or of --loki without it);
+// and whether the rules in effect hold a Loki ruler's rule replayed
+// against --loki.
+type inEffectReads struct {
+	promql, logql map[string]bool
+	loki          bool
+}
+
+// readsInEffect is what the rules in effect read: the version of the rules
+// serve runs now, as its runs replay it (parse), each rule it replays. A
+// rule it can't replay (paused, unsupported as read, a Loki's with no
+// Loki to ask) reads nothing, and a query of a Grafana rule's on a data
+// source its condition doesn't read isn't asked.
+func (s *Server) readsInEffect(ctx context.Context) (inEffectReads, error) {
+	e := inEffectReads{promql: map[string]bool{}, logql: map[string]bool{}}
+	v, ok, err := s.l.Latest(ctx)
+	if err != nil || !ok {
+		return e, err
+	}
+	rs, err := s.parse(ctx, v)
+	if err != nil {
+		return e, err
+	}
+	for _, r := range rs {
+		switch {
+		case r.Unsupported != "":
+		case r.Graph != nil:
+			for _, d := range r.Graph.Data {
+				if d.UID == r.Graph.Logs {
+					e.logql[d.UID] = true
+				} else {
+					e.promql[d.UID] = true
+				}
+			}
+		case r.Logs != "" && s.cfg.Loki != "":
+			e.loki = true
+		}
+	}
+	return e, nil
+}
+
+// builtIn are Grafana's data sources of its own, by uid: none is a data
+// source's of the rules', and none is asked.
+var builtIn = map[string]bool{"-- Mixed --": true, "-- Dashboard --": true, "-- Grafana --": true, "grafana": true}
+
+// dataSourceUID is a Grafana data source's uid as Grafana makes and takes
+// one, as source.Logs puts one into its proxy's path.
+var dataSourceUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+
+// taken says why a rule that differs can't be backtested for what it
+// reads, "" when it can: a Grafana rule each of whose queries names a data
+// source, by its uid exactly, that a rule in effect asks, as that rule
+// asks it (PromQL or LogQL), never one of Grafana's own; a Loki ruler's
+// rule only where a rule in effect is one, asked of --loki. Nothing of
+// serve's says which: a data source refused is one no rule in effect
+// reads, whatever the reason.
+func taken(r rules.Rule, eff inEffectReads) string {
+	name := verdict.Clean(r.Name)
+	uids := r.GrafanaUIDs()
+	if r.Graph != nil || len(uids) > 0 {
+		refused := name + " reads a data source no rule in effect reads: here a Grafana rule reads only the data sources the rules lapilli serve runs read already"
+		for _, u := range uids {
+			if builtIn[u] || !dataSourceUID.MatchString(u) || !eff.promql[u] && !eff.logql[u] {
+				return refused
+			}
+		}
+		if g := r.Graph; g != nil && r.Unsupported == "" {
+			for _, d := range g.Data {
+				if d.UID == g.Logs && !eff.logql[d.UID] || d.UID != g.Logs && !eff.promql[d.UID] {
+					return refused
+				}
+			}
+		}
+		return ""
+	}
+	if r.Logs != "" && !eff.loki {
+		return name + " is a Loki ruler's rule: here one is taken only where the rules lapilli serve runs hold a Loki ruler's already"
 	}
 	return ""
 }
@@ -905,6 +1167,15 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, http.StatusServiceUnavailable, why)
 		return
 	}
+	// What the rules in effect read, which a pull request's Grafana and
+	// Loki rules are held to.
+	eff, err := s.readsInEffect(ctx)
+	if err != nil {
+		s.log.Error("backtest port: reading the rules in effect", "err", err)
+		w.Header().Set("Retry-After", "60")
+		backtestError(w, http.StatusServiceUnavailable, "the rules in effect couldn't be read: try again in a minute")
+		return
+	}
 	// The pull request a newer commit of would supersede the one waiting:
 	// the token's own, as the body can't say otherwise.
 	supersedes := int64(-1)
@@ -968,7 +1239,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		refused(http.StatusBadRequest, "pull_request isn't the one the token's ref names")
 		return
 	}
-	p, why := s.prepare(req, a.t.Trust)
+	p, why := s.prepare(req, a.t.Trust, eff)
 	if why != "" {
 		refused(http.StatusBadRequest, why)
 		return

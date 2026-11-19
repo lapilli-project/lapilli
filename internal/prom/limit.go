@@ -102,6 +102,17 @@ func (p *Pace) Reserve(share float64, held func() bool) *Pace {
 	return p
 }
 
+// Holding says whether p keeps the share Reserve gave another now: that
+// one says it has work.
+func (p *Pace) Holding() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reserved > 0 && p.held != nil && p.held()
+}
+
 // Reserved is the share of p's rate Reserve keeps for another, 0 for
 // none.
 func (p *Pace) Reserved() float64 {

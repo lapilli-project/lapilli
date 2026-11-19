@@ -403,11 +403,11 @@ const (
 
 // whileBacktest adds, to the hourly runs' item, how long their requests
 // take while the lane runs a backtest the whole hour: --max-rate less the
-// share kept for the lane (prom.Pace.Reserve), for the requests to
-// --prometheus, which the lane asks too; the other APIs' at their rate.
-// A run that then takes longer than --every is unknown, not a problem:
-// whether backtests run back to back, hour after hour, is the pull
-// requests' to say.
+// share kept for the lane (prom.Pace.Reserve), for the requests to each
+// API, --prometheus, a Loki or Grafana's data source proxy, as a backtest
+// of the rules in effect may ask each of them too. A run that then takes
+// longer than --every is unknown, not a problem: whether backtests run
+// back to back, hour after hour, is the pull requests' to say.
 func (p *run) whileBacktest() {
 	h := p.r.Estimates.Hourly
 	if !p.backtesting() || h == nil || p.c.MaxRate <= 0 {
@@ -419,12 +419,8 @@ func (p *run) whileBacktest() {
 	var took, longest time.Duration
 	for _, by := range p.runsBy {
 		t := time.Duration(0)
-		for k, n := range by {
-			r := p.c.MaxRate
-			if k == "prometheus" {
-				r = runs
-			}
-			t = max(t, time.Duration(float64(n)/r*float64(time.Second)))
+		for _, n := range by {
+			t = max(t, time.Duration(float64(n)/runs*float64(time.Second)))
 		}
 		took += t
 		longest = max(longest, t)
@@ -477,8 +473,9 @@ func itemByID(p *run, id string) *Item {
 }
 
 // changedRules are the rules the estimate's backtest changes: ten of those
-// read that the port takes, in Prometheus's format and replayed, each of
-// an expression of its own, so that none shares a read with another, in
+// read that are replayed, which the port takes (a Grafana rule's data
+// sources and a Loki ruler's are those the rules in effect read: these),
+// each of queries of its own, so that none shares a read with another, in
 // the order read, each with its own for and keep_firing_for, which start
 // its reads earlier: one that reaches back past midnight UTC asks a day
 // more.
@@ -489,11 +486,23 @@ func changedRules(rs []rules.Rule) []rules.Rule {
 		if len(out) == laneRules {
 			break
 		}
-		if r.Graph != nil || r.Logs != "" || r.Unsupported != "" || seen[r.Expr] {
+		if r.Unsupported != "" || seen[readsOf(r)] {
 			continue
 		}
-		seen[r.Expr] = true
+		seen[readsOf(r)] = true
 		out = append(out, r)
+	}
+	return out
+}
+
+// readsOf is what a rule asks, to tell rules that share no read apart: its
+// expression and where it is asked, or a Grafana rule's queries.
+func readsOf(r rules.Rule) string {
+	out := r.Logs + "\x00" + r.Expr
+	if r.Graph != nil {
+		for _, ref := range slices.Sorted(maps.Keys(r.Graph.Queries)) {
+			out += "\x00" + r.Graph.Queries[ref]
+		}
 	}
 	return out
 }
@@ -594,7 +603,7 @@ func (p *run) backtests(ctx context.Context, rd *read) {
 	}
 	p.r.Estimates.Backtests = b
 	if len(rs) == 0 {
-		it.What += "; no rule read is one the port takes (Prometheus's format, replayed), so none is counted"
+		it.What += "; no rule read is replayed, so none is counted"
 		if laneAt > 0 && b.Fit == 0 {
 			it.State = Problem
 			it.Why = "the port refuses every backtest of a rule that differs before it is queued: not a request fits within --backtest-timeout at the lane's rate"

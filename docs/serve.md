@@ -799,18 +799,39 @@ ledger's: any replica takes a backtest and answers for it.
 What the pull request's PromQL can do: it runs as range queries, with
 serve's access, so it can read whatever that access reads, a count at a
 time in the firings the comment says. Give serve's history credential what
-the rules need and no more. The port takes rules in Prometheus's format
-alone; 50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
+the rules need and no more. The port takes rules in Prometheus's format;
+Grafana-managed rules, as `--rules` reads a provisioning file, only on the
+data sources the rules serve runs read already: each of a rule's queries
+names, by its uid exactly, a data source whose queries a rule in effect's
+replay asks, and asks it as that rule does (PromQL of `--prometheus`, or
+LogQL through `--grafana`'s data source proxy, or `--loki` without it),
+never one of Grafana's own (`grafana`, `-- Mixed --`, `-- Dashboard --`),
+so that a pull request makes serve read nothing with its credentials that
+it doesn't read for its own rules; and a Loki ruler's rules, from a file
+the job marks as one (`"loki": true`, the recipes' `LOKI_PATHS`), only
+where serve has `--loki` and its rules in effect hold one, asked with
+serve's tenant. A rule refused for what it reads is said to read "a data
+source no rule in effect reads", whatever why, naming nothing of serve's.
+50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
 a group interval of an hour at most; each selector one metric's, by its
 name (`{job="api"}` and `{__name__=~"..."}` are refused); what a rule
 reads back, its range and offset added to those of every subquery around
-them, 8 days at most in all (`rate(x[1d] offset 7d)` fits,
+them and its group's `query_offset`, 8 days at most in all (`rate(x[1d] offset 7d)` fits,
 `rate(x[7d] offset 7d)` doesn't); a subquery of 11,000 points at most, its
 step written in it (`[1d:1m]`, not `[1d:]`: without one, Prometheus steps
 at its evaluation interval, which Lapilli doesn't know, so the points
 can't be counted; add the step); ranges and offsets written as durations;
 and no `@`; comments read past, as Prometheus does; each range query with a timeout of a minute; days 1 to
-14, and the entry's `days`. What it learns comes a bit at a time, as a rule
+14, and the entry's `days`. A Grafana rule has 8 queries of data sources
+and 16 queries and expressions at most, each query's `relativeTimeRange`
+8 days back at most, and each query the replay asks held as a rule's, its
+relativeTimeRange's end added to what it reads back. A query in LogQL is
+a metric query, never one of log lines; each stream selector names its
+streams by a label matched with `=` to a value (`{app=~".+"}` alone is
+refused); a range with its offset reaches 8 days back at most, with no
+subquery and no `@`. The lane asks a Loki through a client of its own, at
+its share of that Loki's rate, kept for it while a backtest asking that
+Loki runs. What it learns comes a bit at a time, as a rule
 fires or doesn't: an entry's `hourly` is what bounds how fast. Keep it as
 low as the pull requests need; a day's cap, of the rules that differ
 times the backtests, is the `hourly` times 24 times 50 at most. `hourly`

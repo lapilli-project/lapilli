@@ -233,7 +233,10 @@ range read's.
 
 **The backtest lane.** While the lane runs a backtest, its share of
 `--max-rate` (`--backtest-share`) is kept for it, and the runs' requests
-to `--prometheus` are spaced by the rest (`prom.Pace.Reserve`). So, with
+to `--prometheus` are spaced by the rest (`prom.Pace.Reserve`); to a Loki
+and Grafana's data source proxy too, while it asks them
+([backtests.md](backtests.md), "As built (step 3)"), so each API the runs
+ask is timed so. So, with
 `--backtest-listen`, the hourly runs are timed twice: at `--max-rate`, and
 in the worst case, a backtest running the whole hour, at `--max-rate` less
 the share. A run that takes longer than `--every` only then is unknown,
@@ -901,8 +904,9 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   only so (`keysAllowed`), once read, so a discovery document can't have
   preflight fetch from anywhere else even if signin's check went.
 - **What a typical pull request is.** Ten of the rules read that the
-  port takes (Prometheus's format, replayed), each of an expression of
-  its own, the first ten in the order read, each with its own `for` and
+  port takes (replayed: from backtests' step 3, a Grafana rule's and a
+  Loki ruler's too, whose data sources are the rules in effect's), each
+  of queries of its own, the first ten in the order read, each with its own `for` and
   `keep_firing_for`: a rule in Prometheus's format asks one query a day
   its reads touch, and its `for` starts them earlier, so one whose `for`
   reaches back past midnight UTC asks a day more (`for: 2h` at 02:30 UTC:

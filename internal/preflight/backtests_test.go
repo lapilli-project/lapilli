@@ -821,6 +821,65 @@ func TestEstimateHourlyWhileBacktest(t *testing.T) {
 	}
 }
 
+// A Loki's requests, and a Grafana data source's, are timed at the runs'
+// rate less the lane's share too, as a backtest of the rules in effect may
+// ask them; the estimate's backtest changes Grafana and Loki rules
+// replayed as well, each of queries of its own.
+func TestEstimateBacktestsLokiGrafana(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("groups:\n  - name: logs\n    interval: 1m\n    rules:\n")
+	for i := range 200 {
+		fmt.Fprintf(&b, "      - alert: LogErrors%d\n        expr: sum(count_over_time({app=\"svc%d\"} |= \"error\" [5m])) > 1\n", i, i)
+	}
+	rs, err := rules.Parse([]byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rs {
+		rs[i].Logs = rules.LokiRuler
+	}
+	c := backtestConfig()
+	c.MaxRate, c.Serve.Loki = 0.5, "http://loki:3100"
+	p := newRun(c)
+	p.estimate(context.Background(), &read{all: rs})
+	h := p.r.Estimates.Hourly
+	if h == nil || h.By["loki"] == 0 || h.WhileBacktest == nil || math.Abs(h.WhileBacktest.Seconds-float64(h.Most)/0.375) > 1e-6 {
+		t.Errorf("%+v %+v", h, h.WhileBacktest)
+	}
+	if bt := p.r.Estimates.Backtests; bt == nil || bt.Rules != 10 || bt.Changed == 0 {
+		t.Errorf("%+v", bt)
+	}
+	grafana, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: a
+        title: A
+        condition: A
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'up == 0'}}
+      - uid: b
+        title: B
+        condition: A
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'up == 0'}}
+      - uid: c
+        title: C
+        condition: A
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'errors > 1'}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changedRules(slices.Concat(grafana, rs[:2], rulesOf(t, 1, 0))); len(got) != 5 || got[0].Name != "A" || got[1].Name != "C" {
+		t.Errorf("%d: %v", len(got), got)
+	}
+}
+
 // The lane's reads are held beside the runs' at their bound: a memory
 // limit the runs fit and the two don't is unknown, never ok.
 func TestEstimateMemoryBacktests(t *testing.T) {

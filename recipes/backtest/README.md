@@ -556,6 +556,21 @@ file that isn't UTF-8 isn't sent, and two of `PATHS` holding a file of one
 name can't be: each is said in the comment, which file in the job's log.
 A request past the 4 MiB serve takes is said before anything is sent.
 
+**Grafana and Loki rules.** Serve backtests rules in Prometheus's format,
+and a Grafana-managed rule in `PATHS` (a provisioning file, as `--rules`
+reads one) only when each of its queries names, by its uid, a data source
+the rules serve runs read already, and asks it as they do. A Loki ruler's
+rules come from `LOKI_PATHS` (the action's `loki-paths`): directories or
+files in the repository, as `PATHS` names them, none of `PATHS`, with
+`PATHS` and not `RENDER`, sent marked as a Loki ruler's, as `--loki-rules`
+reads them; serve backtests them where its own rules hold a Loki ruler's,
+against its `--loki`, with its tenant. Any other is refused, the comment
+saying the rule reads "a data source no rule in effect reads", naming none
+of serve's
+([docs/serve.md](../../docs/serve.md#pull-request-backtests)).
+`LOKI_PATHS` is refused without `LAPILLI_SERVE`: `lapilli verdict
+--compare` takes no Loki ruler's files.
+
 **Waiting.** Serve answers with an id and a key, and the recipe asks
 where its backtest is every `SERVE_POLL` seconds (10), the job's log
 saying where it is in the queue and, while it runs, how many of its
