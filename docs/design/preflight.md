@@ -939,6 +939,15 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   CI's keeps the detail. A discovery document that names an algorithm many times
   names it once (`signin.NewKeys`, which serve's checks use too), and four
   are listed at most.
+- **A fetch that got no answer names no other host.** Go's client says a
+  redirect it refused with where it led (another host, its query), and a
+  certificate not for the host asked with the names it is for; serve's
+  log said them too. `signin`'s fetch now says each by the URL asked
+  alone (a redirect refused, a certificate not for the host, an authority
+  not trusted): the URL asked is the trust file's, hidden as an issuer
+  of no public CI's is (`TestGetSaysNoOtherHost`). A name that doesn't
+  resolve, a refused connection or a time out name that URL's host, and
+  are said as they are.
 - **`CI.DiscoverKeys` is preflight's alone.** It skips what `keysOf`
   holds a token from anyone to (discovery once a minute after a failure,
   one ask at a time); a test reads the source and fails on a call of it

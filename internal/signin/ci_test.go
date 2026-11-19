@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -406,5 +407,47 @@ func TestDiscoverKeysPreflightAlone(t *testing.T) {
 	}
 	if read < 50 {
 		t.Fatalf("%d files read", read)
+	}
+}
+
+// A fetch that got no answer is said naming no host but the one asked: a
+// redirect refused without where it led (the Location, another host, its
+// query), a certificate without the names it is for or the authority that
+// signed it; in what serve logs, and lapilli preflight prints.
+func TestGetSaysNoOtherHost(t *testing.T) {
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://sso.corp-a.example/login?client=secret-client-77", http.StatusFound)
+	}))
+	defer redirect.Close()
+	_, err := get(context.Background(), Client(nil), redirect.URL+"/.well-known/openid-configuration", keysBody)
+	if err == nil || strings.Contains(err.Error(), "corp-a") || strings.Contains(err.Error(), "secret-client") ||
+		!strings.Contains(err.Error(), "/.well-known/openid-configuration: it redirected, and redirects aren't followed") {
+		t.Errorf("a redirect: %v", err)
+	}
+	ci := &CI{Issuer: redirect.URL, Client: Client(nil)}
+	if _, err := ci.DiscoverKeys(context.Background()); err == nil || strings.Contains(err.Error(), "corp-a") || !errors.Is(err, ErrUnreachable) {
+		t.Errorf("discovery redirected: %v", err)
+	}
+	// TLS: a certificate of an authority not trusted, and one trusted but
+	// for other names than the host asked (localhost: the test's certificate
+	// is for example.com and 127.0.0.1).
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer tlsSrv.Close()
+	_, err = get(context.Background(), Client(nil), tlsSrv.URL+"/keys", keysBody)
+	if err == nil || strings.Contains(err.Error(), "x509") || !strings.Contains(err.Error(), "of an authority this machine doesn't trust") {
+		t.Errorf("an authority not trusted: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(tlsSrv.Certificate())
+	trusting := Client(&http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}})
+	_, port, _ := strings.Cut(strings.TrimPrefix(tlsSrv.URL, "https://"), ":")
+	_, err = get(context.Background(), trusting, "https://localhost:"+port+"/keys", keysBody)
+	names := strings.Join(tlsSrv.Certificate().DNSNames, " ")
+	if err == nil || names == "" || strings.Contains(err.Error(), tlsSrv.Certificate().DNSNames[0]) || !strings.Contains(err.Error(), "isn't for the host asked") {
+		t.Errorf("a certificate for %s: %v", names, err)
+	}
+	// One that doesn't resolve names the host asked alone, as it is.
+	if _, err := get(context.Background(), Client(nil), "http://nowhere.invalid/keys", keysBody); err == nil || !strings.Contains(err.Error(), "nowhere.invalid") {
+		t.Errorf("a name that doesn't resolve: %v", err)
 	}
 }

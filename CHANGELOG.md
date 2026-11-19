@@ -36,6 +36,17 @@ stays at 023.
   first run found code blocks and tables that scroll sideways and couldn't
   be reached by the keyboard (16 pages), and each now takes the focus.
 
+### Fixed
+
+- **A sign-in's or a CI issuer's fetch that got no answer names no other
+  host.** A discovery document or a key set that redirected was said, in
+  serve's log and `lapilli preflight`'s report, with where the redirect
+  led, its query too; a certificate not for the host asked, with the
+  names it is for, and one of an authority not trusted, with that
+  authority. Each is now said by the URL asked alone: "it redirected, and
+  redirects aren't followed", "its certificate isn't for the host asked",
+  "its certificate is of an authority this machine doesn't trust".
+
 ## [0.61.0] - 2026-11-19
 
 Pull request backtests through `lapilli serve`: a CI job sends a pull

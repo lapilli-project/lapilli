@@ -18,6 +18,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,9 +66,12 @@ const (
 // redirects, so nothing is fetched from anywhere but the URL given.
 func Client(rt http.RoundTripper) *http.Client {
 	return &http.Client{Transport: egress.Wrap(rt), Timeout: fetchTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return errors.New("redirects aren't followed")
+		return errRedirect
 	}}
 }
+
+// errRedirect is a redirect Client refuses to follow.
+var errRedirect = errors.New("redirects aren't followed")
 
 // Keys are the public keys at a JWKS URL, fetched when first needed and
 // again when a token names a key not held, at most once a minute.
@@ -341,7 +345,7 @@ func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, er
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, unasked(u, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -355,6 +359,27 @@ func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, er
 		return nil, fmt.Errorf("%s: more than %d bytes", redact(u), limit)
 	}
 	return b, nil
+}
+
+// unasked is why a fetch of u got no answer, naming no host but u's: a
+// redirect refused is said without where it led (the client's error names
+// the Location, another host, with its query); a certificate not for the
+// host asked, or of an authority not trusted, without the names the
+// certificate gives. Each would be in serve's log, and what lapilli
+// preflight prints, otherwise. A name that doesn't resolve, a connection
+// refused, a time out, name u's host alone, and are said as they are.
+func unasked(u string, err error) error {
+	var host x509.HostnameError
+	var ca x509.UnknownAuthorityError
+	switch {
+	case errors.Is(err, errRedirect):
+		return fmt.Errorf("%s: it redirected, and redirects aren't followed", redact(u))
+	case errors.As(err, &host):
+		return fmt.Errorf("%s: TLS: its certificate isn't for the host asked", redact(u))
+	case errors.As(err, &ca):
+		return fmt.Errorf("%s: TLS: its certificate is of an authority this machine doesn't trust", redact(u))
+	}
+	return err
 }
 
 // statusError is an answer other than 200.

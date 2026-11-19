@@ -181,9 +181,19 @@ func TestBacktestIssuers(t *testing.T) {
 			doc: func(*issuerAt) func(map[string]any) {
 				return func(d map[string]any) { d["jwks_uri"] = elsewhere.URL + "/.well-known/jwks" }
 			}},
-		{name: "a redirect", state: Problem, says: "redirects aren't followed", asked: 1,
+		{name: "a redirect", state: Problem, says: "/.well-known/openid-configuration: it redirected, and redirects aren't followed", asked: 1,
+			hidden: "sso.corp-a.example",
 			serve: func(w http.ResponseWriter, r *http.Request) bool {
-				http.Redirect(w, r, elsewhere.URL+"/.well-known/openid-configuration", http.StatusFound)
+				http.Redirect(w, r, "https://sso.corp-a.example/login?client=secret-client-77", http.StatusFound)
+				return true
+			}},
+		{name: "a redirect of the keys", state: Problem, says: "/.well-known/jwks: it redirected, and redirects aren't followed", asked: 2,
+			hidden: "secret-client-77",
+			serve: func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path != "/.well-known/jwks" {
+					return false
+				}
+				http.Redirect(w, r, "https://sso.corp-a.example/login?client=secret-client-77", http.StatusFound)
 				return true
 			}},
 		{name: "not found", state: Problem, says: "404 Not Found", asked: 1,
