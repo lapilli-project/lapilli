@@ -878,6 +878,45 @@ func TestVerdictHeldTakenAwayNoted(t *testing.T) {
 	}
 }
 
+// A note rewritten alone, by another, takes away none of the verdicts
+// the firing holds: only "unrelated" written or undone does.
+func TestVerdictHeldKeptByANote(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.Put(ctx, incident.Incident{ID: "INC-12", Title: "checkout 5xx", Start: vAt(14, 10), End: vAt(14, 40),
+		Labels: incident.Labels{"service": {"checkout"}}}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	lab := map[string]string{"service": "checkout", "instance": "db"}
+	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 8)},
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 12), End: vAt(14, 20)},
+	})
+	fs, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour)})
+	for _, f := range fs {
+		if _, err := l.SetVerdict(ctx, keyOfFiring(f), VerdictChange{Unrelated: yes(), UnrelatedNote: text("rotation")}, editorBy(), opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 20)}})
+	merged := firingsByRule(t, l)["Disk"]
+	bo := VerdictBy{By: "bo", Admin: true, Now: vNow.Add(time.Hour)}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(merged), VerdictChange{UnrelatedNote: text("rotation, and a typo fixed")}, bo, opts); err != nil {
+		t.Fatal(err)
+	}
+	vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil)
+	if len(vs) != 2 {
+		t.Fatalf("a note rewritten by another took one away: %+v", vs)
+	}
+	cy := VerdictBy{By: "cy", Admin: true, Now: vNow.Add(2 * time.Hour)}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(merged), VerdictChange{Unrelated: yes()}, cy, opts); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil); len(vs) != 1 {
+		t.Errorf("\"unrelated\" written again took none away: %+v", vs)
+	}
+}
+
 // A window confirmed: the incident it writes takes the window's place in
 // the verdicts naming it, which stay as they were, unmarked.
 func TestVerdictWindowConfirmed(t *testing.T) {

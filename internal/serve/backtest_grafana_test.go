@@ -474,16 +474,26 @@ func TestBacktestLogQLComments(t *testing.T) {
 			t.Errorf("a Grafana rule's %q: %d %q", expr, code, why)
 		}
 	}
+	// A log query in brackets, or after a byte order mark, which Loki's
+	// grammar and lexer read as one.
+	for _, expr := range []string{`({app="x"} |= "x")`, "\uFEFF{app=\"x\"} |= \"x\""} {
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btAdding(added("loki.yaml", loki(expr), true)))
+		if why, _ := m["error"].(string); code != 400 || !strings.Contains(why, "Raised asks Loki for log lines") {
+			t.Errorf("a Loki ruler's %q: %d %q", expr, code, why)
+		}
+	}
 	if n, _ := b.s.l.BacktestsWaiting(context.Background()); len(n) != 0 {
 		t.Errorf("queued: %v", n)
 	}
 	b, _, logs := btGrafana(t, false, nil)
-	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), grafana(`/**/{app="x"} |= "x"`)); code == 202 {
-		if got := laneOnce(t, b.s); got.State != ledger.BacktestDone {
-			t.Errorf("a Grafana rule's log query: %s", got.State)
+	for _, expr := range []string{`/**/{app="x"} |= "x"`, `({app="x"} |= "x")`} {
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), grafana(expr)); code == 202 {
+			if got := laneOnce(t, b.s); got.State != ledger.BacktestDone {
+				t.Errorf("a Grafana rule's log query %q: %s", expr, got.State)
+			}
+		} else if code != 400 {
+			t.Errorf("a Grafana rule's log query %q: %d %v", expr, code, m)
 		}
-	} else if code != 400 {
-		t.Errorf("a Grafana rule's log query: %d %v", code, m)
 	}
 	logs.Lock()
 	defer logs.Unlock()

@@ -252,7 +252,8 @@ func (l *Ledger) SetVerdict(ctx context.Context, k FiringKey, c VerdictChange, w
 			return err
 		}
 		out = now
-		return l.keepVerdict(t, f, was, now, w, "verdict on "+firingName(f), o)
+		_, limited := scopeOf(t.ctx)
+		return l.keepVerdict(t, f, was, now, c.Unrelated != nil && !limited, w, "verdict on "+firingName(f), o)
 	})
 	if errors.Is(err, errNothing) {
 		err = nil
@@ -393,10 +394,11 @@ func sameVerdict(a, b Verdict) bool {
 
 // keepVerdict writes now in place of was (none when was.ID is 0), notes the
 // change as what, by w at its time, and judges f's span again. A verdict
-// that says nothing is taken away. Writing "unrelated", or undoing it,
-// takes away the verdicts another held of f (movedHeld), each noted as
-// taken away by w: what a person says of f now is what it is.
-func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, w VerdictBy, what string, o verdict.Options) error {
+// that says nothing is taken away. Writing "unrelated" (said), or undoing
+// it, takes away the verdicts another held of f (movedHeld), each noted as
+// taken away by w: what a person says of f now is what it is. A note
+// rewritten alone, by whoever, takes none away.
+func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, said bool, w VerdictBy, what string, o verdict.Options) error {
 	if was.ID != 0 && sameVerdict(was, now) {
 		return errNothing
 	}
@@ -406,7 +408,7 @@ func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, w VerdictBy, wh
 	if err := writeVerdict(t, was, now); err != nil {
 		return err
 	}
-	if !sameKeys(was.Unrelated, now.Unrelated) || was.UnrelatedBy != now.UnrelatedBy {
+	if said || !sameKeys(was.Unrelated, now.Unrelated) {
 		held, err := l.readVerdicts(t.ctx, t, "WHERE v.moved = ?", heldAt(f.Series, f.Start))
 		if err != nil {
 			return err
@@ -839,7 +841,7 @@ func (l *Ledger) DeleteVerdict(ctx context.Context, k FiringKey, part string, w 
 		if sameVerdict(was, now) {
 			return ErrNoVerdict
 		}
-		return l.keepVerdict(t, f, was, now, w, "verdict on "+firingName(f)+verdictUndone, o)
+		return l.keepVerdict(t, f, was, now, false, w, "verdict on "+firingName(f)+verdictUndone, o)
 	})
 	return err
 }

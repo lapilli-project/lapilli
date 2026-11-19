@@ -1884,7 +1884,8 @@ says, with schema 026, and what building them settled:
   away the verdicts another held of that firing, each noted as `verdict
   on RULE {labels} at START taken away` with what it said, by the writer,
   and not counted among the thirty: what a person says of it now is what
-  it is. A bulk answer's firings are each checked as one alone, and one
+  it is. A note rewritten alone, by whoever, takes none away. A bulk
+  answer's firings are each checked as one alone, and one
   refused refuses all.
 - **Keys moved.** `Decide` passes a window's key to the incident a
   confirmation writes, unmarked; `remapImpact` counts the verdicts naming

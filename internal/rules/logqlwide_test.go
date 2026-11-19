@@ -77,11 +77,15 @@ func TestLogQLComments(t *testing.T) {
 	}
 	// A log query past comments of every kind is one.
 	for expr, want := range map[string]bool{
-		`/**/{app="x"} |= "x"`:                true,
-		"# c\n{app=\"x\"}":                    true,
-		"// c\n  /* d\n */ {app=\"x\"}":       true,
-		"/* {app=\"x\"} */ count_over_time":   false,
-		`sum(count_over_time({app="x"}[5m]))`: false,
+		`/**/{app="x"} |= "x"`:                  true,
+		"# c\n{app=\"x\"}":                      true,
+		"// c\n  /* d\n */ {app=\"x\"}":         true,
+		"/* {app=\"x\"} */ count_over_time":     false,
+		`sum(count_over_time({app="x"}[5m]))`:   false,
+		`({app="x"} |= "x")`:                    true,
+		"( (/* c */ {app=\"x\"}))":              true,
+		"\uFEFF{app=\"x\"} |= \"x\"":            true,
+		`(sum(count_over_time({app="x"}[5m])))`: false,
 	} {
 		if got := LogQuery(expr); got != want {
 			t.Errorf("LogQuery(%q) = %t", expr, got)

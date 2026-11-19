@@ -1167,7 +1167,8 @@ step 3 does otherwise than the sections above say, or says more:
   `'` outside one, is refused as a whole (`rules.LogQLText`: "has a // or
   /* comment, or a ' outside a string"), before the rest, which read the
   same text, its `#` comments blanked; whether it is a log query is read
-  past comments of every kind. No metric query needs them. What Loki
+  past comments of every kind, opening brackets and a byte order mark, as
+  Loki's lexer and grammar read past them. No metric query needs them. What Loki
   answers is held as `--loki`'s always is: 256 MiB, `--max-samples`, the
   series, and a log query's lines refused.
 - **A Loki ruler's files**, from the job: `"loki": true` on a file of the
