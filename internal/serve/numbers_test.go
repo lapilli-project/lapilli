@@ -36,6 +36,8 @@ var stableMetrics = []struct {
 	{"lapilli_incidents", []string{"state", "source"}, nil},
 	{"lapilli_incident_detection_delay_seconds", []string{"incident"}, nil},
 	{"lapilli_last_run_timestamp_seconds", nil, nil},
+	{"lapilli_rule_episodes", []string{"rule"}, []string{"severity", "team"}},
+	{"lapilli_rule_episodes_caught", []string{"rule"}, []string{"severity", "team"}},
 	{"lapilli_rule_firings_during_deploys", []string{"rule"}, []string{"severity", "team"}},
 	{"lapilli_rule_caught_during_deploys", []string{"rule"}, []string{"severity", "team"}},
 	{"lapilli_rule_refired_weeks", []string{"rule"}, []string{"severity", "team"}},

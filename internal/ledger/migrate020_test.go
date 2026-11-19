@@ -59,7 +59,7 @@ func TestMigrate020(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo024, undo023, undo022pg, undo021, undo020), "UPDATE schema_version SET version = 19") {
+		for _, q := range append(slices.Concat(undo025, undo024, undo023, undo022pg, undo021, undo020), "UPDATE schema_version SET version = 19") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -70,7 +70,7 @@ func TestMigrate020(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo024, undo023, undo022, undo021, undo020), "PRAGMA user_version = 19") {
+		for _, q := range append(slices.Concat(undo025, undo024, undo023, undo022, undo021, undo020), "PRAGMA user_version = 19") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -89,6 +89,11 @@ func TestMigrate020(t *testing.T) {
 	x, err := l2.TaskByID(ctx, id)
 	if err != nil || x.Title != "tune it" || x.Goal != "" || x.TeamID != team {
 		t.Errorf("the task after migrating: %+v %v", x, err)
+	}
+	// Its episodes counted, as the leader counts them after an upgrade
+	// (schema 025).
+	if _, err := l2.CountEpisodes(ctx, opts, nil); err != nil {
+		t.Fatal(err)
 	}
 	after, err := l2.Report(ctx, t0, t0.Add(24*time.Hour), opts, true)
 	if err != nil || !reflect.DeepEqual(before.Rules, after.Rules) || len(after.Firings) != 2 {

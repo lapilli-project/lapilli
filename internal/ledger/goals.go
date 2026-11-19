@@ -95,12 +95,16 @@ var GoalMeasures = map[string]GoalMeasure{
 	"incidents.noisy_only":             {Record: true, Incidents: true, Each: true},
 	"incidents.median_lead_seconds":    {Higher: true, Record: true, Incidents: true, Seconds: true, Each: true, NoWorse: true},
 	"during_deploys.precision_without": {Higher: true, Record: true, Share: true},
+	// The firings counted as episodes (docs/design/judging.md, item 2):
+	// how many, and their precision.
+	"episodes.total":     {Each: true},
+	"episodes.precision": {Higher: true, Record: true, Share: true, Each: true, NoWorse: true},
 }
 
 // GoalMeasureNames are the measures, in the order the design lists them.
 var GoalMeasureNames = []string{"firings", "precision", "critical.firings", "critical.share_caught", "refired.firings", "refired.share",
 	"asleep.firings", "off_hours.firings", "asleep.nothing", "off_hours.nothing", "incidents.missed", "impacts.missed",
-	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without"}
+	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without", "episodes.total", "episodes.precision"}
 
 // Bounds on what --config declares of goals: 50 goals, and four lists of
 // severities counted as critical among them, as each is a count of its own
@@ -231,9 +235,9 @@ func CheckGoal(g *Goal) error {
 	case g.Each != goalWeek && !markedKind.MatchString(g.Each):
 		return invalid("each is week, or a kind of marked window, such as sale")
 	case g.Each != goalWeek && !m.Each:
-		return invalid("%s isn't counted inside a marked window: with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only or incidents.median_lead_seconds", g.Measure)
+		return invalid("%s isn't counted inside a marked window: with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only, incidents.median_lead_seconds, episodes.total or episodes.precision", g.Measure)
 	case g.NoWorseThan != "" && !m.NoWorse:
-		return invalid("no_worse_than sets %s beside the weeks before, which only precision and incidents.median_lead_seconds can be", g.Measure)
+		return invalid("no_worse_than sets %s beside the weeks before, which only precision, incidents.median_lead_seconds and episodes.precision can be", g.Measure)
 	case g.NoWorseThan != "" && g.Each == goalWeek:
 		return invalid("no_worse_than holds over a period: give each, a kind of marked window")
 	}

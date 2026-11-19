@@ -86,6 +86,43 @@
   keep a copy of its disk, or of its database, first ([Going back after a
   schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
 
+- **Episodes beside firings** (docs/design/judging.md, step 3). A rule's
+  firings are counted as episodes too, one problem however many alerts it
+  is: its firings with the same values of the match labels in effect,
+  each starting while another is on or within `--refire` of the latest end
+  among them so far, parted at midnight in `--tz`, so that an alert on
+  twelve pods, or one that flaps, is one episode a day, not twelve or
+  twenty stones. An episode is white when any of its firings is white, and
+  judged by its first firing's record. They change no number of today's:
+  precision, noisy, the badge, the suggestions and what a catch counts for
+  stay by firings, and noisy by episodes, by the same thresholds, is shown
+  and decides nothing. The report (`lapilli verdict --json`,
+  `/api/v1/report`) gives `rules[].episodes` (`total`, `white`,
+  `unjudged`, `noisy`), each firing's `episode` (numbered in the report)
+  and `day`, and `settings.zone`, so that numbers.md's new "Episodes"
+  counts them again; the CSV an `episode` column, at the end; `/metrics`
+  and `--metrics` `lapilli_rule_episodes` and
+  `lapilli_rule_episodes_caught`; `/api/v1/summary` each row's `episodes`
+  (`total`, `caught`, `unjudged`, `precision`, `noisy_rules`) and each
+  marked kind's `episodes`, `episodes_caught` and `episodes_precision`;
+  MCP each rule's `episodes` and `noisy_episodes`, and each firing's
+  episode. The rules list has an Episodes column and `noisy:episodes`; a
+  rule's page its episodes, their precision, and "Noisy by firings, not by
+  episodes" when the two differ, and of its latest firings the episode
+  each is of; the overview's noisiest rules their episodes; the digest a
+  line of the noisy rules' episodes. Goals take `episodes.total` and
+  `episodes.precision`, each with `each: KIND` (an episode during a kind
+  when its first firing is), the latter with `no_worse_than: before`. **Ledger
+  schema 025**, after 024: `firings.episode` and `episode_white`, and
+  `episodes` and `episodes_white` on `days`, `weeks`, `marked_days` and
+  `marked_weeks`. Each write walks the firings of the days it counts once
+  more; the upgrade, and a ledger opened in another `--tz`, count the
+  episodes again a week at a time, the newest first, in the leader's
+  round, and until then those weeks say their episodes aren't counted yet
+  (`episodes: null`). No stone changes. A lapilli before this one doesn't
+  open a ledger it has migrated: keep a copy of its disk, or of its
+  database, first.
+
 ### Changed
 
 - **A signal taken away judges no one** (docs/design/judging.md, step 2,

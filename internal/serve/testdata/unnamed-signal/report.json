@@ -25,7 +25,13 @@
       "off_hours": 0,
       "off_hours_black": 0,
       "asleep": 0,
-      "asleep_black": 0
+      "asleep_black": 0,
+      "episodes": {
+        "total": 3,
+        "white": 1,
+        "unjudged": 1,
+        "noisy": false
+      }
     }
   ],
   "incidents": [
@@ -72,7 +78,9 @@
       "start": "2026-11-01T10:02:00Z",
       "end": "2026-11-01T10:11:00Z",
       "white": false,
-      "no_record": true
+      "no_record": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -84,7 +92,9 @@
       "end": "2026-11-01T11:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -96,7 +106,9 @@
       "end": "2026-11-01T12:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -108,7 +120,9 @@
       "end": "2026-11-01T13:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -120,7 +134,9 @@
       "end": "2026-11-01T14:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -132,7 +148,9 @@
       "end": "2026-11-01T15:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -144,7 +162,9 @@
       "end": "2026-11-01T16:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -156,7 +176,9 @@
       "end": "2026-11-01T17:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -168,7 +190,9 @@
       "end": "2026-11-01T18:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -180,7 +204,9 @@
       "end": "2026-11-01T19:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -192,7 +218,9 @@
       "end": "2026-11-01T20:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -204,7 +232,9 @@
       "end": "2026-11-01T21:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -216,7 +246,9 @@
       "end": "2026-11-01T22:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -228,7 +260,9 @@
       "end": "2026-11-01T23:11:00Z",
       "white": false,
       "no_record": true,
-      "refired": true
+      "refired": true,
+      "episode": 1,
+      "day": "2026-11-01"
     },
     {
       "rule": "Errors",
@@ -239,7 +273,9 @@
       "start": "2026-11-02T00:02:00Z",
       "end": "2026-11-02T00:11:00Z",
       "white": false,
-      "refired": true
+      "refired": true,
+      "episode": 2,
+      "day": "2026-11-02"
     },
     {
       "rule": "Errors",
@@ -250,7 +286,9 @@
       "start": "2026-11-02T01:02:00Z",
       "end": "2026-11-02T01:11:00Z",
       "white": false,
-      "refired": true
+      "refired": true,
+      "episode": 2,
+      "day": "2026-11-02"
     },
     {
       "rule": "Errors",
@@ -261,7 +299,9 @@
       "start": "2026-11-02T02:02:00Z",
       "end": "2026-11-02T02:11:00Z",
       "white": false,
-      "refired": true
+      "refired": true,
+      "episode": 2,
+      "day": "2026-11-02"
     },
     {
       "rule": "Errors",
@@ -272,7 +312,9 @@
       "start": "2026-11-02T03:02:00Z",
       "end": "2026-11-02T03:11:00Z",
       "white": false,
-      "refired": true
+      "refired": true,
+      "episode": 2,
+      "day": "2026-11-02"
     },
     {
       "rule": "Errors",
@@ -283,7 +325,9 @@
       "start": "2026-11-02T04:02:00Z",
       "end": "2026-11-02T04:11:00Z",
       "white": false,
-      "refired": true
+      "refired": true,
+      "episode": 2,
+      "day": "2026-11-02"
     },
     {
       "rule": "Errors",
@@ -294,7 +338,9 @@
       "start": "2026-11-02T05:02:00Z",
       "end": "2026-11-02T05:11:00Z",
       "white": false,
-      "refired": true
+      "refired": true,
+      "episode": 2,
+      "day": "2026-11-02"
     },
     {
       "rule": "Errors",
@@ -307,7 +353,9 @@
       "white": true,
       "incidents": [
         "INC-1"
-      ]
+      ],
+      "episode": 3,
+      "day": "2026-11-02"
     }
   ],
   "settings": {
@@ -319,6 +367,7 @@
     "unknown_length_ns": 3600000000000,
     "record_lookback_ns": 1209600000000000,
     "impact_from": "2026-10-31T11:00:00Z",
-    "record_by_week": true
+    "record_by_week": true,
+    "zone": "UTC"
   }
 }

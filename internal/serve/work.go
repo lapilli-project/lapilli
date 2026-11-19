@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -111,6 +112,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	} else if err != nil {
 		s.fail("judging again", err)
 		pended = false
+	}
+	// The episodes of the weeks not counted yet, after an upgrade or a
+	// change of zone, a week a write from the newest back
+	// (docs/design/judging.md, item 2): no stone changes.
+	if n, err := s.l.CountEpisodes(ctx, o, func() bool { return s.still(ctx) }); err != nil {
+		s.fail("counting the episodes", err)
+	} else if n > 0 {
+		s.log.Info("episodes counted, from the newest week back", "weeks", n)
 	}
 	switch {
 	case rejudge && pended && s.still(ctx):
@@ -2201,7 +2210,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{goals, onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, onLine, episodesLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2215,6 +2224,43 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 // digestAbout is what is told of a digest: its numbers, for a receiver to
 // use as it likes, and the report as text, for one to pass on to a chat:
 // as written, and escaped for Slack.
+//
+// episodesLine is what the digest says of the noisy rules' episodes
+// (docs/design/judging.md, item 2): each one's firings in its episodes, and
+// those caught, the most firings that caught nothing first; and of a rule
+// noisy by firings and not by episodes, that it isn't. "" with none, or
+// with the week's episodes not counted yet.
+func episodesLine(l string, rep *verdict.Report) string {
+	if rep.EpisodesNotCounted {
+		return ""
+	}
+	var noisy []verdict.RuleResult
+	for _, r := range rep.Rules {
+		if r.Noisy && r.Episodes.Total > 0 {
+			noisy = append(noisy, r)
+		}
+	}
+	if len(noisy) == 0 {
+		return ""
+	}
+	slices.SortStableFunc(noisy, func(a, b verdict.RuleResult) int {
+		return cmp.Or(cmp.Compare(b.Black-b.Unjudged, a.Black-a.Unjudged), strings.Compare(a.Rule, b.Rule))
+	})
+	items := make([]string, 0, 10)
+	for _, r := range noisy[:min(len(noisy), 10)] {
+		if r.Episodes.Noisy {
+			items = append(items, tr(l, "%s, %d firings in %d episodes, %d caught", verdict.Clean(r.Rule), r.Firings, r.Episodes.Total, r.Episodes.White))
+		} else {
+			items = append(items, tr(l, "%s, %d firings in %d episodes, %d caught: noisy by firings, not by episodes", verdict.Clean(r.Rule), r.Firings, r.Episodes.Total, r.Episodes.White))
+		}
+	}
+	line := tr(l, "The noisy rules' episodes, one problem each however many alerts: %s.", strings.Join(items, "; "))
+	if n := len(noisy) - len(items); n > 0 {
+		line += " " + tr(l, "And %d more.", n)
+	}
+	return line
+}
+
 func digestAbout(rep *verdict.Report, text, team string, spare []string) map[string]any {
 	firings, white := 0, 0
 	noisy, silent := []string{}, 0

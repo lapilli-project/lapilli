@@ -82,6 +82,10 @@ type Options struct {
 	// changed no more (docs/design/signals.md, "Step 3, as built"). Zero,
 	// not said: then Signals are held to what the ledger keeps.
 	SignalsGen int64 `json:"-"`
+	// Zone is the zone days are counted in, which parts episodes at
+	// midnight (countEpisodes): --tz, or lapilli serve's ledger's; the
+	// machine's when nil.
+	Zone *time.Location `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -138,6 +142,14 @@ type Judged struct {
 	// neither white nor black, and in none of the numbers. A report's
 	// Firings leave such firings out.
 	Excused bool `json:"-"`
+	// Episode is the episode it is of (docs/design/judging.md, item 2),
+	// numbered from 1 in the report in order of their first firing: 0
+	// when the report's episodes aren't counted (lapilli serve, before
+	// its ledger has counted the weeks). Day is the day its start falls
+	// on in the zone days are counted in (Settings.Zone), 2026-11-19:
+	// what parts an episode at midnight.
+	Episode int    `json:"episode,omitempty"`
+	Day     string `json:"day,omitempty"`
 }
 
 // RuleResult is one rule's stones.
@@ -210,6 +222,9 @@ type RuleResult struct {
 	// that came during one of the kind (docs/design/marked.md): in
 	// Firings and White as any other, and counted apart.
 	Marked map[string]MarkedCount `json:"marked,omitempty"`
+	// Episodes are its firings counted as episodes (EpisodeCount), beside
+	// them: left out with none, or not counted.
+	Episodes EpisodeCount `json:"episodes,omitzero"`
 }
 
 // MarkedCount is a rule's firings during the windows of one kind: those
@@ -373,6 +388,10 @@ type Report struct {
 	// read back from lapilli serve's ledger has none: its numbers keep
 	// what a rule fired before its last replay failed.
 	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
+	// EpisodesNotCounted says, in lapilli serve, that its ledger hasn't
+	// counted the episodes of all of the period yet (after an upgrade, or
+	// a change of zone): its rules' and firings' are left out.
+	EpisodesNotCounted bool `json:"-"`
 }
 
 // Settings are what a report's firings were judged by, as Options has
@@ -406,6 +425,10 @@ type Settings struct {
 	// with an impact signal that has no name.
 	ImpactSignals []Signal    `json:"impact_signals,omitempty"`
 	ImpactRules   []RuleEntry `json:"impact_rules,omitempty"`
+	// Zone is the zone days are counted in, an IANA name: what each
+	// firing's day (Judged.Day) is of, and what parts episodes at
+	// midnight.
+	Zone string `json:"zone,omitempty"`
 }
 
 // NoRecordOf is, with named signals, whether a period, or a row, has no
@@ -426,7 +449,8 @@ func (o Options) Settings() *Settings {
 		match = []string{}
 	}
 	s := &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
-		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil}
+		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil,
+		Zone: o.zone().String()}
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
 	}
@@ -608,6 +632,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		return x.Rule < y.Rule
 	})
+	rep.countEpisodes(o, at)
 	rep.Credit(nil)
 	return rep
 }

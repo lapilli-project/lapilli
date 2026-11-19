@@ -49,7 +49,7 @@ func openAt(ctx context.Context, where string, loc *time.Location) (*Ledger, err
 	return Open(ctx, where, loc)
 }
 
-var opts = verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}}
+var opts = verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}, Zone: time.UTC}
 
 // keepAll keeps the record of the week from t0, and of the two before it,
 // and catches no firing of world's.

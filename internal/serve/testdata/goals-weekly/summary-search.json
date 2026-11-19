@@ -80,6 +80,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -143,6 +150,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
       },
       "goals": [
         {

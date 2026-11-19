@@ -109,6 +109,14 @@ func periodValue(measure string, c markedCount) *float64 {
 			f := float64(*m)
 			return &f
 		}
+	case "episodes.total":
+		if c.episodesCounted {
+			return n(c.Episodes)
+		}
+	case "episodes.precision":
+		if c.episodesCounted {
+			return share(c.EpisodesCaught, c.episodesJudged)
+		}
 	}
 	return nil
 }
@@ -168,6 +176,8 @@ func periodOn(g ledger.Goal, byCatching bool, o markedOcc, in, before markedCoun
 		unknown(whyByCatching)
 	case m.Record && when.noRecord:
 		unknown(whyNoRecord)
+	case episodesMeasure(g.Measure) && (!in.episodesCounted || kind == "no_worse_than" && !before.episodesCounted):
+		unknown(whyNoEpisodes)
 	case v == nil:
 		unknown(whyNoValue)
 	case kind == "no_worse_than" && b == nil:

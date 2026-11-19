@@ -922,8 +922,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	if err := f.signalsRead(); err != nil {
 		return nil, err
 	}
-	// The hours are read once the zone is known, wherever --tz came.
+	// The hours are read once the zone is known, wherever --tz came; and
+	// the days episodes are parted by.
 	f.opts.Hours = verdict.DefaultHours(f.loc)
+	f.opts.Zone = f.loc
 	if f.work != "" {
 		if err := f.opts.Hours.ParseWork(f.work); err != nil {
 			return nil, fmt.Errorf("--work-hours %v", err)

@@ -1041,8 +1041,10 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	if o.ImpactFrom, err = s.impactFrom(ctx, s.criterionOf(set)); err != nil {
 		return o, err
 	}
-	// What it replays is judged by the weeks it keeps its stones by.
+	// What it replays is judged by the weeks it keeps its stones by, and
+	// its episodes parted by the ledger's days.
 	o.RecordWeek = s.l.WeekOf
+	o.Zone = s.l.Location()
 	for k, v := range set {
 		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) {
 			continue // the incident criteria's, above and below

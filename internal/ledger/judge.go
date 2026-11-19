@@ -342,6 +342,11 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	if err := l.tieUntied(t, o); err != nil {
 		return err
 	}
+	// The episodes of the days the tally counts, from the stones just
+	// given (docs/design/judging.md, item 2).
+	if err := l.walkEpisodes(t, lo, hi, o); err != nil {
+		return err
+	}
 	return l.tally(t, lo, hi)
 }
 
@@ -631,8 +636,9 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	// An excused firing is counted apart: neither white nor black. By
 	// the signals its alert is tied to, too, so that a rule's firings are
 	// judged by them apart (docs/design/signals.md, "In the ledger").
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white)
-		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white)
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white)
+		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white),
+			`+firstFirings+`, sum(f.episode_white)
 		FROM firings f JOIN series s ON s.id = f.series_id
 		WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.day, f.rule_id, s.signals`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
@@ -648,8 +654,8 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week >= ? AND week <= ?", w1, w2); err != nil {
 		return err
 	}
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white)
-		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white)
+		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), sum(episodes), sum(episodes_white) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY 1, 2, 3`, w1, w2+6); err != nil {
 		return err
 	}

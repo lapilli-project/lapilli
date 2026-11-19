@@ -81,11 +81,29 @@ it first. The bar's search finds rules, incidents and teams, and opens the
 one it finds. The rules list gives each rule a badge on three axes (Noisy,
 No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
-name and `is:noisy`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
+name and `is:noisy`, `noisy:episodes`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all; each rule's own labels
 are chips too, each picking the rules with it
 ([docs/design/ui.md](design/ui.md)).
+
+Beside its firings, each rule's are counted as **episodes**, one problem
+however many alerts it is: its firings with the same values of the match
+labels, overlapping or re-firing within `--refire`, parted at midnight in
+`--tz` ([The numbers](numbers.md#episodes)). The rules list has an
+Episodes column, and `noisy:episodes` picks the rules noisy by their
+episodes, by the same thresholds as by firings; a rule's page says its
+episodes, their precision, and when it is noisy by one and not the other
+("Noisy by firings, not by episodes: 41 firings in 17 episodes"), and of
+each of its latest firings the episode it is of; the overview's noisiest
+rules their episodes; the digest each noisy rule's; `/api/v1/summary`,
+MCP, the report, the CSV and `/metrics` theirs. Noisy by episodes decides
+nothing: the badge, the suggestions and what a catch counts for stay by
+firings. A ledger upgraded to this release, or opened in another `--tz`,
+counts its episodes again a week at a time, the newest first, in the
+leader's round: until it has, those weeks say their episodes aren't
+counted yet. Goals take `episodes.total` and `episodes.precision`
+([docs/design/goals.md](design/goals.md)).
 
 With no incident written down over the weeks shown, or the two before
 their end, the pages call no rule noisy and show no precision, and say why

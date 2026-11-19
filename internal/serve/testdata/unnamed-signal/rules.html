@@ -65,6 +65,7 @@
 <p class="quiet keys"><code>team:</code> <code>severity:</code> <code>is:</code> <code>status:</code> <code>has:</code> <code>label:k=v</code> <code>group:</code></p>
 <fieldset><legend>Performance</legend>
   <label class="opt zero"><input type="checkbox" name="perf" value="noisy"> <span>Noisy</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="noisy-episodes"> <span>Noisy by episodes</span> <span class="n">0</span></label>
   <label class="opt"><input type="checkbox" name="perf" value="unrecorded"> <span>No record</span> <span class="n">1</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="ok"> <span>OK</span> <span class="n">0</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="silent"> <span>Silent</span> <span class="n">0</span></label>
@@ -88,6 +89,7 @@
 <p class="quiet keys"><code>team:</code> <code>severity:</code> <code>is:</code> <code>status:</code> <code>has:</code> <code>label:k=v</code> <code>group:</code></p>
 <fieldset><legend>Performance</legend>
   <label class="opt zero"><input type="checkbox" name="perf" value="noisy"> <span>Noisy</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="noisy-episodes"> <span>Noisy by episodes</span> <span class="n">0</span></label>
   <label class="opt"><input type="checkbox" name="perf" value="unrecorded"> <span>No record</span> <span class="n">1</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="ok"> <span>OK</span> <span class="n">0</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="silent"> <span>Silent</span> <span class="n">0</span></label>
@@ -133,19 +135,19 @@
 <p class="quiet">At most 100 rules at a time, 20 for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.</p>
 </fieldset>
 <div class="scroll"><table class="rules-table">
-<thead><tr><th scope="col" class="pick"><span class="vh">Pick</span></th><th scope="col">Rule</th><th scope="col">Team</th><th scope="col">Severity</th><th scope="col" class="n">Fired</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">? Not judged</th><th scope="col" class="n">Precision</th><th scope="col" class="n">Refired</th><th scope="col" class="n">Incidents</th><th scope="col">12 weeks</th></tr></thead>
+<thead><tr><th scope="col" class="pick"><span class="vh">Pick</span></th><th scope="col">Rule</th><th scope="col">Team</th><th scope="col">Severity</th><th scope="col" class="n">Fired</th><th scope="col" class="n">Episodes</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">? Not judged</th><th scope="col" class="n">Precision</th><th scope="col" class="n">Refired</th><th scope="col" class="n">Incidents</th><th scope="col">12 weeks</th></tr></thead>
 <tbody>
 <tr class=" has-more">
   <td class="pick"><input type="checkbox" name="rule" value="Errors" aria-label="Errors" disabled></td>
   <td class="rule"><a href="/rules/Errors?weeks=4"><bdi>Errors</bdi></a> <span class="badges"><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></span></td>
   <td class="name">–</td>
   <td class="name"><bdi>page</bdi></td>
-  <td class="n">21</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td class="n">1</td>
+  <td class="n">21</td><td class="n">3</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td class="n">1</td>
   <td><svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="Stones by week: 08-17: 0 ○ 0 ●; 08-24: 0 ○ 0 ●; 08-31: 0 ○ 0 ●; 09-07: 0 ○ 0 ●; 09-14: 0 ○ 0 ●; 09-21: 0 ○ 0 ●; 09-28: 0 ○ 0 ●; 10-05: 0 ○ 0 ●; 10-12: 0 ○ 0 ●; 10-19: 0 ○ 0 ●; 10-26: 0 ○ 0 ●, 14 not judged; 11-02: 1 ○ 6 ●"><g><title>08-17: 0 ○ 0 ●</title><rect class="w" x="0" y="18" width="5" height="0"/><rect class="b" x="0" y="18" width="5" height="0"/></g><g><title>08-24: 0 ○ 0 ●</title><rect class="w" x="6" y="18" width="5" height="0"/><rect class="b" x="6" y="18" width="5" height="0"/></g><g><title>08-31: 0 ○ 0 ●</title><rect class="w" x="12" y="18" width="5" height="0"/><rect class="b" x="12" y="18" width="5" height="0"/></g><g><title>09-07: 0 ○ 0 ●</title><rect class="w" x="18" y="18" width="5" height="0"/><rect class="b" x="18" y="18" width="5" height="0"/></g><g><title>09-14: 0 ○ 0 ●</title><rect class="w" x="24" y="18" width="5" height="0"/><rect class="b" x="24" y="18" width="5" height="0"/></g><g><title>09-21: 0 ○ 0 ●</title><rect class="w" x="30" y="18" width="5" height="0"/><rect class="b" x="30" y="18" width="5" height="0"/></g><g><title>09-28: 0 ○ 0 ●</title><rect class="w" x="36" y="18" width="5" height="0"/><rect class="b" x="36" y="18" width="5" height="0"/></g><g><title>10-05: 0 ○ 0 ●</title><rect class="w" x="42" y="18" width="5" height="0"/><rect class="b" x="42" y="18" width="5" height="0"/></g><g><title>10-12: 0 ○ 0 ●</title><rect class="w" x="48" y="18" width="5" height="0"/><rect class="b" x="48" y="18" width="5" height="0"/></g><g><title>10-19: 0 ○ 0 ●</title><rect class="w" x="54" y="18" width="5" height="0"/><rect class="b" x="54" y="18" width="5" height="0"/></g><g><title>10-26: 0 ○ 0 ●, 14 not judged</title><rect class="w" x="60" y="18" width="5" height="0"/><rect class="b" x="60" y="18" width="5" height="0"/><rect class="u" x="60" y="0" width="5" height="18"/></g><g><title>11-02: 1 ○ 6 ●</title><rect class="w" x="66" y="16.714285714285715" width="5" height="1.2857142857142858"/><rect class="b" x="66" y="9" width="5" height="7.714285714285714"/></g></svg></td>
 </tr>
-<tr class="more"><td class="pick"></td><td colspan="11"><p class="row-notes"><span class="vh"><bdi>Errors</bdi>: </span><span>re-fired: 90% of firings</span><span>incidents: first 1, alone 1</span></p></td></tr></tbody>
+<tr class="more"><td class="pick"></td><td colspan="12"><p class="row-notes"><span class="vh"><bdi>Errors</bdi>: </span><span>re-fired: 90% of firings</span><span>incidents: first 1, alone 1</span></p></td></tr></tbody>
 <tfoot><tr><th scope="row" colspan="4">The rule shown</th>
-  <td class="n">21</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
+  <td class="n">21</td><td class="n">3</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
 </table></div></form>
 
 

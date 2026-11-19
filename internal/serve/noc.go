@@ -125,6 +125,11 @@ type summaryRow struct {
 	DuringDeploys summaryDeploys   `json:"during_deploys"`
 	Incidents     summaryIncidents `json:"incidents"`
 	Impacts       summaryImpacts   `json:"impacts"`
+	// Episodes are the week's firings counted as episodes
+	// (docs/design/judging.md, item 2), beside them, changing none of
+	// them: null until the ledger has counted the week's (after an
+	// upgrade, or a change of zone).
+	Episodes *summaryEpisodes `json:"episodes"`
 	// Goals are the goals --config declares of the row's team (everyone's,
 	// in a row for everyone; the team's own and each team's, in a team's),
 	// each with its value and the week's result (docs/design/goals.md); left
@@ -161,6 +166,26 @@ type summaryMarked struct {
 	Refired          int              `json:"refired"`
 	Incidents        summaryIncidents `json:"incidents"`
 	Impacts          summaryIncidents `json:"impacts"`
+	// Episodes are those whose first firing is marked with the kind, and
+	// EpisodesCaught those of them with a white firing; null, with
+	// EpisodesPrecision, until the ledger has counted the week's.
+	Episodes          *int     `json:"episodes"`
+	EpisodesCaught    *int     `json:"episodes_caught"`
+	EpisodesPrecision *float64 `json:"episodes_precision"`
+}
+
+// summaryEpisodes are a row's episodes: Total, Caught those with a white
+// firing, Unjudged those not judged (no white firing, and no record at
+// their first firing's), Precision Caught over those judged (null as the
+// row's is), and NoisyRules how many of the row's rules are noisy by
+// their episodes in the week, by the same thresholds as by firings
+// (noisy_at), which decides nothing.
+type summaryEpisodes struct {
+	Total      int      `json:"total"`
+	Caught     int      `json:"caught"`
+	Unjudged   int      `json:"unjudged"`
+	Precision  *float64 `json:"precision"`
+	NoisyRules int      `json:"noisy_rules"`
 }
 
 type summaryCount struct {
@@ -348,6 +373,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			var unjudgedDeploys, unjudgedCrit int
 			unjudgedSev := map[string]int{}
 			unjudgedCrits := make([]int, len(lists))
+			var ep summaryEpisodes
 			for id, x := range t.by[w] {
 				rule := t.rules[id]
 				if !mine(rule.Name) {
@@ -355,6 +381,12 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				}
 				u := t.unjudged(w, id)
 				ub := u.Firings - u.White
+				ep.Total += x.Episodes
+				ep.Caught += x.EpisodesWhite
+				ep.Unjudged += u.Episodes - u.EpisodesWhite
+				if j := t.judged(w, id); noisy(j.Episodes, j.EpisodesWhite, t.o) {
+					ep.NoisyRules++
+				}
 				row.Firings += x.Firings
 				row.Caught += x.White
 				row.Unjudged += ub
@@ -406,6 +438,10 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			crit.Share = judged(crit.Caught, crit.Firings, unjudgedCrit)
 			row.Critical = crit
 			row.Precision = judged(row.Caught, row.Firings, row.Unjudged)
+			if t.episodesCounted(w) {
+				ep.Precision = judged(ep.Caught, ep.Total, ep.Unjudged)
+				row.Episodes = &ep
+			}
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
 			for i, x := range refired {
 				if mine(x.Rule) {

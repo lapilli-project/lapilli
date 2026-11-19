@@ -1504,40 +1504,44 @@ type MarkedTally struct {
 	// Signals are the signals the firings' alerts are tied to, of a tally
 	// by them (MarkedWeeksBy): 0 of one summed over them.
 	Signals int64
+	// Episodes are the episodes whose first firing is marked with the
+	// kind (docs/design/judging.md, item 2), and EpisodesWhite those of
+	// them with a white firing.
+	Episodes, EpisodesWhite int
 }
 
 // MarkedDays are the firings marked with each kind by day and rule, from
 // day to day.
 func (l *Ledger) MarkedDays(ctx context.Context, from, to int64) ([]MarkedTally, error) {
-	return l.markedTallies(ctx, `SELECT d.day, d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired), 0 FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
+	return l.markedTallies(ctx, `SELECT d.day, d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired), 0, sum(d.episodes), sum(d.episodes_white) FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
 		WHERE d.day >= ? AND d.day <= ? GROUP BY d.day, d.rule_id, k.name ORDER BY d.day, d.rule_id, k.name`, from, to)
 }
 
 // MarkedDaysBy are MarkedDays, apart by the signals the firings' alerts
 // are tied to: what a firing is judged by.
 func (l *Ledger) MarkedDaysBy(ctx context.Context, from, to int64) ([]MarkedTally, error) {
-	return l.markedTallies(ctx, `SELECT d.day, d.rule_id, k.name, d.firings, d.white, d.refired, d.signals FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
+	return l.markedTallies(ctx, `SELECT d.day, d.rule_id, k.name, d.firings, d.white, d.refired, d.signals, d.episodes, d.episodes_white FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
 		WHERE d.day >= ? AND d.day <= ? ORDER BY d.day, d.rule_id, k.name, d.signals`, from, to)
 }
 
 // MarkedWeeksBy are MarkedWeeks, apart by the signals the firings' alerts
 // are tied to.
 func (l *Ledger) MarkedWeeksBy(ctx context.Context, from, to int64) ([]MarkedTally, error) {
-	return l.markedTallies(ctx, `SELECT d.week, d.rule_id, k.name, d.firings, d.white, d.refired, d.signals FROM marked_weeks d JOIN marked_kinds k ON k.id = d.kind_id
+	return l.markedTallies(ctx, `SELECT d.week, d.rule_id, k.name, d.firings, d.white, d.refired, d.signals, d.episodes, d.episodes_white FROM marked_weeks d JOIN marked_kinds k ON k.id = d.kind_id
 		WHERE d.week >= ? AND d.week <= ? ORDER BY d.week, d.rule_id, k.name, d.signals`, from, to)
 }
 
 // MarkedWeeks are the firings marked with each kind by week and rule, from
 // the week starting on one Monday to that starting on another.
 func (l *Ledger) MarkedWeeks(ctx context.Context, from, to int64) ([]MarkedTally, error) {
-	return l.markedTallies(ctx, `SELECT d.week, d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired), 0 FROM marked_weeks d JOIN marked_kinds k ON k.id = d.kind_id
+	return l.markedTallies(ctx, `SELECT d.week, d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired), 0, sum(d.episodes), sum(d.episodes_white) FROM marked_weeks d JOIN marked_kinds k ON k.id = d.kind_id
 		WHERE d.week >= ? AND d.week <= ? GROUP BY d.week, d.rule_id, k.name ORDER BY d.week, d.rule_id, k.name`, from, to)
 }
 
 // RuleMarked are a rule's firings marked with each kind, by day, from day
 // to day.
 func (l *Ledger) RuleMarked(ctx context.Context, rule string, from, to int64) ([]MarkedTally, error) {
-	return l.markedTallies(ctx, `SELECT d.day, d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired), 0 FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
+	return l.markedTallies(ctx, `SELECT d.day, d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired), 0, sum(d.episodes), sum(d.episodes_white) FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
 		WHERE d.rule_id = (SELECT id FROM rules WHERE name = ?) AND d.day >= ? AND d.day <= ? GROUP BY d.day, d.rule_id, k.name ORDER BY d.day, k.name`, rule, from, to)
 }
 
@@ -1550,7 +1554,7 @@ func (l *Ledger) markedTallies(ctx context.Context, q string, args ...any) ([]Ma
 	var out []MarkedTally
 	for rows.Next() {
 		var x MarkedTally
-		if err := rows.Scan(&x.At, &x.Rule, &x.Kind, &x.Firings, &x.White, &x.Refired, &x.Signals); err != nil {
+		if err := rows.Scan(&x.At, &x.Rule, &x.Kind, &x.Firings, &x.White, &x.Refired, &x.Signals, &x.Episodes, &x.EpisodesWhite); err != nil {
 			return nil, err
 		}
 		out = append(out, x)
@@ -1579,14 +1583,15 @@ func (l *Ledger) tallyMarked(t *txn, d1, d2, w1, w2 int64) error {
 	if ok, err := t.marks(); err != nil || !ok {
 		return err
 	}
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO marked_days (day, rule_id, kind_id, signals, firings, white, refired)
-		SELECT f.day, f.rule_id, k.id, s.signals, count(*), sum(f.white), sum(f.refired) FROM firings f JOIN marked_kinds k ON `+markedOn+`
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO marked_days (day, rule_id, kind_id, signals, firings, white, refired, episodes, episodes_white)
+		SELECT f.day, f.rule_id, k.id, s.signals, count(*), sum(f.white), sum(f.refired), `+firstFirings+`, sum(f.episode_white)
+		FROM firings f JOIN marked_kinds k ON `+markedOn+`
 		JOIN series s ON s.id = f.series_id
 		WHERE f.start_at >= ? AND f.start_at < ? AND f.marked != 0 GROUP BY f.day, f.rule_id, k.id, s.signals`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
 	}
-	_, err := t.ExecContext(t.ctx, `INSERT INTO marked_weeks (week, rule_id, kind_id, signals, firings, white, refired)
-		SELECT day - (day + 3) % 7, rule_id, kind_id, signals, sum(firings), sum(white), sum(refired) FROM marked_days
+	_, err := t.ExecContext(t.ctx, `INSERT INTO marked_weeks (week, rule_id, kind_id, signals, firings, white, refired, episodes, episodes_white)
+		SELECT day - (day + 3) % 7, rule_id, kind_id, signals, sum(firings), sum(white), sum(refired), sum(episodes), sum(episodes_white) FROM marked_days
 		WHERE day >= ? AND day <= ? GROUP BY 1, 2, 3, 4`, w1, w2+6)
 	return err
 }

@@ -36,6 +36,7 @@
 <dd class="big">{{.Backtest}}{{template "delta" .BacktestBy}}</dd>
 <dd>{{if .Either}}{{t "alike with what really fired, of %d" .Either}}{{else}}{{t "not set beside what really fired"}}{{end}}</dd></div>
 </dl>{{end}}
+{{if .Firings}}<p class="episodes">{{if .EpisodesCounted}}{{t "Episodes: %d, each one problem, its alerts of the same labels overlapping or re-firing within a day; %d of them caught something, precision by episodes %s." .Episodes .EpisodesWhite .EpisodesPrecision}}{{if .NoisyApart}} {{if .Noisy}}{{t "Noisy by firings, not by episodes: %d firings in %d episodes." .Firings .Episodes}}{{else}}{{t "Noisy by episodes, not by firings: %d firings in %d episodes." .Firings .Episodes}}{{end}}{{end}}{{else}}{{t "Its episodes aren't counted yet: the ledger counts them a week at a time, the newest first."}}{{end}}</p>{{end}}
 
 {{with .Strip}}<figure class="strip">
 <figcaption>{{t "The last 84 days"}}</figcaption>
@@ -69,7 +70,7 @@
 <h2>{{t "Latest firings"}}</h2>
 {{if .Latest}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
-<tbody>{{range .Latest}}<tr><td>{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Latest}}<tr><td>{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}{{if gt .EpisodeFirings 1}} <span class="quiet">{{t "of an episode of %d firings from %s" .EpisodeFirings (at $loc .EpisodeStart)}}</span>{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>
 <p><a href="{{$.Link "/firings" "rule" .Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>

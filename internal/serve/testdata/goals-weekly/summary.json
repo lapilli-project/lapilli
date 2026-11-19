@@ -74,6 +74,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 1,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "critical-caught",
@@ -144,6 +151,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 1,
+        "precision": null,
+        "noisy_rules": 0
       },
       "goals": [
         {
@@ -222,6 +236,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -293,6 +314,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 2,
+        "caught": 0,
+        "unjudged": 2,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "critical-caught",
@@ -363,6 +391,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 2,
+        "caught": 0,
+        "unjudged": 2,
+        "precision": null,
+        "noisy_rules": 0
       },
       "goals": [
         {
@@ -439,6 +474,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -509,6 +551,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 1,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "critical-caught",
@@ -577,6 +626,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 1,
+        "noisy_rules": 0
       },
       "goals": [
         {
@@ -651,6 +707,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
       },
       "goals": [
         {
@@ -733,6 +796,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 2,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 0.5,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "critical-caught",
@@ -801,6 +871,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 1,
+        "unjudged": 0,
+        "precision": 1,
+        "noisy_rules": 0
       },
       "goals": [
         {
@@ -888,6 +965,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "every-missed",
@@ -958,6 +1042,13 @@
         "median_lead_seconds": null,
         "by_signal": {}
       },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
+      },
       "goals": [
         {
           "name": "critical-caught",
@@ -1026,6 +1117,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": 0,
+        "noisy_rules": 0
       },
       "goals": [
         {
@@ -1101,6 +1199,13 @@
         "missed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
+      },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "unjudged": 0,
+        "precision": null,
+        "noisy_rules": 0
       },
       "goals": [
         {

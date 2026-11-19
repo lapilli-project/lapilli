@@ -66,13 +66,13 @@ func TestCheckGoal(t *testing.T) {
 	// design's table of measures says them: every other refused, saying
 	// which are.
 	withEach := map[string]bool{"firings": true, "precision": true, "refired.firings": true, "incidents.missed": true, "impacts.missed": true,
-		"incidents.noisy_only": true, "incidents.median_lead_seconds": true}
-	withNoWorse := map[string]bool{"precision": true, "incidents.median_lead_seconds": true}
+		"incidents.noisy_only": true, "incidents.median_lead_seconds": true, "episodes.total": true, "episodes.precision": true}
+	withNoWorse := map[string]bool{"precision": true, "incidents.median_lead_seconds": true, "episodes.precision": true}
 	for _, m := range GoalMeasureNames {
 		g := Goal{Name: "a", Measure: m, AtMost: "0", Each: "sale"}
 		if err := CheckGoal(&g); withEach[m] != (err == nil) {
 			t.Errorf("each: sale, %s, at_most: %v", m, err)
-		} else if err != nil && !strings.Contains(err.Error(), "with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only or incidents.median_lead_seconds") {
+		} else if err != nil && !strings.Contains(err.Error(), "with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only, incidents.median_lead_seconds, episodes.total or episodes.precision") {
 			t.Errorf("each: sale, %s: %v", m, err)
 		}
 		if g := (Goal{Name: "a", Measure: m, AtMost: "0"}); CheckGoal(&g) != nil {

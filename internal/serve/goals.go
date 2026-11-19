@@ -48,6 +48,9 @@ const (
 	whyNoValue    = "no_value"
 	whyNotWhole   = "not_whole"
 	whyByCatching = "team_owns_by_catching"
+	// whyNoEpisodes: the ledger hasn't counted the episodes of the week,
+	// or the occurrence's, yet (after an upgrade, or a change of zone).
+	whyNoEpisodes = "episodes_not_counted"
 )
 
 // summaryGoal is a goal in a summary row: its bound, the row's value of
@@ -156,6 +159,16 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 		return &f
 	case "during_deploys.precision_without":
 		return row.DuringDeploys.PrecisionWithout
+	case "episodes.total":
+		if row.Episodes == nil {
+			return nil
+		}
+		return n(row.Episodes.Total)
+	case "episodes.precision":
+		if row.Episodes == nil {
+			return nil
+		}
+		return row.Episodes.Precision
 	}
 	return nil
 }
@@ -194,6 +207,8 @@ func goalOn(g ledger.Goal, row *summaryRow) summaryGoal {
 		unknown(whyByCatching)
 	case m.Record && row.NoRecord:
 		unknown(whyNoRecord)
+	case episodesMeasure(g.Measure) && row.Episodes == nil:
+		unknown(whyNoEpisodes)
 	case v == nil:
 		unknown(whyNoValue)
 	case kind == "at_least" && *v >= target, kind == "at_most" && *v <= target:
@@ -412,12 +427,19 @@ var goalMeasureNames = map[string]string{
 	"incidents.noisy_only":             "incidents caught only by noisy rules",
 	"incidents.median_lead_seconds":    "the median lead",
 	"during_deploys.precision_without": "precision without the firings during deploys",
+	"episodes.total":                   "episodes",
+	"episodes.precision":               "precision by episodes",
 }
+
+// episodesMeasure reports whether a measure is of the episodes, which the
+// ledger may not have counted yet.
+func episodesMeasure(measure string) bool { return strings.HasPrefix(measure, "episodes.") }
 
 // goalWhys are why a week's goal isn't known, as a person reads it.
 var goalWhys = map[string]string{
 	whyNoRecord:   "not known: no incident written down to judge the firings by",
 	whyNoValue:    "not known: nothing to count it of that week",
+	whyNoEpisodes: "not known: the ledger hasn't counted that week's episodes yet",
 	whyNotWhole:   "not known: the ledger holds only part of the week",
 	whyByCatching: "not known: the team has no labels, so it owns only the incidents its rules caught: give it labels",
 	whyNoBefore:   "not known: nothing to set it beside in the four weeks before",
@@ -426,9 +448,10 @@ var goalWhys = map[string]string{
 // goalPeriodWhys are why an occurrence's goal isn't known, where a week's
 // would say the week.
 var goalPeriodWhys = map[string]string{
-	whyNoRecord: "not known: no incident written down to judge the firings during it by",
-	whyNoValue:  "not known: nothing to count it of during it",
-	whyNotWhole: "not known: the ledger holds only part of the week it started in",
+	whyNoRecord:   "not known: no incident written down to judge the firings during it by",
+	whyNoValue:    "not known: nothing to count it of during it",
+	whyNoEpisodes: "not known: the ledger hasn't counted the episodes during it yet",
+	whyNotWhole:   "not known: the ledger holds only part of the week it started in",
 }
 
 // goalMeasureText is a measure as a person reads it, in l.

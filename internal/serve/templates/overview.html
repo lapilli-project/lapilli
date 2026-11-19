@@ -110,8 +110,8 @@
   <span class="heat-scale" aria-hidden="true">{{t "fewer"}} <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> {{t "more"}}</span></p>
   {{if .HeatLeft}}<p class="quiet">{{t "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known."}}</p>{{end}}
   <div class="scroll"><table class="heat">
-    <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th></tr></thead>
-    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
+    <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th><th scope="col" class="n">{{t "Episodes"}}</th></tr></thead>
+    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td><td class="n">{{if .Counted}}{{.Episodes}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}

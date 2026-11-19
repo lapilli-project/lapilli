@@ -67,7 +67,7 @@ func TestFacetsNoRecord(t *testing.T) {
 	for _, o := range all.Facets[0].Options {
 		perf[o.Value] = o.Count
 	}
-	if want := map[string]int{"noisy": 0, "unrecorded": 17, "ok": 0, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
+	if want := map[string]int{"noisy": 0, "noisy-episodes": 0, "unrecorded": 17, "ok": 0, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
 		t.Errorf("performance: %v, want %v", perf, want)
 	}
 	if !all.NoRecord {

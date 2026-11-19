@@ -55,6 +55,8 @@ the rest of the words, is in [The numbers](numbers.md#a-white-or-a-black-stone).
 | `lapilli_rule_incidents` | `rule`, `severity`, `team` | Incidents the rule caught |
 | `lapilli_rule_incidents_first` | `rule`, `severity`, `team` | Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's |
 | `lapilli_rule_incidents_alone` | `rule`, `severity`, `team` | Incidents no other rule caught, counted the same way |
+| `lapilli_rule_episodes` | `rule`, `severity`, `team` | The rule's firings counted as [episodes](numbers.md#episodes): one problem, its alerts of the same match labels overlapping or re-firing within `--refire`, a day at most; none while the ledger hasn't counted the seven days' episodes yet |
+| `lapilli_rule_episodes_caught` | `rule`, `severity`, `team` | Of them, episodes with a firing that caught an incident |
 | `lapilli_rule_nothing_by_hours` | `rule`, `severity`, `team`, `hours` | Black stones by when they came: `asleep`, `off_hours` or `at_work`, by `--work-hours`, `--sleep-hours`, `--tz` and `--shifts`, or the hours of the team that owns the rule |
 | `lapilli_rule_refired_weeks` | `rule`, `severity`, `team` | Whole weeks, of `lapilli_weeks_counted`, in which a firing of the rule re-fired; rules with one at least |
 | `lapilli_rule_notifications` | `rule`, `receiver`, `reason` | Notifications sent for the rule in the seven days, as the alert manager sent them to `--notify-listen`, by receiver and why: `first`, `new`, `resolved`, `repeat` or `unknown` |
@@ -254,6 +256,8 @@ the report's period, the week before for the chart, and all gauges:
 | `lapilli_rule_incidents_first` | `rule`, `severity` | Incidents the rule caught before any other rule |
 | `lapilli_rule_incidents_alone` | `rule`, `severity` | Incidents no other rule caught |
 | `lapilli_rule_nothing_by_hours` | `rule`, `severity`, `hours` | Black stones by when they came: `asleep`, `off_hours`, `at_work` |
+| `lapilli_rule_episodes` | `rule`, `severity` | The rule's firings counted as [episodes](numbers.md#episodes) |
+| `lapilli_rule_episodes_caught` | `rule`, `severity` | Of them, episodes with a firing that caught an incident |
 | `lapilli_incidents` | `state`, `source` | Incidents by state and source, as `lapilli serve` gives them |
 | `lapilli_incident_detection_delay_seconds` | `incident` | From each caught incident's start to the first alert of a rule that isn't noisy |
 | `lapilli_last_run_timestamp_seconds` | | When this run wrote them, in Unix seconds |

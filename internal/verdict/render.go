@@ -751,7 +751,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			b.WriteString(l + "\n")
 		}
 	}
-	var fired, caught, nothing, refired, incidents, first, alone, hours []string
+	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught []string
 	for _, rr := range r.Rules {
 		if rr.Unsupported != "" {
 			continue
@@ -771,6 +771,10 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		incidents = append(incidents, fmt.Sprintf("lapilli_rule_incidents%s %d", l, rr.Incidents))
 		first = append(first, fmt.Sprintf("lapilli_rule_incidents_first%s %d", l, rr.First))
 		alone = append(alone, fmt.Sprintf("lapilli_rule_incidents_alone%s %d", l, rr.Alone))
+		if !r.EpisodesNotCounted {
+			episodes = append(episodes, fmt.Sprintf("lapilli_rule_episodes%s %d", l, rr.Episodes.Total))
+			episodesCaught = append(episodesCaught, fmt.Sprintf("lapilli_rule_episodes_caught%s %d", l, rr.Episodes.White))
+		}
 		if r.Hours != nil {
 			for _, x := range []struct {
 				name string
@@ -785,6 +789,8 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	family("lapilli_rule_nothing", "Firings with no incident (black stones).", nothing)
 	family("lapilli_rule_refired", "Firings that came soon after the same alert resolved.", refired)
 	family("lapilli_rule_incidents", "Incidents the rule caught.", incidents)
+	family("lapilli_rule_episodes", "Episodes of the rule's firings: one problem, its alerts of the same match labels overlapping or re-firing within a day.", episodes)
+	family("lapilli_rule_episodes_caught", "Episodes of which a firing caught an incident.", episodesCaught)
 	if r.Hours != nil {
 		family("lapilli_rule_nothing_by_hours", "Firings with no incident, by when they came: asleep, off hours or at work.", hours)
 	}

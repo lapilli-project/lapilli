@@ -25,8 +25,10 @@ metrics that keep their names. `--metrics` gives `lapilli_rule_firings`, `lapill
 `lapilli_rule_nothing`, `lapilli_rule_refired`, `lapilli_rule_incidents`,
 `lapilli_rule_incidents_first`, `lapilli_rule_incidents_alone` (by `rule`),
 `lapilli_rule_nothing_by_hours` (by `rule` and `hours`: `asleep`,
-`off_hours`, `at_work`), `lapilli_incidents` (by `state` and `source`) and
-`lapilli_incident_detection_delay_seconds`.
+`off_hours`, `at_work`), `lapilli_rule_episodes` and
+`lapilli_rule_episodes_caught` (each rule's firings counted as
+[episodes](numbers.md#episodes), and those caught), `lapilli_incidents`
+(by `state` and `source`) and `lapilli_incident_detection_delay_seconds`.
 
 A replay asks for each query a day at a time, once for every rule that needs
 it, and runs `--parallel` (8) rules at once against each API it reads:

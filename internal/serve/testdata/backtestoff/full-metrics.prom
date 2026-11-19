@@ -23,6 +23,16 @@ lapilli_rule_refired{rule="Limited"} 0
 lapilli_rule_incidents{rule="Flapping"} 0
 lapilli_rule_incidents{rule="Errors",severity="page",team="payments"} 1
 lapilli_rule_incidents{rule="Limited"} 1
+# HELP lapilli_rule_episodes Episodes of the rule's firings: one problem, its alerts of the same match labels overlapping or re-firing within a day.
+# TYPE lapilli_rule_episodes gauge
+lapilli_rule_episodes{rule="Flapping"} 1
+lapilli_rule_episodes{rule="Errors",severity="page",team="payments"} 1
+lapilli_rule_episodes{rule="Limited"} 1
+# HELP lapilli_rule_episodes_caught Episodes of which a firing caught an incident.
+# TYPE lapilli_rule_episodes_caught gauge
+lapilli_rule_episodes_caught{rule="Flapping"} 0
+lapilli_rule_episodes_caught{rule="Errors",severity="page",team="payments"} 1
+lapilli_rule_episodes_caught{rule="Limited"} 1
 # HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
 # TYPE lapilli_rule_incidents_first gauge
 lapilli_rule_incidents_first{rule="Flapping"} 0

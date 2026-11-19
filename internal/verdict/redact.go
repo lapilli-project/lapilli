@@ -451,6 +451,11 @@ func (x *Redactor) report(r *Report) *Report {
 		st := *r.Settings // label names, which stay, and durations
 		st.Match = slices.Clone(r.Settings.Match)
 		st.ImpactFrom = utc(r.Settings.ImpactFrom)
+		// Where it was made, as the hours' zone: its days stay, which
+		// part the episodes.
+		if st.Zone != "" {
+			st.Zone = Redacted
+		}
 		st.ImpactSignals = nil
 		for _, sg := range r.Settings.ImpactSignals {
 			sg.Name = x.alias("signal", sg.Name)
@@ -630,6 +635,21 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 	slices.SortStableFunc(out, func(a, b Judged) int {
 		return cmp.Or(a.Start.Compare(b.Start), strings.Compare(a.Rule, b.Rule), strings.Compare(labelsText(a.Labels), labelsText(b.Labels)))
 	})
+	// The episodes numbered again in this order, as Judge numbers them in
+	// its own: the order of first firings at one time would say which
+	// names sort first.
+	again := map[int]int{}
+	for i, f := range out {
+		if f.Episode == 0 {
+			continue
+		}
+		n, ok := again[f.Episode]
+		if !ok {
+			n = len(again) + 1
+			again[f.Episode] = n
+		}
+		out[i].Episode = n
+	}
 	return out
 }
 

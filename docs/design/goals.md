@@ -138,6 +138,13 @@ thresholds for `noisy_only`, the hours for asleep and off hours):
 | `incidents.noisy_only` | `incidents.noisy_only` | lower | yes | yes |
 | `incidents.median_lead_seconds` | `incidents.median_lead_seconds` | higher | yes | yes, and `no_worse_than` |
 | `during_deploys.precision_without` | `during_deploys.precision_without` | higher | yes | no |
+| `episodes.total` | `episodes.total` | lower | no | yes |
+| `episodes.precision` | `episodes.precision` | higher | yes | yes, and `no_worse_than` |
+
+The two `episodes.*` measures ([judging.md](judging.md), item 2) are not
+known in a week whose episodes the ledger hasn't counted yet, after an
+upgrade or a change of zone (`episodes: null`); with `each: KIND`, an
+episode is during a kind when its first firing is marked with it.
 
 "With `each: KIND`" is what [marked.md](marked.md) counts inside an
 occurrence of a kind (`marked` in the summary: firings, caught, precision,
@@ -466,9 +473,11 @@ Small things the design left open, settled as they were built:
   given. The whys are tried in order: `not_whole`, `team_owns_by_catching`
   (a team with no labels, for `incidents.missed`, `impacts.missed`,
   `incidents.noisy_only` and `incidents.median_lead_seconds`), `no_record`
-  (a measure that needs it, in a row whose `no_record` is true), then
-  `no_value`. `not_whole` is a week at or before the one the ledger's first
-  firing fell in, or with none.
+  (a measure that needs it, in a row whose `no_record` is true),
+  `episodes_not_counted` (an `episodes.*` measure in a week whose episodes
+  the ledger hasn't counted yet: [judging.md](judging.md), "As built (step
+  3)"), then `no_value`. `not_whole` is a week at or before the one the
+  ledger's first firing fell in, or with none.
 - **The week under way** is `open`, its value so far, and `over: true`
   for a count whose `at_most` it is past already (a measure lower is
   better, neither a share nor a time).

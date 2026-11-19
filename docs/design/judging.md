@@ -1,8 +1,9 @@
 # Judging refined: a lead per signal, episodes beside firings, a person's verdict on one firing, and rows by label
 
 Status: accepted; step 1 (leads and `require:`, schema 024, "As built
-(step 1)") and step 2 (a signal taken away judging no one, no schema, "As
-built (step 2)") built. Merged on 2026-11-19, before its week was out, by the
+(step 1)"), step 2 (a signal taken away judging no one, no schema, "As
+built (step 2)") and step 3 (episodes beside firings, schema 025, "As
+built (step 3)") built. Merged on 2026-11-19, before its week was out, by the
 maintainer's decision, its open questions decided ("Open questions").
 Under [GOVERNANCE.md](../../GOVERNANCE.md) this changes how a firing is
 judged (a lead of a signal's or a rule entry's own, a person's word that
@@ -1742,6 +1743,95 @@ what building it settled:
   ledgers at once). `TestUnnamedSignalUnchanged`'s goldens are as they
   were.
 
+## As built (step 3)
+
+Episodes beside firings, as item 2 says, with schema 025, and what
+building them settled:
+
+- **Grouping.** `verdict.EpisodeKey` (the rule, and of each label of the
+  match in effect the firing's value, or none for a label it doesn't
+  carry) and `verdict.EpisodeWalk`, which `verdict.Judge` and the ledger's
+  walk share: a firing starts a new episode when it is its key's first,
+  the first of its day, or starts more than `--refire` after every firing
+  of the episode so far ended (one still on holds it open), as `Refired`
+  measures a re-fire. Days are numbered as the ledger numbers them
+  (`verdict.DayIn`), in `verdict.Options.Zone`: `lapilli verdict`'s `--tz`,
+  the machine's (`Local`) when it isn't given; serve's, its ledger's zone.
+- **Judged.** White when any firing is; else by its first firing's record
+  (`no_record`). `noisy_at` gives noisy by episodes; nothing reads it but
+  where it is shown.
+- **The report.** `rules[].episodes` (`total`, `white`, `unjudged`,
+  `noisy`, left out with none: `omitzero`), `firings[].episode` and `day`,
+  and `settings.zone`; numbered in the report in order of first firing.
+  A redacted report says the zone `[redacted]`, keeps the days, and numbers
+  the episodes again in its own order of firings, which no name decides.
+  `lapilli verdict`'s text says nothing of them; its `--metrics`, `--csv`
+  and `--json` do.
+- **The ledger (schema 025).** `firings.episode` (the id of the first
+  firing, 0 for an excused one) and `episode_white` (on a first firing);
+  `episodes` and `episodes_white` on `days`, `weeks`, `marked_days` and
+  `marked_weeks`, counted from the first firings (`firstFirings`). Each
+  judge walks the firings of the whole days its tally counts
+  (`walkEpisodes`), one read and the changed rows written, before the
+  tally; a write that judged a span inside a day reaches no further than
+  that day. A firing's labels are its alert's, as `stones` reads them.
+- **The upgrade and a change of zone.** The migration notes
+  `episodes_from`, the week after the newest firing's, in `meta`; a ledger
+  opened in another `--tz` sets every `episode` to 0 and the same note in
+  the write that counts the days again. `Ledger.CountEpisodes`, in the
+  leader's round after `JudgePending`, walks the next week back with a
+  firing in it, a write each, reading the note again in the write, until
+  none is left, and takes the note away. Weeks before the note say their
+  episodes aren't counted: the summary's `episodes: null`, a report with
+  no `episodes` and no `episode` (`Report.EpisodesNotCounted`), no
+  `lapilli_rule_episodes` series, "not counted yet" on a rule's page, "–"
+  in the rules list and the overview, no digest line, and a goal on them
+  not known (`episodes_not_counted`).
+- **Where it shows.** The summary's `episodes` (`total`, `caught`,
+  `unjudged`, `precision`, `noisy_rules`) and each marked kind's
+  `episodes`, `episodes_caught` and `episodes_precision`, null until
+  counted; the goals' `episodes.total` and `episodes.precision`, weekly and
+  `each: KIND`, the latter with `no_worse_than: before`; the rules list's
+  Episodes column and `noisy:episodes` (`perf=noisy-episodes`, a value of
+  the Performance facet beside Noisy); a rule's page, a line under its
+  numbers ("Noisy by firings, not by episodes: 41 firings in 17 episodes."
+  when they differ), and of its latest firings, those of an episode that
+  held more than one, the episode's start and size; the overview's noisiest
+  rules' table, an Episodes column; the digest, a line of the noisy rules'
+  episodes; MCP's `rules` and `rule` (`episodes`, `noisy_episodes`), its
+  `summary`, and its `firings` and a rule's latest (`episode`: its first
+  firing's start and how many it held, looked up by `Ledger.Episodes`
+  along the index of a rule's firings); the CSV's `episode`; `/metrics`'
+  and `--metrics`' `lapilli_rule_episodes` and
+  `lapilli_rule_episodes_caught`.
+- **Kept, not as designed.** The digest's line is one line of the noisy
+  rules' episodes beside the report, not a change to each rule's line, as
+  the digest has no line of each noisy rule but the report's table. A
+  firing's episode on MCP is its first firing's start and size, not the
+  report's number, which a list of the latest firings can't give.
+- **numbers.md.** "Episodes": the rules' counts and each week's in the
+  summary, counted again from `firings[].episode`, and which firings make
+  one, from each firing's rule, labels, start, end and `day`, with
+  `settings.match` and `settings.refire_ns`. In `lapilli serve` a period
+  beginning inside a day may begin inside an episode: count from whole
+  days.
+- **Cost.** A write reads the firings of its days once more (a run's,
+  a day or two); `TestRecordedScale` allows each firing one more row
+  written, its episode, and a thousand episodes a Postgres statement. The
+  pages read the tallies' two columns more, and the meta note once.
+- **Tests.** `internal/verdict/episodes_test.go` (overlap, `--refire`, the
+  latest end, one still on, midnight, the zone's midnight, labels not
+  carried, no match, judging, noisy, and today's numbers unchanged);
+  `internal/ledger/episodes_test.go` (the ledger's episodes as
+  `verdict.Judge`'s through two runs, an incident written down and a
+  match changed; a quiet window's firing; midnight and how far a write
+  walks; a change of zone walked back a week a write, newest first, once,
+  as a ledger kept in that zone; the upgrade walked once by two at a time,
+  every number as before); `internal/serve/episodes_test.go` (every place
+  it shows, and not counted). The goldens that capture a report, a
+  summary, `/metrics` or the pages that now show episodes gained them,
+  and nothing else.
+
 ## Steps
 
 1. **Leads.** `verdict.Options.LeadFor` and `MaxLead`, and every place
@@ -1768,7 +1858,8 @@ what building it settled:
    of zone; the summary's `episodes`, a rule's page, the rules list's
    column and facet, the digest's noisy line, MCP, the report (with its
    zone and each firing's day), the CSV and `/metrics`; the marked counts
-   and the two goal measures; numbers.md's "Episodes".
+   and the two goal measures; numbers.md's "Episodes". (Built: "As built
+   (step 3)".)
 4. **People's verdicts.** The next schema; the ledger's write, part by
    part, and `stones`; verdicts in every replay, on both sides; the keys
    moved with incidents' keys; the forms (with series and start, "This

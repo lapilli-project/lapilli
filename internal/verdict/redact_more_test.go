@@ -100,6 +100,7 @@ func TestRedactEveryField(t *testing.T) {
 		"ExpectResult.BeforeState": true,
 		"ExpectResult.AfterState":  true,
 		"ExpectResult.WasLimit":    true,
+		"Judged.Day":               true, // a date, which parts episodes
 	}
 	for _, v := range []any{&Report{}, &Comparison{}} {
 		c := &canaries{texts: map[string]string{}}

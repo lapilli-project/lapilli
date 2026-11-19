@@ -41,7 +41,8 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†):
+`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
+and the zone days are counted in (`zone`†, which parts episodes, below):
 the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
 everywhere in the report.
@@ -406,6 +407,108 @@ first(.rows[] | select(.team == "")) | {firings: .refired.firings, share: .refir
 | {firings: ., share: (if $all > 0 then . / $all else null end)}
 ```
 
+## Episodes
+
+An **episode** is one problem however many alerts it is
+(docs/design/judging.md, item 2): the firings of one rule with the same
+values of the match labels (`settings.match`, a label a firing doesn't
+carry counted as none), each starting while another of them is on, or
+within `refire` of the latest end among them so far. The first such
+firing of a day starts a new one: a firing's `day`† is the day its start
+falls on in `settings.zone`† (`lapilli verdict`'s `--tz`, the machine's,
+`Local`, when it isn't given; `lapilli serve`'s `--tz`). The labels that
+tell alerts apart and aren't matched on, a `pod`, an `instance`, don't
+part them; with no match, every overlapping firing of a rule is one.
+`lapilli serve` leaves out the firings a quiet window excused, which are
+in no number.
+
+An episode is **white** when any of its firings is white; else judged,
+and black, when its first firing was judged, and not judged
+(`unjudged`†) when it wasn't. Its day, its week, its marks and its record
+are its first firing's. A rule's `episodes`† are `total`, `white`,
+`unjudged`† and `noisy`: noisy by its episodes, by the same thresholds as
+by its firings (`noisy_at`). Episodes are counted beside the firings and
+change no other number: `noisy` stays by firings, and decides what it
+decides; `episodes.noisy` is shown, and decides nothing. Each firing's
+`episode`† numbers the episode it is of, from 1 in the report, in order
+of their first firing.
+
+```jq
+# episodes: as the report has it
+[.rules[] | select(.episodes) | {rule, total: .episodes.total, white: .episodes.white, unjudged: (.episodes.unjudged // 0), noisy: .episodes.noisy}]
+| sort_by(.rule)
+```
+
+```jq
+# episodes: counted again
+.noisy_at as $at
+| [.firings | map(select(.episode)) | group_by(.episode)[] | sort_by(.start)
+   | {rule: .[0].rule, white: any(.white), judged: (any(.white) or (.[0].no_record | not))}]
+| group_by(.rule)
+| map({rule: .[0].rule, total: length, white: map(select(.white)) | length, unjudged: map(select(.judged | not)) | length}
+      | (.total - .unjudged) as $j | . + {noisy: ($j > 0 and $j >= $at.firings and .white / $j < $at.precision)})
+| sort_by(.rule)
+```
+
+Which firings make one, from each firing's rule, labels, start, end and
+`day`, with `settings.match` and `settings.refire_ns`:
+
+```jq
+# which firings make an episode: as the report has it
+[.firings[] | .episode]
+```
+
+```jq
+# which firings make an episode: counted again
+def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
+  | (.t + "Z" | fromdateiso8601) + ((.f // "0") | tonumber)
+    - (if .z == "Z" then 0 else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end);
+.settings.match as $m | (.settings.refire_ns / 1e9) as $refire
+| reduce .firings[] as $f ({walks: {}, n: 0, out: []};
+    ([$f.rule, ($m[] as $k | if ($f.labels // {}) | has($k) then "=" + $f.labels[$k] else null end)] | tojson) as $key
+    | ($f.start | epoch) as $s | (if $f.end then $f.end | epoch else null end) as $e
+    | .walks[$key] as $w
+    | if $w == null or $w.day != $f.day or (($w.on | not) and $s - $w.until > $refire)
+      then .n += 1 | .walks[$key] = {n: .n, day: $f.day, until: $e, on: ($e == null)}
+      else .walks[$key] |= (if $e == null then .on = true elif $e > .until then .until = $e else . end)
+      end
+    | .out += [.walks[$key].n])
+| .out
+```
+
+`lapilli verdict` sees the firings of the period alone, so an episode it
+counts begins in it. `lapilli serve` keeps each firing's episode, walked
+over whole days: a period that begins inside a day may begin inside an
+episode, which the report numbers from its first firing in the period and
+leaves out of `rules[].episodes`, counted where its first firing is; count
+from a period of whole days. A ledger upgraded to this release, or opened
+in another `--tz`, counts its episodes again a week at a time, the newest
+first: until it has, a report of those weeks has no `episodes` and no
+`episode`, the summary's rows `"episodes": null`.
+
+`/api/v1/summary`'s `episodes` is a week's: `total`, `caught` (white),
+`unjudged`, `precision` (null as the row's is) and `noisy_rules`, how many
+of the row's rules are noisy by their episodes. Count it again from
+`/api/v1/report` over the same week:
+
+```jq
+# episodes in a week: as the summary has it
+first(.rows[] | select(.team == "")) | .episodes | {total, caught, unjudged, precision}
+```
+
+```jq
+# episodes in a week: counted again
+[.firings | map(select(.episode)) | group_by(.episode)[] | sort_by(.start)
+ | {white: any(.white), judged: (any(.white) or (.[0].no_record | not))}]
+| {total: length, caught: map(select(.white)) | length, unjudged: map(select(.judged | not)) | length}
+| (.total - .unjudged) as $j | . + {precision: (if $j > 0 then .caught / $j else null end)}
+```
+
+`/metrics` gives each rule's episodes over the last seven days, and those
+caught (`lapilli_rule_episodes`, `lapilli_rule_episodes_caught`), as
+`lapilli verdict --metrics` over its period; the CSV each firing's
+`episode`.
+
 ## Incidents missed, and caught only by noisy rules
 
 An incident is **missed** when no firing caught it (`caught_by` empty). It
@@ -634,6 +737,7 @@ row each, for a spreadsheet or a script:
 | `during_deploy` | `true` when it came during a deploy (`lapilli serve`) |
 | `excused` | `true` for a firing a quiet window excused (`lapilli serve`): in none of the numbers |
 | `marked` | the kinds of marked window it came during (`lapilli serve`), a JSON array, `[]` for none |
+| `episode` | the episode it is of, as `firings[].episode`; empty for an excused firing, or with episodes not counted |
 
 The firings are in order of their start, then of their rule. The file is
 UTF-8 with no byte order mark: open it in a spreadsheet as UTF-8 (Excel's
@@ -691,14 +795,15 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
+| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`† |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
+| `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy` |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`† |
 
 ### The metrics
 
@@ -721,6 +826,8 @@ it, which only `lapilli serve` says.
 | `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`), `source` (`written`, `impact`) |
 | `lapilli_incident_detection_delay_seconds` | `incident` |
 | `lapilli_last_run_timestamp_seconds` | |
+| `lapilli_rule_episodes` | `rule`, [`severity`], [`team`] |
+| `lapilli_rule_episodes_caught` | `rule`, [`severity`], [`team`] |
 | `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
 | `lapilli_rule_firings_during_deploys` | `rule`, [`severity`], [`team`] |
@@ -757,7 +864,7 @@ it, which only `lapilli serve` says.
 | `lapilli_marked_on` | `kind` |
 | `lapilli_serve_marked_read_timestamp_seconds` | |
 
-The first eleven are `--metrics`' too. The next two are there with named
+The first thirteen are `--metrics`' too. The next two are there with named
 impact signals, in `--metrics` and in `lapilli serve`'s `/metrics` (over
 its last seven days): each signal's windows by state, and from when it
 keeps the record (none for a signal that doesn't, or whose data a
@@ -781,8 +888,8 @@ adds to the others can't be said there.
 ### The CSV's columns
 
 `rule`, `severity`, `team`, `labels`, `start`, `end`, `stone`, `no_record`,
-`incidents`, `refired`, `during_deploy`, `excused`, `marked`, in that order.
-`TestCSVColumns` holds them.
+`incidents`, `refired`, `during_deploy`, `excused`, `marked`, `episode`, in
+that order. `TestCSVColumns` holds them.
 
 ### lapilli preflight's report
 

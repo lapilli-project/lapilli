@@ -81,7 +81,8 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 			// A firing that caught something is judged whatever its
 			// signals, as the report has it (verdict.RuleResult.Judged):
 			// of a part with no record, its white stones alone.
-			judged = ledger.Tally{Firings: x.White, White: x.White, Deploy: x.DeployWhite, DeployWhite: x.DeployWhite}
+			judged = ledger.Tally{Firings: x.White, White: x.White, Deploy: x.DeployWhite, DeployWhite: x.DeployWhite,
+				Episodes: x.EpisodesWhite, EpisodesWhite: x.EpisodesWhite}
 		}
 		j := m[x.Rule].Add(judged)
 		j.At, j.Rule, j.Signals = x.At, x.Rule, 0
@@ -147,6 +148,8 @@ func minus(a, b ledger.Tally) ledger.Tally {
 	a.Excused -= b.Excused
 	a.Deploy -= b.Deploy
 	a.DeployWhite -= b.DeployWhite
+	a.Episodes -= b.Episodes
+	a.EpisodesWhite -= b.EpisodesWhite
 	return a
 }
 
@@ -183,6 +186,9 @@ func (t *tallies) someUnjudged(w int64) bool {
 func (s *Server) fillTallies(ctx context.Context, t *tallies, w1, w2 int64) error {
 	rows, err := s.l.WeeksBy(ctx, w1, w2)
 	if err != nil {
+		return err
+	}
+	if t.epFrom, t.epSome, err = s.l.EpisodesFrom(ctx); err != nil {
 		return err
 	}
 	t.parts = rows

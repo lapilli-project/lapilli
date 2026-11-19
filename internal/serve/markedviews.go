@@ -62,6 +62,8 @@ func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*m
 		k.Firings += m.Firings
 		k.White += m.White
 		k.Refired += m.Refired
+		k.Episodes += m.Episodes
+		k.EpisodesWhite += m.EpisodesWhite
 		x.tally[m.At][m.Rule][m.Kind] = k
 	}
 	return x, nil
@@ -71,13 +73,20 @@ func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*m
 // those that caught nothing and had no record by the signals tied to them
 // (tallies.judgedPart).
 func (x *markedSpan) unjudged(w int64, kind string, mine func(string) bool, t *tallies) int {
-	n := 0
+	n, _ := x.unjudgedBoth(w, kind, mine, t)
+	return n
+}
+
+// unjudgedBoth is unjudged, and of the episodes whose first firing is
+// marked with kind, those not judged likewise.
+func (x *markedSpan) unjudgedBoth(w int64, kind string, mine func(string) bool, t *tallies) (firings, episodes int) {
 	for _, m := range x.parts {
 		if m.At == w && m.Kind == kind && mine(t.rules[m.Rule].Name) && !t.judgedPart(w, m.Rule, m.Signals) {
-			n += m.Firings - m.White
+			firings += m.Firings - m.White
+			episodes += m.Episodes - m.EpisodesWhite
 		}
 	}
-	return n
+	return firings, episodes
 }
 
 // applies reports whether a window is everyone's or team's: for everyone
@@ -135,6 +144,7 @@ func (x *markedSpan) row(w int64, team *ledger.Team, mine func(string) bool, row
 	occs := x.occurrences(x.s.l.Midnight(w), x.s.l.Midnight(w+7), team)
 	for kind, os := range occs {
 		c := summaryMarked{Windows: len(os)}
+		var episodes, caught int
 		for id, byKind := range x.tally[w] {
 			if !mine(t.rules[id].Name) {
 				continue
@@ -143,10 +153,18 @@ func (x *markedSpan) row(w int64, team *ledger.Team, mine func(string) bool, row
 			c.Firings += k.Firings
 			c.Caught += k.White
 			c.Refired += k.Refired
+			episodes += k.Episodes
+			caught += k.EpisodesWhite
 		}
-		u := x.unjudged(w, kind, mine, t)
+		u, ue := x.unjudgedBoth(w, kind, mine, t)
 		c.Precision = judged(c.Caught, c.Firings, u)
 		c.PrecisionOutside = judged(row.Caught-c.Caught, row.Firings-c.Firings, row.Unjudged-u)
+		// Episodes by their first firing's marks, once the week's are
+		// counted (docs/design/judging.md, item 2).
+		if t.episodesCounted(w) {
+			c.Episodes, c.EpisodesCaught = &episodes, &caught
+			c.EpisodesPrecision = judged(caught, episodes, ue)
+		}
 		var leads, impactLeads []time.Duration
 		for _, in := range incs {
 			if team != nil && !x.own.ownsIncident(*team, in) || !x.during(in, os) {
@@ -232,10 +250,12 @@ func (s *Server) markedOnly(ctx context.Context, t *tallies, in, out string) err
 					delete(t.by[w], id)
 					continue
 				}
-				t.by[w][id] = ledger.Tally{At: w, Rule: id, Firings: m.Firings, White: m.White, Refired: m.Refired}
+				t.by[w][id] = ledger.Tally{At: w, Rule: id, Firings: m.Firings, White: m.White, Refired: m.Refired,
+					Episodes: m.Episodes, EpisodesWhite: m.EpisodesWhite}
 				continue
 			}
 			x.Firings, x.White, x.Refired = x.Firings-m.Firings, x.White-m.White, x.Refired-m.Refired
+			x.Episodes, x.EpisodesWhite = x.Episodes-m.Episodes, x.EpisodesWhite-m.EpisodesWhite
 			if x.Firings+x.Excused == 0 {
 				delete(t.by[w], id)
 				continue

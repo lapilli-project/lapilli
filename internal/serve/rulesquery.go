@@ -17,12 +17,12 @@ import (
 
 // queryKeys are the keys the search box takes, in the order its help names
 // them.
-var queryKeys = []string{"team", "severity", "is", "status", "has", "label", "group", "during", "outside"}
+var queryKeys = []string{"team", "severity", "is", "noisy", "status", "has", "label", "group", "during", "outside"}
 
 // The facets' values: performance (judged), trust (the backtest), the
 // rule's disposition (its note), and what is under way.
 var (
-	perfValues   = []string{"noisy", "unrecorded", "ok", "silent", "spare"}
+	perfValues   = []string{"noisy", "noisy-episodes", "unrecorded", "ok", "silent", "spare"}
 	trustValues  = []string{"differs", "unreplayed", "recorded"}
 	statusValues = []string{"keep", "tune", "retire", "none"}
 	hasValues    = []string{"proposal", "facts"}
@@ -181,6 +181,10 @@ func keyed(k, v string) qword {
 		t.Bad = "value"
 	case t.Key == "is" && isValues[strings.ToLower(v)] == [2]string{}:
 		t.Bad = "value"
+	case t.Key == "noisy" && !strings.EqualFold(v, "episodes"):
+		// noisy:episodes, noisy by its episodes (docs/design/judging.md,
+		// item 2), beside is:noisy, by its firings.
+		t.Bad = "value"
 	case t.Key == "status" && !slices.Contains(statusValues, strings.ToLower(v)):
 		t.Bad = "value"
 	case t.Key == "has" && !slices.Contains(hasValues, strings.ToLower(v)):
@@ -247,6 +251,8 @@ func canonical(q url.Values, teams []string) (out url.Values, changed bool) {
 		case "is":
 			fv := isValues[strings.ToLower(t.Value)]
 			add(fv[0], fv[1])
+		case "noisy":
+			add("perf", "noisy-episodes")
 		case "status", "has":
 			add(t.Key, strings.ToLower(t.Value))
 		case "during", "outside":

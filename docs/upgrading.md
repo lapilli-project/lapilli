@@ -97,6 +97,7 @@ turn.
 | 022 | 0.55.0 | Named impact signals and the rule entries in effect; an incident's signal and match labels; the signals each alert is tied to; and the tallies by day and week keyed by them too, every row copied in once |
 | 023 | 0.61.0 | Pull request backtests (`--backtest-listen`): a row each backtest asked for, kept a day after it ends, and the tokens that started one, kept past their hour |
 | 024 | unreleased | A lead of a named signal's or a rule entry's own (`lead_ns`, NULL to follow), and the labels a rule entry requires (`require_labels`) |
+| 025 | unreleased | Episodes beside firings: each firing's episode (`episode`, the id of its first firing, and `episode_white` on a first firing), and `episodes` and `episodes_white` on the tallies by day and week, marked ones too; counted after the upgrade a week at a time, the newest first (`episodes_from` in `meta`), no stone changed |
 
 The image has no shell and no `sqlite3`, so the schema a ledger is at is
 read where its data can be reached: `sqlite3 COPY/ledger.db 'PRAGMA

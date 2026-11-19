@@ -66,6 +66,12 @@
         "missed": 0,
         "median_lead_seconds": null
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "marked": {}
     },
     {
@@ -111,6 +117,12 @@
         "missed": 0,
         "median_lead_seconds": null
       },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "marked": {}
     },
     {
@@ -155,6 +167,12 @@
         "noisy_only": 0,
         "missed": 0,
         "median_lead_seconds": null
+      },
+      "episodes": {
+        "total": 0,
+        "caught": 0,
+        "precision": null,
+        "noisy_rules": 0
       },
       "marked": {}
     },
@@ -214,6 +232,12 @@
         "missed": 0,
         "median_lead_seconds": null
       },
+      "episodes": {
+        "total": 1,
+        "caught": 0,
+        "precision": null,
+        "noisy_rules": 0
+      },
       "marked": {}
     },
     {
@@ -271,6 +295,12 @@
         "noisy_only": 0,
         "missed": 1,
         "median_lead_seconds": null
+      },
+      "episodes": {
+        "total": 2,
+        "caught": 1,
+        "precision": 0.5,
+        "noisy_rules": 0
       },
       "marked": {}
     }

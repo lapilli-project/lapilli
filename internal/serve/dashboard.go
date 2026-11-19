@@ -207,6 +207,11 @@ type heatRow struct {
 	Name  string
 	Cells []heatCell
 	Black int
+	// Episodes are its firings of the four weeks counted as episodes
+	// (docs/design/judging.md, item 2); Counted, that the ledger has
+	// counted them.
+	Episodes int
+	Counted  bool
 }
 
 // action is something to look at, and the task it would make, or the
@@ -892,7 +897,7 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, l
 	for _, l := range lines {
 		left = left || l.Unjudged > 0
 		if judged := l.Black - l.Unjudged; judged > 0 {
-			rows = append(rows, heatRow{Name: l.Name, Black: judged})
+			rows = append(rows, heatRow{Name: l.Name, Black: judged, Episodes: l.Episodes, Counted: l.EpisodesCounted})
 		}
 	}
 	slices.SortStableFunc(rows, func(a, b heatRow) int { return b.Black - a.Black })

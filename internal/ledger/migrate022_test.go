@@ -22,6 +22,7 @@ var (
 	undo022pg = ledgertest.Undo022Postgres
 	undo023   = ledgertest.Undo023
 	undo024   = ledgertest.Undo024
+	undo025   = ledgertest.Undo025
 )
 
 // A ledger at 021 with one impact signal with no name, in SQLite or, with
@@ -101,7 +102,7 @@ func TestMigrate022(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo024, undo023, undo022pg), "UPDATE schema_version SET version = 21") {
+		for _, q := range append(slices.Concat(undo025, undo024, undo023, undo022pg), "UPDATE schema_version SET version = 21") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -112,7 +113,7 @@ func TestMigrate022(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo024, undo023, undo022), "PRAGMA user_version = 21") {
+		for _, q := range append(slices.Concat(undo025, undo024, undo023, undo022), "PRAGMA user_version = 21") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -131,6 +132,11 @@ func TestMigrate022(t *testing.T) {
 	keptAfter, err := l2.ImpactKept(ctx)
 	if err != nil || !reflect.DeepEqual(keptBefore, keptAfter) || keptAfter.From().IsZero() {
 		t.Errorf("what keeps the record: %+v, not %+v (%v)", keptAfter, keptBefore, err)
+	}
+	// Its episodes, counted after the upgrade as the leader counts them
+	// (schema 025), before its tallies are held to the ledger made anew.
+	if _, err := l2.CountEpisodes(ctx, opts, nil); err != nil {
+		t.Fatal(err)
 	}
 	incs2, days2, weeks2, rep2 := read(l2)
 	if !reflect.DeepEqual(incs, incs2) {

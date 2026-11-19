@@ -680,6 +680,7 @@ spaces (`label:"a=b c"`, `team:"a b"`):
 | `team:NAME` | the team |
 | `severity:VALUE` | the severity facet |
 | `is:noisy`, `is:unrecorded`, `is:ok`, `is:silent`, `is:spare` | Performance |
+| `noisy:episodes` | Performance: noisy by its episodes ([judging.md](judging.md), item 2), `perf=noisy-episodes` |
 | `is:differs`, `is:unreplayed`, `is:recorded` | Trust |
 | `is:proposed`, `is:facts` | Progress |
 | `status:keep\|tune\|retire\|none` | Disposition |

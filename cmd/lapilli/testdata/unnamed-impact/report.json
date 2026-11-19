@@ -22,7 +22,12 @@
       "off_hours": 0,
       "off_hours_black": 0,
       "asleep": 0,
-      "asleep_black": 0
+      "asleep_black": 0,
+      "episodes": {
+        "total": 3,
+        "white": 2,
+        "noisy": false
+      }
     },
     {
       "rule": "CartSlow",
@@ -40,7 +45,12 @@
       "off_hours": 0,
       "off_hours_black": 0,
       "asleep": 1,
-      "asleep_black": 1
+      "asleep_black": 1,
+      "episodes": {
+        "total": 2,
+        "white": 1,
+        "noisy": false
+      }
     },
     {
       "rule": "BackendMissing",
@@ -58,7 +68,12 @@
       "off_hours": 0,
       "off_hours_black": 0,
       "asleep": 0,
-      "asleep_black": 0
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 0,
+        "noisy": false
+      }
     },
     {
       "rule": "PayQueue",
@@ -75,7 +90,12 @@
       "off_hours": 1,
       "off_hours_black": 1,
       "asleep": 0,
-      "asleep_black": 0
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 0,
+        "noisy": false
+      }
     },
     {
       "rule": "SearchDown",
@@ -93,7 +113,12 @@
       "off_hours": 0,
       "off_hours_black": 0,
       "asleep": 1,
-      "asleep_black": 0
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 1,
+        "noisy": false
+      }
     }
   ],
   "incidents": [
@@ -221,7 +246,9 @@
       "white": true,
       "incidents": [
         "impact-1"
-      ]
+      ],
+      "episode": 1,
+      "day": "2026-10-06"
     },
     {
       "rule": "BackendMissing",
@@ -232,7 +259,9 @@
       },
       "start": "2026-10-06T10:05:00Z",
       "end": "2026-10-06T10:20:00Z",
-      "white": false
+      "white": false,
+      "episode": 2,
+      "day": "2026-10-06"
     },
     {
       "rule": "CartSlow",
@@ -246,7 +275,9 @@
       "white": true,
       "incidents": [
         "impact-1"
-      ]
+      ],
+      "episode": 3,
+      "day": "2026-10-06"
     },
     {
       "rule": "ApiErrors",
@@ -260,7 +291,9 @@
       "white": true,
       "incidents": [
         "INC-2"
-      ]
+      ],
+      "episode": 4,
+      "day": "2026-10-07"
     },
     {
       "rule": "ApiErrors",
@@ -271,7 +304,9 @@
       },
       "start": "2026-10-08T12:00:00Z",
       "end": "2026-10-08T12:05:00Z",
-      "white": false
+      "white": false,
+      "episode": 5,
+      "day": "2026-10-08"
     },
     {
       "rule": "SearchDown",
@@ -285,7 +320,9 @@
       "white": true,
       "incidents": [
         "INC-1"
-      ]
+      ],
+      "episode": 6,
+      "day": "2026-10-09"
     },
     {
       "rule": "CartSlow",
@@ -296,7 +333,9 @@
       },
       "start": "2026-10-09T05:00:00Z",
       "end": "2026-10-09T05:10:00Z",
-      "white": false
+      "white": false,
+      "episode": 7,
+      "day": "2026-10-09"
     },
     {
       "rule": "PayQueue",
@@ -306,7 +345,9 @@
       },
       "start": "2026-10-10T21:00:00Z",
       "end": "2026-10-10T21:05:00Z",
-      "white": false
+      "white": false,
+      "episode": 8,
+      "day": "2026-10-10"
     }
   ],
   "hours": {
@@ -323,6 +364,7 @@
     "refire_ns": 3600000000000,
     "unknown_length_ns": 3600000000000,
     "record_lookback_ns": 1209600000000000,
-    "impact_from": "2026-09-21T00:00:00Z"
+    "impact_from": "2026-09-21T00:00:00Z",
+    "zone": "UTC"
   }
 }
