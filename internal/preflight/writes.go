@@ -96,6 +96,20 @@ func (p *run) cloudSaid(err error) string {
 }
 
 func (p *run) cloudSaidText(s string) string {
+	// Each ARN of an account first, whole, before the scrubber writes what
+	// it learned in its parts' places: after, an ARN of the role's own
+	// account reads [--changes-aws-role's account] and is no ARN, and
+	// another role's whose ARN begins with the role's would show what
+	// follows (role/example-writer/other). One that is a value hidden by
+	// flag is named as the scrubber names it.
+	s = arnText.ReplaceAllStringFunc(s, func(arn string) string {
+		for _, h := range p.hidden {
+			if h[1] == arn {
+				return "[" + h[0] + "]"
+			}
+		}
+		return "[an ARN]"
+	})
 	if p.c.Scrubber != nil {
 		s = p.c.Scrubber(p.hiddenSaid...)(p.c.Scrubber(p.hidden...)(s))
 	}
@@ -109,23 +123,17 @@ var (
 	// only those Lapilli writes to (aws-iso, aws-iso-b, aws-eusc, and any
 	// to come): an error may name an ARN of one. A comma is the ARN's when
 	// what follows it is too (a role's name may hold them, role/a,,b), the
-	// sentence's when a space or the end does. Its account, or a name in
-	// it, may be what the report's scrubber put in its place already
-	// ([--changes-aws-role's account]): an ARN of the role's own account,
-	// as the pod's often is, is hidden whole all the same.
-	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:(?:[0-9]{12}|` + arnHidden + `):(?:` + arnPart + `|,+` + arnPart + `|` + arnHidden + `)+`)
+	// sentence's when a space or the end does. It is read in what a cloud
+	// said as it said it, before the scrubber (cloudSaidText).
+	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:(?:` + arnPart + `|,+` + arnPart + `)+`)
 	// numberText is what may be an account's or a project's number: ten
 	// digits or more, or 1234-5678-9012 as AWS writes an account, whatever
 	// is beside it but another digit (acct_123456789012).
 	numberText = regexp.MustCompile(`[0-9]{4}-[0-9]{4}-[0-9]{4}|[0-9]{10,}`)
 )
 
-// arnPart is a character of an ARN after its account; arnHidden is what
-// the report's scrubber writes in a value's place, [what it was].
-const (
-	arnPart   = `[^\s"'<>,;()\[\]{}]`
-	arnHidden = `\[[^\[\]\n]{1,128}\]`
-)
+// arnPart is a character of an ARN after its account.
+const arnPart = `[^\s"'<>,;()\[\]{}]`
 
 // cloudIDs is s without an ARN of an account, a GUID, or a number of ten
 // digits or more, or one written 1234-5678-9012, not part of a longer run

@@ -1505,6 +1505,45 @@ func TestTakeErrorRedacted(t *testing.T) {
 	}
 }
 
+// Each ARN of an account in what a cloud said is hidden whole, whatever the
+// scrubber would make of its parts: the role's own named as the role, any
+// other an ARN, its account and names never said.
+func TestCloudSaidARNsWhole(t *testing.T) {
+	for _, c := range []struct{ role, said string }{
+		{"example-writer", "arn:aws:sts::123456789012:assumed-role/ci,example-writer/session-name"},
+		{"example-writer", "arn:aws:iam::999999999999:role/a,,example-writer,pod-name and"},
+		{"example-writer", "arn:aws:iam::123456789012:role/example-writer/other-name"},
+		{"example-writer", "arn:aws:iam::123456789012:role/example-writer+other-name"},
+		{"example-writer", "arn:aws:sts::123456789012:assumed-role/example-writer/session-name"},
+		{"example-writer", "arn:aws:iam::123456789012:role/other-name, then"},
+		// A role named as a word of the scrubber's own: no placeholder
+		// is written into another's.
+		{"account", "arn:aws:iam::123456789012:role/other-name"},
+		{"name", "arn:aws:sts::123456789012:assumed-role/name/session-name"},
+	} {
+		cfg := writesConfig(t)
+		cfg.Serve.ChangesAWSRole = "arn:aws:iam::123456789012:role/" + c.role
+		p := newRun(cfg)
+		p.hideWho("aws", "--changes-aws-role", cfg.Serve.ChangesAWSRole)
+		got := p.cloudSaidText("User: " + c.said)
+		for _, hidden := range []string{"123456789012", "999999999999", "other-name", "session-name", "pod-name", "assumed-role", c.role + "/"} {
+			if strings.Contains(got, hidden) {
+				t.Errorf("role %s, %q: %q says %q", c.role, c.said, got, hidden)
+			}
+		}
+		if !strings.Contains(got, "User: [an ARN]") {
+			t.Errorf("role %s, %q: %q", c.role, c.said, got)
+		}
+	}
+	// The role's own ARN, alone, is named as the role.
+	cfg := writesConfig(t)
+	p := newRun(cfg)
+	p.hideWho("aws", "--changes-aws-role", cfg.Serve.ChangesAWSRole)
+	if got := p.cloudSaidText("on resource: " + cfg.Serve.ChangesAWSRole + ", then"); !strings.Contains(got, "on resource: [--changes-aws-role], then") {
+		t.Errorf("%q", got)
+	}
+}
+
 // What a cloud said loses its ids; Lapilli's own words keep theirs.
 func TestCloudIDs(t *testing.T) {
 	for in, want := range map[string]string{
@@ -1525,9 +1564,6 @@ func TestCloudIDs(t *testing.T) {
 		"roles arn:aws:iam::123456789012:role/a,arn:aws:iam::123456789012:role/b.": "roles [an ARN]",
 		"arn:aws:iam::123456789012:role/x,":                                        "[an ARN],",
 		"arn:aws:iam::123456789012:role/a,,b then":                                 "[an ARN] then",
-		"arn:aws:iam::[--changes-aws-role's account]:role/other, then":             "[an ARN], then",
-		"arn:aws:sts::[x's account]:assumed-role/[x's name]/i-0abc is":             "[an ARN] is",
-		"arn:aws:iam::aws:policy/[x] stays":                                        "arn:aws:iam::aws:policy/[x] stays",
 		"arn:aws:s3:::bucket stays":                                                "arn:aws:s3:::bucket stays",
 		"object 00000000-0000-0000-0000-00000000000d":                              "object [an id]",
 	} {
