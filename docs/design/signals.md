@@ -1101,7 +1101,7 @@ settled:
   again. Of another criterion, the one with no name is read again, as one
   turned on.
 - **Named signals given on the command line** in place of `--impact
-  PROMQL` (a fix, decided on 2026-11-19; 0.55.0 to 0.61.0 left the
+  PROMQL` (a fix, decided on 2026-11-19; 0.55.0 to 0.61.1 left the
   windows with no name, incidents with no signal that kept every rule's
   record, a rule's an entry ties only to a signal with `record: false`
   among them, which `lapilli verdict` with the same file leaves unjudged).

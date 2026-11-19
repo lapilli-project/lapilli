@@ -176,7 +176,7 @@ whichever way the switch is made
   judged again in the same round. A tie the database refuses is logged
   (`the windows of the impact signal with no name weren't tied to a named
   signal`), the windows judged as they are, and tried again at the next
-  round. From 0.55.0 to 0.61.0 the windows were left with no name, and
+  round. From 0.55.0 to 0.61.1 the windows were left with no name, and
   kept every rule's record in their weeks and the two after each.
 
 ## The Helm chart
