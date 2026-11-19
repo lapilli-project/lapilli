@@ -1954,8 +1954,10 @@ impact" in the incidents list, not "(--impact)" and "found by --impact";
 the API gives the title as it was kept ("user impact (--impact)"), the
 command line's report as it was. Where a page has only the title at hand
 (a rule's changes reviewed, a marked window's incidents, the Settings
-trial), `incTitle` says it so. The confirm form is filled with the shown
-title; sent back unchanged, the window keeps its own (`decide`).
+trial), `incTitle` says it so, as `shown` says the incident confirmed of
+a window, which keeps the window's title. A form filled with the shown
+title (confirm, Change it) sent back unchanged keeps the incident's own
+(`sameTitle`).
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

@@ -1375,7 +1375,9 @@ func shownTitle(lang, title string) string {
 // the UI's own, so it is translated, a named signal's with its name.
 func shown(lang string, in ledger.Incident) ledger.Incident {
 	switch {
-	case in.Origin == "impact" && in.Title == impactTitle:
+	case in.Title == impactTitle:
+		// A window, or the incident confirmed of one, which keeps its
+		// title (docs/design/ui.md).
 		in.Title = shownTitle(lang, in.Title)
 	case in.Origin == "impact" && in.Signal != "" && in.Title == "user impact ("+in.Signal+")":
 		in.Title = tr(lang, "user impact (%s)", in.Signal)

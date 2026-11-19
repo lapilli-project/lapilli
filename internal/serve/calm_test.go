@@ -435,4 +435,35 @@ func TestConfirmKeepsTitle(t *testing.T) {
 	if !titles[impactTitle] || !titles["Checkout down"] || titles[tr("ko", "user impact")] {
 		t.Errorf("written down as %v", titles)
 	}
+	// The incident confirmed is shown as the window was, and saved from
+	// its form unchanged but for a label, keeps its title.
+	var made ledger.Incident
+	for _, in := range all {
+		if in.Origin != "impact" && in.Title == impactTitle {
+			made = in
+		}
+	}
+	for _, lang := range []string{"en", "ko"} {
+		r := httptest.NewRequest(http.MethodGet, "/incidents/"+made.ID, nil)
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if body := w.Body.String(); w.Code != http.StatusOK || strings.Contains(body, "(--impact)") || !strings.Contains(body, tr(lang, "user impact")) {
+			t.Errorf("%s: %s, %d, says the flag or not its title", made.ID, lang, w.Code)
+		}
+	}
+	form := url.Values{"id": {made.ID}, "title": {tr("ko", "user impact")}, "start": {made.Start.UTC().Format("2006-01-02T15:04")}, "labels": {"service=search"}}
+	r := httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("X-Forwarded-Email", "bo@example.com")
+	r.Header.Set("Accept-Language", "ko")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("save %s: %d %s", made.ID, w.Code, w.Body.String())
+	}
+	if in, err := s.l.IncidentByID(ctx, made.ID); err != nil || in.Title != impactTitle || in.Labels["service"][0] != "search" {
+		t.Errorf("saved as %+v %v", in, err)
+	}
 }

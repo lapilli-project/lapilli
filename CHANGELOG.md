@@ -86,7 +86,9 @@ change: the ledger stays at 023.
   - An impact window confirmed with the title its form was filled with is
     written down with the window's own title, not the page's words in the
     reader's language (a named signal's window confirmed in Korean was
-    "사용자 영향 (NAME)"); a title written in its place is kept.
+    "사용자 영향 (NAME)"); a title written in its place is kept. The
+    incident confirmed is shown as the window was, and an incident's
+    "Change it" form, saved with its title unchanged, keeps its own.
   - lapilli.dev's icon is serve's mark, on a light round plate in the dark.
 
 ### Fixed
