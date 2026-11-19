@@ -21,9 +21,22 @@
 #                         fetched: Bitbucket Pipelines clones the pull
 #                         request's branch alone, and lets the step fetch
 #
-# Through lapilli serve (LAPILLI_SERVE, see lib.sh), a plain token,
-# LAPILLI_SERVE_TOKEN_FILE: serve doesn't take Bitbucket's ID token yet
-# (docs/design/backtests.md, step 2).
+# Through lapilli serve (LAPILLI_SERVE, see lib.sh), the step's ID token,
+# from a step that asks for serve's audience alone, given as
+# LAPILLI_ID_TOKEN:
+#
+#   - step:
+#       oidc:
+#         audiences:
+#           - https://lapilli-ci.example.com
+#       script:
+#         - LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN sh ci/backtest/bitbucket.sh --since 14d
+#
+# The token names the workspace's own audience beside serve's, as
+# Bitbucket writes every token, so it is one other services that trust the
+# workspace take too: the step asks for no other audience, and the recipe
+# doesn't take BITBUCKET_STEP_OIDC_TOKEN of itself. Or a plain token,
+# LAPILLI_SERVE_TOKEN_FILE.
 recipe=bitbucket.sh
 here=$(dirname "$0")
 : "${BITBUCKET_TOKEN_FILE:?a file holding a repository access token}"

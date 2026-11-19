@@ -315,8 +315,8 @@ func (s *Server) who(ctx context.Context, w http.ResponseWriter, r *http.Request
 			}
 			verified[t.ci] = tok
 		}
-		if !tok.For(t.Audience) {
-			why = "its audience isn't the entry's"
+		if !t.forUs(tok) {
+			why = "its audience isn't the entry's, or it names another beside it"
 			continue
 		}
 		if claim, ok := t.pinned(tok.Claims); !ok {
@@ -474,6 +474,22 @@ func refusedWhy(err error) string {
 		return "another issuer's"
 	}
 	return "its signature doesn't verify by the issuer's keys, by an algorithm of a key pair"
+}
+
+// forUs reports whether a token was made for the entry's audience: that
+// alone; or, of a Bitbucket entry, that beside its workspace's default,
+// which Bitbucket puts in every token whatever the step asks, the
+// workspace the entry pins (ReadTrust holds a Bitbucket entry to one).
+// Never for a third service, and no other CI's beside anything.
+func (t *trusted) forUs(tok signin.CIToken) bool {
+	if t.CI != "bitbucket" {
+		return tok.For(t.Audience)
+	}
+	ws := t.Claims["workspaceUuid"].Values
+	if len(ws) != 1 {
+		return tok.For(t.Audience)
+	}
+	return tok.ForBeside(t.Audience, bitbucketAudience(ws[0]))
 }
 
 // pinned holds a token's claims to the entry's pins, each exactly, as a

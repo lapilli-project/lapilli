@@ -113,6 +113,54 @@ func TestCITokenRefused(t *testing.T) {
 	}
 }
 
+// A Bitbucket step's token names its workspace's default audience beside
+// the one the step asked for: verified, it is for that pair (ForBeside),
+// never for this audience alone (For), and no third audience, nor the
+// default alone, nor another beside it, is taken. Three are refused as
+// it is verified.
+func TestCITokenBeside(t *testing.T) {
+	idp, ci, _ := newCI(t, "/2.0/workspaces/example/pipelines-config/identity/oidc")
+	ws := "{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}"
+	def := idptest.BitbucketAudience(ws)
+	if def != "ari:cloud:bitbucket::workspace/4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d" {
+		t.Fatal(def)
+	}
+	tok, err := ci.VerifyToken(context.Background(), idp.Token(ciAudience, idptest.Bitbucket("{11111111-2222-4333-8444-555555555555}", ws, ciAudience)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tok.ForBeside(ciAudience, def) || tok.For(ciAudience) || tok.ForBeside(ciAudience, "") || tok.ForBeside(def, ciAudience+"/x") {
+		t.Errorf("%v", tok.Audience)
+	}
+	if got, ok := ClaimString(tok.Claims["repositoryUuid"]); !ok || got != "{11111111-2222-4333-8444-555555555555}" || tok.Claims["jti"] != nil {
+		t.Errorf("%v", tok.Claims)
+	}
+	for name, c := range map[string]struct {
+		aud  []string
+		ok   bool
+		errs bool
+	}{
+		"its own alone":         {[]string{ciAudience}, true, false},
+		"the other way about":   {[]string{ciAudience, def}, true, false},
+		"the default alone":     {[]string{def}, false, false},
+		"another beside it":     {[]string{"https://other.example.com", ciAudience}, false, false},
+		"its own twice":         {[]string{ciAudience, ciAudience}, false, false},
+		"the default twice":     {[]string{def, def}, false, false},
+		"a third":               {[]string{def, ciAudience, "sts.amazonaws.com"}, false, true},
+		"another workspace's":   {[]string{idptest.BitbucketAudience("{00000000-0000-4000-8000-000000000000}"), ciAudience}, false, false},
+		"an audience of a case": {[]string{def, strings.ToUpper(ciAudience)}, false, false},
+	} {
+		tok, err := ci.VerifyToken(context.Background(), idp.Token(ciAudience, map[string]any{"aud": c.aud}))
+		if (err != nil) != c.errs {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if err == nil && tok.ForBeside(ciAudience, def) != c.ok {
+			t.Errorf("%s: %v taken %t", name, tok.Audience, !c.ok)
+		}
+	}
+}
+
 // No token signed with a shared secret, or not at all, is taken, whatever
 // the key set holds: one signed with HMAC by the issuer's public key, as
 // a confused verifier would take it, is refused; so is alg none; and an

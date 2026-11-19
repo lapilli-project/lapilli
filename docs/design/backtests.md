@@ -1,9 +1,11 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted; step 1 built.
+Status: accepted; step 1 built, and step 2 for Bitbucket.
 Merged on 2026-11-18, before its week was out, by the maintainer's
-decision, with open questions 1, 5 and 6 decided ("Open questions"
-below); 2, 3 and 4 wait for the steps that need them. Under
+decision, with open questions 1, 5 and 6 decided, and 4 on 2026-11-19
+("Open questions" below); 3, decided on 2026-11-19 on a condition
+Microsoft's documentation turned out not to meet, waits for the
+maintainer again, and 2 for the step that needs it. Under
 [GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
 ledger (the backtests CI jobs ask for, kept a day), and a port that takes
 input from outside with a token of a new kind, so it is designed first,
@@ -16,8 +18,9 @@ companion to [expectations.md](expectations.md) (#81), whose first step
 Step 1 is built: in serve, the port, the trust file, the lane and schema
 023, and the chart's `serve.backtest`; in the recipes, their serve mode
 (`LAPILLI_SERVE`) and the action's inputs (`serve-url`, `audience`,
-`serve-wait`). Where the code had to do otherwise than this note says, "As
-built (step 1)" below says so.
+`serve-wait`). Step 2 is built for Bitbucket Pipelines' ID token, not
+Azure Pipelines'. Where the code had to do otherwise than this note says,
+"As built (step 1)" and "As built (step 2)" below say so.
 
 ## Why
 
@@ -148,6 +151,12 @@ trust:
     claims:
       project_id: "42"
       pipeline_source: merge_request_event
+  - name: monitoring-bitbucket
+    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc
+    audience: https://lapilli-ci.example.com
+    claims:                      # UUIDs as Bitbucket writes them
+      repositoryUuid: "{1a2b3c4d-2222-4333-8444-5555555555ee}"
+      workspaceUuid: "{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}"
   - name: monitoring-azure
     token_file: /etc/lapilli/backtest/azure-token   # a plain token
 ```
@@ -209,10 +218,13 @@ question 6, decided). Every other pinned claim is one value.
   so it isn't the one to pin.
 - **Bitbucket Pipelines.** One issuer for each workspace,
   `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`,
-  as the repository's OpenID Connect settings show it. The step has `oidc:
-  true` and a custom audience under `oidc: audiences:`, and the token is
-  `BITBUCKET_STEP_OIDC_TOKEN`. Pin `repositoryUuid`, and `workspaceUuid`.
-  No claim says the step is a pull request's.
+  WORKSPACE its slug, as the repository's OpenID Connect settings show it;
+  its keys at the same origin, each workspace's its own. The step has
+  `oidc:` with serve's audience under `audiences:`, and the token is
+  `BITBUCKET_STEP_OIDC_TOKEN`. Pin `repositoryUuid`, and `workspaceUuid`,
+  each as Bitbucket writes it, lowercase in braces. No claim says the step
+  is a pull request's, nor which; the token names the workspace's own
+  audience beside the step's ("As built (step 2)").
 - **Forgejo Actions.** Issuer `URL/api/actions`. The workflow sets
   `enable-openid-connect: true`, and asks with
   `ACTIONS_ID_TOKEN_REQUEST_URL` and an audience. Pin `repository_id` and
@@ -220,13 +232,15 @@ question 6, decided). Every other pinned claim is one value.
   of it would break.
 - **Gitea Actions.** No ID token in the documentation read for this note
   (a proposal, go-gitea/gitea#33681): a plain token.
-- **Azure Pipelines.** A job's ID token is for a service connection
-  (issuer `https://vstoken.dev.azure.com/ORGANIZATION-ID`, subject
-  `sc://ORG/PROJECT/CONNECTION`), made for Microsoft Entra's token
-  exchange, `api://AzureADTokenExchange` in the federations documented:
-  serve could check it, but a token of that audience is one Entra would
-  take too, for whatever identity trusts that connection. A plain token in
-  the first step (open questions).
+- **Azure Pipelines.** A job's ID token is for a service connection,
+  made for Microsoft Entra's token exchange, its audience
+  `api://AzureADTokenExchange`, which the job doesn't choose. A new
+  service connection's is issued by Entra itself, the tenant's
+  `https://login.microsoftonline.com/TENANT/v2.0`, an issuer every app of
+  the tenant shares; the older Azure DevOps issuer,
+  `https://vstoken.dev.azure.com/ORGANIZATION-ID` (subject
+  `sc://ORG/PROJECT/CONNECTION`), retires on 2027-07-01. A plain token
+  (open question 3).
 
 The keys are fetched as `signin.Keys` fetches them ([signin.md](signin.md),
 "Keys, fetched sparingly"): from the discovery document's JWKS alone,
@@ -335,9 +349,19 @@ the event pinned, and the pins keep forks out:
 - GitLab names a merge request pipeline's source project in `project_id`,
   so a fork's merge request carries the fork's, and is refused, run in the
   parent project too (its `job_project_id` would be the parent's).
-- Bitbucket and Forgejo say nothing of forks in what was read; pin the
-  repository, and keep OpenID Connect from forks' pipelines as the recipes'
-  README keeps secrets from them.
+- Bitbucket says "Pull requests from a forked repository don't trigger the
+  pipeline" (its pipeline start conditions): a fork's pipelines run in the
+  fork, another repository (`repositoryUuid`) and, in another workspace,
+  another issuer with keys of its own, which the entry's issuer and pins
+  refuse.
+- Forgejo's reference says its OpenID Connect is off for a fork's
+  `pull_request` ("As built (step 1)"); pin the repository, and keep
+  OpenID Connect from forks' pipelines as the recipes' README keeps
+  secrets from them.
+- Azure Pipelines, not taken (open question 3), doesn't give a build of a
+  pull request from a fork a service connection's credentials, unless
+  "Make secrets available to builds of forks" is on, as it is by default
+  for GitHub Enterprise Server's pipelines.
 
 A contributor from outside is backtested once a maintainer, having read the
 rules, pushes the branch into the repository, as with any job that holds a
@@ -658,10 +682,44 @@ on stdin).
    effect already use, by uid?
 3. **Azure Pipelines' ID token.** Take it, for a service connection made
    for Lapilli alone and trusted by no identity in Entra; or keep the plain
-   token?
+   token? **Decided on 2026-11-19, by the maintainer: take it**, an entry
+   with `ci: azure` pinning the service connection's subject exactly and
+   Entra's audience taken for it alone; **unless the token's issuer is one
+   every app of an Entra tenant shares, which would send the question
+   back.** It is, for a service connection made now, so it is back with
+   the maintainer and nothing of it is built. Microsoft's documentation,
+   read on 2026-11-19:
+   - New workload identity service connections use the Microsoft Entra
+     issuer by default, `https://login.microsoftonline.com/TENANT/v2.0`,
+     their subject `<Microsoft Entra prefix>/sc/ORGANIZATION-ID/CONNECTION-ID`
+     (an `/eid1/...` form, in what others have shown of it), and a token
+     that "can only be exchanged for Microsoft Entra access tokens". The
+     Azure DevOps issuer, `https://vstoken.dev.azure.com/ORGANIZATION-ID`
+     with `sc://ORG/PROJECT/CONNECTION`, was deprecated on 2026-07-01 and
+     retires on 2027-07-01, for single-tenant apps and managed identities
+     in Azure's public cloud; it stays for multitenant apps and other
+     clouds.
+   - The Entra issuer is the tenant's: a v2.0 token's `iss` "identifies the
+     STS that constructs and returns the token, and the Microsoft Entra
+     tenant", whatever the app. A managed identity of the tenant gets a
+     token of that issuer for `api://AzureADTokenExchange` too, its own
+     object id as `sub`. Issuer and audience would tie a token to the
+     tenant; only `sub` would tie it to one service connection.
+   - The audience is Entra's token exchange, not the job's to choose: the
+     `oidctoken` API (`POST .../jobs/JOB/oidctoken?serviceConnectionId=ID`,
+     with `System.AccessToken`, as `System.OidcRequestUri` names it) takes
+     a service connection, and no audience.
+
+   Built on the Azure DevOps issuer alone, it would end with it, within
+   the year.
 4. **Bitbucket.** No claim says a step is a pull request's, and what was
    read says nothing of forks: take its token from the first step, or once
-   checked against an account?
+   checked against an account? **Decided on 2026-11-19, by the maintainer:
+   take it**, an entry with `ci: bitbucket`, or known from its issuer,
+   pinning `repositoryUuid` (a list allowed) and `workspaceUuid`, or serve
+   doesn't start. A Bitbucket backtest supersedes none, as a GitLab one
+   doesn't: the token carries no pull request's number. Built in step 2,
+   not yet checked against an account ("As built (step 2)").
 5. **The share.** A quarter of `--max-rate`, or what is left after the runs
    need it, as [preflight.md](preflight.md) counts it? **Decided on
    2026-11-18, by the maintainer: a quarter**, `--backtest-share` 0.25 by
@@ -903,10 +961,99 @@ Where step 1 does otherwise than the sections above say, or says more:
   for byte. A comment past 65,000 bytes even without a log is cut to the
   report's first lines, within 60,000 bytes, saying so.
 
+## As built (step 2)
+
+Bitbucket Pipelines' ID token, as open question 4 decided it; not Azure
+Pipelines', which open question 3 sends back. Where step 2 does otherwise
+than the sections above say, or says more:
+
+- **Known by its issuer.** `ci: bitbucket`, or an issuer
+  `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`.
+  An entry pins `repositoryUuid`, which may be a list, and
+  `workspaceUuid`, one value, each a UUID lowercase in braces as
+  Bitbucket's tokens write them (a slug, a UUID without braces or in
+  capitals, which no token would match, stops serve at start); no event,
+  as its tokens say none. Every other pin is one value. No schema.
+- **Two audiences, of Bitbucket's alone.** Bitbucket puts the workspace's
+  own audience, `ari:cloud:bitbucket::workspace/UUID` (its UUID without
+  braces), in every token, and a step's `audiences:` beside it, in one
+  `aud` list. A Bitbucket entry's token may name its `audience` alone, or
+  beside that of the workspace the entry pins: nothing else, no third,
+  never the workspace's alone. Every other entry's names one, as before.
+  The cost: a token taken here is one any service that trusts the
+  workspace's own audience takes too (Bitbucket's AWS setup trusts it), so
+  whoever reads it on its way to serve, or in serve, could use it there
+  until it expires; serve keeps none, only its hash. The step that asks
+  for serve's audience asks for no other, and runs the recipe alone. An
+  entry's `audience` under `ari:cloud:bitbucket:` is refused, a CI's
+  default.
+- **No `jti`, no `nbf`.** Bitbucket's discovery document lists neither:
+  a token is known by the hash of its payload, as Forgejo's is, and held
+  to the hour from its `iat`. Each step's token is its own (`stepUuid`).
+- **No pull request.** The number is the job's word
+  (`BITBUCKET_PR_ID`), so a Bitbucket backtest supersedes none. The Run
+  history shows the repository by its `repositoryUuid`: the token names it
+  by nothing else.
+- **lapilli preflight** reads the file with `serve.ReadTrust`, as serve
+  does, and says such an entry's CI as `bitbucket`; a Bitbucket issuer,
+  which names the workspace, is said as the trust file's issuer N.
+- **The recipe.** `bitbucket.sh` sends the step's token as
+  `LAPILLI_ID_TOKEN`, the job writing
+  `LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN`: the recipe doesn't take
+  the step's token of itself, which, from a step that asked for no
+  audience of serve's, would name the workspace's alone and be one to
+  keep from serve. The plain token stays.
+- **What was read.** Atlassian's documentation shows a token's claims as a
+  picture, and doesn't say how `aud` reads with `audiences:`; its own
+  example payload, and a workspace's discovery document, say the rest:
+  - <https://support.atlassian.com/bitbucket-cloud/docs/integrate-pipelines-with-resource-servers-using-oidc/>
+    (the identity provider URL and audience from the repository's
+    settings; `audiences:` under `oidc`, 10 at most, 150 characters each);
+  - <https://support.atlassian.com/bitbucket-cloud/docs/deploy-on-aws-using-bitbucket-pipelines-openid-connect/>
+    (`oidc: true`, `BITBUCKET_STEP_OIDC_TOKEN`, `sub` as
+    `{REPOSITORY_UUID}[:{ENVIRONMENT_UUID}]:{STEP_UUID}`, a payload with
+    `repositoryUuid` in braces and `aud` the workspace's ARI);
+  - <https://www.atlassian.com/blog/bitbucket/bitbucket-pipelines-oidc-now-supports-multiple-audiences>
+    (2026-02-03: audiences are a list a resource server finds its own in);
+  - <https://support.atlassian.com/bitbucket-cloud/docs/pipeline-start-conditions/>
+    ("Pull requests from a forked repository don't trigger the pipeline");
+  - <https://docs.openfaas.com/openfaas-pro/iam/bitbucket-federation/>
+    (a payload whose `aud` is the workspace's ARI and the step's
+    audience, the UUIDs in braces, no `jti`);
+  - a workspace's
+    `.../pipelines-config/identity/oidc/.well-known/openid-configuration`
+    (`claims_supported`: `sub`, `iss`, `aud`, `exp`, `iat`,
+    `branchName`, `compliant`, `deploymentEnvironmentUuid`,
+    `pipelineUuid`, `repositoryUuid`, `stepUuid`, `commitSha`,
+    `pipelineRunUuid`, `workspaceUuid`, `isPrivateRepository`,
+    `isInternalWorkspace`; RS256; `jwks_uri` `.../keys.json` at the same
+    origin), and two workspaces' keys, which differ.
+
+  And Microsoft's, for open question 3:
+  - <https://learn.microsoft.com/en-us/azure/devops/pipelines/release/troubleshoot-workload-identity>
+    (the two issuers and subjects side by side);
+  - <https://learn.microsoft.com/en-us/azure/devops/pipelines/release/convert-service-connections>
+    and
+    <https://learn.microsoft.com/en-us/azure/devops/pipelines/release/configure-workload-identity>
+    (the Azure DevOps issuer retired on 2027-07-01; new connections on
+    Entra's);
+  - <https://devblogs.microsoft.com/devops/?p=72939> (2026-06-22: the
+    retirement; "an OIDC token minted by Microsoft Entra");
+  - <https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-config-app-trust-managed-identity>
+    (a managed identity's token: the tenant's issuer,
+    `api://AzureADTokenExchange`, its principal id as `sub`);
+  - <https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference>
+    (`iss`, the tenant's STS);
+  - <https://learn.microsoft.com/en-us/rest/api/azure/devops/distributedtask/oidctoken/create>
+    (`serviceConnectionId`, no audience);
+  - <https://learn.microsoft.com/en-us/azure/devops/pipelines/repos/github>
+    (forks and service connections).
+
 ## Steps
 
 1. The port, ID tokens of GitHub, GitLab and Forgejo, and the plain token;
    Prometheus-format rules; the lane and its share; schema 023; the
    recipes' serve mode and the action's inputs.
-2. Bitbucket's token, and Azure Pipelines' if decided.
+2. Bitbucket's token: built. Azure Pipelines', if open question 3 is
+   decided again.
 3. Grafana and Loki rules, if decided.

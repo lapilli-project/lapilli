@@ -327,39 +327,48 @@ func TestBacktestServeRecipe(t *testing.T) {
 	}
 }
 
-// LAPILLI_ID_TOKEN, the CI's ID token (GitLab's id_tokens:), is sent as
-// the bearer token, kept out of what the recipe runs: neither curl's
-// command line nor its environment has it, nor RENDER's.
+// LAPILLI_ID_TOKEN, the CI's ID token (GitLab's id_tokens:, Bitbucket's
+// BITBUCKET_STEP_OIDC_TOKEN as the step gives it), is sent as the bearer
+// token, kept out of what the recipe runs: neither curl's command line nor
+// its environment has it, nor RENDER's, under either name.
 func TestBacktestServeRecipeIDToken(t *testing.T) {
 	needRecipeTools(t)
-	repo := newPRRepo(t, map[string]string{"chart/out.yaml": shopRules("5m")})
-	repo.pullRequest(map[string]string{"chart/out.yaml": shopRules("2h")})
-	srv := newServeStandIn(t)
-	srv.token = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2dpdGxhYi5leGFtcGxlLmNvbSJ9.c2lnbmF0dXJl"
-	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
-	rr := newRecipeRun(t, backtestHosts[2], repo)
-	var argv, envs string
-	rr.env, argv, envs = curlShim(t, rr.env)
-	seen := filepath.Join(t.TempDir(), "render-saw")
-	out, err := rr.run([]string{"LAPILLI_SERVE=" + srv.url, "LAPILLI_ID_TOKEN=" + srv.token, "SERVE_POLL=0",
-		"RENDER=printf '%s' \"${LAPILLI_ID_TOKEN:-none}\" >" + seen + "; cat chart/out.yaml"})
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if body := srv.sent(); !maps.Equal(sentFiles(t, body["after"]), map[string]string{"rules.yaml": shopRules("2h")}) ||
-		!maps.Equal(sentFiles(t, body["before"]), map[string]string{"rules.yaml": shopRules("5m")}) {
-		t.Errorf("what RENDER wrote isn't sent as rules.yaml: %v", body)
-	}
-	if b, _ := os.ReadFile(seen); string(b) != "none" {
-		t.Errorf("RENDER saw LAPILLI_ID_TOKEN: %q", b)
-	}
-	args, _ := os.ReadFile(argv)
-	e, _ := os.ReadFile(envs)
-	if strings.Contains(string(args), srv.token) || strings.Contains(string(e), srv.token) {
-		t.Error("the ID token on curl's command line, or in its environment")
-	}
-	if !strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0 |") {
-		t.Errorf("the comment:\n%s", rr.body())
+	for _, h := range []backtestHost{backtestHosts[2], backtestHosts[3]} {
+		t.Run(h.kind, func(t *testing.T) {
+			repo := newPRRepo(t, map[string]string{"chart/out.yaml": shopRules("5m")})
+			repo.pullRequest(map[string]string{"chart/out.yaml": shopRules("2h")})
+			srv := newServeStandIn(t)
+			srv.token = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2dpdGxhYi5leGFtcGxlLmNvbSJ9.c2lnbmF0dXJl"
+			srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+			rr := newRecipeRun(t, h, repo)
+			var argv, envs string
+			rr.env, argv, envs = curlShim(t, rr.env)
+			seen := filepath.Join(t.TempDir(), "render-saw")
+			env := []string{"LAPILLI_SERVE=" + srv.url, "LAPILLI_ID_TOKEN=" + srv.token, "SERVE_POLL=0",
+				"RENDER=printf '%s' \"${LAPILLI_ID_TOKEN:-none}${BITBUCKET_STEP_OIDC_TOKEN:-none}\" >" + seen + "; cat chart/out.yaml"}
+			if h.kind == "bitbucket" {
+				env = append(env, "BITBUCKET_STEP_OIDC_TOKEN="+srv.token, "PR=7")
+			}
+			out, err := rr.run(env)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if body := srv.sent(); !maps.Equal(sentFiles(t, body["after"]), map[string]string{"rules.yaml": shopRules("2h")}) ||
+				!maps.Equal(sentFiles(t, body["before"]), map[string]string{"rules.yaml": shopRules("5m")}) {
+				t.Errorf("what RENDER wrote isn't sent as rules.yaml: %v", body)
+			}
+			if b, _ := os.ReadFile(seen); string(b) != "nonenone" {
+				t.Errorf("RENDER saw the ID token: %q", b)
+			}
+			args, _ := os.ReadFile(argv)
+			e, _ := os.ReadFile(envs)
+			if strings.Contains(string(args), srv.token) || strings.Contains(string(e), srv.token) {
+				t.Error("the ID token on curl's command line, or in its environment")
+			}
+			if !strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0 |") {
+				t.Errorf("the comment:\n%s", rr.body())
+			}
+		})
 	}
 }
 

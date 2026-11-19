@@ -119,7 +119,8 @@
 #                    14d), --tz and --rules-select are taken
 #   LAPILLI_ID_TOKEN the CI's ID token for the audience serve's trust file
 #                    names (GitLab's id_tokens:, Bitbucket's
-#                    BITBUCKET_STEP_OIDC_TOKEN once serve takes it); or
+#                    BITBUCKET_STEP_OIDC_TOKEN from a step whose oidc:
+#                    asks for serve's audience alone); or
 #   LAPILLI_SERVE_TOKEN_FILE
 #                    a file holding the plain token serve's trust file
 #                    names, for a CI with no ID token; or
@@ -460,7 +461,9 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
       exit 1
     fi
   fi
-  unset LAPILLI_ID_TOKEN
+  # Bitbucket's step token, which the job gives as LAPILLI_ID_TOKEN, is
+  # in the step's environment too: nothing the recipe runs here needs it.
+  unset LAPILLI_ID_TOKEN BITBUCKET_STEP_OIDC_TOKEN
   one="give lapilli serve one token: LAPILLI_ID_TOKEN, LAPILLI_SERVE_TOKEN_FILE or LAPILLI_SERVE_AUDIENCE"
   if [ -n "${LAPILLI_SERVE_TOKEN_FILE:-}" ]; then
     [ -z "$token_from" ] || { say "$one"; exit 1; }
@@ -473,7 +476,7 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
   if [ -n "${LAPILLI_SERVE_AUDIENCE:-}" ]; then
     [ -z "$token_from" ] || { say "$one"; exit 1; }
     if [ "${ci_tokens:-}" != actions ]; then
-      say "LAPILLI_SERVE_AUDIENCE: ${recipe:-lib.sh} asks its CI for no ID token: give LAPILLI_ID_TOKEN, the one the CI gives the job for serve's audience (GitLab's id_tokens:), or LAPILLI_SERVE_TOKEN_FILE"
+      say "LAPILLI_SERVE_AUDIENCE: ${recipe:-lib.sh} asks its CI for no ID token: give LAPILLI_ID_TOKEN, the one the CI gives the job for serve's audience (GitLab's id_tokens:, Bitbucket's BITBUCKET_STEP_OIDC_TOKEN), or LAPILLI_SERVE_TOKEN_FILE"
       exit 1
     fi
     if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then

@@ -4,6 +4,28 @@
 
 ### Added
 
+- **Bitbucket Pipelines' ID token at the backtest port**
+  (docs/design/backtests.md, step 2; open question 4 decided). A trust
+  entry with `ci: bitbucket`, or known from a workspace's issuer,
+  `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`,
+  must pin `repositoryUuid` (a list allowed) and `workspaceUuid`, each
+  lowercase in braces as Bitbucket writes them, or serve doesn't start.
+  Bitbucket writes the workspace's own audience
+  (`ari:cloud:bitbucket::workspace/UUID`) in every token beside the step's:
+  a Bitbucket entry takes its audience alone or beside the pinned
+  workspace's, never a third, and every other entry still one alone;
+  `ari:cloud:bitbucket:...` is refused as an entry's audience. Its token
+  has no `jti` and names no pull request: known by what it says, it
+  supersedes no backtest. The Run history shows the repository by its
+  UUID. `bitbucket.sh` sends the step's token given as `LAPILLI_ID_TOKEN`
+  (`LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN`, from a step whose
+  `oidc: audiences:` names serve's alone), and keeps
+  `BITBUCKET_STEP_OIDC_TOKEN` out of what it runs in serve mode;
+  `lapilli preflight` says such an entry's CI as `bitbucket`. Azure
+  Pipelines' token isn't taken: new service connections' are issued by
+  the Microsoft Entra tenant, an issuer every app of it shares, which
+  sends open question 3 back to the maintainer.
+
 - **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
   step 3). With `--backtest-listen`: `backtest.trust` says what serve does
   with `--backtest-trust` at start, read by serve's own reader: it takes

@@ -189,15 +189,34 @@ var (
 // repository by its id, which an entry must pin, alone of its claims a
 // list; the claim of the event the job runs for, which it must pin too,
 // to one of events, those a fork's pull request can't run in the
-// repository's own context with; and the claim that names the repository,
-// which the Run history shows.
+// repository's own context with ("" for a CI whose tokens say no event);
+// the claim that names the repository, which the Run history shows; and
+// other claims an entry must pin, one value each.
 var knownCIs = map[string]struct {
 	repoID, event, repoName string
 	events                  []string
+	also                    []string
 }{
-	"github":  {"repository_id", "event_name", "repository", []string{"pull_request", "push"}},
-	"forgejo": {"repository_id", "event_name", "repository", []string{"pull_request", "push"}},
-	"gitlab":  {"project_id", "pipeline_source", "project_path", []string{"merge_request_event", "push"}},
+	"github":  {"repository_id", "event_name", "repository", []string{"pull_request", "push"}, nil},
+	"forgejo": {"repository_id", "event_name", "repository", []string{"pull_request", "push"}, nil},
+	"gitlab":  {"project_id", "pipeline_source", "project_path", []string{"merge_request_event", "push"}, nil},
+	// Bitbucket's tokens say no event, and name the repository by its UUID
+	// alone; its workspace is pinned too, as its issuer is the workspace's.
+	"bitbucket": {"repositoryUuid", "", "repositoryUuid", nil, []string{"workspaceUuid"}},
+}
+
+// ciNames are the CIs ci: takes, as a refusal says them.
+const ciNames = "github, gitlab, forgejo or bitbucket"
+
+// bitbucketUUID is a UUID as Bitbucket's tokens write one: lowercase, in
+// braces.
+var bitbucketUUID = regexp.MustCompile(`^\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}$`)
+
+// bitbucketAudience is the audience Bitbucket Pipelines puts in every token
+// of a workspace's, whatever the step asks for beside it: the workspace's
+// UUID, without its braces.
+func bitbucketAudience(workspaceUUID string) string {
+	return "ari:cloud:bitbucket::workspace/" + strings.TrimSuffix(strings.TrimPrefix(workspaceUUID, "{"), "}")
 }
 
 // GitHub Enterprise Cloud's issuer of an enterprise's own (its slug after
@@ -205,6 +224,8 @@ var knownCIs = map[string]struct {
 var (
 	ghec = regexp.MustCompile(`^https://token\.actions\.githubusercontent\.com/[A-Za-z0-9][A-Za-z0-9-]{0,99}$`)
 	ghes = regexp.MustCompile(`^https://[A-Za-z0-9.-]+(:[0-9]+)?/_services/token$`)
+	// Bitbucket Pipelines' issuer of a workspace's, by its slug.
+	bitbucketIssuer = regexp.MustCompile(`^https://api\.bitbucket\.org/2\.0/workspaces/[A-Za-z0-9][A-Za-z0-9._-]{0,99}/pipelines-config/identity/oidc$`)
 )
 
 // eventClaims are the claims that say which event a job runs for, as the
@@ -226,6 +247,8 @@ func ciOf(issuer string) string {
 		return "gitlab"
 	case strings.HasSuffix(issuer, "/api/actions"):
 		return "forgejo"
+	case bitbucketIssuer.MatchString(issuer):
+		return "bitbucket"
 	}
 	return ""
 }
@@ -519,8 +542,8 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 	if t.CI == "" {
 		t.CI = ciOf(t.Issuer)
 	} else if _, ok := knownCIs[t.CI]; !ok {
-		return refuse("ci", "ci: want github, gitlab or forgejo, or leave it out for another issuer",
-			fmt.Errorf("ci %q: want github, gitlab or forgejo, or leave it out for another issuer", t.CI))
+		return refuse("ci", "ci: want "+ciNames+", or leave it out for another issuer",
+			fmt.Errorf("ci %q: want %s, or leave it out for another issuer", t.CI, ciNames))
 	}
 	if len(t.Claims) == 0 {
 		return refuseAs("claims", "claims: pin the claims a token must hold, the repository's id among them")
@@ -564,7 +587,7 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 			}
 		}
 		if _, ok := t.Claims["sub"]; !ok {
-			return refuseAs("claims", "claims: an issuer Lapilli doesn't know by its URL needs ci: (github, gitlab or forgejo), or sub pinned, and the event (event_name or pipeline_source)")
+			return refuseAs("claims", "claims: an issuer Lapilli doesn't know by its URL needs ci: ("+ciNames+"), or sub pinned, and the event (event_name or pipeline_source)")
 		}
 		if _, ok := t.Claims["event_name"]; !ok {
 			if _, ok := t.Claims["pipeline_source"]; !ok {
@@ -581,6 +604,27 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 	}
 	if _, ok := t.Claims[known.repoID]; !ok {
 		return refuseAs("claims", fmt.Sprintf("claims: pin %s, the repository's id (a name is taken again by a repository made under it; an owner alone would trust every repository made in it)", known.repoID))
+	}
+	for _, name := range known.also {
+		if _, ok := t.Claims[name]; !ok {
+			return refuseAs("claims", fmt.Sprintf("claims: pin %s beside %s", name, known.repoID))
+		}
+	}
+	if t.CI == "bitbucket" {
+		// A UUID as Bitbucket's tokens write it, or no token would match:
+		// said at start, not as every token refused.
+		for _, name := range append([]string{known.repoID}, known.also...) {
+			for _, v := range t.Claims[name].Values {
+				if !bitbucketUUID.MatchString(v) {
+					return refuseClaim(name, fmt.Sprintf("claims: %s: want a UUID as Bitbucket writes it, lowercase, in braces: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", name),
+						fmt.Errorf("claims: %s %q: want a UUID as Bitbucket writes it, lowercase, in braces: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", name, v))
+				}
+			}
+		}
+	}
+	if known.event == "" {
+		// Its tokens say no event: no pin could hold one.
+		return nil
 	}
 	ev, ok := t.Claims[known.event]
 	if !ok {
@@ -618,15 +662,18 @@ func issuerWhy(u string) string {
 
 // defaultAudience says why an audience is one a token made for another
 // service has, "" when it isn't: a CI's default (GitHub's is the
-// repository owner's URL, Forgejo's its own, under the issuer's origin),
-// sigstore's, or one a cloud's token exchange takes (AWS STS, Azure's
-// Entra, Google Cloud's workload identity federation). A token of such an
-// audience could be sent here, or one made here sent there.
+// repository owner's URL, Forgejo's its own, under the issuer's origin,
+// Bitbucket's its workspace's ARI), sigstore's, or one a cloud's token
+// exchange takes (AWS STS, Azure's Entra, Google Cloud's workload identity
+// federation). A token of such an audience could be sent here, or one made
+// here sent there.
 func defaultAudience(aud, issuer string) string {
 	a := strings.ToLower(strings.TrimSpace(aud))
 	switch {
 	case a == "https://github.com" || strings.HasPrefix(a, "https://github.com/"):
 		return "GitHub's default, its repository owner's URL"
+	case strings.HasPrefix(a, "ari:cloud:bitbucket:"):
+		return "Bitbucket's default, its workspace's"
 	case a == "sigstore":
 		return "sigstore's"
 	case a == "sts.amazonaws.com" || strings.HasSuffix(a, ".amazonaws.com"):

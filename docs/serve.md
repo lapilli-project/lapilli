@@ -680,6 +680,12 @@ trust:
     claims:
       project_id: "42"
       pipeline_source: merge_request_event
+  - name: monitoring-bitbucket
+    issuer: https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc
+    audience: https://lapilli-ci.example.com
+    claims:                      # as Bitbucket writes them, in braces
+      repositoryUuid: "{1a2b3c4d-2222-4333-8444-5555555555ee}"
+      workspaceUuid: "{4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d}"
   - name: monitoring-azure
     token_file: /etc/lapilli/backtest/azure-token   # 32 characters at least
 ```
@@ -688,7 +694,8 @@ trust:
   signature, by a key of the issuer's (from its discovery document's JWKS
   at the issuer's own origin, or `jwks_url`), by an algorithm of a key
   pair, never `none` or HMAC, and an RSA key of 2048 to 4096 bits; `aud`
-  the entry's `audience` and nothing beside it; `exp` and `nbf`; `iat`
+  the entry's `audience` and nothing beside it (but, of a Bitbucket
+  entry's, its workspace's own, below); `exp` and `nbf`; `iat`
   within the last hour, whatever `exp` says; each claim pinned exactly,
   a string as it is, an integer by its decimal. `jti`, or with none (as
   Forgejo's) the hash of what it says as it was signed, never how it was
@@ -697,11 +704,11 @@ trust:
   again (two at once, the first not yet kept when the second was read: the
   same body is answered with the same backtest, 200, without its key).
 - **The audience** is required, and should be the port's URL. GitHub's
-  default (the repository owner's URL), one at the issuer's own origin,
-  `sigstore`, and the audiences of AWS STS, Microsoft Entra's token
-  exchange and Google Cloud's workload identity federation are refused:
-  a token made for one of them could be sent here, or one made here sent
-  there.
+  default (the repository owner's URL), Bitbucket's (a workspace's,
+  `ari:cloud:bitbucket:...`), one at the issuer's own origin, `sigstore`,
+  and the audiences of AWS STS, Microsoft Entra's token exchange and
+  Google Cloud's workload identity federation are refused: a token made
+  for one of them could be sent here, or one made here sent there.
 - **Pins.** For GitHub Actions (`ci: github`, known from its issuer, an
   enterprise's on GitHub Enterprise Cloud, `.../<slug>`, and GitHub
   Enterprise Server's, `https://HOST/_services/token`), Forgejo Actions 16
@@ -712,8 +719,14 @@ trust:
   a list, one of them enough; and the event, `event_name` (GitLab's
   `pipeline_source`), to `pull_request` or `push` (`merge_request_event`
   or `push`): another can run a fork's pull request in the repository's
-  own context. Every other pin is one value, `repository_owner_id` among
-  them, which narrows, never replaces, the repository's. An issuer known
+  own context. For Bitbucket Pipelines (`ci: bitbucket`, known from its
+  issuer, a workspace's,
+  `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`),
+  the entry pins `repositoryUuid`, which may be a list, and
+  `workspaceUuid`, each lowercase in braces as Bitbucket writes them, and
+  no event, as its tokens say none. Every other pin is one value,
+  `repository_owner_id` among them, which narrows, never replaces, the
+  repository's. An issuer known
   neither by its URL nor by `ci:` must pin `sub` and the event, one value
   each, or serve doesn't start; and under every issuer, an event pinned
   is one of those, never `pull_request_target`, `workflow_run` or
@@ -729,8 +742,22 @@ trust:
   reference says `enable-openid-connect` "is disabled for `pull_request`
   events from forked repositories". GitLab names a fork's merge request by
   the fork's own project (`project_id`), which the entry doesn't pin.
-- **A plain token**, for a CI with no ID token (Azure Pipelines, Gitea,
-  Jenkins), is read for each request, and refused while it is the same as
+  Bitbucket says "Pull requests from a forked repository don't trigger the
+  pipeline"; a fork's own pipelines run in the fork, another
+  `repositoryUuid`, and, in another workspace, under another issuer.
+- **Bitbucket's audiences.** Bitbucket puts its workspace's own audience
+  (`ari:cloud:bitbucket::workspace/UUID`) in every token, beside what the
+  step asks for under `oidc: audiences:`. A Bitbucket entry takes a token
+  naming its `audience` alone or beside that of the workspace it pins,
+  and nothing else: never a third. Such a token is one any service that
+  trusts the workspace's own audience takes too, so the step that asks
+  for serve's audience asks for no other, and serve is reached over TLS.
+  Its token has no `jti`: it is known by what it says, as Forgejo's is.
+  It names no pull request, so a Bitbucket backtest takes no other's
+  place.
+- **A plain token**, for a CI with no ID token serve takes (Azure
+  Pipelines, whose token is Microsoft Entra's, Gitea, Jenkins), is read
+  for each request, and refused while it is the same as
   another token serve takes. It is a long-lived secret: whoever holds it
   backtests as that entry until it is rotated.
 
@@ -754,7 +781,8 @@ entries at once, each within 5 seconds of its headers. 20 wait at most (`--backt
 entry, one of a pull request the token's `ref` names (a newer commit's
 takes the place of the one waiting; a number the job said takes none's:
 GitLab's ID token names a merge request's source branch, not its number,
-so a GitLab merge request's backtests don't take each other's place);
+and Bitbucket's no pull request, so their backtests don't take each
+other's place);
 past them, 429 with `Retry-After`. One the leader stopped while running is
 run again by the next, twice at most. A job reads its backtest by its key:
 each read is charged to the address it comes from before anything is
