@@ -34,6 +34,14 @@
   exit 1, where serve exits 2. Without `--backtest-listen`, the report is
   what it was, to the byte.
 
+### Changed
+
+- CI on a pull request: a new push cancels the run in progress, the tests
+  on Postgres run in two shards each (`test/shard.sh`), each in half the
+  time, and an end-to-end job runs only when the changes reach it
+  (`test/e2e/reached.sh`), none for the docs alone. On main every job
+  runs, as before (CONTRIBUTING.md).
+
 ### Fixed
 
 - **A sign-in's or a CI issuer's fetch that got no answer names no other
