@@ -105,7 +105,7 @@ jobs:
       # On Postgres the serve tests took fifteen to twenty-one minutes in
       # one job (21 on Postgres 15 at 0.61.1), a shard half that. go test's
       # own limit is still twenty-five, inside the job's thirty.
-      - run: test/shard.sh "$SHARD" -timeout 25m
+      - run: test/shard.sh "$SHARD" -timeout 25m -v
         env:
           SHARD: ${{ matrix.shard }}
 

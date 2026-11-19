@@ -10,8 +10,8 @@
 # lapilli itself, which each one builds (go.mod, go.sum, cmd/ and
 # internal/, but their tests and testdata), the script, and what it reads
 # of the repository. A path that reaches none is named so (Markdown, docs/,
-# site/, assets/, Go's tests, other workflows); a path named nowhere here
-# reaches every job.
+# site/, assets/, Go's tests and test/shard.sh, other workflows); a path
+# named nowhere here reaches every job.
 # shellcheck disable=SC2086 # a list of jobs, split into its ids
 set -euo pipefail
 
@@ -30,7 +30,7 @@ while IFS= read -r f || [ -n "$f" ]; do
     # lapilli, which every job builds, and what runs the jobs
     go.mod | go.sum | .github/workflows/ci.yml | test/e2e/reached.sh) to $jobs ;;
     *.md | docs/* | site/* | assets/* | .github/* | LICENSE | .gitignore) ;;
-    *_test.go | */testdata/* | test/screenshots/*) ;;
+    *_test.go | */testdata/* | test/shard.sh | test/screenshots/*) ;;
     cmd/* | internal/*) to $jobs ;;
     charts/*) to $chart ;;
     Dockerfile | .dockerignore) to $image ;;
