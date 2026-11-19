@@ -168,7 +168,7 @@ whichever way the switch is made
   with `record: false` left unjudged, as `lapilli verdict` leaves them,
   give the file the old expression as a signal named `impact`. The
   firings that could catch the windows are judged again in the same
-  round. From 0.55.0 to 0.60.0 the windows were left with no name, and
+  round. From 0.55.0 to 0.61.0 the windows were left with no name, and
   kept every rule's record in their weeks and the two after each.
 
 ## The Helm chart
