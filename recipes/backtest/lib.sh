@@ -1300,7 +1300,7 @@ side() {
           exit 1
         fi
         jq -nc --arg path "$rel" --rawfile content "$f" --argjson loki "$loki" \
-          "{path: \$path, content: \$content} + (if \$loki then {loki: true} else {} end)" >>"$out.jsonl" || exit 1
+          "{path: \$path, content: \$content} | if \$loki then .loki = true else . end" >>"$out.jsonl" || exit 1
       done' sh "$root" "$tmp/$s" "$loki" {} + 2>"$tmp/find.log"; then
       if [ -e "$tmp/$s.unsent" ]; then
         # Its path is the pull request's: in the job's log, not the comment.
