@@ -524,10 +524,16 @@ By CI:
   a token sent to serve is then one that whatever trusts the workspace's
   own audience (an AWS role set up as Bitbucket's guide sets it) takes
   too. Ask for serve's audience alone, in this step alone, and reach serve
-  over https. The token names no pull request: a newer commit's backtest
+  over https; and have those other services trust an audience of their
+  own, which the steps that need them ask for under `oidc: audiences:`,
+  rather than the workspace's, so that a token serve is sent is of no use
+  to them. The token names no pull request: a newer commit's backtest
   waits behind the older one, as on GitLab. The recipe doesn't send
-  `BITBUCKET_STEP_OIDC_TOKEN` of itself: from a step that asked for no
-  audience of serve's, it would name the workspace's alone.
+  `BITBUCKET_STEP_OIDC_TOKEN` of itself, and refuses at once a
+  `LAPILLI_ID_TOKEN` whose `aud` names Bitbucket's workspace audience
+  alone (`ari:cloud:bitbucket:...`, its payload read, not verified), from
+  a step that asked for no audience of serve's: serve would refuse it,
+  and sending it would hand it over for nothing.
 - **Forgejo Actions.** The workflow sets `enable-openid-connect: true`,
   and `gitea.sh` asks for the token with `LAPILLI_SERVE_AUDIENCE`.
 - **Gitea Actions and Azure Pipelines.** A plain token, in

@@ -1,12 +1,10 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted; step 1 built, and step 2 for Bitbucket.
+Status: accepted; steps 1 and 2 built.
 Merged on 2026-11-18, before its week was out, by the maintainer's
-decision, with open questions 1, 5 and 6 decided, and 4 on 2026-11-19
-("Open questions" below); 3, decided on 2026-11-19 on a condition
-Microsoft's documentation turned out not to meet, waits for the
-maintainer again, and 2 for the step that needs it. Under
-[GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
+decision, with open questions 1, 5 and 6 decided, and 3 and 4 on
+2026-11-19 ("Open questions" below); 2 waits for the step that needs it.
+Under [GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
 ledger (the backtests CI jobs ask for, kept a day), and a port that takes
 input from outside with a token of a new kind, so it is designed first,
 as a pull request, and reviewed as an attacker would
@@ -18,8 +16,9 @@ companion to [expectations.md](expectations.md) (#81), whose first step
 Step 1 is built: in serve, the port, the trust file, the lane and schema
 023, and the chart's `serve.backtest`; in the recipes, their serve mode
 (`LAPILLI_SERVE`) and the action's inputs (`serve-url`, `audience`,
-`serve-wait`). Step 2 is built for Bitbucket Pipelines' ID token, not
-Azure Pipelines'. Where the code had to do otherwise than this note says,
+`serve-wait`). Step 2 is built: Bitbucket Pipelines' ID token; Azure
+Pipelines stays on the plain token. Where the code had to do otherwise
+than this note says,
 "As built (step 1)" and "As built (step 2)" below say so.
 
 ## Why
@@ -682,13 +681,16 @@ on stdin).
    effect already use, by uid?
 3. **Azure Pipelines' ID token.** Take it, for a service connection made
    for Lapilli alone and trusted by no identity in Entra; or keep the plain
-   token? **Decided on 2026-11-19, by the maintainer: take it**, an entry
-   with `ci: azure` pinning the service connection's subject exactly and
-   Entra's audience taken for it alone; **unless the token's issuer is one
-   every app of an Entra tenant shares, which would send the question
-   back.** It is, for a service connection made now, so it is back with
-   the maintainer and nothing of it is built. Microsoft's documentation,
-   read on 2026-11-19:
+   token? **Decided on 2026-11-19, by the maintainer: the plain token.**
+   A service connection made now has its token issued by the Microsoft
+   Entra tenant, an issuer every app of the tenant shares, so only `sub`
+   would tie it to the connection; its audience is Entra's token exchange,
+   which the job can't choose; the older Azure DevOps issuer retires on
+   2027-07-01; and there is no account to check any of it against. To
+   look at again once it can be checked against a real account. (A first
+   decision the same day, to take it unless its issuer were one a whole
+   tenant shares, met that condition.)
+   Microsoft's documentation, read on 2026-11-19:
    - New workload identity service connections use the Microsoft Entra
      issuer by default, `https://login.microsoftonline.com/TENANT/v2.0`,
      their subject `<Microsoft Entra prefix>/sc/ORGANIZATION-ID/CONNECTION-ID`
@@ -708,7 +710,11 @@ on stdin).
    - The audience is Entra's token exchange, not the job's to choose: the
      `oidctoken` API (`POST .../jobs/JOB/oidctoken?serviceConnectionId=ID`,
      with `System.AccessToken`, as `System.OidcRequestUri` names it) takes
-     a service connection, and no audience.
+     a service connection, and no audience. A post outside Microsoft says
+     an Entra-issued token names the exchange by its application id,
+     `fb60f99c-7a34-4190-8149-302f77469936`; Microsoft's documentation
+     read doesn't, and that audience isn't refused as an entry's (a
+     follow-up, once Microsoft says it).
 
    Built on the Azure DevOps issuer alone, it would end with it, within
    the year.
@@ -963,8 +969,9 @@ Where step 1 does otherwise than the sections above say, or says more:
 
 ## As built (step 2)
 
-Bitbucket Pipelines' ID token, as open question 4 decided it; not Azure
-Pipelines', which open question 3 sends back. Where step 2 does otherwise
+Bitbucket Pipelines' ID token, as open question 4 decided it; Azure
+Pipelines stays on the plain token, as open question 3 decided. Where step
+2 does otherwise
 than the sections above say, or says more:
 
 - **Known by its issuer.** `ci: bitbucket`, or an issuer
@@ -983,10 +990,15 @@ than the sections above say, or says more:
   The cost: a token taken here is one any service that trusts the
   workspace's own audience takes too (Bitbucket's AWS setup trusts it), so
   whoever reads it on its way to serve, or in serve, could use it there
-  until it expires; serve keeps none, only its hash. The step that asks
-  for serve's audience asks for no other, and runs the recipe alone. An
-  entry's `audience` under `ari:cloud:bitbucket:` is refused, a CI's
-  default.
+  until it expires; serve keeps none, only its hash. Accepted on
+  2026-11-19 by the maintainer, with what keeps it small: the step that
+  asks for serve's audience asks for no other, and runs the recipe alone;
+  and the other services that trust the workspace (an AWS role made as
+  Bitbucket's guide makes it, and the like) trust an audience of their
+  own, asked for under `oidc: audiences:` by the steps that need them,
+  rather than the workspace's, so that a token serve is sent is of no use
+  to them. An entry's `audience` under `ari:cloud:bitbucket:` is refused,
+  a CI's default.
 - **No `jti`, no `nbf`.** Bitbucket's discovery document lists neither:
   a token is known by the hash of its payload, as Forgejo's is, and held
   to the hour from its `iat`. Each step's token is its own (`stepUuid`).
@@ -1001,8 +1013,13 @@ than the sections above say, or says more:
   `LAPILLI_ID_TOKEN`, the job writing
   `LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN`: the recipe doesn't take
   the step's token of itself, which, from a step that asked for no
-  audience of serve's, would name the workspace's alone and be one to
-  keep from serve. The plain token stays.
+  audience of serve's, would name the workspace's alone. `lib.sh` reads a
+  `LAPILLI_ID_TOKEN`'s payload, not verified, for its `aud` alone, and
+  refuses at once to send one that names Bitbucket's workspace audiences
+  and nothing else (`ari:cloud:bitbucket:...`): serve would refuse it,
+  and sending it would hand it over for nothing. It keeps
+  `BITBUCKET_STEP_OIDC_TOKEN` out of what it runs in serve mode. The plain
+  token stays.
 - **What was read.** Atlassian's documentation shows a token's claims as a
   picture, and doesn't say how `aud` reads with `audiences:`; its own
   example payload, and a workspace's discovery document, say the rest:
@@ -1054,6 +1071,6 @@ than the sections above say, or says more:
 1. The port, ID tokens of GitHub, GitLab and Forgejo, and the plain token;
    Prometheus-format rules; the lane and its share; schema 023; the
    recipes' serve mode and the action's inputs.
-2. Bitbucket's token: built. Azure Pipelines', if open question 3 is
-   decided again.
+2. Bitbucket's token: built. Azure Pipelines stays on the plain token
+   (open question 3).
 3. Grafana and Loki rules, if decided.

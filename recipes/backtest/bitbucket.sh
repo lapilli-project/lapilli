@@ -34,9 +34,11 @@
 #
 # The token names the workspace's own audience beside serve's, as
 # Bitbucket writes every token, so it is one other services that trust the
-# workspace take too: the step asks for no other audience, and the recipe
-# doesn't take BITBUCKET_STEP_OIDC_TOKEN of itself. Or a plain token,
-# LAPILLI_SERVE_TOKEN_FILE.
+# workspace take too: the step asks for no other audience, those services
+# trust an audience of their own rather than the workspace's, and the
+# recipe doesn't take BITBUCKET_STEP_OIDC_TOKEN of itself; one whose aud
+# names the workspace's audience alone isn't sent (lib.sh). Or a plain
+# token, LAPILLI_SERVE_TOKEN_FILE.
 recipe=bitbucket.sh
 here=$(dirname "$0")
 : "${BITBUCKET_TOKEN_FILE:?a file holding a repository access token}"

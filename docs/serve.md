@@ -751,12 +751,18 @@ trust:
   naming its `audience` alone or beside that of the workspace it pins,
   and nothing else: never a third. Such a token is one any service that
   trusts the workspace's own audience takes too, so the step that asks
-  for serve's audience asks for no other, and serve is reached over TLS.
+  for serve's audience asks for no other, and serve is reached over TLS;
+  and the other services that trust the workspace (an AWS role made as
+  Bitbucket's guide makes it, and the like) should trust an audience of
+  their own, which the steps that need them ask for under `oidc:
+  audiences:`, rather than the workspace's: a token serve is sent is then
+  of no use to them.
   Its token has no `jti`: it is known by what it says, as Forgejo's is.
   It names no pull request, so a Bitbucket backtest takes no other's
   place.
 - **A plain token**, for a CI with no ID token serve takes (Azure
-  Pipelines, whose token is Microsoft Entra's, Gitea, Jenkins), is read
+  Pipelines, whose token is issued by the Microsoft Entra tenant, an
+  issuer every app of it shares; Gitea; Jenkins), is read
   for each request, and refused while it is the same as
   another token serve takes. It is a long-lived secret: whoever holds it
   backtests as that entry until it is rotated.

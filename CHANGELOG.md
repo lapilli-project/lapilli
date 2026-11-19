@@ -5,8 +5,8 @@
 ### Added
 
 - **Bitbucket Pipelines' ID token at the backtest port**
-  (docs/design/backtests.md, step 2; open question 4 decided). A trust
-  entry with `ci: bitbucket`, or known from a workspace's issuer,
+  (docs/design/backtests.md, step 2; open questions 3 and 4 decided). A
+  trust entry with `ci: bitbucket`, or known from a workspace's issuer,
   `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`,
   must pin `repositoryUuid` (a list allowed) and `workspaceUuid`, each
   lowercase in braces as Bitbucket writes them, or serve doesn't start.
@@ -19,12 +19,18 @@
   supersedes no backtest. The Run history shows the repository by its
   UUID. `bitbucket.sh` sends the step's token given as `LAPILLI_ID_TOKEN`
   (`LAPILLI_ID_TOKEN=$BITBUCKET_STEP_OIDC_TOKEN`, from a step whose
-  `oidc: audiences:` names serve's alone), and keeps
-  `BITBUCKET_STEP_OIDC_TOKEN` out of what it runs in serve mode;
-  `lapilli preflight` says such an entry's CI as `bitbucket`. Azure
-  Pipelines' token isn't taken: new service connections' are issued by
-  the Microsoft Entra tenant, an issuer every app of it shares, which
-  sends open question 3 back to the maintainer.
+  `oidc: audiences:` names serve's alone), refuses at once to send one
+  whose `aud` (its payload read, not verified) names Bitbucket's
+  workspace audience alone, which serve would refuse and whatever trusts
+  the workspace takes, and keeps `BITBUCKET_STEP_OIDC_TOKEN` out of what
+  it runs in serve mode; `lapilli preflight` says such an entry's CI as
+  `bitbucket`. A token serve takes is one whatever trusts the workspace's
+  own audience takes too: the docs say to have those services (an AWS
+  role made by Bitbucket's guide) trust an audience of their own instead.
+  Azure Pipelines stays on the plain token (open question 3 decided): new
+  service connections' tokens are issued by the Microsoft Entra tenant,
+  an issuer every app of it shares, for an audience the job can't choose,
+  and the Azure DevOps issuer retires on 2027-07-01.
 
 - **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
   step 3). With `--backtest-listen`: `backtest.trust` says what serve does

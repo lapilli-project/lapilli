@@ -120,7 +120,8 @@
 #   LAPILLI_ID_TOKEN the CI's ID token for the audience serve's trust file
 #                    names (GitLab's id_tokens:, Bitbucket's
 #                    BITBUCKET_STEP_OIDC_TOKEN from a step whose oidc:
-#                    asks for serve's audience alone); or
+#                    asks for serve's audience alone: one whose aud names
+#                    Bitbucket's workspace audience alone isn't sent); or
 #   LAPILLI_SERVE_TOKEN_FILE
 #                    a file holding the plain token serve's trust file
 #                    names, for a CI with no ID token; or
@@ -268,6 +269,20 @@ serve_url() {
 # most. Read through printf, a builtin, never on a command line.
 token_ok() {
   [ -n "$1" ] && [ "${#1}" -le 8192 ] && [ -z "$(printf '%s' "$1" | tr -d '\041-\176')" ]
+}
+
+# id_token_audience reads an ID token on stdin, its payload decoded and
+# not verified, and writes bitbucket-default when its aud names Bitbucket's
+# workspace audiences alone (ari:cloud:bitbucket:...), ok when it names
+# another, unknown when it can't be read: serve decides the rest.
+id_token_audience() {
+  jq -Rr 'def b64url: gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - (length % 4)) % 4));
+    (split(".") | if length == 3 then .[1] else "" end) as $p
+    | (try ($p | b64url | @base64d | fromjson) catch null) as $c
+    | if ($c | type) != "object" then "unknown"
+      else ($c.aud | if type == "string" then [.] elif type == "array" then map(strings) else [] end) as $aud
+        | if ($aud | length) > 0 and ($aud | all(ascii_downcase | startswith("ari:cloud:bitbucket:"))) then "bitbucket-default" else "ok" end
+      end' 2>/dev/null || echo unknown
 }
 
 # The settings, checked before anything runs.
@@ -458,6 +473,14 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     token_from=LAPILLI_ID_TOKEN
     if ! token_ok "$serve_token"; then
       say "LAPILLI_ID_TOKEN: want an ID token, visible characters and no space, 8 KiB at most"
+      exit 1
+    fi
+    # A Bitbucket step's token that names its workspace's audience alone
+    # (a step whose oidc: names none of serve's) is refused by serve, and
+    # taken by whatever trusts the workspace's audience: it isn't sent.
+    # Its payload is read, not verified, for its aud alone; on stdin.
+    if [ "$(printf '%s' "$serve_token" | id_token_audience)" = bitbucket-default ]; then
+      say "LAPILLI_ID_TOKEN names Bitbucket's workspace audience alone (ari:cloud:bitbucket:...), which lapilli serve refuses and other services that trust the workspace take: give the step oidc: audiences: with serve's audience, its port's URL"
       exit 1
     fi
   fi

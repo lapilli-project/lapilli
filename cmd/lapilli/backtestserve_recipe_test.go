@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -369,6 +370,59 @@ func TestBacktestServeRecipeIDToken(t *testing.T) {
 				t.Errorf("the comment:\n%s", rr.body())
 			}
 		})
+	}
+}
+
+// A Bitbucket step's token that names its workspace's audience alone, from
+// a step whose oidc: asks for none of serve's, isn't sent: serve would
+// refuse it, and whatever trusts the workspace's audience takes it. Its
+// payload is read, not verified, as base64url without padding, its aud a
+// string or a list; capitals are the same. One with serve's audience
+// beside the workspace's is sent.
+func TestBacktestServeRecipeBitbucketDefaultAudience(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	def := "ari:cloud:bitbucket::workspace/4b1d9c2e-7a3f-4e5b-8c6d-0e1f2a3b4c5d"
+	// jwt is a token of aud whose payload, encoded, has both of
+	// base64url's own characters and no padding.
+	jwt := func(aud any) string {
+		for i := range 12 {
+			for j := range 12 {
+				x := strings.Repeat("?", i) + strings.Repeat("~", j)
+				b, _ := json.Marshal(map[string]any{"iss": "https://api.bitbucket.org/2.0/workspaces/example/pipelines-config/identity/oidc", "aud": aud, "x": x})
+				if p := base64.RawURLEncoding.EncodeToString(b); strings.Contains(p, "-") && strings.Contains(p, "_") && len(p)%4 != 0 {
+					return "eyJhbGciOiJSUzI1NiJ9." + p + ".c2lnbmF0dXJl"
+				}
+			}
+		}
+		t.Fatal("no payload with - and _ and no padding")
+		return ""
+	}
+	srv := newServeStandIn(t)
+	for name, aud := range map[string]any{
+		"a string":        def,
+		"a list":          []string{def},
+		"two workspaces'": []string{def, "ari:cloud:bitbucket::workspace/0e1f2a3b-4c5d-4e6f-8a7b-9c0d1e2f3a4b"},
+		"in capitals":     strings.ToUpper(def),
+	} {
+		rr := serveRun(t, backtestHosts[3], repo, srv)
+		out, err := rr.run([]string{"PATHS=alerts", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_ID_TOKEN=" + jwt(aud)})
+		if err == nil || !strings.Contains(out, "LAPILLI_ID_TOKEN names Bitbucket's workspace audience alone") {
+			t.Errorf("%s: %v\n%s", name, err, out)
+		}
+	}
+	if posts, gets, _ := srv.counts(); posts+gets != 0 {
+		t.Errorf("sent: %d POSTs, %d GETs", posts, gets)
+	}
+	srv.token = jwt([]string{def, "https://lapilli-ci.example.com"})
+	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+	rr := serveRun(t, backtestHosts[3], repo, srv)
+	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_ID_TOKEN=" + srv.token}); err != nil {
+		t.Fatalf("beside serve's: %v\n%s", err, out)
+	}
+	if posts, _, _ := srv.counts(); posts != 1 {
+		t.Errorf("beside serve's: %d POSTs", posts)
 	}
 }
 
