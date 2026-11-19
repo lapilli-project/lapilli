@@ -11,28 +11,28 @@
 </table></div>
 {{if not $ro}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">{{t "Try them on the last week first"}}</button></p>{{else}}<p>{{template "off" (offOf $ "Save, and judge again" "admin" "settings-why")}}</p>{{end}}
 {{if not $ro}}</form>{{end}}
-<p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
+<p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{tbdi "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
 {{with .Criteria}}{{template "criteria" (on $ .)}}{{end}}
 {{with .Sources}}{{template "sources" (on $ .)}}{{end}}
 
 <h2 id="config">{{t "Declared configuration"}}</h2>
 {{with .Config}}
-<p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." (or .File "--config")}} {{t "A file is kept to once it has been read the same twice in a row, 15 seconds or more apart: a new one, usually within half a minute."}} {{if .Prune}}{{t "What it no longer declares is deleted then (--config-prune), but a team something names, which is the UI's again; a role is taken away."}}{{else}}{{t "What it no longer declares is the UI's again then, but a role, which is taken away, and what is past the UI's most, which is deleted; with --config-prune, the rest is deleted too."}}{{end}}</p>
+<p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." (code (or .File "--config"))}} {{t "A file is kept to once it has been read the same twice in a row, 15 seconds or more apart: a new one, usually within half a minute."}} {{if .Prune}}{{tbdi "What it no longer declares is deleted then (--config-prune), but a team something names, which is the UI's again; a role is taken away."}}{{else}}{{tbdi "What it no longer declares is the UI's again then, but a role, which is taken away, and what is past the UI's most, which is deleted; with --config-prune, the rest is deleted too."}}{{end}}</p>
 {{if not .WriteFailed.IsZero}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{if .Again}}{{t "The ledger couldn't be kept again to the file it is kept to, tried again for what couldn't be kept of it, at %s: it is tried again at %s, and the log says why." (at $loc .WriteFailed) (at $loc .Retry)}}{{else}}{{t "A new file was read twice in a row, but the ledger couldn't be kept to it at %s: it is tried again at %s, and the log says why." (at $loc .WriteFailed) (at $loc .Retry)}}{{end}}</p>{{end}}
 {{if not .Pending.IsZero}}<p class="quiet">{{t "A new file was read at %s, once: the ledger is kept to it once it is read the same again." (at $loc .Pending)}}</p>{{end}}
 {{if not .PendingSince.IsZero}}<p class="quiet">{{t "Files other than the one the ledger is kept to have been read since %s, none of them the same twice in a row: none is kept to until one is." (at $loc .PendingSince)}}</p>{{end}}
 {{if .Applied.IsZero}}<p class="quiet">{{t "Not kept to it yet."}}</p>{{else}}<p class="quiet">{{t "The ledger is kept to it as of %s, the file's hash beginning %s." (at $loc .Applied) .Hash}}</p>{{end}}
 {{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}
-{{else}}<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
-{{if .GivenBackN}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "%d of what a file declared were given back to the UI as lapilli serve ran without --config. Until the UI changes one, the next --config that doesn't declare it again lets it go: a role is taken away, and the rest is the UI's for good, or, with --config-prune, deleted." .GivenBackN}} {{t "To keep one as the UI's, change it, or keep it here. A role can't be changed: keep it here, or delete it on the Roles page and give it again. Given back stays given back: a --config put back long after still lets go of what it doesn't declare."}}</p>
+{{else}}<p>{{tbdi "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
+{{if .GivenBackN}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{tbdi "%d of what a file declared were given back to the UI as lapilli serve ran without --config. Until the UI changes one, the next --config that doesn't declare it again lets it go: a role is taken away, and the rest is the UI's for good, or, with --config-prune, deleted." .GivenBackN}} {{tbdi "To keep one as the UI's, change it, or keep it here. A role can't be changed: keep it here, or delete it on the Roles page and give it again. Given back stays given back: a --config put back long after still lets go of what it doesn't declare."}}</p>
 {{with .GivenBack}}<ul>{{range .}}<li>{{t .What}}: <code>{{.Name}}</code>{{with .Team}}, {{t "Team"}} <code>{{.}}</code>{{end}}<form class="track" method="post" action="/settings/given-back"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="id" value="{{.ID}}"><button class="quiet-button">{{t "Keep as the UI's"}}</button></form></li>{{end}}</ul>
 <form method="post" action="/settings/given-back"><input type="hidden" name="all" value="1"><button>{{t "Keep them all as the UI's"}}</button></form>{{end}}
 {{if $ro}}<p>{{template "off" (offOf $ "Keep them all as the UI's" "admin" "givenback-why")}}</p>{{end}}{{end}}
-<p>{{if $.Status.Admin}}<a href="/config.yaml">config.yaml</a> {{t "gives them all, declared and made here alike, as --config takes them, to commit."}}{{else}}{{t "An admin can have them all as --config takes them, from config.yaml."}}{{end}}</p>
+<p>{{if $.Status.Admin}}<a href="/config.yaml">config.yaml</a> {{tbdi "gives them all, declared and made here alike, as --config takes them, to commit."}}{{else}}{{tbdi "An admin can have them all as --config takes them, from config.yaml."}}{{end}}</p>
 
 <h2>{{t "Changes to the rules"}}</h2>
-<p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
+<p>{{if not $.Status.ChangesOn}}{{tbdi "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
 
 {{with .Notify}}{{template "notifystatus" (on $ .)}}{{end}}
@@ -72,7 +72,7 @@
 {{with .Check}}<h2>{{t "The replay beside what really fired"}}</h2>
 <p>{{if .To.IsZero}}{{t "Not yet: a day is set beside what really fired once the runs won't replay it again."}}{{else}}{{t "Set beside %s up to %s." (join .Series ", ") (at $loc .To)}}{{end}}
 {{with .Alarms}}<br>{{t "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it." (join . ", ")}}{{end}}
-{{with .Empty}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
+{{with .Empty}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{tbdi "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .History}}<br>{{t "For Grafana's rules, its own alert state history, kept in %s, stands in for GRAFANA_ALERTS." .}}{{end}}
 {{if eq .HistoryOff "from"}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Grafana's alert state history holds no change of state from before %s: its rules weren't checked that day. Grafana may keep none that far back." (day $loc .EmptyDay)}}</strong>{{end}}
 {{if eq .HistoryOff "unusable"}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Grafana's alert state history over %s couldn't be used, as it answered: its rules weren't checked that day. The log says why." (day $loc .EmptyDay)}}</strong>{{end}}
@@ -82,11 +82,11 @@
 <div class="scroll"><table><thead><tr><th scope="col">{{t "Schedule"}}</th><th scope="col">{{t "Read"}}</th><th scope="col">{{t "Turns kept"}}</th><th scope="col">{{t "From and to"}}</th></tr></thead>
 <tbody>{{range .}}<tr><td>{{.Name}}</td><td class="t">{{if .OK.IsZero}}{{t "not yet"}}{{else}}{{at $loc .OK}}{{end}}</td><td class="n">{{.Turns}}</td><td class="t">{{if .Turns}}{{at $loc .From}} → {{at $loc .To}}{{end}}</td></tr>
 {{with .Err}}<tr><td colspan="4"><strong class="status-bad"><span aria-hidden="true">✕</span> {{t "The last read failed, and the turns kept stay: %s" .}}</strong></td></tr>{{end}}
-{{with .Unknown}}<tr><td colspan="4">{{t "Its turns name people --on-call doesn't, whose turns go by the team's hours: %s." (join . ", ")}}</td></tr>{{end}}
+{{with .Unknown}}<tr><td colspan="4">{{tbdi "Its turns name people --on-call doesn't, whose turns go by the team's hours: %s." (join . ", ")}}</td></tr>{{end}}
 {{with .Notes}}<tr><td colspan="4" class="quiet">{{t "Passed over in its feed: %s" (join . "; ")}}</td></tr>{{end}}{{end}}</tbody>
 </table></div>{{end}}
 {{with .Backtests}}{{template "backtests" (on $ .)}}
-{{end}}{{with .GoalTasksWait}}<p class="notice status-info" role="status"><span class="sign" aria-hidden="true">↻</span> {{t "%d tasks for goals missed wait for the runs after: a run makes 20 at most (--goal-tasks)." .}} <a href="{{$.Link "/goals"}}">{{t "Goals"}}</a></p>{{end}}
+{{end}}{{with .GoalTasksWait}}<p class="notice status-info" role="status"><span class="sign" aria-hidden="true">↻</span> {{tbdi "%d tasks for goals missed wait for the runs after: a run makes 20 at most (--goal-tasks)." .}} <a href="{{$.Link "/goals"}}">{{t "Goals"}}</a></p>{{end}}
 {{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
 <p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
@@ -96,7 +96,7 @@
 {{/* Pull request backtests (docs/design/backtests.md), with
 --backtest-listen: a row each, counts and the repository, no rule's name. */}}
 {{define "backtests"}}{{$loc := .P.Loc}}<h2 id="backtests">{{t "Pull request backtests"}}</h2>
-<p class="quiet">{{t "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request."}}</p>
+<p class="quiet">{{tbdi "Asked by CI jobs on --backtest-listen, run by the replica that leads, one at a time; each kept a day after it ends. A backtest's comment is on its pull request."}}</p>
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Pull request backtests"}}"><table>
 <thead><tr><th scope="col">{{t "Asked"}}</th><th scope="col">{{t "Trust entry"}}</th><th scope="col">{{t "Repository"}}</th><th scope="col" class="n">{{t "Rules that differ"}}</th><th scope="col" class="n">{{t "Queries"}}</th><th scope="col">{{t "Took"}}</th><th scope="col">{{t "How it ended"}}</th></tr></thead>
 <tbody>{{range .V.Rows}}
@@ -116,8 +116,8 @@ and kind, for anyone else, whom why could tell who holds a role. */}}
 change and to try on the last four weeks first; everyone else reads it. */}}
 {{define "criteria"}}{{$p := .P}}{{$loc := .P.Loc}}{{$edit := and .P.Status.Admin (not .V.NoHistory)}}{{with .V}}
 <h2 id="incident-criteria">{{t "Incident criteria"}}</h2>
-<p>{{t "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand."}}</p>
-{{if .NoHistory}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project."}}</p>{{end}}
+<p>{{tbdi "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand."}}</p>
+{{if .NoHistory}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{tbdi "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project."}}</p>{{end}}
 {{if .Named}}{{template "namedcriteria" (on $p .)}}{{else}}{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
 {{range .Settings}}<div class="field">
 {{if $edit}}<label for="criterion-{{.Key}}">{{else}}<p class="field-name">{{end}}<code>{{.Flag}}</code> {{if eq .Key "impact"}}{{t "Impact signal (PromQL)"}}{{else}}{{t "How long it must last"}}{{end}}{{if $edit}}</label>{{else}}</p>{{end}}
@@ -126,14 +126,14 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 <p id="criterion-{{.Key}}-at" class="quiet">{{t "Started with"}}: {{with .CommandLine}}<code><bdi>{{shown .}}</bdi></code>{{else}}{{t "off"}}{{end}}{{if and $edit $.V.Tried}}. {{t "In effect"}}: {{if eq .Value "off"}}{{t "off"}}{{else}}<code><bdi>{{shown .Value}}</bdi></code>{{end}}{{end}}{{if .Changed}}. {{t "changed by %s, %s" (who .By) (at $loc .Updated)}}{{end}}</p>
 {{if and .Changed $edit}}<label class="check"><input type="checkbox" name="reset-{{.Key}}" value="1"> {{t "back to the start"}}</label>{{end}}
 </div>{{end}}
-<p id="criteria-help" class="quiet">{{t "Empty, or off, turns the impact signal off. --impact-for is from the step to a day: a series must return something that long for its window to be an incident."}}</p>
+<p id="criteria-help" class="quiet">{{tbdi "Empty, or off, turns the impact signal off. --impact-for is from the step to a day: a series must return something that long for its window to be an incident."}}</p>
 {{if $edit}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#impact-tried" name="impact-try" value="1" class="quiet-button">{{t "Try it on the last four weeks"}}</button></p>
 </form>{{else}}</div><p>{{if .NoHistory}}{{template "off" (offWhy "Save, and judge again" "criteria-why" "Needs --prometheus")}}{{else}}{{template "off" (offOf $p "Save, and judge again" "admin" "criteria-why")}}{{end}}</p>{{end}}
 <p class="quiet">{{t "Saving a new one reads it again over the last four weeks, and judges them again; the record is kept by it from then on, and the weeks before keep only the windows the one before found, as incidents. The overview's weekly panels the digest works out, the longer fors it suggests and the rules that fired as often as a noisy one with no record, catch up at the next digest."}}</p>
 {{if not .Since.IsZero}}<p>{{t "The record is kept by the impact signal from %s." (at $loc .Since)}}</p>{{end}}
 {{if not .Floor.IsZero}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Since %s the runs have read another criterion than the one the record is kept by: the impact signal keeps no record until the criterion in effect is read again." (at $loc .Floor)}}</p>{{end}}
 {{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The impact signal keeps no record: a selector it reads has no data yet."}}</p>{{end}}{{template "impactdata" (on $p .)}}{{end}}
-{{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}} {{t "To get past it: raise --timeout or --max-samples where lapilli serve is started, or narrow the expression so that four weeks of it read within them. Turned off until a run has gone by, then on again, it keeps a record from that run on, the weeks before still to be read again."}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
+{{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}} {{tbdi "To get past it: raise --timeout or --max-samples where lapilli serve is started, or narrow the expression so that four weeks of it read within them. Turned off until a run has gone by, then on again, it keeps a record from that run on, the weeks before still to be read again."}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
 {{with .Tried}}{{template "impacttried" (on $p .)}}{{end}}
 {{if $edit}}{{template "addsignal" (on $p .)}}{{end}}{{with .SignalsTried}}{{template "signalstried" (on $p .)}}{{end}}
 {{end}}{{end}}{{end}}
@@ -143,7 +143,7 @@ started with and who changed it here; an admin's to add, change, rename,
 take away, give back to the start, try and read again; and the rule
 entries. */}}
 {{define "namedcriteria"}}{{$p := .P}}{{$loc := .P.Loc}}{{$edit := and .P.Status.Admin (not .V.NoHistory)}}{{with .V}}
-<p class="notice status-info"><span class="sign" aria-hidden="true">i</span> {{t "Named impact signals, each read, started and judged on its own: set where serve starts (--impact NAME=PROMQL, --impact-file, the chart's impact), or here by an admin. What is set here is kept over what serve was started with of the same name; back to the start gives that back."}}</p>
+<p class="notice status-info"><span class="sign" aria-hidden="true">i</span> {{tbdi "Named impact signals, each read, started and judged on its own: set where serve starts (--impact NAME=PROMQL, --impact-file, the chart's impact), or here by an admin. What is set here is kept over what serve was started with of the same name; back to the start gives that back."}}</p>
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals"}}"><table id="impact-signals">
 <caption>{{t "Impact signals"}}</caption>
 <thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col">{{t "How long it must last"}}</th><th scope="col">{{t "Matched on"}}</th><th scope="col">{{t "Keeps the record"}}</th><th scope="col">{{t "Started with"}}</th></tr></thead>
@@ -181,7 +181,7 @@ entries. */}}
 <p class="quiet">{{if .Changed}}{{t "Set here in place of the %d serve was started with, changed by %s, %s." .Started (who .By) (at $loc .Updated)}}{{else}}{{t "As serve was started with them."}}{{end}}</p>
 {{if $edit}}<details{{if .Open}} open{{end}}><summary>{{t "Change them"}}</summary>
 <form method="post" action="/settings/impact-rules" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-<div class="field"><label for="impact-rules-text">{{t "Rule entries, as --impact-file's rules: a YAML list, each with rules or labels, signals, and match if not each signal's own"}}</label>
+<div class="field"><label for="impact-rules-text">{{tbdi "Rule entries, as --impact-file's rules: a YAML list, each with rules or labels, signals, and match if not each signal's own"}}</label>
 <textarea id="impact-rules-text" name="rules" rows="8" spellcheck="false" maxlength="32768">{{.Text}}</textarea></div>
 <p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#signals-tried" name="rules-try" value="1" class="quiet-button">{{t "Try them on the last four weeks"}}</button>{{if .Changed}} <button name="reset" value="1" class="quiet-button">{{t "back to the start"}}</button>{{end}}</p>
 </form></details>{{end}}{{end}}
@@ -274,7 +274,7 @@ over the last four weeks, and what that would do to the verdict. */}}
 <td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "nodata"}}⚠&#xFE0E; {{t "no data"}}{{else if eq .State "unread"}}⚠&#xFE0E; {{t "no record"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
 <td class="t">{{if .Last.IsZero}}–{{else}}{{t .LastWhat}} {{at $loc .Last}}{{with .LastID}} (<bdi>{{.}}</bdi>){{end}}{{end}}</td>
 <td class="n">{{if .Counts}}{{.N}}{{else}}–{{end}}</td>
-<td>{{t .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{if .Signal}}<br>{{if .NoRecord}}{{t "It keeps no record: record is no."}}{{else if .Since.IsZero}}{{t "It keeps no record yet."}}{{else}}{{t "It keeps the record from %s." (at $loc .Since)}}{{end}}{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
+<td>{{tbdi .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{if .Signal}}<br>{{if .NoRecord}}{{t "It keeps no record: record is no."}}{{else if .Since.IsZero}}{{t "It keeps no record yet."}}{{else}}{{t "It keeps the record from %s." (at $loc .Since)}}{{end}}{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}
 <p class="quiet">{{t "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira."}} <a href="{{.Recipes}}">{{t "Copying incidents in from Jira, PagerDuty, incident.io and others"}}</a></p>

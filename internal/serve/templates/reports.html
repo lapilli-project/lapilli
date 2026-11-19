@@ -5,7 +5,7 @@
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Report"}}</th><th scope="col">{{t "When"}}</th><th scope="col">{{t "For whom"}}</th><th scope="col">{{t "Holds"}}</th><th scope="col">{{t "To"}}</th><th scope="col">{{t "Last sent for"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
-  <td>{{if .SetBy}}<a href="{{$.Link "/reports/digest"}}">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="{{$.Link (printf "/reports/%d" .ID)}}">{{.Name}}</a>{{if .Declared}} {{template "declared"}}{{end}}{{end}}
+  <td>{{if .SetBy}}<a href="{{$.Link "/reports/digest"}}">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{tbdi "set in the UI: --digest isn't used"}}{{else}}{{tbdi "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="{{$.Link (printf "/reports/%d" .ID)}}">{{.Name}}</a>{{if .Declared}} {{template "declared"}}{{end}}{{end}}
   {{if eq .Stopped "off"}}<br><span class="quiet">{{t "off"}}</span>{{else if .Stopped}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "its team was removed: it isn't sent"}}</strong>{{end}}</td>
   <td><code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}}</td>
   <td>{{if .SetBy}}{{t "everyone, and each team"}}{{else if .TeamName}}{{.TeamName}}{{if eq .Zone "team"}} <span class="quiet">({{t "its zone"}})</span>{{end}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}}</td>
@@ -15,10 +15,10 @@
   <td>{{if .SetBy}}{{if $admin}}<a href="{{$.Link "/reports" "edit" "digest"}}">{{t "Change"}}</a>{{end}}{{else if and .Declared ($.View.MayEdit .)}}{{template "off" (again (quiet (offDeclared "Change" "declared-why")))}}{{else if $.View.MayEdit .}}<a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a>{{end}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
 </table></div>
-<p class="quiet">{{t "A schedule is daily@09:00, weekly mon@09:00, monthly 1@09:00 (a day from 1 to 28, or last), or a cron expression of five fields, such as 0 9 * * 1-5, hourly at most. A preset covers the day, the week from Monday or the month before it; a cron expression, the time since the one before, or a span given with it, such as 24h or 7d. Times are the ledger's zone's, or the team's."}}</p>
+<details class="howto"><summary>{{t "How to write it"}}</summary><p class="quiet">{{t "A schedule is daily@09:00, weekly mon@09:00, monthly 1@09:00 (a day from 1 to 28, or last), or a cron expression of five fields, such as 0 9 * * 1-5, hourly at most. A preset covers the day, the week from Monday or the month before it; a cron expression, the time since the one before, or a span given with it, such as 24h or 7d. Times are the ledger's zone's, or the team's."}}</p></details>
 {{with .Digest}}
 <h2 id="digest">{{t "Change the weekly digest"}}</h2>
-<p>{{t "Set here, the digest is the ledger's: --digest isn't used, and the flags only name where it can go. It is of the week, Monday to Monday; its suggestions are worked out at its time whether it is sent or not. A week already sent isn't sent again."}}</p>
+<p>{{tbdi "Set here, the digest is the ledger's: --digest isn't used, and the flags only name where it can go. It is of the week, Monday to Monday; its suggestions are worked out at its time whether it is sent or not. A week already sent isn't sent again."}}</p>
 <form method="post" action="/reports/digest" class="grid">
   <label>{{t "When"}} <input name="schedule" required maxlength="100" value="{{.Schedule}}" placeholder="weekly mon@09:00"></label>
   <fieldset><legend>{{t "To"}}</legend>{{$d := .Dests}}{{range $.View.DigestDests}}
@@ -29,7 +29,7 @@
 {{if eq .SetBy "ledger"}}<form method="post" action="/reports/digest/delete"><button class="quiet-button">{{t "Back to the flags"}}</button></form>{{end}}
 {{end}}
 {{if not $ro}}
-{{if not .Dests}}<p>{{t "There is nowhere to send a report: lapilli serve names the destinations, with --report-dest, --slack-webhook-file, --notify-webhook-file or --team-digest. A URL is never typed here."}}</p>
+{{if not .Dests}}<p>{{tbdi "There is nowhere to send a report: lapilli serve names the destinations, with --report-dest, --slack-webhook-file, --notify-webhook-file or --team-digest. A URL is never typed here."}}</p>
 {{else}}
 {{$e := .Edit}}
 {{if and $e $e.Declared}}<h2 id="add">{{t "Change %s" $e.Name}}</h2>
@@ -63,7 +63,7 @@
 {{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "its team was removed: it isn't sent"}}</strong>{{end}}
 {{with .Unknown}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
 <br>{{t "Last sent for the span to %s." (at $loc .LastSent)}}{{with .UpdatedBy}} {{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
-{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="{{$.Link "/reports#digest" "edit" "digest"}}">{{t "Change"}}</a></p>{{else}}<p>{{template "off" (offOf $ "Change it" "admin" "report-why")}}</p>{{end}}
+{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{tbdi "set in the UI: --digest isn't used"}}{{else}}{{tbdi "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="{{$.Link "/reports#digest" "edit" "digest"}}">{{t "Change"}}</a></p>{{else}}<p>{{template "off" (offOf $ "Change it" "admin" "report-why")}}</p>{{end}}
 {{else if .Declared}}<p>{{template "off" (offDeclared "Change it" "report-why")}}</p>
 {{else if or (not $ro) (and (gt .TeamID 0) (edits $.Status .TeamID))}}<p><a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a></p>{{else if gt .TeamID 0}}<p>{{template "off" (offTeam $ "Change it" "report-why" .TeamName)}}</p>{{else}}<p>{{template "off" (offOf $ "Change it" "admin" "report-why")}}</p>{{end}}
 <h2>{{t "As it would be sent now"}}</h2>

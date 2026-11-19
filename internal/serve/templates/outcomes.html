@@ -85,7 +85,7 @@
 <section class="tiles" aria-label="{{t "Use"}}">
   <div class="tile"><div class="tile-label">{{t "Edits, four weeks"}}</div>
     <div class="tile-value">{{.Edits}}</div>
-    <div class="tile-of">{{if ge .People 0}}{{t "by %d people" .People}}{{else}}{{t "who made them is known with --user-header"}}{{end}}</div><div class="tile-delta"> </div></div>
+    <div class="tile-of">{{if ge .People 0}}{{t "by %d people" .People}}{{else}}{{tbdi "who made them is known with --user-header"}}{{end}}</div><div class="tile-delta"> </div></div>
   <div class="tile"><div class="tile-label">{{t "Suggestions acted on"}}</div>
     <div class="tile-value">{{if .Suggested}}{{t "%d of %d" .ActedOn .Suggested}}{{else}}–{{end}}</div>
     <div class="tile-of">{{t "a task made, or the rule changed"}}</div><div class="tile-delta"> </div></div>

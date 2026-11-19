@@ -7,7 +7,7 @@ admin, the button that makes them; disabled, with why, for anyone else. */}}
 {{define "teamsuggest"}}{{$p := .P}}{{with .V}}<section class="card" id="suggested" aria-labelledby="suggested-title">
 <h2 id="suggested-title">{{t "Teams these rules' labels suggest"}}</h2>
 <p>{{t "No team owns these rules, and they say whose they are in a label. Each value can be a team of its own, owning the rules with that label, as the form below would make it."}}</p>
-<div class="scroll"><table>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Teams these rules' labels suggest"}}"><table>
 <thead><tr><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Owns the rules with"}}</th><th scope="col" class="n">{{t "Rules it would own"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr><td class="name"><bdi>{{shown .Value}}</bdi>{{if .Why}}<br><span class="quiet">{{template "suggestwhy" (on $p .)}}</span>{{end}}</td><td class="labels"><code><bdi>{{shown .Key}}={{shown .Value}}</bdi></code></td><td class="n">{{.Rules}}</td></tr>{{end}}</tbody>
 </table></div>
@@ -37,7 +37,7 @@ note, its name, or its labels; or why no team owns it. */}}
 
 {{/* Who may approve a change, on the Roles page (an admin's): those
 --approvers names, the admins without it, or no one, and why. */}}
-{{define "approvers"}}{{if eq .No "changes"}}{{t "No one: changes are off, as lapilli serve was started without --changes."}}{{else if eq .No "read-only"}}{{t "No one: lapilli serve was started with --read-only."}}{{else if eq .No "roles"}}{{t "No one: without --approvers or --admins, no one approves a change."}}{{else if eq .From "approvers"}}{{tbdi "Those --approvers names: %s." (join .List ", ")}}{{else}}{{tbdi "The admins, as --approvers isn't given: %s." (join .List ", ")}}{{end}}{{end}}
+{{define "approvers"}}{{if eq .No "changes"}}{{tbdi "No one: changes are off, as lapilli serve was started without --changes."}}{{else if eq .No "read-only"}}{{tbdi "No one: lapilli serve was started with --read-only."}}{{else if eq .No "roles"}}{{tbdi "No one: without --approvers or --admins, no one approves a change."}}{{else if eq .From "approvers"}}{{tbdi "Those --approvers names: %s." (join .List ", ")}}{{else}}{{tbdi "The admins, as --approvers isn't given: %s." (join .List ", ")}}{{end}}{{end}}
 
 {{/* Who may approve a proposal waiting for approval, in its approval
 panel: to an admin, who may approve a change, but the one it was made by or
@@ -46,9 +46,9 @@ and how to change it; to anyone else, that an approver approves it, or
 that no one can yet and an admin sees why. */}}
 {{define "mayapprove"}}<p id="may-approve"{{if or .In.No .Stuck}} class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{else}}>{{end}}
 {{- if not .Named}}{{if or .In.No .Stuck}}{{t "No one can approve this yet; an admin sees why on the Roles page."}}{{else}}{{t "Who may approve it: an approver other than the one it was made by or for."}}{{end}}
-{{- else if .In.No}}{{if eq .In.No "read-only"}}{{t "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{t "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
-{{- else if .NoOne}}{{if eq .In.From "admins"}}{{t "No one may approve it: only the admins approve, as --approvers isn't given, and the only admin is the one it was made by or for. Give --approvers to name who else may."}}{{else}}{{t "No one may approve it: --approvers names only the one it was made by or for. Name others in --approvers."}}{{end}}
-{{- else if .Stuck}}{{if eq .Need 1}}{{t "It needs 1 more approval, and everyone who may approve has made or approved it: name more in --approvers, or give --approvals 1."}}{{else}}{{t "It needs %d more approvals, and only %d of those who may approve haven't made or approved it: name more in --approvers, or give --approvals 1." .Need (len .Left)}}{{end}}
+{{- else if .In.No}}{{if eq .In.No "read-only"}}{{tbdi "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{tbdi "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
+{{- else if .NoOne}}{{if eq .In.From "admins"}}{{tbdi "No one may approve it: only the admins approve, as --approvers isn't given, and the only admin is the one it was made by or for. Give --approvers to name who else may."}}{{else}}{{tbdi "No one may approve it: --approvers names only the one it was made by or for. Name others in --approvers."}}{{end}}
+{{- else if .Stuck}}{{if eq .Need 1}}{{tbdi "It needs 1 more approval, and everyone who may approve has made or approved it: name more in --approvers, or give --approvals 1."}}{{else}}{{tbdi "It needs %d more approvals, and only %d of those who may approve haven't made or approved it: name more in --approvers, or give --approvals 1." .Need (len .Left)}}{{end}}
 {{- else if eq .In.From "admins"}}{{tbdi "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for: %s." (join .Left ", ")}}
 {{- else}}{{tbdi "Who may approve it: those --approvers names, but the one it was made by or for: %s." (join .Left ", ")}}{{end}}</p>{{end}}
 
@@ -57,8 +57,8 @@ page. Counts and kinds, never a URL. */}}
 {{define "notifystatus"}}{{$p := .P}}{{with .V}}<h2 id="notifications">{{t "Notifications"}}</h2>
 {{template "notifywarn" .}}
 <ul class="plain">
-<li>{{if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{t "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
-<li>{{t "Places reports can go to by name (--report-dest): %d. Teams with a digest of their own (--team-digest): %d." .ReportDests .TeamDigests}}</li>
+<li>{{if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{tbdi "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
+<li>{{tbdi "Places reports can go to by name (--report-dest): %d. Teams with a digest of their own (--team-digest): %d." .ReportDests .TeamDigests}}</li>
 <li>{{if not .DigestOn}}{{t "The weekly digest is off, as set on the Reports page."}}{{else if .DigestSet}}{{t "The weekly digest: %s, to %d of the places it names, as set on the Reports page." .DigestWhen .DigestTo}}{{else}}{{t "The weekly digest: %s, to %d places, as the flags set it." .DigestWhen .DigestTo}}{{end}}{{with .Reports}} {{t "Reports on: %d." .}}{{end}} <a href="{{$p.Link "/reports"}}">{{t "Reports"}}</a>{{with .Posted}}<br>{{template "slackposted" (on $p .)}}{{end}}</li>
 <li>{{template "notifysent" .}}</li>
 </ul>{{end}}{{end}}
@@ -85,7 +85,7 @@ with, posted or passed over, that. */}}
 
 {{/* What is on and goes nowhere, or failed to go: a sentence each, never a
 colour alone. */}}
-{{define "notifywarn"}}{{if .DigestNowhere}}{{template "warnnotice"}}{{if .DigestSet}}{{t "The weekly digest is worked out %s and goes nowhere: none of the places set for it on the Reports page is there now. Pick another there." .DigestWhen}}{{else}}{{t "The weekly digest is worked out %s and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page to go to a place --report-dest names." .DigestWhen}}{{end}}</p>{{end}}
+{{define "notifywarn"}}{{if .DigestNowhere}}{{template "warnnotice"}}{{if .DigestSet}}{{t "The weekly digest is worked out %s and goes nowhere: none of the places set for it on the Reports page is there now. Pick another there." .DigestWhen}}{{else}}{{tbdi "The weekly digest is worked out %s and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page to go to a place --report-dest names." .DigestWhen}}{{end}}</p>{{end}}
 {{- with .Posted}}{{if .Failed}}{{template "badnotice"}}{{t "The weekly digest for the week to %s failed, at %s: the Run history page says why." (day $.Loc .FailedTo) (at $.Loc .At)}}</p>{{end}}{{end}}
 {{- with .ReportsNowhere}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 report is on with nowhere to go: the places it names are gone."}}{{else}}{{t "%d reports are on with nowhere to go: the places they name are gone." .}}{{end}}</p>{{end}}
 {{- if .Backlog}}{{template "warnnotice"}}{{t "More than %d notices wait to be sent, tried and failed or not tried yet: the log says why they don't go." .Counted}}</p>{{else}}{{with .Failed}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 notice made in the last day wasn't sent: its last try failed, and the log says why."}}{{else}}{{t "%d notices made in the last day weren't sent: their last try failed, and the log says why." .}}{{end}}</p>{{end}}{{end}}

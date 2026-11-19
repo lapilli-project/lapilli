@@ -407,7 +407,7 @@ func TestRuleActions(t *testing.T) {
 		`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-1">Add a task</button></span> ` +
 		`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-1">Edit the note</button> ` +
 		`<span id="rule-why-1" class="why">Read-only: lapilli serve was started with --read-only</span></span> </p>`
-	if !strings.Contains(body, want) {
+	if !containsPlain(body, want) {
 		t.Errorf("read-only: no %s", want)
 	}
 

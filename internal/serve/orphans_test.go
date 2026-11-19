@@ -56,7 +56,7 @@ func TestOrphans(t *testing.T) {
 		strings.Contains(body, "<bdi>ErrorsRate</bdi>") || !strings.Contains(body, fmt.Sprintf(`/proposals/%d"`, pid)) || !strings.Contains(body, `<option value="ErrorsRate">`) {
 		t.Fatalf("/orphans: %d\n%s", code, body)
 	}
-	if !strings.Contains(body, "1 to 2 of 2") || !strings.Contains(body, "--rules-select and --rule narrow it") {
+	if !containsPlain(body, "1 to 2 of 2") || !containsPlain(body, "--rules-select and --rule narrow it") {
 		t.Errorf("the count, and what it is compared with: %s", body)
 	}
 	_, body = getAs(t, h, "/orphans", "viewer@example.com")

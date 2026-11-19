@@ -394,7 +394,7 @@ func TestActionDisabled(t *testing.T) {
 	check := func(t *testing.T, h http.Handler, who, path, want string) {
 		t.Helper()
 		code, body, _ := ui(t, h, http.MethodGet, path, who, "", nil)
-		if code != http.StatusOK || !strings.Contains(body, want) {
+		if code != http.StatusOK || !containsPlain(body, want) {
 			t.Errorf("%s as %q: %d, no %s", path, who, code, want)
 		}
 	}

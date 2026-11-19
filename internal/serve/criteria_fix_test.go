@@ -780,7 +780,7 @@ func TestImpactPendingNoData(t *testing.T) {
 	if row := sourceRowOf(page, "Impact signal"); !strings.Contains(row, `status-warn">⚠&#xFE0E; no record`) || !strings.Contains(row, "waiting to be read again") {
 		t.Errorf("the sources row:\n%s", row)
 	}
-	if !strings.Contains(page, "raise --timeout or --max-samples") {
+	if !containsPlain(page, "raise --timeout or --max-samples") {
 		t.Errorf("no way past a failing read again:\n%s", page)
 	}
 }
