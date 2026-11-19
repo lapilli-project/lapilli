@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
@@ -301,10 +302,10 @@ func TestBacktestGrafanaLokiBounds(t *testing.T) {
 		"9 queries":                   {gRule("p1", "Raised", "Q0", many...), "9 queries of data sources"},
 		"17 expressions":              {gRule("p1", "Raised", "A", wide...), "8 and 16 at most"},
 		"relativeTimeRange 9d":        {gRule("p1", "Raised", "B", gRange("A", "prom-a", 9*86400, 0, prom("errors")), gQuery("B", "__expr__", `{type: reduce, expression: A, reducer: max}`)), "before each evaluation (its relativeTimeRange)"},
-		"a selector naming no metric": {gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom(`{job="api"} > 1`))), "names no metric"},
-		"7d read, ending 2d before":   {gRule("p1", "Raised", "A", gRange("A", "prom-a", 2*86400, 2*86400, prom("rate(errors[7d]) > 1"))), "past 6d"},
+		"a selector naming no metric": {gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom(`{job="api"} > 1`))), "Raised's query A reads a selector that names no metric"},
+		"7d read, ending 2d before":   {gRule("p1", "Raised", "A", gRange("A", "prom-a", 2*86400, 2*86400, prom("rate(errors[7d]) > 1"))), "Raised's query A reads past what is taken: here"},
 		"for 49h":                     {strings.Replace(gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom("errors > 1"))), "        condition:", "        for: 49h\n        condition:", 1), "48h"},
-		"LogQL from 8d, a 5m range":   {gRule("p1", "Raised", "B", gRange("A", "loki-a", 8*86400, 0, `{expr: 'sum(count_over_time({app="x"}[5m]))', datasource: {type: loki}}`), gQuery("B", "__expr__", `{type: reduce, expression: A, reducer: max}`)), "reaching 5m back"},
+		"LogQL from 8d, a 5m range":   {gRule("p1", "Raised", "B", gRange("A", "loki-a", 8*86400, 0, `{expr: 'sum(count_over_time({app="x"}[5m]))', datasource: {type: loki}}`), gQuery("B", "__expr__", `{type: reduce, expression: A, reducer: max}`)), "Raised's query B reads past what is taken: here what a rule in LogQL reads"},
 	}
 	for name, c := range grafana {
 		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btAdding(added("grafana.yaml", prGrafana(c.rule), false)))
@@ -436,5 +437,85 @@ func TestBacktestGrafanaInEffectChanged(t *testing.T) {
 	defer h.Unlock()
 	if len(h.exprs) != 0 {
 		t.Errorf("asked %v", h.exprs)
+	}
+}
+
+// Loki's lexer skips a // comment and a /* */ one as well as #, and reads
+// a ' as a character: a pull request's LogQL with one is refused as a
+// whole, a Loki ruler's rule and a Grafana rule's on a Loki data source
+// alike, so that a # or a quote inside one can't hide a wide selector, a
+// long range or a log query from the checks; and a Grafana rule's log
+// query behind a comment, which the replay doesn't take, asks Loki
+// nothing.
+func TestBacktestLogQLComments(t *testing.T) {
+	b, _, _ := btGrafana(t, true, nil)
+	loki := func(expr string) string {
+		return fmt.Sprintf("groups:\n  - name: logs\n    rules:\n      - alert: Raised\n        expr: %q\n", expr)
+	}
+	grafana := func(expr string) []byte {
+		rule := gRule("p1", "Wide", "A", gRange("A", "loki-a", 300, 0, `{expr: '`+expr+`', queryType: instant, datasource: {type: loki}}`))
+		return btAdding(added("grafana.yaml", prGrafana(rule), false))
+	}
+	for _, expr := range []string{
+		`/* # */ sum(count_over_time({namespace=~".+"}[30d])) > 1`,
+		`/* " */ sum(count_over_time({namespace=~".+"}[30d])) > 1 /* " */`,
+		`/**/{app="x"} |= "x"`,
+		"// #\nsum(count_over_time({namespace=~\".+\"}[30d])) > 1",
+	} {
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btAdding(added("loki.yaml", loki(expr), true)))
+		if why, _ := m["error"].(string); code != 400 || !strings.Contains(why, "Raised has a // or /* comment, or a ' outside a string") {
+			t.Errorf("a Loki ruler's %q: %d %q", expr, code, why)
+		}
+		if strings.Contains(expr, "\n") || strings.HasPrefix(expr, "/**/") {
+			continue
+		}
+		code, m, _ = btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), grafana(expr))
+		if why, _ := m["error"].(string); code != 400 || !strings.Contains(why, "Wide's query A has a // or /* comment, or a ' outside a string") {
+			t.Errorf("a Grafana rule's %q: %d %q", expr, code, why)
+		}
+	}
+	if n, _ := b.s.l.BacktestsWaiting(context.Background()); len(n) != 0 {
+		t.Errorf("queued: %v", n)
+	}
+	b, _, logs := btGrafana(t, false, nil)
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), grafana(`/**/{app="x"} |= "x"`)); code == 202 {
+		if got := laneOnce(t, b.s); got.State != ledger.BacktestDone {
+			t.Errorf("a Grafana rule's log query: %s", got.State)
+		}
+	} else if code != 400 {
+		t.Errorf("a Grafana rule's log query: %d %v", code, m)
+	}
+	logs.Lock()
+	defer logs.Unlock()
+	if slices.ContainsFunc(logs.asked, func(s string) bool { return strings.Contains(s, `|= "x"`) }) {
+		t.Errorf("a Grafana rule's log query: Loki asked %q", logs.asked)
+	}
+}
+
+// A Grafana rule's query refused for what it reads is said by its refId,
+// nothing of it quoted: the PromQL the replay asks has the macros put in,
+// $__rate_interval with the scrape interval serve read of its data
+// source, which a pull request could otherwise read back from the
+// refusal. A Loki ruler's rule, which has no macros, is quoted as before.
+func TestBacktestGrafanaRefusalQuotesNothing(t *testing.T) {
+	b, _, _ := btGrafana(t, true, nil)
+	b.s.dataSources.Lock()
+	b.s.dataSources.ds = rules.DataSources{"prom-a": 37 * time.Second}
+	b.s.dataSources.kinds = map[string]string{"prom-a": "prometheus", "loki-a": "loki"}
+	b.s.dataSources.Unlock()
+	for name, c := range map[string]struct{ expr, says string }{
+		"reach":     {`rate(errors[$__rate_interval] offset 9d) > 1`, "Probe's query A reads past what is taken: here"},
+		"a pattern": {`rate({__name__=~"err.+", job="$__rate_interval"}[5m]) > 1`, "Probe's query A reads a selector that names no metric"},
+	} {
+		rule := gRule("p1", "Probe", "A", gQuery("A", "prom-a", `{expr: '`+c.expr+`', datasource: {type: prometheus}}`))
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btAdding(added("grafana.yaml", prGrafana(rule), false)))
+		why, _ := m["error"].(string)
+		if code != 400 || !strings.Contains(why, c.says) || strings.Contains(why, "2m28s") || strings.Contains(why, "148") || strings.Contains(why, "37") {
+			t.Errorf("%s: %d %q", name, code, why)
+		}
+	}
+	loki := "groups:\n  - name: logs\n    rules:\n      - alert: Raised\n        expr: 'sum(count_over_time({app=\"x\"}[9d])) > 1'\n"
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btAdding(added("loki.yaml", loki, true))); code != 400 || !strings.Contains(m["error"].(string), "Raised reads a range and its offset reaching 9d back, past 8d") {
+		t.Errorf("a Loki ruler's rule: %d %v", code, m)
 	}
 }

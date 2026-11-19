@@ -21,22 +21,27 @@
   one, and is taken only where serve has `--loki` and its rules in effect
   hold one, asked with serve's tenant. A rule refused for what it reads is
   said to read "a data source no rule in effect reads", whatever why,
-  naming no uid or data source of serve's. Beside every bound the
-  Prometheus path has: a Grafana rule has 8 queries of data sources and 16
-  queries and expressions at most, each query's `relativeTimeRange` 8 days
-  back at most, and each query asked held as a rule's, the end of its
+  naming no uid or data source of serve's; a Grafana rule's query held to
+  a bound below is said by its refId, nothing of it quoted, as what the
+  replay asks has serve's data source's scrape interval put in for
+  `$__rate_interval`. Beside every bound the Prometheus path has: a
+  Grafana rule has 8 queries of data sources and 16 queries and
+  expressions at most, each query's `relativeTimeRange` 8 days back at
+  most, and each query asked held as a rule's, the end of its
   relativeTimeRange added to what it reads back; a LogQL query is a metric
   query, each stream selector naming its streams by a label matched with
   `=` to a value, its range and offset 8 days back at most, with no
-  subquery and no `@`. The lane asks a Loki through a client of its own at
-  its share of that Loki's rate, kept for it while a backtest asking that
-  Loki runs, and all its requests within a quarter of `--parallel` at
-  once. The recipes send `LOKI_PATHS` (the action's `loki-paths`) so, with
-  `PATHS`, in serve mode. `lapilli preflight` times the runs at
-  `--max-rate` less the lane's share for every API they ask, a Loki and
-  Grafana's data source proxy too, and its estimate's backtest changes
-  Grafana and Loki rules as well. MCP's `compare` is as it was: no Grafana
-  rule, and LogQL only as a change to a Loki ruler's rule in effect.
+  subquery and no `@`, its comments in `#` alone and no `'` outside a
+  string (Loki also reads `//` and `/* */` as comments, and a quote in one
+  would hide the rest from these checks). The lane asks a Loki through a
+  client of its own at its share of that Loki's rate, kept for it while a
+  backtest asking that Loki runs, and all its requests within a quarter of
+  `--parallel` at once. The recipes send `LOKI_PATHS` (the action's
+  `loki-paths`) so, with `PATHS`, in serve mode. `lapilli preflight` times
+  the runs at `--max-rate` less the lane's share for every API they ask, a
+  Loki and Grafana's data source proxy too, and its estimate's backtest
+  changes Grafana and Loki rules as well. MCP's `compare` is as it was: no
+  Grafana rule, and LogQL only as a change to a Loki ruler's rule in effect.
 
 - **Bitbucket Pipelines' ID token at the backtest port**
   (docs/design/backtests.md, step 2; open questions 3 and 4 decided). A

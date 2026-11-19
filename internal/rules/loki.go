@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // lokiQuery reads one of a Grafana rule's queries on a Loki data source as
@@ -50,8 +51,30 @@ func lokiQuery(ref string, q dataQuery, dm, model map[string]any, span time.Dura
 
 // LogQuery reports whether a LogQL query is a log query, a stream selector
 // and its pipeline, which returns log lines: every metric query starts
-// with a function, an aggregation, a number or a bracket.
-func LogQuery(expr string) bool { return strings.HasPrefix(strings.TrimSpace(expr), "{") }
+// with a function, an aggregation, a number or a bracket. Spaces and
+// comments before it are read past as Loki's lexer reads them: # and // to
+// the line's end, /* to */.
+func LogQuery(expr string) bool {
+	for {
+		expr = strings.TrimLeftFunc(expr, unicode.IsSpace)
+		switch {
+		case strings.HasPrefix(expr, "#"), strings.HasPrefix(expr, "//"):
+			i := strings.IndexByte(expr, '\n')
+			if i < 0 {
+				return false
+			}
+			expr = expr[i:]
+		case strings.HasPrefix(expr, "/*"):
+			i := strings.Index(expr[2:], "*/")
+			if i < 0 {
+				return false
+			}
+			expr = expr[i+4:]
+		default:
+			return strings.HasPrefix(expr, "{")
+		}
+	}
+}
 
 // lokiMaxPoints is the most points Grafana's Loki data source asks for a
 // range: a longer range is asked at a longer step.

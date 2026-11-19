@@ -834,27 +834,34 @@ func (p *prepared) checkRule(r *rules.Rule) string {
 	case r.Graph != nil:
 		return p.checkGraph(r)
 	case r.Logs != "":
-		return checkLogQL(name, r.Expr, r.QueryOffset)
+		return checkLogQL(name, r.Expr, r.QueryOffset, true)
 	}
-	return p.checkPromQL(r, r.Expr, r.QueryOffset)
+	return p.checkPromQL(r, name, r.Expr, r.QueryOffset, true)
 }
 
 // checkPromQL holds a PromQL query a rule asks, read back before from each
 // evaluation, to what the port takes: one that doesn't read leaves the
-// rule unsupported, refused as written.
-func (p *prepared) checkPromQL(r *rules.Rule, expr string, before time.Duration) string {
-	name := verdict.Clean(r.Name)
+// rule unsupported, refused as written. A refusal says the query as name,
+// and, with quote, what of it is past the bounds; without, nothing of it.
+func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Duration, quote bool) string {
 	if _, err := rules.Selectors(expr); err != nil {
 		r.Unsupported = refusedAsWritten
 		p.reasons[r.Unsupported] = true
 		return ""
 	}
 	if sel, wide := rules.Wide(expr); wide {
+		if !quote {
+			return name + " reads a selector that names no metric, or names it by a pattern: here each selector reads one metric, by its name"
+		}
 		return fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
 	}
 	if what := rules.Reach(expr, backtestReach-before, backtestPoints); what != "" {
-		return fmt.Sprintf("%s reads %s: here what a rule reads, its ranges and offsets and its subqueries' added up, with its group's query_offset or its query's relativeTimeRange, reaches %d days back at most, a subquery %d points with a step of its own, each written as a duration, and no @",
-			name, clip(verdict.Clean(what), 300), int(backtestReach/(24*time.Hour)), backtestPoints)
+		said := name + " reads past what is taken"
+		if quote {
+			said = name + " reads " + clip(verdict.Clean(what), 300)
+		}
+		return fmt.Sprintf("%s: here what a rule reads, its ranges and offsets and its subqueries' added up, with its group's query_offset or its query's relativeTimeRange, reaches %d days back at most, a subquery %d points with a step of its own, each written as a duration, and no @",
+			said, int(backtestReach/(24*time.Hour)), backtestPoints)
 	}
 	return ""
 }
@@ -865,7 +872,10 @@ func (p *prepared) checkPromQL(r *rules.Rule, expr string, before time.Duration)
 // backtestReach; and each query the replay asks, PromQL or LogQL, as a
 // rule's query is held, read back as far again as its relativeTimeRange
 // ends before the evaluation, and, of a reduce over LogQL, as its window.
-// Its expressions are worked out by Lapilli, and read nothing.
+// Its expressions are worked out by Lapilli, and read nothing. A refusal
+// says the query by its refId and quotes nothing of it: what the replay
+// asks has the macros put in, $__rate_interval with serve's data source's
+// scrape interval among them, and isn't what the pull request wrote.
 func (p *prepared) checkGraph(r *rules.Rule) string {
 	name := verdict.Clean(r.Name)
 	g := r.Graph
@@ -887,16 +897,17 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 	for _, ref := range refs {
 		expr, _ := g.Expr(ref, r.AskStep(ref))
 		before := g.Shift[ref]
+		query := name + "'s query " + clip(verdict.Clean(ref), 100)
 		if g.Logs != "" {
 			if a, ok := g.Asks[ref]; ok && a.Logs {
 				before += a.Window
 			}
-			if why := checkLogQL(name, expr, before); why != "" {
+			if why := checkLogQL(query, expr, before, false); why != "" {
 				return why
 			}
 			continue
 		}
-		if why := p.checkPromQL(r, expr, before); why != "" || r.Unsupported != "" {
+		if why := p.checkPromQL(r, query, expr, before, false); why != "" || r.Unsupported != "" {
 			return why
 		}
 	}
@@ -904,20 +915,33 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 }
 
 // checkLogQL holds a LogQL query a rule asks, read back before from each
-// evaluation, to what the port takes: a metric query, never one of log
-// lines; each stream selector naming its streams by a label's value; its
-// ranges with their offsets within backtestReach, with no subquery and no
-// @.
-func checkLogQL(name, expr string, before time.Duration) string {
-	if rules.LogQuery(expr) {
+// evaluation, to what the port takes: comments in # alone, and no ' outside
+// a string (rules.LogQLText); a metric query, never one of log lines; each
+// stream selector naming its streams by a label's value; its ranges with
+// their offsets within backtestReach, with no subquery and no @. Each is
+// read of the same text, its # comments read past. A refusal says the
+// query as name, and, with quote, what of it is past the bounds.
+func checkLogQL(name, expr string, before time.Duration, quote bool) string {
+	text, ok := rules.LogQLText(expr)
+	if !ok {
+		return name + " has a // or /* comment, or a ' outside a string: here a rule in LogQL has comments in # alone, and its strings in \" or `"
+	}
+	if rules.LogQuery(text) {
 		return name + " asks Loki for log lines: here a rule in LogQL is a metric query, such as count_over_time"
 	}
-	if sel, wide := rules.LogQLWide(expr); wide {
+	if sel, wide := rules.LogQLWide(text); wide {
+		if !quote {
+			return name + " reads a stream selector that names no stream by a label's value: here each stream selector has a label matched with = to a value"
+		}
 		return fmt.Sprintf("%s reads %s, which names no stream by a label's value: here each stream selector has a label matched with = to a value", name, clip(verdict.Clean(sel), 200))
 	}
-	if what := rules.LogQLReach(expr, backtestReach-before); what != "" {
-		return fmt.Sprintf("%s reads %s: here what a rule in LogQL reads, a range and its offset, with its query's relativeTimeRange, reaches %d days back at most, each written as a duration, with no subquery and no @",
-			name, clip(verdict.Clean(what), 300), int(backtestReach/(24*time.Hour)))
+	if what := rules.LogQLReach(text, backtestReach-before); what != "" {
+		said := name + " reads past what is taken"
+		if quote {
+			said = name + " reads " + clip(verdict.Clean(what), 300)
+		}
+		return fmt.Sprintf("%s: here what a rule in LogQL reads, a range and its offset, with its query's relativeTimeRange, reaches %d days back at most, each written as a duration, with no subquery and no @",
+			said, int(backtestReach/(24*time.Hour)))
 	}
 	return ""
 }

@@ -37,3 +37,54 @@ func TestLogQLWideReach(t *testing.T) {
 		}
 	}
 }
+
+// Loki's lexer is Go's scanner's: it skips a // comment and a /* */ one
+// outside a string as well as #, and reads a ' as a character. A # or a
+// quote inside one of those would hide what follows from every check, so
+// an expression with one is refused as a whole; inside a string, and
+// a # comment read past, are as before.
+func TestLogQLComments(t *testing.T) {
+	week := 8 * 24 * time.Hour
+	for _, expr := range []string{
+		`/* # */ sum(count_over_time({namespace=~".+"}[30d])) > 1`,
+		`/* " */ sum(count_over_time({namespace=~".+"}[30d])) > 1 /* " */`,
+		"// #\nsum(count_over_time({namespace=~\".+\"}[30d])) > 1",
+		`/**/{app="x"} |= "x"`,
+		`sum(count_over_time({app="x"}[5m])) > 1 // a note`,
+		`sum(count_over_time({app='x'}[5m])) > 1`,
+	} {
+		if _, ok := LogQLText(expr); ok {
+			t.Errorf("%s: read", expr)
+		}
+		if _, wide := LogQLWide(expr); !wide {
+			t.Errorf("%s: not wide", expr)
+		}
+		if LogQLReach(expr, week) == "" {
+			t.Errorf("%s: reaches nothing", expr)
+		}
+	}
+	for _, expr := range []string{
+		`sum(count_over_time({app="x"} |= "http://x/*y" |~ "can't" [5m])) > 1`,
+		"sum(count_over_time({app=`x`} |= `//` [5m])) # it's // /* \n > 1",
+		`sum(count_over_time({app="x"} |= "a\"//" [5m])) / 2 > 1`,
+	} {
+		if text, ok := LogQLText(expr); !ok || len(text) != len(expr) {
+			t.Errorf("%s: %q %t", expr, text, ok)
+		}
+		if sel, wide := LogQLWide(expr); wide || LogQLReach(expr, week) != "" {
+			t.Errorf("%s: wide %q, reach %q", expr, sel, LogQLReach(expr, week))
+		}
+	}
+	// A log query past comments of every kind is one.
+	for expr, want := range map[string]bool{
+		`/**/{app="x"} |= "x"`:                true,
+		"# c\n{app=\"x\"}":                    true,
+		"// c\n  /* d\n */ {app=\"x\"}":       true,
+		"/* {app=\"x\"} */ count_over_time":   false,
+		`sum(count_over_time({app="x"}[5m]))`: false,
+	} {
+		if got := LogQuery(expr); got != want {
+			t.Errorf("LogQuery(%q) = %t", expr, got)
+		}
+	}
+}

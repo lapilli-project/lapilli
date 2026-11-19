@@ -630,8 +630,8 @@ read, the planner's refusal, the lane's Limiter, the queue's writes, and
 the recipe's serve mode in `lib.sh` (what it sends, and that the token goes
 on stdin). From step 3: what the rules in effect read (`readsInEffect`),
 what a pull request's Grafana and Loki rules are held to (`taken`,
-`checkGraph`, `checkLogQL`, `rules.LogQLWide`, `rules.LogQLReach`), and the
-lane's Lokis (`laneLogs`).
+`checkGraph`, `checkLogQL`, `rules.LogQLText`, `rules.LogQLWide`,
+`rules.LogQLReach`), and the lane's Lokis (`laneLogs`).
 
 ## Alternatives
 
@@ -1133,6 +1133,13 @@ step 3 does otherwise than the sections above say, or says more:
   is in effect, as taking it would: the price of the decision, each
   refusal costing the entry an hour. A Loki ruler's rule is refused the
   same way whether serve has no `--loki` or no Loki ruler's rule in effect.
+  A Grafana rule's query held to a bound below (a selector, what it reads
+  back, LogQL's) is said by its refId, "X's query A", and nothing of it is
+  quoted: what the replay asks has the macros put in, `$__rate_interval`
+  with the scrape interval serve read of the data source among them, so a
+  refusal that quoted it, or what it reads back worked out from it, would
+  tell a pull request that interval. A Prometheus or a Loki ruler's rule,
+  which has no macros, is quoted as before.
 - **Nothing more of Grafana is asked.** A pull request's Grafana rule is
   read with the types and scrape intervals of its data sources serve read
   for its own rules (`replayedAs`); Grafana's API isn't asked of any uid
@@ -1151,9 +1158,18 @@ step 3 does otherwise than the sections above say, or says more:
   isn't empty (`{app=~".+"}` and `{app!="x"}` alone are refused, as
   `{__name__=~"..."}` is); a range with its offset 8 days back at most,
   with a Grafana query's relativeTimeRange, each written as a duration, no
-  subquery, no `@`, no offset after no range; comments read past as Loki
-  reads them. What Loki answers is held as `--loki`'s always is: 256 MiB,
-  `--max-samples`, the series, and a log query's lines refused.
+  subquery, no `@`, no offset after no range; `#` comments read past as
+  Loki reads them. Loki's lexer is a copy of Go's `text/scanner`: beside
+  `#`, it skips `//` and `/* */` comments outside a string and reads a `'`
+  as a character, so a `#` or a quote inside one would hide what follows
+  from every check (`/* # */ sum(count_over_time({app=~".+"}[30d]))`
+  passed them all). A query with a `//` or a `/*` outside a string, or a
+  `'` outside one, is refused as a whole (`rules.LogQLText`: "has a // or
+  /* comment, or a ' outside a string"), before the rest, which read the
+  same text, its `#` comments blanked; whether it is a log query is read
+  past comments of every kind. No metric query needs them. What Loki
+  answers is held as `--loki`'s always is: 256 MiB, `--max-samples`, the
+  series, and a log query's lines refused.
 - **A Loki ruler's files**, from the job: `"loki": true` on a file of the
   body, read as `--loki-rules` reads one (its queries LogQL, its
   `keep_firing_for` and its group's `query_offset` dropped, as Loki 3.7.9
@@ -1191,7 +1207,8 @@ step 3 does otherwise than the sections above say, or says more:
 - **MCP's `compare`** takes no Grafana rule, and a rule in LogQL only as a
   change to a Loki ruler's rule in effect, asked of `--loki` in its
   namespace (`proposed`): no data source the rules in effect don't read.
-  Left as it is.
+  Left as it is: it holds a rule to none of the port's bounds, LogQL's
+  among them, so a comment has no check of its to hide anything from.
 
 ## Steps
 
