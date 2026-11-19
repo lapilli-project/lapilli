@@ -24,8 +24,18 @@ import (
 var slow = 1.0
 
 // TestPagesScale fills a ledger with twelve weeks of a busy set of rules
-// and holds each page, worked out afresh, to a budget. LAPILLI_SCALE
+// and holds each page, worked out afresh, and each write that judges again,
+// to a budget of what the ledger does (ledgerWork), not of time, so that a
+// slow runner fails none; the time each took is logged. LAPILLI_SCALE
 // multiplies the firings (default 1: about 200,000).
+//
+// A page, and the hours, send a few statements for each rule or reviewed
+// change at most, never one for each firing: fewer than a hundredth of the
+// firings kept (the most, the digest's, about 1,000 of some 200,000 on
+// SQLite). A write judges again its days a few statements a day (about 7
+// on SQLite) and writes fewer rows than the firings kept (about 60% for
+// twelve weeks judged again): one for each firing, or the firings written
+// twice, is past both.
 func TestPagesScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -37,6 +47,7 @@ func TestPagesScale(t *testing.T) {
 	ctx := context.Background()
 	// Counted by the hours, as the command line does by default.
 	s, _ := server(t, func(c *Config) {
+		counting(c)
 		c.Options.Hours = verdict.DefaultHours(time.UTC)
 		if c.LedgerURLFile != "" {
 			// Postgres plans each statement for its own arguments, as a
@@ -59,6 +70,7 @@ func TestPagesScale(t *testing.T) {
 	if _, err := s.l.SyncFile(ctx, incs, o); err != nil {
 		t.Fatal(err)
 	}
+	kept := int64(0)
 	for d := start; d.Before(now); d = d.Add(24 * time.Hour) {
 		var fs []firing.Firing
 		for i := 0; i < int(2400*k); i++ {
@@ -67,6 +79,7 @@ func TestPagesScale(t *testing.T) {
 				Labels: map[string]string{"service": services[r.IntN(len(services))], "severity": "page"},
 				Start:  at, End: at.Add(time.Duration(1+r.IntN(60)) * time.Minute)})
 		}
+		kept += int64(len(fs))
 		if err := s.l.Record(ctx, ledger.Found{From: d, To: d.Add(24*time.Hour - time.Second), Firings: fs,
 			Run: ledger.Run{Kind: "backfill", Started: d, Finished: d}}, o); err != nil {
 			t.Fatal(err)
@@ -82,6 +95,17 @@ func TestPagesScale(t *testing.T) {
 			ledgerExec(t, s, "ANALYZE firings")
 		}
 	}
+	readMost := kept / 100
+	// judged holds a write that judged again days of firings to its budget.
+	judged := func(what string, did ledgerWork, days int64) {
+		t.Helper()
+		if most := 30 * days; did.statements > most {
+			t.Errorf("%s: %d statements, over %d for %d days judged again", what, did.statements, most, days)
+		}
+		if did.rows > kept {
+			t.Errorf("%s: %d rows written, over the %d firings kept", what, did.rows, kept)
+		}
+	}
 	// What people keep: teams, quiet windows, tasks and comments.
 	for i := 0; i < 5; i++ {
 		if _, err := s.l.PutTeam(ctx, ledger.Team{Name: fmt.Sprintf("team%d", i), Rules: fmt.Sprintf("^Rule%d", i)}, "ana"); err != nil {
@@ -89,17 +113,21 @@ func TestPagesScale(t *testing.T) {
 		}
 	}
 	began := time.Now()
-	for i := 0; i < 20; i++ {
-		at := start.Add(time.Duration(r.IntN(weeks*7*24)) * time.Hour)
-		if _, err := s.l.PutWindow(ctx, ledger.Window{Title: fmt.Sprint("deploy ", i), Start: at, End: at.Add(time.Duration(1+r.IntN(24)) * time.Hour),
-			Labels: incident.Labels{"service": {services[r.IntN(len(services))]}}}, "ana", o); err != nil {
-			t.Fatal(err)
+	did := ledgerDid(t, s, func() {
+		for i := 0; i < 20; i++ {
+			at := start.Add(time.Duration(r.IntN(weeks*7*24)) * time.Hour)
+			if _, err := s.l.PutWindow(ctx, ledger.Window{Title: fmt.Sprint("deploy ", i), Start: at, End: at.Add(time.Duration(1+r.IntN(24)) * time.Hour),
+				Labels: incident.Labels{"service": {services[r.IntN(len(services))]}}}, "ana", o); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
+	})
 	took := time.Since(began) / 20
-	t.Logf("%-32s %s", "a quiet window, judged again", took.Round(time.Microsecond))
-	if budget := time.Duration(float64(2*time.Second) * max(1, k) * slow); took > budget {
-		t.Errorf("a quiet window took %s, over %s", took, budget)
+	t.Logf("%-32s %s %d statements %d rows", "a quiet window, judged again", took.Round(time.Microsecond), did.statements/20, did.rows/20)
+	// Each of a day or two, and its lead and re-fires: three days each.
+	judged("20 quiet windows", did, 20*3)
+	if most := 20 * 3 * kept / (weeks * 7); did.rows > most {
+		t.Errorf("20 quiet windows: %d rows written, over %d: three days of firings each", did.rows, most)
 	}
 	// A deploy of each service every few hours, read from the deploys
 	// file all at once, the firings they meet marked (docs/design/noc.md).
@@ -109,17 +137,17 @@ func TestPagesScale(t *testing.T) {
 	}
 	o.DeployAfter = 10 * time.Minute
 	began = time.Now()
-	if _, err := s.l.SyncDeploys(ctx, deploys, o, ledger.DeploysRead{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.l.JudgePending(ctx, o); err != nil {
-		t.Fatal(err)
-	}
+	did = ledgerDid(t, s, func() {
+		if _, err := s.l.SyncDeploys(ctx, deploys, o, ledger.DeploysRead{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.l.JudgePending(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	})
 	took = time.Since(began)
-	t.Logf("%-32s %s", fmt.Sprintf("%d deploys, marked", len(deploys)), took.Round(time.Microsecond))
-	if budget := time.Duration(float64(5*time.Second) * max(1, k) * slow); took > budget {
-		t.Errorf("deploys took %s, over %s", took, budget)
-	}
+	t.Logf("%-32s %s %d statements %d rows", fmt.Sprintf("%d deploys, marked", len(deploys)), took.Round(time.Microsecond), did.statements, did.rows)
+	judged("deploys", did, weeks*7)
 	// Windows every month, by cron, and a team's, each judged again over the
 	// twelve weeks, to the end (docs/design/serveops.md).
 	labelled, err := s.l.PutTeam(ctx, ledger.Team{Name: "billing", Labels: incident.Labels{"service": {"billing"}}}, "ana")
@@ -137,17 +165,17 @@ func TestPagesScale(t *testing.T) {
 			continue
 		}
 		began := time.Now()
-		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.l.JudgePending(ctx, o); err != nil {
-			t.Fatal(err)
-		}
+		did := ledgerDid(t, s, func() {
+			if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.l.JudgePending(ctx, o); err != nil {
+				t.Fatal(err)
+			}
+		})
 		took := time.Since(began)
-		t.Logf("%-32s %s", w.Title+", judged again", took.Round(time.Microsecond))
-		if budget := time.Duration(float64(10*time.Second) * max(1, k) * slow); took > budget {
-			t.Errorf("%s took %s, over %s", w.Title, took, budget)
-		}
+		t.Logf("%-32s %s %d statements %d rows", w.Title+", judged again", took.Round(time.Microsecond), did.statements, did.rows)
+		judged(w.Title, did, weeks*7)
 	}
 	for i := 0; i < 300; i++ {
 		id, err := s.l.PutTask(ctx, ledger.Task{Title: fmt.Sprint("task ", i), Kind: "tune", Rule: fmt.Sprintf("Rule%03d", r.IntN(400)),
@@ -179,11 +207,10 @@ func TestPagesScale(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name   string
-		budget time.Duration
 		before func()
 	}{
-		{"hours, twelve weeks afresh", 500 * time.Millisecond, func() { s.hours.by = nil }},
-		{"hours, after a run", 100 * time.Millisecond, func() {
+		{"hours, twelve weeks afresh", func() { s.hours.by = nil }},
+		{"hours, after a run", func() {
 			last := now.Truncate(time.Hour)
 			if err := s.l.Record(ctx, ledger.Found{From: last.Add(-time.Hour), To: last, Run: ledger.Run{Kind: "hourly", Started: last, Finished: last}}, o); err != nil {
 				t.Fatal(err)
@@ -191,7 +218,7 @@ func TestPagesScale(t *testing.T) {
 		}},
 		// A team keeping its own hours: its twelve weeks by those, afresh;
 		// the pages below count by both.
-		{"hours, a team's own", 500 * time.Millisecond, func() {
+		{"hours, a team's own", func() {
 			teams, err := s.l.Teams(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -210,7 +237,7 @@ func TestPagesScale(t *testing.T) {
 		}},
 		// Fifty teams, each with hours of its own, owning every rule: about
 		// as slow as reading the firings once more, row by row.
-		{"hours, fifty teams' own, afresh", time.Second, func() {
+		{"hours, fifty teams' own, afresh", func() {
 			for i := 0; i < 50; i++ {
 				var names []string
 				for j := 0; j < 8; j++ {
@@ -228,7 +255,7 @@ func TestPagesScale(t *testing.T) {
 			s.hours.by = nil
 		}},
 		// The same teams in shifts of eight hours, round three zones.
-		{"hours, fifty teams in shifts, afresh", time.Second, func() {
+		{"hours, fifty teams in shifts, afresh", func() {
 			teams, err := s.l.Teams(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -250,13 +277,17 @@ func TestPagesScale(t *testing.T) {
 	} {
 		c.before()
 		began := time.Now()
-		if _, err := s.byHours(ctx, t12); err != nil {
-			t.Fatal(err)
-		}
+		did := ledgerDid(t, s, func() {
+			if _, err := s.byHours(ctx, t12); err != nil {
+				t.Fatal(err)
+			}
+		})
 		took := time.Since(began)
-		t.Logf("%-32s %s", c.name, took.Round(time.Microsecond))
-		if budget := time.Duration(float64(c.budget) * max(1, k) * slow); took > budget {
-			t.Errorf("%s took %s, over %s", c.name, took, budget)
+		t.Logf("%-32s %s %d statements %d rows", c.name, took.Round(time.Microsecond), did.statements, did.rows)
+		// A week and a team's hours a statement or a few: fifty teams'
+		// about 600.
+		if did.statements > readMost {
+			t.Errorf("%s: %d statements, over %d", c.name, did.statements, readMost)
 		}
 	}
 	h := s.Handler()
@@ -274,15 +305,13 @@ func TestPagesScale(t *testing.T) {
 
 		began := time.Now()
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		did := ledgerDid(t, s, func() {
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		})
 		took := time.Since(began)
-		t.Logf("%-32s %4d %8d bytes  %s", path, w.Code, w.Body.Len(), took.Round(time.Microsecond))
-		budget := time.Duration(float64(time.Second) * max(1, k) * slow)
-		if path == "/api/v1/report" {
-			budget *= 4 // every firing of the week, as JSON
-		}
-		if w.Code != 200 || took > budget {
-			t.Errorf("%s: %d in %s, over %s", path, w.Code, took, budget)
+		t.Logf("%-32s %4d %8d bytes  %s %d statements %d rows", path, w.Code, w.Body.Len(), took.Round(time.Microsecond), did.statements, did.rows)
+		if w.Code != 200 || did.statements > readMost {
+			t.Errorf("%s: %d, %d statements, over %d", path, w.Code, did.statements, readMost)
 		}
 	}
 	goalsScale(t, s, h)
