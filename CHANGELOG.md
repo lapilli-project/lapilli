@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-11-20
+
+Judging, steps 1 to 4 (docs/design/judging.md): a lead and `require:` of
+a signal's or a rule entry's own, a signal taken away judging no one,
+episodes beside firings, and a person's verdict on one firing, kept apart
+from Lapilli's own stones. Backtests, steps 2 and 3
+(docs/design/backtests.md): Bitbucket Pipelines' ID token, and
+Grafana-managed and Loki rules on the data sources the rules in effect
+read already, at the backtest port. And a pull request's rule there read
+back no further than its group's `query_offset` and 8 days allow.
+
+Before upgrading:
+- **Ledger schemas 024, 025 and 026**, after 023, in one start: keep a
+  copy of the ledger's disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger.
+- After the upgrade, the leader counts the episodes again a week at a
+  time, the newest first; until then those weeks say their episodes
+  aren't counted yet. No stone changes.
+
 ### Added
 
 - **Grafana-managed and Loki rules at the backtest port**
