@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% if page.title %}{{ page.title | escape }} · {% endif %}{{ site.title }}</title>
-<meta name="description" content="{{ page.description | default: site.description }}">
+<meta name="description" content="{{ page.description | default: site.description | escape }}">
+<link rel="canonical" href="{{ page.url | absolute_url }}">
 <link rel="icon" href="{{ '/favicon-32.png' | relative_url }}" sizes="32x32">
 <link rel="apple-touch-icon" href="{{ '/apple-touch-icon.png' | relative_url }}">
 <meta property="og:type" content="website">
 <meta property="og:title" content="{% if page.title %}{{ page.title | escape }}{% else %}{{ site.title }}{% endif %}">
-<meta property="og:description" content="{{ page.description | default: site.description }}">
+<meta property="og:description" content="{{ page.description | default: site.description | escape }}">
 <meta property="og:image" content="{{ '/og.png' | absolute_url }}">
 <meta property="og:url" content="{{ page.url | absolute_url }}">
 <meta name="twitter:card" content="summary_large_image">
@@ -61,6 +62,10 @@
   code { background: var(--panel); padding: .12em .4em; border-radius: 6px; }
   pre { background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); padding: 1rem 1.1rem; border-radius: 14px; overflow-x: auto; line-height: 1.5; }
   pre code { background: none; padding: 0; }
+  /* A code block or a table wider than the page scrolls: it takes the
+     keyboard's focus (tabindex, below) so it can be scrolled without a
+     mouse. */
+  pre:focus-visible, table:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   blockquote { border-left: 3px solid var(--accent-wash); margin-left: 0; padding-left: 1rem; color: var(--dim); }
   table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; margin-bottom: 1rem; }
   th, td { border-bottom: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
@@ -122,7 +127,8 @@
   <a href="https://github.com/lapilli-project/lapilli/releases/latest">Releases</a>
   <a href="https://github.com/lapilli-project/lapilli">GitHub</a>
 </nav>
-{{ content }}
+{%- comment -%} Each code block and table can take the focus, to be scrolled with the keyboard (WCAG 2.1.1). {%- endcomment -%}
+{{ content | replace: '<pre', '<pre tabindex="0"' | replace: '<table', '<table tabindex="0"' }}
 <footer>
   Apache-2.0 · Heebo is under the <a href="{{ '/OFL-Heebo.txt' | relative_url }}">SIL Open Font License 1.1</a> ·
   <a href="https://github.com/lapilli-project/lapilli">github.com/lapilli-project/lapilli</a>
