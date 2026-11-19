@@ -419,26 +419,12 @@ func TestEpisodesUpgradedOnce(t *testing.T) {
 }
 
 // The walk of the weeks not counted yet reads the latest firing before a
-// week along an index, in SQLite's plan: no scan of every firing while the
-// ledger's one writer is held.
+// week along an index, in either database's plan: no scan of every firing
+// while the ledger's one writer is held.
 func TestEpisodesWalkIndexed(t *testing.T) {
 	l := open(t, time.UTC)
-	rows, err := l.r.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+newestBefore, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var plan []string
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-			t.Fatal(err)
-		}
-		plan = append(plan, detail)
-	}
-	if len(plan) == 0 || slices.ContainsFunc(plan, func(d string) bool { return strings.HasPrefix(d, "SCAN") }) ||
-		!slices.ContainsFunc(plan, func(d string) bool { return strings.Contains(d, "INDEX firings_start") }) {
-		t.Errorf("plan: %q", plan)
+	p := plan(t, l, newestBefore, 0)
+	if p == "" || scansAll(l, p, "firings") || !strings.Contains(p, "firings_start") {
+		t.Errorf("plan: %q", p)
 	}
 }
