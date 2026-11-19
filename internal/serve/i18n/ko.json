@@ -1571,7 +1571,6 @@
  "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known.": "판정할 기록된 인시던트가 없는 주는 빠져 있어요. 그때 울린 발화는 기록된 것을 잡지 못했을 뿐, 노이즈인지는 알 수 없어요.",
  "%s, week of %s: %d fired with no incident written down to judge them by": "%s, %s 주: 판정할 기록된 인시던트 없이 %d번 발화",
  "Of its firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours.": "판정할 기록된 인시던트가 없는 발화 중 %d건은 자는 시간에, %d건은 업무 시간 외에 울렸어요.",
- "%s, with no incident written down to judge them by": "%s, 판정할 기록된 인시던트 없음",
  "%d notifications while people slept, with no incident written down to judge their firings by": "자는 시간에 보낸 알림 %d건 (발화를 판정할 기록된 인시던트 없음)",
  "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)": "알 수 없음: 발화를 판정할 기록된 인시던트가 없어요. 그 주에 자는 시간에 보낸 알림 %d건 (알림은 %s부터 셈)",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or had no incident written down to judge them by.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못했거나 판정할 기록된 인시던트가 없는 발화에 대한 알림 %[5]d건.",
@@ -2256,5 +2255,13 @@
  "under a second": "1초 미만",
  "No firing started in the span.": "이 기간에 시작된 발화가 없어요.",
  "Firings that started in the span: %d; the JSON lists the first %d.": "이 기간에 시작된 발화는 %d건이고, JSON에는 앞의 %d건만 있어요.",
- "Firings that started in the span: %d, each listed in the JSON.": "이 기간에 시작된 발화는 %d건이고, JSON에 하나씩 모두 있어요."
+ "Firings that started in the span: %d, each listed in the JSON.": "이 기간에 시작된 발화는 %d건이고, JSON에 하나씩 모두 있어요.",
+ "by its note": "메모로",
+ "by its name": "이름으로",
+ "by its labels": "라벨로",
+ "Acting on several rules at once": "여러 규칙 한 번에 처리",
+ "by each team's hours asleep": "팀마다 자는 시간 기준",
+ "by the hours asleep of each shift": "교대마다 자는 시간 기준",
+ "%s in %s": "%[2]s 기준 %[1]s",
+ "firings while people slept, %s, with no incident written down to judge them by": "자는 시간 발화 (%s), 판정할 기록된 인시던트 없음"
 }

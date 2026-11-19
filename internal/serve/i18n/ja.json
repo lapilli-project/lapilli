@@ -1571,7 +1571,6 @@
  "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known.": "判定するための記録済みインシデントがない週は除いています。その間の発火は記録されたものを何も検知しなかっただけで、ノイズかどうかは分かりません。",
  "%s, week of %s: %d fired with no incident written down to judge them by": "%s、%s の週: 判定するための記録済みインシデントなしで %d 回発火",
  "Of its firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours.": "判定するための記録済みインシデントがない発火のうち、%d 件は寝ている時間に、さらに %d 件は業務時間外に発火しました。",
- "%s, with no incident written down to judge them by": "%s、判定するための記録済みインシデントなし",
  "%d notifications while people slept, with no incident written down to judge their firings by": "就寝中の通知 %d 件 (発火を判定するための記録済みインシデントなし)",
  "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)": "不明: 発火を判定するための記録済みインシデントがありません。その週の睡眠時間中の通知 %d 件 (通知は %s から集計)",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or had no incident written down to judge them by.": "アラートマネージャーが実際に送った通知: ルール %[2]d 件で %[1]d 件。繰り返し %[3]d 件、睡眠時間中 %[4]d 件、何も検知しなかったか判定するための記録済みインシデントがない発火への通知 %[5]d 件。",
@@ -2256,5 +2255,13 @@
  "under a second": "1秒未満",
  "No firing started in the span.": "この期間に始まった発火はありません。",
  "Firings that started in the span: %d; the JSON lists the first %d.": "この期間に始まった発火は %d 件で、JSON には最初の %d 件を載せています。",
- "Firings that started in the span: %d, each listed in the JSON.": "この期間に始まった発火は %d 件で、JSON にすべてを 1 件ずつ載せています。"
+ "Firings that started in the span: %d, each listed in the JSON.": "この期間に始まった発火は %d 件で、JSON にすべてを 1 件ずつ載せています。",
+ "by its note": "メモで",
+ "by its name": "名前で",
+ "by its labels": "ラベルで",
+ "Acting on several rules at once": "複数のルールをまとめて操作",
+ "by each team's hours asleep": "チームごとの睡眠時間で",
+ "by the hours asleep of each shift": "シフトごとの睡眠時間で",
+ "%s in %s": "%[2]s 基準の %[1]s",
+ "firings while people slept, %s, with no incident written down to judge them by": "睡眠時間の発火（%s）、判定するインシデントの記録なし"
 }

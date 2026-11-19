@@ -45,6 +45,9 @@ type ruleRow struct {
 	// Chips are the labels label: picks it by, but its severity, which
 	// has a column of its own: rowChips of them, and More, the rest.
 	Chips, More []labelChip
+	// TeamBy is how its team was found, as its page says it (ownHow):
+	// note, pattern or labels; "" with no team.
+	TeamBy string
 	// labels are those it fires with, for label:; sev and group, its
 	// severity and group, from them and the rules in effect where the
 	// ledger hasn't them.
@@ -550,6 +553,16 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		}
 	}
 	v.Shown = len(v.Rows)
+	// How each row's team was found, under its name (docs/design/ui.md,
+	// "Why a rule is a team's").
+	if len(v.Rows) > 0 {
+		w := d.own.walk()
+		for i := range v.Rows {
+			if v.Rows[i].Team != "" {
+				v.Rows[i].TeamBy = w.how(v.Rows[i].Name).By
+			}
+		}
+	}
 	for _, row := range v.Rows {
 		x := &v.Sum
 		x.Firings += row.Firings

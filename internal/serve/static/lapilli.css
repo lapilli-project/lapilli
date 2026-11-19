@@ -456,6 +456,20 @@ a.chip:hover { background: var(--accent-soft); }
    rule's (1280 px, the demo: 396 px to 323). */
 p.row-notes { margin: 0; display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; font-size: .85rem; color: var(--dim); width: 0; min-width: 100%; }
 p.row-notes .hint { font-size: inherit; }
+/* How a rule's team was found, under its name, as its page says it
+   (docs/design/ui.md, "Why a rule is a team's"). */
+.team-by { display: block; font-size: .8rem; color: var(--dim); white-space: nowrap; }
+/* Narrower than 1200 CSS px, the rule's column has room: the 12 weeks'
+   column is left out (each rule's page has them, and the table under its
+   strip), and a label chip is a little smaller. */
+@media (max-width: 1199.98px) {
+  .rules-main table .wk12 { display: none; }
+  td.rule div.labels .chip { font-size: .75rem; padding: 0 .4rem; }
+}
+/* For whoever may change no rule, a line in place of the bar; under What to
+   look at, one line in place of a disabled button on each. */
+p.bulk-off { margin: .6rem 0 .8rem; }
+p.look-off { margin: .3rem 0 0; }
 td.rule { min-width: 10rem; }
 td.rule bdi { overflow-wrap: anywhere; }
 .badges { display: inline; }
@@ -469,9 +483,10 @@ fieldset.bulk-bar p { margin: 0; flex-basis: 100%; }
 /* The rules list's controls for the rules picked, once one is: until then
    a line says what they do, so the list starts near the top; then they
    rise at the foot of the window, over the page, and nothing in the list
-   moves under the pointer. One who may not change them sees them, disabled,
-   with why; a browser without :has shows them all where they are, as
-   before. */
+   moves under the pointer. One who may change no rule sees a line saying
+   why in their place, and no box to pick a rule by (p.bulk-off); a team's
+   editor sees those they may not use disabled, with why. A browser
+   without :has shows them all where they are, as before. */
 .bulk-hint { display: none; margin: 0 0 .8rem; }
 @supports selector(:has(*)) {
   form.bulk:has(.bulk-hint) .bulk-hint { display: block; }

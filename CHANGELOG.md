@@ -34,6 +34,27 @@
   exit 1, where serve exits 2. Without `--backtest-listen`, the report is
   what it was, to the byte.
 
+### Changed
+
+- **The pages for whoever may not change things, the rules list on a
+  laptop, and a rule's team said** (docs/design/ui.md, bundle 62), from
+  0.61 read on a real deployment:
+  - Whoever may change no rule sees a line saying why in place of the
+    rules list's bar, and no column of boxes to pick a rule by; whoever
+    may make none of What to look at's tasks, for one reason, a line under
+    it, not a disabled button on each. A team's editor, who may do some,
+    still sees each disabled, with why.
+  - Narrower than 1200 px the rules list leaves out its 12 weeks' column,
+    which each rule's page has, and its label chips are a little smaller,
+    so that a row isn't three chips of two lines each tall.
+  - The rules list says, under a rule's team, how it was found: by its
+    note, its name or its labels, as the rule's page does.
+  - A proposal's backtest says how many more or fewer firings as a number
+    alone, as a rule's page does, not better or worse: a change may mean to
+    fire more.
+  - The tile of firings while people slept, when it can't say whether they
+    caught anything, says when people sleep, not that they caught nothing.
+
 ### Fixed
 
 - **Serve started again with named impact signals kept the windows of the

@@ -124,6 +124,19 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 // asleepNote says what the tile of firings while people slept counts, for
 // the rules of t, or one team's: "" when nobody's hours have people asleep.
 func (sc schedules) asleepNote(l string, t *tallies, team *ledger.Team, home *time.Location) string {
+	return sc.asleepSaid(l, t, team, home, true)
+}
+
+// asleepHours is when people sleep, as that tile counts it, and not what
+// it counts: the span, in its zone when not the server's; by each team's,
+// or each shift's; "" when nobody's hours have people asleep. A tile that
+// doesn't know whether its firings caught anything says this alone, not
+// that they caught nothing.
+func (sc schedules) asleepHours(l string, t *tallies, team *ledger.Team, home *time.Location) string {
+	return sc.asleepSaid(l, t, team, home, false)
+}
+
+func (sc schedules) asleepSaid(l string, t *tallies, team *ledger.Team, home *time.Location, note bool) string {
 	var in []*verdict.Hours
 	if team != nil {
 		in = append(in, sc.forTeam(team))
@@ -155,17 +168,26 @@ func (sc schedules) asleepNote(l string, t *tallies, team *ledger.Team, home *ti
 	switch {
 	case len(asleep) == 0:
 		return ""
-	case len(asleep) > 1 || len(in) > 1:
+	case (len(asleep) > 1 || len(in) > 1) && note:
 		return tr(l, "firings that caught nothing, by each team's hours asleep")
-	case asleep[0].Shifts != nil:
+	case len(asleep) > 1 || len(in) > 1:
+		return tr(l, "by each team's hours asleep")
+	case asleep[0].Shifts != nil && note:
 		return tr(l, "firings that caught nothing, by the hours asleep of each shift")
+	case asleep[0].Shifts != nil:
+		return tr(l, "by the hours asleep of each shift")
 	}
 	h := asleep[0]
 	span := strings.ReplaceAll(h.SleepText(), "-", "–")
-	if h.Loc.String() != home.String() {
+	switch {
+	case h.Loc.String() != home.String() && note:
 		return tr(l, "firings that caught nothing, %s in %s", span, h.Loc.String())
+	case h.Loc.String() != home.String():
+		return tr(l, "%s in %s", span, h.Loc.String())
+	case note:
+		return tr(l, "firings that caught nothing, %s", span)
 	}
-	return tr(l, "firings that caught nothing, %s", span)
+	return span
 }
 
 // countsHours reports whether a report counts firings by any hours: the

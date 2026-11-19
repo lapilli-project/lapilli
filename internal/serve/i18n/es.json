@@ -1571,7 +1571,6 @@
  "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known.": "Las semanas sin ningún incidente registrado con el que juzgar quedan fuera: lo que se disparó entonces no detectó nada registrado, y no se sabe si era ruido.",
  "%s, week of %s: %d fired with no incident written down to judge them by": "%s, semana del %s: %d disparos sin ningún incidente registrado con el que juzgarlos",
  "Of its firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours.": "De sus disparos, sin ningún incidente registrado con el que juzgarlos, %d llegaron mientras se dormía, y %d más fuera de horario.",
- "%s, with no incident written down to judge them by": "%s, sin ningún incidente registrado con el que juzgarlos",
  "%d notifications while people slept, with no incident written down to judge their firings by": "%d notificaciones mientras se dormía, sin ningún incidente registrado con el que juzgar sus disparos",
  "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)": "desconocido: ningún incidente registrado con el que juzgar sus disparos; %d notificaciones llegaron mientras la gente dormía esa semana (contadas desde %s)",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or had no incident written down to judge them by.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada o sin ningún incidente registrado con el que juzgarlos.",
@@ -2256,5 +2255,13 @@
  "under a second": "menos de un segundo",
  "No firing started in the span.": "Ningún disparo empezó en el periodo.",
  "Firings that started in the span: %d; the JSON lists the first %d.": "Disparos que empezaron en el periodo: %d; el JSON lista los primeros %d.",
- "Firings that started in the span: %d, each listed in the JSON.": "Disparos que empezaron en el periodo: %d, cada uno en el JSON."
+ "Firings that started in the span: %d, each listed in the JSON.": "Disparos que empezaron en el periodo: %d, cada uno en el JSON.",
+ "by its note": "por su nota",
+ "by its name": "por su nombre",
+ "by its labels": "por sus etiquetas",
+ "Acting on several rules at once": "Actuar sobre varias reglas a la vez",
+ "by each team's hours asleep": "según las horas de sueño de cada equipo",
+ "by the hours asleep of each shift": "según las horas de sueño de cada turno",
+ "%s in %s": "%s en %s",
+ "firings while people slept, %s, with no incident written down to judge them by": "disparos en horas de sueño, %s, sin incidentes anotados para juzgarlos"
 }

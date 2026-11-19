@@ -28,7 +28,8 @@
     {{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
     {{else if and .May .Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{.Goal}}"><input type="hidden" name="team" value="{{.GoalTeam}}"><input type="hidden" name="week" value="{{.Week}}">{{with .Occurrence}}<input type="hidden" name="occurrence" value="{{.}}">{{end}}<input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
     {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
-    {{else if .Kind}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
+    {{else if and .Kind (not $.View.TaskOff)}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
+  {{with .TaskOff}}<p class="quiet look-off">{{t "Make it a task"}} — {{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</p>{{end}}
   {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}
   {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
   {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
