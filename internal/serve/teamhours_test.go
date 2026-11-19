@@ -100,14 +100,15 @@ func TestTeamHours(t *testing.T) {
 		return body[i:min(len(body), i+500)]
 	}
 	// No incident is written down: how many came while people slept, not a
-	// number of them woken for nothing.
-	if x := tile("/", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "12 came while people slept (firings that caught nothing, by each team&#39;s hours asleep)") {
+	// number of them woken for nothing, and when people sleep, not that they
+	// caught nothing.
+	if x := tile("/", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "12 came while people slept (by each team&#39;s hours asleep)") {
 		t.Errorf("overview: %s", x)
 	}
-	if x := tile("/?team=search", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "10 came while people slept (firings that caught nothing, 22:00–08:00 in Asia/Tokyo)") {
+	if x := tile("/?team=search", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "10 came while people slept (22:00–08:00 in Asia/Tokyo)") {
 		t.Errorf("the team's overview: %s", x)
 	}
-	if x := tile("/?team=search", "ko"); !strings.Contains(x, "사람이 자는 시간에 10번 울렸어요 (인시던트를 잡지 못한 발화, Asia/Tokyo 기준 22:00–08:00)") || strings.Contains(x, ">10<") {
+	if x := tile("/?team=search", "ko"); !strings.Contains(x, "사람이 자는 시간에 10번 울렸어요 (Asia/Tokyo 기준 22:00–08:00)") || strings.Contains(x, ">10<") {
 		t.Errorf("in Korean: %s", x)
 	}
 	if _, body, _ := get(t, h, "/teams"); !strings.Contains(body, "at work mon-sun 08:00-18:00, asleep 22:00-08:00, in Asia/Tokyo") ||
@@ -156,7 +157,7 @@ func TestTeamHours(t *testing.T) {
 	if _, body, _ := get(t, h, "/rules"); strings.Count(body, "8 asleep, 4 off hours") != 2 {
 		t.Errorf("rules after the team's hours went: %s", body)
 	}
-	if x := tile("/", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "4 came while people slept (firings that caught nothing, 22:00–08:00)") {
+	if x := tile("/", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "4 came while people slept (22:00–08:00)") {
 		t.Errorf("overview after: %s", x)
 	}
 }

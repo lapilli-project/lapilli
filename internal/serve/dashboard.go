@@ -228,6 +228,31 @@ type action struct {
 	Said              bool
 }
 
+// TaskOff is, when the reader may make none of the tasks What to look at
+// offers, and all for one reason, that reason: said once under the list,
+// in place of a disabled button on each line. nil when they may make some,
+// or the reasons differ (a team's editor, another team's rule), as a
+// button on each line then says which.
+func (d dashboard) TaskOff() *pageAction {
+	var off *pageAction
+	for _, a := range d.Actions {
+		if a.Kind == "" || a.Task != 0 {
+			continue
+		}
+		if a.May {
+			return nil
+		}
+		o := a.Off()
+		if off != nil && (off.Why != o.Why || off.WhyOf != o.WhyOf) {
+			return nil
+		}
+		if off == nil {
+			off = &o
+		}
+	}
+	return off
+}
+
 // Off is the task it would make, disabled, with why: the first disabled
 // for a reason says it, the rest are tied to it.
 func (a action) Off() pageAction {
@@ -419,7 +444,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// The last whole week, beside the week before.
 	last, before := ws[len(ws)-2], ws[len(ws)-3]
 	v.From, v.To = last.Start, ws[len(ws)-1].Start
-	asleep := o.schedules(t.o.Hours).asleepNote(l, t, team, s.cfg.Loc)
+	sc := o.schedules(t.o.Hours)
+	asleep, sleeps := sc.asleepNote(l, t, team, s.cfg.Loc), sc.asleepHours(l, t, team, s.cfg.Loc)
 	// Once notifications come, woken for nothing counts them: a
 	// notification, unlike a firing, is a person woken.
 	since := ""
@@ -433,7 +459,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.NoRecord = last.NoRecord
-	v.Tiles = s.tiles(l, ws, last, before, asleep, since, v.Deploys, func() (int, int) {
+	v.Tiles = s.tiles(l, ws, last, before, asleep, sleeps, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
 	})
 	if s.checking() {
@@ -560,7 +586,10 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 }
 
 // tiles are the headline numbers.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, since string, deploys bool, refired func() (int, int)) []tile {
+// asleep is what the tile of firings while people slept counts, hours when
+// people sleep alone, which a tile that doesn't know whether they caught
+// anything says in place of it.
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, hours, since string, deploys bool, refired func() (int, int)) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
@@ -638,16 +667,16 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		switch {
 		case last.Uncounted:
 			if last.NoRecord {
-				asleep = tr(l, "%s, with no incident written down to judge them by", asleep)
+				asleep = tr(l, "firings while people slept, %s, with no incident written down to judge them by", hours)
 			}
 		case unknown(last) && last.NoRecord && since != "":
 			asleep = tr(l, "not known: no record; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last) && last.NoRecord:
-			asleep = tr(l, "not known: no record; %d came while people slept (%s)", last.Asleep, asleep)
+			asleep = tr(l, "not known: no record; %d came while people slept (%s)", last.Asleep, hours)
 		case unknown(last) && since != "":
 			asleep = tr(l, "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last):
-			asleep = tr(l, "not known: no incident written down to judge them by; %d came while people slept (%s)", last.Asleep, asleep)
+			asleep = tr(l, "not known: no incident written down to judge them by; %d came while people slept (%s)", last.Asleep, hours)
 		}
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted && !unknown(w) }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)

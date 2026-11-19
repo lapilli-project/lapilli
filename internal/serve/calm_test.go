@@ -114,7 +114,7 @@ func TestOverviewLookFirst(t *testing.T) {
 // column of their own, not a note under ● Nothing, and the firings
 // asleep among those that caught nothing aren't said to be all judged.
 func TestRuleNumbersAlone(t *testing.T) {
-	notes := regexp.MustCompile(`<tr class="more"><td class="pick"></td><td colspan="(\d+)"><p class="row-notes">`)
+	notes := regexp.MustCompile(`<tr class="more">(?:<td class="pick"></td>)?<td colspan="(\d+)"><p class="row-notes">`)
 	cellNotes := regexp.MustCompile(`<td class="n">[^<]*<br>`)
 	// spans checks each line of notes spans every column but the pick's,
 	// as the header has them, and says how many lines there are.
@@ -123,9 +123,12 @@ func TestRuleNumbersAlone(t *testing.T) {
 		head := body[strings.Index(body, `<table class="rules-table">`):]
 		head = head[:strings.Index(head, "</thead>")]
 		cols := strings.Count(head, "<th ")
+		if strings.Contains(head, `class="pick"`) {
+			cols-- // the line starts after the column to pick a rule by
+		}
 		ms := notes.FindAllStringSubmatch(body, -1)
 		for _, m := range ms {
-			if m[1] != strconv.Itoa(cols-1) {
+			if m[1] != strconv.Itoa(cols) {
 				t.Errorf("a line of notes spans %s columns of %d", m[1], cols)
 			}
 		}
@@ -248,7 +251,7 @@ func TestPrecisionChartNone(t *testing.T) {
 // went off again.
 func TestRefiredToldNotJudged(t *testing.T) {
 	ws := []*weekView{{Refired: 1, Kept: true}, {Refired: 5, Kept: true}, {}}
-	for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "", "", false, func() (int, int) { return 0, 0 }) {
+	for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "", "", "", false, func() (int, int) { return 0, 0 }) {
 		if x.key == "Refired" {
 			if x.Delta != "+4 on the week before" || x.Worse || x.Better {
 				t.Errorf("refired: %+v", x)
@@ -279,5 +282,42 @@ func TestRuleColumnRoom(t *testing.T) {
 	}
 	if r := css[i : i+strings.Index(css[i:], "}")]; !strings.Contains(r, "width: 0;") || !strings.Contains(r, "min-width: 100%") {
 		t.Errorf("the notes widen the columns: %s", r)
+	}
+}
+
+// TestTeamSaidHow: the rules list says, under a rule's team, how it was
+// found, as the rule's page does: by its note, its name or its labels
+// (docs/design/ui.md, "Why a rule is a team's").
+func TestTeamSaidHow(t *testing.T) {
+	s := pagesServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+	// Errors is payments' by its note, which comes before the team's
+	// pattern, as owners finds it.
+	if !strings.Contains(body, `<td class="name"><bdi>payments</bdi><span class="team-by">by its note</span></td>`) {
+		t.Error("a team given by a rule's note isn't said so")
+	}
+	if strings.Contains(body, `<td class="name">–<span class="team-by">`) {
+		t.Error("a rule of no team is said how its team was found")
+	}
+}
+
+// TestNarrowRulesTable: narrower than 1200 CSS px the rules list leaves
+// out its 12 weeks' column, which each rule's page has, so that the rule's
+// column has room; the column is marked in the head, each row and the sum.
+func TestNarrowRulesTable(t *testing.T) {
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+	i := strings.Index(css, "@media (max-width: 1199.98px) {\n  .rules-main table .wk12 { display: none; }")
+	if i < 0 {
+		t.Fatal("the 12 weeks' column isn't left out below 1200 px")
+	}
+	s := pagesServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+	rows := strings.Count(body, `<td class="wk12"><svg class="spark"`)
+	if !strings.Contains(body, `<th scope="col" class="wk12">12 weeks</th>`) || rows == 0 || !strings.Contains(body, `<td></td><td class="wk12"></td></tr>`) {
+		t.Errorf("the 12 weeks' column isn't marked: %d rows", rows)
 	}
 }

@@ -224,7 +224,9 @@ func btTableOf(bt *backtest, noRecord bool) *btTable {
 	n := strconv.Itoa
 	x := &btTable{From: bt.From, To: bt.To, Lost: bt.Lost, Gained: bt.Gained, Later: bt.Later, Unfinished: bt.Unfinished, Worse: len(bt.Lost) > 0}
 	x.Rows = []btRow{
-		{"Fired", n(bt.Before.Firings), n(bt.After.Firings), moved{On: true, By: bt.After.Firings - bt.Before.Firings}},
+		// More firings are told, not called worse: a change may mean to
+		// fire more, to catch what it missed (docs/design/ui.md).
+		{"Fired", n(bt.Before.Firings), n(bt.After.Firings), moved{On: true, By: bt.After.Firings - bt.Before.Firings, Plain: true}},
 		{"Caught something", n(bt.Before.White), n(bt.After.White), moved{On: true, By: bt.After.White - bt.Before.White, Up: true}},
 		{"Incidents missed that the other catches", n(len(bt.Gained)), n(len(bt.Lost)), moved{On: true, By: len(bt.Lost) - len(bt.Gained)}},
 		{"Incidents caught later", "–", n(len(bt.Later)), moved{On: true, By: len(bt.Later)}},
@@ -260,7 +262,7 @@ func btUndoOf(bt *backtest, n int64, noRecord bool) *btTable {
 		Worse: len(bt.Gained) > 0, Undoes: n}
 	c := strconv.Itoa
 	x.Rows = []btRow{
-		{"Fired", c(bt.After.Firings), c(bt.Before.Firings), moved{On: true, By: bt.Before.Firings - bt.After.Firings}},
+		{"Fired", c(bt.After.Firings), c(bt.Before.Firings), moved{On: true, By: bt.Before.Firings - bt.After.Firings, Plain: true}},
 		{"Caught something", c(bt.After.White), c(bt.Before.White), moved{On: true, By: bt.Before.White - bt.After.White, Up: true}},
 		{"Incidents missed that the other catches", c(len(bt.Lost)), c(len(bt.Gained)), moved{On: true, By: len(bt.Gained) - len(bt.Lost)}},
 		{"Incidents caught later", c(len(bt.Later)), "–", moved{}},

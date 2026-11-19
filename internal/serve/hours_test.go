@@ -52,7 +52,7 @@ func TestHours(t *testing.T) {
 	_, body, _ = get(t, h, "/")
 	i := strings.Index(body, "Woken for nothing")
 	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">–<") || strings.Contains(body[i:min(len(body), i+400)], ">2<") ||
-		!strings.Contains(body, "not known: no record; 2 came while people slept (firings that caught nothing, 22:00–08:00)") ||
+		!strings.Contains(body, "not known: no record; 2 came while people slept (22:00–08:00)") ||
 		strings.Count(body, "No incident written down for the week of") != 1 || strings.Contains(body, "not known: no incident written down") {
 		t.Errorf("overview: %s", body)
 	}

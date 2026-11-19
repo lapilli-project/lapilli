@@ -25,7 +25,7 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 		return tile{}
 	}
 	overview := func(last, before *weekView) []tile {
-		return (&Server{}).tiles("en", []*weekView{before, last}, last, before, "", "", false, func() (int, int) { return 0, 0 })
+		return (&Server{}).tiles("en", []*weekView{before, last}, last, before, "", "", "", false, func() (int, int) { return 0, 0 })
 	}
 	for _, c := range []struct {
 		name         string

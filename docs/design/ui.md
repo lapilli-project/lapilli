@@ -6,7 +6,9 @@ ways in, in v0.39.0; the two items left after it (a proposal for the rules
 picked, a rule's labels as chips on the list), with the rules table made to
 fit a laptop's screen, in v0.40.0; first use (bundle 20), built,
 unreleased; status colours (bundle 28), built, unreleased; plain controls
-and fewer words (bundle 59), built, unreleased. This is how the
+and fewer words (bundle 59), in 0.60.0 and 0.61.0; read-only lines, the
+rules list under 1200 px and a rule's team said (bundle 62), built,
+unreleased. This is how the
 pages are put together: the status colours every page uses, the frame
 every page has, the team and period carried from page to page, the
 search, the rules list and its filters, a rule's page, the way to change
@@ -429,8 +431,13 @@ proposal is finished with, the forms are back (`TestFirstProposeWhileOneWaits`,
 `TestProposeFormsWhileOneWaits`). A disabled field looks as a disabled
 button does, dim words on the panel and a dashed edge, not as one to fill
 (`TestDisabledFieldsLookIt`, and in a browser `disabled-look` in
-`test/a11y/axe.mjs`); the rules list's bar, disabled for a viewer, is drawn
-so too. A checkbox stands before its words, on their first line's
+`test/a11y/axe.mjs`). Since bundle 62 whoever may do none of a list's
+things, for one reason, is told it once, not shown each disabled: the
+rules list says it in a line in place of its bar ("Acting on several rules
+at once — Editors only"), with no column of boxes to pick a rule by, and
+What to look at in a line under its list ("Make it a task — Read-only: no
+one is signed in"). A team's editor, who may do some of them, still sees
+the rest disabled, each with why, so that it shows which. A checkbox stands before its words, on their first line's
 baseline, in any form (`TestCheckboxOnItsLine`, `checkbox-line`).
 
 ### Empty states
@@ -667,6 +674,13 @@ line widened the columns it spans, the numbers' among them, and left the
 rule's at its floor (the demo at 1280 px: 323 px, 396 with the line out
 of the sizing). A label chip breaks after its "=" (`<wbr>`), not inside a
 word ("category=availabilit / y").
+
+Narrower than 1200 CSS px (bundle 62, from the same deployment at 1070
+px, where three label chips two lines each made a row 140 to 210 px
+tall), the 12 weeks' column is left out, as each rule's page has them in
+its strip and its table, and a label chip is a little smaller: the rule's
+column has the room the sparkline took. From 1200 px the table is as it
+was, and fits at 1280, 1440, 1600 and 1920 px as before.
 
 ### The search box
 
@@ -929,7 +943,9 @@ dry run, its history), with the backtest in the dry run's place:
 - **The backtest**: a table, now beside as proposed, from the evidence the
   proposal kept when it was made: fired, caught something, the incidents
   one misses that the other catches, the incidents caught later, each with
-  its difference signed and, where better or worse, said so in words. The
+  its difference signed and, where better or worse, said so in words;
+fired is a number alone, as on a rule's page (bundle 62): a change may
+mean to fire more, to catch what it missed. The
   evidence holds which incidents are caught later, not by how much, so
   that is the last row: no time is made up. One that misses an incident
   the rule catches now has a warning above the table naming it. Retiring a
@@ -1644,7 +1660,10 @@ pod restarting say, which the record can't tell from noise. A chart with
 nothing to draw, Precision by week with no week judged, is a line saying
 so and the way to the table, not an empty grid: "?" in the unknown
 status when weeks had firings and none was judged, no status when none
-fired.
+fired. The tile of firings while people slept, when it can't say whether
+they caught anything, says when people sleep alone ("10 came while people
+slept (22:00–08:00 in Asia/Tokyo)"), not that they caught nothing
+(bundle 62).
 
 Each tile links to the list that makes its number, with the same team,
 over the tiles' week, last week: `week=DATE` on the rules and the
@@ -1791,9 +1810,13 @@ named); its labels having a team's (the labels named); or that no team's
 name pattern or labels match it, with the link above when there is no team.
 `ownWalk` finds it as `owners` does, the note, then the patterns, then the
 labels, each team in name order; `TestTeamsSuggestedAsOwnersWould` holds it
-to `owners` for every rule. The rules list's Team cell is as it was: the
-reason doesn't fit the table at 1280 px, and a visually hidden one would
-tell a screen reader what no one else is told.
+to `owners` for every rule. The rules list's Team cell says it too, under
+the team's name, dim, in a word: by its note, by its name, by its labels
+(bundle 62). Until then it said nothing of it: the reason didn't fit the
+table at 1280 px, and a visually hidden one would have told a screen
+reader what no one else is told. A word fits, and a row's rule cell is two
+lines or more, its name and its badges, so the second line in the team's
+costs the row nothing.
 
 ### Who may approve
 
@@ -1947,6 +1970,6 @@ every page to.
 
 Nothing of what the phases set out: the last two (the overview's table of
 the weeks on a laptop's screen, a rule's header drawn by the `off`
-template) went out in 0.40.1. Of first use, the rules list's Team cell
-doesn't say how its team was found (above). New work starts from
+template) went out in 0.40.1. The rules list's Team cell, the last of first
+use, says how its team was found since bundle 62. New work starts from
 ROADMAP.md.
