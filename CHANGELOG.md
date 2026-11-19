@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-11-19
+
+A security fix to what `lapilli preflight` hides of a cloud's errors:
+an ARN in the account of `--changes-aws-role`, as the pod's own role
+often is, showed its role's and session's names. And lapilli.dev can be
+found, and is checked like serve's pages. No schema change: the ledger
+stays at 023.
+
 ### Fixed (security)
 
 - **`lapilli preflight` hides each ARN of an account in what a cloud
