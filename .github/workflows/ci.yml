@@ -11,6 +11,14 @@ on:
 permissions:
   contents: read
 
+# A pull request's run is cancelled by the pull request's next push. Every
+# other run (a push to main, the schedule, one asked for) is in a group of
+# its own, so none waits for another or is cancelled: in one group a run
+# would wait for the one before, and a run waiting be cancelled by the next.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     # The job names are what the branch ruleset requires; rename them there too.
@@ -56,14 +64,17 @@ jobs:
     # Postgres (docs/design/postgres.md): each test's in a schema of its
     # own. The oldest major the PostgreSQL project still supports, and the
     # latest; the images' own collation is en_US.utf8, not C, which the
-    # ledger's columns must not depend on. Not a required check: it pulls
-    # an image.
-    name: tests on Postgres ${{ matrix.major }}
+    # ledger's columns must not depend on. In two shards each
+    # (test/shard.sh), every test in one: serve's alone took some twenty
+    # minutes in one job. Not a required check: it pulls an image.
+    name: tests on Postgres ${{ matrix.major }}, shard ${{ matrix.shard }} of 2
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        major: ["15", "18"]
+        shard: [1, 2]
         include:
           - major: "15"
             image: postgres:15.19@sha256:1aac5b49cefd627f02816141ca4ad012d6cc19460dfe02a9b5168a105be3fc53
@@ -91,10 +102,47 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-      # On Postgres the serve tests take fifteen to nineteen minutes (19 on
-      # Postgres 15 at 0.56.0), go test's own limit: twenty-five, inside the
-      # job's thirty.
-      - run: go test -timeout 25m ./internal/ledger ./internal/serve ./cmd/lapilli
+      # In one job, serve's tests took seventeen to twenty-one minutes on
+      # Postgres (1,284 s on 15 in November 2026); a shard's job takes eight
+      # to eleven, fourteen on a slow runner. go test's own limit is still
+      # twenty-five, inside the job's thirty.
+      - run: test/shard.sh "$SHARD" -timeout 25m
+        env:
+          SHARD: ${{ matrix.shard }}
+
+  changes:
+    # The end-to-end jobs a pull request's changes reach
+    # (test/e2e/reached.sh): the merge commit against its first parent,
+    # the base it is merged into. On a pull request, a job it doesn't reach
+    # is skipped; on main, on the schedule and when asked, every one runs.
+    name: the end-to-end jobs a pull request reaches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      e2e: ${{ steps.reached.outputs.e2e }}
+      e2e-replicas: ${{ steps.reached.outputs.e2e-replicas }}
+      e2e-serve-lb: ${{ steps.reached.outputs.e2e-serve-lb }}
+      e2e-service: ${{ steps.reached.outputs.e2e-service }}
+      e2e-postgres: ${{ steps.reached.outputs.e2e-postgres }}
+      e2e-signin: ${{ steps.reached.outputs.e2e-signin }}
+      e2e-changes: ${{ steps.reached.outputs.e2e-changes }}
+      e2e-backtest: ${{ steps.reached.outputs.e2e-backtest }}
+      e2e-loki: ${{ steps.reached.outputs.e2e-loki }}
+      e2e-rendered: ${{ steps.reached.outputs.e2e-rendered }}
+      e2e-dashboard: ${{ steps.reached.outputs.e2e-dashboard }}
+      e2e-ratelimit: ${{ steps.reached.outputs.e2e-ratelimit }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: reached
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git diff --name-only --no-renames HEAD^1 HEAD | tee "$RUNNER_TEMP/changed"
+          test/e2e/reached.sh <"$RUNNER_TEMP/changed" | tee -a "$GITHUB_OUTPUT"
 
   e2e-postgres:
     # lapilli serve on a real Postgres in Docker: firings kept across a
@@ -102,6 +150,8 @@ jobs:
     # follows, a copy out refused while they hold it, a SQLite ledger copied
     # in and read back. Not a required check: it pulls an image.
     name: the ledger in a real Postgres
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-postgres == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -120,6 +170,8 @@ jobs:
     # rolling restart the API answers through. Not a required check: it
     # pulls images and starts a cluster.
     name: replicas on kind
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-replicas == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -135,6 +187,8 @@ jobs:
     # The chart's CronJob on a kind cluster, against a real Prometheus. Not a
     # required check: it pulls images and starts a cluster.
     name: e2e on kind
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -153,6 +207,8 @@ jobs:
     # NetworkPolicy letting in what is in front. Not a required check: it
     # pulls images and starts a cluster.
     name: serve at a URL on kind
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-serve-lb == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -174,6 +230,8 @@ jobs:
     # a headless Chromium, whose screenshots are kept. Not a required
     # check: it pulls images and starts a cluster.
     name: the whole service on kind
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-service == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -200,6 +258,8 @@ jobs:
     # replayed callback, signing out. Not a required check: it pulls an
     # image.
     name: sign-in against Dex
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-signin == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -215,6 +275,8 @@ jobs:
     # Changes to rules carried out against a real Prometheus, Gitea and
     # Grafana in Docker. Not a required check: it pulls images.
     name: changes on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-changes == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -232,6 +294,8 @@ jobs:
     # rule changed; Gitea renders what a rule's name holds as text. Not a
     # required check: it pulls images.
     name: pull request backtests on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-backtest == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -248,6 +312,8 @@ jobs:
     # Docker, and set beside what they fired. Not a required check: it
     # pulls images, and logs must run for some minutes first.
     name: Loki on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-loki == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -265,6 +331,8 @@ jobs:
     # in Docker. Not a required check: it pulls images. helm and yq are the
     # runner's.
     name: rendered rules on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-rendered == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -281,6 +349,8 @@ jobs:
     # scraping a real lapilli serve: every panel's query returns data. Not
     # a required check: it pulls images.
     name: dashboard on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-dashboard == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -297,6 +367,8 @@ jobs:
     # answered HTTP 429: every rule replayed, and --max-rate kept under it.
     # Not a required check: it pulls images.
     name: rate limit on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-ratelimit == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

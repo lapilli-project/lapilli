@@ -1327,6 +1327,9 @@ func (s *Server) postIncident(w http.ResponseWriter, r *http.Request) {
 	}
 	in := incident.Incident{ID: strings.TrimSpace(r.PostFormValue("id")), Title: strings.TrimSpace(r.PostFormValue("title")),
 		Start: start, End: end, Labels: labels}
+	if kept, same := s.sameTitle(r, in.ID, in.Title); same {
+		in.Title = kept
+	}
 	o, err := s.options(r.Context())
 	if err != nil {
 		s.oops(w, r, err)
@@ -1363,6 +1366,21 @@ func (s *Server) deleteIncident(w http.ResponseWriter, r *http.Request) {
 	back(w, r, "/incidents")
 }
 
+// sameTitle says whether title, sent back by a form, is incident id's own
+// title as the page showed it (shown) in the reader's language, and what
+// its own title is: the form is filled with the page's words, which aren't
+// to be written into the ledger in their place.
+func (s *Server) sameTitle(r *http.Request, id, title string) (string, bool) {
+	if id == "" || title == "" {
+		return "", false
+	}
+	in, err := s.l.IncidentByID(r.Context(), id)
+	if err != nil || in.Title == title || shown(lang(r), in).Title != title {
+		return "", false
+	}
+	return in.Title, true
+}
+
 func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	if err := form(r); err != nil {
 		s.oops(w, r, err)
@@ -1373,7 +1391,12 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	made, err := s.l.Decide(r.Context(), r.PathValue("id"), r.PostFormValue("state"), strings.TrimSpace(r.PostFormValue("title")), s.user(r), o)
+	// Sent back unchanged, the window's own title is kept: empty keeps it.
+	title := strings.TrimSpace(r.PostFormValue("title"))
+	if _, same := s.sameTitle(r, r.PathValue("id"), title); same {
+		title = ""
+	}
+	made, err := s.l.Decide(r.Context(), r.PathValue("id"), r.PostFormValue("state"), title, s.user(r), o)
 	if err != nil {
 		s.oops(w, r, wrapBad(err))
 		return

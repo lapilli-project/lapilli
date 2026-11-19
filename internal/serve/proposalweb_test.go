@@ -52,7 +52,7 @@ func TestProposalPage(t *testing.T) {
 		// The file the pull request changes.
 		`The file as the pull request changes it: <bdi>shop.yaml</bdi>`, `<span class="ins">&#43;        for: 15m</span>`,
 		// The backtest: fired 21 → 1, caught 1 → 1.
-		`<th scope="row">Fired</th><td class="n">21</td><td class="n">1</td><td class="n"> <span class="delta better status-ok">−20 better</span></td>`,
+		`<th scope="row">Fired</th><td class="n">21</td><td class="n">1</td><td class="n"> <span class="delta">−20</span></td>`,
 		`<th scope="row">Caught something</th><td class="n">1</td><td class="n">1</td><td class="n"> <span class="delta">±0</span></td>`,
 		`<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">0</td>`,
 	} {
@@ -139,7 +139,8 @@ func TestApproveReadFirst(t *testing.T) {
 
 // offButton is a disabled button, with why, as the page draws it.
 func offButton(label, id, why string) string {
-	return `<button type="button" disabled aria-describedby="` + id + `">` + label + `</button> <span id="` + id + `" class="why">` + why + `</span>`
+	// A flag's name in the why is code, as a page says it (codeFlags).
+	return `<button type="button" disabled aria-describedby="` + id + `">` + label + `</button> <span id="` + id + `" class="why">` + codeFlags(why) + `</span>`
 }
 
 // TestApproveDisabledWithWhy: a reader who may not approve sees the button
@@ -283,7 +284,7 @@ func TestProposalStepsGone(t *testing.T) {
 	s.cache.Lock()
 	s.cache.gen = "" // the page worked out afresh: a write to the database isn't the ledger's
 	s.cache.Unlock()
-	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); !strings.Contains(body, "Steps older than the changes the ledger keeps (--keep) aren&#39;t shown.") ||
+	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); !containsPlain(body, "Steps older than the changes the ledger keeps (--keep) aren&#39;t shown.") ||
 		!strings.Contains(body, "Made by <bdi>bo@example.com</bdi>") {
 		t.Error("a proposal whose changes were pruned doesn't say so, or its making")
 	}
@@ -538,7 +539,7 @@ func TestUndoPage(t *testing.T) {
 		`It puts back the rule as it was before the change it undoes: <a href="/proposals/` + n + `">#` + n + `</a>. An agent proposed #` + n + `, for bo@example.com.`,
 		`<th scope="col" class="n">With #` + n + `</th><th scope="col" class="n">After undoing it</th>`,
 		// 1 firing with the change, 21 once it is undone.
-		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta worse status-bad">&#43;20 worse</span></td>`,
+		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta">&#43;20</span></td>`,
 		`The backtest of #` + n + `, replayed from`,
 		`Caught sooner once undone: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`,
 	} {

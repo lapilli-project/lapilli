@@ -7,6 +7,8 @@ package serve
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -114,7 +116,7 @@ func TestOverviewLookFirst(t *testing.T) {
 // column of their own, not a note under ● Nothing, and the firings
 // asleep among those that caught nothing aren't said to be all judged.
 func TestRuleNumbersAlone(t *testing.T) {
-	notes := regexp.MustCompile(`<tr class="more"><td class="pick"></td><td colspan="(\d+)"><p class="row-notes">`)
+	notes := regexp.MustCompile(`<tr class="more">(?:<td class="pick"></td>)?<td colspan="(\d+)"><p class="row-notes">`)
 	cellNotes := regexp.MustCompile(`<td class="n">[^<]*<br>`)
 	// spans checks each line of notes spans every column but the pick's,
 	// as the header has them, and says how many lines there are.
@@ -123,9 +125,12 @@ func TestRuleNumbersAlone(t *testing.T) {
 		head := body[strings.Index(body, `<table class="rules-table">`):]
 		head = head[:strings.Index(head, "</thead>")]
 		cols := strings.Count(head, "<th ")
+		if strings.Contains(head, `class="pick"`) {
+			cols-- // the line starts after the column to pick a rule by
+		}
 		ms := notes.FindAllStringSubmatch(body, -1)
 		for _, m := range ms {
-			if m[1] != strconv.Itoa(cols-1) {
+			if m[1] != strconv.Itoa(cols) {
 				t.Errorf("a line of notes spans %s columns of %d", m[1], cols)
 			}
 		}
@@ -248,7 +253,7 @@ func TestPrecisionChartNone(t *testing.T) {
 // went off again.
 func TestRefiredToldNotJudged(t *testing.T) {
 	ws := []*weekView{{Refired: 1, Kept: true}, {Refired: 5, Kept: true}, {}}
-	for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "", "", false, func() (int, int) { return 0, 0 }) {
+	for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "", "", "", false, func() (int, int) { return 0, 0 }) {
 		if x.key == "Refired" {
 			if x.Delta != "+4 on the week before" || x.Worse || x.Better {
 				t.Errorf("refired: %+v", x)
@@ -279,5 +284,253 @@ func TestRuleColumnRoom(t *testing.T) {
 	}
 	if r := css[i : i+strings.Index(css[i:], "}")]; !strings.Contains(r, "width: 0;") || !strings.Contains(r, "min-width: 100%") {
 		t.Errorf("the notes widen the columns: %s", r)
+	}
+}
+
+// TestTeamSaidHow: the rules list says, under a rule's team, how it was
+// found, as the rule's page does: by its note, its name or its labels
+// (docs/design/ui.md, "Why a rule is a team's").
+func TestTeamSaidHow(t *testing.T) {
+	s := pagesServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+	// Errors is payments' by its note, which comes before the team's
+	// pattern, as owners finds it.
+	if !strings.Contains(body, `<td class="name"><bdi>payments</bdi><span class="team-by">by its note</span></td>`) {
+		t.Error("a team given by a rule's note isn't said so")
+	}
+	if strings.Contains(body, `<td class="name">–<span class="team-by">`) {
+		t.Error("a rule of no team is said how its team was found")
+	}
+}
+
+// TestNarrowRulesTable: narrower than 1200 CSS px the rules list leaves
+// out its 12 weeks' column, which each rule's page has, so that the rule's
+// column has room; the column is marked in the head, each row and the sum.
+func TestNarrowRulesTable(t *testing.T) {
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+	i := strings.Index(css, "@media (max-width: 1199.98px) {\n  .rules-main table .wk12 { display: none; }")
+	if i < 0 {
+		t.Fatal("the 12 weeks' column isn't left out below 1200 px")
+	}
+	s := pagesServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+	rows := strings.Count(body, `<td class="wk12"><svg class="spark"`)
+	if !strings.Contains(body, `<th scope="col" class="wk12">12 weeks</th>`) || rows == 0 || !strings.Contains(body, `<td></td><td class="wk12"></td></tr>`) {
+		t.Errorf("the 12 weeks' column isn't marked: %d rows", rows)
+	}
+}
+
+// TestLookSaysWhatToCheck: What to look at's lines say what to check, not
+// ask it, in every language (docs/design/ui.md, "Times, and Korean").
+func TestLookSaysWhatToCheck(t *testing.T) {
+	first, _ := firstUseServer(t)
+	// A rule another catches each incident of as soon: the spare rule's
+	// line (TestSpareOnlyOfWhatCanFire's ledger).
+	spare, rules := server(t, func(c *Config) {
+		c.Backfill = 28 * 24 * time.Hour
+		c.Options.NoisyFirings = 1000
+	})
+	os.WriteFile(filepath.Join(rules, "more.yaml"), []byte("groups:\n  - name: more\n    rules:\n      - {alert: Errors2, expr: errors > 1, for: 2m, labels: {severity: page}}\n"), 0o644)
+	ctx := context.Background()
+	raw := ""
+	if err := spare.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	spare.jobs(ctx, true)
+	for _, in := range []string{"I-1", "I-2"} {
+		if code, body := api(t, spare.Handler(), "PUT", "/api/v1/incidents/"+in, `{"title": "x", "start": "2026-11-02T06:01:00Z", "labels": {"service": ["checkout"]}}`); code != http.StatusOK {
+			t.Fatalf("incident: %d %s", code, body)
+		}
+	}
+	line := regexp.MustCompile(`(?s)<span class="look-what">(.*?)</span></span>`)
+	tags := regexp.MustCompile(`<[^>]*>`)
+	for name, s := range map[string]*Server{"first use": first, "a spare rule": spare} {
+		for _, n := range names {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set("Accept-Language", n.Code)
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			body := w.Body.String()
+			ms := line.FindAllStringSubmatch(body, -1)
+			if len(ms) == 0 {
+				t.Fatalf("%s, %s: nothing to look at", name, n.Code)
+			}
+			if name == "a spare rule" && !strings.Contains(body, `href="/rules/Errors2`) {
+				t.Fatalf("%s: no line for the spare rule", n.Code)
+			}
+			for _, m := range ms {
+				// The words read, not a link's query.
+				if words := tags.ReplaceAllString(m[1], ""); strings.ContainsAny(words, "?？¿") {
+					t.Errorf("%s, %s: asks: %s", name, n.Code, words)
+				}
+			}
+		}
+	}
+}
+
+// TestImpactTitleSaid: an impact window of the unnamed signal is "user
+// impact" on the pages, its flag left out; the API gives its title as it
+// was kept.
+func TestImpactTitleSaid(t *testing.T) {
+	s := pagesServer(t)
+	_, page, _ := get(t, s.Handler(), "/incidents")
+	if !strings.Contains(page, "user impact") || strings.Contains(page, "(--impact)") {
+		t.Error("the incidents page names the flag")
+	}
+	_, api, _ := get(t, s.Handler(), "/api/v1/incidents")
+	if !strings.Contains(api, "user impact (--impact)") {
+		t.Error("the API changed the title kept")
+	}
+	// Searched for by the title as kept, it is found still.
+	for _, q := range []string{"--impact", "user impact"} {
+		if _, found, _ := get(t, s.Handler(), "/search?q="+url.QueryEscape(q)); !strings.Contains(found, `href="/incidents/impact-`) {
+			t.Errorf("searched for %q: no impact window", q)
+		}
+	}
+}
+
+// TestConfirmKeepsTitle: an impact window confirmed with the title its form
+// was filled with, the page's words in the reader's language, is written
+// down with the window's own; one written in its place is kept as written.
+func TestConfirmKeepsTitle(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) {
+		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"bo@example.com"}
+		c.Impact = "impact > 1"
+	})
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	s.ready.Store(true)
+	ws, err := s.l.ImpactWindows(ctx, now.Add(-30*24*time.Hour), now)
+	if err != nil || len(ws) < 2 {
+		t.Fatalf("windows: %v %v", ws, err)
+	}
+	confirm := func(id, lang, title string) {
+		t.Helper()
+		form := url.Values{"state": {"confirmed"}, "title": {title}}
+		r := httptest.NewRequest(http.MethodPost, "/incidents/"+id+"/decide", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		r.Header.Set("X-Forwarded-Email", "bo@example.com")
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("confirm %s: %d %s", id, w.Code, w.Body.String())
+		}
+	}
+	confirm(ws[0].ID, "ko", tr("ko", "user impact"))
+	confirm(ws[1].ID, "en", "Checkout down")
+	all, err := s.l.Incidents(ctx, now.Add(-30*24*time.Hour), now, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := map[string]bool{}
+	for _, in := range all {
+		if in.Origin != "impact" {
+			titles[in.Title] = true
+		}
+	}
+	if !titles[impactTitle] || !titles["Checkout down"] || titles[tr("ko", "user impact")] {
+		t.Errorf("written down as %v", titles)
+	}
+	// The incident confirmed is shown as the window was, and saved from
+	// its form unchanged but for a label, keeps its title.
+	var made ledger.Incident
+	for _, in := range all {
+		if in.Origin != "impact" && in.Title == impactTitle {
+			made = in
+		}
+	}
+	for _, lang := range []string{"en", "ko"} {
+		r := httptest.NewRequest(http.MethodGet, "/incidents/"+made.ID, nil)
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if body := w.Body.String(); w.Code != http.StatusOK || strings.Contains(body, "(--impact)") || !strings.Contains(body, tr(lang, "user impact")) {
+			t.Errorf("%s: %s, %d, says the flag or not its title", made.ID, lang, w.Code)
+		}
+	}
+	form := url.Values{"id": {made.ID}, "title": {tr("ko", "user impact")}, "start": {made.Start.UTC().Format("2006-01-02T15:04")}, "labels": {"service=search"}}
+	r := httptest.NewRequest(http.MethodPost, "/incidents", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("X-Forwarded-Email", "bo@example.com")
+	r.Header.Set("Accept-Language", "ko")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("save %s: %d %s", made.ID, w.Code, w.Body.String())
+	}
+	if in, err := s.l.IncidentByID(ctx, made.ID); err != nil || in.Title != impactTitle || in.Labels["service"][0] != "search" {
+		t.Errorf("saved as %+v %v", in, err)
+	}
+}
+
+// TestFlagsAsCode: a flag's name in a page's words is code, in every
+// language, on every page the tests serve and on a first-time user's; in
+// the pages' font two hyphens read as one dash (docs/design/ui.md).
+func TestFlagsAsCode(t *testing.T) {
+	first, firstPaths := firstUseServer(t)
+	skip := regexp.MustCompile(`(?s)<code[^>]*>.*?</code>|<pre[^>]*>.*?</pre>|<textarea[^>]*>.*?</textarea>|<title>.*?</title>|<style[^>]*>.*?</style>|<[^>]*>`)
+	flag := regexp.MustCompile(`(^|[^\w-])--[a-z][a-z0-9-]*`)
+	seen := map[string]bool{}
+	for _, c := range []struct {
+		s     *Server
+		paths []string
+	}{{pagesServer(t), pagePaths}, {first, firstPaths}} {
+		for _, n := range names {
+			for _, p := range c.paths {
+				r := httptest.NewRequest(http.MethodGet, p, nil)
+				r.Header.Set("Accept-Language", n.Code)
+				w := httptest.NewRecorder()
+				c.s.Handler().ServeHTTP(w, r)
+				text := skip.ReplaceAllString(w.Body.String(), "\x00")
+				for _, part := range strings.Split(text, "\x00") {
+					if m := flag.FindString(part); m != "" {
+						key := n.Code + " " + strings.TrimSpace(part)
+						if !seen[key] {
+							seen[key] = true
+							t.Errorf("%s %s: a flag not as code: %q", n.Code, p, strings.TrimSpace(part))
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// plainMarks is the <code> a page adds around a flag's name (codeFlags);
+// a value's <bdi> is left, to be checked as it was.
+var plainMarks = regexp.MustCompile(`<code>(--[a-z][a-z0-9-]*)</code>`)
+
+// containsPlain is strings.Contains of a page and the words it should say,
+// a flag's name plain in each (plainMarks).
+func containsPlain(s, sub string) bool {
+	plain := func(x string) string {
+		return plainMarks.ReplaceAllString(x, "$1")
+	}
+	return strings.Contains(plain(s), plain(sub))
+}
+
+// TestTbdiWithoutArguments: tbdi with no arguments gives the translation
+// as t does, its verbs as they are, its flags as code: a disabled
+// button's why of a team not found isn't Sprintf's %!s(MISSING).
+func TestTbdiWithoutArguments(t *testing.T) {
+	if got := string(trBDI("en", "Only %s's editors")); got != "Only %s&#39;s editors" {
+		t.Errorf("no arguments: %q", got)
+	}
+	if got := string(trBDI("en", "Read-only: lapilli serve was started with --read-only")); got != "Read-only: lapilli serve was started with <code>--read-only</code>" {
+		t.Errorf("a flag: %q", got)
+	}
+	if got := string(trBDI("en", "Those --approvers names: %s.", "a@example.com")); got != "Those <code>--approvers</code> names: <bdi>a@example.com</bdi>." {
+		t.Errorf("a flag and an argument: %q", got)
 	}
 }

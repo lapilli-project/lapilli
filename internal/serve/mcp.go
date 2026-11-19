@@ -1246,7 +1246,7 @@ func (s *Server) toolCompare(ctx context.Context, _ *mcp.CallToolRequest, in com
 		return out
 	}
 	for _, ic := range cmp.Incidents {
-		out.Incidents = append(out.Incidents, incidentChangeOut{ID: ic.ID, Title: ic.Title, Start: ic.Start,
+		out.Incidents = append(out.Incidents, incidentChangeOut{ID: ic.ID, Title: shownTitle("en", ic.Title), Start: ic.Start,
 			Before: catches(ic.Before), After: catches(ic.After)})
 	}
 	if len(out.Unfinished) > 0 {

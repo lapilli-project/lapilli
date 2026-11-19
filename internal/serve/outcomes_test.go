@@ -271,10 +271,10 @@ func TestOutcomesQuiet(t *testing.T) {
 		strings.Contains(tile[:min(len(tile), 300)], ">–<") {
 		t.Errorf("/outcomes: the latest incident's tile: %s", tile[:min(len(tile), 300)])
 	}
-	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "are they still being written down?") {
-		t.Errorf("the overview should ask about the incidents")
+	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "check they are still being written down.") {
+		t.Errorf("the overview should say to check the incidents")
 	}
-	if line, err := s.outcomesLine(ctx); err != nil || !strings.Contains(line, "are they still being written down?") {
+	if line, err := s.outcomesLine(ctx); err != nil || !strings.Contains(line, "check they are still being written down.") {
 		t.Errorf("the digest's line: %q %v", line, err)
 	}
 }

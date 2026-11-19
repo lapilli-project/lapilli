@@ -136,7 +136,7 @@ func TestOldProposalReadNow(t *testing.T) {
 	}
 	body := page(cy)
 	outlast := "As proposed, its for (1h) is as long as the 30m its condition counts over, or longer: one event alone could never fire it; only events that keep coming for 1h would."
-	noRecord := "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."
+	noRecord := "No incident was written down, or found from user impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."
 	stale := "It is stale, so it isn't approved until it is backtested again: it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge."
 	for _, want := range []string{outlast, noRecord, stale, offButton("Approve", "approve-why", "Held until it is backtested again: it is stale"),
 		`<tr><th scope="row">Fired</th><td class="n">141</td><td class="n">3</td><td class="n"> <span class="delta">−138</span></td></tr>`,

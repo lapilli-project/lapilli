@@ -66,36 +66,6 @@
   an issuer every app of it shares, for an audience the job can't choose,
   and the Azure DevOps issuer retires on 2027-07-01.
 
-- **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
-  step 3). With `--backtest-listen`: `backtest.trust` says what serve does
-  with `--backtest-trust` at start, read by serve's own reader: it takes
-  the file, naming each entry, its CI and the claims it pins, never what a
-  claim is pinned to, a plain token's file read as serve reads it and said
-  long enough, never its text or length; or it stops, a problem saying
-  where (the line, the entry, the key) and why in Lapilli's words, never a
-  value the file holds: `serve.ReadTrust` refuses a file as a
-  `TrustRefused`, its message to serve's log as it was. The file needs no
-  credential, and is read with `--offline` too. `backtest.issuers` asks each
-  issuer the file names for its discovery document and keys, once, four
-  at a time, as a token's first check does (its issuer to the byte, its
-  keys at its own origin or `jwks_url`, no redirect, 1 MB and 100 keys),
-  GETs of exactly those through the allowlist, counted as `backtest` in
-  `asked.by`: ok when a key verifies a token of an algorithm it names. An
-  issuer of no public CI's, and a `jwks_url`, are said as
-  `[--backtest-trust's issuer N]` and hidden wherever the report would say
-  them. `estimate.backtests` says how many requests a backtest fits in
-  `--backtest-timeout` at the lane's share of `--max-rate`, and how many
-  days of ten of the rules changed fit, their expressions or their `for`
-  alone, counted by the count the port refuses one by
-  (`serve.BacktestRequests`); a problem only when one rule added, taken
-  away or its `for` changed over a day doesn't fit; the hourly runs
-  are timed at `--max-rate` less `--backtest-share` too, as while a
-  backtest runs the whole hour (`while_backtest`), a run past `--every`
-  only then unknown; and memory says the lane's reads beside the runs'
-  (`backtest_bytes`). A trust file serve refuses is the item's problem,
-  exit 1, where serve exits 2. Without `--backtest-listen`, the report is
-  what it was, to the byte.
-
 - **A lead of a signal's or a rule entry's own, and `require:` on an
   entry** (docs/design/judging.md, step 1; signals.md's open question 4
   closed). A named signal may give a `lead`, how long before one of its
@@ -222,6 +192,7 @@
   precision goal to hold it to Lapilli's stones alone; the Goals page, a
   goal's `goal.missed` notice and its task's "no longer missed" say what
   people's word moved.
+
 - **Rules judged by nothing** (docs/design/judging.md, step 4). A rule
   entry may say `judged: false` in place of signals, in `--impact-file` or
   on the Settings page: a watchdog, a forecast. Its rules' firings are
@@ -299,6 +270,136 @@
   queries back by that much, past the 8 days the port holds what a rule
   reads back to: it is added to them now, and 8 days at most.
 
+## [0.62.1] - 2026-11-19
+
+The pages in words a person reads: Korean without the ledger's name and
+with one name for each thing, a flag's name in a sentence set as code,
+three forms' syntax behind "How to write it", and what the review of
+0.62.0 left. No schema change: the ledger stays at 023.
+
+### Changed
+
+- **Words a person reads, not Lapilli's own** (docs/design/ui.md, bundle
+  64):
+  - Korean doesn't name the ledger (원장): "아직 기록된 발화가 없어요", a
+    limit as the reader's ("메인터넌스 윈도우는 %d개까지 둘 수 있어요"), 기준
+    시간대 for its time zone. A marked window is 이벤트 구간 everywhere, a
+    rule retired 폐기 (not 은퇴 or 없애기), a report's section of the hours asleep 자는 시간 오탐
+    as the overview's tile, not 자는 중 깨움; Outcomes' lede says what it
+    checks, not that Lapilli asks itself.
+  - A flag's name in a page's sentences is set as code, in every language:
+    in the pages' font two hyphens read as one dash. (A form's refusal,
+    when one names a flag, says it plain still.)
+  - A repeating window's, a report schedule's and a marked window's kind's
+    syntax is behind "How to write it" under its form.
+  - A proposal with no record says "or found from user impact", and search
+    finds an impact window by its title as kept ("--impact") too.
+  - A table whose labels column can make it scroll sideways (the firings, a
+    rule's latest, quiet and marked windows, teams) takes the focus, so it
+    can be scrolled by the keyboard in Safari too.
+  - A one-line field grows with its line, as with a large minimum font
+    size, past 36 px.
+
+## [0.62.0] - 2026-11-19
+
+`lapilli preflight` reads the backtest lane: its trust file as serve
+reads it, its issuers' keys, and its share of the rate. And the pages as
+0.61 read on a real deployment: one line for whoever may not change
+things, the rules list on a laptop, a rule's team said, the pages saying
+what to check, and Safari's fields and the firings list fixed. No schema
+change: the ledger stays at 023.
+
+### Added
+
+- **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
+  step 3). With `--backtest-listen`: `backtest.trust` says what serve does
+  with `--backtest-trust` at start, read by serve's own reader: it takes
+  the file, naming each entry, its CI and the claims it pins, never what a
+  claim is pinned to, a plain token's file read as serve reads it and said
+  long enough, never its text or length; or it stops, a problem saying
+  where (the line, the entry, the key) and why in Lapilli's words, never a
+  value the file holds: `serve.ReadTrust` refuses a file as a
+  `TrustRefused`, its message to serve's log as it was. The file needs no
+  credential, and is read with `--offline` too. `backtest.issuers` asks each
+  issuer the file names for its discovery document and keys, once, four
+  at a time, as a token's first check does (its issuer to the byte, its
+  keys at its own origin or `jwks_url`, no redirect, 1 MB and 100 keys),
+  GETs of exactly those through the allowlist, counted as `backtest` in
+  `asked.by`: ok when a key verifies a token of an algorithm it names. An
+  issuer of no public CI's, and a `jwks_url`, are said as
+  `[--backtest-trust's issuer N]` and hidden wherever the report would say
+  them. `estimate.backtests` says how many requests a backtest fits in
+  `--backtest-timeout` at the lane's share of `--max-rate`, and how many
+  days of ten of the rules changed fit, their expressions or their `for`
+  alone, counted by the count the port refuses one by
+  (`serve.BacktestRequests`); a problem only when one rule added, taken
+  away or its `for` changed over a day doesn't fit; the hourly runs
+  are timed at `--max-rate` less `--backtest-share` too, as while a
+  backtest runs the whole hour (`while_backtest`), a run past `--every`
+  only then unknown; and memory says the lane's reads beside the runs'
+  (`backtest_bytes`). A trust file serve refuses is the item's problem,
+  exit 1, where serve exits 2. Without `--backtest-listen`, the report is
+  what it was, to the byte.
+
+### Changed
+
+- CI on a pull request: a new push cancels the run in progress, the tests
+  on Postgres run in two shards each (`test/shard.sh`), each in half the
+  time, and an end-to-end job runs only when the changes reach it
+  (`test/e2e/reached.sh`), none for the docs alone. On main every job
+  runs, as before (CONTRIBUTING.md).
+- **The pages for whoever may not change things, the rules list on a
+  laptop, and a rule's team said** (docs/design/ui.md, bundle 62), from
+  0.61 read on a real deployment:
+  - Whoever may change no rule sees a line saying why in place of the
+    rules list's bar, and no column of boxes to pick a rule by; whoever
+    may make none of What to look at's tasks, for one reason, a line under
+    it, not a disabled button on each. A team's editor, who may do some,
+    still sees each disabled, with why.
+  - Narrower than 1200 px the rules list leaves out its 12 weeks' column,
+    which each rule's page has, and its label chips are a little smaller,
+    so that a row isn't three chips of two lines each tall.
+  - The rules list says, under a rule's team, how it was found: by its
+    note, its name or its labels, as the rule's page does.
+  - A proposal's backtest says how many more or fewer firings as a number
+    alone, as a rule's page does, not better or worse: a change may mean to
+    fire more.
+  - The tile of firings while people slept, when it can't say whether they
+    caught anything, says when people sleep, not that they caught nothing.
+- **The pages say what to check, and name a flag only where it is to be
+  set** (docs/design/ui.md, bundle 63):
+  - What to look at's lines and a feed's line say what to check in
+    English, Japanese and Spanish, as Korean has since 0.60.0: "if they
+    mattered, write them down; if not, fix what fires them", "check its job
+    is still running", "Check X still earns its place", not a question; a
+    task made of a spare rule's line is "Consider retiring X".
+  - An impact window of the unnamed signal is "user impact" on the pages
+    (the incidents, an incident's page, search, What to look at, a rule's
+    changes reviewed, a marked window's incidents, the Settings trial), and
+    "found from user impact" in the incidents list, not "(--impact)" and
+    "found by --impact". The MCP tools, which read what the pages show,
+    say it so too; the API gives the title as it was kept, and the command
+    line's report is as it was. A sentence that tells whoever runs serve
+    what to set keeps its flag's name.
+  - An impact window confirmed with the title its form was filled with is
+    written down with the window's own title, not the page's words in the
+    reader's language (a named signal's window confirmed in Korean was
+    "사용자 영향 (NAME)"); a title written in its place is kept. The
+    incident confirmed is shown as the window was, and an incident's
+    "Change it" form, saved with its title unchanged, keeps its own.
+  - lapilli.dev's icon is serve's mark, on a light round plate in the dark.
+
+### Fixed
+
+- **Safari and the firings list** (docs/design/ui.md, "In other
+  browsers"). Safari kept a select at 27 px beside 36 px buttons, and a
+  field's padding put it at 37.5 px in every browser: a one-line field and
+  a select are now as tall as a button in Chromium, Firefox and Safari,
+  the select still the browser's own. The firings list gave a label's
+  chips the least width it could beside a rule's long name, a chip one
+  letter a line and a row 1,129 px tall; its labels column is now at least
+  12 rem, a rule's name breaks where it must and a chip may break after
+  its `=`, and a Korean button breaks between its words: the row is 91 px.
 - **Serve started again with named impact signals kept the windows of the
   one with no name as incidents with no signal** (docs/design/signals.md,
   "Step 3, as built"; docs/upgrading.md, "From `--impact` to named
@@ -316,11 +417,9 @@
   it is made of the one with no name, its record kept and nothing read
   again when its expression and `for` are the same; with none named
   `impact`, they are the windows of a signal no longer read, kept as
-  those of a signal taken away are, which from this release judge no one
-  (Changed, above): the rules an entry ties only to a signal with
-  `record: false` are left unjudged in their weeks, as `lapilli verdict`
-  leaves them (give the file the old expression as `impact`, before the
-  first start with named signals, to keep them as its windows, its record
+  those of a signal taken away are, which keep every rule's record still
+  (give the file the old expression as `impact`, before the first start
+  with this release, to have them judged as its windows, its record
   kept). The firings that could catch them are judged again; the log says
   how many windows were tied, and to what, in one line, and the Run
   history notes it (`lapilli: impact windows of the signal with no name

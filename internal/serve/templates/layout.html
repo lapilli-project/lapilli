@@ -46,12 +46,12 @@ screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
 </nav>{{end}}
 
 {{/* A page's main action, or the button disabled, with why. */}}
-{{define "action"}}{{if .Href}}<a class="button" href="{{.Href}}">{{t .Label}}</a>{{else}}<span class="action-off"><button type="button" disabled aria-describedby="action-why">{{t .Label}}</button> <span id="action-why" class="why">{{t .Why}}</span></span>{{end}}{{end}}
+{{define "action"}}{{if .Href}}<a class="button" href="{{.Href}}">{{t .Label}}</a>{{else}}<span class="action-off"><button type="button" disabled aria-describedby="action-why">{{t .Label}}</button> <span id="action-why" class="why">{{tbdi .Why}}</span></span>{{end}}{{end}}
 
 {{/* An empty state: nothing judged yet (first), nothing matching
 (notfound), or nothing left to do (done); all clear (Clear), ok, only where
 nothing stands out on the overview. */}}
-{{define "empty"}}<div class="empty empty-{{.Kind}}{{if .Clear}} empty-clear{{end}}">{{with .Title}}<p class="empty-title">{{if $.Clear}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t .}}</span>{{else}}{{t .}}{{end}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
+{{define "empty"}}<div class="empty empty-{{.Kind}}{{if .Clear}} empty-clear{{end}}">{{with .Title}}<p class="empty-title">{{if $.Clear}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t .}}</span>{{else}}{{t .}}{{end}}</p>{{end}}{{with .Text}}<p class="quiet">{{tbdi .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
 
 {{/* Why no record leaves precision unknown, behind a details, under a
 notice that says so in a line (docs/design/ui.md, "What a page says"). */}}

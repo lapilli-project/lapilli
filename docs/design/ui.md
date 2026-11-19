@@ -6,7 +6,9 @@ ways in, in v0.39.0; the two items left after it (a proposal for the rules
 picked, a rule's labels as chips on the list), with the rules table made to
 fit a laptop's screen, in v0.40.0; first use (bundle 20), built,
 unreleased; status colours (bundle 28), built, unreleased; plain controls
-and fewer words (bundle 59), built, unreleased. This is how the
+and fewer words (bundle 59), in 0.60.0 and 0.61.0; read-only lines, the
+rules list under 1200 px and a rule's team said (bundle 62), built,
+unreleased. This is how the
 pages are put together: the status colours every page uses, the frame
 every page has, the team and period carried from page to page, the
 search, the rules list and its filters, a rule's page, the way to change
@@ -429,8 +431,13 @@ proposal is finished with, the forms are back (`TestFirstProposeWhileOneWaits`,
 `TestProposeFormsWhileOneWaits`). A disabled field looks as a disabled
 button does, dim words on the panel and a dashed edge, not as one to fill
 (`TestDisabledFieldsLookIt`, and in a browser `disabled-look` in
-`test/a11y/axe.mjs`); the rules list's bar, disabled for a viewer, is drawn
-so too. A checkbox stands before its words, on their first line's
+`test/a11y/axe.mjs`). Since bundle 62 whoever may do none of a list's
+things, for one reason, is told it once, not shown each disabled: the
+rules list says it in a line in place of its bar ("Acting on several rules
+at once — Editors only"), with no column of boxes to pick a rule by, and
+What to look at in a line under its list ("Make it a task — Read-only: no
+one is signed in"). A team's editor, who may do some of them, still sees
+the rest disabled, each with why, so that it shows which. A checkbox stands before its words, on their first line's
 baseline, in any form (`TestCheckboxOnItsLine`, `checkbox-line`).
 
 ### Empty states
@@ -667,6 +674,13 @@ line widened the columns it spans, the numbers' among them, and left the
 rule's at its floor (the demo at 1280 px: 323 px, 396 with the line out
 of the sizing). A label chip breaks after its "=" (`<wbr>`), not inside a
 word ("category=availabilit / y").
+
+Narrower than 1200 CSS px (bundle 62, from the same deployment at 1070
+px, where three label chips two lines each made a row 140 to 210 px
+tall), the 12 weeks' column is left out, as each rule's page has them in
+its strip and its table, and a label chip is a little smaller: the rule's
+column has the room the sparkline took. From 1200 px the table is as it
+was, and fits at 1280, 1440, 1600 and 1920 px as before.
 
 ### The search box
 
@@ -952,7 +966,9 @@ dry run, its history), with the backtest in the dry run's place:
 - **The backtest**: a table, now beside as proposed, from the evidence the
   proposal kept when it was made: fired, caught something, the incidents
   one misses that the other catches, the incidents caught later, each with
-  its difference signed and, where better or worse, said so in words. The
+  its difference signed and, where better or worse, said so in words;
+fired is a number alone, as on a rule's page (bundle 62): a change may
+mean to fire more, to catch what it missed. The
   evidence holds which incidents are caught later, not by how much, so
   that is the last row: no time is made up. One that misses an incident
   the rule catches now has a warning above the table naming it. Retiring a
@@ -1667,7 +1683,10 @@ pod restarting say, which the record can't tell from noise. A chart with
 nothing to draw, Precision by week with no week judged, is a line saying
 so and the way to the table, not an empty grid: "?" in the unknown
 status when weeks had firings and none was judged, no status when none
-fired.
+fired. The tile of firings while people slept, when it can't say whether
+they caught anything, says when people sleep alone ("10 came while people
+slept (22:00–08:00 in Asia/Tokyo)"), not that they caught nothing
+(bundle 62).
 
 Each tile links to the list that makes its number, with the same team,
 over the tiles' week, last week: `week=DATE` on the rules and the
@@ -1814,9 +1833,13 @@ named); its labels having a team's (the labels named); or that no team's
 name pattern or labels match it, with the link above when there is no team.
 `ownWalk` finds it as `owners` does, the note, then the patterns, then the
 labels, each team in name order; `TestTeamsSuggestedAsOwnersWould` holds it
-to `owners` for every rule. The rules list's Team cell is as it was: the
-reason doesn't fit the table at 1280 px, and a visually hidden one would
-tell a screen reader what no one else is told.
+to `owners` for every rule. The rules list's Team cell says it too, under
+the team's name, dim, in a word: by its note, by its name, by its labels
+(bundle 62). Until then it said nothing of it: the reason didn't fit the
+table at 1280 px, and a visually hidden one would have told a screen
+reader what no one else is told. A word fits, and a row's rule cell is two
+lines or more, its name and its badges, so the second line in the team's
+costs the row nothing.
 
 ### Who may approve
 
@@ -1939,6 +1962,47 @@ digests too, not 자는 동안 깨운 or 헛알림. What to look at's line for n
 record says when and what to do, not why again: the notice above it says
 why.
 
+Since bundle 63 English, Japanese and Spanish say it so too: What to
+look at's lines and a feed's line say what to check ("if they mattered,
+write them down; if not, fix what fires them", "check its job is still
+running"), not ask it; `TestLookSaysWhatToCheck` fails on a question
+mark in any language.
+
+A flag's name stays in a sentence that tells whoever runs serve what to
+set (why changes are off, where a notice is set up, what the trust file
+is): there the flag is what they will type. It leaves a label of the data:
+an impact window of the unnamed signal is "user impact" on the pages and
+in the MCP tools, which read what the pages show, and "found from user
+impact" in the incidents list, not "(--impact)" and "found by --impact";
+the API gives the title as it was kept ("user impact (--impact)"), the
+command line's report as it was. Where a page has only the title at hand
+(a rule's changes reviewed, a marked window's incidents, the Settings
+trial), `incTitle` says it so, as `shown` says the incident confirmed of
+a window, which keeps the window's title. A form filled with the shown
+title (confirm, Change it) sent back unchanged keeps the incident's own
+(`sameTitle`).
+
+Since bundle 64 Korean doesn't say 원장 for the ledger, a name for how
+Lapilli keeps what it keeps, which a reader needn't learn: 기록 (아직 기록된
+발화가 없어요), or Lapilli, or nothing, where a limit is the reader's own
+(메인터넌스 윈도우는 %d개까지 둘 수 있어요); 기준 시간대 for the ledger's
+time zone. A marked window is 이벤트 구간 everywhere, as the menu says, not
+표시 구간; a rule retired is 폐기, as the triage says, not 정리(retire).
+A report's section of the hours asleep is 자는 시간 오탐, as the overview's
+tile. `TestKoreanTerms` fails on 원장, 표시 구간 and 깨움. English keeps replay, ledger
+and the stones: docs/glossary.md defines replay (the rules run over
+history) apart from backtest (a replay of a change), and the flags and
+the docs say them so; Korean, by its readers' usage, says 백테스트 for both.
+
+A flag's name in a sentence is code (`codeFlags`, in `tbdi`, which with no
+arguments gives the translation as `t` does, its verbs as they are): in Heebo two
+hyphens read as one dash, and `--config` is typed as it is. A template's
+sentence with a flag is `tbdi`, as are the texts a page gets from Go (an
+empty list's, Administration's cards', a feed's, a disabled button's
+why); `TestFlagsAsCode` reads every page the tests serve, and a first-time
+user's, in each language. A form's syntax (a repeating window, a report's
+schedule, a marked window's kind) is behind "How to write it" under it.
+
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only
 admin's proposal waiting, nowhere to send a notice, a report going
@@ -1966,10 +2030,46 @@ every page to.
 | a toast saying what was done | the page gone back to says it once, from its query |
 | annotations toggled on a chart | a link to the same page with `marks=` |
 
+### In other browsers
+
+`test/a11y/axe.mjs` reads every page in Chromium. Bundle 63 read the
+pages that have fields in WebKit (Safari's engine) and Firefox too, light
+and dark, at 1,280, 1,070 and 320 CSS px: no page wider than the screen in
+any. Two differences were fixed:
+
+- Safari keeps a native select at 27 px whatever its `min-height`, beside
+  36 px buttons, and a field's padding put it at 37.5 px in every engine.
+  A one-line field and a select are now `height: var(--control-h)`,
+  borders in, so the bar's controls are one height in all three, the
+  select still the browser's own, its one arrow.
+- In the firings list, a label's chips break anywhere, so the table gave
+  them the least width it could beside a rule's long name: 47 px, a chip
+  one letter a line, a row 1,129 px tall. The labels column is now at
+  least 12 rem, a rule's name breaks where it must as the rules list's
+  does, and a chip's value may start a line after its `=`; and a Korean
+  button breaks between its words, where Safari broke "실제 문제였음" a
+  syllable a line. The row is 91 px in each.
+
 ## What is left
 
 Nothing of what the phases set out: the last two (the overview's table of
 the weeks on a laptop's screen, a rule's header drawn by the `off`
-template) went out in 0.40.1. Of first use, the rules list's Team cell
-doesn't say how its team was found (above). New work starts from
+template) went out in 0.40.1. The rules list's Team cell, the last of first
+use, says how its team was found since bundle 62. New work starts from
 ROADMAP.md.
+
+Weighed and not done, in bundle 63:
+
+- **Choosing the rules list's columns.** Without a script it is a form
+  and a parameter on every link the list makes, for a list whose rows are
+  71 to 97 px at 1,070 px since bundle 62; each rule's page has every
+  number. It waits for someone who asks for it.
+- **A register other than 해요체 in Korean.** As "Times, and Korean" says:
+  a page in another register beside the rest would read worse than
+  either, and the whole UI in another is a change for its readers to ask
+  for.
+- **Listening with a screen reader.** axe and the tests hold the pages to
+  what a screen reader needs (a name for each control, a caption or a
+  heading for each table, `aria-current`, text for each state); a person
+  listening is still the check left to do, and the accessibility statement
+  asks whoever meets a barrier to say so.

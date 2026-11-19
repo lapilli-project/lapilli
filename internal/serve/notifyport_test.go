@@ -579,7 +579,9 @@ func TestNoNotificationsShown(t *testing.T) {
 			t.Errorf("%s: %s", p, body)
 		}
 	}
-	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "firings that caught nothing, 22:00–08:00") {
+	// The tile counts firings, as no notification is kept; with no record,
+	// how many came while people slept, and when they sleep.
+	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "came while people slept (22:00–08:00)") || strings.Contains(body, "notifications, counted since") {
 		t.Errorf("overview: %s", body)
 	}
 	if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); strings.Contains(body, "lapilli_rule_notifications") {

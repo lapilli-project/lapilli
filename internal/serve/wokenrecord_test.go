@@ -110,7 +110,7 @@ func TestWokenTileNotifiedAlone(t *testing.T) {
 	woken := func(last *weekView) tile {
 		t.Helper()
 		ws := []*weekView{{Asleep: 3, Kept: true}, last, {}} // the week before, the last, the one going on
-		for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "notifications, counted since 2026-10-19", "2026-10-19",
+		for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "notifications, counted since 2026-10-19", "22:00–07:00", "2026-10-19",
 			false, func() (int, int) { return 0, 0 }) {
 			if x.key == "Woken for nothing" {
 				return x

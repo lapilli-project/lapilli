@@ -6,10 +6,10 @@ people and files: shown escaped, in <bdi>. */}}
 <p class="lede">{{t "A sale, a launch, a campaign: what was happening, read with the incidents. A firing that starts during a marked window and agrees with it is marked with its kind, and every count is read inside the kind and outside it. Nothing is excused: that is a quiet window's."}}</p>
 {{range .Kinds}}<h2><bdi>{{.Kind}}</bdi></h2>
 {{template "occurrences" (on $ .Lines)}}
-{{else}}<p class="quiet">{{if .Has}}{{t "No occurrence in the last twelve weeks, or in the next four."}}{{else}}{{t "None yet: keep one below, give --marked a file, or --mark an expression."}}{{end}}</p>{{end}}
+{{else}}<p class="quiet">{{if .Has}}{{t "No occurrence in the last twelve weeks, or in the next four."}}{{else}}{{tbdi "None yet: keep one below, give --marked a file, or --mark an expression."}}{{end}}</p>{{end}}
 {{if .Cut}}<p class="quiet">{{t "The latest %d occurrences are listed." 100}}</p>{{end}}
 {{with .Windows}}<h2>{{t "Windows"}}</h2>
-<div class="scroll"><table>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Marked windows"}}"><table>
 <thead><tr><th scope="col">{{t "Window"}}</th><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Repeats"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "From"}}</th></tr></thead>
 <tbody>{{range .}}<tr>
   <td><a href="{{$.Link (printf "/marked/%d" .ID)}}"><bdi>{{.Title}}</bdi></a>{{if .Declared}} {{template "declared"}}{{end}}</td><td><bdi>{{.Kind}}</bdi></td>
@@ -20,7 +20,7 @@ people and files: shown escaped, in <bdi>. */}}
 {{if editsAny $.Status}}
 <h2 id="add">{{t "Add a marked window"}}</h2>
 {{template "markedform" .Draft}}
-<p class="quiet">{{t "A kind is a name: a letter, then letters, digits and -, such as sale, launch or campaign; deploy and week are taken. A window that repeats does as a quiet window does, each repeat an occurrence of its own. With no labels, it marks every firing while it is on; with service=search, search's alone. A team's window marks only the rules its team owns."}}</p>
+<details class="howto"><summary>{{t "How to write it"}}</summary><p class="quiet">{{t "A kind is a name: a letter, then letters, digits and -, such as sale, launch or campaign; deploy and week are taken. A window that repeats does as a quiet window does, each repeat an occurrence of its own. With no labels, it marks every firing while it is on; with service=search, search's alone. A team's window marks only the rules its team owns."}}</p></details>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
@@ -41,7 +41,7 @@ weeks before it, outside its kind. */}}
 
 {{define "markedincidents"}}{{with .Incidents}}{{if .Total}}{{t "%d: %d caught, %d only noisy, %d missed" .Total .Caught .NoisyOnly .Missed}}{{with .Lead}}; {{t "median lead %s" .}}{{end}}{{else}}–{{end}}{{end}}{{with .Impacts}}{{if .Total}}<br>{{t "impact %d: %d caught, %d only noisy, %d missed" .Total .Caught .NoisyOnly .Missed}}{{with .Lead}}; {{t "median lead %s" .}}{{end}}{{end}}{{end}}{{end}}
 
-{{define "markedorigin"}}{{if eq . "file"}}{{t "the marked file"}}{{else if eq . "config"}}{{t "config"}}{{else if eq . "expr"}}{{t "an expression (--mark)"}}{{else}}{{t "made here"}}{{end}}{{end}}
+{{define "markedorigin"}}{{if eq . "file"}}{{t "the marked file"}}{{else if eq . "config"}}{{t "config"}}{{else if eq . "expr"}}{{tbdi "an expression (--mark)"}}{{else}}{{t "made here"}}{{end}}{{end}}
 
 {{define "markedform"}}<form method="post" action="/marked" class="grid">
   {{with .ID}}<input type="hidden" name="id" value="{{.}}">{{end}}
@@ -64,13 +64,13 @@ weeks before it, outside its kind. */}}
 <h2>{{t "Its occurrences"}}</h2>
 {{if .Lines}}{{template "occurrences" (on $ .Lines)}}{{if .Cut}}<p class="quiet">{{t "The latest %d occurrences are listed." 100}}</p>{{end}}{{else}}<p class="quiet">{{t "None in the last twelve weeks, or in the next four."}}</p>{{end}}
 <h2>{{t "Incidents during it"}}</h2>
-{{if .Incidents}}<ul class="plain">{{range .Incidents}}<li><a href="{{$.Incident .ID}}"><bdi>{{.ID}}</bdi></a>{{with .Title}} <bdi>{{.}}</bdi>{{end}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+{{if .Incidents}}<ul class="plain">{{range .Incidents}}<li><a href="{{$.Incident .ID}}"><bdi>{{.ID}}</bdi></a>{{with .Title}} <bdi>{{incTitle .}}</bdi>{{end}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{if .Declared}}
 <h2>{{t "Change it"}}</h2>
 <p>{{template "off" (offDeclared "Change it" "marked-why")}}</p>
 {{else if .Theirs}}
 <h2>{{t "Change it"}}</h2>
-<p class="quiet">{{if eq .Origin "file"}}{{t "The marked file keeps it: change it there."}}{{else}}{{t "An expression (--mark) found it: it is found again as the expression says."}}{{end}}</p>
+<p class="quiet">{{if eq .Origin "file"}}{{t "The marked file keeps it: change it there."}}{{else}}{{tbdi "An expression (--mark) found it: it is found again as the expression says."}}{{end}}</p>
 {{else if not $ro}}
 <h2>{{t "Change it"}}</h2>
 {{template "markedform" .Draft}}

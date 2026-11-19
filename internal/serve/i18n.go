@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -67,9 +68,10 @@ func init() {
 		lang := n.Code
 		t := template.Must(pages.Clone())
 		pagesIn[lang] = t.Funcs(template.FuncMap{
-			"t":    func(msg string, args ...any) string { return tr(lang, msg, args...) },
-			"tbdi": func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
-			"tin":  func(ctx, msg string) string { return trIn(lang, ctx, msg) },
+			"t":        func(msg string, args ...any) string { return tr(lang, msg, args...) },
+			"tbdi":     func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
+			"tin":      func(ctx, msg string) string { return trIn(lang, ctx, msg) },
+			"incTitle": func(title string) string { return shownTitle(lang, title) },
 			// movedText is why a person's verdict is to be looked at
 			// again (ledger.MovedText), its incident set apart.
 			"movedText": func(moved string) template.HTML { return movedText(lang, moved) },
@@ -140,6 +142,12 @@ func movedText(lang, moved string) template.HTML {
 // translation's and each argument's. A number is as its verb (%d) has it:
 // digits, nothing to set apart. One given as asCode is set in <code> too.
 func trBDI(lang, msg string, args ...any) template.HTML {
+	// Without arguments, the translation as it is, its verbs too, as tr
+	// gives it: a why of a team not found ("Only %s's editors") is said as
+	// t said it, not as Sprintf's %!s(MISSING).
+	if len(args) == 0 {
+		return template.HTML(codeFlags(template.HTMLEscapeString(tr(lang, msg))))
+	}
 	set := make([]any, len(args))
 	for i, a := range args {
 		switch a := a.(type) {
@@ -151,8 +159,17 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 			set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
 		}
 	}
-	// tr without arguments is the translation as it is, its verbs too.
-	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, msg)), set...))
+	return template.HTML(fmt.Sprintf(codeFlags(template.HTMLEscapeString(tr(lang, msg))), set...))
+}
+
+// flagName is a flag's name in a sentence: --impact, --changes-in.
+var flagName = regexp.MustCompile(`(^|[^\w-])(--[a-z][a-z0-9-]*)`)
+
+// codeFlags sets each flag's name in an escaped text as code: in the
+// pages' font two hyphens read as one dash, and a flag is typed as it is
+// (docs/design/ui.md).
+func codeFlags(escaped string) string {
+	return flagName.ReplaceAllString(escaped, "$1<code>$2</code>")
 }
 
 // asCode is an argument trBDI sets in <code>: a selector or an expression

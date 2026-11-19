@@ -130,8 +130,8 @@ func TestFiringLabels(t *testing.T) {
 	// rest of what was asked kept; one picked already, none.
 	_, body, _ := get(t, h, "/firings?day=2026-11-02&rule=Errors&black=1&label=service%3Dsearch&team=&weeks=4")
 	for _, want := range []string{
-		`<a class="chip label" href="/firings?black=1&amp;day=2026-11-02&amp;label=service%3Dsearch&amp;label=zone%3Dz2&amp;rule=Errors&amp;team=&amp;weeks=4"><span class="vh">Only those with the label </span><bdi>zone=z2</bdi></a>`,
-		`<span class="chip label on"><bdi>service=search</bdi></span>`,
+		`<a class="chip label" href="/firings?black=1&amp;day=2026-11-02&amp;label=service%3Dsearch&amp;label=zone%3Dz2&amp;rule=Errors&amp;team=&amp;weeks=4"><span class="vh">Only those with the label </span><bdi>zone=<wbr>z2</bdi></a>`,
+		`<span class="chip label on"><bdi>service=<wbr>search</bdi></span>`,
 		`<a class="chip" href="/firings?black=1&amp;day=2026-11-02&amp;rule=Errors&amp;team=&amp;weeks=4"><span class="vh">Remove filter: </span>Label: <bdi>service=search</bdi> <span aria-hidden="true">✕</span></a>`,
 		`<input type="hidden" name="label" value="service=search">`,
 		`<a href="/firings?black=1&amp;day=2026-11-01&amp;label=service%3Dsearch&amp;rule=Errors&amp;team=&amp;weeks=4">`,

@@ -153,7 +153,7 @@ its digest.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-rules-dark.png">
-  <img alt="The rules list filtered to the noisy rules over four weeks: the filters above it, side by side with their counts, the filter in effect as a chip, the orders, a line saying rules can be picked to act on several at once, and the rules, each with a checkbox, its badges, its labels as chips and its numbers, and under it a line of what they come with: the for suggested, notifications, the firings that caught nothing while people slept and off hours, re-fires, those excused, precision without the deploys' firings" src="../assets/serve-rules.png" width="820">
+  <img alt="The rules list filtered to the noisy rules over four weeks: the filters above it, side by side with their counts, the filter in effect as a chip, the orders, a line saying rules can be picked to act on several at once, and the rules, each with a checkbox, its badges, its labels as chips, its team and how it was found, and its numbers, and under it a line of what they come with: the for suggested, notifications, the firings that caught nothing while people slept and off hours, re-fires, those excused, precision without the deploys' firings" src="../assets/serve-rules.png" width="820">
 </picture>
 
 Many can be changed at once: rules picked on the list get a task each, a

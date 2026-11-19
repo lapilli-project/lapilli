@@ -402,7 +402,7 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 			}
 			if now.Sub(row.Last) > receivedQuiet {
 				row.State = "quiet"
-				row.About = "Nothing received in two days: is its job still running?"
+				row.About = "Nothing received in two days: check its job is still running."
 			}
 			v.Rows = append(v.Rows, row)
 		}
@@ -476,7 +476,7 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 			// another's.
 			imp.State, imp.About = "pending", "Not read with the criterion in effect yet."
 		case now.Sub(seen.ImpactRead) > impactStale(s.cfg):
-			imp.State, imp.About = "quiet", "Not read for longer than two runs: are the runs running?"
+			imp.State, imp.About = "quiet", "Not read for longer than two runs: check the runs are running."
 		case !k.Floor.IsZero():
 			imp.State, imp.About = "unread", "Read, waiting to be read again over the last four weeks: no record is kept by it meanwhile."
 		case imp.Data != nil && imp.Data.NoData:
@@ -555,7 +555,7 @@ func (s *Server) signalSources(ctx context.Context, n signalsNow, seen sourcesSe
 		case got.Read.IsZero() || k.Read != key:
 			row.State, row.About = "pending", "Not read with the criterion in effect yet."
 		case now.Sub(got.Read) > impactStale(s.cfg):
-			row.State, row.About = "quiet", "Not read for longer than two runs: are the runs running?"
+			row.State, row.About = "quiet", "Not read for longer than two runs: check the runs are running."
 		case !k.Floor.IsZero():
 			row.State, row.About = "unread", "Read, waiting to be read again over the last four weeks: no record is kept by it meanwhile."
 		case row.Data != nil && row.Data.NoData:

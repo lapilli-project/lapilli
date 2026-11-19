@@ -1,7 +1,7 @@
 {{define "goals"}}{{$title := t "Goals"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
-<p class="lede">{{t "What the alerts are held to: each whole week met, not met or not known, as its numbers read now, and the week under way as it stands. Goals are declared in --config, under goals:, and changed there, not here."}}</p>
-{{if .Empty}}<div class="empty empty-first"><p class="empty-title">{{t "No goals are declared"}}</p><p class="quiet">{{t "A goal is a bound on one of the weekly numbers, for everyone, for a team or for each team. Declare goals in --config (serve.config in the Helm chart's values), under goals:, for example:"}}</p>
+<p class="lede">{{tbdi "What the alerts are held to: each whole week met, not met or not known, as its numbers read now, and the week under way as it stands. Goals are declared in --config, under goals:, and changed there, not here."}}</p>
+{{if .Empty}}<div class="empty empty-first"><p class="empty-title">{{t "No goals are declared"}}</p><p class="quiet">{{tbdi "A goal is a bound on one of the weekly numbers, for everyone, for a team or for each team. Declare goals in --config (serve.config in the Helm chart's values), under goals:, for example:"}}</p>
 <pre class="example"><code>goals:
   - name: critical-caught
     measure: critical.share_caught

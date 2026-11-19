@@ -45,14 +45,14 @@
 <p class="quiet">{{t "Each one picked that caught nothing is written down as an incident, as its own button does: at most %d at a time." 100}}</p>
 {{if $b.May}}<label>{{t "Needed action"}} <select name="action"><option value="yes">{{t "yes"}}</option><option value="no">{{t "no"}}</option><option value="none">{{t "none"}}</option></select></label> <button formaction="/firings/verdict">{{t "Answer for those picked"}}</button>{{end}}
 </fieldset></form>{{end}}
-<div class="scroll"><table>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Firings"}}"><table>
 <thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td class="pick">{{if or (not .White) (and $b.May (not .Excused))}}<input type="checkbox" form="real-picked" name="firing" value="{{.Ref}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
 <td>{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td>
-<td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
+<td class="rule"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
-<td class="n">{{template "notified" .}}</td><td class="labels">{{range .Chips}}{{if .Href}}<a class="chip label" href="{{$.Link .Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{shown .Text}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{shown .Text}}</bdi></span> {{end}}{{end}}</td>
+<td class="n">{{template "notified" .}}</td><td class="labels">{{range .Chips}}{{if .Href}}<a class="chip label" href="{{$.Link .Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{template "chiptext" .Parts}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{template "chiptext" .Parts}}</bdi></span> {{end}}{{end}}</td>
 <td>{{if and (not .White) (not .SaidUnrelated)}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real">{{template "firingref" .}}<button class="quiet-button">{{t "This was real"}}</button></form>{{else}}{{template "off" (again (quiet (offOf $ "This was real" "editor" "real-why")))}}{{end}}{{end}}{{template "verdict" (verdictOf $ . $b.Back)}}</td></tr>
 {{else}}<tr><td colspan="8" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>

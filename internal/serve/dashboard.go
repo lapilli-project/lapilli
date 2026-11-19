@@ -233,6 +233,31 @@ type action struct {
 	Said              bool
 }
 
+// TaskOff is, when the reader may make none of the tasks What to look at
+// offers, and all for one reason, that reason: said once under the list,
+// in place of a disabled button on each line. nil when they may make some,
+// or the reasons differ (a team's editor, another team's rule), as a
+// button on each line then says which.
+func (d dashboard) TaskOff() *pageAction {
+	var off *pageAction
+	for _, a := range d.Actions {
+		if a.Kind == "" || a.Task != 0 {
+			continue
+		}
+		if a.May {
+			return nil
+		}
+		o := a.Off()
+		if off != nil && (off.Why != o.Why || off.WhyOf != o.WhyOf) {
+			return nil
+		}
+		if off == nil {
+			off = &o
+		}
+	}
+	return off
+}
+
 // Off is the task it would make, disabled, with why: the first disabled
 // for a reason says it, the rest are tied to it.
 func (a action) Off() pageAction {
@@ -428,7 +453,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// The last whole week, beside the week before.
 	last, before := ws[len(ws)-2], ws[len(ws)-3]
 	v.From, v.To = last.Start, ws[len(ws)-1].Start
-	asleep := o.schedules(t.o.Hours).asleepNote(l, t, team, s.cfg.Loc)
+	sc := o.schedules(t.o.Hours)
+	asleep, sleeps := sc.asleepNote(l, t, team, s.cfg.Loc), sc.asleepHours(l, t, team, s.cfg.Loc)
 	// Once notifications come, woken for nothing counts them: a
 	// notification, unlike a firing, is a person woken.
 	since := ""
@@ -442,7 +468,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.NoRecord = last.NoRecord
-	v.Tiles = s.tiles(l, ws, last, before, asleep, since, v.Deploys, func() (int, int) {
+	v.Tiles = s.tiles(l, ws, last, before, asleep, sleeps, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
 	})
 	if s.checking() {
@@ -583,7 +609,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d changes measured came out as predicted", e.AsPredicted, e.Measured)})
 	}
 	if out.Record.Quiet {
-		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: are they still being written down?"), Warn: true})
+		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: check they are still being written down."), Warn: true})
 	}
 	if u.Suggested > 0 {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d suggestions acted on", u.ActedOn, u.Suggested)})
@@ -597,7 +623,10 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 }
 
 // tiles are the headline numbers.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, since string, deploys bool, refired func() (int, int)) []tile {
+// asleep is what the tile of firings while people slept counts, hours when
+// people sleep alone, which a tile that doesn't know whether they caught
+// anything says in place of it.
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, hours, since string, deploys bool, refired func() (int, int)) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
@@ -675,16 +704,16 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		switch {
 		case last.Uncounted:
 			if last.NoRecord {
-				asleep = tr(l, "%s, with no incident written down to judge them by", asleep)
+				asleep = tr(l, "firings while people slept, %s, with no incident written down to judge them by", hours)
 			}
 		case unknown(last) && last.NoRecord && since != "":
 			asleep = tr(l, "not known: no record; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last) && last.NoRecord:
-			asleep = tr(l, "not known: no record; %d came while people slept (%s)", last.Asleep, asleep)
+			asleep = tr(l, "not known: no record; %d came while people slept (%s)", last.Asleep, hours)
 		case unknown(last) && since != "":
 			asleep = tr(l, "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last):
-			asleep = tr(l, "not known: no incident written down to judge them by; %d came while people slept (%s)", last.Asleep, asleep)
+			asleep = tr(l, "not known: no incident written down to judge them by; %d came while people slept (%s)", last.Asleep, hours)
 		}
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted && !unknown(w) }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
@@ -989,12 +1018,12 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		return strings.Compare(a.Rule, b.Rule)
 	})
 	for _, u := range unrec[:min(len(unrec), unrecordedShown)] {
-		d := tr(l, "did they matter? Write it down, or fix what fires them")
+		d := tr(l, "if they mattered, write them down; if not, fix what fires them")
 		switch {
 		case u.Events:
-			d = tr(l, "each is an event its condition counts: did they matter? A longer for would hide them.")
+			d = tr(l, "each is an event its condition counts: if they mattered, write them down. A longer for would hide them.")
 		case u.Clear > 0:
-			d = tr(l, "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.", u.Clear)
+			d = tr(l, "%d went well past its bound, not a flicker at its edge: if they mattered, write them down. A longer for would hide them.", u.Clear)
 		}
 		out = append(out, action{Text: tr(l, "%s fired %d times with no incident written down", u.Rule, u.Firings), Detail: d, Href: path(u.Rule),
 			Kind: "tune", Rule: u.Rule, Title: tr(l, "Find out why %s fires", u.Rule)})
@@ -1034,7 +1063,7 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		if in.Title != "" {
 			name += " " + in.Title
 		}
-		out = append(out, action{Text: tr(l, "No alert caught %s", name), Detail: tr(l, "%s: a rule for it, or a lower threshold?", in.Start.In(s.cfg.Loc).Format("2006-01-02 15:04")),
+		out = append(out, action{Text: tr(l, "No alert caught %s", name), Detail: tr(l, "%s: whether to add a rule that catches it, or lower a threshold", in.Start.In(s.cfg.Loc).Format("2006-01-02 15:04")),
 			Href: "/incidents/" + url.PathEscape(in.ID), Kind: "write", Incident: in.ID, Title: tr(l, "A rule for %s", in.ID)})
 	}
 	if undecided > 0 {
@@ -1042,13 +1071,13 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 	}
 	for _, x := range lines {
 		if x.Spare {
-			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
+			out = append(out, action{Text: tr(l, "Check %s still earns its place", x.Name),
 				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
-				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
+				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Consider retiring %s", x.Name)})
 		}
 	}
 	if len(silent) > 0 {
-		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "still needed, or do they watch something gone?"), Href: "/rules?weeks=12"})
+		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "check they are still needed and still watch something that is there"), Href: "/rules?weeks=12"})
 	}
 	if len(out) > actionsShown {
 		out = out[:actionsShown]

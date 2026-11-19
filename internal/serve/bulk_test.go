@@ -311,17 +311,16 @@ func TestBulkResultShown(t *testing.T) {
 	}
 }
 
-// TestBulkDisabled: whoever may not use the bulk bar sees it disabled, with
-// why; a team's editor may make tasks and set dispositions, not teams.
+// TestBulkDisabled: whoever may change no rule sees a line saying why, in
+// place of the bar, and no box to pick a rule by; a team's editor may make
+// tasks and set dispositions, not teams, and sees the rest disabled, with
+// why.
 func TestBulkDisabled(t *testing.T) {
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
 	for who, want := range map[string][]string{
-		"": {`<span class="action-off"><button type="button" disabled aria-describedby="bulk-why">Make a task for each</button> <span id="bulk-why" class="why">Read-only: no one is signed in</span></span>`,
-			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Set the team</button></span>`,
-			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Set the disposition</button></span>`,
-			`aria-label="Errors" disabled>`},
-		"vi@example.com": {`<button type="button" disabled aria-describedby="bulk-why">Make a task for each</button> <span id="bulk-why" class="why">Editors only</span>`},
+		"":               {`<p class="quiet bulk-off">Acting on several rules at once — Read-only: no one is signed in</p>`},
+		"vi@example.com": {`<p class="quiet bulk-off">Acting on several rules at once — Editors only</p>`},
 		"pat@example.com": {`<button name="do" value="task">`, `<button class="quiet-button" name="do" value="status">`,
 			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-team-why">Set the team</button> <span id="bulk-team-why" class="why">Editors only</span></span>`},
 		"ed@example.com": {`<button name="do" value="task">`, `<button class="quiet-button" name="do" value="team">`, `aria-label="Errors">`},
@@ -334,6 +333,9 @@ func TestBulkDisabled(t *testing.T) {
 			if !strings.Contains(body, w) {
 				t.Errorf("%q: no %s", who, w)
 			}
+		}
+		if (who == "" || who == "vi@example.com") && (strings.Contains(body, `fieldset class="bulk-bar"`) || strings.Contains(body, `name="rule"`) || strings.Contains(body, `class="pick"`)) {
+			t.Errorf("%q: may change no rule, and is offered the bar or a box to pick one", who)
 		}
 		// Each reason is said once, by the first disabled for it.
 		for _, id := range []string{"bulk-why", "bulk-team-why"} {

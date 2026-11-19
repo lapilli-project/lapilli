@@ -47,6 +47,11 @@ LAPILLI_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:55432/postgres?sslmode=d
   go test ./internal/ledger ./internal/serve ./cmd/lapilli
 ```
 
+CI runs them in two shards on each of Postgres 15 and 18, as
+`test/shard.sh 1` and `test/shard.sh 2` do: the second every other of
+serve's tests, the first the rest, with the ledger's and the command's.
+Each checks first that every test is in one shard, and one only.
+
 A statement that Postgres takes otherwise than SQLite is given for both
 (`internal/ledger/dialect.go`); `TestDialectSeam` says where one isn't. A
 migration comes in a pair: `schema/NNN.sql` and `schema/postgres/NNN.sql`.
@@ -83,15 +88,23 @@ tests, so a change that slows a run or a page fails.
   three reviews of 0.20.0's new ports, all of what they did, missed that
   one read a body before its token (GHSA-ggwv-m6g7-jchx).
 - **CI runs:**
-  - the tests on Linux, macOS and the latest Go
+  - the tests on Linux, macOS and the latest Go, and govulncheck: the
+    checks a pull request must pass to merge
+  - the tests on Postgres 15 and 18, in two shards each
   - the chart end to end on kind, and served at a URL there
   - the whole service on kind: a scenario of user impact, a re-fire and a
     deploy, Grafana's alerts and notifications, the dashboard, a browser
   - the sign-in against a real identity provider
-  - govulncheck
+  - the other end-to-end jobs, against real servers in Docker
   - CodeQL
 
-  All of them must pass.
+  On a pull request, an end-to-end job runs only when the changes reach
+  it: lapilli itself, which each one builds (`go.mod`, `go.sum`, `cmd/`
+  and `internal/`, but their tests and testdata), or its script and what
+  the script reads (`test/e2e/reached.sh` says which). A change to the
+  docs alone runs none of them. A new push to a pull request cancels the
+  run in progress. On each push to main every job runs, and weekly the
+  fuzzing too. All of what runs must pass.
 - **Dependencies.** A new one needs a reason. Versions are at least two weeks
   old, except for security fixes.
 - **Nothing private.** Real rule names, hostnames, incident titles and
@@ -177,7 +190,10 @@ the pages aim for, and what a change to them should check.
 
 ## Releases
 
-A maintainer tags `vX.Y.Z` on `main`. `.github/workflows/release.yml` builds
+A maintainer tags `vX.Y.Z` on a commit of `main` whose CI run passed in
+full: a pull request's run leaves out the end-to-end jobs its changes
+don't reach, so main's is the run that has them all.
+`.github/workflows/release.yml` builds
 the binaries, the image and the chart, checks them with govulncheck,
 attests their provenance, and puts the attestations' Sigstore bundles
 beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md). The job
@@ -188,5 +204,6 @@ publishes nothing:
 
 ```sh
 gh workflow run release.yml --ref main -f version=vX.Y.Z
-``` `lapilli.dev` is built from `site/` by
-`.github/workflows/pages.yml`.
+```
+
+`lapilli.dev` is built from `site/` by `.github/workflows/pages.yml`.

@@ -500,24 +500,28 @@ func TestBulkProposeTimeUp(t *testing.T) {
 	}
 }
 
-// TestBulkProposeBar: the bar's proposal is an editor's; whoever may not
-// sees it disabled, with why, said once: read-only, a viewer, a team's
-// editor, and a lapilli serve with no rules of its own, to anyone.
+// TestBulkProposeBar: the bar's proposal is an editor's; a team's editor
+// sees it disabled, with why, said once; whoever may change no rule, read
+// only or a viewer, sees a line saying why in place of the bar; and a
+// lapilli serve with no rules of its own says why to anyone.
 func TestBulkProposeBar(t *testing.T) {
 	s := proposeServer(t, nil)
 	for who, want := range map[string]string{
 		bo:                `<button class="quiet-button" name="do" value="propose">Propose</button>`,
-		"vi@example.com":  `<button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Propose</button>`,
+		"vi@example.com":  `<p class="quiet bulk-off">Acting on several rules at once — Editors only</p>`,
 		"pat@example.com": `<button class="quiet-button" type="button" disabled aria-describedby="bulk-team-why">Propose</button>`,
-		"":                `<button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Propose</button>`,
+		"":                `<p class="quiet bulk-off">Acting on several rules at once — Read-only: no one is signed in</p>`,
 	} {
 		// A team's editor sees their own team's rules unless they pick all.
 		_, body := getAs(t, s.Handler(), "/rules?weeks=12&team=", who)
 		if !strings.Contains(body, want) {
 			t.Errorf("%q: no %s", who, want)
 		}
-		if who != bo && !strings.Contains(body, `<select name="propose" disabled`) {
+		if who == "pat@example.com" && !strings.Contains(body, `<select name="propose" disabled`) {
 			t.Errorf("%q: what to propose isn't disabled", who)
+		}
+		if (who == "" || who == "vi@example.com") && (strings.Contains(body, `name="propose"`) || strings.Contains(body, `name="rule"`)) {
+			t.Errorf("%q: may change no rule, and is offered the bar or a box to pick one", who)
 		}
 	}
 	s.cfg.RulesPath, s.cfg.Alerts = "", true // no rules of its own

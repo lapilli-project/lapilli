@@ -10,7 +10,8 @@ import (
 )
 
 // TestOverviewTaskDisabled: "Make it a task", under What to look at, is a
-// form for whoever may make the task, and for anyone else the button
+// form for whoever may make the task. Whoever may make none, for one
+// reason, is told it once under the list; anyone else sees the button
 // disabled, with why: a team's editor makes tasks of their team's rules
 // and none of another's, nor about an incident; those disabled for one
 // reason share the sentence that says it.
@@ -42,6 +43,14 @@ func TestOverviewTaskDisabled(t *testing.T) {
 			if want := strings.Contains(strings.Join(c.form, ""), f); has != want {
 				t.Errorf("%q: the form with %s: %v", c.who, f, has)
 			}
+		}
+		// Whoever may make none, for one reason, is told it once under the
+		// list, with no disabled button on each line.
+		if len(c.form) == 0 && len(c.why) == 1 {
+			if line := `<p class="quiet look-off">Make it a task — ` + c.why[0] + `</p>`; !strings.Contains(look, line) || strings.Contains(look, "disabled") {
+				t.Errorf("%q: not one line, %s:\n%s", c.who, line, look)
+			}
+			continue
 		}
 		disabled := strings.Count(look, `type="button" disabled aria-describedby="look-why-`)
 		if want := 2 - len(c.form); disabled != want {

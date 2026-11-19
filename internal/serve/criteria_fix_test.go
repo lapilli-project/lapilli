@@ -660,7 +660,7 @@ func TestSourcesImpactRead(t *testing.T) {
 	s.jobs(ctx, false)
 	runDue(s, 12)
 	_, body = askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if row := sourceRowOf(body, "Impact signal"); !strings.Contains(row, "quiet") || !strings.Contains(row, "are the runs running?") {
+	if row := sourceRowOf(body, "Impact signal"); !strings.Contains(row, "quiet") || !strings.Contains(row, "check the runs are running.") {
 		t.Errorf("read long ago:\n%s", row)
 	}
 }
@@ -780,7 +780,7 @@ func TestImpactPendingNoData(t *testing.T) {
 	if row := sourceRowOf(page, "Impact signal"); !strings.Contains(row, `status-warn">⚠&#xFE0E; no record`) || !strings.Contains(row, "waiting to be read again") {
 		t.Errorf("the sources row:\n%s", row)
 	}
-	if !strings.Contains(page, "raise --timeout or --max-samples") {
+	if !containsPlain(page, "raise --timeout or --max-samples") {
 		t.Errorf("no way past a failing read again:\n%s", page)
 	}
 }

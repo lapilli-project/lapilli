@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Historial de ejecuciones · Lapilli</title>
-<link rel="icon" href="/static/mark-32.png?v=0ad4d9e620b2" sizes="32x32" type="image/png">
-<link rel="icon" href="/static/mark-16.png?v=0ad4d9e620b2" sizes="16x16" type="image/png">
-<link rel="stylesheet" href="/static/lapilli.css?v=0ad4d9e620b2">
+<link rel="icon" href="/static/mark-32.png?v=e610e9b4f055" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=e610e9b4f055" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=e610e9b4f055">
 </head>
 <body>
 <a class="skip" href="#main">Saltar al contenido</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/mark-48.png?v=0ad4d9e620b2" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=e610e9b4f055" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menú<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Historial de ejecuciones</span></summary>
   <nav class="nav-menu" aria-label="Menú">
   <p class="nav-group" id="menu-see">Supervisión</p>
@@ -75,7 +75,7 @@
 <h2>El backtest frente a lo que realmente se disparó</h2>
 <p>Contrastado con ALERTS{alertstate=&#34;firing&#34;}, GRAFANA_ALERTS{alertstate=&#34;firing&#34;,grafana_alertstate!=&#34;error&#34;} hasta 2026-11-03 00:00.
 
-<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> GRAFANA_ALERTS{alertstate=&#34;firing&#34;,grafana_alertstate!=&#34;error&#34;} no tenía nada durante 2026-11-02: las reglas a las que corresponde no se comprobaron ese día. Puede que un almacén no lo guarde; --check-series nombra otra.</strong>
+<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> <bdi>GRAFANA_ALERTS{alertstate=&#34;firing&#34;,grafana_alertstate!=&#34;error&#34;}</bdi> no tenía nada durante <bdi>2026-11-02</bdi>: las reglas a las que corresponde no se comprobaron ese día. Puede que un almacén no lo guarde; <code>--check-series</code> nombra otra.</strong>
 
 
 
@@ -85,7 +85,7 @@
 <div class="scroll"><table><thead><tr><th scope="col">Calendario</th><th scope="col">Leído</th><th scope="col">Turnos guardados</th><th scope="col">Desde y hasta</th></tr></thead>
 <tbody><tr><td>primary</td><td class="t">2026-11-03 12:00</td><td class="n">3</td><td class="t">2026-10-31 12:00 → 2026-11-06 12:00</td></tr>
 
-<tr><td colspan="4">Sus turnos nombran a personas que --on-call no tiene, cuyos turnos se cuentan con el horario del equipo: pat.</td></tr>
+<tr><td colspan="4">Sus turnos nombran a personas que <code>--on-call</code> no tiene, cuyos turnos se cuentan con el horario del equipo: <bdi>pat</bdi>.</td></tr>
 <tr><td colspan="4" class="quiet">Omitido en su feed: an event with no one in it</td></tr><tr><td>secondary</td><td class="t">todavía no</td><td class="n">0</td><td class="t"></td></tr>
 <tr><td colspan="4"><strong class="status-bad"><span aria-hidden="true">✕</span> La última lectura falló y se mantienen los turnos guardados: feed.example.com: 503</strong></td></tr>
 

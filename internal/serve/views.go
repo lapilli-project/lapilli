@@ -1449,12 +1449,25 @@ type incidentLine struct {
 // impactTitle is the title an impact window is found with.
 const impactTitle = "user impact (--impact)"
 
+// shownTitle is an incident's title as shown in a language where only its
+// title is at hand (a backtest's or a trial's list): the unnamed signal's
+// windows are kept with impactTitle, said without the flag
+// (docs/design/ui.md); any other title as it was written.
+func shownTitle(lang, title string) string {
+	if title == impactTitle {
+		return tr(lang, "user impact")
+	}
+	return title
+}
+
 // shown is an incident as shown in a language: an impact window's title is
 // the UI's own, so it is translated, a named signal's with its name.
 func shown(lang string, in ledger.Incident) ledger.Incident {
 	switch {
-	case in.Origin == "impact" && in.Title == impactTitle:
-		in.Title = tr(lang, impactTitle)
+	case in.Title == impactTitle:
+		// A window, or the incident confirmed of one, which keeps its
+		// title (docs/design/ui.md).
+		in.Title = shownTitle(lang, in.Title)
 	case in.Origin == "impact" && in.Signal != "" && in.Title == "user impact ("+in.Signal+")":
 		in.Title = tr(lang, "user impact (%s)", in.Signal)
 	}
@@ -2565,10 +2578,11 @@ func historyShown(where string) string {
 }
 
 var funcs = template.FuncMap{
-	"static": static,
-	"t":      func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
-	"tbdi":   func(msg string, args ...any) template.HTML { return trBDI("en", msg, args...) },
-	"tin":    func(ctx, msg string) string { return trIn("en", ctx, msg) },
+	"static":   static,
+	"t":        func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
+	"tbdi":     func(msg string, args ...any) template.HTML { return trBDI("en", msg, args...) },
+	"tin":      func(ctx, msg string) string { return trIn("en", ctx, msg) },
+	"incTitle": func(title string) string { return shownTitle("en", title) },
 	// shown is a text as a page shows what it can't change: an expression,
 	// a ruler's namespace, with what turns text around as U+FFFD.
 	"shown": rules.Shown,

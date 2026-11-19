@@ -48,12 +48,12 @@ func approval(t *testing.T, h http.Handler, id int64, who string) string {
 func TestApproversAsTheyAre(t *testing.T) {
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
-	if _, body, _ := ui(t, h, http.MethodGet, "/roles", ana, "", nil); !strings.Contains(body, "<td>Those --approvers names: <bdi>ana@example.com, cy@example.com</bdi>.</td>") {
+	if _, body, _ := ui(t, h, http.MethodGet, "/roles", ana, "", nil); !containsPlain(body, "<td>Those --approvers names: <bdi>ana@example.com, cy@example.com</bdi>.</td>") {
 		t.Errorf("/roles doesn't say who --approvers names:\n%s", body)
 	}
 	id := proposeFor(t, h, "15m")
 	named := "Who may approve it: those --approvers names, but the one it was made by or for: <bdi>ana@example.com, cy@example.com</bdi>."
-	if p := approval(t, h, id, ana); !strings.Contains(p, named) {
+	if p := approval(t, h, id, ana); !containsPlain(p, named) {
 		t.Errorf("an admin isn't told who may approve it, by name:\n%s", p)
 	}
 	p := approval(t, h, id, bo)
@@ -72,18 +72,18 @@ func TestApproversAsTheyAre(t *testing.T) {
 	// Without --approvers, the admins, named on the Roles page.
 	s, _ = changesServer(t, func(c *Config) { c.Approvers = nil; c.Admins = []string{ana, cy} })
 	h = s.Handler()
-	if _, body, _ := ui(t, h, http.MethodGet, "/roles", ana, "", nil); !strings.Contains(body, "<td>The admins, as --approvers isn&#39;t given: <bdi>ana@example.com, cy@example.com</bdi>.</td>") {
+	if _, body, _ := ui(t, h, http.MethodGet, "/roles", ana, "", nil); !containsPlain(body, "<td>The admins, as --approvers isn&#39;t given: <bdi>ana@example.com, cy@example.com</bdi>.</td>") {
 		t.Errorf("/roles doesn't say the admins approve:\n%s", body)
 	}
 	id = proposeAs(t, h, ana, "15m")
-	if p := approval(t, h, id, cy); !strings.Contains(p, "Who may approve it: the admins, as --approvers isn&#39;t given, but the one it was made by or for: <bdi>cy@example.com</bdi>.") {
+	if p := approval(t, h, id, cy); !containsPlain(p, "Who may approve it: the admins, as --approvers isn&#39;t given, but the one it was made by or for: <bdi>cy@example.com</bdi>.") {
 		t.Errorf("an admin isn't told the other admin may approve it:\n%s", p)
 	}
 
 	// Changes off: no one, said on the Roles page; the proposal's button
 	// says it already.
 	s, _ = server(t, func(c *Config) { c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{ana}, []string{"*"} })
-	if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/roles", ana, "", nil); !strings.Contains(body, "<td>No one: changes are off, as lapilli serve was started without --changes.</td>") {
+	if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/roles", ana, "", nil); !containsPlain(body, "<td>No one: changes are off, as lapilli serve was started without --changes.</td>") {
 		t.Errorf("/roles doesn't say no one approves with changes off:\n%s", body)
 	}
 }
@@ -100,7 +100,7 @@ func TestApproversNoOneLeft(t *testing.T) {
 	generic := "No one can approve this yet; an admin sees why on the Roles page."
 	told := func(h http.Handler, id int64, admin, said string) {
 		t.Helper()
-		if p := approval(t, h, id, admin); !strings.Contains(p, said) || !strings.Contains(p, `class="notice status-warn"`) {
+		if p := approval(t, h, id, admin); !containsPlain(p, said) || !strings.Contains(p, `class="notice status-warn"`) {
 			t.Errorf("an admin isn't told %q, as a warning:\n%s", said, p)
 		}
 		for _, who := range []string{bo, ""} {
