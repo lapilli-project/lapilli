@@ -5,13 +5,19 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -312,5 +318,136 @@ func TestCIDiscoveryAlone(t *testing.T) {
 	}
 	if n := asked.Load(); n != 1 {
 		t.Errorf("asked %d times", n)
+	}
+}
+
+// DiscoverKeys reads the issuer's discovery document as a token's first
+// check does, under its caller's context, keeping nothing; Usable fetches
+// the keys under it too, and counts those that verify a token of an
+// algorithm the document names. A context already done sends nothing.
+func TestCIDiscoverKeys(t *testing.T) {
+	idp, ci, _ := newCI(t, "/api/actions")
+	keys, err := ci.DiscoverKeys(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys.URL() != idp.Issuer+"/.well-known/jwks" || strings.Join(keys.Algs(), ",") != "RS256" || idp.Discoveries.Load() != 1 || idp.KeyFetches.Load() != 0 {
+		t.Fatalf("%s %v, %d discoveries, %d key fetches", keys.URL(), keys.Algs(), idp.Discoveries.Load(), idp.KeyFetches.Load())
+	}
+	if n, err := keys.Usable(context.Background()); n != 1 || err != nil || idp.KeyFetches.Load() != 1 {
+		t.Errorf("%d usable, %v, %d fetches", n, err, idp.KeyFetches.Load())
+	}
+	// Kept nothing: asked again, asked again.
+	if _, err := ci.DiscoverKeys(context.Background()); err != nil || idp.Discoveries.Load() != 2 {
+		t.Errorf("%v, %d discoveries", err, idp.Discoveries.Load())
+	}
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ci.DiscoverKeys(done); err == nil || idp.Discoveries.Load() != 2 {
+		t.Errorf("a context done: %v, %d discoveries", err, idp.Discoveries.Load())
+	}
+	if _, err := keys.Usable(done); err == nil || idp.KeyFetches.Load() != 1 {
+		t.Errorf("a context done: %v, %d key fetches", err, idp.KeyFetches.Load())
+	}
+	// The keys the algorithms named verify, by type and curve.
+	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	for _, x := range []struct {
+		algs []string
+		want int
+	}{{[]string{"RS256"}, 1}, {[]string{"PS512"}, 1}, {[]string{"ES256"}, 0}, {[]string{"EdDSA"}, 0}, {nil, 1}} {
+		k := NewKeys("", nil, x.algs, nil)
+		n := 0
+		for _, a := range k.algs {
+			if verifies(jose.JSONWebKey{Key: &rsaKey.PublicKey}, a) {
+				n = 1
+			}
+		}
+		if n != x.want {
+			t.Errorf("%v: %d", x.algs, n)
+		}
+	}
+}
+
+// NewKeys takes each algorithm once, however many times a discovery
+// document names it.
+func TestKeysAlgorithmsOnce(t *testing.T) {
+	k := NewKeys("", nil, []string{"RS256", "RS256", "ES256", "HS256", "RS256", "ES256"}, nil)
+	if got := strings.Join(k.Algs(), ","); got != "RS256,ES256" {
+		t.Errorf("%s", got)
+	}
+}
+
+// DiscoverKeys skips what keysOf holds a token from anyone to (once a
+// minute after a failure, one ask at a time): no code but lapilli
+// preflight's calls it, so no path a request to serve takes does.
+func TestDiscoverKeysPreflightAlone(t *testing.T) {
+	var files []string
+	for _, root := range []string{"../../internal", "../../cmd"} {
+		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".go") && !strings.HasSuffix(p, "_test.go") {
+				files = append(files, p)
+			}
+			return nil
+		})
+	}
+	read := 0
+	for _, f := range files {
+		file, err := parser.ParseFile(token.NewFileSet(), f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read++
+		ast.Inspect(file, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "DiscoverKeys" &&
+				!strings.HasPrefix(filepath.ToSlash(f), "../../internal/preflight/") && !strings.HasPrefix(filepath.ToSlash(f), "../../internal/signin/") {
+				t.Errorf("%s calls DiscoverKeys: serve's paths call Discover and VerifyToken", f)
+			}
+			return true
+		})
+	}
+	if read < 50 {
+		t.Fatalf("%d files read", read)
+	}
+}
+
+// A fetch that got no answer is said naming no host but the one asked: a
+// redirect refused without where it led (the Location, another host, its
+// query), a certificate without the names it is for or the authority that
+// signed it; in what serve logs, and lapilli preflight prints.
+func TestGetSaysNoOtherHost(t *testing.T) {
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://sso.corp-a.example/login?client=secret-client-77", http.StatusFound)
+	}))
+	defer redirect.Close()
+	_, err := get(context.Background(), Client(nil), redirect.URL+"/.well-known/openid-configuration", keysBody)
+	if err == nil || strings.Contains(err.Error(), "corp-a") || strings.Contains(err.Error(), "secret-client") ||
+		!strings.Contains(err.Error(), "/.well-known/openid-configuration: it redirected, and redirects aren't followed") {
+		t.Errorf("a redirect: %v", err)
+	}
+	ci := &CI{Issuer: redirect.URL, Client: Client(nil)}
+	if _, err := ci.DiscoverKeys(context.Background()); err == nil || strings.Contains(err.Error(), "corp-a") || !errors.Is(err, ErrUnreachable) {
+		t.Errorf("discovery redirected: %v", err)
+	}
+	// TLS: a certificate of an authority not trusted, and one trusted but
+	// for other names than the host asked (localhost: the test's certificate
+	// is for example.com and 127.0.0.1).
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer tlsSrv.Close()
+	_, err = get(context.Background(), Client(nil), tlsSrv.URL+"/keys", keysBody)
+	if err == nil || strings.Contains(err.Error(), "x509") || !strings.Contains(err.Error(), "of an authority this machine doesn't trust") {
+		t.Errorf("an authority not trusted: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(tlsSrv.Certificate())
+	trusting := Client(&http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}})
+	_, port, _ := strings.Cut(strings.TrimPrefix(tlsSrv.URL, "https://"), ":")
+	_, err = get(context.Background(), trusting, "https://localhost:"+port+"/keys", keysBody)
+	names := strings.Join(tlsSrv.Certificate().DNSNames, " ")
+	if err == nil || names == "" || strings.Contains(err.Error(), tlsSrv.Certificate().DNSNames[0]) || !strings.Contains(err.Error(), "isn't for the host asked") {
+		t.Errorf("a certificate for %s: %v", names, err)
+	}
+	// One that doesn't resolve names the host asked alone, as it is.
+	if _, err := get(context.Background(), Client(nil), "http://nowhere.invalid/keys", keysBody); err == nil || !strings.Contains(err.Error(), "nowhere.invalid") {
+		t.Errorf("a name that doesn't resolve: %v", err)
 	}
 }

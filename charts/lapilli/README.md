@@ -584,6 +584,14 @@ To check a CI's ID tokens, serve fetches each issuer's discovery document
 and keys: with `serve.networkPolicy.egress`, its `to` must let serve reach
 them over https, port 443, as it must an identity provider.
 
+`lapilli preflight` with serve's flags, where serve runs, says before a
+change is rolled out whether serve takes the trust file or stops at it
+(`backtest.trust`), whether each issuer's discovery document and keys
+answer as a token's check needs (`backtest.issuers`), and how much a
+backtest fits in `timeout` at `share` (`estimate.backtests`); with
+`--offline`, in CI, the trust file is read all the same, the plain
+tokens' Secrets not (docs/design/preflight.md).
+
 ## Who people are
 
 

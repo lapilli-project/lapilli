@@ -16,7 +16,9 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,9 +66,12 @@ const (
 // redirects, so nothing is fetched from anywhere but the URL given.
 func Client(rt http.RoundTripper) *http.Client {
 	return &http.Client{Transport: egress.Wrap(rt), Timeout: fetchTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return errors.New("redirects aren't followed")
+		return errRedirect
 	}}
 }
+
+// errRedirect is a redirect Client refuses to follow.
+var errRedirect = errors.New("redirects aren't followed")
 
 // Keys are the public keys at a JWKS URL, fetched when first needed and
 // again when a token names a key not held, at most once a minute.
@@ -93,8 +98,9 @@ type Keys struct {
 func NewKeys(jwksURL string, client *http.Client, algs []string, now func() time.Time) *Keys {
 	k := &Keys{url: jwksURL, client: client, now: now}
 	for _, a := range algs {
-		if slices.Contains(Asymmetric, jose.SignatureAlgorithm(a)) {
-			k.algs = append(k.algs, jose.SignatureAlgorithm(a))
+		// Each once: a discovery document may name one many times.
+		if alg := jose.SignatureAlgorithm(a); slices.Contains(Asymmetric, alg) && !slices.Contains(k.algs, alg) {
+			k.algs = append(k.algs, alg)
 		}
 	}
 	if len(k.algs) == 0 {
@@ -230,6 +236,46 @@ func (k *Keys) Fetch(ctx context.Context) (int, error) {
 	return len(ks), err
 }
 
+// URL is where the keys are fetched from.
+func (k *Keys) URL() string { return k.url }
+
+// Usable fetches the keys once, as the first token would (fetchSet),
+// within ctx, and says how many of them verify a token signed with one of
+// the algorithms taken (Algs), as go-jose verifies one: an RSA key for
+// RS* and PS*, an ECDSA key of P-256, P-384 or P-521 for ES256, ES384 or
+// ES512, an Ed25519 key for EdDSA. It keeps none.
+func (k *Keys) Usable(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	keys, _, err := k.fetchSet(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, key := range keys {
+		if slices.ContainsFunc(k.algs, func(a jose.SignatureAlgorithm) bool { return verifies(key, a) }) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// verifies reports whether key can verify a signature of alg: by its
+// type, and an ECDSA key by its curve, which go-jose holds to the
+// algorithm's.
+func verifies(key jose.JSONWebKey, alg jose.SignatureAlgorithm) bool {
+	switch pub := key.Key.(type) {
+	case *rsa.PublicKey:
+		return strings.HasPrefix(string(alg), "RS") || strings.HasPrefix(string(alg), "PS")
+	case *ecdsa.PublicKey:
+		return alg == jose.ES256 && pub.Curve == elliptic.P256() || alg == jose.ES384 && pub.Curve == elliptic.P384() ||
+			alg == jose.ES512 && pub.Curve == elliptic.P521()
+	case ed25519.PublicKey:
+		return alg == jose.EdDSA
+	}
+	return false
+}
+
 // fetch reads the keys at the URL: public keys of a key pair alone.
 func (k *Keys) fetch(ctx context.Context) ([]jose.JSONWebKey, error) {
 	keys, _, err := k.fetchSet(ctx)
@@ -299,7 +345,7 @@ func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, er
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, unasked(u, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -313,6 +359,27 @@ func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, er
 		return nil, fmt.Errorf("%s: more than %d bytes", redact(u), limit)
 	}
 	return b, nil
+}
+
+// unasked is why a fetch of u got no answer, naming no host but u's: a
+// redirect refused is said without where it led (the client's error names
+// the Location, another host, with its query); a certificate not for the
+// host asked, or of an authority not trusted, without the names the
+// certificate gives. Each would be in serve's log, and what lapilli
+// preflight prints, otherwise. A name that doesn't resolve, a connection
+// refused, a time out, name u's host alone, and are said as they are.
+func unasked(u string, err error) error {
+	var host x509.HostnameError
+	var ca x509.UnknownAuthorityError
+	switch {
+	case errors.Is(err, errRedirect):
+		return fmt.Errorf("%s: it redirected, and redirects aren't followed", redact(u))
+	case errors.As(err, &host):
+		return fmt.Errorf("%s: TLS: its certificate isn't for the host asked", redact(u))
+	case errors.As(err, &ca):
+		return fmt.Errorf("%s: TLS: its certificate is of an authority this machine doesn't trust", redact(u))
+	}
+	return err
 }
 
 // statusError is an answer other than 200.

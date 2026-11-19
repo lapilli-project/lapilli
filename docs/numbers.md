@@ -765,23 +765,27 @@ out when it is zero or empty, as in the report.
 | the report | `version`, `lapilli`, `items`, `estimates`, `left_out`, `asked` |
 | `items[]` | `id`, `state` (`ok`, `problem`, `unknown`), `what`, `why`†, `fix`† |
 | `asked` | `requests`, `by`, `refused` |
-| `estimates` | `hourly`†, `backfill`†, `nights`†, `beside`†, `memory`† |
-| `estimates.hourly` | `runs`, `requests`, `most`, `day`, `by`, `guard`, `impact`, `seconds`†, `share`† |
+| `estimates` | `hourly`†, `backfill`†, `nights`†, `beside`†, `backtests`†, `memory`† |
+| `estimates.hourly` | `runs`, `requests`, `most`, `day`, `by`, `guard`, `impact`, `seconds`†, `share`†, `while_backtest`† |
+| `estimates.hourly.while_backtest` | `rate`, `seconds`, `share`†: with `--backtest-listen` and `--max-rate`, the runs while a backtest runs the whole hour |
 | `estimates.backfill` | `pieces`, `requests`, `most`, `by`, `guard`, `impact`, `rate`†, `seconds`†, `piece_hours`† |
 | `estimates.nights` | `hours`, `nights` (`-1`: never, the catch-up falls further behind), `per_night` |
 | `estimates.beside` | `day`, `by` |
-| `estimates.memory` | `from` (`alerts`, `caps`), `peak_bytes`, `request_bytes`, `limit_bytes`, `cgroup_bytes`† |
+| `estimates.backtests` | `share`, `rate`†, `parallel`, `timeout_seconds`, `fit`†, `rules`, `days`, `changed`, `shared`, `changed_days`, `shared_days` (`0`: not a day fits), `week_rules`†, `day_rules`† (how many of the rules changed fit 7 days, and a day, when all of them don't) |
+| `estimates.memory` | `from` (`alerts`, `caps`), `peak_bytes`, `request_bytes`, `limit_bytes`, `cgroup_bytes`†, `backtest_bytes`† |
 
 The ids: `rules.read`, `rules.replayable`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
 `history.intervals`, `grafana.notifications`, `grafana.write`,
 `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
 `changes.oci`, `changes.ruler`, `inputs.files`, `secrets.files`,
-`ledger.sqlite`, `ledger.postgres`, `signin`, `access`, `estimate.hourly`,
-`estimate.backfill`, `estimate.nights`, `estimate.beside`,
+`ledger.sqlite`, `ledger.postgres`, `signin`, `backtest.trust`,
+`backtest.issuers`, `access`, `estimate.hourly`, `estimate.backfill`,
+`estimate.nights`, `estimate.beside`, `estimate.backtests`,
 `estimate.memory`. The keys of `asked.by` and of the estimates' `by` are the
 APIs asked (`prometheus`, `loki`, `grafana`, `ruler`, `alarms:SOURCE`,
-`signin`, `on-call`, `credentials`, and what a cloud's identity may write
+`signin`, `on-call`, `credentials`, `backtest` (the backtest port's
+issuers' discovery documents and keys), and what a cloud's identity may write
 is asked of, `iam:aws`, `iam:azure`, `iam:google`, `iam:oci`); of `estimates.beside.by`, what asks
 (`rules`, `loki_rules`, `alarms`, `check_replay`, `scrape_intervals`,
 `grafana_notifications`, `grafana_data_sources`, `on_call`). The texts of

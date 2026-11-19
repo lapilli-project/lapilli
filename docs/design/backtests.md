@@ -379,12 +379,13 @@ they need:
 **What it costs.** Ten rules that differ, over 7 days at a 1-minute step:
 each side asks each expression for the 8 or so days its reads fall on (a day's
 read at most, on days from midnight UTC, `chunks`), 80 requests a side, 160
-in all; a change of `for` alone asks for the same expressions on both sides,
-which share their reads (`RunEach`), 80. At `--max-rate 0.5` with a quarter
-for the lane, 0.125 a second, 160 requests take some 21 minutes, past
-`--backtest-timeout`'s 15: the backtest is refused before it waits, saying
-that 4 days would fit. The change of `for` alone, 80 requests, takes some
-11. A self-hosted Prometheus with no `--max-rate` answers either in
+in all; a change of `for` alone (5m to 10m) asks for the same expressions
+on both sides, which share the reads their `for` doesn't move (`RunEach`):
+each rule's first read starts where its `for` says, so 90. At `--max-rate
+0.5` with a quarter for the lane, 0.125 a second, 160 requests take some
+21 minutes, past `--backtest-timeout`'s 15: the backtest is refused before
+it waits, saying that 4 days would fit. The change of `for` alone, 90
+requests, takes some 12. A self-hosted Prometheus with no `--max-rate` answers either in
 seconds, as the job does today. Under a quota, a backtest through serve is slower than one
 in CI at the job's own rate: that is the price of one quota and no
 credential in CI, and the job's log says where it is in the queue.

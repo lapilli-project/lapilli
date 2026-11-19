@@ -655,19 +655,34 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 // backtestable says why the backtest port can't be served, nil when it
 // can: who may ask, rules to replay, a history to ask, and writes taken.
 func (s *Server) backtestable() error {
+	return backtestable(s.cfg, s.replaying(), s.h != nil)
+}
+
+func backtestable(cfg Config, replaying, history bool) error {
 	switch {
-	case len(s.cfg.Trust) == 0:
+	case len(cfg.Trust) == 0:
 		return errors.New("--backtest-listen needs --backtest-trust: who may ask")
-	case s.cfg.Alerts:
+	case cfg.Alerts:
 		return errors.New("--backtest-listen replays a pull request's rules, and --alerts judges the ALERTS series, not rules")
-	case !s.replaying() || s.h == nil:
+	case !replaying || !history:
 		return errors.New("--backtest-listen replays a pull request's rules against the history: it needs rules to replay and --prometheus or --gcp-project")
-	case s.cfg.ReadOnly:
+	case cfg.ReadOnly:
 		return errors.New("--backtest-listen queues backtests in the ledger, and --read-only refuses writes")
-	case s.cfg.BacktestShare != 0 && (s.cfg.BacktestShare < 0.05 || s.cfg.BacktestShare > 0.75):
+	case cfg.BacktestShare != 0 && (cfg.BacktestShare < 0.05 || cfg.BacktestShare > 0.75):
 		return errors.New("--backtest-share is 0.05 to 0.75")
 	}
 	return nil
+}
+
+// BacktestRefused is why New refuses cfg's backtest port, as it starts,
+// nil when it takes it or there is none: lapilli preflight says it before
+// serve is deployed. history says New is given a history to replay
+// against (--prometheus or --gcp-project).
+func BacktestRefused(cfg Config, history bool) error {
+	if cfg.BacktestListen == "" {
+		return nil
+	}
+	return backtestable(cfg, (&Server{cfg: cfg}).replaying(), history)
 }
 
 // openLedger opens the ledger: in Postgres, with --ledger-url-file, else

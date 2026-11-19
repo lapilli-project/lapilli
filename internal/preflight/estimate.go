@@ -26,7 +26,9 @@ type Estimates struct {
 	Backfill *Backfill `json:"backfill,omitempty"`
 	Nights   *Nights   `json:"nights,omitempty"`
 	Beside   *Beside   `json:"beside,omitempty"`
-	Memory   *Memory   `json:"memory,omitempty"`
+	// Backtests is the backtest lane's, with --backtest-listen.
+	Backtests *Backtests `json:"backtests,omitempty"`
+	Memory    *Memory    `json:"memory,omitempty"`
 }
 
 // Hourly is the runs every --every once caught up, over a day of them.
@@ -47,6 +49,56 @@ type Hourly struct {
 	// Neither without --max-rate.
 	Seconds float64 `json:"seconds,omitempty"`
 	Share   float64 `json:"share,omitempty"`
+	// WhileBacktest is the same runs while the backtest lane runs a
+	// backtest the whole hour, with --backtest-listen and --max-rate.
+	WhileBacktest *WhileBacktest `json:"while_backtest,omitempty"`
+}
+
+// WhileBacktest is the hourly runs while the backtest lane runs, its share
+// of --max-rate kept for it (prom.Pace.Reserve): Rate what the runs have
+// of it then, requests a second; Seconds the most a run takes at that
+// rate, at least; Share what share of that rate the runs and what is
+// asked beside them use once caught up.
+type WhileBacktest struct {
+	Rate    float64 `json:"rate"`
+	Seconds float64 `json:"seconds"`
+	Share   float64 `json:"share,omitempty"`
+}
+
+// Backtests is the backtest lane's, with --backtest-listen
+// (docs/design/backtests.md): what a pull request's backtest can ask
+// within --backtest-timeout, counted as serve's port counts one before it
+// is queued.
+type Backtests struct {
+	// Share is --backtest-share; Rate the lane's requests a second, that
+	// share of --max-rate, none without it; Parallel how many it asks at
+	// once.
+	Share    float64 `json:"share"`
+	Rate     float64 `json:"rate,omitempty"`
+	Parallel int     `json:"parallel"`
+	// TimeoutSeconds is --backtest-timeout; Fit the most requests a
+	// backtest asks within it at Rate, none without --max-rate.
+	TimeoutSeconds float64 `json:"timeout_seconds"`
+	Fit            int     `json:"fit,omitempty"`
+	// Rules are how many rules the backtest counted changes: ten of those
+	// read the port takes, or fewer; Days its period, the recipe's
+	// default.
+	Rules int `json:"rules"`
+	Days  int `json:"days"`
+	// Changed is its requests with each rule's expression changed, the
+	// two sides' reads apart; Shared with each rule's for alone, 5 minutes
+	// longer, the two sides sharing the reads their for doesn't move.
+	Changed int `json:"changed"`
+	Shared  int `json:"shared"`
+	// ChangedDays and SharedDays are the most days of each that fit within
+	// --backtest-timeout at Rate, 1 to 14; 0, not a day; 14 without
+	// --max-rate, as none is refused for its time then; 0 with no rule.
+	ChangedDays int `json:"changed_days"`
+	SharedDays  int `json:"shared_days"`
+	// WeekRules and DayRules are, when the rules changed don't fit Days,
+	// how many of them changed fit Days, and a day.
+	WeekRules int `json:"week_rules,omitempty"`
+	DayRules  int `json:"day_rules,omitempty"`
 }
 
 // Backfill is a first start's: a day at a time from --backfill before now.
@@ -92,6 +144,10 @@ type Memory struct {
 	// CgroupBytes is the memory limit this process runs under, 0 for none
 	// known.
 	CgroupBytes int64 `json:"cgroup_bytes,omitempty"`
+	// BacktestBytes is what the backtest lane's reads hold at once at most
+	// beside the peak, with --backtest-listen: as many as it asks at once,
+	// each of --max-samples.
+	BacktestBytes int64 `json:"backtest_bytes,omitempty"`
 }
 
 // cacheBytes are the pages' cache and the ledger's, which a serve holds
@@ -125,6 +181,8 @@ func (p *run) estimate(ctx context.Context, rd *read) {
 		p.backfill(ctx, rs)
 	}
 	p.beside(rd)
+	p.whileBacktest()
+	p.backtests(ctx, rd)
 	p.memory(rs)
 }
 
@@ -281,6 +339,7 @@ func (p *run) hourly(ctx context.Context, rs []rules.Rule) {
 			h.By[k] += v
 		}
 		h.Most = max(h.Most, sum(by))
+		p.runsBy = append(p.runsBy, by)
 		if p.c.MaxRate > 0 {
 			t := floor(by, p.c.MaxRate)
 			took += t
@@ -618,9 +677,21 @@ func (p *run) memory(rs []rules.Rule) {
 	if len(over) > 0 {
 		it.Why = fmt.Sprintf("a day of %s would pass --max-samples %s: serve won't replay it, and says why", names(over, 5), num(most))
 	}
+	// The backtest lane's reads, beside the runs': of a pull request's
+	// rules, which nothing read here says the size of, so at their bound.
+	if m.BacktestBytes = p.laneMemory(most); m.BacktestBytes > 0 {
+		it.What += fmt.Sprintf("; beside them, the backtest lane's %d reads at once, of a pull request's rules, hold %s at most (%d x %s x %d bytes)",
+			p.laneParallel(), bytesOf(uint64(m.BacktestBytes)), p.laneParallel(), num(most), prom.SampleBytes)
+	}
 	if limit, ok := cgroupLimit(p.c.CgroupMemory); ok {
 		m.CgroupBytes = limit
 		switch {
+		case limit >= m.PeakBytes && limit < m.PeakBytes+m.BacktestBytes:
+			// What a pull request's rules read is a bound here, not an
+			// estimate: past the limit is unknown, never a problem.
+			it.State = Unknown
+			it.Why = strings.TrimPrefix(it.Why+fmt.Sprintf("; this process runs under a memory limit of %s: the runs' peak fits, and with the backtest lane's reads at their bound it doesn't; what a pull request's rules read can't be told here", bytesOf(uint64(limit))), "; ")
+			it.Fix = fmt.Sprintf("to be held under the limit whatever a backtest reads, give the pod %s more, or lower --parallel or --max-samples", bytesOf(uint64(m.PeakBytes+m.BacktestBytes-limit)))
 		case limit >= m.PeakBytes:
 		case m.From == "caps":
 			// With nothing read of what fired, the bound is what the caps

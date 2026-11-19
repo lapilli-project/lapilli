@@ -1,0 +1,143 @@
+exit 0
+{
+  "version": 1,
+  "lapilli": "dev",
+  "items": [
+    {
+      "id": "rules.read",
+      "state": "ok",
+      "what": "13 alert rules (Prometheus), 1 recording rule, from --rules"
+    },
+    {
+      "id": "rules.replayable",
+      "state": "ok",
+      "what": "13 can be replayed"
+    },
+    {
+      "id": "expressions",
+      "state": "ok",
+      "what": "--impact and --guard read, and not sent",
+      "why": "Lapilli has no PromQL parser of its own: whether the history takes them as written, the first run says"
+    },
+    {
+      "id": "history.reach",
+      "state": "ok",
+      "what": "[--prometheus] answered vector(1) in <took>, with no credentials"
+    },
+    {
+      "id": "history.alerts",
+      "state": "ok",
+      "what": "1 alert name fired in the last day, 120 samples in all: for the memory estimate"
+    },
+    {
+      "id": "inputs.files",
+      "state": "ok",
+      "what": "--incidents read, as serve reads them"
+    },
+    {
+      "id": "secrets.files",
+      "state": "ok",
+      "what": "2 secret files read: --incidents-token-file incidents-token: 26 characters; --firings-token-file firings-token: 24 characters"
+    },
+    {
+      "id": "ledger.sqlite",
+      "state": "ok",
+      "what": "schema 023, this release's",
+      "why": "<free> free"
+    },
+    {
+      "id": "signin",
+      "state": "ok",
+      "what": "--oidc-issuer's configuration read, its issuer as given, 1 public key"
+    },
+    {
+      "id": "access",
+      "state": "ok",
+      "what": "roles: those --editors and --admins name change what their role allows; everyone else may only look; --listen (the UI, the API, /mcp), --incidents-listen (what its tokens write)"
+    },
+    {
+      "id": "estimate.hourly",
+      "state": "ok",
+      "what": "about 25 requests a run, the most 36, 590 a day, the guard's and --impact's among them: at --max-rate 0.5 a run takes 49s at least, the most 1m; once caught up, with what is asked beside them, 1% of --max-rate"
+    },
+    {
+      "id": "estimate.backfill",
+      "state": "ok",
+      "what": "1,036 requests over 28d, 28 pieces of a day at most, the most 37: at least 35m at 0.5 a second",
+      "why": "each day's in 1m at most, within --timeout 50m"
+    },
+    {
+      "id": "estimate.nights",
+      "state": "ok",
+      "what": "1 night at least, in 01:00-06:00 at 0.5 a second, 9,000 of the backfill's requests a night",
+      "why": "each day the catch-up waits outside its hours is a day more to catch up, counted; each 429 with --yield-on-429, or each time the guard holds the runs, makes it longer; nothing newer is recorded meanwhile, so the pages show the ledger days behind until it is done"
+    },
+    {
+      "id": "estimate.beside",
+      "state": "ok",
+      "what": "3 requests a day beside the runs: the replay check 3"
+    },
+    {
+      "id": "estimate.memory",
+      "state": "ok",
+      "what": "about 67 MB at the peak: the 1 largest reads of what fired in the last day at once, beside 64 MB of caches: a request of 134 MB, a limit of 268 MB"
+    }
+  ],
+  "estimates": {
+    "hourly": {
+      "runs": 24,
+      "requests": 25,
+      "most": 36,
+      "day": 590,
+      "by": {
+        "prometheus": 590
+      },
+      "guard": 24,
+      "impact": 24,
+      "seconds": 72,
+      "share": 0.013726851851851851
+    },
+    "backfill": {
+      "pieces": 28,
+      "requests": 1036,
+      "most": 37,
+      "by": {
+        "prometheus": 1036
+      },
+      "guard": 28,
+      "impact": 56,
+      "rate": 0.5,
+      "seconds": 2072
+    },
+    "nights": {
+      "hours": "01:00-06:00",
+      "nights": 1,
+      "per_night": 9000
+    },
+    "beside": {
+      "day": 3,
+      "by": {
+        "check_replay": 3
+      }
+    },
+    "memory": {
+      "from": "alerts",
+      "peak_bytes": 67116544,
+      "request_bytes": 134217728,
+      "limit_bytes": 268435456
+    }
+  },
+  "left_out": [
+    "change reviews, a week of each new version of the rules",
+    "the weekly digest's backtests",
+    "what people and agents ask for (a proposal's backtest, MCP's compare, the settings tried)"
+  ],
+  "asked": {
+    "requests": 4,
+    "by": {
+      "prometheus": 2,
+      "signin": 2
+    },
+    "refused": 0
+  }
+}

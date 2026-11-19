@@ -590,8 +590,8 @@ func TestOffline(t *testing.T) {
 var IDs = []string{"rules.read", "rules.replayable", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
 	"history.alerts", "history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
 	"changes.google", "changes.oci", "changes.ruler", "inputs.files",
-	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "access", "estimate.hourly", "estimate.backfill", "estimate.nights",
-	"estimate.beside", "estimate.memory"}
+	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "backtest.trust", "backtest.issuers", "access", "estimate.hourly",
+	"estimate.backfill", "estimate.nights", "estimate.beside", "estimate.backtests", "estimate.memory"}
 
 // The report's fields and its items' ids keep their names
 // (docs/numbers.md, "lapilli preflight's report"): each the code gives is
@@ -599,8 +599,8 @@ var IDs = []string{"rules.read", "rules.replayable", "rules.history", "expressio
 func TestPreflightStable(t *testing.T) {
 	full := &Report{Version: 1, Lapilli: "v0", Items: []Item{{ID: "access", State: OK, What: "x", Why: "y", Fix: "z"}}, LeftOut: []string{"x"},
 		Asked: Asked{Requests: 1, By: map[string]int{"prometheus": 1}, Refused: 0},
-		Estimates: Estimates{Hourly: &Hourly{Runs: 1, Seconds: 1, Share: 1}, Backfill: &Backfill{Rate: 1, Seconds: 1, PieceHours: 1},
-			Nights: &Nights{Hours: "x"}, Beside: &Beside{}, Memory: &Memory{From: "caps", CgroupBytes: 1}}}
+		Estimates: Estimates{Hourly: &Hourly{Runs: 1, Seconds: 1, Share: 1, WhileBacktest: &WhileBacktest{Share: 1}}, Backfill: &Backfill{Rate: 1, Seconds: 1, PieceHours: 1},
+			Nights: &Nights{Hours: "x"}, Beside: &Beside{}, Backtests: &Backtests{Rate: 1, Fit: 1, WeekRules: 1, DayRules: 1}, Memory: &Memory{From: "caps", CgroupBytes: 1, BacktestBytes: 1}}}
 	var b bytes.Buffer
 	if err := full.JSON(&b); err != nil {
 		t.Fatal(err)
@@ -628,15 +628,17 @@ func TestPreflightStable(t *testing.T) {
 	_, section, _ := strings.Cut(string(numbers), "### lapilli preflight's report")
 	section = strings.Join(strings.Fields(section), " ")
 	fields := map[string][]string{
-		"":                   {"version", "lapilli", "items", "estimates", "left_out", "asked"},
-		"items[]":            {"id", "state", "what", "why", "fix"},
-		"asked":              {"requests", "by", "refused"},
-		"estimates":          {"hourly", "backfill", "nights", "beside", "memory"},
-		"estimates.hourly":   {"runs", "requests", "most", "day", "by", "guard", "impact", "seconds", "share"},
-		"estimates.backfill": {"pieces", "requests", "most", "by", "guard", "impact", "rate", "seconds", "piece_hours"},
-		"estimates.nights":   {"hours", "nights", "per_night"},
-		"estimates.beside":   {"day", "by"},
-		"estimates.memory":   {"from", "peak_bytes", "request_bytes", "limit_bytes", "cgroup_bytes"},
+		"":                                {"version", "lapilli", "items", "estimates", "left_out", "asked"},
+		"items[]":                         {"id", "state", "what", "why", "fix"},
+		"asked":                           {"requests", "by", "refused"},
+		"estimates":                       {"hourly", "backfill", "nights", "beside", "backtests", "memory"},
+		"estimates.hourly":                {"runs", "requests", "most", "day", "by", "guard", "impact", "seconds", "share", "while_backtest"},
+		"estimates.hourly.while_backtest": {"rate", "seconds", "share"},
+		"estimates.backfill":              {"pieces", "requests", "most", "by", "guard", "impact", "rate", "seconds", "piece_hours"},
+		"estimates.nights":                {"hours", "nights", "per_night"},
+		"estimates.beside":                {"day", "by"},
+		"estimates.backtests":             {"share", "rate", "parallel", "timeout_seconds", "fit", "rules", "days", "changed", "shared", "changed_days", "shared_days", "week_rules", "day_rules"},
+		"estimates.memory":                {"from", "peak_bytes", "request_bytes", "limit_bytes", "cgroup_bytes", "backtest_bytes"},
 	}
 	for where, fs := range fields {
 		obj := at(where)
