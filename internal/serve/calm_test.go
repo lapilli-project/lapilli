@@ -385,6 +385,12 @@ func TestImpactTitleSaid(t *testing.T) {
 	if !strings.Contains(api, "user impact (--impact)") {
 		t.Error("the API changed the title kept")
 	}
+	// Searched for by the title as kept, it is found still.
+	for _, q := range []string{"--impact", "user impact"} {
+		if _, found, _ := get(t, s.Handler(), "/search?q="+url.QueryEscape(q)); !strings.Contains(found, `href="/incidents/impact-`) {
+			t.Errorf("searched for %q: no impact window", q)
+		}
+	}
 }
 
 // TestConfirmKeepsTitle: an impact window confirmed with the title its form
@@ -466,4 +472,55 @@ func TestConfirmKeepsTitle(t *testing.T) {
 	if in, err := s.l.IncidentByID(ctx, made.ID); err != nil || in.Title != impactTitle || in.Labels["service"][0] != "search" {
 		t.Errorf("saved as %+v %v", in, err)
 	}
+}
+
+// TestFlagsAsCode: a flag's name in a page's words is code, in every
+// language, on every page the tests serve and on a first-time user's; in
+// the pages' font two hyphens read as one dash (docs/design/ui.md).
+func TestFlagsAsCode(t *testing.T) {
+	first, firstPaths := firstUseServer(t)
+	skip := regexp.MustCompile(`(?s)<code[^>]*>.*?</code>|<pre[^>]*>.*?</pre>|<textarea[^>]*>.*?</textarea>|<title>.*?</title>|<style[^>]*>.*?</style>|<[^>]*>`)
+	flag := regexp.MustCompile(`(^|[^\w-])--[a-z][a-z0-9-]*`)
+	seen := map[string]bool{}
+	for _, c := range []struct {
+		s     *Server
+		paths []string
+	}{{pagesServer(t), pagePaths}, {first, firstPaths}} {
+		for _, n := range names {
+			for _, p := range c.paths {
+				r := httptest.NewRequest(http.MethodGet, p, nil)
+				r.Header.Set("Accept-Language", n.Code)
+				w := httptest.NewRecorder()
+				c.s.Handler().ServeHTTP(w, r)
+				text := skip.ReplaceAllString(w.Body.String(), "\x00")
+				for _, part := range strings.Split(text, "\x00") {
+					if m := flag.FindString(part); m != "" {
+						key := n.Code + " " + strings.TrimSpace(part)
+						if !seen[key] {
+							seen[key] = true
+							t.Errorf("%s %s: a flag not as code: %q", n.Code, p, strings.TrimSpace(part))
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// plainMarks takes out what a page adds around the words it says: <bdi>
+// around a value, <code> around a flag's name (codeFlags).
+var plainMarks = regexp.MustCompile(`</?bdi>|<code>(--[a-z][a-z0-9-]*)</code>`)
+
+// containsPlain is strings.Contains of a page and the words it should say,
+// with neither's marks (plainMarks).
+func containsPlain(s, sub string) bool {
+	plain := func(x string) string {
+		return plainMarks.ReplaceAllStringFunc(x, func(m string) string {
+			if strings.HasPrefix(m, "<code>") {
+				return strings.TrimSuffix(strings.TrimPrefix(m, "<code>"), "</code>")
+			}
+			return ""
+		})
+	}
+	return strings.Contains(plain(s), plain(sub))
 }

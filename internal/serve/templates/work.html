@@ -43,7 +43,7 @@
 {{if .Declared}}<p{{if $ro}} class="quiet"{{else}} id="declared-why" class="why"{{end}}>{{t "Declared in config — change it in values"}}</p>{{end}}
 {{with .Made}}{{template "teamsmade" .}}{{end}}
 {{if .Suggested.Lines}}{{template "teamsuggest" (on $ .Suggested)}}{{end}}
-<div class="scroll"><table>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Teams"}}"><table>
 <thead><tr><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Hours"}}</th><th scope="col" class="n">{{t "Rules owned"}}</th><th scope="col" class="n">{{t "Open tasks"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
   <td><a href="{{$.Link "/" "team" .Name}}">{{.Name}}</a>{{if .Team.Declared}} {{template "declared"}}{{end}}{{with .Note}}<br><span class="quiet">{{.}}</span>{{end}}</td>
@@ -95,7 +95,7 @@
 {{define "windows"}}{{$title := t "Quiet windows"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a quiet window" (editsAny $.Status) "team" "")}}</div>
 <p class="lede">{{t "A deploy, maintenance, a load test: firings expected to be noise. A firing that starts in a quiet window and matches it, and catches nothing, is excused, neither white nor black, so it doesn't weigh on the rule's precision. One that caught an incident still counts."}}</p>
-<div class="scroll"><table>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Quiet windows"}}"><table>
 <thead><tr><th scope="col">{{t "Window"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Repeats"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "By"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr{{if .Covers $.View.Now}} class="current-window"{{end}}>
   <td><a href="{{$.Link (printf "/windows/%d" .ID)}}">{{.Title}}</a>{{if .Covers $.View.Now}} <span class="badge status-info"><span aria-hidden="true">●</span> {{t "active now"}}</span>{{end}}{{if .Declared}} {{template "declared"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
@@ -108,7 +108,7 @@
 {{with .Preview}}{{template "windowpreview" (on $ .)}}{{end}}
 <h2 id="add">{{t "Add a quiet window"}}</h2>
 {{template "windowform" .Draft}}
-<p class="quiet">{{t "A window that repeats starts and ends as its first repeat. Every month, it falls on the start's day, or on what is given: a day from 1 to 28, last, or a weekday of the month, such as first sat or last fri. By a cron expression, on five cron fields, such as 0 2 * * 6, hourly at most; its start is one of its times. Each repeat is shorter than the time between two. A team's window quiets only the rules its team owns."}}</p>
+<details class="howto"><summary>{{t "How to write it"}}</summary><p class="quiet">{{t "A window that repeats starts and ends as its first repeat. Every month, it falls on the start's day, or on what is given: a day from 1 to 28, last, or a weekday of the month, such as first sat or last fri. By a cron expression, on five cron fields, such as 0 2 * * 6, hourly at most; its start is one of its times. Each repeat is shorter than the time between two. A team's window quiets only the rules its team owns."}}</p></details>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
@@ -157,7 +157,7 @@ first, so that Enter in a field writes nothing. */}}
 <h1>{{.Title}}</h1>
 <p class="lede">{{if .Declared}}{{template "declared"}} {{end}}{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .TeamName))}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
-{{if .Excused}}<div class="scroll"><table>
+{{if .Excused}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Firings it excused"}}"><table>
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Excused}}<tr><td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
@@ -254,5 +254,5 @@ first, so that Enter in a field writes nothing. */}}
   <button>{{t "Give it"}}</button>
 </form>
 <p class="quiet">{{t "At most %d roles." .Most}}</p>
-{{else}}<p>{{t "Roles are given here only with --admins and --user-header."}}</p>{{end}}
+{{else}}<p>{{tbdi "Roles are given here only with --admins and --user-header."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

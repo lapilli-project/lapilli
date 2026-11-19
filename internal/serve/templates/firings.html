@@ -44,7 +44,7 @@
 {{if $b.May}}<button>{{t "These were real"}}</button>{{else}}{{template "off" (offOf $ "These were real" "editor" "real-why")}}{{end}}
 <p class="quiet">{{t "Each one picked that caught nothing is written down as an incident, as its own button does: at most %d at a time." 100}}</p>
 </fieldset></form>{{end}}
-<div class="scroll"><table>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Firings"}}"><table>
 <thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td class="pick">{{if not .White}}<input type="checkbox" form="real-picked" name="firing" value="{{.ID}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>

@@ -137,8 +137,11 @@ func (s *Server) searchPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	for _, in := range incs {
+		// Found by its title as the page says it, or as it was kept
+		// ("user impact (--impact)" too).
+		kept := in.Title
 		in = shown(lang(r), in)
-		if found(strings.ToLower(in.ID + " " + in.Title)) {
+		if found(strings.ToLower(in.ID + " " + in.Title + " " + kept)) {
 			v.Incidents = append(v.Incidents, in)
 		}
 	}

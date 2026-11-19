@@ -321,7 +321,7 @@ func TestManagePage(t *testing.T) {
 	cards := func(who string) []string {
 		_, body := as(t, h, http.MethodGet, "/manage", who, "", nil)
 		var out []string
-		for _, m := range regexp.MustCompile(`<li class="card">\s*<h2><a href="([^"]+)">([^<]+)</a></h2>\s*<p>([^<]+)</p>`).FindAllStringSubmatch(body, -1) {
+		for _, m := range regexp.MustCompile(`<li class="card">\s*<h2><a href="([^"]+)">([^<]+)</a></h2>\s*<p>(.+?)</p>`).FindAllStringSubmatch(body, -1) {
 			out = append(out, m[1]+" "+m[2])
 		}
 		return out

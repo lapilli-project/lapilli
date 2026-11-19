@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -139,7 +140,17 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 		}
 	}
 	// tr without arguments is the translation as it is, its verbs too.
-	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, msg)), set...))
+	return template.HTML(fmt.Sprintf(codeFlags(template.HTMLEscapeString(tr(lang, msg))), set...))
+}
+
+// flagName is a flag's name in a sentence: --impact, --changes-in.
+var flagName = regexp.MustCompile(`(^|[^\w-])(--[a-z][a-z0-9-]*)`)
+
+// codeFlags sets each flag's name in an escaped text as code: in the
+// pages' font two hyphens read as one dash, and a flag is typed as it is
+// (docs/design/ui.md).
+func codeFlags(escaped string) string {
+	return flagName.ReplaceAllString(escaped, "$1<code>$2</code>")
 }
 
 // asCode is an argument trBDI sets in <code>: a selector or an expression

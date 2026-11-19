@@ -225,8 +225,9 @@ input, select, textarea {
 }
 /* A one-line field is as tall as a button, borders in: Safari keeps a
    native select at 27 px with only a min-height, and padding put a field
-   at 37.5 px beside a 36 px button. */
-input:not([type=checkbox], [type=radio]), select:not([multiple], [size]) { box-sizing: border-box; height: var(--control-h); padding-block: .2rem; }
+   at 37.5 px beside a 36 px button. Taller when its line is, as with a
+   large minimum font size; a browser without lh keeps 36 px. */
+input:not([type=checkbox], [type=radio]), select:not([multiple], [size]) { box-sizing: border-box; height: var(--control-h); height: max(var(--control-h), calc(1lh + .4rem + 2px)); padding-block: .2rem; }
 select[multiple], select[size] { min-height: var(--control-h); }
 button {
   font: inherit; font-size: .95rem; font-weight: 500; line-height: 1.2; color: var(--on-accent); background: var(--accent); border: 1px solid transparent; border-radius: var(--control-r);
@@ -694,6 +695,11 @@ details.badge-legend dd { font-size: .9rem; }
 .notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) .sign { color: var(--s); }
 div.notice p, div.notice ul { margin: .3rem 0; }
 /* Why, under a notice that says what in a line. */
+/* A form's syntax, behind a summary under it: read once, then in the way
+   (docs/design/ui.md, bundle 64). */
+details.howto { margin: .4rem 0 1rem; }
+details.howto summary { font-size: .9rem; color: var(--dim); }
+details.howto p { margin: .3rem 0 0; max-width: 46rem; }
 .notice details.why { margin: 0 0 .2rem; }
 .notice details.why summary { font-size: .9rem; }
 .notice details.why p { margin: .25rem 0 .1rem; font-size: .9rem; max-width: 46rem; }

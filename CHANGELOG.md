@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Words a person reads, not Lapilli's own** (docs/design/ui.md, bundle
+  64):
+  - Korean doesn't name the ledger (원장): "아직 기록된 발화가 없어요", a
+    limit as the reader's ("메인터넌스 윈도우는 %d개까지 둘 수 있어요"), 기준
+    시간대 for its time zone. A marked window is 이벤트 구간 everywhere, a
+    rule retired 폐기, a report's section of the hours asleep 자는 시간 오탐
+    as the overview's tile, not 자는 중 깨움; Outcomes' lede says what it
+    checks, not that Lapilli asks itself.
+  - A flag's name in a sentence is set as code, in every language: in the
+    pages' font two hyphens read as one dash.
+  - A repeating window's, a report schedule's and a marked window's kind's
+    syntax is behind "How to write it" under its form.
+  - A proposal with no record says "or found from user impact", and search
+    finds an impact window by its title as kept ("--impact") too.
+  - A table whose labels column can make it scroll sideways (the firings, a
+    rule's latest, quiet and marked windows, teams) takes the focus, so it
+    can be scrolled by the keyboard in Safari too.
+  - A one-line field grows with its line, as with a large minimum font
+    size, past 36 px.
+
 ## [0.62.0] - 2026-11-19
 
 `lapilli preflight` reads the backtest lane: its trust file as serve

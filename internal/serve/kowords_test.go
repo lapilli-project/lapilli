@@ -103,10 +103,12 @@ func TestKoreanSaysNoStones(t *testing.T) {
 // TestKoreanTerms: Korean says 정탐 and 오탐, not 무언가를 잡음 and 아무것도
 // 못 잡음; 백테스트, not 재생, for a replay; 규칙, not 룰, for a rule; and
 // doesn't say a person was woken (깨운), or woken in vain (괜히, 헛알림),
-// where only the hours are known (docs/design/ui.md, "Times, and Korean").
+// where only the hours are known; nor 원장 for the ledger, a name for how
+// Lapilli keeps it, nor 표시 구간 for a marked window, which the menu calls
+// 이벤트 구간 (docs/design/ui.md, "Times, and Korean").
 func TestKoreanTerms(t *testing.T) {
 	for en, ko := range catalogs["ko"] {
-		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운"} {
+		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운", "깨움", "원장", "표시 구간"} {
 			if strings.Contains(ko, w) && !strings.Contains(en, "returned anything") {
 				t.Errorf("%q says %s: %q", en, w, ko)
 			}

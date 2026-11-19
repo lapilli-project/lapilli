@@ -1959,6 +1959,26 @@ a window, which keeps the window's title. A form filled with the shown
 title (confirm, Change it) sent back unchanged keeps the incident's own
 (`sameTitle`).
 
+Since bundle 64 Korean doesn't say 원장 for the ledger, a name for how
+Lapilli keeps what it keeps, which a reader needn't learn: 기록 (아직 기록된
+발화가 없어요), or Lapilli, or nothing, where a limit is the reader's own
+(메인터넌스 윈도우는 %d개까지 둘 수 있어요); 기준 시간대 for the ledger's
+time zone. A marked window is 이벤트 구간 everywhere, as the menu says, not
+표시 구간; a rule retired is 폐기, as the triage says, not 정리(retire).
+A report's section of the hours asleep is 자는 시간 오탐, as the overview's
+tile. `TestKoreanTerms` fails on 원장, 표시 구간 and 깨움. English keeps replay, ledger
+and the stones: docs/glossary.md defines replay (the rules run over
+history) apart from backtest (a replay of a change), and the flags and
+the docs say them so; Korean, by its readers' usage, says 백테스트 for both.
+
+A flag's name in a sentence is code (`codeFlags`, in `tbdi`): in Heebo two
+hyphens read as one dash, and `--config` is typed as it is. A template's
+sentence with a flag is `tbdi`, as are the texts a page gets from Go (an
+empty list's, Administration's cards', a feed's, a disabled button's
+why); `TestFlagsAsCode` reads every page the tests serve, and a first-time
+user's, in each language. A form's syntax (a repeating window, a report's
+schedule, a marked window's kind) is behind "How to write it" under it.
+
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only
 admin's proposal waiting, nowhere to send a notice, a report going

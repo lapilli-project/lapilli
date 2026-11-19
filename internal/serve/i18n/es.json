@@ -1581,7 +1581,7 @@
  "stale: backtest it again": "desactualizada: repite el backtest",
  "It is stale, so it isn't approved until it is backtested again: %s.": "Está desactualizada, así que no se aprueba hasta que se repita su backtest: %s.",
  "Backtest it again": "Repetir el backtest",
- "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden.": "No se registró ningún incidente, ni lo encontró --impact, en el periodo ni en las dos semanas anteriores: los disparos se cuentan, no se juzgan. Menos disparos no es mejor, ni más es peor: los que faltan pueden ser eventos que ocurrieron, ocultos.",
+ "No incident was written down, or found from user impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden.": "No se registró ningún incidente, ni se encontró en el impacto en usuarios, en el periodo ni en las dos semanas anteriores: los disparos se cuentan, no se juzgan. Menos disparos no es mejor, ni más es peor: los que faltan pueden ser eventos que ocurrieron, ocultos.",
  "Backtesting it again replays the change with this lapilli, against the rule in effect, over the twelve weeks to now. The backtest it replaces is kept in its history, and any approval given to that one is taken back.": "Repetir el backtest reproduce el cambio con este lapilli, contra la regla en vigor, durante las doce semanas hasta hoy. El backtest que reemplaza se guarda en su historial, y se retira cualquier aprobación dada a ese.",
  "Backtest again": "Repetir el backtest",
  "Backtested again by %s, with lapilli %s": "Backtest repetido por %s, con lapilli %s",
@@ -2263,5 +2263,6 @@
  "No incident written down in two weeks or more: check they are still being written down.": "Ningún incidente anotado en dos semanas o más: comprueba que se siguen anotando.",
  "Nothing received in two days: check its job is still running.": "Nada recibido en dos días: comprueba que su trabajo sigue en marcha.",
  "Not read for longer than two runs: check the runs are running.": "Sin leer desde hace más de dos ejecuciones: comprueba que las ejecuciones siguen en marcha.",
- "user impact": "impacto en usuarios"
+ "user impact": "impacto en usuarios",
+ "How to write it": "Cómo escribirlo"
 }

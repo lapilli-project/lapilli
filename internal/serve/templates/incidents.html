@@ -25,7 +25,7 @@
   <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout errors"}}"></label>
   <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
   <label>{{t "End"}} <input name="end" type="datetime-local"></label>
-  <label>{{t "Labels"}} <input name="labels" placeholder="service=checkout service=cart"> <span class="quiet">{{with .Match}}{{t "matched on %s" .}}{{else}}{{t "not matched on: no --match"}}{{end}}</span></label>
+  <label>{{t "Labels"}} <input name="labels" placeholder="service=checkout service=cart"> <span class="quiet">{{with .Match}}{{t "matched on %s" .}}{{else}}{{tbdi "not matched on: no --match"}}{{end}}</span></label>
   <label>{{t "Id"}} <input name="id" maxlength="64" placeholder="{{t "next L-n"}}"></label>
   <button>{{t "Write it down"}}</button>
 </form>
