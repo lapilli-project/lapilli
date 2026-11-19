@@ -7,8 +7,11 @@ nothing) and adds new kinds of data to the ledger (episodes, and people's
 verdicts on firings), so it is designed first, as a pull request open for
 at least a week. The direction of items 1 to 3 was decided by the
 maintainer on 2026-11-19; this note works out how. Item 4 is a proposal:
-whether to build it, and its shape, are open ("Open questions"). Each item
-is built as its own pull request, in the order of the items ("Steps").
+whether to build it, and its shape, are open ("Open questions"). Item 5,
+whose record the windows of a signal taken away keep, was added to this
+design by the maintainer on the same day. Each item is built as its own
+pull request, in the order "Steps" gives: item 1, item 5, then items 2, 3
+and 4.
 Its first review's eleven findings are taken in, and each open question
 says what that review recommends; the maintainer decides.
 
@@ -21,7 +24,7 @@ and measures items 2 and 3 add to; and on deciding impact windows and
 ## Why
 
 A team deploying Lapilli measured it against its own alerts for a week,
-and found four things. Their numbers are rounded and their names left out:
+and found five things. Their numbers are rounded and their names left out:
 
 - **A cause comes before its incident by more than `--lead`.** A memory
   rule fired 41 times in seven days. Two of its firings were white, 22
@@ -37,6 +40,10 @@ and found four things. Their numbers are rounded and their names left out:
   from the channel, which alerts needed someone to act.
 - **Rows are by team.** One team label holds two business domains, and the
   summary and goals can't tell them apart.
+- **A signal taken away still judges everyone.** Its windows stay as
+  incidents, so for their weeks and the two after they keep every rule's
+  record, rules an entry ties only to a `record: false` signal among
+  them, and serve judges what `lapilli verdict` leaves unjudged.
 
 ## 1. A lead per signal and per rule entry
 
@@ -580,7 +587,7 @@ on an incident's page. Counted (below):
   those they may say again.
 - **"This was real" is held the same.** Today it has no limit of age: an
   editor can turn a black stone of any week white. It moves the same
-  numbers as "unrelated", the other way, so from step 3 it is an
+  numbers as "unrelated", the other way, so from step 4 it is an
   editor's on the last 14 days' firings and an admin's beyond. Writing an
   incident down by hand stays an editor's at any age: an incident log is
   copied in late as a matter of course, and an incident written is said
@@ -623,7 +630,7 @@ id, and the write refuses a mismatch (409, "this firing changed since the
 page was read: look again"); the API is keyed by rule, labels and start
 already. "This was real" (`POST /firings/{id}/real`,
 `internal/serve/web.go:1417`) and its bulk form have the same flaw today;
-step 3 fixes them the same way.
+step 4 fixes them the same way.
 
 ### Through judging again
 
@@ -1003,6 +1010,176 @@ groups:
   rule over both domains is one group's, which is the case that started
   this.
 
+## 5. A signal taken away: whose record its windows keep
+
+Decided on 2026-11-19, by the maintainer, to be part of this design rather
+than a fix of its own. A judging fix: it is built right after the leads
+("Steps").
+
+### Today
+
+A signal taken away, on the Settings page or by starting serve without it,
+keeps its windows, with its name, "as incidents" (signals.md, "Changing
+signals"). Both paths end in `syncSignals`
+(`internal/ledger/signals.go:352`, reached from `SyncSignalSet` and from
+`ChangeSignals` in `internal/ledger/signalsui.go:59`), which deletes the
+signal's row, ties every alert again from the signals left and pends
+every firing (`signals.go:497-504`). From then on its windows are judged
+as if a person had written them down:
+
+- **They keep everyone's record.** `verdict.RecordOf` sets a window aside
+  by its signal only while that signal is in effect: `i < 0`, "a window of
+  a signal no longer read, which stays as an incident"
+  (`internal/verdict/record.go:75-77`), goes with the incidents written
+  down, which keep every rule's record for their week and the two after
+  (`Record.Judges`).
+- **Any rule catches them.** `Options.Agrees` reads a rule's entry only
+  for a window of a signal in effect (`internal/verdict/signals.go:568`),
+  so a rule an entry ties to other signals alone catches a taken-away
+  signal's window on its match labels, as anyone's.
+  `TestSignalRemovedWindowsCaughtByAnyRule`
+  (`internal/serve/signals_test.go:890`) holds both.
+
+So in those weeks a rule an entry ties only to a `record: false` signal,
+which its operator means to leave unjudged, is judged, and its firings
+are black. `lapilli verdict` with the same rules and file doesn't read the
+signal taken away, finds none of its windows, and leaves them unjudged:
+the two disagree. #151 (open) meets the same case from the other side:
+when serve is started with named signals in place of `--impact PROMQL`,
+it ties the windows of the signal with no name to `impact`; with no
+`impact` in the new file, they are a taken-away signal's windows, and the
+deploying team's file has none. Today's way round it is to give the file
+the old expression as `impact`.
+
+### Whose record they keep
+
+A window of a signal taken away keeps the record of the firings of a rule
+when both hold:
+
+- **The rule was tied to that signal while it was read.** Of a named
+  signal, a rule with an alert tied to its bit (`series.signals`) when it
+  was taken away, fallen back ones (`verdict.FellBackBit`) among them when
+  it kept the record; of the signal with no name, every rule, as reading
+  it kept every rule's record. Kept by rule, in the write that takes the
+  signal away, before the alerts are tied again, since after it nothing
+  says which they were.
+- **The rule has no entry now.** An entry ties a rule to its signals and
+  no others ([signals.md](signals.md#which-rules-a-signal-judges)), and no
+  entry can name a signal taken away: the Settings page refuses to take
+  away a signal an entry names, and `--impact-file` refuses an entry
+  naming a signal it doesn't declare. So a rule an entry ties elsewhere,
+  or only to `record: false` signals, is not judged by those windows: it
+  is judged as `lapilli verdict` judges it.
+
+And never a rule `judged: false` (item 3). A window confirmed is written
+down by a person, and keeps everyone's record, as every confirmation
+does; confirming one is how to say it was everyone's outage.
+
+**Caught by the same rules.** A window of a signal taken away is caught
+only by the rules with no entry now, on the match labels it was found
+with (`incidents.match_labels`), and never by a rule `judged: false`. A
+rule an entry ties to other signals doesn't catch it, as it never caught
+another signal's window while that signal was read: a window of another
+signal is, to its firings, "as if it weren't there". Today `Agrees`
+lets any rule catch it; `TestSignalRemovedWindowsCaughtByAnyRule` is
+turned round. A rule with no entry that wasn't tied to the signal can
+catch a window it agrees with, and its firing is white, as any firing
+that catches something is judged; only the record of the rest of its
+firings isn't kept by it.
+
+**Windows taken away before the upgrade** have no rules kept. Their
+signal's ties are gone, so they keep the record of every rule with no
+entry now, which is the signal with no name's rule, and are caught by the
+same rules. That is enough for #151's case: the deploying team's rules
+are tied by entries, so they are left unjudged, as `lapilli verdict`
+leaves them, with no `impact` added to the file.
+
+### Judged again
+
+- **The record** is worked out when it is read, as every record is
+  ([serve.md](serve.md), "The impact criterion"): no stone needs giving
+  again for whose record a window keeps.
+- **The catches** change with an entry: a taking away already pends every
+  firing (`pendAll`), and so does a change to the entries; nothing more is
+  pended for either.
+- **The upgrade** pends the spans of the windows of signals taken away,
+  from `MaxLead` before each one's start to its end, so that the rules
+  with an entry now stop catching them: 2,000 windows a week a signal at
+  most.
+
+### With the other items
+
+- **Leads (item 1).** A window of a signal taken away is judged by
+  `--lead` (`LeadFor`'s last case): its signal's lead, and its entries',
+  went with it, and no entry can name it.
+- **`judged: false` and people's verdicts (item 3).** A rule judged by
+  nothing neither catches these windows nor is judged by them. A
+  verdict naming one keeps its key, which a window taken away keeps; a
+  firing whose rule has an entry now and so no longer catches it says
+  "it no longer catches INC-12", as for an incident gone.
+- **Episodes (item 2)** follow the stones, and change no more than they
+  do.
+
+### `lapilli verdict` and the report
+
+`lapilli verdict` never has a signal taken away: it reads the signals it
+is given over the period, and finds the windows of those alone. With the
+rule above, it and serve agree for every rule with an entry, and for
+every rule tied to no signal taken away. Where serve keeps a rule's record
+from the windows of a signal it no longer reads, which `lapilli verdict`
+can't read, the rule's page says so ("kept in the weeks of 2026-11-02 by
+the windows of probe, taken away on 2026-11-10, which it was tied to").
+Open question 9 asks whether to keep even that.
+
+The report (`/api/v1/report`) gives `settings.retired_signals`†, each
+signal taken away with windows in the period: its `name`, when it was
+taken away, and `rules`, the rules it was tied to (or `all`: true, of the
+signal with no name and of those taken away before the upgrade), so that
+numbers.md's blocks of the record count it again. `incidents[].signal` is
+the window's signal as now, a name not among `settings.impact_signals`.
+
+### Where it shows
+
+- **A window's page**: "probe, taken away on 2026-11-10: keeps the record
+  of the 12 rules tied to it while it was read, and is caught by the rules
+  with no entry".
+- **A rule's page**: in the weeks such windows keep its record, which
+  ones; with an entry, that they don't.
+- **The Incident sources panel**: a row a signal taken away with windows
+  kept, how many, and how many rules they keep the record of.
+- **MCP**: `incidents` gives a window's signal and whether it was taken
+  away; `rule` what keeps its record.
+
+### In the ledger, and the cost
+
+- **In judging**: `verdict.Options.Retired`, each signal taken away by
+  name, with the rules it keeps the record of (or every rule). `RecordOf`
+  and `Agrees` read it whether or not a named signal is in effect: a
+  ledger whose named signals were all taken away, now on `--impact
+  PROMQL` or none, has `Signals.Named()` false, and today judges every
+  incident as written there (`recordOf(incs, o, o.ImpactFrom)`,
+  `record.go:65-66`).
+- **`impact_retired`**: a row a signal taken away (its name, when, and
+  whether it keeps every rule's record), and `impact_retired_rules`, a row
+  a rule tied to it (`name`, `rule_id`). Written in `syncSignals`' write,
+  in the loop that deletes the signal's row: one read of `series` for the
+  rules with an alert of its bit, or fallen back when it kept the record
+  (`SELECT DISTINCT rule_id FROM series WHERE signals & ? != 0`), as the
+  bits are read (`carriedBits`), before `UPDATE series SET signals = -1`.
+  A signal added again under its name, or a read again that takes the
+  place of its windows, drops its rows.
+- **Bounds**: as many rows a signal as rules (400 rules, 400 rows), and as
+  many signals as have windows kept; let go with `--keep`, once the last
+  of a signal's windows is pruned.
+- **Read**: a record reads the rows of the signals taken away whose
+  windows meet its weeks once, cached until the ledger changes as the
+  owners are; per tally row (week, rule, signals), a lookup by rule.
+  `TestPagesScale` holds the rows each page reads, `TestScale` the
+  removal's write by the rows it reads and writes.
+- **Upgrade**: an `impact_retired` row with every rule for each signal a
+  window names that no row of `impact_signals` has, and the spans above
+  pended.
+
 ## What stays the same, and what changes
 
 [numbers.md](../numbers.md) lists what keeps its name and its meaning, and
@@ -1019,13 +1196,19 @@ says:
   changes with the defaults: `goal.missed`, the goals' tasks and their
   `/metrics` move from about 00:00 on Monday to about 01:20; the digest,
   at Monday 09:00, doesn't move.
-- **Step 2** changes no number. It adds "Episodes", `rules[].episodes`†,
+- **Step 2** changes the record of the rules a taken-away signal's
+  windows were judging and shouldn't (item 5), and their catches: the
+  rules with an entry now, and those it wasn't tied to. numbers.md's
+  "No record" says whose record such a window keeps, and its blocks read
+  `settings.retired_signals`†, added to the report's fields. A ledger
+  that never took a signal away judges as before.
+- **Step 3** changes no number. It adds "Episodes", `rules[].episodes`†,
   `firings[].episode`†, `firings[].day`† and `settings.zone`† to the
   report's fields
   (`TestReportFieldsStable`), the CSV's `episode` (`TestCSVColumns`), and
   `lapilli_rule_episodes` and `lapilli_rule_episodes_caught`
   (`TestMetricsStable`).
-- **Step 3** changes the stones of the firings a person says are
+- **Step 4** changes the stones of the firings a person says are
   unrelated, and of the rules an entry says are judged by nothing, and
   nothing else. It adds "A person's verdict", the report's
   `rules[].unrelated`†, `action_yes`†, `action_no`†, `not_judged`†,
@@ -1035,12 +1218,14 @@ says:
 - **The summary** keeps `schema` 1 throughout: `episodes`, `people` and
   `not_judged` are fields added, and no field changes its meaning.
 - **`verdict.Semantics`** isn't bumped by any step: a ledger with no lead,
-  no verdict and no entry judged by nothing judges as before, and episodes
-  judge nothing.
+  no verdict, no entry judged by nothing and no signal taken away judges
+  as before, and episodes judge nothing. A backtest judges against the
+  ledger's incidents, a taken-away signal's windows among them, by the
+  same `RecordOf` and `Agrees`, so it follows item 5 with the ledger.
 
 ## In the ledger: schema numbers
 
-Steps 1, 2 and 3 each add a schema, in a pair (`schema/NNN.sql` and
+Steps 1 to 4 each add a schema, in a pair (`schema/NNN.sql` and
 `schema/postgres/NNN.sql`), each with its row in
 [upgrading.md](../upgrading.md) (`TestSchemasDocumented`):
 
@@ -1048,9 +1233,11 @@ Steps 1, 2 and 3 each add a schema, in a pair (`schema/NNN.sql` and
   follow), so that the ledger holds the leads its options are judged by,
   beside the rest of each signal (`SignalDef`) and entry, compared apart
   from them (`sameDef`, `entryKey`: "Judged again when a lead changes");
-- step 2: `firings.episode`, `firings.episode_white`, and `episodes` and
+- step 2: `impact_retired` and `impact_retired_rules`, filled for the
+  signals taken away before it (item 5);
+- step 3: `firings.episode`, `firings.episode_white`, and `episodes` and
   `episodes_white` on `days`, `weeks`, `marked_days` and `marked_weeks`;
-- step 3: `verdicts`, `firings.person`, `unrelated`, `unrelated_excused`,
+- step 4: `verdicts`, `firings.person`, `unrelated`, `unrelated_excused`,
   `real_white`, `action_yes` and `action_no` on `days` and `weeks`,
   `incidents.real_of`, and `impact_rules.judged`.
 
@@ -1094,6 +1281,10 @@ As counts and bytes, which the tests hold, not times:
   values.
 - **Rules judged by nothing.** One more field of an entry, looked up as
   the entry is.
+- **A signal taken away** (item 5): a row a rule tied to it, 400 at most
+  a signal; one read of `series` in the write that takes it away; a
+  lookup by rule per tally row read, the rows cached until the ledger
+  changes.
 - **Groups** (if built): 32, a row per group per week; `series.grp` worked
   out per alert as ties are.
 
@@ -1115,7 +1306,7 @@ entries, `judged: false` among them, are set on the command line, in
 alone, made from a page read before a run, could write about another
 alert's firing; every form carries the firing's series and start, and the
 write refuses a mismatch. "This was real" has the flaw today
-(`internal/serve/web.go:1417`), and step 3 fixes it with the rest.
+(`internal/serve/web.go:1417`), and step 4 fixes it with the rest.
 
 **Cross-site requests.** Each form posts to the mux behind
 `http.NewCrossOriginProtection` (`internal/serve/web.go`), as every form
@@ -1186,6 +1377,14 @@ used to make the numbers say something:
   report's settings beside every number it judged, and the try says how
   many of the catches it gains agreed on no label.
 
+**Taking a signal away.** It is an admin's, on the Settings page, or
+whoever starts serve; it now decides whose record its windows keep, so
+it is noted as every change to the signals is, with the rules it was
+tied to in its after. It can't widen what a window judges: the rules
+kept are those tied while it was read, and an entry still keeps its
+rules from every signal's windows but its own. The rows kept are a
+rule's id each, nothing a person wrote.
+
 **Agents.** No MCP tool writes a verdict, a lead or an entry, and the
 replays agents ask for (`compare`, `propose`'s backtest, `backtest_again`)
 carry people's verdicts on both sides, so a change can't look better on
@@ -1248,6 +1447,17 @@ taking `lead` and `judged`.
     (above).
   - *A note's status* (`keep`, `tune`, `retire`). An editor's, about what
     is to become of a rule, not how it is judged, which is an admin's.
+- **A signal taken away** (item 5).
+  - *Use what exists: give the file the old expression as `impact`*, as
+    #151's workaround does: the windows are a signal in effect's again,
+    and it is read every run, one of the eight, to judge weeks it no
+    longer measures.
+  - *No rule's record* (open question 9).
+  - *Ties by alert, kept from what the signal had seen.* Its `seen` and
+    `match`, kept at the taking away, tie each alert again as they did,
+    at the cost of reading the alerts' labels wherever the record is
+    read, which the tallies, kept by rule, don't hold; a signal no longer
+    read keeps no more than its rules.
 - **Groups**: above, "Two other shapes".
 
 ## Not in this design
@@ -1310,6 +1520,10 @@ Decided on 2026-11-19, by the maintainer, and worked out above:
   that firing alone, and "did it need action?".
 - **The order** of the steps: leads, episodes, people's verdicts, then
   rows by label, each its own pull request.
+- **A signal taken away** (item 5) is this design's, not a fix of its
+  own. It is placed right after the leads: a judging fix, which changes
+  `Agrees` as the leads do, and needs nothing of episodes or verdicts. It
+  could as well go first.
 
 Open, each with what the review of this design recommends, for the
 maintainer to decide:
@@ -1346,6 +1560,18 @@ maintainer to decide:
    labels; within a team or across teams; and whether goals take a group.
    *Recommended: wait.* If it is built, groups by the alerts' labels,
    within one team, and goals taking `group:` in a later step.
+9. **Whose record a taken-away signal's windows keep.** Two shapes are
+   reasonable. *Proposed (item 5): the rules tied to the signal while it
+   was read, that have no entry now*, which keeps the record those
+   windows were keeping for the rules they were about, and agrees with
+   `lapilli verdict` for every rule with an entry. Or *no rule's*: a
+   window of a signal no longer read keeps no record at all, and is
+   caught as a written incident is. That one is simpler, needs no rows
+   kept, and agrees with a fresh `lapilli verdict` everywhere; but taking
+   a signal away then takes back the record of the weeks it found
+   windows in, for the rules it was about, which reading it had kept.
+   *Recommended: the proposed shape*, as the review recommends for item
+   5: only the rules that were tied to it while it was read.
 
 ## Steps
 
@@ -1359,13 +1585,22 @@ maintainer to decide:
    the summary's settings; numbers.md's stone section; signals.md's open
    question 4 closed there; and `require:`, if open question 2 is decided
    as recommended.
-2. **Episodes.** `verdict.Judge`'s episodes; the next schema; the tally's
+2. **A signal taken away** (item 5). The next schema, `impact_retired` and
+   its rules, written where `syncSignals` takes a signal away, and filled
+   on the upgrade for the signals taken away before it; `RecordOf` and
+   `Agrees` reading them, with named signals in effect or none; the
+   upgrade's spans pended; `settings.retired_signals` in the report; a
+   window's page, a rule's page, the Incident sources panel and MCP;
+   numbers.md's "No record"; `TestSignalRemovedWindowsCaughtByAnyRule`
+   turned round, and #151's case with no `impact` in the file judged as
+   `lapilli verdict` judges it.
+3. **Episodes.** `verdict.Judge`'s episodes; the next schema; the tally's
    walk, and the walk from the newest week back on an upgrade or a change
    of zone; the summary's `episodes`, a rule's page, the rules list's
    column and facet, the digest's noisy line, MCP, the report (with its
    zone and each firing's day), the CSV and `/metrics`; the marked counts
    and the two goal measures; numbers.md's "Episodes".
-3. **People's verdicts.** The next schema; the ledger's write, part by
+4. **People's verdicts.** The next schema; the ledger's write, part by
    part, and `stones`; verdicts in every replay, on both sides; the keys
    moved with incidents' keys; the forms (with series and start, "This
    was real"'s among them), `/api/v1/verdicts`, roles, the 14 days and the
@@ -1377,5 +1612,5 @@ maintainer to decide:
    beside each goal; numbers.md's "A person's verdict". It may be two pull
    requests, as signals' step 2 was: the ledger, judging, the API and the
    numbers first, the pages after.
-4. **Rows by label**, only once open question 8 is decided, in the shape
+5. **Rows by label**, only once open question 8 is decided, in the shape
    decided.
