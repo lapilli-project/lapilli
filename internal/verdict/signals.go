@@ -324,8 +324,13 @@ type RuleEntry struct {
 	// "Coincidences"): against those windows, a firing that lacks one, or
 	// whose window lacks it, agrees with none. None, they agree as ever.
 	Require []string `json:"require,omitempty"`
-	re      *regexp.Regexp
-	idx     []int
+	// Judged, when false, says its rules are judged by nothing
+	// (docs/design/judging.md, "Rules judged by nothing"): their firings
+	// counted, never white nor black, catching nothing. An entry gives it
+	// or Signals, not both. Nil, as true, judges them by its signals.
+	Judged *bool `json:"judged,omitempty"`
+	re     *regexp.Regexp
+	idx    []int
 }
 
 // Signals are the named signals a report's firings are judged against, and
@@ -342,6 +347,9 @@ type Signals struct {
 	// maxLead is the longest lead a signal or an entry gives of its own,
 	// 0 for none: worked out once, as every catch looks at it.
 	maxLead time.Duration
+	// unjudged says an entry says its rules are judged by nothing: only
+	// then is a rule's entry looked up for it (NotJudged).
+	unjudged bool
 }
 
 // NewSignals are signals and rule entries to judge by, the entries' rule
@@ -359,6 +367,7 @@ func NewSignals(list []Signal, entries []RuleEntry) *Signals {
 		if e.Lead != nil {
 			s.maxLead = max(s.maxLead, *e.Lead)
 		}
+		s.unjudged = s.unjudged || e.NotJudged()
 		if e.Rules != "" {
 			e.re, _ = regexp.Compile(e.Rules)
 		}

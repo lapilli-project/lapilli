@@ -169,7 +169,10 @@ func (s *Server) bulkCount(b *bulkResult, r *http.Request, err error) (stop bool
 		b.Done++
 	case errors.Is(err, ledger.ErrNotYourTeam):
 		b.Theirs++
-	case errors.As(err, &inv), errors.Is(err, ledger.ErrNotFound):
+	case errors.As(err, &inv), errors.Is(err, ledger.ErrNotFound), errors.Is(err, ledger.ErrFiringChanged), errors.Is(err, ledger.ErrTooOld),
+		errors.Is(err, ledger.ErrSaidUnrelated):
+		// What it is (a firing changed since the page was read, older than
+		// an editor's 14 days, said unrelated): refused, the rest go on.
 		b.Refused++
 	default:
 		b.Failed++
@@ -303,14 +306,14 @@ func (s *Server) bulkReal(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("at most %d firings at a time: pick fewer", maxBulk))
 		return
 	}
-	var ids []int64
+	var ids []ledger.FiringKey
 	for _, v := range vs {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			s.oops(w, r, bad("no such firing"))
+		k, err := firingRef(v)
+		if err != nil {
+			s.oops(w, r, err)
 			return
 		}
-		ids = append(ids, id)
+		ids = append(ids, k)
 	}
 	var res bulkResult
 	for i, id := range ids {

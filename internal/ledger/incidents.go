@@ -30,6 +30,18 @@ type Incident struct {
 	By      string
 	// CaughtBy are the rules that caught it, the first first.
 	CaughtBy []verdict.Catch
+	// RealOf is, of one "This was real" wrote, the alert and start of the
+	// firing it was written from, "" for any other (docs/design/judging.md,
+	// item 3).
+	RealOf string
+}
+
+// RealSeries is the id of the alert "This was real" wrote it from, 0 for
+// none.
+func (in Incident) RealSeries() int64 {
+	a, _, _ := strings.Cut(in.RealOf, " ")
+	n, _ := strconv.ParseInt(a, 10, 64)
+	return n
 }
 
 // Errors from writing incidents.
@@ -66,7 +78,7 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 	err := l.write(ctx, func(t *txn) error {
 		taken = nil
 		have := map[string]incidentRow{}
-		rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents WHERE origin = 'file'")
+		rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of FROM incidents WHERE origin = 'file'")
 		if err != nil {
 			return err
 		}
@@ -187,11 +199,12 @@ func put(t *txn, in incident.Incident, origin, by string, now int64) error {
 	if in.Signal != "" {
 		match = matchText(in.Match)
 	}
-	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by, signal, match_labels)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+	// What "This was real" wrote it from (t.realOf), kept once written.
+	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by, signal, match_labels, real_of)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
 			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by, signal = excluded.signal, match_labels = excluded.match_labels`,
-		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by, in.Signal, match)
+		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by, in.Signal, match, t.realOf)
 	return err
 }
 
@@ -396,7 +409,7 @@ func oldOrNil(err error, old incidentRow) any {
 }
 
 func (l *Ledger) get(t *txn, key string) (incidentRow, error) {
-	r, err := scanIncident(t.QueryRowContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents WHERE key = ?", key))
+	r, err := scanIncident(t.QueryRowContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of FROM incidents WHERE key = ?", key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -487,6 +500,13 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 				return err
 			}
 			made = in.ID
+			// The incident it wrote takes the window's place in what
+			// people said of firings (docs/design/judging.md, item 3):
+			// confirming changes no person's verdict.
+			lo, hi := span(old.Incident, o)
+			if err := l.moveVerdictKeys(t, []keyMove{{from: key, to: made, lo: lo - verdictReach, hi: hi}}); err != nil {
+				return err
+			}
 		}
 		what := "impact window " + key + " " + map[string]string{"": "reopened", "confirmed": "confirmed as " + made, "dismissed": "dismissed"}[state]
 		if err := change(t, by, what, nil, nil); err != nil {

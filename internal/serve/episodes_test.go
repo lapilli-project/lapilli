@@ -172,13 +172,13 @@ func TestEpisodesShown(t *testing.T) {
 	span := "from=" + url.QueryEscape(from.Format(time.RFC3339)) + "&to=" + url.QueryEscape(to.Format(time.RFC3339))
 	_, body, _ := get(t, h, "/api/v1/report?format=csv&"+span)
 	rows, err := csv.NewReader(strings.NewReader(body)).ReadAll()
-	if err != nil || rows[0][len(rows[0])-1] != "episode" {
+	if err != nil || rows[0][13] != "episode" {
 		t.Fatalf("the CSV's columns: %v %v", rows[0], err)
 	}
 	flaps := map[string]bool{}
 	for _, r := range rows[1:] {
 		if r[0] == "Flap" {
-			flaps[r[len(r)-1]] = true
+			flaps[r[13]] = true
 		}
 	}
 	if len(flaps) != 1 || flaps[""] {

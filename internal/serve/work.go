@@ -1459,6 +1459,12 @@ func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel 
 		plain = append(plain, in.Incident)
 	}
 	o.From, o.To, o.SomeRules = from, to, true
+	// People's verdicts, on both sides alike (docs/design/judging.md,
+	// "Through judging again"): a change mustn't look better on the
+	// firings people called coincidences.
+	if o.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
+		return nil, err
+	}
 	var changed []string
 	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
@@ -1678,6 +1684,12 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 		in.incs = append(in.incs, x.Incident)
 	}
 	in.o.From, in.o.To = from, to
+	// People's verdicts, which a replay with another "for" or number
+	// finds its firings again by (docs/design/judging.md, "Through judging
+	// again").
+	if in.o.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
+		return replayInput{}, err
+	}
 	// What a replay with another "for" or number fires is excused by the
 	// quiet windows as the ledger's firings are.
 	quiet, err := s.l.Windows(ctx, from, to)

@@ -1415,6 +1415,12 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 			plain = append(plain, f.Firing)
 		}
 	}
+	// People's verdicts, on both sides (docs/design/judging.md, item 3).
+	said, err := s.l.ReplayVerdicts(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	o.Verdicts, with.Verdicts = said, said
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
 	weeks := s.l.SpanWeeks(from, to)

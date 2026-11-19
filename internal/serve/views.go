@@ -1977,6 +1977,10 @@ type firingLine struct {
 	EpisodeFirings int
 }
 
+// Ref is the firing as a form picks it: its id, its alert's series and its
+// start (firingRef).
+func (l firingLine) Ref() string { return pickRef(l.Firing) }
+
 // episodesOf gives each of lines the episode it is of, as the ledger has
 // counted it.
 func (s *Server) episodesOf(ctx context.Context, lines []firingLine) error {
@@ -2230,6 +2234,11 @@ func (s *Server) try(ctx context.Context, o, tried verdict.Options) (*tryView, e
 	}
 	for _, in := range now.Incidents {
 		incs = append(incs, in.Incident)
+	}
+	// People's verdicts, as the ledger's stones keep them
+	// (docs/design/judging.md, item 3).
+	if tried.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
+		return nil, err
 	}
 	would := verdict.Judge(nil, plain, incs, tried)
 	v := &tryView{From: from, To: to}

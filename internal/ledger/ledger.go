@@ -391,6 +391,10 @@ type txn struct {
 	// named signals last changed: 0 not read yet, 1 they were, 2 not
 	// (staleSignals).
 	stale int
+	// realOf is, in "This was real"'s write, the alert and start of the
+	// firing the incident it writes is from (realKey): kept as its
+	// real_of.
+	realOf string
 }
 
 // versionNames are the names any version of the rules holds, read the

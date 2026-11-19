@@ -293,7 +293,7 @@ func TestBulkReal(t *testing.T) {
 		}
 		var ids []string
 		for _, f := range got {
-			ids = append(ids, fmt.Sprint(f.ID))
+			ids = append(ids, pickRef(f))
 		}
 		slices.Reverse(ids) // the earliest first
 		return s, ids
@@ -308,7 +308,7 @@ func TestBulkReal(t *testing.T) {
 		t.Errorf("back to %q", loc)
 	}
 	for _, id := range oneIDs[:4] {
-		postAs(t, one.Handler(), "/firings/"+id+"/real", nil, ed, "same-origin")
+		postAs(t, one.Handler(), realPathOf(id), realFormOf(id), ed, "same-origin")
 	}
 	incs := func(s *Server) []string {
 		is, err := s.l.Incidents(ctx, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), now, true)
@@ -341,7 +341,7 @@ func TestBulkReal(t *testing.T) {
 	// Refused whole.
 	many := make([]string, 101)
 	for i := range many {
-		many[i] = fmt.Sprint(i + 1)
+		many[i] = fmt.Sprintf("%d:1:1", i+1)
 	}
 	h := bulk.Handler()
 	for _, c := range []struct {
@@ -379,7 +379,7 @@ func TestBulkReal(t *testing.T) {
 	_, body = getAs(t, h, "/firings?day=2026-11-01", ed)
 	// But the button Enter presses, which no one sees (TestBulkNoEnter).
 	body = strings.Replace(body, `<button type="submit" disabled hidden></button>`, "", 1)
-	if strings.Contains(body, "disabled") || !strings.Contains(body, `<form method="post" action="/firings/`+ids[5]+`/real">`) {
+	if strings.Contains(body, "disabled") || !strings.Contains(body, `<form method="post" action="/firings/`+idOf(ids[5])+`/real">`) {
 		t.Error("an editor's firings are disabled, or lack their own buttons")
 	}
 }

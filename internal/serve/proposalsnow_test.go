@@ -601,7 +601,7 @@ func TestStalePagesTranslated(t *testing.T) {
 	for _, who := range []string{ana, bo, cy} {
 		pageA11y(t, h, who, "/proposals/"+itoa(changed), "/proposals?stale=1")
 	}
-	for _, x := range []string{staleRule, staleNoVersion, staleVersion, staleRecorded, staleUnrecorded} {
+	for _, x := range []string{staleRule, staleNoVersion, staleVersion, staleRecorded, staleUnrecorded, staleSaid} {
 		for lang := range catalogs {
 			tr(lang, x)
 		}

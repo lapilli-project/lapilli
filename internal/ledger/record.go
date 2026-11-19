@@ -826,7 +826,7 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 		}
 		made = append(made, madeWindow{key, in})
 	}
-	return lo, remapImpact(t, before, from, made)
+	return lo, l.remapImpact(t, before, from, made)
 }
 
 // goesOn is the window of r's signal, begun before from, that in, found
@@ -1050,7 +1050,7 @@ func freeKey(t *txn, base string, reserved map[string]bool) (string, error) {
 // decision to half the new window alone). One that none is so near keeps
 // its key, which no window gets again (freeKey), and the Cleanup page
 // lists it (OrphanedImpact).
-func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) error {
+func (l *Ledger) remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) error {
 	keys := map[string]bool{}
 	for _, m := range made {
 		keys[m.key] = true
@@ -1064,7 +1064,14 @@ func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) erro
 			(SELECT count(*) FROM comments WHERE on_kind = 'incident' AND on_key = ?)`, o.key, o.key).Scan(&n); err != nil {
 			return err
 		}
-		if n == 0 {
+		// And the people's verdicts naming it (docs/design/judging.md,
+		// item 3), whose firings started from a day before it.
+		lo, hi := o.start-verdictReach, o.end
+		said, err := l.countVerdictsNaming(t, o.key, lo, hi)
+		if err != nil {
+			return err
+		}
+		if n+said == 0 {
 			continue
 		}
 		to, most := "", int64(0)
@@ -1082,6 +1089,13 @@ func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) erro
 		}
 		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET on_key = ? WHERE on_kind = 'incident' AND on_key = ?", to, o.key); err != nil {
 			return err
+		}
+		// Its verdicts follow it, marked moved: the window found now isn't
+		// the span they were said of.
+		if said > 0 {
+			if err := l.moveVerdictKeys(t, []keyMove{{from: o.key, to: to, lo: lo, hi: hi, spanChanged: true}}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

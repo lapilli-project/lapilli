@@ -277,15 +277,15 @@ func TestServe(t *testing.T) {
 
 	// A black stone was real: written down from the UI, it turns white.
 	_, body, _ = get(t, h, "/firings?day=2026-11-01&black=1")
-	m := regexp.MustCompile(`action="(/firings/[0-9]+/real)"`).FindStringSubmatch(body)
+	m := regexp.MustCompile(`action="(/firings/[0-9]+/real)"><input type="hidden" name="series" value="([0-9]+)"><input type="hidden" name="start" value="([0-9]+)">`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no black stone to say was real:\n%s", body)
 	}
-	action := m[1]
-	if code, body, _ := post(t, h, action, nil, "cross-site"); code != http.StatusForbidden {
+	action, held := m[1], url.Values{"series": {m[2]}, "start": {m[3]}}
+	if code, body, _ := post(t, h, action, held, "cross-site"); code != http.StatusForbidden {
 		t.Errorf("a post from another site: %d %s", code, body)
 	}
-	code, _, hd := post(t, h, action, nil, "same-origin")
+	code, _, hd := post(t, h, action, held, "same-origin")
 	if code != http.StatusSeeOther || hd.Get("Location") != "/incidents/L-1" {
 		t.Fatalf("this was real: %d %v", code, hd)
 	}

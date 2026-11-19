@@ -118,7 +118,7 @@ func TestManyAtOnceScale(t *testing.T) {
 	}
 	var ids []string
 	for _, f := range day {
-		ids = append(ids, fmt.Sprint(f.ID))
+		ids = append(ids, pickRef(f))
 	}
 	for _, c := range []struct {
 		path string

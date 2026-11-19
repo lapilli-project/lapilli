@@ -960,6 +960,14 @@ func errCode(err error) (int, bool) {
 		return http.StatusRequestURITooLong, true
 	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
 		return http.StatusConflict, true
+	case errors.Is(err, ledger.ErrFiringChanged), errors.Is(err, ledger.ErrSaidUnrelated), errors.Is(err, ledger.ErrCaughtNothing),
+		errors.Is(err, ledger.ErrRealFiring):
+		// What a firing is now (docs/design/judging.md, item 3).
+		return http.StatusConflict, true
+	case errors.Is(err, ledger.ErrTooOld), errors.Is(err, ledger.ErrUnrelatedRole):
+		return http.StatusForbidden, true
+	case errors.Is(err, ledger.ErrTooManyVerdicts):
+		return http.StatusTooManyRequests, true
 	case errors.Is(err, ledger.ErrDeclared), errors.Is(err, ledger.ErrNamedByDeclared), errors.Is(err, ledger.ErrNotTheUIs):
 		// --config's, or the marked file's: changed in the file alone.
 		return http.StatusConflict, true

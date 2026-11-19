@@ -581,6 +581,11 @@ type backtest struct {
 	// of them is no better, nor more worse. nil for a backtest made before
 	// it was kept, worked out from the ledger when it is read.
 	NoRecord *bool `json:"no_record,omitempty"`
+	// At is when it was backtested: a person's "unrelated" said of a
+	// firing of its rule in its period since makes it stale
+	// (docs/design/judging.md, "Through judging again"). Zero for one made
+	// before it was kept.
+	At time.Time `json:"at,omitzero"`
 }
 
 type side struct {
@@ -1236,7 +1241,7 @@ func (s *Server) backtestWithin(ctx context.Context, name string, before, after 
 		return nil, err
 	}
 	no := !kept
-	bt := &backtest{From: from, To: to, Lost: []string{}, Gained: []string{}, Later: []string{}, NoRecord: &no}
+	bt := &backtest{From: from, To: to, Lost: []string{}, Gained: []string{}, Later: []string{}, NoRecord: &no, At: s.now().UTC().Truncate(time.Second)}
 	for _, rc := range cmp.Rules {
 		if rc.Rule != name {
 			continue

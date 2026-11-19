@@ -47,12 +47,12 @@
 <div class="scroll"><table>
 <thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
-<tr><td class="pick">{{if not .White}}<input type="checkbox" form="real-picked" name="firing" value="{{.ID}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
+<tr><td class="pick">{{if not .White}}<input type="checkbox" form="real-picked" name="firing" value="{{.Ref}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
 <td>{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td>
 <td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
 <td class="n">{{template "notified" .}}</td><td class="labels">{{range .Chips}}{{if .Href}}<a class="chip label" href="{{$.Link .Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{shown .Text}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{shown .Text}}</bdi></span> {{end}}{{end}}</td>
-<td>{{if not .White}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{else}}{{template "off" (again (quiet (offOf $ "This was real" "editor" "real-why")))}}{{end}}{{end}}</td></tr>
+<td>{{if not .White}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real">{{template "firingref" .}}<button class="quiet-button">{{t "This was real"}}</button></form>{{else}}{{template "off" (again (quiet (offOf $ "This was real" "editor" "real-why")))}}{{end}}{{end}}</td></tr>
 {{else}}<tr><td colspan="8" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Next}}<p><a href="{{$.Link .}}">{{t "Earlier →"}}</a></p>{{end}}
@@ -65,5 +65,10 @@ to say. */}}
 that caught nothing with no record to judge it by is neither, as the
 weeks and the summary count it. */}}
 {{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .Unjudged}}<span class="unjudged" title="{{t "no record to judge it by: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
+
+{{/* The alert and start of the firing a form is about, which the write
+holds to the firing's own: a run gives its firings again, and an id to
+another. */}}
+{{define "firingref"}}<input type="hidden" name="series" value="{{.Series}}"><input type="hidden" name="start" value="{{.Start.Unix}}">{{end}}
 
 {{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}

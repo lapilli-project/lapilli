@@ -145,7 +145,7 @@ func TestFixTextsTranslated(t *testing.T) {
 		"Make it a task", "Approve", "Pause changes", "Resume changes", "Lapilli", "a change recipe", "No proposals yet.", "No proposal matches these filters.",
 		"A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest.",
 		// A proposal stale, or backtested again (proposalsNow).
-		staleRule, staleNoVersion, staleVersion, staleNewer, staleRecorded, staleUnrecorded, staleNotice, "No proposal waiting for approval is stale.",
+		staleRule, staleNoVersion, staleVersion, staleNewer, staleRecorded, staleUnrecorded, staleSaid, staleNotice, "No proposal waiting for approval is stale.",
 		"Held until it is backtested again: it is stale", "Backtest again", "%s ran its backtest again and kept nothing of it",
 		"%s ran its backtest again %d times in a row and kept nothing of it, the last at the time shown", "Backtested again by an agent, for %s, with lapilli %s",
 		"Approvals withdrawn, given to the backtest it replaced: %s. Approve it again.",

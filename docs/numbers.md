@@ -797,13 +797,13 @@ holds them, and this list.
 | `noisy_at` | `firings`, `precision` |
 | `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
-| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`† |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`† |
+| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
-| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`† |
+| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`†, `real`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy` |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`† |
 
 ### The metrics
 
@@ -888,8 +888,11 @@ adds to the others can't be said there.
 ### The CSV's columns
 
 `rule`, `severity`, `team`, `labels`, `start`, `end`, `stone`, `no_record`,
-`incidents`, `refired`, `during_deploy`, `excused`, `marked`, `episode`, in
-that order. `TestCSVColumns` holds them.
+`incidents`, `refired`, `during_deploy`, `excused`, `marked`, `episode`,
+`unrelated`, `action`, in that order. `TestCSVColumns` holds them.
+`unrelated` is the JSON list of the incidents a person said the firing is
+unrelated to (`firings[].unrelated`), `action` their answer to whether it
+needed someone to act (`yes`, `no`, or empty).
 
 ### lapilli preflight's report
 

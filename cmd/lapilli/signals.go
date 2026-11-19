@@ -241,7 +241,7 @@ func (f *verdictFlags) anyImpact() bool { return f.impact != "" || len(f.signals
 func (f *verdictFlags) signalsRead() error {
 	perName := len(f.impactSets) > 0
 	switch {
-	case f.impactFile != "" && f.anyImpact():
+	case f.impactFile != "" && len(f.signals) > 0:
 		return errors.New("--impact-file gives the impact signals: leave out --impact")
 	case f.impactFile != "" && perName:
 		return errors.New("--impact-file says each signal's for, match, record and lead: leave out --impact-for NAME=DUR, --impact-match, --impact-record and --impact-lead")
@@ -250,10 +250,16 @@ func (f *verdictFlags) signalsRead() error {
 	}
 	var entries []verdict.RuleEntry
 	if f.impactFile != "" {
-		var err error
-		if f.signals, entries, err = readImpactFile(f.impactFile); err != nil {
+		signals, es, err := readImpactFile(f.impactFile)
+		if err != nil {
 			return fmt.Errorf("--impact-file %s: %w", f.impactFile, err)
 		}
+		// A file of rule entries that judge their rules by nothing alone
+		// goes with --impact PROMQL, the signal with no name, or none.
+		if len(signals) > 0 && f.impact != "" {
+			return errors.New("--impact-file gives the impact signals: leave out --impact")
+		}
+		f.signals, entries = signals, es
 	}
 	for _, n := range slices.Sorted(maps.Keys(f.impactSets)) {
 		set := f.impactSets[n]
@@ -276,6 +282,12 @@ func (f *verdictFlags) signalsRead() error {
 		}
 	}
 	if len(f.signals) == 0 {
+		if len(entries) > 0 {
+			// Rule entries that judge their rules by nothing, with no
+			// named signal (docs/design/judging.md, "Rules judged by
+			// nothing").
+			f.opts.Signals = verdict.NewSignals(nil, entries)
+		}
 		return nil
 	}
 	if len(f.signals) > verdict.MaxSignals {
@@ -303,6 +315,10 @@ func (f *verdictFlags) signalsRead() error {
 // its "for", --impact-for's when it gives none; and the rule entries.
 func (f *verdictFlags) signalDefs() ([]ledger.SignalDef, []verdict.RuleEntry) {
 	if !f.opts.Signals.Named() {
+		// Rule entries alone: those that judge their rules by nothing.
+		if f.opts.Signals != nil {
+			return nil, slices.Clone(f.opts.Signals.Entries)
+		}
 		return nil, nil
 	}
 	var out []ledger.SignalDef
@@ -343,10 +359,11 @@ type impactFileSignal struct {
 type impactFileEntry struct {
 	Rules   string          `yaml:"rules"`
 	Labels  incident.Labels `yaml:"labels"`
-	Signals []string        `yaml:"signals"`
+	Signals *[]string       `yaml:"signals"`
 	Match   []string        `yaml:"match"`
 	Lead    *string         `yaml:"lead"`
 	Require []string        `yaml:"require"`
+	Judged  *bool           `yaml:"judged"`
 }
 
 // readImpactFile reads --impact-file strictly, as --config is read: a key
@@ -391,8 +408,10 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 		}
 		doc = *doc.Impact
 	}
-	if len(doc.Signals) == 0 {
-		return nil, nil, errors.New("no signals: want signals:, with a list of them under it")
+	// A file whose rule entries all judge their rules by nothing needs no
+	// signal (docs/design/judging.md, "Rules judged by nothing").
+	if len(doc.Signals) == 0 && (len(doc.Rules) == 0 || slices.ContainsFunc(doc.Rules, func(e impactFileEntry) bool { return e.Judged == nil || *e.Judged })) {
+		return nil, nil, errors.New("no signals: want signals:, with a list of them under it, or rule entries that all say judged: false")
 	}
 	if len(doc.Signals) > verdict.MaxSignals {
 		return nil, nil, fmt.Errorf("%d signals: %d at most", len(doc.Signals), verdict.MaxSignals)
@@ -432,15 +451,26 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 	var entries []verdict.RuleEntry
 	for i, e := range doc.Rules {
 		at := fmt.Sprintf("rule entry %d", i+1)
+		var signals []string
+		if e.Signals != nil {
+			signals = *e.Signals
+		}
+		notJudged := e.Judged != nil && !*e.Judged
 		switch {
 		case e.Rules == "" && len(e.Labels) == 0:
 			return nil, nil, fmt.Errorf("%s names no rule: give rules, a pattern of their names, or labels they have", at)
 		case len(e.Labels) > verdict.MaxEntryLabels:
 			return nil, nil, fmt.Errorf("%s: %d labels: %d at most", at, len(e.Labels), verdict.MaxEntryLabels)
-		case len(e.Signals) == 0:
-			return nil, nil, fmt.Errorf("%s: no signals: name the signals its rules are judged against", at)
-		case len(e.Signals) > verdict.MaxEntrySignals:
-			return nil, nil, fmt.Errorf("%s: %d signals: %d at most", at, len(e.Signals), verdict.MaxEntrySignals)
+		case e.Judged != nil && *e.Judged:
+			return nil, nil, fmt.Errorf("%s: judged: true is what naming its signals says: give signals, or judged: false", at)
+		case notJudged && e.Signals != nil:
+			return nil, nil, fmt.Errorf("%s: judged: false judges its rules by nothing: give it or signals, not both", at)
+		case notJudged && (e.Match != nil || e.Lead != nil || e.Require != nil):
+			return nil, nil, fmt.Errorf("%s: judged: false judges its rules by nothing: match, lead and require say how they are judged", at)
+		case !notJudged && len(signals) == 0:
+			return nil, nil, fmt.Errorf("%s: no signals: name the signals its rules are judged against, or say judged: false for none", at)
+		case len(signals) > verdict.MaxEntrySignals:
+			return nil, nil, fmt.Errorf("%s: %d signals: %d at most", at, len(signals), verdict.MaxEntrySignals)
 		}
 		if _, err := ledger.CheckRE(e.Rules); err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", at, err)
@@ -453,18 +483,22 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 		if err := ledger.CheckLabels(e.Labels); err != nil {
 			return nil, nil, fmt.Errorf("%s: labels: %w", at, err)
 		}
-		for j, name := range e.Signals {
+		for j, name := range signals {
 			switch {
 			case !slices.ContainsFunc(out, func(x impactSignal) bool { return x.name == name }):
 				return nil, nil, fmt.Errorf("%s: the signal %q isn't one the file declares", at, nameText(name))
-			case slices.Contains(e.Signals[:j], name):
+			case slices.Contains(signals[:j], name):
 				return nil, nil, fmt.Errorf("%s: the signal %s is there twice", at, name)
 			}
 		}
 		if err := matchList(at, e.Match); err != nil {
 			return nil, nil, err
 		}
-		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Signals: e.Signals, Match: e.Match}
+		x := verdict.RuleEntry{Rules: e.Rules, Labels: e.Labels, Signals: signals, Match: e.Match}
+		if notJudged {
+			no := false
+			x.Judged = &no
+		}
 		if e.Lead != nil {
 			d, err := leadOf(*e.Lead)
 			if err != nil {

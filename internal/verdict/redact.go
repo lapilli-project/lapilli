@@ -624,6 +624,12 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 		}
 		slices.Sort(afters)
 		f.After = afters
+		var unrelated []string
+		for _, id := range f.Unrelated {
+			unrelated = append(unrelated, x.alias("incident", id))
+		}
+		slices.Sort(unrelated)
+		f.Unrelated = unrelated
 		var kinds []string
 		for _, k := range f.Marked {
 			kinds = append(kinds, x.alias("kind", k))

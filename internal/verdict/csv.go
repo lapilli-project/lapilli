@@ -15,7 +15,7 @@ import (
 
 // CSVColumns are the columns of a report's firings as CSV, in this order.
 // A column is only ever added at the end (docs/numbers.md).
-var CSVColumns = []string{"rule", "severity", "team", "labels", "start", "end", "stone", "no_record", "incidents", "refired", "during_deploy", "excused", "marked", "episode"}
+var CSVColumns = []string{"rule", "severity", "team", "labels", "start", "end", "stone", "no_record", "incidents", "refired", "during_deploy", "excused", "marked", "episode", "unrelated", "action"}
 
 // CSV writes a report's firings, a row each, as CSV (docs/numbers.md):
 // with excused, the firings a quiet window excused, which a report leaves
@@ -85,8 +85,16 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 		if j.Episode > 0 && !j.Excused {
 			episode = strconv.Itoa(j.Episode)
 		}
+		// The incidents a person said it is unrelated to, which it caught as
+		// Lapilli judged it, and their answer to whether it needed action
+		// (docs/design/judging.md, item 3).
+		unrelated := []string{}
+		for _, id := range j.Unrelated {
+			unrelated = append(unrelated, cellText(id))
+		}
 		row := []string{Cell(j.Rule), Cell(severity[j.Rule]), Cell(team), csvJSON(labels), csvTime(j.Start), end, stone,
-			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(refired), csvBool(j.DuringDeploy), csvBool(j.Excused), csvJSON(marked), episode}
+			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(refired), csvBool(j.DuringDeploy), csvBool(j.Excused), csvJSON(marked), episode,
+			csvJSON(unrelated), j.Action}
 		if err := cw.Write(row); err != nil {
 			return err
 		}
