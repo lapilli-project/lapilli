@@ -848,7 +848,8 @@ and 16 queries and expressions at most, each query's `relativeTimeRange`
 8 days back at most, and each query the replay asks held as a rule's, its
 relativeTimeRange's end added to what it reads back, and for a data source
 query a day more, as the replay asks it over the day before when it
-returns nothing (since 0.63.2). A query in LogQL is
+returns nothing (since 0.63.2), and in PromQL a group's interval of 8
+seconds at least, as that day is a subquery at it. A query in LogQL is
 a metric query, never one of log lines; each stream selector names its
 streams by a label matched with `=` to a value (`{app=~".+"}` alone is
 refused); a range with its offset reaches 8 days back at most, with no

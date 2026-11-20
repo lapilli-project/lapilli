@@ -115,9 +115,12 @@ failed before it; no schema change: the ledger stays at 026.
   Grafana rule returns nothing, the replay asks it whether it returned
   anything in the day before (a day's subquery of it, or, in LogQL, the
   query itself over the day), which the port didn't count: a query that
-  read 8 days back read 9. That day is added to what each data source
-  query reads back now, 8 days in all. A classic condition's window was
-  counted already, in the queries its reducers ask.
+  read 8 days back read 9; and, in PromQL, a subquery at the group's
+  interval, 86,400 points a series at `interval: 1s`, past the 11,000 a
+  subquery is held to. That day is added to what each data source query
+  reads back now, 8 days in all, and its points counted: a Grafana rule's
+  group is evaluated every 8 seconds or more. A classic condition's
+  window was counted already, in the queries its reducers ask.
 - **The lane's requests to a Loki weren't given up on** (affected: 0.63.0
   and 0.63.1). Each range query the lane asks a Prometheus carries
   `timeout=1m`, so that a shared Prometheus gives up on a pull request's

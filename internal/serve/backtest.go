@@ -951,6 +951,15 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 	// condition's window is in what its asks write (Ask.PromQL), a half
 	// step past the window's first numbers, which the replay asks of the
 	// query from the window's start.
+	// In PromQL, that day is a subquery at the rule's interval (a minute at
+	// most, a second at least: replay.ProbeStep), held to backtestPoints
+	// as any subquery is: a group evaluated every second would have
+	// 86,400 points a series.
+	if step := replay.ProbeStep(*r); g.Logs == "" && len(g.Data) > 0 && int64(backtestNoData/step) > backtestPoints {
+		least := time.Duration(math.Ceil(backtestNoData.Seconds()/backtestPoints)) * time.Second
+		return fmt.Sprintf("%s is evaluated every %s, and a query of it that returns nothing is looked through over the day before at that step, %d points a series: here a subquery has %d points at most, a Grafana rule's group an interval of %s or more",
+			name, verdict.Duration(r.Interval), int64(backtestNoData/step), backtestPoints, verdict.Duration(least))
+	}
 	for _, ref := range slices.Sorted(maps.Keys(g.Data)) {
 		expr, ok := g.Queries[ref]
 		if !ok {

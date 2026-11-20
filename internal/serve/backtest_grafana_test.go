@@ -533,3 +533,24 @@ func TestBacktestGrafanaRefusalQuotesNothing(t *testing.T) {
 		t.Errorf("a Loki ruler's rule: %d %v", code, m)
 	}
 }
+
+// A Grafana rule's query that returns nothing is looked through over the
+// day before, in a subquery at its group's interval (replay.ProbeStep):
+// held to backtestPoints as any subquery is, an interval under 8 seconds
+// is refused, 86,400 points a series at 1s; 8s, 10s, a minute and five,
+// as Grafana's groups run, are taken.
+func TestBacktestGrafanaProbePoints(t *testing.T) {
+	b, _, _ := btGrafana(t, true, nil)
+	prom := func(expr string) string { return fmt.Sprintf(`{expr: '%s', datasource: {type: prometheus}}`, expr) }
+	for interval, refused := range map[string]bool{"1s": true, "7s": true, "8s": false, "10s": false, "1m": false, "5m": false} {
+		rule := strings.Replace(prGrafana(gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom("errors > 1")))), "interval: 1m", "interval: "+interval, 1)
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btAdding(added("grafana.yaml", rule, false)))
+		why, _ := m["error"].(string)
+		switch {
+		case refused && (code != 400 || !strings.Contains(why, "an interval of 8s or more")):
+			t.Errorf("interval %s: %d %q, want refused", interval, code, why)
+		case !refused && code != 202:
+			t.Errorf("interval %s: %d %q, want taken", interval, code, why)
+		}
+	}
+}

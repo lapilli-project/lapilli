@@ -1196,8 +1196,10 @@ step 3 does otherwise than the sections above say, or says more:
   with the relativeTimeRange's end, or a reduce's window over LogQL, added
   up within 8 days; and each data source query a day further back again
   (since 0.63.2), as the replay asks it over the day before when it
-  returns nothing (`replay`'s probe). A classic condition's window is
-  counted in the queries its reducers ask.
+  returns nothing (`replay`'s probe), and, in PromQL, that day's
+  subquery, at the group's interval (`replay.ProbeStep`), held to 11,000
+  points: an interval of 8 seconds at least. A classic condition's window
+  is counted in the queries its reducers ask.
 - **LogQL's bounds**, of a Loki ruler's rule and a Grafana rule's on a
   Loki data source: a metric query, never one of log lines; each stream
   selector naming its streams by a label matched with `=` to a value that
