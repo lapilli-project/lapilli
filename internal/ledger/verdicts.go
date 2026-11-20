@@ -632,6 +632,14 @@ const verdictCols = `v.id, v.series_id, s.labels, r.name, v.start_at, v.end_at, 
 	v.action, v.action_by, v.action_at, v.action_note, v.moved,
 	coalesce((SELECT min(f.id) FROM firings f WHERE f.series_id = v.series_id AND f.start_at = v.start_at), 0)`
 
+// verdictColsJudged are verdictCols as judging reads them, every replay of
+// every backtest, comparison and try (ReplayVerdicts): without the two
+// notes, up to MaxVerdictNote characters each, nor the firing of each
+// verdict, which judging takes nothing from (an empty string and 0 in
+// their place).
+const verdictColsJudged = `v.id, v.series_id, s.labels, r.name, v.start_at, v.end_at, v.unrelated, v.unrelated_by, v.unrelated_at, '',
+	v.action, v.action_by, v.action_at, '', v.moved, 0`
+
 // readVerdicts reads the verdicts where says, in order of their start.
 func (l *Ledger) readVerdicts(ctx context.Context, q queryer, where string, args ...any) ([]Verdict, error) {
 	return l.readVerdictsOrdered(ctx, q, where+` ORDER BY v.start_at, v.id`, args...)
@@ -640,7 +648,13 @@ func (l *Ledger) readVerdicts(ctx context.Context, q queryer, where string, args
 // readVerdictsOrdered reads the verdicts where says, its order and limit
 // with it.
 func (l *Ledger) readVerdictsOrdered(ctx context.Context, q queryer, where string, args ...any) ([]Verdict, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+verdictCols+` FROM verdicts v JOIN series s ON s.id = v.series_id JOIN rules r ON r.id = s.rule_id
+	return l.readVerdictsOf(ctx, q, verdictCols, where, args...)
+}
+
+// readVerdictsOf reads cols, verdictCols or verdictColsJudged, of the
+// verdicts where says, its order and limit with it.
+func (l *Ledger) readVerdictsOf(ctx context.Context, q queryer, cols, where string, args ...any) ([]Verdict, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+cols+` FROM verdicts v JOIN series s ON s.id = v.series_id JOIN rules r ON r.id = s.rule_id
 		`+where, args...)
 	if err != nil {
 		return nil, err
@@ -1028,7 +1042,7 @@ func (l *Ledger) SaidSince(ctx context.Context, from, to, since time.Time, in fu
 // ledger, but one another holds the firing of (movedHeld), which a replay
 // places again itself.
 func (l *Ledger) ReplayVerdicts(ctx context.Context, from, to time.Time) ([]verdict.Verdict, error) {
-	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.start_at >= ? AND v.start_at < ?", from.Unix(), to.Unix())
+	vs, err := l.judgedVerdicts(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -1037,6 +1051,13 @@ func (l *Ledger) ReplayVerdicts(ctx context.Context, from, to time.Time) ([]verd
 		out = append(out, ReplayVerdict(v))
 	}
 	return out, nil
+}
+
+// judgedVerdicts are the verdicts ReplayVerdicts reads, of the firings
+// that started in [from, to): what judging takes of them alone, never
+// their notes (verdictColsJudged).
+func (l *Ledger) judgedVerdicts(ctx context.Context, from, to time.Time) ([]Verdict, error) {
+	return l.readVerdictsOf(ctx, l.r, verdictColsJudged, "WHERE v.start_at >= ? AND v.start_at < ? ORDER BY v.start_at, v.id", from.Unix(), to.Unix())
 }
 
 // ReplayVerdict is v as judging takes it.

@@ -1158,3 +1158,32 @@ func TestVerdictsSameAsJudge(t *testing.T) {
 		}
 	}
 }
+
+// Judging reads a verdict's parts, never its notes: every replay of every
+// backtest, comparison and try would read both of every verdict otherwise,
+// MaxVerdictNote characters each. What it judges by is as before.
+func TestVerdictsJudgedWithoutNotes(t *testing.T) {
+	ctx := context.Background()
+	l, fs := verdictLedger(t)
+	note := strings.Repeat("가", MaxVerdictNote)
+	if _, err := l.SetVerdict(ctx, keyOfFiring(fs["Disk"]), VerdictChange{Unrelated: yes(), UnrelatedNote: &note, Action: text("yes"), ActionNote: &note}, adminBy(), opts); err != nil {
+		t.Fatal(err)
+	}
+	from, to := t0, t0.Add(24*time.Hour)
+	vs, err := l.judgedVerdicts(ctx, from, to)
+	if err != nil || len(vs) != 1 {
+		t.Fatalf("%v %v", vs, err)
+	}
+	if vs[0].UnrelatedNote != "" || vs[0].ActionNote != "" {
+		t.Errorf("notes read for judging: %d and %d bytes", len(vs[0].UnrelatedNote), len(vs[0].ActionNote))
+	}
+	full, err := l.readVerdicts(ctx, l.r, "WHERE v.start_at >= ? AND v.start_at < ?", from.Unix(), to.Unix())
+	if err != nil || len(full) != 1 || full[0].ActionNote != note {
+		t.Fatalf("%v %v", full, err)
+	}
+	got, err := l.ReplayVerdicts(ctx, from, to)
+	if want := ReplayVerdict(full[0]); err != nil || len(got) != 1 || got[0].Rule != want.Rule || !slices.Equal(got[0].Unrelated, want.Unrelated) ||
+		got[0].Action != want.Action || !got[0].At.Equal(want.At) || !got[0].Start.Equal(want.Start) || !got[0].End.Equal(want.End) {
+		t.Errorf("judged by %+v, want %+v (%v)", got, want, err)
+	}
+}
