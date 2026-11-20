@@ -91,7 +91,20 @@ type Change struct {
 
 // Changes are the latest changes, the latest first.
 func (l *Ledger) Changes(ctx context.Context, limit int) ([]Change, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT at, by, what, before, after FROM changes ORDER BY at DESC, id DESC LIMIT ?", limit)
+	return l.changesWhere(ctx, "", limit)
+}
+
+// SettingChanges are the latest changes of the settings, the latest first:
+// asked for apart from the others, which, however many one person makes
+// (notes, comments, verdicts), don't push an admin's off what the Settings
+// page shows.
+func (l *Ledger) SettingChanges(ctx context.Context, limit int) ([]Change, error) {
+	return l.changesWhere(ctx, "WHERE what LIKE 'setting %'", limit)
+}
+
+// changesWhere are the latest changes where says, the latest first.
+func (l *Ledger) changesWhere(ctx context.Context, where string, limit int) ([]Change, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT at, by, what, before, after FROM changes "+where+" ORDER BY at DESC, id DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
