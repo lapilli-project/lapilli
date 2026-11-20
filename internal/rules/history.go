@@ -33,7 +33,11 @@ const basicTime = "20060102T150405Z"
 // History lists the versions in dir, the earliest first. A name is an RFC
 // 3339 time, 2026-10-14T16:40:31Z, or its basic form, 20261014T164031Z.
 // Names starting with a dot are passed over: a mounted volume keeps its own
-// there. Anything else is refused, naming it, as are two names for one time,
+// there (..data), as a checkout does (.git). They are versions' names, not
+// rule files', and none is a time, so none is a version Prometheus would
+// load rules from; the files within each version are read as ReadPicked
+// reads a directory, hidden ones holding rules among them. Anything else
+// is refused, naming it, as are two names for one time,
 // and a version, or a file in one, that is a link to somewhere outside it:
 // what a version holds comes from a repository, which could hold a link to
 // any file the reader can read.

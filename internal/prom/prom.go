@@ -49,7 +49,8 @@ type Client struct {
 	// api is which of APIs its requests are counted under (CountedAs).
 	api string
 	// queryTimeout, when set, is sent with each range query as its
-	// timeout, so that the API gives up on one sooner than it would (Lane).
+	// timeout, so that the API gives up on one sooner than it would (Lane);
+	// a Loki, which takes none, has each request given up on after it.
 	queryTimeout time.Duration
 }
 
@@ -116,7 +117,9 @@ func (c *Client) Limiter() *Limiter { return c.limit }
 // timeout sent with each range query (Prometheus's timeout parameter, 0
 // for none): a lane of its own, such as pull request backtests', paced by
 // a share of the rate c keeps (Limiter.AlsoPaced), whose queries a shared
-// Prometheus gives up on before its own default. c is left as it is.
+// Prometheus gives up on before its own default. A Loki takes no such
+// parameter: each request of a lane to one is given up on after timeout
+// here, from when it is sent to its answer read. c is left as it is.
 func (c *Client) Lane(l *Limiter, timeout time.Duration) *Client {
 	cc := *c
 	cc.limit, cc.queryTimeout = l, timeout
@@ -1062,6 +1065,14 @@ func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read fu
 	n := countsOf(ctx)
 	if n != nil {
 		n.Requests.Add(1)
+	}
+	if c.loki && c.queryTimeout > 0 {
+		// A Loki takes no timeout with a query (Lane): a lane's request
+		// to one is given up on here, from when it is sent, its turn
+		// had, to its answer read.
+		rctx, cancel := context.WithTimeout(req.Context(), c.queryTimeout)
+		defer cancel()
+		req = req.WithContext(rctx)
 	}
 	resp, err := c.http.Do(req)
 	countAnswer(ctx, c.kind(), resp)

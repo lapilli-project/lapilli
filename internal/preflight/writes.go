@@ -31,8 +31,11 @@ import (
 // answer that says "allowed" is judged, and nothing more is done with it.
 
 // askClient is how these are asked: through egress, so the allowlist
-// sees each request first, following no redirect.
-var askClient = &http.Client{Transport: egress.Wrap(nil),
+// sees each request first, following no redirect, and giving up on one
+// after eachTime of its own, its answer read, as every caller's context
+// gives up on what it asks: a caller that gave none can't hang on an API
+// that doesn't answer.
+var askClient = &http.Client{Transport: egress.Wrap(nil), Timeout: eachTime,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // answered is an answer that isn't a success: its status, and what it
@@ -84,8 +87,8 @@ func ask(req *http.Request) (http.Header, []byte, error) {
 
 // cloudSaid is said for what a cloud answered, or an error in asking it:
 // redacted first as the run redacts, so that what it knows is said by
-// what it is, then without any other ARN of an account, GUID, or number
-// of ten digits or more (or 1234-5678-9012), which a cloud's error names
+// what it is, then without any other ARN of an account, OCID, GUID, or
+// number of ten digits or more (or 1234-5678-9012), which a cloud's error names
 // beside what was asked (the pod's own role, an object's id, a project's
 // number). Lapilli's own words aren't so read.
 func (p *run) cloudSaid(err error) string {
@@ -112,6 +115,18 @@ func (p *run) cloudSaidText(s string) string {
 		}
 		return "[an ARN]" + arn[len(end):]
 	})
+	// Each OCID alike, whole: one the run learned (a compartment's, the
+	// config's tenancy or user) by what it is; another (another
+	// compartment's, a dynamic group's, a policy's) as an OCID, before the
+	// scrubber writes a part it learned, a region, in a part's place.
+	s = ocidText.ReplaceAllStringFunc(s, func(id string) string {
+		for _, h := range slices.Concat(p.hidden, p.hiddenSaid) {
+			if h[1] == id {
+				return "[" + h[0] + "]"
+			}
+		}
+		return "[an OCID]"
+	})
 	if p.c.Scrubber != nil {
 		s = p.c.Scrubber(p.hiddenSaid...)(p.c.Scrubber(p.hidden...)(s))
 	}
@@ -128,6 +143,11 @@ var (
 	// sentence's when a space or the end does. It is read in what a cloud
 	// said as it said it, before the scrubber (cloudSaidText).
 	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:(?:` + arnPart + `|,+` + arnPart + `)+`)
+	// ocidText is an Oracle Cloud ID: ocid1, the resource's type, the
+	// realm, the region (empty for one of no region) and any parts to
+	// come, then the unique part; whatever is before it, a word's
+	// character among them (_ocid1..., %3Docid1... in a URL).
+	ocidText = regexp.MustCompile(`(?i)ocid1\.[a-z0-9]+\.[a-z0-9-]+(?:\.[a-z0-9-]*)*\.[a-z0-9]+`)
 	// numberText is what may be an account's or a project's number: ten
 	// digits or more, or 1234-5678-9012 as AWS writes an account, whatever
 	// is beside it but another digit (acct_123456789012).

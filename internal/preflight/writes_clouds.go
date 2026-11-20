@@ -771,8 +771,9 @@ const mostIDBytes = 1024
 // linkedOf are the resources an alert rule's document names beside itself:
 // its targets (scopes), its action groups, a workspace, each a resource's
 // id under a resource group; and odd, how many it names that aren't (a
-// subscription, a management group, an id past mostIDBytes), which aren't
-// asked and are unknown, never passed over.
+// subscription, a management group, an id past mostIDBytes, one with a .
+// or .. for a part of its path, which would ask of another resource than
+// it names), which aren't asked and are unknown, never passed over.
 func linkedOf(n azureNamed) (out []string, odd int) {
 	var v any
 	if json.Unmarshal(n.data, &v) != nil {
@@ -799,7 +800,8 @@ func linkedOf(n azureNamed) (out []string, odd int) {
 				return
 			}
 			seen[low] = true
-			if len(y) > mostIDBytes || !azureResource.MatchString(y) {
+			if len(y) > mostIDBytes || !azureResource.MatchString(y) ||
+				slices.ContainsFunc(strings.Split(y, "/"), func(part string) bool { return part == "." || part == ".." }) {
 				odd++
 				return
 			}

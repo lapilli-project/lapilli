@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
@@ -219,7 +220,7 @@ func curlShim(t *testing.T, env []string, flags ...string) ([]string, string, st
 func serveRepo(t *testing.T) *prRepo {
 	t.Helper()
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "alerts/team/api.yaml": shopRules("10m"),
-		"alerts/.draft.yaml": "not sent\n", "rules/extra.yaml": "groups: []\n", "expect.yaml": "expectations: []\n", "README.md": "x\n"})
+		"alerts/.draft.yaml": "a draft, sent: hidden, read when it holds rules\n", "rules/extra.yaml": "groups: []\n", "expect.yaml": "expectations: []\n", "README.md": "x\n"})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h"),
 		"expect.yaml": "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"})
 	return repo
@@ -284,8 +285,9 @@ func TestBacktestServeRecipe(t *testing.T) {
 			}
 			body := srv.sent()
 			before, after := sentFiles(t, body["before"]), sentFiles(t, body["after"])
-			wantBefore := map[string]string{"shop.yaml": shopRules("5m"), "team/api.yaml": shopRules("10m"), "extra.yaml": "groups: []\n"}
-			wantAfter := map[string]string{"shop.yaml": shopRules("2h"), "team/api.yaml": shopRules("10m"), "extra.yaml": "groups: []\n"}
+			draft := "a draft, sent: hidden, read when it holds rules\n"
+			wantBefore := map[string]string{"shop.yaml": shopRules("5m"), "team/api.yaml": shopRules("10m"), ".draft.yaml": draft, "extra.yaml": "groups: []\n"}
+			wantAfter := map[string]string{"shop.yaml": shopRules("2h"), "team/api.yaml": shopRules("10m"), ".draft.yaml": draft, "extra.yaml": "groups: []\n"}
 			if !maps.Equal(before, wantBefore) || !maps.Equal(after, wantAfter) {
 				t.Errorf("before %v\nafter %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
 			}
@@ -304,7 +306,7 @@ func TestBacktestServeRecipe(t *testing.T) {
 			// Where it is when that changes (and every 30 seconds).
 			for _, want := range []string{"waiting in lapilli serve's queue, 1 before it",
 				"running in lapilli serve: 40 of its 160 requests to the history asked", "lapilli serve took the backtest (" + serveID + "): 160 requests",
-				"sending lapilli serve 3 files of the pull request's commit, and 3 of the commit it goes into", "LAPILLI passed over"} {
+				"sending lapilli serve 4 files of the pull request's commit, and 4 of the commit it goes into", "LAPILLI passed over"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("the job's log doesn't say %q:\n%s", want, out)
 				}
@@ -839,6 +841,77 @@ func TestBacktestServeRecipeRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pageEveryone is a rule no expectation holds, which pages at once.
+const pageEveryone = `groups:
+  - name: sneaky
+    rules:
+      - alert: PageEveryone
+        expr: vector(1)
+        labels: {severity: page}
+`
+
+// A rule file whose name, or a directory's in its path, begins with a dot
+// is one Prometheus's rule_files glob loads (alerts/*.yaml reads
+// alerts/.page.yaml and alerts/..page.yaml, alerts/*/*.yaml
+// alerts/.d/page.yaml and alerts/..d/page.yaml), and yaml.v3 reads one in
+// UTF-16 with its BOM: backtested as any other, its rule held to the
+// expectations, and the job failing as for a file without a dot, in
+// either mode. In serve mode each is sent, but one in UTF-16, which is
+// trouble, as any rule file that isn't UTF-8 text; a hidden file that
+// isn't text and has no BOM, a .DS_Store, isn't sent, and isn't trouble.
+func TestBacktestRecipeHiddenRuleFile(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	base := map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"}
+	gates := []string{"PATHS=alerts", "EXPECT=expect.yaml", "EXPECT_REQUIRED=true", "FAIL_ON_EXPECTATIONS=true", "FAIL_ON_ERROR=true"}
+	for path, content := range map[string]string{"alerts/page.yaml": pageEveryone, "alerts/.page.yaml": pageEveryone, "alerts/..page.yaml": pageEveryone,
+		"alerts/.d/page.yaml": pageEveryone, "alerts/..d/page.yaml": pageEveryone, "alerts/.u16.yaml": utf16LE(pageEveryone)} {
+		repo := newPRRepo(t, base)
+		repo.pullRequest(map[string]string{path: content})
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		out, err := rr.run(gates, "--prometheus", prom.URL, "--tz", "UTC")
+		if err == nil || rr.host.posts == 0 || !strings.Contains(rr.body(), "PageEveryone") {
+			t.Errorf("%s, local: the job passed, or said nothing of PageEveryone (%v, %d posts)\n%s", path, err, rr.host.posts, out)
+		}
+	}
+	repo := newPRRepo(t, base)
+	repo.pullRequest(map[string]string{"alerts/.page.yaml": pageEveryone, "alerts/..page.yaml": pageEveryone, "alerts/.d/page.yaml": pageEveryone,
+		"alerts/.DS_Store": "\x00\x00\x00\x01Bud1\x00\xff\xfe", "alerts/..2026_11_20/shop.yaml": shopRules("1h")})
+	srv := newServeStandIn(t)
+	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(`{"nothing_changed":false,"changed":0,"added":1,"removed":0,"same":2,"alike":0,"unreplayed":0,"expected":true,"expectations_broken":0,"unexpected":1}`))})
+	sr := serveRun(t, backtestHosts[0], repo, srv)
+	out, _ := sr.run(gates, "--since", "7d")
+	after := sentFiles(t, srv.sent()["after"])
+	if want := []string{"..2026_11_20/shop.yaml", "..page.yaml", ".d/page.yaml", ".page.yaml", "shop.yaml"}; !slices.Equal(slices.Sorted(maps.Keys(after)), want) || after["..page.yaml"] != pageEveryone {
+		t.Errorf("sent %v, want %v\n%s", slices.Sorted(maps.Keys(after)), want, out)
+	}
+	if strings.Contains(out, "not UTF-8") {
+		t.Errorf("a hidden file that isn't text was trouble:\n%s", out)
+	}
+	// One in UTF-16, hidden: trouble, nothing sent.
+	repo = newPRRepo(t, base)
+	repo.pullRequest(map[string]string{"alerts/.u16.yaml": utf16LE(strings.ReplaceAll(pageEveryone, "PageEveryone", "PageInUTF16"))})
+	srv = newServeStandIn(t)
+	srv.answers(nil, nil)
+	sr = serveRun(t, backtestHosts[0], repo, srv)
+	out, err := sr.run(gates, "--since", "7d")
+	if posts, _, _ := srv.counts(); err == nil || posts != 0 || !strings.Contains(out, "not UTF-8 text, in the pull request's commit: .u16.yaml") {
+		t.Errorf("a hidden rule file in UTF-16, serve mode: %v, %d POSTs\n%s", err, posts, out)
+	}
+	failure(t, sr.body(), "a rule file in the pull request's commit isn't UTF-8 text, which lapilli serve takes alone: not sent (the job's log says which)")
+}
+
+// utf16LE is s in UTF-16LE with its BOM, which Prometheus's rulefmt
+// (yaml.v3) reads as it reads UTF-8.
+func utf16LE(s string) string {
+	u := utf16.Encode(append([]rune{0xFEFF}, []rune(s)...))
+	b := make([]byte, 0, 2*len(u))
+	for _, c := range u {
+		b = append(b, byte(c), byte(c>>8))
+	}
+	return string(b)
 }
 
 // LAPILLI_SERVE is https, or plain http to this machine or to a Service in
@@ -1507,4 +1580,14 @@ func TestBacktestServeRecipeRetryAfterZero(t *testing.T) {
 		t.Errorf("%v: %d GETs, %d DELETEs\n%s", err, gets, deletes, out)
 	}
 	failure(t, rr.body(), "the backtest didn't come back within SERVE_WAIT (2s): cancelled in lapilli serve")
+	// Lowered for tests as far as they go, SERVE_RETRY_MIN and SERVE_POLL
+	// of 0, a Retry-After of 0 is still waited a second: a few POSTs
+	// within SERVE_WAIT, not a loop of them.
+	srv.answers([]serveAnswer{busy}, nil)
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	out, err = rr.run([]string{"PATHS=alerts", "SERVE_WAIT=2s", "SERVE_RETRY_MIN=0", "SERVE_POLL=0"})
+	if posts, _, _ := srv.counts(); err != nil || posts > 3 {
+		t.Errorf("SERVE_RETRY_MIN and SERVE_POLL of 0: %v: %d POSTs\n%s", err, posts, out)
+	}
+	failure(t, rr.body(), "lapilli serve had no room for the backtest within SERVE_WAIT (2s)")
 }

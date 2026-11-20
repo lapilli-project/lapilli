@@ -2,8 +2,10 @@ package prom
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -129,3 +131,38 @@ func TestPaceShare(t *testing.T) {
 		t.Error("no rate has a share")
 	}
 }
+
+// A lane's request to a Loki, which takes no timeout with a query, is
+// given up on after the lane's timeout, here: each is sent with a
+// deadline that long after it is sent, its turn had; the client it was
+// made of sends none, and a lane's to a Prometheus sends the parameter.
+func TestLaneLokiTimeout(t *testing.T) {
+	var mu sync.Mutex
+	var left []time.Duration
+	rt := roundTrip(func(r *http.Request) (*http.Response, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if dl, ok := r.Context().Deadline(); ok {
+			left = append(left, time.Until(dl))
+		} else {
+			left = append(left, 0)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Request: r,
+			Body: io.NopCloser(strings.NewReader(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))}, nil
+	})
+	loki := New("http://loki.example:3100", "test", Loki(), WithHTTPClient(&http.Client{Transport: rt}))
+	from := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	for _, c := range []*Client{loki, loki.Lane(NewLimiter(0), time.Hour)} {
+		if _, err := c.QueryRange(context.Background(), `sum(count_over_time({app="checkout"}[5m]))`, from, from.Add(time.Hour), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(left) != 2 || left[0] != 0 || left[1] <= 0 || left[1] > time.Hour {
+		t.Errorf("deadlines: %v, want none from the client, within an hour from its lane", left)
+	}
+}
+
+// roundTrip is a RoundTripper of a function.
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

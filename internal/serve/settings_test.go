@@ -1,11 +1,14 @@
 package serve
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // A try of the settings on the last week, which judges seven days again in
@@ -68,5 +71,28 @@ func TestSettingsTriesCounted(t *testing.T) {
 	q := url.Values{"impact-try": {"1"}, "impact": {"impact > 0"}}
 	if code, body := askAs(t, h, http.MethodGet, "/settings?"+q.Encode(), nil, "ana@example.com", "same-origin"); code != http.StatusOK || strings.Contains(body, "as many incident criteria") {
 		t.Errorf("a try of the incident criteria after the settings' were used up: %d", code)
+	}
+}
+
+// The Settings page's changes are the settings' own, asked for apart from
+// the others: a hundred and more notes an editor writes after an admin
+// changed a setting don't push that change off the page.
+func TestSettingsChangesTheirOwn(t *testing.T) {
+	s, _ := server(t, nil)
+	ctx := context.Background()
+	if err := s.l.SetSettings(ctx, map[string]string{"lead": "20m"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 120 {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: fmt.Sprint("note ", i)}, "bo@example.com"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := s.settingsView(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Changes) != 1 || v.Changes[0].What != "setting lead" || v.Changes[0].By != "ana@example.com" {
+		t.Errorf("the Settings page's changes: %+v, want the admin's change of lead", v.Changes)
 	}
 }

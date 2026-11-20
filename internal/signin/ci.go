@@ -58,6 +58,11 @@ const (
 	// ciRSAMax is the most bits of an RSA key of a CI's taken; the fewest
 	// are MinRSABits, as of every identity provider's.
 	ciRSAMax = 4096
+	// ciNoKid is how many of an issuer's keys a token that names no key
+	// (kid) is tried against, the first its set holds: the CIs' tokens
+	// name theirs, and one sent by anyone, before anyone is known, isn't
+	// checked against every key of a hundred.
+	ciNoKid = 3
 )
 
 // CIToken is what a CI's ID token verified says: its claims, each as the
@@ -253,7 +258,7 @@ func (c *CI) discover(ctx context.Context) (*Keys, error) {
 		jwks = doc.JWKS
 	}
 	k := NewKeys(jwks, c.Client, doc.Algs, c.Now)
-	k.maxRSA = ciRSAMax
+	k.maxRSA, k.noKid = ciRSAMax, ciNoKid
 	return k, nil
 }
 

@@ -213,6 +213,26 @@ func (r *prRepo) pullRequest(files map[string]string) {
 	r.git("merge", "--quiet", "--no-ff", "--no-edit", "pr")
 }
 
+// pullRequestTree is pullRequest written without the work tree, which a
+// file system that folds case can't hold two names of: files beside
+// main's, in a commit of their own, and HEAD a merge of it into main.
+func (r *prRepo) pullRequestTree(files map[string]string) {
+	r.t.Helper()
+	idx, dir := filepath.Join(r.t.TempDir(), "index"), r.t.TempDir()
+	env := r.env
+	r.env = append(slices.Clone(env), "GIT_INDEX_FILE="+idx)
+	defer func() { r.env = env }()
+	r.git("read-tree", "main")
+	for name, body := range files {
+		f := filepath.Join(dir, "blob")
+		os.WriteFile(f, []byte(body), 0o644)
+		r.git("update-index", "--add", "--cacheinfo", "100644,"+r.git("hash-object", "-w", f)+","+name)
+	}
+	tree := r.git("write-tree")
+	pr := r.git("commit-tree", tree, "-p", "main", "-m", "change the rules")
+	r.git("update-ref", "--no-deref", "HEAD", r.git("commit-tree", tree, "-p", "main", "-p", pr, "-m", "merge"))
+}
+
 // hostComment is a comment a stand-in host keeps: one deleted (Bitbucket's,
 // Azure DevOps' thread), or GitLab's own (a system note), never the
 // recipe's.
@@ -1256,6 +1276,230 @@ func TestBacktestRecipeIncidents(t *testing.T) {
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml"}, "--prometheus", prom.URL)
 	failure(t, rr.body(), "INCIDENTS incidents.yaml isn't a file in the commit the pull request goes into")
+}
+
+// INCIDENTS is read from TARGET itself, the commit the pull request goes
+// into as it is now, not from where the pull request branched from its
+// branch, which its author picks: a pull request branched from before an
+// incident was recorded, its own branch checked out (Gitea's, Forgejo's,
+// Bitbucket's, GitLab's without merged results), is judged by it all the
+// same. Its rules, and the expectations of the rules in place, are still
+// those of where it branched: a budget the target lowered since, which the
+// pull request didn't touch, isn't said changed in it, through lapilli
+// serve too.
+func TestBacktestRecipeIncidentsFromTarget(t *testing.T) {
+	needRecipeTools(t)
+	loose := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 50}\n"
+	tight := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n", "expect.yaml": loose})
+	old := repo.git("rev-parse", "HEAD")
+	repo.write(map[string]string{"incidents.yaml": "incidents:\n  - {id: INC-9, start: 2026-11-10T00:00:00Z, end: 2026-11-10T01:00:00Z}\n", "expect.yaml": tight})
+	repo.git("commit", "--quiet", "-am", "record INC-9, and a tighter budget")
+	repo.git("checkout", "--quiet", "-b", "pr", old)
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("commit", "--quiet", "-am", "slower")
+	fake, given := argsLapilli(t)
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	out, err := rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "EXPECT=expect.yaml", "TARGET=main", "LAPILLI=" + fake}, "--prometheus", "http://127.0.0.1:9")
+	incidents, before, compared := given()
+	if err != nil || !strings.Contains(incidents, "INC-9") || before != loose || compared != shopRules("5m") {
+		t.Errorf("%v: given incidents %q, expectations of the rules in place %q, rules compared against %q\n%s", err, incidents, before, compared, out)
+	}
+	// Judged by lapilli: the budget the pull request didn't touch isn't
+	// said changed in it.
+	prom := promStandIn(t)
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "TARGET=main"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		strings.Contains(rr.body(), "in this change") || !strings.Contains(rr.body(), "#### Expectations") {
+		t.Errorf("the budget, not touched: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// Through lapilli serve, the expectations alike.
+	srv := newServeStandIn(t)
+	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+	sr := serveRun(t, backtestHosts[0], repo, srv)
+	if out, err := sr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "TARGET=main"}); err != nil || srv.sent()["expect_before"] != loose {
+		t.Errorf("through serve: %v, expect_before %q\n%s", err, srv.sent()["expect_before"], out)
+	}
+}
+
+// argsLapilli is a lapilli that keeps what a recipe gave it, read by
+// given: the incidents, the expectations of the rules in place and the
+// rules compared against's shop.yaml.
+func argsLapilli(t *testing.T) (string, func() (string, string, string)) {
+	t.Helper()
+	dir := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(fake, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in\n    --incidents) cp \"$2\" '"+dir+"/incidents' ;;\n"+
+		"    --expect-before) cp \"$2\" '"+dir+"/expect-before' ;;\n    --compare) rm -rf '"+dir+"/compare'; cp -R \"$2\" '"+dir+"/compare' ;;\n  esac\n  shift\ndone\n"+
+		"echo '[//]: # (lapilli-compare {\"nothing_changed\":false,\"changed\":1,\"unreplayed\":0})'\n"), 0o755)
+	return fake, func() (string, string, string) {
+		read := func(p ...string) string {
+			b, _ := os.ReadFile(filepath.Join(append([]string{dir}, p...)...))
+			return string(b)
+		}
+		return read("incidents"), read("expect-before"), read("compare", "shop.yaml")
+	}
+}
+
+// gitlab.sh in a merge request pipeline without merged results takes the
+// target branch (CI_MERGE_REQUEST_TARGET_BRANCH_NAME), fetched from origin
+// as the job's clone lets it, for TARGET, not the merge base
+// (CI_MERGE_REQUEST_DIFF_BASE_SHA): INCIDENTS is the branch's as it is,
+// the rules compared from where the two parted. With merged results, the
+// target branch's commit. A branch's name it doesn't take leaves the merge
+// base, saying so.
+func TestBacktestRecipeGitLabTarget(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
+	old := repo.git("rev-parse", "HEAD")
+	repo.write(map[string]string{"incidents.yaml": "incidents:\n  - {id: INC-9, start: 2026-11-10T00:00:00Z, end: 2026-11-10T01:00:00Z}\n"})
+	repo.git("commit", "--quiet", "-am", "record INC-9")
+	tip := repo.git("rev-parse", "HEAD")
+	repo.git("checkout", "--quiet", "-b", "pr", old)
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("commit", "--quiet", "-am", "slower")
+	repo.git("remote", "add", "origin", repo.dir)
+	fake, given := argsLapilli(t)
+	gitlab := backtestHosts[2]
+	for _, c := range []struct {
+		name     string
+		ci       []string
+		incident bool
+		said     string
+	}{
+		{"no merged results", []string{"CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main", "CI_MERGE_REQUEST_DIFF_BASE_SHA=" + old}, true, ""},
+		{"merged results", []string{"CI_MERGE_REQUEST_TARGET_BRANCH_SHA=" + tip, "CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main", "CI_MERGE_REQUEST_DIFF_BASE_SHA=" + old}, true, ""},
+		{"a name not taken", []string{"CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main;x", "CI_MERGE_REQUEST_DIFF_BASE_SHA=" + old}, false,
+			"gitlab.sh: the target branch's name isn't one taken as TARGET_BRANCH: compared with the merge base, INCIDENTS read from it"},
+	} {
+		rr := newRecipeRun(t, gitlab, repo)
+		out, err := rr.run(append([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "LAPILLI=" + fake}, c.ci...), "--prometheus", "http://127.0.0.1:9")
+		incidents, _, compared := given()
+		if err != nil || strings.Contains(incidents, "INC-9") != c.incident || compared != shopRules("5m") || !strings.Contains(out, c.said) {
+			t.Errorf("%s: %v: given incidents %q, rules compared against %q\n%s", c.name, err, incidents, compared, out)
+		}
+	}
+}
+
+// Two paths under PATHS that differ only in case, two files or a file and
+// a directory, are one on a file system that folds case (a macOS or
+// Windows runner's): one's rules would never be backtested, and the gates
+// would pass. Such a commit isn't read, on any runner, the pair said in
+// the job's log and not the comment; through lapilli serve too, nothing
+// sent. A directory named in two cases, each of its own files, is read.
+func TestBacktestRecipeCaseFolded(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	page := "groups:\n  - name: sneaky\n    rules:\n      - alert: PageEveryone\n        expr: vector(1)\n        labels: {severity: page}\n"
+	// Refused where the file system folds case (a macOS or Windows
+	// runner's); elsewhere both paths are written and read.
+	foldsAt := t.TempDir()
+	os.WriteFile(filepath.Join(foldsAt, "case-probe"), nil, 0o600)
+	_, err := os.Stat(filepath.Join(foldsAt, "CASE-PROBE"))
+	folds := err == nil
+	for name, c := range map[string]struct{ path, pair string }{
+		"two files":            {"alerts/Shop.yaml", "alerts/Shop.yaml and alerts/shop.yaml"},
+		"a file, a directory":  {"alerts/SHOP.yaml/page.yaml", "alerts/SHOP.yaml and alerts/shop.yaml"},
+		"below, in LOKI_PATHS": {"logs/team/Page.yaml", "logs/team/Page.yaml and logs/team/page.yaml"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logs := "groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"x\"}[5m])) > 5\n"
+			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "logs/team/page.yaml": logs})
+			repo.pullRequestTree(map[string]string{c.path: page})
+			why := "the pull request's commit holds two paths that differ only in case, which a file system that folds case (macOS's, Windows') writes as one: not read (the job's log says which)"
+			if !folds {
+				if strings.HasPrefix(c.path, "alerts/") {
+					rr := newRecipeRun(t, backtestHosts[0], repo)
+					out, _ := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+					if strings.Contains(out, "differ only in case") || strings.Contains(rr.body(), "differ only in case") || !strings.Contains(rr.body(), "PageEveryone") {
+						t.Errorf("a file system that doesn't fold case: both read\n%s\n%s", rr.body(), out)
+					}
+				}
+				srv := newServeStandIn(t)
+				srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(`{"nothing_changed":false,"changed":0,"added":1,"removed":0,"same":1,"alike":0,"unreplayed":0,"expected":true,"expectations_broken":0,"unexpected":0}`))})
+				sr := serveRun(t, backtestHosts[0], repo, srv)
+				out, _ := sr.run([]string{"PATHS=alerts", "LOKI_PATHS=logs"})
+				if posts, _, _ := srv.counts(); posts != 1 || strings.Contains(out, "differ only in case") {
+					t.Errorf("through serve, a file system that doesn't fold case: %d POSTs\n%s", posts, out)
+				}
+				return
+			}
+			if strings.HasPrefix(c.path, "alerts/") {
+				rr := newRecipeRun(t, backtestHosts[0], repo)
+				out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+				block := failure(t, rr.body(), why)
+				if err == nil || !strings.Contains(out, "two paths that differ only in case, in the pull request's commit: "+c.pair) ||
+					strings.Contains(rr.body(), "SHOP") || strings.Contains(rr.body(), "Shop") {
+					t.Errorf("%v\n%s\n%s\n%s", err, block, rr.body(), out)
+				}
+			}
+			srv := newServeStandIn(t)
+			sr := serveRun(t, backtestHosts[0], repo, srv)
+			out, _ := sr.run([]string{"PATHS=alerts", "LOKI_PATHS=logs"})
+			failure(t, sr.body(), why)
+			if posts, _, _ := srv.counts(); posts != 0 || !strings.Contains(out, c.pair) {
+				t.Errorf("through serve: %d POSTs\n%s", posts, out)
+			}
+		})
+	}
+	// A letter past ASCII in another case, which a file system that folds
+	// case takes as one too: seen by the files written, fewer than the
+	// commit holds, where it does.
+	probe := t.TempDir()
+	os.WriteFile(filepath.Join(probe, "\u00e9"), nil, 0o600)
+	if _, err := os.Stat(filepath.Join(probe, "\u00c9")); err == nil {
+		repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "alerts/\u00e9.yaml": shopRules("10m")})
+		repo.pullRequestTree(map[string]string{"alerts/\u00c9.yaml": page})
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+		failure(t, rr.body(), "the pull request's commit holds files whose names this machine's file system takes as one, as one that folds case does (macOS's, Windows'): not read (the job's log says how many)")
+		if err == nil || !strings.Contains(out, "the pull request's commit: 3 files, 2 of them once written here") {
+			t.Errorf("past ASCII: %v\n%s", err, out)
+		}
+	}
+	// A directory in two cases, a file of its own in each: read.
+	repo := newPRRepo(t, map[string]string{"alerts/team/shop.yaml": shopRules("5m")})
+	repo.pullRequestTree(map[string]string{"alerts/TEAM/page.yaml": page})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	if out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil || strings.Contains(rr.body(), "differ only in case") {
+		t.Errorf("a directory in two cases: %v\n%s\n%s", err, rr.body(), out)
+	}
+}
+
+// The files written are counted without reading their names: a decoy
+// whose name holds a line's end, two lines to find, makes up for no file
+// lost to a pair the check by case can't see (\u00c9.yaml over
+// \u00e9.yaml, quoted by ls-tree), where the file system folds case. Alone,
+// on any file system, such a file is read.
+func TestBacktestRecipeCaseFoldNewline(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequestTree(map[string]string{"alerts/shop.yaml": shopRules("2h"), "alerts/x\ny.yaml": "groups: []\n"})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	if out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		strings.Contains(rr.body(), "takes as one") || strings.Contains(rr.body(), "### Lapilli backtest failed") {
+		t.Errorf("a name with a line's end, alone: %v\n%s\n%s", err, rr.body(), out)
+	}
+	probe := t.TempDir()
+	os.WriteFile(filepath.Join(probe, "\u00e9"), nil, 0o600)
+	if _, err := os.Stat(filepath.Join(probe, "\u00c9")); err != nil {
+		return // a file system that doesn't fold case writes both
+	}
+	page := "groups:\n  - name: sneaky\n    rules:\n      - alert: PageEveryone\n        expr: vector(1)\n        labels: {severity: page}\n"
+	for name, decoy := range map[string]bool{"no decoy": false, "a decoy": true} {
+		repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "alerts/\u00e9.yaml": shopRules("10m")})
+		files := map[string]string{"alerts/\u00c9.yaml": page}
+		if decoy {
+			files["alerts/x\ny.yaml"] = "groups: []\n"
+		}
+		repo.pullRequestTree(files)
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+		if err == nil || !strings.Contains(rr.body(), "takes as one") {
+			t.Errorf("%s: read (%v), \u00c9.yaml's PageEveryone never backtested\n%s\n%s", name, err, rr.body(), out)
+		}
+	}
 }
 
 // RENDER runs in each commit's files, the base's first, each with a HOME

@@ -87,7 +87,8 @@
 #                    it (default HEAD^1: the merge commit's first parent, as
 #                    GitHub checks a pull request out); the rules compared
 #                    against are those of the commit HEAD and TARGET share
-#                    last (git merge-base)
+#                    last (git merge-base), as are the expectations of the
+#                    rules in place; INCIDENTS is TARGET's own
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -165,7 +166,8 @@
 #   SERVE_POLL       how many seconds apart serve is asked (default 10, 0
 #                    to 60)
 #   SERVE_RETRY_MIN  for tests: the least serve's Retry-After is waited, in
-#                    seconds (default 5, 0 to 5), or SERVE_POLL if longer
+#                    seconds (default 5, 0 to 5), or SERVE_POLL if longer;
+#                    a second at least, whatever both say
 #
 # What can fail once it runs (the install, the commits, RENDER, the
 # backtest) is said in the comment, and the job succeeds unless
@@ -492,13 +494,15 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     *) say "SERVE_POLL $serve_poll: want how many seconds apart to ask lapilli serve, 0 to 60"; exit 1 ;;
   esac
   # The least serve's Retry-After is waited: a Retry-After of 0, or none,
-  # isn't a loop of requests. Lowered only for tests.
+  # isn't a loop of requests. Lowered only for tests, and never below a
+  # second, whatever SERVE_RETRY_MIN and SERVE_POLL say.
   retry_min=${SERVE_RETRY_MIN:-5}
   case $retry_min in
     [0-5]) ;;
     *) say "SERVE_RETRY_MIN $retry_min: want the least seconds lapilli serve's Retry-After is waited, 0 to 5 (for tests; 5 unless set)"; exit 1 ;;
   esac
   [ "$retry_min" -ge "$serve_poll" ] || retry_min=$serve_poll
+  [ "$retry_min" -ge 1 ] || retry_min=1
   case $(date +%s 2>/dev/null) in
     '' | *[!0-9]*) say "date +%s doesn't say the time in seconds here: SERVE_WAIT can't be kept"; exit 1 ;;
   esac
@@ -959,6 +963,12 @@ commits() {
   fi
 }
 
+# folds_case: whether the file system the commits are written to takes two
+# names that differ only in case as one.
+folds_case() {
+  : >"$tmp/case-probe" && [ -e "$tmp/CASE-PROBE" ]
+}
+
 # files COMMIT DIR WHAT: COMMIT's files into DIR, as git keeps them: all of
 # them with RENDER, those PATHS names without, an empty directory in place
 # of each it hasn't. With the attributes of an empty work tree and an empty
@@ -990,10 +1000,51 @@ files() {
     trouble "$what is too big to read: $big"
     return 1
   fi
+  if [ -z "${RENDER:-}" ] && folds_case; then
+    # Two files whose paths differ only in case, or a file and a directory
+    # so, are one on a file system that folds case (a macOS or Windows
+    # runner's): written one over the other, one's rules would never be
+    # backtested, and the gates would pass. Refused where this machine's
+    # file system folds case, the pair in the job's log alone: their names
+    # are the pull request's. Elsewhere both are written, and read, as
+    # Prometheus reads them.
+    pair=$(git -C "$repo" ls-tree -r --name-only "$c" -- "$@" | awk '
+      {
+        f = $0; k = tolower(f)
+        if ((k in file) && file[k] != f) { print file[k] " and " f; exit }
+        if (k in dir) { print dir[k] " and " f; exit }
+        file[k] = f
+        n = split(f, part, "/"); p = ""
+        for (i = 1; i < n; i++) {
+          p = (i == 1 ? part[i] : p "/" part[i]); q = tolower(p)
+          if (q in file) { print file[q] " and " p; exit }
+          if (!(q in dir)) dir[q] = p
+        }
+      }')
+    if [ -n "$pair" ]; then
+      say "two paths that differ only in case, in $what: $pair"
+      trouble "$what holds two paths that differ only in case, which a file system that folds case (macOS's, Windows') writes as one: not read (the job's log says which)"
+      return 1
+    fi
+  fi
   if ! (cd "$tmp/empty" && GIT_INDEX_FILE=$tmp/index git --git-dir="$gitdir" --work-tree=. archive --worktree-attributes \
     --format=tar -o "$tmp/c.tar" "$c" -- "$@") 2>"$tmp/git.log" || ! tar -x -f "$tmp/c.tar" -C "$d" 2>>"$tmp/git.log"; then
     trouble "$what couldn't be read" "$tmp/git.log"
     return 1
+  fi
+  if [ -z "${RENDER:-}" ]; then
+    # And whatever else this file system takes as one name (a letter
+    # past ASCII in another case, or written in other code points):
+    # fewer files written than the commit holds. Counted without reading
+    # a name, a line each, as a name may hold a line's end: find prints a
+    # dot a file; ls-tree quotes a name with one, on a line of its own.
+    listed=$(git -C "$repo" ls-tree -r "$c" -- "$@" | awk '$2 == "blob" { n++ } END { print n + 0 }')
+    written=$(find "$d" \( -type f -o -type l \) -exec sh -c 'for f do echo .; done' sh {} + | awk 'END { print NR }')
+    if [ "$written" -lt "$listed" ]; then
+      say "$what: $listed files, $written of them once written here"
+      trouble "$what holds files whose names this machine's file system takes as one, as one that folds case does (macOS's, Windows'): not read (the job's log says how many)"
+      return 1
+    fi
   fi
   l=$(find "$d" -type l | head -n 1)
   if [ -n "$l" ]; then
@@ -1005,29 +1056,37 @@ files() {
 }
 
 # incidents: INCIDENTS, as the commit the pull request goes into has it,
-# into $tmp/incidents.yaml: a file, not a link, of 8 MiB at most.
+# TARGET itself, into $tmp/incidents.yaml: a file, not a link, of 8 MiB at
+# most. Not as the commit the rules are compared against has it, where the
+# pull request branched from TARGET's branch, which its author picks: a
+# pull request branched from before an incident was recorded would be
+# judged without it.
 incidents() {
   [ -n "${INCIDENTS:-}" ] || return 0
-  mode=$(git -C "$repo" ls-tree "$base" -- "$INCIDENTS" | awk '{ print $1 }')
+  mode=$(git -C "$repo" ls-tree "$target" -- "$INCIDENTS" | awk '{ print $1 }')
   case $mode in
     100644 | 100755) ;;
     '') trouble "INCIDENTS $INCIDENTS isn't in the commit the pull request goes into"; return 1 ;;
     *) trouble "INCIDENTS $INCIDENTS isn't a file in the commit the pull request goes into"; return 1 ;;
   esac
-  if [ "$(git -C "$repo" cat-file -s "$base:$INCIDENTS")" -gt 8388608 ]; then
+  if [ "$(git -C "$repo" cat-file -s "$target:$INCIDENTS")" -gt 8388608 ]; then
     trouble "INCIDENTS $INCIDENTS is more than 8 MiB"
     return 1
   fi
-  git -C "$repo" cat-file blob "$base:$INCIDENTS" >"$tmp/incidents.yaml" ||
+  git -C "$repo" cat-file blob "$target:$INCIDENTS" >"$tmp/incidents.yaml" ||
     { trouble "INCIDENTS $INCIDENTS couldn't be read from the commit the pull request goes into"; return 1; }
 }
 
 # expectations: EXPECT, as each commit has it, into
 # $tmp/expect.head.yaml (the pull request's, for the rules it proposes) and
-# $tmp/expect.base.yaml (the commit it goes into's, for the rules in place):
-# files, not links, of 1 MiB at most. The pull request may add the file,
-# and the rules in place are held to its; or take it away, as if it held
-# none: what it held is shown, taken away. In neither commit, it is said.
+# $tmp/expect.base.yaml (the commit the rules are compared against's, for
+# the rules in place): files, not links, of 1 MiB at most. Both sides as
+# the pull request's branch has them, so that what it says changed is
+# what it changed: a pull request is held to the expectations of its own
+# commit, the target's where the job checks out a merge (merged results,
+# or a branch rebased). The pull request may add the file, and the rules
+# in place are held to its; or take it away, as if it held none: what it
+# held is shown, taken away. In neither commit, it is said.
 expectations() {
   [ -n "${EXPECT:-}" ] || return 0
   for side in head base; do
@@ -1356,8 +1415,15 @@ text() { jq -Rsj . "$1" | cmp -s - "$1"; }
 # --rules would read, named by its path under what PATHS names, as --rules
 # reads a directory (a file it holds is the directory's, one below it a
 # directory's below), a file PATHS names by its own name, and what RENDER
-# wrote as rules.yaml; files and directories whose names begin with a dot
-# passed over, as --rules passes them over. LOKI_PATHS's alike, each with
+# wrote as rules.yaml. Hidden ones too, a name in their path beginning with
+# a dot, as Prometheus's rule_files glob loads alerts/.page.yaml and
+# alerts/..page.yaml and --rules reads one holding rules: serve passes over
+# those holding none. A hidden one that isn't UTF-8 text, such as a
+# .DS_Store, is no rule file, and isn't sent; but one in UTF-16 or UTF-32,
+# its BOM first, Prometheus reads as rules, and is said as any file that
+# isn't UTF-8 text is. A directory named .git is never sent; names
+# beginning with .. are, as a commit's files hold no Kubernetes volume's
+# own (the recipe refuses a commit holding a link). LOKI_PATHS's alike, each with
 # "loki": true, a Loki ruler's. WHAT names the commit.
 side() {
   s=$1 what=$2
@@ -1386,12 +1452,22 @@ side() {
     fi
     [ -e "$root" ] || continue
     # shellcheck disable=SC2016
-    if ! find "$root" ! -path "$root" -name '.*' -prune -o -type f -exec sh -c '
+    if ! find "$root" ! -path "$root" -type d -name .git -prune -o -type f -exec sh -c '
       root=$1 out=$2 loki=$3
       shift 3
       for f; do
         if [ -d "$root" ]; then rel=${f#"$root"/}; else rel=${f##*/}; fi
         if ! jq -Rsj . "$f" | cmp -s - "$f"; then
+          # Hidden, and not text: no rule file, unless its BOM says UTF-16
+          # or UTF-32, which Prometheus reads.
+          case /$rel in
+            */.*)
+              case $(od -An -tx1 -N4 "$f" | tr -d " \n") in
+                fffe* | feff* | 0000feff) ;;
+                *) continue ;;
+              esac
+              ;;
+          esac
           printf "%s" "$rel" >"$out.unsent"
           exit 1
         fi
@@ -1506,8 +1582,9 @@ serve_said() {
   fi
 }
 # retry_after DEFAULT: the seconds serve's Retry-After says, or DEFAULT
-# without one; 300 at most, and SERVE_RETRY_MIN (5), or SERVE_POLL if
-# longer, at least: a Retry-After of 0 isn't a loop of requests.
+# without one; 300 at most, and at least SERVE_RETRY_MIN (5), or
+# SERVE_POLL if longer, and a second whatever they say: a Retry-After of 0
+# isn't a loop of requests.
 retry_after() {
   tr -d '\r' <"$tmp/serve.headers" | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\) *$/\1/p' | tail -n 1 |
     awk -v def="$1" -v least="$retry_min" '{ v = $1 + 0 } END { n = (NR ? v : def); if (n > 300) n = 300; if (n < least) n = least; print n }'

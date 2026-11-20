@@ -505,7 +505,11 @@ run is recorded yet.
 "asked"}`; 200 `{"state": "done", "markdown", "report"}` or
 `{"state": "failed", "error"}`, the error in the words `trouble` puts in a
 comment, nothing of where the history is; `superseded`. An unknown id and a
-wrong key are the same 404. **`DELETE /v1/backtests/{id}`**, with the key:
+wrong key are the same 404, once a listing of the ledger's backtests begun
+after the request came doesn't know them (since 0.63.2); past the
+address's 20 waiting, and when no listing ends within 2 seconds, 503 with
+`Retry-After`, so that a job's first poll through another replica than
+the one it asked is never said not found. **`DELETE /v1/backtests/{id}`**, with the key:
 a job cancelled stops waiting, or running.
 
 The recipe: `LAPILLI_SERVE` (the port's URL, https, or http to the machine
@@ -791,7 +795,9 @@ Where step 1 does otherwise than the sections above say, or says more:
   it otherwise. A CI's RSA keys are taken at 4096 bits at most, beside
   the 2048 bits at least every identity provider's are held to (#136),
   and a failed discovery is asked again once a minute at most, not every
-  ten seconds as a sign-in's is.
+  ten seconds as a sign-in's is. A token that names no key (`kid`) is
+  tried against the first three of its issuer's keys alone, not each of
+  a hundred (since 0.63.2): the CIs' tokens name theirs.
 - **One audience.** A token naming several audiences is refused, even with
   the entry's among them: it was made for others too. `iat` may be up to
   five minutes ahead, the leeway `Bearer` gives.
@@ -866,7 +872,8 @@ Where step 1 does otherwise than the sections above say, or says more:
 - **The hour before the body.** An entry's `hourly` is taken right after
   the token, before the body is read, and given back for one refused
   before it is queued; two bodies are read and checked at once at most,
-  past them 429.
+  past them 429. (A token that started a backtest keeps it, since 0.63.2:
+  "The third round" below.)
 - **A token without `jti`** (Forgejo's) is known by the SHA-256 of its
   payload as it was signed, not of the string sent: base64url's bits past
   the last byte, which go-jose passes over, write one token many ways. A
@@ -881,17 +888,37 @@ Where step 1 does otherwise than the sections above say, or says more:
   `workflow_run` or `schedule`.
 - **What a rule reads back.** Beside `for`, a range, a subquery or an
   offset a week back at most, a subquery of 11,000 points at most, and no
-  `@` (`rules.Reach`; added up, 8 days, from the second round).
+  `@` (`rules.Reach`; added up, 8 days, from the second round); no
+  `info()`, which reads `target_info` beside the metric it names
+  (`rules.Unnamed`, since 0.63.2). Since
+  0.63.2, PromQL every history `--prometheus` takes reads alike
+  (`rules.Unalike`): VictoriaMetrics' MetricsQL reads a `\` in a name, `or`
+  in braces, an offset after any expression and `WITH` templates, and
+  Prometheus with unquoted UTF-8 names a name that isn't ASCII, each
+  otherwise than these checks; what any of them could read otherwise is
+  refused.
 - **A pull request superseded by its token's word alone.** Only a number
   the token names (GitHub's and Forgejo's `ref`) supersedes the backtest
   waiting for it; one the job said (GitLab, a plain token, a `push`)
-  supersedes none. The leader takes the oldest of the entry that started
+  supersedes none. Nor, since 0.63.2, does a token whose repository's name
+  isn't kept (past 200 bytes, or with what doesn't show: ""), as the
+  backtest waiting is matched by that name: two repositories an entry pins,
+  each named so, would be one. The repository's id would tell them apart,
+  but isn't kept (a column of its own is a schema change). The leader takes the oldest of the entry that started
   one least lately. One started twice whose leader stopped each time
   (`attempts`, in 023) fails, saying so; one that panics fails. What ended
   a day ago goes at each of the leader's rounds, the port on or not.
-- **Reads by the key.** Each lookup is charged to the client's address
-  before the ledger is asked, and given back when the key is right; a
-  backtest's reads are limited by its id too.
+- **Reads by the key.** Each process keeps the backtests' key hashes by
+  id, those it queued and the ledger's, listed a second apart at most: a
+  pair it knows is read whatever comes from its address; one it doesn't
+  waits for a listing begun after it came, charged to the client's address
+  while it waits (since 0.63.2; before, each lookup was charged to the
+  address, behind an ingress everyone's). A backtest's reads are limited
+  by its id too. 4,096 addresses, and as many ids, are kept so (`perKey`):
+  past them, only those refilled to their burst go, a second apart at
+  most, and while none can, one not kept is refused, as one past its
+  bucket is (since 0.63.2; before, all went at once, the spent ones among
+  them, for anyone with 4,096 addresses to begin afresh).
 - **The second round.** An entry has one turn to have a body read, within
   the two of all entries, and a body comes within 5 seconds of its
   headers; the hour taken stays taken for a request refused as sent (a
@@ -919,7 +946,10 @@ Where step 1 does otherwise than the sections above say, or says more:
 - **The third round.** What can be told without the body is asked before
   it is read (`ledger.BacktestRoom`): a token that started a backtest, and
   the queue's room for the entry, less a newer commit's pull request's
-  waiting one; each refused cheaply, its hour given back. Once the body is
+  waiting one; each refused cheaply, its hour given back, but for a token
+  that started one, which keeps it (since 0.63.2): its job has its
+  backtest, and the token sent again and again would cost a signature and
+  the ledger's reads each time, past the entry's hourly. Once the body is
   read, a request refused keeps its hour, the queue's and the token's own
   checks at `AskBacktest` among them: an entry keeping its three waiting
   can't send heavy bodies to be read and checked, refused, again and
@@ -955,8 +985,12 @@ Where step 1 does otherwise than the sections above say, or says more:
 - **The recipe's serve mode, as built.** The files are named by their path
   under what `PATHS` names, as `--rules` reads a directory (a file it holds
   is the directory's, and what doesn't read in it is said, not passed
-  over), and what `RENDER` wrote as `rules.yaml`; files whose names begin
-  with a dot are passed over, as `--rules` passes them over. Two of `PATHS`
+  over), and what `RENDER` wrote as `rules.yaml`. Hidden files (a name in
+  the path beginning with a dot, `..` too) are sent too, since 0.63.2, as
+  Prometheus's `rule_files` glob loads them and `--rules` reads one that
+  holds rules: one that isn't UTF-8 text and has no BOM isn't, nor any
+  under a `.git` directory; one in UTF-16 or UTF-32, its BOM first, is
+  said, as Prometheus reads it. Two of `PATHS`
   holding a file of one name, a file that isn't UTF-8 text, and a body past
   4 MiB are said in the comment before anything is sent. `--since` is
   taken in whole days, `1d` to `14d`; every argument but it, `--tz` and
@@ -976,13 +1010,22 @@ Where step 1 does otherwise than the sections above say, or says more:
   for, and the job's log says when it isn't `LAPILLI_SERVE`; the action's
   `audience` is it. In GitHub Actions, `github.sh` masks the ID token it
   gets (`::add-mask::`) before anything else could log it, as
-  `core.getIDToken` does; `gitea.sh` doesn't, Forgejo documenting no such
-  command. An expectations file of no bytes is sent as `"expect": ""`,
+  `core.getIDToken` does; `gitea.sh` doesn't, though Forgejo's runner
+  (act's) reads the command as GitHub's does (0.63.2 put right what this
+  said before: that Forgejo has no such command). An expectations file of no bytes is sent as `"expect": ""`,
   given, as `--expect` takes it; the field is left out only when the
-  commit has no file. `Retry-After` is waited, 5 minutes at most, 5
-  seconds at least (or `SERVE_POLL` if longer: a `Retry-After` of 0 isn't
-  a loop; `SERVE_RETRY_MIN` lowers the 5 for tests), and never past
-  `SERVE_WAIT`; a read that fails is asked again, five times in a row at
+  commit has no file. `expect_before` is the file as the commit the two
+  share has it, as the pull request's branch does: a pull request is held
+  to the expectations in its own commit, the target's where the job
+  checks out a merge. Where the runner's file system folds case, a
+  commit with two paths under `PATHS` or `LOKI_PATHS` that differ only in
+  case isn't read, nor anywhere one of more files than the runner's file
+  system holds of it once written (since 0.63.2): a macOS or Windows
+  runner writes one over the other.
+  `Retry-After` is waited, 5 minutes at most, 5 seconds at least (or
+  `SERVE_POLL` if longer: a `Retry-After` of 0 isn't a loop;
+  `SERVE_RETRY_MIN` lowers the 5 for tests, to a second at least since
+  0.63.2), and never past `SERVE_WAIT`; a read that fails is asked again, five times in a row at
   most; past `SERVE_WAIT`, and when the job ends first, the backtest is
   cancelled. `SERVE_POLL` (10 seconds) is how often it is read.
 - **The recipe posts of serve's report only what lapilli writes.** Serve
@@ -1159,7 +1202,12 @@ step 3 does otherwise than the sections above say, or says more:
   before the evaluation at most; each query the replay asks held as a
   rule's expression is, one metric a selector, and what it reads back,
   with the relativeTimeRange's end, or a reduce's window over LogQL, added
-  up within 8 days.
+  up within 8 days; and each data source query a day further back again
+  (since 0.63.2), as the replay asks it over the day before when it
+  returns nothing (`replay`'s probe), and, in PromQL, that day's
+  subquery, at the group's interval (`replay.ProbeStep`), held to 11,000
+  points: an interval of 8 seconds at least. A classic condition's window
+  is counted in the queries its reducers ask.
 - **LogQL's bounds**, of a Loki ruler's rule and a Grafana rule's on a
   Loki data source: a metric query, never one of log lines; each stream
   selector naming its streams by a label matched with `=` to a value that
@@ -1190,9 +1238,11 @@ step 3 does otherwise than the sections above say, or says more:
   (`X-Scope-OrgID`), never the request's, whose body has no field for
   one; at its share of that Loki's pace (a Grafana data source's at its
   share of the Grafana's), which the runs keep for it only while a
-  backtest asking that Loki runs, as `--prometheus`'s; and every request
-  of the lane, of every API, within a quarter of `--parallel` at once, as
-  the memory estimate counts them.
+  backtest asking that Loki runs, as `--prometheus`'s; each request given
+  up on a minute after it is sent (since 0.63.2), where a Prometheus is
+  told `timeout=1m`, which Loki doesn't take; and every request of the
+  lane, of every API, within a quarter of `--parallel` at once, as the
+  memory estimate counts them.
 - **`query_offset` is a read back.** A group's `query_offset` asks each
   query that long before its evaluation, so it is added to what a rule
   reads back, 8 days at most in all. Step 1 didn't count it: a pull
@@ -1216,8 +1266,13 @@ step 3 does otherwise than the sections above say, or says more:
 - **MCP's `compare`** takes no Grafana rule, and a rule in LogQL only as a
   change to a Loki ruler's rule in effect, asked of `--loki` in its
   namespace (`proposed`): no data source the rules in effect don't read.
-  Left as it is: it holds a rule to none of the port's bounds, LogQL's
-  among them, so a comment has no check of its to hide anything from.
+  Left as it is: it holds a rule to none of the port's bounds, its PromQL
+  and its LogQL alike (one metric a selector, what it reads back, a
+  group's `query_offset`), so a comment has no check of its to hide
+  anything from. Its callers are those `--mcp-compare` names, editors or
+  admins, trusted with what serve reads; what holds it is what holds every
+  replay (14 days, 25 seconds, `--max-samples`, Loki's 256 MiB and no log
+  lines). Looked at again for 0.63.2: its LogQL is held as its PromQL is.
 
 ## Steps
 

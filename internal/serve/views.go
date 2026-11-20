@@ -2251,14 +2251,8 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	if v.Criteria, err = s.criteriaView(ctx, set); err != nil {
 		return v, err
 	}
-	cs, err := s.l.Changes(ctx, 100)
-	if err != nil {
+	if v.Changes, err = s.l.SettingChanges(ctx, 20); err != nil {
 		return v, err
-	}
-	for _, c := range cs {
-		if strings.HasPrefix(c.What, "setting ") && len(v.Changes) < 20 {
-			v.Changes = append(v.Changes, c)
-		}
 	}
 	return v, nil
 }
