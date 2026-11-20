@@ -308,8 +308,10 @@ own killed whole at 30s, 64 KiB of what it says at most, and, on Linux,
 rule's annotation template can ask promtool for gigabytes; promtool's
 release, built without cgo, starts in less than 64Mi, while one built
 with cgo maps 8 MiB more for each of its threads, so give it 512Mi; macOS
-sets no cap), five a run, never while the ledger's writer is held, each kept as
-begun before it starts, and again only when promtool, the group or the
+sets no cap), five a run, never while the ledger's writer is held, and
+one at a time across serve, a run's and an agent's check alike (an
+agent's waits within its check's time, and is not known, saying so, past
+it), each kept as begun before it starts, and again only when promtool, the group or the
 test file changed: one that never ended (serve killed as promtool took
 its memory) isn't run again each term; one serve stopped itself, shutting
 down or no longer the leader, is run again. It is met when promtool says

@@ -598,7 +598,9 @@ Step 3, drafts, as built:
   promtool read labels there). Each is plain text: a tag such as
   `!!binary`, which promtool's YAML would decode into another text, is
   refused. An agent's scenarios run one at a time across serve, whatever
-  else holds the comparison's turn.
+  else holds the comparison's turn (another agent's running, one is not
+  run, saying so), and each waits for promtool's one turn, which a
+  round's scenario may hold (step 4), within the check's deadline.
 - **Accepting** is an approver's, in a browser, as approving a proposal is
   (same site, no bearer token, `--changes` on, the page's form). Where
   serve's expectations come from `--expect`, with the change recipes'
@@ -768,7 +770,14 @@ Step 4, scenarios, as built:
   ended (shut down, or the lease lost), isn't one that died: it is kept
   with no version, written past the ended context, and run again by the
   next leader. The rest not known (`not_run_yet`) until a
-  later round. Not known says why: `no_promtool`, `not_prometheus`,
+  later round. **One promtool at a time across serve**, a round's and an
+  agent's (`test_expectation`, `propose_expectation`, a new rule's
+  check) alike, each taking `--promtool-memory` beside serve's own under
+  one container's limit: each waits its turn within its own context,
+  never holding the ledger's writer; a round's before its run is kept as
+  begun (one that waited and never began isn't kept so), an agent's
+  within its check's deadline, past which it is not known, saying so (not
+  in the design: 0.65.0 could run two at once, a review's Low). Not known says why: `no_promtool`, `not_prometheus`,
   `not_run_yet`, `test_unread`, `run_failed`. Schema 027, unreleased, was
   changed in place for it: a column `detail` (what promtool said, or why
   it couldn't run, 2,000 bytes). A broken one is told
