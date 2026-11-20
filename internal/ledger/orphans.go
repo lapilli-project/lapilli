@@ -159,6 +159,13 @@ func (l *Ledger) MoveRuleKept(ctx context.Context, from, to, by string) error {
 			if err != nil {
 				return err
 			}
+			if was.TeamID != 0 && (now == nil || now.TeamID == 0) {
+				// The rule it moves to takes the team of the one moved:
+				// moved into a team, as a note's team is (teamMovable).
+				if err := l.teamMovable(t); err != nil {
+					return err
+				}
+			}
 			if was.TeamID != 0 || now != nil && now.TeamID != 0 {
 				// Who owns a rule may change: a team's window may quiet it now.
 				if err := l.pendTeamWindows(t); err != nil {

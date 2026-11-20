@@ -9,10 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/source"
 )
 
 // A team as the boundary of change (bounds.go): each guard here is what a
@@ -286,10 +289,11 @@ func TestTeamMovedBetween(t *testing.T) {
 		t.Fatal(code)
 	}
 	payments, _ := o.team("payments")
-	if err := s.l.PutNote(ctx, ledger.Note{Rule: "PayDown", TeamID: checkout.ID}, ana); err != nil {
+	// Moved by an admin: with the boundaries declared, an admin's alone.
+	if err := s.l.PutNote(ledger.AsAdmin(ctx), ledger.Note{Rule: "PayDown", TeamID: checkout.ID}, ana); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.l.PutNote(ctx, ledger.Note{Rule: "CartSlow", TeamID: payments.ID}, ana); err != nil {
+	if err := s.l.PutNote(ledger.AsAdmin(ctx), ledger.Note{Rule: "CartSlow", TeamID: payments.ID}, ana); err != nil {
 		t.Fatal(err)
 	}
 	for _, who := range []string{quinn, rob, ana} {
@@ -622,5 +626,354 @@ func TestFreezeSpan(t *testing.T) {
 	// In UTC the same instants: the tz decides the calendar, not the clock.
 	if !w.Covers(time.Date(2026, 11, 10, 14, 30, 0, 0, time.UTC)) || w.Covers(time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)) {
 		t.Error("in UTC")
+	}
+}
+
+// (a) An editor of every team who approves for checkout moves payments's
+// PayDown into checkout with a note, then approves its change as
+// checkout's approver. With the boundaries declared, a rule's team is an
+// admin's to move, by the note's form, the API, the rules list's bulk
+// "team" and the Cleanup page's move alike; the note's other fields are
+// still an editor's.
+func TestNoteTeamAdminsOnly(t *testing.T) {
+	ctx := context.Background()
+	s, _ := boundsServer(t, teamsConfig, func(c *Config) { c.Editors = append(c.Editors, rob) })
+	h := s.Handler()
+	o, _ := s.owners(ctx)
+	checkout, _ := o.team("checkout")
+	into := itoa(checkout.ID)
+	if code, body, _ := ui(t, h, http.MethodPost, "/notes", rob, "same-origin", url.Values{"rule": {"PayDown"}, "team": {into}}); code != http.StatusForbidden {
+		t.Errorf("rob moving PayDown by the note's form: %d %s", code, zzMsg(body))
+	}
+	if code, body, _ := apiAs(t, h, http.MethodPut, "/api/v1/notes", ledger.Note{Rule: "PayDown", TeamID: checkout.ID}, rob, "", ""); code != http.StatusForbidden {
+		t.Errorf("rob moving PayDown through the API: %d %s", code, body)
+	}
+	code, _, hd := ui(t, h, http.MethodPost, "/rules/bulk", rob, "same-origin", url.Values{"do": {"team"}, "team": {into}, "rule": {"PayDown"}, "back": {"/rules"}})
+	if q, _ := url.ParseQuery(strings.SplitN(hd.Get("Location"), "?", 2)[1]); code != http.StatusSeeOther || q.Get("admins") != "1" || q.Get("done") != "" {
+		t.Errorf("rob moving PayDown from the rules list: %d %s", code, hd.Get("Location"))
+	}
+	// A rule's records moved from a name no rule has any more, whose note
+	// is checkout's: PayDown would take its team.
+	if err := s.l.PutNote(ledger.AsAdmin(ctx), ledger.Note{Rule: "PayDownOld", TeamID: checkout.ID}, ana); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, "/orphans/move", rob, "same-origin", url.Values{"from": {"PayDownOld"}, "to": {"PayDown"}}); code != http.StatusForbidden {
+		t.Errorf("rob moving a note of checkout's onto PayDown: %d", code)
+	}
+	if o, _ := s.owners(ctx); o.byID[o.owner("PayDown")].Name != "payments" {
+		t.Fatalf("PayDown is %s's", o.byID[o.owner("PayDown")].Name)
+	}
+	// So bo's proposal is payments's, and rob doesn't approve it.
+	id, _ := proposeSaysAs(t, h, bo, "PayDown")
+	if code, _ := approveAs(t, s, id, rob); code != http.StatusForbidden {
+		t.Errorf("rob approving PayDown's change: %d", code)
+	}
+	// The rest of a note is an editor's still; its team, an admin's.
+	if code, _, _ := ui(t, h, http.MethodPost, "/notes", rob, "same-origin", url.Values{"rule": {"PayDown"}, "status": {"tune"}}); code != http.StatusSeeOther {
+		t.Errorf("rob's note without moving it: %d", code)
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, "/notes", ana, "same-origin", url.Values{"rule": {"CartSlow"}, "team": {into}}); code != http.StatusSeeOther {
+		t.Errorf("an admin's note: %d", code)
+	}
+	// Without boundaries, as before: an editor's.
+	declare(t, s, strings.ReplaceAll(strings.ReplaceAll(teamsConfig, "    approvers: [user:quinn@example.com]\n", ""), "    approvers: [user:rob@example.com]\n", ""))
+	if code, _, _ := ui(t, h, http.MethodPost, "/notes", rob, "same-origin", url.Values{"rule": {"PayDown"}, "team": {into}}); code != http.StatusSeeOther {
+		t.Errorf("without boundaries: %d", code)
+	}
+}
+
+// (b) payments's own freeze, and its changes_in, hold PayDown however a
+// note moves it: bo, an editor of every team, doesn't move it into
+// checkout now; a note an admin wrote (or one written before the
+// boundaries were) leaves it held by both teams' boundaries, and no one
+// team's to approve.
+func TestNoteMovedHeldByBoth(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	const cara = "cara@example.com" // an editor of checkout alone
+	s, _ := boundsServer(t, strings.Replace(teamsConfig, "grants:\n", "grants:\n  - {user: cara@example.com, team: checkout}\n", 1), nil)
+	s.wall = func() time.Time { return at }
+	h := s.Handler()
+	o, _ := s.owners(ctx)
+	checkout, _ := o.team("checkout")
+	if code, body, _ := ui(t, h, http.MethodPost, "/notes", bo, "same-origin", url.Values{"rule": {"PayDown"}, "team": {itoa(checkout.ID)}}); code != http.StatusForbidden {
+		t.Fatalf("bo moving PayDown into checkout: %d %s", code, zzMsg(body))
+	}
+	if err := s.l.PutNote(ledger.AsAdmin(ctx), ledger.Note{Rule: "PayDown", TeamID: checkout.ID}, ana); err != nil {
+		t.Fatal(err)
+	}
+	// Neither team's editor proposes for it alone.
+	for _, who := range []string{cara, pat} {
+		if _, code := proposeSaysAs(t, h, who, "PayDown"); code != http.StatusForbidden {
+			t.Errorf("%s, an editor of one team, proposing for PayDown: %d", who, code)
+		}
+	}
+	before, _ := proposeSaysAs(t, h, bo, "PayDown")
+	if w := proposalEvidence(state(t, s, before)).ownedBy; len(w.Owners) != 2 {
+		t.Errorf("kept as owned by %+v, not by both", w)
+	}
+	if code, _ := approve(t, h, before, ana); code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	frozen := teamsConfig + "freezes:\n  - {title: Payments close, team: payments, start: 2026-11-27T00:00, end: 2026-11-30T00:00}\n"
+	declare(t, s, frozen)
+	s.jobs(ctx, false)
+	if p := state(t, s, before); p.State != ledger.StateApproved || !frozeNote(p.Reason) {
+		t.Errorf("carried out during payments's freeze: %s %q", p.State, p.Reason)
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(before)+"/drop", ana, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Fatalf("dropping it: %d", code)
+	}
+	during, code := proposeSaysAs(t, h, bo, "PayDown")
+	if during == 0 {
+		t.Fatalf("proposing during the freeze: %d", code)
+	}
+	if code, body := approveAs(t, s, during, ana); code != http.StatusConflict {
+		t.Errorf("approved during payments's freeze: %d %s", code, zzMsg(body))
+	}
+	// Once it ends, neither team's approver approves it: it isn't one
+	// team's both ways.
+	s.wall = func() time.Time { return time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC) }
+	for _, who := range []string{rob, quinn} {
+		if code, _ := approveAs(t, s, during, who); code != http.StatusForbidden {
+			t.Errorf("%s, a team's approver: %d", who, code)
+		}
+	}
+	// payments's changes_in, nowhere: a rule of payments's moved into
+	// checkout by a note is still written nowhere.
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	ms := mimirServer(t, m, func(c *Config) { c.Editors = []string{bo} })
+	declare(t, ms, "teams:\n  - name: shop\n    rules: ^Errors\n    changes_in: []\n  - name: edge\n    rules: ^Edge\n")
+	mo, _ := ms.owners(ctx)
+	edge, _ := mo.team("edge")
+	if err := ms.l.PutNote(ledger.AsAdmin(ctx), ledger.Note{Rule: "Errors [shop/api]", TeamID: edge.ID}, ana); err != nil {
+		t.Fatal(err)
+	}
+	id := proposeRule(t, ms.Handler(), "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+	if p := state(t, ms, id); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathTeamIn {
+		t.Errorf("moved out of shop by a note, written outside shop's changes_in: %s %q", p.Path, proposalEvidence(p).NoPath)
+	}
+}
+
+// An applied change to payments's rule, moved into checkout by a note
+// since: checkout's approver doesn't ask to undo it, payments's freeze
+// holds its undo, and the undo an approver of every team asks for is no
+// one team's.
+func TestNoteMovedUndo(t *testing.T) {
+	ctx := context.Background()
+	s, dir := boundsServer(t, teamsConfig, nil)
+	s.wall = func() time.Time { return time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC) }
+	h := s.Handler()
+	id, _ := proposeSaysAs(t, h, bo, "PayDown")
+	if code, _ := approve(t, h, id, quinn); code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	s.jobs(ctx, false)
+	p := state(t, s, id)
+	recipe(t, s.IncidentsHandler(), http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "opened", "link": "https://git.example/shop/pull/9"})
+	recipe(t, s.IncidentsHandler(), http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "merged"})
+	os.WriteFile(filepath.Join(dir, "pay.yaml"), []byte(p.Document), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	if p = state(t, s, id); p.State != ledger.StateApplied {
+		t.Fatalf("applied: %s", p.State)
+	}
+	o, _ := s.owners(ctx)
+	checkout, _ := o.team("checkout")
+	if err := s.l.PutNote(ledger.AsAdmin(ctx), ledger.Note{Rule: "PayDown", TeamID: checkout.ID}, ana); err != nil {
+		t.Fatal(err)
+	}
+	undo := func(who string) (int, int64) {
+		key := s.formKey(state(t, s, id), who, "undo")
+		code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", who, "same-origin", url.Values{"key": {key}, "read": {"1"}})
+		return code, locID(hd)
+	}
+	if code, _ := undo(rob); code != http.StatusForbidden {
+		t.Errorf("checkout's approver asking to undo payments's change: %d", code)
+	}
+	declare(t, s, teamsConfig+"freezes:\n  - {title: Payments close, team: payments, start: 2026-11-27T00:00, end: 2026-11-30T00:00}\n")
+	if code, _ := undo(ana); code != http.StatusConflict {
+		t.Errorf("an undo asked for during payments's freeze: %d", code)
+	}
+	declare(t, s, teamsConfig)
+	code, u := undo(ana)
+	if code != http.StatusSeeOther {
+		t.Fatalf("an approver of every team asking to undo it: %d", code)
+	}
+	if w := proposalEvidence(state(t, s, u)).ownedBy; len(w.Owners) != 2 {
+		t.Errorf("the undo kept as owned by %+v, not by both", w)
+	}
+}
+
+// A freeze that begins while an approved change is checked again (its
+// backtest run again, up to --timeout): asked again just before the write,
+// it holds it, approved, and nothing is handed out or sent.
+func TestFreezeBeginsWhileChecked(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	freeze := "freezes:\n  - {title: Black Friday, start: 2026-11-27T00:00, end: 2026-11-30T00:00}\n"
+	t.Run("git", func(t *testing.T) {
+		s, _ := boundsServer(t, teamsConfig, nil)
+		s.wall = func() time.Time { return at }
+		h, port := s.Handler(), s.IncidentsHandler()
+		id := proposeFor(t, h, "15m")
+		approve(t, h, id, ana)
+		fh := &freezingHistory{s: s, config: teamsConfig + freeze}
+		fh.armed.Store(true)
+		s.h = fh
+		if err := s.carryOut(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if fh.err != nil {
+			t.Fatal(fh.err)
+		}
+		if p := state(t, s, id); p.State != ledger.StateApproved || !frozeNote(p.Reason) || ready(t, port) != 0 {
+			t.Errorf("a freeze begun during the backtest: %s %q, %d handed out", p.State, p.Reason, ready(t, port))
+		}
+	})
+	t.Run("ruler", func(t *testing.T) {
+		m := mimirRuler(t, "/prometheus/config/v1/rules")
+		s := mimirServer(t, m, func(c *Config) { c.Editors = []string{bo} })
+		s.wall = func() time.Time { return at }
+		h := s.Handler()
+		id := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+		approve(t, h, id, ana)
+		fh := &freezingHistory{s: s, config: freeze}
+		fh.armed.Store(true)
+		s.h = fh
+		if err := s.carryOut(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if fh.err != nil {
+			t.Fatal(fh.err)
+		}
+		if p := state(t, s, id); p.State != ledger.StateApproved || !frozeNote(p.Reason) || len(m.written()) != 0 {
+			t.Errorf("a freeze begun during the backtest: %s %q, written %v", p.State, p.Reason, m.written())
+		}
+	})
+}
+
+// freezingHistory is history that keeps a file with a change freeze to
+// the ledger when it is first asked once armed: a freeze declared while a
+// change's backtest runs again.
+type freezingHistory struct {
+	history
+	s      *Server
+	config string
+	armed  atomic.Bool
+	err    error
+}
+
+func (h *freezingHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if h.armed.CompareAndSwap(true, false) {
+		d, err := ParseConfig([]byte(h.config), time.UTC)
+		if err == nil {
+			_, _, err = h.s.l.Reconcile(context.Background(), d, ledger.Leave{}, h.s.cfg.Options)
+		}
+		h.err = err
+	}
+	return h.history.QueryRange(ctx, expr, start, end, step)
+}
+
+// A team's name as the ledger keeps it, without the spaces around it: its
+// approvers and freezes are that team's. Two teams of one name in another
+// letter case, or with spaces, are refused where boundaries name them; a
+// team the ledger didn't keep leaves its boundaries holding nothing, and
+// the Settings page says so.
+func TestBoundsTeamNames(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	spaced := strings.Replace(teamsConfig, "name: payments", `name: "payments "`, 1) +
+		"freezes:\n  - {title: Payments close, team: 'payments ', start: 2026-11-27T00:00, end: 2026-11-30T00:00}\n"
+	s, _ := boundsServer(t, spaced, nil)
+	s.wall = func() time.Time { return at }
+	h := s.Handler()
+	if b, err := s.bounds(ctx); err != nil || len(b.Teams["payments"].Approvers) != 1 || b.Freezes[0].Team != "payments" {
+		t.Fatalf("kept as %+v %v", b, err)
+	}
+	id, _ := proposeSaysAs(t, h, bo, "PayDown")
+	if code, body := approveAs(t, s, id, ana); code != http.StatusConflict {
+		t.Errorf("approved during the freeze of \"payments \": %d %s", code, zzMsg(body))
+	}
+	for _, body := range []string{
+		"teams:\n  - {name: payments, rules: ^Pay}\n  - {name: Payments, rules: ^Pay, approvers: [user:quinn@example.com]}\n",
+		"teams:\n  - {name: payments, rules: ^Pay, approvers: [user:quinn@example.com]}\n  - {name: ' payments', rules: ^Pay}\n",
+		"teams:\n  - {name: payments, rules: ^Pay}\n  - {name: PAYMENTS, rules: ^Pay}\nfreezes:\n  - {title: x, team: PAYMENTS, start: 2026-11-27T00:00, end: 2026-11-28T00:00}\n",
+	} {
+		if _, err := ParseConfig([]byte(body), time.UTC); err == nil || !strings.Contains(err.Error(), "in another letter case or with spaces around it") || !strings.Contains(err.Error(), "line ") {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+	// A team the ledger doesn't keep (its pattern doesn't read): its
+	// boundaries are said to hold nothing.
+	bad := "teams:\n  - {name: billing, rules: '(', approvers: [user:quinn@example.com]}\nfreezes:\n  - {title: Billing close, team: billing, start: 2026-11-27T00:00, end: 2026-11-28T00:00}\n"
+	d, err := ParseConfig([]byte(bad), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, skipped, err := s.l.Reconcile(ctx, d, ledger.Leave{}, s.cfg.Options); err != nil || len(skipped) != 1 {
+		t.Fatalf("%v %v", skipped, err)
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, "/settings", ana, "", nil); !strings.Contains(body, "teams it didn&#39;t keep, so they hold nothing:") || !strings.Contains(body, "<code><bdi>billing</bdi></code>") {
+		t.Error("the Settings page doesn't say billing's boundaries hold nothing")
+	}
+}
+
+// Boundaries the ledger holds that can't be read: the proposal's page and
+// the Settings page are drawn, saying so, approving and undoing taken
+// away and dropping left; nothing they would hold goes ahead.
+func TestBoundsUnreadPages(t *testing.T) {
+	ctx := context.Background()
+	s, _ := boundsServer(t, teamsConfig, nil)
+	h := s.Handler()
+	id, _ := proposeSaysAs(t, h, bo, "PayDown")
+	if err := s.l.SetMeta(ctx, ledger.BoundsKey, "{not json"); err != nil {
+		t.Fatal(err)
+	}
+	const said = "The change boundaries the ledger holds can&#39;t be read"
+	code, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), ana, "", nil)
+	if code != http.StatusOK || !strings.Contains(body, said) || keyFor(t, h, id, ana, "approve") != "" ||
+		!strings.Contains(body, `action="/proposals/`+itoa(id)+`/drop"`) || !strings.Contains(body, "Held while the change boundaries can&#39;t be read") {
+		t.Errorf("the proposal's page: %d\n%s", code, zzMsg(body))
+	}
+	if code, body, _ := ui(t, h, http.MethodGet, "/settings", ana, "", nil); code != http.StatusOK || !strings.Contains(body, said) {
+		t.Errorf("the Settings page: %d %s", code, zzMsg(body))
+	}
+	if code, _ := approveAs(t, s, id, ana); code == http.StatusSeeOther {
+		t.Error("approved while the boundaries can't be read")
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/drop", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Errorf("dropping it: %d", code)
+	}
+}
+
+// A team's changes_in within --changes-in, in the letter case its own
+// source compares names in: an Azure alarm's in any, beside a ruler that
+// isn't Azure's; a CloudWatch alarm's as written, beside an Azure ruler.
+func TestWithinChangesInFoldsBySource(t *testing.T) {
+	alarms := []*source.Alarms{{Source: "cw", Kind: source.AlarmsAWS}, {Source: "az", Kind: source.AlarmsAzure}}
+	for _, c := range []struct {
+		ruler string
+		x     string
+		in    bool
+	}{
+		{source.RulerConfig, "az:payments-high", true},
+		{source.RulerConfig, "az:PAY*", true},
+		{source.RulerConfig, "cw:payments", false},
+		{source.RulerConfig, "cw:Payments", true},
+		{source.RulerAzure, "cw:payments", false},
+		{source.RulerAzure, "cw:PayDown", true},
+		{source.RulerAzure, "rg/shop-api", true},
+		{source.RulerConfig, "rg/shop-api", false},
+		{source.RulerConfig, "rg/Shop-api", true},
+		// Another source's entry is no source's but its own.
+		{source.RulerConfig, "az2:Pay", false},
+	} {
+		s := &Server{ruler: &source.Ruler{Kind: c.ruler}, alarms: alarms}
+		s.cfg.ChangesIn = []string{"cw:Pay*", "az:Pay*", "rg/Shop*"}
+		if got := s.withinChangesIn(c.x); got != c.in {
+			t.Errorf("%s beside a ruler of kind %s: %v, want %v", c.x, c.ruler, got, c.in)
+		}
 	}
 }

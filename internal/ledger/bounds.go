@@ -1,6 +1,8 @@
 package ledger
 
 import (
+	"context"
+	"errors"
 	"time"
 )
 
@@ -16,6 +18,43 @@ import (
 // BoundsKey is the meta key the boundaries are kept under, for Meta: what
 // lapilli serve wrote as Declared.Bounds, "" for none.
 const BoundsKey = "change_bounds"
+
+// ErrRuleTeam is a note that would move a rule into a team or out of one,
+// written by anyone but an admin while the boundaries of change are
+// declared: who owns a rule says whose approvers approve its changes,
+// which freezes hold it and where it is written, and an editor of every
+// team would choose them by moving it.
+var ErrRuleTeam = errors.New("while --config declares the boundaries of change, only an admin moves a rule into a team or out of one")
+
+type adminKey struct{}
+
+// AsAdmin marks the writes made with ctx as an admin's: one may move a
+// rule into a team or out of one while the boundaries of change are
+// declared (teamMovable).
+func AsAdmin(ctx context.Context) context.Context { return context.WithValue(ctx, adminKey{}, true) }
+
+func asAdmin(ctx context.Context) bool {
+	a, _ := ctx.Value(adminKey{}).(bool)
+	return a
+}
+
+// teamMovable refuses a write that moves a rule into a team or out of one
+// (a note's team) while the file the ledger was last kept to declares
+// boundaries of change, unless an admin makes it: read in the write, so
+// that a file kept meanwhile is the one that counts.
+func (l *Ledger) teamMovable(t *txn) error {
+	if asAdmin(t.ctx) {
+		return nil
+	}
+	b, err := l.meta(t.ctx, t, "x."+BoundsKey)
+	if err != nil {
+		return err
+	}
+	if b != "" {
+		return ErrRuleTeam
+	}
+	return nil
+}
 
 // keepBounds keeps the boundaries a file declares, in the write that keeps
 // the ledger to it: noted in the activity log when they changed, as a

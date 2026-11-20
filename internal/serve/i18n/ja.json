@@ -2555,5 +2555,12 @@
  "%s %q: want a day, like 2026-11-02, or an RFC 3339 time": "%s %q: 2026-11-02 のような日付か RFC 3339 の時刻を指定してください",
  "until must be after since": "until は since より後にしてください",
  "before %q: want where a page ended, as its link gives it": "before %q: ページのリンクにある、ページの終わりの位置を指定してください",
- "limit %q: want 1 to %d": "limit %q: 1 から %d を指定してください"
+ "limit %q: want 1 to %d": "limit %q: 1 から %d を指定してください",
+ "while --config declares the boundaries of change, only an admin moves a rule into a team or out of one": "--config で変更の境界を宣言している間は、ルールをチームに入れたりチームから外したりできるのは管理者だけです",
+ "%d refused: admins only, while --config declares the boundaries of change": "%d 件は拒否: --config で変更の境界を宣言している間は管理者のみ",
+ "team %s is declared on line %d too, in another letter case or with spaces around it: give its approvers, changes_in and change freezes to one team": "%s チームは %d 行目にも、大文字小文字か前後の空白だけ違う名前で宣言されています。approvers、changes_in、変更凍結は一つのチームに指定してください",
+ "Held while the change boundaries can't be read": "変更の境界を読めない間は保留",
+ "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can.": "台帳にある変更の境界を読めません。読めるようになるまで、その境界にかかる変更は承認も、元に戻すことも、適用も、レシピへの引き渡しもしません。",
+ "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:": "--config が approvers、changes_in、変更凍結を指定したチームのうち反映されなかったチームがあり、その境界は何にもかかりません:",
+ "Why each wasn't kept is said with the file's problems.": "それぞれが反映されなかった理由は、ファイルの問題の一覧にあります。"
 }

@@ -716,20 +716,21 @@ pages work it out.
   owns the rule is asked three times as it is proposed: of its name as the
   ledger has it, before anything is read for it (no try spent on another
   team's); of the rule as it is read again from where it is kept; and of
-  the rule as proposed. Each must be a team they edit: a rule whose group
-  labels made it another team's since the ledger last read it, or a change
-  that would rename it into another team's pattern or relabel it into
-  another team's labels, isn't theirs. None of today's kinds renames or
-  relabels a rule; the check is there for one that would. On the rules
+  the rule as proposed; each with its note, and without it (below). Each
+  must be a team they edit: a rule whose group labels made it another
+  team's since the ledger last read it, or a change that would rename it
+  into another team's pattern or relabel it into another team's labels,
+  isn't theirs. None of today's kinds renames or relabels a rule; the check is there for one that would. On the rules
   list, another team's rule picked is counted "not your team's", and the
   rest are proposed. A rule in effect that never fired is owned as one
   that did, by a note, its name and its labels (`owners.owner`).
   Agents keep today's rules: `--mcp-propose` is an editor's of every team,
   or an admin's, and an agent proposes as before.
 - **A team's approvers** (`approvers:` under a team) approve a proposal
-  that one team, theirs, owned as it was proposed and owns now, and ask
-  for one of its rule's applied changes to be undone. The approvers of
-  every team (`--approvers`, or the admins) approve anything, as before.
+  that one team, theirs, owned as it was proposed and owns now, by its
+  note and by its name and labels alike, and ask for one of its rule's
+  applied changes to be undone. The approvers of every team
+  (`--approvers`, or the admins) approve anything, as before.
   Approving is still a person's, in the form on the page, refused to its
   maker; `--approvals 2` asks two people, either kind, one person listed
   both ways counting once. A team's approvers are named as `--approvers`
@@ -744,9 +745,11 @@ pages work it out.
   admin, names them beside the approvers of every team.
 - **A team's sources** (`changes_in:` under a team) are where its rules
   are written through a ruler's or a cloud's API, as entries of
-  `--changes-in`, or narrower names and prefixes within its prefixes: a
-  file that names one outside it is refused as a whole. A rule of a team
-  that gives `changes_in`, kept elsewhere, is for a person to change, as
+  `--changes-in`, or narrower names and prefixes within its prefixes, in
+  the letter case its own source compares names in (an Azure rule
+  group's, or an Azure alarm's, in any; an alarm's entry within one of its
+  own source alone): a file that names one outside it is refused as a
+  whole. A rule of a team that gives `changes_in`, kept elsewhere, is for a person to change, as
   one outside `--changes-in` is ("its team's changes_in doesn't name where
   it is kept"); given as `[]`, nowhere. It holds for the team's rules
   whoever proposes or approves them, as an AppProject's destinations hold
@@ -789,10 +792,35 @@ before the write:
   freezes and the sources of every team it was and is held to.
 - A proposal made before this release has no owners kept: the approvers
   of every team approve it, as then.
-- What is left is the time between the check and the write itself, a
-  round's milliseconds, as for every other check that is asked again. A
-  change checked and handed to a recipe (`ready`) is the recipe's: a
-  freeze holds it there, a change of owner doesn't.
+- Carrying it out asks before the change is checked again, and once more
+  just before it is sent or handed to a recipe, where the pause is asked
+  too: checking again runs its backtest again, up to `--timeout`, and a
+  freeze may begin, or its rule move, meanwhile. Held then, it waits,
+  approved, as for the pause, or is refused as above. What is left is the
+  time between that last check and the write itself. A change checked and
+  handed to a recipe (`ready`) is the recipe's: a freeze holds it there, a
+  change of owner doesn't.
+
+**A note moves a rule into a team, and its team still holds it.** Who owns
+a rule is first its note's team (`owners`), so an editor of every team
+who approves for checkout could move payments's rule into checkout with a
+note and approve its change, or move it out of payments's freeze and
+`changes_in`. Two guards:
+
+- While `--config` declares any team's approvers or `changes_in`, or a
+  freeze, a rule's team is an admin's to move: the note's form, the API,
+  the rules list's "Set the team" and the Cleanup page's move of a note
+  onto a rule are refused to anyone else, in the ledger's write, which
+  reads the boundaries in it ("only an admin moves a rule into a team or
+  out of one"). The rest of a note is an editor's, as before; without
+  boundaries, its team too.
+- A rule a note moved out of the team its name and labels give it (the
+  team it has without its note) is held by both teams: either team's
+  freeze and `changes_in` hold it, it is no one team's proposal (only the
+  approvers of every team approve it), and a team's editor proposes for it
+  only as an editor of both. **Builder's decision**: a rule no team owns
+  by its name or labels is its note's team's alone; there is no other
+  team whose boundaries it could leave.
 
 A freeze's times are checked as a quiet window's are, in the same words
 ("a quiet window lasts 31 days at most"). A freeze that holds the end of
@@ -803,7 +831,18 @@ first round after.
 
 **Fail closed.** Boundaries the ledger holds that can't be read stop what
 they would: an approval is an error, an approved change waits, nothing
-ready is handed out.
+ready is handed out. A proposal's page and the Settings page say so,
+drawn all the same, the approve and undo buttons disabled with why;
+dropping and closing go on.
+
+**A team's name** in the boundaries is read as the ledger keeps it,
+without the spaces around it. Two teams of the file of one name, in
+another letter case or with spaces around it, are refused where the
+boundaries name them, with the line: the ledger keeps one and skips the
+other, and what was given to one would hold the other, or a name no team
+has. A team the ledger skips for another reason (its pattern doesn't
+read, a clash with the UI's teams) leaves what the file gives it holding
+nothing: the Settings page names it.
 
 Tests (`internal/serve/bounds_test.go`) hold each guard, and each was
 checked failing without it: a team's editor of another team's rule, of a
@@ -812,9 +851,15 @@ approver of another team's or no team's proposal with a form made up for
 them; a group trusted only with `--groups-header`; a rule moved between
 approval and carrying out; a team's sources at proposing and at carrying
 out; a freeze at approval, at carrying out, at its end, at the recipe, and
-holding promotion and undo; a team's editor dropping another's proposal;
-the file read strictly; and a repeating freeze in Asia/Seoul spanning
-midnight.
+holding promotion and undo; a freeze begun while an approved change's
+backtest runs again, on the git and ruler paths; a team's editor dropping
+another's proposal; a rule's team moved by an editor of every team, by
+each way a note's team is set; a rule a note moved held by both teams'
+freezes and `changes_in` and approved by neither team's approvers; the
+pages drawn while the boundaries can't be read; a team's name with
+spaces, and two in another letter case; `changes_in` compared in its own
+source's letter case; the file read strictly; and a repeating freeze in
+Asia/Seoul spanning midnight.
 
 ## Questions for review
 

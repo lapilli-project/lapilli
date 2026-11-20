@@ -418,7 +418,7 @@ func (s *Server) madeBy(r *http.Request, b *bulkResult) (ok bool) {
 	}
 	claimed := b.Done > 0 || len(b.Made) > 0
 	b.Made, b.Done = own, len(own)
-	b.None = b.Done+b.Theirs+b.Refused+b.Already+b.Failed+b.Untried+b.Editors+b.Limit+b.Tries+b.Unreplayed+b.Absent+b.Same+b.NoSuggest+b.Late == 0
+	b.None = b.Done+b.Theirs+b.Refused+b.Already+b.Failed+b.Untried+b.Editors+b.Admins+b.Limit+b.Tries+b.Unreplayed+b.Absent+b.Same+b.NoSuggest+b.Late == 0
 	return !(b.None && claimed)
 }
 
