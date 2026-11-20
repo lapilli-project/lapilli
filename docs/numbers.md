@@ -922,6 +922,9 @@ it, which only `lapilli serve` says.
 | `lapilli_goal_known` | `goal`, [`team`] |
 | `lapilli_goal_value` | `goal`, [`team`] |
 | `lapilli_goal_weeks_met` | `goal`, [`team`] |
+| `lapilli_expectations_held` | |
+| `lapilli_expectations_broken` | |
+| `lapilli_rule_expectations_broken` | `rule` |
 | `lapilli_rule_firings_marked` | `rule`, [`severity`], [`team`], `kind` |
 | `lapilli_rule_caught_marked` | `rule`, [`severity`], [`team`], `kind` |
 | `lapilli_marked_on` | `kind` |

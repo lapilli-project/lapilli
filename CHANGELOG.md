@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+Expectations, step 2 (docs/design/expectations.md): serve holds each rule
+to what is expected of it after it is deployed.
+
+Before upgrading:
+- **Ledger schema 027**, after 026: keep a copy of the ledger's disk, or
+  of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger. Nothing is
+  backfilled: the first round after the upgrade checks the thirteen weeks.
+
+### Added
+
+- **serve's checks after deploy** (`--expect FILE`, the chart's
+  `serve.expectations`; `expectations:` in `--config`; a rule's annotation
+  `lapilli.dev/budget: "10/week, 2 asleep"`). After each run, the leader
+  holds each rule to its budgets over the week so far and the twelve whole
+  weeks before, by the ledger's weeks, the week so far broken as soon as
+  it is over, and to its catches against the incidents written down,
+  judged again by a replay of the rule as it is when a new version of it
+  came after the incident (five a run). Not known is never shown as met or
+  broken. What it finds is kept (schema 027, `expectation_checks`) and
+  shown on the rule's new Expectations tab, in the overview's What to look
+  at (Make it a task, `POST /expectations/task`), on the rules list
+  (`expect=broken`, `expect=held`, `expect=none`; `is:expected`,
+  `is:unexpected`), in the digest (`expectations` in `digest.ready`), in
+  `GET /api/v1/expectations`, MCP's `rule` (`expectations`) and `/metrics`
+  (`lapilli_expectations_held`, `lapilli_expectations_broken`,
+  `lapilli_rule_expectations_broken`). Told as `expectation.broken` once a
+  rule, an expectation and a week, 50 a run; `--expect-tasks` (off by
+  default) makes a task of kind tune for the rule's team, once a rule, an
+  expectation and a week, 20 a run, none while one is open. The three
+  sources combine as one file: `--expect` and `--config`'s are made one,
+  the same budget or incident in both refused, the two kept as they last
+  were; a rule's annotation holds it unless the file or `--config` give
+  that rule, by `rule:`, the same budget, when it is passed over and said.
+- **`labels:` and `refires` in expectations**, for `lapilli verdict
+  --compare --expect` too: an expectation may name its rules by a label
+  selector, as `--rules-select` takes, of the labels the rules' alerts
+  carry, and a budget may bound re-fires (`refires`). Through serve's
+  backtest port, while people slept is counted by the rule's team's own
+  hours, as serve's checks count it.
+
 ## [0.63.0] - 2026-11-20
 
 Judging, steps 1 to 4 (docs/design/judging.md): a lead and `require:` of

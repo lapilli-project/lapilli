@@ -1,6 +1,6 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: accepted; its first step built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; its first two steps built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, and a backtest that can fail a
 pull request, so it was designed first, as a pull request (#81); it was
 merged on 2026-11-16, before its week was out, by the maintainer's
@@ -218,17 +218,20 @@ names it so expectations are made with it in mind, and leaves it out.
 ## In the ledger
 
 Expectations are declared, in a file or serve's configuration, not made in
-the UI: the ledger keeps what checking them found, not what they are. Schema
-020 adds two tables:
+the UI: the ledger keeps what checking them found, not what they are. Two
+tables, each in the schema of the step that needs it (a schema takes the
+next free number when its pull request opens: this design's first text
+said 020, which goals took):
 
-- `expectation_checks`: by rule, expectation (a hash of its text), week,
-  and result (met, broken, not known), with the numbers. The rule's tab and
-  the digest read it.
-- `expectation_drafts`: an agent's or the history's draft, who proposed it,
-  what checking it found, and whether a person accepted or dropped it.
+- `expectation_checks` (step 2, schema 027): by rule, expectation (a hash
+  of its text), week, and result (met, broken, not known), with the
+  numbers. The rule's tab and the digest read it.
+- `expectation_drafts` (step 3, its own schema, 028 as things stand): an
+  agent's or the history's draft, who proposed it, what checking it found,
+  and whether a person accepted or dropped it.
 
-As with every schema change, a release before 020 doesn't open a ledger at
-020: upgrading adds two tables, with nothing to backfill, and going back
+As with every schema change, a release before 027 doesn't open a ledger at
+027: upgrading adds a table, with nothing to backfill, and going back
 takes the ledger as it was before, so a deployment keeps a copy of it (a
 snapshot of its disk, or of its database) before it upgrades.
 
@@ -268,15 +271,20 @@ The first two need no incident written down.
    expectation.
 3. **Default budgets.** Whether a team may set a budget every rule of it is
    held to unless the rule says otherwise, or every rule must say its own.
+   Decided by the maintainer, 2026-11-20: **none**. Every rule says its
+   own; a team's total is a goal of the team's ([goals.md](goals.md)), and
+   step 3's drafts from the history fill every rule's budget at once.
 4. **The week.** Whole weeks as the ledger's (Monday, in `--tz`), or a
-   rolling seven days for the week so far.
+   rolling seven days for the week so far. Decided by the maintainer,
+   2026-11-20: **the ledger's weeks** (Monday, in `--tz`), the week so far
+   reported as soon as it is over budget.
 
 ## Steps
 
 1. Budgets and catches in `--compare` and the backtest recipes, with
    `--fail-expectations`. No schema change; the PR check is the first use.
 2. serve's checks after deploy: the rule's tab, the overview line, tasks,
-   notices, the digest. Schema 020.
+   notices, the digest. Schema 027.
 3. Drafts: from the history, and MCP's `test_expectation` and
    `propose_expectation`; agents' rewrites on a failed pull request.
 4. Scenarios: promtool test files, for Prometheus-format rules
@@ -291,7 +299,8 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   them), with a `budget` (`week`, `asleep`) or `catches` (`incident`,
   `within`). Read strictly, 1 MiB at most, before anything is replayed.
   Labels as a selector, re-fires in a budget and `scenarios` aren't read
-  yet: a file with them is refused, rather than passed over.
+  yet: a file with them is refused, rather than passed over (step 2 reads
+  the first two).
 - **The weeks.** Whole weeks counted back from the period's end, the most
   in one reported; a period with none is scaled to a week (`scaled_days`).
   While people slept is by `--sleep-hours` (and `--shifts`, `--on-call`),
@@ -329,4 +338,108 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   moved out of a group that held it is said: the group's expectation no
   longer holds it, failing nothing.
 - **Serve** takes none of it yet (step 2).
+
+Step 2, serve's checks after deploy, as built:
+
+- **Three sources, one list.** `--expect FILE` (the chart's
+  `serve.expectations`, a ConfigMap of its own) is read every 15 s and
+  kept to once read the same twice in a row, 15 s apart, as `--config` is;
+  one that can't be read changes nothing and is said (the status line,
+  logged once). `expectations:` in `--config` is read as an expectations
+  file is, strictly (a key an entry doesn't have is refused with its line
+  in the config), and kept to as the ledger is kept to the config. The two
+  are one list, read as one file (`verdict.NewExpectations`): a rule's, a
+  group's or a selector's entries in both are made one, and the same budget
+  or incident given in both is refused, the two kept as they last could
+  be, and said. Nothing is checked until both are read in the leader's
+  term. `GET /config.yaml` gives no `expectations:`: the ledger doesn't keep
+  them.
+- **The annotation** `lapilli.dev/budget` is the rule author's, not the
+  operator's: read from the latest version's rules, strictly (parts
+  separated by commas, `N/week`, `N asleep`, `N refires` or `N re-fires`,
+  each once, 0 to 1,000,000, 100 bytes), it holds the rule by its own name.
+  A budget the file or `--config` give that rule by the same `rule:` wins,
+  and the annotation's is passed over and said on the rule's tab as not
+  known (`annotation_twice`); one that can't be read is said too
+  (`annotation_unread`), without its text. So no annotation can make the
+  operator's file unusable, nor change what it holds a rule to.
+- **What step 1 refused.** `labels:`, a selector as `--rules-select` takes
+  one, of the labels the rule's alerts carry (its group's among them): in
+  serve, of the latest version, and of a rule only copied in, the labels
+  all its alerts share (as `label:` on the rules list); in `lapilli verdict
+  --compare`, of the rules each side replayed (`Comparison.LabelRules`). A
+  selector that selects every rule is refused, and one is kept as it reads,
+  so the same selector written with other spaces is one entry.
+  `refires` in a budget, the firings that re-fired (`--refire`), by week.
+  `scenarios:` stays refused, for step 4.
+- **Which rules, which weeks.** The rules of the latest version and those
+  copied in; with no version, every rule the ledger has. A budget's week
+  before the rule came into effect has no check, shown empty. By the
+  ledger's weeks (open question 4): over its budget, a week is broken,
+  the week under way and a week the runs haven't finished too, as soon as
+  it is over; under it, a whole week is met, the week under way (and one
+  past the runs' cursor) is so far (`open`), and the week the ledger's
+  first firing fell in, or the rule's first, is not known (`not_whole`).
+  While people slept is by the rule's team's own hours, or the server's
+  (as the tiles count it); by hours with no sleep, not known
+  (`no_hours`). A rule Lapilli can't replay and doesn't copy in is not
+  known (`unreplayed`). A budget needs no record.
+- **Catches.** Judged by the ledger's catches of the incident written
+  down (counted: not a dismissed impact window); with none written down,
+  not known (`no_incident`). A catch's row is of the week its incident
+  began in, 0 while it isn't written down: a catch is of an incident, not
+  of a week. **A new version of the rule**, one whose definition
+  (`rules.Rule.Whole`) took effect after the incident began, is judged
+  again by replaying the rule as it is over the incident (from the lead,
+  its `for` and an hour before its start to its end, the catch's delay
+  and an hour after, now at most), through the replay change reviews use,
+  five a round within one `--timeout`, while the runs don't wait for the
+  history; until then not known (`not_judged_again`), and kept with the
+  version it was judged on, so each version is replayed once. An incident
+  older than the thirteen weeks is not replayed (`older`): the history may
+  not reach so far back, and a replay of nothing would read as a catch
+  lost. A replay that fails is not known (`replay_failed`).
+- **In the ledger (027).** A row a rule, an expectation and a week; the
+  expectation is the hash of what holds the rule, what and the bound
+  (`rule: Restarts`, `budget week`, `10`), so one budget held by two
+  selectors is two expectations, each shown. Written only where a row
+  changed, 20,000 rows a round at most, the rest the rounds after; read by
+  the leader before it takes the writer, never firings under it. One no
+  longer held is kept not current, so that a ConfigMap put back tells no
+  week again; a budget's weeks out of the thirteen are let go, and a catch
+  held no more, 13 weeks on. A rule's name is kept unique in Postgres by
+  its md5, as `checked`'s.
+- **Bounds.** 10,000 rules and expectations a round, each rule to each
+  budget and catch that holds it, past which the check fails, saying what
+  to do (a catch by `rule:`, not `group:` or `labels:`).
+- **Told and made a task.** `expectation.broken` is told of a budget
+  broken in the week so far or the last whole week, or a catch broken,
+  once a rule, an expectation and a week, 50 a round, the rest the rounds
+  after; a catch met again is told again once it is next broken, in a
+  later week. It carries the rule, its team, what, held, the selector and
+  the source, the count or the delay, whether it is the week so far, the
+  week's span (a catch, its incident and its start), and links to the
+  rule's tab. Make it a task (`POST /expectations/task`, a team's editor's
+  of their own team's rule) works the row out again as the ledger last
+  checked it, refuses one not broken, and goes to a task open about the
+  expectation, of any week. `--expect-tasks` makes one of kind tune for
+  the rule's team, 20 a round, once a rule, an expectation and a week,
+  none while one made of it is open; unlike a goal's task, nothing is said
+  on it afterwards.
+- **Where it shows.** The rule's Expectations tab, each expectation with
+  its thirteen weeks, or a catch with its incident; the overview's What to
+  look at, after the goals' lines, five at most (the week so far first),
+  the rest one line to the rules list; the rules list's facet
+  Expectations (broken, held to some, held to none; `is:expected`,
+  `is:unexpected`) and a badge of one broken; the digest of a week, its
+  budgets' weeks and the catches of incidents begun in it (`expectations`
+  in `digest.ready`), checked just before it in the round;
+  `GET /api/v1/expectations` (a viewer's, `rule=`), MCP's `rule`
+  (`expectations`) and `/metrics` (`lapilli_expectations_held`,
+  `lapilli_expectations_broken`, `lapilli_rule_expectations_broken`, 500
+  rules at most).
+- **The backtest port** now counts while people slept by the rule's
+  team's own hours too (`Comparison.ExpectBy`), as its design said it
+  would once step 2 made it so; it still writes no checks, and doesn't
+  read serve's own expectations.
 

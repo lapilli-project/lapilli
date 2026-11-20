@@ -547,9 +547,9 @@ heading ("judged by lapilli serve's record"):
   its change reviews are, where `lapilli verdict` judges each by the two
   weeks before it; the same pull request can read differently through
   serve than in CI with a file of the same incidents.
-- "While people slept" is by serve's `--sleep-hours` and `--shifts` (and,
-  once step 2 makes it so, the rule's team's own hours), not the job's
-  flags.
+- "While people slept" is by serve's `--sleep-hours` and `--shifts`, and
+  the rule's team's own hours where it has them (since expectations' step
+  2), not the job's flags.
 
 **Step 2** (serve's checks after deploy, `expectation_checks`, a schema of
 its own)

@@ -240,6 +240,48 @@ goals:
   - {name: sale-none-missed, each: sale, measure: incidents.missed, at_most: 0}
 ```
 
+A rule can be held to what is expected of it after it is deployed, as a
+pull request's backtest holds it before (docs/design/expectations.md):
+`--expect FILE` takes the expectations file `lapilli verdict --expect`
+takes, read again every 15s and kept to once read the same twice in a
+row, as `--config` is (the chart's `serve.expectations`, a ConfigMap).
+Rules kept only in Grafana or a ruler can be held under `expectations:`
+in `--config`; a rule can carry its own budget in its annotation
+`lapilli.dev/budget: "10/week, 2 asleep, 3 refires"`. An expectation names
+its rules by `rule:`, `group:` or `labels:` (a selector, as
+`--rules-select` takes, of the rule's own labels), and holds them to a
+budget (`week`, `asleep`, `refires`) or to incidents they must keep
+catching (`catches`, `within`):
+
+```yaml
+expectations:
+  - rule: ContainerRestarts
+    budget: {week: 10, asleep: 2}
+    catches:
+      - {incident: INC-43, within: 5m}
+  - labels: severity=page
+    budget: {refires: 3}
+```
+
+After each run the leader checks each rule over the week so far and the
+twelve whole weeks before, by the ledger's weeks (Monday, in `--tz`): a
+budget is broken in a week it went over, the week so far as soon as it
+does, met in a whole week it didn't, and not known in a week the ledger
+holds only part of; while people slept is by the rule's team's own hours,
+or the server's. A catch is judged against the incident written down,
+again on a new version of the rule by replaying it as it is over the
+incident, a few a run; with no incident written down it is not known. A
+budget needs no record. What is broken shows on the rule's Expectations
+tab, each expectation with its weeks; in the overview's What to look at,
+made a task with one press; on the rules list (`expect=broken`, and
+`expect=none` for the rules held to nothing); in the digest; in
+`/api/v1/expectations`, MCP's `rule` and `/metrics`
+(`lapilli_expectations_held`, `lapilli_expectations_broken`,
+`lapilli_rule_expectations_broken`). It is told
+(`expectation.broken`) once a rule, an expectation and a week, and with
+`--expect-tasks` made a task for the rule's team, once a rule, an
+expectation and a week, none while one is open.
+
 Some weeks aren't like the others: a sale, a launch, a campaign. Marked
 windows (docs/design/marked.md) name them, each of a kind a team chooses,
 from a file (`--marked`), `--config`'s `marked:`, the Marked windows page,

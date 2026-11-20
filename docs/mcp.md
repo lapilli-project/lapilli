@@ -17,7 +17,7 @@ Six tools read what the pages show, each answer as JSON with a schema:
 
 - `overview`
 - `rules`
-- `rule`: a rule's definition and history
+- `rule`: a rule's definition and history, and what it is held to (`expectations`, [design/expectations.md](design/expectations.md))
 - `incidents`
 - `firings`: with their labels
 - `outcomes`
