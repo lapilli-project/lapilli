@@ -205,8 +205,13 @@ func TestTestExpectationScenarios(t *testing.T) {
 	}
 	runs := count()
 	for want, test := range map[string]string{
-		"values repeat 100000000 times":          strings.Replace(scenariotest.Test("pass"), "0+10x20", "0+1x100000000", 1),
-		"evaluated 20000 times":                  strings.Replace(scenariotest.Test("pass"), "eval_time: 10m", "eval_time: 20000m", 1),
+		"values repeat 100000000 times": strings.Replace(scenariotest.Test("pass"), "0+10x20", "0+1x100000000", 1),
+		"evaluated 20000 times":         strings.Replace(scenariotest.Test("pass"), "eval_time: 10m", "eval_time: 20000m", 1),
+		// Values carried in the series, which promtool writes before its
+		// values; a histogram's buckets copied at each step.
+		"series is a metric name": strings.Replace(scenariotest.Test("pass"), `'errors{service="checkout"}'`, `'errors{service="checkout"} 0+0x100000000'`, 1),
+		"values expand to more than 100000": strings.Replace(scenariotest.Test("pass"), "'0+10x20'",
+			"'{{buckets:["+strings.TrimSpace(strings.Repeat("1 ", 2000))+"]}}+{{buckets:[1]}}x100'", 1),
 		"a key promtool's test files don't have": "rule_files: [x]\nnot_promtool: 1\ntests: [{name: pass}]\n",
 	} {
 		failed, text := call(t, agent, "test_expectation", map[string]any{"rule": "Errors", "expectations": held, "tests": map[string]any{"tests/errors.yaml": test}}, &out)
