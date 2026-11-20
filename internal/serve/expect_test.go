@@ -128,10 +128,16 @@ func TestExpectationsChecked(t *testing.T) {
 		"budget week 2026-10-12": {ledger.ExpectMet, 2},
 		"budget week 2026-10-19": {ledger.ExpectBroken, 5},
 		"budget week 2026-10-26": {ledger.ExpectMet, 2},
-		"budget week 2026-11-02": {ledger.ExpectBroken, 41}, // so far, and over already
-		"budget week 2026-09-28": {ledger.ExpectUnknown, 0}, // before the ledger began
+		"budget week 2026-11-02": {ledger.ExpectBroken, 41},  // so far, and over already
+		"budget week 2026-09-28": {ledger.ExpectUnknown, -1}, // before the ledger began: no number
 	} {
 		c, ok := paged[k]
+		if want.n < 0 {
+			if !ok || c.Result != want.result || c.N != nil || c.Value != "–" || c.Why != whyNotHeld {
+				t.Errorf("%s: %+v, want %s with no number: no firing held isn't none fired", k, c, want.result)
+			}
+			continue
+		}
 		if !ok || c.Result != want.result || c.N == nil || *c.N != want.n {
 			t.Errorf("%s: %+v, want %s %d", k, c, want.result, want.n)
 		}

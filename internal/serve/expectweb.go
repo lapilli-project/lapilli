@@ -26,6 +26,7 @@ import (
 var expectWhyText = map[string]string{
 	whyNoHours:        "no one's hours say when people sleep",
 	whyNotWhole:       "a week the ledger holds part of",
+	whyNotHeld:        "a week before the ledger's first firing",
 	whySoFar:          "so far",
 	whyUnreplayed:     "the rule isn't replayed, nor copied in",
 	whyNoIncident:     "the incident isn't written down",

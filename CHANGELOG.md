@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.65.1] - 2026-11-21
+
+The expectations' screens (0.65.0) checked as the others were: a budget's
+week before the ledger's first firing has no number, and their Korean
+words are the other pages'. No schema change: the ledger stays at 027.
+
+### Changed
+
+- Korean: the expectations' ledger is 기록, as on the other pages, a
+  re-fire 재발화, as in the rules list, and a Latin name takes its
+  particle after a space, as the other sentences' do.
+
+### Fixed
+
+- **A budget's week before the ledger's first firing read as none fired**
+  (0.65.0): "? 0" on a rule's Expectations tab, `n: 0` in the API and
+  MCP. It is not known with no number, "–", why `not_held`: no firing
+  held isn't none fired. A week the ledger holds part of still counts
+  what it holds.
+
 ## [0.65.0] - 2026-11-21
 
 Expectations, steps 2 to 5 (docs/design/expectations.md): serve holds
