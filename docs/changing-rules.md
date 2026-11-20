@@ -27,17 +27,22 @@ Prometheus refuses a whole file for a function it hasn't.
 
 A new rule is proposed too, from the proposals page's **Propose a new
 rule** or an agent's `propose` (kind `add`), held to what it is to do
-before anyone approves it ([docs/design/expectations.md](design/expectations.md),
-step 5): one Prometheus alerting rule, named apart from every rule, a
-place among those serve offers (a rule file's group or a new one, a
-Grafana folder's group, a ruler namespace's group or a new one,
-CloudWatch's or Google Cloud's alarms), whom it tells among whom the rules
-there already tell, and one expectation at least. Lapilli writes the rule
-itself where it goes, replays it over the twelve weeks with nothing beside
-it, and holds it to each expectation; no one approves it while one is
-broken, or its backtest didn't replay it. It goes the way a change goes
-there; undone, the rule is deleted; once added, its expectations go where
-an accepted draft of them goes ([Keep judging](serve.md)).
+before anyone approves it
+([docs/design/expectations.md](design/expectations.md), step 5): one
+Prometheus alerting rule, named apart from every rule, a place among those
+serve offers (a rule file's group or a new one, a Grafana folder's group,
+a ruler namespace's group or a new one, CloudWatch's or Google Cloud's
+alarms), whom it tells among whom the rules there already tell (in
+Grafana, one of their contact points where each of them names one, none
+where none does; in CloudWatch, an SNS topic, an OpsItem or a response
+plan, never a Lambda function or an automation; in a rule file or a ruler,
+no one: its labels route it through Alertmanager), and one expectation at
+least; its labels are plain text. Lapilli writes the rule itself where it
+goes, replays it over the twelve weeks with nothing beside it, and holds
+it to each expectation; no one approves it while one is broken, or its
+backtest didn't replay it. It goes the way a change goes there; undone,
+the rule is deleted; once added, its expectations go where an accepted
+draft of them goes ([Keep judging](serve.md)).
 
 Nothing is changed until a person approves it, on its page, in a browser:
 

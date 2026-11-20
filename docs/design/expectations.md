@@ -395,15 +395,22 @@ Step 2, serve's checks after deploy, as built:
 - **Which rules, which weeks.** The rules of the latest version and those
   copied in; with no version, every rule the ledger has. A budget's week
   before the rule came into effect has no check, shown empty. By the
-  ledger's weeks (open question 4): over its budget, a week is broken,
-  the week under way and a week the runs haven't finished too, as soon as
-  it is over; under it, a whole week is met, the week under way (and one
-  past the runs' cursor) is so far (`open`), and the week the ledger's
-  first firing fell in, or the rule's first, is not known (`not_whole`).
-  While people slept is by the rule's team's own hours, or the server's
-  (as the tiles count it); by hours with no sleep, not known
-  (`no_hours`). A rule Lapilli can't replay and doesn't copy in is not
-  known (`unreplayed`). A budget needs no record.
+  ledger's weeks (open question 4): over its budget, a week is broken, the
+  week under way and a week the runs haven't finished too, as soon as it
+  is over; under it, a whole week is met, the week under way (and one past
+  the runs' cursor) is so far (`open`), and the week the ledger's first
+  firing fell in, or the rule's first, is not known (`not_whole`). A rule
+  only copied in is known as far as its source's copies cover (the
+  ledger's `Coverage` of it): a week past where they end, whole, or the
+  week so far none of reached, is not known (`not_copied`), however far
+  the runs' cursor is, so that a job that stopped copying doesn't read as
+  weeks of no firings; and a catch of an incident they don't reach, its
+  delay with it, not caught in them, is not known too, rather than broken.
+  Not in the design; a review found such weeks met. While people slept is
+  by the rule's team's own hours, or the server's (as the tiles count it);
+  by hours with no sleep, not known (`no_hours`). A rule Lapilli can't
+  replay and doesn't copy in is not known (`unreplayed`). A budget needs
+  no record.
 - **Catches.** Judged by the ledger's catches of the incident written
   down (counted: not a dismissed impact window); with none written down,
   not known (`no_incident`). A catch's row is of the week its incident
@@ -430,8 +437,13 @@ Step 2, serve's checks after deploy, as built:
   held no more, 13 weeks on. A rule's name is kept unique in Postgres by
   its md5, as `checked`'s.
 - **Bounds.** 10,000 rules and expectations a round, each rule to each
-  budget and catch that holds it, past which the check fails, saying what
-  to do (a catch by `rule:`, not `group:` or `labels:`).
+  budget and catch that holds it. The operator's own (the file's and
+  `--config`'s) are counted first: past 10,000 of them the check fails,
+  saying what to do (a catch by `rule:`, not `group:` or `labels:`). A
+  rule's annotation, its author's, is held after them, a rule's whole
+  while it fits in what is left, in the rules' order; past it, one row a
+  rule, not known (`annotation_past`). So no annotation, however many
+  rules carry one, stops the operator's checks.
 - **Told and made a task.** `expectation.broken` is told of a budget
   broken in the week so far or the last whole week, or a catch broken,
   once a rule, an expectation and a week, 50 a round, the rest the rounds
@@ -630,11 +642,32 @@ Step 4, scenarios, as built:
   promtool is given this group alone, so that no test file chooses what it
   reads.
 - **How it is run.** In a directory of its own, removed after, holding
-  `test.yaml` and `rules.yaml`: promtool started directly, never through
-  a shell, as `promtool test rules test.yaml`, with nothing in its
+  `test.yaml` and `rules.yaml`: promtool started directly, never through a
+  shell, as `promtool test rules test.yaml`, with nothing in its
   environment but `TMPDIR`, a directory there (its test storage writes
-  under it); 30 s at most, killed past it; 64 KiB of what it says kept,
-  the rest neither kept nor read. Exit 0 saying `SUCCESS` is met; exit 1
+  under it), in a process group of its own; 30 s at most, the group killed
+  whole past it, so that a `--promtool` that is a wrapper leaves no child
+  running; 64 KiB of what it says kept, the rest neither kept nor read.
+  **Its memory, capped** (not in the design: a review found a rule
+  author's annotation whose template promtool expands at each evaluation
+  of an alert that fires, such as `absent(up)`'s, which fires in
+  promtool's empty storage and never in production, took promtool 3.5.0 to
+  2.6 GB in 1.6 s, from rule text alone). On Linux, within
+  `--promtool-memory` (256Mi unless given, 64Mi at least; the chart's
+  `serve.promtool.memory`): Lapilli starts itself again under a name of
+  its own (`lapilli-promtool-capped`, never a command a person gives,
+  which reads promtool's path and the cap from its environment and refuses
+  any other argument or variable), which sets RLIMIT_DATA, hard and soft,
+  to the cap and executes promtool in its place with the same fixed
+  arguments and `TMPDIR` alone. Past it promtool's allocations fail, Go's
+  runtime says so, and the scenario is not known (`promtool took more
+  memory than it may`). RLIMIT_DATA rather than RLIMIT_AS: since Linux 4.7
+  it holds every private writable mapping, Go's heap among them, while
+  RLIMIT_AS would hold the address space Go's runtime reserves as it
+  starts, far more than it uses, and stop promtool before it read a test.
+  macOS refuses RLIMIT_DATA: there promtool runs without a cap, said once
+  as serve starts. `lapilli verdict --promtool` runs it without one, in a
+  CI job whose own limits hold it. Exit 0 saying `SUCCESS` is met; exit 1
   saying `FAILED:` is broken, the lines after it kept (2,000 bytes);
   anything else couldn't be run, and is not known: a time out, a crash,
   another exit status, an answer promtool doesn't give. promtool also says
@@ -645,7 +678,10 @@ Step 4, scenarios, as built:
   promtool, which refuses any other command line, environment or
   `rule_files`), and promtool itself where one is on `PATH`
   (`TestRealPromtool`, skipped in CI); the group and the rewritten test
-  file were checked with promtool 3.5.0.
+  file were checked with promtool 3.5.0. The cap is tested on Linux
+  alone: the stand-in says the RLIMIT_DATA it was started under, and one
+  that takes a GiB is stopped (`TestRunMemoryCap`, `TestScenarioRunsCapped`);
+  the wrapper refuses another command line (`TestCapWrapperRefuses`).
 - **Which rules.** Those read from Prometheus's own format
   (`rules.Rule.Prometheus`): a rule file, a PrometheusRule, a ConfigMap of
   one, an Amazon namespace, a ruler, Google Cloud's `ClusterRules` and
@@ -664,12 +700,14 @@ Step 4, scenarios, as built:
   `FAIL_ON_EXPECTATIONS` cover them; a test file the change edited is said
   (`edited`). Not in the design: the summary's `scenarios_unrun`, those
   that couldn't be run after the change, promtool given and the rule one
-  it runs (the test file unread, a time out, a crash, past the 200), which
+  it runs (the test file unread, a time out, a crash, past the 200), and
+  one run before the change and not known after it (the change moved the
+  rule out of Prometheus's format, or its definition out of reach), which
   the recipes' gate fails on, as on a rule not replayed: a gate that can't
   judge doesn't pass. Without `--promtool`, each is not known (`not run:
   no --promtool`) and counts nothing. The text and Markdown say what
-  promtool said after the table, each line a code span, eight at most;
-  the JSON has `before_why`, `after_why`, `said`, `edited`, `unrun`;
+  promtool said after the table, each line a code span, eight at most; the
+  JSON has `before_why`, `after_why`, `said`, `edited`, `unrun`;
   `--redact` aliases a scenario's path, and hides what promtool said.
 - **The recipes.** `PROMTOOL` (the action's `promtool`), with `EXPECT`:
   passed as `--promtool`, found on the runner, refused in the checkout.
@@ -691,24 +729,30 @@ Step 4, scenarios, as built:
 - **In serve** (`--promtool PATH`, the chart's `serve.promtool`). The
   scenarios of `--expect`'s and `--config`'s expectations, each read in
   the directory of its own file, every round (a test file edited is
-  checked again, though nothing else changed), against the rule's group
-  as the latest version has it, its recording rules read from the
-  version's documents. A scenario's row is of the week what it found was
-  found in, one a rule and an expectation, as a catch's is of its
-  incident's; its version is a hash of promtool's path, the group and the
-  test file, and it is run again only when that changes: the design's
-  "when the rule's version changes", and also when its test file, its
-  group's other rules or promtool do. One that couldn't be run is kept so
-  too, not run again each round. Five a round (`expectScenariosARun`),
-  before the rows are written, never under the ledger's writer; the rest
-  not known (`not_run_yet`) until a later round. Not known says why:
-  `no_promtool`, `not_prometheus`, `not_run_yet`, `test_unread`,
-  `run_failed`. Schema 027, unreleased, was changed in place for it: a
-  column `detail` (what promtool said, or why it couldn't run, 2,000
-  bytes). A broken one is told (`expectation.broken`, with `scenario`),
-  made a task, and shown on the rule's tab (with what promtool said), the
-  overview, the rules list, the digest (in the week it was found),
-  `GET /api/v1/expectations`, MCP's `rule` and `/metrics`, as a catch is.
+  checked again, though nothing else changed), against the rule's group as
+  the latest version has it, its recording rules read from the version's
+  documents. A scenario's row is of the week what it found was found in,
+  one a rule and an expectation, as a catch's is of its incident's; its
+  version is a hash of promtool's path, the group and the test file, and
+  it is run again only when that changes: the design's "when the rule's
+  version changes", and also when its test file, its group's other rules
+  or promtool do. One that couldn't be run is kept so too, not run again
+  each round. Five a round (`expectScenariosARun`), never under the
+  ledger's writer, each kept as begun before promtool starts (its row,
+  alone: not known, `run_failed`, what it is run on) and as found once it
+  ends; a run that never ends, serve killed as promtool took the
+  container's memory, is so for the next leader, which runs it again only
+  once promtool, the group or the test file changes, rather than each term
+  (of a scenario's two rows, the run begun and the one it was to replace,
+  the later week's is read). The rest not known (`not_run_yet`) until a
+  later round. Not known says why: `no_promtool`, `not_prometheus`,
+  `not_run_yet`, `test_unread`, `run_failed`. Schema 027, unreleased, was
+  changed in place for it: a column `detail` (what promtool said, or why
+  it couldn't run, 2,000 bytes). A broken one is told
+  (`expectation.broken`, with `scenario`), made a task, and shown on the
+  rule's tab (with what promtool said), the overview, the rules list, the
+  digest (in the week it was found), `GET /api/v1/expectations`, MCP's
+  `rule` and `/metrics`, as a catch is.
 - **The chart.** `serve.scenarios` puts each test file beside
   `expectations.yaml` in its ConfigMap, a scenario's path its name.
   Lapilli's image stays without promtool: `serve.promtool.image`, an image
@@ -716,7 +760,8 @@ Step 4, scenarios, as built:
   which an init container copies `serve.promtool.from` into an emptyDir
   only the pod has; or `serve.promtool.path` in an image of one's own.
   With either, `/tmp` is an emptyDir, the root being read-only. promtool
-  runs in serve's container: its memory counts toward serve's limit.
+  runs in serve's container: its memory counts toward serve's limit, each
+  run held to `serve.promtool.memory` (256Mi) on Linux.
 
 Step 5, adding a rule, as built:
 
@@ -741,7 +786,11 @@ Step 5, adding a rule, as built:
   (changes.md, `says`): each a template that parses in the place's
   template language, calling no `query`, nothing that grows without bound
   each time the alert fires; a summary or a description 4 KB at most, a
-  runbook an https URL. Prometheus refuses a whole rule file for one that
+  runbook an https URL. Its labels are plain text: one holding `{{` is
+  refused, Prometheus and Grafana expanding a label's template at each
+  evaluation (`{{ $value }}` makes each one another alert), which the
+  backtest, keeping a label as written, wouldn't count; its annotations
+  may be templates. Prometheus refuses a whole rule file for one that
   doesn't parse, and every rule in it with it. It is written by Lapilli's
   encoder, never as given: its keys in one order, its texts double-quoted,
   an expression of more lines a literal block.
@@ -755,34 +804,44 @@ Step 5, adding a rule, as built:
   them; anything else is refused with one reason, whether it exists or
   not. The git path: a group of a Prometheus rule file read under
   `--rules` (a rule file, a PrometheusRule, Google Cloud's `ClusterRules`
-  or `GlobalRules`, a rule file a ConfigMap holds in a literal block), or
-  a new group after the last; not Google Cloud's namespaced `Rules`, whose
-  expressions Lapilli scopes to their namespace, nor a Grafana
-  provisioning file, nor a file a CI system runs,
-  by Lapilli's own copy of the change recipes' list, a first lock beside
+  or `GlobalRules`, a rule file a ConfigMap holds in a literal block; in a
+  file of two PrometheusRules, either's groups, the other document as it
+  was), or a new group after the last, offered only in a file where one
+  document holds groups (`rules.NewGroupFits`); not Google Cloud's
+  namespaced `Rules`, whose expressions Lapilli scopes to their namespace,
+  nor a Grafana provisioning file, nor a file a CI system runs, by
+  Lapilli's own copy of the change recipes' list, a first lock beside
   theirs, nor a new file, which isn't a document Lapilli read, and so not
   one a recipe finds by its hash. Grafana: a group of a folder whose rules
   Lapilli replays as PromQL, its query one of the data sources they read;
-  not a new group, which Grafana would make with an interval of its own.
-  A ruler: a group, or a new group, in a Mimir's, a Cortex's or an Amazon
+  not a new group, which Grafana would make with an interval of its own. A
+  ruler: a group, or a new group, in a Mimir's, a Cortex's or an Amazon
   namespace `--changes-in` names; not an Azure rule group, whose rules
   carry action groups of their own. A cloud's alarms: CloudWatch's or
   Google Cloud's `--alarms` with alarms read, under a name `--changes-in`
-  names there; not Azure Monitor's alert rules (a PromQL metric alert takes
-  a workspace's scope and a location Lapilli would have to guess) nor
-  OCI's (MQL, which Lapilli doesn't replay, so one added couldn't be held
-  to anything). Those left out aren't offered.
-- **Whom it tells: no power over the account the rules there don't
-  already use.** A rule added to a rule file or a ruler names no one: its
-  labels route it, as every rule there is routed. In Grafana, one contact
-  point at most (`notification_settings`), of those the rules of its
-  folder name; in CloudWatch, actions (`AlarmActions` and `OKActions`) of
-  those the alarms of its `--alarms` take that only tell (an SNS topic, a
-  Lambda function, Systems Manager's OpsItems, Incident Manager's response
-  plans), never an action that does more (Auto Scaling, EC2: stopping or
-  terminating a machine), even where an alarm there takes one; in Google
-  Cloud, notification channels of those its policies tell. Anything else
-  is refused, as a place is; it is checked again, against the rules read
+  names there; not Azure Monitor's alert rules (a PromQL metric alert
+  takes a workspace's scope and a location Lapilli would have to guess)
+  nor OCI's (MQL, which Lapilli doesn't replay, so one added couldn't be
+  held to anything). Those left out aren't offered.
+- **Whom it tells: no power over the account the rules there don't already
+  use.** A rule added to a rule file or a ruler names no one: its labels
+  route it through Alertmanager, as every rule's there do, to whichever
+  receiver its routes match; its page says so. In Grafana, one contact
+  point at most (`notification_settings`), of those the rules of its group
+  name: where every rule there names one, it names one of theirs (named
+  none, Grafana's notification policies would route it by its labels to
+  whichever contact point they match); where none of them names one, it
+  names none, routed by the policies as they are, its page saying so;
+  where some do, either. In CloudWatch, actions (`AlarmActions` and
+  `OKActions`) of those the alarms of its `--alarms` take that only tell:
+  an SNS topic, a Systems Manager OpsItem, an Incident Manager response
+  plan, each by its ARN's shape; never a Lambda function or a Systems
+  Manager automation, which run code, nor an action that does more (Auto
+  Scaling, EC2: stopping or terminating a machine), even where an alarm
+  there takes one (a change to an alarm already there, alarms.md, still
+  counts a Lambda function as telling, as released). In Google Cloud,
+  notification channels of those its policies tell. Anything else is
+  refused, as a place is; it is checked again, against the rules read
   then, as it is carried out.
 - **Held to its expectations before approval.** An expectations text
   holding it by `rule: NAME` alone, one expectation at least (a budget's
@@ -816,18 +875,20 @@ Step 5, adding a rule, as built:
   anew.
 - **Carried out** after it is checked again: its place still offered, its
   name still free, held to its expectations again over the twelve weeks to
-  now, refused when it now breaks one or isn't replayed to the end. The git
-  path: the rule file's other lines changed since, the rule is added afresh
-  in it; the file as it was is kept for undo, and the change recipes write
-  it as any change, their own guards on which file and what of it. Grafana:
-  a `POST` of the rule with a uid of Lapilli's (`lapilli-` and twenty hex
-  digits), in the folder and group a rule there is in now (their uid and
-  name read from it), refused when another tool keeps that rule
-  (provenance), when its folder's rules no longer read its data source or
-  tell its contact point, or when a rule of its title is in its folder;
-  read back by its uid. A ruler: the group written as rulers.md writes
-  one, only the rule added to it as it is now (`rules.AddsRule`), a new
-  group only while it is still gone. CloudWatch: `PutMetricAlarm`, as
+  now, refused when it now breaks one or isn't replayed to the end. It
+  waits for a comparison running (an agent's `compare` or
+  `test_expectation`), as a change's backtest does, rather than failing.
+  The git path: the rule file's other lines changed since, the rule is
+  added afresh in it; the file as it was is kept for undo, and the change
+  recipes write it as any change, their own guards on which file and what
+  of it. Grafana: a `POST` of the rule with a uid of Lapilli's (`lapilli-`
+  and twenty hex digits), in the folder and group a rule there is in now
+  (their uid and name read from it), refused when another tool keeps that
+  rule (provenance), when its folder's rules no longer read its data
+  source or tell its contact point, or when a rule of its title is in its
+  folder; read back by its uid. A ruler: the group written as rulers.md
+  writes one, only the rule added to it as it is now (`rules.AddsRule`), a
+  new group only while it is still gone. CloudWatch: `PutMetricAlarm`, as
   undoing a deletion makes one (its PromQL in
   `EvaluationCriteria.PromQLCriteria`: `Query`, `PendingPeriod`,
   `RecoveryPeriod`; `EvaluationInterval` 60), in the account the alarms
@@ -850,12 +911,20 @@ Step 5, adding a rule, as built:
   approver, by the git path to `--expect`'s file when it can go there,
   otherwise the YAML on its page and the rule's tab, for a person. Kept
   once the rule is applied, not before: a rule not added holds nothing.
-  The proposal counted toward the hour, so the draft doesn't.
-- **In the ledger** (027, unreleased, in place): `proposals.expect`, what a
-  rule added is held to (the text as Lapilli wrote it, and its test files,
-  bounded as a draft's, and, once kept, the draft it was kept as, so that
-  it is kept once however many drafts are let go), read with its proposal
-  alone, never with a list; `expectation_drafts.proposal`.
+  Kept only of one someone approved: one applied with no one's approval
+  (its proposed diff merged by hand) has no approver to accept them, and
+  is marked never to be kept as it is applied; one the ledger refuses as
+  it is kept is marked so too, and one that fails otherwise is tried the
+  next round, so that none holds up another, nor the changes carried out
+  after. The proposal counted toward the hour, so the draft doesn't.
+- **In the ledger** (027, unreleased, in place): `proposals.expect`, what
+  a rule added is held to (the text as Lapilli wrote it, and its test
+  files, bounded as a draft's), read with its proposal alone, never with a
+  list; `proposals.expect_kept`, what became of it once the rule was added
+  (0 waiting, the draft it was kept as, so that it is kept once however
+  many drafts are let go, -1 never), those waiting read along
+  `proposals_unkept`, never by what the JSON holds;
+  `expectation_drafts.proposal`.
 - **Grafana's `is_number`** is now replayed (`internal/sse`), as Grafana
   evaluates it: the condition Grafana's own conversion of a Prometheus rule
   writes, `is_number($A) || is_nan($A) || is_inf($A)`, firing on every
@@ -865,11 +934,15 @@ Step 5, adding a rule, as built:
   there makes (`addedUnder`); Grafana's `:create` and Google's `create`
   were asked already, for undoing a deletion.
 - **Tested** against the stand-ins the paths' own tests use: each path
-  made, read back and undone (a file's group, a Mimir group and a new
-  one, a Grafana folder's group, a CloudWatch alarm, a Google policy);
-  each guard (the place offered, a name in effect, the strict read and
+  made, read back and undone (a file's group, a Mimir group and a new one,
+  a Grafana folder's group, a CloudWatch alarm, a Google policy); each
+  guard (the place offered, a name in effect, the strict read and
   Lapilli's own encoding, whom it tells, the templates, the roles and
   self-approval, the hour, one expectation at least, a broken or
   unreplayed one holding approval, the check again as it is carried out)
-  taken out in turn, a test failing for each; none against a real
-  account.
+  taken out in turn, a test failing for each; none against a real account.
+  After review: an add carried out while a comparison runs, the adds whose
+  expectations can't be kept ahead of one that can, a file of two
+  PrometheusRules, a Grafana group whose every rule names a contact point,
+  a Lambda function and an automation among CloudWatch's actions, a
+  label's template; each fails with its guard taken out.

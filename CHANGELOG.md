@@ -16,7 +16,8 @@ Before upgrading:
   A lapilli before this one doesn't open the upgraded ledger. Nothing is
   backfilled: the first round after the upgrade checks the thirteen weeks,
   and runs the scenarios, five a run. 027 holds `expectation_checks` and
-  `expectation_drafts`, and adds `proposals.expect`.
+  `expectation_drafts`, and adds `proposals.expect` and
+  `proposals.expect_kept`.
 - **Proposals and drafts share a person's hour**: the 20 proposals a
   person, with the agents acting for them, makes in an hour now count the
   drafts of expectations they make too.
@@ -31,21 +32,26 @@ Before upgrading:
   it is over, and to its catches against the incidents written down,
   judged again by a replay of the rule as it is when a new version of it
   came after the incident (five a run). Not known is never shown as met or
-  broken. What it finds is kept (schema 027, `expectation_checks`) and
-  shown on the rule's new Expectations tab, in the overview's What to look
-  at (Make it a task, `POST /expectations/task`), on the rules list
-  (`expect=broken`, `expect=held`, `expect=none`; `is:expected`,
-  `is:unexpected`), in the digest (`expectations` in `digest.ready`), in
-  `GET /api/v1/expectations`, MCP's `rule` (`expectations`) and `/metrics`
-  (`lapilli_expectations_held`, `lapilli_expectations_broken`,
-  `lapilli_rule_expectations_broken`). Told as `expectation.broken` once a
-  rule, an expectation and a week, 50 a run; `--expect-tasks` (off by
-  default) makes a task of kind tune for the rule's team, once a rule, an
-  expectation and a week, 20 a run, none while one is open. The three
-  sources combine as one file: `--expect` and `--config`'s are made one,
-  the same budget or incident in both refused, the two kept as they last
-  were; a rule's annotation holds it unless the file or `--config` give
-  that rule, by `rule:`, the same budget, when it is passed over and said.
+  broken: a rule only copied in is known as far as its source's copies
+  reach, a week past them, or a catch of an incident past them, not known.
+  A check holds 10,000 rules and expectations, the expectations file's and
+  `--config`'s first: a rule's annotation past what is left is not known,
+  and never stops theirs. What it finds is kept (schema 027,
+  `expectation_checks`) and shown on the rule's new Expectations tab, in
+  the overview's What to look at (Make it a task, `POST
+  /expectations/task`), on the rules list (`expect=broken`, `expect=held`,
+  `expect=none`; `is:expected`, `is:unexpected`), in the digest
+  (`expectations` in `digest.ready`), in `GET /api/v1/expectations`, MCP's
+  `rule` (`expectations`) and `/metrics` (`lapilli_expectations_held`,
+  `lapilli_expectations_broken`, `lapilli_rule_expectations_broken`). Told
+  as `expectation.broken` once a rule, an expectation and a week, 50 a
+  run; `--expect-tasks` (off by default) makes a task of kind tune for the
+  rule's team, once a rule, an expectation and a week, 20 a run, none
+  while one is open. The three sources combine as one file: `--expect` and
+  `--config`'s are made one, the same budget or incident in both refused,
+  the two kept as they last were; a rule's annotation holds it unless the
+  file or `--config` give that rule, by `rule:`, the same budget, when it
+  is passed over and said.
 - **`labels:` and `refires` in expectations**, for `lapilli verdict
   --compare --expect` too: an expectation may name its rules by a label
   selector, as `--rules-select` takes, of the labels the rules' alerts
@@ -53,29 +59,40 @@ Before upgrading:
   backtest port, while people slept is counted by the rule's team's own
   hours, as serve's checks count it.
 - **Scenarios** (`scenarios:` in an expectation: paths of promtool test
-  files, relative to the expectations file, inside its directory, 200 in
-  a file, 1 MiB each). `lapilli verdict --compare --expect FILE --promtool
+  files, relative to the expectations file, inside its directory, 200 in a
+  file, 1 MiB each). `lapilli verdict --compare --expect FILE --promtool
   PATH` runs each scenario of a rule the change touches, before and after,
   against the rule's group as each side has it: met, broken (what promtool
   said, in the report), or not known, and why (`not run: no --promtool`
   without it; a rule not in Prometheus's format; a test file that can't be
   read, a time out or a crash, which the summary counts as
-  `scenarios_unrun`). Counted with budgets and catches, so
-  `--fail-expectations` covers them; a test file the change edited is
-  said. `lapilli serve --promtool PATH` runs those of its own expectations
-  (`--expect`, `--config`) after a run, again when the rule's group or its
-  test file changes, five a run, never while holding the ledger's writer:
-  kept in `expectation_checks` (with what promtool said, `detail`), and
-  shown, told and made a task as a broken budget is. The chart's
-  `serve.scenarios` puts the test files beside `serve.expectations`;
-  `serve.promtool.image` copies promtool from an image of yours (Prometheus's
-  own) by an init container, or `serve.promtool.path` names it in an image
-  of your own. Lapilli's image has no promtool. The backtest recipes take
-  `PROMTOOL` (the action's `promtool`), refused with `LAPILLI_SERVE`: serve
-  runs no scenario a pull request sends, each said as not run through it.
-  promtool runs with a fixed command line, no environment, 30s and 64 KiB
-  of what it says at most, in a directory of its own, its `rule_files` the
-  group Lapilli wrote, whatever the test file named.
+  `scenarios_unrun`, as it counts one run before the change and not known
+  after it, the change having moved the rule out of Prometheus's format).
+  Counted with budgets and catches, so `--fail-expectations` covers them;
+  a test file the change edited is said. `lapilli serve --promtool PATH`
+  runs those of its own expectations (`--expect`, `--config`) after a run,
+  again when the rule's group or its test file changes, five a run, never
+  while holding the ledger's writer: kept in `expectation_checks` (with
+  what promtool said, `detail`), and shown, told and made a task as a
+  broken budget is. The chart's `serve.scenarios` puts the test files
+  beside `serve.expectations`; `serve.promtool.image` copies promtool from
+  an image of yours (Prometheus's own) by an init container, or
+  `serve.promtool.path` names it in an image of your own. Lapilli's image
+  has no promtool. The backtest recipes take `PROMTOOL` (the action's
+  `promtool`), refused with `LAPILLI_SERVE`: serve runs no scenario a pull
+  request sends, each said as not run through it. promtool runs with a
+  fixed command line, no environment, 30s and 64 KiB of what it says at
+  most, in a directory of its own, its `rule_files` the group Lapilli
+  wrote, whatever the test file named, in a process group of its own
+  killed whole at its time limit. On Linux, serve holds each run to
+  `--promtool-memory` (256Mi unless given, 64Mi at least; the chart's
+  `serve.promtool.memory`), promtool's RLIMIT_DATA, which lapilli sets by
+  starting itself again before promtool: a rule's annotation template,
+  which promtool expands at each evaluation of an alert that fires, could
+  otherwise take gigabytes and the container with it. macOS sets no cap.
+  serve keeps each run as begun before promtool starts, so that one that
+  never ends (serve stopped as promtool took its memory) isn't run again
+  each term, only once promtool, the group or the test file changes.
 - **Drafts from the history.** A rule's Expectations tab shows what it is
   held to as it is now: the most it fired in a whole week of the twelve
   before this one, while people slept and re-fired, rounded up (1 to 9 as
@@ -99,12 +116,12 @@ Before upgrading:
   repeated, an expected sample's histogram) or 10,000 evaluations a test,
   and refused where promtool would load what isn't counted (a `series`
   that isn't a metric name and its labels alone, a line break in `values`,
-  a tag such as `!!binary`), before promtool runs, and run one at a time.
-  A rewrite that meets every expectation, losing no catch, the rule as it
-  is and rewritten each replayed to the end, comes back with `post`,
-  Markdown marked as an agent's rewrite backtested by Lapilli, with the
-  numbers before and after, for the agent or a person to post on the pull
-  request: Lapilli writes nothing there.
+  a tag such as `!!binary`), before promtool runs, and run one at a time,
+  within `--promtool-memory`. A rewrite that meets every expectation,
+  losing no catch, the rule as it is and rewritten each replayed to the
+  end, comes back with `post`, Markdown marked as an agent's rewrite
+  backtested by Lapilli, with the numbers before and after, for the agent
+  or a person to post on the pull request: Lapilli writes nothing there.
 - **MCP's `propose_expectation`** (with `--mcp-propose`): an agent's draft
   of what one rule is held to, by `rule:` alone, checked as
   `test_expectation` checks it and kept for a person to accept or drop on
@@ -132,25 +149,36 @@ Before upgrading:
   strictly (one document; `alert`, `expr`, `for`, `keep_firing_for`,
   `labels`, `annotations`, each once, every value text; bounded) and
   written by Lapilli where it goes, never as given, named apart from every
-  rule in effect; its labels and annotations held as a fix to what a rule
-  says is (templates that parse, no `query`, a runbook an https URL). It
-  goes only where serve offers: a group of a rule file under `--rules`, or
-  a new group in it (not a file a CI system runs); a Grafana folder's
-  group, its query reading a data source the folder's rules read; a group
-  of a Mimir's, a Cortex's or an Amazon namespace `--changes-in` names, or
-  a new group; CloudWatch's or Google Cloud's `--alarms`, under a name
-  `--changes-in` names there. It tells only whom the rules there already
-  tell (a Grafana contact point, a CloudWatch action that only tells, a
-  Google notification channel), never an automation action. It is held to
-  one expectation at least, replayed over the twelve weeks with nothing
-  beside it and checked as `test_expectation` checks one; no one approves
-  it while one is broken or its backtest didn't replay it to the end (not
-  known is shown, never met). Checked again as it is carried out, it goes
-  the way a change goes there: a pull request; Grafana's `POST`, with a
-  uid of Lapilli's; the ruler's group written with it; CloudWatch's
-  `PutMetricAlarm` or Google's `alertPolicies.create`. Undone, it is
-  deleted. Once added, its expectations go where an accepted draft goes
-  (origin `proposal`, accepted by its first approver). An agent's counts
+  rule in effect; its labels plain text (a label's template would make
+  each evaluation another alert, which the backtest wouldn't count), its
+  annotations held as a fix to what a rule says is (templates that parse,
+  no `query`, a runbook an https URL). It goes only where serve offers: a
+  group of a rule file under `--rules` (either PrometheusRule's of a file
+  of two), or a new group in a file one document of which holds groups
+  (not a file a CI system runs); a Grafana folder's group, its query
+  reading a data source the folder's rules read; a group of a Mimir's, a
+  Cortex's or an Amazon namespace `--changes-in` names, or a new group;
+  CloudWatch's or Google Cloud's `--alarms`, under a name `--changes-in`
+  names there. It tells only whom the rules there already tell: in
+  Grafana, a contact point of its group's rules (one of theirs where each
+  of them names one; none where none does, Grafana's notification policies
+  routing it by its labels as they route those); in CloudWatch, an SNS
+  topic, an OpsItem or an Incident Manager response plan the alarms there
+  take, never a Lambda function, an automation or an action that does
+  more; in Google Cloud, a notification channel its policies tell. Added
+  to a rule file or a ruler, it names no one: its labels route it through
+  Alertmanager, as any rule's there do. It is held to one expectation at
+  least, replayed over the twelve weeks with nothing beside it and checked
+  as `test_expectation` checks one; no one approves it while one is broken
+  or its backtest didn't replay it to the end (not known is shown, never
+  met). Checked again as it is carried out (waiting for a comparison
+  running, as a change does), it goes the way a change goes there: a pull
+  request; Grafana's `POST`, with a uid of Lapilli's; the ruler's group
+  written with it; CloudWatch's `PutMetricAlarm` or Google's
+  `alertPolicies.create`. Undone, it is deleted. Once added, its
+  expectations go where an accepted draft goes (origin `proposal`,
+  accepted by its first approver); one merged by hand before anyone
+  approved it has none kept, and holds up no other. An agent's counts
   toward its person's twenty an hour. Not offered: Azure's rule groups and
   alert rules, OCI's alarms, a new Grafana group, a new rule file.
 - **Grafana's `is_number`** in a rule's math expression is replayed.

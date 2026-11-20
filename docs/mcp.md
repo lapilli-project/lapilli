@@ -39,17 +39,19 @@ to now, and says, per item, met, broken or not known, as it is and
 rewritten ([design/expectations.md](design/expectations.md), step 3). A
 scenario's promtool test file, given in `tests` by its path, is run by
 serve's `--promtool`, once it is read as promtool would expand it and is
-within bounds. Given a rewrite that meets every expectation, losing no
-incident the rule catches, the rule as it is and rewritten each replayed
-to the end, it answers with `post`: Markdown, marked as an agent's
-rewrite backtested by Lapilli, with the numbers before and after, which
-the agent or a person may post on the pull request. Lapilli posts
-nothing; without `post`, the items and the note say why. One check runs
-at a time, with `compare`'s.
+within bounds, and within `--promtool-memory` on Linux (a rewrite's
+annotation template can ask promtool for more memory than a test file
+says: past it, the scenario is not known). Given a rewrite that meets
+every expectation, losing no incident the rule catches, the rule as it is
+and rewritten each replayed to the end, it answers with `post`: Markdown,
+marked as an agent's rewrite backtested by Lapilli, with the numbers
+before and after, which the agent or a person may post on the pull
+request. Lapilli posts nothing; without `post`, the items and the note say
+why. One check runs at a time, with `compare`'s.
 
 Nothing an agent asks for changes anything: `compare` and
 `test_expectation` replay and keep nothing. With `--mcp-propose editors`
-(or `admins`), `propose` keeps a change to one rule, or to what it says, or a new rule (kind `add`, where `places` says one may go, held to the expectations given: no one approves it while one is broken), as a proposal ([Changing rules](changing-rules.md)),
+(or `admins`), `propose` keeps a change to one rule, or to what it says, or a new rule (kind `add`, where `places` says one may go, telling only whom the rules there tell, one of their contact points where every Grafana rule there names one (`places`' `must_tell`), its labels plain text, held to the expectations given: no one approves it while one is broken), as a proposal ([Changing rules](changing-rules.md)),
 marked as an agent's, for someone other than the person it acts for to
 approve in the UI, and `backtest_again` backtests a stale proposal again,
 as an editor does from its page. No tool approves or applies one. With it
