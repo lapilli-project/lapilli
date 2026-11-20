@@ -1255,6 +1255,46 @@ func TestBacktestRecipeIncidents(t *testing.T) {
 	failure(t, rr.body(), "INCIDENTS incidents.yaml isn't a file in the commit the pull request goes into")
 }
 
+// INCIDENTS, and the expectations of the rules in place, are read from
+// TARGET itself, the commit the pull request goes into as it is now, not
+// from where the pull request branched from its branch, which its author
+// picks: a pull request branched from before an incident was recorded, or
+// a budget lowered, its own branch checked out (Gitea's, Forgejo's,
+// Bitbucket's), is judged by both all the same. Its rules are still
+// compared against those of where it branched, through lapilli serve too.
+func TestBacktestRecipeIncidentsFromTarget(t *testing.T) {
+	needRecipeTools(t)
+	loose := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 50}\n"
+	tight := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n", "expect.yaml": loose})
+	old := repo.git("rev-parse", "HEAD")
+	repo.write(map[string]string{"incidents.yaml": "incidents:\n  - {id: INC-9, start: 2026-11-10T00:00:00Z, end: 2026-11-10T01:00:00Z}\n", "expect.yaml": tight})
+	repo.git("commit", "--quiet", "-am", "record INC-9, and a tighter budget")
+	repo.git("checkout", "--quiet", "-b", "pr", old)
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("commit", "--quiet", "-am", "slower")
+	given := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(fake, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in\n    --incidents) cp \"$2\" '"+given+"/incidents' ;;\n"+
+		"    --expect-before) cp \"$2\" '"+given+"/expect-before' ;;\n    --compare) cp -R \"$2\" '"+given+"/compare' ;;\n  esac\n  shift\ndone\n"+
+		"echo '[//]: # (lapilli-compare {\"nothing_changed\":false,\"changed\":1,\"unreplayed\":0})'\n"), 0o755)
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	out, err := rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "EXPECT=expect.yaml", "TARGET=main", "LAPILLI=" + fake}, "--prometheus", "http://127.0.0.1:9")
+	incidents, _ := os.ReadFile(filepath.Join(given, "incidents"))
+	before, _ := os.ReadFile(filepath.Join(given, "expect-before"))
+	compared, _ := os.ReadFile(filepath.Join(given, "compare", "shop.yaml"))
+	if err != nil || !strings.Contains(string(incidents), "INC-9") || string(before) != tight || string(compared) != shopRules("5m") {
+		t.Errorf("%v: given incidents %q, expectations of the rules in place %q, rules compared against %q\n%s", err, incidents, before, compared, out)
+	}
+	// Through lapilli serve, the expectations of the rules in place alike.
+	srv := newServeStandIn(t)
+	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+	sr := serveRun(t, backtestHosts[0], repo, srv)
+	if out, err := sr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "TARGET=main"}); err != nil || srv.sent()["expect_before"] != tight {
+		t.Errorf("through serve: %v, expect_before %q\n%s", err, srv.sent()["expect_before"], out)
+	}
+}
+
 // RENDER runs in each commit's files, the base's first, each with a HOME
 // of its own, and without the variables CIs keep tokens in.
 func TestBacktestRecipeRenderAlone(t *testing.T) {

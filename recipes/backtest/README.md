@@ -54,8 +54,8 @@ serve](#through-lapilli-serve)). Each also needs:
 And, as wanted:
 
 - `INCIDENTS`, a file of incidents in the repository, read from the commit
-  the pull request goes into, never the pull request's own: a file, not a
-  link, of 8 MiB at most. Or `--incidents` with a file from outside the
+  the pull request goes into, `TARGET` itself, never the pull request's
+  own, nor where it branched from: a file, not a link, of 8 MiB at most. Or `--incidents` with a file from outside the
   checkout, such as one an earlier step wrote from your incident tool
   ([recipes/incidents](../incidents)).
 - `IMPACT`, a PromQL expression that returns something while users are
@@ -70,8 +70,10 @@ And, as wanted:
   `origin`, which needs the checkout's credentials kept. The rules compared
   against are those of the commit `HEAD` and the target share last (`git
   merge-base`): what the pull request itself changes, whether the checkout
-  is a merge or the pull request's own commit. Each script defaults it from
-  its CI.
+  is a merge or the pull request's own commit. `INCIDENTS`, and the
+  expectations the rules in place are held to, are the target's own, as it
+  is now: a pull request branched from before an incident was written
+  down is judged by it all the same. Each script defaults it from its CI.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).

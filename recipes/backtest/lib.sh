@@ -76,7 +76,8 @@
 #                    it (default HEAD^1: the merge commit's first parent, as
 #                    GitHub checks a pull request out); the rules compared
 #                    against are those of the commit HEAD and TARGET share
-#                    last (git merge-base)
+#                    last (git merge-base), INCIDENTS and the expectations
+#                    of the rules in place TARGET's own
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -965,33 +966,38 @@ files() {
 }
 
 # incidents: INCIDENTS, as the commit the pull request goes into has it,
-# into $tmp/incidents.yaml: a file, not a link, of 8 MiB at most.
+# TARGET itself, into $tmp/incidents.yaml: a file, not a link, of 8 MiB at
+# most. Not as the commit the rules are compared against has it, where the
+# pull request branched from TARGET's branch, which its author picks: a
+# pull request branched from before an incident was recorded would be
+# judged without it.
 incidents() {
   [ -n "${INCIDENTS:-}" ] || return 0
-  mode=$(git -C "$repo" ls-tree "$base" -- "$INCIDENTS" | awk '{ print $1 }')
+  mode=$(git -C "$repo" ls-tree "$target" -- "$INCIDENTS" | awk '{ print $1 }')
   case $mode in
     100644 | 100755) ;;
     '') trouble "INCIDENTS $INCIDENTS isn't in the commit the pull request goes into"; return 1 ;;
     *) trouble "INCIDENTS $INCIDENTS isn't a file in the commit the pull request goes into"; return 1 ;;
   esac
-  if [ "$(git -C "$repo" cat-file -s "$base:$INCIDENTS")" -gt 8388608 ]; then
+  if [ "$(git -C "$repo" cat-file -s "$target:$INCIDENTS")" -gt 8388608 ]; then
     trouble "INCIDENTS $INCIDENTS is more than 8 MiB"
     return 1
   fi
-  git -C "$repo" cat-file blob "$base:$INCIDENTS" >"$tmp/incidents.yaml" ||
+  git -C "$repo" cat-file blob "$target:$INCIDENTS" >"$tmp/incidents.yaml" ||
     { trouble "INCIDENTS $INCIDENTS couldn't be read from the commit the pull request goes into"; return 1; }
 }
 
 # expectations: EXPECT, as each commit has it, into
 # $tmp/expect.head.yaml (the pull request's, for the rules it proposes) and
-# $tmp/expect.base.yaml (the commit it goes into's, for the rules in place):
-# files, not links, of 1 MiB at most. The pull request may add the file,
-# and the rules in place are held to its; or take it away, as if it held
-# none: what it held is shown, taken away. In neither commit, it is said.
+# $tmp/expect.base.yaml (the commit it goes into's, TARGET itself, for the
+# rules in place, as INCIDENTS is read): files, not links, of 1 MiB at
+# most. The pull request may add the file, and the rules in place are held
+# to its; or take it away, as if it held none: what it held is shown,
+# taken away. In neither commit, it is said.
 expectations() {
   [ -n "${EXPECT:-}" ] || return 0
   for side in head base; do
-    if [ "$side" = head ]; then commit=$head what="the pull request's commit"; else commit=$base what="the commit it goes into"; fi
+    if [ "$side" = head ]; then commit=$head what="the pull request's commit"; else commit=$target what="the commit it goes into"; fi
     mode=$(git -C "$repo" ls-tree "$commit" -- "$EXPECT" | awk '{ print $1 }')
     case $mode in
       100644 | 100755) ;;
