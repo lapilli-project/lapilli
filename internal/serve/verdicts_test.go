@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -742,7 +743,7 @@ func TestNotJudgedServe(t *testing.T) {
 	if !strings.Contains(page, "not judged: no record, or judged by nothing") {
 		t.Error("the day's legend doesn't say judged by nothing")
 	}
-	if !strings.Contains(page, `class="unjudged" x=`) {
+	if !regexp.MustCompile(`<rect class="unjudged" x="\d+" y="`).MatchString(page) {
 		t.Error("the day's strip counts the firings judged by nothing as caught nothing")
 	}
 }
