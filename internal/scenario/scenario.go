@@ -218,8 +218,11 @@ func (p Promtool) Run(ctx context.Context, group, test []byte) Result {
 		return Result{State: Failed, Said: failure(said)}
 	case p.capped() && errors.As(err, &exit) && exit.ExitCode() == capFailed && bytes.HasPrefix(said, []byte("lapilli: ")):
 		return Result{State: Unrun, Why: "promtool couldn't be started"}
-	case p.capped() && errors.As(err, &exit) && (bytes.Contains(said, []byte("out of memory")) || bytes.Contains(said, []byte("cannot allocate memory"))):
-		// Go's runtime says so as an allocation past RLIMIT_DATA fails.
+	case p.capped() && errors.As(err, &exit) && (bytes.Contains(said, []byte("out of memory")) || bytes.Contains(said, []byte("cannot allocate memory")) ||
+		bytes.Contains(said, []byte("pthread_create failed"))):
+		// Go's runtime says so as an allocation past RLIMIT_DATA fails;
+		// built with cgo, as a thread's stack, 8 MiB each, can't be
+		// mapped.
 		return Result{State: Unrun, Why: fmt.Sprintf("promtool took more memory than it may (%d MiB)", p.Memory>>20)}
 	case errors.As(err, &exit) && exit.ExitCode() < 0:
 		return Result{State: Unrun, Why: "promtool crashed"}

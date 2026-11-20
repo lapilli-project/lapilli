@@ -222,9 +222,12 @@ func TestScenarioRunsCapped(t *testing.T) {
 	}
 	expect := "expectations:\n  - rule: Errors\n    scenarios: [tests/errors.yaml]\n"
 	s, _, _, _ := scenarioServer(t, expect, map[string]string{"tests/errors.yaml": scenariotest.Test("see")}, true)
-	s.cfg.PromtoolMemory = 96 << 20
+	// The stand-in, this test binary built with cgo, needs more than
+	// promtool's release to start (scenario's TestRunMemoryCap).
+	const cap = 512 << 20
+	s.cfg.PromtoolMemory = cap
 	checkAgain(t, s)
-	if c := checksOf(t, s, "Errors")["scenario tests/errors.yaml"]; !strings.Contains(c.Detail, "rlimit_data "+strconv.Itoa(96<<20)+"\n") {
+	if c := checksOf(t, s, "Errors")["scenario tests/errors.yaml"]; !strings.Contains(c.Detail, "rlimit_data "+strconv.Itoa(cap)+"\n") {
 		t.Errorf("a round's run: %+v", c)
 	}
 	test, err := scenario.Rewrite([]byte(scenariotest.Test("see")))
@@ -232,7 +235,7 @@ func TestScenarioRunsCapped(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &draftRun{ctx: context.Background(), s: s, tests: map[string][]byte{"t.yaml": test}, groups: [2][]byte{[]byte("groups: []\n"), []byte("groups: []\n")}}
-	if r := d.RunScenario("after", false, "Errors", "t.yaml"); !strings.Contains(r.Said, "rlimit_data "+strconv.Itoa(96<<20)+"\n") {
+	if r := d.RunScenario("after", false, "Errors", "t.yaml"); !strings.Contains(r.Said, "rlimit_data "+strconv.Itoa(cap)+"\n") {
 		t.Errorf("a check's run: %+v", r)
 	}
 }

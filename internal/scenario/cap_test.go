@@ -26,14 +26,18 @@ import (
 // which sets RLIMIT_DATA to the cap and gives promtool what it is given
 // uncapped, nothing more: test rules test.yaml, TMPDIR alone. Past the cap,
 // a run that takes memory stops, and is unrun, saying so. Uncapped, no
-// limit is set. Skipped where no cap can be set (macOS).
+// limit is set. Skipped where no cap can be set (macOS). The stand-in is
+// this test binary, built with cgo: each of its threads maps 8 MiB of
+// stack, which RLIMIT_DATA counts, so it starts under no less than about
+// 160 MiB (on four CPUs), where promtool's release, built without, starts
+// under 64 MiB.
 func TestRunMemoryCap(t *testing.T) {
 	if !CanCap {
 		t.Skip("no memory cap on " + runtime.GOOS)
 	}
 	t.Setenv("LAPILLI_TEST_SECRET", "s3cret-value")
 	link := scenariotest.Install(t)
-	const cap = 96 << 20
+	const cap = 512 << 20
 	p := Promtool{Path: link, Memory: cap}
 	r := run(t, p, "see")
 	if r.State != Failed || !strings.Contains(r.Said, `args ["test" "rules" "test.yaml"]`) || !strings.Contains(r.Said, `env ["TMPDIR=`) ||
@@ -43,7 +47,7 @@ func TestRunMemoryCap(t *testing.T) {
 	if r := run(t, Promtool{Path: link}, "see"); strings.Contains(r.Said, "rlimit_data "+strconv.Itoa(cap)+"\n") {
 		t.Errorf("uncapped, a cap set:\n%s", r.Said)
 	}
-	if r := run(t, p, "hog"); r.State != Unrun || r.Why != "promtool took more memory than it may (96 MiB)" {
+	if r := run(t, p, "hog"); r.State != Unrun || r.Why != "promtool took more memory than it may (512 MiB)" {
 		t.Errorf("past the cap: %+v", r)
 	}
 	if r := run(t, p, "pass"); r.State != Passed {

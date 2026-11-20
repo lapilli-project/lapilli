@@ -667,8 +667,14 @@ Step 4, scenarios, as built:
   it holds every private writable mapping, Go's heap among them, while
   RLIMIT_AS would hold the address space Go's runtime reserves as it
   starts, far more than it uses, and stop promtool before it read a test.
-  macOS refuses RLIMIT_DATA: there promtool runs without a cap, said once
-  as serve starts. `lapilli verdict --promtool` runs it without one, in a
+  Measured on a GitHub runner (4 CPUs, Linux 7.0): promtool 3.5.0's
+  release, built without cgo, runs a test under 64 MiB; a Go binary built
+  with cgo, as this package's test stand-in is, maps each thread's 8 MiB
+  stack, which RLIMIT_DATA counts, and doesn't start under about 160 MiB
+  (`pthread_create failed`, which is read as past the cap too), so the
+  tests cap the stand-in at 512 MiB and the docs say so for a promtool
+  built with cgo. macOS refuses RLIMIT_DATA: there promtool runs without
+  a cap, said once as serve starts. `lapilli verdict --promtool` runs it without one, in a
   CI job whose own limits hold it. Exit 0 saying `SUCCESS` is met; exit 1
   saying `FAILED:` is broken, the lines after it kept (2,000 bytes);
   anything else couldn't be run, and is not known: a time out, a crash,

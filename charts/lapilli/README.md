@@ -493,8 +493,10 @@ or the test file changes, five a run, 30s each, with no environment; the
 root being read-only, `/tmp` is an emptyDir of its own, and promtool's
 memory counts toward `resources.limits.memory`. `serve.promtool.memory`
 (256Mi) is what one run may take (`--promtool-memory`, promtool's
-RLIMIT_DATA): past it the run stops, and the scenario is not known, rather
-than the container being killed, as it would be by a rule's annotation
+RLIMIT_DATA; promtool's release starts in less than 64Mi, one built with
+cgo needs 8 MiB more for each of its threads, so 512Mi for it): past it
+the run stops, and the scenario is not known, rather than the container
+being killed, as it would be by a rule's annotation
 whose template asks promtool for gigabytes. Keep it, with room for an
 agent's run beside a round's, under `resources.limits.memory`. Without
 `serve.promtool`, each scenario is not known.
