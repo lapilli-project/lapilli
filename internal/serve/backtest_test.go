@@ -400,6 +400,29 @@ func TestBacktestTokenOnce(t *testing.T) {
 	}
 }
 
+// A token that started a backtest, sent again, is refused before its body
+// is read, and keeps the hour it took: a job that has its backtest can't
+// send its token again and again, each a signature checked and the
+// ledger read, past the entry's hourly.
+func TestBacktestUsedTokenKeepsHour(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	gh := b.s.trustNamed("alerts")
+	gh.hourly, gh.Hourly = &limiter{rate: 2.0 / 3600, burst: 2}, 2
+	tok := b.github(nil)
+	body := btBody(ruleFile, changedRules, nil)
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, body); code != http.StatusAccepted {
+		t.Fatalf("%d %v", code, m)
+	}
+	if code, m, n := btPostCounting(t, b, tok, body); code != http.StatusConflict || n != 0 {
+		t.Fatalf("the token again: %d %v, %d bytes read", code, m, n)
+	}
+	// An hour of two, spent: another job's token is past it.
+	code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(map[string]any{"ref": "refs/pull/43/merge"}), body)
+	if code != http.StatusTooManyRequests || !strings.Contains(fmt.Sprint(m["error"]), "an hour") {
+		t.Errorf("after the used token's refusal: %d %v, want the hour spent", code, m)
+	}
+}
+
 // What a request may be: read strictly, 4 MiB at most; the period, the
 // zone and the numbers within their bounds; Prometheus-format rules, 50
 // that differ at most, a for of 48h and a group interval of an hour at

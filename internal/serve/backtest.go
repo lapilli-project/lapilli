@@ -1191,8 +1191,11 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	// The entry's hour is taken before the body is read, so that past it a
 	// body costs nothing to send. What can be told without the body is
 	// asked first, each refused cheaply and its hour given back: the
-	// ledger not ready, a token that started a backtest already, no room
-	// in the queue for the entry, the reads full. Once the body is read,
+	// ledger not ready, no room in the queue for the entry, the reads
+	// full. But for a token that started a backtest already, which keeps
+	// it: its job has its backtest, and the same token sent again and
+	// again would otherwise cost a signature and the ledger's reads each
+	// time, for an hour, past the entry's hourly. Once the body is read,
 	// whatever is refused keeps the hour: a request refused after its
 	// rules were read and checked costs the port what it cost, and the
 	// hour bounds how often.
@@ -1238,6 +1241,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, http.StatusServiceUnavailable, "the queue couldn't be read: try again in a minute")
 		return
 	case used:
+		refund = false
 		refused(http.StatusConflict, "this token started a backtest already: a job asks once, with a token of its own")
 		return
 	case full:
