@@ -105,11 +105,14 @@ func TestKoreanSaysNoStones(t *testing.T) {
 // doesn't say a person was woken (깨운), or woken in vain (괜히, 헛알림),
 // where only the hours are known; nor 원장 for the ledger, a name for how
 // Lapilli keeps it, nor 표시 구간 for a marked window, which the menu calls
-// 이벤트 구간, nor 은퇴 for a rule retired, which triage calls 폐기
-// (docs/design/ui.md, "Times, and Korean").
+// 이벤트 구간, nor 은퇴 for a rule retired, which triage calls 폐기; nor
+// 에피소드 for an episode, 알림 묶음 to whoever is on call, nor 판정 안 함
+// for a rule entry's judged: false, 판정 제외, a letter from 판정 안 됨,
+// a firing with no record (docs/design/ui.md, "Times, and Korean", and
+// bundle 65).
 func TestKoreanTerms(t *testing.T) {
 	for en, ko := range catalogs["ko"] {
-		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운", "깨움", "원장", "표시 구간", "은퇴"} {
+		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운", "깨움", "원장", "표시 구간", "은퇴", "에피소드", "판정 안 함"} {
 			if strings.Contains(ko, w) && !strings.Contains(en, "returned anything") {
 				t.Errorf("%q says %s: %q", en, w, ko)
 			}
@@ -117,6 +120,45 @@ func TestKoreanTerms(t *testing.T) {
 		// A rule is 규칙; 룰러 is the ruler, Prometheus's and Loki's.
 		if strings.Contains(strings.ReplaceAll(ko, "룰러", ""), "룰") {
 			t.Errorf("%q says 룰 for a rule: %q", en, ko)
+		}
+	}
+}
+
+// TestJudgedApart: in each translation, a firing with no record to judge
+// it by ("not judged") and a rule entry that judges its rules by nothing
+// ("Not judged", "judged by nothing") are said apart, neither in the
+// other's words, whatever the case (bundle 65: Spanish said both "sin
+// juzgar", Korean 판정 안 됨 and 판정 안 함, Japanese 判定なし and 判定しない).
+// English keeps docs/design/judging.md's words.
+func TestJudgedApart(t *testing.T) {
+	for lang, want := range map[string]string{"ko": "판정 제외", "ja": "判定対象外", "es": "fuera del juicio"} {
+		none := strings.ToLower(tr(lang, "not judged"))
+		for _, off := range []string{"Not judged", "judged by nothing"} {
+			x := strings.ToLower(tr(lang, off))
+			if x != strings.ToLower(want) || strings.Contains(x, none) || strings.Contains(none, x) {
+				t.Errorf("%s: %q is %q, want %q, apart from %q for no record", lang, off, x, want, none)
+			}
+		}
+	}
+}
+
+// TestMovedSaysWhatMoved: the Goals page's line of what people moved says
+// the parts that aren't zero alone, and nothing when none is (bundle 65).
+func TestMovedSaysWhatMoved(t *testing.T) {
+	for _, c := range []struct {
+		p    goalPeople
+		lang string
+		want string
+	}{
+		{goalPeople{Unrelated: 2}, "en", "Moved by people: 2 said unrelated"},
+		{goalPeople{Real: 1, Answered: 3}, "en", "Moved by people: 1 This was real, 3 firings answered"},
+		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "ko", "사람이 바꿈: 무관 1건, “실제 문제였음” 2건, 판정 제외 발화 3건, 답한 발화 4건"},
+		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "ja", "人による変化: 無関係 1 件, 「実際の問題だった」 2 件, 判定対象外の発火 3 件, 回答した発火 4 件"},
+		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "es", "Movida por personas: 1 dichos no relacionados, 2 Esto fue real, 3 disparos fuera del juicio, 4 disparos respondidos"},
+		{goalPeople{}, "en", ""},
+	} {
+		if got := peopleMovedText(c.lang, &c.p); got != c.want {
+			t.Errorf("%+v in %s: %q, want %q", c.p, c.lang, got, c.want)
 		}
 	}
 }

@@ -224,7 +224,7 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 				v.ByCatching = v.ByCatching || w.Why == whyByCatching
 			}
 			if p := w.People; p != nil {
-				row.Moved = tr(l, "Moved by people: %d said unrelated, %d This was real, %d firings not judged, %d answered", p.Unrelated, p.Real, p.NotJudged, p.Answered)
+				row.Moved = peopleMovedText(l, p)
 			}
 		}
 		v.Rows = append(v.Rows, row)
@@ -730,4 +730,22 @@ type goalsCardOut struct {
 	OccurrencesMet     int `json:"occurrences_met,omitempty" jsonschema:"of the goals over a period (each: KIND), the occurrences that ended since the last whole week began and met their goal"`
 	OccurrencesOf      int `json:"occurrences_of,omitempty" jsonschema:"of the goals over a period, the occurrences that ended since the last whole week began"`
 	OccurrencesUnknown int `json:"occurrences_not_known,omitempty" jsonschema:"of the goals over a period, the occurrences not known"`
+}
+
+// peopleMovedText is what people moved of a goal's week, the parts that aren't
+// zero alone (bundle 65): "" when none is.
+func peopleMovedText(l string, p *goalPeople) string {
+	var parts []string
+	for _, x := range []struct {
+		msg string
+		n   int
+	}{{"%d said unrelated", p.Unrelated}, {"%d This was real", p.Real}, {"%d firings not judged", p.NotJudged}, {"%d firings answered", p.Answered}} {
+		if x.n > 0 {
+			parts = append(parts, tr(l, x.msg, x.n))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return tr(l, "Moved by people: %s", strings.Join(parts, ", "))
 }

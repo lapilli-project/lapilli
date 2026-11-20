@@ -737,3 +737,39 @@ func mustOptions(t *testing.T, s *Server) verdict.Options {
 	}
 	return o
 }
+
+// TestBulkAnswerPicked: the firings list's bulk "needed action" starts on
+// no answer, which the browser holds back (required), "These were real"
+// left to go without it (formnovalidate); sent with no answer picked, it
+// writes nothing, rather than every answer picked cleared; "none" clears
+// them (bundle 65).
+func TestBulkAnswerPicked(t *testing.T) {
+	s := verdictServer(t, nil)
+	h := s.Handler()
+	f := errorsFiring(t, s)
+	if code, body, _ := postAs(t, h, fmt.Sprintf("/firings/%d/verdict", f.ID), formOf(f, "action", "yes"), vAdmin, "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("answering: %d %.200s", code, body)
+	}
+	day := f.Start.In(s.cfg.Loc).Format("2006-01-02")
+	_, page := getAs(t, h, "/firings?day="+day, vAdmin)
+	for _, want := range []string{`<select name="action" required><option value="">pick one</option><option value="yes">Needed action</option><option value="no">Needed no action</option>`, `<option value="none">clear the answer</option>`,
+		`<button formnovalidate>These were real</button>`, `<button formaction="/firings/verdict">Save for those picked</button>`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the bulk bar has no %s", want)
+		}
+	}
+	for _, v := range []url.Values{{"firing": {pickRef(f)}, "action": {""}}, {"firing": {pickRef(f)}}, {"firing": {pickRef(f)}, "action": {"maybe"}}} {
+		if code, body, _ := postAs(t, h, "/firings/verdict", v, vAdmin, "same-origin"); code != http.StatusBadRequest || !strings.Contains(body, "pick whether they needed action, or clear the answer") {
+			t.Errorf("%v: %d %.300s", v, code, body)
+		}
+		if a := verdictOn(t, s, f).Action; a != "yes" {
+			t.Errorf("%v: the answer is %q, want yes kept", v, a)
+		}
+	}
+	if code, body, _ := postAs(t, h, "/firings/verdict", url.Values{"firing": {pickRef(f)}, "action": {"none"}}, vAdmin, "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("clearing: %d %.200s", code, body)
+	}
+	if a := verdictOn(t, s, f).Action; a != "" {
+		t.Errorf("cleared, the answer is %q", a)
+	}
+}
