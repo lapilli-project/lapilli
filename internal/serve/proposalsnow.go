@@ -777,7 +777,7 @@ func (s *Server) addBacktestAgain(ctx context.Context, p ledger.Proposal, ev evi
 			return err
 		}
 	}
-	again, _, err := s.addAgain(ctx, p, ev)
+	again, _, err := s.addAgain(ctx, p, ev, false)
 	var no refusal
 	switch {
 	case errors.As(err, &no):

@@ -456,7 +456,7 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 	runner := func(ctx context.Context) (verdict.ScenarioRunner, error) {
 		return s.draftRunner(ctx, r, came[0], given, len(gone) > 0, c.out.HeldBy == "given")
 	}
-	results, err := s.replayHeld(ctx, c, held, gone, came, len(current)-1, runner)
+	results, err := s.replayHeld(ctx, c, held, gone, came, len(current)-1, runner, false)
 	if err != nil {
 		return nil, err
 	}
@@ -507,12 +507,17 @@ func unreplayed(sides [2]*verdict.RuleResult) string {
 // and catches (of gone and came), the incidents lost, and its note when
 // the replay didn't finish or nothing holds the rule. One comparison runs
 // at a time, as compare's: it replays history with Lapilli's access, the
-// whole check within the time a comparison has.
+// whole check within the time a comparison has. wait says to wait for a
+// comparison running, as a job does (an approved add carried out, as a
+// change's backtest is); else one asked for meanwhile is refused
+// (comparingBusy), to be asked again.
 func (s *Server) replayHeld(ctx context.Context, c *checked, held *verdict.Expectations, gone, came []rules.Rule, same int,
-	runner func(context.Context) (verdict.ScenarioRunner, error)) ([]verdict.ExpectResult, error) {
+	runner func(context.Context) (verdict.ScenarioRunner, error), wait bool) ([]verdict.ExpectResult, error) {
 	rule := c.out.Rule
-	if !s.comparing.TryLock() {
-		return nil, errors.New(comparingBusy)
+	if wait {
+		s.comparing.Lock()
+	} else if !s.comparing.TryLock() {
+		return nil, bad(comparingBusy)
 	}
 	defer s.comparing.Unlock()
 	// The whole check, its replay and its scenarios, within the time a

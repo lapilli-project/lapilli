@@ -369,7 +369,8 @@ func (l *Ledger) KeepAddedDraft(ctx context.Context, d ExpectDraft, by, document
 		// Kept once a proposal: its expectations say so, and say which,
 		// however many drafts are let go since.
 		var raw, kind, state string
-		if err := t.QueryRowContext(t.ctx, "SELECT expect, kind, state FROM proposals WHERE id = ?", d.Proposal).Scan(&raw, &kind, &state); errors.Is(err, sql.ErrNoRows) {
+		var was int64
+		if err := t.QueryRowContext(t.ctx, "SELECT expect, kind, state, expect_kept FROM proposals WHERE id = ?", d.Proposal).Scan(&raw, &kind, &state, &was); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
@@ -378,7 +379,7 @@ func (l *Ledger) KeepAddedDraft(ctx context.Context, d ExpectDraft, by, document
 		if kind != KindAdd || state != StateApplied || json.Unmarshal([]byte(raw), &x) != nil {
 			return invalid("a rule added's expectations are kept once it is added")
 		}
-		if x.Kept != 0 {
+		if was != 0 {
 			return ErrMoved
 		}
 		var kept int
@@ -397,12 +398,7 @@ func (l *Ledger) KeepAddedDraft(ctx context.Context, d ExpectDraft, by, document
 			d.State, d.DecidedBy, d.Decided.Unix(), d.PR, d.Proposal).Scan(&d.ID); err != nil {
 			return err
 		}
-		x.Kept = d.ID
-		marked, err := json.Marshal(x)
-		if err != nil {
-			return err
-		}
-		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET expect = ? WHERE id = ?", string(marked), d.Proposal); err != nil {
+		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET expect_kept = ? WHERE id = ?", d.ID, d.Proposal); err != nil {
 			return err
 		}
 		if err := change(t, by, fmt.Sprintf("expectation draft #%d accepted, as proposal #%d adds its rule", d.ID, d.Proposal), nil, d.about()); err != nil {

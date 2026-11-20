@@ -140,3 +140,66 @@ func TestAddsRule(t *testing.T) {
 		t.Error("a group made of the rule alone")
 	}
 }
+
+// A file of two PrometheusRules, each holding groups: a rule is added to
+// either's group, the other document as it was; a new group fits neither
+// (which would take it isn't the file's to say), and isn't offered. One
+// PrometheusRule beside a document of another kind takes a new group.
+func TestAddRuleTwoDocuments(t *testing.T) {
+	a := added(t)
+	two := "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata:\n  name: a\nspec:\n  groups:\n  - name: one\n    rules:\n    - alert: A\n      expr: a > 1\n---\n" +
+		"apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata:\n  name: b\nspec:\n  groups:\n  - name: two\n    rules:\n    - alert: B\n      expr: b > 1\n"
+	first, second, _ := strings.Cut(two, "---\n")
+	for _, g := range []string{"one", "two"} {
+		out, err := AddRule([]byte(two), g, false, 0, a)
+		if err != nil {
+			t.Fatalf("group %s: %v", g, err)
+		}
+		rs, err := FromDocs([]Doc{{Source: "two.yaml", Data: out}})
+		if err != nil || len(rs) != 3 {
+			t.Fatalf("group %s read back: %+v %v", g, rs, err)
+		}
+		for _, r := range rs {
+			if r.Name == "CheckoutSlow" && r.Group != g {
+				t.Errorf("added to %s, not %s", r.Group, g)
+			}
+		}
+		// The other document, line for line as it was.
+		if g == "one" && !strings.HasSuffix(string(out), "---\n"+second) || g == "two" && !strings.HasPrefix(string(out), first+"---\n") {
+			t.Errorf("group %s: the other document changed:\n%s", g, out)
+		}
+	}
+	if _, err := AddRule([]byte(two), "three", true, 0, a); !errors.Is(err, ErrNoPlace) {
+		t.Errorf("a new group in two PrometheusRules: %v", err)
+	}
+	pr := "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata:\n  name: shop\nspec:\n  groups:\n  - name: shop\n    rules:\n    - alert: Errors\n      expr: errors > 5\n---\nkind: ServiceMonitor\nmetadata:\n  name: shop\n"
+	cm := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rules\ndata:\n  shop.yaml: |\n    groups:\n      - name: shop\n        rules:\n          - alert: Errors\n            expr: errors > 5\n"
+	for file, want := range map[string]bool{
+		two: false, pr: true, cm: true, "groups:\n  - name: shop\n    rules:\n      - alert: E\n        expr: up\n": true,
+		strings.Replace(cm, "  shop.yaml: |", "  other.yaml: |\n    groups:\n      - name: other\n        rules:\n          - alert: D\n            expr: up\n  shop.yaml: |", 1): false,
+		"kind: ServiceMonitor\nmetadata:\n  name: shop\n": false,
+	} {
+		if got := NewGroupFits([]byte(file)); got != want {
+			t.Errorf("a new group fits %v, not %v:\n%s", got, want, file)
+		}
+		if _, err := AddRule([]byte(file), "slow", true, 0, a); (err == nil) != want {
+			t.Errorf("a new group added: %v, offered %v:\n%s", err, want, file)
+		}
+	}
+}
+
+// An added rule's labels are plain text: Prometheus and Grafana expand a
+// label's template at each evaluation, and {{ $value }} makes each one a
+// new alert, which the backtest, keeping the label as written, wouldn't
+// count. Its annotations may be templates.
+func TestAddedLabelsPlain(t *testing.T) {
+	for _, l := range []string{"'{{ $value }}'", "'{{ $labels.service }}'", "'x{{ humanize 1 }}'", "'{{'"} {
+		if _, err := ParseAdded([]byte("alert: X\nexpr: up\nlabels:\n  value: " + l + "\n")); err == nil || !strings.Contains(err.Error(), "template") {
+			t.Errorf("a label %s: %v", l, err)
+		}
+	}
+	a, err := ParseAdded([]byte("alert: X\nexpr: up\nlabels:\n  severity: page\n  note: '{ not a template }'\nannotations:\n  summary: '{{ $value }} on {{ $labels.service }}'\n"))
+	if err != nil || a.Annotations["summary"] != "{{ $value }} on {{ $labels.service }}" {
+		t.Errorf("plain labels and a templated annotation: %+v %v", a, err)
+	}
+}

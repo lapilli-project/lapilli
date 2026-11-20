@@ -60,5 +60,8 @@ CREATE INDEX expectation_drafts_state ON expectation_drafts (state, id);
 CREATE INDEX expectation_drafts_pr ON expectation_drafts (pr, id);
 CREATE INDEX expectation_drafts_proposal ON expectation_drafts (proposal);
 
--- What a proposal adding a rule holds the rule to, as SQLite's 027.sql.
+-- What a proposal adding a rule holds the rule to, and what became of it
+-- once the rule was added (expect_kept), as SQLite's 027.sql.
 ALTER TABLE proposals ADD COLUMN expect TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE proposals ADD COLUMN expect_kept BIGINT NOT NULL DEFAULT 0;
+CREATE INDEX proposals_unkept ON proposals (kind, state, expect_kept, updated);

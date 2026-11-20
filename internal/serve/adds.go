@@ -92,6 +92,9 @@ type placeOffer struct {
 	kind string
 	// account is, of CloudWatch's alarms, the account they are read in.
 	account string
+	// routed says, of a Grafana group, that a rule there names no contact
+	// point: Grafana's notification policies route it by its labels.
+	routed bool
 }
 
 // placeKey is what a place is named by in a form: a hash of where it is.
@@ -131,13 +134,21 @@ func (s *Server) addPlaces(ctx context.Context) ([]placeOffer, error) {
 		out = append(out, o)
 		return &out[len(out)-1]
 	}
+	fits := map[string]bool{} // a file a new group fits, by its source
 	for _, r := range all {
 		d := docOf(r, full.Docs)
 		switch {
 		case s.gitPlace(r, d):
 			file := s.docName(d.Source)
 			add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, Group: r.Group}})
-			add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, NewGroup: true}})
+			ok, known := fits[d.Source]
+			if !known {
+				ok = rules.NewGroupFits(d.Data)
+				fits[d.Source] = ok
+			}
+			if ok {
+				add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, NewGroup: true}})
+			}
 		case s.grafanaPlace(r, d):
 			o := add(placeOffer{addPlace: addPlace{Path: ledger.PathGrafana, Folder: r.Folder, Group: strings.TrimPrefix(r.Group, r.Folder+"/")}})
 			for _, src := range r.Graph.Data {
@@ -147,6 +158,9 @@ func (s *Server) addPlaces(ctx context.Context) ([]placeOffer, error) {
 			}
 			if r.Receiver != "" && !slices.Contains(o.Tells, r.Receiver) {
 				o.Tells = append(o.Tells, r.Receiver)
+			}
+			if r.Receiver == "" {
+				o.routed = true
 			}
 		case s.rulerPlace(r, d):
 			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, Group: r.Group}, kind: s.ruler.Kind})
@@ -226,9 +240,10 @@ func (s *Server) rulerPlace(r rules.Rule, d rules.Doc) bool {
 	return rulerTarget{s}.allowed("", rules.Edit{Namespace: r.Namespace, Group: r.Group}) == ""
 }
 
-// alarmTells are whom a cloud's alarm tells: CloudWatch's actions of every
-// kind (those only Lapilli's telling ones are offered; any other is
-// automation, never offered), a Google policy's notification channels.
+// alarmTells are whom a cloud's alarm tells, as a rule added may: of
+// CloudWatch's actions, those that only tell (tellsOnly: an SNS topic, an
+// OpsItem, a response plan; a Lambda function, an automation or any other
+// is never offered), a Google policy's notification channels.
 func alarmTells(kind string, raw []byte) []string {
 	m, err := decodeTree(raw)
 	if err != nil {
@@ -243,7 +258,7 @@ func alarmTells(kind string, raw []byte) []string {
 		}
 		for _, k := range []string{"AlarmActions", "OKActions", "InsufficientDataActions"} {
 			for _, x := range list(alarm[k]) {
-				if s, _ := x.(string); telling.MatchString(s) {
+				if s, _ := x.(string); tellsOnly.MatchString(s) {
 					out = append(out, s)
 				}
 			}
@@ -316,7 +331,26 @@ func placeFor(offers []placeOffer, want addPlace) (placeOffer, addPlace, error) 
 	if len(p.Tells) > 1 && p.Path == ledger.PathGrafana {
 		return o, p, bad("a Grafana rule tells one contact point at most")
 	}
+	if err := grafanaRouted(p, o.Tells, o.routed); err != nil {
+		return o, p, err
+	}
 	return o, p, nil
+}
+
+// errNamesNone is a Grafana rule added that names no contact point where
+// every rule of its group names one.
+var errNamesNone = bad("every rule in its group names its contact point: name one of theirs, so that it tells only whom they tell")
+
+// grafanaRouted holds a Grafana rule added to whom the rules of its group
+// tell (tells, and routed when one of them names none): where each names a
+// contact point, it names one of theirs; named none, Grafana's notification
+// policies would route it by its labels to whichever contact point they
+// match. Where none of them names one, they and it are so routed.
+func grafanaRouted(p addPlace, tells []string, routed bool) error {
+	if p.Path == ledger.PathGrafana && len(p.Tells) == 0 && len(tells) > 0 && !routed {
+		return errNamesNone
+	}
+	return nil
 }
 
 // addAsk is what a proposal adding a rule is asked for.
@@ -912,8 +946,9 @@ var errNameTaken = bad("a rule in effect is called that: name the new rule apart
 // checkAdd replays a rule added over the twelve weeks to now, with nothing
 // beside it, and holds it to its expectations: what step 3's
 // test_expectation does, for a rule not yet in effect. Its scenarios run
-// against its group with it added.
-func (s *Server) checkAdd(ctx context.Context, b *addBuilt, held *verdict.Expectations, tests map[string][]byte, agent bool) (*checked, error) {
+// against its group with it added. wait says to wait for a comparison
+// running (replayHeld), as carrying it out does.
+func (s *Server) checkAdd(ctx context.Context, b *addBuilt, held *verdict.Expectations, tests map[string][]byte, agent, wait bool) (*checked, error) {
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil {
 		return nil, err
@@ -939,7 +974,7 @@ func (s *Server) checkAdd(ctx context.Context, b *addBuilt, held *verdict.Expect
 		}
 		return d, nil
 	}
-	if _, err := s.replayHeld(ctx, c, held, nil, []rules.Rule{r}, len(current), runner); err != nil {
+	if _, err := s.replayHeld(ctx, c, held, nil, []rules.Rule{r}, len(current), runner, wait); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -1047,7 +1082,7 @@ func (s *Server) proposeAdd(ctx context.Context, q addAsk, by string, agent bool
 	if err != nil {
 		return 0, err
 	}
-	c, err := s.checkAdd(ctx, b, held, tests, agent)
+	c, err := s.checkAdd(ctx, b, held, tests, agent, false)
 	if err != nil {
 		return 0, err
 	}
@@ -1120,8 +1155,10 @@ func addedOf(ev evidence) (rules.Added, error) {
 // the rules and the history are now: the rule written where its place says
 // from the rules read again, replayed over the twelve weeks to now. What
 // it gives is the evidence anew, and the rule as built; a place no longer
-// offered, or a rule in effect of its name since, is a refusal.
-func (s *Server) addAgain(ctx context.Context, p ledger.Proposal, ev evidence) (evidence, *addBuilt, error) {
+// offered, or a rule in effect of its name since, is a refusal. wait says
+// to wait for a comparison running, as carrying it out does: an approved
+// add isn't failed for an agent's comparison meanwhile.
+func (s *Server) addAgain(ctx context.Context, p ledger.Proposal, ev evidence, wait bool) (evidence, *addBuilt, error) {
 	a, err := addedOf(ev)
 	if err != nil {
 		return ev, nil, err
@@ -1157,7 +1194,7 @@ func (s *Server) addAgain(ctx context.Context, p ledger.Proposal, ev evidence) (
 	if ev.Edit != nil && ev.Edit.UID != "" {
 		b.edit.UID = ev.Edit.UID // Grafana's, as it was kept
 	}
-	c, err := s.checkAdd(ctx, b, held, tests, p.Agent)
+	c, err := s.checkAdd(ctx, b, held, tests, p.Agent, wait)
 	if err != nil {
 		return ev, nil, err
 	}

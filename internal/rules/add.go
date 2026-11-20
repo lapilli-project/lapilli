@@ -173,6 +173,13 @@ func (a Added) Check() error {
 				return addedErr("a %s's value is %d bytes at most", m.what, m.most)
 			case !shows(v, m.what == "annotation"):
 				return addedErr("the %s %s has a character that doesn't show", m.what, k)
+			case m.what == "label" && strings.Contains(v, "{{"):
+				// Prometheus and Grafana expand a label's template at each
+				// evaluation, and an alert of other labels is another alert:
+				// {{ $value }} makes each evaluation a new one. The backtest
+				// keeps a label as written, so its budgets would be met where
+				// the rule breaks them.
+				return addedErr("the label %s is a template: a rule added's labels are plain text (its annotations may be templates)", k)
 			}
 		}
 	}
@@ -446,10 +453,23 @@ func addRule(data []byte, group string, newGroup bool, interval time.Duration, a
 			out = got
 		}
 	}
+	// A new group fits every document that holds groups: in a file of two
+	// or more, which would take it isn't the file's to say.
 	if found != 1 {
 		return nil, ErrNoPlace
 	}
 	return out, nil
+}
+
+// NewGroupFits reports whether AddRule adds a new group to a file: one
+// document of it holds groups (a rule file, a PrometheusRule, Google
+// Cloud's rules, beside documents of other kinds), or a ConfigMap holding
+// one such file in a literal block. A file of two PrometheusRules is
+// offered their groups, not a new one.
+func NewGroupFits(data []byte) bool {
+	// No group is named so, nor can a proposal name one so.
+	_, err := addRule(data, "\x00", true, 0, Added{Alert: "x", Expr: "x"})
+	return err == nil
 }
 
 // addIn adds the rule in one document of the file, when the group is in
@@ -634,7 +654,9 @@ func addedTree(before, after any, group string, newGroup bool, interval time.Dur
 		// The document doesn't hold the group: as it was, untouched.
 		return 0, reflect.DeepEqual(b, af)
 	}
-	return n, n == 1
+	// One added, or, a document that holds groups but not this one, none
+	// and nothing else changed: another of the file's documents holds it.
+	return n, n <= 1
 }
 
 // deepClone is a decoded tree's copy, its maps and lists its own.

@@ -2557,5 +2557,8 @@
  "%d said unrelated": "無関係 %d 件",
  "%d This was real": "「実際の問題だった」 %d 件",
  "%d firings not judged": "判定対象外の発火 %d 件",
- "%d firings answered": "回答した発火 %d 件"
+ "%d firings answered": "回答した発火 %d 件",
+ "every rule in its group names its contact point: name one of theirs, so that it tells only whom they tell": "そのグループのルールはどれもコンタクトポイントを指定しています: それらが通知する先にだけ通知するよう、そのうちの 1 つを指定してください",
+ "It names no contact point, as rules of its group don't: Grafana's notification policies route it by its labels, to whichever contact point they match.": "グループ内のコンタクトポイントを指定していないルールと同じく、コンタクトポイントを指定しません: Grafana の通知ポリシーがラベルでルーティングし、一致するコンタクトポイントに送ります。",
+ "It names no one: its labels route it through Alertmanager, as every rule there is routed.": "通知先は指定しません: そこにあるどのルールとも同じく、ラベルによって Alertmanager がルーティングします。"
 }

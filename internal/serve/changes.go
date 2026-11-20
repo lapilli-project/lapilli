@@ -1653,7 +1653,7 @@ func (s *Server) checkAddAgain(ctx context.Context, p ledger.Proposal, ev eviden
 	if p.Path == ledger.PathNone {
 		return step, "", refusal{"this one is for a person to make where the rule is written"}
 	}
-	again, b, err := s.addAgain(ctx, p, ev)
+	again, b, err := s.addAgain(ctx, p, ev, true)
 	if err != nil {
 		return step, "", err
 	}

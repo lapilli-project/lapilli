@@ -2557,5 +2557,8 @@
  "%d said unrelated": "%d dichos no relacionados",
  "%d This was real": "%d Esto fue real",
  "%d firings not judged": "%d disparos fuera del juicio",
- "%d firings answered": "%d disparos respondidos"
+ "%d firings answered": "%d disparos respondidos",
+ "every rule in its group names its contact point: name one of theirs, so that it tells only whom they tell": "cada regla de su grupo nombra su punto de contacto: nombre uno de ellos, para que avise solo a quien ellas avisan",
+ "It names no contact point, as rules of its group don't: Grafana's notification policies route it by its labels, to whichever contact point they match.": "No nombra ningún punto de contacto, como no lo nombran reglas de su grupo: las políticas de notificación de Grafana la enrutan por sus etiquetas, al punto de contacto que coincida.",
+ "It names no one: its labels route it through Alertmanager, as every rule there is routed.": "No nombra a nadie: sus etiquetas la enrutan por Alertmanager, como a cada regla de ahí."
 }

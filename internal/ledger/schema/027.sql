@@ -131,9 +131,17 @@ CREATE INDEX expectation_drafts_proposal ON expectation_drafts (proposal);
 
 -- What a proposal adding a rule (kind add, step 5) holds the rule to: the
 -- expectations as Lapilli wrote them and their scenarios' test files, as
--- JSON ({"text": ..., "tests": {...}}), bounded as a draft's are, and,
--- once the rule is added and they are kept as a draft, that draft's id
--- ("kept"), so that they are kept once however many drafts are let go;
--- '' for every other kind. Read with the proposal alone, never with a
--- list of them.
+-- JSON ({"text": ..., "tests": {...}}), bounded as a draft's are; '' for
+-- every other kind. Read with the proposal alone, never with a list of
+-- them.
+--
+-- expect_kept is, of a proposal adding a rule, what became of what it is
+-- held to once the rule was added: 0 while it waits to be kept, the draft
+-- it was kept as (an id), so that it is kept once however many drafts are
+-- let go, or -1 when it never will be: the rule added with no one's
+-- approval (its proposed diff merged by hand), which no one accepted, or
+-- refused as it was kept. 0 for every other kind. Those waiting are read
+-- along proposals_unkept, never by what the JSON holds.
 ALTER TABLE proposals ADD COLUMN expect TEXT NOT NULL DEFAULT '';
+ALTER TABLE proposals ADD COLUMN expect_kept INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX proposals_unkept ON proposals (kind, state, expect_kept, updated);

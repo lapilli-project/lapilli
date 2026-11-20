@@ -131,8 +131,10 @@ type AddedExpect struct {
 	Text  string            `json:"text"`
 	Tests map[string]string `json:"tests,omitempty"`
 	// Kept is the draft they were kept as once the rule was added
-	// (KeepAddedDraft), 0 before: kept once, though drafts are let go.
-	Kept int64 `json:"kept,omitempty"`
+	// (KeepAddedDraft), 0 before, -1 when they never will be (the rule
+	// added with no one's approval, or refused as it was kept): kept once,
+	// though drafts are let go. The proposal's expect_kept, not its JSON.
+	Kept int64 `json:"-"`
 }
 
 // check holds what a rule added is held to to a draft's bounds.
@@ -338,7 +340,8 @@ func (l *Ledger) approvals(ctx context.Context, q interface {
 // the zero value for any other.
 func (l *Ledger) ProposalExpect(ctx context.Context, id int64) (AddedExpect, error) {
 	var raw string
-	if err := l.r.QueryRowContext(ctx, "SELECT expect FROM proposals WHERE id = ?", id).Scan(&raw); errors.Is(err, sql.ErrNoRows) {
+	var kept int64
+	if err := l.r.QueryRowContext(ctx, "SELECT expect, expect_kept FROM proposals WHERE id = ?", id).Scan(&raw, &kept); errors.Is(err, sql.ErrNoRows) {
 		return AddedExpect{}, ErrNotFound
 	} else if err != nil {
 		return AddedExpect{}, err
@@ -348,16 +351,19 @@ func (l *Ledger) ProposalExpect(ctx context.Context, id int64) (AddedExpect, err
 		return x, nil
 	}
 	err := json.Unmarshal([]byte(raw), &x)
+	x.Kept = kept
 	return x, err
 }
 
 // AddsUnkept are the proposals adding a rule that are applied and whose
-// expectations aren't kept yet (KeepAddedDraft), the oldest first, most at
-// most: read along the proposals' state, their expectations read here
-// alone.
+// expectations wait to be kept (KeepAddedDraft), the oldest first, most at
+// most: those someone approved, as one applied with no one's approval is
+// marked never to be kept as it is applied (Move). Read along
+// proposals_unkept, by their kind, state and expect_kept, so that those
+// kept, or never to be, are passed over without being read.
 func (l *Ledger) AddsUnkept(ctx context.Context, most int) ([]int64, error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT id FROM proposals WHERE state = ? AND kind = ? AND expect NOT LIKE ? ORDER BY updated, id LIMIT ?`,
-		StateApplied, KindAdd, `%"kept":%`, most)
+	rows, err := l.r.QueryContext(ctx, `SELECT id FROM proposals WHERE kind = ? AND state = ? AND expect_kept = 0 ORDER BY updated, id LIMIT ?`,
+		KindAdd, StateApplied, most)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +377,16 @@ func (l *Ledger) AddsUnkept(ctx context.Context, most int) ([]int64, error) {
 		out = append(out, id)
 	}
 	return out, rows.Err()
+}
+
+// SkipAddedExpect marks what a proposal adding a rule was held to as never
+// to be kept: refused as it was kept, it leaves AddsUnkept, so that it
+// holds up no other. Nothing for one kept, or of another kind.
+func (l *Ledger) SkipAddedExpect(ctx context.Context, id int64) error {
+	return l.write(ctx, func(t *txn) error {
+		_, err := t.ExecContext(t.ctx, "UPDATE proposals SET expect_kept = -1 WHERE id = ? AND kind = ? AND expect_kept = 0", id, KindAdd)
+		return err
+	})
 }
 
 // ProposalQuery picks proposals: of a rule, in some states, the latest
@@ -675,6 +691,15 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 			document = ?, doc_hash = ?, diff = ?, after_hash = ? WHERE id = ?`,
 			p.State, now.Unix(), p.Reason, p.Link, p.Backup, nullable(p.Applied), p.Document, p.DocHash, p.Diff, p.AfterHash, id); err != nil {
 			return err
+		}
+		if p.Kind == KindAdd && to == StateApplied {
+			// A rule added with no one's approval (its diff merged by hand)
+			// has no approver to accept what it was held to: never kept, it
+			// leaves AddsUnkept at once.
+			if _, err := t.ExecContext(t.ctx, `UPDATE proposals SET expect_kept = -1 WHERE id = ? AND expect_kept = 0
+				AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.proposal_id = ?)`, id, id); err != nil {
+				return err
+			}
 		}
 		if err := change(t, by, fmt.Sprintf("proposal #%d %s", id, to), was, p.summary()); err != nil {
 			return err

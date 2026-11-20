@@ -596,6 +596,10 @@ func TestAddWhatItSays(t *testing.T) {
 		"annotations:\n  summary: '{{ .Broken'\n",
 		"annotations:\n  runbook_url: http://runbooks.example.com/x\n",
 		"labels:\n  team: '{{ query \"up\" }}'\n",
+		// A label's template, which Prometheus expands at each evaluation
+		// and the backtest doesn't: each evaluation another alert.
+		"labels:\n  value: '{{ $value }}'\n",
+		"labels:\n  service: '{{ $labels.service }}'\n",
 	} {
 		rule := "alert: ErrorsLow\nexpr: errors > 1\n" + says
 		if _, code, body := proposeAdding(t, h, bo, url.Values{"place": {key}, "rule": {rule}, "expectations": {heldTo(60)}}); code != http.StatusBadRequest {

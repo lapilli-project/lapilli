@@ -74,6 +74,8 @@ var Undo022Postgres = slices.Concat(undo022meta, []string{
 var Undo027 = []string{
 	"DROP TABLE expectation_checks",
 	"DROP TABLE expectation_drafts",
+	"DROP INDEX proposals_unkept",
+	"ALTER TABLE proposals DROP COLUMN expect_kept",
 	"ALTER TABLE proposals DROP COLUMN expect",
 }
 

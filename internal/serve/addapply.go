@@ -54,6 +54,7 @@ func (s *Server) grafanaAdd(ctx context.Context, p ledger.Proposal, ev evidence,
 	}
 	var sibling string
 	var srcs, tells []string
+	routed := false
 	for _, r := range rs {
 		if r.UID == "" || r.Folder != place.Folder {
 			continue
@@ -74,6 +75,8 @@ func (s *Server) grafanaAdd(ctx context.Context, p ledger.Proposal, ev evidence,
 		}
 		if r.Receiver != "" {
 			tells = append(tells, r.Receiver)
+		} else {
+			routed = true
 		}
 	}
 	switch {
@@ -81,6 +84,8 @@ func (s *Server) grafanaAdd(ctx context.Context, p ledger.Proposal, ev evidence,
 		return refusal{"its group is gone from Grafana: propose it again"}
 	case !slices.Contains(srcs, place.DataSource):
 		return refusal{"the rules of its group no longer read its data source: propose it again"}
+	case grafanaRouted(place, tells, routed) != nil:
+		return refusal{"every rule of its group names its contact point now: propose it again, naming one of theirs"}
 	}
 	for _, t := range place.Tells {
 		if !slices.Contains(tells, t) {
@@ -272,43 +277,79 @@ func addReadBack(tg target, u apiUnit, p ledger.Proposal) (rules.Rule, bool) {
 	return rules.Rule{}, false
 }
 
-// addedExpectations keeps, for each proposal adding a rule now applied,
-// what it was held to, where a draft accepted goes (step 3): accepted by
-// its first approver, by the git path to --expect's file when it can go
-// there, else the YAML on the rule's tab for a person. Once a proposal.
+// addedExpectations keeps, for each proposal adding a rule now applied
+// that someone approved, what it was held to, where a draft accepted goes
+// (step 3): accepted by its first approver, by the git path to --expect's
+// file when it can go there, else the YAML on the rule's tab for a person.
+// Once a proposal. One the ledger refuses to keep is marked never to be
+// kept, and one that fails otherwise is left for the next round: neither
+// holds up the others, nor the changes carried out after.
 func (s *Server) addedExpectations(ctx context.Context) error {
 	ids, err := s.l.AddsUnkept(ctx, 20)
 	if err != nil {
 		return err
 	}
 	for _, id := range ids {
-		p, err := s.l.ProposalByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if len(p.Approvals) == 0 {
-			continue
-		}
-		x, err := s.l.ProposalExpect(ctx, p.ID)
-		if err != nil {
-			return err
-		}
-		found, _ := json.Marshal(proposalEvidence(p).Add.Items)
-		target, hash := s.draftTarget()
-		d := ledger.ExpectDraft{Rule: p.Rule, MadeBy: p.MadeBy, Agent: p.Agent, Text: x.Text, Tests: x.Tests, Found: found, Target: target,
-			DocHash: hash, Proposal: p.ID}
-		doc, docHash := "", ""
-		if s.gitPath(d) {
-			text, h, whole, err := s.takenIn(d)
-			if err == nil && whole {
-				doc, docHash = text, h
+		if err := s.keepAdded(ctx, id); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-		}
-		if _, err := s.l.KeepAddedDraft(ctx, d, p.Approvals[0].By, doc, docHash); err != nil && !errors.Is(err, ledger.ErrMoved) {
-			s.log.Warn("a rule added's expectations weren't kept", "proposal", p.ID, "err", err)
+			var inv ledger.ErrInvalid
+			never := errors.As(err, &inv) || errors.Is(err, ledger.ErrOwnDraft) || errors.Is(err, errAddedUnread)
+			s.log.Warn("a rule added's expectations weren't kept", "proposal", id, "err", err, "never", never)
+			if never {
+				if err := s.l.SkipAddedExpect(ctx, id); err != nil {
+					s.log.Warn("a rule added's expectations weren't marked never to be kept", "proposal", id, "err", err)
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// errAddedUnread is a proposal adding a rule whose expectations or
+// evidence don't read, or that no one approved: they are never kept.
+var errAddedUnread = errors.New("what the rule added is held to doesn't read, or no one approved it")
+
+// keepAdded keeps what one proposal adding a rule, applied and approved,
+// was held to (addedExpectations).
+func (s *Server) keepAdded(ctx context.Context, id int64) error {
+	p, err := s.l.ProposalByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if len(p.Approvals) == 0 {
+		return errAddedUnread // no approver to accept them (AddsUnkept reads none such)
+	}
+	x, err := s.l.ProposalExpect(ctx, p.ID)
+	var syntax *json.SyntaxError
+	var typed *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntax), errors.As(err, &typed):
+		return errAddedUnread
+	case err != nil:
+		return err
+	}
+	ev := proposalEvidence(p)
+	if ev.Add == nil || x.Text == "" {
+		return errAddedUnread
+	}
+	found, _ := json.Marshal(ev.Add.Items)
+	target, hash := s.draftTarget()
+	d := ledger.ExpectDraft{Rule: p.Rule, MadeBy: p.MadeBy, Agent: p.Agent, Text: x.Text, Tests: x.Tests, Found: found, Target: target,
+		DocHash: hash, Proposal: p.ID}
+	doc, docHash := "", ""
+	if s.gitPath(d) {
+		text, h, whole, err := s.takenIn(d)
+		if err == nil && whole {
+			doc, docHash = text, h
+		}
+	}
+	_, err = s.l.KeepAddedDraft(ctx, d, p.Approvals[0].By, doc, docHash)
+	if errors.Is(err, ledger.ErrMoved) {
+		return nil // kept meanwhile
+	}
+	return err
 }
 
 // addedYAML is what a proposal adding a rule holds it to, as a person puts
