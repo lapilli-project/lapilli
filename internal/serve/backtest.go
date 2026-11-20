@@ -1431,12 +1431,34 @@ func clientAddr(r *http.Request) string {
 	return host
 }
 
-// perKey are rate limits by a key, a bucket each, in this process; 4,096
-// buckets at most, all let go and begun afresh past them.
+// perKeyMost are the most buckets a perKey keeps.
+const perKeyMost = 4096
+
+// perKey are rate limits by a key, a bucket each, in this process;
+// perKeyMost buckets at most. Past them, only buckets that hold nothing
+// back, refilled to their burst, are let go, a second apart at most: one
+// with many addresses can't begin everyone's afresh. When none can go, a
+// key not kept is refused, as one past its bucket is.
 type perKey struct {
 	mu          sync.Mutex
 	rate, burst float64
 	m           map[string]*limiter
+	// swept is when the full buckets were last let go.
+	swept time.Time
+}
+
+// sweep lets go, at now, of the buckets refilled to their burst; with
+// p.mu held.
+func (p *perKey) sweep(now time.Time) {
+	p.swept = now
+	for k, l := range p.m {
+		l.mu.Lock()
+		full := !l.last.IsZero() && l.left+now.Sub(l.last).Seconds()*l.rate >= l.burst
+		l.mu.Unlock()
+		if full {
+			delete(p.m, k)
+		}
+	}
 }
 
 // give gives back what allow took from key's bucket.
@@ -1451,11 +1473,19 @@ func (p *perKey) give(key string) {
 
 func (p *perKey) allow(key string, now time.Time) bool {
 	p.mu.Lock()
-	if p.m == nil || len(p.m) >= 4096 {
+	if p.m == nil {
 		p.m = map[string]*limiter{}
 	}
 	l := p.m[key]
 	if l == nil {
+		if len(p.m) >= perKeyMost && now.Sub(p.swept) >= time.Second {
+			p.sweep(now)
+		}
+		if len(p.m) >= perKeyMost {
+			// Every bucket holds something back: closed, not begun afresh.
+			p.mu.Unlock()
+			return false
+		}
 		l = &limiter{rate: p.rate, burst: p.burst}
 		p.m[key] = l
 	}

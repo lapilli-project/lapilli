@@ -1608,3 +1608,29 @@ func TestBacktestSyntaxError(t *testing.T) {
 		t.Error("a query that doesn't read was asked of the history")
 	}
 }
+
+// Past its most buckets, perKey lets go only of those refilled to their
+// burst: one who spent their bucket keeps it spent however many addresses
+// come after, and a key not kept is refused while none can go.
+func TestPerKeyFullFailsClosed(t *testing.T) {
+	p := perKey{rate: 1, burst: 2}
+	if !p.allow("victim", now) || !p.allow("victim", now) || p.allow("victim", now) {
+		t.Fatal("a bucket of two")
+	}
+	for i := range perKeyMost - 1 {
+		if !p.allow(fmt.Sprintf("10.0.%d.%d", i/256, i%256), now) {
+			t.Fatalf("address %d refused", i)
+		}
+	}
+	if p.allow("192.0.2.1", now) {
+		t.Error("a key past the most buckets, none of them full, was let through")
+	}
+	if p.allow("victim", now) {
+		t.Error("the spent bucket was begun afresh")
+	}
+	// Two seconds on, every bucket is full again: let go, and the key
+	// taken.
+	if !p.allow("192.0.2.1", now.Add(2*time.Second)) {
+		t.Error("buckets refilled to their burst weren't let go")
+	}
+}
