@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"maps"
 	"net/http"
 	"net/url"
@@ -44,26 +45,31 @@ var expectWhyText = map[string]string{
 	whyRunFailed:      "promtool couldn't run it",
 }
 
-// expectHeldText is what an expectation holds a rule to, for a person.
-func expectHeldText(l string, c ledger.ExpectCheck) string {
+// expectHeldText is what an expectation holds a rule to, for a person: an
+// incident's id, which comes from outside, in a <bdi>, as a name in a
+// sentence is (trBDI), so that one written right to left doesn't turn
+// the words around it.
+func expectHeldText(l string, c ledger.ExpectCheck) template.HTML {
+	esc := template.HTMLEscapeString
+	plain := func(s string) template.HTML { return template.HTML(esc(s)) }
 	switch c.What {
 	case "budget week":
-		return tr(l, "at most %s a week", c.Held)
+		return plain(tr(l, "at most %s a week", c.Held))
 	case "budget asleep":
-		return tr(l, "at most %s a week while people slept", c.Held)
+		return plain(tr(l, "at most %s a week while people slept", c.Held))
 	case "budget refires":
-		return tr(l, "at most %s re-fires a week", c.Held)
+		return plain(tr(l, "at most %s re-fires a week", c.Held))
 	case "budget":
-		return tr(l, "a budget")
+		return plain(tr(l, "a budget"))
 	}
 	if c.Scenario() {
-		return tr(l, "passes the scenario %s", strings.TrimPrefix(c.What, "scenario "))
+		return plain(tr(l, "passes the scenario %s", strings.TrimPrefix(c.What, "scenario ")))
 	}
-	inc := strings.TrimPrefix(c.What, "catches ")
+	inc := "<bdi>" + esc(strings.TrimPrefix(c.What, "catches ")) + "</bdi>"
 	if c.Held == "caught" {
-		return tr(l, "catches %s", inc)
+		return template.HTML(fmt.Sprintf(esc(tr(l, "catches %s")), inc))
 	}
-	return tr(l, "catches %s %s", inc, tr(l, "within %s", strings.TrimPrefix(c.Held, "within ")))
+	return template.HTML(fmt.Sprintf(esc(tr(l, "catches %s %s")), inc, esc(tr(l, "within %s", strings.TrimPrefix(c.Held, "within ")))))
 }
 
 // expectCell is a check as a cell: its colour, sign, value and what it
@@ -108,15 +114,16 @@ var expectResultText = map[string]string{
 // found, and what promtool said); its task open, and, broken, the row a
 // task is made of.
 type expectLine struct {
-	Expect, Held, Selector, Source string
-	Catch, Scenario                bool
-	Weeks                          []expectCell
-	Last                           expectCell
-	Incident, IncidentAt           string
-	Found, Detail                  string
-	Broken                         bool
-	Task                           int64
-	Week                           string // the row a task is made of: its week, as days
+	Held                     template.HTML
+	Expect, Selector, Source string
+	Catch, Scenario          bool
+	Weeks                    []expectCell
+	Last                     expectCell
+	Incident, IncidentAt     string
+	Found, Detail            string
+	Broken                   bool
+	Task                     int64
+	Week                     string // the row a task is made of: its week, as days
 }
 
 // expectView is a rule's expectations: each, how many are broken, and

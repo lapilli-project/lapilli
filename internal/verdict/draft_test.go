@@ -137,6 +137,24 @@ func TestDraftBounded(t *testing.T) {
 	}
 }
 
+// The history's draft leaves out an incident whose id spans lines, or
+// holds what doesn't show: an expectations file can't name it, and the
+// draft reads back.
+func TestDraftLeavesOutIDsThatDontShow(t *testing.T) {
+	d := Draft([]DraftRule{{Rule: "R", Weeks: 12, Most: 3, Caught: []DraftCatch{
+		{Incident: "INC-1\n  - rule: Other", Delay: time.Minute}, {Incident: "INC-2\u202e", Delay: time.Minute}, {Incident: "INC-3", Delay: time.Minute}}}})
+	if cs := d.Expectations[0].Catches; len(cs) != 1 || cs[0].Incident != "INC-3" {
+		t.Fatalf("catches: %+v", cs)
+	}
+	b, err := d.YAML(DraftAbout{By: "lapilli verdict"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadExpectations(bytes.NewReader(b)); err != nil {
+		t.Fatalf("the draft doesn't read back: %v\n%s", err, b)
+	}
+}
+
 // From a report, a rule is counted by whole weeks back from the period's
 // end, as a comparison holds budgets, and its catches the latest first;
 // one that wasn't replayed is left out; with no whole week, scaled.

@@ -1,10 +1,12 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/ledger"
 )
@@ -63,5 +65,30 @@ func TestDraftBodyCells(t *testing.T) {
 	}
 	if rows != 3 {
 		t.Errorf("%d rows:\n%s", rows, body)
+	}
+}
+
+// An incident's id that spans lines, or holds what doesn't show, is
+// refused wherever expectations are read: an agent's draft and check,
+// and --config's expectations, as the file's (verdict.NewExpectations).
+func TestIncidentIDsShow(t *testing.T) {
+	s, _, _ := draftServer(t, "expectations: []\n", nil)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	agent := connect(t, ts.URL, "ed@example.com")
+	for _, id := range []string{`INC-1\n  - rule: Other\n    budget: {week: 99}`, `INC-1‮`, `INC​1`} {
+		text := "expectations:\n  - rule: Errors\n    catches:\n      - {incident: \"" + id + "\"}\n"
+		for _, tool := range []string{"propose_expectation", "test_expectation"} {
+			var out map[string]any
+			if failed, said := call(t, agent, tool, map[string]any{"rule": "Errors", "expectations": text}, &out); !failed || !strings.Contains(said, "an incident's id is one line") {
+				t.Errorf("%s, %s: %s", tool, id, said)
+			}
+		}
+		if _, err := ParseConfig([]byte(text), time.UTC); err == nil || !strings.Contains(err.Error(), "an incident's id is one line") {
+			t.Errorf("--config, %s: %v", id, err)
+		}
+	}
+	if ds, err := s.l.Drafts(context.Background(), ledger.DraftQuery{}); err != nil || len(ds) != 0 {
+		t.Errorf("kept: %+v %v", ds, err)
 	}
 }

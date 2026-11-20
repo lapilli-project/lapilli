@@ -202,8 +202,11 @@ func NewExpectations(list []Expectation) (*Expectations, error) {
 			x.Labels, x.sel = sel.String(), sel
 		}
 		for _, c := range x.Catches {
-			if strings.TrimSpace(c.Incident) == "" {
+			switch {
+			case strings.TrimSpace(c.Incident) == "":
 				return nil, fmt.Errorf("%s: a catch names no incident", at)
+			case !shownID(c.Incident):
+				return nil, fmt.Errorf("%s: incident %q: an incident's id is one line, of characters that show", at, c.Incident)
 			}
 		}
 		for _, p := range x.Scenarios {
@@ -216,6 +219,19 @@ func NewExpectations(list []Expectation) (*Expectations, error) {
 }
 
 func below(n *int) bool { return n != nil && *n < 0 }
+
+// shownID reports whether an incident's id, as an expectation names it, is
+// UTF-8 with nothing in it that doesn't show, as the ledger takes a name
+// from outside (ledger.Plain): no line break or other control character,
+// no format character (a direction mark, a zero-width space), no line or
+// paragraph separator. A draft's catches are written into the expectations
+// file and a pull request's description; an id spanning lines there would
+// read as the file's own lines.
+func shownID(s string) bool {
+	return utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
+	})
+}
 
 // merged is the file with each rule's, and each group's, entries made one:
 // what is held is then compared item by item. The same budget, or the same

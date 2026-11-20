@@ -144,7 +144,9 @@ func Draft(rs []DraftRule) *Drafted {
 			if len(x.Catches) == DraftCatchesARule || catches == MaxExpectationCatches {
 				break
 			}
-			if c.Incident == "" || have[c.Incident] {
+			// An id that spans lines, or holds what doesn't show, isn't
+			// one an expectations file names (NewExpectations).
+			if c.Incident == "" || have[c.Incident] || !shownID(c.Incident) {
 				continue
 			}
 			have[c.Incident] = true

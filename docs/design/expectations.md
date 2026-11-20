@@ -357,6 +357,15 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   made one when read; the same budget or incident twice is refused. A rule
   moved out of a group that held it is said: the group's expectation no
   longer holds it, failing nothing.
+- **An incident's id** is one line of characters that show: one with a
+  line break, another control character, a format character (a direction
+  mark, a zero-width space) or a line or paragraph separator is refused
+  wherever expectations are read (the file, `--config`'s, an agent's
+  through MCP), as the ledger refuses such a name from outside; the
+  history's draft leaves such an incident out. A draft's catches are
+  written into the file and a pull request's description, where an id
+  spanning lines would read as the file's own lines. A rule's
+  Expectations tab sets each id apart in a `<bdi>`.
 - **Serve** takes none of it yet (step 2).
 
 Step 2, serve's checks after deploy, as built:
