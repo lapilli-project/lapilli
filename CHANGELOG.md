@@ -93,10 +93,15 @@ Before upgrading:
   or a rewrite of the rule, against the rule replayed over the twelve
   weeks, keeping nothing: per item met, broken or not known, as it is and
   rewritten; an agent's scenario run by `--promtool`, its test file
-  refused past 100 tests, 1,000 input series, 100,000 values (promtool's
-  values notation counted, `0+1x100000000` among it) or 10,000 evaluations
-  a test, before promtool runs, and run one at a time. A rewrite that
-  meets every expectation, losing no catch, comes back with `post`,
+  refused past 100 tests, 1,000 input series, 100,000 values (all promtool
+  parses as values notation counted: `0+1x100000000` and each repetition
+  among it, a native histogram as the numbers it holds each time it is
+  repeated, an expected sample's histogram) or 10,000 evaluations a test,
+  and refused where promtool would load what isn't counted (a `series`
+  that isn't a metric name and its labels alone, a line break in `values`,
+  a tag such as `!!binary`), before promtool runs, and run one at a time.
+  A rewrite that meets every expectation, losing no catch, the rule as it
+  is and rewritten each replayed to the end, comes back with `post`,
   Markdown marked as an agent's rewrite backtested by Lapilli, with the
   numbers before and after, for the agent or a person to post on the pull
   request: Lapilli writes nothing there.

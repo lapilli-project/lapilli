@@ -519,12 +519,16 @@ Step 3, drafts, as built:
   at most), keeping the rule's name and group; where several share both,
   the labels given pick it. A warning split from a critical is two rules,
   one of them new: adding a rule is step 5's. It is posted (`post`) only
-  when it is held to one expectation at least, meets each, and loses no
-  incident the rule catches as it is (`lost`); the post says it is an
-  agent's rewrite backtested by Lapilli, gives the period, each
-  expectation as it is and rewritten, the firings and catches before and
-  after, and the diff, in a fence a backtick longer than any run of them
-  in it. Lapilli posts nothing (open question 5).
+  when the rule as it is and rewritten were each replayed to the end, it
+  is held to one expectation at least, meets each, and loses no incident
+  the rule catches as it is (`lost`). A side whose replay was cut short,
+  or couldn't be made, catches nothing, so an incident the rewrite loses
+  would go unseen: no post, and the answer's note says which side and
+  why. The post says it is an agent's rewrite backtested by Lapilli,
+  gives the period, each expectation as it is and rewritten, the firings
+  and catches before and after, and the diff, in a fence a backtick
+  longer than any run of them in it. Lapilli posts nothing (open question
+  5).
 - **`propose_expectation`** (behind `--mcp-propose`, as `propose` is) takes
   an expectations text holding the rule by `rule:` alone, checks it as
   `test_expectation` does (no rewrite: a rule's change kept for a person
@@ -550,11 +554,25 @@ Step 3, drafts, as built:
   draft keeps them, each by a path an expectations file may name, those
   given named by the scenarios and the scenarios' given, each read as
   promtool would expand it before it runs (`scenario.Bound`: 100 tests,
-  1,000 input series and 100 a test, values expanding to 100,000, a blank
-  among them, as promtool's parser counts `0+1x100000000` and `_x5`, and
-  10,000 evaluations a test), then rewritten as step 4's are. An agent's
-  scenarios run one at a time across serve, whatever else holds the
-  comparison's turn.
+  1,000 input series and 100 a test, values expanding to 100,000 in all,
+  and 10,000 evaluations a test), then rewritten as step 4's are. All
+  promtool parses as values notation is counted, in one pass, never less
+  than promtool expands: an input series' values, a blank among them, as
+  promtool's parser counts `0+1x100000000`, `_x5` and each repetition in
+  an item; a native histogram as the numbers it holds (its buckets and
+  other fields) each time it is repeated, as promtool copies
+  `{{…}}+{{…}}xN` at each step, an item of more than two refused; and an
+  expected sample's `histogram`, which promtool parses the same way.
+  promtool writes each input series as a line of its load command,
+  `  <series> <values>`: so a `series` is a metric name, its labels in
+  braces, or both, with no space, line break or anything else outside the
+  labels' quoted values (`big 0+0x100000000` would carry values, a line
+  break another series), and `values` holds no line break before its end,
+  nor anything but values notation (a quote or a lone brace would have
+  promtool read labels there). Each is plain text: a tag such as
+  `!!binary`, which promtool's YAML would decode into another text, is
+  refused. An agent's scenarios run one at a time across serve, whatever
+  else holds the comparison's turn.
 - **Accepting** is an approver's, in a browser, as approving a proposal is
   (same site, no bearer token, `--changes` on, the page's form). Where
   serve's expectations come from `--expect`, with the change recipes'

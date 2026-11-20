@@ -40,11 +40,12 @@ rewritten ([design/expectations.md](design/expectations.md), step 3). A
 scenario's promtool test file, given in `tests` by its path, is run by
 serve's `--promtool`, once it is read as promtool would expand it and is
 within bounds. Given a rewrite that meets every expectation, losing no
-incident the rule catches, it answers with `post`: Markdown, marked as an
-agent's rewrite backtested by Lapilli, with the numbers before and after,
-which the agent or a person may post on the pull request. Lapilli posts
-nothing; without `post`, the items say why. One check runs at a time, with
-`compare`'s.
+incident the rule catches, the rule as it is and rewritten each replayed
+to the end, it answers with `post`: Markdown, marked as an agent's
+rewrite backtested by Lapilli, with the numbers before and after, which
+the agent or a person may post on the pull request. Lapilli posts
+nothing; without `post`, the items and the note say why. One check runs
+at a time, with `compare`'s.
 
 Nothing an agent asks for changes anything: `compare` and
 `test_expectation` replay and keep nothing. With `--mcp-propose editors`
