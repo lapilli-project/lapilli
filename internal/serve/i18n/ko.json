@@ -2565,5 +2565,10 @@
  "Held while the change boundaries can't be read": "변경 경계를 읽을 수 없는 동안 보류",
  "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can.": "Lapilli에 저장된 변경 경계를 읽을 수 없어요. 다시 읽을 수 있을 때까지 그 경계에 걸리는 변경은 승인하거나 되돌리거나 적용하거나 레시피에 넘기지 않아요.",
  "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:": "--config 가 approvers, changes_in, 변경 동결을 준 팀 중 반영되지 않은 팀이 있어, 그 경계는 아무것에도 걸리지 않아요:",
- "Why each wasn't kept is said with the file's problems.": "각 팀이 반영되지 않은 이유는 파일의 문제 목록에 있어요."
+ "Why each wasn't kept is said with the file's problems.": "각 팀이 반영되지 않은 이유는 파일의 문제 목록에 있어요.",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings with no incident written down to judge them by, or judged by nothing.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 판정할 기록된 인시던트가 없거나 판정 제외인 발화에 대한 알림 %[5]d건.",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, had no incident written down to judge them by, or were judged by nothing.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못했거나, 판정할 기록된 인시던트가 없거나, 판정 제외인 발화에 대한 알림 %[5]d건.",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못했거나 판정 제외인 발화에 대한 알림 %[5]d건.",
+ "%d caught nothing, %d judged by nothing, %d excused": "오탐 %d건, 판정 제외 %d건, 면제 %d건",
+ "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "발화 %d건, 정탐 %d건, 오탐 %d건, 판정 제외 %d건, 면제 %d건"
 }

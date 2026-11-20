@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"lapilli.dev/internal/verdict"
 )
 
 // whiteBlack is a white or a black stone, as Korean would say it.
@@ -159,6 +161,32 @@ func TestMovedSaysWhatMoved(t *testing.T) {
 	} {
 		if got := peopleMovedText(c.lang, &c.p); got != c.want {
 			t.Errorf("%+v in %s: %q, want %q", c.p, c.lang, got, c.want)
+		}
+	}
+}
+
+// TestDigestSaysWhyUnjudged: the digest's line of notifications sent says
+// why the firings it counts weren't judged, by what its rules' numbers
+// say: no incident, or an entry that judges them by nothing; a rule judged
+// by nothing alone says nothing of incidents (bundle 67).
+func TestDigestSaysWhyUnjudged(t *testing.T) {
+	for _, c := range []struct {
+		rules               []verdict.RuleResult
+		noRecord, byNothing bool
+		says, not           string
+	}{
+		{[]verdict.RuleResult{{Unjudged: 3, NotJudged: 3}}, false, true, "caught nothing, or were judged by nothing.", "no incident"},
+		{[]verdict.RuleResult{{Unjudged: 2}}, true, false, "caught nothing, or had no incident written down to judge them by.", "judged by nothing"},
+		{[]verdict.RuleResult{{Unjudged: 2}, {Unjudged: 4, NotJudged: 4}}, true, true, "had no incident written down to judge them by, or were judged by nothing.", "\\x00"},
+		{[]verdict.RuleResult{{Firings: 5}}, false, false, "5 for firings that caught nothing.", "judged"},
+	} {
+		noRecord, byNothing := unjudgedWhy(c.rules)
+		if noRecord != c.noRecord || byNothing != c.byNothing {
+			t.Errorf("%+v: no record %v, by nothing %v", c.rules, noRecord, byNothing)
+		}
+		line := (&sentLine{Notifications: 9, Rules: 1, ForNothing: 5, Unjudged: noRecord, ByNothing: byNothing}).text("en")
+		if !strings.Contains(line, c.says) || strings.Contains(line, c.not) {
+			t.Errorf("%+v: %q", c.rules, line)
 		}
 	}
 }

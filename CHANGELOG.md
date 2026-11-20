@@ -174,6 +174,20 @@ API. No schema change: the ledger stays at 026.
 - `--config`'s top-level keys are teams, windows, reports, grants, goals,
   marked, **freezes** and **notify**, and its refusals say so.
 - The sidebar's Administration has Sources after Settings.
+- A rule judged by nothing (`judged: false`) says so on its page's panel
+  and its strip's days too, "N judged by nothing", as its firings and the
+  rules list do (0.63.2).
+- A refusal or a failure said on a page (a form refused, serve's status,
+  a source's last read) sets a flag's name in it as code, as the pages'
+  own sentences do; a flag's name in a URL's path or query stays text.
+
+### Fixed
+
+- **The digest said a judged-by-nothing rule's notifications were for
+  firings with no incident to judge them by**: its line of notifications
+  sent says "or were judged by nothing" where an entry says
+  `judged: false`, and nothing of incidents where only that kept them
+  from being judged.
 
 ## [0.63.2] - 2026-11-20
 

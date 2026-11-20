@@ -768,7 +768,7 @@ func TestDeploysUnread(t *testing.T) {
 	s.cfg.Deploys = ""
 	s.jobs(ctx, false)
 	_, body, _ := get(t, s.Handler(), "/runs")
-	if !strings.Contains(body, "--deploys isn&#39;t given") || !strings.Contains(body, "deploys: []") {
+	if !strings.Contains(body, "<code>--deploys</code> isn&#39;t given") || !strings.Contains(body, "deploys: []") {
 		t.Errorf("/runs without --deploys: %s", regexp.MustCompile(`(?s)class="(?:bad|status)[^>]*>.{0,300}`).FindString(body))
 	}
 	s.cfg.Deploys = file

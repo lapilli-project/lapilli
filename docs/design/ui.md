@@ -2055,6 +2055,10 @@ empty list's, Administration's cards', a feed's, a disabled button's
 why); `TestFlagsAsCode` reads every page the tests serve, and a first-time
 user's, in each language. A form's syntax (a repeating window, a report's
 schedule, a marked window's kind) is behind "How to write it" under it.
+Since bundle 67 a text a page shows as it was said, a refusal, serve's
+status line, a source's last failure, sets its flags as code too
+(`flagsAsCode`); a flag's name after `/` or `=`, in a URL's path or
+query, stays text (`TestRefusalFlagsAsCode`).
 
 Since bundle 65 Korean says 알림 묶음 for an episode (같은 라벨의 알림이
 겹치거나 하루 안에 다시 울리면 한 묶음), not 에피소드, a word whoever is on
@@ -2078,7 +2082,11 @@ with "no record to judge it by"; a rule's strip's legend "judged by
 nothing", the day's and the overview's "not judged: no record, or judged
 by nothing" where an entry says `judged: false`; and the day's strip reads
 its starts by rule then (`FiringStartsBy`), where it drew them as caught
-nothing.
+nothing. Since bundle 67 a rule judged by nothing counts them so in its
+panel and its strip's days ("N judged by nothing"), and the digest's line
+of notifications sent says "or were judged by nothing", not "no incident
+written down to judge them by", where only an entry kept them from being
+judged (`unjudgedWhy`, `TestDigestSaysWhyUnjudged`).
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

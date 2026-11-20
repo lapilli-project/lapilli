@@ -538,3 +538,25 @@ func TestTbdiWithoutArguments(t *testing.T) {
 		t.Errorf("a flag and an argument: %q", got)
 	}
 }
+
+// TestRefusalFlagsAsCode: a refusal or a failure said on a page, already
+// translated, sets each flag's name in it as code, as a translation's
+// are (bundle 67); and a flag's name in a URL's path or query stays text.
+func TestRefusalFlagsAsCode(t *testing.T) {
+	s, _ := changesServer(t, func(c *Config) { c.Changes = false })
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/approve", ana, "same-origin", url.Values{})
+	if code != http.StatusBadRequest || !strings.Contains(body, "<p>changes are off: lapilli serve was started without <code>--changes</code></p>") {
+		t.Errorf("the refusal: %d %.300s", code, body[max(0, strings.Index(body, "<h1>")):])
+	}
+	for in, want := range map[string]string{
+		"read within --timeout and --max-samples": "read within <code>--timeout</code> and <code>--max-samples</code>",
+		"<b>--keep</b>":                         "&lt;b&gt;<code>--keep</code>&lt;/b&gt;",
+		"at https://x.example/a/--b?c=--d, --e": "at https://x.example/a/--b?c=--d, <code>--e</code>",
+	} {
+		if got := string(flagsAsCode(in)); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

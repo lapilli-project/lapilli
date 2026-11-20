@@ -163,13 +163,20 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 }
 
 // flagName is a flag's name in a sentence: --impact, --changes-in.
-var flagName = regexp.MustCompile(`(^|[^\w-])(--[a-z][a-z0-9-]*)`)
+var flagName = regexp.MustCompile(`(^|[^\w/=-])(--[a-z][a-z0-9-]*)`)
 
 // codeFlags sets each flag's name in an escaped text as code: in the
 // pages' font two hyphens read as one dash, and a flag is typed as it is
 // (docs/design/ui.md).
 func codeFlags(escaped string) string {
 	return flagName.ReplaceAllString(escaped, "$1<code>$2</code>")
+}
+
+// flagsAsCode is a text already said, a refusal or a failure, escaped,
+// with each flag's name in it as code, as codeFlags sets them in a
+// translation (bundle 67): "a flag in a URL's path or query" stays text.
+func flagsAsCode(text string) template.HTML {
+	return template.HTML(codeFlags(template.HTMLEscapeString(text)))
 }
 
 // asCode is an argument trBDI sets in <code>: a selector or an expression
