@@ -31,6 +31,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/scenario/scenariotest"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -42,6 +43,8 @@ import (
 const backtestRecipes = "../../recipes/backtest/"
 
 func TestMain(m *testing.M) {
+	// Run as promtool, through scenariotest.Install's link: a stand-in.
+	scenariotest.Fake()
 	// Run by a recipe, as lapilli: its arguments, as it was given them,
 	// written down when asked.
 	if f := os.Getenv("LAPILLI_TEST_ARGS"); f != "" && os.Getenv("LAPILLI_TEST_AS_CLI") == "1" {

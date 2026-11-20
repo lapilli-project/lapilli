@@ -121,6 +121,15 @@ type Rule struct {
 	// asked of --loki; for a Grafana rule, the uid of the Loki data source
 	// its condition reads. "" for PromQL.
 	Logs string
+	// Prometheus says the rule was read from Prometheus's own format: a
+	// group of rules as a rule file, a PrometheusRule, a ConfigMap of one,
+	// an Amazon namespace, a ruler, Google Cloud's ClusterRules and
+	// GlobalRules or Prometheus's rules API write it; what promtool test
+	// rules reads (docs/design/expectations.md, step 4). Not an Azure rule
+	// group's, a Grafana rule, a cloud's alarm, nor a Rules of Google
+	// Cloud's, whose expression is scoped to its namespace as Lapilli
+	// replays it, not as its file writes it. Not in Key.
+	Prometheus bool
 	// LokiFile says a Loki ruler's rule was read from its rule files,
 	// which Loki 3.7.9 runs without keep_firing_for and query_offset; not
 	// from its API, which gives a rule as Loki holds it.
@@ -514,6 +523,13 @@ func FromDocs(docs []Doc) ([]Rule, error) { return FromDocsContext(context.Backg
 // ConfigMap holds that Lapilli can't read, or that makes past its bound, is
 // an error, not passed over as one that doesn't read may be.
 func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
+	return FromDocsRecorded(ctx, docs, nil)
+}
+
+// FromDocsRecorded is FromDocsContext, adding to rec, when not nil, the
+// recording rules the documents' files hold, each with its document's
+// Source; an API's answer gives none.
+func FromDocsRecorded(ctx context.Context, docs []Doc, rec *[]Recording) ([]Rule, error) {
 	ctx = Together(ctx)
 	none := false
 	if b, ok := ctx.Value(inputKey{}).(*input); ok {
@@ -542,10 +558,19 @@ func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
 		}
 		var rs []Rule
 		var err error
+		had := 0
+		if rec != nil {
+			had = len(*rec)
+		}
 		if d.API {
 			rs, err = fromAPI(in, d.Data)
 		} else {
-			rs, err = parseContext(in, d.Data, nil)
+			rs, err = parseContext(in, d.Data, rec)
+		}
+		if rec != nil {
+			for i := had; i < len(*rec); i++ {
+				(*rec)[i].Source = d.Source
+			}
 		}
 		if err == nil && d.Namespace != "" {
 			// Each rule's, in its key and on its pages.
@@ -768,6 +793,8 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		if ns := str(meta["namespace"]); doc["kind"] == "Rules" && ns != "" {
 			s := scoping{in: inputOf(ctx), matchers: matchersOf(map[string]string{"namespace": ns}), what: "namespace", value: ns}
 			for i := range rs {
+				// Its expression is no longer as its file writes it.
+				rs[i].Prometheus = false
 				var err error
 				if rs[i].Expr, err = s.scope(rs[i].Expr); refused(err) {
 					return nil, true, err
@@ -934,7 +961,7 @@ func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Ru
 				}
 			}
 			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), GroupLabels: groupLabels,
-				Interval: interval, QueryOffset: offset, Limit: limit, Says: annotated(rm["annotations"], TemplatePrometheus)}
+				Interval: interval, QueryOffset: offset, Limit: limit, Says: annotated(rm["annotations"], TemplatePrometheus), Prometheus: true}
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %q: %w", name, err)
 			}
@@ -1536,7 +1563,7 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
 				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Limit: limit, Phase: phase, Labels: l,
-				Says: annotated(a, TemplatePrometheus)})
+				Says: annotated(a, TemplatePrometheus), Prometheus: true})
 		}
 	}
 	return shownRules(out), nil

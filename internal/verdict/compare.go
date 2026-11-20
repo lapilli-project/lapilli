@@ -50,6 +50,10 @@ type Comparison struct {
 	// Expectations are the rules the change touches held to what they are
 	// expected to do (--expect): set by Expect.
 	Expectations *Checked `json:"expectations,omitempty"`
+	// Scenarios runs the scenarios the expectations hold the rules to
+	// (Expect): NoPromtool when nil, each not known. lapilli serve's
+	// backtests set NotThroughServe: serve runs none it is sent.
+	Scenarios ScenarioRunner `json:"-"`
 	// JudgedBy names whose record judged the firings, when it isn't the
 	// incidents the comparison was given: lapilli serve's, for a pull
 	// request backtested through it (JudgedByServe). CompareMarkdown's
@@ -80,12 +84,18 @@ func (c *Comparison) ExpectBy(after, before *Expectations, hoursOf func(rule str
 	if c.Summary != nil {
 		c.Summary.Expected = true
 		c.Summary.ExpectationsBroken = c.Expectations.Broken()
+		c.Summary.ExpectationsAlreadyBroken, c.Summary.ScenariosUnrun = 0, 0
 		for _, r := range c.Expectations.Results {
 			if r.AlreadyBroken() {
 				c.Summary.ExpectationsAlreadyBroken++
 			}
 		}
 		c.Summary.Unexpected = len(c.Expectations.Unexpected)
+		for _, r := range c.Expectations.Results {
+			if r.Unrun {
+				c.Summary.ScenariosUnrun++
+			}
+		}
 	}
 	return nil
 }
@@ -149,6 +159,11 @@ type Summary struct {
 	ExpectationsBroken        int  `json:"expectations_broken"`
 	ExpectationsAlreadyBroken int  `json:"expectations_already_broken"`
 	Unexpected                int  `json:"unexpected"`
+	// ScenariosUnrun are the scenarios of the rules that differ that
+	// couldn't be run after the change, promtool given (--promtool) and the
+	// rule one it runs: the test file unreadable, a time out, a crash. They
+	// can't be judged, as a rule that couldn't be replayed can't.
+	ScenariosUnrun int `json:"scenarios_unrun"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether

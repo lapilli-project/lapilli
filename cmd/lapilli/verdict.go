@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/scenario"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
@@ -145,6 +147,16 @@ Before a change to the rules:
                       nothing)
   --expect-required   exit 1 when the change adds a rule no expectation
                       holds
+  --promtool PATH     with --expect, run each scenario (scenarios:,
+                      promtool's own test files, read in the directory of
+                      the expectations file that names them) of a rule the
+                      change touches, before and after, with promtool at
+                      PATH, against the rule's group as each side has it:
+                      met, broken, or not known (couldn't be run, and why).
+                      Without it, each scenario is not known. Only rules in
+                      Prometheus's format; promtool runs with no
+                      environment, 30s a scenario, its rule_files the
+                      group alone
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
@@ -462,10 +474,12 @@ type verdictFlags struct {
 	// failExpect, --fail-expectations; expectRequired, --expect-required.
 	expect, expectBefore       string
 	failExpect, expectRequired bool
-	checkReplay                bool
-	checkReplaySet             bool // --check-replay given, true or false
-	checkSeries                []string
-	checkFirings               string
+	// promtool is --promtool, resolved (scenario.Resolve).
+	promtool       string
+	checkReplay    bool
+	checkReplaySet bool // --check-replay given, true or false
+	checkSeries    []string
+	checkFirings   string
 	// checkGrafana is --check-grafana: the Grafana that runs the Grafana
 	// rules --rules gives, whose alert state history says what they
 	// really fired.
@@ -711,6 +725,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.expect = val
 		case "--expect-before":
 			f.expectBefore = val
+		case "--promtool":
+			if f.promtool, err = scenario.Resolve(val); err != nil {
+				return nil, fmt.Errorf("--promtool %s: %w", val, err)
+			}
 		case "--check-series":
 			f.checkSeries = append(f.checkSeries, val)
 		case "--check-firings":
@@ -1090,8 +1108,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--changed-only goes with --compare")
 	case f.expect != "" && len(f.compare) == 0:
 		return nil, errors.New("--expect holds a change to the rules to what they are expected to do: it goes with --compare")
-	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired):
-		return nil, errors.New("--expect-before, --fail-expectations and --expect-required go with --expect")
+	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired || f.promtool != ""):
+		return nil, errors.New("--expect-before, --fail-expectations, --expect-required and --promtool go with --expect")
 	case f.markdown && len(f.compare) == 0:
 		return nil, errors.New("--markdown writes --compare's report, for a pull request: it goes with --compare")
 	case f.markdown && f.json:
@@ -1484,6 +1502,18 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		cmp.PassedOver = f.passedOver
 		cmp.Summarize(f.incidents != "" || f.anyImpact())
 		if expAfter != nil {
+			if f.promtool != "" {
+				var is []rules.Rule
+				if len(versions) > 0 {
+					is = versions[0].Rules
+				}
+				sides, err := f.scenarioSides(ctx, was, is, recordedIs)
+				if err != nil {
+					return fail(err)
+				}
+				defer sides.Close()
+				cmp.Scenarios = sides
+			}
 			if err := cmp.Expect(expAfter, expBefore, f.opts.Hours); err != nil {
 				return fail(fmt.Errorf("--expect %s: %w", f.expect, err))
 			}
@@ -1721,6 +1751,26 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// scenarioSides runs the scenarios of --expect and --expect-before with
+// --promtool (docs/design/expectations.md, step 4): each side's rules,
+// as replayed, and its recording rules, by group; each test file read in
+// the directory of the expectations file that names it, and nowhere else.
+func (f *verdictFlags) scenarioSides(ctx context.Context, was, is []rules.Rule, recordedIs []rules.Recording) (*scenario.Sides, error) {
+	s := &scenario.Sides{Ctx: ctx, Promtool: scenario.Promtool{Path: f.promtool},
+		Rules: [2][]rules.Rule{was, is}, Recorded: [2][]rules.Recording{f.recorded, recordedIs}}
+	var err error
+	if s.After, err = os.OpenRoot(filepath.Dir(f.expect)); err != nil {
+		return nil, fmt.Errorf("--expect %s: %w", f.expect, err)
+	}
+	if f.expectBefore != "" {
+		if s.Before, err = os.OpenRoot(filepath.Dir(f.expectBefore)); err != nil {
+			s.Close()
+			return nil, fmt.Errorf("--expect-before %s: %w", f.expectBefore, err)
+		}
+	}
+	return s, nil
 }
 
 // forComment readies the reasons rules couldn't be replayed for

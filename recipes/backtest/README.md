@@ -91,6 +91,22 @@ And, as wanted:
   reach), no report at all; and one that broke them whose comment couldn't
   be posted. Anything else that goes wrong fails it only with
   `FAIL_ON_ERROR`, as before.
+- `PROMTOOL`, with `EXPECT`: promtool on the runner (its path, or its name
+  on `PATH`, installed in a step before; never one in the checkout, which
+  would be the pull request's to run), which runs the scenarios `EXPECT`
+  names (`scenarios:`, promtool's own test files, paths relative to it)
+  of the rules that differ, before and after (`--promtool`). The directory
+  `EXPECT` is in is read from each commit as `PATHS` is (`git archive`, a
+  symbolic link refused, `MAX_TREE_FILES` and `MAX_TREE_BYTES`), and each
+  test file there. promtool reads each, its `rule_files` the rule's group
+  as Lapilli writes it whatever the file named, with no environment, 30s
+  at most, and runs nothing of the pull request's: it evaluates PromQL on
+  test series of its own. A scenario that fails is broken as a budget is,
+  what promtool said in the comment; one that couldn't be run after the
+  change (its test file gone, a time out) fails the job with
+  `FAIL_ON_EXPECTATIONS=true`, as it can't be judged. Without `PROMTOOL`,
+  each scenario is not known, never met. Refused with `LAPILLI_SERVE`:
+  serve runs none a pull request sends.
 
 They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
 
@@ -165,7 +181,7 @@ the release the action is at), `sha256`, `paths` or `render` and
 `prometheus-url`, `auth`, `gcp-project`, `aws-region`, `since` (default
 `7d`), `args` (more flags, split at spaces and never expanded by a shell),
 `target`, `key`, `fail-on-error`, `expect`, `fail-on-expectations`,
-`expect-required`, `token` (default the job's own) and `login` (the
+`expect-required`, `promtool`, `token` (default the job's own) and `login` (the
 account a GitHub App's token comments as, `NAME[bot]`); and, to backtest
 through `lapilli serve`, `serve-url`, `audience` and `serve-wait`
 ([below](#through-lapilli-serve)). For a cloud's
@@ -396,7 +412,9 @@ same summary line. Serve replays the rules that differ with its own access
 to the history, at its share of the rate, and judges them by its record:
 the job needs no credential for the metrics, and no cloud sign-in. The
 comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS` and `EXPECT_REQUIRED` are
-as they are without it. The design is
+as they are without it. Serve runs no scenario `EXPECT` names: each is
+said as not run through lapilli serve, and `PROMTOOL` is refused; run
+`promtool test rules` in a step of its own to gate on them. The design is
 [docs/design/backtests.md](../../docs/design/backtests.md).
 
 On GitHub Actions, give the action `serve-url` and `audience`, and the

@@ -377,6 +377,9 @@ func heldBy(x *expectRule, e *verdict.Expectations, sources map[string]string) [
 				continue
 			}
 			for _, it := range ex.Items() {
+				if it.Scenario != "" {
+					continue // a scenario: serve runs none yet (step 4's checks after deploy)
+				}
 				out = append(out, heldItem{ExpectItem: it, selector: ex.Selector(), source: sources[ex.Selector()+"\n"+it.What]})
 				if ex.Rule == x.name {
 					given[it.What] = true

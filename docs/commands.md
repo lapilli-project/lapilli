@@ -149,6 +149,16 @@ Before a change to the rules:
                       nothing)
   --expect-required   exit 1 when the change adds a rule no expectation
                       holds
+  --promtool PATH     with --expect, run each scenario (scenarios:,
+                      promtool's own test files, read in the directory of
+                      the expectations file that names them) of a rule the
+                      change touches, before and after, with promtool at
+                      PATH, against the rule's group as each side has it:
+                      met, broken, or not known (couldn't be run, and why).
+                      Without it, each scenario is not known. Only rules in
+                      Prometheus's format; promtool runs with no
+                      environment, 30s a scenario, its rule_files the
+                      group alone
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is

@@ -18,7 +18,6 @@ func TestReadExpectationsLabelsAndRefires(t *testing.T) {
 		"a budget of nothing: give week, asleep or refires": "expectations:\n  - labels: severity=page\n    budget: {}\n",
 		"labels severity=page: a budget of re-fires given twice": "expectations:\n  - labels: severity=page\n    budget: {refires: 1}\n" +
 			"  - labels: \"severity=page\"\n    budget: {refires: 2}\n",
-		"field scenarios not found": "expectations:\n  - rule: A\n    scenarios: [t.yaml]\n",
 	} {
 		if _, err := ReadExpectations(strings.NewReader(s)); err == nil || !strings.Contains(err.Error(), strings.TrimPrefix(want, "labels: ")) {
 			t.Errorf("%q: %v, want %q", s, err, want)

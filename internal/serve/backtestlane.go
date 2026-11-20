@@ -261,6 +261,11 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 		if own, err := s.owners(context.Background()); err == nil {
 			hours = own.schedules(o.Hours).of
 		}
+		// The scenarios a request names are the pull request's files,
+		// which serve isn't sent and never reads, nor runs: each is said
+		// as not run through serve, whatever --promtool serve has
+		// (docs/design/expectations.md, step 4).
+		cmp.Scenarios = verdict.NotThroughServe
 		if err := cmp.ExpectBy(pr.expect, pr.before, hours); err != nil {
 			return nil, "expect: " + clip(verdict.Clean(err.Error()), 600)
 		}

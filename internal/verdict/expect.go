@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -18,7 +20,8 @@ import (
 
 // Expectations are what rules are held to, written beside them
 // (docs/design/expectations.md): how often each may fire in a week, how
-// often while people slept, and the incidents it must keep catching.
+// often while people slept, the incidents it must keep catching, and the
+// scenarios, promtool's own test files, it must pass.
 type Expectations struct {
 	Expectations []Expectation `yaml:"expectations" json:"expectations"`
 }
@@ -32,6 +35,10 @@ type Expectation struct {
 	Labels  string        `yaml:"labels,omitempty" json:"labels,omitempty"`
 	Budget  *Budget       `yaml:"budget,omitempty" json:"budget,omitempty"`
 	Catches []ExpectCatch `yaml:"catches,omitempty" json:"catches,omitempty"`
+	// Scenarios are promtool test files the rule must pass, each a path
+	// relative to the expectations file, inside its directory
+	// (ScenarioPath), run against the rule's group as Lapilli has it.
+	Scenarios []string `yaml:"scenarios,omitempty" json:"scenarios,omitempty"`
 	// sel is Labels, read.
 	sel rules.Selector
 }
@@ -84,6 +91,31 @@ const MaxExpectationEntries = 2000
 // every rule its expectation holds that a change touches.
 const MaxExpectationCatches = 2000
 
+// MaxExpectationScenarios is the most scenarios a file may hold, in all
+// its expectations: each is a run of promtool, on each side of a change.
+const MaxExpectationScenarios = 200
+
+// maxScenarioPath is the longest a scenario's path may be, in bytes.
+const maxScenarioPath = 512
+
+// ScenarioPath says whether a scenario's path is one an expectations file
+// may name: relative to the file, inside its directory, written as it is
+// (no ., .. or empty part, no leading or doubled /, no \), 512 bytes at
+// most, of characters that show. What it leads to is read inside that
+// directory alone (scenario.ReadTest), never run.
+func ScenarioPath(p string) error {
+	bad := p == "" || len(p) > maxScenarioPath || !utf8.ValidString(p) || strings.ContainsFunc(p, func(r rune) bool {
+		return r == '\\' || unicode.IsControl(r) || rules.Turns(r)
+	})
+	for _, part := range strings.Split(p, "/") {
+		bad = bad || part == "" || part == "." || part == ".."
+	}
+	if bad {
+		return fmt.Errorf("scenario %q: want a path relative to the expectations file, inside its directory, such as tests/restarts.yaml", Clean(p))
+	}
+	return nil
+}
+
 // MaxExpectResults is the most a comparison holds the rules that differ
 // to: each rule to each budget and catch that holds it, before and after.
 // A group's 2,000 catches held against every rule of the group a change
@@ -125,12 +157,16 @@ func NewExpectations(list []Expectation) (*Expectations, error) {
 	if len(list) > MaxExpectationEntries {
 		return nil, fmt.Errorf("%d expectations: at most %d", len(list), MaxExpectationEntries)
 	}
-	catches := 0
+	catches, scenarios := 0, 0
 	for _, x := range list {
 		catches += len(x.Catches)
+		scenarios += len(x.Scenarios)
 	}
 	if catches > MaxExpectationCatches {
 		return nil, fmt.Errorf("%d catches: at most %d in all", catches, MaxExpectationCatches)
+	}
+	if scenarios > MaxExpectationScenarios {
+		return nil, fmt.Errorf("%d scenarios: at most %d in all", scenarios, MaxExpectationScenarios)
 	}
 	e := &Expectations{Expectations: slices.Clone(list)}
 	for i := range e.Expectations {
@@ -146,8 +182,8 @@ func NewExpectations(list []Expectation) (*Expectations, error) {
 		switch {
 		case named != 1:
 			return nil, fmt.Errorf("%s: give rule, group or labels, one of them", at)
-		case b == nil && len(x.Catches) == 0:
-			return nil, fmt.Errorf("%s: nothing to hold %s to: give a budget or catches", at, x.name())
+		case b == nil && len(x.Catches) == 0 && len(x.Scenarios) == 0:
+			return nil, fmt.Errorf("%s: nothing to hold %s to: give a budget, catches or scenarios", at, x.name())
 		case b != nil && b.Week == nil && b.Asleep == nil && b.Refires == nil:
 			return nil, fmt.Errorf("%s: a budget of nothing: give week, asleep or refires", at)
 		case b != nil && (below(b.Week) || below(b.Asleep) || below(b.Refires)):
@@ -169,6 +205,11 @@ func NewExpectations(list []Expectation) (*Expectations, error) {
 				return nil, fmt.Errorf("%s: a catch names no incident", at)
 			}
 		}
+		for _, p := range x.Scenarios {
+			if err := ScenarioPath(p); err != nil {
+				return nil, fmt.Errorf("%s: %w", at, err)
+			}
+		}
 	}
 	return e.merged()
 }
@@ -183,7 +224,7 @@ func below(n *int) bool { return n != nil && *n < 0 }
 func (e *Expectations) merged() (*Expectations, error) {
 	out := &Expectations{Expectations: []Expectation{}}
 	at := map[[3]string]int{}
-	caught := map[[4]string]bool{}
+	caught, scenarios := map[[4]string]bool{}, map[[4]string]bool{}
 	for _, x := range e.Expectations {
 		key := [3]string{x.Rule, x.Group, x.Labels}
 		i, seen := at[key]
@@ -224,6 +265,14 @@ func (e *Expectations) merged() (*Expectations, error) {
 			}
 			caught[k] = true
 			y.Catches = append(y.Catches, c)
+		}
+		for _, p := range x.Scenarios {
+			k := [4]string{x.Rule, x.Group, x.Labels, p}
+			if scenarios[k] {
+				return nil, fmt.Errorf("%s: scenario %s given twice", x.name(), Clean(p))
+			}
+			scenarios[k] = true
+			y.Scenarios = append(y.Scenarios, p)
 		}
 	}
 	return out, nil
@@ -307,6 +356,18 @@ type ExpectResult struct {
 	// Moved says it was taken away as the rule left the group that held
 	// it: the expectation is there still, and no longer holds this rule.
 	Moved bool `json:"moved,omitempty"`
+	// Of a scenario: BeforeWhy and AfterWhy, why it is not known on each
+	// side, in Lapilli's words; Said, what promtool said of it failing
+	// after the change, or why its test file can't be read: the test
+	// file's and the rules' own words. Edited says the change edited its
+	// test file; Unrun, that it couldn't be run after the change, promtool
+	// given and the rule one promtool runs (its test file unread, a time
+	// out, a crash), so it can't be judged.
+	BeforeWhy string `json:"before_why,omitempty"`
+	AfterWhy  string `json:"after_why,omitempty"`
+	Said      string `json:"said,omitempty"`
+	Edited    bool   `json:"edited,omitempty"`
+	Unrun     bool   `json:"unrun,omitempty"`
 }
 
 // BrokenByChange says the change broke it: broken after, and met before
@@ -348,13 +409,17 @@ func (c *Checked) Broken() int {
 	return n
 }
 
-// item is one thing an expectation holds a rule to: a budget's limit, or a
-// catch, by what it is.
+// item is one thing an expectation holds a rule to: a budget's limit, a
+// catch or a scenario, by what it is. fromBefore says it was read from the
+// expectations before the change (--expect-before), whose directory a
+// scenario's path is read in.
 type item struct {
 	what           string
 	limit          *int         // a budget's
 	catch          *ExpectCatch // a catch's
+	scenario       string       // a scenario's path
 	asleep, refire bool
+	fromBefore     bool
 }
 
 func (x *Expectation) items() []item {
@@ -376,17 +441,39 @@ func (x *Expectation) items() []item {
 	for i := range x.Catches {
 		out = append(out, item{what: "catches " + x.Catches[i].Incident, catch: &x.Catches[i]})
 	}
+	for _, p := range x.Scenarios {
+		out = append(out, item{what: ScenarioWhat + p, scenario: p})
+	}
 	return out
 }
 
+// itemsFrom are its items, read from the expectations before the change
+// when fromBefore says so.
+func (x *Expectation) itemsFrom(fromBefore bool) []item {
+	out := x.items()
+	for i := range out {
+		out[i].fromBefore = fromBefore
+	}
+	return out
+}
+
+// ScenarioWhat begins what a scenario holds a rule to: "scenario
+// tests/restarts.yaml".
+const ScenarioWhat = "scenario "
+
+// ScenarioHeld is what a scenario holds a rule to: passing it.
+const ScenarioHeld = "passes"
+
 // ExpectItem is one thing an expectation holds a rule to, as a person
-// reads it: What, "budget week", "budget asleep", "budget refires" or
-// "catches INC-43"; Held, its bound ("10", "within 5m", "caught"). Limit
-// is a budget's, Catch a catch's.
+// reads it: What, "budget week", "budget asleep", "budget refires",
+// "catches INC-43" or "scenario tests/restarts.yaml"; Held, its bound
+// ("10", "within 5m", "caught", "passes"). Limit is a budget's, Catch a
+// catch's, Scenario a scenario's path.
 type ExpectItem struct {
 	What, Held string
 	Limit      *int
 	Catch      *ExpectCatch
+	Scenario   string
 }
 
 // Asleep and Refires say what a budget counts: firings while people
@@ -398,7 +485,7 @@ func (it ExpectItem) Refires() bool { return it.What == "budget refires" }
 func (x *Expectation) Items() []ExpectItem {
 	var out []ExpectItem
 	for _, it := range x.items() {
-		out = append(out, ExpectItem{What: it.what, Held: it.limitText(), Limit: it.limit, Catch: it.catch})
+		out = append(out, ExpectItem{What: it.what, Held: it.limitText(), Limit: it.limit, Catch: it.catch, Scenario: it.scenario})
 	}
 	return out
 }
@@ -410,6 +497,9 @@ func BudgetItems(b *Budget) []ExpectItem {
 }
 
 func (it item) limitText() string {
+	if it.scenario != "" {
+		return ScenarioHeld
+	}
 	if it.catch == nil {
 		return fmt.Sprint(*it.limit)
 	}
@@ -422,6 +512,41 @@ func (it item) limitText() string {
 // weekCounts are, of one side's firings, by rule, each whole week's, how
 // many came while people slept and how many re-fired, counted once.
 type weekCounts map[string][]struct{ all, asleep, refired int }
+
+// ScenarioRunner runs the scenarios expectations hold rules to: a promtool
+// test file against a rule's group, on one side of a change.
+type ScenarioRunner interface {
+	// RunScenario runs path, as the expectations name it (fromBefore says
+	// those before the change, --expect-before, whose directory it is read
+	// in), against the group of rule, as side ("before" or "after") has it.
+	RunScenario(side string, fromBefore bool, rule, path string) ScenarioResult
+}
+
+// ScenarioResult is what running a scenario came to: State met, broken or
+// not known; of not known, Why, in Lapilli's words; Said, what promtool
+// said of it failing, or why its test file can't be read, in the file's
+// and the rules' own words; Test, a hash of the test file run, "" when it
+// wasn't read; Unrun, that it couldn't be run, promtool given and the rule
+// one it runs (Comparison.Summary's scenarios_unrun).
+type ScenarioResult struct {
+	State, Why, Said, Test string
+	Unrun                  bool
+}
+
+// ScenariosNotRun runs no scenario: each is not known, for why. Never met.
+type ScenariosNotRun string
+
+func (why ScenariosNotRun) RunScenario(string, bool, string, string) ScenarioResult {
+	return ScenarioResult{State: ExpectUnknown, Why: string(why)}
+}
+
+// Why a scenario wasn't run: lapilli verdict wasn't given promtool, or a
+// pull request's backtest ran through lapilli serve, which runs none it is
+// sent.
+const (
+	NoPromtool      ScenariosNotRun = "not run: no --promtool"
+	NotThroughServe ScenariosNotRun = "not run through lapilli serve"
+)
 
 // CheckExpectations holds the rules a comparison's change touches to what
 // after says of them; with before (--expect-before), the side before to
@@ -444,6 +569,10 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 	}
 	countsB, countsA := out.count(c.Before, c.From, c.To, hoursOf), out.count(c.After, c.From, c.To, hoursOf)
 	incsB, incsA := incidentsByID(c.Before), incidentsByID(c.After)
+	var run ScenarioRunner = NoPromtool
+	if c.Scenarios != nil {
+		run = c.Scenarios
+	}
 	for _, rc := range c.Rules {
 		h := hoursOf(rc.Rule)
 		sleeps := h != nil && h.Sleeps()
@@ -461,6 +590,22 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 		}
 		held := false
 		judge := func(it item, beforeLimit item, r ExpectResult) ExpectResult {
+			if it.scenario != "" {
+				var sb, sa ScenarioResult
+				r.Before, r.BeforeState = "–", ExpectAbsent
+				if b != nil {
+					sb = run.RunScenario("before", beforeLimit.fromBefore, rc.Rule, beforeLimit.scenario)
+					r.Before, r.BeforeState, r.BeforeWhy = scenarioShown(sb)
+				}
+				r.After, r.AfterState = "taken away", ExpectBroken
+				if a != nil {
+					sa = run.RunScenario("after", it.fromBefore, rc.Rule, it.scenario)
+					r.After, r.AfterState, r.AfterWhy = scenarioShown(sa)
+					r.Said, r.Unrun = sa.Said, sa.Unrun && !r.Removed
+				}
+				r.Edited = sb.Test != "" && sa.Test != "" && sb.Test != sa.Test
+				return r
+			}
 			if it.catch != nil {
 				r.Before, r.BeforeState = catchState(c.Before, incsB, b, rc.Rule, *beforeLimit.catch)
 				r.After, r.AfterState = catchState(c.After, incsA, a, rc.Rule, *it.catch)
@@ -505,7 +650,7 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 				}
 			}
 			old := map[string]item{}
-			for _, it := range was.items() {
+			for _, it := range was.itemsFrom(before != nil) {
 				old[it.what] = it
 			}
 			for _, it := range x.items() {
@@ -524,7 +669,7 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 				out.Results = append(out.Results, judge(it, beforeLimit, r))
 			}
 			// What the change took away of it: shown, held to what it was.
-			for _, it := range was.items() {
+			for _, it := range was.itemsFrom(before != nil) {
 				if _, gone := old[it.what]; gone && before != nil {
 					r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true}
 					out.Results = append(out.Results, judge(it, it, r))
@@ -548,7 +693,7 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 				continue
 			}
 			moved := slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) })
-			for _, it := range y.items() {
+			for _, it := range y.itemsFrom(before != nil) {
 				r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true, Moved: moved}
 				out.Results = append(out.Results, judge(it, it, r))
 			}
@@ -561,6 +706,18 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 		return nil, errHeldTooMuch
 	}
 	return out, nil
+}
+
+// scenarioShown is a scenario's result as a side shows it: passes, fails,
+// or not known and why.
+func scenarioShown(x ScenarioResult) (shown, state, why string) {
+	switch x.State {
+	case ExpectMet:
+		return "passes", ExpectMet, ""
+	case ExpectBroken:
+		return "fails", ExpectBroken, ""
+	}
+	return "–", ExpectUnknown, x.Why
 }
 
 // errHeldTooMuch is what CheckExpectations says past MaxExpectResults.
@@ -693,6 +850,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s = "at most " + r.Limit + " re-fires a week"
 	case strings.HasPrefix(r.What, "catches "):
 		s = "catches " + name(strings.TrimPrefix(r.What, "catches ")) + ", " + r.Limit
+	case strings.HasPrefix(r.What, ScenarioWhat):
+		s = "passes the scenario " + name(strings.TrimPrefix(r.What, ScenarioWhat))
 	default:
 		s = r.What + " " + r.Limit
 	}
@@ -705,6 +864,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s += " (was " + r.WasLimit + ", in this change)"
 	case r.Changed:
 		s += " (new in this change)"
+	case r.Edited:
+		s += " (its test file edited in this change)"
 	}
 	return s
 }
@@ -726,6 +887,8 @@ func (r ExpectResult) verdictOf() string {
 		return "met"
 	case r.AfterState == ExpectAbsent:
 		return "rule taken away"
+	case r.AfterWhy != "":
+		return "not known: " + r.AfterWhy
 	}
 	return "not known"
 }
@@ -794,6 +957,15 @@ func ExpectationsText(w io.Writer, k *Checked) error {
 			return err
 		}
 	}
+	for _, r := range k.ordered() {
+		if r.Said == "" {
+			continue
+		}
+		fmt.Fprintf(w, "promtool said, of %s and %s after the change:\n", Clean(r.Rule), Clean(strings.TrimPrefix(r.What, ScenarioWhat)))
+		for _, l := range strings.Split(r.Said, "\n") {
+			fmt.Fprintf(w, "    %s\n", Clean(l))
+		}
+	}
 	if len(k.Unexpected) > 0 {
 		names := make([]string, 0, len(k.Unexpected))
 		for _, n := range k.Unexpected {
@@ -821,6 +993,27 @@ func expectationsPart(k *Checked) mdPart {
 		}
 		part.rows = append(part.rows, mdRow([]string{md(r.Rule, 200, true), r.heldTo(code), r.Before, r.After, v}))
 	}
+	// What promtool said of each scenario failing: its lines, each a code
+	// span, after the table.
+	var said []string
+	for _, r := range k.ordered() {
+		if r.Said == "" {
+			continue
+		}
+		var lines []string
+		for i, l := range strings.Split(r.Said, "\n") {
+			if i == maxSaidLines {
+				lines = append(lines, "…")
+				break
+			}
+			lines = append(lines, md(strings.TrimSpace(l), 200, false))
+		}
+		said = append(said, "- "+md(r.Rule, 200, false)+", "+md(strings.TrimPrefix(r.What, ScenarioWhat), 100, false)+": "+strings.Join(lines, " ")+"\n")
+	}
+	var after []string
+	if len(said) > 0 {
+		after = append(after, "promtool said, of the scenarios after the change:\n\n"+strings.Join(said, ""))
+	}
 	if len(k.Unexpected) > 0 {
 		names := make([]string, 0, len(k.Unexpected))
 		for _, n := range k.Unexpected[:min(len(k.Unexpected), 20)] {
@@ -830,10 +1023,17 @@ func expectationsPart(k *Checked) mdPart {
 		if n := len(k.Unexpected) - 20; n > 0 {
 			more = fmt.Sprintf(" and %d more", n)
 		}
-		part.foot = "\nRules this change adds that no expectation holds: " + strings.Join(names, ", ") + more + ".\n\n"
+		after = append(after, "Rules this change adds that no expectation holds: "+strings.Join(names, ", ")+more+".\n")
+	}
+	for _, x := range after {
+		part.foot += x + "\n"
 	}
 	return part
 }
+
+// maxSaidLines is how many of the lines promtool said of a scenario
+// failing a pull request's comment shows.
+const maxSaidLines = 8
 
 // BudgetAnnotation is the annotation a rule may carry its budget in, for
 // teams that keep everything in the rule: "10/week, 2 asleep, 3 refires".
