@@ -2558,5 +2558,12 @@
  "%s %q: want a day, like 2026-11-02, or an RFC 3339 time": "%s %q: 2026-11-02 같은 날짜나 RFC 3339 시각으로 주세요",
  "until must be after since": "until 은 since 보다 뒤여야 해요",
  "before %q: want where a page ended, as its link gives it": "before %q: 페이지 링크에 있는, 페이지가 끝난 위치로 주세요",
- "limit %q: want 1 to %d": "limit %q: 1 ~ %d 로 주세요"
+ "limit %q: want 1 to %d": "limit %q: 1 ~ %d 로 주세요",
+ "while --config declares the boundaries of change, only an admin moves a rule into a team or out of one": "--config 에 변경 경계를 선언한 동안에는 규칙을 팀에 넣거나 팀에서 빼는 일은 관리자만 할 수 있어요",
+ "%d refused: admins only, while --config declares the boundaries of change": "%d건 거부됨: --config 에 변경 경계를 선언한 동안에는 관리자만 가능",
+ "team %s is declared on line %d too, in another letter case or with spaces around it: give its approvers, changes_in and change freezes to one team": "%s 팀은 %d번째 줄에도 대소문자나 앞뒤 공백만 다르게 선언돼 있어요. approvers, changes_in, 변경 동결은 한 팀에만 주세요",
+ "Held while the change boundaries can't be read": "변경 경계를 읽을 수 없는 동안 보류",
+ "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can.": "Lapilli에 저장된 변경 경계를 읽을 수 없어요. 다시 읽을 수 있을 때까지 그 경계에 걸리는 변경은 승인하거나 되돌리거나 적용하거나 레시피에 넘기지 않아요.",
+ "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:": "--config 가 approvers, changes_in, 변경 동결을 준 팀 중 반영되지 않은 팀이 있어, 그 경계는 아무것에도 걸리지 않아요:",
+ "Why each wasn't kept is said with the file's problems.": "각 팀이 반영되지 않은 이유는 파일의 문제 목록에 있어요."
 }

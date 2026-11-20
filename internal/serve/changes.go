@@ -1440,6 +1440,8 @@ func (s *Server) carryOut(ctx context.Context) error {
 			switch {
 			case errors.Is(err, errPaused):
 				return nil // paused while it was checked again: it waits, approved
+			case errors.Is(err, errBoundsHold):
+				continue // its team's boundaries hold it now: it waits, approved, or was refused
 			case errors.Is(err, errFires):
 				if _, _, err := s.waitsWhileFiring(ctx, p, true); err != nil {
 					return err
@@ -1524,8 +1526,9 @@ type refusal struct{ why string }
 func (r refusal) Error() string { return r.why }
 
 // carry checks a proposal again and carries it out: handed to a recipe, or
-// sent to Grafana. The pause is looked at again just before either, since
-// checking again can take as long as a backtest.
+// sent to Grafana. The pause, and its team's boundaries (boundsAgain), are
+// looked at again just before either, since checking again can take as
+// long as a backtest.
 func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	step, to, err := s.checkAgain(ctx, p)
 	if err == nil && p.Reason == firesNote {
@@ -1562,6 +1565,9 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	}
 	if s.changesPaused() {
 		return errPaused
+	}
+	if err := s.boundsAgain(ctx, p); err != nil {
+		return err
 	}
 	step.Applied = true
 	_, err = s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, to, ledger.Proposer, step)

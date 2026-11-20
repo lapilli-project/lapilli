@@ -19,12 +19,14 @@ import (
 // Team, the team that owns its rule now, "" for none; Frozen, the freeze
 // that holds it, nil for none; Moved, that one team owned its rule as it
 // was proposed (MovedFrom) and another, or none (MovedTo ""), does now, so
-// that no one approves it.
+// that no one approves it; Unread, that the boundaries can't be read, so
+// that nothing they would hold goes ahead meanwhile (fail closed).
 type proposalBounds struct {
 	Team               string
 	Frozen             *frozenView
 	Moved              bool
 	MovedFrom, MovedTo string
+	Unread             bool
 	// approver says the reader may approve it, as its team is now
 	// (approverOf); teamApprovers, that its team declares approvers.
 	approver, teamApprovers bool
@@ -32,7 +34,9 @@ type proposalBounds struct {
 
 // boundsOf says what the boundaries say of a proposal, on its page, and
 // takes away the forms they stop: approving it while a freeze holds it or
-// another team owns it now, asking to undo it while a freeze holds it.
+// another team owns it now, asking to undo it while a freeze holds it; and
+// both while the boundaries can't be read, said so, the page drawn all
+// the same (dropping and closing it go on).
 func (s *Server) boundsOf(r *http.Request, p ledger.Proposal, v *proposalView) error {
 	ctx := r.Context()
 	now, err := s.teamNow(ctx, p)
@@ -41,7 +45,14 @@ func (s *Server) boundsOf(r *http.Request, p ledger.Proposal, v *proposalView) e
 	}
 	v.Team = now.Name
 	v.approver = s.approverOf(r, p)
-	if b, err := s.bounds(ctx); err == nil && now.Name != "" {
+	b, err := s.bounds(ctx)
+	if err != nil {
+		s.log.Warn("a proposal's page: the change boundaries can't be read; approving and undoing are held", "proposal", p.ID, "err", err)
+		v.Unread = true
+		v.CanApprove, v.Approve, v.CanUndo, v.Undo = false, "", false, ""
+		return nil
+	}
+	if now.Name != "" {
 		v.teamApprovers = len(b.Teams[now.Name].Approvers) > 0
 	}
 	if p.State == ledger.StateProposed {
@@ -72,7 +83,7 @@ func (s *Server) frozenNow(ctx context.Context, p ledger.Proposal) (*frozenView,
 	if err != nil {
 		return nil, err
 	}
-	now, err := s.teamNow(ctx, p)
+	now, bare, err := s.teamsNow(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +91,7 @@ func (s *Server) frozenNow(ctx context.Context, p ledger.Proposal) (*frozenView,
 	if p.State == ledger.StateApplied {
 		w = ownedBy{}
 	}
-	if f, until, ok := b.frozen(teamsOf(w, now), s.wall()); ok {
+	if f, until, ok := b.frozen(teamsOf(w, now, bare), s.wall()); ok {
 		return &frozenView{Title: f.Title, Team: f.Team, Until: until}, nil
 	}
 	return nil, nil
@@ -95,13 +106,20 @@ func (s *Server) teamEditsProposal(r *http.Request, p ledger.Proposal) bool {
 }
 
 // ownedNow is who owns a proposal's rule now, as an undo of it keeps it:
-// the undo is that team's, asked for now.
+// the undo is that team's, asked for now; and the team its name and
+// labels give it without its note, when that is another (no one team's).
 func (s *Server) ownedNow(ctx context.Context, p ledger.Proposal) (ownedBy, error) {
-	now, err := s.teamNow(ctx, p)
-	if err != nil || now.ID == 0 {
+	now, bare, err := s.teamsNow(ctx, p)
+	if err != nil {
 		return ownedBy{Owned: true}, err
 	}
-	return ownedBy{Owned: true, Owners: []teamRef{now}}, nil
+	w := ownedBy{Owned: true}
+	for _, t := range []teamRef{now, bare} {
+		if t.ID != 0 && !slices.Contains(w.Owners, t) {
+			w.Owners = append(w.Owners, t)
+		}
+	}
+	return w, nil
 }
 
 // freezeView is a change freeze as the Settings page lists it: its title,
@@ -115,13 +133,9 @@ type freezeView struct {
 	Next, NextEnd time.Time
 }
 
-// freezesView are the freezes the ledger holds, as the Settings page lists
-// them, and an error when they can't be read.
-func (s *Server) freezesView(ctx context.Context) ([]freezeView, error) {
-	b, err := s.bounds(ctx)
-	if err != nil {
-		return nil, err
-	}
+// freezesView are the freezes the boundaries hold, as the Settings page
+// lists them.
+func (s *Server) freezesView(b *bounds) []freezeView {
 	at := s.wall()
 	var out []freezeView
 	for _, f := range b.Freezes {
@@ -133,7 +147,46 @@ func (s *Server) freezesView(ctx context.Context) ([]freezeView, error) {
 		}
 		out = append(out, x)
 	}
+	return out
+}
+
+// boundsNoTeam are the names the boundaries give approvers, changes_in or
+// a change freeze to that no team has: the file's team of that name
+// wasn't kept (the file's problems say why), so what is given to it holds
+// nothing. The Settings page says so.
+func (s *Server) boundsNoTeam(ctx context.Context, b *bounds) ([]string, error) {
+	o, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	add := func(name string) {
+		if _, ok := o.team(name); name != "" && !ok && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	for _, n := range sortedKeys(b.Teams) {
+		add(n)
+	}
+	for _, f := range b.Freezes {
+		add(f.Team)
+	}
 	return out, nil
+}
+
+// boundsShown is what the Settings page says of the boundaries: the
+// freezes, the names given boundaries no team has, and, when they can't
+// be read, that (fail closed: nothing they would hold goes ahead).
+func (s *Server) boundsShown(ctx context.Context, v *settingsView) error {
+	b, err := s.bounds(ctx)
+	if err != nil {
+		s.log.Warn("the Settings page: the change boundaries can't be read", "err", err)
+		v.BoundsUnread = true
+		return nil
+	}
+	v.Freezes = s.freezesView(b)
+	v.BoundsNoTeam, err = s.boundsNoTeam(ctx, b)
+	return err
 }
 
 // frozenUntil is when the freezes that hold now end, everyone's or a

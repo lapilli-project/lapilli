@@ -869,12 +869,23 @@ freezes:
 - **Read strictly, as the rest of the file.** An approver is
   `user:NAME`, `group:NAME` or `*@DOMAIN`, not a bare name or `*`;
   `approvers: []` is refused (leave it out for none); a `changes_in` entry
-  is one `--changes-in` would take, within what `--changes-in` names, or
-  the file is refused as a whole, its line said; a freeze has a title,
-  times a quiet window could have (31 days at most, a repeat shorter than
-  its period, a month's or a cron's starting when it falls due), a team the
-  same file declares, 100 freezes at most. A team that can't be kept, kept
-  as it was, keeps the boundaries the file gives under its name.
+  is one `--changes-in` would take, within what `--changes-in` names (in
+  the letter case its own source compares names in), or the file is
+  refused as a whole, its line said; a freeze has a title, times a quiet
+  window could have (31 days at most, a repeat shorter than its period, a
+  month's or a cron's starting when it falls due), a team the same file
+  declares, 100 freezes at most. A team's name is read as the ledger keeps
+  it, without the spaces around it; two teams of one name in another
+  letter case, or with spaces around it, are refused where the boundaries
+  name them. A team that can't be kept, kept as it was, keeps the
+  boundaries the file gives under its name; one no team has holds nothing,
+  and the Settings page names it.
+- **A rule's team is an admin's to move.** While the file declares any
+  team's approvers or `changes_in`, or a freeze, a note that moves a rule
+  into a team or out of one (its form, `PUT /api/v1/notes`, the rules
+  list's "Set the team", the Cleanup page's move) is refused to anyone but
+  an admin, in the ledger's write; and a rule a note moved is held by the
+  boundaries of the team its name and labels give it too.
 - **Kept with the rest, read twice first.** Read, they are written as one
   value in the ledger's `meta` table (`change_bounds`), in the write that
   keeps the ledger to the file, a change noted in the activity log
@@ -891,8 +902,10 @@ freezes:
   when; a rule that another team owns now than when it was proposed. The
   Settings page lists the freezes, under "Changes to the rules", each
   frozen until, next, or over; the Administration page's Settings card
-  says until when a freeze holds changes. Who a team's approvers are is on
-  a proposal's page to an admin alone, as who holds a role is.
+  says until when a freeze holds changes. Boundaries that can't be read
+  are said on both pages, drawn all the same, nothing they would hold
+  going ahead. Who a team's approvers are is on a proposal's page to an
+  admin alone, as who holds a role is.
 
 ## Sources, the activity log, and the daily writes through the API
 

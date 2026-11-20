@@ -2558,5 +2558,12 @@
  "%s %q: want a day, like 2026-11-02, or an RFC 3339 time": "%s %q: se espera un día, como 2026-11-02, o una hora RFC 3339",
  "until must be after since": "until debe ser posterior a since",
  "before %q: want where a page ended, as its link gives it": "before %q: se espera dónde acabó una página, como lo da su enlace",
- "limit %q: want 1 to %d": "limit %q: se espera de 1 a %d"
+ "limit %q: want 1 to %d": "limit %q: se espera de 1 a %d",
+ "while --config declares the boundaries of change, only an admin moves a rule into a team or out of one": "mientras --config declara los límites de cambio, solo un administrador mueve una regla a un equipo o la saca de uno",
+ "%d refused: admins only, while --config declares the boundaries of change": "%d rechazadas: solo administradores, mientras --config declara los límites de cambio",
+ "team %s is declared on line %d too, in another letter case or with spaces around it: give its approvers, changes_in and change freezes to one team": "el equipo %s se declara también en la línea %d, con otras mayúsculas o con espacios alrededor: da sus approvers, changes_in y congelaciones de cambios a un solo equipo",
+ "Held while the change boundaries can't be read": "Retenida mientras no se pueden leer los límites de cambio",
+ "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can.": "No se pueden leer los límites de cambio que guarda el registro: nada de lo que retendrían se aprueba, se deshace, se lleva a cabo ni se entrega a una receta hasta que se puedan leer.",
+ "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:": "--config da approvers, changes_in o una congelación de cambios a equipos que no se guardaron, así que no retienen nada:",
+ "Why each wasn't kept is said with the file's problems.": "Por qué no se guardó cada uno se dice con los problemas del archivo."
 }

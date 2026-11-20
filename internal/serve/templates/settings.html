@@ -33,6 +33,8 @@
 
 <h2>{{t "Changes to the rules"}}</h2>
 <p>{{if not $.Status.ChangesOn}}{{tbdi "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
+{{if .BoundsUnread}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can."}}</p>{{end}}
+{{with .BoundsNoTeam}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:"}} {{range $i, $n := .}}{{if $i}}, {{end}}<code><bdi>{{$n}}</bdi></code>{{end}}. {{t "Why each wasn't kept is said with the file's problems."}}</p>{{end}}
 {{with .Freezes}}<h3 id="freezes">{{t "Change freezes"}}</h3>
 <p class="quiet">{{tbdi "Declared in --config: while one holds, no change to the rules it covers is approved, undone or applied; those approved before wait until it ends. Proposing and backtesting go on."}}</p>
 <ul class="plain">{{range .}}<li><strong><bdi>{{.Title}}</bdi></strong>{{if .Team}} ({{tbdi "team %s" .Team}}){{else}} ({{t "everyone's"}}){{end}}: {{at $loc .W.Start}} → {{at $loc .W.End}}, {{template "repeats" (repeats .W $loc)}}

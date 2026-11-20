@@ -944,7 +944,7 @@ func errCode(err error) (int, bool) {
 	switch {
 	case errors.As(err, &inv):
 		return http.StatusBadRequest, true
-	case errors.Is(err, ledger.ErrNotAuthor), errors.Is(err, ledger.ErrNotYourTeam), errors.Is(err, errTeamDest):
+	case errors.Is(err, ledger.ErrNotAuthor), errors.Is(err, ledger.ErrNotYourTeam), errors.Is(err, errTeamDest), errors.Is(err, ledger.ErrRuleTeam):
 		return http.StatusForbidden, true
 	case errors.Is(err, errBusy), errors.Is(err, errPagesBusy):
 		return http.StatusServiceUnavailable, true

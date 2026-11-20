@@ -77,15 +77,18 @@ API. No schema change: the ledger stays at 026.
   owns, from a rule's page or for the rules picked on the rules list
   (another team's counted "not your team's"), backtest them again, and
   drop the ones they made; who owns the rule is asked of its name, of the
-  rule as it is read again and of it as proposed, each a team they edit.
+  rule as it is read again and of it as proposed, each with its note and
+  without it, each a team they edit.
   Under a team in `--config` (`serve.config`): `approvers:`, as
   `user:NAME`, `group:NAME` or `*@DOMAIN` (not a bare name, nor `*`), who
   approve a proposal one team, theirs, owned as it was proposed and owns
-  now, and ask for its applied change to be undone, beside the approvers
-  of every team, self-approval and `--approvals` as before; and
-  `changes_in:`, where its rules are written through a ruler's or a
-  cloud's API, within `--changes-in` or the file is refused, `[]` for
-  nowhere, a rule kept elsewhere for a person to change. And `freezes:`,
+  now, by its note and by its name and labels alike, and ask for its
+  applied change to be undone, beside the approvers of every team,
+  self-approval and `--approvals` as before; and `changes_in:`, where its
+  rules are written through a ruler's or a cloud's API, within
+  `--changes-in` (in the letter case its own source compares names in) or
+  the file is refused, `[]` for nowhere, a rule kept elsewhere for a
+  person to change. And `freezes:`,
   for everyone or a team, once or repeating as a quiet window does, in
   `--tz`: while one holds, nothing it covers is approved, approved as
   `--approvals` is lowered, asked to be undone, carried out or handed to a
@@ -97,9 +100,19 @@ API. No schema change: the ledger stays at 026.
   page's Settings card says until when changes are held. Approving and
   carrying out each ask again who owns the rule: one a team owned as it
   was proposed and another, or none, owns now is approved by no one, and
-  refused if approved before. Read twice, as the rest of the file, and
-  kept in the ledger's `meta` table in the write that keeps it to the
-  file, for every replica alike; `/config.yaml` gives them back. Agents
+  refused if approved before; carrying out asks the boundaries once more
+  just before the change is sent or handed out, after its backtest runs
+  again, so a freeze begun meanwhile holds it. While the file declares any
+  of these, a rule's team is an admin's to move (a note's form,
+  `PUT /api/v1/notes`, the rules list's "Set the team", the Cleanup page's
+  move), and a rule a note moved is held by the boundaries of the team its
+  name and labels give it too. A team's name is read without the spaces
+  around it; two teams of one name in another letter case are refused
+  where the boundaries name them, and the Settings page names a team given
+  boundaries that wasn't kept. Boundaries that can't be read are said on a
+  proposal's page and the Settings page, drawn all the same. Read twice,
+  as the rest of the file, and kept in the ledger's `meta` table in the
+  write that keeps it to the file, for every replica alike; `/config.yaml` gives them back. Agents
   propose as before: `--mcp-propose` stays an editor's of every team, or
   an admin's. No schema change: the ledger stays at 026.
 - **The Sources page** (`/sources`, Administration, after Settings): every

@@ -89,6 +89,7 @@ var offFuncs = template.FuncMap{
 const (
 	frozenWhy        = "Held by a change freeze, %s, until it ends"
 	teamApproversWhy = "Approvers of every team, and %s's approvers, only"
+	unreadWhy        = "Held while the change boundaries can't be read"
 )
 
 // declaredWhy is why what --config declares isn't changed in the UI.
@@ -124,6 +125,8 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 		switch {
 		case p.Path == ledger.PathNone:
 			v.ApproveOff = &pageAction{Label: "Approve", ID: "approve-why", Why: "For a person to make where the rule is kept: nothing to approve here"}
+		case v.Unread:
+			v.ApproveOff = off("Approve", "approve-why", unreadWhy)
 		case v.Frozen != nil:
 			v.ApproveOff = named(off("Approve", "approve-why", frozenWhy), frozenWhy, v.Frozen.Title)
 		case v.Moved:
@@ -147,6 +150,8 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 	if undoable(p) && !v.CanUndo {
 		why := "Approvers only"
 		switch {
+		case v.Unread:
+			why = unreadWhy
 		case v.Frozen != nil:
 			why = frozenWhy
 		case v.Bearer && v.approver:

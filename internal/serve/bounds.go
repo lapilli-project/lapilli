@@ -29,11 +29,12 @@ import (
 // first, as a role is, and the same on every replica. The UI changes none
 // of it.
 //
-// Who owns a rule is worked out as the pages work it out (owners). A
-// proposal keeps the teams that owned its rule as it was proposed
-// (ownedBy); approving it and carrying it out each ask again who owns it
-// now: a change to who owns it in between refuses the one a team's
-// approver could have approved.
+// Who owns a rule is worked out as the pages work it out (owners), and
+// again without its note (bare): a note moves a rule into a team, and the
+// team its name and labels give it still holds it. A proposal keeps the
+// teams that owned its rule as it was proposed (ownedBy); approving it and
+// carrying it out each ask again who owns it now: a change to who owns it
+// in between refuses the one a team's approver could have approved.
 
 // bounds are the boundaries of change a file declares: by a team's name,
 // who approves its rules' changes and where they are written; and the
@@ -89,6 +90,7 @@ var boundsFormats = []string{
 	"a change freeze has a title",
 	"a config declares %d change freezes at most",
 	"team %s's changes_in %s isn't within --changes-in: a team's sources are some of those --changes-in names",
+	"team %s is declared on line %d too, in another letter case or with spaces around it: give its approvers, changes_in and change freezes to one team",
 }
 
 // lineOf is a refusal of something on a line of a file, as the file's
@@ -107,13 +109,17 @@ const noPathTeamIn = "its team's changes_in doesn't name where it is kept: Lapil
 
 // parseBounds reads the boundaries of change a file declares, once the
 // rest of it was read into d: each team's approvers and changes_in, and
-// the freezes, each freeze's team one the file declares. Kept in
-// d.Bounds, as the ledger keeps them.
+// the freezes, each freeze's team one the file declares. A team's name is
+// read as the ledger keeps it, without the spaces around it
+// (ledger.checkTeam). Kept in d.Bounds, as the ledger keeps them.
 func parseBounds(root *yaml.Node, loc *time.Location, d *ledger.Declared) error {
 	b := bounds{Teams: map[string]teamBounds{}}
 	declared := map[string]bool{}
+	lines := map[string][]int{} // the lines of the teams of a name, in any letter case
 	for _, t := range d.Teams {
-		declared[t.Name] = true
+		n := strings.TrimSpace(t.Name)
+		declared[n] = true
+		lines[ledger.FoldName(n)] = append(lines[ledger.FoldName(n)], t.Line)
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		k, v := root.Content[i], root.Content[i+1]
@@ -132,6 +138,21 @@ func parseBounds(root *yaml.Node, loc *time.Location, d *ledger.Declared) error 
 	}
 	if len(b.Freezes) > maxFreezes {
 		return bad("a config declares %d change freezes at most", maxFreezes)
+	}
+	// A name two teams of the file have, in another letter case or with
+	// spaces around it: the ledger keeps one of them, and skips the other
+	// (declareTeams), so what is given under it would hold a team it
+	// wasn't given to, or a name no team has.
+	named := sortedKeys(b.Teams)
+	for _, f := range b.Freezes {
+		if f.Team != "" {
+			named = append(named, f.Team)
+		}
+	}
+	for _, n := range named {
+		if ls := lines[ledger.FoldName(n)]; len(ls) > 1 {
+			return configError{ls[1], "team %s is declared on line %d too, in another letter case or with spaces around it: give its approvers, changes_in and change freezes to one team", []any{n, ls[0]}}
+		}
 	}
 	if len(b.Teams) == 0 && len(b.Freezes) == 0 {
 		return nil
@@ -176,6 +197,7 @@ func parseTeamBounds(n *yaml.Node, b *bounds) error {
 	if err != nil || len(tb.Approvers) == 0 && !tb.Narrowed {
 		return err
 	}
+	team = strings.TrimSpace(team) // as the ledger keeps it
 	if _, twice := b.Teams[team]; twice {
 		return badAt(n, "team %s's approvers or changes_in are given twice", team)
 	}
@@ -227,7 +249,7 @@ func parseFreeze(n *yaml.Node, loc *time.Location, declared map[string]bool, b *
 		case "title":
 			f.Title, err = name(key, v)
 		case "team":
-			if f.Team, err = name(key, v); err == nil && !declared[f.Team] {
+			if f.Team, err = name(key, v); err == nil && !declared[strings.TrimSpace(f.Team)] {
 				return badAt(v, "a change freeze's team %s isn't one this file declares: declare it under teams", f.Team)
 			}
 		case "start":
@@ -256,6 +278,7 @@ func parseFreeze(n *yaml.Node, loc *time.Location, declared map[string]bool, b *
 	if strings.TrimSpace(f.Title) == "" {
 		return badAt(n, "a change freeze has a title")
 	}
+	f.Team = strings.TrimSpace(f.Team) // as the ledger keeps a team's name
 	w := ledger.Window{Title: f.Title, Start: f.Start, End: f.End, Every: f.Every, On: f.On, Until: f.Until}
 	if err := ledger.CheckSpan(&w, loc); err != nil {
 		return atLine(n.Line, err)
@@ -303,14 +326,20 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // withinChangesIn reports whether an entry a team's changes_in gives is
 // within what --changes-in names: an entry of it, or a name or a narrower
-// prefix within one of its prefixes, as written (in any letter case, of
-// Azure's rule groups, as Azure compares names).
+// prefix within one of its prefixes, as written. An alarm's entry
+// (SOURCE:NAME) is within one of the same source alone, a ruler's within
+// one of the ruler's; each in any letter case where its source compares
+// names so (foldsIn): Azure's rule groups and Azure's alarms.
 func (s *Server) withinChangesIn(x string) bool {
-	fold := s.ruler != nil && s.ruler.Kind == source.RulerAzure
+	src, alarm := s.alarmsSource(x)
+	fold := s.foldsIn(x)
 	if fold {
 		x = strings.ToLower(x)
 	}
 	for _, pat := range s.cfg.ChangesIn {
+		if p, a := s.alarmsSource(pat); a != alarm || p != src {
+			continue // another source's
+		}
 		if fold {
 			pat = strings.ToLower(pat)
 		}
@@ -322,6 +351,26 @@ func (s *Server) withinChangesIn(x string) bool {
 		}
 	}
 	return false
+}
+
+// alarmsSource is the source of --alarms an entry of --changes-in names an
+// alarm of (SOURCE:NAME, alarmsEntry), ok false for a ruler's entry.
+func (s *Server) alarmsSource(x string) (src string, ok bool) {
+	if !s.alarmsEntry(x) {
+		return "", false
+	}
+	src, _, _ = strings.Cut(x, ":")
+	return src, true
+}
+
+// foldsIn reports whether an entry of --changes-in names what it names in
+// any letter case, as its own source compares names: an alarm's, by its
+// source's kind (changesInAlarm), a ruler's by the ruler's (changesIn).
+func (s *Server) foldsIn(x string) bool {
+	if src, ok := s.alarmsSource(x); ok {
+		return s.alarmsOf(src).Kind == source.AlarmsAzure
+	}
+	return s.ruler != nil && s.ruler.Kind == source.RulerAzure
 }
 
 // boundsCache keeps the boundaries the ledger holds until it changes.
@@ -413,6 +462,14 @@ func (o *owners) ownerOf(name string, labels map[string]string) int64 {
 	if n, ok := o.notes[name]; ok && n.TeamID != 0 {
 		return n.TeamID
 	}
+	return o.bareOf(name, labels)
+}
+
+// bareOf is the team that owns a rule of a name and labels by them alone,
+// its note left out: the first team whose pattern matches the name, the
+// first whose labels it has; 0 for none. A rule a note moved into a team
+// is still held by this one's boundaries too.
+func (o *owners) bareOf(name string, labels map[string]string) int64 {
 	for i, t := range o.teams {
 		if i < len(o.res) && o.res[i] != nil && o.res[i].MatchString(name) {
 			return t.ID
@@ -435,6 +492,10 @@ func (o *owners) owner(name string) int64 {
 	}
 	return o.ownerOf(name, o.verLabels[name])
 }
+
+// bare is the team that owns a rule of a name by its name and labels
+// alone, as owner would without its note; 0 for none.
+func (o *owners) bare(name string) int64 { return o.bareOf(name, o.verLabels[name]) }
 
 // refOf is a team the ledger holds, as a proposal keeps it.
 func (o *owners) refOf(id int64) teamRef {
@@ -459,15 +520,20 @@ func (s *Server) mayProposeHere(ctx context.Context, rule string) error {
 	if id := o.owner(rule); id == 0 || !slices.Contains(teams, id) {
 		return ledger.ErrNotYourTeam
 	}
+	if id := o.bare(rule); id != 0 && !slices.Contains(teams, id) {
+		return ledger.ErrNotYourTeam // a note moved it out of another team's
+	}
 	return nil
 }
 
 // proposedOwners are who owned a rule as it is proposed: the team of its
 // name as the ledger has it, of the rule as it was read again (was), and
 // of it as proposed (want), whose name or labels a change could move to
-// another team. A team's editor is refused unless each is a team they
-// edit: a proposal for another team's rule, or one that would make theirs
-// another team's, isn't theirs to make.
+// another team; and of each, the team its name and labels give it without
+// its note, when they give one (bareOf): a rule a note moved out of a
+// team is no one team's. A team's editor is refused unless each is a team
+// they edit: a proposal for another team's rule, or one that would make
+// theirs another team's, isn't theirs to make.
 func (s *Server) proposedOwners(ctx context.Context, f found, was, want rules.Rule) (ownedBy, error) {
 	o, err := s.owners(ctx)
 	if err != nil {
@@ -478,6 +544,11 @@ func (s *Server) proposedOwners(ctx context.Context, f found, was, want rules.Ru
 		name = want.Name
 	}
 	ids := []int64{o.owner(f.name), o.ownerOf(f.name, was.AlertLabels()), o.ownerOf(name, want.AlertLabels())}
+	for _, id := range []int64{o.bare(f.name), o.bareOf(f.name, was.AlertLabels()), o.bareOf(name, want.AlertLabels())} {
+		if id != 0 {
+			ids = append(ids, id)
+		}
+	}
 	if teams, limited := ledger.TeamsOf(ctx); limited {
 		for _, id := range ids {
 			if id == 0 || !slices.Contains(teams, id) {
@@ -500,11 +571,19 @@ func (s *Server) proposedOwners(ctx context.Context, f found, was, want rules.Ru
 // teamNow is the team that owns a proposal's rule now, as the pages name
 // it; ID 0 for none.
 func (s *Server) teamNow(ctx context.Context, p ledger.Proposal) (teamRef, error) {
+	now, _, err := s.teamsNow(ctx, p)
+	return now, err
+}
+
+// teamsNow are the team that owns a proposal's rule now (teamNow), and the
+// team its name and labels give it without its note (bare); ID 0 for
+// none.
+func (s *Server) teamsNow(ctx context.Context, p ledger.Proposal) (now, bare teamRef, err error) {
 	o, err := s.owners(ctx)
 	if err != nil {
-		return teamRef{}, err
+		return teamRef{}, teamRef{}, err
 	}
-	return o.refOf(o.owner(p.Rule)), nil
+	return o.refOf(o.owner(p.Rule)), o.refOf(o.bare(p.Rule)), nil
 }
 
 // teamMoved says a proposal one team owned as it was proposed is another's,
@@ -519,10 +598,11 @@ func teamMoved(w ownedBy, now teamRef) (from teamRef, ok bool) {
 }
 
 // teamsOf are the names of the teams whose boundaries hold a proposal: the
-// team that owns its rule now, and those that did as it was proposed.
-func teamsOf(w ownedBy, now teamRef) []string {
+// team that owns its rule now, the team its name and labels give it
+// without its note (bare), and those that did as it was proposed.
+func teamsOf(w ownedBy, now, bare teamRef) []string {
 	var out []string
-	for _, t := range append([]teamRef{now}, w.Owners...) {
+	for _, t := range append([]teamRef{now, bare}, w.Owners...) {
 		if t.Name != "" && !slices.Contains(out, t.Name) {
 			out = append(out, t.Name)
 		}
@@ -586,11 +666,12 @@ func (s *Server) approverOf(r *http.Request, p ledger.Proposal) bool {
 }
 
 // teamApproved is the team whose approvers may approve a proposal: the one
-// team that owns its rule now and, unless it is an undo, owned it as it
-// was proposed.
+// team that owns its rule now, with its note and without it (a rule a
+// note moved out of another team is no one team's), and, unless it is an
+// undo, owned it as it was proposed.
 func (s *Server) teamApproved(r *http.Request, p ledger.Proposal) (teamRef, bool) {
-	now, err := s.teamNow(r.Context(), p)
-	if err != nil || now.ID == 0 {
+	now, bare, err := s.teamsNow(r.Context(), p)
+	if err != nil || now.ID == 0 || bare.ID != 0 && bare != now {
 		return teamRef{}, false
 	}
 	if p.Kind == ledger.KindUndo || p.State == ledger.StateApplied {
@@ -643,7 +724,7 @@ func (s *Server) mayApproveNow(r *http.Request, p ledger.Proposal) error {
 	if err != nil {
 		return err
 	}
-	now, err := s.teamNow(ctx, p)
+	now, bare, err := s.teamsNow(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -655,7 +736,7 @@ func (s *Server) mayApproveNow(r *http.Request, p ledger.Proposal) error {
 	} else {
 		w = ownedBy{} // an undo is its team's now
 	}
-	if f, until, ok := b.frozen(teamsOf(w, now), s.wall()); ok {
+	if f, until, ok := b.frozen(teamsOf(w, now, bare), s.wall()); ok {
 		return s.frozenErr(f.Title, until)
 	}
 	if !s.approverOf(r, p) {
@@ -692,7 +773,7 @@ func (s *Server) heldByBounds(ctx context.Context, p ledger.Proposal) (bool, err
 		s.log.Warn("an approved change waits: the change boundaries can't be read", "proposal", p.ID, "err", err)
 		return true, nil
 	}
-	now, err := s.teamNow(ctx, p)
+	now, bare, err := s.teamsNow(ctx, p)
 	if err != nil {
 		return true, err
 	}
@@ -707,7 +788,7 @@ func (s *Server) heldByBounds(ctx context.Context, p ledger.Proposal) (bool, err
 	if from, ok := teamMoved(ev.ownedBy, now); ok {
 		return refuse(teamMovedText(from.Name, now.Name))
 	}
-	teams := teamsOf(ev.ownedBy, now)
+	teams := teamsOf(ev.ownedBy, now, bare)
 	if tg := s.targetOf(p.Path); tg != nil && ev.Edit != nil {
 		why, wait := s.outsideTeamIn(b, tg, teams, p.Source, *ev.Edit)
 		switch {
@@ -727,6 +808,38 @@ func (s *Server) heldByBounds(ctx context.Context, p ledger.Proposal) (bool, err
 		return true, nil
 	}
 	return false, nil
+}
+
+// errBoundsHold is a change its team's boundaries hold as it is about to be
+// sent or handed out (boundsAgain): it waits, approved, or was refused, as
+// heldByBounds says, and the round goes on.
+var errBoundsHold = errors.New("held by its team's boundaries of change")
+
+// boundsAgain asks a change's team's boundaries again just before it is
+// sent or handed out, as the pause is asked there: checking it again can
+// take as long as a backtest (--timeout), and meanwhile a freeze may have
+// begun, its rule moved to another team, or its team's changes_in
+// narrowed. Held, it is errBoundsHold (heldByBounds says it once, or
+// refuses it); boundaries that can't be asked again hold it too.
+func (s *Server) boundsAgain(ctx context.Context, p ledger.Proposal) error {
+	if err := s.l.Refresh(ctx); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		s.log.Warn("an approved change waits: the ledger couldn't be read again just before it was written", "proposal", p.ID, "err", err)
+		return errBoundsHold
+	}
+	held, err := s.heldByBounds(ctx, p)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return err
+	case err != nil:
+		s.log.Warn("an approved change waits: its team's boundaries couldn't be asked again just before it was written", "proposal", p.ID, "err", err)
+		return errBoundsHold
+	case held:
+		return errBoundsHold
+	}
+	return nil
 }
 
 // frozenReady says whether a change checked and ready for a recipe waits
@@ -856,7 +969,10 @@ func (s *Server) teamProposes(r *http.Request, rule string) (bool, string) {
 	if err != nil {
 		return false, ""
 	}
-	id := o.owner(rule)
+	id, bare := o.owner(rule), o.bare(rule)
+	if bare != 0 && bare != id {
+		return false, "" // no one team's: an editor of every team's
+	}
 	teams := s.editsTeams(r)
 	return id != 0 && slices.Contains(teams, id), o.byID[id].Name
 }
@@ -869,11 +985,11 @@ func (s *Server) proposalInScope(r *http.Request, p ledger.Proposal) error {
 	if !limited {
 		return nil
 	}
-	now, err := s.teamNow(r.Context(), p)
+	now, bare, err := s.teamsNow(r.Context(), p)
 	if err != nil {
 		return err
 	}
-	if now.ID == 0 || !slices.Contains(teams, now.ID) {
+	if now.ID == 0 || !slices.Contains(teams, now.ID) || bare.ID != 0 && !slices.Contains(teams, bare.ID) {
 		return ledger.ErrNotYourTeam
 	}
 	for _, t := range proposalEvidence(p).Owners {
