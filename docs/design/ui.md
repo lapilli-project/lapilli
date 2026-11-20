@@ -531,7 +531,7 @@ Each rule has a badge on each of three axes, and what is under way:
 
 | Axis | Badges |
 |---|---|
-| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (none of its firings judged, or as many unjudged as a noisy rule fires: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own; the overview's panel lists only those firing as often as a noisy rule); `? Not judged` in its place for a rule its entry judges by nothing, `judged: false`, [judging.md](judging.md), item 3), `○ OK` (judged, and not noisy), `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
+| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (none of its firings judged, or as many unjudged as a noisy rule fires: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own; the overview's panel lists only those firing as often as a noisy rule); `? Judged by nothing` in its place for a rule its entry judges by nothing, `judged: false`, [judging.md](judging.md), item 3; "Not judged" until bundle 66), `○ OK` (judged, and not noisy), `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
 | Its backtest, only when it can't be taken for granted | `≠ Differs` (its replay differed from what really fired over the last week checked), `◌ Not replayed`, `⇣ Recorded only` (copied in from where it fired; its condition unknown) |
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |
@@ -2019,7 +2019,13 @@ people moved says only the parts that moved, a rule's panel's ("0건이
 안 함; `TestJudgedApart` on the two said alike in any language, or in each
 other's words: since bundle 66 English says "Judged by nothing" of a rule
 entry's `judged: false`, as the settings' table of entries does, not "Not
-judged", a capital and a sign from "? Not judged" (no record).
+judged", a capital and a sign from "? Not judged" (no record). Its
+firings say so too: a stone "? judged by nothing", not "? not judged"
+with "no record to judge it by"; a rule's strip's legend "judged by
+nothing", the day's and the overview's "not judged: no record, or judged
+by nothing" where an entry says `judged: false`; and the day's strip reads
+its starts by rule then (`FiringStartsBy`), where it drew them as caught
+nothing.
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

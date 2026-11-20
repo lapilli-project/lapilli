@@ -728,6 +728,23 @@ func TestNotJudgedServe(t *testing.T) {
 	if !strings.Contains(page, "Judged by nothing, as rule entry #1 says: its firings are counted") {
 		t.Error("the rule's page doesn't say it is not judged")
 	}
+	// Its firings say why they aren't judged, not "no record" (bundle 66):
+	// each one's stone, its strip's legend, the day's.
+	_, page = getAs(t, h, "/rules/Errors?tab=firings", vViewer)
+	if !strings.Contains(page, `title="its rule entry judges it by nothing: counted, not judged">? judged by nothing</span>`) || strings.Contains(page, "? not judged</span>") {
+		t.Error("a firing of the rule says no record, not judged by nothing")
+	}
+	_, page = getAs(t, h, "/rules/Errors", vViewer)
+	if strings.Contains(page, "not judged: no record") || !strings.Contains(page, `height="11"/></svg>judged by nothing</li>`) {
+		t.Error("the rule's strip's legend says no record")
+	}
+	_, page = getAs(t, h, "/firings?day="+f.Start.In(s.cfg.Loc).Format("2006-01-02"), vViewer)
+	if !strings.Contains(page, "not judged: no record, or judged by nothing") {
+		t.Error("the day's legend doesn't say judged by nothing")
+	}
+	if !strings.Contains(page, `class="unjudged" x=`) {
+		t.Error("the day's strip counts the firings judged by nothing as caught nothing")
+	}
 }
 
 func mustOptions(t *testing.T, s *Server) verdict.Options {

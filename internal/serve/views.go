@@ -1291,7 +1291,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		if err != nil {
 			return ruleView{}, err
 		}
-		judged(v.Latest, j)
+		judged(v.Latest, j, t.o)
 	}
 	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
 		return ruleView{}, err
@@ -2031,8 +2031,10 @@ type firingLine struct {
 	Notified int
 	Counted  bool
 	// Unjudged says it caught nothing in a week with no record to judge it
-	// by: counted, not judged, neither ○ nor ● (judged).
-	Unjudged bool
+	// by: counted, not judged, neither ○ nor ● (judged). ByNothing says
+	// why, when it isn't for want of a record: its rule entry judges it
+	// by nothing (judged: false), and its stone says so (bundle 66).
+	Unjudged, ByNothing bool
 	// EpisodeStart and EpisodeFirings are the episode it is of
 	// (docs/design/judging.md, item 2): when its first firing started, and
 	// how many firings it held; 0 firings when not counted (episodesOf).
@@ -2148,11 +2150,12 @@ func (s *Server) episodesOf(ctx context.Context, lines []firingLine) error {
 }
 
 // judged marks, of lines, those that caught nothing and that j doesn't
-// judge.
-func judged(lines []firingLine, j firingJudge) {
+// judge, and of them those o's entries judge by nothing.
+func judged(lines []firingLine, j firingJudge, o verdict.Options) {
 	for i := range lines {
 		f := &lines[i]
 		f.Unjudged = !f.White && !f.Excused && !j(f.Rule, f.Start, f.Signals)
+		f.ByNothing = f.Unjudged && o.NotJudged(f.Rule)
 	}
 }
 
@@ -2595,8 +2598,9 @@ var funcs = template.FuncMap{
 	"path":  url.PathEscape,
 	"join":  strings.Join,
 	// joinKeys are the incidents a verdict was said to be unrelated to.
-	"joinKeys":  func(v ledger.Verdict) string { return strings.Join(v.Keys(), ", ") },
-	"movedText": func(moved string) template.HTML { return movedText("en", moved) },
+	"joinKeys":     func(v ledger.Verdict) string { return strings.Join(v.Keys(), ", ") },
+	"movedText":    func(moved string) template.HTML { return movedText("en", moved) },
+	"notJudgedKey": notJudgedKey,
 	// signalsOn says the signals a rule is judged against, each with the
 	// labels it is matched on: probe (service).
 	"signalsOn": func(on []ruleSignalOn) string {

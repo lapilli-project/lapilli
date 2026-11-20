@@ -788,8 +788,8 @@ rules:
   black stones out of precision, noisy, the digest's noisy rules and
   suggestions, and every goal that needs the record: so the Goals page
   says, beside every goal, how many firings of its week were not judged
-  by an entry ("12 firings of 2 rules not judged"), as it says people's
-  verdicts, and the rules list shows the rule as "not judged".
+  by an entry ("12 firings judged by nothing"), as it says people's
+  verdicts, and the rules list shows the rule as "Judged by nothing".
 - So far an entry was about signals ([signals.md](signals.md)); this makes
   entries what a rule is judged by, signals one of the things they say.
   Judged by nothing is judging, not a quiet window: a quiet window
@@ -1377,7 +1377,8 @@ used to make the numbers say something:
   every goal that needs the record: a rule that does nothing but page
   stops counting against anyone. It is an admin's, as every entry is,
   noted with its before and after; the rule's page and the rules list say
-  "not judged", the summary gives `not_judged` beside `unjudged`, and the
+  "Judged by nothing", as each of its firings does (not "not judged: no
+  record"), the summary gives `not_judged` beside `unjudged`, and the
   Goals page says beside every goal how many firings of its week an entry
   kept from being judged.
 - **A lead** makes rules look better: more white. It is an admin's,

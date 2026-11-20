@@ -2374,5 +2374,7 @@
  "%d firings answered": "답한 발화 %d건",
  "Judged by nothing": "판정 제외",
  "Judged by nothing, as rule entry #%d says: its firings are counted, never white nor black, and catch nothing.": "판정 제외: 규칙 항목 #%d이 이 규칙들을 판정에서 빼요. 발화는 세지만 정탐도 오탐도 아니고, 아무것도 잡지 않아요.",
- "%d firings judged by nothing": "판정 제외 발화 %d건"
+ "%d firings judged by nothing": "판정 제외 발화 %d건",
+ "not judged: no record, or judged by nothing": "판정 안 됨: 기록 없음 또는 판정 제외",
+ "its rule entry judges it by nothing: counted, not judged": "규칙 항목이 판정에서 뺐어요: 세지만 판정하지 않아요"
 }

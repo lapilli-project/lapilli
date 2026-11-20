@@ -276,8 +276,11 @@ type dashboard struct {
 	// NoRecord says the last whole week had firings and no record to
 	// judge them by: the page says so once, above its tiles, and the
 	// tiles it leaves unknown say only that.
-	NoRecord  bool
-	Tiles     []tile
+	NoRecord bool
+	Tiles    []tile
+	// ByNothing says some rule entry judges its rules by nothing: the
+	// stones' legend says those not judged may be so for that.
+	ByNothing bool
 	Stones    columnChart
 	Precision lineChart
 	Incidents columnChart
@@ -498,7 +501,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if v.Marked, err = s.markedTile(ctx, t, team, l); err != nil {
 		return nil, err
 	}
-	v.Stones = stonesChart(l, ws, s.cfg.Loc)
+	v.ByNothing = t.o.Signals.NotJudgedRules()
+	v.Stones = stonesChart(l, ws, s.cfg.Loc, v.ByNothing)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
 	for i := len(ws) - 1; i >= 0; i-- {
@@ -890,9 +894,19 @@ func compact(v float64) string {
 	return fmt.Sprintf("%.1f", v)
 }
 
-func stonesChart(l string, ws []*weekView, loc *time.Location) columnChart {
+func stonesChart(l string, ws []*weekView, loc *time.Location, byNothing bool) columnChart {
 	return stacked(l, ws, loc, func(w *weekView) []int { return []int{w.White, w.Nothing(), w.NotJudged()} },
-		[]string{"caught", "nothing", "unjudged"}, []string{"caught something", "caught nothing", "not judged: no record"})
+		[]string{"caught", "nothing", "unjudged"}, []string{"caught something", "caught nothing", notJudgedKey(byNothing)})
+}
+
+// notJudgedKey is the legend's name for the firings not judged: for want
+// of a record, or, where some rule entry judges its rules by nothing, for
+// that too.
+func notJudgedKey(byNothing bool) string {
+	if byNothing {
+		return "not judged: no record, or judged by nothing"
+	}
+	return "not judged: no record"
 }
 
 func incidentsChart(l string, ws []*weekView, loc *time.Location) columnChart {

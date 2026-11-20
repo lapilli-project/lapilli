@@ -2374,5 +2374,7 @@
  "%d firings answered": "回答した発火 %d 件",
  "Judged by nothing": "判定対象外",
  "Judged by nothing, as rule entry #%d says: its firings are counted, never white nor black, and catch nothing.": "判定対象外: ルール項目 #%d がこれらのルールを判定から外しています。発火は数えますが、検知ありにも検知なしにもならず、何も検知しません。",
- "%d firings judged by nothing": "判定対象外の発火 %d 件"
+ "%d firings judged by nothing": "判定対象外の発火 %d 件",
+ "not judged: no record, or judged by nothing": "判定なし: 記録なし、または判定対象外",
+ "its rule entry judges it by nothing: counted, not judged": "ルール項目が判定から外しています: 数えますが判定しません"
 }
