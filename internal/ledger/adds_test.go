@@ -84,11 +84,16 @@ func TestAddedExpectations(t *testing.T) {
 }
 
 // What a rule added reads along an index, in either database: the applied
-// adds whose expectations aren't kept, by the proposals' state.
+// adds whose expectations aren't kept, by the proposals' state; the draft
+// one was kept as, by its proposal.
 func TestAddsUnkeptIndexed(t *testing.T) {
 	l := open(t, time.UTC)
 	q := `SELECT id FROM proposals WHERE state = ?1 AND kind = ?2 AND expect NOT LIKE ?3 ORDER BY updated, id LIMIT ?4`
 	if p := plan(t, l, q, StateApplied, KindAdd, `%"kept":%`, 20); scansAll(l, p, "proposals") {
 		t.Errorf("reads proposals whole: %s", p)
+	}
+	q = "SELECT " + draftCols + " FROM expectation_drafts WHERE origin = ?1 AND proposal = ?2"
+	if p := plan(t, l, q, DraftProposal, int64(7)); scansAll(l, p, "expectation_drafts") {
+		t.Errorf("reads expectation_drafts whole: %s", p)
 	}
 }

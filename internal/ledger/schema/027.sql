@@ -126,6 +126,8 @@ CREATE INDEX expectation_drafts_rule ON expectation_drafts (rule, id);
 CREATE INDEX expectation_drafts_by ON expectation_drafts (made_by, made);
 CREATE INDEX expectation_drafts_state ON expectation_drafts (state, id);
 CREATE INDEX expectation_drafts_pr ON expectation_drafts (pr, id);
+-- The draft a proposal adding a rule was kept as.
+CREATE INDEX expectation_drafts_proposal ON expectation_drafts (proposal);
 
 -- What a proposal adding a rule (kind add, step 5) holds the rule to: the
 -- expectations as Lapilli wrote them and their scenarios' test files, as
