@@ -777,16 +777,19 @@ rate again. Without `--max-rate`, a quarter of `--parallel` at once, one
 at least. A backtest that couldn't finish within `--backtest-timeout` at
 its share is refused before it waits, saying how many requests it needs
 and what period would fit. An entry's `hourly` is taken before the body is
-read. What can be told without the body is refused before it is read, and
-its hour given back: a token that started a backtest already (409,
-whatever body it comes with: no key is given twice), the queue with no
-room for the entry, the reads full, the ledger not ready. Once the body is
-read, a request refused keeps its hour: what it cost to read and check is
-what `hourly` bounds. An entry has one body read at a time, two of all
+read. What can be told without the body is refused before it is read: the
+queue with no room for the entry, the reads full, the ledger not ready,
+each its hour given back; and a token that started a backtest already
+(409, whatever body it comes with: no key is given twice), which keeps its
+hour (since 0.63.2), as its job has its backtest. Once the body is read, a
+request refused keeps its hour: what it cost to read and check is what
+`hourly` bounds. An entry has one body read at a time, two of all
 entries at once, each within 5 seconds of its headers. 20 wait at most
 (`--backtest-queue`), 3 of an entry, one of a pull request the token's
-`ref` names (a newer commit's takes the place of the one waiting; a number
-the job said takes none's: GitLab's ID token names a merge request's
+`ref` names (a newer commit's takes the place of the one waiting, of a
+repository the token names by a name kept: one past 200 bytes, or with
+what doesn't show, takes none's, since 0.63.2; a number the job said takes
+none's: GitLab's ID token names a merge request's
 source branch, not its number, and Bitbucket's no pull request, so their
 backtests don't take each other's place); past them, 429 with
 `Retry-After`. One the leader stopped while running is run again by the
@@ -798,7 +801,11 @@ pair not known waits up to 2 seconds for a listing begun after it came, so
 that a backtest queued through another replica is found on its first poll,
 and is a 404 if still not known; 20 of an address wait at once, one more
 each second, and past them one is a 503 with `Retry-After` at once, and a
-listing begun, so that the job's next poll finds its backtest. One that
+listing begun, so that the job's next poll finds its backtest. 4,096
+addresses are kept so, and as many backtests' reads: past them, only
+those whose waits are all back are let go, and while none can be, one not
+kept is answered as one past its own (since 0.63.2; before, all were let
+go at once). One that
 guesses reads no backtest's row, and the ledger is listed a second apart
 at least, however many guess. With replicas, the queue and each entry's
 hour are the ledger's: any replica takes a backtest and answers for it.
@@ -828,7 +835,8 @@ them and its group's `query_offset`, 8 days at most in all (`rate(x[1d] offset 7
 step written in it (`[1d:1m]`, not `[1d:]`: without one, Prometheus steps
 at its evaluation interval, which Lapilli doesn't know, so the points
 can't be counted; add the step); ranges and offsets written as durations;
-and no `@`; comments read past, as Prometheus does; PromQL that every
+and no `@`; no `info()`, which reads `target_info` beside what it names
+(since 0.63.2); comments read past, as Prometheus does; PromQL that every
 history `--prometheus` takes reads alike (since 0.63.2): outside its
 strings, ASCII names, numbers and durations as Prometheus writes them,
 operators and brackets alone, no `\r`, an `offset` or `@` right after a
@@ -838,13 +846,16 @@ none of MetricsQL's own (`WITH`, `or` in a selector's braces,
 14, and the entry's `days`. A Grafana rule has 8 queries of data sources
 and 16 queries and expressions at most, each query's `relativeTimeRange`
 8 days back at most, and each query the replay asks held as a rule's, its
-relativeTimeRange's end added to what it reads back. A query in LogQL is
+relativeTimeRange's end added to what it reads back, and for a data source
+query a day more, as the replay asks it over the day before when it
+returns nothing (since 0.63.2). A query in LogQL is
 a metric query, never one of log lines; each stream selector names its
 streams by a label matched with `=` to a value (`{app=~".+"}` alone is
 refused); a range with its offset reaches 8 days back at most, with no
 subquery and no `@`. The lane asks a Loki through a client of its own, at
 its share of that Loki's rate, kept for it while a backtest asking that
-Loki runs. What it learns comes a bit at a time, as a rule
+Loki runs, and gives up on each request after a minute (since 0.63.2), as
+a Prometheus is told to. What it learns comes a bit at a time, as a rule
 fires or doesn't: an entry's `hourly` is what bounds how fast. Keep it as
 low as the pull requests need; a day's cap, of the rules that differ
 times the backtests, is the `hourly` times 24 times 50 at most. `hourly`
