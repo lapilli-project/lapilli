@@ -780,7 +780,12 @@ Step 4, scenarios, as built:
   later round. Not known says why: `no_promtool`, `not_prometheus`,
   `not_run_yet`, `test_unread`, `run_failed`. Schema 027, unreleased, was
   changed in place for it: a column `detail` (what promtool said, or why
-  it couldn't run, 2,000 bytes). A broken one is told
+  it couldn't run, 2,000 bytes). Why it couldn't run, or its test file
+  couldn't be read, is Lapilli's words, kept in English and shown on the
+  tab in the reader's language by those words (as are a draft's items'
+  whys, and a scenario's passes and fails), with no schema change; what
+  promtool, or the YAML parser reading a test file, said is shown as it
+  said it. A broken one is told
   (`expectation.broken`, with `scenario`), made a task, and shown on the
   rule's tab (with what promtool said), the overview, the rules list, the
   digest (in the week it was found), `GET /api/v1/expectations`, MCP's

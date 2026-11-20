@@ -89,8 +89,13 @@ func (s *Server) draftsViewOf(r *http.Request, rule string, team int64, teamName
 	target, _ := s.draftTarget()
 	v := &draftsView{Approver: s.approver(r) && !bearer, On: s.cfg.Changes, Target: target}
 	mayDrop := !s.cfg.ReadOnly && (s.role(r) >= editor || s.approver(r))
+	lg := lang(r)
 	for _, d := range ds {
 		l := draftLine{ExpectDraft: d, Items: draftItemsOf(d.Found), Own: ledger.FoldName(d.MadeBy) == ledger.FoldName(user)}
+		for i, it := range l.Items {
+			// What checking it found, in Lapilli's words, kept in English.
+			l.Items[i].Value, l.Items[i].Why = expectValueText(lg, it.Value), reasonText(lg, it.Why)
+		}
 		for _, p := range sortedKeys(d.Tests) {
 			l.Tested = append(l.Tested, draftTest{p, d.Tests[p]})
 		}
