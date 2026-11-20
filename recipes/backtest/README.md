@@ -104,7 +104,9 @@ And, as wanted:
   names (`scenarios:`, promtool's own test files, paths relative to it)
   of the rules that differ, and of a rule alike whose test file the pull
   request edits (a pull request that edits only that is judged by it, and
-  commented on), before and after (`--promtool`). The directory
+  commented on, in this local mode; serve's backtest port runs no scenario,
+  so through it such a pull request is "nothing changed"), before and after
+  (`--promtool`). The directory
   `EXPECT` is in is read from each commit as `PATHS` is (`git archive`, a
   symbolic link refused, `MAX_TREE_FILES` and `MAX_TREE_BYTES`), and each
   test file there. promtool reads each, its `rule_files` the rule's group

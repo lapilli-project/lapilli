@@ -2,6 +2,85 @@
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-11-21
+
+The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.
+A CI job's scenarios capped as serve's are, a scenario whose test file a
+change edited run, and the drafts, the rules added and the checks after
+deploy each closer to what they say. No schema change: the ledger stays
+at 027.
+
+### Added
+
+- **`lapilli verdict --promtool-memory SIZE`** caps each scenario a CI
+  job runs, as serve does (256Mi unless given, 64Mi at least; on Linux,
+  by RLIMIT_DATA; elsewhere a note that none is set). A promtool built
+  with cgo maps 8 MiB more for each of its threads: give it 512Mi.
+
+### Fixed
+
+- **A scenario whose test file a change edited wasn't run** when its
+  rule didn't change (0.65.0): `lapilli verdict --compare --expect
+  --promtool` runs it before and after, a report of "nothing changed"
+  shows the Expectations then, `--fail-expectations` holds it, and the
+  backtest recipes gate and comment on it.
+- **A catch or a scenario whose check moved to another week was told
+  again** (`expectation.broken`) and, with `--expect-tasks`, made a second
+  task while the first was open, the first's link gone from the rule's
+  tab (0.65.0). The row moved keeps what was told of it and its task.
+- **A rule only copied in was judged only inside its copies' latest
+  span** (0.65.0): a week wholly inside any span the ledger keeps is
+  judged; one touching a gap, or outside them, stays not known.
+- **serve could run two promtools at once**, a round's scenario and an
+  agent's check, each to its own memory cap (0.65.0): it runs one at a
+  time; an agent's check waits within its own deadline, and is not known,
+  saying so, past it. Neither holds the ledger's writer while it waits.
+- **`test_expectation`'s `post` said a rewrite meets every expectation
+  the rule is held to** when the agent gave the expectations itself
+  (0.65.0): it says whose they are, those Lapilli holds the rule to or the
+  agent's.
+- **An accepted draft's pull request description could end a table cell
+  early** (0.65.0), as 0.60.0's comments could: a backslash before a `|`
+  in an incident's id is escaped as the comments' tables escape it.
+- **An incident's id in expectations could span lines** (0.65.0), and
+  look like another entry in a pull request's diff: it is one line of
+  characters that show, a line break, control or format character refused
+  in the file, `--config` and MCP, and left out of the history's draft;
+  the Expectations tab sets it apart (`<bdi>`). A format character is
+  refused wherever it is, a zero-width joiner in an emoji among them, and
+  the whole file with it, as any line the strict reader refuses: check an
+  expectations file's ids before upgrading.
+- **Making room for a draft past the 1,000 kept could delete an accepted
+  one** whose pull request was ready or open (0.65.0).
+- **Why a check or a draft's item is not known showed in English** in
+  every language (0.65.0), as did a scenario's passes and fails:
+  Lapilli's words are the reader's language; promtool's own stay as said.
+- **Why `--expect` can't be read showed on the status line to every
+  reader** (0.65.0): to admins only, as `--config`'s problems are; others
+  read that the file can't be read.
+- **The change recipes refused `EXPECT_FILE` from a chart's ConfigMap**
+  as "not the file serve read" when it differed by a trailing newline
+  alone (0.65.0).
+- **Two Grafana folders of one title** (nested folders) were one place
+  for a rule added, their contact points combined (0.65.0): a group of a
+  title another folder has too isn't offered, and one proposed before is
+  refused as it is carried out.
+- **An approved rule added was carried out** when an expectation it met
+  as it was approved was not known by then (0.65.0), or when its group's
+  labels had given it another team: both are refused as it is carried
+  out.
+- **A team's editor could propose a rule added but wasn't shown the
+  form** (0.65.0).
+- **A CloudWatch or Google Cloud alarm added whose `for` the cloud
+  doesn't take** (not whole seconds; past CloudWatch's 24 hours) was
+  refused only as it was carried out (0.65.0): it is refused as it is
+  proposed.
+- **A name of a rule added through an API could be proposed again in
+  another place** before the rules were read again (0.65.0).
+- **The new rule's form, MCP's `places` and a proposal adding a rule
+  read the rules' version twice on each call** (0.65.0): once a version.
+- serve's `--promtool-memory` help ended mid-sentence.
+
 ## [0.65.1] - 2026-11-21
 
 The expectations' screens (0.65.0) checked as the others were: a budget's
