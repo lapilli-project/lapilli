@@ -2576,6 +2576,8 @@
  "a CloudWatch alarm carries no labels: leave them out": "CloudWatch のアラームはラベルを持ちません: 外してください",
  "a CloudWatch alarm's description is 1,024 characters at most": "CloudWatch のアラームの説明は最大 1,024 文字です",
  "a Google Cloud policy closes its alerts itself: leave keep_firing_for out": "Google Cloud のポリシーはアラートを自分で閉じます: keep_firing_for を外してください",
+ "a CloudWatch alarm's for and keep_firing_for are whole seconds, 24h at most": "CloudWatch のアラームの for と keep_firing_for は秒単位で、最大 24h です",
+ "a Google Cloud policy's for is whole seconds": "Google Cloud のポリシーの for は秒単位です",
  "a Grafana rule tells one contact point at most": "Grafana のルールが通知できるコンタクトポイントは 1 つまでです",
  "a group of that name is in the namespace: pick it, or name the new one apart": "その名前のグループがネームスペースにあります: それを選ぶか、新しいグループに別の名前を付けてください",
  "a new group's interval is whole seconds, an hour at most; a group there keeps its own": "新しいグループの評価間隔は秒単位で最大 1 時間です。既存のグループは自分の間隔のままです",

@@ -29,8 +29,10 @@ func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.
 	mux.HandleFunc("GET /proposals", page("proposals", s.proposalsPage))
 	mux.HandleFunc("GET /proposals/{id}", page("proposal", s.proposalPage))
 	// A new rule's form: a proposal adding one (docs/design/expectations.md,
-	// step 5), an editor's, as proposing is.
-	mux.HandleFunc("GET /proposals/new", s.write(page("newrule", s.newRulePage)))
+	// step 5), an editor's or a team's editor's, as proposing it is: what a
+	// team's editor adds is held to their team's as it is posted
+	// (mayProposeAdd).
+	mux.HandleFunc("GET /proposals/new", s.teamWrite(page("newrule", s.newRulePage)))
 	mux.HandleFunc("POST /proposals", s.teamWrite(s.postProposal)) // a team's editors, of its rules (bounds.go)
 	mux.HandleFunc("POST /proposals/{id}/approve", s.person(s.postApprove))
 	mux.HandleFunc("POST /proposals/{id}/undo", s.person(s.postUndo))
@@ -125,7 +127,8 @@ type proposalsView struct {
 	Limits   Limits
 	Need     int
 	Approver bool
-	// CanAdd says the reader may propose a new rule: an editor.
+	// CanAdd says the reader may propose a new rule: an editor, or a
+	// team's editor.
 	CanAdd bool
 	// The facets, the chips and the form (docs/design/ui.md); Shown of
 	// Total for the team, at most proposalsShown; Empty, why none is.
@@ -384,7 +387,7 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(counts), func(i int, param string) []string { return countValues(counts[i], param) },
 		func(i int) int { return counts[i].N })
 	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r), Pick: pick,
-		CanAdd: !s.cfg.ReadOnly && s.role(r) >= editor && s.replaying()}
+		CanAdd: !s.cfg.ReadOnly && (s.role(r) >= editor || len(s.editsTeams(r)) > 0) && s.replaying()}
 	for _, x := range counts {
 		v.Total += x.N
 	}

@@ -599,6 +599,24 @@ func (s *Server) addOwners(ctx context.Context, name string, labels map[string]s
 	return out, nil
 }
 
+// addMoved says why a rule added, read back where it goes again as it is
+// carried out, is refused for its team: its group's labels changed since
+// it was proposed, and the team its name and those labels give it now
+// isn't the one team that owned it then (teamMoved), "" when it is. Its
+// team's approvers approved it as it was proposed, and its proposal keeps
+// the labels it was read back with then (teamsNow asks of those).
+func (s *Server) addMoved(ctx context.Context, p ledger.Proposal, ev evidence, labels map[string]string) (string, error) {
+	o, err := s.owners(ctx)
+	if err != nil {
+		return "", err
+	}
+	now := o.refOf(o.ownerOf(p.Rule, labels))
+	if from, ok := teamMoved(ev.ownedBy, now); ok {
+		return teamMovedText(from.Name, now.Name), nil
+	}
+	return "", nil
+}
+
 // addLabels are the labels a proposal adding a rule gives it, as it was
 // read back where it goes, its group's with its own, which the rule has
 // once it is in effect; kept before they were, its own as proposed. A

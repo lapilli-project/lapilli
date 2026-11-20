@@ -923,17 +923,24 @@ func (s *Server) named(ctx context.Context, id int64) ([]rules.Rule, []string, e
 // namedRec is named, adding to rec, when not nil, the version's recording
 // rules.
 func (s *Server) namedRec(ctx context.Context, id int64, rec *[]rules.Recording) ([]rules.Rule, []string, error) {
+	all, names, _, err := s.namedDocs(ctx, id, rec)
+	return all, names, err
+}
+
+// namedDocs is namedRec, with the version's documents the rules were read
+// from.
+func (s *Server) namedDocs(ctx context.Context, id int64, rec *[]rules.Recording) ([]rules.Rule, []string, []rules.Doc, error) {
 	namedReads.Add(1)
 	full, err := s.l.VersionByID(ctx, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	all, err := rules.FromDocsRecorded(context.Background(), full.Docs, rec)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(all) == len(full.Names) {
-		return all, full.Names, nil
+		return all, full.Names, full.Docs, nil
 	}
 	s.log.Warn("a version of the rules reads differently now; naming its rules afresh", "version", id)
 	names := make([]string, len(all))
@@ -949,7 +956,7 @@ func (s *Server) namedRec(ctx context.Context, id int64, rec *[]rules.Recording)
 	for j, i := range at {
 		names[i] = keep[j].Name
 	}
-	return all, names, nil
+	return all, names, full.Docs, nil
 }
 
 // watch reads the rules every --watch and records a new version when
