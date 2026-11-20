@@ -56,6 +56,41 @@ func Wide(expr string) (string, bool) {
 	return "", false
 }
 
+// Unnamed says the first thing in a PromQL expression that reads a metric
+// it doesn't name, "" when there is none: info(), which reads target_info
+// beside the series it is given (or the info metrics its second argument
+// matches), to join their labels on. A pull request's rule backtested
+// through lapilli serve reads what it names (Wide), and nothing beside it.
+// The name is read as Prometheus reads a function's, outside strings and
+// comments, before a (, spaces between them or not; MetricsQL's, in any
+// case.
+func Unnamed(expr string) string {
+	t := blankComments(expr)
+	var quote byte
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch {
+		case quote != 0 && c == '\\' && quote != '`':
+			i++
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case isWordByte(c):
+			j := i
+			for j < len(t) && isWordByte(t[j]) {
+				j++
+			}
+			if strings.EqualFold(t[i:j], "info") && nextOf(t, j) == '(' {
+				return "info(...), which reads target_info beside the metric it names"
+			}
+			i = j - 1
+		}
+	}
+	return ""
+}
+
 // unquoteLabel is a label's name as written, bare or quoted (Prometheus
 // 3's {"http.requests", "le"="1"}); err says a quoted one didn't unquote.
 func unquoteLabel(label string) (string, bool) {

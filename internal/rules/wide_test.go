@@ -31,6 +31,29 @@ func TestWide(t *testing.T) {
 	}
 }
 
+// Unnamed is info(), which reads target_info beside what it names,
+// written as Prometheus or MetricsQL reads a function's name: in any case,
+// spaces or a comment before its (; never a label, a string or a comment
+// of that name.
+func TestUnnamed(t *testing.T) {
+	for expr, want := range map[string]bool{
+		`info(rate(http_requests_total[5m])) > 1`:    true,
+		`sum(info (up, {k8s_cluster_name="a"})) > 0`: true,
+		`INFO(up) > 0`:           true,
+		"info # (\n (up) > 0":    true,
+		`sum by (info) (up) > 0`: false,
+		`up{info="a"} > 0`:       false,
+		`label_replace(up, "a", "info(", "b", "(.*)") > 0`: false,
+		"up > 0 # info(up)": false,
+		`build_info > 0`:    false,
+		`info_total > 0`:    false,
+	} {
+		if got := Unnamed(expr) != ""; got != want {
+			t.Errorf("Unnamed(%q) = %t, want %t", expr, got, want)
+		}
+	}
+}
+
 // Reach holds what a rule reads, its range and its offset with those of
 // every subquery around it, to 8 days back in all, a subquery to 11,000
 // points and a step of its own, a duration as written and no @: what

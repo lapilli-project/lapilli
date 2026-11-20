@@ -879,6 +879,9 @@ func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Dur
 		}
 		return fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
 	}
+	if what := rules.Unnamed(expr); what != "" {
+		return name + " reads " + what + ": here a rule reads the metrics it names, and nothing beside them"
+	}
 	if what := rules.Reach(expr, backtestReach-before, backtestPoints); what != "" {
 		said := name + " reads past what is taken"
 		if quote {

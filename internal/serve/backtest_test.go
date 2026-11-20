@@ -465,6 +465,8 @@ func TestBacktestRequestsRefused(t *testing.T) {
 		"an offset past a comment":    {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `"rate(errors[5m] #\n offset 30d) > 1"`, 1), nil), 400, "past 8d"},
 		"@ past a quote in a comment": {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `"rate(errors[5m]) # \"\n + errors @ 0 > 1"`, 1), nil), 400, "@"},
 		"@ 0":                         {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors @ 0 > 1`, 1), nil), 400, "no @"},
+		"info()":                      {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `info(rate(errors[5m])) > 1`, 1), nil), 400, "target_info"},
+		"info () past a comment":      {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `"info # (\n (errors) > 1"`, 1), nil), 400, "target_info"},
 		"expect_before only":          {btBody(ruleFile, changedRules, map[string]any{"expect_before": "expectations: []"}), 400, "expect_before goes with expect"},
 		"expect broken":               {btBody(ruleFile, changedRules, map[string]any{"expect": "expectations: [{rule: Errors, nope: 1}]"}), 400, "expect"},
 		"a path control":              {[]byte(`{"before":[],"after":[{"path":"a\u0007b.yaml","content":"groups: []"}]}`), 400, "path"},
