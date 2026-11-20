@@ -572,7 +572,11 @@ this port call one function in serve, the replay of a change held to its
 expectations (`replayChange`, then `Comparison.Expect`), so a rule's budget
 is counted one way whoever asks. The port proposes nothing, keeps no draft,
 and passes nothing: a rewrite an agent suggests is backtested the same way,
-and the recipe's gate still decides.
+and the recipe's gate still decides. As built (expectations' step 3),
+`test_expectation` replays the rule, and its rewrite, as the port does
+(`replayCompared`, its firings kept) and holds them with
+`CheckExpectationsBy`, as the port does, by whole weeks back from the
+period's end; `compare` still calls `replayChange`, as it holds nothing.
 
 **Order.** It is built once step 1 is merged, and needs nothing from steps
 2 and 3; its schema is the next free one when its pull request opens.

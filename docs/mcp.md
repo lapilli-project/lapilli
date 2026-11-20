@@ -32,12 +32,30 @@ would have caught, sooner or later or not at all. The agent proposes and
 Lapilli measures. Once the change is merged, `outcomes` says whether it
 did what `compare` said.
 
-Nothing an agent asks for changes anything: `compare` replays and keeps
-nothing. With `--mcp-propose editors` (or `admins`), an eighth tool,
-`propose`, keeps a change to one rule, or to what it says, as a proposal ([Changing rules](changing-rules.md)),
+`--mcp-compare` also gives `test_expectation`: it checks what a rule is
+held to (an expectations text, such as a pull request's, or serve's own),
+or a rewrite of the rule, against the rule replayed over the twelve weeks
+to now, and says, per item, met, broken or not known, as it is and
+rewritten ([design/expectations.md](design/expectations.md), step 3). A
+scenario's promtool test file, given in `tests` by its path, is run by
+serve's `--promtool`, once it is read as promtool would expand it and is
+within bounds. Given a rewrite that meets every expectation, losing no
+incident the rule catches, it answers with `post`: Markdown, marked as an
+agent's rewrite backtested by Lapilli, with the numbers before and after,
+which the agent or a person may post on the pull request. Lapilli posts
+nothing; without `post`, the items say why. One check runs at a time, with
+`compare`'s.
+
+Nothing an agent asks for changes anything: `compare` and
+`test_expectation` replay and keep nothing. With `--mcp-propose editors`
+(or `admins`), `propose` keeps a change to one rule, or to what it says, as a proposal ([Changing rules](changing-rules.md)),
 marked as an agent's, for someone other than the person it acts for to
 approve in the UI, and `backtest_again` backtests a stale proposal again,
-as an editor does from its page. No tool approves or applies one.
+as an editor does from its page. No tool approves or applies one. With it
+too, `propose_expectation` keeps a draft of what one rule is held to,
+checked as `test_expectation` checks it, for someone other than the person
+the agent acts for to accept or drop on the rule's Expectations tab; it
+counts toward that person's 20 proposals an hour.
 
 - **Access.** Agents come through the same sign-in as the pages (with
   `--oidc-issuer`, an ID token as a bearer token), and

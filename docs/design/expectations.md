@@ -1,6 +1,6 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: accepted; steps 1, 2 and 4 built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; steps 1 to 4 built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, and a backtest that can fail a
 pull request, so it was designed first, as a pull request (#81); it was
 merged on 2026-11-16, before its week was out, by the maintainer's
@@ -226,12 +226,12 @@ said 020, which goals took):
 - `expectation_checks` (step 2, schema 027): by rule, expectation (a hash
   of its text), week, and result (met, broken, not known), with the
   numbers. The rule's tab and the digest read it.
-- `expectation_drafts` (step 3, its own schema, 028 as things stand): an
-  agent's or the history's draft, who proposed it, what checking it found,
-  and whether a person accepted or dropped it.
+- `expectation_drafts` (step 3; built in 027, unreleased, in place, not a
+  028 of its own): an agent's or the history's draft, who proposed it,
+  what checking it found, and whether a person accepted or dropped it.
 
 As with every schema change, a release before 027 doesn't open a ledger at
-027: upgrading adds a table, with nothing to backfill, and going back
+027: upgrading adds two tables, with nothing to backfill, and going back
 takes the ledger as it was before, so a deployment keeps a copy of it (a
 snapshot of its disk, or of its database) before it upgrades.
 
@@ -240,9 +240,10 @@ snapshot of its disk, or of its database) before it upgrades.
 1. A pull request adds a restart rule. Over the fourteen days the backtest
    reads, it fires forty a week, seventeen while people slept; its
    expectation, written with it, says ten and two. The job fails, and the
-   comment says by how much. The author raises `for` from 1m to 10m, which the comment's
-   agent rewrite also suggests: eight and one, and the incident it was
-   written for is still caught. It passes.
+   comment says by how much. The author raises `for` from 1m to 10m, which an agent's
+   rewrite, checked by `test_expectation` and posted by the agent, also
+   suggests: eight and one, and the incident it was written for is still
+   caught. It passes.
 2. Two weeks after a rule goes out, a release doubles a service's traffic,
    and the rule fires twenty-six times in a week against a budget of five.
    The next hourly run puts it first on the overview and tells the rule's
@@ -278,6 +279,18 @@ The first two need no incident written down.
    rolling seven days for the week so far. Decided by the maintainer,
    2026-11-20: **the ledger's weeks** (Monday, in `--tz`), the week so far
    reported as soon as it is over budget.
+5. **Agents' rewrites on a failed pull request: who posts them.** "Only
+   those that meet all of them are posted" doesn't say by whom: Lapilli
+   would need to write to the pull request, a write path of its own.
+   Decided by the maintainer, 2026-11-20: **MCP only returns the text to
+   post.** `test_expectation`, given a rewrite of a rule, replays it
+   against the rule's expectations; only when it meets all of them, losing
+   no catch, does its answer include a Markdown block a person or the
+   agent may post on the pull request, marked as an agent's rewrite
+   backtested by Lapilli, with its backtest (the numbers before and
+   after). Otherwise the answer has each item's result and no such block.
+   Lapilli writes nothing to the pull request and gains no write path for
+   it: posting is the agent's own access, or a person's.
 
 ## Steps
 
@@ -443,7 +456,124 @@ Step 2, serve's checks after deploy, as built:
   would once step 2 made it so; it still writes no checks, and doesn't
   read serve's own expectations.
 
-Step 4, scenarios, as built (step 3 isn't yet):
+Step 3, drafts, as built:
+
+- **One way to draft, two places.** `verdict.Draft` makes a draft from
+  what each rule did, and writes it with the YAML encoder; serve and
+  `lapilli verdict` each count as they check budgets. serve counts the
+  ledger's twelve whole weeks before this one (Monday, in `--tz`), a week
+  whole for a rule as step 2 holds it (the ledger's first firing before
+  it, the rule in effect from its start, the runs past its end), while
+  people slept by the rule's team's hours, and the incidents written down
+  in those weeks it caught. `lapilli verdict --draft-expectations FILE`
+  counts the period it judged by whole weeks back from its end, as
+  `--compare` holds budgets, a period of no whole week scaled to one; it
+  needs no `--incidents` or `--impact` (budgets alone), and isn't taken
+  with `--compare`, `--check-replay` or `--redact`.
+- **Rounded up** (the design left it open): 1 to 9 as they are; 10 to 99
+  to the next multiple of 5; from 100, to two significant figures (123 is
+  130, 1,234 is 1,300); never below 1. A budget of 0 is broken by the
+  rule's first firing however right it was, so **a rule that never fired
+  is held to 1** a week, 1 while people slept, 1 re-fire: as it is,
+  rounded up. While people slept is drafted only by hours that say when
+  people sleep; with none, it is left out, and the line beside the rule
+  says so. A catch is held within its delay rounded up to the whole
+  minute, a minute at least (an alert before the incident began is held to
+  come within a minute of it); a rule's latest ten.
+- **Every rule at once** (the maintainer's decision of no default budgets
+  rests on it): the rule's tab shows its draft, and a team's rules' or
+  every rule's is a file to take (`GET /expectations/draft.yaml`, `team=`
+  or `rule=`; `GET /api/v1/expectations/draft`, the same as JSON), bounded
+  as an expectations file is (2,000 rules, 2,000 catches), what is left
+  out said in its first lines: a rule nothing was counted of, one Lapilli
+  doesn't replay nor copies in, those past the bounds. The file's comments
+  are Lapilli's words and numbers alone, never a rule's name; a name of
+  more than one line is quoted on one. The same weeks give the same file.
+- **`test_expectation`** (behind `--mcp-compare`, as `compare` is, one at a
+  time with it, the whole check within `--timeout` or 25 s, whichever is
+  less: a scenario still running then is stopped, and not known). It
+  replays
+  the rule as it is, and the rewrite beside it when one is given, over the
+  twelve weeks to now (or since the runs began), its firings kept, as the
+  backtest port's (`replayCompared`), and holds them with
+  `CheckExpectationsBy`: budgets by whole weeks back from the period's end,
+  as the port and `--compare` count them, not the ledger's Mondays as
+  serve's checks do; a catch as the replay of the rule as it is judges
+  it, as step 2 judges a rule changed since (an incident outside the
+  weeks is not known); a scenario run by `--promtool` through step 4's
+  runner, against the rule's group as it is, and with the rewrite in its
+  place. The expectations are the text given, its entries that hold the
+  rule, or serve's own for it (the file's, `--config`'s and its
+  annotation's, as step 2 holds it, their test files as serve reads them).
+  Each item is met, broken or not known, with why; not known is never
+  met.
+- **A rewrite** is one alert rule, as `compare` takes one (a Prometheus
+  rule, `for` and `keep_firing_for` 48h at most, an interval of an hour
+  at most), keeping the rule's name and group; where several share both,
+  the labels given pick it. A warning split from a critical is two rules,
+  one of them new: adding a rule is step 5's. It is posted (`post`) only
+  when it is held to one expectation at least, meets each, and loses no
+  incident the rule catches as it is (`lost`); the post says it is an
+  agent's rewrite backtested by Lapilli, gives the period, each
+  expectation as it is and rewritten, the firings and catches before and
+  after, and the diff, in a fence a backtick longer than any run of them
+  in it. Lapilli posts nothing (open question 5).
+- **`propose_expectation`** (behind `--mcp-propose`, as `propose` is) takes
+  an expectations text holding the rule by `rule:` alone, checks it as
+  `test_expectation` does (no rewrite: a rule's change kept for a person
+  is `propose`), and keeps it, as Lapilli writes it, with its test files
+  and what checking it found, for the person the agent acts for, refused
+  as `propose` is when who that is isn't known. Before anything is
+  replayed, the hour's limit is asked (`ProposalsAnHour`, 20, which
+  proposals and drafts now share, a person's with their agents') and a try
+  is taken (`triesAnHour`).
+- **Drafts the history makes** are kept from the rule's tab ("Keep it as a
+  draft", a team's editor of their own team's rule), made by the person
+  who kept them: Lapilli keeps no draft of itself. The design said an
+  agent can't accept its own draft; as built, **no one accepts a draft
+  they proposed, or their agent did**, as no one approves their own
+  proposal, refused in the ledger's write by the folded name.
+- **In the ledger** (027, in place). A draft is bounded: its expectations
+  64 KiB, its test files 20 and 256 KiB in all, its reason 2,000 bytes,
+  what it found 64 KiB, the file it makes 1 MiB; ten wait for a rule at
+  most, and 1,000 are kept, the oldest decided let go to keep another,
+  none kept while as many wait.
+- **What an agent sends**, beyond what `compare` bounds: the rule's name 1
+  KiB, the expectations 256 KiB, the rewrite 64 KiB, the test files as a
+  draft keeps them, each by a path an expectations file may name, those
+  given named by the scenarios and the scenarios' given, each read as
+  promtool would expand it before it runs (`scenario.Bound`: 100 tests,
+  1,000 input series and 100 a test, values expanding to 100,000, a blank
+  among them, as promtool's parser counts `0+1x100000000` and `_x5`, and
+  10,000 evaluations a test), then rewritten as step 4's are. An agent's
+  scenarios run one at a time across serve, whatever else holds the
+  comparison's turn.
+- **Accepting** is an approver's, in a browser, as approving a proposal is
+  (same site, no bearer token, `--changes` on, the page's form). Where
+  serve's expectations come from `--expect`, with the change recipes'
+  token, and the draft holds no scenario (whose test file is another
+  file), it goes **the git path**: the file is read again, the draft taken
+  into it (`verdict.TakeIn`: the file's tree, each budget field, catch and
+  scenario the draft gives in place of the file's by the same `rule:`, its
+  comments kept, written by the encoder and read back; a file with anchors
+  is for a person), its hash kept, and it is handed to the change recipes
+  beside the proposals (`GET /api/v1/changes`'s `expectations`, `PATCH
+  /api/v1/changes/expectations/{id}`). The recipes write `EXPECT_FILE`
+  alone, a tracked, non-executable `*.yml` or `*.yaml` not of a CI system,
+  only while its sha256 is that hash, and only as an expectations file,
+  one document whose only key is `expectations`, before and after: a
+  Lapilli someone took over can't make them write anything else.
+  Otherwise accepting keeps the decision, and the tab says it isn't
+  applied and gives the YAML: the expectations file with the draft taken
+  in, or, for `--config` or none, its entries, to put there by hand.
+- **Told**: `expectation.drafted`, `expectation.accepted`,
+  `expectation.dropped` and `expectation.pull_request`, never a draft's
+  text, test files or reason. **Shown**: a Drafts part of the rule's
+  Expectations tab, each draft with what it found, its reason as the
+  agent's words, escaped, and its text; the open ones on the proposals
+  page; `GET /api/v1/expectation-drafts` and `/{id}`.
+
+Step 4, scenarios, as built:
 
 - **The file.** `scenarios:`, paths of promtool test files relative to the
   expectations file, inside its directory (`ScenarioPath`: no `.`, `..` or
@@ -562,4 +692,3 @@ Step 4, scenarios, as built (step 3 isn't yet):
   only the pod has; or `serve.promtool.path` in an image of one's own.
   With either, `/tmp` is an emptyDir, the root being read-only. promtool
   runs in serve's container: its memory counts toward serve's limit.
-

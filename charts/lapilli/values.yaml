@@ -765,14 +765,16 @@ serve:
   # /healthz.
   readinessPath: /readyz
   # Agents reach /mcp and read what the pages show. Who an agent must act
-  # for to replay a change to the rules it proposes: editors or admins. Off
-  # when empty: it runs PromQL the agent writes, with lapilli's access to
-  # Prometheus, and for a Loki's rules LogQL, with its access to Loki. It
-  # needs roles.editors or roles.admins.
+  # for to replay a change to the rules it proposes, or check what a rule
+  # is held to (test_expectation): editors or admins. Off when empty: it
+  # runs PromQL the agent writes, with lapilli's access to Prometheus, and
+  # for a Loki's rules LogQL, with its access to Loki. It needs
+  # roles.editors or roles.admins.
   mcpCompare: ""
-  # Who an agent must act for to propose a change to a rule over MCP, kept
-  # as an agent's for a person to approve: editors or admins. Off when
-  # empty. An agent never approves or applies one.
+  # Who an agent must act for to propose a change to a rule over MCP, or a
+  # draft of what a rule is held to (propose_expectation), kept as an
+  # agent's for a person to approve or accept: editors or admins. Off when
+  # empty. An agent never approves, accepts or applies one.
   mcpPropose: ""
   # Changing rules, with a person's approval (docs/design/changes.md). Off
   # unless enabled: Lapilli reads, and proposes when people ask. Enabled,

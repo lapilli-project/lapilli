@@ -301,6 +301,36 @@ made a task with one press; on the rules list (`expect=broken`, and
 `--expect-tasks` made a task for the rule's team, once a rule, an
 expectation and a week, none while one is open.
 
+Nobody writes expectations for rules that already page them, so serve
+drafts them (docs/design/expectations.md, step 3). **From the history**: a
+rule's Expectations tab shows what it is held to as it is now, the most it
+fired in a whole week of the twelve before this one, while people slept
+and re-fired, rounded up (1 to 9 as they are, 10 to 99 to the next 5, from
+100 to two figures, never below 1: a rule that never fired is held to 1),
+and the incidents it caught, each within its delay rounded up to a minute.
+A team's rules', or every rule's, is a file to take
+(`/expectations/draft.yaml?team=payments`), counted, never written by a
+model: the same weeks give the same file. `lapilli verdict
+--draft-expectations FILE` drafts one from the period it judges. **From an
+agent**: MCP's `test_expectation` checks an expectations text, or a
+rewrite of a rule, against the rule replayed over the twelve weeks, and
+keeps nothing; given a rewrite that meets each expectation, losing no
+catch, it answers with Markdown the agent or a person may post on the pull
+request (Lapilli posts nothing). `propose_expectation` keeps an agent's
+draft, checked, for a person to accept or drop on the rule's tab, as
+`--mcp-propose` lets it ([Ask it from an agent](mcp.md)). A person keeps
+the history's too, there. No one accepts a draft they proposed, or their
+agent did; accepting is an approver's, in the browser, as approving a
+proposal is (`--changes` on). With `--expect` and `--changes-token-file`,
+an accepted draft with no scenario goes the git path: the expectations
+file with it taken in is handed to the change recipes, which open a pull
+request to `EXPECT_FILE`, the file in git `--expect` is made from
+([recipes/changes](../recipes/changes/README.md)). Otherwise accepting
+keeps the decision, and the tab gives the YAML to put where the
+expectations are declared: Lapilli doesn't write a ConfigMap or `--config`.
+Drafts count with proposals toward a person's 20 an hour; ten wait for a
+rule at most, and 1,000 are kept.
+
 Some weeks aren't like the others: a sale, a launch, a campaign. Marked
 windows (docs/design/marked.md) name them, each of a kind a team chooses,
 from a file (`--marked`), `--config`'s `marked:`, the Marked windows page,

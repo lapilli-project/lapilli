@@ -2,8 +2,9 @@
 
 ## [Unreleased]
 
-Expectations, steps 2 and 4 (docs/design/expectations.md): serve holds
-each rule to what is expected of it after it is deployed; and scenarios,
+Expectations, steps 2 to 4 (docs/design/expectations.md): serve holds
+each rule to what is expected of it after it is deployed; drafts of what a
+rule is held to, from the history and from an agent; and scenarios,
 promtool's own test files, held to before a change is merged and after.
 
 Before upgrading:
@@ -12,7 +13,11 @@ Before upgrading:
   ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
   A lapilli before this one doesn't open the upgraded ledger. Nothing is
   backfilled: the first round after the upgrade checks the thirteen weeks,
-  and runs the scenarios, five a run.
+  and runs the scenarios, five a run. 027 holds `expectation_checks` and
+  `expectation_drafts`.
+- **Proposals and drafts share a person's hour**: the 20 proposals a
+  person, with the agents acting for them, makes in an hour now count the
+  drafts of expectations they make too.
 
 ### Added
 
@@ -69,6 +74,51 @@ Before upgrading:
   promtool runs with a fixed command line, no environment, 30s and 64 KiB
   of what it says at most, in a directory of its own, its `rule_files` the
   group Lapilli wrote, whatever the test file named.
+- **Drafts from the history.** A rule's Expectations tab shows what it is
+  held to as it is now: the most it fired in a whole week of the twelve
+  before this one, while people slept and re-fired, rounded up (1 to 9 as
+  they are, 10 to 99 to the next 5, from 100 to two significant figures,
+  never below 1: a rule that never fired is held to 1), and the incidents
+  it caught, within their delay rounded up to a minute. A team's rules',
+  or every rule's, is a file to take (`GET /expectations/draft.yaml`,
+  `team=`, `rule=`; `GET /api/v1/expectations/draft`), written by the YAML
+  encoder, counted, never written by a model. `lapilli verdict
+  --draft-expectations FILE` drafts one from the period it judged, by
+  whole weeks back from its end. A person keeps the history's draft of a
+  rule on its tab (Keep it as a draft) for another to accept.
+- **MCP's `test_expectation`** (with `--mcp-compare`): checks an
+  expectations text (a pull request's `expectations.yaml`) or serve's own,
+  or a rewrite of the rule, against the rule replayed over the twelve
+  weeks, keeping nothing: per item met, broken or not known, as it is and
+  rewritten; an agent's scenario run by `--promtool`, its test file
+  refused past 100 tests, 1,000 input series, 100,000 values (promtool's
+  values notation counted, `0+1x100000000` among it) or 10,000 evaluations
+  a test, before promtool runs, and run one at a time. A rewrite that
+  meets every expectation, losing no catch, comes back with `post`,
+  Markdown marked as an agent's rewrite backtested by Lapilli, with the
+  numbers before and after, for the agent or a person to post on the pull
+  request: Lapilli writes nothing there.
+- **MCP's `propose_expectation`** (with `--mcp-propose`): an agent's draft
+  of what one rule is held to, by `rule:` alone, checked as
+  `test_expectation` checks it and kept for a person to accept or drop on
+  the rule's tab, for the person the agent acts for, who can't accept it.
+  No one accepts a draft they proposed, or their agent did; accepting is
+  an approver's, in a browser, with `--changes`. Kept in
+  `expectation_drafts` (schema 027): 10 waiting for a rule, 1,000 in all,
+  the oldest decided let go. Told as `expectation.drafted`,
+  `expectation.accepted`, `expectation.dropped` and
+  `expectation.pull_request`, without a draft's text or reason. The open
+  ones are listed on the proposals page; `GET /api/v1/expectation-drafts`.
+- **A draft accepted goes the git path** where serve's expectations come
+  from `--expect`, with `--changes-token-file`, and it holds no scenario:
+  the file is read again and the draft taken into it, field by field, its
+  comments kept, and handed to the change recipes
+  (`GET /api/v1/changes`'s `expectations`,
+  `PATCH /api/v1/changes/expectations/{id}`). The recipes take
+  `EXPECT_FILE`, the expectations file in git `--expect` is made from, and
+  write it alone, only while it is the file serve read, only as an
+  expectations file. Otherwise accepting keeps the decision, and the tab
+  gives the YAML to put where the expectations are declared.
 
 ## [0.63.0] - 2026-11-20
 
