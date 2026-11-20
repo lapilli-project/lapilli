@@ -1473,9 +1473,9 @@ serve_said() {
   fi
 }
 # retry_after DEFAULT: the seconds serve's Retry-After says, or DEFAULT
-# without one; 300 at most, and SERVE_RETRY_MIN (5), or SERVE_POLL if
-# longer, a second at least, at least: a Retry-After of 0 isn't a loop of
-# requests.
+# without one; 300 at most, and at least SERVE_RETRY_MIN (5), or
+# SERVE_POLL if longer, and a second whatever they say: a Retry-After of 0
+# isn't a loop of requests.
 retry_after() {
   tr -d '\r' <"$tmp/serve.headers" | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\) *$/\1/p' | tail -n 1 |
     awk -v def="$1" -v least="$retry_min" '{ v = $1 + 0 } END { n = (NR ? v : def); if (n > 300) n = 300; if (n < least) n = least; print n }'
