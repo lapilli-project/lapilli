@@ -133,9 +133,17 @@ func (s *Server) bulkVerdict(w http.ResponseWriter, r *http.Request) {
 		back(w, r, bulkBack(r.PostFormValue("back"), "/firings", "action", bulkResult{None: true}))
 		return
 	}
+	// The form's select starts on no answer, which the browser holds back
+	// (required): without one, nothing is written, rather than every
+	// answer picked cleared. "none" clears them.
 	action := r.PostFormValue("action")
-	if action == "none" {
+	switch action {
+	case "yes", "no":
+	case "none":
 		action = ""
+	default:
+		s.oops(w, r, bad("pick whether they needed action, or clear the answer"))
+		return
 	}
 	var note *string
 	if v, ok := r.PostForm["action_note"]; ok && strings.TrimSpace(v[0]) != "" {

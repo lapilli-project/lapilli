@@ -354,6 +354,12 @@ table.heat tbody tr:hover td { background: none; }
 table.heat th.hw { font-size: .85rem; font-weight: 400; text-align: center; min-width: 2.8rem; }
 table.heat th.hn { font-weight: 400; font-size: inherit; white-space: nowrap; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; padding-right: .6rem; }
 table.heat td.hc { height: 1.7rem; border-radius: 5px; }
+/* The totals' headers wrap, Korean's between words; under a laptop's
+   1,280 px a rule's name is cut sooner (its link's title has it whole):
+   the table, with its Episodes column, fits beside the sidebar at 1,200
+   px (bundle 65). */
+table.heat thead th.n { white-space: normal; word-break: keep-all; }
+@media (max-width: 1279.98px) { table.heat th.hn { max-width: 11rem; } }
 /* A goal's weeks (the Goals page): a cell a week, its sign in the week's
    status colour, its value under it. */
 table.goals th.hw { font-size: .85rem; font-weight: 400; text-align: center; }
@@ -452,8 +458,10 @@ a.chip:hover { background: var(--accent-soft); }
    Names and label values wrap anywhere; a team's name between its words
    and after its hyphens; a number's notes under it, a little smaller; a
    header between its words, a little smaller (Korean's too, keep-all, not
-   between its syllables); the cells are a little tighter. */
+   between its syllables); the cells are a little tighter, a number's
+   tighter still: the Episodes column fits at 1,070 px (bundle 65). */
 .rules-main table th, .rules-main table td { padding: .5rem .4rem; }
+.rules-main table th.n, .rules-main table td.n { padding-inline: .3rem; }
 .rules-main table th { white-space: normal; word-break: keep-all; font-size: .85rem; }
 /* A row's numbers alone in their cells; what they come with on a line
    under the row, each note apart, as wide as the row (rulenotes). */
@@ -483,6 +491,22 @@ p.bulk-off { margin: .6rem 0 .8rem; }
 p.look-off { margin: .3rem 0 0; }
 td.rule { min-width: 10rem; }
 td.rule bdi { overflow-wrap: anywhere; }
+/* A firing's stone, and what people said of it, in the firings list and a
+   rule's firings: the stone's words break between words, Korean's too, not
+   a letter at a time; each form of a verdict on a line of its own, a select
+   between its words and its button, so that a row stays a few lines tall. */
+td.stone { word-break: keep-all; }
+td.said { min-width: 12rem; }
+/* "paged no one" may take two lines: the column is a number's. */
+td.n.notified { white-space: normal; }
+td.n.notified:lang(ko) { word-break: keep-all; }
+td.said > form, td.said > p, td.said > details { margin: 0 0 .35rem; }
+td.said > :last-child { margin-bottom: 0; }
+td.said p.said { font-size: .9rem; }
+form.said-action { display: flex; flex-wrap: nowrap; align-items: center; gap: .4rem; }
+td.said button, td.said select { font-size: .9rem; padding-inline: .55rem; }
+form.said-action label { display: flex; align-items: center; gap: .4rem; font-size: .9rem; }
+td.said details form { display: grid; gap: .35rem; margin-top: .35rem; }
 .badges { display: inline; }
 .badge { display: inline-block; font-size: .8rem; line-height: 1.5; padding: 0 .5rem; margin: .1rem 0; border-radius: 9999px; border: 1px solid var(--line-strong); color: var(--dim); background: var(--card); white-space: nowrap; text-decoration: none; font-weight: 400; }
 a.badge:hover { text-decoration: underline; }

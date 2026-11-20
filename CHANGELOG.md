@@ -153,6 +153,37 @@ Before upgrading:
   prefix `--changes-in` gives, the name of an alarm a rule added there
   would make.
 
+## [0.63.1] - 2026-11-20
+
+The forms for people's verdicts on firings (0.63.0) on a few lines a row,
+and their words in Korean. No schema change: the ledger stays at 026.
+
+### Changed
+
+- **A row of the firings list is 96 px again**, at 1,280 px, from 179
+  (331 with a note): what people said of a firing is its own column, "What
+  people said", "needed action" a select that says its answer and a
+  button on one line; the stone's words break between words, Korean's too,
+  not a syllable a line, and "paged no one" may take two lines. A rule's
+  firings, 55 px from 99.
+- **The bulk "needed action" starts on "pick one"**, which the browser
+  holds back; it started on yes, so that one press marked every firing
+  picked as needing action. Its "none" is "clear the answer". A bulk
+  answer sent with no choice writes nothing. "Answer" is "Save".
+- **Korean**: 알림 묶음 for an episode, not 에피소드; 판정 제외 for a rule
+  entry's `judged: false`, not 판정 안 함, a letter from 판정 안 됨 (no
+  record); “실제 문제였음” quoted as a button's name; 무관: INC-111, not
+  INC-111와 무관함; a rule's precision as Lapilli judged it says only what
+  people moved, as the Goals page's line of what people moved does now,
+  where it said every zero. Japanese and Spanish said the two not-judged
+  states alike too (判定対象外, "Fuera del juicio" now); Spanish's
+  Notified is "Avisos".
+- The Episodes column fits where the tables did before it: the rules list
+  at 1,070 px, the overview's heatmap at 1,200 px (a rule's name cut
+  sooner under 1,280 px).
+- The accessibility check reads people's verdicts and the episodes: its
+  server has them.
+
 ## [0.63.0] - 2026-11-20
 
 Judging, steps 1 to 4 (docs/design/judging.md): a lead and `require:` of

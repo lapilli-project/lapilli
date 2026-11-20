@@ -472,7 +472,7 @@ func TestNotificationsShown(t *testing.T) {
 		t.Errorf("Sunday: %d paged no one, want 6 (16:02 to 21:02): %s", n, body)
 	}
 	_, body, _ = get(t, h, "/firings?day=2026-11-02")
-	if !strings.Contains(body, `<td class="n">2</td>`) {
+	if !strings.Contains(body, `<td class="n notified">2</td>`) {
 		t.Errorf("Monday: the checkout firing told of twice: %s", body)
 	}
 	// The last whole week ended that Sunday: two notifications came while
