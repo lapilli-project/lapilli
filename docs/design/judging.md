@@ -762,7 +762,10 @@ rules:
 - **In the numbers** they are `unjudged`, as firings with no record are,
   and said apart: the report's `rules[].not_judged`† and
   `firings[].not_judged`†, the summary's `not_judged` beside `unjudged`.
-  The rule's page says "Not judged: rule entry 3", not "No record".
+  The rule's page says "Judged by nothing, as rule entry 3 says", not
+  "No record", and the rules list's badge "Judged by nothing": not "Not
+  judged", which the column of firings with no record says ("? Not
+  judged"), a capital and a sign apart (bundle 66).
 - **Without signals.** An entry gives `judged: false` or `signals`, not
   both. A file whose `rules:` are all `judged: false` needs no `signals:`,
   and goes with `--impact PROMQL` (the signal with no name) or with no

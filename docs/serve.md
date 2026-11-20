@@ -136,7 +136,7 @@ A rule entry may say `judged: false` in place of signals, in
 `--impact-file` or on the Settings page: a watchdog, a capacity forecast,
 a reminder. Its rules' firings are counted, never white nor black, in no
 precision, never noisy, and catch nothing; the summary says them
-`not_judged`, the rules list and the rule's page "Not judged", and the
+`not_judged`, the rules list and the rule's page "Judged by nothing", and the
 Goals page beside each goal how many firings an entry kept from being
 judged. A file whose entries all say so needs no signal.
 

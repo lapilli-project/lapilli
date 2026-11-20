@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **A rule entry's `judged: false` is "Judged by nothing" in English**, on
+  the rules list's badge, a rule's page and the Goals page, as the
+  settings' table of entries says it: "Not judged" was a capital and a
+  sign from "? Not judged", the firings with no record.
+- The Goals page's line of what people moved lists its parts as Japanese
+  lists things, with 、.
+- Spanish's rules list fits a laptop's 1,280 px, and the overview's
+  heatmap 1,200 px, as the other languages' do: its headers, single long
+  words, are a little smaller. Under 1,280 px the rules list still
+  scrolls in its box.
+
 ## [0.63.1] - 2026-11-20
 
 The forms for people's verdicts on firings (0.63.0) on a few lines a row,

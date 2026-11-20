@@ -703,7 +703,8 @@ func TestActionShareGoal(t *testing.T) {
 
 // An entry that says judged: false keeps its rules from being judged: the
 // summary says their firings not_judged beside unjudged, the rules list
-// "Not judged", and their stones catch nothing.
+// "Judged by nothing", apart from "? Not judged" (no record), and their
+// stones catch nothing.
 func TestNotJudgedServe(t *testing.T) {
 	no := false
 	s := verdictServer(t, func(c *Config) { c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Judged: &no}} })
@@ -720,11 +721,11 @@ func TestNotJudgedServe(t *testing.T) {
 		t.Errorf("the summary: firings %d, unjudged %d, not judged %d, precision %v, caught %d", row.Firings, row.Unjudged, row.NotJudged, row.Precision, row.Caught)
 	}
 	_, page := getAs(t, h, "/rules", vViewer)
-	if !strings.Contains(page, "Not judged") {
-		t.Error("the rules list doesn't say Errors is not judged")
+	if !strings.Contains(page, `<span aria-hidden="true">?</span> Judged by nothing</span>`) {
+		t.Error("the rules list doesn't say Errors is judged by nothing")
 	}
 	_, page = getAs(t, h, "/rules/Errors", vViewer)
-	if !strings.Contains(page, "Not judged: rule entry #1 says its rules are judged by nothing.") {
+	if !strings.Contains(page, "Judged by nothing, as rule entry #1 says: its firings are counted") {
 		t.Error("the rule's page doesn't say it is not judged")
 	}
 }

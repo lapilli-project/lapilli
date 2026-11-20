@@ -463,6 +463,12 @@ a.chip:hover { background: var(--accent-soft); }
 .rules-main table th, .rules-main table td { padding: .5rem .4rem; }
 .rules-main table th.n, .rules-main table td.n { padding-inline: .3rem; }
 .rules-main table th { white-space: normal; word-break: keep-all; font-size: .85rem; }
+/* Spanish's headers are single long words (Redisparos, Episodios) that
+   can't break: a little smaller, the rules list fits a laptop's 1,280 px
+   and the heatmap 1,200 px, as the other languages' do (bundle 66).
+   Hyphenated, each broke at every syllable and the rule's column took
+   the room. */
+.rules-main table th:lang(es), table.heat thead th.n:lang(es) { font-size: .8rem; }
 /* A row's numbers alone in their cells; what they come with on a line
    under the row, each note apart, as wide as the row (rulenotes). */
 .rules-main tr.has-more > * { border-bottom: 0; }
