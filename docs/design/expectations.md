@@ -403,14 +403,17 @@ Step 2, serve's checks after deploy, as built:
   week before the ledger's first firing is not known with no number
   (`not_held`, "–"): no firing held isn't none fired. A rule
   only copied in is known where its source's copies cover it without a
-  gap (the ledger's `Coverage` of it, the latest span): a week begun
-  before the span began (in a gap, or before the first copy), a week past
-  where it ends, whole, or the week so far none of reached, is not known
-  (`not_copied`), however far the runs' cursor is, so that a job that
-  stopped copying, or began late, doesn't read as weeks of no firings; and
-  a catch of an incident outside the span, its delay with it, not caught
-  in the copies, is not known too, rather than broken. Not in the design;
-  a review found such weeks met, and a second the weeks before the span. While people slept is
+  gap, in any of the spans the ledger keeps of them (`Spans`, the latest
+  64): a week inside one is judged; a week touching a gap, before the
+  first copy or, whole, past the last, or the week so far the latest span
+  didn't reach from its start, is not known (`not_copied`), however far
+  the runs' cursor is, so that a job that stopped copying, or began late,
+  doesn't read as weeks of no firings; and a catch of an incident no span
+  covers, its delay with it, not caught in the copies, is not known too,
+  rather than broken. Not in the design; a review found such weeks met,
+  and a second the weeks before the span; 0.65.0 held a rule to the
+  latest span alone, and a week inside an earlier one was not known (a
+  review's Low). While people slept is
   by the rule's team's own hours, or the server's (as the tiles count it);
   by hours with no sleep, not known (`no_hours`). A rule Lapilli can't
   replay and doesn't copy in is not known (`unreplayed`). A budget needs

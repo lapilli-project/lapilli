@@ -293,8 +293,8 @@ After each run the leader checks each rule over the week so far and the
 twelve whole weeks before, by the ledger's weeks (Monday, in `--tz`): a
 budget is broken in a week it went over, the week so far as soon as it
 does, met in a whole week it didn't, and not known in a week the ledger
-holds only part of, or, for a rule only copied in, a week past where its
-source's copies end; while people slept is by the rule's team's own hours,
+holds only part of, or, for a rule only copied in, a week no span of its
+source's copies covers whole (before the first, in a gap, past the last); while people slept is by the rule's team's own hours,
 or the server's. A catch is judged against the incident written down,
 again on a new version of the rule by replaying it as it is over the
 incident, a few a run; with no incident written down, or one a rule only
