@@ -431,6 +431,17 @@ in place, keeping what names it, give the new `name` with the old as
 `renamed_from`, and change every `team:` that names it, in one change:
 renamed by its name alone, it is another team.
 
+A team in `serve.config` may say who of it approves its rules' changes
+(`approvers:`, as `user:NAME`, `group:NAME` or `*@DOMAIN`) and where they
+are written (`changes_in:`, within `serve.changes.in`; `[]` for nowhere),
+and the file may declare change freezes (`freezes:`, with a quiet
+window's times, for everyone or a team): a team's editors then propose
+changes to its rules, its approvers approve them, and while a freeze holds
+nothing it covers is approved, undone or applied; those approved before
+wait until it ends (`docs/design/changes.md`, "A team as the boundary of
+change", in the repository). They are read as the rest of the file is,
+twice before they are kept.
+
 `serve.config` declares goals too (`goals:`, `docs/design/goals.md` in
 the repository): what the alerting is held to, each a bound on one of the
 summary's numbers, for everyone, a team or each team (`team: "*"`), each

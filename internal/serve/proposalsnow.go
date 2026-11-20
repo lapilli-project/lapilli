@@ -968,13 +968,24 @@ func (s *Server) backtestStale(ctx context.Context) error {
 }
 
 // postBacktestAgain is "Backtest again" on a stale proposal's page: an
-// editor's, as proposing is (POST /proposals), from this site.
+// editor's, as proposing is (POST /proposals), from this site; a team's
+// editor's, of their team's rule (bounds.go).
 func (s *Server) postBacktestAgain(w http.ResponseWriter, r *http.Request) {
 	if err := form(r); err != nil {
 		s.oops(w, r, err)
 		return
 	}
 	id := pathID(r)
+	if _, limited := scoped(r); limited {
+		p, err := s.l.ProposalByID(r.Context(), id)
+		if err == nil {
+			err = s.proposalInScope(r, p)
+		}
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+	}
 	if err := s.backtestAgain(r.Context(), id, s.user(r), false); err != nil {
 		s.oops(w, r, err)
 		return

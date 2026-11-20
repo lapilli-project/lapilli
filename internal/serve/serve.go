@@ -417,6 +417,8 @@ type Server struct {
 	config configState
 	// routing is what this replica made of --config's notify: last.
 	routing routingState
+	// bnd keeps the boundaries of change the ledger holds (bounds).
+	bnd boundsCache
 	// backtesting are the proposals being backtested again here, which
 	// expiry leaves.
 	backtesting inFlight

@@ -958,7 +958,7 @@ func errCode(err error) (int, bool) {
 		return http.StatusServiceUnavailable, true
 	case errors.Is(err, errLongQuery):
 		return http.StatusRequestURITooLong, true
-	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
+	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed), errors.As(err, new(frozenErr)):
 		return http.StatusConflict, true
 	case errors.Is(err, ledger.ErrFiringChanged), errors.Is(err, ledger.ErrSaidUnrelated), errors.Is(err, ledger.ErrCaughtNothing),
 		errors.Is(err, ledger.ErrRealFiring):

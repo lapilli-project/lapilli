@@ -124,8 +124,9 @@ Admins give roles in the UI, on top of the flags:
 |---|---|---|
 | admin | `--admins` only | everything an editor may, and the settings, teams, reports, the digest and roles |
 | approver | `--approvers` only, or the admins | approve and undo a change to a rule |
+| approver of a team | `--config` only (`approvers:` under the team) | approve and undo a change to that team's rules |
 | editor | `--editors`, or an admin in the UI | incidents, tasks, comments, quiet windows, notes on rules; proposes changes |
-| editor of a team | an admin in the UI | that team's notes, tasks, quiet windows and reports, and comments on what is the team's |
+| editor of a team | an admin in the UI | that team's notes, tasks, quiet windows and reports, and comments on what is the team's; proposes changes to its rules |
 | viewer | everyone else | nothing |
 
 The Roles page says who may approve in effect (those `--approvers` names,
@@ -188,7 +189,10 @@ changed by the wrong team's editors:
   incident their team owns.
 
 Not incidents (an incident turns firings white for every team), not
-proposals, settings, teams, the digest or roles.
+settings, teams, the digest or roles. Since the release after 0.63.1
+(below, "A team's boundaries of change"), **proposals** for a rule their
+team owns: made, backtested again, and dropped when they made them;
+checked in the request, as a proposal isn't a row of a team's.
 
 ### A team's quiet window
 
@@ -834,3 +838,57 @@ again, its approvals withdrawn, it would wait anew; one being backtested again
 on the leader is left until it is done, and one backtested on another
 replica, closed meanwhile, has its backtest refused as moved. A proposal's
 page says when it would expire, while no one approved it.
+
+### A team's boundaries of change
+
+As built for the release after 0.63.1 ([changes.md](changes.md), "A team
+as the boundary of change"). A team declared in `--config` may say who of
+it approves its rules' changes, and where they are written; a file may
+declare change freezes:
+
+```yaml
+teams:
+  - name: payments
+    labels: {team: payments}
+    approvers: [user:ana@example.com, group:payments-leads]
+    changes_in: [payments-*]      # within --changes-in; [] for nowhere
+freezes:
+  - title: Black Friday
+    start: 2026-11-27T00:00       # in --tz, or with an offset
+    end: 2026-11-30T00:00
+  - title: Payments month end
+    team: payments                # everyone's when left out
+    start: 2026-11-30T18:00
+    end: 2026-12-01T06:00
+    every: month                  # as a quiet window: day, week, month or cron
+    repeat_on: last
+    until: 2027-06-30
+```
+
+- **Read strictly, as the rest of the file.** An approver is
+  `user:NAME`, `group:NAME` or `*@DOMAIN`, not a bare name or `*`;
+  `approvers: []` is refused (leave it out for none); a `changes_in` entry
+  is one `--changes-in` would take, within what `--changes-in` names, or
+  the file is refused as a whole, its line said; a freeze has a title,
+  times a quiet window could have (31 days at most, a repeat shorter than
+  its period, a month's or a cron's starting when it falls due), a team the
+  same file declares, 100 freezes at most. A team that can't be kept, kept
+  as it was, keeps the boundaries the file gives under its name.
+- **Kept with the rest, read twice first.** Read, they are written as one
+  value in the ledger's `meta` table (`change_bounds`), in the write that
+  keeps the ledger to the file, a change noted in the activity log
+  ("change boundaries declared in config", by `config`): a file read half
+  written gives no one an approver's role and lifts no freeze, and every
+  replica reads the same. A file that says them as the ledger holds them
+  writes nothing. Without `--config`, there are none: no team's approvers,
+  sources or freezes, as nothing declares them; a role given in the UI is
+  never an approver's.
+- **Exported.** `/config.yaml` gives them back as the file takes them,
+  each freeze's times as RFC 3339 in `--tz`; read back, it writes nothing.
+- **Shown.** A proposal's page says its team; to an admin, who of every
+  team and of its team may approve it; a freeze that holds it, and until
+  when; a rule that another team owns now than when it was proposed. The
+  Settings page lists the freezes, under "Changes to the rules", each
+  frozen until, next, or over; the Administration page's Settings card
+  says until when a freeze holds changes. Who a team's approvers are is on
+  a proposal's page to an admin alone, as who holds a role is.

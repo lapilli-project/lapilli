@@ -2204,6 +2204,8 @@ type settingsView struct {
 	// for anyone.
 	GivenBack  []givenBackView `json:"-"`
 	GivenBackN int             `json:"-"`
+	// Freezes are the change freezes --config declares (bounds.go).
+	Freezes []freezeView `json:"-"`
 }
 
 // givenBackView is one given back without --config: what it is, a text to
@@ -2273,6 +2275,9 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Config = s.configFor(r)
+	if v.Freezes, err = s.freezesView(r.Context()); err != nil {
+		return nil, err
+	}
 	gb, err := s.l.GivenBack(r.Context())
 	if err != nil {
 		return nil, err

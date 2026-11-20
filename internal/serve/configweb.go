@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,6 +63,20 @@ type yTeam struct {
 	SleepHours string  `yaml:"sleep_hours,omitempty"`
 	TZ         string  `yaml:"tz,omitempty"`
 	Shifts     string  `yaml:"shifts,omitempty"`
+	// Its boundaries of change (bounds.go): changes_in given as none is
+	// [], which isn't left out.
+	Approvers []string  `yaml:"approvers,flow,omitempty"`
+	ChangesIn *[]string `yaml:"changes_in,flow,omitempty"`
+}
+
+type yFreeze struct {
+	Title string `yaml:"title"`
+	Team  string `yaml:"team,omitempty"`
+	Start string `yaml:"start"`
+	End   string `yaml:"end"`
+	Every string `yaml:"every,omitempty"`
+	On    string `yaml:"repeat_on,omitempty"`
+	Until string `yaml:"until,omitempty"`
 }
 
 type yWindow struct {
@@ -139,6 +154,7 @@ type yConfig struct {
 	Grants  []yGrant  `yaml:"grants,omitempty"`
 	Goals   []yGoal   `yaml:"goals,omitempty"`
 	Marked  []yMarked `yaml:"marked,omitempty"`
+	Freezes []yFreeze `yaml:"freezes,omitempty"`
 }
 
 // exportConfig is what the ledger holds that --config can declare, as a
@@ -150,9 +166,35 @@ type yConfig struct {
 func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 	names := map[int64]string{}
 	var c yConfig
+	var bd bounds
+	if d.Bounds != "" {
+		json.Unmarshal([]byte(d.Bounds), &bd)
+	}
 	for _, t := range d.Teams {
 		names[t.ID] = t.Name
-		c.Teams = append(c.Teams, yTeam{t.Name, t.Rules, yLabels(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts})
+		y := yTeam{Name: t.Name, Rules: t.Rules, Labels: yLabels(t.Labels), Note: t.Note, WorkHours: t.WorkHours, SleepHours: t.SleepHours, TZ: t.TZ, Shifts: t.Shifts}
+		if tb, ok := bd.Teams[t.Name]; ok {
+			y.Approvers = tb.Approvers
+			if tb.Narrowed {
+				in := slices.Clone(tb.In)
+				if in == nil {
+					in = []string{}
+				}
+				y.ChangesIn = &in
+			}
+		}
+		c.Teams = append(c.Teams, y)
+	}
+	for _, f := range bd.Freezes {
+		y := yFreeze{Title: f.Title, Team: f.Team, Start: f.Start.In(loc).Format(time.RFC3339), End: f.End.In(loc).Format(time.RFC3339), Every: f.Every, On: f.On}
+		if !f.Until.IsZero() {
+			if u := f.Until.In(loc); midnight(u, loc).Equal(f.Until) {
+				y.Until = u.Format("2006-01-02")
+			} else {
+				y.Until = u.Format(time.RFC3339)
+			}
+		}
+		c.Freezes = append(c.Freezes, y)
 	}
 	var left []string
 	teamOf := func(id int64) (string, bool) {
