@@ -269,6 +269,10 @@ func TestExpectFileReadTwice(t *testing.T) {
 	if st := s.statusView("en", true); !strings.Contains(st.Err, "budjet") {
 		t.Errorf("not said: %+v", st.Err)
 	}
+	// Its path, as every file serve was started with, to an admin alone.
+	if st := s.statusView("en", false); strings.Contains(st.Err, s.cfg.Expect) || !strings.Contains(st.Err, "--expect") {
+		t.Errorf("to a viewer: %+v", st.Err)
+	}
 	os.WriteFile(s.cfg.Expect, []byte("expectations:\n  - rule: Paged\n    budget: {week: 1}\n"), 0o600)
 	s.readExpect()
 	if e, _, _, _ := s.expectations(); len(e.Expectations) != 2 {
