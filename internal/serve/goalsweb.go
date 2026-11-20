@@ -739,7 +739,7 @@ func peopleMovedText(l string, p *goalPeople) string {
 	for _, x := range []struct {
 		msg string
 		n   int
-	}{{"%d said unrelated", p.Unrelated}, {"%d This was real", p.Real}, {"%d firings not judged", p.NotJudged}, {"%d firings answered", p.Answered}} {
+	}{{"%d said unrelated", p.Unrelated}, {"%d This was real", p.Real}, {"%d firings judged by nothing", p.NotJudged}, {"%d firings answered", p.Answered}} {
 		if x.n > 0 {
 			parts = append(parts, tr(l, x.msg, x.n))
 		}
@@ -747,5 +747,14 @@ func peopleMovedText(l string, p *goalPeople) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return tr(l, "Moved by people: %s", strings.Join(parts, ", "))
+	return tr(l, "Moved by people: %s", joinList(l, parts))
+}
+
+// joinList joins the parts of a list in lang: Japanese with 、, as its
+// sentences list things; the others with a comma.
+func joinList(lang string, parts []string) string {
+	if lang == "ja" {
+		return strings.Join(parts, "、")
+	}
+	return strings.Join(parts, ", ")
 }

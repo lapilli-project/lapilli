@@ -186,6 +186,26 @@ Before upgrading:
   prefix `--changes-in` gives, the name of an alarm a rule added there
   would make.
 
+### Changed
+
+- **A rule entry's `judged: false` is "Judged by nothing" in English**, on
+  the rules list's badge, a rule's page and the Goals page, as the
+  settings' table of entries says it: "Not judged" was a capital and a
+  sign from "? Not judged", the firings with no record. Its firings say
+  so too, not "no record to judge it by", and the legends with them.
+- The Goals page's line of what people moved lists its parts as Japanese
+  lists things, with 、.
+- Spanish's rules list fits a laptop's 1,280 px, and the overview's
+  heatmap 1,200 px, as the other languages' do: its headers, single long
+  words, are a little smaller. Under 1,280 px the rules list still
+  scrolls in its box.
+
+### Fixed
+
+- **A day's strip drew the firings of a rule judged by nothing as caught
+  nothing** (0.63.0), with no named signal: it read the day's starts
+  apart by rule only for named signals.
+
 ## [0.63.1] - 2026-11-20
 
 The forms for people's verdicts on firings (0.63.0) on a few lines a row,
