@@ -414,16 +414,27 @@ func matchesEmpty(op, quoted string) bool {
 }
 
 // unquote is a PromQL string's value: double-quoted, single-quoted with
-// the same escapes, or raw in backticks.
+// the same escapes, or raw in backticks; false for what isn't one string,
+// a quote of its kind inside it not escaped ('a' or b='c', `a` or `b`),
+// which ends it where PromQL reads it.
 func unquote(q string) (string, bool) {
 	if len(q) < 2 || q[0] != q[len(q)-1] {
 		return "", false
 	}
+	inner := q[1 : len(q)-1]
 	switch q[0] {
 	case '`':
-		return q[1 : len(q)-1], true
+		return inner, !strings.Contains(inner, "`")
 	case '\'':
-		inner := strings.ReplaceAll(q[1:len(q)-1], `\'`, `'`)
+		for i := 0; i < len(inner); i++ {
+			switch inner[i] {
+			case '\\':
+				i++
+			case '\'':
+				return "", false
+			}
+		}
+		inner = strings.ReplaceAll(inner, `\'`, `'`)
 		q = `"` + strings.ReplaceAll(inner, `"`, `\"`) + `"`
 	}
 	v, err := strconv.Unquote(q)

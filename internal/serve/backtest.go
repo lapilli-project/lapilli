@@ -854,10 +854,19 @@ func (p *prepared) checkRule(r *rules.Rule) string {
 // A \r is refused, whatever else: Prometheus ends a # comment at one, and
 // the checks here do too, but a rule's lines end in \n alone (YAML makes a
 // \r\n one), so none has a reason to hold one but to read otherwise than
-// it looks.
+// it looks. So is what a history --prometheus names may read otherwise
+// than these checks do (rules.Unalike): Prometheus with unquoted UTF-8
+// names, VictoriaMetrics' MetricsQL.
 func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Duration, quote bool) string {
 	if strings.Contains(expr, "\r") {
 		return name + " holds a carriage return (\\r): here a rule's PromQL ends its lines in \\n alone"
+	}
+	if what := rules.Unalike(expr); what != "" {
+		said := name + " holds what a history may read otherwise than Prometheus does"
+		if quote {
+			said = name + " holds " + clip(verdict.Clean(what), 200)
+		}
+		return said + ": here a rule's PromQL is read alike by Prometheus and the histories like it (VictoriaMetrics' MetricsQL): outside its strings, ASCII names, numbers, operators and brackets alone, an offset or @ right after a selector, a range or a subquery, and no WITH, nor or, and or unless in a selector's braces"
 	}
 	if _, err := rules.Selectors(expr); err != nil {
 		r.Unsupported = refusedAsWritten

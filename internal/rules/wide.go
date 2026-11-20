@@ -13,7 +13,8 @@ import (
 // reads with serve's access, of a Prometheus others share, and is held to
 // one metric a selector: what it reads is what it names. An expression
 // that doesn't read as Selectors reads it is wide as a whole, said as
-// itself.
+// itself; so is a selector with a label's name that doesn't unquote, or
+// __graphite__, which VictoriaMetrics reads as a pattern of names.
 func Wide(expr string) (string, bool) {
 	sels, err := Selectors(expr)
 	if err != nil {
@@ -30,7 +31,14 @@ func Wide(expr string) (string, bool) {
 			if !ok {
 				return sel, true
 			}
-			if l, err := unquoteLabel(label); err || l != "__name__" {
+			// A label's name that doesn't unquote, a history may read
+			// otherwise ("\__name__" is __name__ to MetricsQL); and
+			// __graphite__ is VictoriaMetrics' pattern of names.
+			l, bad := unquoteLabel(label)
+			if bad || l == "__graphite__" {
+				return sel, true
+			}
+			if l != "__name__" {
 				continue
 			}
 			if op != "=" {

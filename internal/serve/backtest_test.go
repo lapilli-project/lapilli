@@ -24,6 +24,7 @@ import (
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/signin/idptest"
 	"lapilli.dev/internal/verdict"
 )
@@ -515,6 +516,66 @@ func TestBacktestCommentsHideNothing(t *testing.T) {
 	}
 	if !read {
 		t.Errorf("x_total not read: %v", h.exprs)
+	}
+}
+
+// A rule a history --prometheus names reads past the bounds, as
+// VictoriaMetrics' MetricsQL or Prometheus with unquoted UTF-8 names reads
+// it, is refused, asking the history nothing: a \ in a name, or in
+// braces, an offset after any expression, a WITH template, a name that
+// isn't ASCII. A Grafana rule's query is refused so too, quoting nothing
+// of it. Rules as alerting rules are written are taken, each through the
+// port's checks.
+func TestBacktestMetricsQLRefused(t *testing.T) {
+	h := &history{}
+	b := btServer(t, h, "", nil)
+	h.Lock()
+	before := h.asked
+	h.Unlock()
+	for expr, says := range map[string]string{
+		"up\\` or count({__name__=~\".+\"}) > 0 or up\\`": `'\\' outside a string`,
+		"count({__name__='up' or __name__=~'.+'}) > 0":    "or in a selector's braces",
+		"rate(errors[5m]) offset 1400d > 0":               "an offset after something other than a selector",
+		`WITH (x = {__name__=~".+"}) count(x) > 0`:        "WITH",
+		"温度 offset 1400d > 0":                             "isn't ASCII",
+	} {
+		q, _ := json.Marshal(expr)
+		after := ruleFile + "      - alert: Unalike\n        expr: " + string(q) + "\n"
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btBody(ruleFile, after, nil))
+		why, _ := m["error"].(string)
+		if code != http.StatusBadRequest || !strings.Contains(why, "Unalike holds") || !strings.Contains(why, says) || !strings.Contains(why, "MetricsQL") {
+			t.Errorf("%q: %d %q, want 400 %q", expr, code, why, says)
+		}
+	}
+	if n, _ := b.s.l.BacktestsWaiting(context.Background()); len(n) != 0 {
+		t.Errorf("queued: %v", n)
+	}
+	h.Lock()
+	if h.asked != before {
+		t.Errorf("asked the history: %v", h.exprs)
+	}
+	h.Unlock()
+	// Without quote, as a Grafana rule's query is held, nothing of it.
+	p := &prepared{reasons: map[string]bool{}}
+	if why := p.checkPromQL(&rules.Rule{}, "G's query A", "温度 > 0", 0, false); !strings.HasPrefix(why, "G's query A holds what a history may read otherwise") || strings.Contains(why, "ASCII outside") {
+		t.Errorf("%q", why)
+	}
+	for _, expr := range []string{
+		`sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[5m])) > 0.9`,
+		`histogram_quantile(0.99, sum by (le, job) (rate(http_request_duration_seconds_bucket{job="api"}[5m]))) > 1`,
+		`node_filesystem_avail_bytes{fstype!=""} / node_filesystem_size_bytes{fstype!=""} * 100 < 15 and predict_linear(node_filesystem_avail_bytes{fstype!=""}[6h], 4*60*60) < 0`,
+		`absent(up{job="prometheus"} == 1)`,
+		`label_replace(up{job="node"}, "host", "$1", "instance", "(.*):.*") == 0`,
+		`node_load1 * on (instance) group_left (nodename) node_uname_info > 4`,
+		`rate(http_requests_total[5m] offset 1w) * 1.5 < rate(http_requests_total[5m])`,
+		`max_over_time(rate(http_requests_total[5m])[1h:1m] offset 1d) > 100`,
+		`probe_ssl_earliest_cert_expiry - time() < 86400 * 14`,
+		"up{job=`api`} == 0 # a comment",
+	} {
+		r := rules.Rule{Name: "Taken", Expr: expr}
+		if why := p.checkPromQL(&r, "Taken", expr, 0, true); why != "" || r.Unsupported != "" {
+			t.Errorf("%q: %q %q", expr, why, r.Unsupported)
+		}
 	}
 }
 

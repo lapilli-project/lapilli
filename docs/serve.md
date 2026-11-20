@@ -827,7 +827,13 @@ them and its group's `query_offset`, 8 days at most in all (`rate(x[1d] offset 7
 step written in it (`[1d:1m]`, not `[1d:]`: without one, Prometheus steps
 at its evaluation interval, which Lapilli doesn't know, so the points
 can't be counted; add the step); ranges and offsets written as durations;
-and no `@`; comments read past, as Prometheus does; each range query with a timeout of a minute; days 1 to
+and no `@`; comments read past, as Prometheus does; PromQL that every
+history `--prometheus` takes reads alike (since 0.63.2): outside its
+strings, ASCII names, numbers and durations as Prometheus writes them,
+operators and brackets alone, no `\r`, an `offset` or `@` right after a
+selector, a range or a subquery, no `\` in a label's name in quotes, and
+none of MetricsQL's own (`WITH`, `or` in a selector's braces,
+`keep_metric_names`), which VictoriaMetrics would read past the bounds; each range query with a timeout of a minute; days 1 to
 14, and the entry's `days`. A Grafana rule has 8 queries of data sources
 and 16 queries and expressions at most, each query's `relativeTimeRange`
 8 days back at most, and each query the replay asks held as a rule's, its

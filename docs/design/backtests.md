@@ -876,7 +876,13 @@ Where step 1 does otherwise than the sections above say, or says more:
   `workflow_run` or `schedule`.
 - **What a rule reads back.** Beside `for`, a range, a subquery or an
   offset a week back at most, a subquery of 11,000 points at most, and no
-  `@` (`rules.Reach`; added up, 8 days, from the second round).
+  `@` (`rules.Reach`; added up, 8 days, from the second round). Since
+  0.63.2, PromQL every history `--prometheus` takes reads alike
+  (`rules.Unalike`): VictoriaMetrics' MetricsQL reads a `\` in a name, `or`
+  in braces, an offset after any expression and `WITH` templates, and
+  Prometheus with unquoted UTF-8 names a name that isn't ASCII, each
+  otherwise than these checks; what any of them could read otherwise is
+  refused.
 - **A pull request superseded by its token's word alone.** Only a number
   the token names (GitHub's and Forgejo's `ref`) supersedes the backtest
   waiting for it; one the job said (GitLab, a plain token, a `push`)
@@ -884,9 +890,13 @@ Where step 1 does otherwise than the sections above say, or says more:
   one least lately. One started twice whose leader stopped each time
   (`attempts`, in 023) fails, saying so; one that panics fails. What ended
   a day ago goes at each of the leader's rounds, the port on or not.
-- **Reads by the key.** Each lookup is charged to the client's address
-  before the ledger is asked, and given back when the key is right; a
-  backtest's reads are limited by its id too.
+- **Reads by the key.** Each process keeps the backtests' key hashes by
+  id, those it queued and the ledger's, listed a second apart at most: a
+  pair it knows is read whatever comes from its address; one it doesn't
+  waits for a listing begun after it came, charged to the client's address
+  while it waits (since 0.63.2; before, each lookup was charged to the
+  address, behind an ingress everyone's). A backtest's reads are limited
+  by its id too.
 - **The second round.** An entry has one turn to have a body read, within
   the two of all entries, and a body comes within 5 seconds of its
   headers; the hour taken stays taken for a request refused as sent (a
