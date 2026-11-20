@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -217,6 +218,17 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 	}
 	q := a.q
 	q.Limit = max(limit+1, 200)
+	// A team's changes are a few of those looked through: each one's before
+	// and after are read once it is kept, not for every one looked at.
+	q.Light = a.team != ""
+	done := func() (activityRead, error) {
+		if q.Light {
+			if err := s.l.ActivityBodies(ctx, out.Changes); err != nil {
+				return out, err
+			}
+		}
+		return s.activitySaid(out, adminReads, l), nil
+	}
 	scanned := 0
 	last := q.Before // the last change looked at
 	for {
@@ -234,7 +246,7 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 			if errors.Is(err, errLookedUp) && last.ID != 0 {
 				// Stopped before it: the next page looks it up afresh.
 				out.Next, out.Cut = last, true
-				return s.activitySaid(out, adminReads, l), nil
+				return done()
 			} else if err != nil && !errors.Is(err, errLookedUp) {
 				return out, err
 			}
@@ -245,17 +257,17 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 			if len(out.Changes) == limit {
 				// One more than the page: the page ends at its last.
 				out.Next = out.Changes[limit-1].Cursor()
-				return s.activitySaid(out, adminReads, l), nil
+				return done()
 			}
 			out.Changes = append(out.Changes, c)
 		}
 		if len(got) < q.Limit {
-			return s.activitySaid(out, adminReads, l), nil // no more
+			return done() // no more
 		}
 		q.Before = got[len(got)-1].Cursor()
 		if scanned >= activityScan {
 			out.Next, out.Cut = q.Before, true
-			return s.activitySaid(out, adminReads, l), nil
+			return done()
 		}
 	}
 }
@@ -459,6 +471,15 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("format %q: want json or csv", format))
 		return
 	}
+	// Worked out as a page is, a few at a time (pageRenders): it takes a
+	// page's turn, and gives it back once the answer is written out, before
+	// it goes to the network.
+	tn, err := s.renderTurn(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer tn.give()
 	got, err := s.activity(r.Context(), a, limit, s.role(r) == admin, "en")
 	if err != nil {
 		s.oops(w, r, err)
@@ -476,32 +497,42 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 		nq.Set("before", got.Next.String())
 		next = "/api/v1/activity?" + nq.Encode()
 	}
+	// Written out whole, then the turn given back, then sent.
+	var body bytes.Buffer
 	if format == "csv" {
 		if next != "" {
 			w.Header().Set("Link", "<"+next+`>; rel="next"`)
 		}
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="lapilli-activity.csv"`)
-		cw := csv.NewWriter(w)
+		cw := csv.NewWriter(&body)
 		cw.Write([]string{"id", "at", "by", "kind", "what", "before", "after"})
 		for _, c := range got.Changes {
 			cw.Write([]string{strconv.FormatInt(c.ID, 10), c.At.UTC().Format(time.RFC3339), csvCell(c.By), c.Kind, csvCell(c.What), csvCell(c.Before), csvCell(c.After)})
 		}
 		cw.Flush()
-		return
+	} else {
+		out := struct {
+			Activity []apiLogged `json:"activity"`
+			Next     string      `json:"next,omitempty"`
+			Cut      bool        `json:"cut,omitempty"`
+		}{Activity: []apiLogged{}, Cut: got.Cut}
+		if got.Next.ID != 0 {
+			out.Next = got.Next.String()
+		}
+		for _, c := range got.Changes {
+			out.Activity = append(out.Activity, apiLogged{c.ID, c.At.UTC(), c.By, c.Kind, c.What, rawOf(c.Before), rawOf(c.After)})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		enc := json.NewEncoder(&body)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(out); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 	}
-	out := struct {
-		Activity []apiLogged `json:"activity"`
-		Next     string      `json:"next,omitempty"`
-		Cut      bool        `json:"cut,omitempty"`
-	}{Activity: []apiLogged{}, Cut: got.Cut}
-	if got.Next.ID != 0 {
-		out.Next = got.Next.String()
-	}
-	for _, c := range got.Changes {
-		out.Activity = append(out.Activity, apiLogged{c.ID, c.At.UTC(), c.By, c.Kind, c.What, rawOf(c.Before), rawOf(c.After)})
-	}
-	writeJSON(w, out)
+	tn.give()
+	w.Write(body.Bytes())
 }
 
 // csvCell is a cell of the CSV export a spreadsheet won't take for a

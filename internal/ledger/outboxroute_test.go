@@ -124,3 +124,43 @@ func TestOutboxLastError(t *testing.T) {
 		t.Errorf("sent: %q", why)
 	}
 }
+
+// TellFrom tells only while the key holds what its caller read: two who
+// read "down" alike, each telling back at its own time, tell it once; one
+// who reads what the first kept tells on.
+func TestTellFrom(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	told := []Told{{Dest: "webhook", About: map[string]any{"n": 1}}}
+	count := func() (n int) {
+		t.Helper()
+		if err := l.w.QueryRowContext(ctx, "SELECT count(*) FROM outbox").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for _, c := range []struct {
+		from, value string
+		want        int
+	}{
+		{"", "down", 1},
+		{"", "down", 1},
+		{"down", "up 1", 2},
+		{"down", "up 2", 2}, // read down a moment before up 1 was kept
+		{"up 1", "down", 3},
+	} {
+		event := "source.back"
+		if c.value == "down" {
+			event = "source.down"
+		}
+		if err := l.TellFrom(ctx, "source-told.rules", c.from, c.value, event, told); err != nil {
+			t.Fatal(err)
+		}
+		if n := count(); n != c.want {
+			t.Errorf("from %q to %q: %d told, want %d", c.from, c.value, n, c.want)
+		}
+	}
+	if v, _ := l.Told(ctx, "source-told.rules"); v != "down" {
+		t.Errorf("kept %q", v)
+	}
+}

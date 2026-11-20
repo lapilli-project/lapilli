@@ -1318,10 +1318,13 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	if primary {
 		s.noteRead("rules", began, len(rs), err)
 	}
-	if err != nil {
-		return nil, nil, err
+	// What is read beside them is read, and noted, whatever the rules'
+	// read came to: one left unread because another failed would age into
+	// quiet on the Sources page, and be told down.
+	r, d, xerr := s.extras(ctx)
+	if err == nil {
+		err = xerr
 	}
-	r, d, err := s.extras(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1329,13 +1332,29 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 }
 
 // extras are the rules read beside the rules: a cloud's own alarms, and a
-// Loki ruler's. A read that fails anywhere fails whole, so the version
-// stays as it was.
+// Loki ruler's. Each is read, and its read noted, whichever of the others
+// failed, and a read that fails anywhere fails the whole, so the version
+// stays as it was. One the time given ran out before is held (noteHeld):
+// not read, and not aging meanwhile.
 func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	agent := "lapilli/" + s.cfg.Version
 	var rs []rules.Rule
 	var docs []rules.Doc
+	var failed error
+	// read reports whether the source id is read: false, held, once the
+	// time is out.
+	read := func(id string) bool {
+		if ctx.Err() != nil {
+			s.noteHeld(id)
+			failed = cmp.Or(failed, ctx.Err())
+			return false
+		}
+		return true
+	}
 	for _, a := range s.alarms {
+		if !read("alarms/" + a.Source) {
+			continue
+		}
 		began := time.Now()
 		d, err := a.Docs(ctx, s.alarmsEvery())
 		var r []rules.Rule
@@ -1344,7 +1363,8 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 		}
 		s.noteRead("alarms/"+a.Source, began, len(r), err)
 		if err != nil {
-			return nil, nil, err
+			failed = cmp.Or(failed, err)
+			continue
 		}
 		rs, docs = append(rs, r...), append(docs, d...)
 	}
@@ -1352,6 +1372,8 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant, Limit: s.cfg.LokiLimit}
 	began := time.Now()
 	switch {
+	case (s.cfg.LokiLoaded || s.cfg.LokiRules != "") && !read("loki"):
+		// Held: the time ran out on another.
 	case s.cfg.LokiLoaded:
 		r, d, err := source.LokiRules(ctx, l, agent, func(what string) { s.log.Warn(what) })
 		s.noteRead("loki", began, len(r), err)
@@ -1391,6 +1413,9 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 		}
 		s.places.Unlock()
 		rs, docs = append(rs, r...), append(docs, d...)
+	}
+	if failed != nil {
+		return nil, nil, failed
 	}
 	return rs, docs, nil
 }

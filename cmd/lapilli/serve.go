@@ -121,7 +121,8 @@ The ledger:
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
   --keep-activity DUR drop the activity log's changes older than this, never
-                      sooner than --keep (default 800d; 0 keeps them all)
+                      sooner than --keep (default 800d, or --keep when
+                      longer; 0 keeps them all, as with --keep 0)
   --watch DUR         read the rules this often (default 1m)
   --alarms-every DUR  read each --alarms this often (default 10m), so the
                       clouds' request quotas hold
@@ -671,6 +672,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	}
 	timeoutSet := false
 	ledgerSet := false
+	keepActivitySet := false
 	yieldForSet := false
 	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
 	var marks, markMatches []string
@@ -911,6 +913,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			cfg.Keep, err = dur(0)
 		case "--keep-activity":
 			cfg.KeepActivity, err = dur(0)
+			keepActivitySet = true
 		case "--watch":
 			cfg.Watch, err = dur(10 * time.Second)
 		case "--alarms-every":
@@ -1152,6 +1155,15 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	if err == nil && slackLater != "" {
 		f.slackFile = slackLater
 	}
+	if !keepActivitySet {
+		// Not given: 800 days, or --keep when that is longer, so that a
+		// --keep past 800 days starts as it did before; with --keep 0,
+		// nothing is pruned, and the activity log is kept whole.
+		cfg.KeepActivity = max(cfg.KeepActivity, cfg.Keep)
+		if cfg.Keep <= 0 {
+			cfg.KeepActivity = 0
+		}
+	}
 	signIns := 0
 	for _, on := range []bool{cfg.UserHeader != "", ocSet, pxSet} {
 		if on {
@@ -1189,6 +1201,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--keep %s is shorter than --backfill %s", time.Duration(cfg.Keep), time.Duration(cfg.Backfill))
 	case cfg.Keep > 0 && cfg.KeepActivity > 0 && cfg.KeepActivity < cfg.Keep:
 		err = fmt.Errorf("--keep-activity %s is shorter than --keep %s: the activity log is kept as long as the firings at least", time.Duration(cfg.KeepActivity), time.Duration(cfg.Keep))
+	case cfg.Keep <= 0 && cfg.KeepActivity > 0:
+		err = fmt.Errorf("--keep-activity %s with --keep 0: nothing is pruned with --keep 0, the activity log neither: give --keep too, or leave --keep-activity out", time.Duration(cfg.KeepActivity))
 	case cfg.EveryoneAdmin && (len(cfg.Editors) > 0 || len(cfg.Admins) > 0):
 		err = fmt.Errorf("--everyone-admin is for no roles: with --editors or --admins, they say who may change what")
 	case cfg.EveryoneAdmin && cfg.ReadOnly:

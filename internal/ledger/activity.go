@@ -116,12 +116,16 @@ func ParseActivityCursor(v string) (ActivityCursor, error) {
 // ActivityQuery picks changes: by whom (By, the name as noted, whole), of
 // which kind ("" for any), made from Since and before Until (each zero for
 // no bound), after a page that ended at Before; Limit of them at most.
+// Light reads no change's before and after but a bulk verdict's after,
+// which says its rules (ChangeSubject): a reader that keeps few of those
+// it looks through fills in the rest of those it keeps (ActivityBodies).
 type ActivityQuery struct {
 	By           string
 	Kind         string
 	Since, Until time.Time
 	Before       ActivityCursor
 	Limit        int
+	Light        bool
 }
 
 // Activity are the changes q picks, the latest first. The kinds are told
@@ -167,6 +171,9 @@ func (l *Ledger) Activity(ctx context.Context, q ActivityQuery) ([]LogEntry, err
 		limit = 100
 	}
 	query := "SELECT id, at, by, what, before, after FROM changes"
+	if q.Light {
+		query = "SELECT id, at, by, what, '', CASE WHEN what LIKE 'verdicts: %' THEN after ELSE '' END FROM changes"
+	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -187,6 +194,39 @@ func (l *Ledger) Activity(ctx context.Context, q ActivityQuery) ([]LogEntry, err
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// ActivityBodies fills in the before and after of changes Activity read
+// Light, by their ids: one read for a page.
+func (l *Ledger) ActivityBodies(ctx context.Context, cs []LogEntry) error {
+	if len(cs) == 0 {
+		return nil
+	}
+	of := make(map[int64]int, len(cs))
+	ids := make([]int64, len(cs))
+	for i, c := range cs {
+		of[c.ID], ids[i] = i, c.ID
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	rows, err := l.r.QueryContext(ctx, "SELECT id, before, after FROM changes WHERE id IN ("+l.d.ints("?")+")", string(list))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var before, after string
+		if err := rows.Scan(&id, &before, &after); err != nil {
+			return err
+		}
+		if i, ok := of[id]; ok {
+			cs[i].Before, cs[i].After = before, after
+		}
+	}
+	return rows.Err()
 }
 
 // Cursor is where a page that ends with c goes on from.

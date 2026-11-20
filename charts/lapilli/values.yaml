@@ -167,7 +167,8 @@ serve:
   keep: 400d     # drop firings older than this
   # Drop the activity log's changes older than this, never sooner than keep
   # (--keep-activity): who changed what stays findable after the firings
-  # it was about are gone. Empty for serve's own, 800d; 0 keeps them all.
+  # it was about are gone. Empty for serve's own: 800d, or keep when longer;
+  # 0 keeps them all. With keep: 0, leave it empty.
   keepActivity: ""
   digest: mon@09:00  # the weekly digest, in timeZone, until an admin sets it in the UI
   # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day

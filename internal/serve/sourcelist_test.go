@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -230,6 +232,20 @@ func TestScrubSecrets(t *testing.T) {
 		`token=ghp_abcdefghijklmnopqrstuvwxyz`:               `token=***`,
 		`basic auth failed`:                                  `basic auth failed`,
 		`open /etc/lapilli/rules.yaml: no such file`:         `open /etc/lapilli/rules.yaml: no such file`,
+		// An Azure Function's key, in its query.
+		`POST https://fn.example.com/api/alarms?code=abcDEF123==&x=1: 401`: `POST https://fn.example.com/api/alarms?code=***&x=1: 401`,
+		`GET /x?zipcode=12345`: `GET /x?zipcode=12345`,
+		// A JSON body quoted back, as is and escaped in a Go string.
+		`400: {"token":"tok123","user":"ana"}`:                           `400: {"token":"***","user":"ana"}`,
+		`400: {"password": "hunter2", "secret":"s3", "api_key" : "k3y"}`: `400: {"password": "***", "secret":"***", "api_key" : "***"}`,
+		`body "{\"client_secret\":\"abc\",\"name\":\"x\"}"`:              `body "{\"client_secret\":\"***\",\"name\":\"x\"}"`,
+		// Header lines.
+		"request had api-key: abc123\nx-api-key: def456": "request had api-key: ***\nx-api-key: ***",
+		`X-Auth-Token: short`:                            `X-Auth-Token: ***`,
+		// Given between spaces, as a connection string says them.
+		`connect host=db.example.com user=ana password=hunter2 sslmode=require`: `connect host=db.example.com user=ana password=*** sslmode=require`,
+		`token=abc failed, access_key=AKIA1 refused`:                            `token=*** failed, access_key=*** refused`,
+		`unexpected token: line 3`:                                              `unexpected token: line 3`,
 	} {
 		if got := scrubSecrets(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
@@ -265,5 +281,157 @@ func TestSourcesAPIAndBanner(t *testing.T) {
 	s.fail("pruning", errors.New("disk full"))
 	if _, page, _ := get(t, h, "/rules"); strings.Contains(page, `disk full <a href="/sources">`) {
 		t.Errorf("the banner links a failure that isn't a source's")
+	}
+}
+
+// A source read beside the rules is read, and judged, by its own reads:
+// the rules failing for five hours leave Loki's rule files working, never
+// quiet nor told down, and the rules alone are told down and back. One the
+// time ran out on before it was read waits, held, however long since it
+// last read well.
+func TestSourceBesideAFailingOne(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "loki")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "logs.yaml"), []byte("groups:\n  - name: logs\n    rules:\n      - alert: CheckoutLogErrors\n        expr: sum(count_over_time({app=\"checkout\"} |= \"error\" [5m])) > 5\n"), 0o644)
+	s, clock := hookServer(t, func(c *Config) { c.Loki, c.LokiRules = "http://loki:3100", dir })
+	broken := filepath.Join(s.cfg.RulesPath, "broken.yaml")
+	raw := ""
+	read := func(fail bool, step time.Duration) {
+		t.Helper()
+		*clock = clock.Add(step)
+		if fail {
+			os.WriteFile(broken, []byte("groups: [\n"), 0o644)
+		} else {
+			os.Remove(broken)
+		}
+		if err := s.look(ctx, &raw); fail != (err != nil) {
+			t.Fatalf("a read meant to fail %v: %v", fail, err)
+		}
+		if err := s.tellSources(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := func(id string) sourceItem {
+		t.Helper()
+		items, err := s.sourceList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(items, func(it sourceItem) bool { return it.ID == id })
+		if i < 0 {
+			t.Fatalf("no %s in %+v", id, items)
+		}
+		return items[i]
+	}
+	read(false, 0)
+	for range 30 {
+		read(true, 10*time.Minute)
+	}
+	if it := state("loki"); it.State != "ok" || it.Down {
+		t.Errorf("the rules failing five hours: Loki's rule files %s, down %v", it.State, it.Down)
+	}
+	read(false, time.Minute)
+	read(false, 20*time.Minute)
+	if got, want := sourceEvents(t, s), []string{"source.down rules", "source.back rules"}; !slices.Equal(got, want) {
+		t.Errorf("told %q, want %q", got, want)
+	}
+
+	// The time out before Loki's turn: held, not read, and not quiet five
+	// hours on.
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, _, err := s.readRules(gone); err == nil {
+		t.Fatal("a read with no time left read")
+	}
+	*clock = clock.Add(5 * time.Hour)
+	if it := state("loki"); it.State != "pending" || it.Down {
+		t.Errorf("held five hours: %s, down %v", it.State, it.Down)
+	}
+	read(false, 0)
+	if it := state("loki"); it.State != "ok" {
+		t.Errorf("read again: %s", it.State)
+	}
+}
+
+// The watch and the jobs each look at the sources, at once at times, each
+// at its own second: a source back is told back once between them.
+func TestSourceBackOnce(t *testing.T) {
+	ctx := context.Background()
+	s, clock := hookServer(t, nil)
+	for range sourceDownAfter {
+		s.noteRead("rules", time.Now(), 2, errors.New("the ruler answered 503"))
+	}
+	if err := s.tellSources(ctx); err != nil {
+		t.Fatal(err)
+	}
+	*clock = clock.Add(time.Minute)
+	s.noteRead("rules", time.Now(), 2, nil)
+	base := clock.Add(sourceBackAfter + time.Minute)
+	var ticks atomic.Int64
+	s.now = func() time.Time { return base.Add(time.Duration(ticks.Add(1)) * time.Second) }
+	const rounds = 10
+	for round := range rounds {
+		if round > 0 {
+			// Kept down again, nothing told: the next round tells it back.
+			if err := s.l.TellOnce(ctx, toldKey("rules"), "down", "source.down", nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Go(func() {
+				<-start
+				if err := s.tellSources(ctx); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		close(start)
+		wg.Wait()
+	}
+	backs := 0
+	for _, e := range sourceEvents(t, s) {
+		if e == "source.back rules" {
+			backs++
+		}
+	}
+	if backs != rounds {
+		t.Errorf("told back %d times in %d rounds", backs, rounds)
+	}
+}
+
+// An incidents id prefix nothing was written to in two days is down, and
+// told so; one nothing was written to in 14 days was an id's one-off
+// prefix, not a job's: left out of the list, and never told down.
+func TestSourceIntakeForgotten(t *testing.T) {
+	ctx := context.Background()
+	s, _ := hookServer(t, func(c *Config) {
+		c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, "incidents-token-0123456789")
+	})
+	for name, ago := range map[string]time.Duration{"PAY": time.Hour, "SEARCH": 3 * 24 * time.Hour, "oneoff": 15 * 24 * time.Hour} {
+		if err := s.l.NoteReceived(ctx, name, now.Add(-ago)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := s.sourceList(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []string
+	for _, it := range items {
+		if strings.HasPrefix(it.ID, "intake/") {
+			listed = append(listed, it.ID+" "+it.State)
+		}
+	}
+	if want := []string{"intake/PAY ok", "intake/SEARCH quiet"}; !slices.Equal(listed, want) {
+		t.Errorf("listed %q, want %q", listed, want)
+	}
+	if err := s.tellSources(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := sourceEvents(t, s); !slices.Equal(got, []string{"source.down intake/SEARCH"}) {
+		t.Errorf("told %q", got)
 	}
 }

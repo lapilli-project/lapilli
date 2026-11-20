@@ -107,8 +107,8 @@ filtered by who, kind, team and period, and `/api/v1/activity` exports it
 as JSON or CSV with the same filters (a cell a spreadsheet would take for
 a formula starts with `'`). The roles given and taken are an admin's to
 read, as on Run history. It is kept for `--keep-activity` (800 days
-unless given, never less than `--keep`; 0 keeps it all), past the
-firings it is about.
+unless given, or `--keep` when longer; never less than `--keep`; 0 keeps
+it all, as `--keep 0` does), past the firings it is about.
 
 Beside its firings, each rule's are counted as **episodes**, one problem
 however many alerts it is: its firings with the same values of the match

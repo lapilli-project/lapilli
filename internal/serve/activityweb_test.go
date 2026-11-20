@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -307,5 +308,35 @@ func TestActivityTeamBounded(t *testing.T) {
 	}
 	if !found || pages < 1 {
 		t.Errorf("payments' note not found in %d requests", pages+1)
+	}
+}
+
+// GET /api/v1/activity is worked out as a page is: with every page's turn
+// taken, it waits its turn and is answered 503, to try again; given one,
+// it answers, and gives the turn back. A team's changes come with their
+// before and after, read once each is kept.
+func TestActivityTakesATurn(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	was := renderWait
+	defer func() { renderWait = was }()
+	renderWait = 50 * time.Millisecond
+	for range pageRenders {
+		s.renders <- struct{}{}
+	}
+	if code, body := getAs(t, h, "/api/v1/activity?format=csv", vViewer); code != http.StatusServiceUnavailable || !strings.Contains(body, "busy with many pages at once") {
+		t.Errorf("all turns taken: %d %s", code, body)
+	}
+	<-s.renders
+	got, _ := activityOf(t, h, "team=payments", vViewer)
+	i := slices.IndexFunc(got, func(c apiLogged) bool { return strings.HasPrefix(c.What, "task ") })
+	if i < 0 || !strings.Contains(string(got[i].After), `"tune it"`) {
+		t.Errorf("payments' task without its after: %+v", got)
+	}
+	if len(s.renders) != pageRenders-1 {
+		t.Errorf("%d turns held, not %d", len(s.renders), pageRenders-1)
+	}
+	for range pageRenders - 1 {
+		<-s.renders
 	}
 }

@@ -177,8 +177,8 @@ or the `series` given; a rule whose replay differs over a week (`differs`,
 `serve.keep` (400 days) is how long firings, runs and what goes with them
 are kept; `serve.keepActivity` the activity log, who changed what, never
 less than `serve.keep` (`--keep-activity`; empty, or left out by a release
-upgraded with `--reuse-values`, for serve's own 800 days; `0` keeps it
-all).
+upgraded with `--reuse-values`, for serve's own: 800 days, or `serve.keep`
+when longer; `0` keeps it all; with `serve.keep: 0`, left empty).
 
 `serve.ledger.postgres` keeps the ledger in a Postgres database, 15 or later,
 rather than on a PersistentVolumeClaim (`docs/design/postgres.md`):

@@ -24,8 +24,9 @@ import (
 // sourceRead is how reading a source went, as the replica that reads it
 // (the leader) saw: when it last read well (OK); when a read last failed
 // (Failed) and why (Err); how many reads in a row failed since (InARow);
-// the rules the last read gave (Rules, -1 for a source of no rules); and
-// how long the last read took.
+// the rules the last read gave (Rules, -1 for a source of no rules); how
+// long the last read took; and Held, that its last turn to be read was
+// passed over, the time for it spent by another (noteHeld).
 type sourceRead struct {
 	OK     time.Time     `json:"ok,omitzero"`
 	Failed time.Time     `json:"failed,omitzero"`
@@ -33,6 +34,7 @@ type sourceRead struct {
 	InARow int           `json:"in_a_row,omitempty"`
 	Rules  int           `json:"rules"`
 	Took   time.Duration `json:"took,omitempty"`
+	Held   bool          `json:"held,omitempty"`
 }
 
 // readsState is what this replica saw of the sources it reads itself,
@@ -54,13 +56,27 @@ func (s *Server) noteRead(id string, began time.Time, rules int, err error) {
 		s.reads.m = map[string]sourceRead{}
 	}
 	x := s.reads.m[id]
-	x.Took = time.Since(began)
+	x.Took, x.Held = time.Since(began), false
 	if err != nil {
 		x.Failed, x.Err = s.now(), err.Error()
 		x.InARow++
 	} else {
 		x.OK, x.Err, x.InARow, x.Rules = s.now(), "", 0, rules
 	}
+	s.reads.m[id] = x
+}
+
+// noteHeld keeps that the source id wasn't read in its turn, the time
+// for it spent by another source: until it is read, it is waiting, not
+// quiet, however long since it last read well, and isn't down for it.
+func (s *Server) noteHeld(id string) {
+	s.reads.Lock()
+	defer s.reads.Unlock()
+	if s.reads.m == nil {
+		s.reads.m = map[string]sourceRead{}
+	}
+	x := s.reads.m[id]
+	x.Held = true
 	s.reads.m[id] = x
 }
 
@@ -97,6 +113,11 @@ const (
 	// told down again, at the soonest: one that goes down, back and down
 	// again is told of once an hour at most, and is shown down meanwhile.
 	sourceRenotify = time.Hour
+	// intakeForgotten is how long an incidents id prefix nothing was
+	// written to since is listed (--keep when shorter): past it, it was no
+	// job's that stopped but an id's one-off prefix, and is left out, not
+	// told down.
+	intakeForgotten = 14 * 24 * time.Hour
 )
 
 // sourceItem is a source as the Sources page and the API show it.
@@ -138,7 +159,8 @@ type sourceItem struct {
 	// Where is, for an admin alone, the path or address it is read from.
 	Where string `json:"where,omitempty"`
 	// counted says Failures is counted; held, that the runs wait (--guard,
-	// a 429 yielded to), so that Prometheus not read meanwhile isn't quiet.
+	// a 429 yielded to), so that Prometheus not read meanwhile isn't quiet,
+	// or that a source read beside the rules was passed over (noteHeld).
 	counted, held bool
 }
 
@@ -159,7 +181,7 @@ func (s *Server) sourceList(ctx context.Context) ([]sourceItem, error) {
 	var out []sourceItem
 	read := func(id, kind, name, from, where string, rules bool) *sourceItem {
 		x, ok := reads[id]
-		it := sourceItem{ID: id, Kind: kind, Name: name, From: from, Where: where, counted: true, Failures: x.InARow}
+		it := sourceItem{ID: id, Kind: kind, Name: name, From: from, Where: where, counted: true, Failures: x.InARow, held: x.Held}
 		if ok {
 			it.LastOK, it.LastFailed, it.LastError = x.OK, x.Failed, x.Err
 			if rules && !x.OK.IsZero() {
@@ -248,7 +270,14 @@ func (s *Server) sourceList(ctx context.Context) ([]sourceItem, error) {
 		if err != nil {
 			return nil, err
 		}
+		forgotten := intakeForgotten
+		if s.cfg.Keep > 0 {
+			forgotten = min(forgotten, s.cfg.Keep)
+		}
 		for _, name := range slices.Sorted(maps.Keys(received)) {
+			if now.Sub(received[name]) > forgotten {
+				continue
+			}
 			it := sourceItem{ID: "intake/" + name, Kind: "incidents", Name: name + "-", Raw: true, From: "--incidents-token-file", LastOK: received[name], Failures: -1}
 			switch name {
 			case "":
@@ -404,19 +433,29 @@ var sourceErrors = []string{"reading the rules", "a run", "incidents", "deploys"
 func errOfSource(what string) bool { return slices.Contains(sourceErrors, what) }
 
 // secrets are what may stand for a credential in an error or an address:
-// a URL's user and password, a query's token, key, secret, password or
-// signature, and a bearer or basic token.
+// a URL's user and password; a query's token, key, secret, password,
+// signature or code (an Azure Function's key); the same name given as
+// name=value between spaces, or as a JSON string; a header such as
+// api-key or x-api-key; and a bearer or basic token.
 var (
 	secretUser  = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@"'<>]+@`)
-	secretQuery = regexp.MustCompile(`(?i)([?&;][A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|sig|credential)[A-Za-z0-9_.-]*=)[^&\s"'<>]+`)
+	secretQuery = regexp.MustCompile(`(?i)([?&;](?:[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|sig|credential)[A-Za-z0-9_.-]*|code)=)[^&\s"'<>]+`)
+	secretSaid  = regexp.MustCompile(`(?i)((?:^|[\s,(])[A-Za-z0-9_.-]*(?:token|secret|passw|pwd|credential|api[_-]?key|access[_-]?key)[A-Za-z0-9_.-]*=)[^\s&"'<>,;)]+`)
+	secretJSON  = regexp.MustCompile(`(?i)(\\?"[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|credential)[A-Za-z0-9_.-]*\\?"\s*:\s*\\?")[^"\\]*`)
+	secretHead  = regexp.MustCompile(`(?i)\b((?:[A-Za-z0-9]+-)+(?:key|token|secret|password|signature)\s*:\s*)[^\s"'<>,;]+`)
 	secretToken = regexp.MustCompile(`(?i)\b(bearer|basic|token)(\s+|=|:\s*)[A-Za-z0-9._~+/=-]{12,}`)
 )
 
 // scrubSecrets is a text with what may be a credential in it said as ***,
 // for every reader, an admin too: a source's error or address shows none.
+// It goes by patterns, and takes out more than a credential where a name
+// only looks like one's.
 func scrubSecrets(text string) string {
 	text = secretUser.ReplaceAllString(text, "${1}***@")
 	text = secretQuery.ReplaceAllString(text, "${1}***")
+	text = secretSaid.ReplaceAllString(text, "${1}***")
+	text = secretJSON.ReplaceAllString(text, "${1}***")
+	text = secretHead.ReplaceAllString(text, "${1}***")
 	return secretToken.ReplaceAllString(text, "${1}${2}***")
 }
 
@@ -565,7 +604,9 @@ func (s *Server) tellSources(ctx context.Context) error {
 		for _, d := range dests {
 			told = append(told, ledger.Told{Dest: d, About: map[string]any{"source_read": n}})
 		}
-		if err := s.l.TellOnce(ctx, toldKey(it.ID), value, event, told); err != nil {
+		// Told only while what was read is kept still: a call a moment
+		// before this one (the watch's, and the jobs') told it already.
+		if err := s.l.TellFrom(ctx, toldKey(it.ID), was, value, event, told); err != nil {
 			return err
 		}
 	}

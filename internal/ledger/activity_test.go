@@ -88,6 +88,45 @@ func TestActivity(t *testing.T) {
 	}
 }
 
+// Read Light, a change's before and after are left out but a bulk
+// verdict's after, which says its rules; ActivityBodies fills them in for
+// the changes kept, by id.
+func TestActivityLight(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	t0 := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range [][3]string{
+		{"setting lead", `"5m"`, `"10m"`},
+		{"verdicts: needed action yes, on 1 firings of 1 rules", "", `{"firings":[{"rule":"Errors"}]}`},
+		{"task 3 changed", `{"title":"w"}`, `{"title":"x"}`},
+	} {
+		if _, err := l.w.ExecContext(ctx, "INSERT INTO changes (at, by, what, before, after) VALUES (?, ?, ?, ?, ?)", t0.Unix(), "ana", c[0], c[1], c[2]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := l.Activity(ctx, ActivityQuery{Light: true})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("%v %v", got, err)
+	}
+	bodies := func() []string {
+		var out []string
+		for _, c := range got {
+			out = append(out, c.Before+"|"+c.After)
+		}
+		return out
+	}
+	// The latest first: the task, the bulk verdict, the setting.
+	if want := []string{"|", `|{"firings":[{"rule":"Errors"}]}`, "|"}; !slices.Equal(bodies(), want) {
+		t.Errorf("read light: %q, want %q", bodies(), want)
+	}
+	if err := l.ActivityBodies(ctx, got[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{`{"title":"w"}|{"title":"x"}`, `|{"firings":[{"rule":"Errors"}]}`, "|"}; !slices.Equal(bodies(), want) {
+		t.Errorf("the first two filled in: %q, want %q", bodies(), want)
+	}
+}
+
 // What a change is of: the rules, a task or a proposal, for the activity
 // log's team.
 func TestChangeSubject(t *testing.T) {

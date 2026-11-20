@@ -927,18 +927,27 @@ the rules the last read gave, how far behind it is where that is known
 (the runs' cursor; a source's furthest period copied in) and how long its
 last read took. Its state is one of the incident sources' (statusKinds'
 `source/…`): working, failing (its last read failed), quiet (nothing read
-or written past its bound), waiting (not read yet, or the runs held by
-`--guard` or a 429). The rules and what is read beside them are read in
-one go, which fails whole, so a source after the one that failed keeps its
-last read until the next.
+or written past its bound), waiting (not read yet, the runs held by
+`--guard` or a 429, or a source beside the rules held, below). The rules
+and what is read beside them make one version, which a read that fails
+anywhere fails whole, so the version stays as it was; each is read all the
+same, its read noted, whichever of the others failed, so that one source
+failing never makes another look quiet or down. One the minute the reads
+get ran out on before its turn is held (`noteHeld`): not read, waiting,
+and not aging, until its next read.
 
 A source's error is said as Run history says a run's (`runsFor`): the
 paths of the files `serve` was started with to an admin alone, each by its
 flag to anyone else, and why the ledger's database can't be reached in a
 few fixed words. On this page, the API and in a notice, what may be a
 credential is `***` to everyone, an admin too: a URL's user and password,
-a query's token, key, secret, password, signature or credential, a bearer
-or basic token of 12 characters or more (`scrubSecrets`). Where a source
+a query's token, key, secret, password, signature or credential, and its
+`code` (an Azure Function's key); such a name given as `name=value`
+between spaces (a connection string's `password=`) or as a JSON string
+(`"token":"…"`, escaped or not); a header such as `api-key:` or
+`x-api-key:`; a bearer or basic token of 12 characters or more
+(`scrubSecrets`). It goes by patterns, and takes out more than a
+credential where a name only looks like one's. Where a source
 is read (its path or address) is an admin's alone, scrubbed too. The page
 is worked out as it is asked, never kept (what a source's reads came to is
 no write a kept page would be told by), and so is the API's `all=true`;
@@ -957,7 +966,11 @@ read well past its bound, or, never having read well, since this replica
 first saw it failing; and when it is quiet. The bounds are the impact
 signal's (`impactStale`: two runs, the hours they settle, and one more),
 and for what a job writes, its own: two days for incidents through the
-port (`receivedQuiet`), `--source-quiet` for firings.
+port (`receivedQuiet`), `--source-quiet` for firings. An incidents id
+prefix nothing was written to in 14 days (`intakeForgotten`, or `--keep`
+when shorter) is left out of the list, and not told down: it was an id's
+one-off prefix, not a job's that stopped, and anyone with the incidents
+token can make 63 of them.
 
 The leader tells the webhook and Slack `source.down`, once, and
 `source.back` once it has read well for 15 minutes since its last failure
@@ -965,7 +978,10 @@ The leader tells the webhook and Slack `source.down`, once, and
 state, last read well, reads failed in a row, and its error as anyone but
 an admin is shown it). What was last told of each is kept in `meta`
 (`source-told.ID`: `down`, or `up` and when), so a source stays told down
-across restarts and leaders, and isn't told again while it is. A source
+across restarts and leaders, and isn't told again while it is. What is
+told is written, and kept, only while `meta` holds what the look read, in
+the same write (`TellFrom`): the watch and the jobs each look, at once at
+times, and tell a source back once between them. A source
 told back is told down again no sooner than an hour after
 (`sourceRenotify`): one that fails three reads, reads one, and fails again,
 over and over, is told down once, and one that goes down every twenty
@@ -990,7 +1006,9 @@ where the last ended (`before`, its last change's time and id), so a
 change made meanwhile neither repeats one nor hides one. A team's changes
 are found by looking through the others: a request looks through 20,000
 at most, and looks up 200 tasks and proposals at most for their team,
-then says where it stopped, and the next request goes on from there.
+then says where it stopped, and the next request goes on from there; it
+reads the before and after of a change it keeps alone, not of each it
+looks through (but a bulk verdict's after, which says its rules).
 
 `GET /api/v1/activity` gives the same, with the same filters: `limit` (1
 to 1,000), as JSON (`activity`, each with its id, `at`, `by`, `kind`,
@@ -1002,12 +1020,18 @@ a cell starts with `'`, which a spreadsheet shows as text (CSV injection).
 Who reads Run history reads it: a viewer. The roles given and taken are an
 admin's, as there (`changesSeen`), and to anyone else the paths of `serve`'s
 files are their flags. Neither is kept by a cache: `Cache-Control:
-no-store`.
+no-store`. The export is worked out as a page is, a few at a time: it
+takes a page's turn (`pageRenders`), 503 past the wait, and gives it back
+once the answer is written out, before it goes to the network.
 
 **Builder's decision: the activity log outlives the firings.**
-`--keep-activity` (`serve.keepActivity`, 800 days unless given; 0 keeps it
-all) is how long it is kept, never less than `--keep` (a shorter one is
-refused as `serve` starts); with `--keep 0` nothing is pruned, as before.
+`--keep-activity` (`serve.keepActivity`) is how long it is kept: unless
+given, 800 days, or `--keep` when that is longer, so that an install with
+a longer `--keep` starts as it did; 0 keeps it all. One given shorter than
+`--keep` is refused as `serve` starts, and so is one given beside `--keep
+0`, which prunes nothing, the activity log neither: refused rather than
+pruned alone, which would drop who changed what before the firings it was
+about.
 Who changed a rule's threshold is asked long after its firings are gone,
 and a change is a row of a few hundred bytes: a person writing 30
 verdicts every hour of a year keeps some 260,000 rows, under 100 MB.
@@ -1063,3 +1087,33 @@ Read as an attacker would, once built:
 - **A write past its form.** The routes take the form's role, a team's
   editor refused as the form refuses them, and the ledger's checks
   (`TestAPIDecide`, `TestAPIReal`).
+
+Read so again, once built:
+
+- **An upgrade that wouldn't start.** `--keep-activity` was 800 days unless
+  given, and refused shorter than `--keep`: a `--keep` past 800 days
+  stopped `serve` starting, naming a flag no one gave. Unless given, it is
+  `--keep` when longer; one given shorter is refused, and one given beside
+  `--keep 0` too, as it would do nothing (`TestServeKeepActivity`).
+- **One source making others look down.** The rules failing stopped what
+  is read beside them being read, and the first `--alarms` failing those
+  after it: five hours of broken rule files told Loki's files down, then
+  back. Each is read, and noted, by itself; one the time ran out on before
+  its turn is held (`TestSourceBesideAFailingOne`,
+  `TestAlarmsBesideAFailingOne`).
+- **An export with no turn.** `GET /api/v1/activity` took no page's turn:
+  any number at once could each look through 20,000 changes, before and
+  after with them. It takes one, and a team's changes are looked through
+  without their before and after (`TestActivityTakesATurn`,
+  `TestActivityLight`).
+- **Credentials in other forms.** An Azure Function's `?code=`, a
+  `password=` between spaces, a JSON `"token"`, an `x-api-key:` header
+  went through as said (`TestScrubSecrets`).
+- **Back told twice.** The watch and the jobs each look at the sources:
+  two looks a second apart each read `down`, and each told back with its
+  own time. Told only while `meta` holds what was read
+  (`TestSourceBackOnce`, `TestTellFrom`).
+- **One-off prefixes down for ever.** An incident id's one-off prefix,
+  of the 63 the incidents token can make, was down on the page for ever:
+  left out after 14 days, and never told down past it
+  (`TestSourceIntakeForgotten`).
