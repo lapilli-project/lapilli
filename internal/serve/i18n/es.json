@@ -2186,6 +2186,8 @@
  "the config file": "el archivo de config",
  "the path given to %s": "la ruta dada a %s",
  "can't reach the ledger's database; an admin sees why": "no se puede conectar con la base de datos del registro; un administrador ve por qué",
+ "%s can't be read as an expectations file; an admin sees why": "%s no se puede leer como archivo de expectativas; un administrador ve por qué",
+ "the expectations of --expect and --config can't be held together; an admin sees why": "las expectativas de --expect y --config no se pueden aplicar juntas; un administrador ve por qué",
  "the ledger keeps a signal named %s, or the windows of one since taken away: give it another name": "el registro guarda una señal llamada %s, o las ventanas de una ya quitada: dale otro nombre",
  "more than %d named signals: take one away first": "más de %d señales con nombre: quita una primero",
  "named impact signals are in effect: one with no name doesn't go beside them; change them under Impact signals": "hay señales de impacto con nombre en vigor: una sin nombre no va junto a ellas; cámbialas en Señales de impacto",

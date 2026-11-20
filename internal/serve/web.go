@@ -1156,6 +1156,16 @@ func (s *Server) statusView(l string, adminReads bool) statusView {
 			// and as whom serve connects: the server's address, and what
 			// it answered, which can name the user and the database.
 			why = tr(l, unreachedText)
+		case st.ErrWhat == expectReading && strings.HasPrefix(st.Err, expectHeldBad):
+			// What --expect and --config's expectations can't hold
+			// together, which names what --config declares: an admin's, as
+			// a --config problem's text is.
+			why = tr(l, "the expectations of --expect and --config can't be held together; an admin sees why")
+		case st.ErrWhat == expectReading:
+			// Why --expect can't be read is what the file holds, or
+			// where it is: only that it can't, by its path as anyone but
+			// an admin reads it, as a --config file's is said.
+			why = tr(l, "%s can't be read as an expectations file; an admin sees why", s.redactPaths(s.cfg.Expect, l))
 		default:
 			// The paths of the files serve was started with (sources.go).
 			why = s.redactPaths(why, l)
@@ -1165,6 +1175,15 @@ func (s *Server) statusView(l string, adminReads bool) statusView {
 	}
 	return v
 }
+
+// expectReading is what the status line says failed when --expect, or it
+// and --config's expectations together, can't be read (expectAfter);
+// expectHeldBad begins what it says of the second. statusView says either
+// to anyone but an admin without what the files hold.
+const (
+	expectReading = "reading the expectations"
+	expectHeldBad = "--expect and --config's expectations: "
+)
 
 // unreachedText is why the ledger's database can't be reached, as it is
 // said to anyone but an admin.

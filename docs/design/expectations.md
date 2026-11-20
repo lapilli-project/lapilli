@@ -374,7 +374,9 @@ Step 2, serve's checks after deploy, as built:
   `serve.expectations`, a ConfigMap of its own) is read every 15 s and
   kept to once read the same twice in a row, 15 s apart, as `--config` is;
   one that can't be read changes nothing and is said (the status line,
-  logged once). `expectations:` in `--config` is read as an expectations
+  logged once): why, to an admin; to anyone else only that the file, by
+  its path as they read it, can't be read, as a `--config` file's problem
+  is said, and so what it and `--config`'s can't hold together. `expectations:` in `--config` is read as an expectations
   file is, strictly (a key an entry doesn't have is refused with its line
   in the config), and kept to as the ledger is kept to the config. The two
   are one list, read as one file (`verdict.NewExpectations`): a rule's, a

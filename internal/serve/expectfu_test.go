@@ -1,11 +1,14 @@
 package serve
 
 import (
+	"context"
 	"html"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/scenario/scenariotest"
 )
@@ -79,5 +82,48 @@ func TestExpectationReasonsInLanguage(t *testing.T) {
 		if l != "en" && (strings.Contains(body, "<code>no such file</code>") || strings.Contains(body, ">fails<") || strings.Contains(body, ", fails")) {
 			t.Errorf("%s: Lapilli's words in English", l)
 		}
+	}
+}
+
+// Why --expect can't be read is said on the status line to an admin; to
+// anyone else, only that the file, by its path as they read it, can't be,
+// as a --config file's problem is said: what it holds, or where it is,
+// isn't theirs to read. So is what it and --config's expectations can't
+// hold together, which names what --config declares.
+func TestExpectUnreadToReaders(t *testing.T) {
+	s := expectServer(t, theExpectations, false)
+	os.WriteFile(s.cfg.Expect, []byte("expectations:\n  - rule: Paged\n    budjet: {week: 1}\n"), 0o600)
+	s.readExpect()
+	if err := s.expectAfter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.statusView("en", true); !strings.Contains(st.Err, "budjet") || !strings.Contains(st.Err, s.cfg.Expect) {
+		t.Errorf("to an admin: %q", st.Err)
+	}
+	for l, want := range map[string]string{
+		"en": "reading the expectations: the path given to --expect can't be read as an expectations file; an admin sees why",
+		"ko": "기대치 읽기: 기대치 파일(--expect 에 준 경로)을 읽을 수 없어요. 이유는 관리자가 볼 수 있어요",
+	} {
+		if st := s.statusView(l, false); st.Err != want {
+			t.Errorf("%s, to a viewer: %q", l, st.Err)
+		}
+	}
+	// Read again, and held together with --config's, with the same budget
+	// given twice.
+	os.WriteFile(s.cfg.Expect, []byte(theExpectations), 0o600)
+	expectReadTwice(t, s)
+	cfg, err := ParseConfig([]byte("expectations:\n  - rule: Noise\n    budget: {refires: 5}\n"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.keptConfig(cfg.Expectations)
+	if err := s.expectAfter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.statusView("en", true); !strings.Contains(st.Err, "a budget of re-fires given twice") {
+		t.Errorf("to an admin: %q", st.Err)
+	}
+	if st := s.statusView("en", false); st.Err != "reading the expectations: the expectations of --expect and --config can't be held together; an admin sees why" {
+		t.Errorf("to a viewer: %q", st.Err)
 	}
 }

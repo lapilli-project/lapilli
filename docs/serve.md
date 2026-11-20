@@ -268,6 +268,7 @@ pull request's backtest holds it before (docs/design/expectations.md):
 `--expect FILE` takes the expectations file `lapilli verdict --expect`
 takes, read again every 15s and kept to once read the same twice in a
 row, as `--config` is (the chart's `serve.expectations`, a ConfigMap).
+One that can't be read is said on the status line, why to admins alone.
 Rules kept only in Grafana or a ruler can be held under `expectations:`
 in `--config`; a rule can carry its own budget in its annotation
 `lapilli.dev/budget: "10/week, 2 asleep, 3 refires"`. An expectation names

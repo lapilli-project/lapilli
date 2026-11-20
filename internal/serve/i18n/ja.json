@@ -2186,6 +2186,8 @@
  "the config file": "config ファイル",
  "the path given to %s": "%s に渡したパス",
  "can't reach the ledger's database; an admin sees why": "台帳のデータベースに接続できません。理由は管理者が確認できます",
+ "%s can't be read as an expectations file; an admin sees why": "%s を期待値ファイルとして読めません。理由は管理者が確認できます",
+ "the expectations of --expect and --config can't be held together; an admin sees why": "--expect と --config の期待値を合わせて使えません。理由は管理者が確認できます",
  "the ledger keeps a signal named %s, or the windows of one since taken away: give it another name": "台帳には %s という指標、または外した指標のウィンドウが残っています: 別の名前にしてください",
  "more than %d named signals: take one away first": "名前付きの指標が %d 個を超えます: まず 1 つ外してください",
  "named impact signals are in effect: one with no name doesn't go beside them; change them under Impact signals": "名前付きの影響指標が有効です: 名前のない指標は併用できません。影響指標の欄で変更してください",

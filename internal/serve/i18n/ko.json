@@ -2186,6 +2186,8 @@
  "the config file": "config 파일",
  "the path given to %s": "%s 에 준 경로",
  "can't reach the ledger's database; an admin sees why": "기록 데이터베이스에 연결할 수 없어요. 이유는 관리자가 볼 수 있어요",
+ "%s can't be read as an expectations file; an admin sees why": "기대치 파일(%s)을 읽을 수 없어요. 이유는 관리자가 볼 수 있어요",
+ "the expectations of --expect and --config can't be held together; an admin sees why": "--expect 와 --config 의 기대치를 함께 적용할 수 없어요. 이유는 관리자가 볼 수 있어요",
  "the ledger keeps a signal named %s, or the windows of one since taken away: give it another name": "%s 라는 지표, 또는 이미 뺀 지표의 구간이 기록에 남아 있어요: 다른 이름을 쓰세요",
  "more than %d named signals: take one away first": "이름 있는 지표가 %d개를 넘어요: 먼저 하나를 빼세요",
  "named impact signals are in effect: one with no name doesn't go beside them; change them under Impact signals": "이름 있는 영향 지표가 적용 중이에요: 이름 없는 지표는 함께 쓸 수 없어요. 영향 지표 항목에서 바꾸세요",
