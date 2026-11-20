@@ -499,3 +499,35 @@ func TestGetSaysNoOtherHost(t *testing.T) {
 		t.Errorf("a name that doesn't resolve: %v", err)
 	}
 }
+
+// A token that names no key (kid) is tried against the first ciNoKid keys
+// of the issuer's alone, not each of a hundred: one sent by anyone, before
+// anyone is known, costs a few signatures checked at most.
+func TestCINoKidTriesFewKeys(t *testing.T) {
+	idp, _, _ := newCI(t, "")
+	set := []jose.JSONWebKey{{Key: &idp.Key.PublicKey, KeyID: idp.KID, Algorithm: "RS256", Use: "sig"}}
+	var last *rsa.PrivateKey
+	for i := range ciNoKid + 2 {
+		k, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatal(err)
+		}
+		set, last = append(set, jose.JSONWebKey{Key: &k.PublicKey, KeyID: "ci-key-" + string(rune('a'+i)), Algorithm: "RS256", Use: "sig"}), k
+	}
+	keys := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: set})
+	}))
+	defer keys.Close()
+	ci := &CI{Issuer: idp.Issuer, JWKS: keys.URL + "/keys", Client: Client(nil), Now: idp.Now}
+	now := idp.Now()
+	claims := map[string]any{"iss": idp.Issuer, "aud": ciAudience, "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix()}
+	if _, err := ci.Verify(context.Background(), idptest.Sign(idp.Key, "", jose.RS256, claims), ciAudience); err != nil {
+		t.Errorf("no kid, signed by the set's first key: %v", err)
+	}
+	if _, err := ci.Verify(context.Background(), idptest.Sign(last, "", jose.RS256, claims), ciAudience); err == nil {
+		t.Errorf("no kid, signed by the set's key %d: taken, past the first %d tried", len(set), ciNoKid)
+	}
+	if _, err := ci.Verify(context.Background(), idptest.Sign(last, set[len(set)-1].KeyID, jose.RS256, claims), ciAudience); err != nil {
+		t.Errorf("its kid named, signed by the set's key %d: %v", len(set), err)
+	}
+}
