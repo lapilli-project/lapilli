@@ -608,25 +608,7 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 		held := false
 		judge := func(it item, beforeLimit item, r ExpectResult) ExpectResult {
 			if it.scenario != "" {
-				var sb, sa ScenarioResult
-				r.Before, r.BeforeState = "–", ExpectAbsent
-				if b != nil {
-					sb = run.RunScenario("before", beforeLimit.fromBefore, rc.Rule, beforeLimit.scenario)
-					r.Before, r.BeforeState, r.BeforeWhy = scenarioShown(sb)
-				}
-				r.After, r.AfterState = "taken away", ExpectBroken
-				if a != nil {
-					sa = run.RunScenario("after", it.fromBefore, rc.Rule, it.scenario)
-					r.After, r.AfterState, r.AfterWhy = scenarioShown(sa)
-					// Run before the change and not known after it (the change
-					// moved the rule out of Prometheus's format, or its
-					// definition out of reach) can't be judged either: the
-					// gate fails closed, as on a run that failed.
-					ranBefore := sb.State == ExpectMet || sb.State == ExpectBroken
-					r.Said, r.Unrun = sa.Said, (sa.Unrun || ranBefore && sa.State == ExpectUnknown) && !r.Removed
-				}
-				r.Edited = sb.Test != "" && sa.Test != "" && sb.Test != sa.Test
-				return r
+				return judgeScenario(run, rc.Rule, b != nil, a != nil, it, beforeLimit, r)
 			}
 			if it.catch != nil {
 				r.Before, r.BeforeState = catchState(c.Before, incsB, b, rc.Rule, *beforeLimit.catch)
@@ -724,10 +706,136 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 			out.Unexpected = append(out.Unexpected, rc.Rule)
 		}
 	}
+	if err := out.editedScenarios(c, run, after, before); err != nil {
+		return nil, err
+	}
 	if len(out.Results) > MaxExpectResults {
 		return nil, errHeldTooMuch
 	}
 	return out, nil
+}
+
+// judgeScenario runs a scenario of a rule on each side it is on (before,
+// after), held to it (it, after's; beforeLimit, before's), into r.
+func judgeScenario(run ScenarioRunner, rule string, before, after bool, it, beforeLimit item, r ExpectResult) ExpectResult {
+	var sb, sa ScenarioResult
+	r.Before, r.BeforeState = "–", ExpectAbsent
+	if before {
+		sb = run.RunScenario("before", beforeLimit.fromBefore, rule, beforeLimit.scenario)
+		r.Before, r.BeforeState, r.BeforeWhy = scenarioShown(sb)
+	}
+	r.After, r.AfterState = "taken away", ExpectBroken
+	if after {
+		sa = run.RunScenario("after", it.fromBefore, rule, it.scenario)
+		r.After, r.AfterState, r.AfterWhy = scenarioShown(sa)
+		// Run before the change and not known after it (the change
+		// moved the rule out of Prometheus's format, or its
+		// definition out of reach) can't be judged either: the
+		// gate fails closed, as on a run that failed.
+		ranBefore := sb.State == ExpectMet || sb.State == ExpectBroken
+		r.Said, r.Unrun = sa.Said, (sa.Unrun || ranBefore && sa.State == ExpectUnknown) && !r.Removed
+	}
+	r.Edited = sb.Test != "" && sa.Test != "" && sb.Test != sa.Test
+	return r
+}
+
+// TestEditor is a ScenarioRunner that reads each side's test files
+// (scenario.Sides): TestEdited says a scenario's differs between them, by
+// what it holds, before's path read where fromBefore says
+// (--expect-before's directory, or --expect's), after's in --expect's.
+type TestEditor interface {
+	TestEdited(fromBefore bool, before, after string) bool
+}
+
+// AlikeRule is a rule alike on both sides of a change, as an expectation
+// holds it: its name, group and the labels its alerts carry.
+type AlikeRule struct {
+	Name, Group string
+	Labels      map[string]string
+}
+
+// AlikeRules are rules as Comparison.Alike gives them.
+func AlikeRules(rs []rules.Rule) []AlikeRule {
+	out := make([]AlikeRule, 0, len(rs))
+	seen := map[string]bool{}
+	for _, r := range rs {
+		if seen[r.Name] {
+			continue
+		}
+		seen[r.Name] = true
+		out = append(out, AlikeRule{Name: r.Name, Group: r.Group, Labels: cmpOr(r.AlertLabels(), map[string]string{})})
+	}
+	return out
+}
+
+// editedScenarios holds the rules a change left alone (c.Alike) to the
+// scenarios whose test files it edited, as the runner reads each side's
+// (TestEditor): each such scenario of a rule run before and after, the
+// rule alike on both sides, so that a pull request editing only a test
+// file is judged by it. Nothing else of the rule is held: it wasn't
+// replayed.
+func (out *Checked) editedScenarios(c *Comparison, run ScenarioRunner, after, before *Expectations) error {
+	ed, ok := run.(TestEditor)
+	if !ok || len(c.Alike) == 0 {
+		return nil
+	}
+	type edited struct {
+		x     *Expectation
+		items [][2]item // after's, and before's
+	}
+	var eds []edited
+	for i := range after.Expectations {
+		x := &after.Expectations[i]
+		if len(x.Scenarios) == 0 {
+			continue
+		}
+		was := x
+		if before != nil {
+			was = nil
+			for j := range before.Expectations {
+				if before.Expectations[j].same(*x) {
+					was = &before.Expectations[j]
+					break
+				}
+			}
+		}
+		old := map[string]item{}
+		for _, it := range was.itemsFrom(before != nil) {
+			old[it.what] = it
+		}
+		e := edited{x: x}
+		for _, it := range x.items() {
+			if it.scenario == "" {
+				continue
+			}
+			// New in the change: read in after's directory on both sides.
+			bl, ok := old[it.what]
+			if !ok {
+				bl = it
+			}
+			if ed.TestEdited(bl.fromBefore, bl.scenario, it.scenario) {
+				e.items = append(e.items, [2]item{it, bl})
+			}
+		}
+		if len(e.items) > 0 {
+			eds = append(eds, e)
+		}
+	}
+	for _, r := range c.Alike {
+		for _, e := range eds {
+			if !e.x.Holds(r.Name, r.Group, r.Labels) {
+				continue
+			}
+			for _, p := range e.items {
+				if len(out.Results) > MaxExpectResults {
+					return errHeldTooMuch
+				}
+				res := ExpectResult{Rule: r.Name, What: p[0].what, Limit: p[0].limitText()}
+				out.Results = append(out.Results, judgeScenario(run, r.Name, true, true, p[0], p[1], res))
+			}
+		}
+	}
+	return nil
 }
 
 // scenarioShown is a scenario's result as a side shows it: passes, fails,

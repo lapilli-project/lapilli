@@ -161,6 +161,65 @@ func TestMakeExpectTask(t *testing.T) {
 	}
 }
 
+// A catch's or a scenario's row that moves to another week takes what was
+// told of it and its task with it, in SQLite or, with
+// LAPILLI_TEST_POSTGRES, in Postgres: no task is made again while it is
+// open, nothing told again; a row turned met is told again when next
+// broken, in a later week.
+func TestKeepExpectMovedRow(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	w := Week(l.Day(t0))
+	sc := ExpectCheck{Rule: "Restarts", Expect: ExpectHash("rule: Restarts", "scenario tests/r.yaml", "passes"), Week: w - 7,
+		What: "scenario tests/r.yaml", Held: "passes", Selector: "rule: Restarts", Source: "file", Result: ExpectBroken, Value: "fails", Version: "a"}
+	keep := func(c ExpectCheck, this int64) ExpectCheck {
+		t.Helper()
+		old, err := l.ExpectChecks(ctx, ExpectQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.KeepExpectChecks(ctx, []ExpectCheck{c}, old, this-12*7, this, t0); err != nil {
+			t.Fatal(err)
+		}
+		all, err := l.ExpectChecks(ctx, ExpectQuery{})
+		if err != nil || len(all) != 1 {
+			t.Fatalf("%+v %v", all, err)
+		}
+		return all[0]
+	}
+	keep(sc, w-7)
+	id, err := l.MakeExpectTask(ctx, Task{Title: "Restarts fails", Kind: "tune", Rule: "Restarts"}, sc.Key(), w-7, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.TellExpectBroken(ctx, []ExpectKey{sc.Key()}, w-7, [][]Told{nil}); err != nil {
+		t.Fatal(err)
+	}
+	// Found again a week on, failing still.
+	moved := sc
+	moved.Week, moved.Version = w, "b"
+	if c := keep(moved, w); c.Week != w || c.Task != id || c.Tasked != w-7 || c.Told != w-7 {
+		t.Fatalf("moved: %+v", c)
+	}
+	if again, err := l.MakeExpectTask(ctx, Task{Title: "again", Kind: "tune", Rule: "Restarts"}, moved.Key(), w, "ana"); !errors.Is(err, ErrExpectTaskOpen) || again != id {
+		t.Errorf("another while one is open: %d %v", again, err)
+	}
+	if open, err := l.OpenExpectTasks(ctx); err != nil || open[moved.Key()] != id {
+		t.Errorf("open: %v %v", open, err)
+	}
+	// Met a week on, then broken the week after: told again, the task kept.
+	met := moved
+	met.Week, met.Result, met.Value, met.Version = w+7, ExpectMet, "passes", "c"
+	if c := keep(met, w+7); c.Told != 0 || c.Task != id {
+		t.Errorf("met: %+v", c)
+	}
+	broken := sc
+	broken.Week, broken.Version = w+14, "d"
+	if c := keep(broken, w+14); c.Told != 0 || c.Task != id {
+		t.Errorf("broken again: %+v", c)
+	}
+}
+
 // The incidents a catch names are found by their ids, counted ones alone,
 // with what caught them.
 func TestIncidentsByKey(t *testing.T) {
@@ -184,9 +243,14 @@ func TestExpectQueriesIndexed(t *testing.T) {
 		{"SELECT " + expectCols + " FROM expectation_checks WHERE " + l.d.pick("rule = ?1", "md5(rule) = md5(?1) AND rule = ?1"), "expectation_checks"},
 		{"SELECT " + expectCols + " FROM expectation_checks WHERE result = 'broken' AND (week >= ?1 OR what LIKE 'catches %' OR what LIKE 'scenario %')", "expectation_checks"},
 		{"SELECT i.id FROM incidents i WHERE " + l.d.pick("i.key IN (?1, ?2)", "md5(i.key) IN (md5(?1), md5(?2)) AND i.key IN (?1, ?2)"), "incidents"},
+		// A moved row's, by its key (moveExpectRow).
+		{"SELECT told, task, tasked FROM expectation_checks WHERE " + l.d.pick("rule = ?1 AND expect = ?2 AND week = ?3",
+			"md5(rule) = md5(?1) AND rule = ?1 AND expect = ?2 AND week = ?3"), "expectation_checks"},
 	} {
 		args := []any{"Restarts"}
-		if strings.Contains(c.q, "?2") {
+		if strings.Contains(c.q, "?3") {
+			args = []any{"Restarts", "ab", int64(20000)}
+		} else if strings.Contains(c.q, "?2") {
 			args = []any{"INC-1", "INC-2"}
 		} else if strings.Contains(c.q, "week >=") {
 			args = []any{int64(20000)}

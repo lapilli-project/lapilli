@@ -54,6 +54,10 @@ type Comparison struct {
 	// (Expect): NoPromtool when nil, each not known. lapilli serve's
 	// backtests set NotThroughServe: serve runs none it is sent.
 	Scenarios ScenarioRunner `json:"-"`
+	// Alike are the rules alike on both sides, which Expect holds to the
+	// scenarios whose test files the change edited, when Scenarios reads
+	// each side's (TestEditor), and to nothing else.
+	Alike []AlikeRule `json:"-"`
 	// JudgedBy names whose record judged the firings, when it isn't the
 	// incidents the comparison was given: lapilli serve's, for a pull
 	// request backtested through it (JudgedByServe). CompareMarkdown's

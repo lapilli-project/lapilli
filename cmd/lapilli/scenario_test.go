@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,9 @@ func TestCompareScenarios(t *testing.T) {
 	promtool := scenariotest.Install(t)
 	lapilli := func(args ...string) (int, string, string) {
 		var out, errs strings.Builder
+		if slices.Contains(args, "--promtool") {
+			args = append(args, standInMemory...)
+		}
 		code := run(append([]string{"verdict", "--prometheus", "http://p", "--tz", "UTC", "--rules", pr, "--compare", base}, args...), &out, &errs)
 		return code, out.String(), errs.String()
 	}
@@ -121,7 +125,8 @@ func TestBacktestRecipeScenarios(t *testing.T) {
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
 	settings := []string{"PATHS=alerts", "EXPECT=checks/expectations.yaml", "PROMTOOL=" + promtool}
-	out, err := rr.run(append(settings, "FAIL_ON_EXPECTATIONS=true"), "--prometheus", prom.URL, "--tz", "UTC")
+	args := append([]string{"--prometheus", prom.URL, "--tz", "UTC"}, standInMemory...)
+	out, err := rr.run(append(settings, "FAIL_ON_EXPECTATIONS=true"), args...)
 	if err == nil || !strings.Contains(rr.body(), "| `CheckoutErrors` | passes the scenario `tests/shop.yaml` | passes | fails | **✗ broken by this change** |") ||
 		!strings.Contains(out, "the change breaks 1 expectations the rules in place meet (FAIL_ON_EXPECTATIONS=true)") || count() != 2 {
 		t.Errorf("broken: %v, %d runs\n%s\n%s", err, count(), rr.body(), out)
@@ -131,14 +136,14 @@ func TestBacktestRecipeScenarios(t *testing.T) {
 	repo.git("checkout", "--quiet", "main")
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h"), "checks/tests/shop.yaml": ""})
 	rr.host.set(func(h *commentHost) { h.comments = nil })
-	out, err = rr.run(append(settings, "FAIL_ON_EXPECTATIONS=true"), "--prometheus", prom.URL, "--tz", "UTC")
+	out, err = rr.run(append(settings, "FAIL_ON_EXPECTATIONS=true"), args...)
 	if err == nil || !strings.Contains(out, "1 scenarios of the rules that differ couldn't be run, so they can't be judged") ||
 		!strings.Contains(rr.body(), "not known: its test file can't be read") {
 		t.Errorf("no test file after: %v\n%s\n%s", err, rr.body(), out)
 	}
 	// Not held to them: said, and the job passes.
 	rr.host.set(func(h *commentHost) { h.comments = nil })
-	if out, err := rr.run(settings, "--prometheus", prom.URL, "--tz", "UTC"); err != nil {
+	if out, err := rr.run(settings, args...); err != nil {
 		t.Errorf("not held: %v\n%s", err, out)
 	}
 	// A symbolic link beside EXPECT: not read.

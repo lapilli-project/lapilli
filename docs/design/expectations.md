@@ -414,14 +414,17 @@ Step 2, serve's checks after deploy, as built:
   week before the ledger's first firing is not known with no number
   (`not_held`, "–"): no firing held isn't none fired. A rule
   only copied in is known where its source's copies cover it without a
-  gap (the ledger's `Coverage` of it, the latest span): a week begun
-  before the span began (in a gap, or before the first copy), a week past
-  where it ends, whole, or the week so far none of reached, is not known
-  (`not_copied`), however far the runs' cursor is, so that a job that
-  stopped copying, or began late, doesn't read as weeks of no firings; and
-  a catch of an incident outside the span, its delay with it, not caught
-  in the copies, is not known too, rather than broken. Not in the design;
-  a review found such weeks met, and a second the weeks before the span. While people slept is
+  gap, in any of the spans the ledger keeps of them (`Spans`, the latest
+  64): a week inside one is judged; a week touching a gap, before the
+  first copy or, whole, past the last, or the week so far the latest span
+  didn't reach from its start, is not known (`not_copied`), however far
+  the runs' cursor is, so that a job that stopped copying, or began late,
+  doesn't read as weeks of no firings; and a catch of an incident no span
+  covers, its delay with it, not caught in the copies, is not known too,
+  rather than broken. Not in the design; a review found such weeks met,
+  and a second the weeks before the span; 0.65.0 held a rule to the
+  latest span alone, and a week inside an earlier one was not known (a
+  review's Low). While people slept is
   by the rule's team's own hours, or the server's (as the tiles count it);
   by hours with no sleep, not known (`no_hours`). A rule Lapilli can't
   replay and doesn't copy in is not known (`unreplayed`). A budget needs
@@ -463,7 +466,12 @@ Step 2, serve's checks after deploy, as built:
   broken in the week so far or the last whole week, or a catch broken,
   once a rule, an expectation and a week, 50 a round, the rest the rounds
   after; a catch met again is told again once it is next broken, in a
-  later week. It carries the rule, its team, what, held, the selector and
+  later week. A catch's row moving to another week, its incident's start
+  written down otherwise, takes what was told of it and its task with it,
+  read in the write that lets the old row go, and the new row keeps a
+  task of its own; in 0.65.0 it was told again, and made a second task
+  while the first was open (a review's Low), as a scenario's was (step
+  4). It carries the rule, its team, what, held, the selector and
   the source, the count or the delay, whether it is the week so far, the
   week's span (a catch, its incident and its start), and links to the
   rule's tab; with routes in `--config`'s `notify:`, it goes where they
@@ -605,7 +613,9 @@ Step 3, drafts, as built:
   promtool read labels there). Each is plain text: a tag such as
   `!!binary`, which promtool's YAML would decode into another text, is
   refused. An agent's scenarios run one at a time across serve, whatever
-  else holds the comparison's turn.
+  else holds the comparison's turn (another agent's running, one is not
+  run, saying so), and each waits for promtool's one turn, which a
+  round's scenario may hold (step 4), within the check's deadline.
 - **Accepting** is an approver's, in a browser, as approving a proposal is
   (same site, no bearer token, `--changes` on, the page's form). Where
   serve's expectations come from `--expect`, with the change recipes'
@@ -700,8 +710,13 @@ Step 4, scenarios, as built:
   (`pthread_create failed`, which is read as past the cap too), so the
   tests cap the stand-in at 512 MiB and the docs say so for a promtool
   built with cgo. macOS refuses RLIMIT_DATA: there promtool runs without
-  a cap, said once as serve starts. `lapilli verdict --promtool` runs it without one, in a
-  CI job whose own limits hold it. Exit 0 saying `SUCCESS` is met; exit 1
+  a cap, said once as serve starts. `lapilli verdict --promtool` takes
+  `--promtool-memory` too, alike (256Mi unless given, 64Mi at least,
+  Linux alone, said on its standard error elsewhere): 0.65.0 ran it
+  without one, leaving it to the CI job's own limits (a review's Low).
+  The wrapper is Lapilli started again, `lapilli` itself as serve's is: the
+  package's `init` that reads the name is linked into every binary that
+  runs a scenario. Exit 0 saying `SUCCESS` is met; exit 1
   saying `FAILED:` is broken, the lines after it kept (2,000 bytes);
   anything else couldn't be run, and is not known: a time out, a crash,
   another exit status, an answer promtool doesn't give. promtool also says
@@ -732,7 +747,17 @@ Step 4, scenarios, as built:
   200 runs a comparison at most, the rest not known. Counted as budgets
   and catches are, so `--fail-expectations` and the recipes'
   `FAIL_ON_EXPECTATIONS` cover them; a test file the change edited is said
-  (`edited`). Not in the design: the summary's `scenarios_unrun`, those
+  (`edited`). **A test file edited, its rule alike** on both sides: the
+  scenario is run too, before and after, each side's test file as its
+  expectations file's directory has it (with `--expect-before`, which the
+  recipes give; without it, one file is read for both, so nothing is
+  edited), compared by what it holds; nothing else of the rule is held,
+  as it isn't replayed (`Comparison.Alike`, `scenario.Sides.TestEdited`).
+  So with no rule changed: the report says nothing changed, and then the
+  expectations, the summary's `expected` true; the recipes post it and
+  gate on it (a report that says nothing changed and holds nothing is
+  posted as before: not at all). 0.65.0 ran no scenario of a pull request
+  that edited only its test file (a review's Low). Not in the design: the summary's `scenarios_unrun`, those
   that couldn't be run after the change, promtool given and the rule one
   it runs (the test file unread, a time out, a crash, past the 200), and
   one run before the change and not known after it (the change moved the
@@ -782,7 +807,14 @@ Step 4, scenarios, as built:
   ended (shut down, or the lease lost), isn't one that died: it is kept
   with no version, written past the ended context, and run again by the
   next leader. The rest not known (`not_run_yet`) until a
-  later round. Not known says why: `no_promtool`, `not_prometheus`,
+  later round. **One promtool at a time across serve**, a round's and an
+  agent's (`test_expectation`, `propose_expectation`, a new rule's
+  check) alike, each taking `--promtool-memory` beside serve's own under
+  one container's limit: each waits its turn within its own context,
+  never holding the ledger's writer; a round's before its run is kept as
+  begun (one that waited and never began isn't kept so), an agent's
+  within its check's deadline, past which it is not known, saying so (not
+  in the design: 0.65.0 could run two at once, a review's Low). Not known says why: `no_promtool`, `not_prometheus`,
   `not_run_yet`, `test_unread`, `run_failed`. Schema 027, unreleased, was
   changed in place for it: a column `detail` (what promtool said, or why
   it couldn't run, 2,000 bytes). Why it couldn't run, or its test file
@@ -794,7 +826,10 @@ Step 4, scenarios, as built:
   (`expectation.broken`, with `scenario`), made a task, and shown on the
   rule's tab (with what promtool said), the overview, the rules list, the
   digest (in the week it was found), `GET /api/v1/expectations`, MCP's
-  `rule` and `/metrics`, as a catch is.
+  `rule` and `/metrics`, as a catch is. Its row moving to another week,
+  what it found found again in a later week, takes what was told of it
+  and its task with it, as a catch's does (step 2): told once while it
+  stays broken, and no second task while the first is open.
 - **The chart.** `serve.scenarios` puts each test file beside
   `expectations.yaml` in its ConfigMap, a scenario's path its name.
   Lapilli's image stays without promtool: `serve.promtool.image`, an image
