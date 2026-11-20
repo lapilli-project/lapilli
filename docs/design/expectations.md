@@ -812,7 +812,15 @@ Step 5, adding a rule, as built:
 - **Named apart from every rule in effect**, not only from its group's:
   a proposal, its expectations and the ledger name a rule by its name, and
   two rules of one name are told apart by labels that can change. A rule
-  in effect of its name since refuses it as it is carried out.
+  added and applied through Grafana's API, a ruler's or a cloud's, which
+  make it at once, is in effect before the rules are read again: its name
+  is taken until a version of the rules read after it says whether it is
+  there (one applied by the git path is unfinished until it is read
+  back). A rule in effect of its name since refuses it as it is carried
+  out. The names in effect and the places (below) are worked out once a
+  version of the rules (`addReadOf`): the form, `places`, and a proposal
+  refused before its try is taken (a place not offered, a name in
+  effect) read no version again however often they are asked.
 - **Where it goes: a place serve offers, and nothing else.** Worked out
   from the rules it read last (`addPlaces`, the new rule's form, MCP's
   `places`), never from what a proposal says, which is only matched to
@@ -829,7 +837,12 @@ Step 5, adding a rule, as built:
   theirs, nor a new file, which isn't a document Lapilli read, and so not
   one a recipe finds by its hash. Grafana: a group of a folder whose rules
   Lapilli replays as PromQL, its query one of the data sources they read;
-  not a new group, which Grafana would make with an interval of its own. A
+  not a new group, which Grafana would make with an interval of its own;
+  not a folder whose title another folder has too (nested folders,
+  `Payments/Alerts` and `Security/Alerts`): a place is named by its
+  folder's title, and the rules Grafana's export gives carry no folder's
+  uid to tell the two apart, so the place would offer both folders'
+  contact points and the rule could land in either. A
   ruler: a group, or a new group, in a Mimir's, a Cortex's or an Amazon
   namespace `--changes-in` names; not an Azure rule group, whose rules
   carry action groups of their own. A cloud's alarms: CloudWatch's or
@@ -857,7 +870,13 @@ Step 5, adding a rule, as built:
   counts a Lambda function as telling, as released). In Google Cloud,
   notification channels of those its policies tell. Anything else is
   refused, as a place is; it is checked again, against the rules read
-  then, as it is carried out.
+  then, as it is carried out. A cloud's alarm's `for` is one the cloud
+  takes, as a `for` changed on an alarm there is (`rules.AlarmFor`):
+  CloudWatch's `PendingPeriod` and `RecoveryPeriod` (its `for` and
+  `keep_firing_for`) whole seconds, 86,400 at most (the API reference's
+  range, 0 to 86400; Lapilli's own bound is 48 hours), a Google policy's
+  `duration` whole seconds; refused as it is proposed, not by the cloud
+  once approved, and checked again as it is carried out.
 - **Held to its expectations before approval.** An expectations text
   holding it by `rule: NAME` alone, one expectation at least (a budget's
   field, a catch or a scenario: an added rule held to nothing is refused,
@@ -886,11 +905,16 @@ Step 5, adding a rule, as built:
 - **Its team** (changes.md, "A team as the boundary of change"): until it
   is in effect, the team its name and the labels it is added with give
   it, as read back where it goes, its group's with its own, as they will
-  once it is. A team's editor adds only what their team would own so;
+  once it is. A team's editor adds only what their team would own so, and
+  is shown the new rule's form, as they may post it (its places what serve
+  offers anyone, what they add asked of their team as it is posted);
   that team's approvers approve it, and its freezes and `changes_in` hold
   it. Backtested again after its group's labels changed, it is the team
   they give, and one another team owned as it was proposed is proposed
-  again; one whose labels can't be read is refused as it is carried out.
+  again; carried out after they changed, read back again as it is, one
+  whose team they give isn't the one that owned it as it was proposed is
+  refused with the same reason; one whose labels can't be read is refused
+  as it is carried out.
 - **Stale** as changes.md says of any backtest (an earlier lapilli's, a
   record changed since): held until it is backtested again, from its page,
   by MCP's `backtest_again` or by Lapilli itself, which writes it where its
@@ -898,7 +922,10 @@ Step 5, adding a rule, as built:
   anew.
 - **Carried out** after it is checked again: its place still offered, its
   name still free, held to its expectations again over the twelve weeks to
-  now, refused when it now breaks one or isn't replayed to the end. It
+  now, refused when it now breaks one, isn't replayed to the end, or one
+  it met as it was approved isn't known now (a scenario promtool doesn't
+  run now, a catch of an incident the twelve weeks no longer reach): what
+  was met is what its approver approved, and not known is never met. It
   waits for a comparison running (an agent's `compare` or
   `test_expectation`), as a change's backtest does, rather than failing.
   The git path: the rule file's other lines changed since, the rule is
@@ -908,8 +935,10 @@ Step 5, adding a rule, as built:
   and twenty hex digits), in the folder and group a rule there is in now
   (their uid and name read from it), refused when another tool keeps that
   rule (provenance), when its folder's rules no longer read its data
-  source or tell its contact point, or when a rule of its title is in its
-  folder; read back by its uid. A ruler: the group written as rulers.md
+  source or tell its contact point, when a rule of its title is in its
+  folder, or when another folder has its folder's title now, as Grafana
+  is read just before (which of the two the title names isn't known);
+  read back by its uid. A ruler: the group written as rulers.md
   writes one, only the rule added to it as it is now (`rules.AddsRule`), a
   new group only while it is still gone. CloudWatch: `PutMetricAlarm`, as
   undoing a deletion makes one (its PromQL in
@@ -968,4 +997,11 @@ Step 5, adding a rule, as built:
   expectations can't be kept ahead of one that can, a file of two
   PrometheusRules, a Grafana group whose every rule names a contact point,
   a Lambda function and an automation among CloudWatch's actions, a
-  label's template; each fails with its guard taken out.
+  label's template; each fails with its guard taken out. After a review
+  of 0.65.0: two Grafana folders of one title, offered and carried out;
+  the rules read once a version, asked again and again; a scenario met as
+  it was approved and not known as it is carried out; a group's labels
+  making it another team's between approval and carrying out; a team's
+  editor's form; a cloud's `for` it doesn't take; a name taken by an add
+  applied and not yet read back, and free once a version read after it
+  holds it no more; each fails with its guard taken out.
