@@ -32,33 +32,34 @@ ledger stays at 026.
 
 - **A pull request's PromQL could read past the backtest port's bounds,
   written as the history reads it otherwise than the port's checks did**
-  (affected: 0.61.0 to 0.63.1). Prometheus ends a `#` comment at a `\r`
-  as at a `\n`, and reads one in a selector's braces and a range's
-  brackets as anywhere outside a string; the port's checks ended one at
-  `\n` alone, and read none in braces or brackets, so that what followed a
-  comment's `\r`, or a `}` or a `]` and a quote in one, was a comment or a
-  string to them, and code to Prometheus. With VictoriaMetrics, a
-  `--prometheus` the docs name, MetricsQL reads a `\` in a name as
-  escaping the character after it, a backtick among them
-  (``up\` or {__name__=~".+"} or up\` `` was a string to the checks), `or`
-  in a selector's braces as joining its matchers
-  (`{__name__='up' or __name__=~'.+'}`, one string to the checks), an
-  offset after any expression (`rate(up[5m]) offset 1400d`), `WITH`
-  templates, `1doffset` as `1d offset` and `"__\name__"` as `__name__`;
-  and Prometheus with unquoted UTF-8 names reads a name that isn't ASCII
-  (`温度 offset 1400d`). Either way a rule backtested through the port
-  could read every series, 1,400 days back, or at a time of its own
-  (`@ 0`), with serve's access, and be taken. The checks now read comments
-  as Prometheus does, and the port takes only what every history reads
-  alike: no `\r`; outside its strings, ASCII names, numbers and durations
-  as Prometheus writes them, operators and brackets alone; an `offset` or
-  `@` right after a selector, a range or a subquery; and none of
-  MetricsQL's own (`WITH`, `or`, `and` or `unless` in a selector's braces,
-  `keep_metric_names`, `__graphite__`, a `\` in a label's name in
-  quotes). A string with an unescaped quote of its kind inside isn't one
-  string to the checks any more. A rule's own comments are taken as
-  before, and rules as alerting rules are written read alike, as checked
-  with Prometheus's parser and MetricsQL's.
+  (affected: 0.61.0 to 0.63.1). Prometheus ends a `#` comment at a `\r` as
+  at a `\n`, and reads one in a selector's braces and a range's brackets
+  as anywhere outside a string; the port's checks ended one at `\n` alone,
+  and read none in braces or brackets, so that what followed a comment's
+  `\r`, or a `}` or a `]` and a quote in one, was a comment or a string to
+  them, and code to Prometheus. With VictoriaMetrics, a `--prometheus` the
+  docs name, MetricsQL reads a `\` in a name as escaping the character
+  after it, a backtick among them (``up\` or {__name__=~".+"} or up\` ``
+  was a string to the checks), `or` in a selector's braces as joining its
+  matchers (`{__name__='up' or __name__=~'.+'}`, one string to the
+  checks), an offset after any expression (`rate(up[5m]) offset 1400d`),
+  `WITH` templates, `1doffset` as `1d offset` and `"__\name__"` as
+  `__name__`; and Prometheus with unquoted UTF-8 names reads a name that
+  isn't ASCII (`温度 offset 1400d`). Either way a rule backtested through
+  the port could read every series, 1,400 days back, or at a time of its
+  own (`@ 0`), with serve's access, and be taken. The checks now read
+  comments as Prometheus does, and the port takes only what every history
+  reads alike: no `\r`; outside its strings, ASCII names, numbers and
+  durations as Prometheus writes them, operators and brackets alone; an
+  `offset` or `@` right after a selector, a range or a subquery; and none
+  of MetricsQL's own (`WITH`, `or`, `and` or `unless` in a selector's
+  braces, `default`, `if` and `ifnot` between two expressions, which made
+  `x ifnot {job=~".+"}` read every series with a job, `keep_metric_names`,
+  `__graphite__`, a `\` in a label's name in quotes). A string with an
+  unescaped quote of its kind inside isn't one string to the checks any
+  more. A rule's own comments are taken as before, and rules as alerting
+  rules are written read alike, as checked with Prometheus's parser and
+  MetricsQL's.
 - **Anyone who could reach the backtest port could keep a job from reading
   or cancelling its backtest** (affected: 0.61.0 to 0.63.1). Each `GET`
   and `DELETE` was charged to the client's address before its key was
@@ -67,7 +68,7 @@ ledger stays at 026.
   token, for an id made up, made every job's poll and cancel a 429 until
   `SERVE_WAIT` ended it, its backtest running on. Each replica now holds
   the backtests' key hashes, those it queued and the ledger's, listed a
-  second apart at most: a job's id and key, known, are read whatever else
+  second apart at least: a job's id and key, known, are read whatever else
   comes from its address. A pair not known waits up to 2 seconds for a
   listing begun after it came, so that a backtest queued through another
   replica is found, on its first poll, or, when guesses from the address

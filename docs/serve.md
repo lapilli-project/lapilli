@@ -770,38 +770,38 @@ trust:
 The replica that leads runs the queue, one backtest at a time, beside the
 runs and not in them, the oldest of the entry that started one least
 lately first. While it runs one, its share of `--max-rate`
-(`--backtest-share`, a quarter by default) is kept for it: the runs ask
-at the rest, and the lane at its share, which nothing else takes, so the
-two never pass the rate together; once it runs none, the runs have the
-whole rate again. Without `--max-rate`, a quarter of `--parallel` at once,
-one at least. A backtest that couldn't finish within `--backtest-timeout`
-at its share is refused before it waits, saying how many requests it needs
-and what period would fit. An entry's `hourly` is taken before the body
-is read. What can be told without the body is refused before it is read,
-and its hour given back: a token that started a backtest already (409,
+(`--backtest-share`, a quarter by default) is kept for it: the runs ask at
+the rest, and the lane at its share, which nothing else takes, so the two
+never pass the rate together; once it runs none, the runs have the whole
+rate again. Without `--max-rate`, a quarter of `--parallel` at once, one
+at least. A backtest that couldn't finish within `--backtest-timeout` at
+its share is refused before it waits, saying how many requests it needs
+and what period would fit. An entry's `hourly` is taken before the body is
+read. What can be told without the body is refused before it is read, and
+its hour given back: a token that started a backtest already (409,
 whatever body it comes with: no key is given twice), the queue with no
-room for the entry, the reads full, the ledger not ready. Once the body
-is read, a request refused keeps its hour: what it cost to read and check
-is what `hourly` bounds. An entry has one body read at a time, two of all
-entries at once, each within 5 seconds of its headers. 20 wait at most (`--backtest-queue`), 3 of an
-entry, one of a pull request the token's `ref` names (a newer commit's
-takes the place of the one waiting; a number the job said takes none's:
-GitLab's ID token names a merge request's source branch, not its number,
-and Bitbucket's no pull request, so their backtests don't take each
-other's place);
-past them, 429 with `Retry-After`. One the leader stopped while running is
-run again by the next, twice at most. A job reads its backtest by its id
-and key, told from the keys each replica holds: those it queued, and the
-ledger's, listed one at a time, a second apart at least. A pair known is
-read, whatever else comes from the job's address, which behind an
-ingress is everyone's. A pair not known waits up to 2 seconds for a
-listing begun after it came, so that a backtest queued through another
-replica is found on its first poll, and is a 404 if still not known;
-20 of an address wait at once, one more each second, and past them one
-is a 503 with `Retry-After` at once, and a listing begun, so that the
-job's next poll finds its backtest. One that guesses reads no backtest's row, and the
-ledger is listed a second apart at most however many guess. With replicas, the queue and each entry's hour are the
-ledger's: any replica takes a backtest and answers for it.
+room for the entry, the reads full, the ledger not ready. Once the body is
+read, a request refused keeps its hour: what it cost to read and check is
+what `hourly` bounds. An entry has one body read at a time, two of all
+entries at once, each within 5 seconds of its headers. 20 wait at most
+(`--backtest-queue`), 3 of an entry, one of a pull request the token's
+`ref` names (a newer commit's takes the place of the one waiting; a number
+the job said takes none's: GitLab's ID token names a merge request's
+source branch, not its number, and Bitbucket's no pull request, so their
+backtests don't take each other's place); past them, 429 with
+`Retry-After`. One the leader stopped while running is run again by the
+next, twice at most. A job reads its backtest by its id and key, told from
+the keys each replica holds: those it queued, and the ledger's, listed one
+at a time, a second apart at least. A pair known is read, whatever else
+comes from the job's address, which behind an ingress is everyone's. A
+pair not known waits up to 2 seconds for a listing begun after it came, so
+that a backtest queued through another replica is found on its first poll,
+and is a 404 if still not known; 20 of an address wait at once, one more
+each second, and past them one is a 503 with `Retry-After` at once, and a
+listing begun, so that the job's next poll finds its backtest. One that
+guesses reads no backtest's row, and the ledger is listed a second apart
+at least, however many guess. With replicas, the queue and each entry's
+hour are the ledger's: any replica takes a backtest and answers for it.
 
 What the pull request's PromQL can do: it runs as range queries, with
 serve's access, so it can read whatever that access reads, a count at a

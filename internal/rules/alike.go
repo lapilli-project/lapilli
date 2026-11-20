@@ -17,8 +17,8 @@ import (
 // escaping the character after it (a backtick among them), a . in a name,
 // a \ before a string in backticks' last backtick as going on, a label's
 // name in quotes by escapes of its own ("__\name__" is __name__), WITH
-// (...) templates, or, and and unless in a selector's braces,
-// keep_metric_names, an offset or @ after any expression, a range after an
+// (...) templates, or, and and unless in a selector's braces, default, if
+// and ifnot as operators between two expressions, keep_metric_names, an offset or @ after any expression, a range after an
 // offset, 1doffset as 1d offset, 1d-1y as one duration and 1.5d as one.
 //
 // So what is taken is what they all read alike, comments read past as
@@ -85,6 +85,11 @@ func Unalike(expr string) string {
 				return word + " in a selector's braces, which MetricsQL reads as joining its matchers"
 			case !braces && word == "with" && next == '(':
 				return "WITH (...), which MetricsQL reads as templates"
+			case !braces && (word == "default" || word == "if" || word == "ifnot") && next != ')' && next != ',':
+				// An operator to MetricsQL (x default {a="b"} reads every
+				// series with a="b"), a metric's name to Prometheus; not
+				// a label's name in by (...) or on (...).
+				return word + ", which MetricsQL reads as an operator between two expressions"
 			case !braces && word == "offset" && next != ')' && next != ',':
 				// An offset, not a label's name in by (...) or on (...).
 				if last != name && last != brace && last != bracket {
