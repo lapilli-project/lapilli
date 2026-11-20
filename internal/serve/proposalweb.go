@@ -388,6 +388,9 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 				// its rule fires. Being applied, moved to being applied,
 				// is a step of its own (sent, not read back yet).
 				st.Kind = "waits"
+				if frozeNote(after.Reason) {
+					st.Kind = "frozen" // a change freeze holds it (bounds.go)
+				}
 			}
 			if after.Reason != before.Reason {
 				st.Reason = after.Reason

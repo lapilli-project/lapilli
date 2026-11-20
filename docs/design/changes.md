@@ -695,6 +695,127 @@ their own, `ruler`, beside `git`, `grafana` and `none`; `applying` is a
 change sent to Grafana or a ruler and not yet read back; and Azure's rules,
 which can be turned off, are retired as Grafana's are.
 
+### A team as the boundary of change
+
+Built for the release after 0.63.1 (bundle 24). Until then proposals and
+their approval were everyone's: an editor of every team proposed, an
+approver of every team approved, into whatever `--changes-in` named, at
+any hour. A team that runs its own rules, as an Argo CD AppProject's roles,
+destinations and sync windows let a team run its own applications, or a
+Grafana folder's permissions its own dashboards, needed four things, each
+declared in `--config` beside the team ([serveops.md](serveops.md),
+"A team's boundaries of change"), none made in the UI. No schema change:
+what the file declares is kept in the ledger's `meta` table, in the write
+that keeps the ledger to the file, and who owns what is worked out as the
+pages work it out.
+
+- **A team's editors propose for its rules.** Making a proposal (from a
+  rule's page, or for the rules picked on the rules list), backtesting one
+  again and dropping one they made, or an agent made for them, are a
+  team's editor's for a rule their team owns, as notes and tasks are. Who
+  owns the rule is asked three times as it is proposed: of its name as the
+  ledger has it, before anything is read for it (no try spent on another
+  team's); of the rule as it is read again from where it is kept; and of
+  the rule as proposed. Each must be a team they edit: a rule whose group
+  labels made it another team's since the ledger last read it, or a change
+  that would rename it into another team's pattern or relabel it into
+  another team's labels, isn't theirs. None of today's kinds renames or
+  relabels a rule; the check is there for one that would. On the rules
+  list, another team's rule picked is counted "not your team's", and the
+  rest are proposed. A rule in effect that never fired is owned as one
+  that did, by a note, its name and its labels (`owners.owner`).
+  Agents keep today's rules: `--mcp-propose` is an editor's of every team,
+  or an admin's, and an agent proposes as before.
+- **A team's approvers** (`approvers:` under a team) approve a proposal
+  that one team, theirs, owned as it was proposed and owns now, and ask
+  for one of its rule's applied changes to be undone. The approvers of
+  every team (`--approvers`, or the admins) approve anything, as before.
+  Approving is still a person's, in the form on the page, refused to its
+  maker; `--approvals 2` asks two people, either kind, one person listed
+  both ways counting once. A team's approvers are named as `--approvers`
+  names people, but stricter: `user:NAME`, `group:NAME` or `*@DOMAIN`, not
+  a bare name (a person whose name is a group's would take the group's
+  approval, as the Roles page refuses it) nor `*`. Their groups are those
+  the sign-in or `--groups-header` says, trusted as for every role. Naming
+  someone a team's approver doesn't let them in where a sign-in or
+  `--viewers` keeps who may come in: they come in as anyone does. Without
+  `--approvers` and `--admins`, a team's approvers are the only ones who
+  approve anything, and only their team's. The proposal's page, to an
+  admin, names them beside the approvers of every team.
+- **A team's sources** (`changes_in:` under a team) are where its rules
+  are written through a ruler's or a cloud's API, as entries of
+  `--changes-in`, or narrower names and prefixes within its prefixes: a
+  file that names one outside it is refused as a whole. A rule of a team
+  that gives `changes_in`, kept elsewhere, is for a person to change, as
+  one outside `--changes-in` is ("its team's changes_in doesn't name where
+  it is kept"); given as `[]`, nowhere. It holds for the team's rules
+  whoever proposes or approves them, as an AppProject's destinations hold
+  for its applications whoever syncs them. **Builder's decision**:
+  `--changes-in` governs only the rulers and the clouds' alarms, so a
+  team's does too; a pull request (the git path) is reviewed where the
+  rule is kept, and Grafana's rules are scoped by the token's folder
+  permissions, as before.
+- **Change freezes** (`freezes:`), once or repeating as a quiet window
+  does (every day, week, month or by a cron expression, until a day), in
+  `--tz`, for everyone or for a team. While one holds, a change to a rule
+  it covers isn't approved, nor approved as `--approvals` is lowered,
+  nor asked to be undone, and an approved one isn't carried out or handed to a recipe: it
+  waits, approved, said once in its history ("a change freeze, NAME,
+  holds it until …"), and is carried out once the freeze ends, at the
+  next round after its end, which is still within it. Proposing,
+  backtesting again and dropping go on. The approve and undo buttons are
+  drawn disabled with the freeze's name; the page says until when; the
+  Settings page lists the freezes, each frozen until, next, or over, and
+  the Administration page's Settings card says until when changes are
+  held. **Builder's decision: an undo is held too.** Asking for one is
+  its approval, and it writes the rule as any change does; a freeze is a
+  time nothing is written. To undo during one, take the freeze out of
+  `--config` (kept to on its second read, 15 seconds on), pause changes,
+  or change the rule by hand.
+
+Who owns a proposal's rule can change while it waits: a note, a team's
+pattern or labels, a team renamed or removed. A proposal keeps, in its
+evidence, the teams that owned its rule as it was proposed (`owners`,
+`owned`); approving it asks again, and carrying it out asks again just
+before the write:
+
+- One team owned it as it was proposed and another, or none, does now:
+  no one approves it, an approver of every team neither, and approved, it
+  is refused as it is carried out ("its rule was payments's when it was
+  proposed and is checkout's now: propose it again"). A team renamed is
+  another: its id and its name are both kept.
+- Owned by no team, or by more than one (the three reads disagreed), it
+  was never a team's approver's to approve, and goes on as before; the
+  freezes and the sources of every team it was and is held to.
+- A proposal made before this release has no owners kept: the approvers
+  of every team approve it, as then.
+- What is left is the time between the check and the write itself, a
+  round's milliseconds, as for every other check that is asked again. A
+  change checked and handed to a recipe (`ready`) is the recipe's: a
+  freeze holds it there, a change of owner doesn't.
+
+A freeze's times are checked as a quiet window's are, in the same words
+("a quiet window lasts 31 days at most"). A freeze that holds the end of
+one repeat and the start of the next holds each to its own end: a
+repeating one spanning midnight in `--tz` ends at its end there, whatever
+UTC says. Its end is part of it: an approved change is carried out at the
+first round after.
+
+**Fail closed.** Boundaries the ledger holds that can't be read stop what
+they would: an approval is an error, an approved change waits, nothing
+ready is handed out.
+
+Tests (`internal/serve/bounds_test.go`) hold each guard, and each was
+checked failing without it: a team's editor of another team's rule, of a
+rule no team owns, of one relabelled since or as proposed; a team's
+approver of another team's or no team's proposal with a form made up for
+them; a group trusted only with `--groups-header`; a rule moved between
+approval and carrying out; a team's sources at proposing and at carrying
+out; a freeze at approval, at carrying out, at its end, at the recipe, and
+holding promotion and undo; a team's editor dropping another's proposal;
+the file read strictly; and a repeating freeze in Asia/Seoul spanning
+midnight.
+
 ## Questions for review
 
 - Five deletions a day and twenty changes an hour: too many, or too few for

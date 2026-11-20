@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A team as the boundary of change** (docs/design/changes.md, "A team
+  as the boundary of change"; serveops.md, "A team's boundaries of
+  change"). A team's editors propose changes to the rules their team
+  owns, from a rule's page or for the rules picked on the rules list
+  (another team's counted "not your team's"), backtest them again, and
+  drop the ones they made; who owns the rule is asked of its name, of the
+  rule as it is read again and of it as proposed, each a team they edit.
+  Under a team in `--config` (`serve.config`): `approvers:`, as
+  `user:NAME`, `group:NAME` or `*@DOMAIN` (not a bare name, nor `*`), who
+  approve a proposal one team, theirs, owned as it was proposed and owns
+  now, and ask for its applied change to be undone, beside the approvers
+  of every team, self-approval and `--approvals` as before; and
+  `changes_in:`, where its rules are written through a ruler's or a
+  cloud's API, within `--changes-in` or the file is refused, `[]` for
+  nowhere, a rule kept elsewhere for a person to change. And `freezes:`,
+  for everyone or a team, once or repeating as a quiet window does, in
+  `--tz`: while one holds, nothing it covers is approved, approved as
+  `--approvals` is lowered, asked to be undone, carried out or handed to a
+  recipe; proposing and backtesting go on; one approved before waits,
+  approved, said once in its history, and is carried out at the first
+  round after the freeze's end. The buttons are drawn disabled with the
+  freeze's name, a proposal's page says until when, the Settings page
+  lists the freezes (frozen until, next, over) and the Administration
+  page's Settings card says until when changes are held. Approving and
+  carrying out each ask again who owns the rule: one a team owned as it
+  was proposed and another, or none, owns now is approved by no one, and
+  refused if approved before. Read twice, as the rest of the file, and
+  kept in the ledger's `meta` table in the write that keeps it to the
+  file, for every replica alike; `/config.yaml` gives them back. Agents
+  propose as before: `--mcp-propose` stays an editor's of every team, or
+  an admin's. No schema change: the ledger stays at 026.
+
+### Changed
+
+- `--config`'s top-level keys are teams, windows, reports, grants, goals,
+  marked and **freezes**, and its refusals say so.
+
 ## [0.63.1] - 2026-11-20
 
 The forms for people's verdicts on firings (0.63.0) on a few lines a row,

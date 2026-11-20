@@ -409,6 +409,8 @@ type Server struct {
 	againFailed againFailed
 	// config is what the leader last made of --config.
 	config configState
+	// bnd keeps the boundaries of change the ledger holds (bounds).
+	bnd boundsCache
 	// backtesting are the proposals being backtested again here, which
 	// expiry leaves.
 	backtesting inFlight

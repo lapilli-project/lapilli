@@ -100,6 +100,10 @@ func (t *tries) take(who string, agent bool, now time.Time) bool {
 // propose asks it first; a bulk proposal, and the single form, before they
 // wait for the heavy turn too, so that one refused waits for nothing.
 func (s *Server) mayPropose(ctx context.Context, rule, by string, agent bool) error {
+	// A team's editor, of their team's rules alone (bounds.go).
+	if err := s.mayProposeHere(ctx, rule); err != nil {
+		return err
+	}
 	if err := s.l.MayPropose(ctx, rule, by); err != nil {
 		return err
 	}

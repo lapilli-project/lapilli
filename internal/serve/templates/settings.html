@@ -33,6 +33,10 @@
 
 <h2>{{t "Changes to the rules"}}</h2>
 <p>{{if not $.Status.ChangesOn}}{{tbdi "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
+{{with .Freezes}}<h3 id="freezes">{{t "Change freezes"}}</h3>
+<p class="quiet">{{tbdi "Declared in --config: while one holds, no change to the rules it covers is approved, undone or applied; those approved before wait until it ends. Proposing and backtesting go on."}}</p>
+<ul class="plain">{{range .}}<li><strong><bdi>{{.Title}}</bdi></strong>{{if .Team}} ({{tbdi "team %s" .Team}}){{else}} ({{t "everyone's"}}){{end}}: {{at $loc .W.Start}} → {{at $loc .W.End}}, {{template "repeats" (repeats .W $loc)}}
+  <br>{{if not .Until.IsZero}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Frozen until %s." (at $loc .Until)}}</span>{{else if not .Next.IsZero}}<span class="quiet">{{t "Next: %s → %s." (at $loc .Next) (at $loc .NextEnd)}}</span>{{else}}<span class="quiet">{{t "Over."}}</span>{{end}}</li>{{end}}</ul>{{end}}
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
 
 {{with .Notify}}{{template "notifystatus" (on $ .)}}{{end}}

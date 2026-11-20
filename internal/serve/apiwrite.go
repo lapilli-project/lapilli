@@ -155,6 +155,13 @@ func (s *Server) apiPropose(ctx context.Context, tg target, p *ledger.Proposal, 
 		ev.NoPath = why
 		return nil
 	}
+	// Where its team's changes_in, when it gives one, says (bounds.go).
+	if why, err := s.teamInWhy(ctx, tg, ev.ownedBy, f.doc.Source, e); err != nil {
+		return err
+	} else if why != "" {
+		ev.NoPath = why
+		return nil
+	}
 	u, err := tg.unit(ctx, f.doc.Source, e)
 	if errors.Is(err, source.ErrUnreadable) {
 		ev.NoPath = noPathUnread

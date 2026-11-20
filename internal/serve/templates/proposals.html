@@ -33,7 +33,7 @@
 {{define "proposal"}}{{$head := .View.Head.Text .Lang}}{{template "top" (crumbed . (print "#" .View.ID " " $head) (print "#" .View.ID))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}{{$v := .}}
 {{if .Agent}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "An agent proposed this, for %s. What it says is its own: check the diff and the backtest, not its words." (who .MadeBy)}}</p>{{end}}
 <h1>#{{.ID}} {{.Head.HTML $.Lang}}</h1>
-<p class="proposal-facts">{{template "proposalbadge" .Badge}} <span aria-hidden="true">·</span> <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> <span aria-hidden="true">·</span> {{if .Agent}}<span class="badge agent status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{end}}{{if .ByLapilli}}{{t "made by Lapilli, %s" (at $loc .Made)}}{{else}}{{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{end}} <span aria-hidden="true">·</span> {{template "proposalpath" .Path}}{{with .Evidence.From}} <span aria-hidden="true">·</span> {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} <span aria-hidden="true">·</span> <a href="{{$.Incident .}}"><bdi>{{.}}</bdi></a>{{end}}{{if .Follows}} <span aria-hidden="true">·</span> {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
+<p class="proposal-facts">{{template "proposalbadge" .Badge}} <span aria-hidden="true">·</span> <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> <span aria-hidden="true">·</span> {{if .Agent}}<span class="badge agent status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{end}}{{if .ByLapilli}}{{t "made by Lapilli, %s" (at $loc .Made)}}{{else}}{{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{end}} <span aria-hidden="true">·</span> {{template "proposalpath" .Path}}{{with .Team}} <span aria-hidden="true">·</span> {{tbdi "team %s" .}}{{end}}{{with .Evidence.From}} <span aria-hidden="true">·</span> {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} <span aria-hidden="true">·</span> <a href="{{$.Incident .}}"><bdi>{{.}}</bdi></a>{{end}}{{if .Follows}} <span aria-hidden="true">·</span> {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
 {{with .Undoes}}<p>{{t "It puts back the rule as it was before the change it undoes:"}} <a href="{{$.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a>.{{if .Agent}} {{t "An agent proposed #%d, for %s." .ID (who .For)}}{{end}}</p>
 {{if eq $v.Path "grafana"}}<p class="hint">{{t "In Grafana, it puts back the whole rule as it was before #%d, its annotations too: whatever was edited in Grafana since is put back with it." .ID}}</p>{{end}}{{end}}
 {{template "changesoff" .}}
@@ -44,6 +44,8 @@
 {{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the ruler:"}} {{t .}}</p>{{end}}{{end}}
 {{if .Stale}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The rule in effect isn't the one this was proposed against: it changed since, so this is refused when checked again. Propose it again from the rule's page."}}</p>{{end}}
 {{with .StaleWhy}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⟳</span> {{.Notice $.Lang}} <a href="#backtest">{{t "Backtest it again"}}</a></p>{{end}}
+{{with .Frozen}}<p class="notice status-warn" id="frozen"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{if eq $v.State "proposed"}}{{tbdi "A change freeze, %s, holds it until %s: no one approves it until then. It can still be backtested again, or dropped." .Title (at $loc .Until)}}{{else if eq $v.State "applied"}}{{tbdi "A change freeze, %s, holds its rule until %s: no one asks to undo it until then." .Title (at $loc .Until)}}{{else}}{{tbdi "Approved, and a change freeze, %s, holds it until %s: it waits, and is carried out once the freeze ends." .Title (at $loc .Until)}}{{end}}</p>{{end}}
+{{if .Moved}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{if .MovedTo}}{{tbdi "Its rule was %s's when it was proposed and is %s's now: no one approves it. Propose it again, for %s's approvers." .MovedFrom .MovedTo .MovedTo}}{{else}}{{tbdi "Its rule was %s's when it was proposed and is no team's now: no one approves it. Propose it again." .MovedFrom}}{{end}}</p>{{end}}
 {{with .Reason}}<p class="notice {{$v.ReasonClass}}"><span class="sign" aria-hidden="true">{{sign $v.ReasonClass}}</span> {{.}}</p>{{end}}
 {{if not .Expires.IsZero}}<p class="quiet">{{tbdi "Unless someone approves it first, it closes as expired on %s: --proposals-expire after it began to wait, when it was made or last backtested again." (at $loc .Expires)}}</p>{{end}}
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a></p>{{end}}
@@ -121,6 +123,7 @@
 <ol class="steps">{{range .Steps}}<li><span class="t">{{at $loc .At}}</span> {{if eq .Kind "made"}}{{if $v.Agent}}{{tbdi "Made by an agent, for %s" (.Name $.Lang)}}{{else if eq .Who "Lapilli"}}{{t "Made by Lapilli"}}{{else}}{{tbdi "Made by %s" (.Name $.Lang)}}{{end}}
 {{- else if eq .Kind "approved"}}{{tbdi "Approved by %s: %d of %d" (.Name $.Lang) .Of (or .Need $v.Need)}}
 {{- else if eq .Kind "waits"}}{{template "proposalbadge" .Badge}} {{t "waits: it fires now"}}{{with .Reason}}<br><span class="quiet">{{shown .}}</span>{{end}}
+{{- else if eq .Kind "frozen"}}{{template "proposalbadge" .Badge}} {{t "waits: a change freeze holds it"}}{{with .Reason}}<br><span class="quiet">{{shown .}}</span>{{end}}
 {{- else if eq .Kind "promoted"}}{{t "Approved, as fewer approvals are needed"}}
 {{- else if eq .Kind "demoted"}}{{t "Waiting for approval again, as more approvals are needed"}}
 {{- else if eq .Kind "undo"}}{{tbdi "%s asked to undo it, as" (.Name $.Lang)}} <a href="{{$.Link (printf "/proposals/%d" .Undo)}}">#{{.Undo}}</a>
@@ -150,7 +153,7 @@ rule (ledger.ErrProposed): to an editor each form is drawn as it is,
 disabled, its button tied to why, with a link to the one that waits; a
 reader who may propose nothing is told so, as before, with the link. */}}
 {{$open := .OpenProposal}}{{$why := "this rule has a proposal not yet finished with: one at a time"}}
-{{if not $ro}}<section class="card" id="propose">
+{{if or (not $ro) .TeamPropose}}<section class="card" id="propose">
 <h2>{{t "Propose a change"}}</h2>
 {{with $open}}<p id="propose-open" class="why">{{t "this rule has a proposal not yet finished with: one at a time"}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a></p>{{end}}
 <form method="post" action="/proposals" class="grid">
@@ -175,7 +178,7 @@ reader who may propose nothing is told so, as before, with the link. */}}
 {{if $open}}<p>{{template "off" (quiet (again (offWhy $retire "propose-open" $why)))}}</p>{{else}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{t $retire}}</button></form>{{end}}
 </section>{{else}}<section class="card" id="propose">
 <h2>{{t "Propose a change"}}</h2>
-<p>{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}{{with $open}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a>{{end}}</p>
+<p>{{if and $.Status.Teams .OwnerTeam}}{{template "off" (offTeam $ "Propose a change" "propose-why" .OwnerTeam)}}{{else}}{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}{{end}}{{with $open}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a>{{end}}</p>
 </section>{{end}}
 {{end}}{{end}}
 

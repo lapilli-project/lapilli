@@ -112,6 +112,9 @@ type Declared struct {
 	// declares: one it no longer declares is deleted.
 	Goals  []DeclaredGoal
 	Marked []DeclaredMarked
+	// Bounds are the boundaries of change it declares (bounds.go), as
+	// lapilli serve writes them: kept as they are, under BoundsKey.
+	Bounds string
 }
 
 // Kinds of what --config declares, as a DeclaredError names them.
@@ -307,6 +310,9 @@ func (l *Ledger) Reconcile(ctx context.Context, d Declared, left Leave, o verdic
 			return err
 		}
 		spans = append(spans, marked...)
+		if err := keepBounds(t, d.Bounds, &r); err != nil {
+			return err
+		}
 		// The teams last: what names one the file no longer does is known.
 		if err := l.leaveTeams(t, leftTeams, left, &r, skip); err != nil {
 			return err
@@ -1239,6 +1245,8 @@ type Declaring struct {
 	// Marked are the marked windows declared or made in the UI: not the
 	// marked file's, nor an expression's, which are theirs.
 	Marked []Marked
+	// Bounds are the boundaries of change the file declared last.
+	Bounds string
 }
 
 // AllDeclarable is every team, quiet window (the earliest made first),
@@ -1278,7 +1286,10 @@ func (l *Ledger) AllDeclarable(ctx context.Context) (Declaring, error) {
 	if d.Goals, err = goals(ctx, tx); err != nil {
 		return d, err
 	}
-	d.Marked, err = l.markedRows(ctx, tx, "WHERE m.origin IN ('ui', 'config') ORDER BY m.id")
+	if d.Marked, err = l.markedRows(ctx, tx, "WHERE m.origin IN ('ui', 'config') ORDER BY m.id"); err != nil {
+		return d, err
+	}
+	d.Bounds, err = l.meta(ctx, tx, "x."+BoundsKey)
 	return d, err
 }
 
