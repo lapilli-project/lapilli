@@ -24,7 +24,7 @@
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
 <dd class="big">{{.Precision}}{{template "delta" .PrecisionBy}}</dd>
 <dd>{{if $v.NoRecord}}{{t "not known: no record"}}{{else if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd>
-{{- if $v.PrecisionByLapilli}}<dd>{{t "%s as Lapilli judged it: people said %d firings were unrelated, and This was real turned %d white" $v.PrecisionByLapilli $v.Unrelated $v.Real}}</dd>{{end}}
+{{- if $v.PrecisionByLapilli}}<dd>{{if and $v.Unrelated $v.Real}}{{t "%s as Lapilli judged it: people said %d firings were unrelated, and This was real turned %d white" $v.PrecisionByLapilli $v.Unrelated $v.Real}}{{else if $v.Unrelated}}{{t "%s as Lapilli judged it: people said %d firings were unrelated" $v.PrecisionByLapilli $v.Unrelated}}{{else}}{{t "%s as Lapilli judged it: This was real turned %d white" $v.PrecisionByLapilli $v.Real}}{{end}}</dd>{{end}}
 {{- if or $v.ActionYes $v.ActionNo}}<dd>{{t "Needed action: %d yes, %d no" $v.ActionYes $v.ActionNo}}</dd>{{end}}</div>
 <div><dt><details class="def"><summary>{{t "Firings"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "The times it fired and was judged; those a quiet window excused are counted apart."}}</p></details></dt>
 <dd class="big">{{.Firings}}{{template "delta" .FiringsBy}}</dd>
@@ -73,7 +73,7 @@
 <h2>{{t "Latest firings"}}</h2>
 {{if .Latest}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Latest firings"}}"><table>
 <thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "What people said"}}</th></tr></thead>
-<tbody>{{range .Latest}}<tr><td>{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}{{if gt .EpisodeFirings 1}} <span class="quiet">{{t "of an episode of %d firings from %s" .EpisodeFirings (at $loc .EpisodeStart)}}</span>{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td><td>{{template "verdict" (verdictOf $ . (print $v.Path "?tab=firings"))}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Latest}}<tr><td class="stone">{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}{{if gt .EpisodeFirings 1}} <span class="quiet">{{t "of an episode of %d firings from %s" .EpisodeFirings (at $loc .EpisodeStart)}}</span>{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n notified">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td><td class="said">{{template "verdict" (verdictOf $ . (print $v.Path "?tab=firings"))}}</td></tr>{{end}}</tbody>
 </table></div>
 <p><a href="{{$.Link "/firings" "rule" .Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>

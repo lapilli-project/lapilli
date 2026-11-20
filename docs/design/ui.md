@@ -2003,6 +2003,19 @@ why); `TestFlagsAsCode` reads every page the tests serve, and a first-time
 user's, in each language. A form's syntax (a repeating window, a report's
 schedule, a marked window's kind) is behind "How to write it" under it.
 
+Since bundle 65 Korean says 알림 묶음 for an episode (같은 라벨의 알림이
+겹치거나 하루 안에 다시 울리면 한 묶음), not 에피소드, a word whoever is on
+call doesn't use of alerts; 판정 제외 for a rule entry's `judged: false`,
+not 판정 안 함, a letter from 판정 안 됨, a firing with no record to judge
+it by (Japanese 判定対象外 beside 判定なし, Spanish "Fuera del juicio"
+beside "sin juzgar", which differed by a capital alone). A button's name in
+a sentence is in quotes (“실제 문제였음”으로), as a badge's is; who said a
+firing was unrelated to what reads 무관: INC-111 (dana, …), with no particle
+after a value whose sound Korean can't know (INC-111와). A line of what
+people moved says only the parts that moved: no "0건이 정탐이 됐어요".
+`TestKoreanTerms` fails on 에피소드 and 판정 안 함; `TestJudgedApart` on the
+two said alike in any language.
+
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only
 admin's proposal waiting, nowhere to send a notice, a report going
@@ -2049,6 +2062,42 @@ any. Two differences were fixed:
   does, and a chip's value may start a line after its `=`; and a Korean
   button breaks between its words, where Safari broke "실제 문제였음" a
   syllable a line. The row is 91 px in each.
+
+### People's verdicts, in a row
+
+Steps 1 to 4 of docs/design/judging.md (0.63.0) gave each row of the
+firings list and of a rule's firings what people said of the firing:
+"Unrelated", "Undo", and "needed action" as a select and a button. In a
+cell with no width of its own they stood a line each, the select's label
+on a line of its own: a row 179 px tall at 1,280 px where bundle 63 left
+it at 91, 331 with a note, a rule's name broken a letter from its end, and
+"● 무관 판정 재발화" a syllable a line. Bundle 65:
+
+- The column is "What people said", at least 12 rem. "needed action" is
+  one line, its select saying the answer in words ("Action: yes", 조치
+  필요, "Action: –" 답 없음), its label for a screen reader, and "Save";
+  the other forms a line each. The stone's words break between words,
+  Korean's too, and "paged no one" may take two lines: the Notified
+  column is a number's. A row is 96 px at 1,280 px in each language, 171
+  to 194 with a note; a rule's firings, 55. The table fits its box at
+  1,280 px in Korean and English, and within 16 px in the others.
+- The bulk bar's "needed action" starts on "pick one", `required`, and
+  "These were real" goes without it (`formnovalidate`). It started on
+  yes, so that a press marked every firing picked as needing action; its
+  "none", which clears the answers, read as "needed action: none", and is
+  "clear the answer". A bulk answer sent with no choice writes nothing
+  (`TestBulkAnswerPicked`). "Answer" and "Answer for those picked" are
+  "Save" and "Save for those picked".
+- The Episodes column fits where the tables did before it: a number's
+  cells in the rules list a little tighter (1,070 px), the heatmap's
+  totals' headers wrapping and a rule's name cut at 11 rem under 1,280
+  px (1,200 px). Spanish, which didn't fit there before it, still
+  doesn't (ACCESSIBILITY.md).
+- `a11yServer` has people's verdicts (`peopleSay`: one said unrelated,
+  one answered, one to look at again) and the episodes counted, so that
+  `test/a11y/axe.mjs` reads their forms, words and columns on every
+  change; they were read once by hand in Chromium and WebKit, 4
+  languages, light and dark, at 1,280 and 320 px: no violation.
 
 ## What is left
 

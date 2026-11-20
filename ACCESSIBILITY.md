@@ -59,14 +59,18 @@ found, and what it fixed.
 
 ## Known not to work yet
 
-- The overview's heatmap cuts a long rule name short; the whole name is in
-  its link and on the rule's page ([#129](https://github.com/lapilli-project/lapilli/issues/129)).
+- The overview's heatmap cuts a long rule name short, sooner under 1,280
+  CSS px; the whole name is in its link and on the rule's page ([#129](https://github.com/lapilli-project/lapilli/issues/129)).
+- In Spanish, the rules list and the overview's heatmap are a little
+  wider than their box from 1,070 to 1,280 CSS px, and scroll sideways in
+  it, where the other languages fit.
 - The Spanish and Japanese were written with a machine's help and want a
   native speaker's review ([#131](https://github.com/lapilli-project/lapilli/issues/131),
   [#130](https://github.com/lapilli-project/lapilli/issues/130)).
 - The pages are checked in Chromium, by tools, on every change. The pages
   with fields were read once in WebKit (Safari's engine) and Firefox too,
-  light and dark, from 1,280 to 320 CSS px (0.62.0); they are not checked
+  light and dark, from 1,280 to 320 CSS px (0.62.0), and the forms for
+  people's verdicts on firings in WebKit (0.63.1); they are not checked
   there on every change, and not yet with VoiceOver, NVDA, JAWS or
   TalkBack.
 

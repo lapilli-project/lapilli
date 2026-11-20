@@ -105,11 +105,14 @@ func TestKoreanSaysNoStones(t *testing.T) {
 // doesn't say a person was woken (깨운), or woken in vain (괜히, 헛알림),
 // where only the hours are known; nor 원장 for the ledger, a name for how
 // Lapilli keeps it, nor 표시 구간 for a marked window, which the menu calls
-// 이벤트 구간, nor 은퇴 for a rule retired, which triage calls 폐기
-// (docs/design/ui.md, "Times, and Korean").
+// 이벤트 구간, nor 은퇴 for a rule retired, which triage calls 폐기; nor
+// 에피소드 for an episode, 알림 묶음 to whoever is on call, nor 판정 안 함
+// for a rule entry's judged: false, 판정 제외, a letter from 판정 안 됨,
+// a firing with no record (docs/design/ui.md, "Times, and Korean", and
+// bundle 65).
 func TestKoreanTerms(t *testing.T) {
 	for en, ko := range catalogs["ko"] {
-		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운", "깨움", "원장", "표시 구간", "은퇴"} {
+		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운", "깨움", "원장", "표시 구간", "은퇴", "에피소드", "판정 안 함"} {
 			if strings.Contains(ko, w) && !strings.Contains(en, "returned anything") {
 				t.Errorf("%q says %s: %q", en, w, ko)
 			}
@@ -117,6 +120,23 @@ func TestKoreanTerms(t *testing.T) {
 		// A rule is 규칙; 룰러 is the ruler, Prometheus's and Loki's.
 		if strings.Contains(strings.ReplaceAll(ko, "룰러", ""), "룰") {
 			t.Errorf("%q says 룰 for a rule: %q", en, ko)
+		}
+	}
+}
+
+// TestJudgedApart: in every language, a firing with no record to judge it
+// by ("not judged") and a rule entry that judges its rules by nothing
+// ("Not judged", "judged by nothing") are said apart, not in words that
+// differ by a capital alone (TestKoreanTerms holds Korean's apart by more
+// than a letter).
+func TestJudgedApart(t *testing.T) {
+	for _, lang := range []string{"ko", "ja", "es"} {
+		none := tr(lang, "not judged")
+		for _, off := range []string{"Not judged", "judged by nothing"} {
+			x := tr(lang, off)
+			if x == off || strings.EqualFold(x, none) {
+				t.Errorf("%s: %q is %q, beside %q for no record", lang, off, x, none)
+			}
 		}
 	}
 }

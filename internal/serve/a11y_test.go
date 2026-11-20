@@ -30,13 +30,24 @@ import (
 )
 
 // a11yServer is pagesServer with a proposal, a rule that caught nothing
-// (for the noise's heatmap) and a task with an issue in a tracker, and the
-// pages to read: those TestPagesInEachLanguage renders, the proposals, and
-// a page not found.
+// (for the noise's heatmap), a task with an issue in a tracker, people's
+// verdicts and the episodes counted (their forms, words and columns, which
+// test/a11y/axe.mjs reads too), and the pages to read: those
+// TestPagesInEachLanguage renders, the proposals, and a page not found.
 func a11yServer(t *testing.T) (*Server, []string) {
 	t.Helper()
 	ctx := context.Background()
 	s := pagesServer(t)
+	peopleSay(t, s)
+	for {
+		n, err := s.l.CountEpisodes(ctx, s.cfg.Options, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			break
+		}
+	}
 	if _, err := s.propose(ctx, ask{Rule: "Errors", Kind: ledger.KindFor, For: 15 * time.Minute}, "ana", false, true); err != nil {
 		t.Fatal(err)
 	}
