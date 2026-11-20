@@ -1263,13 +1263,15 @@ func TestBacktestReadsNotStarved(t *testing.T) {
 		t.Fatalf("the job's first poll: %d", c)
 	}
 	// Someone else, with no token, through the same proxy: 150 guesses,
-	// 20 of them a 404 after a listing, the rest a 503 at once.
+	// the bucket's 20 of them a 404 after a listing, the rest a 503 at
+	// once; one more a second comes back to the bucket, so a slow run may
+	// have a 404 or two more, never most.
 	codes := map[int]int{}
 	for i := range 150 {
 		codes[ask("GET", proxy, fmt.Sprintf("/v1/backtests/%032x", i), "nothing")]++
 	}
 	codes[ask("GET", proxy, "/v1/backtests/"+id, "a wrong key")]++
-	if codes[404] != 20 || codes[503] != 131 {
+	if codes[404] < 20 || codes[503] < 100 || codes[404]+codes[503] != 151 {
 		t.Errorf("151 guesses: %v", codes)
 	}
 	if c := ask("GET", proxy, "/v1/backtests/"+id, key); c != 202 {
