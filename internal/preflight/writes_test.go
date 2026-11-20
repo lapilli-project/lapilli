@@ -1625,3 +1625,12 @@ func TestCloudIDs(t *testing.T) {
 		t.Errorf("%+v", it)
 	}
 }
+
+// askClient gives up on a request of its own, after the time each of its
+// callers' contexts gives what they ask: one asked without a deadline
+// doesn't hang on an API that doesn't answer.
+func TestAskClientGivesUp(t *testing.T) {
+	if askClient.Timeout <= 0 || askClient.Timeout > eachTime {
+		t.Errorf("askClient gives up after %s, want within %s", askClient.Timeout, eachTime)
+	}
+}

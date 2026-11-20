@@ -31,8 +31,11 @@ import (
 // answer that says "allowed" is judged, and nothing more is done with it.
 
 // askClient is how these are asked: through egress, so the allowlist
-// sees each request first, following no redirect.
-var askClient = &http.Client{Transport: egress.Wrap(nil),
+// sees each request first, following no redirect, and giving up on one
+// after eachTime of its own, its answer read, as every caller's context
+// gives up on what it asks: a caller that gave none can't hang on an API
+// that doesn't answer.
+var askClient = &http.Client{Transport: egress.Wrap(nil), Timeout: eachTime,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // answered is an answer that isn't a success: its status, and what it
