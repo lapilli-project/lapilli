@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,19 +23,27 @@ type Expectations struct {
 	Expectations []Expectation `yaml:"expectations" json:"expectations"`
 }
 
-// Expectation is one rule's, or a group's rules', by name.
+// Expectation is one rule's, or a group's rules', by name; or the rules
+// whose labels a selector matches, as --rules-select takes one (labels:
+// severity=page, team in (payments,cart)).
 type Expectation struct {
 	Rule    string        `yaml:"rule,omitempty" json:"rule,omitempty"`
 	Group   string        `yaml:"group,omitempty" json:"group,omitempty"`
+	Labels  string        `yaml:"labels,omitempty" json:"labels,omitempty"`
 	Budget  *Budget       `yaml:"budget,omitempty" json:"budget,omitempty"`
 	Catches []ExpectCatch `yaml:"catches,omitempty" json:"catches,omitempty"`
+	// sel is Labels, read.
+	sel rules.Selector
 }
 
 // Budget is how often a rule may fire in each whole week of a period, and
-// of those, how often while people slept, by the hours it is counted by.
+// of those, how often while people slept, by the hours it is counted by,
+// and how often a firing came again within --refire of the same alert
+// resolving.
 type Budget struct {
-	Week   *int `yaml:"week,omitempty" json:"week,omitempty"`
-	Asleep *int `yaml:"asleep,omitempty" json:"asleep,omitempty"`
+	Week    *int `yaml:"week,omitempty" json:"week,omitempty"`
+	Asleep  *int `yaml:"asleep,omitempty" json:"asleep,omitempty"`
+	Refires *int `yaml:"refires,omitempty" json:"refires,omitempty"`
 }
 
 // ExpectCatch is an incident a rule must keep catching, within a delay of
@@ -82,8 +91,8 @@ const MaxExpectationCatches = 2000
 const MaxExpectResults = 100000
 
 // ReadExpectations reads an expectations file strictly: a key it doesn't
-// know, a value of another kind, an expectation naming no rule or group,
-// or a budget below nothing is an error, with its line.
+// know, a value of another kind, an expectation naming no rule, group or
+// labels, or a budget below nothing is an error, with its line.
 func ReadExpectations(r io.Reader) (*Expectations, error) {
 	b, err := io.ReadAll(io.LimitReader(r, MaxExpectations+1))
 	if err != nil {
@@ -104,27 +113,56 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 	if err := dec.Decode(&e); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	if len(e.Expectations) > MaxExpectationEntries {
-		return nil, fmt.Errorf("%d expectations: at most %d", len(e.Expectations), MaxExpectationEntries)
+	return NewExpectations(e.Expectations)
+}
+
+// NewExpectations checks expectations read, from a file or from where else
+// they are declared (lapilli serve's --config), as ReadExpectations does:
+// each names one of a rule, a group and labels, and holds it to something;
+// the same budget or incident given twice for one of them is refused. Each
+// rule's, each group's and each selector's entries are made one.
+func NewExpectations(list []Expectation) (*Expectations, error) {
+	if len(list) > MaxExpectationEntries {
+		return nil, fmt.Errorf("%d expectations: at most %d", len(list), MaxExpectationEntries)
 	}
 	catches := 0
-	for _, x := range e.Expectations {
+	for _, x := range list {
 		catches += len(x.Catches)
 	}
 	if catches > MaxExpectationCatches {
 		return nil, fmt.Errorf("%d catches: at most %d in all", catches, MaxExpectationCatches)
 	}
-	for i, x := range e.Expectations {
+	e := &Expectations{Expectations: slices.Clone(list)}
+	for i := range e.Expectations {
+		x := &e.Expectations[i]
 		at := fmt.Sprintf("expectation %d", i+1)
+		named := 0
+		for _, v := range []string{x.Rule, x.Group, x.Labels} {
+			if v != "" {
+				named++
+			}
+		}
+		b := x.Budget
 		switch {
-		case (x.Rule == "") == (x.Group == ""):
-			return nil, fmt.Errorf("%s: give rule or group, one of them", at)
-		case x.Budget == nil && len(x.Catches) == 0:
+		case named != 1:
+			return nil, fmt.Errorf("%s: give rule, group or labels, one of them", at)
+		case b == nil && len(x.Catches) == 0:
 			return nil, fmt.Errorf("%s: nothing to hold %s to: give a budget or catches", at, x.name())
-		case x.Budget != nil && x.Budget.Week == nil && x.Budget.Asleep == nil:
-			return nil, fmt.Errorf("%s: a budget of nothing: give week or asleep", at)
-		case x.Budget != nil && (x.Budget.Week != nil && *x.Budget.Week < 0 || x.Budget.Asleep != nil && *x.Budget.Asleep < 0):
+		case b != nil && b.Week == nil && b.Asleep == nil && b.Refires == nil:
+			return nil, fmt.Errorf("%s: a budget of nothing: give week, asleep or refires", at)
+		case b != nil && (below(b.Week) || below(b.Asleep) || below(b.Refires)):
 			return nil, fmt.Errorf("%s: a budget below nothing", at)
+		}
+		if x.Labels != "" {
+			sel, err := rules.ParseSelector(x.Labels)
+			if err == nil && sel.Empty() {
+				err = errors.New("it selects every rule: give a rule, a group, or a label to select by")
+			}
+			if err != nil {
+				return nil, fmt.Errorf("%s: labels: %w", at, err)
+			}
+			// As written, its spaces aside: one selector is one entry.
+			x.Labels, x.sel = sel.String(), sel
 		}
 		for _, c := range x.Catches {
 			if strings.TrimSpace(c.Incident) == "" {
@@ -135,6 +173,8 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 	return e.merged()
 }
 
+func below(n *int) bool { return n != nil && *n < 0 }
+
 // merged is the file with each rule's, and each group's, entries made one:
 // what is held is then compared item by item. The same budget, or the same
 // incident, given twice for one rule or group is refused: which holds isn't
@@ -142,14 +182,14 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 // rule or group in a set.
 func (e *Expectations) merged() (*Expectations, error) {
 	out := &Expectations{Expectations: []Expectation{}}
-	at := map[[2]string]int{}
-	caught := map[[3]string]bool{}
+	at := map[[3]string]int{}
+	caught := map[[4]string]bool{}
 	for _, x := range e.Expectations {
-		key := [2]string{x.Rule, x.Group}
+		key := [3]string{x.Rule, x.Group, x.Labels}
 		i, seen := at[key]
 		if !seen {
 			at[key] = len(out.Expectations)
-			y := Expectation{Rule: x.Rule, Group: x.Group}
+			y := Expectation{Rule: x.Rule, Group: x.Group, Labels: x.Labels, sel: x.sel}
 			out.Expectations = append(out.Expectations, y)
 			i = at[key]
 		}
@@ -170,9 +210,15 @@ func (e *Expectations) merged() (*Expectations, error) {
 				}
 				y.Budget.Asleep = x.Budget.Asleep
 			}
+			if x.Budget.Refires != nil {
+				if y.Budget.Refires != nil {
+					return nil, fmt.Errorf("%s: a budget of re-fires given twice", x.name())
+				}
+				y.Budget.Refires = x.Budget.Refires
+			}
 		}
 		for _, c := range x.Catches {
-			k := [3]string{x.Rule, x.Group, c.Incident}
+			k := [4]string{x.Rule, x.Group, x.Labels, c.Incident}
 			if caught[k] {
 				return nil, fmt.Errorf("%s: incident %s given twice", x.name(), c.Incident)
 			}
@@ -184,25 +230,51 @@ func (e *Expectations) merged() (*Expectations, error) {
 }
 
 func (x Expectation) name() string {
-	if x.Rule != "" {
+	switch {
+	case x.Rule != "":
 		return x.Rule
+	case x.Group != "":
+		return "group " + x.Group
 	}
-	return "group " + x.Group
+	return "labels " + x.Labels
 }
 
-// For says whether it holds a rule of that name and group. A name several
+// Selector is what it names its rules by, as written: rule: NAME,
+// group: NAME or labels: SELECTOR.
+func (x Expectation) Selector() string {
+	switch {
+	case x.Rule != "":
+		return "rule: " + x.Rule
+	case x.Group != "":
+		return "group: " + x.Group
+	}
+	return "labels: " + x.Labels
+}
+
+// For says whether it holds a rule of that name and group, its labels
+// unknown: an expectation by labels holds none of them. A name several
 // rules share is told apart in a run (CheckoutErrors [severity=page]):
 // rule: CheckoutErrors holds each of them; the name told apart, one.
-func (x Expectation) For(rule, group string) bool {
-	if x.Rule != "" {
+func (x Expectation) For(rule, group string) bool { return x.Holds(rule, group, nil) }
+
+// Holds says whether it holds a rule of that name, group and labels (the
+// labels its alerts carry, its group's among them): by labels, when every
+// requirement of its selector holds of them.
+func (x Expectation) Holds(rule, group string, labels map[string]string) bool {
+	switch {
+	case x.Rule != "":
 		return x.Rule == rule || strings.HasPrefix(rule, x.Rule+" [")
+	case x.Group != "":
+		return x.Group == group
 	}
-	return x.Group == group
+	return labels != nil && x.sel.Matches(labels)
 }
 
-// same says two expectations name the same rule or group: the one is the
-// other, as a change may have made it.
-func (x Expectation) same(y Expectation) bool { return x.Rule == y.Rule && x.Group == y.Group }
+// same says two expectations name the same rule, group or labels: the one
+// is the other, as a change may have made it.
+func (x Expectation) same(y Expectation) bool {
+	return x.Rule == y.Rule && x.Group == y.Group && x.Labels == y.Labels
+}
 
 // Expect states, of an expectation on one side of a change.
 const (
@@ -279,10 +351,10 @@ func (c *Checked) Broken() int {
 // item is one thing an expectation holds a rule to: a budget's limit, or a
 // catch, by what it is.
 type item struct {
-	what   string
-	limit  *int         // a budget's
-	catch  *ExpectCatch // a catch's
-	asleep bool
+	what           string
+	limit          *int         // a budget's
+	catch          *ExpectCatch // a catch's
+	asleep, refire bool
 }
 
 func (x *Expectation) items() []item {
@@ -297,11 +369,44 @@ func (x *Expectation) items() []item {
 		if b.Asleep != nil {
 			out = append(out, item{what: "budget asleep", limit: b.Asleep, asleep: true})
 		}
+		if b.Refires != nil {
+			out = append(out, item{what: "budget refires", limit: b.Refires, refire: true})
+		}
 	}
 	for i := range x.Catches {
 		out = append(out, item{what: "catches " + x.Catches[i].Incident, catch: &x.Catches[i]})
 	}
 	return out
+}
+
+// ExpectItem is one thing an expectation holds a rule to, as a person
+// reads it: What, "budget week", "budget asleep", "budget refires" or
+// "catches INC-43"; Held, its bound ("10", "within 5m", "caught"). Limit
+// is a budget's, Catch a catch's.
+type ExpectItem struct {
+	What, Held string
+	Limit      *int
+	Catch      *ExpectCatch
+}
+
+// Asleep and Refires say what a budget counts: firings while people
+// slept, re-fires; neither, every firing.
+func (it ExpectItem) Asleep() bool  { return it.What == "budget asleep" }
+func (it ExpectItem) Refires() bool { return it.What == "budget refires" }
+
+// Items are what it holds a rule to, its budget's first.
+func (x *Expectation) Items() []ExpectItem {
+	var out []ExpectItem
+	for _, it := range x.items() {
+		out = append(out, ExpectItem{What: it.what, Held: it.limitText(), Limit: it.limit, Catch: it.catch})
+	}
+	return out
+}
+
+// BudgetItems are what a budget holds a rule to, as Items gives them.
+func BudgetItems(b *Budget) []ExpectItem {
+	x := Expectation{Budget: b}
+	return x.Items()
 }
 
 func (it item) limitText() string {
@@ -314,9 +419,9 @@ func (it item) limitText() string {
 	return "caught"
 }
 
-// weekCounts are, of one side's firings, by rule, each whole week's and
-// how many came while people slept, counted once.
-type weekCounts map[string][]struct{ all, asleep int }
+// weekCounts are, of one side's firings, by rule, each whole week's, how
+// many came while people slept and how many re-fired, counted once.
+type weekCounts map[string][]struct{ all, asleep, refired int }
 
 // CheckExpectations holds the rules a comparison's change touches to what
 // after says of them; with before (--expect-before), the side before to
@@ -324,27 +429,35 @@ type weekCounts map[string][]struct{ all, asleep int }
 // said. hours count the firings while people slept. Past MaxExpectResults
 // it stops, and says what to do.
 func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours) (*Checked, error) {
+	return CheckExpectationsBy(c, after, before, func(string) *Hours { return hours })
+}
+
+// CheckExpectationsBy is CheckExpectations, each rule's firings counted
+// while people slept by the hours hoursOf gives it: lapilli serve's, its
+// team's own where it has them. nil for none.
+func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf func(rule string) *Hours) (*Checked, error) {
 	out := &Checked{Results: []ExpectResult{}}
 	span := c.To.Sub(c.From)
 	out.Weeks = int(span / (7 * 24 * time.Hour))
 	if out.Weeks == 0 {
 		out.Scaled = span.Hours() / 24
 	}
-	countsB, countsA := out.count(c.Before, c.From, c.To, hours), out.count(c.After, c.From, c.To, hours)
+	countsB, countsA := out.count(c.Before, c.From, c.To, hoursOf), out.count(c.After, c.From, c.To, hoursOf)
 	incsB, incsA := incidentsByID(c.Before), incidentsByID(c.After)
-	sleeps := hours != nil && hours.Sleeps()
 	for _, rc := range c.Rules {
+		h := hoursOf(rc.Rule)
+		sleeps := h != nil && h.Sleeps()
 		// Checked as each rule's are added: one rule adds a few
 		// expectations' items at most, each file's 2,000 catches at most.
 		if len(out.Results) > MaxExpectResults {
 			return nil, errHeldTooMuch
 		}
 		b, a := rc.Before, rc.After
-		group := ""
+		group, labels := "", rc.AfterLabels
 		if a != nil {
 			group = a.Group
 		} else if b != nil {
-			group = b.Group
+			group, labels = b.Group, rc.BeforeLabels
 		}
 		held := false
 		judge := func(it item, beforeLimit item, r ExpectResult) ExpectResult {
@@ -358,11 +471,14 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 				}
 				return r
 			}
-			wb, sb := out.most(countsB, rc.Rule)
-			wa, sa := out.most(countsA, rc.Rule)
+			wb, sb, rb := out.most(countsB, rc.Rule)
+			wa, sa, ra := out.most(countsA, rc.Rule)
 			nb, na := wb, wa
-			if it.asleep {
+			switch {
+			case it.asleep:
 				nb, na = sb, sa
+			case it.refire:
+				nb, na = rb, ra
 			}
 			counted := !it.asleep || sleeps
 			r.Before, r.BeforeState = budgetState(b, nb, beforeLimit.limit, counted)
@@ -371,7 +487,7 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		}
 		for i := range after.Expectations {
 			x := &after.Expectations[i]
-			if !x.For(rc.Rule, group) {
+			if !x.Holds(rc.Rule, group, labels) {
 				continue
 			}
 			held = true
@@ -418,9 +534,9 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		// What held the rule before and holds it no more: an expectation
 		// the change took away whole, or one by group of a rule the change
 		// moved out of the group. The rule's group before decides.
-		bGroup := group
+		bGroup, bLabels := group, labels
 		if b != nil {
-			bGroup = b.Group
+			bGroup, bLabels = b.Group, rc.BeforeLabels
 		}
 		ys := before
 		if ys == nil {
@@ -428,7 +544,7 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		}
 		for j := range ys.Expectations {
 			y := &ys.Expectations[j]
-			if !y.For(rc.Rule, bGroup) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) && x.For(rc.Rule, group) }) {
+			if !y.Holds(rc.Rule, bGroup, bLabels) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) && x.Holds(rc.Rule, group, labels) }) {
 				continue
 			}
 			moved := slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) })
@@ -469,7 +585,7 @@ func incidentsByID(rep *Report) map[string]int {
 // count counts a side's firings by rule and whole week, counted back from
 // to, the weeks closed at their start, so a firing at from is in the
 // first; with no whole week, the period's, as one.
-func (k *Checked) count(r *Report, from, to time.Time, hours *Hours) weekCounts {
+func (k *Checked) count(r *Report, from, to time.Time, hoursOf func(string) *Hours) weekCounts {
 	out := weekCounts{}
 	if r == nil {
 		return out
@@ -489,29 +605,32 @@ func (k *Checked) count(r *Report, from, to time.Time, hours *Hours) weekCounts 
 		}
 		ws := out[f.Rule]
 		if ws == nil {
-			ws = make([]struct{ all, asleep int }, n)
+			ws = make([]struct{ all, asleep, refired int }, n)
 			out[f.Rule] = ws
 		}
 		ws[i].all++
-		if hours != nil && hours.Of(f.Start) == Asleep {
+		if h := hoursOf(f.Rule); h != nil && h.Of(f.Start) == Asleep {
 			ws[i].asleep++
+		}
+		if f.Refired {
+			ws[i].refired++
 		}
 	}
 	return out
 }
 
-// most is the most a rule fired in a week, and while people slept; with
-// no whole week, the period's, scaled to a week.
-func (k *Checked) most(counts weekCounts, rule string) (int, int) {
-	most, asleep := 0, 0
+// most is the most a rule fired in a week, while people slept, and
+// re-fired; with no whole week, the period's, scaled to a week.
+func (k *Checked) most(counts weekCounts, rule string) (int, int, int) {
+	most, asleep, refired := 0, 0, 0
 	for _, w := range counts[rule] {
-		most, asleep = max(most, w.all), max(asleep, w.asleep)
+		most, asleep, refired = max(most, w.all), max(asleep, w.asleep), max(refired, w.refired)
 	}
 	if k.Weeks == 0 {
 		scale := 7 / max(k.Scaled, 1.0/24)
-		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5)
+		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5), int(float64(refired)*scale + 0.5)
 	}
-	return most, asleep
+	return most, asleep, refired
 }
 
 func budgetState(r *RuleResult, n int, limit *int, counted bool) (string, string) {
@@ -544,7 +663,14 @@ func catchState(rep *Report, at map[string]int, r *RuleResult, rule string, k Ex
 	if !ok {
 		return "–", ExpectUnknown
 	}
-	for _, c := range rep.Incidents[i].CaughtBy {
+	return CaughtWithin(rep.Incidents[i].CaughtBy, rule, k)
+}
+
+// CaughtWithin is whether rule is among the rules that caught an incident,
+// within the catch's delay of its start: its delay, met or broken; ✗,
+// broken, when it isn't among them.
+func CaughtWithin(by []Catch, rule string, k ExpectCatch) (string, string) {
+	for _, c := range by {
 		if c.Rule == rule {
 			if k.Within > 0 && c.Delay > time.Duration(k.Within) {
 				return Delay(c.Delay), ExpectBroken
@@ -563,6 +689,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s = "at most " + r.Limit + " a week"
 	case r.What == "budget asleep":
 		s = "at most " + r.Limit + " a week while people slept"
+	case r.What == "budget refires":
+		s = "at most " + r.Limit + " re-fires a week"
 	case strings.HasPrefix(r.What, "catches "):
 		s = "catches " + name(strings.TrimPrefix(r.What, "catches ")) + ", " + r.Limit
 	default:
@@ -705,4 +833,64 @@ func expectationsPart(k *Checked) mdPart {
 		part.foot = "\nRules this change adds that no expectation holds: " + strings.Join(names, ", ") + more + ".\n\n"
 	}
 	return part
+}
+
+// BudgetAnnotation is the annotation a rule may carry its budget in, for
+// teams that keep everything in the rule: "10/week, 2 asleep, 3 refires".
+const BudgetAnnotation = "lapilli.dev/budget"
+
+// maxBudgetText is the longest an annotation's budget is read, in bytes;
+// maxBudget, the most a budget's number may be.
+const (
+	maxBudgetText = 100
+	maxBudget     = 1000000
+)
+
+// errBudgetText is what ParseBudget says of a budget it can't read. A
+// rule's annotation is its author's: what is wrong is said without its
+// text.
+var errBudgetText = errors.New(`want a budget such as "10/week, 2 asleep, 3 refires": a whole number and what it counts, each once`)
+
+// ParseBudget reads a budget as an annotation writes it: parts separated
+// by commas, each a whole number and what it counts, N/week, N asleep and
+// N refires (or re-fires), each once, one at least.
+func ParseBudget(s string) (*Budget, error) {
+	if len(s) > maxBudgetText {
+		return nil, fmt.Errorf("more than %d bytes: %w", maxBudgetText, errBudgetText)
+	}
+	b := &Budget{}
+	parts := strings.Split(s, ",")
+	if len(parts) > 3 {
+		return nil, errBudgetText
+	}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		num, what := p, ""
+		if i := strings.IndexAny(p, "/ "); i > 0 {
+			num, what = p[:i], strings.TrimSpace(strings.TrimPrefix(p[i:], "/"))
+		}
+		n, err := strconv.Atoi(num)
+		if err != nil || n < 0 || n > maxBudget || strings.HasPrefix(num, "+") {
+			return nil, errBudgetText
+		}
+		var at **int
+		switch what {
+		case "week":
+			if !strings.Contains(p, "/") {
+				return nil, errBudgetText
+			}
+			at = &b.Week
+		case "asleep":
+			at = &b.Asleep
+		case "refires", "re-fires":
+			at = &b.Refires
+		default:
+			return nil, errBudgetText
+		}
+		if *at != nil {
+			return nil, errBudgetText
+		}
+		*at = &n
+	}
+	return b, nil
 }

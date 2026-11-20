@@ -66,7 +66,13 @@ const JudgedByServe = "lapilli serve"
 // what the change broke. Held to more than MaxExpectResults, it holds
 // nothing, and says why.
 func (c *Comparison) Expect(after, before *Expectations, hours *Hours) error {
-	k, err := CheckExpectations(c, after, before, hours)
+	return c.ExpectBy(after, before, func(string) *Hours { return hours })
+}
+
+// ExpectBy is Expect, each rule's firings counted while people slept by
+// the hours hoursOf gives it (CheckExpectationsBy).
+func (c *Comparison) ExpectBy(after, before *Expectations, hoursOf func(rule string) *Hours) error {
+	k, err := CheckExpectationsBy(c, after, before, hoursOf)
 	if err != nil {
 		return err
 	}
@@ -249,6 +255,44 @@ type RuleChange struct {
 	Rule   string      `json:"rule"`
 	Before *RuleResult `json:"before"`
 	After  *RuleResult `json:"after"`
+	// BeforeLabels and AfterLabels are the labels its alerts carry on each
+	// side, its group's among them (rules.Rule.AlertLabels), as LabelRules
+	// sets them: what an expectation by labels holds a rule by. Not shown.
+	BeforeLabels map[string]string `json:"-"`
+	AfterLabels  map[string]string `json:"-"`
+}
+
+func cmpOr(m, or map[string]string) map[string]string {
+	if m == nil {
+		return or
+	}
+	return m
+}
+
+// LabelRules gives the rules that differ the labels their alerts carry on
+// each side, from the rules each side replayed: what an expectation by
+// labels (labels: severity=page) holds a rule by.
+func (c *Comparison) LabelRules(before, after []rules.Rule) {
+	of := func(rs []rules.Rule) map[string]map[string]string {
+		out := make(map[string]map[string]string, len(rs))
+		for _, r := range rs {
+			if _, ok := out[r.Name]; !ok {
+				// None is known to be none: a selector such as !team holds it.
+				out[r.Name] = cmpOr(r.AlertLabels(), map[string]string{})
+			}
+		}
+		return out
+	}
+	b, a := of(before), of(after)
+	for i := range c.Rules {
+		rc := &c.Rules[i]
+		if rc.Before != nil {
+			rc.BeforeLabels = b[rc.Rule]
+		}
+		if rc.After != nil {
+			rc.AfterLabels = a[rc.Rule]
+		}
+	}
 }
 
 // Alike reports whether a changed rule fires as often, and catches as

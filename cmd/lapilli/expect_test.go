@@ -67,6 +67,13 @@ func TestCompareExpectations(t *testing.T) {
 		t.Errorf("--expect-required: exit %d\n%s\n%s", code, out, errs)
 	}
 
+	// By labels, as --rules-select takes them: the rule's own labels.
+	byLabels := write(t, "labels.yaml", "expectations:\n  - labels: severity=page\n    budget: {week: 5}\n  - labels: severity=ticket\n    budget: {week: 0}\n")
+	if code, out, _ := lapilli("--rules", flappy, "--compare", inPlace, "--expect", byLabels, "--fail-expectations"); code != 1 ||
+		!strings.Contains(out, "Expectations: 1 broken by this change, 0 broken before too, 0 met") {
+		t.Errorf("by labels: exit %d\n%s", code, out)
+	}
+
 	bad := write(t, "bad.yaml", "expectations:\n  - rule: CheckoutErrors\n    budjet: {week: 5}\n")
 	if code, _, errs := lapilli("--rules", flappy, "--compare", inPlace, "--expect", bad); code != 1 || !strings.Contains(errs, "--expect "+bad+": ") ||
 		!strings.Contains(errs, "budjet") {

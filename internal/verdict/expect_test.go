@@ -36,15 +36,15 @@ func check(t *testing.T, c *Comparison, after, before *Expectations, hours *Hour
 // an error, never passed over.
 func TestReadExpectationsStrict(t *testing.T) {
 	for want, s := range map[string]string{
-		"field budjet not found":                "expectations:\n  - rule: A\n    budjet: {week: 3}\n",
-		"give rule or group":                    "expectations:\n  - budget: {week: 3}\n",
-		"give rule or group, one of them":       "expectations:\n  - rule: A\n    group: g\n    budget: {week: 3}\n",
-		"nothing to hold A to":                  "expectations:\n  - rule: A\n",
-		"a budget of nothing":                   "expectations:\n  - rule: A\n    budget: {}\n",
-		"a budget below nothing":                "expectations:\n  - rule: A\n    budget: {week: -1}\n",
-		"a catch names no incident":             "expectations:\n  - rule: A\n    catches: [{incident: ' '}]\n",
-		"want a duration such as 5m":            "expectations:\n  - rule: A\n    catches: [{incident: INC-1, within: soon}]\n",
-		"cannot unmarshal !!str `ten` into int": "expectations:\n  - rule: A\n    budget: {week: ten}\n",
+		"field budjet not found":                  "expectations:\n  - rule: A\n    budjet: {week: 3}\n",
+		"give rule, group or labels":              "expectations:\n  - budget: {week: 3}\n",
+		"give rule, group or labels, one of them": "expectations:\n  - rule: A\n    group: g\n    budget: {week: 3}\n",
+		"nothing to hold A to":                    "expectations:\n  - rule: A\n",
+		"a budget of nothing":                     "expectations:\n  - rule: A\n    budget: {}\n",
+		"a budget below nothing":                  "expectations:\n  - rule: A\n    budget: {week: -1}\n",
+		"a catch names no incident":               "expectations:\n  - rule: A\n    catches: [{incident: ' '}]\n",
+		"want a duration such as 5m":              "expectations:\n  - rule: A\n    catches: [{incident: INC-1, within: soon}]\n",
+		"cannot unmarshal !!str `ten` into int":   "expectations:\n  - rule: A\n    budget: {week: ten}\n",
 	} {
 		if _, err := ReadExpectations(strings.NewReader(s)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", s, err, want)

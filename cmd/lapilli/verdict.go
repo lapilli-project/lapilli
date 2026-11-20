@@ -1479,6 +1479,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, oa),
 			changed, len(was)-len(before))
 		cmp.ChangedOnly = f.changedOnly
+		cmp.LabelRules(before, after)
 		cmp.Recording = recordingChanges(f.recorded, recordedIs)
 		cmp.PassedOver = f.passedOver
 		cmp.Summarize(f.incidents != "" || f.anyImpact())

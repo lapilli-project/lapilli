@@ -255,7 +255,13 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 	// With nothing that differs, nothing is held, as lapilli verdict holds
 	// nothing then: its summary says nothing changed.
 	if pr.expect != nil && cmp.Before != nil && cmp.After != nil {
-		if err := cmp.Expect(pr.expect, pr.before, o.Hours); err != nil {
+		// While people slept by the hours of the rule's team, where it has
+		// its own, as serve's checks count it (docs/design/expectations.md).
+		hours := func(string) *verdict.Hours { return o.Hours }
+		if own, err := s.owners(context.Background()); err == nil {
+			hours = own.schedules(o.Hours).of
+		}
+		if err := cmp.ExpectBy(pr.expect, pr.before, hours); err != nil {
 			return nil, "expect: " + clip(verdict.Clean(err.Error()), 600)
 		}
 	}

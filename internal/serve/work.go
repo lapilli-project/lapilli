@@ -1471,6 +1471,7 @@ func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel 
 	}
 	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, same)
 	cmp.ChangedOnly = true
+	cmp.LabelRules(gone, came)
 	return cmp, nil
 }
 
