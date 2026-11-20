@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -210,6 +211,21 @@ func TestAddGrafanaWhomItTells(t *testing.T) {
 	if _, code, body := proposeAdding(t, h, bo, form); code != http.StatusSeeOther {
 		t.Errorf("one of theirs: %d %s", code, zzMsg(body))
 	}
+	// An agent is told so by places.
+	places := func(s *Server) []placeOut {
+		t.Helper()
+		s.cfg.MCPPropose = "editors"
+		ts := httptest.NewServer(s.Handler())
+		defer ts.Close()
+		var out placesOut
+		if failed, text := call(t, connect(t, ts.URL, cy), "places", map[string]any{}, &out); failed {
+			t.Fatal(text)
+		}
+		return out.Places
+	}
+	if ps := places(s); len(ps) != 1 || !ps[0].MustTell {
+		t.Errorf("places, every rule naming one: %+v", ps)
+	}
 
 	_, s = grafanaTold(t, nil)
 	h = s.Handler()
@@ -220,6 +236,9 @@ func TestAddGrafanaWhomItTells(t *testing.T) {
 	}
 	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), ana, "", nil); !strings.Contains(body, "It names no contact point") {
 		t.Error("its page doesn't say Grafana's policies route it")
+	}
+	if ps := places(s); len(ps) != 1 || ps[0].MustTell {
+		t.Errorf("places, none naming one: %+v", ps)
 	}
 
 	g, s := grafanaTold(t, map[string]string{"def": "oncall"})

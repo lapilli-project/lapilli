@@ -187,7 +187,8 @@ type placeOut struct {
 	Group       string   `json:"group,omitempty" jsonschema:"the group; none for a new group, whose name you give"`
 	NewGroup    bool     `json:"new_group,omitempty" jsonschema:"a new group, made for the rule, in that file or namespace"`
 	DataSources []string `json:"data_sources,omitempty" jsonschema:"grafana: the data sources its folder's rules read, one of which the rule's query reads"`
-	Tells       []string `json:"tells,omitempty" jsonschema:"grafana and alarm: whom the rules there tell (a contact point, an action, a notification channel): a rule added tells only some of these"`
+	Tells       []string `json:"tells,omitempty" jsonschema:"grafana and alarm: whom the rules there tell (a contact point, an action that only tells, a notification channel): a rule added tells only some of these"`
+	MustTell    bool     `json:"must_tell,omitempty" jsonschema:"grafana: every rule of the group names a contact point, so a rule added names one of tells; otherwise one naming none is routed by Grafana's notification policies, by its labels, as those naming none are"`
 }
 
 // toolPlaces are the places a rule may be added to, for propose's kind
@@ -200,7 +201,7 @@ func (s *Server) toolPlaces(ctx context.Context, _ *mcp.CallToolRequest, _ place
 	}
 	for _, o := range offers {
 		out.Places = append(out.Places, placeOut{Path: o.Path, File: o.File, Folder: o.Folder, Namespace: o.Namespace, Alarms: o.Alarms, Group: o.Group,
-			NewGroup: o.NewGroup, DataSources: o.DataSources, Tells: o.Tells})
+			NewGroup: o.NewGroup, DataSources: o.DataSources, Tells: o.Tells, MustTell: grafanaRouted(o.addPlace, o.Tells, o.routed) != nil})
 	}
 	return nil, out, nil
 }
