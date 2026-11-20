@@ -155,7 +155,8 @@
 #   SERVE_POLL       how many seconds apart serve is asked (default 10, 0
 #                    to 60)
 #   SERVE_RETRY_MIN  for tests: the least serve's Retry-After is waited, in
-#                    seconds (default 5, 0 to 5), or SERVE_POLL if longer
+#                    seconds (default 5, 0 to 5), or SERVE_POLL if longer;
+#                    a second at least, whatever both say
 #
 # What can fail once it runs (the install, the commits, RENDER, the
 # backtest) is said in the comment, and the job succeeds unless
@@ -474,13 +475,15 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     *) say "SERVE_POLL $serve_poll: want how many seconds apart to ask lapilli serve, 0 to 60"; exit 1 ;;
   esac
   # The least serve's Retry-After is waited: a Retry-After of 0, or none,
-  # isn't a loop of requests. Lowered only for tests.
+  # isn't a loop of requests. Lowered only for tests, and never below a
+  # second, whatever SERVE_RETRY_MIN and SERVE_POLL say.
   retry_min=${SERVE_RETRY_MIN:-5}
   case $retry_min in
     [0-5]) ;;
     *) say "SERVE_RETRY_MIN $retry_min: want the least seconds lapilli serve's Retry-After is waited, 0 to 5 (for tests; 5 unless set)"; exit 1 ;;
   esac
   [ "$retry_min" -ge "$serve_poll" ] || retry_min=$serve_poll
+  [ "$retry_min" -ge 1 ] || retry_min=1
   case $(date +%s 2>/dev/null) in
     '' | *[!0-9]*) say "date +%s doesn't say the time in seconds here: SERVE_WAIT can't be kept"; exit 1 ;;
   esac
@@ -1471,7 +1474,8 @@ serve_said() {
 }
 # retry_after DEFAULT: the seconds serve's Retry-After says, or DEFAULT
 # without one; 300 at most, and SERVE_RETRY_MIN (5), or SERVE_POLL if
-# longer, at least: a Retry-After of 0 isn't a loop of requests.
+# longer, a second at least, at least: a Retry-After of 0 isn't a loop of
+# requests.
 retry_after() {
   tr -d '\r' <"$tmp/serve.headers" | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\) *$/\1/p' | tail -n 1 |
     awk -v def="$1" -v least="$retry_min" '{ v = $1 + 0 } END { n = (NR ? v : def); if (n > 300) n = 300; if (n < least) n = least; print n }'

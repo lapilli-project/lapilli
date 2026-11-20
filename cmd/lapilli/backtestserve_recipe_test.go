@@ -1580,4 +1580,14 @@ func TestBacktestServeRecipeRetryAfterZero(t *testing.T) {
 		t.Errorf("%v: %d GETs, %d DELETEs\n%s", err, gets, deletes, out)
 	}
 	failure(t, rr.body(), "the backtest didn't come back within SERVE_WAIT (2s): cancelled in lapilli serve")
+	// Lowered for tests as far as they go, SERVE_RETRY_MIN and SERVE_POLL
+	// of 0, a Retry-After of 0 is still waited a second: a few POSTs
+	// within SERVE_WAIT, not a loop of them.
+	srv.answers([]serveAnswer{busy}, nil)
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	out, err = rr.run([]string{"PATHS=alerts", "SERVE_WAIT=2s", "SERVE_RETRY_MIN=0", "SERVE_POLL=0"})
+	if posts, _, _ := srv.counts(); err != nil || posts > 3 {
+		t.Errorf("SERVE_RETRY_MIN and SERVE_POLL of 0: %v: %d POSTs\n%s", err, posts, out)
+	}
+	failure(t, rr.body(), "lapilli serve had no room for the backtest within SERVE_WAIT (2s)")
 }

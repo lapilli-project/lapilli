@@ -589,7 +589,8 @@ requests to the history it has asked, when that changes and every 30
 seconds. When serve says to wait (`Retry-After`: a full queue, the entry's
 hour, serve not ready yet), it waits so long, 5 minutes at most, and 5
 seconds at least, or `SERVE_POLL` if longer, so that a `Retry-After` of 0
-isn't a loop of requests (`SERVE_RETRY_MIN`, for tests, lowers the 5). Past
+isn't a loop of requests (`SERVE_RETRY_MIN`, for tests, lowers the 5, to a
+second at least, whatever it and `SERVE_POLL` say). Past
 `SERVE_WAIT` (`30m`; the action's `serve-wait`), the backtest is cancelled
 (`DELETE`), and the comment says it didn't come back; a job that stops
 first, cancelled say, cancels it as it exits.
