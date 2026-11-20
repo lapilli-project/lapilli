@@ -790,10 +790,16 @@ GitLab's ID token names a merge request's source branch, not its number,
 and Bitbucket's no pull request, so their backtests don't take each
 other's place);
 past them, 429 with `Retry-After`. One the leader stopped while running is
-run again by the next, twice at most. A job reads its backtest by its key:
-each read is charged to the address it comes from before anything is
-looked up, and given back when the key is right, so one that guesses is
-held to a few a second. With replicas, the queue and each entry's hour are the
+run again by the next, twice at most. A job reads its backtest by its id
+and key, told from the keys each replica holds: those it queued, and the
+ledger's, listed one at a time, a second apart at least. A pair known is
+read, whatever else comes from the job's address, which behind an
+ingress is everyone's. A pair not known waits up to 2 seconds for a
+listing begun after it came, so that a backtest queued through another
+replica is found on its first poll, and is a 404 if still not known;
+20 of an address wait at once, one more each second, and past them one
+is a 404 at once. One that guesses reads no backtest's row, and the
+ledger is listed a second apart at most however many guess. With replicas, the queue and each entry's hour are the
 ledger's: any replica takes a backtest and answers for it.
 
 What the pull request's PromQL can do: it runs as range queries, with

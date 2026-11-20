@@ -112,10 +112,16 @@ type backtestPort struct {
 	// it replayed.
 	asked    prom.Counts
 	progress replay.Progress
-	// reads are how fast a backtest is read (GET, DELETE) with its key,
-	// by its id; misses, how fast an id that isn't, or a key that's wrong,
-	// is answered, by the client's address: one who guesses can't keep a
-	// job from reading its own.
+	// keys are the backtests' key hashes, by id, as this process knows
+	// them: a job's id and key are told from them in memory, and only a
+	// pair they know is read from the ledger.
+	keys *btKeys
+	// reads are how fast a backtest is read (GET, DELETE) with its key, by
+	// its id, once the key is known right. misses are how many pairs keys
+	// doesn't know may wait for a listing of the ledger, by the client's
+	// address: past them, one is answered at once. A pair keys knows never
+	// touches misses, so that one who guesses, from the address everyone
+	// shares behind an ingress, can't keep a job from its own backtest.
 	reads, misses perKey
 	// wake is poked when a backtest is queued here, so the leader, if it
 	// is this process, takes it at once.
@@ -152,6 +158,7 @@ type trusted struct {
 // replicas; and the lane's history.
 func (s *Server) newBacktestPort() *backtestPort {
 	p := &backtestPort{reads: perKey{rate: 1, burst: 10}, misses: perKey{rate: 1, burst: 20}, wake: make(chan struct{}, 1), reading: make(chan struct{}, backtestReading), ended: map[[2]string]int{}, said: map[string]time.Time{}}
+	p.keys = newBTKeys(s.life, func(ctx context.Context) (map[string]string, error) { return s.l.BacktestKeys(ctx, backtestKeysListed) })
 	cis := map[[2]string]*signin.CI{}
 	for _, t := range s.cfg.Trust {
 		tr := &trusted{Trust: t, hourly: &limiter{rate: float64(t.Hourly) / 3600, burst: float64(t.Hourly)}, reading: make(chan struct{}, 1)}
@@ -1302,6 +1309,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be queued: try again in a minute")
 		return
 	}
+	s.btPort.keys.put(b.ID, b.KeyHash)
 	for range superseded {
 		s.backtestEnded(a.t.Name, ledger.BacktestSuperseded)
 	}
@@ -1328,38 +1336,61 @@ var bodyHook func(asker)
 var backtestID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // kept is the backtest a job reads with its key: none, the same 404, for an
-// id that isn't and a key that's wrong, compared in constant time.
+// id that isn't and a key that's wrong. The pair is told from what this
+// process knows of the backtests' keys (btKeys), in memory and in constant
+// time: one it knows is read from the ledger, and charged to nothing but
+// its own reads. One it doesn't waits for a listing of the ledger begun
+// after it came, as another replica may have queued it, charged to the
+// address it comes from while it waits: past what that address may, it is
+// answered at once, a listing begun all the same, so that a job's backtest
+// queued elsewhere is known by its next poll.
 func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, bool) {
 	id, key := r.PathValue("id"), bearerOf(r)
-	// Each lookup is charged to the address it comes from before the
-	// ledger is asked, and given back once the key is right: what isn't
-	// known costs the ledger no more than the bucket lets through.
-	addr := clientAddr(r)
-	if !s.btPort.misses.allow(addr, s.now()) {
-		w.Header().Set("Retry-After", "10")
-		backtestError(w, http.StatusTooManyRequests, "too many backtests not found from here: try again in a while")
-		return ledger.Backtest{}, false
-	}
-	var b ledger.Backtest
-	var found bool
-	if backtestID.MatchString(id) {
-		var err error
-		if b, found, err = s.l.Backtest(r.Context(), id); err != nil {
-			s.log.Error("backtest port: reading a backtest", "err", err)
-			backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be read: try again in a minute")
+	sum := sha256.Sum256([]byte(key))
+	hash := hex.EncodeToString(sum[:])
+	keys := s.btPort.keys
+	if !keys.known(id, hash) {
+		if !backtestID.MatchString(id) || key == "" {
+			backtestError(w, http.StatusNotFound, "no such backtest")
 			return ledger.Backtest{}, false
 		}
+		addr := clientAddr(r)
+		if !s.btPort.misses.allow(addr, s.now()) {
+			keys.kick()
+			backtestError(w, http.StatusNotFound, "no such backtest")
+			return ledger.Backtest{}, false
+		}
+		listed, err := keys.await(r.Context())
+		switch {
+		case err != nil:
+			s.log.Error("backtest port: listing the backtests", "err", err)
+			backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be read: try again in a minute")
+			return ledger.Backtest{}, false
+		case !listed:
+			// The ledger slower than the wait: not said not found, which
+			// a job takes as the end of its backtest.
+			w.Header().Set("Retry-After", "1")
+			backtestError(w, http.StatusServiceUnavailable, "the backtests couldn't be listed in time: try again in a second")
+			return ledger.Backtest{}, false
+		}
+		if !keys.known(id, hash) {
+			backtestError(w, http.StatusNotFound, "no such backtest")
+			return ledger.Backtest{}, false
+		}
+		s.btPort.misses.give(addr)
 	}
-	got := sha256.Sum256([]byte(key))
-	want := b.KeyHash
+	b, found, err := s.l.Backtest(r.Context(), id)
+	if err != nil {
+		s.log.Error("backtest port: reading a backtest", "err", err)
+		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be read: try again in a minute")
+		return ledger.Backtest{}, false
+	}
 	if !found {
-		want = strings.Repeat("0", 64)
-	}
-	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(got[:])), []byte(want)) != 1 || !found || key == "" {
+		// Let go of since it was known: known here no longer.
+		keys.drop(id)
 		backtestError(w, http.StatusNotFound, "no such backtest")
 		return ledger.Backtest{}, false
 	}
-	s.btPort.misses.give(addr)
 	if !s.btPort.reads.allow(id, s.now()) {
 		w.Header().Set("Retry-After", "1")
 		backtestError(w, http.StatusTooManyRequests, "too many reads of this backtest: try again in a second")

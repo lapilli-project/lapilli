@@ -3,6 +3,8 @@ package serve
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1049,7 +1051,8 @@ func TestBacktestOrdinary(t *testing.T) {
 
 // Replicas sharing a Postgres ledger share the queue and each entry's
 // hour: a backtest asked of one is run by another's lane and read through
-// the one asked, and an entry's hourly counts what every replica took.
+// the one asked, or another, on its first poll, and an entry's hourly
+// counts what every replica took.
 func TestBacktestReplicas(t *testing.T) {
 	shared := sharedLedger(t)
 	a := btServer(t, nil, "", func(c *Config) { c.LedgerURLFile = shared })
@@ -1074,6 +1077,9 @@ func TestBacktestReplicas(t *testing.T) {
 	}
 	if code, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+asked[1]["id"].(string), asked[1]["key"].(string), nil); code != 200 || m["state"] != "done" {
 		t.Errorf("read through b: %d %v", code, m)
+	}
+	if code, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+asked[0]["id"].(string), asked[0]["key"].(string), nil); code != 200 || m["state"] != "done" {
+		t.Errorf("the one asked of a, read through b: %d %v", code, m)
 	}
 }
 
@@ -1161,53 +1167,147 @@ func TestBacktestPrunedPortOff(t *testing.T) {
 	}
 }
 
-// What isn't known is charged to the address it came from before the
-// ledger is asked: a wrong key, or an id that isn't, comes to 429 from an
-// address past its bucket, the right key from it too; reads from another
-// address are answered, and the job's own, the key right, gives its
-// charge back; a backtest's reads are limited by its id too.
+// A job's id and key, known, are read from the ledger whatever anyone
+// guessing does from the job's address: behind an ingress, or a
+// LoadBalancer, everyone's. A pair not known is charged to the address it
+// came from while it waits for a listing: a wrong key, or an id that isn't,
+// is a 404 either way, at once past the address's bucket; the job's own
+// reads, and its DELETE, are charged to nothing but the backtest's reads,
+// which are limited by its id.
 func TestBacktestReadsNotStarved(t *testing.T) {
 	b := btServer(t, nil, "", nil)
-	_, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, nil))
-	id, key := m["id"].(string), m["key"].(string)
-	from := func(addr, path, key string) int {
-		r := httptest.NewRequest("GET", path, nil)
-		r.RemoteAddr = addr + ":1234"
-		r.Header.Set("Authorization", "Bearer "+key)
+	b.s.btPort.keys.every = 0 // a listing for each guess that waits
+	const proxy = "192.0.2.5" // the ingress controller's
+	ask := func(method, addr, path, key string) int {
+		r := httptest.NewRequest(method, path, nil)
+		r.RemoteAddr = addr + ":41000"
+		if key != "" {
+			r.Header.Set("Authorization", "Bearer "+key)
+		}
 		w := httptest.NewRecorder()
 		b.h.ServeHTTP(w, r)
 		return w.Code
 	}
-	// The job's own reads cost its address nothing: past the address's
-	// bucket of misses, a miss from it is still a 404.
-	for range 4 {
-		from("192.0.2.9", "/v1/backtests/"+id, key)
+	r := httptest.NewRequest("POST", "/v1/backtests", bytes.NewReader(btBody(ruleFile, changedRules, nil)))
+	r.RemoteAddr = proxy + ":41000"
+	r.Header.Set("Authorization", "Bearer "+b.github(nil))
+	w := httptest.NewRecorder()
+	b.h.ServeHTTP(w, r)
+	m := map[string]any{}
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil || w.Code != http.StatusAccepted {
+		t.Fatalf("POST: %d %s", w.Code, w.Body)
 	}
-	for i := range 20 {
-		if c := from("192.0.2.9", fmt.Sprintf("/v1/backtests/%032x", i), key); c != 404 {
-			t.Errorf("miss %d after the job's reads: %d", i+1, c)
-			break
-		}
+	id, key := m["id"].(string), m["key"].(string)
+	if c := ask("GET", proxy, "/v1/backtests/"+id, key); c != 202 {
+		t.Fatalf("the job's first poll: %d", c)
 	}
+	// Someone else, with no token, through the same proxy: 150 guesses,
+	// each a 404, the most of them at once.
 	codes := map[int]int{}
 	for i := range 150 {
-		codes[from("192.0.2.1", fmt.Sprintf("/v1/backtests/%032x", i), key)]++
+		codes[ask("GET", proxy, fmt.Sprintf("/v1/backtests/%032x", i), "nothing")]++
 	}
-	if codes[404] == 0 || codes[429] == 0 {
-		t.Errorf("150 guesses: %v", codes)
+	codes[ask("GET", proxy, "/v1/backtests/"+id, "a wrong key")]++
+	if codes[404] != 151 {
+		t.Errorf("151 guesses: %v", codes)
 	}
-	if c := from("192.0.2.1", "/v1/backtests/"+id, key); c != 429 {
-		t.Errorf("past its bucket, the right key from that address: %d", c)
+	if c := ask("GET", proxy, "/v1/backtests/"+id, key); c != 202 {
+		t.Errorf("the job's poll, its key right, after the guesses from its address: %d", c)
 	}
-	if c := from("192.0.2.2", "/v1/backtests/"+id, key); c != 202 {
+	if c := ask("GET", "192.0.2.2", "/v1/backtests/"+id, key); c != 202 {
 		t.Errorf("from another address: %d", c)
 	}
 	reads := map[int]int{}
 	for range 30 {
-		reads[from("192.0.2.3", "/v1/backtests/"+id, key)]++
+		reads[ask("GET", "192.0.2.3", "/v1/backtests/"+id, key)]++
 	}
 	if reads[202] == 0 || reads[429] == 0 {
 		t.Errorf("30 reads of one backtest at once: %v", reads)
+	}
+	b.s.btPort.reads.mu.Lock()
+	b.s.btPort.reads.m = nil // its reads begun afresh
+	b.s.btPort.reads.mu.Unlock()
+	if c := ask("DELETE", proxy, "/v1/backtests/"+id, key); c != http.StatusNoContent {
+		t.Errorf("the job's DELETE after the guesses from its address: %d", c)
+	}
+}
+
+// A backtest queued through another replica, whose row this process
+// didn't write, is found on its job's first poll: the pair not known waits
+// for a listing of the ledger begun after it came. A wrong key for it, and
+// an id no backtest has, are each a 404 after the listing; a backtest let
+// go of since is a 404 too, and known no longer.
+func TestBacktestQueuedElsewhereFound(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	ctx := context.Background()
+	id, key := strings.Repeat("e", 32), "a-key-the-other-replica-gave"
+	kh := sha256.Sum256([]byte(key))
+	if _, _, _, err := b.s.l.AskBacktest(ctx, ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: "plain", KeyHash: hex.EncodeToString(kh[:])},
+		Body: []byte("{}"), Queue: 5, PerTrust: 3}, now); err != nil {
+		t.Fatal(err)
+	}
+	if code, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, key, nil); code != 202 || m["state"] != ledger.BacktestWaiting {
+		t.Fatalf("the first poll of a backtest queued elsewhere: %d %v", code, m)
+	}
+	b.s.btPort.keys.mu.Lock()
+	b.s.btPort.keys.every = 0 // the next listings at once
+	b.s.btPort.keys.mu.Unlock()
+	if code, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, "a wrong key", nil); code != 404 || m["error"] != "no such backtest" {
+		t.Errorf("a wrong key: %d %v", code, m)
+	}
+	if code, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+strings.Repeat("f", 32), key, nil); code != 404 || m["error"] != "no such backtest" {
+		t.Errorf("an id no backtest has: %d %v", code, m)
+	}
+	// Let go of by the ledger, as one ended a day ago is.
+	b.s.l.CancelBacktest(ctx, id, now.Add(-48*time.Hour))
+	b.s.l.PruneBacktests(ctx, now)
+	if code, _, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, key, nil); code != 404 {
+		t.Errorf("a backtest let go of: %d", code)
+	}
+	if b.s.btPort.keys.known(id, hex.EncodeToString(kh[:])) {
+		t.Error("a backtest let go of is known still")
+	}
+}
+
+// Guesses, however many and from however many addresses, list the ledger's
+// backtests once a listing's time apart at most, never read a row each.
+func TestBacktestGuessesListOnce(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	k := b.s.btPort.keys
+	k.every, k.within = time.Hour, time.Millisecond // a second listing never comes within the test
+	var listed atomic.Int64
+	list := k.list
+	k.list = func(ctx context.Context) (map[string]string, error) {
+		listed.Add(1)
+		return list(ctx)
+	}
+	var wg sync.WaitGroup
+	for i := range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := httptest.NewRequest("GET", fmt.Sprintf("/v1/backtests/%032x", i), nil)
+			r.RemoteAddr = fmt.Sprintf("192.0.2.%d:1234", i%50) // past some addresses' buckets
+			r.Header.Set("Authorization", "Bearer nothing")
+			w := httptest.NewRecorder()
+			b.h.ServeHTTP(w, r)
+			if w.Code != 404 && w.Code != 503 {
+				t.Errorf("a guess: %d", w.Code)
+			}
+		}()
+	}
+	wg.Wait()
+	k.mu.Lock()
+	wanted, ended, changed := k.wanted, k.ended, k.changed
+	k.mu.Unlock()
+	if wanted == 0 {
+		t.Fatal("100 guesses listed the backtests never")
+	}
+	if ended == 0 {
+		<-changed // the one listing, ended
+	}
+	if n := listed.Load(); n != 1 {
+		t.Errorf("100 guesses listed the backtests %d times", n)
 	}
 }
 
