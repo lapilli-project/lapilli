@@ -2,31 +2,13 @@
 
 ## [Unreleased]
 
-### Changed
-
-- **A rule entry's `judged: false` is "Judged by nothing" in English**, on
-  the rules list's badge, a rule's page and the Goals page, as the
-  settings' table of entries says it: "Not judged" was a capital and a
-  sign from "? Not judged", the firings with no record. Its firings say
-  so too, not "no record to judge it by", and the legends with them.
-- The Goals page's line of what people moved lists its parts as Japanese
-  lists things, with 、.
-- Spanish's rules list fits a laptop's 1,280 px, and the overview's
-  heatmap 1,200 px, as the other languages' do: its headers, single long
-  words, are a little smaller. Under 1,280 px the rules list still
-  scrolls in its box.
-
-### Fixed
-
-- **A day's strip drew the firings of a rule judged by nothing as caught
-  nothing** (0.63.0), with no named signal: it read the day's starts
-  apart by rule only for named signals.
-
 ## [0.63.2] - 2026-11-20
 
 A security release, after a review of 0.63.0 from an attacker's point of
 view and the rest of the week's reviews, each fix of code with a test that
-failed before it; no schema change: the ledger stays at 026.
+failed before it; with it, "Judged by nothing" for a rule entry's
+`judged: false`, and Spanish's tables at a laptop's width. No schema
+change: the ledger stays at 026.
 
 ### Fixed (security)
 
@@ -220,6 +202,9 @@ failed before it; no schema change: the ledger stays at 026.
   Forgejo's runner reads no `::add-mask::`** (0.61.0 to 0.63.1). It does,
   as act does, and they say so now; the recipe still doesn't send it, as
   nothing it runs prints the token.
+- **A day's strip drew the firings of a rule judged by nothing as caught
+  nothing** (0.63.0), with no named signal: it read the day's starts
+  apart by rule only for named signals.
 
 ### Changed
 
@@ -241,6 +226,17 @@ failed before it; no schema change: the ledger stays at 026.
   serve, `..` names among them, but one that isn't UTF-8 text and has no
   BOM (a `.DS_Store`); one in UTF-16 or UTF-32 is said, as a rule file
   that isn't UTF-8 text is.
+- **A rule entry's `judged: false` is "Judged by nothing" in English**, on
+  the rules list's badge, a rule's page and the Goals page, as the
+  settings' table of entries says it: "Not judged" was a capital and a
+  sign from "? Not judged", the firings with no record. Its firings say
+  so too, not "no record to judge it by", and the legends with them.
+- The Goals page's line of what people moved lists its parts as Japanese
+  lists things, with 、.
+- Spanish's rules list fits a laptop's 1,280 px, and the overview's
+  heatmap 1,200 px, as the other languages' do: its headers, single long
+  words, are a little smaller. Under 1,280 px the rules list still
+  scrolls in its box.
 
 ## [0.63.1] - 2026-11-20
 
