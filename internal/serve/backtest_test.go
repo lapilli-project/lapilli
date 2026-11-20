@@ -1232,9 +1232,9 @@ func TestBacktestPrunedPortOff(t *testing.T) {
 // guessing does from the job's address: behind an ingress, or a
 // LoadBalancer, everyone's. A pair not known is charged to the address it
 // came from while it waits for a listing: a wrong key, or an id that isn't,
-// is a 404 either way, at once past the address's bucket; the job's own
-// reads, and its DELETE, are charged to nothing but the backtest's reads,
-// which are limited by its id.
+// is a 404 either way, and past the address's bucket a 503 at once; the
+// job's own reads, and its DELETE, are charged to nothing but the
+// backtest's reads, which are limited by its id.
 func TestBacktestReadsNotStarved(t *testing.T) {
 	b := btServer(t, nil, "", nil)
 	b.s.btPort.keys.every = 0 // a listing for each guess that waits
@@ -1263,13 +1263,13 @@ func TestBacktestReadsNotStarved(t *testing.T) {
 		t.Fatalf("the job's first poll: %d", c)
 	}
 	// Someone else, with no token, through the same proxy: 150 guesses,
-	// each a 404, the most of them at once.
+	// 20 of them a 404 after a listing, the rest a 503 at once.
 	codes := map[int]int{}
 	for i := range 150 {
 		codes[ask("GET", proxy, fmt.Sprintf("/v1/backtests/%032x", i), "nothing")]++
 	}
 	codes[ask("GET", proxy, "/v1/backtests/"+id, "a wrong key")]++
-	if codes[404] != 151 {
+	if codes[404] != 20 || codes[503] != 131 {
 		t.Errorf("151 guesses: %v", codes)
 	}
 	if c := ask("GET", proxy, "/v1/backtests/"+id, key); c != 202 {
@@ -1327,6 +1327,59 @@ func TestBacktestQueuedElsewhereFound(t *testing.T) {
 	}
 	if b.s.btPort.keys.known(id, hex.EncodeToString(kh[:])) {
 		t.Error("a backtest let go of is known still")
+	}
+}
+
+// A backtest queued through another replica, polled first through this
+// one from an address others share, which guesses have taken past its
+// bucket before this one listed the ledger again: not a 404, which the
+// job takes as the end of its backtest, but a 503 with Retry-After, and a
+// listing begun. One a listing begun after the poll came ended without is
+// a 404 there.
+func TestBacktestQueuedElsewhereFirstPoll(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	k := b.s.btPort.keys
+	k.mu.Lock()
+	k.within = 5 * time.Millisecond
+	k.mu.Unlock()
+	const proxy = "192.0.2.5"
+	ask := func(path, key string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.RemoteAddr = proxy + ":41000"
+		r.Header.Set("Authorization", "Bearer "+key)
+		w := httptest.NewRecorder()
+		b.h.ServeHTTP(w, r)
+		return w
+	}
+	// One listing, then none within the test.
+	ask(fmt.Sprintf("/v1/backtests/%032x", 999), "nothing")
+	k.mu.Lock()
+	k.every = time.Hour
+	k.mu.Unlock()
+	for i := range 25 {
+		ask(fmt.Sprintf("/v1/backtests/%032x", i), "nothing")
+	}
+	ctx := context.Background()
+	id, key := strings.Repeat("e", 32), "a-key-the-other-replica-gave"
+	kh := sha256.Sum256([]byte(key))
+	if _, _, _, err := b.s.l.AskBacktest(ctx, ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: "plain", KeyHash: hex.EncodeToString(kh[:])},
+		Body: []byte("{}"), Queue: 5, PerTrust: 3}, now); err != nil {
+		t.Fatal(err)
+	}
+	k.mu.Lock()
+	begun := k.begun
+	k.mu.Unlock()
+	if w := ask("/v1/backtests/"+id, key); w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") != "1" {
+		t.Errorf("the job's first poll of a backtest queued elsewhere: %d %q", w.Code, w.Header().Get("Retry-After"))
+	}
+	k.mu.Lock()
+	wanted := k.wanted
+	k.mu.Unlock()
+	if wanted <= begun {
+		t.Error("no listing begun")
+	}
+	if !k.listedSince(0) || k.listedSince(begun) {
+		t.Errorf("listedSince: %d begun, %d ended", begun, k.ended)
 	}
 }
 

@@ -83,6 +83,22 @@ func (k *btKeys) known(id, hash string) bool {
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(want)) == 1 && ok
 }
 
+// begunNow is how many listings have begun: a listing whose number is
+// past it begins after now (listedSince).
+func (k *btKeys) begunNow() uint64 {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.begun
+}
+
+// listedSince reports whether a listing begun after begun did, as
+// begunNow gave it, has ended well.
+func (k *btKeys) listedSince(begun uint64) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.ended > begun && k.err == nil
+}
+
 // kick asks for a listing, and doesn't wait for it.
 func (k *btKeys) kick() {
 	k.mu.Lock()

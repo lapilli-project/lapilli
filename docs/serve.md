@@ -798,7 +798,8 @@ ingress is everyone's. A pair not known waits up to 2 seconds for a
 listing begun after it came, so that a backtest queued through another
 replica is found on its first poll, and is a 404 if still not known;
 20 of an address wait at once, one more each second, and past them one
-is a 404 at once. One that guesses reads no backtest's row, and the
+is a 503 with `Retry-After` at once, and a listing begun, so that the
+job's next poll finds its backtest. One that guesses reads no backtest's row, and the
 ledger is listed a second apart at most however many guess. With replicas, the queue and each entry's hour are the
 ledger's: any replica takes a backtest and answers for it.
 

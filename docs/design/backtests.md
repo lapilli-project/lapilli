@@ -506,9 +506,10 @@ run is recorded yet.
 `{"state": "failed", "error"}`, the error in the words `trouble` puts in a
 comment, nothing of where the history is; `superseded`. An unknown id and a
 wrong key are the same 404, once a listing of the ledger's backtests begun
-after the request came doesn't know them (since 0.63.1), or at once past
-the address's 20 waiting; 503 with `Retry-After` when no listing ends
-within 2 seconds. **`DELETE /v1/backtests/{id}`**, with the key:
+after the request came doesn't know them (since 0.63.2); past the
+address's 20 waiting, and when no listing ends within 2 seconds, 503 with
+`Retry-After`, so that a job's first poll through another replica than
+the one it asked is never said not found. **`DELETE /v1/backtests/{id}`**, with the key:
 a job cancelled stops waiting, or running.
 
 The recipe: `LAPILLI_SERVE` (the port's URL, https, or http to the machine

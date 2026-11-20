@@ -1350,14 +1350,19 @@ var backtestID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // time: one it knows is read from the ledger, and charged to nothing but
 // its own reads. One it doesn't waits for a listing of the ledger begun
 // after it came, as another replica may have queued it, charged to the
-// address it comes from while it waits: past what that address may, it is
-// answered at once, a listing begun all the same, so that a job's backtest
-// queued elsewhere is known by its next poll.
+// address it comes from while it waits, and is a 404 if the listing
+// doesn't know it. Past what that address may wait, it is answered at
+// once: a 404 only if a listing begun after it came has ended without it,
+// otherwise a 503 with Retry-After, a listing begun all the same, so that
+// a job's backtest queued elsewhere, polled from an address others share,
+// is known by its next poll, never said not found, which the job takes as
+// the end of its backtest.
 func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, bool) {
 	id, key := r.PathValue("id"), bearerOf(r)
 	sum := sha256.Sum256([]byte(key))
 	hash := hex.EncodeToString(sum[:])
 	keys := s.btPort.keys
+	came := keys.begunNow()
 	if !keys.known(id, hash) {
 		if !backtestID.MatchString(id) || key == "" {
 			backtestError(w, http.StatusNotFound, "no such backtest")
@@ -1365,8 +1370,13 @@ func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, 
 		}
 		addr := clientAddr(r)
 		if !s.btPort.misses.allow(addr, s.now()) {
+			if keys.listedSince(came) && !keys.known(id, hash) {
+				backtestError(w, http.StatusNotFound, "no such backtest")
+				return ledger.Backtest{}, false
+			}
 			keys.kick()
-			backtestError(w, http.StatusNotFound, "no such backtest")
+			w.Header().Set("Retry-After", "1")
+			backtestError(w, http.StatusServiceUnavailable, "too many backtests not known yet asked from here: try again in a second")
 			return ledger.Backtest{}, false
 		}
 		listed, err := keys.await(r.Context())
