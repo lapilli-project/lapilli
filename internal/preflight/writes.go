@@ -142,8 +142,9 @@ var (
 	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:(?:` + arnPart + `|,+` + arnPart + `)+`)
 	// ocidText is an Oracle Cloud ID: ocid1, the resource's type, the
 	// realm, the region (empty for one of no region) and any parts to
-	// come, then the unique part.
-	ocidText = regexp.MustCompile(`(?i)\bocid1\.[a-z0-9]+\.[a-z0-9-]+(?:\.[a-z0-9-]*)*\.[a-z0-9]+`)
+	// come, then the unique part; whatever is before it, a word's
+	// character among them (_ocid1..., %3Docid1... in a URL).
+	ocidText = regexp.MustCompile(`(?i)ocid1\.[a-z0-9]+\.[a-z0-9-]+(?:\.[a-z0-9-]*)*\.[a-z0-9]+`)
 	// numberText is what may be an account's or a project's number: ten
 	// digits or more, or 1234-5678-9012 as AWS writes an account, whatever
 	// is beside it but another digit (acct_123456789012).

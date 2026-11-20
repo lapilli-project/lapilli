@@ -1576,6 +1576,10 @@ func TestCloudSaidOCIDs(t *testing.T) {
 	said := judged(p, Item{ID: "x", Why: p.cloudSaid(&answered{404, "NotAuthorizedOrNotFound: policy ocid1.policy.oc1..aaaaexamplepolicy0001 in " +
 		"ocid1.compartment.oc1..aaaaexampleotherteam0002 (dynamic group ocid1.dynamicgroup.oc1..aaaaexampledg0003) of " +
 		"ocid1.tenancy.oc1..aaaaexampletenancy0001; instance ocid1.instance.oc1.ap-seoul-1.anuwgexampleinstance0004."})})
+	glued := p.cloudSaidText("vcn_ocid1.vcn.oc1.ap-seoul-1.aaaaexamplevcn0005 at /20231130/vcns?compartmentId=ocid1.compartment.oc1..aaaaexampleglued0006 or %3Docid1.subnet.oc1..aaaaexamplesubnet0007")
+	if strings.Contains(glued, "aaaaexample") || strings.Count(glued, "[an OCID]") != 3 {
+		t.Errorf("an OCID after a word's character: %s", glued)
+	}
 	for _, hidden := range []string{"ocid1", "aaaaexample", "anuwgexample"} {
 		if strings.Contains(said.Why, hidden) {
 			t.Errorf("says %q: %s", hidden, said.Why)
