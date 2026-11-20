@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.64.0] - 2026-11-20
+## [0.65.0] - 2026-11-21
 
 Expectations, steps 2 to 5 (docs/design/expectations.md): serve holds
 each rule to what is expected of it after it is deployed; drafts of what a
@@ -10,10 +10,6 @@ rule is held to, from the history and from an agent; scenarios, promtool's
 own test files, held to before a change is merged and after; and a new
 rule, proposed held to its expectations before it is approved, added by
 the four paths a change goes.
-
-And who is told what, by routes in `--config`; a team as the boundary of
-change; and every source as an object, told down and back, with the
-activity log filtered and exported and the daily writes through the API.
 
 Before upgrading:
 - **Ledger schema 027**, after 026: keep a copy of the ledger's disk, or
@@ -54,7 +50,9 @@ Before upgrading:
   as `expectation.broken` once a rule, an expectation and a week, 50 a
   run; `--expect-tasks` (off by default) makes a task of kind tune for the
   rule's team, once a rule, an expectation and a week, 20 a run, none
-  while one is open. The three sources combine as one file: `--expect` and
+  while one is open. Routes (0.64.0) take it, and the drafts' notices
+  (`expectation.drafted`, `.accepted`, `.dropped`, `.pull_request`), by
+  their rule's team and labels. The three sources combine as one file: `--expect` and
   `--config`'s are made one, the same budget or incident in both refused,
   the two kept as they last were; a rule's annotation holds it unless the
   file or `--config` give that rule, by `rule:`, the same budget, when it
@@ -187,18 +185,30 @@ Before upgrading:
   expectations go where an accepted draft goes (origin `proposal`,
   accepted by its first approver); one merged by hand before anyone
   approved it has none kept, and holds up no other. An agent's counts
-  toward its person's twenty an hour. Not offered: Azure's rule groups and
+  toward its person's twenty an hour. It is the team's its name and the
+  labels it is added with give it (its group's with its own), for a
+  team's editor proposing it and for that team's approvers, freezes and
+  `changes_in` (0.64.0). Not offered: Azure's rule groups and
   alert rules, OCI's alarms, a new Grafana group, a new rule file.
 - **Grafana's `is_number`** in a rule's math expression is replayed.
 - **lapilli preflight**'s `changes.aws` also asks, under each CloudWatch
   prefix `--changes-in` gives, the name of an alarm a rule added there
   would make.
+
+## [0.64.0] - 2026-11-20
+
+Who is told what, by routes in `--config`; a team as the boundary of
+change; and every source as an object, told down and back, with the
+activity log filtered and exported and the daily writes through the
+API. No schema change: the ledger stays at 026.
+
+### Added
+
 - **Routes** (docs/design/notifications.md, "Who is told what").
   `--config`'s `notify:` sends each event by its kind (`task.created`, or a
   family, `task.*`), its team (a task's or a window's, a rule's owner, an
-  incident's by its labels, a goal's, an expectation broken's rule's) and
-  its labels (its rule's, a marked window's, an incident's), each at one
-  of the values given, to
+  incident's by its labels, a goal's) and its labels (its rule's, a marked
+  window's, an incident's), each at one of the values given, to
   destinations by name: the first route that takes it decides, unless it
   says `continue: true`, and what none takes goes to `default`, which
   routes need. Without routes, what happens is told as before, to the
@@ -263,9 +273,7 @@ Before upgrading:
   (another team's counted "not your team's"), backtest them again, and
   drop the ones they made; who owns the rule is asked of its name, of the
   rule as it is read again and of it as proposed, each with its note and
-  without it, each a team they edit; a rule added (kind `add`) is the
-  team's its name and the labels it is added with give it, its group's
-  with its own, for proposing, approving, freezes and `changes_in` alike.
+  without it, each a team they edit.
   Under a team in `--config` (`serve.config`): `approvers:`, as
   `user:NAME`, `group:NAME` or `*@DOMAIN` (not a bare name, nor `*`), who
   approve a proposal one team, theirs, owned as it was proposed and owns

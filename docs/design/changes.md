@@ -709,7 +709,7 @@ which can be turned off, are retired as Grafana's are.
 
 ### A team as the boundary of change
 
-Built for the release after 0.63.1 (bundle 24). Until then proposals and
+Built in 0.64.0 (bundle 24). Until then proposals and
 their approval were everyone's: an editor of every team proposed, an
 approver of every team approved, into whatever `--changes-in` named, at
 any hour. A team that runs its own rules, as an Argo CD AppProject's roles,
