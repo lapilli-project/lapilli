@@ -34,6 +34,9 @@ type ruleRow struct {
 	// Has is what is under way: proposal, facts (problems of fact in what
 	// it says).
 	Has []string
+	// Expect is what it is held to (docs/design/expectations.md): broken
+	// and held, held, or none.
+	Expect []string
 	// Facts is how many problems of fact what it says has; Checks, how
 	// many things to check its page lists, these among them (condsOf).
 	Facts, Checks int
@@ -193,6 +196,7 @@ var badgeMeans = map[string][3]string{
 	"status/retire":    {"pill retire", "⊘", "Its note says to retire it."},
 	"has/proposal":     {"prog", "✎", "A change to it is proposed and not finished with."},
 	"has/facts":        {"check", "⚠\uFE0E", "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check."},
+	"expect/broken":    {"expect", "✕", "An expectation it is held to is broken: a budget in the week so far or the last whole week, or a catch."},
 }
 
 // legendOf is the badges' legend: the facets' values that have a badge,
@@ -289,6 +293,7 @@ var facetsOf = []struct {
 	{"trust", "Trust", trustValues, []string{"Differs", "Not replayed", "Recorded only"}},
 	{"status", "Disposition", statusValues, []string{"keep", "tune", "retire", "Undecided"}},
 	{"has", "Progress", hasValues, []string{"Proposed", "Problems to check"}},
+	{"expect", "Expectations", expectValues, []string{"Broken", "Held to some", "Held to none"}},
 }
 
 // values are a row's values in a facet.
@@ -309,6 +314,8 @@ func (r ruleRow) values(param string) []string {
 		return []string{cmpOr(r.Status, "none")}
 	case "has":
 		return r.Has
+	case "expect":
+		return r.Expect
 	}
 	return nil
 }
@@ -839,6 +846,14 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta, w checki
 	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
 	r.Checks = len(condsOf(condsIn{Facts: r.Facts, Differs: l.Differs, Unsupported: l.Unsupported, Unseen: meta[l.Name].unseen,
 		Tie: w.ties[l.Name], Source: l.Source, Stale: w.stale[l.Name]}))
+	switch {
+	case w.broken[l.Name]:
+		r.Expect = []string{"broken", "held"}
+	case w.held[l.Name]:
+		r.Expect = []string{"held"}
+	default:
+		r.Expect = []string{"none"}
+	}
 	return r
 }
 
@@ -849,6 +864,9 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta, w checki
 type checking struct {
 	ties  map[string]*tieView
 	stale map[string]int
+	// held and broken are the rules held to an expectation, and those of
+	// them with one broken (expectHeld).
+	held, broken map[string]bool
 }
 
 // checkingOf is what the rules list reads, once, of what to check.
@@ -876,7 +894,8 @@ func (s *Server) checkingOf(r *http.Request) (checking, error) {
 			w.stale[p.Rule]++
 		}
 	}
-	return w, nil
+	w.held, w.broken, err = s.expectHeld(r.Context())
+	return w, err
 }
 
 // PerfClass is the status colour of how it did (statusKinds): unknown for

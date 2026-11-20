@@ -20,6 +20,7 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // Declared configuration (docs/design/serveops.md): --config is a YAML
@@ -43,7 +44,7 @@ var configEvery = 15 * time.Second
 // configKeys are the keys of a --config file and of each thing in it, in
 // the order an export writes them.
 var configKeys = map[string][]string{
-	"":     {"teams", "windows", "reports", "grants", "goals", "marked"},
+	"":     {"teams", "windows", "reports", "grants", "goals", "marked", "expectations"},
 	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts", "renamed_from"},
 	// A window's on is repeat_on: YAML 1.1, which Helm reads values by,
 	// takes a key on, unquoted, for true.
@@ -80,8 +81,8 @@ var (
 	}
 	configFormats = []string{
 		"line %d: %s", "line %d (%s): %s", "the file isn't YAML: %s", "the file is more than %d bytes",
-		"one document only: --config is one file of teams, windows, reports, grants, goals and marked",
-		"want a mapping of teams, windows, reports, grants, goals and marked", "unknown key %q: want teams, windows, reports, grants, goals or marked",
+		"one document only: --config is one file of teams, windows, reports, grants, goals, marked and expectations",
+		"want a mapping of teams, windows, reports, grants, goals, marked and expectations", "unknown key %q: want teams, windows, reports, grants, goals, marked or expectations",
 		"%s is given twice, on line %d too", "%s is a list", "%s is a text", "%s is a list of texts",
 		"labels are a mapping of a label's name to a value, or a list of values", "a label's name is a text", "label %s has no value",
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
@@ -96,6 +97,7 @@ var (
 		"a config declares %d roles at most", "a config declares %d goals at most", "a goal has a name", "a goal has a measure",
 		"a goal called %s is declared on line %d already: a goal's name is unique, across everyone's and every team's",
 		"%s is a number, such as 0.8 or 40", "a config declares %d marked windows at most", "a marked window has a kind and a title",
+		"expectations: %s",
 		"label %s of a marked window has one value",
 		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"], unknownIn["goal"], unknownIn["marked"],
 		wantA["team"], wantA["window"], wantA["report"], wantA["grant"], wantA["goal"], wantA["marked"],
@@ -173,7 +175,7 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	}
 	var more yaml.Node
 	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
-		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals and marked")
+		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals, marked and expectations")
 	}
 	root := &doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
@@ -190,6 +192,9 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		}
 		if v.Kind != yaml.SequenceNode {
 			return badAt(v, "%s is a list", key)
+		}
+		if key == "expectations" {
+			return parseExpectations(b, v, &d)
 		}
 		for _, item := range v.Content {
 			var err error
@@ -238,6 +243,28 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	return d, err
 }
 
+// parseExpectations reads what --config's expectations: hold, as an
+// expectations file's are read (verdict.ReadExpectations): strictly, a key
+// an expectation doesn't have refused with its line in the file, and each
+// one checked (verdict.NewExpectations). v is the list, in b.
+func parseExpectations(b []byte, v *yaml.Node, d *ledger.Declared) error {
+	var x struct {
+		Teams, Windows, Reports, Grants, Goals, Marked yaml.Node
+		Expectations                                   []verdict.Expectation `yaml:"expectations"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(&x); err != nil {
+		return badAt(v, "expectations: %s", strings.TrimPrefix(err.Error(), "yaml: "))
+	}
+	e, err := verdict.NewExpectations(x.Expectations)
+	if err != nil {
+		return badAt(v, "expectations: %s", err.Error())
+	}
+	d.Expectations = e.Expectations
+	return nil
+}
+
 // null says a node holds nothing: empty, or null.
 func null(n *yaml.Node) bool {
 	return n.Kind == 0 || n.Kind == yaml.ScalarNode && n.Tag == "!!null"
@@ -249,7 +276,7 @@ func null(n *yaml.Node) bool {
 func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) error {
 	if n.Kind != yaml.MappingNode {
 		if what == "" {
-			return badAt(n, "want a mapping of teams, windows, reports, grants, goals and marked")
+			return badAt(n, "want a mapping of teams, windows, reports, grants, goals, marked and expectations")
 		}
 		return badAt(n, wantA[what], strings.Join(configKeys[what], ", "))
 	}
@@ -262,7 +289,7 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 		seen[k.Value] = k.Line
 		if k.Kind != yaml.ScalarNode || !slices.Contains(configKeys[what], k.Value) {
 			if what == "" {
-				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals or marked", k.Value)
+				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals, marked or expectations", k.Value)
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}
@@ -979,6 +1006,9 @@ const configStuck = 5 * time.Minute
 // whatever an earlier term kept it to.
 func (s *Server) configTerm(ctx context.Context) error {
 	s.config.newTerm(s.wall())
+	// --expect too, read twice again (expect.go).
+	s.expect.newTerm()
+	s.readExpect()
 	return s.reconcileConfig(ctx)
 }
 
@@ -1119,6 +1149,9 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	if err != nil {
 		return later(err)
 	}
+	// Its expectations, which the ledger doesn't keep: what the leader's
+	// checks hold rules to (expect.go).
+	s.keptConfig(d.Expectations)
 	st.Lock()
 	st.applied, st.at, st.failed, st.pending = hash, now, "", ""
 	st.failHash, st.failedAt, st.failAt, st.failBackoff = "", time.Time{}, time.Time{}, 0
@@ -1194,6 +1227,7 @@ func (s *Server) watchConfig(ctx context.Context) {
 		if err := s.reconcileConfig(ctx); err != nil && !steppingDown(ctx, err) {
 			s.log.Error("keeping the ledger to --config", "err", err)
 		}
+		s.readExpect()
 	}
 }
 

@@ -60,3 +60,23 @@ data:
     {{- toYaml .Values.serve.config | nindent 4 }}
   {{- end }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") .Values.serve.expectations }}
+---
+# What serve.expectations holds the rules to (docs/design/expectations.md):
+# read again as it changes, through the file the kubelet swaps in place,
+# as serve.config is.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-expectations
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  {{- if kindIs "string" .Values.serve.expectations }}
+  expectations.yaml: |2
+    {{- .Values.serve.expectations | trimSuffix "\n" | nindent 4 }}
+  {{- else }}
+  expectations.yaml: |
+    {{- toYaml .Values.serve.expectations | nindent 4 }}
+  {{- end }}
+{{- end }}

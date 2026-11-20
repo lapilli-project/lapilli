@@ -418,6 +418,23 @@ func demoServer(t *testing.T) *Server {
 	if err := s.l.SetMeta(ctx, "demo-dated", "1"); err != nil {
 		t.Fatal(err)
 	}
+	// What the rules are held to (docs/design/expectations.md): the noisy
+	// latency rule to a budget it is over, two catches, and the
+	// platform's rules, by their team's label, to one they keep.
+	s.cfg.Expect = filepath.Join(t.TempDir(), "expectations.yaml")
+	os.WriteFile(s.cfg.Expect, []byte(`expectations:
+  - rule: CheckoutLatencyP99
+    budget: {week: 10, asleep: 2}
+    catches:
+      - {incident: INC-111, within: 5m}
+  - rule: CheckoutErrors
+    catches:
+      - {incident: INC-107, within: 5m}
+  - labels: team=platform
+    budget: {week: 60}
+`), 0o644)
+	expectReadTwice(t, s)
+	checkAgain(t, s)
 	return s
 }
 

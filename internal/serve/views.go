@@ -1038,6 +1038,9 @@ type ruleView struct {
 	// Refires are its firings that re-fired, week by week, and its alerts
 	// that re-fired most; nil when it hasn't fired.
 	Refires *refiresView
+	// Expect is what it is held to, as last checked (docs/design/
+	// expectations.md); nil when it is held to nothing.
+	Expect *expectView
 
 	// The page (docs/design/ui.md): its own path; the tab shown, and each;
 	// the weeks it shows (1, 4 or 12), from From, and, when the ledger
@@ -1260,6 +1263,9 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		v.Content = countOf(st.findings[name])
 	}
 	if v.Reviews, err = s.reviews(ctx, name, 10); err != nil {
+		return ruleView{}, err
+	}
+	if v.Expect, err = s.expectViewOf(ctx, lang(r), name); err != nil {
 		return ruleView{}, err
 	}
 	caught, err := s.l.CaughtBy(ctx, name, 20)

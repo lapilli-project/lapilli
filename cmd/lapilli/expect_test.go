@@ -88,9 +88,11 @@ func TestCompareExpectations(t *testing.T) {
 			t.Errorf("%v: exit %d\n%s", args, code, errs)
 		}
 	}
+	// serve takes --expect (docs/design/expectations.md, step 2), and
+	// refuses at start a file it can't read as one.
 	var out2, errs2 strings.Builder
-	if code := run([]string{"serve", "--rules", inPlace, "--prometheus", "http://p", "--expect", expect}, &out2, &errs2); code != 2 ||
-		!strings.Contains(errs2.String(), "lapilli serve doesn't take --expect") {
+	if code := run([]string{"serve", "--rules", inPlace, "--prometheus", "http://p", "--expect", bad}, &out2, &errs2); code != 2 ||
+		!strings.Contains(errs2.String(), "--expect "+bad+": ") || !strings.Contains(errs2.String(), "budjet") {
 		t.Errorf("serve --expect: exit %d\n%s", code, errs2.String())
 	}
 }

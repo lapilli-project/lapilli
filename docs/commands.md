@@ -707,6 +707,21 @@ The web UI and API:
                       as weeks (occurrences) are missed again, met, or no
                       longer missed (docs/design/goals.md). Off unless
                       turned on
+  --expect FILE       an expectations file, as lapilli verdict --expect
+                      takes, that the rules are held to after deploy: after
+                      each run, each rule's budgets and catches are checked
+                      over the week so far and the twelve whole weeks
+                      before, shown on its page, the overview and the
+                      digest, and told once a rule, an expectation and a
+                      week when broken. Read again every 15s, as --config;
+                      a file that can't be read changes nothing. --config's
+                      expectations: and a rule's annotation
+                      lapilli.dev/budget hold rules too
+                      (docs/design/expectations.md)
+  --expect-tasks      make a task, of kind tune, for the rule's team, of
+                      each expectation broken, once a rule, an expectation
+                      and a week, 20 a run at most, none while one is open.
+                      Off unless turned on
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)

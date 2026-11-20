@@ -169,6 +169,8 @@ type notice struct {
 	Proposal *proposalNotice `json:"proposal,omitempty"`
 	// A goal missed in a week (docs/design/goals.md).
 	Goal *goalNotice `json:"goal,omitempty"`
+	// An expectation of a rule broken (docs/design/expectations.md).
+	Expectation *expectNotice `json:"expectation,omitempty"`
 }
 
 // proposalNotice is what a notice says of a proposal.
@@ -195,6 +197,8 @@ func (s *Server) pageOf(n notice) string {
 	case n.Event == "replay.differs":
 		// The rules whose replay differs, this one among them.
 		path = "/rules?trust=differs"
+	case n.Expectation != nil:
+		path = "/rules/" + url.PathEscape(n.Expectation.Rule) + "?tab=expectations"
 	case n.Goal != nil:
 		path = "/goals"
 		if n.Goal.Team != "" && n.Goal.Team != "*" {
@@ -301,6 +305,8 @@ func (s *Server) line(n notice) string {
 		case "task.overdue":
 			return tr(l, "lapilli: task #%d, %q, was due %s", t.ID, t.Title, t.Due.In(s.cfg.Loc).Format("2006-01-02"))
 		}
+	case n.Expectation != nil:
+		return "lapilli: " + s.expectSentence(l, n.Expectation.check(s), s.expectThis(n.Expectation))
 	case n.Goal != nil:
 		g := ledger.Goal{Name: n.Goal.Name, Measure: n.Goal.Measure}
 		switch {

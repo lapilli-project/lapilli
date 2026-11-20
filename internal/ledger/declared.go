@@ -112,6 +112,11 @@ type Declared struct {
 	// declares: one it no longer declares is deleted.
 	Goals  []DeclaredGoal
 	Marked []DeclaredMarked
+	// Expectations are what rules kept only in Grafana or a ruler are held
+	// to (docs/design/expectations.md), as an expectations file has them:
+	// the ledger keeps what checking them found, not them, and Reconcile
+	// passes them over.
+	Expectations []verdict.Expectation
 }
 
 // Kinds of what --config declares, as a DeclaredError names them.

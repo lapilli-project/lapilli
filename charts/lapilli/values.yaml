@@ -416,6 +416,30 @@ serve:
   # (each: KIND), 20 a run at most (--goal-tasks); an open one is commented
   # on as weeks (occurrences) are missed again, met, or no longer missed.
   goalTasks: false
+  # What the rules are held to after deploy (--expect,
+  # docs/design/expectations.md): an expectations file, as lapilli verdict
+  # --expect takes, as a text (usually --set-file serve.expectations=FILE,
+  # the file kept beside the rule files) or a map, in a ConfigMap read
+  # again as it changes, as config is. After each run, each rule's
+  # budgets and catches are checked over the week so far and the twelve
+  # whole weeks before: shown on its page, the overview and the digest,
+  # and told once a rule, an expectation and a week when broken. Rules
+  # kept only in Grafana or a ruler can be held under expectations: in
+  # config instead, and a rule can carry its own budget in its annotation
+  # lapilli.dev/budget ("10/week, 2 asleep").
+  #   expectations: |
+  #     expectations:
+  #       - rule: ContainerRestarts
+  #         budget: {week: 10, asleep: 2}
+  #         catches:
+  #           - {incident: INC-43, within: 5m}
+  #       - labels: severity=page
+  #         budget: {refires: 3}
+  expectations: null
+  # Make a task, of kind tune, for the rule's team, of each expectation
+  # broken, once a rule, an expectation and a week, 20 a run at most, none
+  # while one is open (--expect-tasks).
+  expectTasks: false
   # Close a proposal no one approved that waited longer than this since it
   # began to wait (made, or backtested again), such as 30d, as expired, so
   # its rule takes another (--proposals-expire). Empty keeps it waiting.

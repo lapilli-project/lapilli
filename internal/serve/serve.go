@@ -307,6 +307,14 @@ type Config struct {
 	// week missed, 20 a run at most (docs/design/goals.md): off unless
 	// turned on, as Lapilli would make tasks nobody asked for.
 	GoalTasks bool
+
+	// Expect is the expectations file the rules are held to after they are
+	// deployed (docs/design/expectations.md, step 2), read again as it
+	// changes, as Config is; "" for none. ExpectTasks makes a task, for the
+	// rule's team, of each expectation broken, once a rule, an expectation
+	// and a week: off unless turned on, as GoalTasks.
+	Expect      string
+	ExpectTasks bool
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -409,6 +417,9 @@ type Server struct {
 	againFailed againFailed
 	// config is what the leader last made of --config.
 	config configState
+	// expect is what the leader made of the expectations declared, and of
+	// checking them (expect.go).
+	expect expectState
 	// backtesting are the proposals being backtested again here, which
 	// expiry leaves.
 	backtesting inFlight

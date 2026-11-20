@@ -291,6 +291,21 @@ The web UI and API:
                       as weeks (occurrences) are missed again, met, or no
                       longer missed (docs/design/goals.md). Off unless
                       turned on
+  --expect FILE       an expectations file, as lapilli verdict --expect
+                      takes, that the rules are held to after deploy: after
+                      each run, each rule's budgets and catches are checked
+                      over the week so far and the twelve whole weeks
+                      before, shown on its page, the overview and the
+                      digest, and told once a rule, an expectation and a
+                      week when broken. Read again every 15s, as --config;
+                      a file that can't be read changes nothing. --config's
+                      expectations: and a rule's annotation
+                      lapilli.dev/budget hold rules too
+                      (docs/design/expectations.md)
+  --expect-tasks      make a task, of kind tune, for the rule's team, of
+                      each expectation broken, once a rule, an expectation
+                      and a week, 20 a run at most, none while one is open.
+                      Off unless turned on
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)
@@ -911,6 +926,10 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			cfg.ConfigPrune = val == "true"
 		case "--goal-tasks":
 			cfg.GoalTasks = val == "true"
+		case "--expect":
+			cfg.Expect = val
+		case "--expect-tasks":
+			cfg.ExpectTasks = val == "true"
 		case "--proposals-expire":
 			// 0, 0s or 0d: off.
 			if d, perr := serve.ParseDuration(val); perr == nil && d == 0 {
@@ -1233,6 +1252,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--proposals-expire closes proposals in the ledger, and --read-only refuses writes")
 	case cfg.Config != "" && configFlag(cfg.Config) != nil:
 		err = configFlag(cfg.Config)
+	case cfg.Expect != "" && expectFlag(cfg.Expect) != nil:
+		err = expectFlag(cfg.Expect)
 	case yieldForSet && !cfg.Yield:
 		err = fmt.Errorf("--yield-for is how long --yield-on-429 leaves an API alone after a 429: give --yield-on-429")
 	case cfg.Guard != "" && f.promURL == "" && f.gcpProj == "":
@@ -1483,6 +1504,20 @@ func thisMachine(host string) bool {
 // flag given wrong. One that can't be used is said once serve runs, as when
 // it changes to one: the ledger keeps what it last declared, and a pod
 // restarted on it serves, rather than loop.
+// expectFlag says an --expect file can't be read as one, at start: later,
+// one that can't is said, and changes nothing.
+func expectFlag(path string) error {
+	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+		_, err = verdict.ReadExpectations(f)
+	}
+	if err != nil {
+		return fmt.Errorf("--expect %s: %w", path, err)
+	}
+	return nil
+}
+
 func configFlag(path string) error {
 	if _, err := os.ReadFile(path); err != nil {
 		return fmt.Errorf("--config: %w", err)

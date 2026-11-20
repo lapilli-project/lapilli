@@ -116,6 +116,12 @@ spec:
             {{- end }}
             - --goal-tasks
             {{- end }}
+            {{- if $s.expectations }}
+            - --expect=/etc/lapilli/expectations/expectations.yaml
+            {{- end }}
+            {{- if $s.expectTasks }}
+            - --expect-tasks
+            {{- end }}
             {{- with $s.proposalsExpire }}
             - {{ printf "--proposals-expire=%s" . | quote }}
             {{- end }}
@@ -431,6 +437,12 @@ spec:
               mountPath: /etc/lapilli/config
               readOnly: true
             {{- end }}
+            {{- if $s.expectations }}
+            # The whole directory, as config's.
+            - name: expectations
+              mountPath: /etc/lapilli/expectations
+              readOnly: true
+            {{- end }}
             {{- if ($s.deploys).configMap.name }}
             - name: deploys
               mountPath: /etc/lapilli/deploys
@@ -569,6 +581,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "lapilli.fullname" . }}-config
+        {{- end }}
+        {{- if $s.expectations }}
+        - name: expectations
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-expectations
         {{- end }}
         {{- if ($s.deploys).configMap.name }}
         - name: deploys

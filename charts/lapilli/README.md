@@ -452,6 +452,33 @@ serve:
   goalTasks: true
 ```
 
+`serve.expectations` holds the rules to what is expected of them after
+they are deployed (`--expect`, `docs/design/expectations.md` in the
+repository): an expectations file, as `lapilli verdict --expect` takes,
+kept beside the rule files and given with `--set-file`, in a ConfigMap
+read again as it changes, as `serve.config` is. After each run, each
+rule's budgets (`week`, `asleep`, `refires`) are held to each of the
+ledger's weeks, the week so far and the twelve whole weeks before, and
+its catches to the incidents written down: shown on the rule's
+Expectations tab, the overview, the rules list (held to none, broken),
+the digest and `/metrics`, and told once a rule, an expectation and a
+week when broken. A rule kept only in Grafana or a ruler can be held
+under `expectations:` in `serve.config` instead; a rule can carry its own
+budget in its annotation `lapilli.dev/budget: "10/week, 2 asleep"`.
+`serve.expectTasks` makes a task, for the rule's team, of each one broken
+(`--expect-tasks`).
+
+```yaml
+serve:
+  expectations: |
+    expectations:
+      - rule: ContainerRestarts
+        budget: {week: 10, asleep: 2}
+        catches:
+          - {incident: INC-43, within: 5m}
+  expectTasks: true
+```
+
 `serve.proposalsExpire` closes a proposal that waited for approval longer
 since it began to wait (made, or backtested again), such as `30d`, and
 that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however

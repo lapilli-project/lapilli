@@ -282,6 +282,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// The rules held to what is expected of them (docs/design/
+	// expectations.md), before the digest, which counts what this finds.
+	if err := s.expectAfter(ctx); err != nil {
+		s.fail("checking the expectations", err)
+	}
+	if !s.still(ctx) {
+		return
+	}
 	var fresh bool
 	if !waiting {
 		if fresh, err = s.digest(ctx, o); err != nil {
@@ -2184,6 +2192,12 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// The expectations of its rules, as last checked (docs/design/
+	// expectations.md).
+	ed, err := s.expectDigestOf(ctx, ledger.Week(s.l.Day(from)), team)
+	if err != nil {
+		return "", err
+	}
 	// The marked windows on in the week (docs/design/marked.md).
 	mk, err := s.markedOfReport(ctx, rep, from, to, team, s.cfg.Loc)
 	if err != nil {
@@ -2223,7 +2237,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{goals, onLine, episodesLine(s.cfg.Lang, rep), peopleLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, ed.text(s.cfg.Lang), onLine, episodesLine(s.cfg.Lang, rep), peopleLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2458,6 +2472,9 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 			if err := s.aboutGoals(ctx, about, from, nil); err != nil {
 				return err
 			}
+			if err := s.aboutExpect(ctx, about, from, nil); err != nil {
+				return err
+			}
 			told = append(told, ledger.Told{Dest: "webhook", About: about})
 		}
 		for _, name := range named {
@@ -2489,6 +2506,9 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 			return err
 		}
 		if err := s.aboutGoals(ctx, about, from, &t); err != nil {
+			return err
+		}
+		if err := s.aboutExpect(ctx, about, from, &t); err != nil {
 			return err
 		}
 		if webhook {
