@@ -22,6 +22,9 @@ import (
 const (
 	DraftAgent   = "agent"
 	DraftHistory = "history"
+	// DraftProposal is what a proposal adding a rule held it to, kept
+	// accepted once the rule is added (KeepAddedDraft).
+	DraftProposal = "proposal"
 )
 
 // A draft's states.
@@ -102,6 +105,8 @@ type ExpectDraft struct {
 	PR   string `json:"pull_request,omitempty"`
 	Link string `json:"link,omitempty"`
 	Why  string `json:"pull_request_reason,omitempty"`
+	// Proposal is, of origin proposal, the proposal adding the rule.
+	Proposal int64 `json:"proposal,omitempty"`
 }
 
 // about is what a notice says of a draft: never its text, its tests or
@@ -122,7 +127,8 @@ func madeInHour(ctx context.Context, q interface {
 	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM proposals WHERE made_by = ? AND kind != ? AND made > ?`, by, KindUndo, since).Scan(&p); err != nil {
 		return 0, err
 	}
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM expectation_drafts WHERE made_by = ? AND made > ?`, by, since).Scan(&d); err != nil {
+	// Those a proposal adding a rule carried, the proposal counted.
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM expectation_drafts WHERE made_by = ? AND made > ? AND origin != ?`, by, since, DraftProposal).Scan(&d); err != nil {
 		return 0, err
 	}
 	return p + d, nil
@@ -238,14 +244,14 @@ func ruleArgs(d dialect, rule string, more ...any) []any {
 	return append(args, more...)
 }
 
-const draftCols = "id, rule, origin, made_by, agent, made, text, tests, reason, found, target, doc_hash, document, state, decided_by, decided, pr, link, pr_reason"
+const draftCols = "id, rule, origin, made_by, agent, made, text, tests, reason, found, target, doc_hash, document, state, decided_by, decided, pr, link, pr_reason, proposal"
 
 func scanDraft(row interface{ Scan(...any) error }) (ExpectDraft, error) {
 	var d ExpectDraft
 	var made, decided int64
 	var tests, found string
 	if err := row.Scan(&d.ID, &d.Rule, &d.Origin, &d.MadeBy, &d.Agent, &made, &d.Text, &tests, &d.Reason, &found, &d.Target, &d.DocHash, &d.Document,
-		&d.State, &d.DecidedBy, &decided, &d.PR, &d.Link, &d.Why); err != nil {
+		&d.State, &d.DecidedBy, &decided, &d.PR, &d.Link, &d.Why, &d.Proposal); err != nil {
 		return d, err
 	}
 	d.Made, d.Found = unix(made), json.RawMessage(found)
@@ -320,6 +326,101 @@ func (l *Ledger) Drafts(ctx context.Context, q DraftQuery) ([]ExpectDraft, error
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// KeepAddedDraft keeps what a proposal adding a rule held it to, as the
+// rule is added: a draft of origin proposal, made by whoever proposed the
+// rule, accepted by by (its first approver, never the proposer), with
+// document, by the git path, ready for a recipe, as AcceptDraft makes one.
+// Not counted toward the hour's limit (the proposal was), nor held to the
+// drafts waiting for a rule: it waits for none. Kept once a proposal. It
+// is told (expectation.accepted).
+func (l *Ledger) KeepAddedDraft(ctx context.Context, d ExpectDraft, by, document, docHash string) (int64, error) {
+	tests, err := json.Marshal(d.Tests)
+	if err != nil {
+		return 0, err
+	}
+	if d.Tests == nil {
+		tests = []byte("{}")
+	}
+	by = FoldName(by)
+	switch {
+	case d.Proposal == 0 || d.Rule == "" || !plain(d.Rule) || d.MadeBy == "" || !plain(d.MadeBy):
+		return 0, invalid("a rule added's expectations are of its proposal, its rule and who proposed it")
+	case FoldName(d.MadeBy) == by:
+		return 0, ErrOwnDraft
+	case !slices.Contains([]string{DraftToFile, DraftToConfig, DraftToNone}, d.Target):
+		return 0, invalid("a draft goes to the expectations file, serve's configuration or none")
+	case d.Text == "" || len(d.Text) > MaxDraftText || !utf8.ValidString(d.Text):
+		return 0, invalid("a draft's expectations are %d bytes at most", MaxDraftText)
+	case len(document) > MaxDraftDocument:
+		return 0, invalid("the expectations file with a draft taken in is %d bytes at most", MaxDraftDocument)
+	case document != "" && (len(docHash) != 64 || strings.Trim(docHash, "0123456789abcdef") != ""):
+		return 0, invalid("a draft's file is named by its hash")
+	case len(d.Found) == 0:
+		d.Found = json.RawMessage("[]")
+	}
+	now := time.Now().Truncate(time.Second)
+	d.Origin, d.State, d.Made, d.MadeBy, d.DecidedBy, d.Decided = DraftProposal, DraftAccepted, now, FoldName(d.MadeBy), by, now
+	if document != "" {
+		d.PR, d.Document, d.DocHash = DraftReady, document, docHash
+	}
+	err = l.write(ctx, func(t *txn) error {
+		// Kept once a proposal: its expectations say so, and say which,
+		// however many drafts are let go since.
+		var raw, kind, state string
+		if err := t.QueryRowContext(t.ctx, "SELECT expect, kind, state FROM proposals WHERE id = ?", d.Proposal).Scan(&raw, &kind, &state); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		var x AddedExpect
+		if kind != KindAdd || state != StateApplied || json.Unmarshal([]byte(raw), &x) != nil {
+			return invalid("a rule added's expectations are kept once it is added")
+		}
+		if x.Kept != 0 {
+			return ErrMoved
+		}
+		var kept int
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM expectation_drafts").Scan(&kept); err != nil {
+			return err
+		}
+		if kept >= DraftsKept {
+			if _, err := t.ExecContext(t.ctx, `DELETE FROM expectation_drafts WHERE id IN (SELECT id FROM expectation_drafts WHERE state != ? AND pr NOT IN (?, ?) ORDER BY id LIMIT ?)`,
+				DraftOpen, DraftReady, DraftOpened, kept-DraftsKept+1); err != nil {
+				return err
+			}
+		}
+		if err := t.QueryRowContext(t.ctx, `INSERT INTO expectation_drafts (rule, origin, made_by, agent, made, text, tests, reason, found, target, doc_hash, document,
+			state, decided_by, decided, pr, proposal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			d.Rule, d.Origin, d.MadeBy, d.Agent, d.Made.Unix(), d.Text, string(tests), d.Reason, string(d.Found), d.Target, d.DocHash, d.Document,
+			d.State, d.DecidedBy, d.Decided.Unix(), d.PR, d.Proposal).Scan(&d.ID); err != nil {
+			return err
+		}
+		x.Kept = d.ID
+		marked, err := json.Marshal(x)
+		if err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET expect = ? WHERE id = ?", string(marked), d.Proposal); err != nil {
+			return err
+		}
+		if err := change(t, by, fmt.Sprintf("expectation draft #%d accepted, as proposal #%d adds its rule", d.ID, d.Proposal), nil, d.about()); err != nil {
+			return err
+		}
+		return l.tell(t, "expectation.accepted", by, d.about())
+	})
+	return d.ID, err
+}
+
+// AddedDraft is the draft a proposal adding a rule was kept as
+// (KeepAddedDraft); ErrNotFound when it wasn't, yet.
+func (l *Ledger) AddedDraft(ctx context.Context, proposal int64) (ExpectDraft, error) {
+	d, err := scanDraft(l.r.QueryRowContext(ctx, "SELECT "+draftCols+" FROM expectation_drafts WHERE origin = ? AND proposal = ?", DraftProposal, proposal))
+	if errors.Is(err, sql.ErrNoRows) {
+		return d, ErrNotFound
+	}
+	return d, err
 }
 
 // AcceptDraft notes a person's acceptance of an open draft: refused for

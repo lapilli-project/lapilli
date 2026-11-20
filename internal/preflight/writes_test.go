@@ -421,13 +421,19 @@ func TestAWSWrites(t *testing.T) {
 				return "implicitDeny", nil
 			}
 			return "allowed", nil
-		}, false, Problem, "cloudwatch:DeleteAlarms denied for 1 of 3"},
+		}, false, Problem, "cloudwatch:DeleteAlarms denied for 1 of 4"},
 		{"a name under the prefix denied", 200, func(a, r string) (string, []string) {
 			if a == "cloudwatch:PutMetricAlarm" && strings.HasSuffix(r, ":alarm:checkout-b") {
 				return "explicitDeny", nil
 			}
 			return "allowed", nil
-		}, false, Problem, "cloudwatch:PutMetricAlarm denied for 1 of 3"},
+		}, false, Problem, "cloudwatch:PutMetricAlarm denied for 1 of 4"},
+		{"the name a rule added would make, denied", 200, func(a, r string) (string, []string) {
+			if a == "cloudwatch:PutMetricAlarm" && strings.HasSuffix(r, ":alarm:checkout-lapilli-added") {
+				return "implicitDeny", nil
+			}
+			return "allowed", nil
+		}, false, Problem, "cloudwatch:PutMetricAlarm denied for 1 of 4"},
 		{"a condition", 200, func(a, r string) (string, []string) {
 			if a == "cloudwatch:TagResource" {
 				return "implicitDeny", []string{"aws:RequestTag/team"}
@@ -439,7 +445,7 @@ func TestAWSWrites(t *testing.T) {
 				return "allowed", []string{"aws:ResourceTag/team"}
 			}
 			return "allowed", nil
-		}, false, Unknown, "cloudwatch:PutMetricAlarm for 3 of 3 on a condition of aws:ResourceTag/team"},
+		}, false, Unknown, "cloudwatch:PutMetricAlarm for 4 of 4 on a condition of aws:ResourceTag/team"},
 		{"truncated", 200, allowed, true, Unknown, "went on past its first page"},
 		{"no simulation", 403, nil, false, Unknown, "iam:SimulatePrincipalPolicy on its own ARN"},
 	} {
@@ -469,7 +475,8 @@ func TestAWSWrites(t *testing.T) {
 		}
 		if len(forms) != 1 || forms[0].Get("ResourceArns.member.1") != "arn:aws:cloudwatch:eu-west-1:123456789012:alarm:checkout-a" ||
 			forms[0].Get("ResourceArns.member.2") != "arn:aws:cloudwatch:eu-west-1:123456789012:alarm:checkout-b" ||
-			forms[0].Get("ResourceArns.member.3") != queue || forms[0].Get("ResourceArns.member.4") != "" || forms[0].Get("ActionNames.member.5") == "" ||
+			forms[0].Get("ResourceArns.member.3") != "arn:aws:cloudwatch:eu-west-1:123456789012:alarm:checkout-lapilli-added" ||
+			forms[0].Get("ResourceArns.member.4") != queue || forms[0].Get("ResourceArns.member.5") != "" || forms[0].Get("ActionNames.member.5") == "" ||
 			forms[0].Get("ActionNames.member.6") != "" || forms[0].Get(ctxName) != "aws:RequestedRegion" || forms[0].Get(ctxValue) != "eu-west-1" {
 			t.Errorf("%s: asked %v", x.name, forms)
 		}

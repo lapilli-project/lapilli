@@ -146,6 +146,8 @@ func headOf(p ledger.Proposal, ev evidence, was time.Duration, known bool) propo
 		}
 	case ledger.KindUndo:
 		return proposalHead{"Undoing #%d, on %s", []any{p.Follows, rule}}
+	case ledger.KindAdd:
+		return proposalHead{"A new rule, %s", []any{rule}}
 	}
 	return proposalHead{"A change to %s", []any{rule}}
 }

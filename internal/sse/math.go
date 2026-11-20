@@ -251,9 +251,13 @@ func (p *parser) unary() (Expr, error) {
 
 var funcs = map[string]func(float64) float64{
 	"abs": math.Abs, "ceil": math.Ceil, "floor": math.Floor, "round": math.Round, "log": math.Log, "exp": math.Exp,
-	"is_nan":  func(v float64) float64 { return b2f(math.IsNaN(v)) },
-	"is_inf":  func(v float64) float64 { return b2f(math.IsInf(v, 0)) },
-	"is_null": func(v float64) float64 { return b2f(math.IsNaN(v)) },
+	"is_nan": func(v float64) float64 { return b2f(math.IsNaN(v)) },
+	// Grafana's: 1 for a real number, 0 for NaN or an infinity. Its own
+	// conversion of a Prometheus rule fires on is_number($A) || is_nan($A)
+	// || is_inf($A): every series the query returns.
+	"is_number": func(v float64) float64 { return b2f(!math.IsNaN(v) && !math.IsInf(v, 0)) },
+	"is_inf":    func(v float64) float64 { return b2f(math.IsInf(v, 0)) },
+	"is_null":   func(v float64) float64 { return b2f(math.IsNaN(v)) },
 }
 
 type number float64

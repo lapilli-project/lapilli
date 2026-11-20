@@ -564,6 +564,10 @@ type evidence struct {
 	// against (ledger.ImpactKept.Criterion), "" for none: read again with
 	// another since, it is stale (staleImpact).
 	Impact string `json:"impact_criterion,omitempty"`
+	// Add is, of a rule added, where it goes, the rule as Lapilli wrote it
+	// and what holding it to its expectations found (docs/design/
+	// expectations.md, step 5).
+	Add *addEvidence `json:"add,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -1393,6 +1397,9 @@ func (s *Server) carryOut(ctx context.Context) error {
 	if s.changesPaused() {
 		return nil
 	}
+	if err := s.addedExpectations(ctx); err != nil {
+		return err
+	}
 	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateApproved}, Limit: 100})
 	if err != nil {
 		return err
@@ -1557,6 +1564,9 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step, string, error) {
 	var step ledger.Step
 	ev := proposalEvidence(p)
+	if p.Kind == ledger.KindAdd {
+		return s.checkAddAgain(ctx, p, ev)
+	}
 	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
 		// Grafana's own copy, the ruler's or the cloud's, is read again
 		// where it is applied.
@@ -1627,6 +1637,42 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 	}
 	if err := s.checkEvidence(ctx, p, ev, now); err != nil {
 		return step, "", err
+	}
+	return step, ledger.StateReady, nil
+}
+
+// checkAddAgain checks an approved proposal adding a rule against the
+// rules and the history as they are now (addAgain): refused when its
+// place is gone, a rule of its name is in effect, or, held to its
+// expectations again, it breaks one or isn't replayed to the end. On the
+// git path, a file whose other lines changed since gets the rule written
+// afresh in it, and the file as it was is kept for undo; through an API,
+// the rule is written where it goes as it is read there just before.
+func (s *Server) checkAddAgain(ctx context.Context, p ledger.Proposal, ev evidence) (ledger.Step, string, error) {
+	var step ledger.Step
+	if p.Path == ledger.PathNone {
+		return step, "", refusal{"this one is for a person to make where the rule is written"}
+	}
+	again, b, err := s.addAgain(ctx, p, ev)
+	if err != nil {
+		return step, "", err
+	}
+	if why := addWorse(again); why != "" {
+		return step, "", refusal{why}
+	}
+	if p.Path != ledger.PathGit {
+		return step, ledger.StateApplying, nil
+	}
+	if b.source != p.Source {
+		return step, "", refusal{"the file the rule goes in is gone"}
+	}
+	step.Backup = string(b.before)
+	if b.docHash != p.DocHash {
+		// The rest of the file changed: the rule is added afresh in it.
+		step.Document, step.DocHash, step.Diff = string(b.doc), b.docHash, b.diff
+		if h := ruleHash(b.rule); h != p.AfterHash {
+			return step, "", refusal{"the rule can't be added to the file as it is now as it was proposed: propose it again"}
+		}
 	}
 	return step, ledger.StateReady, nil
 }
@@ -2066,7 +2112,7 @@ func utf8RuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 type proposeIn struct {
 	Rule   string   `json:"rule" jsonschema:"the rule's name, as rules gives it"`
-	Kind   string   `json:"kind" jsonschema:"for, threshold, retire or says"`
+	Kind   string   `json:"kind" jsonschema:"for, threshold, retire, says or add"`
 	For    string   `json:"for,omitempty" jsonschema:"the new for, such as 15m: kind for"`
 	Bound  int      `json:"bound,omitempty" jsonschema:"which number of its condition, from 0, as written: kind threshold"`
 	Value  *float64 `json:"value,omitempty" jsonschema:"the threshold's new number: kind threshold"`
@@ -2076,6 +2122,20 @@ type proposeIn struct {
 	Text       string `json:"text,omitempty" jsonschema:"what the annotation is to say, as you wrote it (a summary or description of 4 KB at most; a runbook an https URL): kind says"`
 	Unset      bool   `json:"unset,omitempty" jsonschema:"take the annotation out instead: kind says"`
 	Check      string `json:"check,omitempty" jsonschema:"the content check's finding it answers, as the rule tool gives it, such as no_runbook: kind says"`
+	// A new rule: kind add.
+	Added        string            `json:"added,omitempty" jsonschema:"kind add: the new rule, one Prometheus alerting rule in YAML (alert, expr, for, keep_firing_for, labels, annotations): its alert is its name, apart from every rule's, and rule names it too"`
+	Path         string            `json:"path,omitempty" jsonschema:"kind add: where it goes, as places gives one: git, grafana, ruler or alarm"`
+	File         string            `json:"file,omitempty" jsonschema:"kind add, git: the rule file, as places names it"`
+	Folder       string            `json:"folder,omitempty" jsonschema:"kind add, grafana: the folder's title"`
+	Namespace    string            `json:"namespace,omitempty" jsonschema:"kind add, ruler: the namespace"`
+	Alarms       string            `json:"alarms,omitempty" jsonschema:"kind add, alarm: the --alarms source"`
+	Group        string            `json:"group,omitempty" jsonschema:"kind add: the group, as places gives it, or a new group's name with new_group"`
+	NewGroup     bool              `json:"new_group,omitempty" jsonschema:"kind add: a new group of that name, where places offers one"`
+	Interval     string            `json:"interval,omitempty" jsonschema:"kind add: a new group's interval, such as 1m, an hour at most"`
+	DataSource   string            `json:"data_source,omitempty" jsonschema:"kind add, grafana: the data source its query reads, one of those places gives"`
+	Tells        []string          `json:"tells,omitempty" jsonschema:"kind add, grafana and alarm: whom it tells, each one of those places gives for the place"`
+	Expectations string            `json:"expectations,omitempty" jsonschema:"kind add: what it is held to, an expectations file holding it by rule: NAME alone, one expectation at least (budget with week, asleep, refires; catches with incident and within; scenarios, their test files in tests)"`
+	Tests        map[string]string `json:"tests,omitempty" jsonschema:"kind add: promtool's test files its scenarios name, by path: 20 at most, 256 KiB in all"`
 }
 
 type proposeOut struct {
@@ -2084,6 +2144,8 @@ type proposeOut struct {
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
 	// Outlasts warns of a for proposed that one event can't outlast.
 	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for as long as the range the rule's condition counts events over, or longer: one event alone could never fire it, only events that keep coming for all of it. Proposed all the same, and said on its page"`
+	// Held is, of a rule added, why it isn't approved as it is.
+	Held string `json:"held,omitempty" jsonschema:"kind add: why no one may approve it as it is (an expectation it breaks, a backtest that didn't replay it): kept all the same, and said on its page"`
 }
 
 // toolPropose is an agent proposing a change, for the person it acts for:
@@ -2130,8 +2192,26 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 		q.Kind = kindRetire // turned off or deleted, as propose finds the rule
 	case "says":
 		q.Kind, q.Annotation, q.Text, q.Unset, q.Check = ledger.KindSays, in.Annotation, in.Text, in.Unset, in.Check
+	case "add":
+		add, err := in.addOf(reason)
+		if err != nil {
+			return nil, out, err
+		}
+		id, err := s.proposeAdd(ctx, add, by, true)
+		if err != nil {
+			return nil, out, err
+		}
+		p, err := s.l.ProposalByID(ctx, id)
+		if err != nil {
+			return nil, out, err
+		}
+		out.ID, out.Path, out.Held = id, p.Path, addHeldWhy(proposalEvidence(p))
+		if s.cfg.ExternalURL != "" {
+			out.Page = fmt.Sprintf("%s/proposals/%d", strings.TrimRight(s.cfg.ExternalURL, "/"), id)
+		}
+		return nil, out, nil
 	default:
-		return nil, out, errors.New("kind is for, threshold, retire or says")
+		return nil, out, errors.New("kind is for, threshold, retire, says or add")
 	}
 	id, err := s.propose(ctx, q, by, true, false)
 	if err != nil {

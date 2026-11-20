@@ -92,6 +92,12 @@ CREATE INDEX expectation_checks_result ON expectation_checks (result, week);
 -- closed or failed, '' for none; link, its pull request's; pr_reason, why
 -- it failed or was closed. Drafts are bounded: 10 open a rule, 1,000 kept
 -- in all, the oldest decided let go first.
+--
+-- proposal is, of the expectations a proposal adding a rule was held to
+-- (step 5, origin proposal), that proposal: kept accepted, by its first
+-- approver, once the rule is added, where a draft accepted goes; 0 for
+-- every other draft. A proposal counts toward the hour's limit, not the
+-- expectations it carries.
 CREATE TABLE expectation_drafts (
 	id INTEGER PRIMARY KEY,
 	rule TEXT NOT NULL,
@@ -111,7 +117,8 @@ CREATE TABLE expectation_drafts (
 	decided INTEGER NOT NULL DEFAULT 0,
 	pr TEXT NOT NULL DEFAULT '',
 	link TEXT NOT NULL DEFAULT '',
-	pr_reason TEXT NOT NULL DEFAULT ''
+	pr_reason TEXT NOT NULL DEFAULT '',
+	proposal INTEGER NOT NULL DEFAULT 0
 );
 -- A rule's drafts, its tab's; who made how many in the last hour, as the
 -- proposals they count with; those of a state, the list and the recipes'.
@@ -119,3 +126,12 @@ CREATE INDEX expectation_drafts_rule ON expectation_drafts (rule, id);
 CREATE INDEX expectation_drafts_by ON expectation_drafts (made_by, made);
 CREATE INDEX expectation_drafts_state ON expectation_drafts (state, id);
 CREATE INDEX expectation_drafts_pr ON expectation_drafts (pr, id);
+
+-- What a proposal adding a rule (kind add, step 5) holds the rule to: the
+-- expectations as Lapilli wrote them and their scenarios' test files, as
+-- JSON ({"text": ..., "tests": {...}}), bounded as a draft's are, and,
+-- once the rule is added and they are kept as a draft, that draft's id
+-- ("kept"), so that they are kept once however many drafts are let go;
+-- '' for every other kind. Read with the proposal alone, never with a
+-- list of them.
+ALTER TABLE proposals ADD COLUMN expect TEXT NOT NULL DEFAULT '';

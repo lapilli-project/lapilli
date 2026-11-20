@@ -51,9 +51,13 @@ CREATE TABLE expectation_drafts (
 	decided BIGINT NOT NULL DEFAULT 0,
 	pr TEXT COLLATE "C" NOT NULL DEFAULT '',
 	link TEXT COLLATE "C" NOT NULL DEFAULT '',
-	pr_reason TEXT COLLATE "C" NOT NULL DEFAULT ''
+	pr_reason TEXT COLLATE "C" NOT NULL DEFAULT '',
+	proposal BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX expectation_drafts_rule ON expectation_drafts (md5(rule), id);
 CREATE INDEX expectation_drafts_by ON expectation_drafts (made_by, made);
 CREATE INDEX expectation_drafts_state ON expectation_drafts (state, id);
 CREATE INDEX expectation_drafts_pr ON expectation_drafts (pr, id);
+
+-- What a proposal adding a rule holds the rule to, as SQLite's 027.sql.
+ALTER TABLE proposals ADD COLUMN expect TEXT COLLATE "C" NOT NULL DEFAULT '';

@@ -28,6 +28,9 @@ import (
 func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.Request) (any, error)) http.HandlerFunc) {
 	mux.HandleFunc("GET /proposals", page("proposals", s.proposalsPage))
 	mux.HandleFunc("GET /proposals/{id}", page("proposal", s.proposalPage))
+	// A new rule's form: a proposal adding one (docs/design/expectations.md,
+	// step 5), an editor's, as proposing is.
+	mux.HandleFunc("GET /proposals/new", s.write(page("newrule", s.newRulePage)))
 	mux.HandleFunc("POST /proposals", s.write(s.postProposal))
 	mux.HandleFunc("POST /proposals/{id}/approve", s.person(s.postApprove))
 	mux.HandleFunc("POST /proposals/{id}/undo", s.person(s.postUndo))
@@ -107,6 +110,10 @@ type proposalLine struct {
 	Outlasts *verdict.Outlast
 	NoRecord bool
 	read     bool
+	// AddHeld is, of a rule added waiting for approval, why it isn't
+	// approved as its evidence says now (addHeldWhy): an expectation it
+	// breaks, a backtest that didn't replay it; "" when it may be.
+	AddHeld string
 }
 
 type proposalsView struct {
@@ -116,6 +123,8 @@ type proposalsView struct {
 	Limits   Limits
 	Need     int
 	Approver bool
+	// CanAdd says the reader may propose a new rule: an editor.
+	CanAdd bool
 	// The facets, the chips and the form (docs/design/ui.md); Shown of
 	// Total for the team, at most proposalsShown; Empty, why none is.
 	Pick         pickView
@@ -215,8 +224,8 @@ var proposalFacets = []pickFacet{
 			ledger.StateDropped, ledger.StateAmended, ledger.StateExpired},
 		// A state there is no such of, as an older link may name, is none.
 		none: true},
-	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindUndo},
-		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "undoing a change"}},
+	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindAdd, ledger.KindUndo},
+		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "a new rule", "undoing a change"}},
 	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathAlarm, ledger.PathNone},
 		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "the cloud's API", "for a person to make"}},
 	{param: "by", name: "Made by", values: []string{ledger.MakerPerson, ledger.MakerAgent, ledger.MakerLapilli}, labels: []string{"a person", "an agent", "Lapilli itself"}},
@@ -372,7 +381,8 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	}
 	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(counts), func(i int, param string) []string { return countValues(counts[i], param) },
 		func(i int) int { return counts[i].N })
-	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r), Pick: pick}
+	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r), Pick: pick,
+		CanAdd: !s.cfg.ReadOnly && s.role(r) >= editor && s.replaying()}
 	for _, x := range counts {
 		v.Total += x.N
 	}
@@ -516,6 +526,8 @@ type proposalView struct {
 	Undoes *undoneOf
 	// MayApprove is, waiting for approval, who may approve it.
 	MayApprove *mayApprove
+	// Add is, of a rule added, where it goes and what it is held to.
+	Add *addView
 }
 
 // undoneOf is the change an undo undoes, as the undo's page names it: its
@@ -553,8 +565,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		me := ledger.FoldName(user)
 		v.Own = ledger.FoldName(p.MadeBy) == me
 		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return ledger.FoldName(a.By) == me })
-		// A stale one is held until it is backtested again (postApprove).
-		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done && !v.Bearer && v.StaleWhy == nil {
+		// A stale one is held until it is backtested again (postApprove),
+		// and a rule added that breaks what it is held to.
+		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done && !v.Bearer && v.StaleWhy == nil && v.AddHeld == "" {
 			v.CanApprove, v.Approve = true, s.formKey(p, user, "approve")
 		}
 		if undoable(p) && !v.Bearer {
@@ -593,6 +606,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		v.File, v.FileRows = s.docName(p.Source), fileRows(p.Diff)
 	}
 	v.Backtest = btTableOf(v.Evidence.Backtest, v.NoRecord)
+	if v.Add, err = s.addViewOf(ctx, v.proposalLine, v.Evidence); err != nil {
+		return nil, err
+	}
 	if p.Kind == ledger.KindUndo {
 		// What it undoes is the change's: its backtest read the other way,
 		// who made it; nothing of why it was made is the asker's.
@@ -698,6 +714,15 @@ func (s *Server) prBody(l proposalLine) string {
 	if p.Kind == ledger.KindSays {
 		b.WriteString("It changes what the alert says, not when it fires.\n\n")
 	}
+	if x := ev.Add; p.Kind == ledger.KindAdd && x != nil {
+		// What it is held to, each a line: Lapilli's words and numbers,
+		// what holds it as code.
+		b.WriteString("It adds the rule, held to its expectations before it was approved: replayed with nothing beside it,\n\n")
+		for _, it := range x.Items {
+			fmt.Fprintf(&b, "- %s %s: %s, %s\n", mdCode(it.What), mdCode(it.Held), mdCode(it.Value), it.State)
+		}
+		b.WriteString("\nOnce it is added, its expectations go where an accepted draft of them goes.\n\n")
+	}
 	o := ev.Outlasts
 	if l.read {
 		o = l.Outlasts // as it is read now, whichever lapilli made it
@@ -786,6 +811,8 @@ func kindText(kind string) string {
 		return "a fix to what it says"
 	case ledger.KindUndo:
 		return "undoing a change"
+	case ledger.KindAdd:
+		return "a new rule"
 	}
 	return kind
 }
@@ -794,6 +821,10 @@ func kindText(kind string) string {
 func (s *Server) postProposal(w http.ResponseWriter, r *http.Request) {
 	if err := form(r); err != nil {
 		s.oops(w, r, err)
+		return
+	}
+	if r.PostFormValue("kind") == ledger.KindAdd {
+		s.postAddProposal(w, r)
 		return
 	}
 	q := ask{Rule: r.PostFormValue("rule"), Kind: r.PostFormValue("kind"), From: "person"}
@@ -890,6 +921,12 @@ func (s *Server) postApprove(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errHeld)
 		return
 	}
+	// A rule added is approved only held to what it is to do, none of it
+	// broken, its backtest replayed to the end.
+	if ls[0].AddHeld != "" {
+		s.oops(w, r, errAddHeld)
+		return
+	}
 	// As it was shown, and read here: backtested again meanwhile, it
 	// moved, and the ledger refuses it.
 	if _, err := s.l.Approve(r.Context(), p.ID, s.user(r), s.approvals(), p.Updated); err != nil {
@@ -929,6 +966,13 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 	u.AfterHash = p.BeforeHash
 	if p.Kind == ledger.KindDelete {
 		u.BeforeHash = ""
+	}
+	if p.Kind == ledger.KindAdd && p.Path == ledger.PathAlarm {
+		// A Google policy added is named as the create answered: its
+		// document keeps the name.
+		if m, err := decodeTree([]byte(p.Document)); err == nil && str(m["name"]) != "" {
+			u.Source = str(m["name"])
+		}
 	}
 	switch p.Path {
 	case ledger.PathGit:
@@ -1183,7 +1227,17 @@ func (s *Server) apiProposal(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	writeJSON(w, proposalJSONOf(ls[0]))
+	out := proposalJSONOf(ls[0])
+	if p.Kind == ledger.KindAdd {
+		// What it is held to, as Lapilli wrote it, with its proposal alone.
+		x, err := s.l.ProposalExpect(r.Context(), p.ID)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		out.Expectations, out.Tests = x.Text, x.Tests
+	}
+	writeJSON(w, out)
 }
 
 // The change recipes' token, on the incidents port: it reads the changes

@@ -286,7 +286,8 @@ const grafanaPermissions = "/api/access-control/user/permissions"
 // 12.4.15 and 13.3.1): a rule read (GET of the rule and of the export)
 // takes any of the first three, or both alert.rules:read and folders:read,
 // whose scopes Grafana checks in the handler; a rule changed (PUT),
-// deleted (DELETE) or made again (POST) takes any of the two provisioning
+// deleted (DELETE) or made (POST: again, to undo a deletion, or added, by
+// a proposal adding a rule, docs/design/expectations.md step 5) takes any of the two provisioning
 // writes, or alert.rules:write, :delete or :create, each with
 // alert.provisioning.provenance:write, and then the rule's folder.
 var (
@@ -501,7 +502,8 @@ const crmHost = "https://cloudresourcemanager.googleapis.com"
 
 // googleAlarmWrites are what serve's writes to a Google alerting policy
 // need (https://cloud.google.com/monitoring/access-control): a PATCH of a
-// policy, its DELETE, and its create, to undo a deletion.
+// policy, its DELETE, and its create, to undo a deletion or to add a rule
+// (docs/design/expectations.md, step 5).
 var googleAlarmWrites = []string{"monitoring.alertPolicies.create", "monitoring.alertPolicies.delete", "monitoring.alertPolicies.update"}
 
 // readOnly is the scope the service account's token is asked for here.

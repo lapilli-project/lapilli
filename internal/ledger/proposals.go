@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Proposals (docs/design/changes.md): a change to one rule, with the
@@ -26,6 +27,10 @@ const (
 	KindSays = "says"
 	// KindUndo writes back the rule an applied proposal changed.
 	KindUndo = "undo"
+	// KindAdd adds a rule, in the place its proposal names, held to its
+	// expectations before it is approved (docs/design/expectations.md,
+	// step 5). Its rule is the name the rule is added under.
+	KindAdd = "add"
 
 	PathGit     = "git"
 	PathGrafana = "grafana"
@@ -114,6 +119,35 @@ type Proposal struct {
 	Updated   time.Time  `json:"updated"`
 	Applied   time.Time  `json:"applied,omitzero"`
 	Approvals []Approval `json:"approvals"`
+	// Expect is, of a rule added, what it is held to (AddedExpect, as
+	// JSON): kept with it, read with it alone (ProposalExpect).
+	Expect string `json:"-"`
+}
+
+// AddedExpect is what a proposal adding a rule holds it to: the
+// expectations as Lapilli wrote them, and their scenarios' test files by
+// path, bounded as a draft's are.
+type AddedExpect struct {
+	Text  string            `json:"text"`
+	Tests map[string]string `json:"tests,omitempty"`
+	// Kept is the draft they were kept as once the rule was added
+	// (KeepAddedDraft), 0 before: kept once, though drafts are let go.
+	Kept int64 `json:"kept,omitempty"`
+}
+
+// check holds what a rule added is held to to a draft's bounds.
+func (x AddedExpect) check() error {
+	n := 0
+	for p, t := range x.Tests {
+		n += len(p) + len(t)
+	}
+	switch {
+	case x.Text == "" || len(x.Text) > MaxDraftText || !utf8.ValidString(x.Text):
+		return invalid("a rule added is held to expectations of %d bytes at most", MaxDraftText)
+	case len(x.Tests) > MaxDraftTestsN || n > MaxDraftTests:
+		return invalid("a rule added holds %d test files, %d bytes in all, at most", MaxDraftTestsN, MaxDraftTests)
+	}
+	return nil
 }
 
 // Approval is a person's approval of a proposal.
@@ -199,12 +233,27 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 	switch {
 	case p.Rule == "" || !plain(p.Rule):
 		return 0, invalid("a proposal is for a rule")
-	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete, KindSays}, p.Kind):
-		return 0, invalid("a proposal's kind is for, threshold, disable, delete or says")
+	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete, KindSays, KindAdd}, p.Kind):
+		return 0, invalid("a proposal's kind is for, threshold, disable, delete, says or add")
 	case !slices.Contains([]string{PathGit, PathGrafana, PathRuler, PathAlarm, PathNone}, p.Path):
 		return 0, invalid("a proposal's path is git, grafana, ruler or none")
 	case len(p.Evidence) == 0:
 		p.Evidence = json.RawMessage("{}")
+	}
+	// A rule added is held to what it carries, and only it carries any.
+	switch {
+	case p.Kind == KindAdd && p.Expect == "":
+		return 0, invalid("a rule added is held to expectations")
+	case p.Kind != KindAdd && p.Expect != "":
+		return 0, invalid("only a rule added carries expectations")
+	case p.Kind == KindAdd:
+		var x AddedExpect
+		if err := json.Unmarshal([]byte(p.Expect), &x); err != nil {
+			return 0, invalid("what a rule added is held to isn't read")
+		}
+		if err := x.check(); err != nil {
+			return 0, err
+		}
 	}
 	now := time.Now()
 	p.State, p.Made, p.Updated, p.MadeBy = StateProposed, now.Truncate(time.Second), now.Truncate(time.Second), FoldName(p.MadeBy)
@@ -214,9 +263,9 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 			return err
 		}
 		if err := t.QueryRowContext(t.ctx, `INSERT INTO proposals (rule, kind, path, state, made, made_by, agent, source, doc_hash, before, before_hash,
-			after, after_hash, document, diff, evidence, follows, task_id, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			after, after_hash, document, diff, evidence, follows, task_id, updated, expect) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 			p.Rule, p.Kind, p.Path, p.State, p.Made.Unix(), p.MadeBy, p.Agent, p.Source, p.DocHash, p.Before, p.BeforeHash,
-			p.After, p.AfterHash, p.Document, p.Diff, string(p.Evidence), nullID(p.Follows), nullID(p.TaskID), p.Updated.Unix()).Scan(&id); err != nil {
+			p.After, p.AfterHash, p.Document, p.Diff, string(p.Evidence), nullID(p.Follows), nullID(p.TaskID), p.Updated.Unix(), p.Expect).Scan(&id); err != nil {
 			return err
 		}
 		p.ID = id
@@ -281,6 +330,45 @@ func (l *Ledger) approvals(ctx context.Context, q interface {
 		}
 		a.At = unix(at)
 		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ProposalExpect is what a proposal adding a rule holds it to, as kept;
+// the zero value for any other.
+func (l *Ledger) ProposalExpect(ctx context.Context, id int64) (AddedExpect, error) {
+	var raw string
+	if err := l.r.QueryRowContext(ctx, "SELECT expect FROM proposals WHERE id = ?", id).Scan(&raw); errors.Is(err, sql.ErrNoRows) {
+		return AddedExpect{}, ErrNotFound
+	} else if err != nil {
+		return AddedExpect{}, err
+	}
+	var x AddedExpect
+	if raw == "" {
+		return x, nil
+	}
+	err := json.Unmarshal([]byte(raw), &x)
+	return x, err
+}
+
+// AddsUnkept are the proposals adding a rule that are applied and whose
+// expectations aren't kept yet (KeepAddedDraft), the oldest first, most at
+// most: read along the proposals' state, their expectations read here
+// alone.
+func (l *Ledger) AddsUnkept(ctx context.Context, most int) ([]int64, error) {
+	rows, err := l.r.QueryContext(ctx, `SELECT id FROM proposals WHERE state = ? AND kind = ? AND expect NOT LIKE ? ORDER BY updated, id LIMIT ?`,
+		StateApplied, KindAdd, `%"kept":%`, most)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }

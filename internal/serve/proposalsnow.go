@@ -94,8 +94,10 @@ func (s *Server) versionOf() string {
 }
 
 // backtested reports whether a proposal's kind has a backtest: a for or a
-// threshold, replayed.
-func backtested(kind string) bool { return kind == ledger.KindFor || kind == ledger.KindThreshold }
+// threshold, replayed, or a rule added, held to its expectations.
+func backtested(kind string) bool {
+	return kind == ledger.KindFor || kind == ledger.KindThreshold || kind == ledger.KindAdd
+}
 
 // proposedFor is the for a proposal of a new for proposes: its edit's, or
 // its evidence's.
@@ -472,6 +474,9 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 				l.NoRecord = *bt.NoRecord
 			}
 		}
+		if l.State == ledger.StateProposed && l.Kind == ledger.KindAdd {
+			l.AddHeld = addHeldWhy(ev)
+		}
 		if l.State != ledger.StateProposed || bt == nil || !backtested(l.Kind) {
 			continue
 		}
@@ -542,7 +547,7 @@ func (s *Server) heldPromotable(ctx context.Context) ([]int64, error) {
 	}
 	var out []int64
 	for _, l := range ls {
-		if l.StaleWhy != nil {
+		if l.StaleWhy != nil || l.AddHeld != "" {
 			out = append(out, l.ID)
 		}
 	}
@@ -636,6 +641,10 @@ var errRuleChanged = bad("the rule changed since it was proposed, so the proposa
 // errHeld is an approval of a proposal that waits to be backtested again.
 var errHeld = bad("it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it")
 
+// errAddHeld is an approval of a rule added that its evidence holds: an
+// expectation broken, a backtest not replayed to the end.
+var errAddHeld = bad("a rule added is approved only once its backtest meets what it is held to: none of its expectations broken, its backtest replayed to the end; its page says why it waits")
+
 // backtestAgain runs a stale proposal's backtest again, with this lapilli,
 // against the rule in effect, over the twelve weeks to now (as proposing
 // it would), for who asks (agent, for an agent acting for them): its
@@ -691,6 +700,9 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 		return err
 	}
 	defer done()
+	if p.Kind == ledger.KindAdd {
+		return s.addBacktestAgain(ctx, p, ev, by, agent)
+	}
 	f, err := s.current(ctx, p.Rule, false)
 	var b badRequest
 	switch {
@@ -748,6 +760,39 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 	}
 	_, _, err = s.l.BacktestAgain(ctx, p.ID, by, agent, p.Evidence, raw,
 		map[string]any{"backtest": ev.Backtest, "version": ev.Version}, map[string]any{"backtest": bt, "version": again.Version})
+	return err
+}
+
+// addBacktestAgain is backtestAgain of a proposal adding a rule: the rule
+// written where its place says from the rules read again, replayed and
+// held to its expectations anew (addAgain); refused as stale ones whose
+// rule changed are, when its place is gone or a rule of its name is in
+// effect since.
+func (s *Server) addBacktestAgain(ctx context.Context, p ledger.Proposal, ev evidence, by string, agent bool) error {
+	if by != ledger.Proposer && !s.tries.take(by, agent, time.Now()) {
+		return errTooManyTries
+	}
+	if by == ledger.Proposer {
+		if err := s.l.BacktestTried(ctx, p.ID); err != nil {
+			return err
+		}
+	}
+	again, _, err := s.addAgain(ctx, p, ev)
+	var no refusal
+	switch {
+	case errors.As(err, &no):
+		return errRuleChanged
+	case err != nil:
+		return err
+	case again.Backtest.Unfinished && by == ledger.Proposer:
+		return errUnfinished
+	}
+	raw, err := json.Marshal(again)
+	if err != nil {
+		return err
+	}
+	_, _, err = s.l.BacktestAgain(ctx, p.ID, by, agent, p.Evidence, raw,
+		map[string]any{"backtest": ev.Backtest, "version": ev.Version}, map[string]any{"backtest": again.Backtest, "version": again.Version})
 	return err
 }
 
@@ -1024,10 +1069,16 @@ type proposalJSON struct {
 	// NoRecord says, of one with a backtest, that its period had no
 	// incident written down to judge its firings by.
 	NoRecord *bool `json:"no_record,omitempty"`
+	// Held is, of a rule added waiting for approval, why it isn't approved
+	// (addHeldWhy); Expectations and Tests, read with it alone, what it is
+	// held to.
+	Held         string            `json:"held,omitempty"`
+	Expectations string            `json:"expectations,omitempty"`
+	Tests        map[string]string `json:"tests,omitempty"`
 }
 
 func proposalJSONOf(l proposalLine) proposalJSON {
-	out := proposalJSON{Proposal: l.Proposal, Outlasts: l.Outlasts, Stale: l.staleText()}
+	out := proposalJSON{Proposal: l.Proposal, Outlasts: l.Outlasts, Stale: l.staleText(), Held: l.AddHeld}
 	if proposalEvidence(l.Proposal).Backtest != nil {
 		out.NoRecord = &l.NoRecord
 	}

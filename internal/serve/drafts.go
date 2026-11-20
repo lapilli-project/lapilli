@@ -450,6 +450,42 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 	} else {
 		came = []rules.Rule{r}
 	}
+	runner := func(ctx context.Context) (verdict.ScenarioRunner, error) {
+		return s.draftRunner(ctx, r, came[0], given, len(gone) > 0, c.out.HeldBy == "given")
+	}
+	results, err := s.replayHeld(ctx, c, held, gone, came, len(current)-1, runner)
+	if err != nil {
+		return nil, err
+	}
+	if len(gone) > 0 {
+		c.out.Meets = verdict.RewriteMeets(results, c.out.Lost)
+		if c.out.Meets {
+			c.out.Post = verdict.RewriteMarkdown(verdict.Rewritten{Rule: rule, From: c.out.From, To: c.out.To, Fired: c.out.Fired, Caught: c.out.Caught,
+				Results: results}, rules.Diff(rule, []byte(ruleText(r)), []byte(ruleText(came[0]))))
+		}
+	}
+	switch {
+	case c.out.Unfinished:
+	case len(results) == 0:
+	case len(gone) > 0 && !c.out.Meets:
+		c.out.Note = "The rewrite doesn't meet each expectation, or loses a catch: there is nothing to post."
+	}
+	return c, nil
+}
+
+// replayHeld replays the rules came (beside gone, the rule as it is, of a
+// rewrite; nothing, of a rule added) over the twelve weeks to now, or since
+// the runs began, its firings kept, and holds them to held with
+// CheckExpectationsBy, each scenario run by the runner made for the
+// replay: what test_expectation, propose_expectation and a proposal adding
+// a rule are each checked by. It fills c's period, weeks, items, firings
+// and catches (of gone and came), the incidents lost, and its note when
+// the replay didn't finish or nothing holds the rule. One comparison runs
+// at a time, as compare's: it replays history with Lapilli's access, the
+// whole check within the time a comparison has.
+func (s *Server) replayHeld(ctx context.Context, c *checked, held *verdict.Expectations, gone, came []rules.Rule, same int,
+	runner func(context.Context) (verdict.ScenarioRunner, error)) ([]verdict.ExpectResult, error) {
+	rule := c.out.Rule
 	if !s.comparing.TryLock() {
 		return nil, errors.New(comparingBusy)
 	}
@@ -475,7 +511,7 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 	}
 	// Its firings kept, as the backtest port's are: a budget counts them
 	// by week.
-	cmp, err := s.replayCompared(ctx, s.h, s.cfg.Parallel, gone, came, len(current)-1, c.out.From, c.out.To, within, o)
+	cmp, err := s.replayCompared(ctx, s.h, s.cfg.Parallel, gone, came, same, c.out.From, c.out.To, within, o)
 	if err != nil {
 		return nil, err
 	}
@@ -483,11 +519,11 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 	if own, err := s.owners(ctx); err == nil {
 		hours = own.schedules(o.Hours).of
 	}
-	runner, err := s.draftRunner(ctx, r, came[0], given, len(gone) > 0, c.out.HeldBy == "given")
+	run, err := runner(ctx)
 	if err != nil {
 		return nil, err
 	}
-	cmp.Scenarios = runner
+	cmp.Scenarios = run
 	k, err := verdict.CheckExpectationsBy(cmp, held, nil, hours)
 	if err != nil {
 		return nil, err
@@ -568,21 +604,14 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 				c.out.Lost = append(c.out.Lost, ic.ID)
 			}
 		}
-		c.out.Meets = verdict.RewriteMeets(results, c.out.Lost)
-		if c.out.Meets {
-			c.out.Post = verdict.RewriteMarkdown(verdict.Rewritten{Rule: rule, From: c.out.From, To: c.out.To, Fired: c.out.Fired, Caught: c.out.Caught,
-				Results: results}, rules.Diff(rule, []byte(ruleText(r)), []byte(ruleText(came[0]))))
-		}
 	}
 	switch {
 	case c.out.Unfinished:
 		c.out.Note = fmt.Sprintf("The replay didn't finish within %s: what it decides is not known.", within)
 	case len(results) == 0:
 		c.out.Note = "Nothing holds the rule: there is nothing to check."
-	case len(gone) > 0 && !c.out.Meets:
-		c.out.Note = "The rewrite doesn't meet each expectation, or loses a catch: there is nothing to post."
 	}
-	return c, nil
+	return results, nil
 }
 
 // rewritten is an agent's rewrite of a rule, as a Prometheus rule file

@@ -170,6 +170,9 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 	if !grafanaUID.MatchString(uid) {
 		return refusal{"the proposal names no Grafana rule"}
 	}
+	if p.Kind == ledger.KindAdd {
+		return s.grafanaAdd(ctx, p, ev, step)
+	}
 	path := "/api/v1/provisioning/alert-rules/" + url.PathEscape(uid)
 	raw, rule, gone, err := s.grafanaRule(ctx, uid)
 	if err != nil {
@@ -239,6 +242,19 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 // kept: made again, when it was deleted. The rule must be as the change
 // left it.
 func (s *Server) grafanaUndo(ctx context.Context, p ledger.Proposal, step ledger.Step, uid string, raw map[string]any, hash string, gone bool) error {
+	if undoesAdd(ctx, s, p) {
+		// A rule added, taken out: as the add left it, kept by no tool.
+		switch {
+		case gone:
+			return refusal{"the rule is gone from Grafana"}
+		case hash != p.BeforeHash:
+			return refusal{"the rule changed in Grafana since the change: undo it in Grafana"}
+		}
+		if err := provenanceRefusal(raw); err != nil {
+			return err
+		}
+		return s.grafanaWrite(ctx, p, step, uid, http.MethodDelete, "/api/v1/provisioning/alert-rules/"+url.PathEscape(uid), nil)
+	}
 	var was map[string]any
 	if err := json.Unmarshal([]byte(p.Backup), &was); err != nil || was == nil {
 		return refusal{"the rule as it was isn't kept, so it can't be written back"}
@@ -353,10 +369,10 @@ func (s *Server) grafanaSettle(ctx context.Context, p ledger.Proposal, uid strin
 		}
 		return nil
 	}
-	deleting := p.Kind == ledger.KindDelete
+	deleting := p.Kind == ledger.KindDelete || (p.Kind == ledger.KindUndo && p.AfterHash == "" && p.BeforeHash != "")
 	var changed bool
 	switch {
-	case p.BeforeHash == "": // an undo of a deletion: made again
+	case p.BeforeHash == "": // an undo of a deletion, or a rule added: made
 		changed = !gone
 	case deleting:
 		changed = gone

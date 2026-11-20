@@ -219,6 +219,9 @@ func (s *Server) apiApply(ctx context.Context, tg target, p ledger.Proposal, ste
 		return refusal{"the proposal names no rule read through an API Lapilli still reads"}
 	}
 	e := *ev.Edit
+	if p.Kind == ledger.KindAdd {
+		return s.apiAdd(ctx, tg, p, step)
+	}
 	// Written where it was read, and nowhere else.
 	if err := tg.owns(p.Source, e); err != nil {
 		return refusal{err.Error()}
@@ -329,6 +332,9 @@ func (s *Server) unitBusy(ctx context.Context, tg target, p ledger.Proposal, e r
 // key of it, not only those its hash covers; a deleted one, not there
 // again.
 func (s *Server) apiUndo(ctx context.Context, tg target, p ledger.Proposal, step ledger.Step, u apiUnit, e rules.Edit) error {
+	if undoesAdd(ctx, s, p) {
+		return s.apiUndoAdd(ctx, tg, p, step, u, e)
+	}
 	if p.Backup == "" {
 		return refusal{"what the change replaced isn't kept, so it can't be put back"}
 	}
@@ -387,6 +393,49 @@ func (s *Server) apiUndo(ctx context.Context, tg target, p ledger.Proposal, step
 	if err != nil || !slices.ContainsFunc(back, func(x rules.Rule) bool { return x.Name == e.Name && hashOf(p, x) == p.AfterHash }) ||
 		!tg.onlyRule(u, out, p, e) {
 		return refusal{fmt.Sprintf("the rule as it was can't be put back in %s as it is now: undo it there", tg.where())}
+	}
+	step.Document, step.DocHash, step.Diff = string(out), u.Hash, rules.Diff(tg.unitName(p.Source, e), u.Raw, out)
+	step.Backup = string(tg.backup(u))
+	return s.apiWrite(ctx, tg, p, step, u, out)
+}
+
+// apiUndoAdd takes out the rule an applied proposal added: only while it
+// is as the add left it (its hash; a ruler's, every key of it), and only
+// it, as a deletion is written there; an Amazon namespace's last rule, as
+// a deletion's, is for a person.
+func (s *Server) apiUndoAdd(ctx context.Context, tg target, p ledger.Proposal, step ledger.Step, u apiUnit, e rules.Edit) error {
+	if u.Gone {
+		return refusal{tg.goneUndo()}
+	}
+	orig, err := s.l.ProposalByID(ctx, p.Follows)
+	if err != nil {
+		return err
+	}
+	rs, err := tg.rules(u)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(rs, func(x rules.Rule) bool { return x.Name == e.Name && hashOf(p, x) == p.BeforeHash })
+	changed := refusal{fmt.Sprintf("the rule changed in %s since it was added: undo it in %s", tg.where(), tg.where())}
+	if i < 0 || (tg.path() == ledger.PathRuler && !tg.leftAsChanged(orig, u, p, e)) {
+		return changed
+	}
+	if why := tg.managed(u); why != "" {
+		return refusal{why}
+	}
+	if why, err := tg.offered(ctx, u, rs[i], ledger.KindDelete); err != nil {
+		return err
+	} else if why != "" {
+		return refusal{why}
+	}
+	del := e
+	del.Delete = true
+	out, why := tg.edit(u, rs[i], del, ledger.KindDelete, rules.Bound{}, 0)
+	if why != "" {
+		return refusal{why}
+	}
+	if _, ok := tg.reads(u.Raw, out, rs[i], rs[i], ledger.KindDelete); !ok {
+		return changed
 	}
 	step.Document, step.DocHash, step.Diff = string(out), u.Hash, rules.Diff(tg.unitName(p.Source, e), u.Raw, out)
 	step.Backup = string(tg.backup(u))
@@ -475,10 +524,18 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 		return fail(failed)
 	}
 	// As it was: the unit as kept before it was sent; for a deletion
-	// undone, gone still.
+	// undone, or a rule added where there was none, gone still.
 	asWas := tg.same(u, []byte(p.Backup)) || (p.Kind == ledger.KindUndo && p.BeforeHash == "" && u.Gone)
+	written := tg.same(u, []byte(p.Document))
+	var made rules.Rule
+	if p.Kind == ledger.KindAdd {
+		// A rule added is read back by what it is, however the API writes
+		// the rest out; gone, it wasn't made.
+		made, written = addReadBack(tg, u, p)
+		asWas = asWas || u.Gone
+	}
 	switch {
-	case tg.same(u, []byte(p.Document)):
+	case written:
 	case asWas && sent == nil && within(s.now(), p.Applied, tg):
 		// What may give the unit as it was for a while after it took the
 		// change is read again, each round, until its lag is up. A round
@@ -506,6 +563,9 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 				step.AfterHash = hashOf(p, x)
 			}
 		}
+	}
+	if p.Kind == ledger.KindAdd {
+		step.AfterHash = hashOf(p, made)
 	}
 	switch {
 	case sent != nil:
