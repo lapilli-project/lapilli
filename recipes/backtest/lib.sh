@@ -995,9 +995,11 @@ files() {
   if [ -z "${RENDER:-}" ]; then
     # And whatever else this file system takes as one name (a letter
     # past ASCII in another case, or written in other code points):
-    # fewer files written than the commit holds.
+    # fewer files written than the commit holds. Counted without reading
+    # a name, a line each, as a name may hold a line's end: find prints a
+    # dot a file; ls-tree quotes a name with one, on a line of its own.
     listed=$(git -C "$repo" ls-tree -r "$c" -- "$@" | awk '$2 == "blob" { n++ } END { print n + 0 }')
-    written=$(find "$d" \( -type f -o -type l \) | awk 'END { print NR }')
+    written=$(find "$d" \( -type f -o -type l \) -exec sh -c 'for f do echo .; done' sh {} + | awk 'END { print NR }')
     if [ "$written" -lt "$listed" ]; then
       say "$what: $listed files, $written of them once written here"
       trouble "$what holds files whose names this machine's file system takes as one, as one that folds case does (macOS's, Windows'): not read (the job's log says how many)"

@@ -1400,6 +1400,42 @@ func TestBacktestRecipeCaseFolded(t *testing.T) {
 	}
 }
 
+// The files written are counted without reading their names: a decoy
+// whose name holds a line's end, two lines to find, makes up for no file
+// lost to a pair the check by case can't see (\u00c9.yaml over
+// \u00e9.yaml, quoted by ls-tree), where the file system folds case. Alone,
+// on any file system, such a file is read.
+func TestBacktestRecipeCaseFoldNewline(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequestTree(map[string]string{"alerts/shop.yaml": shopRules("2h"), "alerts/x\ny.yaml": "groups: []\n"})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	if out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		strings.Contains(rr.body(), "takes as one") || strings.Contains(rr.body(), "### Lapilli backtest failed") {
+		t.Errorf("a name with a line's end, alone: %v\n%s\n%s", err, rr.body(), out)
+	}
+	probe := t.TempDir()
+	os.WriteFile(filepath.Join(probe, "\u00e9"), nil, 0o600)
+	if _, err := os.Stat(filepath.Join(probe, "\u00c9")); err != nil {
+		return // a file system that doesn't fold case writes both
+	}
+	page := "groups:\n  - name: sneaky\n    rules:\n      - alert: PageEveryone\n        expr: vector(1)\n        labels: {severity: page}\n"
+	for name, decoy := range map[string]bool{"no decoy": false, "a decoy": true} {
+		repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "alerts/\u00e9.yaml": shopRules("10m")})
+		files := map[string]string{"alerts/\u00c9.yaml": page}
+		if decoy {
+			files["alerts/x\ny.yaml"] = "groups: []\n"
+		}
+		repo.pullRequestTree(files)
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+		if err == nil || !strings.Contains(rr.body(), "takes as one") {
+			t.Errorf("%s: read (%v), \u00c9.yaml's PageEveryone never backtested\n%s\n%s", name, err, rr.body(), out)
+		}
+	}
+}
+
 // RENDER runs in each commit's files, the base's first, each with a HOME
 // of its own, and without the variables CIs keep tokens in.
 func TestBacktestRecipeRenderAlone(t *testing.T) {
