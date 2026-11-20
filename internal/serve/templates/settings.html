@@ -34,7 +34,7 @@
 <h2>{{t "Changes to the rules"}}</h2>
 <p>{{if not $.Status.ChangesOn}}{{tbdi "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
 {{if .BoundsUnread}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can."}}</p>{{end}}
-{{with .BoundsNoTeam}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:"}} {{range $i, $n := .}}{{if $i}}, {{end}}<code><bdi>{{$n}}</bdi></code>{{end}}. {{t "Why each wasn't kept is said with the file's problems."}}</p>{{end}}
+{{with .BoundsNoTeam}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{tbdi "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:"}} {{range $i, $n := .}}{{if $i}}, {{end}}<code><bdi>{{$n}}</bdi></code>{{end}}. {{t "Why each wasn't kept is said with the file's problems."}}</p>{{end}}
 {{with .Freezes}}<h3 id="freezes">{{t "Change freezes"}}</h3>
 <p class="quiet">{{tbdi "Declared in --config: while one holds, no change to the rules it covers is approved, undone or applied; those approved before wait until it ends. Proposing and backtesting go on."}}</p>
 <ul class="plain">{{range .}}<li><strong><bdi>{{.Title}}</bdi></strong>{{if .Team}} ({{tbdi "team %s" .Team}}){{else}} ({{t "everyone's"}}){{end}}: {{at $loc .W.Start}} → {{at $loc .W.End}}, {{template "repeats" (repeats .W $loc)}}
@@ -68,7 +68,7 @@
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
 <tbody>{{range .Runs}}
 <tr><td>{{t .Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
-<td>{{with .Failed}}<span class="status-warn">{{range $rule, $why := .}}{{$rule}}: {{$why}}<br>{{end}}</span>{{end}}</td><td>{{if eq .Kind "held"}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{.Error}}</span>{{else}}{{with .Error}}<span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
+<td>{{with .Failed}}<span class="status-warn">{{range $rule, $why := .}}{{$rule}}: {{$why}}<br>{{end}}</span>{{end}}</td><td>{{if eq .Kind "held"}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{.Error}}</span>{{else}}{{with .Error}}<span class="status-bad"><span aria-hidden="true">✕</span> {{flagsAsCode .}}</span>{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if or .Sources .Copying}}<h2>{{t "Firings copied in"}}</h2>
 <div class="scroll"><table>
@@ -223,7 +223,7 @@ the first makes it a named one. */}}
 effect and with it, and the verdict in effect and with all of them. */}}
 {{define "signalstried"}}{{$loc := .P.Loc}}{{with .V}}<section class="card wide" id="signals-tried" aria-labelledby="signals-tried-h">
 <h3 id="signals-tried-h">{{if .From.IsZero}}{{t "Tried"}}{{else}}{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}{{end}}</h3>
-{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.}}</p>{{else}}
+{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{flagsAsCode .}}</p>{{else}}
 {{if .Same}}<p>{{t "It is what is in effect: nothing would change."}}</p>{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals, in effect and with it"}}"><table>
 <caption>{{t "Impact signals, in effect and with it"}}</caption>
@@ -255,7 +255,7 @@ effect and with it, and the verdict in effect and with all of them. */}}
 over the last four weeks, and what that would do to the verdict. */}}
 {{define "impacttried"}}{{$loc := .P.Loc}}{{with .V}}<section class="card wide" id="impact-tried" aria-labelledby="impact-tried-h">
 <h3 id="impact-tried-h">{{if .From.IsZero}}{{t "Tried"}}{{else}}{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}{{end}}</h3>
-{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.}}</p>{{else}}
+{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{flagsAsCode .}}</p>{{else}}
 <p>{{if .Off}}{{t "Turned off, the impact signal finds no window and keeps the record of no week; the windows found before stay, as incidents."}}{{else}}{{t "%d windows found; %d of them would count, the rest covered by an incident written down or decided before." .Found .Counted}}{{end}}{{if .Same}} {{t "It is the criterion in effect, read already: nothing would change."}}{{end}}</p>
 {{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "A selector it reads had no data over the four weeks: it would keep the record of no week."}}</p>{{else if not .Floor.IsZero}}<p>{{t "The impact signal has data from %s: the weeks before it keep no record by it." (at $.P.Loc .Floor)}}</p>{{end}}{{template "impactdata" (on $.P .)}}{{end}}
 {{if .Windows}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Windows found"}}"><table>
@@ -285,7 +285,7 @@ over the last four weeks, and what that would do to the verdict. */}}
 <td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "nodata"}}⚠&#xFE0E; {{t "no data"}}{{else if eq .State "unread"}}⚠&#xFE0E; {{t "no record"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
 <td class="t">{{if .Last.IsZero}}–{{else}}{{t .LastWhat}} {{at $loc .Last}}{{with .LastID}} (<bdi>{{.}}</bdi>){{end}}{{end}}</td>
 <td class="n">{{if .Counts}}{{.N}}{{else}}–{{end}}</td>
-<td>{{tbdi .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{if .Signal}}<br>{{if .NoRecord}}{{t "It keeps no record: record is no."}}{{else if .Since.IsZero}}{{t "It keeps no record yet."}}{{else}}{{t "It keeps the record from %s." (at $loc .Since)}}{{end}}{{end}}{{with .Gone}}<br>{{t "Signals"}}: {{range $i, $g := .}}{{if $i}}, {{end}}<code><bdi>{{$g}}</bdi></code>{{end}}{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
+<td>{{tbdi .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{flagsAsCode .}}</span>{{end}}{{if .Signal}}<br>{{if .NoRecord}}{{t "It keeps no record: record is no."}}{{else if .Since.IsZero}}{{t "It keeps no record yet."}}{{else}}{{t "It keeps the record from %s." (at $loc .Since)}}{{end}}{{end}}{{with .Gone}}<br>{{t "Signals"}}: {{range $i, $g := .}}{{if $i}}, {{end}}<code><bdi>{{$g}}</bdi></code>{{end}}{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}
 <p class="quiet">{{t "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira."}} <a href="{{.Recipes}}">{{t "Copying incidents in from Jira, PagerDuty, incident.io and others"}}</a></p>

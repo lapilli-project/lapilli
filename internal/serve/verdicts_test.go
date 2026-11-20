@@ -739,6 +739,10 @@ func TestNotJudgedServe(t *testing.T) {
 	if strings.Contains(page, "not judged: no record") || !strings.Contains(page, `height="11"/></svg>judged by nothing</li>`) {
 		t.Error("the rule's strip's legend says no record")
 	}
+	// Its panel and its strip's days count them so too (bundle 67).
+	if regexp.MustCompile(`\d+ not judged`).MatchString(page) || !regexp.MustCompile(`caught nothing, \d+ judged by nothing, \d+ excused`).MatchString(page) {
+		t.Error("the rule's panel or strip counts its firings not judged, not judged by nothing")
+	}
 	_, page = getAs(t, h, "/firings?day="+f.Start.In(s.cfg.Loc).Format("2006-01-02"), vViewer)
 	if !strings.Contains(page, "not judged: no record, or judged by nothing") {
 		t.Error("the day's legend doesn't say judged by nothing")

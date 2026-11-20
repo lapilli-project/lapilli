@@ -195,7 +195,12 @@ func TestSourcesRedacted(t *testing.T) {
 			if has := strings.Contains(body, s.cfg.RulesPath); has != c.admin {
 				t.Errorf("%s as %s: the rules' path shown %v", p, c.who, has)
 			}
-			if !c.admin && !strings.Contains(body, "the path given to --rules") {
+			// The page sets the flag as code (flagsAsCode); the API says it as it is.
+			want := "the path given to --rules"
+			if p == "/sources" {
+				want = "the path given to <code>--rules</code>"
+			}
+			if !c.admin && !strings.Contains(body, want) {
 				t.Errorf("%s as %s doesn't say which path: %.500s", p, c.who, body)
 			}
 		}

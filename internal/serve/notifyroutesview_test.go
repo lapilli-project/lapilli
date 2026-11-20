@@ -91,7 +91,7 @@ func TestRoutesBrokenShown(t *testing.T) {
 	_, admin := getAs(t, h, "/settings", ana)
 	_, editor := getAs(t, h, "/settings", cy)
 	said := `unknown kind &#34;task.nope&#34;`
-	if !strings.Contains(admin, "line 3: "+said) || strings.Contains(editor, said) || !strings.Contains(editor, "Line 3 of --config&#39;s notify: can&#39;t be used: an admin sees why.") {
+	if !strings.Contains(admin, "line 3: "+said) || strings.Contains(editor, said) || !strings.Contains(editor, "Line 3 of <code>--config</code>&#39;s notify: can&#39;t be used: an admin sees why.") {
 		t.Errorf("why: admin %v, editor %v", strings.Contains(admin, said), strings.Contains(editor, said))
 	}
 	for _, want := range []string{"No routes have been read since lapilli serve started: what happens is told as without them.",
@@ -101,7 +101,7 @@ func TestRoutesBrokenShown(t *testing.T) {
 		}
 	}
 	_, card, _ := get(t, h, "/manage")
-	if !strings.Contains(card, "--config&#39;s notify: can&#39;t be used.") || !strings.Contains(card, "1 event went where no route sent it.") {
+	if !strings.Contains(card, "<code>--config</code>&#39;s notify: can&#39;t be used.") || !strings.Contains(card, "1 event went where no route sent it.") {
 		t.Error("/manage doesn't say the routes can't be used")
 	}
 	_, metrics, _ := get(t, s.MetricsHandler(), "/metrics")
@@ -132,7 +132,7 @@ func TestRoutesUnknownShown(t *testing.T) {
 		t.Errorf("told to %v, want the default's", got)
 	}
 	h := s.Handler()
-	said := "--config&#39;s notify: names a destination this replica&#39;s flags don&#39;t give, left out of the routes here: line 3: there is no destination called &#34;nowhere&#34;"
+	said := "<code>--config</code>&#39;s notify: names a destination this replica&#39;s flags don&#39;t give, left out of the routes here: <bdi>line 3: there is no destination called &#34;nowhere&#34;: <code>--notify-webhook-file</code> names webhook"
 	for _, who := range []string{ana, cy} {
 		_, page := getAs(t, h, "/settings", who)
 		for _, want := range []string{said, "What happens is told where the routes below send it.", "1 event since lapilli serve started went where no route sent it"} {
@@ -145,7 +145,7 @@ func TestRoutesUnknownShown(t *testing.T) {
 		}
 	}
 	_, card, _ := get(t, h, "/manage")
-	if !strings.Contains(card, "--config&#39;s notify: names destinations this replica&#39;s flags don&#39;t give.") || strings.Contains(card, "can&#39;t be used") {
+	if !strings.Contains(card, "<code>--config</code>&#39;s notify: names destinations this replica&#39;s flags don&#39;t give.") || strings.Contains(card, "can&#39;t be used") {
 		t.Error("/manage doesn't say the routes name a destination not given")
 	}
 	missing.Lock()

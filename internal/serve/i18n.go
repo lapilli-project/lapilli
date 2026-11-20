@@ -140,7 +140,8 @@ func movedText(lang, moved string) template.HTML {
 // sentence is: one written right to left, or holding what turns text
 // around, doesn't turn the sentence around it. The text is escaped, the
 // translation's and each argument's. A number is as its verb (%d) has it:
-// digits, nothing to set apart. One given as asCode is set in <code> too.
+// digits, nothing to set apart. One given as asCode is set in <code> too;
+// one given as template.HTML (flagsAsCode's) is kept as it is, in a <bdi>.
 func trBDI(lang, msg string, args ...any) template.HTML {
 	// Without arguments, the translation as it is, its verbs too, as tr
 	// gives it: a why of a team not found ("Only %s's editors") is said as
@@ -155,6 +156,10 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 			set[i] = a
 		case asCode:
 			set[i] = template.HTML("<code><bdi>" + template.HTMLEscapeString(string(a)) + "</bdi></code>")
+		case template.HTML:
+			// Already escaped, as flagsAsCode gives a text said: its own
+			// direction still set apart.
+			set[i] = template.HTML("<bdi>" + string(a) + "</bdi>")
 		default:
 			set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
 		}
@@ -163,13 +168,20 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 }
 
 // flagName is a flag's name in a sentence: --impact, --changes-in.
-var flagName = regexp.MustCompile(`(^|[^\w-])(--[a-z][a-z0-9-]*)`)
+var flagName = regexp.MustCompile(`(^|[^\w/=-])(--[a-z][a-z0-9-]*)`)
 
 // codeFlags sets each flag's name in an escaped text as code: in the
 // pages' font two hyphens read as one dash, and a flag is typed as it is
 // (docs/design/ui.md).
 func codeFlags(escaped string) string {
 	return flagName.ReplaceAllString(escaped, "$1<code>$2</code>")
+}
+
+// flagsAsCode is a text already said, a refusal or a failure, escaped,
+// with each flag's name in it as code, as codeFlags sets them in a
+// translation (bundle 67): "a flag in a URL's path or query" stays text.
+func flagsAsCode(text string) template.HTML {
+	return template.HTML(codeFlags(template.HTMLEscapeString(text)))
 }
 
 // asCode is an argument trBDI sets in <code>: a selector or an expression

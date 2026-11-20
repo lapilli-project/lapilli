@@ -6,6 +6,7 @@ package serve
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -536,5 +537,56 @@ func TestTbdiWithoutArguments(t *testing.T) {
 	}
 	if got := string(trBDI("en", "Those --approvers names: %s.", "a@example.com")); got != "Those <code>--approvers</code> names: <bdi>a@example.com</bdi>." {
 		t.Errorf("a flag and an argument: %q", got)
+	}
+}
+
+// TestRefusalFlagsAsCode: a refusal or a failure said on a page, already
+// translated, sets each flag's name in it as code, as a translation's
+// are (bundle 67); and a flag's name in a URL's path or query stays text.
+func TestRefusalFlagsAsCode(t *testing.T) {
+	s, _ := changesServer(t, func(c *Config) { c.Changes = false })
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/approve", ana, "same-origin", url.Values{})
+	if code != http.StatusBadRequest || !strings.Contains(body, "<p>changes are off: lapilli serve was started without <code>--changes</code></p>") {
+		t.Errorf("the refusal: %d %.300s", code, body[max(0, strings.Index(body, "<h1>")):])
+	}
+	for in, want := range map[string]string{
+		"read within --timeout and --max-samples": "read within <code>--timeout</code> and <code>--max-samples</code>",
+		"<b>--keep</b>":                         "&lt;b&gt;<code>--keep</code>&lt;/b&gt;",
+		"at https://x.example/a/--b?c=--d, --e": "at https://x.example/a/--b?c=--d, <code>--e</code>",
+	} {
+		if got := string(flagsAsCode(in)); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSentencesSetFlagsAsCode: a page's sentence naming a flag is said
+// with tbdi, which sets the flag as code, not with t, whose text the
+// template escapes as it is: --config read as "–config" in the pages'
+// font in eight sentences of 0.64's routes, boundaries and activity log
+// (bundle 67).
+func TestSentencesSetFlagsAsCode(t *testing.T) {
+	said := regexp.MustCompile(`\{\{-?\s*t "((?:[^"\\]|\\.)*)"`)
+	pages, err := fs.Glob(files, "templates/*.html")
+	if err != nil || len(pages) == 0 {
+		t.Fatalf("templates: %v %v", pages, err)
+	}
+	checked := 0
+	for _, f := range pages {
+		b, err := fs.ReadFile(files, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range said.FindAllStringSubmatch(string(b), -1) {
+			checked++
+			if flagName.MatchString(m[1]) {
+				t.Errorf("%s: %q names a flag: say it with tbdi", f, m[1])
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("read only %d sentences said with t", checked)
 	}
 }

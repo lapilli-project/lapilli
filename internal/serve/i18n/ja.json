@@ -2565,5 +2565,10 @@
  "Held while the change boundaries can't be read": "変更の境界を読めない間は保留",
  "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can.": "台帳にある変更の境界を読めません。読めるようになるまで、その境界にかかる変更は承認も、元に戻すことも、適用も、レシピへの引き渡しもしません。",
  "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:": "--config が approvers、changes_in、変更凍結を指定したチームのうち反映されなかったチームがあり、その境界は何にもかかりません:",
- "Why each wasn't kept is said with the file's problems.": "それぞれが反映されなかった理由は、ファイルの問題の一覧にあります。"
+ "Why each wasn't kept is said with the file's problems.": "それぞれが反映されなかった理由は、ファイルの問題の一覧にあります。",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings with no incident written down to judge them by, or judged by nothing.": "アラートマネージャーが実際に送った通知: ルール %[2]d 件で %[1]d 件。繰り返し %[3]d 件、睡眠時間中 %[4]d 件、判定するための記録済みインシデントがないか判定対象外の発火への通知 %[5]d 件。",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, had no incident written down to judge them by, or were judged by nothing.": "アラートマネージャーが実際に送った通知: ルール %[2]d 件で %[1]d 件。繰り返し %[3]d 件、睡眠時間中 %[4]d 件、何も検知しなかったか、判定するための記録済みインシデントがないか、判定対象外の発火への通知 %[5]d 件。",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "アラートマネージャーが実際に送った通知: ルール %[2]d 件で %[1]d 件。繰り返し %[3]d 件、睡眠時間中 %[4]d 件、何も検知しなかったか判定対象外の発火への通知 %[5]d 件。",
+ "%d caught nothing, %d judged by nothing, %d excused": "検知なし %d 件、判定対象外 %d 件、免除 %d 件",
+ "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "発火 %d 件、検知 %d 件、検知なし %d 件、判定対象外 %d 件、免除 %d 件"
 }

@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+## [0.64.1] - 2026-11-20
+
+The Sources page on a laptop's screen, 0.64's sentences setting their
+flags as code as the others do, and a rule judged by nothing said so on
+its page and in the digest. No schema change: the ledger stays at 026.
+
+### Changed
+
+- **The Sources page fits a laptop's 1,280 px** in each language: a
+  source's path or URL wraps in its row header, where it pushed the kinds
+  into a letter a line in Korean and the table past the screen; its kind
+  keeps its words and its last error breaks anywhere. Under 1,280 px it
+  scrolls in its box, as the rules list does.
+- A rule judged by nothing (`judged: false`) says so on its page's panel
+  and its strip's days too, "N judged by nothing", as its firings and the
+  rules list do (0.63.2).
+- A refusal or a failure said on a page (a form refused, serve's status,
+  a source's last read, a route's last error) sets a flag's name in it as
+  code, as the pages' own sentences do; a flag's name in a URL's path or
+  query stays text.
+- A table's caption reads from the start, as the heading of what is under
+  it, a little apart from the table before it (the routes' two tables, the
+  Settings page's impact signals), and a row's own header is lined as its
+  row, not as the columns' headers.
+- Korean: the activity log's dates are a start and an end date, and a
+  team's or an entry's name takes its particle as the other sentences'
+  names do.
+
+### Fixed
+
+- **Eight sentences of the routes, the boundaries of change and the
+  activity log said `--config` and `--keep-activity` as text** (0.64.0),
+  read as a dash in the pages' font, where every other sentence sets a
+  flag as code: they do too, and so do why the routes can't be used and a
+  destination they name that no flag gives. A test fails on a sentence
+  naming a flag said the other way.
+- **The digest said a judged-by-nothing rule's notifications were for
+  firings with no incident to judge them by**: its line of notifications
+  sent says "or were judged by nothing" where an entry says
+  `judged: false`, and nothing of incidents where only that kept them
+  from being judged. The report's numbers keep `unjudged` as they were,
+  with `by_nothing` beside it.
+
 ## [0.64.0] - 2026-11-20
 
 Who is told what, by routes in `--config`; a team as the boundary of
