@@ -602,7 +602,12 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 				if a != nil {
 					sa = run.RunScenario("after", it.fromBefore, rc.Rule, it.scenario)
 					r.After, r.AfterState, r.AfterWhy = scenarioShown(sa)
-					r.Said, r.Unrun = sa.Said, sa.Unrun && !r.Removed
+					// Run before the change and not known after it (the change
+					// moved the rule out of Prometheus's format, or its
+					// definition out of reach) can't be judged either: the
+					// gate fails closed, as on a run that failed.
+					ranBefore := sb.State == ExpectMet || sb.State == ExpectBroken
+					r.Said, r.Unrun = sa.Said, (sa.Unrun || ranBefore && sa.State == ExpectUnknown) && !r.Removed
 				}
 				r.Edited = sb.Test != "" && sa.Test != "" && sb.Test != sa.Test
 				return r

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/scenario"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
@@ -318,8 +320,11 @@ type Config struct {
 	// Promtool is promtool's path (--promtool), resolved, which runs the
 	// scenarios the expectations hold rules to (docs/design/expectations.md,
 	// step 4), each again when the rule's group or its test file changes;
-	// "" for none, each scenario not known.
-	Promtool string
+	// "" for none, each scenario not known. PromtoolMemory is how much
+	// memory one run may take, in bytes (--promtool-memory): promtool's
+	// RLIMIT_DATA on Linux (scenario.CanCap), none elsewhere; 0 for no cap.
+	Promtool       string
+	PromtoolMemory uint64
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -629,6 +634,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s.open.Store(cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen))
+	if cfg.Promtool != "" && cfg.PromtoolMemory > 0 && !scenario.CanCap {
+		log.Warn("promtool runs without a memory cap: --promtool-memory is set through RLIMIT_DATA, on Linux alone", "os", runtime.GOOS)
+	}
 	if cfg.OIDC != nil || cfg.Proxy != nil {
 		if err := s.newSignIn(ctx); err != nil {
 			l.Close()

@@ -750,6 +750,13 @@ The web UI and API:
                       Prometheus's format. Without it, each scenario is not
                       known. Scenarios a pull request's backtest sends
                       (--backtest-listen) are never run
+  --promtool-memory SIZE
+                      the memory one run of --promtool may take, as 256Mi
+                      or 1Gi, 64Mi at least (default 256Mi): on Linux,
+                      promtool's RLIMIT_DATA, past which the run stops and
+                      the scenario is not known; promtool runs in serve's
+                      container, so leave room for it under its memory
+                      limit. Not set on macOS, where promtool runs without
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)

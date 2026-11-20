@@ -17,8 +17,12 @@
 //	garbage         says what promtool doesn't, exit 0
 //	exit2           exits 2, saying nothing promtool says of a test
 //	flood           8 MiB of nothing, then SUCCESS, exit 0
+//	hog             takes 1 GiB of memory, a page at a time, then SUCCESS
+//	wait            waits for a file named release beside the link Install
+//	                made, then SUCCESS; WRONG after a minute without it
 //	see             FAILED:, then what it was given: its arguments, its
-//	                environment, and rules.yaml as it read it
+//	                environment, its RLIMIT_DATA, and rules.yaml as it
+//	                read it
 //
 // Each run is also written down, a line a run, in the file named by
 // count.txt beside the link Install made, when there is one: how many
@@ -28,6 +32,7 @@ package scenariotest
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -140,8 +145,30 @@ func fake() int {
 			os.Stdout.WriteString(line)
 		}
 		return pass()
+	case mode == "hog":
+		var kept [][]byte
+		for range 64 {
+			b := make([]byte, 16<<20)
+			for i := 0; i < len(b); i += 4096 {
+				b[i] = 1
+			}
+			kept = append(kept, b)
+		}
+		fmt.Fprintln(io.Discard, len(kept))
+		return pass()
+	case mode == "wait":
+		release := filepath.Join(filepath.Dir(os.Args[0]), "release")
+		for range 6000 {
+			if fileExists(release) {
+				return pass()
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return wrong("not released")
 	case mode == "see":
-		return failed(fmt.Sprintf("args %q", os.Args[1:]), fmt.Sprintf("env %q", env), "rules.yaml:", string(group))
+		var lim syscall.Rlimit
+		syscall.Getrlimit(syscall.RLIMIT_DATA, &lim)
+		return failed(fmt.Sprintf("args %q", os.Args[1:]), fmt.Sprintf("env %q", env), fmt.Sprintf("rlimit_data %d", lim.Cur), "rules.yaml:", string(group))
 	}
 	return wrong("no such mode %q", mode)
 }

@@ -2560,5 +2560,7 @@
  "%d firings answered": "답한 발화 %d건",
  "every rule in its group names its contact point: name one of theirs, so that it tells only whom they tell": "그 그룹의 규칙은 모두 연락 지점을 지정하고 있어요. 그 규칙들이 알리는 대상에게만 알리도록 그중 하나를 지정하세요",
  "It names no contact point, as rules of its group don't: Grafana's notification policies route it by its labels, to whichever contact point they match.": "그룹 안에서 연락 지점을 지정하지 않은 규칙들처럼 이 규칙도 연락 지점을 지정하지 않아요. Grafana 알림 정책이 레이블로 라우팅해서, 정책에 맞는 연락 지점으로 보내요.",
- "It names no one: its labels route it through Alertmanager, as every rule there is routed.": "알릴 대상을 직접 지정하지 않아요. 그곳의 다른 규칙들처럼 레이블에 따라 Alertmanager가 라우팅해요."
+ "It names no one: its labels route it through Alertmanager, as every rule there is routed.": "알릴 대상을 직접 지정하지 않아요. 그곳의 다른 규칙들처럼 레이블에 따라 Alertmanager가 라우팅해요.",
+ "passed over: a check holds so many expectations at most, the expectations file's and serve's configuration's first": "건너뛰었어요. 한 번의 확인이 담는 기대치에는 한도가 있고, 기대치 파일과 serve 설정의 것을 먼저 담아요",
+ "a week its firings' copies don't reach": "가져온 알림 기록이 닿지 않는 주예요"
 }

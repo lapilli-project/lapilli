@@ -228,3 +228,32 @@ func TestCheckExpectationsScenariosBefore(t *testing.T) {
 		}
 	}
 }
+
+// A scenario run before the change and not known after it, the change
+// having moved its rule out of what promtool runs (out of Prometheus's
+// format, or its definition out of reach), can't be judged: counted as
+// unrun, so that FAIL_ON_EXPECTATIONS fails closed. Not known on both
+// sides (no --promtool, through serve) counts nothing, as before.
+func TestCheckExpectationsScenariosMovedOut(t *testing.T) {
+	to := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	before, after := &Report{Rules: []RuleResult{{Rule: "A"}, {Rule: "B"}}}, &Report{Rules: []RuleResult{{Rule: "A"}, {Rule: "B"}}}
+	c := &Comparison{From: to.Add(-7 * 24 * time.Hour), To: to, Before: before, After: after,
+		Rules: []RuleChange{{Rule: "A", Before: &before.Rules[0], After: &after.Rules[0]}, {Rule: "B", Before: &before.Rules[1], After: &after.Rules[1]}}}
+	c.Summarize(false)
+	notProm := ScenarioResult{State: ExpectUnknown, Why: "not a rule in Prometheus's format, which promtool runs"}
+	c.Scenarios = &runner{results: map[string]ScenarioResult{
+		"before false A a.yaml": {State: ExpectMet, Test: "t1"}, "after false A a.yaml": notProm,
+		"before false B b.yaml": notProm, "after false B b.yaml": notProm,
+	}}
+	e := readExpect(t, "expectations:\n  - rule: A\n    scenarios: [a.yaml]\n  - rule: B\n    scenarios: [b.yaml]\n")
+	if err := c.Expect(e, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ExpectResult{}
+	for _, r := range c.Expectations.Results {
+		got[r.Rule] = r
+	}
+	if !got["A"].Unrun || got["B"].Unrun || c.Summary.ScenariosUnrun != 1 {
+		t.Errorf("A run before and not after: unrun %v; B not known on both: unrun %v; summary %d", got["A"].Unrun, got["B"].Unrun, c.Summary.ScenariosUnrun)
+	}
+}

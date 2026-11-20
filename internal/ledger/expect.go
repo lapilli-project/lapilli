@@ -250,24 +250,7 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 		for len(put) > 0 {
 			part := put[:min(len(put), each)]
 			put = put[len(part):]
-			var vals []string
-			var args []any
-			for _, c := range part {
-				vals = append(vals, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")
-				var n any
-				if c.N != nil {
-					n = int64(*c.N)
-				}
-				args = append(args, c.Rule, c.Expect, c.Week, c.What, c.Held, c.Selector, c.Source, c.Result, c.Why, n, c.Value, unixOr0(c.At), c.Version,
-					c.Detail, now.Unix())
-			}
-			args = append(args, this)
-			if _, err := t.ExecContext(t.ctx, `INSERT INTO expectation_checks (rule, expect, week, what, held, selector, source, result, why, n, value, at, version, detail, current, checked)
-				VALUES `+strings.Join(vals, ", ")+`
-				ON CONFLICT `+t.d.pick("(rule, expect, week)", "(md5(rule), expect, week)")+` DO UPDATE SET what = excluded.what, held = excluded.held,
-					selector = excluded.selector, source = excluded.source, result = excluded.result, why = excluded.why, n = excluded.n,
-					value = excluded.value, at = excluded.at, version = excluded.version, detail = excluded.detail, current = 1, checked = excluded.checked,
-					told = CASE WHEN excluded.result = 'met' AND expectation_checks.told < ? THEN 0 ELSE expectation_checks.told END`, args...); err != nil {
+			if err := putExpectChecks(t, part, this, now); err != nil {
 				return err
 			}
 		}
@@ -286,6 +269,44 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 		return nil
 	})
 	return left, err
+}
+
+// putExpectChecks writes checks, each a row made or made again current,
+// what was told of it and the task made of it kept; one turned met is told
+// again when it is next broken, in a later week than this.
+func putExpectChecks(t *txn, part []ExpectCheck, this int64, now time.Time) error {
+	var vals []string
+	var args []any
+	for _, c := range part {
+		vals = append(vals, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")
+		var n any
+		if c.N != nil {
+			n = int64(*c.N)
+		}
+		args = append(args, c.Rule, c.Expect, c.Week, c.What, c.Held, c.Selector, c.Source, c.Result, c.Why, n, c.Value, unixOr0(c.At), c.Version,
+			c.Detail, now.Unix())
+	}
+	args = append(args, this)
+	_, err := t.ExecContext(t.ctx, `INSERT INTO expectation_checks (rule, expect, week, what, held, selector, source, result, why, n, value, at, version, detail, current, checked)
+		VALUES `+strings.Join(vals, ", ")+`
+		ON CONFLICT `+t.d.pick("(rule, expect, week)", "(md5(rule), expect, week)")+` DO UPDATE SET what = excluded.what, held = excluded.held,
+			selector = excluded.selector, source = excluded.source, result = excluded.result, why = excluded.why, n = excluded.n,
+			value = excluded.value, at = excluded.at, version = excluded.version, detail = excluded.detail, current = 1, checked = excluded.checked,
+			told = CASE WHEN excluded.result = 'met' AND expectation_checks.told < ? THEN 0 ELSE expectation_checks.told END`, args...)
+	return err
+}
+
+// KeepScenarioRun keeps one scenario's check at once, apart from the
+// round's (KeepExpectChecks): as its run begins, what it is run on
+// (Version) and that it hasn't finished, so that a run that never ends (the
+// process killed as promtool takes its memory) is kept so by the next
+// leader, which runs it again only once what it is run on changes; as it
+// ends, what it found. One row, written alone, never while promtool runs.
+func (l *Ledger) KeepScenarioRun(ctx context.Context, c ExpectCheck, this int64, now time.Time) error {
+	if !c.Scenario() {
+		return errors.New("only a scenario's check is kept as it runs")
+	}
+	return l.write(ctx, func(t *txn) error { return putExpectChecks(t, []ExpectCheck{c}, this, now) })
 }
 
 // expectKeys are a map's keys in one order, so that what a round leaves

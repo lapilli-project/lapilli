@@ -24,21 +24,23 @@ import (
 
 // expectWhyText says why a check is not known, or so far.
 var expectWhyText = map[string]string{
-	whyNoHours:       "no one's hours say when people sleep",
-	whyNotWhole:      "a week the ledger holds part of",
-	whySoFar:         "so far",
-	whyUnreplayed:    "the rule isn't replayed, nor copied in",
-	whyNoIncident:    "the incident isn't written down",
-	whyNotJudged:     "the rule changed since: to be judged again on it as it is",
-	whyTooOld:        "the rule changed since, and the incident is older than the weeks checked",
-	whyReplayFailed:  "judging it again on the rule as it is failed",
-	whyAnnotationBad: "its annotation lapilli.dev/budget can't be read: want a budget such as \"10/week, 2 asleep, 3 refires\"",
-	whyAnnotationTwo: "passed over: the expectations file or serve's configuration give this rule this budget too",
-	whyNoPromtool:    "not run: serve has no --promtool",
-	whyNotProm:       "not a rule in Prometheus's format, which promtool runs",
-	whyNotRunYet:     "the rule's group or its test file changed since: to be run",
-	whyTestUnread:    "its test file can't be read",
-	whyRunFailed:     "promtool couldn't run it",
+	whyNoHours:        "no one's hours say when people sleep",
+	whyNotWhole:       "a week the ledger holds part of",
+	whySoFar:          "so far",
+	whyUnreplayed:     "the rule isn't replayed, nor copied in",
+	whyNoIncident:     "the incident isn't written down",
+	whyNotJudged:      "the rule changed since: to be judged again on it as it is",
+	whyTooOld:         "the rule changed since, and the incident is older than the weeks checked",
+	whyReplayFailed:   "judging it again on the rule as it is failed",
+	whyAnnotationBad:  "its annotation lapilli.dev/budget can't be read: want a budget such as \"10/week, 2 asleep, 3 refires\"",
+	whyAnnotationTwo:  "passed over: the expectations file or serve's configuration give this rule this budget too",
+	whyAnnotationPast: "passed over: a check holds so many expectations at most, the expectations file's and serve's configuration's first",
+	whyNotCopied:      "a week its firings' copies don't reach",
+	whyNoPromtool:     "not run: serve has no --promtool",
+	whyNotProm:        "not a rule in Prometheus's format, which promtool runs",
+	whyNotRunYet:      "the rule's group or its test file changed since: to be run",
+	whyTestUnread:     "its test file can't be read",
+	whyRunFailed:      "promtool couldn't run it",
 }
 
 // expectHeldText is what an expectation holds a rule to, for a person.

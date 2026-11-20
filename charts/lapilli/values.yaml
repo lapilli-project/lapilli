@@ -459,11 +459,16 @@ serve:
   # FROM Lapilli's. Neither, and each scenario is not known. promtool runs
   # in lapilli's container, 30s a scenario, 5 a run, with no environment;
   # its memory counts toward resources.limits.memory, and it writes under
-  # /tmp, an emptyDir of its own.
+  # /tmp, an emptyDir of its own. memory is what one run may take
+  # (--promtool-memory, promtool's RLIMIT_DATA), past which it stops and
+  # the scenario is not known: an annotation's template can ask promtool
+  # for gigabytes, and the container would be killed. Keep it, with room
+  # for an agent's run beside a round's, under resources.limits.memory.
   promtool:
     image: ""
     from: /bin/promtool
     path: ""
+    memory: 256Mi
   # Close a proposal no one approved that waited longer than this since it
   # began to wait (made, or backtested again), such as 30d, as expired, so
   # its rule takes another (--proposals-expire). Empty keeps it waiting.

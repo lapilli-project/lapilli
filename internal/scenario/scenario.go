@@ -11,9 +11,15 @@
 // promtool is executed directly, never through a shell, at the path the
 // operator gave (--promtool), with fixed arguments, an emptied environment
 // but for a TMPDIR inside that directory, a time limit, and a cap on what
-// it says that is kept. promtool evaluates PromQL on its own storage in
-// memory and runs nothing of the file's: running it is reading what a pull
-// request holds, not running it.
+// it says that is kept; in a process group of its own, killed whole at the
+// time limit. promtool evaluates PromQL on its own storage in memory and
+// runs nothing of the file's: running it is reading what a pull request
+// holds, not running it. What it evaluates can still take memory without
+// bound (an annotation's template expanded at each evaluation of an alert
+// that fires), so on Linux a cap can be set on it (Memory): Lapilli starts
+// itself again under a name of its own, which sets RLIMIT_DATA and executes
+// promtool in its place with the same fixed arguments and environment
+// (cap_linux.go).
 package scenario
 
 import (
@@ -24,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +60,53 @@ type Promtool struct {
 	// how many bytes of what it says are kept, DefaultOutput when 0.
 	Timeout time.Duration
 	Output  int
+	// Memory is how much memory a run may take, in bytes: promtool's
+	// RLIMIT_DATA, where one can be set (CanCap); 0 for no cap. Past it,
+	// promtool's allocations fail, it stops, and the run is unrun.
+	Memory uint64
+}
+
+// MinMemory is the least Memory may be: promtool, a Go program, maps tens
+// of MiB as it starts, before reading a test.
+const MinMemory = 64 << 20
+
+// The memory cap's wrapper: Lapilli started again under capName, told
+// promtool's path and the cap by capPath and capMemory, which it alone
+// reads; it exits capFailed, saying "lapilli: " and why, when it can't
+// start promtool under the cap.
+const (
+	capName   = "lapilli-promtool-capped"
+	capPath   = "LAPILLI_PROMTOOL_CAPPED_PATH"
+	capMemory = "LAPILLI_PROMTOOL_CAPPED_MEMORY"
+	capFailed = 125
+)
+
+// capped says a run is capped: a cap given, and one can be set here.
+func (p Promtool) capped() bool { return p.Memory > 0 && CanCap }
+
+// command is how a run in dir starts promtool: directly, at its path, with
+// test rules test.yaml and TMPDIR alone; capped, through Lapilli started
+// again under capName, which sets the cap and executes promtool in its
+// place, with those alone. Either way in a process group of its own, which
+// is killed whole when ctx ends.
+func (p Promtool) command(ctx context.Context, dir, tmp string) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, p.Path, "test", "rules", testName)
+	cmd.Dir = dir
+	// Nothing of Lapilli's own environment (its credentials' variables
+	// among it): promtool's teststorage writes under TMPDIR, inside the
+	// run's directory.
+	cmd.Env = []string{"TMPDIR=" + tmp}
+	if p.capped() {
+		self, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		cmd.Path, cmd.Err = self, nil
+		cmd.Args = []string{capName, "test", "rules", testName}
+		cmd.Env = []string{"TMPDIR=" + tmp, capPath + "=" + p.Path, capMemory + "=" + strconv.FormatUint(p.Memory, 10)}
+	}
+	ownGroup(cmd)
+	return cmd, nil
 }
 
 // Resolve finds promtool as --promtool names it: a path, or a name looked
@@ -112,7 +166,8 @@ const maxSaid = 2000
 // cap. It passed when it exits 0 saying SUCCESS; failed when it exits 1
 // saying FAILED:, as promtool says a test that doesn't hold, a test file
 // it can't read, or rules it can't load; else it is unrun: a time out, a
-// crash, an exit of another status, or an answer promtool doesn't give.
+// crash, an exit of another status, or an answer promtool doesn't give,
+// or, capped, more memory taken than it may.
 func (p Promtool) Run(ctx context.Context, group, test []byte) Result {
 	timeout := p.Timeout
 	if timeout <= 0 {
@@ -138,12 +193,10 @@ func (p Promtool) Run(ctx context.Context, group, test []byte) Result {
 	}
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(rctx, p.Path, "test", "rules", testName)
-	cmd.Dir = dir
-	// Nothing of Lapilli's own environment (its credentials' variables
-	// among it): promtool's teststorage writes under TMPDIR, inside the
-	// run's directory.
-	cmd.Env = []string{"TMPDIR=" + tmp}
+	cmd, err := p.command(rctx, dir, tmp)
+	if err != nil {
+		return Result{State: Unrun, Why: "promtool couldn't be started"}
+	}
 	out := &capped{most: most}
 	cmd.Stdout, cmd.Stderr = out, out
 	// Once killed, what holds its output open is waited for this long at
@@ -163,6 +216,11 @@ func (p Promtool) Run(ctx context.Context, group, test []byte) Result {
 		return Result{State: Passed}
 	case errors.As(err, &exit) && exit.ExitCode() == 1 && bytes.Contains(said, []byte("FAILED:")):
 		return Result{State: Failed, Said: failure(said)}
+	case p.capped() && errors.As(err, &exit) && exit.ExitCode() == capFailed && bytes.HasPrefix(said, []byte("lapilli: ")):
+		return Result{State: Unrun, Why: "promtool couldn't be started"}
+	case p.capped() && errors.As(err, &exit) && (bytes.Contains(said, []byte("out of memory")) || bytes.Contains(said, []byte("cannot allocate memory"))):
+		// Go's runtime says so as an allocation past RLIMIT_DATA fails.
+		return Result{State: Unrun, Why: fmt.Sprintf("promtool took more memory than it may (%d MiB)", p.Memory>>20)}
 	case errors.As(err, &exit) && exit.ExitCode() < 0:
 		return Result{State: Unrun, Why: "promtool crashed"}
 	case errors.As(err, &exit):

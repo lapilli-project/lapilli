@@ -149,6 +149,9 @@ spec:
             {{- else if $promtool.path }}
             - {{ printf "--promtool=%s" $promtool.path | quote }}
             {{- end }}
+            {{- if and (or $promtool.image $promtool.path) $promtool.memory }}
+            - {{ printf "--promtool-memory=%s" $promtool.memory | quote }}
+            {{- end }}
             {{- with $s.proposalsExpire }}
             - {{ printf "--proposals-expire=%s" . | quote }}
             {{- end }}

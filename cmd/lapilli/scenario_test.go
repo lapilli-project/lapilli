@@ -198,3 +198,31 @@ func TestServePromtool(t *testing.T) {
 		}
 	}
 }
+
+// --promtool-memory is the memory one run of --promtool may take: 256Mi
+// unless given, a whole number of Mi or Gi, 64Mi at least, and only with
+// --promtool.
+func TestPromtoolMemoryFlag(t *testing.T) {
+	rules := write(t, "rules.yaml", shopRules("5m"))
+	expect := write(t, "expectations.yaml", "expectations:\n  - rule: CheckoutErrors\n    scenarios: [t.yaml]\n")
+	promtool := scenariotest.Install(t)
+	base := []string{"--prometheus", "http://127.0.0.1:1", "--rules", rules, "--expect", expect, "--promtool", promtool}
+	st, err := readServe(base, true)
+	if err != nil || st.cfg.PromtoolMemory != 256<<20 {
+		t.Fatalf("by default: %d %v", st.cfg.PromtoolMemory, err)
+	}
+	for v, want := range map[string]uint64{"64Mi": 64 << 20, "1Gi": 1 << 30, "512Mi": 512 << 20} {
+		if st, err := readServe(append(append([]string{}, base...), "--promtool-memory", v), true); err != nil || st.cfg.PromtoolMemory != want {
+			t.Errorf("%s: %d %v", v, st.cfg.PromtoolMemory, err)
+		}
+	}
+	for _, v := range []string{"32Mi", "256M", "256", "1.5Gi", "-1Mi", "+1Gi", "Mi", "99999999999Gi"} {
+		if _, err := readServe(append(append([]string{}, base...), "--promtool-memory", v), true); err == nil || !strings.Contains(err.Error(), "--promtool-memory") {
+			t.Errorf("%s: %v", v, err)
+		}
+	}
+	if _, err := readServe([]string{"--prometheus", "http://127.0.0.1:1", "--rules", rules, "--promtool-memory", "1Gi"}, true); err == nil ||
+		!strings.Contains(err.Error(), "give --promtool") {
+		t.Errorf("without --promtool: %v", err)
+	}
+}

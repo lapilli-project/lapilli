@@ -95,7 +95,7 @@ func TestChartScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{"- --promtool=/opt/lapilli-promtool/promtool", `image: "` + image + `"`, `command: ["cp", "/bin/promtool", "/promtool/promtool"]`,
+	for _, want := range []string{"- --promtool=/opt/lapilli-promtool/promtool", `- "--promtool-memory=256Mi"`, `image: "` + image + `"`, `command: ["cp", "/bin/promtool", "/promtool/promtool"]`,
 		"mountPath: /opt/lapilli-promtool", "mountPath: /tmp", "name: scenarios-tmp"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("image: no %q", want)
@@ -116,8 +116,9 @@ func TestChartScenarios(t *testing.T) {
 	if strings.TrimSpace(held["restarts.test.yaml"]) != strings.TrimSpace(test) || held["expectations.yaml"] != expect {
 		t.Errorf("the ConfigMap: %q", held)
 	}
-	out, err = helmTemplate(t, with("--set", "serve.promtool.path=/usr/local/bin/promtool")...)
-	if err != nil || !strings.Contains(out, `- "--promtool=/usr/local/bin/promtool"`) || strings.Contains(out, "name: promtool\n") || !strings.Contains(out, "mountPath: /tmp") {
+	out, err = helmTemplate(t, with("--set", "serve.promtool.path=/usr/local/bin/promtool", "--set", "serve.promtool.memory=512Mi")...)
+	if err != nil || !strings.Contains(out, `- "--promtool=/usr/local/bin/promtool"`) || strings.Contains(out, "name: promtool\n") || !strings.Contains(out, "mountPath: /tmp") ||
+		!strings.Contains(out, `- "--promtool-memory=512Mi"`) {
 		t.Errorf("path: %v\n%s", err, out)
 	}
 	for _, c := range []struct {

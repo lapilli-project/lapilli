@@ -67,6 +67,12 @@ const (
 	whyReplayFailed  = "replay_failed"    // judging it again failed
 	whyAnnotationBad = "annotation_unread"
 	whyAnnotationTwo = "annotation_twice"
+	// whyAnnotationPast is a rule's annotation passed over: the check
+	// holds maxExpectHeld at most, the operator's first.
+	whyAnnotationPast = "annotation_past"
+	// whyNotCopied is a week of a rule only copied in that its source's
+	// copies don't cover: no firing copied isn't none fired.
+	whyNotCopied = "not_copied"
 	// A scenario's (step 4).
 	whyNoPromtool = "no_promtool"    // serve has no --promtool
 	whyNotProm    = "not_prometheus" // the rule isn't in Prometheus's format, or its definition isn't known
@@ -74,6 +80,12 @@ const (
 	whyTestUnread = "test_unread"    // its test file can't be read
 	whyRunFailed  = "run_failed"     // promtool couldn't run it: a time out, a crash, an answer it doesn't give
 )
+
+// scenarioBegun is what a scenario's check says while its run hasn't
+// ended (KeepScenarioRun): kept so by the next leader when the run never
+// ended, as when lapilli serve was stopped as promtool took its memory.
+const scenarioBegun = "promtool didn't finish: lapilli serve stopped while it ran (as when the container runs out of memory); " +
+	"it isn't run again until the rule's group, the test file or promtool changes"
 
 // expectWeeks is how many weeks a check reads: the week so far and the
 // twelve whole weeks before it.
@@ -282,6 +294,10 @@ type expectRule struct {
 	from, since time.Time
 	key         string
 	def         *rules.Rule
+	// copied says it is only copied in (its source's, as rules lists it);
+	// copiedTo, as far as its source's copies cover, without a gap.
+	copied   bool
+	copiedTo time.Time
 }
 
 // expectRules are the rules in effect now: those of the latest version of
@@ -416,10 +432,65 @@ func heldBy(x *expectRule, e *verdict.Expectations, sources map[string]string) [
 	return out
 }
 
-// errHeldTooMuch is what a check says past maxExpectHeld.
+// errHeldTooMuch is what a check says past maxExpectHeld, of the
+// operator's own: the expectations file's and serve's configuration's.
 func errExpectTooMuch() error {
-	return fmt.Errorf("the rules are held to more than %d expectations, each rule to each budget and catch that holds it: "+
+	return fmt.Errorf("the rules are held to more than %d expectations by the expectations file and serve's configuration, each rule to each budget and catch that holds it: "+
 		"give a catch to the rule it is for (rule:, not group: or labels:), or hold fewer rules", maxExpectHeld)
+}
+
+// expectPair is a rule and one thing it is held to.
+type expectPair struct {
+	r  *expectRule
+	it heldItem
+}
+
+// expectPairs are what each rule is held to, bounded: the operator's own
+// (the expectations file's and serve's configuration's) first, maxExpectHeld
+// at most, past which the check fails, saying what to do; then the rule
+// authors' annotations, a rule's whole, in the rules' order, while they
+// fit in what is left, the rest each one not known (whyAnnotationPast). So
+// no rule's annotation can stop the operator's checks.
+func expectPairs(rs []*expectRule, e *verdict.Expectations, sources map[string]string) ([]expectPair, error) {
+	type held struct {
+		r        *expectRule
+		own, its []heldItem
+	}
+	var all []held
+	n := 0
+	for _, r := range rs {
+		h := held{r: r}
+		for _, it := range heldBy(r, e, sources) {
+			if it.source == expectFromAnnotation {
+				h.its = append(h.its, it)
+			} else {
+				h.own = append(h.own, it)
+			}
+		}
+		if n += len(h.own); n > maxExpectHeld {
+			return nil, errExpectTooMuch()
+		}
+		all = append(all, h)
+	}
+	var out []expectPair
+	for _, h := range all {
+		for _, it := range h.own {
+			out = append(out, expectPair{h.r, it})
+		}
+		if len(h.its) == 0 {
+			continue
+		}
+		if n+len(h.its) > maxExpectHeld {
+			out = append(out, expectPair{h.r, heldItem{ExpectItem: verdict.ExpectItem{What: "budget", Held: "–"}, selector: annotationSelector,
+				source: expectFromAnnotation, why: whyAnnotationPast}})
+			continue
+		}
+		n += len(h.its)
+		for _, it := range h.its {
+			out = append(out, expectPair{h.r, it})
+		}
+	}
+	return out, nil
 }
 
 // expectAfter checks each rule's expectations after a round, the
@@ -587,6 +658,13 @@ func (s *Server) scenarioGroups(ctx context.Context) (map[string][]byte, error) 
 	return out, nil
 }
 
+// promtool is --promtool as a scenario runs it: each run within its time
+// limit, the output it keeps and the memory it may take
+// (--promtool-memory).
+func (s *Server) promtool() scenario.Promtool {
+	return scenario.Promtool{Path: s.cfg.Promtool, Memory: s.cfg.PromtoolMemory}
+}
+
 // scenarioKey is what a scenario is run on: promtool, the group and the
 // test file, as its row's version keeps it.
 func scenarioKey(promtool string, group, test []byte) string {
@@ -622,23 +700,36 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	if err != nil {
 		return false, err
 	}
-	type pair struct {
-		r  *expectRule
-		it heldItem
+	pairs, err := expectPairs(rs, e, sources)
+	if err != nil {
+		return false, err
 	}
-	var pairs []pair
 	asleep, catches := false, map[string]bool{}
+	for _, p := range pairs {
+		if p.it.why != "" {
+			continue
+		}
+		asleep = asleep || p.it.Asleep()
+		if p.it.Catch != nil {
+			catches[p.it.Catch.Incident] = true
+		}
+	}
+	// A rule only copied in is known as far as its source's copies cover:
+	// past it, a week no firing was copied in for isn't a week none fired.
+	covered := map[string]time.Time{}
 	for _, r := range rs {
-		for _, it := range heldBy(r, e, sources) {
-			pairs = append(pairs, pair{r, it})
-			asleep = asleep || it.Asleep()
-			if it.Catch != nil {
-				catches[it.Catch.Incident] = true
+		row, ok := table[r.id]
+		if r.def != nil || !ok || r.id == 0 || row.Source == "" {
+			continue
+		}
+		to, seen := covered[row.Source]
+		if !seen {
+			if _, to, err = s.l.Coverage(ctx, row.Source); err != nil {
+				return false, err
 			}
+			covered[row.Source] = to
 		}
-		if len(pairs) > maxExpectHeld {
-			return false, errExpectTooMuch()
-		}
+		r.copied, r.copiedTo = true, to
 	}
 	old, err := s.l.ExpectChecks(ctx, ledger.ExpectQuery{})
 	if err != nil {
@@ -711,7 +802,9 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	lastOf := map[[2]string]ledger.ExpectCheck{}
 	for _, c := range old {
 		if k := [2]string{c.Rule, c.Expect}; c.Scenario() {
-			if p, ok := lastOf[k]; !ok || !p.Current && c.Current {
+			// The current one, and of two (a run begun, kept apart, beside
+			// the row it was to replace) the later week's.
+			if p, ok := lastOf[k]; !ok || !p.Current && c.Current || p.Current == c.Current && c.Week > p.Week {
 				lastOf[k] = c
 			}
 		}
@@ -783,6 +876,11 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 				c.Result, c.Why = ledger.ExpectUnknown, whyNoIncident
 			case r.unreplayed:
 				c.Week, c.At, c.Result, c.Why = ledger.Week(s.l.Day(in.Start)), in.Start, ledger.ExpectUnknown, whyUnreplayed
+			case r.copied && !slices.ContainsFunc(in.CaughtBy, func(k verdict.Catch) bool { return k.Rule == r.name }) &&
+				r.copiedTo.Before(in.Start.Add(time.Duration(it.Catch.Within))):
+				// Its copies don't reach the incident and its delay: not
+				// caught in them isn't missed.
+				c.Week, c.At, c.Result, c.Why = ledger.Week(s.l.Day(in.Start)), in.Start, ledger.ExpectUnknown, whyNotCopied
 			default:
 				c.Week, c.At = ledger.Week(s.l.Day(in.Start)), in.Start
 				value, state := verdict.CaughtWithin(in.CaughtBy, r.name, *it.Catch)
@@ -830,6 +928,10 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			case n > *it.Limit:
 				// Over, in the week so far or a week held in part too.
 				c.Result = ledger.ExpectBroken
+			case r.copied && r.copiedTo.Before(wTo) && (w != this || r.copiedTo.Before(wFrom)):
+				// Past what its source's copies cover: a whole week, or the
+				// week so far that none of reached.
+				c.Result, c.Why = ledger.ExpectUnknown, whyNotCopied
 			case w == this || upTo.Before(wTo):
 				c.Result, c.Why = ledger.ExpectOpen, whySoFar
 			case !whole:
@@ -859,16 +961,24 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 		cancel()
 	}
 	// Scenarios to run: a few a round, each within promtool's own time
-	// limit, never while the ledger's writer is held.
-	p := scenario.Promtool{Path: s.cfg.Promtool}
+	// limit and memory cap, never while the ledger's writer is held. Each
+	// is kept as begun before promtool starts, and as found once it ends:
+	// a run that never ends (lapilli serve killed as promtool took its
+	// memory) is kept so, and not run again by the next leader until what
+	// it is run on changes.
+	p := s.promtool()
 	for i, x := range runs {
 		if i == expectScenariosARun || ctx.Err() != nil {
 			again = true
 			break
 		}
-		res := scenario.Judged(p.Run(ctx, x.group, x.test))
 		c := &found[x.at]
 		c.Version, c.Week = x.key, this
+		c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, scenarioBegun
+		if err := s.l.KeepScenarioRun(ctx, *c, this, now); err != nil {
+			return false, err
+		}
+		res := scenario.Judged(p.Run(ctx, x.group, x.test))
 		switch res.State {
 		case verdict.ExpectMet:
 			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectMet, "passes", "", ""
@@ -876,6 +986,9 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectBroken, "fails", "", cutText(res.Said, maxDetail)
 		default:
 			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, res.Why
+		}
+		if err := s.l.KeepScenarioRun(ctx, *c, this, now); err != nil {
+			return false, err
 		}
 	}
 	left, err := s.l.KeepExpectChecks(ctx, found, old, first, this, now)

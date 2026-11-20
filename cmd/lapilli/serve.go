@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -317,6 +318,13 @@ The web UI and API:
                       Prometheus's format. Without it, each scenario is not
                       known. Scenarios a pull request's backtest sends
                       (--backtest-listen) are never run
+  --promtool-memory SIZE
+                      the memory one run of --promtool may take, as 256Mi
+                      or 1Gi, 64Mi at least (default 256Mi): on Linux,
+                      promtool's RLIMIT_DATA, past which the run stops and
+                      the scenario is not known; promtool runs in serve's
+                      container, so leave room for it under its memory
+                      limit. Not set on macOS, where promtool runs without
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)
@@ -676,9 +684,10 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
 		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, Watch: time.Minute,
-		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(),
+		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(), PromtoolMemory: defaultPromtoolMemory,
 	}
 	timeoutSet := false
+	promtoolMemorySet := false
 	ledgerSet := false
 	yieldForSet := false
 	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
@@ -945,6 +954,11 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			if cfg.Promtool, err = scenario.Resolve(val); err != nil {
 				return true, fmt.Errorf("--promtool %s: %v", val, err)
 			}
+		case "--promtool-memory":
+			if cfg.PromtoolMemory, err = memorySize(val); err != nil {
+				return true, fmt.Errorf("--promtool-memory %s: %v", val, err)
+			}
+			promtoolMemorySet = true
 		case "--proposals-expire":
 			// 0, 0s or 0d: off.
 			if d, perr := serve.ParseDuration(val); perr == nil && d == 0 {
@@ -1271,6 +1285,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = expectFlag(cfg.Expect)
 	case cfg.Promtool != "" && cfg.Expect == "" && cfg.Config == "":
 		err = fmt.Errorf("--promtool runs the scenarios of the expectations, --expect's or --config's: give one")
+	case promtoolMemorySet && cfg.Promtool == "":
+		err = fmt.Errorf("--promtool-memory is the memory --promtool's runs may take: give --promtool")
 	case yieldForSet && !cfg.Yield:
 		err = fmt.Errorf("--yield-for is how long --yield-on-429 leaves an API alone after a 429: give --yield-on-429")
 	case cfg.Guard != "" && f.promURL == "" && f.gcpProj == "":
@@ -1540,4 +1556,31 @@ func configFlag(path string) error {
 		return fmt.Errorf("--config: %w", err)
 	}
 	return nil
+}
+
+// defaultPromtoolMemory is --promtool-memory's default: a quarter of the
+// chart's default memory limit (1Gi), so that a scenario run as an agent's
+// is, beside serve's own, fits under it.
+const defaultPromtoolMemory = 256 << 20
+
+// memorySize reads a size of memory as Kubernetes writes one, a whole
+// number of Mi or Gi, scenario.MinMemory at least.
+func memorySize(v string) (uint64, error) {
+	num, shift := v, 0
+	switch {
+	case strings.HasSuffix(v, "Mi"):
+		num, shift = strings.TrimSuffix(v, "Mi"), 20
+	case strings.HasSuffix(v, "Gi"):
+		num, shift = strings.TrimSuffix(v, "Gi"), 30
+	default:
+		return 0, errors.New("want a size such as 256Mi or 1Gi")
+	}
+	n, err := strconv.ParseUint(num, 10, 32)
+	if err != nil || num == "" || num[0] == '+' {
+		return 0, errors.New("want a size such as 256Mi or 1Gi")
+	}
+	if n<<shift < scenario.MinMemory {
+		return 0, fmt.Errorf("%dMi at least: promtool maps tens of MiB as it starts", scenario.MinMemory>>20)
+	}
+	return n << shift, nil
 }

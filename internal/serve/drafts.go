@@ -792,7 +792,7 @@ func (d *draftRun) RunScenario(side string, _ bool, _ string, path string) verdi
 		}
 		defer d.s.agentScenarios.Unlock()
 	}
-	return scenario.Judged(scenario.Promtool{Path: d.s.cfg.Promtool}.Run(d.ctx, d.groups[i], t))
+	return scenario.Judged(d.s.promtool().Run(d.ctx, d.groups[i], t))
 }
 
 // draftRunner is a check's scenario runner: the rule's group as the latest
