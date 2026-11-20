@@ -184,6 +184,8 @@ a.hint { color: var(--accent); }
 table { border-collapse: collapse; width: 100%; font-size: .95rem; }
 th, td { border-bottom: 1px solid var(--line); padding: .55rem .65rem; text-align: left; vertical-align: top; }
 th { font-weight: 500; font-size: .9rem; color: var(--dim); white-space: nowrap; border-bottom-color: var(--line-strong); }
+/* A row's own header is lined as its row, not as the columns' headers. */
+tbody th { border-bottom-color: var(--line); }
 tbody tr:hover td { background: color-mix(in srgb, var(--panel) 55%, transparent); }
 td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* A label's chips break anywhere, so the table would give them the least
@@ -404,9 +406,17 @@ textarea { width: 100%; padding: .45rem .6rem; }
 .criteria .field > label, .criteria .field-name { display: block; margin: 0 0 .3rem; }
 .criteria .field p { margin: .3rem 0 0; }
 .criteria textarea { font-family: var(--mono); font-size: .9rem; }
-#impact-tried caption { caption-side: top; text-align: start; font-weight: 600; padding: .9rem 0 .4rem; }
+/* A table's caption reads as the heading of what is under it, from the
+   start, a little apart from the table before it (bundle 67). */
+caption { caption-side: top; text-align: start; font-weight: 600; padding: .9rem 0 .4rem; }
 td.state { white-space: nowrap; }
 table.sources .where { overflow-wrap: anywhere; }
+/* Sources' list: a source's row header holds its path or URL, so it
+   wraps there, as its cell does on Settings; its kind keeps its words,
+   and its last error breaks anywhere (bundle 67). */
+table.sources tbody th { white-space: normal; min-width: 14rem; }
+table.sources td.kind { word-break: keep-all; }
+table.sources td.err { overflow-wrap: anywhere; min-width: 10rem; }
 select { padding-inline: .45rem; }
 .comment-head { font-size: .95rem; }
 .comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; }

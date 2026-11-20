@@ -9,12 +9,12 @@ applications. */}}
 <thead><tr><th scope="col">{{t "Source"}}</th><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Last read well"}}</th><th scope="col" class="n">{{t "Rules"}}</th><th scope="col">{{t "Behind, and the last read"}}</th><th scope="col">{{t "Last error"}}</th></tr></thead>
 <tbody>{{range .Items}}<tr>
 <th scope="row">{{if .Raw}}<bdi>{{.Name}}</bdi>{{else}}{{t .Name}}{{end}}{{with .From}} <code>{{.}}</code>{{end}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}</th>
-<td>{{tin "source kind" .KindText}}</td>
+<td class="kind">{{tin "source kind" .KindText}}</td>
 <td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else}}↻ {{t "waiting"}}{{end}}</span>{{if .Down}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{t "down"}}</span>{{end}}{{if gt .Failures 0}}<br><span class="quiet">{{t "%d reads in a row failed" .Failures}}</span>{{end}}</td>
 <td class="t">{{if .LastOK.IsZero}}–{{else}}{{at $loc .LastOK}}{{end}}</td>
 <td class="n">{{if .HasRules}}{{.RuleCount}}{{else}}–{{end}}</td>
 <td>{{with .Lag}}{{t "%s behind" (dur .)}}{{end}}{{if and .Lag .Took}}<br>{{end}}{{with .Took}}<span class="quiet">{{t "the last read took %s" (dur .)}}</span>{{end}}{{if not (or .Lag .Took)}}–{{end}}</td>
-<td>{{with .LastError}}<span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{if and .LastError (not .LastFailed.IsZero)}}<br><span class="quiet">{{at $loc .LastFailed}}</span>{{end}}{{if not .LastError}}–{{end}}</td>
+<td class="err">{{with .LastError}}<span class="status-bad"><span aria-hidden="true">✕</span> {{flagsAsCode .}}</span>{{end}}{{if and .LastError (not .LastFailed.IsZero)}}<br><span class="quiet">{{at $loc .LastFailed}}</span>{{end}}{{if not .LastError}}–{{end}}</td>
 </tr>{{end}}</tbody>
 </table></div>
 {{else}}{{template "empty" (emptyOf "first" "No source is read yet." "lapilli serve lists here each source it is told to read: its rules, Prometheus, the incidents and what jobs copy in.")}}{{end}}

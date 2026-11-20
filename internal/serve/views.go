@@ -2618,6 +2618,7 @@ var funcs = template.FuncMap{
 	"joinKeys":     func(v ledger.Verdict) string { return strings.Join(v.Keys(), ", ") },
 	"movedText":    func(moved string) template.HTML { return movedText("en", moved) },
 	"notJudgedKey": notJudgedKey,
+	"flagsAsCode":  flagsAsCode,
 	// signalsOn says the signals a rule is judged against, each with the
 	// labels it is matched on: probe (service).
 	"signalsOn": func(on []ruleSignalOn) string {
