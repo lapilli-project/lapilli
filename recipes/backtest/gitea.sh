@@ -25,9 +25,12 @@
 # token, LAPILLI_SERVE_TOKEN_FILE.
 recipe=gitea.sh
 here=$(dirname "$0")
-# Forgejo's ID token is asked of Actions (lib.sh's actions_token). It
-# isn't masked: Forgejo documents no ::add-mask::, and its FORGEJO_ACTIONS
-# is GITHUB_ACTIONS too, as each FORGEJO_ variable is a GITHUB_ one.
+# Forgejo's ID token is asked of Actions (lib.sh's actions_token). Its
+# runner, act's, reads ::add-mask:: as GitHub's does, but the token isn't
+# masked here (ci_masks isn't github): nothing the recipe runs prints it,
+# as it goes to curl on stdin. Forgejo's FORGEJO_ACTIONS is GITHUB_ACTIONS
+# too, as each FORGEJO_ variable is a GITHUB_ one, so ci_masks, not
+# GITHUB_ACTIONS, says which recipe masks it.
 ci_tokens=actions
 if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   GITEA_API=${GITEA_API:-${GITHUB_API_URL:-}}

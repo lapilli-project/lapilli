@@ -986,8 +986,9 @@ Where step 1 does otherwise than the sections above say, or says more:
   for, and the job's log says when it isn't `LAPILLI_SERVE`; the action's
   `audience` is it. In GitHub Actions, `github.sh` masks the ID token it
   gets (`::add-mask::`) before anything else could log it, as
-  `core.getIDToken` does; `gitea.sh` doesn't, Forgejo documenting no such
-  command. An expectations file of no bytes is sent as `"expect": ""`,
+  `core.getIDToken` does; `gitea.sh` doesn't, though Forgejo's runner
+  (act's) reads the command as GitHub's does (0.63.2 put right what this
+  said before: that Forgejo has no such command). An expectations file of no bytes is sent as `"expect": ""`,
   given, as `--expect` takes it; the field is left out only when the
   commit has no file. `Retry-After` is waited, 5 minutes at most, 5
   seconds at least (or `SERVE_POLL` if longer: a `Retry-After` of 0 isn't

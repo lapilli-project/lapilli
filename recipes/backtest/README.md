@@ -469,8 +469,8 @@ has none, a plain token. One of:
   `LAPILLI_SERVE` (without a trailing slash): the port's URL is one no
   other service takes. In GitHub Actions, `github.sh` masks the token in
   the job's log (`::add-mask::`, on stdout) as soon as it has it, as
-  `core.getIDToken` does; `gitea.sh` doesn't, as Forgejo documents no such
-  command.
+  `core.getIDToken` does; `gitea.sh` doesn't, though Forgejo's runner reads
+  the command as GitHub's does: nothing the recipe runs prints the token.
 
 By CI:
 
