@@ -452,7 +452,12 @@ Step 2, serve's checks after deploy, as built:
   broken in the week so far or the last whole week, or a catch broken,
   once a rule, an expectation and a week, 50 a round, the rest the rounds
   after; a catch met again is told again once it is next broken, in a
-  later week. It carries the rule, its team, what, held, the selector and
+  later week. A catch's row moving to another week, its incident's start
+  written down otherwise, takes what was told of it and its task with it,
+  read in the write that lets the old row go, and the new row keeps a
+  task of its own; in 0.65.0 it was told again, and made a second task
+  while the first was open (a review's Low), as a scenario's was (step
+  4). It carries the rule, its team, what, held, the selector and
   the source, the count or the delay, whether it is the week so far, the
   week's span (a catch, its incident and its start), and links to the
   rule's tab; with routes in `--config`'s `notify:`, it goes where they
@@ -767,7 +772,10 @@ Step 4, scenarios, as built:
   (`expectation.broken`, with `scenario`), made a task, and shown on the
   rule's tab (with what promtool said), the overview, the rules list, the
   digest (in the week it was found), `GET /api/v1/expectations`, MCP's
-  `rule` and `/metrics`, as a catch is.
+  `rule` and `/metrics`, as a catch is. Its row moving to another week,
+  what it found found again in a later week, takes what was told of it
+  and its task with it, as a catch's does (step 2): told once while it
+  stays broken, and no second task while the first is open.
 - **The chart.** `serve.scenarios` puts each test file beside
   `expectations.yaml` in its ConfigMap, a scenario's path its name.
   Lapilli's image stays without promtool: `serve.promtool.image`, an image

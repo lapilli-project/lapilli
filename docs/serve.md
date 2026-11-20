@@ -334,7 +334,10 @@ digest; in `/api/v1/expectations`, MCP's `rule` and `/metrics`
 `lapilli_rule_expectations_broken`). It is told (`expectation.broken`)
 once a rule, an expectation and a week, and with `--expect-tasks` made a
 task for the rule's team, once a rule, an expectation and a week, none
-while one is open.
+while one is open; a catch or a scenario is of one week (its incident's,
+or when what it found was found), and one that moves to another week,
+still broken, isn't told again, nor made a second task, its task kept on
+its tab.
 
 Nobody writes expectations for rules that already page them, so serve
 drafts them (docs/design/expectations.md, step 3). **From the history**: a
