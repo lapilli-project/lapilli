@@ -578,7 +578,8 @@ Step 3, drafts, as built:
   64 KiB, its test files 20 and 256 KiB in all, its reason 2,000 bytes,
   what it found 64 KiB, the file it makes 1 MiB; ten wait for a rule at
   most, and 1,000 are kept, the oldest decided let go to keep another,
-  none kept while as many wait.
+  never one accepted whose pull request is ready for a recipe or opened
+  (as keeping a new rule's lets none go), none kept while as many wait.
 - **What an agent sends**, beyond what `compare` bounds: the rule's name 1
   KiB, the expectations 256 KiB, the rewrite 64 KiB, the test files as a
   draft keeps them, each by a path an expectations file may name, those

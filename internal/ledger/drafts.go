@@ -64,7 +64,9 @@ const (
 )
 
 // DraftsKept is the most drafts the ledger keeps: past it, the oldest
-// decided are let go as one is kept; with as many open, none is kept.
+// decided are let go as one is kept, but those accepted whose pull request
+// is ready or opened; with as many open or waiting for theirs, none is
+// kept.
 var DraftsKept = 1000
 
 // ErrOwnDraft is a draft accepted by whoever proposed it, or the person
@@ -151,8 +153,8 @@ func (l *Ledger) MayDraft(ctx context.Context, by string) error {
 
 // KeepDraft keeps a draft, open: within its bounds, the hour's limit it
 // shares with proposals, DraftsOpenARule open for its rule and DraftsKept
-// in all, the oldest decided let go to keep it. It is told
-// (expectation.drafted).
+// in all, the oldest decided let go to keep it, but those accepted whose
+// pull request is ready or opened. It is told (expectation.drafted).
 func (l *Ledger) KeepDraft(ctx context.Context, d ExpectDraft) (int64, error) {
 	tests, err := json.Marshal(d.Tests)
 	if err != nil {
@@ -209,9 +211,12 @@ func (l *Ledger) KeepDraft(ctx context.Context, d ExpectDraft) (int64, error) {
 			return err
 		}
 		if kept >= DraftsKept {
-			// The oldest decided, as many as keeping this one takes.
-			res, err := t.ExecContext(t.ctx, `DELETE FROM expectation_drafts WHERE id IN (SELECT id FROM expectation_drafts WHERE state != ? ORDER BY id LIMIT ?)`,
-				DraftOpen, kept-DraftsKept+1)
+			// The oldest decided, as many as keeping this one takes; never
+			// one accepted whose pull request waits for a recipe or is
+			// open, as KeepAddedDraft lets go none: its recipe would find
+			// it gone, and its pull request's merge untold.
+			res, err := t.ExecContext(t.ctx, `DELETE FROM expectation_drafts WHERE id IN (SELECT id FROM expectation_drafts WHERE state != ? AND pr NOT IN (?, ?) ORDER BY id LIMIT ?)`,
+				DraftOpen, DraftReady, DraftOpened, kept-DraftsKept+1)
 			if err != nil {
 				return err
 			}

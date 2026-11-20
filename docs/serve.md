@@ -364,7 +364,8 @@ request to `EXPECT_FILE`, the file in git `--expect` is made from
 keeps the decision, and the tab gives the YAML to put where the
 expectations are declared: Lapilli doesn't write a ConfigMap or `--config`.
 Drafts count with proposals toward a person's 20 an hour; ten wait for a
-rule at most, and 1,000 are kept.
+rule at most, and 1,000 are kept, the oldest decided let go first, never
+one whose pull request is waiting for a recipe or open.
 
 A rule not yet written can be proposed too, held to what it is to do
 before anyone approves it (docs/design/expectations.md, step 5). **Propose
