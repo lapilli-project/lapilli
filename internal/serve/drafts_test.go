@@ -287,6 +287,14 @@ func TestProposeExpectation(t *testing.T) {
 			t.Errorf("%s: %s", want, text)
 		}
 	}
+	// A reason too long is refused before anything is replayed: with a
+	// comparison running, it is still what is said.
+	s.comparing.Lock()
+	if failed, text := call(t, agent, "propose_expectation", map[string]any{"rule": "Errors", "expectations": errorsHeld, "reason": strings.Repeat("x", 2001)}, &out); !failed ||
+		!strings.Contains(text, "reason is 2000 bytes at most") {
+		t.Errorf("a reason too long, before the replay: %s", text)
+	}
+	s.comparing.Unlock()
 	// The rule's tab: the draft, its reason escaped, no accept form for
 	// its proposer, one for an approver who isn't.
 	h := s.Handler()
@@ -311,6 +319,8 @@ func TestProposeExpectation(t *testing.T) {
 		{"boss@example.com", "cross-site", key, http.StatusForbidden},
 		{"boss@example.com", "same-origin", "nope", http.StatusForbidden},
 		{"ed@example.com", "same-origin", key, http.StatusForbidden},
+		// An editor with a key of their own is no approver.
+		{"ed@example.com", "same-origin", ownKey(s, d, "ed@example.com"), http.StatusForbidden},
 		{"ana@example.com", "same-origin", ownKey(s, d, "ana@example.com"), http.StatusForbidden},
 	} {
 		if code, body, _ := postAs(t, h, path, url.Values{"key": {c.key}}, c.who, c.site); code != c.code {
@@ -378,6 +388,23 @@ func TestProposeExpectation(t *testing.T) {
 		if got[event] != want {
 			t.Errorf("%s: %q", event, got[event])
 		}
+	}
+	// An approver's own draft, through their agent: no form offered, and
+	// the ledger refuses it, whatever key is sent.
+	var mine proposeExpectOut
+	if failed, text := call(t, connect(t, ts.URL, "boss@example.com"), "propose_expectation", map[string]any{"rule": "Errors", "expectations": errorsHeld}, &mine); failed {
+		t.Fatalf("the admin's agent: %s", text)
+	}
+	minePath := "/expectations/drafts/" + strconv.FormatInt(mine.ID, 10) + "/accept"
+	if _, page := getAs(t, h, "/rules/Errors?tab=expectations", "boss@example.com"); strings.Contains(page, `action="`+minePath+`"`) {
+		t.Error("an approver is offered to accept their own agent's draft")
+	}
+	md, _ := s.l.DraftByID(ctx, mine.ID)
+	if code, body, _ := postAs(t, h, minePath, url.Values{"key": {ownKey(s, md, "boss@example.com")}}, "boss@example.com", "same-origin"); code != http.StatusForbidden {
+		t.Errorf("accepted by its proposer: %d %s", code, body)
+	}
+	if md, _ := s.l.DraftByID(ctx, mine.ID); md.State != ledger.DraftOpen {
+		t.Errorf("its proposer's acceptance kept: %+v", md)
 	}
 	// The hour's: twenty proposals and drafts, together.
 	for i := 0; i < ledger.ProposalsAnHour-1; i++ {
