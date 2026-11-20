@@ -951,10 +951,47 @@ files() {
     trouble "$what is too big to read: $big"
     return 1
   fi
+  if [ -z "${RENDER:-}" ]; then
+    # Two files whose paths differ only in case, or a file and a directory
+    # so, are one on a file system that folds case (a macOS or Windows
+    # runner's): written one over the other, one's rules would never be
+    # backtested, and the gates would pass. Refused wherever it runs, the
+    # pair in the job's log alone: their names are the pull request's.
+    pair=$(git -C "$repo" ls-tree -r --name-only "$c" -- "$@" | awk '
+      {
+        f = $0; k = tolower(f)
+        if ((k in file) && file[k] != f) { print file[k] " and " f; exit }
+        if (k in dir) { print dir[k] " and " f; exit }
+        file[k] = f
+        n = split(f, part, "/"); p = ""
+        for (i = 1; i < n; i++) {
+          p = (i == 1 ? part[i] : p "/" part[i]); q = tolower(p)
+          if (q in file) { print file[q] " and " p; exit }
+          if (!(q in dir)) dir[q] = p
+        }
+      }')
+    if [ -n "$pair" ]; then
+      say "two paths that differ only in case, in $what: $pair"
+      trouble "$what holds two paths that differ only in case, which a file system that folds case (macOS's, Windows') writes as one: not read (the job's log says which)"
+      return 1
+    fi
+  fi
   if ! (cd "$tmp/empty" && GIT_INDEX_FILE=$tmp/index git --git-dir="$gitdir" --work-tree=. archive --worktree-attributes \
     --format=tar -o "$tmp/c.tar" "$c" -- "$@") 2>"$tmp/git.log" || ! tar -x -f "$tmp/c.tar" -C "$d" 2>>"$tmp/git.log"; then
     trouble "$what couldn't be read" "$tmp/git.log"
     return 1
+  fi
+  if [ -z "${RENDER:-}" ]; then
+    # And whatever else this file system takes as one name (a letter
+    # past ASCII in another case, or written in other code points):
+    # fewer files written than the commit holds.
+    listed=$(git -C "$repo" ls-tree -r "$c" -- "$@" | awk '$2 == "blob" { n++ } END { print n + 0 }')
+    written=$(find "$d" \( -type f -o -type l \) | awk 'END { print NR }')
+    if [ "$written" -lt "$listed" ]; then
+      say "$what: $listed files, $written of them once written here"
+      trouble "$what holds files whose names this machine's file system takes as one, as one that folds case does (macOS's, Windows'): not read (the job's log says how many)"
+      return 1
+    fi
   fi
   l=$(find "$d" -type l | head -n 1)
   if [ -n "$l" ]; then

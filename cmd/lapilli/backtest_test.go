@@ -210,6 +210,26 @@ func (r *prRepo) pullRequest(files map[string]string) {
 	r.git("merge", "--quiet", "--no-ff", "--no-edit", "pr")
 }
 
+// pullRequestTree is pullRequest written without the work tree, which a
+// file system that folds case can't hold two names of: files beside
+// main's, in a commit of their own, and HEAD a merge of it into main.
+func (r *prRepo) pullRequestTree(files map[string]string) {
+	r.t.Helper()
+	idx, dir := filepath.Join(r.t.TempDir(), "index"), r.t.TempDir()
+	env := r.env
+	r.env = append(slices.Clone(env), "GIT_INDEX_FILE="+idx)
+	defer func() { r.env = env }()
+	r.git("read-tree", "main")
+	for name, body := range files {
+		f := filepath.Join(dir, "blob")
+		os.WriteFile(f, []byte(body), 0o644)
+		r.git("update-index", "--add", "--cacheinfo", "100644,"+r.git("hash-object", "-w", f)+","+name)
+	}
+	tree := r.git("write-tree")
+	pr := r.git("commit-tree", tree, "-p", "main", "-m", "change the rules")
+	r.git("update-ref", "--no-deref", "HEAD", r.git("commit-tree", tree, "-p", "main", "-p", pr, "-m", "merge"))
+}
+
 // hostComment is a comment a stand-in host keeps: one deleted (Bitbucket's,
 // Azure DevOps' thread), or GitLab's own (a system note), never the
 // recipe's.
@@ -1292,6 +1312,68 @@ func TestBacktestRecipeIncidentsFromTarget(t *testing.T) {
 	sr := serveRun(t, backtestHosts[0], repo, srv)
 	if out, err := sr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "TARGET=main"}); err != nil || srv.sent()["expect_before"] != tight {
 		t.Errorf("through serve: %v, expect_before %q\n%s", err, srv.sent()["expect_before"], out)
+	}
+}
+
+// Two paths under PATHS that differ only in case, two files or a file and
+// a directory, are one on a file system that folds case (a macOS or
+// Windows runner's): one's rules would never be backtested, and the gates
+// would pass. Such a commit isn't read, on any runner, the pair said in
+// the job's log and not the comment; through lapilli serve too, nothing
+// sent. A directory named in two cases, each of its own files, is read.
+func TestBacktestRecipeCaseFolded(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	page := "groups:\n  - name: sneaky\n    rules:\n      - alert: PageEveryone\n        expr: vector(1)\n        labels: {severity: page}\n"
+	for name, c := range map[string]struct{ path, pair string }{
+		"two files":            {"alerts/Shop.yaml", "alerts/Shop.yaml and alerts/shop.yaml"},
+		"a file, a directory":  {"alerts/SHOP.yaml/page.yaml", "alerts/SHOP.yaml and alerts/shop.yaml"},
+		"below, in LOKI_PATHS": {"logs/team/Page.yaml", "logs/team/Page.yaml and logs/team/page.yaml"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logs := "groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"x\"}[5m])) > 5\n"
+			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "logs/team/page.yaml": logs})
+			repo.pullRequestTree(map[string]string{c.path: page})
+			why := "the pull request's commit holds two paths that differ only in case, which a file system that folds case (macOS's, Windows') writes as one: not read (the job's log says which)"
+			if strings.HasPrefix(c.path, "alerts/") {
+				rr := newRecipeRun(t, backtestHosts[0], repo)
+				out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+				block := failure(t, rr.body(), why)
+				if err == nil || !strings.Contains(out, "two paths that differ only in case, in the pull request's commit: "+c.pair) ||
+					strings.Contains(rr.body(), "SHOP") || strings.Contains(rr.body(), "Shop") {
+					t.Errorf("%v\n%s\n%s\n%s", err, block, rr.body(), out)
+				}
+			}
+			srv := newServeStandIn(t)
+			sr := serveRun(t, backtestHosts[0], repo, srv)
+			out, _ := sr.run([]string{"PATHS=alerts", "LOKI_PATHS=logs"})
+			failure(t, sr.body(), why)
+			if posts, _, _ := srv.counts(); posts != 0 || !strings.Contains(out, c.pair) {
+				t.Errorf("through serve: %d POSTs\n%s", posts, out)
+			}
+		})
+	}
+	// A letter past ASCII in another case, which a file system that folds
+	// case takes as one too: seen by the files written, fewer than the
+	// commit holds, where it does.
+	probe := t.TempDir()
+	os.WriteFile(filepath.Join(probe, "\u00e9"), nil, 0o600)
+	if _, err := os.Stat(filepath.Join(probe, "\u00c9")); err == nil {
+		repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "alerts/\u00e9.yaml": shopRules("10m")})
+		repo.pullRequestTree(map[string]string{"alerts/\u00c9.yaml": page})
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+		failure(t, rr.body(), "the pull request's commit holds files whose names this machine's file system takes as one, as one that folds case does (macOS's, Windows'): not read (the job's log says how many)")
+		if err == nil || !strings.Contains(out, "the pull request's commit: 3 files, 2 of them once written here") {
+			t.Errorf("past ASCII: %v\n%s", err, out)
+		}
+	}
+	// A directory in two cases, a file of its own in each: read.
+	repo := newPRRepo(t, map[string]string{"alerts/team/shop.yaml": shopRules("5m")})
+	repo.pullRequestTree(map[string]string{"alerts/TEAM/page.yaml": page})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	if out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil || strings.Contains(rr.body(), "differ only in case") {
+		t.Errorf("a directory in two cases: %v\n%s\n%s", err, rr.body(), out)
 	}
 }
 
