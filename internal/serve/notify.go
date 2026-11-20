@@ -158,6 +158,8 @@ type notice struct {
 	Comment *ledger.Comment `json:"comment,omitempty"`
 	// A source firings are copied in from, gone quiet.
 	Source *ledger.Source `json:"source,omitempty"`
+	// A source serve reads, down or back (sourcelist.go).
+	SourceRead *sourceNotice `json:"source_read,omitempty"`
 	// A digest: the team it is for, when it is for one, and the report.
 	Team string `json:"team,omitempty"`
 	Text string `json:"text,omitempty"`
@@ -207,6 +209,8 @@ func (s *Server) pageOf(n notice) string {
 		path = "/?team=" + url.QueryEscape(n.Team)
 	case n.Source != nil:
 		path = "/runs"
+	case n.SourceRead != nil:
+		path = "/sources"
 	case n.Proposal != nil:
 		path = fmt.Sprintf("/proposals/%d", n.Proposal.ID)
 	case n.Task != nil:
@@ -334,6 +338,8 @@ func (s *Server) line(n notice) string {
 		return tr(l, "lapilli: %s kept a quiet window, %q, from %s", who, n.Window.Title, n.Window.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Marked != nil:
 		return tr(l, "lapilli: %s kept a marked window of %s, %q, from %s", who, n.Marked.Kind, n.Marked.Title, n.Marked.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+	case n.SourceRead != nil:
+		return s.sourceLine(l, n.Event, n.SourceRead)
 	case n.Source != nil:
 		return tr(l, "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped", n.Source.Name, n.Source.Written.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Comment != nil:

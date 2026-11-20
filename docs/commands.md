@@ -535,6 +535,8 @@ The ledger:
                       most 3650d)
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
+  --keep-activity DUR drop the activity log's changes older than this, never
+                      sooner than --keep (default 800d; 0 keeps them all)
   --watch DUR         read the rules this often (default 1m)
   --alarms-every DUR  read each --alarms this often (default 10m), so the
                       clouds' request quotas hold

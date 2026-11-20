@@ -175,9 +175,9 @@ rest are written in the template that draws them.
 
 | Kind | States |
 |---|---|
-| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught; an incident source working (`✓ working`) |
+| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught; an incident source working (`✓ working`), and a source on the Sources page |
 | warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), an impact signal a selector of which has no data (`⚠ no data`), or read and waiting to be read again (`⚠ no record`, and the criteria's notice), proposals a try of the incident criteria would hold |
-| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), the incident criteria that failed to be read again, a try that couldn't read them |
+| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), a source failing or down on the Sources page, the incident criteria that failed to be read again, a try that couldn't read them |
 | info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired); an incident source set up and not read yet (`↻ waiting`), the incident criteria waiting to be read again |
 | unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run; an incident source not set up (`? not set up`), none written in four weeks; the impact signal with no Prometheus to read it from |
 | no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Cleanup page, whose names are neither well nor wrong |
@@ -258,7 +258,7 @@ The pages are in four groups, each named, not a link:
 | Monitoring | Overview `/`, Rules `/rules`, Incidents `/incidents`, Alert history `/firings` |
 | Improve | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
 | Reporting | Reports `/reports`, Outcomes `/outcomes` |
-| Administration | Teams `/teams`, Roles `/roles`, Settings `/settings`, Run history `/runs`, Cleanup `/orphans` |
+| Administration | Teams `/teams`, Roles `/roles`, Settings `/settings`, Sources `/sources`, Run history `/runs`, Cleanup `/orphans` |
 
 Groups and pages are named by nouns, what they hold, as Argo CD's and
 Grafana's sidebars are. They were verbs (See, Fix, Report, Manage) and
@@ -291,6 +291,7 @@ Firings and Proposals tabs. The URLs, the API and MCP are as they were.
 | group, `/manage` | Administration | 관리 | 管理 | Administración |
 | `/firings` | Alert history | 발화 이력 | アラート履歴 | Historial de alertas |
 | `/outcomes` | Outcomes | 변경 효과 | 変更の効果 | Resultados |
+| `/sources` | Sources | 출처 | ソース | Fuentes |
 | `/runs` | Run history | 실행 이력 | 実行履歴 | Historial de ejecuciones |
 | `/orphans` | Cleanup | 남은 기록 정리 | 整理対象 | Limpieza |
 
@@ -1329,6 +1330,34 @@ The Cleanup page lists, below the rules' names, the tasks and comments
 kept on impact windows read again that nothing found covers now (a task
 or a comment moves to the window found that covers most of the one it was
 on): each window's key, its tasks linked, its comments counted.
+
+### Sources, and the activity log
+
+`/sources`, in Administration after Settings: every source `serve` reads,
+a row each (its name, and the flag it is given by; where it is read, for
+an admin), with its kind, its state in the incident sources' words and
+colours (`✓ working`, `✕ failing`, `⚠ quiet`, `↻ waiting`, `source/…`), `✕
+down` beside it once it is down by its bounds (told or not), the reads in a row that failed, when
+it was last read well, the rules it gave, how far behind it is and how
+long its last read took, and its last error, as Run history says a run's.
+A line above the table counts them by state; below it, links to the
+incident sources on the Settings page and to Run history. The status
+banner's failure, when it is a source's read, links here, and so does Run
+history. Its words in Korean are 출처, as the incident sources' are (인시던트
+출처), and 다운 for down.
+
+`/activity` is an item of Run history (the breadcrumb Administration › Run
+history › Activity log; Run history marked in the sidebar as the page it
+is of). A GET form filters it, with no script: who, a kind (a select, the
+roles only for an admin), a team (a select of the teams), since and until
+(date fields), Show, and a link that clears who, kind and dates, the
+team staying the page's, as every link carries it. Below it, the export
+with the same filters, CSV and JSON. The table: when, who, the kind, what
+changed, and its before and after in a `<details>`, its `<pre>` wrapped
+at the cell's width; "Older" goes on from the page's last change, "The
+newest" back to the first. Korean: 활동 기록; a kind is the noun the
+sidebar uses for its page where there is one (변경 제안, 메인터넌스 윈도우,
+이벤트 구간, 남은 기록 정리), 사람의 판정 for a verdict.
 
 ### The Administration page
 

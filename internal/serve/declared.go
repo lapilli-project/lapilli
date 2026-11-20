@@ -86,8 +86,8 @@ var (
 	}
 	configFormats = []string{
 		"line %d: %s", "line %d (%s): %s", "the file isn't YAML: %s", "the file is more than %d bytes",
-		"one document only: --config is one file of teams, windows, reports, grants, goals, marked and freezes",
-		"want a mapping of teams, windows, reports, grants, goals, marked and freezes", "unknown key %q: want teams, windows, reports, grants, goals, marked or freezes",
+		"one document only: --config is one file of teams, windows, reports, grants, goals, marked, freezes and notify",
+		"want a mapping of teams, windows, reports, grants, goals, marked, freezes and notify", "unknown key %q: want teams, windows, reports, grants, goals, marked, freezes or notify",
 		"%s is given twice, on line %d too", "%s is a list", "%s is a text", "%s is a list of texts",
 		"labels are a mapping of a label's name to a value, or a list of values", "a label's name is a text", "label %s has no value",
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
@@ -180,7 +180,7 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	}
 	var more yaml.Node
 	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
-		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals, marked and freezes")
+		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals, marked, freezes and notify")
 	}
 	root := &doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
@@ -266,7 +266,7 @@ func null(n *yaml.Node) bool {
 func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) error {
 	if n.Kind != yaml.MappingNode {
 		if what == "" {
-			return badAt(n, "want a mapping of teams, windows, reports, grants, goals, marked and freezes")
+			return badAt(n, "want a mapping of teams, windows, reports, grants, goals, marked, freezes and notify")
 		}
 		return badAt(n, wantA[what], strings.Join(configKeys[what], ", "))
 	}
@@ -279,7 +279,7 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 		seen[k.Value] = k.Line
 		if k.Kind != yaml.ScalarNode || !slices.Contains(configKeys[what], k.Value) {
 			if what == "" {
-				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals, marked or freezes", k.Value)
+				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals, marked, freezes or notify", k.Value)
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}

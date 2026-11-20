@@ -61,7 +61,7 @@ var routeKinds = []string{
 	"change.opened", "change.applied", "change.refused", "change.failed", "change.undone", "change.amended",
 	"replay.differs",
 	"goal.missed",
-	"source.quiet",
+	"source.quiet", "source.down", "source.back",
 }
 
 // ownWay are the kinds that go where their own settings send them, never

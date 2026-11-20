@@ -1,0 +1,311 @@
+package serve
+
+import (
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"lapilli.dev/internal/ledger"
+)
+
+// activityServer is verdictServer with changes of each kind to find: a
+// note on payments' Errors, one on search's SearchLatency, a task of
+// payments', a role given, and a quiet window named for the rules' path.
+func activityServer(t *testing.T) *Server {
+	t.Helper()
+	ctx := context.Background()
+	s := verdictServer(t, nil)
+	o, err := s.owners(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pay, _ := o.team("payments")
+	if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: "pay's"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.PutNote(ctx, ledger.Note{Rule: "SearchLatency", Note: "search's"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "tune it", Kind: "tune", TeamID: pay.ID}, "ben"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "no one's"}, "ben"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutWindow(ctx, ledger.Window{Title: s.cfg.RulesPath, Start: now.Add(-2 * time.Hour), End: now.Add(-time.Hour)}, "ana", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// activityOf is what GET /api/v1/activity gives who for a query.
+func activityOf(t *testing.T, h http.Handler, query, who string) ([]apiLogged, string) {
+	t.Helper()
+	code, body := getAs(t, h, "/api/v1/activity?"+query, who)
+	if code != http.StatusOK {
+		t.Fatalf("%s as %s: %d %s", query, who, code, body)
+	}
+	var out struct {
+		Activity []apiLogged `json:"activity"`
+		Next     string      `json:"next"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out.Activity, out.Next
+}
+
+func whatsOf(ls []apiLogged) []string {
+	var out []string
+	for _, l := range ls {
+		out = append(out, l.What)
+	}
+	return out
+}
+
+// The activity log filters by who, kind, team and period, as the page and
+// the API alike read them, and refuses what it can't read.
+func TestActivityFilters(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	got, _ := activityOf(t, h, "who=ben", vViewer)
+	if w := whatsOf(got); len(w) != 2 || !strings.HasPrefix(w[0], "task ") || !strings.HasPrefix(w[1], "task ") {
+		t.Errorf("ben's: %q", w)
+	}
+	got, _ = activityOf(t, h, "kind=note", vViewer)
+	if w := whatsOf(got); len(w) != 2 || w[0] != "note on SearchLatency kept" {
+		t.Errorf("notes: %q", w)
+	}
+	// payments': its team, its rule's note and its task; not search's
+	// note, nor the task of no team.
+	got, _ = activityOf(t, h, "team=payments", vViewer)
+	w := strings.Join(whatsOf(got), "|")
+	if !strings.Contains(w, "note on Errors kept") || !strings.Contains(w, "team payments kept") || strings.Count(w, "task ") != 1 ||
+		strings.Contains(w, "SearchLatency") || strings.Contains(w, "quiet window") {
+		t.Errorf("payments': %s", w)
+	}
+	got, _ = activityOf(t, h, "since="+now.AddDate(1, 0, 0).Format("2006-01-02"), vViewer)
+	if len(got) != 0 {
+		t.Errorf("since next year: %q", whatsOf(got))
+	}
+	for _, q := range []string{"kind=everything", "team=nobody", "since=yesterday", "until=2026-01-01&since=2026-02-01", "limit=0", "limit=1001",
+		"format=xml", "before=x", "who=" + strings.Repeat("x", ledger.MaxName+1)} {
+		if code, body := getAs(t, h, "/api/v1/activity?"+q, vViewer); code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", q, code, body)
+		}
+		if code, _ := getAs(t, h, "/activity?"+q, vViewer); code != http.StatusBadRequest && !strings.HasPrefix(q, "limit") && !strings.HasPrefix(q, "format") {
+			t.Errorf("the page with %s: %d", q, code)
+		}
+	}
+}
+
+// Past a page, the activity log goes on from where it ended, on the page
+// as through the API, with nothing given twice or left out.
+func TestActivityPages(t *testing.T) {
+	ctx := context.Background()
+	s := activityServer(t)
+	for i := range 150 {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: fmt.Sprint(i)}, "cy"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := s.Handler()
+	_, page := getAs(t, h, "/activity?who=cy", vViewer)
+	if n := strings.Count(page, "note on Errors kept"); n != activityShown {
+		t.Errorf("the first page has %d", n)
+	}
+	i := strings.Index(page, `">Older</a>`)
+	j := strings.LastIndex(page[:max(i, 0)], `href="`)
+	if i < 0 || j < 0 {
+		t.Fatalf("no link to the older ones")
+	}
+	next := strings.ReplaceAll(page[j+len(`href="`):i], "&amp;", "&")
+	_, older := getAs(t, h, next, vViewer)
+	if n := strings.Count(older, "note on Errors kept"); n != 50 || strings.Contains(older, `">Older</a>`) || !strings.Contains(older, "The newest") {
+		t.Errorf("%s has %d", next, n)
+	}
+	seen := map[int64]bool{}
+	q := "who=cy&limit=60"
+	for range 5 {
+		got, n := activityOf(t, h, q, vViewer)
+		for _, c := range got {
+			if seen[c.ID] {
+				t.Errorf("%d given twice", c.ID)
+			}
+			seen[c.ID] = true
+		}
+		if n == "" {
+			break
+		}
+		q = "who=cy&limit=60&before=" + url.QueryEscape(n)
+	}
+	if len(seen) != 150 {
+		t.Errorf("%d of 150 read through the API", len(seen))
+	}
+}
+
+// The roles given and taken are an admin's to read, on the page, through
+// the API and in the export, as on Run history; anyone but an admin reads
+// the paths of serve's files as the flags that gave them.
+func TestActivityWhoReadsWhat(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	for _, c := range []struct {
+		who   string
+		admin bool
+	}{{vViewer, false}, {vEditor, false}, {vAdmin, true}} {
+		for _, p := range []string{"/activity", "/activity?kind=role", "/api/v1/activity", "/api/v1/activity?kind=role", "/api/v1/activity?format=csv"} {
+			code, body := getAs(t, h, p, c.who)
+			if code != http.StatusOK {
+				t.Fatalf("%s as %s: %d", p, c.who, code)
+			}
+			if has := strings.Contains(body, ledger.RoleGiven); has != c.admin {
+				t.Errorf("%s as %s: roles shown %v", p, c.who, has)
+			}
+			if p != "/activity?kind=role" && p != "/api/v1/activity?kind=role" {
+				if has := strings.Contains(body, s.cfg.RulesPath); has != c.admin {
+					t.Errorf("%s as %s: the rules' path shown %v", p, c.who, has)
+				}
+			}
+		}
+	}
+	// Who no role lets in reads none of it.
+	s.cfg.Viewers = []string{vAdmin, vEditor}
+	for _, p := range []string{"/activity", "/api/v1/activity", "/api/v1/activity?format=csv"} {
+		if code, body := getAs(t, h, p, "stranger@example.com"); code != http.StatusForbidden || strings.Contains(body, "note on") {
+			t.Errorf("%s as a stranger: %d", p, code)
+		}
+	}
+}
+
+// The CSV export takes no cell for a formula: one that starts with =, +,
+// -, @, a tab or a carriage return, or their full-width forms, starts with
+// '. It is the API's, with the page's filters, and kept by no cache.
+func TestActivityCSV(t *testing.T) {
+	ctx := context.Background()
+	s := activityServer(t)
+	evil := []string{`=HYPERLINK("https://evil.example","x")`, "+1+1", "-2+3", "@SUM(A1)", "\t=1", "  =1", "＝1"}
+	for _, by := range evil {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: by}, by); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/activity?format=csv&kind=note", nil)
+	r.Header.Set("X-Forwarded-Email", vViewer)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	code, body, hd := w.Code, w.Body.String(), w.Header()
+	if code != http.StatusOK || !strings.HasPrefix(hd.Get("Content-Type"), "text/csv") || hd.Get("Cache-Control") != "no-store" ||
+		!strings.Contains(hd.Get("Content-Disposition"), "attachment") {
+		t.Fatalf("%d %v", code, hd)
+	}
+	rows, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rows[0], ",") != "id,at,by,kind,what,before,after" {
+		t.Errorf("the header: %v", rows[0])
+	}
+	got := map[string]bool{}
+	for _, r := range rows[1:] {
+		for _, cell := range r {
+			if t0 := strings.TrimLeft(cell, " "); t0 != "" && strings.ContainsAny(t0[:1], "=+-@\t\r") || strings.HasPrefix(cell, "＝") {
+				t.Errorf("a cell a spreadsheet takes for a formula: %q", cell)
+			}
+		}
+		got[r[2]] = true
+	}
+	for _, by := range evil {
+		if !got["'"+by] {
+			t.Errorf("%q isn't said as text: %v", by, got)
+		}
+	}
+	if csvCell("ana") != "ana" || csvCell("") != "" || csvCell("\r=1") != "'\r=1" || csvCell("＋1") != "'＋1" {
+		t.Error("csvCell")
+	}
+}
+
+// --keep-activity keeps the activity log past --keep: a change older than
+// the firings kept stays, one older than the activity log kept goes.
+func TestKeepActivity(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) { c.Keep, c.KeepActivity = 30*24*time.Hour, 60*24*time.Hour })
+	if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: "x"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		t.Helper()
+		cs, err := s.l.Changes(ctx, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(cs)
+	}
+	before := count()
+	// The change, made now by the wall clock, is 45 days old: past the
+	// firings' 30, within the activity log's 60.
+	s.now = func() time.Time { return time.Now().Add(45 * 24 * time.Hour) }
+	if err := s.prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != before {
+		t.Errorf("pruned at 45 days: %d of %d changes kept", n, before)
+	}
+	s.now = func() time.Time { return time.Now().Add(61 * 24 * time.Hour) }
+	s.l.SetMeta(ctx, "pruned", "")
+	if err := s.prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 0 {
+		t.Errorf("pruned at 61 days: %d changes kept", n)
+	}
+}
+
+// A team's changes are found by looking each task and proposal up: a
+// request looks up activityLookups at most, says where it stopped, and the
+// next goes on from there, so that no change is passed over.
+func TestActivityTeamBounded(t *testing.T) {
+	ctx := context.Background()
+	s := activityServer(t)
+	for i := range activityLookups + 50 {
+		if _, err := s.l.PutTask(ctx, ledger.Task{Title: fmt.Sprint("no one's ", i)}, "dan"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := s.Handler()
+	q, pages, found := "team=payments", 0, false
+	for ; pages < 10; pages++ {
+		code, body := getAs(t, h, "/api/v1/activity?"+q, vViewer)
+		var out struct {
+			Activity []apiLogged `json:"activity"`
+			Next     string      `json:"next"`
+			Cut      bool        `json:"cut"`
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatalf("%s: %d %s", q, code, body)
+		}
+		if pages == 0 && (!out.Cut || out.Next == "" || len(out.Activity) != 0) {
+			t.Errorf("the first request didn't stop: %+v", out)
+		}
+		for _, c := range out.Activity {
+			found = found || c.What == "note on Errors kept"
+			if c.By == "dan" {
+				t.Errorf("another team's task given: %+v", c)
+			}
+		}
+		if out.Next == "" {
+			break
+		}
+		q = "team=payments&before=" + url.QueryEscape(out.Next)
+	}
+	if !found || pages < 1 {
+		t.Errorf("payments' note not found in %d requests", pages+1)
+	}
+}

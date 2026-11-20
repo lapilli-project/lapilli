@@ -64,6 +64,12 @@ spec:
             - {{ printf "--settle=%s" $s.settle | quote }}
             - {{ printf "--backfill=%s" $s.backfill | quote }}
             - {{ printf "--keep=%s" $s.keep | quote }}
+            {{- /* 0 keeps it all: given as it is. Empty, or left out (a
+            release from before it, upgraded with --reuse-values), serve's
+            own 800d. */}}
+            {{- if and (not (kindIs "invalid" $s.keepActivity)) (ne (toString $s.keepActivity) "") }}
+            - {{ printf "--keep-activity=%v" $s.keepActivity | quote }}
+            {{- end }}
             - {{ printf "--digest=%s" $s.digest | quote }}
             {{- if not $s.checkReplay.enabled }}
             - --check-replay=false
