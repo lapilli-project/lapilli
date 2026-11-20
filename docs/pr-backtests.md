@@ -146,7 +146,7 @@ What a tool reads is stable:
   | `incidents_given` | incidents were given, `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0. The firings were judged only when it is true and `no_record` false |
   | `incidents`, `incidents_changed` | incidents in the period, and those caught differently |
   | `no_record` | incidents were given, and none was on in the period or the two weeks before it (nor `--impact` read): nothing was judged, as without them |
-  | `expected` | the rules that differ were held to expectations, `--expect` |
+  | `expected` | the rules that differ were held to expectations, `--expect`, or, with `--promtool` and nothing else changed, rules alike were held to scenarios whose test files the change edited |
   | `expectations_broken` | expectations the change broke: met by the rules in place (or of a rule it adds), broken by those proposed |
   | `expectations_already_broken` | expectations broken on both sides, which aren't the change's |
   | `unexpected` | rules the change adds that no expectation holds |
@@ -159,6 +159,10 @@ What a tool reads is stable:
 
   Nothing that decides when the 42 rules fire has changed: nothing to replay.
   ```
+
+  but for a change that edited a scenario's test file (`--promtool`, its
+  rule alike on both sides): then the Expectations section follows, as
+  after the totals of a change, and `expected` is true.
 
 - The exit status is `lapilli verdict`'s, as it was: 0 when the report is
   written, whether or not anything changed; 1 when it failed, or a rule's

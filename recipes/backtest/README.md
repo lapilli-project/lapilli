@@ -102,7 +102,9 @@ And, as wanted:
   on `PATH`, installed in a step before; never one in the checkout, which
   would be the pull request's to run), which runs the scenarios `EXPECT`
   names (`scenarios:`, promtool's own test files, paths relative to it)
-  of the rules that differ, before and after (`--promtool`). The directory
+  of the rules that differ, and of a rule alike whose test file the pull
+  request edits (a pull request that edits only that is judged by it, and
+  commented on), before and after (`--promtool`). The directory
   `EXPECT` is in is read from each commit as `PATHS` is (`git archive`, a
   symbolic link refused, `MAX_TREE_FILES` and `MAX_TREE_BYTES`), and each
   test file there. promtool reads each, its `rule_files` the rule's group

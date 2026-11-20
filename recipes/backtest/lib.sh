@@ -1364,7 +1364,9 @@ judge() {
       true/* | */true) judged=1 ;;
     esac
   fi
-  if [ -n "$judged" ] && [ "$(summary nothing_changed)" != true ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
+  # Nothing changed is held too when the report held it to expectations:
+  # a scenario whose test file the change edited, run before and after.
+  if [ -n "$judged" ] && { [ "$(summary nothing_changed)" != true ] || [ "$(summary expected)" = true ]; } && { [ -n "$held" ] || [ -n "$required" ]; }; then
     broken=$(summary expectations_broken)
     unexpected=$(summary unexpected)
     unreplayed=$(summary unreplayed)
@@ -1958,9 +1960,11 @@ serve_cancel() {
 }
 
 # nothing_changed: whether the report says nothing that decides when a rule
-# fires changed, on its first line, from a run that went well.
+# fires changed, on its first line, from a run that went well, and held
+# nothing to expectations (as it holds a scenario whose test file the
+# change edited).
 nothing_changed() {
-  [ "$verdict" = 0 ] && [ -z "$problem" ] && [ -s "$tmp/report.md" ] && [ "$(summary nothing_changed)" = true ]
+  [ "$verdict" = 0 ] && [ -z "$problem" ] && [ -s "$tmp/report.md" ] && [ "$(summary nothing_changed)" = true ] && [ "$(summary expected)" != true ]
 }
 
 # compose: the comment, in $tmp/comment.md: the marker; the report, if

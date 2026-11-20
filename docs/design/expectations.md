@@ -725,7 +725,17 @@ Step 4, scenarios, as built:
   200 runs a comparison at most, the rest not known. Counted as budgets
   and catches are, so `--fail-expectations` and the recipes'
   `FAIL_ON_EXPECTATIONS` cover them; a test file the change edited is said
-  (`edited`). Not in the design: the summary's `scenarios_unrun`, those
+  (`edited`). **A test file edited, its rule alike** on both sides: the
+  scenario is run too, before and after, each side's test file as its
+  expectations file's directory has it (with `--expect-before`, which the
+  recipes give; without it, one file is read for both, so nothing is
+  edited), compared by what it holds; nothing else of the rule is held,
+  as it isn't replayed (`Comparison.Alike`, `scenario.Sides.TestEdited`).
+  So with no rule changed: the report says nothing changed, and then the
+  expectations, the summary's `expected` true; the recipes post it and
+  gate on it (a report that says nothing changed and holds nothing is
+  posted as before: not at all). 0.65.0 ran no scenario of a pull request
+  that edited only its test file (a review's Low). Not in the design: the summary's `scenarios_unrun`, those
   that couldn't be run after the change, promtool given and the rule one
   it runs (the test file unread, a time out, a crash, past the 200), and
   one run before the change and not known after it (the change moved the

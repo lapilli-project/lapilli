@@ -60,6 +60,12 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	if s.NothingChanged || c.Before == nil || c.After == nil {
 		text(NothingChangedHeading + "\n\n")
 		text(fmt.Sprintf("Nothing that decides when the %d rules fire has changed: nothing to replay.\n", c.Same))
+		// But a scenario's test file the change edited, run before and
+		// after.
+		if c.Expectations != nil && len(c.Expectations.Results) > 0 {
+			text("\n")
+			parts = append(parts, expectationsPart(c.Expectations))
+		}
 		return writeParts(w, parts, MarkdownLimit)
 	}
 	p := c.parts()

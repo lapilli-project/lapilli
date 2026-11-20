@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -117,6 +118,26 @@ func (s *Sides) RunScenario(side string, fromBefore bool, rule, path string) ver
 	x.Test = test
 	return x
 }
+
+// TestEdited says a scenario's test file differs between the sides
+// (verdict.TestEditor), by what it holds: before's path read in the
+// directory of --expect-before's file when fromBefore says so, else in
+// --expect's; after's in --expect's. One that can be read on neither side
+// isn't; one read on one side alone is.
+func (s *Sides) TestEdited(fromBefore bool, before, after string) bool {
+	root := s.After
+	if fromBefore {
+		root = s.Before
+	}
+	b, errB := ReadTest(root, before)
+	a, errA := ReadTest(s.After, after)
+	if errB != nil || errA != nil {
+		return (errB == nil) != (errA == nil)
+	}
+	return !bytes.Equal(a, b)
+}
+
+var _ verdict.TestEditor = (*Sides)(nil)
 
 // Judged is a run's result as an expectation's: passed met, failed broken
 // (what promtool said of it), unrun not known, and so.
