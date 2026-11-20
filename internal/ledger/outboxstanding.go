@@ -19,6 +19,9 @@ type OutboxStanding struct {
 	More        bool
 	GivenUp     int
 	GivenUpMore bool
+	// Waiting are the notices that wait to be sent, tried or not, of the
+	// latest FailedCounted waiting a place has (More, that it has more).
+	Waiting int
 }
 
 // FailedCounted is how many of a place's waiting notices, and of its given
@@ -70,6 +73,7 @@ func (l *Ledger) Standing(ctx context.Context, dests []string, since time.Time) 
 			return out, err
 		}
 		out.Failed += min(failed, FailedCounted)
+		out.Waiting += min(waiting, FailedCounted)
 		out.More = out.More || waiting > FailedCounted
 		out.GivenUp += min(givenUp, FailedCounted)
 		out.GivenUpMore = out.GivenUpMore || givenUp > FailedCounted

@@ -65,6 +65,9 @@ type Ledger struct {
 	// tellTo are where what happens is to be sent, by the outbox: none,
 	// and nothing is written there.
 	tellTo atomic.Pointer[[]string]
+	// router picks, of those places, the ones each event goes to (RouteBy):
+	// nil for all of them.
+	router atomic.Pointer[Router]
 	// recorded counts the writes that may have changed recorded rules or
 	// their alerts; shared keeps what was worked out from them at a count.
 	recorded atomic.Int64

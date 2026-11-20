@@ -183,7 +183,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		}
 	}
 	if s.cfg.Deploys != "" {
-		if err := s.syncDeploys(ctx, o); err != nil {
+		began := time.Now()
+		err := s.syncDeploys(ctx, o)
+		s.noteRead("deploys-file", began, -1, err)
+		if err != nil {
 			s.fail("deploys", err)
 		} else {
 			s.status.Lock()
@@ -205,7 +208,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// The marked file, as the deploys file; the expressions (--mark) read
 	// again over the last four weeks once their key is new.
 	if s.cfg.Marked != "" {
-		if err := s.syncMarked(ctx, o); err != nil {
+		began := time.Now()
+		err := s.syncMarked(ctx, o)
+		s.noteRead("marked-file", began, -1, err)
+		if err != nil {
 			s.fail("marked windows", err)
 		} else {
 			s.status.Lock()
@@ -261,14 +267,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
-	if len(s.dests()) > 0 {
-		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
-			s.fail("notifying", err)
-		}
-		if err := s.tellQuiet(ctx); err != nil {
-			s.fail("notifying", err)
-		}
-	}
+	s.tellDue(ctx)
 	// While the runs wait (--guard, --catch-up-hours, a 429 yielded to),
 	// what reads the history waits with them, for a later round: reviews
 	// of changes, the digest and what follows it, backtests again, and
@@ -966,6 +965,11 @@ func (s *Server) watch(ctx context.Context, raw string) {
 		if err := s.look(ctx, &raw); err != nil {
 			s.fail("reading the rules", err)
 		}
+		// A source of rules down, or back, told of as it is read, not
+		// at the next run.
+		if err := s.tellSources(ctx); err != nil {
+			s.fail("notifying", err)
+		}
 	}
 }
 
@@ -1290,6 +1294,10 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	var rs []rules.Rule
 	var docs []rules.Doc
 	var err error
+	// How the read went, for the Sources page and its notices
+	// (sourcelist.go): the rules where they are kept, then each source
+	// read beside them.
+	began, primary := time.Now(), s.cfg.Loaded || s.cfg.Grafana != "" || s.ruler != nil || s.following() || s.cfg.RulesPath != ""
 	switch {
 	case s.cfg.Loaded:
 		var d rules.Doc
@@ -1311,10 +1319,16 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})
 		s.sayPicked("--rules", picked)
 	}
-	if err != nil {
-		return nil, nil, err
+	if primary {
+		s.noteRead("rules", began, len(rs), err)
 	}
-	r, d, err := s.extras(ctx)
+	// What is read beside them is read, and noted, whatever the rules'
+	// read came to: one left unread because another failed would age into
+	// quiet on the Sources page, and be told down.
+	r, d, xerr := s.extras(ctx)
+	if err == nil {
+		err = xerr
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1322,28 +1336,51 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 }
 
 // extras are the rules read beside the rules: a cloud's own alarms, and a
-// Loki ruler's. A read that fails anywhere fails whole, so the version
-// stays as it was.
+// Loki ruler's. Each is read, and its read noted, whichever of the others
+// failed, and a read that fails anywhere fails the whole, so the version
+// stays as it was. One the time given ran out before is held (noteHeld):
+// not read, and not aging meanwhile.
 func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	agent := "lapilli/" + s.cfg.Version
 	var rs []rules.Rule
 	var docs []rules.Doc
-	for _, a := range s.alarms {
-		d, err := a.Docs(ctx, s.alarmsEvery())
-		if err != nil {
-			return nil, nil, err
+	var failed error
+	// read reports whether the source id is read: false, held, once the
+	// time is out.
+	read := func(id string) bool {
+		if ctx.Err() != nil {
+			s.noteHeld(id)
+			failed = cmp.Or(failed, ctx.Err())
+			return false
 		}
-		r, err := rules.FromDocs(d)
+		return true
+	}
+	for _, a := range s.alarms {
+		if !read("alarms/" + a.Source) {
+			continue
+		}
+		began := time.Now()
+		d, err := a.Docs(ctx, s.alarmsEvery())
+		var r []rules.Rule
+		if err == nil {
+			r, err = rules.FromDocs(d)
+		}
+		s.noteRead("alarms/"+a.Source, began, len(r), err)
 		if err != nil {
-			return nil, nil, err
+			failed = cmp.Or(failed, err)
+			continue
 		}
 		rs, docs = append(rs, r...), append(docs, d...)
 	}
 	// A Loki's ruler's rules, beside them, the same way.
 	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant, Limit: s.cfg.LokiLimit}
+	began := time.Now()
 	switch {
+	case (s.cfg.LokiLoaded || s.cfg.LokiRules != "") && !read("loki"):
+		// Held: the time ran out on another.
 	case s.cfg.LokiLoaded:
 		r, d, err := source.LokiRules(ctx, l, agent, func(what string) { s.log.Warn(what) })
+		s.noteRead("loki", began, len(r), err)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1366,6 +1403,7 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 		rs, docs = append(rs, r...), append(docs, d...)
 	case s.cfg.LokiRules != "":
 		r, d, notes, err := source.LokiFiles(s.cfg.LokiRules)
+		s.noteRead("loki", began, len(r), err)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1379,6 +1417,9 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 		}
 		s.places.Unlock()
 		rs, docs = append(rs, r...), append(docs, d...)
+	}
+	if failed != nil {
+		return nil, nil, failed
 	}
 	return rs, docs, nil
 }
@@ -2544,7 +2585,7 @@ func (s *Server) prune(ctx context.Context) error {
 		return err
 	}
 	s.status.set("pruning")
-	if err := s.l.Prune(ctx, s.now().Add(-s.cfg.Keep)); err != nil {
+	if err := s.l.PruneKeeping(ctx, s.now().Add(-s.cfg.Keep), s.activityBefore()); err != nil {
 		return err
 	}
 	return s.l.SetMeta(ctx, "pruned", today)
@@ -2558,4 +2599,23 @@ func (s *Server) tasksLine(ctx context.Context, from, to time.Time, team int64) 
 		return "", err
 	}
 	return tr(s.cfg.Lang, "Tasks: %d open, %d overdue, %d done in the week.", open, late, done), nil
+}
+
+// tellDue tells what is told once as the leader comes round to it: tasks
+// gone overdue, sources quiet, down or back. With nowhere to tell it
+// (toldTo), nothing is looked at, so that none of it is marked told with
+// no notice written.
+func (s *Server) tellDue(ctx context.Context) {
+	if len(s.toldTo()) == 0 {
+		return
+	}
+	if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
+		s.fail("notifying", err)
+	}
+	if err := s.tellQuiet(ctx); err != nil {
+		s.fail("notifying", err)
+	}
+	if err := s.tellSources(ctx); err != nil {
+		s.fail("notifying", err)
+	}
 }

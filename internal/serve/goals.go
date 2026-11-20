@@ -1024,7 +1024,7 @@ type goalNoticeTeam struct {
 // week, or a later one, as by a leader whose clock was ahead, is passed
 // over.
 func (s *Server) tellGoals(ctx context.Context, lines []goalLine, last int64) error {
-	dests := s.dests()
+	dests := s.toldTo()
 	if len(dests) == 0 {
 		return nil
 	}

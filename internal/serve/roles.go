@@ -282,9 +282,20 @@ func (s *Server) need(at role, h http.HandlerFunc) http.HandlerFunc {
 			s.oops(w, r, s.forbidden(at))
 			return
 		}
+		r = s.asAdmin(r)
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		h(w, r)
 	}
+}
+
+// asAdmin marks an admin's request as an admin's to the ledger's writes:
+// a rule's team moved while the boundaries of change are declared is
+// theirs alone (ledger.ErrRuleTeam).
+func (s *Server) asAdmin(r *http.Request) *http.Request {
+	if s.role(r) == admin {
+		return r.WithContext(ledger.AsAdmin(r.Context()))
+	}
+	return r
 }
 
 // teamWrite is a handler that changes the ledger, for editors, and for a
@@ -304,6 +315,7 @@ func (s *Server) teamWrite(h http.HandlerFunc) http.HandlerFunc {
 			}
 			r = r.WithContext(ledger.WithTeams(r.Context(), teams))
 		}
+		r = s.asAdmin(r)
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		h(w, r)
 	}

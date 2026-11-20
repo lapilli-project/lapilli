@@ -138,6 +138,12 @@ func (p *run) secrets() {
 	for _, name := range slices.Sorted(maps.Keys(s.ReportDests)) {
 		add("--report-dest "+name, s.ReportDests[name], 0, true)
 	}
+	for _, name := range slices.Sorted(maps.Keys(s.WebhookDests)) {
+		add("--webhook-dest "+name, s.WebhookDests[name], 0, true)
+	}
+	for _, name := range slices.Sorted(maps.Keys(s.WebhookDestSecrets)) {
+		add("--webhook-dest-secret "+name, s.WebhookDestSecrets[name], report.SigningKeyLeast, false)
+	}
 	if len(all) == 0 {
 		return
 	}
@@ -150,7 +156,7 @@ func (p *run) secrets() {
 	for _, x := range all {
 		b, err := os.ReadFile(x.path)
 		text := strings.TrimSpace(string(b))
-		if x.flag == "--notify-webhook-secret-file" {
+		if x.flag == "--notify-webhook-secret-file" || strings.HasPrefix(x.flag, "--webhook-dest-secret ") {
 			text = string(report.TrimKey(b)) // as serve reads it: spaces are of the key
 		}
 		switch {
@@ -183,7 +189,7 @@ func (p *run) secrets() {
 		it.State, it.Why = Problem, strings.Join(bad, "; ")
 		it.Fix = "serve refuses a token it can't read, or one another holds; a webhook that holds no URL posts nothing"
 	}
-	if len(s.Slack)+len(s.NotifyWebhook)+len(s.TeamDigests)+len(s.ReportDests) > 0 {
+	if len(s.Slack)+len(s.NotifyWebhook)+len(s.TeamDigests)+len(s.ReportDests)+len(s.WebhookDests) > 0 {
 		it.Why = strings.TrimPrefix(it.Why+"; whether a webhook takes a post isn't asked: knowing it would post", "; ")
 	}
 	p.add(it)

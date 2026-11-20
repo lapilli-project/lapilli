@@ -95,20 +95,38 @@ func SlackText(report string) string {
 // SlackMessage posts one line of text, not a report, to the Slack incoming
 // webhook whose URL is in file: for what happened, as it happens.
 func SlackMessage(ctx context.Context, file, text string) error {
-	hook, err := secretURL(file, "--slack-webhook-file")
-	if err != nil {
-		return err
-	}
+	return SlackMessageFrom(ctx, file, "--slack-webhook-file", text)
+}
+
+// SlackMessageFrom is SlackMessage to the webhook in file, which flag
+// named: its errors say the flag, never the file's URL.
+func SlackMessageFrom(ctx context.Context, file, flag, text string) error {
 	text = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(text)
 	// Shown as written: a name in it from outside, a rule's or a task's,
 	// makes no bold text and no preview of a link.
-	body, err := json.Marshal(map[string]any{"text": text, "mrkdwn": false, "unfurl_links": false, "unfurl_media": false})
+	return slackPost(ctx, file, flag, text, false)
+}
+
+// SlackMarkup posts text as Slack's markup (mrkdwn) to the webhook in file,
+// which flag named: a template an admin wrote, its links and mentions read
+// as such, with everything in it from outside escaped already, by the
+// caller. No link is previewed.
+func SlackMarkup(ctx context.Context, file, flag, text string) error {
+	return slackPost(ctx, file, flag, text, true)
+}
+
+func slackPost(ctx context.Context, file, flag, text string, mrkdwn bool) error {
+	hook, err := secretURL(file, flag)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{"text": text, "mrkdwn": mrkdwn, "unfurl_links": false, "unfurl_media": false})
 	if err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
 	if err != nil {
-		return errors.New("--slack-webhook-file: the file should hold the webhook's URL")
+		return fmt.Errorf("%s: the file should hold the webhook's URL", flag)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return send(req, "Slack")
@@ -119,13 +137,20 @@ func SlackMessage(ctx context.Context, file, text string) error {
 // a file, never shown. With keyFile, the post is signed with the key in it,
 // at the time at (Sign), read for each post so that it can be rotated.
 func Webhook(ctx context.Context, file string, body []byte, key, keyFile string, at time.Time) error {
-	hook, err := secretURL(file, "--notify-webhook-file")
+	return WebhookFrom(ctx, file, "--notify-webhook-file", body, key, keyFile, "--notify-webhook-secret-file", at)
+}
+
+// WebhookFrom is Webhook to the URL in file, which flag named, signed with
+// the key in keyFile, which keyFlag named: its errors say the flag, never
+// the URL or the key.
+func WebhookFrom(ctx context.Context, file, flag string, body []byte, key, keyFile, keyFlag string, at time.Time) error {
+	hook, err := secretURL(file, flag)
 	if err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
 	if err != nil {
-		return errors.New("--notify-webhook-file: the file should hold a URL")
+		return fmt.Errorf("%s: the file should hold a URL", flag)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "lapilli")
@@ -133,7 +158,7 @@ func Webhook(ctx context.Context, file string, body []byte, key, keyFile string,
 	if keyFile != "" {
 		// Never sent unsigned: a key that can't be read fails the post,
 		// which is tried again.
-		k, err := SigningKey(keyFile)
+		k, err := SigningKey(keyFile, keyFlag)
 		if err != nil {
 			return err
 		}
@@ -148,15 +173,17 @@ const SigningKeyLeast = 32
 
 // SigningKey is the key in a file that a webhook's posts are signed with:
 // what it holds, less one line break at its end (a file written with echo
-// has one), 32 bytes at least. Its errors never hold the key.
-func SigningKey(file string) ([]byte, error) {
+// has one), 32 bytes at least. Its errors say flag, the flag that named the
+// file (--notify-webhook-secret-file, or --webhook-dest-secret NAME), and
+// never hold the key.
+func SigningKey(file, flag string) ([]byte, error) {
 	b, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("--notify-webhook-secret-file: %w", err)
+		return nil, fmt.Errorf("%s: %w", flag, err)
 	}
 	k := TrimKey(b)
 	if len(k) < SigningKeyLeast {
-		return nil, fmt.Errorf("--notify-webhook-secret-file: want a key of %d bytes at least, not %d", SigningKeyLeast, len(k))
+		return nil, fmt.Errorf("%s: want a key of %d bytes at least, not %d", flag, SigningKeyLeast, len(k))
 	}
 	return k, nil
 }

@@ -644,6 +644,15 @@ search) and the rules list's badges and filters are in [ui.md](ui.md).
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).
 - `/incidents`, `/incidents/ID`, `/firings?day=`, `/settings`, `/runs`.
+- `/sources`: every source `serve` reads (the rules and what is read beside
+  them, Prometheus as the runs ask it, the incidents, deploys and marked
+  files, the impact signals, the on-call schedules, what jobs copy in),
+  each with when it was last read well, its last error, the rules it gave,
+  how far behind it is, and a state; a source down told once to the webhook
+  and Slack (`source.down`), and once back (`source.back`). `/activity`:
+  every change kept, by who, kind, team and period, a page at a time, and
+  `/api/v1/activity` exports it as JSON or CSV
+  ([serveops.md](serveops.md#sources-the-activity-log-and-the-daily-writes-through-the-api)).
 - `/search?q=`: rules, incidents and teams by name ([ui.md](ui.md)).
 - `/api/v1/report?from=&to=`: `lapilli verdict --json`'s report for a period
   (up to 31 days with every firing, a year without: `firings=false`);
@@ -654,7 +663,9 @@ search) and the rules list's badges and filters are in [ui.md](ui.md).
   does, the aliases that answer's own.
   `/api/v1/incidents` (GET, POST, PUT, DELETE), `/api/v1/rules`, `/runs`,
   `/settings`, `/outcomes`, `/summary` (each week and team, for dashboards
-  and other tools: [noc.md](noc.md)).
+  and other tools: [noc.md](noc.md)), `/sources`, `/activity`; an impact
+  window decided (`POST /api/v1/incidents/{id}/decide`) and a firing
+  written down as real (`POST /api/v1/firings/real`), as their forms do.
 - `/metrics`: `--metrics` over the last seven days, and `serve`'s own (the
   cursor, how long the last run took, runs by kind and result; the firings
   the reviewed changes avoided, the changes by how they came out, when the

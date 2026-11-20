@@ -74,7 +74,7 @@ Grafana dashboard of them.
 The pages are in a sidebar of four groups, named as a console names them
 (Monitoring: Overview, Rules, Incidents, Alert history; Improve: Tasks,
 Proposals, Quiet windows; Reporting: Reports, Outcomes;
-Administration: Teams, Roles, Settings, Run history, Cleanup), a
+Administration: Teams, Roles, Settings, Sources, Run history, Cleanup), a
 menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
@@ -86,6 +86,29 @@ name and `is:noisy`, `noisy:episodes`, `is:unrecorded`, `severity:critical`, `st
 chip that takes it away, and the URL keeps them all; each rule's own labels
 are chips too, each picking the rules with it
 ([docs/design/ui.md](design/ui.md)).
+
+The Sources page (`/sources`) lists every source `serve` reads, as Argo
+CD lists its applications: the rules where they are kept and what is read
+beside them (a cloud's alarms, Loki's rules), Prometheus as the runs ask
+it, the incidents, deploys and marked files, the impact signals, the
+on-call schedules, and what jobs copy in; each with when it was last read
+well, its last error (without the paths of `serve`'s files but to an
+admin, and without a credential to anyone), the rules it gave, how far
+behind it is, and a state: working, failing, quiet or waiting. A source
+whose reads fail three times in a row, or that fails or goes quiet past
+its bound, is down: the webhook and Slack are told once (`source.down`),
+and once it has read well again for 15 minutes (`source.back`); one that
+flaps is told of once, and again an hour after it was told back at the
+soonest. `/api/v1/sources?all=true` gives the same.
+
+The activity log (`/activity`, from Run history) lists every change made
+through the UI, the API, `--config` and by Lapilli itself, 100 a page,
+filtered by who, kind, team and period, and `/api/v1/activity` exports it
+as JSON or CSV with the same filters (a cell a spreadsheet would take for
+a formula starts with `'`). The roles given and taken are an admin's to
+read, as on Run history. It is kept for `--keep-activity` (800 days
+unless given, or `--keep` when longer; never less than `--keep`; 0 keeps
+it all, as `--keep 0` does), past the firings it is about.
 
 Beside its firings, each rule's are counted as **episodes**, one problem
 however many alerts it is: its firings with the same values of the match
@@ -1119,6 +1142,38 @@ What it writes is noted as `tasks-token` and isn't counted as anyone's use.
 In the chart, `serve.trackers` names its Secret and, with `tracker`, runs the
 script as a CronJob.
 
+## Who is told what
+
+By default, every event (a task made, a proposal approved, a goal missed, a
+source gone quiet) goes to `--notify-webhook-file` and, with
+`--notify-slack`, to Slack. Routes in `--config`, under `notify:`, send
+each by its kind, its team and its labels instead, to destinations the
+flags name: `webhook`, `slack`, `team:NAME` (`--team-digest`), a
+`--report-dest`'s name, or a JSON webhook of its own,
+`--webhook-dest NAME=FILE`, signed with `--webhook-dest-secret NAME=FILE`.
+
+```yaml
+notify:
+  routes:
+    - kinds: [task.*, proposal.*]
+      teams: [payments]
+      to: [team:payments]
+    - labels: {severity: page}
+      to: [oncall-hook]
+  default: [slack]
+  templates:
+    team:payments: "*{{.Event}}* {{.Title}} <{{.Link}}|open>"
+```
+
+The first route that takes an event decides, unless it says
+`continue: true`; what none takes goes to `default`, which routes need, so
+nothing is dropped. A template is text and fields (`{{.Event}}`,
+`{{.Line}}`, `{{.Link}}`, `{{.Rule}}`, `{{.Team}}`, `{{.Title}}`,
+`{{.ID}}`, `{{.By}}`, `{{.Labels}}`, `{{.At}}`), each value escaped for
+where it goes. The Settings page shows the routes in force and how each
+destination's notices went; they are changed in the file
+([design/notifications.md](design/notifications.md#who-is-told-what)).
+
 ## Signed posts to the webhook
 
 Whoever learns the webhook's URL can post to it, and a receiver that turns
@@ -1142,7 +1197,9 @@ it can't read, or without `--notify-webhook-file`. It is read for each post,
 so it can be rotated, and it and the signatures are never shown or logged.
 A key that can't be read later fails the post, which is tried again: nothing
 is sent unsigned. Without the flag, a post carries neither header, as
-before.
+before. A webhook routes send to by a name of its own, `--webhook-dest
+NAME=FILE`, is signed the same way with its own key,
+`--webhook-dest-secret NAME=FILE`.
 
 To check a post, read its body as it came, before parsing it:
 

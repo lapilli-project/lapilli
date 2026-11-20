@@ -679,7 +679,7 @@ func TestParseConfigGoals(t *testing.T) {
 		{"goals:\n  - {name: a, measure: critical.firings, at_most: 1}\n  - {name: b, measure: critical.firings, critical: [p1], at_most: 1}\n" +
 			"  - {name: c, measure: critical.firings, critical: [p2], at_most: 1}\n  - {name: d, measure: critical.firings, critical: [p3], at_most: 1}\n" +
 			"  - {name: e, measure: critical.firings, critical: [p4], at_most: 1}\n", "line 6: the goals count 4 lists of severities as critical at most"},
-		{"goal:\n  - {name: a}\n", `line 1: unknown key "goal": want teams, windows, reports, grants, goals, marked or expectations`},
+		{"goal:\n  - {name: a}\n", `line 1: unknown key "goal": want teams, windows, reports, grants, goals, marked, freezes, notify or expectations`},
 	} {
 		_, err := ParseConfig([]byte(c.body), time.UTC)
 		if err == nil || !strings.Contains(configText("en", err), c.want) {

@@ -568,6 +568,8 @@ type evidence struct {
 	// and what holding it to its expectations found (docs/design/
 	// expectations.md, step 5).
 	Add *addEvidence `json:"add,omitempty"`
+	// ownedBy is who owned its rule as it was proposed (bounds.go).
+	ownedBy
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -897,6 +899,11 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		return 0, bad("a proposal's kind is for, threshold, disable, delete or says")
 	}
 	ev.Edit = &e
+	// Who owns it, as it is and as proposed: a team's editor proposes for
+	// their team's rules alone (bounds.go).
+	if ev.ownedBy, err = s.proposedOwners(ctx, f, r, want); err != nil {
+		return 0, err
+	}
 	says := q.Kind == ledger.KindSays
 	hash := ruleHash
 	if says {
@@ -1385,6 +1392,8 @@ func (s *Server) carryOut(ctx context.Context) error {
 	// approved so this round, and the rest goes on.
 	if held, err := s.heldPromotable(ctx); err != nil {
 		s.log.Warn("no proposal approved as fewer approvals are needed this round: which are stale couldn't be read", "err", err)
+	} else if held, err = s.alsoFrozen(ctx, held); err != nil {
+		s.log.Warn("no proposal approved as fewer approvals are needed this round: which a change freeze holds couldn't be read", "err", err)
 	} else if _, err := s.l.Promote(ctx, s.approvals(), held); err != nil {
 		return err
 	}
@@ -1420,6 +1429,13 @@ func (s *Server) carryOut(ctx context.Context) error {
 		} else if fires {
 			continue
 		}
+		// Its team's boundaries, asked again now (bounds.go): refused, or
+		// waiting while a freeze holds it.
+		if held, err := s.heldByBounds(ctx, p); err != nil {
+			return err
+		} else if held {
+			continue
+		}
 		wait, err := s.overLimit(ctx, p.Kind)
 		if err != nil {
 			return err
@@ -1431,6 +1447,8 @@ func (s *Server) carryOut(ctx context.Context) error {
 			switch {
 			case errors.Is(err, errPaused):
 				return nil // paused while it was checked again: it waits, approved
+			case errors.Is(err, errBoundsHold):
+				continue // its team's boundaries hold it now: it waits, approved, or was refused
 			case errors.Is(err, errFires):
 				if _, _, err := s.waitsWhileFiring(ctx, p, true); err != nil {
 					return err
@@ -1515,12 +1533,16 @@ type refusal struct{ why string }
 func (r refusal) Error() string { return r.why }
 
 // carry checks a proposal again and carries it out: handed to a recipe, or
-// sent to Grafana. The pause is looked at again just before either, since
-// checking again can take as long as a backtest.
+// sent to Grafana. The pause, and its team's boundaries (boundsAgain), are
+// looked at again just before either, since checking again can take as
+// long as a backtest.
 func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	step, to, err := s.checkAgain(ctx, p)
 	if err == nil && p.Reason == firesNote {
 		step.Reason = firedNote // said once it is sent or handed out
+	}
+	if err == nil && frozeNote(p.Reason) {
+		step.Reason = thawedNote
 	}
 	if err == nil {
 		switch p.Path {
@@ -1550,6 +1572,9 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	}
 	if s.changesPaused() {
 		return errPaused
+	}
+	if err := s.boundsAgain(ctx, p); err != nil {
+		return err
 	}
 	step.Applied = true
 	_, err = s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, to, ledger.Proposer, step)

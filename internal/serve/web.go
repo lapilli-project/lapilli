@@ -140,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	s.orphansRoutes(mux, page)
 	s.changesRoutes(mux, page)
 	s.signInRoutes(mux, page)
+	s.auditRoutes(mux, page)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
@@ -163,7 +164,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/incidents/{id}", s.write(s.apiPutIncident))
 	mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.write(s.apiDeleteIncident))
 	mux.HandleFunc("GET /api/v1/runs", s.cached(s.apiRuns))
-	mux.HandleFunc("GET /api/v1/sources", s.cached(s.apiSources))
+	mux.HandleFunc("GET /api/v1/sources", s.apiSourcesOf())
 	mux.HandleFunc("GET /api/v1/settings", s.cached(s.apiSettings))
 	mux.HandleFunc("GET /api/v1/outcomes", s.cached(s.apiOutcomes))
 	mux.HandleFunc("GET /api/v1/summary", s.apiSummary)
@@ -1131,6 +1132,8 @@ type statusView struct {
 	// Why is why the reader may change nothing, when it isn't their role
 	// (see Server.why).
 	Why string
+	// ErrSource says Err is a source's read, which the Sources page shows.
+	ErrSource bool
 }
 
 // statusView is the status banner in language l, as an admin reads it or
@@ -1158,6 +1161,7 @@ func (s *Server) statusView(l string, adminReads bool) statusView {
 			why = s.redactPaths(why, l)
 		}
 		v.Err = tr(l, st.ErrWhat) + ": " + why
+		v.ErrSource = errOfSource(st.ErrWhat)
 	}
 	return v
 }

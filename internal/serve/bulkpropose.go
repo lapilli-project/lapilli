@@ -113,9 +113,10 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 	case len(rules) > maxPropose:
 		s.oops(w, r, bad("at most %d rules at a time for proposals: pick fewer", maxPropose))
 		return
-	case s.role(r) < editor:
-		// Proposing is an editor's, as POST /proposals is: a team's
-		// editor's are refused, each, for that.
+	case s.role(r) < editor && len(s.editsTeams(r)) == 0:
+		// Proposing is an editor's, as POST /proposals is, or a team's
+		// editor's, of their team's rules, each refused else as another
+		// team's (bounds.go).
 		res.Editors = len(rules)
 		back(w, r, bulkBack(from, "/rules", "propose", res))
 		return
@@ -153,7 +154,7 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 		s.proposeCount(&res, r, err, len(rules))
 		back(w, r, bulkBack(from, "/rules", "propose", res))
 		return
-	case err != nil && !errors.Is(err, ledger.ErrProposed):
+	case err != nil && !errors.Is(err, ledger.ErrProposed) && !errors.Is(err, ledger.ErrNotYourTeam):
 		s.oops(w, r, err)
 		return
 	}
@@ -365,6 +366,10 @@ func (s *Server) proposeCount(b *bulkResult, r *http.Request, err error, left in
 		return false
 	case errors.Is(err, ledger.ErrProposed):
 		why = "already"
+	case errors.Is(err, ledger.ErrNotYourTeam):
+		// Another team's rule, to a team's editor: the rest go on.
+		b.Theirs++
+		return false
 	case errors.Is(err, ledger.ErrTooManyProposals):
 		b.Limit += left
 		return true
@@ -413,7 +418,7 @@ func (s *Server) madeBy(r *http.Request, b *bulkResult) (ok bool) {
 	}
 	claimed := b.Done > 0 || len(b.Made) > 0
 	b.Made, b.Done = own, len(own)
-	b.None = b.Done+b.Theirs+b.Refused+b.Already+b.Failed+b.Untried+b.Editors+b.Limit+b.Tries+b.Unreplayed+b.Absent+b.Same+b.NoSuggest+b.Late == 0
+	b.None = b.Done+b.Theirs+b.Refused+b.Already+b.Failed+b.Untried+b.Editors+b.Admins+b.Limit+b.Tries+b.Unreplayed+b.Absent+b.Same+b.NoSuggest+b.Late == 0
 	return !(b.None && claimed)
 }
 

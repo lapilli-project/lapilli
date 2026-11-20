@@ -594,8 +594,10 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 	}
 	return l.write(ctx, func(t *txn) error {
 		// A team's editors keep the rule's team as it is: moving a rule in or
-		// out of a team is an editor's. Which rules are the team's, the
-		// server checks: the ledger doesn't know each rule's labels.
+		// out of a team is an editor's, and an admin's alone while the
+		// boundaries of change are declared (teamMovable). Which rules are
+		// the team's, the server checks: the ledger doesn't know each rule's
+		// labels.
 		var was int64
 		if err := t.QueryRowContext(t.ctx, "SELECT coalesce(team_id, 0) FROM notes WHERE rule = ?", n.Rule).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -604,6 +606,9 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 			return ErrNotYourTeam
 		}
 		if was != n.TeamID {
+			if err := l.teamMovable(t); err != nil {
+				return err
+			}
 			// Who owns the rule changed: a team's window may quiet it now,
 			// or no longer.
 			if err := l.pendTeamWindows(t); err != nil {

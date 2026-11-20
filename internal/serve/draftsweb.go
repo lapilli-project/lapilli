@@ -148,15 +148,6 @@ func draftBadge(state string) stateBadge {
 	return b
 }
 
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // postHistoryDraft keeps the history's draft of a rule, for another to
 // accept: a team's editor, of their own team's rule.
 func (s *Server) postHistoryDraft(w http.ResponseWriter, r *http.Request) {

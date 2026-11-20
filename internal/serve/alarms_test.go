@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -192,4 +193,39 @@ func TestRetireWaitsWhileFiring(t *testing.T) {
 			t.Errorf("once it stopped: %s %q", p.State, p.Reason)
 		}
 	})
+}
+
+// One cloud's alarms failing leave the next read, and noted, by its own
+// read: the version fails whole, and the other is working, not left to go
+// quiet.
+func TestAlarmsBesideAFailingOne(t *testing.T) {
+	ctx := context.Background()
+	cw := alarmtest.NewCloudWatch("us-east-1")
+	cw.Add(map[string]any{"AlarmName": "cpu-high", "Namespace": "AWS/EC2", "MetricName": "CPUUtilization", "Statistic": "Average",
+		"Period": 300, "EvaluationPeriods": 3, "Threshold": 90, "ComparisonOperator": "GreaterThanThreshold"}, "OK", nil)
+	var failing atomic.Bool
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failing.Load() && strings.Contains(r.Host, "eu-west-1") {
+			http.Error(w, "not allowed", http.StatusForbidden)
+			return
+		}
+		cw.ServeHTTP(w, r)
+	})
+	s := alarmsServer(t, "cloudwatch-eu", "https://monitoring.eu-west-1.amazonaws.com", h, func(c *Config) {
+		c.Alarms = append(c.Alarms, AlarmsAt{Source: "cloudwatch-us", URL: "https://monitoring.us-east-1.amazonaws.com"})
+		c.AlarmsEvery = -1 // each read asks again
+	})
+	failing.Store(true)
+	later := now.Add(time.Hour)
+	s.now = func() time.Time { return later }
+	if _, _, err := s.readRules(ctx); err == nil {
+		t.Fatal("a cloud's alarms failing didn't fail the read")
+	}
+	reads := s.readsNow()
+	if r := reads["alarms/cloudwatch-eu"]; r.InARow != 1 || r.Err == "" {
+		t.Errorf("the failing one: %+v", r)
+	}
+	if r := reads["alarms/cloudwatch-us"]; !r.OK.Equal(later) || r.Rules != 1 {
+		t.Errorf("the one after it: %+v", r)
+	}
 }

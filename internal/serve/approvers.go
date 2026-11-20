@@ -52,6 +52,11 @@ func (s *Server) approversIn() approversIn {
 // more approvals it needs; Approved, that someone approved it. When fewer
 // are left than it needs, and none is open, it can't be approved until the
 // flags change.
+//
+// Team is its team, whose approvers --config declares, when it is one
+// team's (bounds.go): TeamLeft, of those, the ones left, TeamOpen, that
+// one of them may be more than a person. They may approve it beside the
+// approvers of every team, and without them.
 type mayApprove struct {
 	In       approversIn
 	Named    bool
@@ -59,15 +64,32 @@ type mayApprove struct {
 	Open     bool
 	Need     int
 	Approved bool
+	Team     string
+	TeamLeft []string
+	TeamOpen bool
 }
 
 // Stuck says fewer are left who may approve it than it needs: none, when
-// no one approved it yet, is No one.
-func (m mayApprove) Stuck() bool { return m.In.No == "" && !m.Open && len(m.Left) < m.Need }
+// no one approved it yet, is No one. One listed both for every team and
+// for its team is one person.
+func (m mayApprove) Stuck() bool {
+	return m.In.No == "" && !m.Open && !m.TeamOpen && len(m.everyone()) < m.Need
+}
+
+// everyone are those left who may approve it, each once.
+func (m mayApprove) everyone() []string {
+	out := slices.Clone(m.Left)
+	for _, x := range m.TeamLeft {
+		if !slices.Contains(out, x) {
+			out = append(out, x)
+		}
+	}
+	return out
+}
 
 // NoOne says no one at all may approve it but the one it was made by or
 // for.
-func (m mayApprove) NoOne() bool { return m.Stuck() && len(m.Left) == 0 && !m.Approved }
+func (m mayApprove) NoOne() bool { return m.Stuck() && len(m.everyone()) == 0 && !m.Approved }
 
 func (s *Server) mayApproveOf(r *http.Request, p ledger.Proposal, need int) *mayApprove {
 	if p.State != ledger.StateProposed || p.Path == ledger.PathNone || p.Kind == ledger.KindUndo {
@@ -81,24 +103,45 @@ func (s *Server) mayApproveOf(r *http.Request, p ledger.Proposal, need int) *may
 	for _, a := range p.Approvals {
 		out = append(out, ledger.FoldName(a.By))
 	}
-	for _, x := range m.In.List {
+	m.Left, m.Open = leftOf(m.In.List, out)
+	// Its team's approvers, when one team owned it as it was proposed and
+	// owns it now (bounds.go): who may approve it without --approvers too.
+	if t, ok := s.teamApproved(r, p); ok {
+		if b, err := s.bounds(r.Context()); err == nil && len(b.Teams[t.Name].Approvers) > 0 {
+			m.Team = t.Name
+			m.TeamLeft, m.TeamOpen = leftOf(b.Teams[t.Name].Approvers, out)
+			if m.In.No == "roles" {
+				m.In = approversIn{From: "team"}
+			}
+		}
+	}
+	return m
+}
+
+// leftOf are those of a list who may approve, but those of out (the one it
+// was made by or for, and who approved it), as the list names them; open
+// says one of them may be more than a person, as listed takes them: a
+// group, everyone of a domain, everyone, or a name with neither user: nor
+// group:, which is a group too where there is one of that name.
+func leftOf(list, out []string) (left []string, open bool) {
+	for _, x := range list {
 		name, person := strings.CutPrefix(x, "user:")
 		switch {
 		case x == "*" || strings.HasPrefix(x, "group:") || strings.HasPrefix(x, "*@"):
 			// Everyone, a group, everyone of a domain: who is in them
 			// isn't known here.
-			m.Open = true
+			open = true
 		case slices.Contains(out, ledger.FoldName(name)):
 			// The one it was made by or for, or one who approved it. A
 			// name with neither prefix is a person or a group: taken for
 			// theirs, a group of the same name is passed over.
 			continue
 		case !person:
-			m.Open = true // a person, or a group of the name (listed)
+			open = true // a person, or a group of the name (listed)
 		}
-		if !slices.Contains(m.Left, x) {
-			m.Left = append(m.Left, x)
+		if !slices.Contains(left, x) {
+			left = append(left, x)
 		}
 	}
-	return m
+	return left, open
 }

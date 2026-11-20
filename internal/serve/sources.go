@@ -178,6 +178,7 @@ func (s *Server) filePaths() []filePath {
 	for _, f := range c.ReportDests {
 		given = append(given, filePath{f, "--report-dest"})
 	}
+	given = append(given, s.webhookDestPaths()...)
 	var out []filePath
 	add := func(path, flag string) {
 		if p := (filePath{strings.TrimRight(path, `/\`), flag}); pathLike(p.path) && !slices.Contains(out, p) {

@@ -284,8 +284,8 @@ func (s *Server) grafanaUndo(ctx context.Context, p ledger.Proposal, step ledger
 	return s.grafanaWrite(ctx, p, step, uid, http.MethodPut, "/api/v1/provisioning/alert-rules/"+url.PathEscape(uid), body)
 }
 
-// grafanaWrite sends a change to Grafana. The pause is looked at once more
-// just before; then the proposal is kept as applying, with the rule as it
+// grafanaWrite sends a change to Grafana. The pause, and its team's
+// boundaries, are looked at once more just before; then the proposal is kept as applying, with the rule as it
 // was and counted against the limits, before anything is sent, so that
 // whatever Grafana answers, or doesn't, the change is neither lost nor sent
 // twice. What became of it is read back from Grafana, not taken from its
@@ -293,6 +293,9 @@ func (s *Server) grafanaUndo(ctx context.Context, p ledger.Proposal, step ledger
 func (s *Server) grafanaWrite(ctx context.Context, p ledger.Proposal, step ledger.Step, uid, method, path string, body []byte) error {
 	if s.changesPaused() {
 		return errPaused
+	}
+	if err := s.boundsAgain(ctx, p); err != nil {
+		return err
 	}
 	step.Applied = true
 	p, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApplying, ledger.Proposer, step)

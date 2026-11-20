@@ -33,6 +33,12 @@
 
 <h2>{{t "Changes to the rules"}}</h2>
 <p>{{if not $.Status.ChangesOn}}{{tbdi "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
+{{if .BoundsUnread}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "The change boundaries the ledger holds can't be read: nothing they would hold is approved, undone, carried out or handed to a recipe until they can."}}</p>{{end}}
+{{with .BoundsNoTeam}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "--config gives approvers, changes_in or a change freeze to teams it didn't keep, so they hold nothing:"}} {{range $i, $n := .}}{{if $i}}, {{end}}<code><bdi>{{$n}}</bdi></code>{{end}}. {{t "Why each wasn't kept is said with the file's problems."}}</p>{{end}}
+{{with .Freezes}}<h3 id="freezes">{{t "Change freezes"}}</h3>
+<p class="quiet">{{tbdi "Declared in --config: while one holds, no change to the rules it covers is approved, undone or applied; those approved before wait until it ends. Proposing and backtesting go on."}}</p>
+<ul class="plain">{{range .}}<li><strong><bdi>{{.Title}}</bdi></strong>{{if .Team}} ({{tbdi "team %s" .Team}}){{else}} ({{t "everyone's"}}){{end}}: {{at $loc .W.Start}} → {{at $loc .W.End}}, {{template "repeats" (repeats .W $loc)}}
+  <br>{{if not .Until.IsZero}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Frozen until %s." (at $loc .Until)}}</span>{{else if not .Next.IsZero}}<span class="quiet">{{t "Next: %s → %s." (at $loc .Next) (at $loc .NextEnd)}}</span>{{else}}<span class="quiet">{{t "Over."}}</span>{{end}}</li>{{end}}</ul>{{end}}
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
 
 {{with .Notify}}{{template "notifystatus" (on $ .)}}{{end}}
@@ -56,6 +62,7 @@
 {{define "runs"}}{{$title := t "Run history"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Firings are in up to %s." (at $loc .Cursor)}}{{with .Took}} {{t "The last run took %s." (dur .)}}{{end}}</p>
+<p class="row"><a href="{{$.Link "/sources"}}">{{t "Sources: how each was last read, and its errors"}}</a> <a href="{{$.Link "/activity"}}">{{t "Activity log"}}</a></p>
 {{with .Config}}{{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
@@ -91,6 +98,7 @@
 <p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+<p><a href="{{$.Link "/activity"}}">{{t "All of the activity log, with filters and export"}}</a></p>
 {{end}}{{template "bottom" .}}{{end}}
 
 {{/* Pull request backtests (docs/design/backtests.md), with

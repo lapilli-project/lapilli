@@ -21,7 +21,7 @@
   <p class="nav-group" id="menu-report">Reporting</p>
   <ul aria-labelledby="menu-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
   <p class="nav-group" id="menu-manage"><a href="/manage">Administration</a></p>
-  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs" aria-current="page">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Settings</a></li><li><a href="/sources">Sources</a></li><li><a href="/runs" aria-current="page">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
 </nav>
   </details>
   <nav class="nav-side" aria-label="Pages">
@@ -32,14 +32,14 @@
   <p class="nav-group" id="side-report">Reporting</p>
   <ul aria-labelledby="side-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
   <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
-  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs" aria-current="page">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Settings</a></li><li><a href="/sources">Sources</a></li><li><a href="/runs" aria-current="page">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
 </nav>
   <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Fruns" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Fruns" lang="ko" hreflang="ko">한국어</a></nav>
 </header>
 <div class="page">
 <section class="statuses" aria-label="Status">
 
-<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> replaying a → b</p><p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> a run: boom</p>
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> replaying a → b</p><p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> a run: boom <a href="/sources">Sources</a></p>
 </section>
 <main id="main">
 <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/manage">Administration</a></li><li><span aria-current="page">Run history</span></li></ol></nav>
@@ -53,6 +53,7 @@
 
 <h1>Run history</h1>
 <p class="lede">Firings are in up to 2026-11-03 12:00.</p>
+<p class="row"><a href="/sources">Sources: how each was last read, and its errors</a> <a href="/activity">Activity log</a></p>
 
 <div class="scroll"><table>
 <thead><tr><th scope="col">Kind</th><th scope="col">Started</th><th scope="col">Period</th><th scope="col" class="n">Firings</th><th scope="col">Not replayed</th><th scope="col">Error</th></tr></thead>
@@ -96,6 +97,7 @@
 <p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> Their team was removed, so they aren&#39;t sent until they name another: gone daily. <a href="/reports">Reports</a></p>
 <h2>Changes made here</h2>
 <ul class="plain"><li><clock> config: goal launch-missed kept</li><li><clock> config: goal sale-no-worse kept</li><li><clock> config: goal no-refire kept</li><li><clock> config: goal paged kept</li><li><clock> config: goal precise kept</li><li><clock> ana: marked window Newsletter kept</li><li><clock> ana: marked window Autumn sale kept</li><li><clock> firings-token: firings</li><li><clock> tasks-token: comment on task 1 copied in from its issue</li><li><clock> anonymous: comment on incident INC-1</li><li><clock> anonymous: comment on task 1</li><li><clock> anonymous: comment on rule Errors</li><li><clock> ana: team gone deleted</li><li><clock> ana: report gone daily kept</li><li><clock> ana: team gone kept</li><li><clock> ana: report payments weekly kept</li><li><clock> ana: the weekly digest kept</li><li><clock> ana: role given to group:sre</li><li><clock> ana: role given to user:pat</li><li><clock> ana: quiet window cron kept</li><li><clock> ana: quiet window monthly kept</li><li><clock> ana: task 1 made</li><li><clock> ana: quiet window w kept</li><li><clock> ana: note on Errors kept</li><li><clock> ana: team payments kept</li></ul>
+<p><a href="/activity">All of the activity log, with filters and export</a></p>
 
 </main>
 <footer>lapilli test · times in UTC</footer>

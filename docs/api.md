@@ -182,7 +182,10 @@ Bounds:
   `/api/v1/windows` and `/api/v1/marked` 400 days; `/api/v1/summary` 53
   weeks.
 - `GET /api/v1/tasks` gives 500 tasks at most, the latest changed first;
-  `GET /api/v1/proposals` 200; `GET /api/v1/runs` the last 100. Only a
+  `GET /api/v1/proposals` 200; `GET /api/v1/runs` the last 100;
+  `GET /api/v1/activity` 1,000, and, for a `team`'s, looks through
+  20,000 changes and looks up 200 tasks and proposals at most, then says
+  where it stopped (`next`, `cut`). Only a
   tracker job's `GET /api/v1/tasks` goes on from where it stopped
   (`after`, `next`).
 - A heavy request takes the one turn there is for one: a report with its
@@ -206,7 +209,8 @@ Bounds:
 | `GET /api/v1/expectation-drafts/{id}` | viewer | | the draft |
 | `GET /api/v1/rules` | viewer | `weeks` (`1`, `4` or `12`; 4 by default), `team`, `sort` (`refired`, `deploys`), `during` or `outside` (a marked window's kind) | the rules list: `Lines`, a rule each, with `Firings`, `White`, `Black`, `Precision`, `Noisy`, `Team`, `Suggestion`, ...; `Silent`, the rules that didn't fire in the twelve weeks kept |
 | `GET /api/v1/runs` | viewer | | the last 100 runs, the latest first: `Kind`, `From`, `To`, `Firings`, `Error`, `Failed`; to anyone but an admin, without the paths of serve's files |
-| `GET /api/v1/sources` | viewer | | the sources firings are copied in from: `name`, `written`, `by`, `from`, `to`, `firings`, `rules` |
+| `GET /api/v1/sources` | viewer | `all` (`true` for every source) | the sources firings are copied in from: `name`, `written`, `by`, `from`, `to`, `firings`, `rules`; with `all=true`, `sources`, every source serve reads as the Sources page shows it: `id`, `kind`, `name`, `from` (its flag), `state` (`ok`, `failing`, `quiet`, `pending`), `down`, `last_ok`, `last_failed`, `last_error` (as `GET /api/v1/runs` says an error, and without a credential to anyone), `failures` (reads in a row, -1 where not counted), `rules`, `lag_seconds`, `took_seconds`, and, to an admin, `where`; never kept ([docs/design/serveops.md](design/serveops.md#sources)) |
+| `GET /api/v1/activity` | viewer | `who`, `kind` (`setting`, `incident`, `verdict`, `proposal`, `task`, `comment`, `note`, `window`, `marked`, `report`, `team`, `role`, `goal`, `firings`, `cleanup`, `other`), `team`, `since`, `until` (a day, `2026-11-02`, in `--tz`, `until` taking it whole, or an RFC 3339 time), `before` (where a page ended), `limit` (1 to 1,000; 1,000 unless given), `format` (`json`, `csv`) | `activity`, the changes kept, the latest first: `id`, `at`, `by`, `kind`, `what`, `before`, `after`; `next`, the `before` to go on from; `cut`, that it stopped looking. With `format=csv`, the same as CSV (`id,at,by,kind,what,before,after`), the next page in `Link`, no cell a formula. The roles given and taken to an admin alone, and to anyone else the paths of serve's files as their flags; never kept ([docs/design/serveops.md](design/serveops.md#the-activity-log)) |
 | `GET /api/v1/settings` | viewer | | the judging settings, each with its flag and value (`Settings`), the incident criteria (`criteria`), and what `--config` came to (`config`; to anyone but an admin, without the file's name) |
 | `GET /api/v1/me` | anyone let in | | `user`, `groups`, `role`, `teams` |
 
@@ -218,12 +222,14 @@ Bounds:
 | `POST /api/v1/incidents` | editor | `id` (the next `L-n` when left out), `title`, `start`, `end`, `labels` (`{"service": ["checkout"]}`) | 201, the incident |
 | `PUT /api/v1/incidents/{id}` | editor | as `POST` | the incident with that id, made or replaced |
 | `DELETE /api/v1/incidents/{id}` | editor | | 204 |
+| `POST /api/v1/incidents/{id}/decide` | editor | `state` (`confirmed`, `dismissed`, or `""` to reopen), `title` (of the incident a window confirmed becomes; its own when left out), `together` (`true` dismisses the other named signals' windows at that time not decided yet) | `id`, `state`, and `incident`, the one it was confirmed as |
 
 A write that changes an incident gives the firings their stones again at
 once; one written again as it was changes nothing. An incident from the
 incidents file, one a job copied in, or an impact window is changed where
-it comes from: 409. Deciding an impact window is a form of the UI's
-([The pages](#the-pages)).
+it comes from: 409. An impact window is decided as its form decides it:
+a window only (400 for an incident), its title 500 bytes at most, noted in
+the activity log as the editor's.
 
 ## People's verdicts on firings
 
@@ -239,6 +245,7 @@ stone. A firing is picked by its alert and start, as a report gives it
 | `PUT /api/v1/verdicts` | editor; a team's editor, `action` and `action_note` of the rules it owns | `rule`, `labels`, `start`; `unrelated` (`true` or `false`), `unrelated_note`, `action` (`yes`, `no`, or `""` for none), `action_note`: a part left out is left as it is | the verdict |
 | `PUT /api/v1/verdicts/bulk` | editor; a team's editor, of the rules it owns | `firings` (each `rule`, `labels`, `start`; 100 at most), `action`, `action_note` | `firings`, `changed` |
 | `DELETE /api/v1/verdicts` | editor; a team's editor, `action` of the rules it owns | `rule`, `labels`, `start`, `part` (`unrelated`, `action`, or both when left out) | 204 |
+| `POST /api/v1/firings/real` | editor | `rule`, `labels`, `start` | the firing written down as an incident it caught, as "This was real" writes it: 201 and `incident`, with `Location`; 200 and no `incident` once one was written from it, or it caught one since. An editor's of the last 14 days' firings, an admin's of any (older, 403); 409 on a firing said unrelated; 404 with no such firing |
 
 - **Part by part.** A team's editor's write leaves `unrelated` as it is
   stored: a `PUT` that gives it otherwise, or its note, is 403, and their
@@ -489,12 +496,13 @@ The UI's pages are HTML for people: `/` (the overview), `/rules` and
 and `/tasks/{id}`, `/proposals` and `/proposals/{id}`, `/windows` and
 `/windows/{id}`, `/marked` and `/marked/{id}`, `/reports`,
 `/reports/digest` and `/reports/{id}`, `/outcomes`, `/goals`, `/teams`,
-`/roles`, `/settings`, `/runs`, `/orphans`, `/manage` and `/search`. Their
+`/roles`, `/settings`, `/sources`, `/runs`, `/activity`, `/orphans`,
+`/manage` and `/search`. Their
 forms post to paths of their own (`POST /incidents`, `POST /rules/bulk`,
 `POST /settings`, ...), and need the roles the API's writes of the same
 things do. Some writes are there alone, with no route of the API:
-changing the settings, proposing a change, approving one, deciding an
-impact window, writing a firing down as real, making a task of a goal
+changing the settings, proposing a change (an agent proposes through MCP),
+approving one, making a task of a goal
 missed or an expectation broken (`POST /goals/task`, `POST
 /expectations/task`, the latter of a rule's `rule`, `expect` and `week`,
 refused unless it is broken as last checked), keeping the history's draft
@@ -504,7 +512,9 @@ team's editor's, of their own team's rule), accepting a draft (`POST
 a browser, never its proposer's) or dropping one (`POST
 /expectations/drafts/{id}/drop`, an editor's or an approver's), and the
 changes to many rules or firings at once. `GET /expectations/draft.yaml`
-(`rule` or `team`) gives the history's draft as a file to take. A form about a firing (`POST /firings/{id}/real`,
+(`rule` or `team`) gives the history's draft as a file to take. Deciding
+an impact window and writing a firing down as real have routes of their
+own too (above), with the forms' roles and checks. A form about a firing (`POST /firings/{id}/real`,
 `POST /firings/{id}/verdict`, and their bulk `POST /firings/real` and
 `POST /firings/verdict`) carries the firing's series and start beside its
 id, and is refused, 409, when the firing is another by then: a run gives

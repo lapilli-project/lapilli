@@ -44,8 +44,10 @@ var configEvery = 15 * time.Second
 // configKeys are the keys of a --config file and of each thing in it, in
 // the order an export writes them.
 var configKeys = map[string][]string{
-	"":     {"teams", "windows", "reports", "grants", "goals", "marked", "expectations"},
-	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts", "renamed_from"},
+	"": {"teams", "windows", "reports", "grants", "goals", "marked", "freezes", "expectations"},
+	// A team's approvers and changes_in are its boundaries of change
+	// (bounds.go), kept apart from the team itself.
+	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts", "renamed_from", "approvers", "changes_in"},
 	// A window's on is repeat_on: YAML 1.1, which Helm reads values by,
 	// takes a key on, unquoted, for true.
 	"window": {"title", "team", "start", "end", "every", "repeat_on", "until", "rules", "labels"},
@@ -57,6 +59,8 @@ var configKeys = map[string][]string{
 	// A marked window (docs/design/marked.md): a kind and a title, its
 	// times as a quiet window's, and labels of one value each.
 	"marked": {"kind", "title", "team", "start", "end", "every", "repeat_on", "until", "labels"},
+	// A change freeze (bounds.go): its times as a quiet window's.
+	"freeze": {"title", "team", "start", "end", "every", "repeat_on", "until"},
 }
 
 // What can be wrong with a --config file, as texts to translate: the
@@ -70,6 +74,7 @@ var (
 		"grant":  "unknown key %q in a role: want %s",
 		"goal":   "unknown key %q in a goal: want %s",
 		"marked": "unknown key %q in a marked window: want %s",
+		"freeze": "unknown key %q in a change freeze: want %s",
 	}
 	wantA = map[string]string{
 		"team":   "want a team, as a mapping of %s",
@@ -78,11 +83,12 @@ var (
 		"grant":  "want a role, as a mapping of %s",
 		"goal":   "want a goal, as a mapping of %s",
 		"marked": "want a marked window, as a mapping of %s",
+		"freeze": "want a change freeze, as a mapping of %s",
 	}
 	configFormats = []string{
 		"line %d: %s", "line %d (%s): %s", "the file isn't YAML: %s", "the file is more than %d bytes",
-		"one document only: --config is one file of teams, windows, reports, grants, goals, marked and expectations",
-		"want a mapping of teams, windows, reports, grants, goals, marked and expectations", "unknown key %q: want teams, windows, reports, grants, goals, marked or expectations",
+		"one document only: --config is one file of teams, windows, reports, grants, goals, marked, freezes, notify and expectations",
+		"want a mapping of teams, windows, reports, grants, goals, marked, freezes, notify and expectations", "unknown key %q: want teams, windows, reports, grants, goals, marked, freezes, notify or expectations",
 		"%s is given twice, on line %d too", "%s is a list", "%s is a text", "%s is a list of texts",
 		"labels are a mapping of a label's name to a value, or a list of values", "a label's name is a text", "label %s has no value",
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
@@ -101,6 +107,7 @@ var (
 		"label %s of a marked window has one value",
 		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"], unknownIn["goal"], unknownIn["marked"],
 		wantA["team"], wantA["window"], wantA["report"], wantA["grant"], wantA["goal"], wantA["marked"],
+		unknownIn["freeze"], wantA["freeze"],
 	}
 )
 
@@ -175,7 +182,7 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	}
 	var more yaml.Node
 	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
-		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals, marked and expectations")
+		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals, marked, freezes, notify and expectations")
 	}
 	root := &doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
@@ -185,6 +192,13 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		return d, empty
 	}
 	err := each(root, "", func(key string, v *yaml.Node) error {
+		if key == "notify" {
+			// Routes, which each replica reads apart (notifyroutes.go):
+			// read here too, so that a file whose notify: can't be read
+			// changes nothing.
+			_, err := parseNotify(v)
+			return err
+		}
 		// A key with nothing after it, as a file cut short reads: not a
 		// list of none, which [] says.
 		if null(v) {
@@ -240,6 +254,9 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	if err == nil {
 		err = checkGoals(d.Goals)
 	}
+	if err == nil {
+		err = parseBounds(root, loc, &d) // approvers, changes_in, freezes
+	}
 	return d, err
 }
 
@@ -276,7 +293,7 @@ func null(n *yaml.Node) bool {
 func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) error {
 	if n.Kind != yaml.MappingNode {
 		if what == "" {
-			return badAt(n, "want a mapping of teams, windows, reports, grants, goals, marked and expectations")
+			return badAt(n, "want a mapping of teams, windows, reports, grants, goals, marked, freezes, notify and expectations")
 		}
 		return badAt(n, wantA[what], strings.Join(configKeys[what], ", "))
 	}
@@ -289,7 +306,7 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 		seen[k.Value] = k.Line
 		if k.Kind != yaml.ScalarNode || !slices.Contains(configKeys[what], k.Value) {
 			if what == "" {
-				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals, marked or expectations", k.Value)
+				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals, marked, freezes, notify or expectations", k.Value)
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}
@@ -1046,6 +1063,9 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 		d, hash, fileErr = ReadConfig(s.cfg.Config, s.cfg.Loc)
 		if hash == "" { // not read at all
 			hash = "unread"
+		}
+		if fileErr == nil {
+			fileErr = s.boundsOK(d) // a team's changes_in within --changes-in
 		}
 	}
 	now, gen := s.wall(), s.l.Gen()

@@ -83,6 +83,15 @@ var offFuncs = template.FuncMap{
 	},
 }
 
+// frozenWhy is why a change isn't approved, or undone, while a freeze holds
+// it; teamApproversWhy, why a reader who approves none of every team's may
+// not approve a team's change.
+const (
+	frozenWhy        = "Held by a change freeze, %s, until it ends"
+	teamApproversWhy = "Approvers of every team, and %s's approvers, only"
+	unreadWhy        = "Held while the change boundaries can't be read"
+)
+
 // declaredWhy is why what --config declares isn't changed in the UI.
 const declaredWhy = "Declared in config — change it in values"
 
@@ -104,11 +113,27 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 		}
 		return a
 	}
+	// What a team's boundaries stop (bounds.go): named, the freeze or the
+	// team, unless the reader may change nothing here at all.
+	named := func(a *pageAction, format, name string) *pageAction {
+		if a.Why == format {
+			a.WhyOf = name
+		}
+		return a
+	}
 	if p.State == ledger.StateProposed && !v.CanApprove {
 		switch {
 		case p.Path == ledger.PathNone:
 			v.ApproveOff = &pageAction{Label: "Approve", ID: "approve-why", Why: "For a person to make where the rule is kept: nothing to approve here"}
-		case v.Bearer && s.approver(r):
+		case v.Unread:
+			v.ApproveOff = off("Approve", "approve-why", unreadWhy)
+		case v.Frozen != nil:
+			v.ApproveOff = named(off("Approve", "approve-why", frozenWhy), frozenWhy, v.Frozen.Title)
+		case v.Moved:
+			v.ApproveOff = off("Approve", "approve-why", "Its rule is another team's now than when it was proposed: propose it again")
+		case !v.approver && v.Team != "" && v.teamApprovers:
+			v.ApproveOff = named(off("Approve", "approve-why", teamApproversWhy), teamApproversWhy, v.Team)
+		case v.Bearer && v.approver:
 			v.ApproveOff = off("Approve", "approve-why", "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session")
 		case v.Own && p.Agent:
 			v.ApproveOff = off("Approve", "approve-why", "Your agent proposed this: someone else approves it.")
@@ -116,7 +141,7 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 			v.ApproveOff = off("Approve", "approve-why", "You proposed this: someone else approves it.")
 		case v.Done:
 			v.ApproveOff = off("Approve", "approve-why", "You approved it: it waits for another approver.")
-		case v.StaleWhy != nil && s.approver(r):
+		case v.StaleWhy != nil && v.approver:
 			v.ApproveOff = off("Approve", "approve-why", "Held until it is backtested again: it is stale")
 		case v.AddHeld != "" && s.approver(r):
 			v.ApproveOff = off("Approve", "approve-why", "Held: it breaks what it is held to, or its backtest didn't replay it")
@@ -126,13 +151,23 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 	}
 	if undoable(p) && !v.CanUndo {
 		why := "Approvers only"
-		if v.Bearer && s.approver(r) {
+		switch {
+		case v.Unread:
+			why = unreadWhy
+		case v.Frozen != nil:
+			why = frozenWhy
+		case v.Bearer && v.approver:
 			why = "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session"
 		}
 		v.UndoOff = off("Ask to undo it", "undo-why", why)
+		if v.Frozen != nil {
+			named(v.UndoOff, frozenWhy, v.Frozen.Title)
+		}
 	}
 	if !v.CanDrop {
 		switch {
+		case p.State == ledger.StateProposed && len(s.editsTeams(r)) > 0 && s.role(r) < editor && !s.approver(r):
+			v.DropOff = off("Drop it", "drop-why", "Editors, approvers and whoever proposed it, of its team's editors, only")
 		case slices.Contains(closing, p.State):
 			v.DropOff = off("Close it", "drop-why", "Admins only")
 		case p.State == ledger.StateReady:
@@ -144,8 +179,12 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 	if p.TaskID == 0 && s.role(r) < editor {
 		v.TaskOff = off("Make it a task", "task-why", "Editors only")
 	}
-	// Backtesting it again: an editor's, of one that waits for it.
+	// Backtesting it again: an editor's, or its team's editors', of one
+	// that waits for it.
 	if v.StaleWhy != nil && !v.CanAgain {
 		v.AgainOff = off("Backtest again", "again-why", "Editors only")
+		if v.Team != "" && len(s.editsTeams(r)) > 0 {
+			v.AgainOff = named(off("Backtest again", "again-why", "Only %s's editors"), "Only %s's editors", v.Team)
+		}
 	}
 }

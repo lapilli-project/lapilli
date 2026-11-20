@@ -155,6 +155,13 @@ func (s *Server) apiPropose(ctx context.Context, tg target, p *ledger.Proposal, 
 		ev.NoPath = why
 		return nil
 	}
+	// Where its team's changes_in, when it gives one, says (bounds.go).
+	if why, err := s.teamInWhy(ctx, tg, ev.ownedBy, f.doc.Source, e); err != nil {
+		return err
+	} else if why != "" {
+		ev.NoPath = why
+		return nil
+	}
 	u, err := tg.unit(ctx, f.doc.Source, e)
 	if errors.Is(err, source.ErrUnreadable) {
 		ev.NoPath = noPathUnread
@@ -442,8 +449,8 @@ func (s *Server) apiUndoAdd(ctx context.Context, tg target, p ledger.Proposal, s
 	return s.apiWrite(ctx, tg, p, step, u, out)
 }
 
-// apiWrite sends a unit to its API. The pause is looked at once more just
-// before; then the proposal is kept as applying, with the unit as it was
+// apiWrite sends a unit to its API. The pause, and its team's boundaries,
+// are looked at once more just before; then the proposal is kept as applying, with the unit as it was
 // and counted against the limits, before anything is sent, so that
 // whatever the API answers, or doesn't, the change is neither lost nor sent
 // twice. What became of it is read back, not taken from the answer.
@@ -455,6 +462,9 @@ func (s *Server) apiWrite(ctx context.Context, tg target, p ledger.Proposal, ste
 	}
 	if s.changesPaused() {
 		return errPaused
+	}
+	if err := s.boundsAgain(ctx, p); err != nil {
+		return err
 	}
 	step.Applied = true
 	p, err = s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApplying, ledger.Proposer, step)

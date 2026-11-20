@@ -31,13 +31,13 @@ func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.
 	// A new rule's form: a proposal adding one (docs/design/expectations.md,
 	// step 5), an editor's, as proposing is.
 	mux.HandleFunc("GET /proposals/new", s.write(page("newrule", s.newRulePage)))
-	mux.HandleFunc("POST /proposals", s.write(s.postProposal))
+	mux.HandleFunc("POST /proposals", s.teamWrite(s.postProposal)) // a team's editors, of its rules (bounds.go)
 	mux.HandleFunc("POST /proposals/{id}/approve", s.person(s.postApprove))
 	mux.HandleFunc("POST /proposals/{id}/undo", s.person(s.postUndo))
 	mux.HandleFunc("POST /proposals/{id}/drop", s.need(viewer, s.postDrop)) // an approver need not be an editor
 	mux.HandleFunc("POST /proposals/{id}/task", s.write(s.postProposalTask))
 	// An editor's, as proposing is: the same role, site and tries an hour.
-	mux.HandleFunc("POST /proposals/{id}/backtest", s.write(s.postBacktestAgain))
+	mux.HandleFunc("POST /proposals/{id}/backtest", s.teamWrite(s.postBacktestAgain))
 	mux.HandleFunc("POST /settings/changes", s.admin(s.postChangesPaused))
 	// To read, as every page can be; none of the API approves or applies.
 	mux.HandleFunc("GET /api/v1/proposals", s.cached(s.apiProposals))
@@ -84,7 +84,9 @@ func (s *Server) person(h http.HandlerFunc) http.HandlerFunc {
 			s.oops(w, r, errNotAForm)
 			return
 		}
-		if !s.approver(r) {
+		// A team's approver too: the handler asks whether of this
+		// proposal's team (mayApproveNow).
+		if !s.approver(r) && !s.anyTeamApprover(r) {
 			s.oops(w, r, errNotApprover)
 			return
 		}
@@ -528,6 +530,8 @@ type proposalView struct {
 	MayApprove *mayApprove
 	// Add is, of a rule added, where it goes and what it is held to.
 	Add *addView
+	// What its team's boundaries say of it now (bounds.go).
+	proposalBounds
 }
 
 // undoneOf is the change an undo undoes, as the undo's page names it: its
@@ -561,7 +565,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	if id, ok := whoOf(r); ok && id.by == byBearer {
 		v.Bearer = true
 	}
-	if s.approver(r) {
+	if s.approverOf(r, p) {
 		me := ledger.FoldName(user)
 		v.Own = ledger.FoldName(p.MadeBy) == me
 		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return ledger.FoldName(a.By) == me })
@@ -574,11 +578,11 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 			v.CanUndo, v.Undo = true, s.formKey(p, user, "undo")
 		}
 	}
-	v.CanDrop = slices.Contains(s.droppable(r), p.State)
+	v.CanDrop = slices.Contains(s.droppable(r), p.State) || slices.Contains(s.ownDroppable(r, p), p.State)
 	v.Closing = v.CanDrop && slices.Contains(closing, p.State)
 	v.Unwritten = v.Closing && p.State == ledger.StateApplying
 	v.TwoAlike = v.Unwritten && p.Path == ledger.PathAlarm && strings.HasPrefix(p.Reason, twoAlikeNote)
-	v.CanAgain = v.StaleWhy != nil && s.role(r) >= editor
+	v.CanAgain = v.StaleWhy != nil && (s.role(r) >= editor || s.teamEditsProposal(r, p))
 	v.Body = s.prBody(v.proposalLine)
 	if p.TaskID != 0 {
 		if t, err := s.l.TaskByID(ctx, p.TaskID); err == nil {
@@ -633,6 +637,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	}
 	v.StepsMost = stepsMost
 	if v.Steps, v.StepsCut, v.StepsOlder, err = s.stepsOf(r, p); err != nil {
+		return nil, err
+	}
+	if err := s.boundsOf(r, p, &v); err != nil {
 		return nil, err
 	}
 	s.offs(r, p, &v)
@@ -908,6 +915,11 @@ func (s *Server) postApprove(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errNotRead)
 		return
 	}
+	// Its team's boundaries, now: whose it is, a freeze, who approves it.
+	if err := s.mayApproveNow(r, p); err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	// One that waits to be backtested again is held until it is: its page
 	// offers no form, and one shown before it was found stale is refused
 	// here. One whose rule changed since is refused when it is checked
@@ -955,7 +967,18 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errNotReadUndo)
 		return
 	}
-	ev, err := json.Marshal(undoEvidence(proposalEvidence(p)))
+	// Asked for as approving is: not while a freeze holds it, by an
+	// approver of every team or of its team now, which it keeps.
+	if err := s.mayApproveNow(r, p); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	uev := undoEvidence(proposalEvidence(p))
+	if uev.ownedBy, err = s.ownedNow(r.Context(), p); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	ev, err := json.Marshal(uev)
 	if err != nil {
 		s.oops(w, r, err)
 		return
@@ -1034,13 +1057,16 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := s.droppable(r)
+	ctx := r.Context()
+	id := pathID(r)
+	p, err := s.l.ProposalByID(ctx, id)
+	if len(from) == 0 && err == nil {
+		from = s.ownDroppable(r, p) // a team's editor's own (bounds.go)
+	}
 	if len(from) == 0 {
 		s.oops(w, r, s.forbidden(editor))
 		return
 	}
-	ctx := r.Context()
-	id := pathID(r)
-	p, err := s.l.ProposalByID(ctx, id)
 	if err != nil {
 		s.oops(w, r, err)
 		return
@@ -1304,6 +1330,10 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 		if p.State == ledger.StateReady && p.Kind != ledger.KindUndo && len(p.Approvals) < s.approvals() {
 			continue
 		}
+		// Held, ready, while a change freeze holds it (bounds.go).
+		if p.State == ledger.StateReady && s.frozenReady(r.Context(), p) {
+			continue
+		}
 		h := handedOut{ID: p.ID, Ledger: s.ledgerID, Rule: p.Rule, Kind: p.Kind, State: p.State, Source: p.Source, DocHash: p.DocHash,
 			Link: p.Link, Branch: fmt.Sprintf("lapilli/%s/proposal-%d", s.ledgerID, p.ID), Title: prTitle(p), Body: s.prBody(ls[i])}
 		if p.State == ledger.StateReady {
@@ -1442,6 +1472,10 @@ type ruleChanges struct {
 	// before (?diff=, ?context=), and DiffLinks the links to the others.
 	Diffs     diffOpts
 	DiffLinks [2][]diffLink
+	// TeamPropose says the reader, an editor of its team alone, may
+	// propose a change to it, OwnerTeam its team's name (bounds.go).
+	TeamPropose bool
+	OwnerTeam   string
 }
 
 // OpenProposal is the rule's proposal not finished with, its id; 0 with
@@ -1494,6 +1528,7 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 	if v.Proposals, err = s.linesNow(ctx, ps); err != nil {
 		return err
 	}
+	v.TeamPropose, v.OwnerTeam = s.teamProposes(r, v.Name)
 	if !s.replaying() {
 		return nil
 	}

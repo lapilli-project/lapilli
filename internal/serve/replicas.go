@@ -85,6 +85,13 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 			s.notify(ctx)
 		}()
 	}
+	// What waits for a destination a route named that no flag here gives
+	// any more: no sender above is started for it.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.watchGone(ctx)
+	}()
 	if s.btPort != nil {
 		// Pull request backtests, beside the worker: neither waits for
 		// the other.
@@ -234,6 +241,8 @@ type sharedStatus struct {
 	// Goals is what the leader worked out of the goals after its last
 	// round (docs/design/goals.md), in brief: the rest is in the ledger.
 	Goals *goalsBrief `json:"goals,omitempty"`
+	// Reads are how the leader's reads of each source went (sourcelist.go).
+	Reads map[string]sourceRead `json:"reads,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -255,6 +264,7 @@ func (s *Server) ownStatus() sharedStatus {
 	st.Config = s.configShown()
 	st.Sources = s.sourcesNow()
 	st.Goals = s.goalsBriefNow()
+	st.Reads = s.readsNow()
 	return st
 }
 

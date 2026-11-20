@@ -306,8 +306,10 @@ func TestBulkProposeOff(t *testing.T) {
 
 // TestBulkProposeRefused: a bulk proposal is refused whole past twenty
 // rules, from another site, to a viewer, read-only, or for what it can't
-// propose; a team's editor's are each refused, editors only, as the single
-// form refuses them; nothing is made.
+// propose; nothing is made. A team's editor proposes for their team's
+// rules alone (docs/design/changes.md, "A team as the boundary of
+// change"): another team's, or no team's, is counted as not theirs, as the
+// single form refuses it.
 func TestBulkProposeRefused(t *testing.T) {
 	s := proposeServer(t, nil)
 	h := s.Handler()
@@ -343,16 +345,20 @@ func TestBulkProposeRefused(t *testing.T) {
 			t.Errorf("%s: %d, not %d: %.300s", c.what, code, c.want, body)
 		}
 	}
-	// The single form refuses a team's editor; the bulk one counts each.
-	if code, _, _ := postAs(t, h, "/proposals", url.Values{"rule": {"BulkA"}, "kind": {"for"}, "for": {"15m"}}, "pat@example.com", "same-origin"); code != http.StatusForbidden {
-		t.Errorf("a team's editor's single proposal: %d", code)
+	// The single form takes a team's editor's for their team's rule, and
+	// refuses another's; the bulk one counts each.
+	if code, _, _ := postAs(t, h, "/proposals", url.Values{"rule": {"BulkD"}, "kind": {"for"}, "for": {"15m"}}, "pat@example.com", "same-origin"); code != http.StatusForbidden {
+		t.Errorf("a team's editor's single proposal for no team's rule: %d", code)
+	}
+	if code, _, _ := postAs(t, h, "/proposals", url.Values{"rule": {"BulkA"}, "kind": {"for"}, "for": {"15m"}}, "pat@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Errorf("a team's editor's single proposal for their team's rule: %d", code)
 	}
 	code, _, hd := postAs(t, h, "/rules/bulk", base, "pat@example.com", "same-origin")
-	if code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), "editors=2") || strings.Contains(hd.Get("Location"), "done=") {
+	if code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), "theirs=1") || !strings.Contains(hd.Get("Location"), "already=1") || strings.Contains(hd.Get("Location"), "done=") {
 		t.Errorf("a team's editor: %d %s", code, hd.Get("Location"))
 	}
-	if n := len(proposalsKept(t, s)); n != before {
-		t.Errorf("%d proposals after refusals, not the %d there were", n, before)
+	if n := len(proposalsKept(t, s)); n != before+1 {
+		t.Errorf("%d proposals after refusals, not the %d there were and the one of their team's", n, before)
 	}
 	// Read-only, no one may.
 	ro := proposeServer(t, func(c *Config) { c.ReadOnly = true })
@@ -500,8 +506,8 @@ func TestBulkProposeTimeUp(t *testing.T) {
 	}
 }
 
-// TestBulkProposeBar: the bar's proposal is an editor's; a team's editor
-// sees it disabled, with why, said once; whoever may change no rule, read
+// TestBulkProposeBar: the bar's proposal is an editor's, and a team's
+// editor's, for their team's rules; whoever may change no rule, read
 // only or a viewer, sees a line saying why in place of the bar; and a
 // lapilli serve with no rules of its own says why to anyone.
 func TestBulkProposeBar(t *testing.T) {
@@ -509,7 +515,7 @@ func TestBulkProposeBar(t *testing.T) {
 	for who, want := range map[string]string{
 		bo:                `<button class="quiet-button" name="do" value="propose">Propose</button>`,
 		"vi@example.com":  `<p class="quiet bulk-off">Acting on several rules at once — Editors only</p>`,
-		"pat@example.com": `<button class="quiet-button" type="button" disabled aria-describedby="bulk-team-why">Propose</button>`,
+		"pat@example.com": `<button class="quiet-button" name="do" value="propose">Propose</button>`,
 		"":                `<p class="quiet bulk-off">Acting on several rules at once — Read-only: no one is signed in</p>`,
 	} {
 		// A team's editor sees their own team's rules unless they pick all.
@@ -517,8 +523,8 @@ func TestBulkProposeBar(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("%q: no %s", who, want)
 		}
-		if who == "pat@example.com" && !strings.Contains(body, `<select name="propose" disabled`) {
-			t.Errorf("%q: what to propose isn't disabled", who)
+		if who == "pat@example.com" && strings.Contains(body, `<select name="propose" disabled`) {
+			t.Errorf("%q: what to propose is disabled", who)
 		}
 		if (who == "" || who == "vi@example.com") && (strings.Contains(body, `name="propose"`) || strings.Contains(body, `name="rule"`)) {
 			t.Errorf("%q: may change no rule, and is offered the bar or a box to pick one", who)

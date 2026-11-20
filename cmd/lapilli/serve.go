@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -121,6 +122,9 @@ The ledger:
                       most 3650d)
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
+  --keep-activity DUR drop the activity log's changes older than this, never
+                      sooner than --keep (default 800d, or --keep when
+                      longer; 0 keeps them all, as with --keep 0)
   --watch DUR         read the rules this often (default 1m)
   --alarms-every DUR  read each --alarms this often (default 10m), so the
                       clouds' request quotas hold
@@ -280,7 +284,9 @@ The web UI and API:
                       A file that can't be used changes nothing, a thing it
                       declares that can't be kept is kept as it was, and the
                       Settings and Run history pages say why
-                      (docs/design/serveops.md)
+                      (docs/design/serveops.md). Under notify:, routes:
+                      who is told what, by kind, team and labels, and a
+                      default (docs/design/notifications.md)
   --config-prune      delete what --config no longer declares, once the file
                       is read the same twice in a row, but a team something
                       the UI made names; without it, that is the UI's again.
@@ -461,6 +467,18 @@ written down; quiet windows kept; comments):
                       . _ -. Reports can also go to slack (--slack-webhook-
                       file), webhook (--notify-webhook-file, as
                       report.ready) and team:TEAM (each --team-digest)
+  --webhook-dest NAME=FILE
+                      a destination routes in --config's notify: can send
+                      to: the webhook whose URL is in FILE, posted JSON as
+                      --notify-webhook-file is (repeatable). NAME is
+                      lowercase letters, digits and . _ -, none that
+                      --report-dest gives. It takes only what a route
+                      sends it; needs --config
+  --webhook-dest-secret NAME=FILE
+                      the file holding a key, 32 bytes at least, to sign
+                      each post to --webhook-dest NAME with, as
+                      --notify-webhook-secret-file signs the webhook's
+                      (repeatable)
 
 Notifications as they were sent, kept beside the firings: how many each rule
 sent, how many repeats, how many woke people, how many for nothing:
@@ -683,12 +701,13 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error) {
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
-		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, Watch: time.Minute,
+		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, KeepActivity: 800 * 24 * time.Hour, Watch: time.Minute,
 		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(), PromtoolMemory: defaultPromtoolMemory,
 	}
 	timeoutSet := false
 	promtoolMemorySet := false
 	ledgerSet := false
+	keepActivitySet := false
 	yieldForSet := false
 	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
 	var marks, markMatches []string
@@ -927,6 +946,9 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			}
 		case "--keep":
 			cfg.Keep, err = dur(0)
+		case "--keep-activity":
+			cfg.KeepActivity, err = dur(0)
+			keepActivitySet = true
 		case "--watch":
 			cfg.Watch, err = dur(10 * time.Second)
 		case "--alarms-every":
@@ -1108,6 +1130,36 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				cfg.ReportDests = map[string]string{}
 			}
 			cfg.ReportDests[name] = file
+		case "--webhook-dest":
+			name, file, ok := strings.Cut(val, "=")
+			if !ok || file == "" || !ledger.ValidDest(name) || name == "slack" || name == "webhook" || strings.HasPrefix(name, "team:") {
+				return true, fmt.Errorf("--webhook-dest %s: want a name (lowercase letters, digits and . _ -, not slack, webhook or team:) and a file, like payments-hook=/run/secrets/payments-hook", val)
+			}
+			if err := there(file); err != nil {
+				return true, fmt.Errorf("--webhook-dest: %v", err)
+			}
+			if cfg.WebhookDests == nil {
+				cfg.WebhookDests = map[string]string{}
+			}
+			cfg.WebhookDests[name] = file
+		case "--webhook-dest-secret":
+			name, file, ok := strings.Cut(val, "=")
+			if !ok || name == "" || file == "" {
+				return true, fmt.Errorf("--webhook-dest-secret %s: want a --webhook-dest's name and a file, like payments-hook=/run/secrets/payments-hook-key", val)
+			}
+			// Read once here, as --notify-webhook-secret-file is: serve
+			// reads it again for each post, and never shows it.
+			b, err := secret(file, report.SigningKeyLeast)
+			if err != nil {
+				return true, fmt.Errorf("--webhook-dest-secret %s: %v", name, err)
+			}
+			if n := len(report.TrimKey(b)); n < report.SigningKeyLeast {
+				return true, fmt.Errorf("--webhook-dest-secret %s: want a key of %d bytes at least, not %d", name, report.SigningKeyLeast, n)
+			}
+			if cfg.WebhookDestSecrets == nil {
+				cfg.WebhookDestSecrets = map[string]string{}
+			}
+			cfg.WebhookDestSecrets[name] = file
 		case "--backtest-listen":
 			cfg.BacktestListen = val
 		case "--backtest-trust":
@@ -1151,6 +1203,15 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	if err == nil && slackLater != "" {
 		f.slackFile = slackLater
 	}
+	if !keepActivitySet {
+		// Not given: 800 days, or --keep when that is longer, so that a
+		// --keep past 800 days starts as it did before; with --keep 0,
+		// nothing is pruned, and the activity log is kept whole.
+		cfg.KeepActivity = max(cfg.KeepActivity, cfg.Keep)
+		if cfg.Keep <= 0 {
+			cfg.KeepActivity = 0
+		}
+	}
 	signIns := 0
 	for _, on := range []bool{cfg.UserHeader != "", ocSet, pxSet} {
 		if on {
@@ -1186,6 +1247,10 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--alarms-every is how often --alarms is read: give --alarms")
 	case cfg.Keep > 0 && cfg.Keep < cfg.Backfill:
 		err = fmt.Errorf("--keep %s is shorter than --backfill %s", time.Duration(cfg.Keep), time.Duration(cfg.Backfill))
+	case cfg.Keep > 0 && cfg.KeepActivity > 0 && cfg.KeepActivity < cfg.Keep:
+		err = fmt.Errorf("--keep-activity %s is shorter than --keep %s: the activity log is kept as long as the firings at least", time.Duration(cfg.KeepActivity), time.Duration(cfg.Keep))
+	case cfg.Keep <= 0 && cfg.KeepActivity > 0:
+		err = fmt.Errorf("--keep-activity %s with --keep 0: nothing is pruned with --keep 0, the activity log neither: give --keep too, or leave --keep-activity out", time.Duration(cfg.KeepActivity))
 	case cfg.EveryoneAdmin && (len(cfg.Editors) > 0 || len(cfg.Admins) > 0):
 		err = fmt.Errorf("--everyone-admin is for no roles: with --editors or --admins, they say who may change what")
 	case cfg.EveryoneAdmin && cfg.ReadOnly:
@@ -1202,6 +1267,12 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
 	case cfg.NotifyWebhookSecret != "" && cfg.NotifyWebhook == "":
 		err = fmt.Errorf("--notify-webhook-secret-file signs the posts to --notify-webhook-file: give it too")
+	case len(cfg.WebhookDests) > 0 && cfg.Config == "":
+		err = fmt.Errorf("--webhook-dest takes what a route in --config's notify: sends it: give --config")
+	case webhookDestTwice(cfg) != "":
+		err = fmt.Errorf("--webhook-dest %s: --report-dest gives a destination of that name already: give each its own", webhookDestTwice(cfg))
+	case webhookSecretAlone(cfg) != "":
+		err = fmt.Errorf("--webhook-dest-secret %s signs the posts to --webhook-dest %s: give it too", webhookSecretAlone(cfg), webhookSecretAlone(cfg))
 	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "":
 		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file, --changes-token-file or more than one")
 	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != ""):
@@ -1549,6 +1620,28 @@ func expectFlag(path string) error {
 		return fmt.Errorf("--expect %s: %w", path, err)
 	}
 	return nil
+}
+
+// webhookDestTwice is a --webhook-dest's name --report-dest gives too, ""
+// for none: a route names a destination by its name alone.
+func webhookDestTwice(cfg serve.Config) string {
+	for _, name := range slices.Sorted(maps.Keys(cfg.WebhookDests)) {
+		if _, ok := cfg.ReportDests[name]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
+// webhookSecretAlone is a --webhook-dest-secret's name no --webhook-dest
+// gives, "" for none.
+func webhookSecretAlone(cfg serve.Config) string {
+	for _, name := range slices.Sorted(maps.Keys(cfg.WebhookDestSecrets)) {
+		if _, ok := cfg.WebhookDests[name]; !ok {
+			return name
+		}
+	}
+	return ""
 }
 
 func configFlag(path string) error {

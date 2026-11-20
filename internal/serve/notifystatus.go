@@ -55,6 +55,9 @@ type notifyStatus struct {
 	// through the outbox, how its posts went, as the ledger has it.
 	Posted *digestPosted
 	Loc    *time.Location
+	// Routes are the routes in force and each destination's state
+	// (notifyroutesview.go).
+	Routes *routesView
 }
 
 // digestPosted is how the weekly digest's posts to Slack went, as the
@@ -138,13 +141,22 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 	}
 	dests := s.sendsTo()
 	n.Sends = len(dests) > 0
+	// And what waits for a destination no flag gives any more, which fails
+	// and is given up on (sweepGone).
+	gone, err := s.gonePlaces(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// By the wall clock, as the outbox keeps when each notice was made.
-	st, err := s.l.Standing(ctx, dests, time.Now().Add(-24*time.Hour))
+	st, err := s.l.Standing(ctx, slices.Concat(dests, gone), time.Now().Add(-24*time.Hour))
 	if err != nil {
 		return nil, err
 	}
 	n.LastSent, n.Failed, n.Backlog, n.Counted = st.LastSent, st.Failed, st.More, ledger.FailedCounted
 	n.GivenUp, n.GivenUpMore = st.GivenUp, st.GivenUpMore
+	if n.Routes, err = s.routesView(ctx, lang, gone); err != nil {
+		return nil, err
+	}
 	return n, nil
 }
 
@@ -159,5 +171,5 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 // that asking for it again reads nothing again.
 func freshPage(name string, r *http.Request) bool {
 	q := r.URL.Query()
-	return name == "manage" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == "" && q.Get("signal-try") == "" && q.Get("rules-try") == ""
+	return name == "manage" || name == "sourcelist" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == "" && q.Get("signal-try") == "" && q.Get("rules-try") == ""
 }
