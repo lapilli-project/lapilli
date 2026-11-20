@@ -71,6 +71,22 @@ func a11yServer(t *testing.T) (*Server, []string) {
 			t.Fatal(err)
 		}
 	}
+	// Drafts of what Errors is held to: an agent's waiting, with what it
+	// found, its reason and a test file; one accepted, the YAML to put
+	// where they are declared (docs/design/expectations.md, step 3).
+	for i, target := range []string{ledger.DraftToNone, ledger.DraftToConfig} {
+		d, err := s.l.KeepDraft(ctx, ledger.ExpectDraft{Rule: "Errors", Origin: ledger.DraftAgent, MadeBy: "bo", Agent: true,
+			Text: "expectations:\n  - rule: Errors\n    budget:\n      week: 5\n", Tests: map[string]string{"t.yaml": "tests: []\n"}, Reason: "fewer pages <b>at night</b>",
+			Found: json.RawMessage(`[{"what":"budget week","held":"5","as_it_is":"21","as_it_is_state":"broken"}]`), Target: target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			if _, err := s.l.AcceptDraft(ctx, d, "ana", "", ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	uev, _ := json.Marshal(undoEvidence(proposalEvidence(state(t, s, id))))
 	undo, err := s.l.Undo(ctx, ledger.Proposal{Rule: "Noise", Kind: ledger.KindUndo, Path: ledger.PathGrafana, Follows: id, Before: "Noise ()\nfor: 5m\n",
 		After: "Noise ()\nfor: 0s\n", Evidence: uev}, "ana")
@@ -980,6 +996,17 @@ func TestPagesAccessibleInMoreStates(t *testing.T) {
 		h := s.Handler()
 		pageA11y(t, h, cy, "/proposals", "/proposals/1", "/rules/Errors")
 		pageA11y(t, h, ana, "/proposals/1")
+	})
+	t.Run("a draft to accept", func(t *testing.T) {
+		s, _ := changesServer(t, nil)
+		if _, err := s.l.KeepDraft(context.Background(), ledger.ExpectDraft{Rule: "Errors", Origin: ledger.DraftAgent, MadeBy: bo, Agent: true,
+			Text: "expectations:\n  - rule: Errors\n    budget:\n      week: 5\n", Reason: "fewer pages", Target: ledger.DraftToNone,
+			Found: json.RawMessage(`[{"what":"budget week","held":"5","as_it_is":"21","as_it_is_state":"broken"}]`)}); err != nil {
+			t.Fatal(err)
+		}
+		h := s.Handler()
+		pageA11y(t, h, cy, "/rules/Errors?tab=expectations", "/proposals")
+		pageA11y(t, h, bo, "/rules/Errors?tab=expectations")
 	})
 }
 

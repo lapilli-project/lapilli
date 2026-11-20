@@ -144,6 +144,55 @@
 {{end}}{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>
 
+{{else if eq .Tab "expectations"}}{{/* tab: expectations */}}
+<section class="card" id="expectations">
+<h2>{{t "Expectations"}}</h2>
+{{with .Expect}}<p class="quiet">{{t "What this rule is held to, checked after each run over the week so far and the twelve whole weeks before, by the ledger's weeks: ✓ met, ✕ broken, ? not known, … so far."}}</p>
+{{range .Lines}}{{$x := .}}<div class="expect" id="expect-{{.Expect}}">
+<h3>{{.Held}}{{if .Broken}} <span class="badge {{status "expect" "broken"}}">✕ {{t "broken"}}</span>{{end}}</h3>
+<p class="quiet">{{t "Held by %s, in %s." .Selector .Source}}{{if .Task}} <a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>{{else if .Broken}} {{if edits $.Status $v.TeamID}}<form method="post" action="/expectations/task" class="track"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="expect" value="{{.Expect}}"><input type="hidden" name="week" value="{{.Week}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "expectations"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{template "off" (offTeam $ "Make it a task" (print "expect-why-" .Expect) $v.Team)}}{{end}}{{end}}</p>
+{{if .Catch}}<p><span class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}}</span> {{.Last.Text}}</span>{{with .IncidentAt}} <span class="quiet">{{t "(%s began %s)" $x.Incident .}}</span>{{end}} <a href="{{$.Link (print "/incidents/" (path .Incident))}}"><bdi>{{.Incident}}</bdi></a></p>
+{{else if .Scenario}}<p><span class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}}</span> {{.Last.Text}}</span>{{with .Found}} <span class="quiet">{{t "(found %s)" .}}</span>{{end}}</p>
+{{with .Detail}}<pre class="example"><code>{{.}}</code></pre>{{end}}
+{{else}}<div class="scroll" tabindex="0" role="region" aria-label="{{.Held}}"><table class="goals">
+<thead><tr>{{range $v.Expect.Weeks}}<th scope="col" class="hw">{{if .SoFar}}{{t "so far"}}{{else}}{{.Label}}{{end}}</th>{{end}}</tr></thead>
+<tbody><tr>{{range .Weeks}}{{if .Class}}<td class="gw {{.Class}}" title="{{.Text}}"><span aria-hidden="true">{{.Sign}}<span class="v">{{.Value}}</span></span><span class="vh">{{.Text}}</span></td>{{else}}<td class="gw"><span aria-hidden="true">–</span><span class="vh">{{t "not in effect that week"}}</span></td>{{end}}{{end}}</tr></tbody>
+</table></div>{{end}}
+</div>{{end}}
+{{else}}<p>{{t "This rule is held to no expectation."}}</p>
+<p class="quiet">{{tbdi "Hold it to a budget, or to incidents it must keep catching, in the expectations file (--expect), under expectations: in serve's configuration, or in its own annotation lapilli.dev/budget, for example:"}}</p>
+<pre class="example"><code>expectations:
+  - rule: {{.Name}}
+    budget: {week: 10, asleep: 2}</code></pre>{{end}}
+</section>
+{{with .Drafts}}{{$d := .}}<section class="card" id="drafts">
+<h2>{{t "Drafts"}}</h2>
+<p class="quiet">{{t "Drafts of what this rule is held to: the history's, counted, or an agent's, through MCP. Each was checked against the rule as it is over the twelve weeks. A person other than whoever proposed it, or whose agent did, accepts or drops it."}}</p>
+{{if not .Lines}}<p class="quiet">{{t "None."}}</p>{{end}}
+{{range .Lines}}{{$x := .}}<div class="draft" id="draft-{{.ID}}">
+<h3>{{t "Draft #%d" .ID}} {{template "proposalbadge" (draftBadge .State)}}{{with .PR}} <span class="badge {{status "draft" .}}">{{t "pull request: %s" (t .)}}</span>{{end}}</h3>
+<p class="quiet">{{if .Agent}}<span class="badge agent status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{t "An agent drafted it, for %s, %s. What it says is its own: check what checking it found, not its words." (who .MadeBy) (at $loc .Made)}}{{else}}{{t "The history's, kept by %s, %s." (who .MadeBy) (at $loc .Made)}}{{end}}{{if eq .State "accepted"}} {{t "Accepted by %s, %s." (who .DecidedBy) (at $loc .Decided)}}{{else if eq .State "dropped"}} {{t "Dropped by %s, %s." (who .DecidedBy) (at $loc .Decided)}}{{end}}</p>
+{{with .Reason}}<blockquote class="said"><p>{{.}}</p></blockquote>{{end}}
+{{with .Items}}<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Held to"}}</th><th scope="col">{{t "As it is"}}</th><th scope="col">{{t "State"}}</th></tr></thead>
+<tbody>{{range .}}<tr><td><code>{{.What}}</code> {{.Held}}</td><td>{{.Value}}</td><td><span class="{{status "expect" (draftState .State)}}">{{t .State}}</span>{{with .Why}} <span class="quiet">({{.}})</span>{{end}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
+<details><summary>{{t "What it holds the rule to"}}</summary><pre class="example"><code>{{.Text}}</code></pre>
+{{range .Tested}}<p class="quiet"><code>{{.Path}}</code></p><pre class="example"><code>{{.Text}}</code></pre>{{end}}</details>
+{{if eq .State "open"}}<div class="draft-actions">{{if .CanAccept}}<form method="post" action="/expectations/drafts/{{.ID}}/accept" class="track"><input type="hidden" name="key" value="{{.Key}}"><button>{{if .GitPath}}{{t "Accept: open a pull request"}}{{else}}{{t "Accept"}}{{end}}</button></form> {{else if .Own}}<span class="quiet">{{t "You proposed it, or your agent did: someone else accepts it."}}</span> {{else if not $d.Approver}}<span class="quiet">{{if $d.On}}{{tbdi "An approver accepts it: one named in --approvers, or an admin when it isn't given."}}{{else}}{{tbdi "Accepting it takes an approver, with changes on: lapilli serve was started without --changes."}}{{end}}</span> {{end}}
+{{if .CanDrop}}<form method="post" action="/expectations/drafts/{{.ID}}/drop" class="track"><button class="quiet-button">{{t "Drop"}}</button></form>{{end}}</div>
+{{if not .GitPath}}<p class="hint">{{if eq .Target "config"}}{{tbdi "Lapilli can't write serve's configuration (--config): accepting it keeps the decision, and gives the YAML to put there."}}{{else if eq .Target "file"}}{{tbdi "Accepting it keeps the decision, and gives the expectations file with it taken in to put where the file comes from: the git path opens a pull request only with --changes, the change recipes' token, and no scenario."}}{{else}}{{tbdi "serve has no expectations file (--expect) nor configuration (--config): accepting it keeps the decision, and gives the YAML to put where you declare them."}}{{end}}</p>{{end}}
+{{else if eq .State "accepted"}}{{if .PR}}<p>{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{t "Its pull request"}}</a>{{else}}{{t "Handed to the change recipes, for a pull request to the expectations file."}}{{end}}{{with .Why}} <span class="quiet">({{.}})</span>{{end}}</p>
+{{else}}<p class="notice status-info"><span class="sign" aria-hidden="true">↻</span> {{if .Whole}}{{t "Accepted, and not applied: Lapilli doesn't write the expectations file. Put this file where it comes from (its ConfigMap, or the file in git it is made from):"}}{{else}}{{t "Accepted, and not applied: Lapilli can't write where this rule's expectations are declared. Add these under expectations: there, in place of what holds the rule by rule: now:"}}{{end}}</p>
+{{with .TakenWhy}}<p class="quiet">{{t "The expectations file couldn't be read with it taken in (%s): its own entries are given." .}}</p>{{end}}
+<pre class="example"><code>{{.Taken}}</code></pre>{{end}}{{end}}
+</div>{{end}}
+<h3 id="history-draft">{{t "From the history"}}</h3>
+<p class="quiet">{{t "As it is now: the most it fired in a whole week of the twelve before this one, while people slept and re-fired, rounded up, and the incidents it caught. Counted, not written by a model: the same weeks give the same draft. Lower what is more than you want."}}</p>
+{{with .History}}<pre class="example"><code>{{.}}</code></pre>{{else}}<p class="quiet">{{t .HistoryNone}}</p>{{end}}
+<div class="draft-actions">{{if .Keep}}<form method="post" action="/expectations/drafts" class="track"><input type="hidden" name="rule" value="{{$v.Name}}"><button class="quiet-button">{{t "Keep it as a draft"}}</button></form> {{end}}{{with .TeamFile}}<a href="{{.}}" download>{{t "The team's rules' draft, as a file"}}</a> · {{end}}<a href="{{.AllFile}}" download>{{t "Every rule's draft, as a file"}}</a></div>
+</section>{{end}}
+
 {{else if eq .Tab "activity"}}{{/* tab: activity */}}
 <section class="card" id="tasks">
 <h2>{{t "Tasks"}}</h2>

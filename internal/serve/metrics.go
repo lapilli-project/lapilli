@@ -293,6 +293,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(&b, "lapilli_rule_content_problems{rule=\"%s\",check=\"%s\"} %d\n", labelValue(p.rule), p.check, p.n)
 			}
 		}
+		// The expectations, as last checked (docs/design/expectations.md).
+		if err := s.expectMetrics(ctx, &b); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
 		s.cache.put(tag, "/metrics", c)
 	}

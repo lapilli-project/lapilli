@@ -203,6 +203,10 @@ Bounds:
 | `GET /api/v1/report` | viewer | `from`, `to`; `firings=false`; `format=csv`; `redact=true` | `lapilli verdict --json`'s report for the period ([fields](numbers.md#the-reports-fields)); with `format=csv`, its firings a row each ([columns](numbers.md#the-csvs-columns)), those quiet windows excused among them; with `redact=true`, every name an alias, as `--redact` gives ([redact.md](redact.md)) |
 | `GET /api/v1/summary` | viewer | `from`, `to` (a day, `2026-11-02`, or an RFC 3339 time; the last four whole weeks and this one by default), `team` (repeatable, or `*` alone for everyone and every team), `critical` (the severities counted as critical, comma-separated) | each week, for everyone or each team: precision, critical firings caught, re-fires, firings off hours and during deploys, incidents and impact windows caught and missed, the firings counted as `episodes` ([numbers.md](numbers.md#episodes); `null` until the ledger has counted the week's), `people`'s verdicts and `not_judged` ([numbers.md](numbers.md#a-persons-verdict-lapilli-serve)), and `goals` with goals declared; with `schema` 1 ([docs/design/noc.md](design/noc.md)) |
 | `GET /api/v1/outcomes` | viewer | | what the Outcomes page shows: `effect` (what the rule changes did, beside what their backtests said), `record` (whether incidents are being written down), `use` |
+| `GET /api/v1/expectations` | viewer | `rule` (one rule's; every rule's when left out) | `checks`, what checking the expectations held now found ([design/expectations.md](design/expectations.md)): each rule's budgets by week (`week_of`, the week's Monday) over the week so far and the twelve whole weeks before, its catches (`week_of` the week the incident began, `""` while it isn't written down), and its scenarios (`what` `scenario PATH`, `week_of` the week what it found was found in, `detail` what promtool said of it failing, or why it couldn't be run), each with `what`, `held`, `selector`, `source`, `result` (`met`, `broken`, `not known`, or `open`: the week under way, not over its budget yet), `why`, `n` and `value`, and `task`, the task made of it; `this_week` |
+| `GET /api/v1/expectations/draft` | viewer | `rule` (one rule's), or `team` (a team's rules'); every rule's when neither | the history's draft of what the rules are held to ([design/expectations.md](design/expectations.md), step 3): `yaml`, an expectations file, as `/expectations/draft.yaml` gives it, of the twelve whole weeks before this one (`from`, `to`), each rule's most in a week, while people slept and re-fired, rounded up, and the incidents it caught; `rules`, how many it holds; `left_out`, those it doesn't, each with `why` (`no_week`, `unreplayed`, `past_bound`); `team` |
+| `GET /api/v1/expectation-drafts` | viewer | `rule`, `state` (`open`, `accepted`, `dropped`; comma-separated) | `drafts`, 200 at most, the latest first: each draft of what a rule is held to, an agent's or the history's, with `made_by`, `agent`, `made`, `text` (the expectations, as Lapilli wrote them), `tests`, `reason` (the proposer's words), `items` (what checking it found: `what`, `held`, `as_it_is`, `as_it_is_state`, `as_it_is_why`), `target` (`file`, `config`, `none`), `state`, `decided_by`, `decided`, and, by the git path, `pull_request` (`ready`, `opened`, `merged`, `closed`, `failed`), `link` and `pull_request_reason` |
+| `GET /api/v1/expectation-drafts/{id}` | viewer | | the draft |
 | `GET /api/v1/rules` | viewer | `weeks` (`1`, `4` or `12`; 4 by default), `team`, `sort` (`refired`, `deploys`), `during` or `outside` (a marked window's kind) | the rules list: `Lines`, a rule each, with `Firings`, `White`, `Black`, `Precision`, `Noisy`, `Team`, `Suggestion`, ...; `Silent`, the rules that didn't fire in the twelve weeks kept |
 | `GET /api/v1/runs` | viewer | | the last 100 runs, the latest first: `Kind`, `From`, `To`, `Firings`, `Error`, `Failed`; to anyone but an admin, without the paths of serve's files |
 | `GET /api/v1/sources` | viewer | `all` (`true` for every source) | the sources firings are copied in from: `name`, `written`, `by`, `from`, `to`, `firings`, `rules`; with `all=true`, `sources`, every source serve reads as the Sources page shows it: `id`, `kind`, `name`, `from` (its flag), `state` (`ok`, `failing`, `quiet`, `pending`), `down`, `last_ok`, `last_failed`, `last_error` (as `GET /api/v1/runs` says an error, and without a credential to anyone), `failures` (reads in a row, -1 where not counted), `rules`, `lag_seconds`, `took_seconds`, and, to an admin, `where`; never kept ([docs/design/serveops.md](design/serveops.md#sources)) |
@@ -343,11 +347,17 @@ The schedules, the sections and the destinations are in
 | Route | Role | Takes | Gives |
 |---|---|---|---|
 | `GET /api/v1/proposals` | viewer | `rule`, `state` (comma-separated) | `proposals`, 200 at most, each with its `diff`, `evidence`, `approvals`, and, when it is stale, `stale`, why; `changes` (whether `--changes` is on) and `paused` |
-| `GET /api/v1/proposals/{id}` | viewer | | the proposal, with the `document` as changed |
+| `GET /api/v1/proposals/{id}` | viewer | | the proposal, with the `document` as changed; of a new rule (kind `add`), its `evidence.add` (where it goes, the rule as Lapilli wrote it, each expectation's `items`), `held` (why no one may approve it yet) and `expectations` and `tests`, what it is held to |
 
 None of the API makes, approves or applies a proposal: a person proposes
-on a rule's page (`POST /proposals`), an agent with MCP's `propose`, and a
-person approves in a browser ([Changing rules](changing-rules.md)).
+on a rule's page (`POST /proposals`), or a new rule on its form
+(`/proposals/new`, `POST /proposals` with `kind=add`), an agent with MCP's
+`propose` (kind `add` for a new rule, where MCP's `places` says it may
+go), and a
+person approves in a browser ([Changing rules](changing-rules.md)). Nor a
+draft of expectations: an agent drafts with MCP's `propose_expectation`, a
+person keeps the history's on the rule's tab, and an approver accepts in a
+browser.
 
 ## The incidents port
 
@@ -365,7 +375,7 @@ checked as on `--listen`.
 | `--incidents-token-file` | `POST /api/v1/incidents`, `PUT /api/v1/incidents/{id}`, `DELETE /api/v1/incidents/{id}` | 20 a second, bursts of 40 | 1 MB |
 | `--firings-token-file` | `PUT /api/v1/firings/{source}` | 20 at once, then one each 5 seconds | 16 MB |
 | `--tasks-token-file` | `GET /api/v1/tasks`, `PATCH /api/v1/tasks/{id}`, `GET /api/v1/tasks/{id}/comments`, `POST /api/v1/tasks/{id}/comments`, `PATCH /api/v1/tasks/{id}/comments/{comment}` | 5 a second, bursts of 100 | 64 KB |
-| `--changes-token-file` | `GET /api/v1/changes`, `PATCH /api/v1/changes/{id}` | 1 a second, bursts of 30 | 64 KB |
+| `--changes-token-file` | `GET /api/v1/changes`, `PATCH /api/v1/changes/{id}`, `PATCH /api/v1/changes/expectations/{id}` | 1 a second, bursts of 30 | 64 KB |
 
 A token makes one request at a time on each replica: another gets 429
 and `Retry-After: 1`. Past its rate, 429 with how long to wait. With
@@ -408,7 +418,14 @@ the one request at a time stays each replica's
   and `link`. `PATCH /api/v1/changes/{id}` takes `state`: `opened` with
   the pull request's `link`, `merged`, `closed`, or `failed` with a
   `reason` of 500 characters at most
-  ([recipes/changes](../recipes/changes/README.md)).
+  ([recipes/changes](../recipes/changes/README.md)). It also gives
+  `expectations`, 50 at most: the drafts of expectations accepted by the
+  git path, ready (with the `document`, the expectations file with the
+  draft taken in, and `doc_hash`, the sha256 of the file as lapilli serve
+  read it) or with a pull request open, each with its `branch`
+  (`lapilli/LEDGER/expectations-ID`), `rule`, `title`, `body` and `link`;
+  `PATCH /api/v1/changes/expectations/{id}` takes the same `state`s
+  ([design/expectations.md](design/expectations.md), step 3).
 
 ## The notifications port
 
@@ -485,7 +502,17 @@ forms post to paths of their own (`POST /incidents`, `POST /rules/bulk`,
 `POST /settings`, ...), and need the roles the API's writes of the same
 things do. Some writes are there alone, with no route of the API:
 changing the settings, proposing a change (an agent proposes through MCP),
-approving one, and the changes to many rules or firings at once. Deciding
+approving one, making a task of a goal
+missed or an expectation broken (`POST /goals/task`, `POST
+/expectations/task`, the latter of a rule's `rule`, `expect` and `week`,
+refused unless it is broken as last checked), keeping the history's draft
+of a rule's expectations (`POST /expectations/drafts`, its `rule`: a
+team's editor's, of their own team's rule), accepting a draft (`POST
+/expectations/drafts/{id}/accept`, an approver's, from the rule's page in
+a browser, never its proposer's) or dropping one (`POST
+/expectations/drafts/{id}/drop`, an editor's or an approver's), and the
+changes to many rules or firings at once. `GET /expectations/draft.yaml`
+(`rule` or `team`) gives the history's draft as a file to take. Deciding
 an impact window and writing a firing down as real have routes of their
 own too (above), with the forms' roles and checks. A form about a firing (`POST /firings/{id}/real`,
 `POST /firings/{id}/verdict`, and their bulk `POST /firings/real` and

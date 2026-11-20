@@ -727,8 +727,14 @@ func (x *Redactor) Comparison(c *Comparison) *Comparison {
 			switch id, ok := strings.CutPrefix(r.What, "catches "); {
 			case ok:
 				r.What = "catches " + x.alias("incident", id)
+			case strings.HasPrefix(r.What, ScenarioWhat):
+				r.What = ScenarioWhat + x.alias("scenario", strings.TrimPrefix(r.What, ScenarioWhat))
 			case r.What != "budget week" && r.What != "budget asleep":
 				r.What = Redacted // none Lapilli writes: not shown as it is
+			}
+			// What promtool said names the rule, its labels, its series.
+			if r.Said != "" {
+				r.Said = Redacted
 			}
 			ex.Results[i] = r
 		}

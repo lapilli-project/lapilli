@@ -139,13 +139,16 @@ func (p *run) awsRegions() []string {
 // prefix (NAME*) is each alarm or namespace this run read under it: a
 // policy's Deny or NotResource for some names under a prefix never matches
 // the prefix written as an ARN, so it isn't asked so. One with nothing read
-// under it, or past mostResources, is unnamed: not asked, and unknown.
+// under it, or past mostResources, is unnamed: not asked, and unknown. A
+// CloudWatch prefix is also asked of one name under it no alarm read has
+// (addedUnder): the alarm a rule added there makes, which no read alarm
+// stands for (docs/design/expectations.md, step 5).
 func (p *run) awsTargets(role string) []simulation {
 	s := p.c.Serve
 	parts := strings.SplitN(role, ":", 6)
 	partition, account := parts[1], parts[4]
 	var out []simulation
-	put := func(of, region string, actions []string, name func(string) string, read []string, pats []string) {
+	put := func(of, region string, actions []string, name func(string) string, read []string, pats []string, added bool) {
 		sim := simulation{of: of, region: region, actions: actions}
 		for _, pat := range pats {
 			var arns []string
@@ -157,6 +160,9 @@ func (p *run) awsTargets(role string) []simulation {
 				}
 				if len(arns) == 0 {
 					sim.unnamed = append(sim.unnamed, "nothing read under a prefix --changes-in gives")
+				}
+				if added {
+					arns = append(arns, name(addedUnder(prefix, read)))
 				}
 			} else {
 				arns = []string{name(pat)}
@@ -199,7 +205,7 @@ func (p *run) awsTargets(role string) []simulation {
 		arn := func(n string) string {
 			return "arn:" + partition + ":cloudwatch:" + region + ":" + account + ":alarm:" + n
 		}
-		put("CloudWatch's alarms of --alarms "+a.Source, region, cloudWatchWrites, arn, read, pats)
+		put("CloudWatch's alarms of --alarms "+a.Source, region, cloudWatchWrites, arn, read, pats, true)
 	}
 	if k, _ := source.RulerKind(s.Ruler); s.Ruler != "" && k == source.RulerAmazon {
 		u, _ := url.Parse(s.Ruler)
@@ -219,9 +225,20 @@ func (p *run) awsTargets(role string) []simulation {
 		arn := func(n string) string {
 			return "arn:" + partition + ":aps:" + region + ":" + account + ":rulegroupsnamespace/" + ws + "/" + n
 		}
-		put("Amazon's namespaces", region, ampWrites, arn, read, pats)
+		put("Amazon's namespaces", region, ampWrites, arn, read, pats, false)
 	}
 	return out
+}
+
+// addedUnder is a name under a prefix that no alarm read has, standing for
+// the alarm a rule added there would make: the prefix, then
+// lapilli-added, a number after it while one read has that name.
+func addedUnder(prefix string, read []string) string {
+	n := prefix + "lapilli-added"
+	for i := 2; slices.Contains(read, n); i++ {
+		n = fmt.Sprintf("%slapilli-added-%d", prefix, i)
+	}
+	return n
 }
 
 // cloudwatchARN is a CloudWatch alarm's ARN: its region, account, name.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -739,7 +740,7 @@ type grafanaStandIn struct {
 
 func (g *grafanaStandIn) export(only string) []byte {
 	var rs []any
-	for _, uid := range []string{"abc", "def"} {
+	for _, uid := range slices.Sorted(maps.Keys(g.rules)) {
 		if r, ok := g.rules[uid]; ok && (only == "" || only == uid) {
 			rs = append(rs, escaped(r))
 		}

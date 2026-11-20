@@ -380,7 +380,8 @@ func TestRuleTabsCounted(t *testing.T) {
 			open++
 		}
 	}
-	want := []string{"overview::0 false false", "firings:firings:7 true false", "versions:versions:4 true true", fmt.Sprintf("proposals:proposals:%d true false", open), "activity:activity:5 true false"}
+	want := []string{"overview::0 false false", "firings:firings:7 true false", "versions:versions:4 true true", fmt.Sprintf("proposals:proposals:%d true false", open),
+		"expectations:expectations:0 true false", "activity:activity:5 true false"}
 	if !slices.Equal(got, want) || open == 0 || open == len(v.Proposals) {
 		t.Errorf("tabs %q, want %q", got, want)
 	}

@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -17,24 +20,37 @@ import (
 
 // Expectations are what rules are held to, written beside them
 // (docs/design/expectations.md): how often each may fire in a week, how
-// often while people slept, and the incidents it must keep catching.
+// often while people slept, the incidents it must keep catching, and the
+// scenarios, promtool's own test files, it must pass.
 type Expectations struct {
 	Expectations []Expectation `yaml:"expectations" json:"expectations"`
 }
 
-// Expectation is one rule's, or a group's rules', by name.
+// Expectation is one rule's, or a group's rules', by name; or the rules
+// whose labels a selector matches, as --rules-select takes one (labels:
+// severity=page, team in (payments,cart)).
 type Expectation struct {
 	Rule    string        `yaml:"rule,omitempty" json:"rule,omitempty"`
 	Group   string        `yaml:"group,omitempty" json:"group,omitempty"`
+	Labels  string        `yaml:"labels,omitempty" json:"labels,omitempty"`
 	Budget  *Budget       `yaml:"budget,omitempty" json:"budget,omitempty"`
 	Catches []ExpectCatch `yaml:"catches,omitempty" json:"catches,omitempty"`
+	// Scenarios are promtool test files the rule must pass, each a path
+	// relative to the expectations file, inside its directory
+	// (ScenarioPath), run against the rule's group as Lapilli has it.
+	Scenarios []string `yaml:"scenarios,omitempty" json:"scenarios,omitempty"`
+	// sel is Labels, read.
+	sel rules.Selector
 }
 
 // Budget is how often a rule may fire in each whole week of a period, and
-// of those, how often while people slept, by the hours it is counted by.
+// of those, how often while people slept, by the hours it is counted by,
+// and how often a firing came again within --refire of the same alert
+// resolving.
 type Budget struct {
-	Week   *int `yaml:"week,omitempty" json:"week,omitempty"`
-	Asleep *int `yaml:"asleep,omitempty" json:"asleep,omitempty"`
+	Week    *int `yaml:"week,omitempty" json:"week,omitempty"`
+	Asleep  *int `yaml:"asleep,omitempty" json:"asleep,omitempty"`
+	Refires *int `yaml:"refires,omitempty" json:"refires,omitempty"`
 }
 
 // ExpectCatch is an incident a rule must keep catching, within a delay of
@@ -60,7 +76,8 @@ func (d *Within) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-func (d Within) MarshalText() ([]byte, error) { return []byte(time.Duration(d).String()), nil }
+// MarshalText writes it as a rule file writes a duration: 5m, 1h30m.
+func (d Within) MarshalText() ([]byte, error) { return []byte(Duration(time.Duration(d))), nil }
 
 // MaxExpectations is the most bytes an expectations file is read to, as
 // serve's declared configuration is.
@@ -75,6 +92,31 @@ const MaxExpectationEntries = 2000
 // every rule its expectation holds that a change touches.
 const MaxExpectationCatches = 2000
 
+// MaxExpectationScenarios is the most scenarios a file may hold, in all
+// its expectations: each is a run of promtool, on each side of a change.
+const MaxExpectationScenarios = 200
+
+// maxScenarioPath is the longest a scenario's path may be, in bytes.
+const maxScenarioPath = 512
+
+// ScenarioPath says whether a scenario's path is one an expectations file
+// may name: relative to the file, inside its directory, written as it is
+// (no ., .. or empty part, no leading or doubled /, no \), 512 bytes at
+// most, of characters that show. What it leads to is read inside that
+// directory alone (scenario.ReadTest), never run.
+func ScenarioPath(p string) error {
+	bad := p == "" || len(p) > maxScenarioPath || !utf8.ValidString(p) || strings.ContainsFunc(p, func(r rune) bool {
+		return r == '\\' || unicode.IsControl(r) || rules.Turns(r)
+	})
+	for _, part := range strings.Split(p, "/") {
+		bad = bad || part == "" || part == "." || part == ".."
+	}
+	if bad {
+		return fmt.Errorf("scenario %q: want a path relative to the expectations file, inside its directory, such as tests/restarts.yaml", Clean(p))
+	}
+	return nil
+}
+
 // MaxExpectResults is the most a comparison holds the rules that differ
 // to: each rule to each budget and catch that holds it, before and after.
 // A group's 2,000 catches held against every rule of the group a change
@@ -82,8 +124,8 @@ const MaxExpectationCatches = 2000
 const MaxExpectResults = 100000
 
 // ReadExpectations reads an expectations file strictly: a key it doesn't
-// know, a value of another kind, an expectation naming no rule or group,
-// or a budget below nothing is an error, with its line.
+// know, a value of another kind, an expectation naming no rule, group or
+// labels, or a budget below nothing is an error, with its line.
 func ReadExpectations(r io.Reader) (*Expectations, error) {
 	b, err := io.ReadAll(io.LimitReader(r, MaxExpectations+1))
 	if err != nil {
@@ -104,36 +146,76 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 	if err := dec.Decode(&e); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	if len(e.Expectations) > MaxExpectationEntries {
-		return nil, fmt.Errorf("%d expectations: at most %d", len(e.Expectations), MaxExpectationEntries)
+	return NewExpectations(e.Expectations)
+}
+
+// NewExpectations checks expectations read, from a file or from where else
+// they are declared (lapilli serve's --config), as ReadExpectations does:
+// each names one of a rule, a group and labels, and holds it to something;
+// the same budget or incident given twice for one of them is refused. Each
+// rule's, each group's and each selector's entries are made one.
+func NewExpectations(list []Expectation) (*Expectations, error) {
+	if len(list) > MaxExpectationEntries {
+		return nil, fmt.Errorf("%d expectations: at most %d", len(list), MaxExpectationEntries)
 	}
-	catches := 0
-	for _, x := range e.Expectations {
+	catches, scenarios := 0, 0
+	for _, x := range list {
 		catches += len(x.Catches)
+		scenarios += len(x.Scenarios)
 	}
 	if catches > MaxExpectationCatches {
 		return nil, fmt.Errorf("%d catches: at most %d in all", catches, MaxExpectationCatches)
 	}
-	for i, x := range e.Expectations {
+	if scenarios > MaxExpectationScenarios {
+		return nil, fmt.Errorf("%d scenarios: at most %d in all", scenarios, MaxExpectationScenarios)
+	}
+	e := &Expectations{Expectations: slices.Clone(list)}
+	for i := range e.Expectations {
+		x := &e.Expectations[i]
 		at := fmt.Sprintf("expectation %d", i+1)
+		named := 0
+		for _, v := range []string{x.Rule, x.Group, x.Labels} {
+			if v != "" {
+				named++
+			}
+		}
+		b := x.Budget
 		switch {
-		case (x.Rule == "") == (x.Group == ""):
-			return nil, fmt.Errorf("%s: give rule or group, one of them", at)
-		case x.Budget == nil && len(x.Catches) == 0:
-			return nil, fmt.Errorf("%s: nothing to hold %s to: give a budget or catches", at, x.name())
-		case x.Budget != nil && x.Budget.Week == nil && x.Budget.Asleep == nil:
-			return nil, fmt.Errorf("%s: a budget of nothing: give week or asleep", at)
-		case x.Budget != nil && (x.Budget.Week != nil && *x.Budget.Week < 0 || x.Budget.Asleep != nil && *x.Budget.Asleep < 0):
+		case named != 1:
+			return nil, fmt.Errorf("%s: give rule, group or labels, one of them", at)
+		case b == nil && len(x.Catches) == 0 && len(x.Scenarios) == 0:
+			return nil, fmt.Errorf("%s: nothing to hold %s to: give a budget, catches or scenarios", at, x.name())
+		case b != nil && b.Week == nil && b.Asleep == nil && b.Refires == nil:
+			return nil, fmt.Errorf("%s: a budget of nothing: give week, asleep or refires", at)
+		case b != nil && (below(b.Week) || below(b.Asleep) || below(b.Refires)):
 			return nil, fmt.Errorf("%s: a budget below nothing", at)
+		}
+		if x.Labels != "" {
+			sel, err := rules.ParseSelector(x.Labels)
+			if err == nil && sel.Empty() {
+				err = errors.New("it selects every rule: give a rule, a group, or a label to select by")
+			}
+			if err != nil {
+				return nil, fmt.Errorf("%s: labels: %w", at, err)
+			}
+			// As written, its spaces aside: one selector is one entry.
+			x.Labels, x.sel = sel.String(), sel
 		}
 		for _, c := range x.Catches {
 			if strings.TrimSpace(c.Incident) == "" {
 				return nil, fmt.Errorf("%s: a catch names no incident", at)
 			}
 		}
+		for _, p := range x.Scenarios {
+			if err := ScenarioPath(p); err != nil {
+				return nil, fmt.Errorf("%s: %w", at, err)
+			}
+		}
 	}
 	return e.merged()
 }
+
+func below(n *int) bool { return n != nil && *n < 0 }
 
 // merged is the file with each rule's, and each group's, entries made one:
 // what is held is then compared item by item. The same budget, or the same
@@ -142,14 +224,14 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 // rule or group in a set.
 func (e *Expectations) merged() (*Expectations, error) {
 	out := &Expectations{Expectations: []Expectation{}}
-	at := map[[2]string]int{}
-	caught := map[[3]string]bool{}
+	at := map[[3]string]int{}
+	caught, scenarios := map[[4]string]bool{}, map[[4]string]bool{}
 	for _, x := range e.Expectations {
-		key := [2]string{x.Rule, x.Group}
+		key := [3]string{x.Rule, x.Group, x.Labels}
 		i, seen := at[key]
 		if !seen {
 			at[key] = len(out.Expectations)
-			y := Expectation{Rule: x.Rule, Group: x.Group}
+			y := Expectation{Rule: x.Rule, Group: x.Group, Labels: x.Labels, sel: x.sel}
 			out.Expectations = append(out.Expectations, y)
 			i = at[key]
 		}
@@ -170,39 +252,79 @@ func (e *Expectations) merged() (*Expectations, error) {
 				}
 				y.Budget.Asleep = x.Budget.Asleep
 			}
+			if x.Budget.Refires != nil {
+				if y.Budget.Refires != nil {
+					return nil, fmt.Errorf("%s: a budget of re-fires given twice", x.name())
+				}
+				y.Budget.Refires = x.Budget.Refires
+			}
 		}
 		for _, c := range x.Catches {
-			k := [3]string{x.Rule, x.Group, c.Incident}
+			k := [4]string{x.Rule, x.Group, x.Labels, c.Incident}
 			if caught[k] {
 				return nil, fmt.Errorf("%s: incident %s given twice", x.name(), c.Incident)
 			}
 			caught[k] = true
 			y.Catches = append(y.Catches, c)
 		}
+		for _, p := range x.Scenarios {
+			k := [4]string{x.Rule, x.Group, x.Labels, p}
+			if scenarios[k] {
+				return nil, fmt.Errorf("%s: scenario %s given twice", x.name(), Clean(p))
+			}
+			scenarios[k] = true
+			y.Scenarios = append(y.Scenarios, p)
+		}
 	}
 	return out, nil
 }
 
 func (x Expectation) name() string {
-	if x.Rule != "" {
+	switch {
+	case x.Rule != "":
 		return x.Rule
+	case x.Group != "":
+		return "group " + x.Group
 	}
-	return "group " + x.Group
+	return "labels " + x.Labels
 }
 
-// For says whether it holds a rule of that name and group. A name several
+// Selector is what it names its rules by, as written: rule: NAME,
+// group: NAME or labels: SELECTOR.
+func (x Expectation) Selector() string {
+	switch {
+	case x.Rule != "":
+		return "rule: " + x.Rule
+	case x.Group != "":
+		return "group: " + x.Group
+	}
+	return "labels: " + x.Labels
+}
+
+// For says whether it holds a rule of that name and group, its labels
+// unknown: an expectation by labels holds none of them. A name several
 // rules share is told apart in a run (CheckoutErrors [severity=page]):
 // rule: CheckoutErrors holds each of them; the name told apart, one.
-func (x Expectation) For(rule, group string) bool {
-	if x.Rule != "" {
+func (x Expectation) For(rule, group string) bool { return x.Holds(rule, group, nil) }
+
+// Holds says whether it holds a rule of that name, group and labels (the
+// labels its alerts carry, its group's among them): by labels, when every
+// requirement of its selector holds of them.
+func (x Expectation) Holds(rule, group string, labels map[string]string) bool {
+	switch {
+	case x.Rule != "":
 		return x.Rule == rule || strings.HasPrefix(rule, x.Rule+" [")
+	case x.Group != "":
+		return x.Group == group
 	}
-	return x.Group == group
+	return labels != nil && x.sel.Matches(labels)
 }
 
-// same says two expectations name the same rule or group: the one is the
-// other, as a change may have made it.
-func (x Expectation) same(y Expectation) bool { return x.Rule == y.Rule && x.Group == y.Group }
+// same says two expectations name the same rule, group or labels: the one
+// is the other, as a change may have made it.
+func (x Expectation) same(y Expectation) bool {
+	return x.Rule == y.Rule && x.Group == y.Group && x.Labels == y.Labels
+}
 
 // Expect states, of an expectation on one side of a change.
 const (
@@ -235,6 +357,18 @@ type ExpectResult struct {
 	// Moved says it was taken away as the rule left the group that held
 	// it: the expectation is there still, and no longer holds this rule.
 	Moved bool `json:"moved,omitempty"`
+	// Of a scenario: BeforeWhy and AfterWhy, why it is not known on each
+	// side, in Lapilli's words; Said, what promtool said of it failing
+	// after the change, or why its test file can't be read: the test
+	// file's and the rules' own words. Edited says the change edited its
+	// test file; Unrun, that it couldn't be run after the change, promtool
+	// given and the rule one promtool runs (its test file unread, a time
+	// out, a crash), so it can't be judged.
+	BeforeWhy string `json:"before_why,omitempty"`
+	AfterWhy  string `json:"after_why,omitempty"`
+	Said      string `json:"said,omitempty"`
+	Edited    bool   `json:"edited,omitempty"`
+	Unrun     bool   `json:"unrun,omitempty"`
 }
 
 // BrokenByChange says the change broke it: broken after, and met before
@@ -276,13 +410,17 @@ func (c *Checked) Broken() int {
 	return n
 }
 
-// item is one thing an expectation holds a rule to: a budget's limit, or a
-// catch, by what it is.
+// item is one thing an expectation holds a rule to: a budget's limit, a
+// catch or a scenario, by what it is. fromBefore says it was read from the
+// expectations before the change (--expect-before), whose directory a
+// scenario's path is read in.
 type item struct {
-	what   string
-	limit  *int         // a budget's
-	catch  *ExpectCatch // a catch's
-	asleep bool
+	what           string
+	limit          *int         // a budget's
+	catch          *ExpectCatch // a catch's
+	scenario       string       // a scenario's path
+	asleep, refire bool
+	fromBefore     bool
 }
 
 func (x *Expectation) items() []item {
@@ -297,14 +435,72 @@ func (x *Expectation) items() []item {
 		if b.Asleep != nil {
 			out = append(out, item{what: "budget asleep", limit: b.Asleep, asleep: true})
 		}
+		if b.Refires != nil {
+			out = append(out, item{what: "budget refires", limit: b.Refires, refire: true})
+		}
 	}
 	for i := range x.Catches {
 		out = append(out, item{what: "catches " + x.Catches[i].Incident, catch: &x.Catches[i]})
 	}
+	for _, p := range x.Scenarios {
+		out = append(out, item{what: ScenarioWhat + p, scenario: p})
+	}
 	return out
 }
 
+// itemsFrom are its items, read from the expectations before the change
+// when fromBefore says so.
+func (x *Expectation) itemsFrom(fromBefore bool) []item {
+	out := x.items()
+	for i := range out {
+		out[i].fromBefore = fromBefore
+	}
+	return out
+}
+
+// ScenarioWhat begins what a scenario holds a rule to: "scenario
+// tests/restarts.yaml".
+const ScenarioWhat = "scenario "
+
+// ScenarioHeld is what a scenario holds a rule to: passing it.
+const ScenarioHeld = "passes"
+
+// ExpectItem is one thing an expectation holds a rule to, as a person
+// reads it: What, "budget week", "budget asleep", "budget refires",
+// "catches INC-43" or "scenario tests/restarts.yaml"; Held, its bound
+// ("10", "within 5m", "caught", "passes"). Limit is a budget's, Catch a
+// catch's, Scenario a scenario's path.
+type ExpectItem struct {
+	What, Held string
+	Limit      *int
+	Catch      *ExpectCatch
+	Scenario   string
+}
+
+// Asleep and Refires say what a budget counts: firings while people
+// slept, re-fires; neither, every firing.
+func (it ExpectItem) Asleep() bool  { return it.What == "budget asleep" }
+func (it ExpectItem) Refires() bool { return it.What == "budget refires" }
+
+// Items are what it holds a rule to, its budget's first.
+func (x *Expectation) Items() []ExpectItem {
+	var out []ExpectItem
+	for _, it := range x.items() {
+		out = append(out, ExpectItem{What: it.what, Held: it.limitText(), Limit: it.limit, Catch: it.catch, Scenario: it.scenario})
+	}
+	return out
+}
+
+// BudgetItems are what a budget holds a rule to, as Items gives them.
+func BudgetItems(b *Budget) []ExpectItem {
+	x := Expectation{Budget: b}
+	return x.Items()
+}
+
 func (it item) limitText() string {
+	if it.scenario != "" {
+		return ScenarioHeld
+	}
 	if it.catch == nil {
 		return fmt.Sprint(*it.limit)
 	}
@@ -314,9 +510,44 @@ func (it item) limitText() string {
 	return "caught"
 }
 
-// weekCounts are, of one side's firings, by rule, each whole week's and
-// how many came while people slept, counted once.
-type weekCounts map[string][]struct{ all, asleep int }
+// weekCounts are, of one side's firings, by rule, each whole week's, how
+// many came while people slept and how many re-fired, counted once.
+type weekCounts map[string][]struct{ all, asleep, refired int }
+
+// ScenarioRunner runs the scenarios expectations hold rules to: a promtool
+// test file against a rule's group, on one side of a change.
+type ScenarioRunner interface {
+	// RunScenario runs path, as the expectations name it (fromBefore says
+	// those before the change, --expect-before, whose directory it is read
+	// in), against the group of rule, as side ("before" or "after") has it.
+	RunScenario(side string, fromBefore bool, rule, path string) ScenarioResult
+}
+
+// ScenarioResult is what running a scenario came to: State met, broken or
+// not known; of not known, Why, in Lapilli's words; Said, what promtool
+// said of it failing, or why its test file can't be read, in the file's
+// and the rules' own words; Test, a hash of the test file run, "" when it
+// wasn't read; Unrun, that it couldn't be run, promtool given and the rule
+// one it runs (Comparison.Summary's scenarios_unrun).
+type ScenarioResult struct {
+	State, Why, Said, Test string
+	Unrun                  bool
+}
+
+// ScenariosNotRun runs no scenario: each is not known, for why. Never met.
+type ScenariosNotRun string
+
+func (why ScenariosNotRun) RunScenario(string, bool, string, string) ScenarioResult {
+	return ScenarioResult{State: ExpectUnknown, Why: string(why)}
+}
+
+// Why a scenario wasn't run: lapilli verdict wasn't given promtool, or a
+// pull request's backtest ran through lapilli serve, which runs none it is
+// sent.
+const (
+	NoPromtool      ScenariosNotRun = "not run: no --promtool"
+	NotThroughServe ScenariosNotRun = "not run through lapilli serve"
+)
 
 // CheckExpectations holds the rules a comparison's change touches to what
 // after says of them; with before (--expect-before), the side before to
@@ -324,30 +555,63 @@ type weekCounts map[string][]struct{ all, asleep int }
 // said. hours count the firings while people slept. Past MaxExpectResults
 // it stops, and says what to do.
 func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours) (*Checked, error) {
+	return CheckExpectationsBy(c, after, before, func(string) *Hours { return hours })
+}
+
+// CheckExpectationsBy is CheckExpectations, each rule's firings counted
+// while people slept by the hours hoursOf gives it: lapilli serve's, its
+// team's own where it has them. nil for none.
+func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf func(rule string) *Hours) (*Checked, error) {
 	out := &Checked{Results: []ExpectResult{}}
 	span := c.To.Sub(c.From)
 	out.Weeks = int(span / (7 * 24 * time.Hour))
 	if out.Weeks == 0 {
 		out.Scaled = span.Hours() / 24
 	}
-	countsB, countsA := out.count(c.Before, c.From, c.To, hours), out.count(c.After, c.From, c.To, hours)
+	countsB, countsA := out.count(c.Before, c.From, c.To, hoursOf), out.count(c.After, c.From, c.To, hoursOf)
 	incsB, incsA := incidentsByID(c.Before), incidentsByID(c.After)
-	sleeps := hours != nil && hours.Sleeps()
+	var run ScenarioRunner = NoPromtool
+	if c.Scenarios != nil {
+		run = c.Scenarios
+	}
 	for _, rc := range c.Rules {
+		h := hoursOf(rc.Rule)
+		sleeps := h != nil && h.Sleeps()
 		// Checked as each rule's are added: one rule adds a few
 		// expectations' items at most, each file's 2,000 catches at most.
 		if len(out.Results) > MaxExpectResults {
 			return nil, errHeldTooMuch
 		}
 		b, a := rc.Before, rc.After
-		group := ""
+		group, labels := "", rc.AfterLabels
 		if a != nil {
 			group = a.Group
 		} else if b != nil {
-			group = b.Group
+			group, labels = b.Group, rc.BeforeLabels
 		}
 		held := false
 		judge := func(it item, beforeLimit item, r ExpectResult) ExpectResult {
+			if it.scenario != "" {
+				var sb, sa ScenarioResult
+				r.Before, r.BeforeState = "–", ExpectAbsent
+				if b != nil {
+					sb = run.RunScenario("before", beforeLimit.fromBefore, rc.Rule, beforeLimit.scenario)
+					r.Before, r.BeforeState, r.BeforeWhy = scenarioShown(sb)
+				}
+				r.After, r.AfterState = "taken away", ExpectBroken
+				if a != nil {
+					sa = run.RunScenario("after", it.fromBefore, rc.Rule, it.scenario)
+					r.After, r.AfterState, r.AfterWhy = scenarioShown(sa)
+					// Run before the change and not known after it (the change
+					// moved the rule out of Prometheus's format, or its
+					// definition out of reach) can't be judged either: the
+					// gate fails closed, as on a run that failed.
+					ranBefore := sb.State == ExpectMet || sb.State == ExpectBroken
+					r.Said, r.Unrun = sa.Said, (sa.Unrun || ranBefore && sa.State == ExpectUnknown) && !r.Removed
+				}
+				r.Edited = sb.Test != "" && sa.Test != "" && sb.Test != sa.Test
+				return r
+			}
 			if it.catch != nil {
 				r.Before, r.BeforeState = catchState(c.Before, incsB, b, rc.Rule, *beforeLimit.catch)
 				r.After, r.AfterState = catchState(c.After, incsA, a, rc.Rule, *it.catch)
@@ -358,11 +622,14 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 				}
 				return r
 			}
-			wb, sb := out.most(countsB, rc.Rule)
-			wa, sa := out.most(countsA, rc.Rule)
+			wb, sb, rb := out.most(countsB, rc.Rule)
+			wa, sa, ra := out.most(countsA, rc.Rule)
 			nb, na := wb, wa
-			if it.asleep {
+			switch {
+			case it.asleep:
 				nb, na = sb, sa
+			case it.refire:
+				nb, na = rb, ra
 			}
 			counted := !it.asleep || sleeps
 			r.Before, r.BeforeState = budgetState(b, nb, beforeLimit.limit, counted)
@@ -371,7 +638,7 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		}
 		for i := range after.Expectations {
 			x := &after.Expectations[i]
-			if !x.For(rc.Rule, group) {
+			if !x.Holds(rc.Rule, group, labels) {
 				continue
 			}
 			held = true
@@ -389,7 +656,7 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 				}
 			}
 			old := map[string]item{}
-			for _, it := range was.items() {
+			for _, it := range was.itemsFrom(before != nil) {
 				old[it.what] = it
 			}
 			for _, it := range x.items() {
@@ -408,7 +675,7 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 				out.Results = append(out.Results, judge(it, beforeLimit, r))
 			}
 			// What the change took away of it: shown, held to what it was.
-			for _, it := range was.items() {
+			for _, it := range was.itemsFrom(before != nil) {
 				if _, gone := old[it.what]; gone && before != nil {
 					r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true}
 					out.Results = append(out.Results, judge(it, it, r))
@@ -418,9 +685,9 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		// What held the rule before and holds it no more: an expectation
 		// the change took away whole, or one by group of a rule the change
 		// moved out of the group. The rule's group before decides.
-		bGroup := group
+		bGroup, bLabels := group, labels
 		if b != nil {
-			bGroup = b.Group
+			bGroup, bLabels = b.Group, rc.BeforeLabels
 		}
 		ys := before
 		if ys == nil {
@@ -428,11 +695,11 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		}
 		for j := range ys.Expectations {
 			y := &ys.Expectations[j]
-			if !y.For(rc.Rule, bGroup) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) && x.For(rc.Rule, group) }) {
+			if !y.Holds(rc.Rule, bGroup, bLabels) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) && x.Holds(rc.Rule, group, labels) }) {
 				continue
 			}
 			moved := slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) })
-			for _, it := range y.items() {
+			for _, it := range y.itemsFrom(before != nil) {
 				r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true, Moved: moved}
 				out.Results = append(out.Results, judge(it, it, r))
 			}
@@ -445,6 +712,18 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		return nil, errHeldTooMuch
 	}
 	return out, nil
+}
+
+// scenarioShown is a scenario's result as a side shows it: passes, fails,
+// or not known and why.
+func scenarioShown(x ScenarioResult) (shown, state, why string) {
+	switch x.State {
+	case ExpectMet:
+		return "passes", ExpectMet, ""
+	case ExpectBroken:
+		return "fails", ExpectBroken, ""
+	}
+	return "–", ExpectUnknown, x.Why
 }
 
 // errHeldTooMuch is what CheckExpectations says past MaxExpectResults.
@@ -469,7 +748,7 @@ func incidentsByID(rep *Report) map[string]int {
 // count counts a side's firings by rule and whole week, counted back from
 // to, the weeks closed at their start, so a firing at from is in the
 // first; with no whole week, the period's, as one.
-func (k *Checked) count(r *Report, from, to time.Time, hours *Hours) weekCounts {
+func (k *Checked) count(r *Report, from, to time.Time, hoursOf func(string) *Hours) weekCounts {
 	out := weekCounts{}
 	if r == nil {
 		return out
@@ -489,29 +768,32 @@ func (k *Checked) count(r *Report, from, to time.Time, hours *Hours) weekCounts 
 		}
 		ws := out[f.Rule]
 		if ws == nil {
-			ws = make([]struct{ all, asleep int }, n)
+			ws = make([]struct{ all, asleep, refired int }, n)
 			out[f.Rule] = ws
 		}
 		ws[i].all++
-		if hours != nil && hours.Of(f.Start) == Asleep {
+		if h := hoursOf(f.Rule); h != nil && h.Of(f.Start) == Asleep {
 			ws[i].asleep++
+		}
+		if f.Refired {
+			ws[i].refired++
 		}
 	}
 	return out
 }
 
-// most is the most a rule fired in a week, and while people slept; with
-// no whole week, the period's, scaled to a week.
-func (k *Checked) most(counts weekCounts, rule string) (int, int) {
-	most, asleep := 0, 0
+// most is the most a rule fired in a week, while people slept, and
+// re-fired; with no whole week, the period's, scaled to a week.
+func (k *Checked) most(counts weekCounts, rule string) (int, int, int) {
+	most, asleep, refired := 0, 0, 0
 	for _, w := range counts[rule] {
-		most, asleep = max(most, w.all), max(asleep, w.asleep)
+		most, asleep, refired = max(most, w.all), max(asleep, w.asleep), max(refired, w.refired)
 	}
 	if k.Weeks == 0 {
 		scale := 7 / max(k.Scaled, 1.0/24)
-		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5)
+		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5), int(float64(refired)*scale + 0.5)
 	}
-	return most, asleep
+	return most, asleep, refired
 }
 
 func budgetState(r *RuleResult, n int, limit *int, counted bool) (string, string) {
@@ -544,7 +826,14 @@ func catchState(rep *Report, at map[string]int, r *RuleResult, rule string, k Ex
 	if !ok {
 		return "–", ExpectUnknown
 	}
-	for _, c := range rep.Incidents[i].CaughtBy {
+	return CaughtWithin(rep.Incidents[i].CaughtBy, rule, k)
+}
+
+// CaughtWithin is whether rule is among the rules that caught an incident,
+// within the catch's delay of its start: its delay, met or broken; ✗,
+// broken, when it isn't among them.
+func CaughtWithin(by []Catch, rule string, k ExpectCatch) (string, string) {
+	for _, c := range by {
 		if c.Rule == rule {
 			if k.Within > 0 && c.Delay > time.Duration(k.Within) {
 				return Delay(c.Delay), ExpectBroken
@@ -563,8 +852,12 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s = "at most " + r.Limit + " a week"
 	case r.What == "budget asleep":
 		s = "at most " + r.Limit + " a week while people slept"
+	case r.What == "budget refires":
+		s = "at most " + r.Limit + " re-fires a week"
 	case strings.HasPrefix(r.What, "catches "):
 		s = "catches " + name(strings.TrimPrefix(r.What, "catches ")) + ", " + r.Limit
+	case strings.HasPrefix(r.What, ScenarioWhat):
+		s = "passes the scenario " + name(strings.TrimPrefix(r.What, ScenarioWhat))
 	default:
 		s = r.What + " " + r.Limit
 	}
@@ -577,6 +870,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s += " (was " + r.WasLimit + ", in this change)"
 	case r.Changed:
 		s += " (new in this change)"
+	case r.Edited:
+		s += " (its test file edited in this change)"
 	}
 	return s
 }
@@ -598,6 +893,8 @@ func (r ExpectResult) verdictOf() string {
 		return "met"
 	case r.AfterState == ExpectAbsent:
 		return "rule taken away"
+	case r.AfterWhy != "":
+		return "not known: " + r.AfterWhy
 	}
 	return "not known"
 }
@@ -666,6 +963,15 @@ func ExpectationsText(w io.Writer, k *Checked) error {
 			return err
 		}
 	}
+	for _, r := range k.ordered() {
+		if r.Said == "" {
+			continue
+		}
+		fmt.Fprintf(w, "promtool said, of %s and %s after the change:\n", Clean(r.Rule), Clean(strings.TrimPrefix(r.What, ScenarioWhat)))
+		for _, l := range strings.Split(r.Said, "\n") {
+			fmt.Fprintf(w, "    %s\n", Clean(l))
+		}
+	}
 	if len(k.Unexpected) > 0 {
 		names := make([]string, 0, len(k.Unexpected))
 		for _, n := range k.Unexpected {
@@ -693,6 +999,27 @@ func expectationsPart(k *Checked) mdPart {
 		}
 		part.rows = append(part.rows, mdRow([]string{md(r.Rule, 200, true), r.heldTo(code), r.Before, r.After, v}))
 	}
+	// What promtool said of each scenario failing: its lines, each a code
+	// span, after the table.
+	var said []string
+	for _, r := range k.ordered() {
+		if r.Said == "" {
+			continue
+		}
+		var lines []string
+		for i, l := range strings.Split(r.Said, "\n") {
+			if i == maxSaidLines {
+				lines = append(lines, "…")
+				break
+			}
+			lines = append(lines, md(strings.TrimSpace(l), 200, false))
+		}
+		said = append(said, "- "+md(r.Rule, 200, false)+", "+md(strings.TrimPrefix(r.What, ScenarioWhat), 100, false)+": "+strings.Join(lines, " ")+"\n")
+	}
+	var after []string
+	if len(said) > 0 {
+		after = append(after, "promtool said, of the scenarios after the change:\n\n"+strings.Join(said, ""))
+	}
 	if len(k.Unexpected) > 0 {
 		names := make([]string, 0, len(k.Unexpected))
 		for _, n := range k.Unexpected[:min(len(k.Unexpected), 20)] {
@@ -702,7 +1029,74 @@ func expectationsPart(k *Checked) mdPart {
 		if n := len(k.Unexpected) - 20; n > 0 {
 			more = fmt.Sprintf(" and %d more", n)
 		}
-		part.foot = "\nRules this change adds that no expectation holds: " + strings.Join(names, ", ") + more + ".\n\n"
+		after = append(after, "Rules this change adds that no expectation holds: "+strings.Join(names, ", ")+more+".\n")
+	}
+	for _, x := range after {
+		part.foot += x + "\n"
 	}
 	return part
+}
+
+// maxSaidLines is how many of the lines promtool said of a scenario
+// failing a pull request's comment shows.
+const maxSaidLines = 8
+
+// BudgetAnnotation is the annotation a rule may carry its budget in, for
+// teams that keep everything in the rule: "10/week, 2 asleep, 3 refires".
+const BudgetAnnotation = "lapilli.dev/budget"
+
+// maxBudgetText is the longest an annotation's budget is read, in bytes;
+// maxBudget, the most a budget's number may be.
+const (
+	maxBudgetText = 100
+	maxBudget     = 1000000
+)
+
+// errBudgetText is what ParseBudget says of a budget it can't read. A
+// rule's annotation is its author's: what is wrong is said without its
+// text.
+var errBudgetText = errors.New(`want a budget such as "10/week, 2 asleep, 3 refires": a whole number and what it counts, each once`)
+
+// ParseBudget reads a budget as an annotation writes it: parts separated
+// by commas, each a whole number and what it counts, N/week, N asleep and
+// N refires (or re-fires), each once, one at least.
+func ParseBudget(s string) (*Budget, error) {
+	if len(s) > maxBudgetText {
+		return nil, fmt.Errorf("more than %d bytes: %w", maxBudgetText, errBudgetText)
+	}
+	b := &Budget{}
+	parts := strings.Split(s, ",")
+	if len(parts) > 3 {
+		return nil, errBudgetText
+	}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		num, what := p, ""
+		if i := strings.IndexAny(p, "/ "); i > 0 {
+			num, what = p[:i], strings.TrimSpace(strings.TrimPrefix(p[i:], "/"))
+		}
+		n, err := strconv.Atoi(num)
+		if err != nil || n < 0 || n > maxBudget || strings.HasPrefix(num, "+") {
+			return nil, errBudgetText
+		}
+		var at **int
+		switch what {
+		case "week":
+			if !strings.Contains(p, "/") {
+				return nil, errBudgetText
+			}
+			at = &b.Week
+		case "asleep":
+			at = &b.Asleep
+		case "refires", "re-fires":
+			at = &b.Refires
+		default:
+			return nil, errBudgetText
+		}
+		if *at != nil {
+			return nil, errBudgetText
+		}
+		*at = &n
+	}
+	return b, nil
 }

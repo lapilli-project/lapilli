@@ -141,6 +141,18 @@ and `lapilli_goal_weeks_met` counts its occurrences met that ended in those
 twelve weeks, so it can be over `lapilli_weeks_counted`
 ([The numbers](numbers.md#the-metrics)).
 
+## Expectations
+
+What rules are held to after they are deployed
+([design/expectations.md](design/expectations.md)), as the leader last
+checked them, from the ledger: no series with none held.
+
+| Metric | Labels | What it counts |
+|---|---|---|
+| `lapilli_expectations_held` | | The expectations rules are held to, each rule to each budget, catch and scenario that holds it |
+| `lapilli_expectations_broken` | | Of them, those broken: a budget in the week so far or the last whole week, a catch, or a scenario |
+| `lapilli_rule_expectations_broken` | `rule` | Each rule's expectations broken, as `lapilli_expectations_broken` counts them; 500 rules at most |
+
 ## What Lapilli came to
 
 The Outcomes page's numbers ([Keep judging](serve.md)), from the ledger.

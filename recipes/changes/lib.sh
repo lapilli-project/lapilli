@@ -42,6 +42,15 @@
 #                       lapilli@localhost)
 #   MAX_CHANGES         the most branches a run pushes (default 10); the
 #                       changes past it wait for the next run
+#   EXPECT_FILE         the expectations file in the repository that lapilli
+#                       serve's --expect is made from (alerts/expectations.yaml),
+#                       to open a pull request for each draft of expectations
+#                       a person accepted (docs/design/expectations.md):
+#                       written only to that file, only while it is the file
+#                       Lapilli read (by its hash), and only as an
+#                       expectations file, one document whose only key is
+#                       expectations, never what a CI system runs. Without
+#                       it, the drafts accepted wait
 #
 # A document no file in the clone is (rules rendered from a chart, read
 # back from a cluster) gets no edit: Lapilli is told it failed, and why, and
@@ -113,6 +122,15 @@ for rp in $RULES_PATHS; do
 done
 set +f
 [ "$rps" -gt 0 ] || { say "RULES_PATHS: want where in the repository the rules are, such as alerts"; exit 1; }
+if [ -n "${EXPECT_FILE:-}" ]; then
+  case /$EXPECT_FILE in
+    //* | */../* | */./* | /-* | */) say "EXPECT_FILE $EXPECT_FILE: want the expectations file in the repository, such as alerts/expectations.yaml"; exit 1 ;;
+  esac
+  if ci "$EXPECT_FILE"; then
+    say "EXPECT_FILE $EXPECT_FILE: it is what a CI system runs, which is never written"
+    exit 1
+  fi
+fi
 # The URL's authority, user and password and all. An http URL with a user
 # in it holds a token (https://TOKEN@host/...), which ps shows and git keeps
 # in the clone's .git/config; ssh's user is no secret.
@@ -188,6 +206,41 @@ tell() {
   esac
 }
 
+
+# tell_draft ID JSON: tells Lapilli what became of a draft of expectations
+# accepted.
+tell_draft() {
+  printf '%s' "$2" >"$tmp/tell"
+  code=$(lapilli PATCH "/api/v1/changes/expectations/$1" "$tmp/tell")
+  case $code in
+    2??) ;;
+    *) say "Lapilli didn't take what became of the draft of expectations $1 ($code): $(shown "$out")"; failed=1 ;;
+  esac
+}
+
+# expect_doc FILE: whether FILE is an expectations file, read here as YAML
+# reads it: one document (a --- before it, or none), whose only key is
+# expectations, read one way only (doc_read), with nothing after it.
+expect_doc() {
+  nobom "$1" "$tmp/ed"
+  plain_text "$tmp/ed" || return 1
+  rm -rf "$tmp/ed.d"
+  ed_n=$(split_docs "$tmp/ed" "$tmp/ed.d")
+  ed_i=0
+  ed_seen=
+  while [ "$ed_i" -lt "$ed_n" ]; do
+    case $(doc_read "$tmp/ed.d/$ed_i") in
+      empty) ;;
+      'other expectations')
+        [ -z "$ed_seen" ] || return 1
+        ed_seen=1
+        ;;
+      *) return 1 ;;
+    esac
+    ed_i=$((ed_i + 1))
+  done
+  [ -n "$ed_seen" ]
+}
 
 # in_rules PATH: whether a tracked file is under RULES_PATHS.
 in_rules() {
@@ -730,8 +783,127 @@ main() {
     fi
     tell "$id" "$(jq -cn --arg link "$link" '{state: "opened", link: $link}')"
   done
+  drafts
   if [ "$left" -gt 0 ]; then
     say "$left changes ready are left for the next run: a run pushes $MAX_CHANGES branches at most (MAX_CHANGES)"
   fi
   [ "$failed" = 0 ]
+}
+
+# drafts opens a pull request to EXPECT_FILE for each draft of expectations
+# accepted in Lapilli and ready, and tells Lapilli which of those open
+# were merged or closed. Without EXPECT_FILE they wait, said once a run.
+drafts() {
+  m=$(jq '.expectations // [] | if type == "array" then length else -1 end' "$tmp/changes")
+  case $m in
+    -1) say 'Lapilli gave something other than a list of drafts of expectations'; failed=1; return ;;
+    0) return ;;
+  esac
+  if [ -z "${EXPECT_FILE:-}" ]; then
+    say "$m drafts of expectations accepted in Lapilli wait: give EXPECT_FILE, the expectations file lapilli serve's --expect is made from"
+    return
+  fi
+  j=0
+  while [ "$j" -lt "$m" ]; do
+    jq -c ".expectations[$j]" "$tmp/changes" >"$tmp/one"
+    j=$((j + 1))
+    id=$(jq -r '.id' "$tmp/one")
+    case $id in *[!0-9]* | '') say "a draft of expectations has no id: $(jq -c '.id' "$tmp/one")"; failed=1; continue ;; esac
+    state=$(jq -r '.state' "$tmp/one")
+    case $state in
+      opened)
+        link=$(jq -r '.link // ""' "$tmp/one")
+        num=${link##*/}
+        case $num in *[!0-9]* | '') say "draft $id: its link doesn't end in a pull request's number"; failed=1; continue ;; esac
+        st=$(pr_state "$num") || { failed=1; continue; }
+        case $st in
+          merged) tell_draft "$id" '{"state":"merged"}' ;;
+          closed) tell_draft "$id" '{"state":"closed"}' ;;
+        esac
+        continue
+        ;;
+      ready) ;;
+      *) continue ;;
+    esac
+    if [ "$pushed" -ge "$MAX_CHANGES" ]; then
+      left=$((left + 1))
+      continue
+    fi
+    ledger=$(jq -r '.ledger // ""' "$tmp/one")
+    case $ledger in
+      '' | *[!0-9a-f]*) say "draft $id: its ledger isn't one: $(jq -c '.ledger' "$tmp/one")"; failed=1; continue ;;
+    esac
+    if [ ${#ledger} -gt 32 ]; then
+      say "draft $id: its ledger isn't one: $(jq -c '.ledger' "$tmp/one")"
+      failed=1
+      continue
+    fi
+    branch=lapilli/$ledger/expectations-$id
+    if [ -z "$cloned" ]; then
+      git clone --quiet --branch "$BASE" -- "$CLONE" "$work"
+      cloned=1
+    fi
+    want=$(jq -r '.doc_hash' "$tmp/one")
+    case $want in *[!0-9a-f]* | '') say "draft $id: no hash to find its file by"; failed=1; continue ;; esac
+    git -C "$work" checkout --quiet "$BASE"
+    line=$(git -C "$work" -c core.quotePath=false ls-files -s -- "$EXPECT_FILE")
+    mode=${line%% *}
+    if [ -z "$line" ] || [ "${line#*	}" != "$EXPECT_FILE" ] || ! writable "$EXPECT_FILE" "$mode" || ! expect_doc "$work/$EXPECT_FILE"; then
+      tell_draft "$id" '{"state":"failed","reason":"EXPECT_FILE is not a file a draft is written to: a tracked expectations file, one document whose only key is expectations, named *.yml or *.yaml, not executable, and not what a CI system runs. Take the draft in by hand; its page gives the file"}'
+      continue
+    fi
+    if [ "$(sha256 "$work/$EXPECT_FILE")" != "$want" ]; then
+      tell_draft "$id" '{"state":"failed","reason":"EXPECT_FILE in the repository is not the expectations file lapilli serve read when the draft was accepted: it changed since, or lapilli serve reads another. Take the draft in by hand; its page gives the file"}'
+      continue
+    fi
+    jq -j '.document' "$tmp/one" >"$tmp/document"
+    if cmp -s "$tmp/document" "$work/$EXPECT_FILE"; then
+      tell_draft "$id" '{"state":"failed","reason":"the draft changes nothing in the expectations file: nothing was pushed"}'
+      continue
+    fi
+    if ! expect_doc "$tmp/document"; then
+      tell_draft "$id" '{"state":"failed","reason":"what Lapilli wrote is not an expectations file, one document whose only key is expectations: nothing was pushed"}'
+      continue
+    fi
+    pushed=$((pushed + 1))
+    git -C "$work" checkout --quiet -B "$branch" "$BASE"
+    cp "$tmp/document" "$work/$EXPECT_FILE"
+    jq -r '.title' "$tmp/one" >"$tmp/msg"
+    printf '\n' >>"$tmp/msg"
+    jq -r '.body' "$tmp/one" >>"$tmp/msg"
+    git -C "$work" add -- "$EXPECT_FILE"
+    git -C "$work" -c user.name="${GIT_NAME:-Lapilli}" -c user.email="${GIT_EMAIL:-lapilli@localhost}" \
+      commit --quiet --no-verify -F "$tmp/msg"
+    # As a rule's change: pushed only where there is no such branch, never
+    # over one a pull request people reviewed may be from.
+    mine=$(git -C "$work" rev-parse 'HEAD^{tree}')
+    there=$(on_remote "$branch") || { failed=1; continue; }
+    if [ -z "$there" ]; then
+      if ! git -C "$work" push --quiet --force-with-lease="refs/heads/$branch:" origin "HEAD:refs/heads/$branch"; then
+        say "draft $id: $branch wasn't pushed"
+        failed=1
+        continue
+      fi
+    elif [ "$there" != "$mine" ]; then
+      tell_draft "$id" "$(jq -cn --arg b "$branch" '{state: "failed", reason: ("the branch " + $b + " holds another change already, which a pull request may be open from: it is never pushed over")}')"
+      continue
+    fi
+    link=$(find_pr "$branch") || { failed=1; continue; }
+    if [ -z "$link" ]; then
+      jq '{title, body}' "$tmp/one" >"$tmp/pr"
+      if ! link=$(create_pr "$branch" "$tmp/pr"); then
+        link=$(find_pr "$branch" anyone) || { failed=1; continue; }
+        if [ -z "$link" ]; then
+          failed=1
+          continue
+        fi
+      fi
+    fi
+    if ! link_ok "$link"; then
+      say "draft $id: the host gave no link for its pull request"
+      failed=1
+      continue
+    fi
+    tell_draft "$id" "$(jq -cn --arg link "$link" '{state: "opened", link: $link}')"
+  done
 }

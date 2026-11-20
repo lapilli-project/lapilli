@@ -150,6 +150,7 @@ What a tool reads is stable:
   | `expectations_broken` | expectations the change broke: met by the rules in place (or of a rule it adds), broken by those proposed |
   | `expectations_already_broken` | expectations broken on both sides, which aren't the change's |
   | `unexpected` | rules the change adds that no expectation holds |
+  | `scenarios_unrun` | scenarios of the rules that differ that couldn't be run after the change, `--promtool` given and the rule one promtool runs: the test file unreadable, a time out, a crash. They can't be judged, as a rule that couldn't be replayed can't; through lapilli serve, which runs none, always 0 |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -222,7 +223,10 @@ don't: a fork's run in the repository carries the repository's own
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate
 (`fail-on-expectations`, `expect-required`) reads the summary line as it
-reads Lapilli's. Serve decides where the history is and what judges the
+reads Lapilli's. Serve runs no scenario a pull request's expectations name
+(`scenarios:`, promtool test files): each is said as not run through
+lapilli serve, and `promtool` is refused with `serve-url`; run `promtool
+test rules` in a step of its own. Serve decides where the history is and what judges the
 firings, so the settings for those (`prometheus-url`, `incidents`,
 `impact`, `match`, `--lead`, `--from`, ...) are refused with it: of the
 arguments, `--since` (whole days, 1 to 14), `--tz` and `--rules-select`

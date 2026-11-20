@@ -118,7 +118,7 @@ func TestParseConfig(t *testing.T) {
 	}
 	for _, c := range []struct{ body, want string }{
 		{"teams:\n  - name: a\n    rule: ^A\n", `line 3: unknown key "rule" in a team`},
-		{"team:\n  - name: a\n", `line 1: unknown key "team": want teams, windows, reports, grants, goals, marked, freezes or notify`},
+		{"team:\n  - name: a\n", `line 1: unknown key "team": want teams, windows, reports, grants, goals, marked, freezes, notify or expectations`},
 		{"teams:\n  name: a\n", "line 2: teams is a list"},
 		{"teams:\n  - name: [a]\n", "line 2: name is a text"},
 		{"teams:\n  - name: a\n    name: b\n", "line 3: name is given twice, on line 2 too"},
@@ -478,7 +478,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 	}
 
 	// MCP: no tool writes a team, a quiet window, a report or a role. Those
-	// that write are proposals' alone.
+	// that write are proposals' and drafts' alone.
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	cs := connect(t, srv.URL, "boss@example.com")
@@ -487,7 +487,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, x := range res.Tools {
-		if (x.Annotations == nil || !x.Annotations.ReadOnlyHint) && x.Name != "propose" && x.Name != "backtest_again" {
+		if (x.Annotations == nil || !x.Annotations.ReadOnlyHint) && x.Name != "propose" && x.Name != "backtest_again" && x.Name != "propose_expectation" {
 			t.Errorf("MCP tool %s writes", x.Name)
 		}
 	}

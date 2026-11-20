@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/scenario"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
@@ -316,6 +318,22 @@ type Config struct {
 	// week missed, 20 a run at most (docs/design/goals.md): off unless
 	// turned on, as Lapilli would make tasks nobody asked for.
 	GoalTasks bool
+
+	// Expect is the expectations file the rules are held to after they are
+	// deployed (docs/design/expectations.md, step 2), read again as it
+	// changes, as Config is; "" for none. ExpectTasks makes a task, for the
+	// rule's team, of each expectation broken, once a rule, an expectation
+	// and a week: off unless turned on, as GoalTasks.
+	Expect      string
+	ExpectTasks bool
+	// Promtool is promtool's path (--promtool), resolved, which runs the
+	// scenarios the expectations hold rules to (docs/design/expectations.md,
+	// step 4), each again when the rule's group or its test file changes;
+	// "" for none, each scenario not known. PromtoolMemory is how much
+	// memory one run may take, in bytes (--promtool-memory): promtool's
+	// RLIMIT_DATA on Linux (scenario.CanCap), none elsewhere; 0 for no cap.
+	Promtool       string
+	PromtoolMemory uint64
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -387,6 +405,10 @@ type Server struct {
 	rejudge atomic.Bool
 	// comparing is held while an agent's proposed change is replayed.
 	comparing sync.Mutex
+	// agentScenarios is held while promtool runs a test file an agent sent
+	// (docs/design/expectations.md, step 3): one at a time, whatever holds
+	// comparing.
+	agentScenarios sync.Mutex
 	// tries are, by reader, the proposals asked for in the last hour that
 	// read the rules again (propose); impactTries, the incident criteria
 	// tried or saved, which read Prometheus (impactTriesAnHour);
@@ -420,6 +442,9 @@ type Server struct {
 	againFailed againFailed
 	// config is what the leader last made of --config.
 	config configState
+	// expect is what the leader made of the expectations declared, and of
+	// checking them (expect.go).
+	expect expectState
 	// routing is what this replica made of --config's notify: last.
 	routing routingState
 	// bnd keeps the boundaries of change the ledger holds (bounds).
@@ -624,6 +649,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s.open.Store(cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen))
+	if cfg.Promtool != "" && cfg.PromtoolMemory > 0 && !scenario.CanCap {
+		log.Warn("promtool runs without a memory cap: --promtool-memory is set through RLIMIT_DATA, on Linux alone", "os", runtime.GOOS)
+	}
 	if cfg.OIDC != nil || cfg.Proxy != nil {
 		if err := s.newSignIn(ctx); err != nil {
 			l.Close()

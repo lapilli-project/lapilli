@@ -149,6 +149,24 @@ Before a change to the rules:
                       nothing)
   --expect-required   exit 1 when the change adds a rule no expectation
                       holds
+  --promtool PATH     with --expect, run each scenario (scenarios:,
+                      promtool's own test files, read in the directory of
+                      the expectations file that names them) of a rule the
+                      change touches, before and after, with promtool at
+                      PATH, against the rule's group as each side has it:
+                      met, broken, or not known (couldn't be run, and why).
+                      Without it, each scenario is not known. Only rules in
+                      Prometheus's format; promtool runs with no
+                      environment, 30s a scenario, its rule_files the
+                      group alone
+  --draft-expectations FILE
+                      write FILE, an expectations file drafted from the
+                      period judged, as each rule is now: the most it fired
+                      in a whole week of it, while people slept and
+                      re-fired, rounded up, and the incidents it caught
+                      (docs/design/expectations.md). Counted, never
+                      written by a model: the same period gives the same
+                      draft. Without --incidents or --impact, budgets alone
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
@@ -712,6 +730,38 @@ The web UI and API:
                       as weeks (occurrences) are missed again, met, or no
                       longer missed (docs/design/goals.md). Off unless
                       turned on
+  --expect FILE       an expectations file, as lapilli verdict --expect
+                      takes, that the rules are held to after deploy: after
+                      each run, each rule's budgets and catches are checked
+                      over the week so far and the twelve whole weeks
+                      before, shown on its page, the overview and the
+                      digest, and told once a rule, an expectation and a
+                      week when broken. Read again every 15s, as --config;
+                      a file that can't be read changes nothing. --config's
+                      expectations: and a rule's annotation
+                      lapilli.dev/budget hold rules too
+                      (docs/design/expectations.md)
+  --expect-tasks      make a task, of kind tune, for the rule's team, of
+                      each expectation broken, once a rule, an expectation
+                      and a week, 20 a run at most, none while one is open.
+                      Off unless turned on
+  --promtool PATH     run the scenarios the expectations hold rules to
+                      (scenarios:, promtool's own test files, read in the
+                      directory of the file that declares them) with
+                      promtool at PATH, against each rule's group as the
+                      rules in effect have it, again when either changes:
+                      5 a run, 30s each, with no environment and its
+                      rule_files the group alone. Only rules in
+                      Prometheus's format. Without it, each scenario is not
+                      known. Scenarios a pull request's backtest sends
+                      (--backtest-listen) are never run
+  --promtool-memory SIZE
+                      the memory one run of --promtool may take, as 256Mi
+                      or 1Gi, 64Mi at least (default 256Mi): on Linux,
+                      promtool's RLIMIT_DATA, past which the run stops and
+                      the scenario is not known; promtool runs in serve's
+                      container, so leave room for it under its memory
+                      limit. Not set on macOS, where promtool runs without
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)

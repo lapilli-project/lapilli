@@ -40,9 +40,31 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- include "lapilli.podSecurity" . | nindent 8 }}
-      {{- if $s.rulesHistory.repository }}
+      {{- $promtool := $s.promtool | default dict }}
+      {{- if and $promtool.image $promtool.path }}
+      {{- fail "serve.promtool: give image, an image promtool is copied from, or path, promtool's path in an image of your own, not both" }}
+      {{- end }}
+      {{- if and (or $promtool.image $promtool.path) (not (or $s.expectations $s.config)) }}
+      {{- fail "serve.promtool runs the scenarios of serve.expectations or of serve.config's expectations: give one" }}
+      {{- end }}
+      {{- if or $s.rulesHistory.repository $promtool.image }}
       initContainers:
+        {{- if $s.rulesHistory.repository }}
         {{- include "lapilli.historyInit" . | nindent 8 }}
+        {{- end }}
+        {{- if $promtool.image }}
+        # promtool, copied from an image that holds it into an emptyDir
+        # of this pod's alone, for --promtool.
+        - name: promtool
+          image: {{ $promtool.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["cp", {{ $promtool.from | default "/bin/promtool" | quote }}, "/promtool/promtool"]
+          securityContext:
+            {{- include "lapilli.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - name: promtool
+              mountPath: /promtool
+        {{- end }}
       {{- end }}
       containers:
         - name: lapilli
@@ -121,6 +143,20 @@ spec:
             {{- fail "serve.goalTasks makes tasks for the goals serve.config declares: give serve.config" }}
             {{- end }}
             - --goal-tasks
+            {{- end }}
+            {{- if $s.expectations }}
+            - --expect=/etc/lapilli/expectations/expectations.yaml
+            {{- end }}
+            {{- if $s.expectTasks }}
+            - --expect-tasks
+            {{- end }}
+            {{- if $promtool.image }}
+            - --promtool=/opt/lapilli-promtool/promtool
+            {{- else if $promtool.path }}
+            - {{ printf "--promtool=%s" $promtool.path | quote }}
+            {{- end }}
+            {{- if and (or $promtool.image $promtool.path) $promtool.memory }}
+            - {{ printf "--promtool-memory=%s" $promtool.memory | quote }}
             {{- end }}
             {{- with $s.proposalsExpire }}
             - {{ printf "--proposals-expire=%s" . | quote }}
@@ -448,6 +484,23 @@ spec:
               mountPath: /etc/lapilli/config
               readOnly: true
             {{- end }}
+            {{- if $s.expectations }}
+            # The whole directory, as config's.
+            - name: expectations
+              mountPath: /etc/lapilli/expectations
+              readOnly: true
+            {{- end }}
+            {{- if $promtool.image }}
+            - name: promtool
+              mountPath: /opt/lapilli-promtool
+              readOnly: true
+            {{- end }}
+            {{- if or $promtool.image $promtool.path }}
+            # Where each scenario is run, and promtool writes: the root is
+            # read-only.
+            - name: scenarios-tmp
+              mountPath: /tmp
+            {{- end }}
             {{- if ($s.deploys).configMap.name }}
             - name: deploys
               mountPath: /etc/lapilli/deploys
@@ -598,6 +651,21 @@ spec:
         - name: config
           configMap:
             name: {{ include "lapilli.fullname" . }}-config
+        {{- end }}
+        {{- if $s.expectations }}
+        - name: expectations
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-expectations
+        {{- end }}
+        {{- if $promtool.image }}
+        - name: promtool
+          emptyDir:
+            sizeLimit: 512Mi
+        {{- end }}
+        {{- if or $promtool.image $promtool.path }}
+        - name: scenarios-tmp
+          emptyDir:
+            sizeLimit: 256Mi
         {{- end }}
         {{- if ($s.deploys).configMap.name }}
         - name: deploys

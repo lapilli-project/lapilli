@@ -215,6 +215,23 @@ type notice struct {
 	Proposal *proposalNotice `json:"proposal,omitempty"`
 	// A goal missed in a week (docs/design/goals.md).
 	Goal *goalNotice `json:"goal,omitempty"`
+	// An expectation of a rule broken (docs/design/expectations.md).
+	Expectation *expectNotice `json:"expectation,omitempty"`
+	// A draft of what a rule is held to, and what became of it (step 3):
+	// never its text, its test files or its reason.
+	Draft *draftNotice `json:"draft,omitempty"`
+}
+
+// draftNotice is what a notice says of a draft of expectations.
+type draftNotice struct {
+	ID     int64  `json:"id"`
+	Rule   string `json:"rule"`
+	Origin string `json:"origin"`
+	MadeBy string `json:"made_by"`
+	Agent  bool   `json:"agent"`
+	State  string `json:"state"`
+	PR     string `json:"pull_request"`
+	Link   string `json:"link"`
 }
 
 // proposalNotice is what a notice says of a proposal.
@@ -241,6 +258,10 @@ func (s *Server) pageOf(n notice) string {
 	case n.Event == "replay.differs":
 		// The rules whose replay differs, this one among them.
 		path = "/rules?trust=differs"
+	case n.Expectation != nil:
+		path = "/rules/" + url.PathEscape(n.Expectation.Rule) + "?tab=expectations"
+	case n.Draft != nil:
+		path = "/rules/" + url.PathEscape(n.Draft.Rule) + "?tab=expectations#draft-" + strconv.FormatInt(n.Draft.ID, 10)
 	case n.Goal != nil:
 		path = "/goals"
 		if n.Goal.Team != "" && n.Goal.Team != "*" {
@@ -352,6 +373,23 @@ func (s *Server) line(n notice) string {
 		case "task.overdue":
 			return tr(l, "lapilli: task #%d, %q, was due %s", t.ID, t.Title, t.Due.In(s.cfg.Loc).Format("2006-01-02"))
 		}
+	case n.Expectation != nil:
+		return "lapilli: " + s.expectSentence(l, n.Expectation.check(s), s.expectThis(n.Expectation))
+	case n.Draft != nil:
+		d := n.Draft
+		switch {
+		case n.Event == "expectation.drafted" && d.Agent:
+			return tr(l, "lapilli: an agent, for %s, drafted what %s is held to, draft #%d", who, d.Rule, d.ID)
+		case n.Event == "expectation.drafted":
+			return tr(l, "lapilli: %s kept the history's draft of what %s is held to, draft #%d", who, d.Rule, d.ID)
+		case n.Event == "expectation.accepted":
+			return tr(l, "lapilli: %s accepted draft #%d of what %s is held to", who, d.ID, d.Rule)
+		case n.Event == "expectation.dropped":
+			return tr(l, "lapilli: %s dropped draft #%d of what %s is held to", who, d.ID, d.Rule)
+		case d.PR == ledger.DraftOpened:
+			return tr(l, "lapilli: a pull request is open for draft #%d of what %s is held to: %s", d.ID, d.Rule, d.Link)
+		}
+		return tr(l, "lapilli: the pull request of draft #%d of what %s is held to is %s", d.ID, d.Rule, tr(l, d.PR))
 	case n.Goal != nil:
 		g := ledger.Goal{Name: n.Goal.Name, Measure: n.Goal.Measure}
 		switch {

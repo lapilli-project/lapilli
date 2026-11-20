@@ -82,6 +82,7 @@ them from what it already finds; a person or an agent can make one too.
 | A nearer threshold, or a shorter `for` | a near miss for an incident nothing caught | the incident, the value it reached, and the backtest of the new threshold over twelve weeks |
 | Retire (disable, then delete) | a spare rule, or one that never fired | twelve weeks of firings, what caught each of its incidents first; and the caveat, shown, that a rule may wait for a rare incident and that incidents nobody wrote down count against it |
 | A fix to what it says | the content check ([content.md](content.md)) | the finding: a missing runbook link, a template naming a label the expression drops |
+| A new rule (as built, [expectations.md](expectations.md), step 5) | a person or an agent, with the place it goes | the rule replayed over twelve weeks with nothing beside it, and each expectation it is held to, met, broken or not known: none broken, or it isn't approved |
 
 **Retiring is two steps.** Where the place the rule is kept can disable a
 rule (Grafana's `isPaused`, a cloud alarm's enabled flag), retiring first
@@ -682,6 +683,17 @@ The first step, for v0.22.0, as above, except:
     long as its own request does. Every incident ID a pull request's
     description names is a code span of its own, a backtick in it a quote
     and a line break a space, one with nothing in it `(none)` (`mdIDs`).
+- **A new rule** (since [expectations.md](expectations.md)'s step 5) is a
+  kind of its own, `add`: one Prometheus alerting rule a person (the new
+  rule's form, `/proposals/new`) or an agent (`propose`, kind `add`) gives,
+  with a place among those serve offers (a rule file's group or a new one,
+  a Grafana folder's group, a ruler namespace's group or a new one,
+  CloudWatch's or Google Cloud's alarms) and what it is held to. It goes
+  the four paths, each making the rule as undoing a deletion makes one
+  there, and undone by deleting it; it isn't approved while it breaks an
+  expectation, or its backtest didn't replay it. Lapilli proposes none of
+  itself. The kinds are now for, threshold, disable, delete, says and add,
+  and undo.
 - **Not yet:** proposals in the weekly digest's tasks line, and a
   proposal carried by a task made elsewhere (a proposal can be made into a
   task).
@@ -723,7 +735,13 @@ pages work it out.
   isn't theirs. None of today's kinds renames or relabels a rule; the check is there for one that would. On the rules
   list, another team's rule picked is counted "not your team's", and the
   rest are proposed. A rule in effect that never fired is owned as one
-  that did, by a note, its name and its labels (`owners.owner`).
+  that did, by a note, its name and its labels (`owners.owner`). A rule
+  added (kind `add`) is owned, until it is in effect, by its name and the
+  labels it is added with as read back where it goes, its group's with
+  its own, as it will be once it is: a team's editor adds only what their
+  team would own so, asked of the labels given before anything is read
+  and again of them as read back; its approvers, freezes and `changes_in`
+  are that team's ([expectations.md](expectations.md), step 5).
   Agents keep today's rules: `--mcp-propose` is an editor's of every team,
   or an admin's, and an agent proposes as before.
 - **A team's approvers** (`approvers:` under a team) approve a proposal

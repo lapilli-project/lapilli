@@ -162,7 +162,7 @@ func (p filePath) name(l string) string {
 // serve starts, and a failure stops it.
 func (s *Server) filePaths() []filePath {
 	c := s.cfg
-	given := []filePath{{c.Incidents, "--incidents"}, {c.Deploys, "--deploys"}, {c.Marked, "--marked"}, {c.Config, "--config"},
+	given := []filePath{{c.Incidents, "--incidents"}, {c.Deploys, "--deploys"}, {c.Marked, "--marked"}, {c.Config, "--config"}, {c.Expect, "--expect"},
 		{c.RulesPath, "--rules"}, {c.RulesHistory, "--rules-history"}, {c.LokiRules, "--loki-rules"},
 		{c.Ledger, "--ledger"}, {c.LedgerURLFile, "--ledger-url-file"},
 		{c.GrafanaToken, "--grafana-token-file"}, {c.LokiToken, "--loki-token-file"}, {c.RulerToken, "--ruler-token-file"},

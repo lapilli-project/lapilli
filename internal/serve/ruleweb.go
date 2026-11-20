@@ -21,14 +21,15 @@ import (
 // The rule's page (docs/design/ui.md): a header with its badges, what to
 // check about it and what can be done; five numbers over the page's period,
 // each beside as long a span before it when the ledger holds one; its last
-// 84 days, a cell a day; and its sections in five tabs, ?tab=.
+// 84 days, a cell a day; and its sections in six tabs, ?tab=.
 
 // ruleTabs are the tabs of a rule's page, in order, each named by a text
 // translated in the context "rule tab" (trIn), apart from the same words
 // in the sidebar. The overview, named Summary, is the one a page shows
 // without tab=, or with one it doesn't have.
 var ruleTabs = []struct{ id, name string }{
-	{"overview", "Summary"}, {"firings", "Firings"}, {"versions", "Versions"}, {"proposals", "Proposals"}, {"activity", "Activity"},
+	{"overview", "Summary"}, {"firings", "Firings"}, {"versions", "Versions"}, {"proposals", "Proposals"}, {"expectations", "Expectations"},
+	{"activity", "Activity"},
 }
 
 // ruleTabOf is the tab a rule's page is asked for: one it has, or else the
@@ -133,6 +134,9 @@ func tabsOf(v *ruleView) []ruleTab {
 		}
 	}
 	counts := map[string]int{"firings": v.Firings, "versions": len(v.Changes), "proposals": open, "activity": len(v.Tasks) + len(v.Comments.List)}
+	if v.Expect != nil {
+		counts["expectations"] = len(v.Expect.Lines)
+	}
 	var out []ruleTab
 	for _, t := range ruleTabs {
 		x := ruleTab{ID: t.id, Name: t.name, Current: t.id == v.Tab}

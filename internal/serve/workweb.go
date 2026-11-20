@@ -948,8 +948,10 @@ func errCode(err error) (int, bool) {
 		return http.StatusForbidden, true
 	case errors.Is(err, errBusy), errors.Is(err, errPagesBusy):
 		return http.StatusServiceUnavailable, true
-	case errors.Is(err, errNotApprover), errors.Is(err, errNotAForm), errors.Is(err, ledger.ErrOwnProposal):
+	case errors.Is(err, errNotApprover), errors.Is(err, errNotAForm), errors.Is(err, ledger.ErrOwnProposal), errors.Is(err, ledger.ErrOwnDraft):
 		return http.StatusForbidden, true
+	case errors.Is(err, ledger.ErrDraftsWaiting):
+		return http.StatusConflict, true
 	case errors.As(err, new(forbiddenSignIn)), errors.As(err, new(notLetIn)):
 		return http.StatusForbidden, true
 	case errors.Is(err, errBadState):

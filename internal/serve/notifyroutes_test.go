@@ -229,7 +229,7 @@ func TestRouteMatch(t *testing.T) {
       to: [payments-hook]
     - labels: {severity: [critical, page]}
       to: [ops]
-    - kinds: [goal.missed]
+    - kinds: [goal.missed, expectation.*]
       teams: [checkout]
       to: [checkout-hook]
   default: [slack]
@@ -250,6 +250,13 @@ func TestRouteMatch(t *testing.T) {
 		{"incident.written", `{"incident": {"id": "INC-1", "labels": {"severity": ["page"], "service": ["pay"]}}}`, []string{"ops"}},
 		{"goal.missed", `{"goal": {"name": "g", "team": "*", "teams": [{"team": "checkout"}]}}`, []string{"checkout-hook"}},
 		{"goal.missed", `{"goal": {"name": "g", "team": "payments"}}`, []string{"slack"}},
+		// An expectation's by its rule's labels, and the team it was told
+		// with; a draft's by its rule's.
+		{"expectation.broken", `{"expectation": {"rule": "Errors", "team": "payments", "what": "budget week"}}`, []string{"ops"}},
+		{"expectation.broken", `{"expectation": {"rule": "Other", "team": "checkout", "what": "budget week"}}`, []string{"checkout-hook"}},
+		{"expectation.broken", `{"expectation": {"rule": "Other", "team": "payments", "what": "budget week"}}`, []string{"slack"}},
+		{"expectation.drafted", `{"draft": {"id": 3, "rule": "Errors"}}`, []string{"ops"}},
+		{"expectation.accepted", `{"draft": {"id": 3, "rule": "Other"}}`, []string{"slack"}},
 		// A label naming a destination, or holding a URL, sends nothing there.
 		{"task.created", `{"task": {"id": 1, "rule": "Errors", "title": "<!channel>", "to": "checkout-hook", "url": "https://attacker.example/x"}}`, []string{"ops"}},
 		{"source.quiet", `{"source": {"name": "cloudwatch"}, "to": "checkout-hook"}`, []string{"slack"}},

@@ -469,6 +469,77 @@ serve:
   goalTasks: true
 ```
 
+`serve.expectations` holds the rules to what is expected of them after
+they are deployed (`--expect`, `docs/design/expectations.md` in the
+repository): an expectations file, as `lapilli verdict --expect` takes,
+kept beside the rule files and given with `--set-file`, in a ConfigMap
+read again as it changes, as `serve.config` is. After each run, each
+rule's budgets (`week`, `asleep`, `refires`) are held to each of the
+ledger's weeks, the week so far and the twelve whole weeks before, and
+its catches to the incidents written down: shown on the rule's
+Expectations tab, the overview, the rules list (held to none, broken),
+the digest and `/metrics`, and told once a rule, an expectation and a
+week when broken. A rule kept only in Grafana or a ruler can be held
+under `expectations:` in `serve.config` instead; a rule can carry its own
+budget in its annotation `lapilli.dev/budget: "10/week, 2 asleep"`.
+`serve.expectTasks` makes a task, for the rule's team, of each one broken
+(`--expect-tasks`).
+
+```yaml
+serve:
+  expectations: |
+    expectations:
+      - rule: ContainerRestarts
+        budget: {week: 10, asleep: 2}
+        catches:
+          - {incident: INC-43, within: 5m}
+  expectTasks: true
+```
+
+A scenario is a promtool test file a rule must pass (`scenarios:` in an
+expectation). `serve.scenarios` puts each test file beside
+`expectations.yaml` in its ConfigMap, by its name, which is the
+scenario's path. Lapilli's image has no promtool: `serve.promtool.image`
+names an image that holds it and `cp`, such as Prometheus's own pinned by
+digest, from which an init container copies `serve.promtool.from`
+(`/bin/promtool`) into an emptyDir only the pod has; or
+`serve.promtool.path` names it in an image of your own built from
+Lapilli's. After each run, each scenario is run against its rule's group
+as the rules in effect have it (`--promtool`), again only when the group
+or the test file changes, five a run, 30s each, with no environment; the
+root being read-only, `/tmp` is an emptyDir of its own, and promtool's
+memory counts toward `resources.limits.memory`. `serve.promtool.memory`
+(256Mi) is what one run may take (`--promtool-memory`, promtool's
+RLIMIT_DATA; promtool's release starts in less than 64Mi, one built with
+cgo needs 8 MiB more for each of its threads, so 512Mi for it): past it
+the run stops, and the scenario is not known, rather than the container
+being killed, as it would be by a rule's annotation
+whose template asks promtool for gigabytes. Keep it, with room for an
+agent's run beside a round's, under `resources.limits.memory`. Without
+`serve.promtool`, each scenario is not known.
+
+```yaml
+serve:
+  expectations: |
+    expectations:
+      - rule: ContainerRestarts
+        scenarios: [restarts.test.yaml]
+  scenarios:
+    restarts.test.yaml: |   # or --set-file serve.scenarios.restarts\.test\.yaml=FILE
+      tests:
+        - interval: 1m
+          input_series:
+            - series: 'kube_pod_container_status_restarts_total{pod="api-0"}'
+              values: '0+1x30'
+          alert_rule_test:
+            - eval_time: 30m
+              alertname: ContainerRestarts
+              exp_alerts:
+                - exp_labels: {pod: api-0, severity: page}
+  promtool:
+    image: prom/prometheus:v3.5.0@sha256:...
+```
+
 `serve.proposalsExpire` closes a proposal that waited for approval longer
 since it began to wait (made, or backtested again), such as `30d`, and
 that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however
@@ -831,9 +902,13 @@ Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they
 propose. It is off by default, since it runs PromQL the agent writes, with
 lapilli's access to Prometheus, and for a Loki's rules LogQL, with lapilli's
-access to Loki, and it needs `serve.roles`.
+access to Loki, and it needs `serve.roles`. It also lets them check what a
+rule is held to, or a rewrite of it, against its history
+(`test_expectation`), which keeps nothing.
 `serve.mcpPropose` lets their agents propose a change to a rule, for a
-person to approve; an agent never approves or applies one.
+person to approve, and a draft of what a rule is held to, for a person to
+accept (`propose_expectation`); an agent never approves, accepts or
+applies one.
 
 `lapilli serve` reads by default, and changes only what a person approves.
 `serve.changes.enabled` turns changes on: a change an approver approved in

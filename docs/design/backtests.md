@@ -551,9 +551,13 @@ heading ("judged by lapilli serve's record"):
   its change reviews are, where `lapilli verdict` judges each by the two
   weeks before it; the same pull request can read differently through
   serve than in CI with a file of the same incidents.
-- "While people slept" is by serve's `--sleep-hours` and `--shifts` (and,
-  once step 2 makes it so, the rule's team's own hours), not the job's
-  flags.
+- "While people slept" is by serve's `--sleep-hours` and `--shifts`, and
+  the rule's team's own hours where it has them (since expectations' step
+  2), not the job's flags.
+- Scenarios (expectations' step 4, promtool test files) aren't run: a
+  request carries no test file, and serve runs none a pull request names,
+  whatever its own `--promtool`. Each is said as not run through lapilli
+  serve, and the recipe refuses `PROMTOOL` with `LAPILLI_SERVE`.
 
 **Step 2** (serve's checks after deploy, `expectation_checks`, a schema of
 its own)
@@ -572,7 +576,11 @@ this port call one function in serve, the replay of a change held to its
 expectations (`replayChange`, then `Comparison.Expect`), so a rule's budget
 is counted one way whoever asks. The port proposes nothing, keeps no draft,
 and passes nothing: a rewrite an agent suggests is backtested the same way,
-and the recipe's gate still decides.
+and the recipe's gate still decides. As built (expectations' step 3),
+`test_expectation` replays the rule, and its rewrite, as the port does
+(`replayCompared`, its firings kept) and holds them with
+`CheckExpectationsBy`, as the port does, by whole weeks back from the
+period's end; `compare` still calls `replayChange`, as it holds nothing.
 
 **Order.** It is built once step 1 is merged, and needs nothing from steps
 2 and 3; its schema is the next free one when its pull request opens.

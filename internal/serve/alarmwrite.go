@@ -309,8 +309,20 @@ func (t alarmTarget) ready(ctx context.Context, u apiUnit, p ledger.Proposal) er
 
 // telling are the actions an alarm's are when they only tell: SNS topics,
 // Lambda functions, Systems Manager's OpsItems and Incident Manager's
-// response plans.
+// response plans. An alarm with any other is automation, and isn't changed
+// (offered).
 var telling = regexp.MustCompile(`^arn:aws(?:-cn|-us-gov)?:(?:sns|lambda|ssm|ssm-incidents):`)
+
+// tellsOnly are the actions a rule added to CloudWatch may take, of those
+// the alarms there take: an SNS topic, a Systems Manager OpsItem, an
+// Incident Manager response plan, each as CloudWatch's documentation
+// writes its ARN, and nothing else. A Lambda function or a Systems Manager
+// automation is code the alarm runs, not someone told, so a rule added
+// never takes one, whatever the alarms there take.
+var tellsOnly = regexp.MustCompile(`^arn:aws(?:-cn|-us-gov)?:(?:` +
+	`sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}(?:\.fifo)?|` +
+	`ssm:[a-z0-9-]+:[0-9]{12}:opsitem:[1-4](?:#CATEGORY=[A-Za-z]+)?|` +
+	`ssm-incidents::[0-9]{12}:response-plan/[A-Za-z0-9_-]{1,200})$`)
 
 // offered says why a change of a kind isn't offered for an alarm, "" when
 // it is: what CloudWatch's alarms that are automation, warm up or are
@@ -468,8 +480,14 @@ func (t alarmTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Ed
 	if a == nil {
 		return apiUnit{}, source.ErrAlarmElsewhere
 	}
-	u, err := t.unit(ctx, p.Source, e)
-	if err != nil || !u.Gone || a.Kind != source.AlarmsGoogle || p.Kind != ledger.KindUndo || p.BeforeHash != "" {
+	added := p.Kind == ledger.KindAdd && a.Kind == source.AlarmsGoogle
+	var u apiUnit
+	var err error
+	if added {
+		// Its source names no policy: it is read back by the name the
+		// create answered with, or found by what it holds.
+		u = apiUnit{Gone: true, ns: a.Source}
+	} else if u, err = t.unit(ctx, p.Source, e); err != nil || !u.Gone || a.Kind != source.AlarmsGoogle || p.Kind != ledger.KindUndo || p.BeforeHash != "" {
 		return u, err
 	}
 	if q, err := t.s.l.ProposalByID(ctx, p.ID); err == nil {
@@ -491,6 +509,10 @@ func (t alarmTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Ed
 	var found []string
 	for _, d := range docs {
 		if got, err := rules.AlarmShape(d.Data, "google"); err == nil && got == want {
+			found = append(found, d.Source)
+		} else if added && rules.AlarmName(d.Data, "google") == rules.AlarmName([]byte(p.Document), "google") {
+			// A policy added is found by its display name, which no other
+			// had when it was made (googleAgain).
 			found = append(found, d.Source)
 		}
 	}

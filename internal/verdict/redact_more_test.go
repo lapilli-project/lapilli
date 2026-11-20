@@ -100,6 +100,8 @@ func TestRedactEveryField(t *testing.T) {
 		"ExpectResult.BeforeState": true,
 		"ExpectResult.AfterState":  true,
 		"ExpectResult.WasLimit":    true,
+		"ExpectResult.BeforeWhy":   true, // why a scenario wasn't run: Lapilli's own words
+		"ExpectResult.AfterWhy":    true,
 		"Judged.Day":               true, // a date, which parts episodes
 		"Judged.Action":            true, // yes or no: Lapilli's words
 	}

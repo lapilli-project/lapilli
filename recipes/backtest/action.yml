@@ -116,6 +116,9 @@ inputs:
   expect-required:
     description: true fails the step when the change adds a rule no expectation holds.
     default: "false"
+  promtool:
+    description: promtool on the runner, its path or its name on PATH, outside the checkout (install it in a step before), which runs the scenarios expect names (scenarios, promtool's own test files) of the rules that differ, before and after, each against the rule's group as Lapilli writes it; with fail-on-expectations, a scenario that couldn't be run after the change fails the step too. Without it, each scenario is not known. Refused with serve-url, which runs none.
+    default: ""
   token:
     description: A token that may comment on the pull request.
     default: ${{ github.token }}
@@ -163,6 +166,7 @@ runs:
         EXPECT: ${{ inputs.expect }}
         FAIL_ON_EXPECTATIONS: ${{ inputs.fail-on-expectations }}
         EXPECT_REQUIRED: ${{ inputs.expect-required }}
+        PROMTOOL: ${{ inputs.promtool }}
         GITHUB_LOGIN: ${{ inputs.login }}
         LAPILLI_SERVE: ${{ inputs.serve-url }}
         LAPILLI_SERVE_AUDIENCE: ${{ inputs.audience }}

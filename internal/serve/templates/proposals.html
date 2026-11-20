@@ -21,6 +21,7 @@
 <p class="lede">{{t "Changes to the rules Lapilli or a person proposed, each with its backtest. Nothing is changed until a person approves it here: then it is checked again, and opened as a pull request where the rule is kept, or applied through Grafana's, a ruler's or a cloud's API, with what it replaces kept for undo."}}</p>
 {{template "changesoff" .}}
 {{if .On}}<p class="quiet">{{t "%d approvals each; at most %d deletions a day and %d changes an hour." .Need .Limits.Deletions .Limits.Changes}}</p>{{end}}
+{{if .CanAdd}}<p><a href="{{$.Link "/proposals/new"}}">{{t "Propose a new rule"}}</a></p>{{end}}
 {{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>
 {{else}}{{with .PauseOff}}<p>{{template "off" .}}</p>{{end}}{{end}}
 {{if .Total}}{{template "pickfacets" .Pick}}{{end}}
@@ -28,6 +29,11 @@
 {{if .Lines}}{{template "proposallist" (on $ .Lines)}}{{end}}
 {{if .More}}<p class="quiet">{{t "The first %d are shown: pick fewer to see the rest." (len .Lines)}}</p>{{end}}
 {{with .Empty}}{{template "empty" .}}{{end}}
+{{with .Drafts}}<section class="card" id="drafts">
+<h2>{{t "Drafts of expectations waiting"}}</h2>
+<p class="quiet">{{t "Drafts of what a rule is held to, the history's or an agent's, each accepted or dropped on its rule's expectations tab."}}</p>
+<ul class="plain">{{range .}}<li><a href="{{$.Link (print "/rules/" (path .Rule)) "tab" "expectations"}}#draft-{{.ID}}">{{t "Draft #%d" .ID}}</a>, <bdi>{{.Rule}}</bdi>: {{if .Agent}}<span class="status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent's, for %s" (who .MadeBy)}}</span>{{else}}{{t "the history's, kept by %s" (who .MadeBy)}}{{end}}, <span class="t">{{at $loc .Made}}</span></li>{{end}}</ul>
+</section>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "proposal"}}{{$head := .View.Head.Text .Lang}}{{template "top" (crumbed . (print "#" .View.ID " " $head) (print "#" .View.ID))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}{{$v := .}}
@@ -71,6 +77,22 @@
 {{end}}</pre></details>{{end}}
 {{if eq .Path "none"}}<p>{{t "Lapilli can't write this change where the rule is kept: make it there. A pull request's description, to copy:"}}</p><pre>{{.Body}}</pre>{{end}}
 </section>
+
+{{with .Add}}<section class="card" id="held">
+<h2>{{t "What it is held to"}}</h2>
+<p>{{t "Where it goes:"}} {{template "proposalpath" .Place.Path}}, <bdi>{{.Place.Where}}</bdi>{{with .Place.DataSource}}; {{t "its query reads"}} <code>{{.}}</code>{{end}}{{with .Place.Tells}}; {{t "it tells"}}{{range $i, $x := .}}{{if $i}},{{end}} <code>{{$x}}</code>{{end}}{{end}}</p>
+{{if and (eq .Place.Path "grafana") (not .Place.Tells)}}<p class="quiet">{{t "It names no contact point, as rules of its group don't: Grafana's notification policies route it by its labels, to whichever contact point they match."}}</p>{{else if or (eq .Place.Path "git") (eq .Place.Path "ruler")}}<p class="quiet">{{t "It names no one: its labels route it through Alertmanager, as every rule there is routed."}}</p>{{end}}
+{{with .Held}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "No one approves it yet:"}} {{t .}}</p>{{end}}
+<p class="quiet">{{if eq .Weeks 1}}{{t "Replayed with nothing beside it, each budget held over the last whole week."}}{{else}}{{t "Replayed with nothing beside it, each budget held over the %d whole weeks to now, the most in one shown." .Weeks}}{{end}} {{t "Not known is never met."}}</p>
+<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Held to"}}</th><th scope="col">{{t "As proposed"}}</th><th scope="col">{{t "State"}}</th></tr></thead>
+<tbody>{{range .Items}}<tr><td><code>{{.What}}</code> {{.Held}}</td><td>{{.Value}}</td><td><span class="{{status "expect" (draftState .State)}}">{{t .State}}</span>{{with .Why}} <span class="quiet">({{.}})</span>{{end}}{{with .Said}}<br><code>{{.}}</code>{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+<details><summary>{{t "The rule, as Lapilli writes it"}}</summary><pre>{{.Rule}}</pre></details>
+<details><summary>{{t "What it is held to, as Lapilli writes it"}}</summary><pre>{{.Expect}}</pre></details>
+{{with .Draft}}<p>{{t "Once it was added, what it is held to was kept as"}} <a href="{{$.Link (print "/rules/" (path .Rule)) "tab" "expectations"}}#draft-{{.ID}}">{{t "Draft #%d" .ID}}</a>, {{t "accepted by %s." (who .DecidedBy)}}{{if .PR}} {{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{t "Its pull request"}}</a>{{else}}{{t "Handed to the change recipes, for a pull request to the expectations file."}}{{end}}{{end}}</p>{{end}}
+{{with .YAML}}<p>{{t "Put it where the expectations are declared: it doesn't go there by the git path."}}</p><pre>{{.}}</pre>{{end}}
+</section>{{end}}
 
 <section class="card" id="backtest">
 <h2>{{t "Backtest"}}</h2>
@@ -210,3 +232,22 @@ counted, and a chip for each filter in effect. */}}
 <p class="row"><button>{{t "Apply"}}</button> <a href="{{.Clear}}">{{t "Clear filters"}}</a></p>
 </form>
 {{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}{{end}}
+
+{{define "newrule"}}{{$title := t "A new rule"}}{{template "top" (titled . $title)}}{{with .View}}
+<h1>{{$title}}</h1>
+<p class="lede">{{t "Propose a rule to add, held to what it is to do before anyone approves it: Lapilli writes it where it goes, replays it over the twelve weeks with nothing beside it, and checks each expectation. No one approves it while one is broken; once it is added, what it is held to goes where an accepted draft goes."}}</p>
+{{template "changesoff" .}}
+{{with .Off}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t .}}</p>{{else}}
+<form method="post" action="/proposals" class="grid">
+<input type="hidden" name="kind" value="add">
+<label>{{t "Where it goes"}} <select name="place" required>{{range .Places.Offers}}<option value="{{.Key}}">{{template "proposalpath" .Path}}: {{.Name}}</option>{{end}}</select></label>
+<label>{{t "A new group's name, where it goes in a new group"}} <input name="group" maxlength="200" autocomplete="off"></label>
+<label>{{t "A new group's interval, such as 1m: none for the ruler's own"}} <input name="interval" maxlength="16" autocomplete="off"></label>
+{{with .Places.DataSources}}<label>{{t "In Grafana, the data source its query reads"}} <select name="data_source"><option value="">{{t "Its folder's, when its rules read one"}}</option>{{range .}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>{{end}}
+{{with .Places.Tells}}<fieldset><legend>{{t "Whom it tells: only some of those the rules in its place tell"}}</legend>{{range .}}<label><input type="checkbox" name="tells" value="{{.}}"> <code>{{.}}</code></label>{{end}}</fieldset>{{end}}
+<label>{{t "The rule: one Prometheus alerting rule in YAML (alert, expr, for, keep_firing_for, labels, annotations), named apart from every rule"}} <textarea name="rule" rows="10" required spellcheck="false" autocomplete="off"></textarea></label>
+<label>{{t "What it is held to: an expectations file holding it by rule: NAME, one expectation at least (a budget, a catch)"}} <textarea name="expectations" rows="8" required spellcheck="false" autocomplete="off"></textarea></label>
+<label>{{t "Why"}} <textarea name="reason" rows="3" maxlength="2000"></textarea></label>
+<button>{{t "Propose it"}}</button>
+</form>{{end}}
+{{end}}{{template "bottom" .}}{{end}}

@@ -50,6 +50,10 @@ type Comparison struct {
 	// Expectations are the rules the change touches held to what they are
 	// expected to do (--expect): set by Expect.
 	Expectations *Checked `json:"expectations,omitempty"`
+	// Scenarios runs the scenarios the expectations hold the rules to
+	// (Expect): NoPromtool when nil, each not known. lapilli serve's
+	// backtests set NotThroughServe: serve runs none it is sent.
+	Scenarios ScenarioRunner `json:"-"`
 	// JudgedBy names whose record judged the firings, when it isn't the
 	// incidents the comparison was given: lapilli serve's, for a pull
 	// request backtested through it (JudgedByServe). CompareMarkdown's
@@ -66,7 +70,13 @@ const JudgedByServe = "lapilli serve"
 // what the change broke. Held to more than MaxExpectResults, it holds
 // nothing, and says why.
 func (c *Comparison) Expect(after, before *Expectations, hours *Hours) error {
-	k, err := CheckExpectations(c, after, before, hours)
+	return c.ExpectBy(after, before, func(string) *Hours { return hours })
+}
+
+// ExpectBy is Expect, each rule's firings counted while people slept by
+// the hours hoursOf gives it (CheckExpectationsBy).
+func (c *Comparison) ExpectBy(after, before *Expectations, hoursOf func(rule string) *Hours) error {
+	k, err := CheckExpectationsBy(c, after, before, hoursOf)
 	if err != nil {
 		return err
 	}
@@ -74,12 +84,18 @@ func (c *Comparison) Expect(after, before *Expectations, hours *Hours) error {
 	if c.Summary != nil {
 		c.Summary.Expected = true
 		c.Summary.ExpectationsBroken = c.Expectations.Broken()
+		c.Summary.ExpectationsAlreadyBroken, c.Summary.ScenariosUnrun = 0, 0
 		for _, r := range c.Expectations.Results {
 			if r.AlreadyBroken() {
 				c.Summary.ExpectationsAlreadyBroken++
 			}
 		}
 		c.Summary.Unexpected = len(c.Expectations.Unexpected)
+		for _, r := range c.Expectations.Results {
+			if r.Unrun {
+				c.Summary.ScenariosUnrun++
+			}
+		}
 	}
 	return nil
 }
@@ -143,6 +159,11 @@ type Summary struct {
 	ExpectationsBroken        int  `json:"expectations_broken"`
 	ExpectationsAlreadyBroken int  `json:"expectations_already_broken"`
 	Unexpected                int  `json:"unexpected"`
+	// ScenariosUnrun are the scenarios of the rules that differ that
+	// couldn't be run after the change, promtool given (--promtool) and the
+	// rule one it runs: the test file unreadable, a time out, a crash. They
+	// can't be judged, as a rule that couldn't be replayed can't.
+	ScenariosUnrun int `json:"scenarios_unrun"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether
@@ -249,6 +270,44 @@ type RuleChange struct {
 	Rule   string      `json:"rule"`
 	Before *RuleResult `json:"before"`
 	After  *RuleResult `json:"after"`
+	// BeforeLabels and AfterLabels are the labels its alerts carry on each
+	// side, its group's among them (rules.Rule.AlertLabels), as LabelRules
+	// sets them: what an expectation by labels holds a rule by. Not shown.
+	BeforeLabels map[string]string `json:"-"`
+	AfterLabels  map[string]string `json:"-"`
+}
+
+func cmpOr(m, or map[string]string) map[string]string {
+	if m == nil {
+		return or
+	}
+	return m
+}
+
+// LabelRules gives the rules that differ the labels their alerts carry on
+// each side, from the rules each side replayed: what an expectation by
+// labels (labels: severity=page) holds a rule by.
+func (c *Comparison) LabelRules(before, after []rules.Rule) {
+	of := func(rs []rules.Rule) map[string]map[string]string {
+		out := make(map[string]map[string]string, len(rs))
+		for _, r := range rs {
+			if _, ok := out[r.Name]; !ok {
+				// None is known to be none: a selector such as !team holds it.
+				out[r.Name] = cmpOr(r.AlertLabels(), map[string]string{})
+			}
+		}
+		return out
+	}
+	b, a := of(before), of(after)
+	for i := range c.Rules {
+		rc := &c.Rules[i]
+		if rc.Before != nil {
+			rc.BeforeLabels = b[rc.Rule]
+		}
+		if rc.After != nil {
+			rc.AfterLabels = a[rc.Rule]
+		}
+	}
 }
 
 // Alike reports whether a changed rule fires as often, and catches as

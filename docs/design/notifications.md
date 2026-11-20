@@ -614,6 +614,8 @@ default so that nothing goes nowhere. This is that, small.
   | `replay.differs` | the rule's owner | the rule's |
   | `goal.missed` | the goal's team, or each team named, for a goal of each team's | |
   | `source.quiet`, `source.down`, `source.back` | | |
+  | `expectation.broken` | the rule's team, as it was told | the rule's |
+  | `expectation.drafted`, `expectation.accepted`, `expectation.dropped`, `expectation.pull_request` | the rule's owner | the rule's |
 
   A source's notice has the source's name as its `Title`.
 
@@ -636,11 +638,12 @@ default so that nothing goes nowhere. This is that, small.
   event about it may not be in them yet, and the event is routed as of no
   team, by the other routes, or to the default.
 - **Without routes, as before.** What is told once and marked told (a task
-  overdue, a source quiet, down or back, a goal missed, a replay that
-  differs) asks where it may go, without routes in force, of the webhook
-  and Slack alone, as before routes: a team's digest or a `--report-dest`,
-  which `--config` makes places a route may send to, is no reason to look,
-  so nothing is marked told where no notice is written.
+  overdue, a source quiet, down or back, a goal missed, an expectation
+  broken, a replay that differs) asks where it may go, without routes in
+  force, of the webhook and Slack alone, as before routes: a team's digest
+  or a `--report-dest`, which `--config` makes places a route may send to,
+  is no reason to look, so nothing is marked told where no notice is
+  written.
 - **Kept in the outbox by name.** A notice to `webhook`, or to `slack` with
   `--notify-slack`, keeps its place's name, as before; to any other
   destination, `route:NAME`. With `--config`, each destination a route may

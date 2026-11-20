@@ -104,9 +104,9 @@ func TestUnnamedSignalUnchanged(t *testing.T) {
 	}
 	// The same ledger taken back to 021, as 0.53 left it, and opened again:
 	// migrated, it says the same.
-	undo, version := slices.Concat(ledgertest.Undo026, ledgertest.Undo025, ledgertest.Undo024, ledgertest.Undo023, ledgertest.Undo022SQLite), "PRAGMA user_version = 21"
+	undo, version := slices.Concat(ledgertest.Undo027, ledgertest.Undo026, ledgertest.Undo025, ledgertest.Undo024, ledgertest.Undo023, ledgertest.Undo022SQLite), "PRAGMA user_version = 21"
 	if s.cfg.LedgerURLFile != "" {
-		undo, version = slices.Concat(ledgertest.Undo026, ledgertest.Undo025, ledgertest.Undo024, ledgertest.Undo023, ledgertest.Undo022Postgres), "UPDATE schema_version SET version = 21"
+		undo, version = slices.Concat(ledgertest.Undo027, ledgertest.Undo026, ledgertest.Undo025, ledgertest.Undo024, ledgertest.Undo023, ledgertest.Undo022Postgres), "UPDATE schema_version SET version = 21"
 	}
 	for _, q := range append(slices.Clone(undo), version) {
 		ledgerExec(t, s, q)

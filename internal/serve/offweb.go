@@ -143,6 +143,8 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 			v.ApproveOff = off("Approve", "approve-why", "You approved it: it waits for another approver.")
 		case v.StaleWhy != nil && v.approver:
 			v.ApproveOff = off("Approve", "approve-why", "Held until it is backtested again: it is stale")
+		case v.AddHeld != "" && s.approver(r):
+			v.ApproveOff = off("Approve", "approve-why", "Held: it breaks what it is held to, or its backtest didn't replay it")
 		default:
 			v.ApproveOff = off("Approve", "approve-why", "Approvers only")
 		}

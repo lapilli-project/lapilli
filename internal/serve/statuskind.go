@@ -49,6 +49,16 @@ var statusKinds = map[string]string{
 	// A goal's week (docs/design/goals.md): met, missed, not known, or, of
 	// the week under way, a count past its bound so far.
 	"goal/met": "ok", "goal/missed": "bad", "goal/unknown": "unknown", "goal/over": "warn",
+	// An expectation of a rule's, as last checked (docs/design/
+	// expectations.md): met, broken, not known, or so far in the week
+	// under way; and, on the rules list, a rule held to some, or none.
+	"expect/met": "ok", "expect/broken": "bad", "expect/unknown": "unknown", "expect/open": "info",
+	"expect/held": "ok", "expect/none": "unknown",
+	// A draft of what a rule is held to (step 3): waiting for a person,
+	// accepted, dropped; and its pull request, by the git path.
+	"draft/" + ledger.DraftOpen: "warn", "draft/" + ledger.DraftAccepted: "ok", "draft/" + ledger.DraftDropped: "unknown",
+	"draft/" + ledger.DraftReady: "info", "draft/" + ledger.DraftOpened: "info", "draft/" + ledger.DraftMerged: "ok",
+	"draft/" + ledger.DraftClosed: "unknown", "draft/" + ledger.DraftFailed: "bad",
 	// Where incidents come from (sources.go): alive; quiet, nothing
 	// received, or read, in a while; no data, an impact signal a selector
 	// of which has none; unread, one read by the runs and waiting to be

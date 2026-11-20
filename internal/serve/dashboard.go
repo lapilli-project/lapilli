@@ -129,6 +129,9 @@ const (
 	heatRows             = 12
 	actionsShown         = 8
 	missedShownInActions = 3
+	// expectShownInActions is how many expectations broken it lists, the
+	// rest in one line.
+	expectShownInActions = 5
 	// unrecordedShown is how many rules that fired often with no record
 	// what to look at names.
 	unrecordedShown = 5
@@ -223,8 +226,11 @@ type action struct {
 	Kind, Rule, Incident, Title string
 	Goal, GoalTeam, Week        string
 	Occurrence                  string
-	GoalTeamID                  int64
-	Task                        int64
+	// Expect and ExpectWeek are, of an expectation broken, the row its
+	// task is made of: its expectation's hash and week, as days.
+	Expect, ExpectWeek string
+	GoalTeamID         int64
+	Task               int64
 	// May says the reader may make the task; else Why is why, WhyOf the
 	// team it names, and WhyID the id of the sentence that says it, said
 	// by the first action disabled for it (Said).
@@ -555,8 +561,18 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Goals = card
-	if len(goalActions) > 0 {
-		v.Actions = append(goalActions, v.Actions...)
+	// Then the expectations broken (docs/design/expectations.md): what a
+	// rule was tested to do, held to after it was deployed.
+	ea, err := s.expectActions(ctx, l, team, o)
+	if err != nil {
+		return nil, err
+	}
+	if n := len(ea); n > expectShownInActions {
+		ea = append(ea[:expectShownInActions], action{Text: tr(l, "%d more expectations broken", n-expectShownInActions),
+			Detail: tr(l, "in the week so far or the last whole week"), Href: "/rules?expect=broken"})
+	}
+	if len(goalActions)+len(ea) > 0 {
+		v.Actions = slices.Concat(goalActions, ea, v.Actions)
 		v.Actions = v.Actions[:min(len(v.Actions), actionsShown)]
 	}
 	s.mayTask(r, o, v.Actions)

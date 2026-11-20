@@ -71,7 +71,18 @@
 #                    true: the job fails when the change breaks an
 #                    expectation the rules in place meet, once the comment
 #                    says which (default false). With EXPECT_REQUIRED=true,
-#                    also when it adds a rule no expectation holds
+#                    also when it adds a rule no expectation holds; with
+#                    PROMTOOL, also when a scenario of a rule that differs
+#                    couldn't be run after the change (scenarios_unrun)
+#   PROMTOOL         optional, with EXPECT: promtool on this machine, a
+#                    path or a name on PATH, outside the checkout, which
+#                    runs the scenarios EXPECT names (scenarios:,
+#                    promtool's own test files) of the rules that differ,
+#                    before and after (--promtool): the directory EXPECT is
+#                    in is read from each commit, as PATHS is, and its test
+#                    files there. promtool reads each, its rule_files the
+#                    rule's group as Lapilli writes it, and runs nothing of
+#                    them. Refused with LAPILLI_SERVE, which runs none
 #   TARGET           the commit the pull request goes into, as the clone has
 #                    it (default HEAD^1: the merge commit's first parent, as
 #                    GitHub checks a pull request out); the rules compared
@@ -388,6 +399,10 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
       exit 1
     fi
   done
+  if [ -n "${PROMTOOL:-}" ]; then
+    say "PROMTOOL: lapilli serve runs no scenario a pull request sends, each said as not run, and nothing is run here: run promtool test rules in a step of its own, or the recipe without LAPILLI_SERVE"
+    exit 1
+  fi
 else
   for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "SERVE_RETRY_MIN ${SERVE_RETRY_MIN:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
     "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY:-}" "LOKI_PATHS $(printf '%s' "${LOKI_PATHS:-}" | tr -d ' ')" \
@@ -449,6 +464,10 @@ if [ -n "${EXPECT:-}" ] && { ! in_repo "$EXPECT" || [ "${EXPECT%/}" != "$EXPECT"
 fi
 if [ -z "${EXPECT:-}" ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
   say "FAIL_ON_EXPECTATIONS and EXPECT_REQUIRED hold the rules to EXPECT: give EXPECT, the expectations file"
+  exit 1
+fi
+if [ -n "${PROMTOOL:-}" ] && [ -z "${EXPECT:-}" ]; then
+  say "PROMTOOL runs the scenarios EXPECT holds the rules to: give EXPECT, the expectations file"
   exit 1
 fi
 if [ -n "${LAPILLI_SERVE:-}" ]; then
@@ -633,6 +652,23 @@ serve_since() {
     *) say "--since $1: through lapilli serve, whole days, 1d to 14d, ending where serve has settled"; exit 1 ;;
   esac
 }
+# PROMTOOL, as lapilli is given it: found here, on PATH or by its path,
+# and never in the checkout, where it would be the pull request's to run.
+promtool=
+if [ -n "${PROMTOOL:-}" ]; then
+  case $PROMTOOL in
+    -*) say "PROMTOOL $PROMTOOL: want promtool's path, or its name on PATH"; exit 1 ;;
+  esac
+  if ! promtool=$(command -v -- "$PROMTOOL" 2>/dev/null) || [ -z "$promtool" ] || [ ! -f "$promtool" ] || [ ! -x "$promtool" ]; then
+    say "PROMTOOL $PROMTOOL: no such program here: install promtool first, or give its path"
+    exit 1
+  fi
+  case $promtool in /*) ;; *) promtool=$here_now/$promtool ;; esac
+  if in_clone "$promtool"; then
+    say "PROMTOOL $PROMTOOL is in the checkout, the pull request's, which it would run: give one from outside the checkout"
+    exit 1
+  fi
+fi
 serve_days='' serve_tz='' serve_select=''
 # Each argument in turn, to the end and around: the same, in order, after.
 # incidents_given: an argument gives incidents, or impact. Through lapilli
@@ -711,6 +747,10 @@ while [ "$n" -gt 0 ]; do
       ;;
     --expect | --expect=* | --expect-before | --expect-before=* | --fail-expectations* | --expect-required*)
       say "$a: the recipe reads the expectations from both commits itself: give EXPECT, and FAIL_ON_EXPECTATIONS or EXPECT_REQUIRED"
+      exit 1
+      ;;
+    --promtool | --promtool=*)
+      say "${a%%=*}: the recipe gives lapilli promtool itself: give PROMTOOL"
       exit 1
       ;;
     --incidents | --on-call | --bearer-token-file | --grafana-token-file | --ruler-token-file | --loki-token-file | --slack-webhook-file)
@@ -1069,6 +1109,48 @@ expectations() {
     return 1
   fi
   [ -f "$tmp/expect.head.yaml" ] || printf 'expectations: []\n' >"$tmp/expect.head.yaml"
+  # With PROMTOOL, each beside the directory it is in, as its commit has it:
+  # its scenarios' test files are read there.
+  [ -n "$promtool" ] || return 0
+  expect_tree head "$head" "the pull request's commit" && expect_tree base "$base" "the commit it goes into"
+}
+
+# expect_tree SIDE COMMIT WHAT: the directory EXPECT is in, as COMMIT has
+# it, into $tmp/expect/SIDE, read as files reads a commit (MAX_TREE_FILES,
+# MAX_TREE_BYTES, its own .gitattributes passed over, a symbolic link
+# refused); EXPECT there as expectations() wrote it. None when the side has
+# no EXPECT, but the pull request's, held to none.
+expect_tree() {
+  s=$1 c=$2 what=$3
+  [ -f "$tmp/expect.$s.yaml" ] || return 0
+  d=$tmp/expect/$s
+  mkdir -p "$d"
+  dir=$(dirname -- "$EXPECT")
+  set --
+  [ "$dir" = . ] || set -- "$dir"
+  if git -C "$repo" cat-file -e "$c:$EXPECT" 2>/dev/null; then
+    big=$(git -C "$repo" ls-tree -r -l "$c" -- "$@" | awk -v files="$tree_files" -v bytes="$tree_bytes" '
+      { n++; if ($4 != "-") s += $4 }
+      END { if (n > files || s > bytes) printf "%d files of %d bytes, more than MAX_TREE_FILES (%d) or MAX_TREE_BYTES (%d)", n, s, files, bytes }')
+    if [ -n "$big" ]; then
+      trouble "the directory of EXPECT in $what is too big to read: $big"
+      return 1
+    fi
+    if ! (cd "$tmp/empty" && GIT_INDEX_FILE=$tmp/index git --git-dir="$gitdir" --work-tree=. archive --worktree-attributes \
+      --format=tar -o "$tmp/e.tar" "$c" -- "$@") 2>"$tmp/git.log" || ! tar -x -f "$tmp/e.tar" -C "$d" 2>>"$tmp/git.log"; then
+      trouble "the directory of EXPECT couldn't be read from $what" "$tmp/git.log"
+      return 1
+    fi
+    l=$(find "$d" -type l | head -n 1)
+    if [ -n "$l" ]; then
+      # Its path is the pull request's: in the job's log, not the comment.
+      say "a symbolic link beside EXPECT in $what: ${l#"$d/"}"
+      trouble "$what holds a symbolic link beside EXPECT, which could lead to any file the job can read: not read (the job's log says where)"
+      return 1
+    fi
+  fi
+  mkdir -p "$d/$dir"
+  cp "$tmp/expect.$s.yaml" "$d/$EXPECT"
 }
 
 # in_tree SIDE COMMAND: RENDER or RENDER_PREPARE, in a commit's files, with
@@ -1211,7 +1293,13 @@ run_lapilli() {
   if [ -n "${INCIDENTS:-}" ]; then
     set -- --incidents "$tmp/incidents.yaml" "$@"
   fi
-  if [ -f "$tmp/expect.head.yaml" ]; then
+  if [ -n "$promtool" ] && [ -f "$tmp/expect.head.yaml" ]; then
+    # Read beside their test files, as each commit has them.
+    set -- --expect "$tmp/expect/head/$EXPECT" --promtool "$promtool" "$@"
+    if [ -f "$tmp/expect.base.yaml" ]; then
+      set -- --expect-before "$tmp/expect/base/$EXPECT" "$@"
+    fi
+  elif [ -f "$tmp/expect.head.yaml" ]; then
     set -- --expect "$tmp/expect.head.yaml" "$@"
     if [ -f "$tmp/expect.base.yaml" ]; then
       set -- --expect-before "$tmp/expect.base.yaml" "$@"
@@ -1244,6 +1332,8 @@ run_lapilli() {
     2)
       if grep -q -e 'unknown flag --expect' "$tmp/lapilli.log"; then
         trouble "the lapilli run has no --expect: give LAPILLI_VERSION (or LAPILLI) a release with it" "$tmp/lapilli.said"
+      elif grep -q -e 'unknown flag --promtool' "$tmp/lapilli.log"; then
+        trouble "the lapilli run has no --promtool: give LAPILLI_VERSION (or LAPILLI) a release with it" "$tmp/lapilli.said"
       elif grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log" && [ -n "${LAPILLI:-}" ]; then
         trouble "the lapilli LAPILLI names has no --markdown: give a later release" "$tmp/lapilli.said"
       elif grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log"; then
@@ -1278,7 +1368,10 @@ judge() {
     broken=$(summary expectations_broken)
     unexpected=$(summary unexpected)
     unreplayed=$(summary unreplayed)
-    case $broken$unexpected$unreplayed in
+    # Scenarios run here, a report that says how many couldn't be.
+    unrun=0
+    [ -z "$promtool" ] || unrun=$(summary scenarios_unrun)
+    case $broken$unexpected$unreplayed$unrun in
       '' | *[!0-9]*)
         judged=
         if [ -n "$serve" ]; then
@@ -1295,6 +1388,9 @@ judge() {
         elif [ "$unreplayed" -gt 0 ]; then
           # A rule that couldn't be replayed can't be held: not known isn't met.
           unmet="$unreplayed of the rules that differ couldn't be replayed, so their expectations can't be judged"
+        elif [ "$unrun" -gt 0 ]; then
+          # Nor a scenario that couldn't be run.
+          unmet="$unrun scenarios of the rules that differ couldn't be run, so they can't be judged"
         fi
         ;;
     esac

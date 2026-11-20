@@ -96,7 +96,7 @@ func TestMCP(t *testing.T) {
 	if got := strings.Join(tools(look), " "); got != "firings incidents outcomes overview rule rules summary" {
 		t.Errorf("a viewer's tools: %s", got)
 	}
-	if got := strings.Join(tools(edit), " "); got != "compare firings incidents outcomes overview rule rules summary" {
+	if got := strings.Join(tools(edit), " "); got != "compare firings incidents outcomes overview rule rules summary test_expectation" {
 		t.Errorf("an editor's tools: %s", got)
 	}
 	if ir := edit.InitializeResult(); ir.ServerInfo.Name != "lapilli" || !strings.Contains(ir.Instructions, "white when it caught an incident") {

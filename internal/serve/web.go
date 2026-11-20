@@ -129,6 +129,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
 	mux.HandleFunc("GET /goals", page("goals", s.goalsPage))
 	mux.HandleFunc("POST /goals/task", s.teamWrite(s.postGoalTask))
+	mux.HandleFunc("POST /expectations/task", s.teamWrite(s.postExpectTask))
+	s.draftRoutes(mux)
 	mux.HandleFunc("GET /search", page("search", s.searchPage))
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)
@@ -156,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/v1/report", s.report)
 	mux.HandleFunc("GET /api/v1/rules", s.cached(s.apiRules))
+	mux.HandleFunc("GET /api/v1/expectations", s.cached(s.apiExpectations))
 	mux.HandleFunc("GET /api/v1/incidents", s.cached(s.apiIncidents))
 	mux.HandleFunc("POST /api/v1/incidents", s.write(s.apiPutIncident))
 	mux.HandleFunc("PUT /api/v1/incidents/{id}", s.write(s.apiPutIncident))
