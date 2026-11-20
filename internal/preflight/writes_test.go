@@ -858,15 +858,20 @@ func TestAzureLinkedReads(t *testing.T) {
 		t.Errorf("asked %v", a.asked)
 	}
 	// A target that isn't a resource under a resource group (the
-	// subscription itself), or an id past 1 KB, isn't asked, and is
-	// unknown, never passed over.
+	// subscription itself), an id past 1 KB, or one with a . or .. for a
+	// part of its path, which would ask of another resource than it names,
+	// another subscription's, isn't asked, and is unknown, never passed
+	// over.
 	long := azRG + "/providers/Microsoft.Compute/virtualMachines/" + strings.Repeat("v", 1100)
-	for _, target := range []string{azSub, "/providers/Microsoft.Management/managementGroups/example", long} {
+	for _, target := range []string{azSub, "/providers/Microsoft.Management/managementGroups/example", long,
+		"/subscriptions/00000000-0000-0000-0000-0000000000ff/resourceGroups/other-rg/providers/Microsoft.Insights/x/../../..",
+		azRG + "/providers/Microsoft.Compute/virtualMachines/./web-1"} {
 		a := newARM(t, map[string]string{azRG: `{"value":[{"actions":["*"]}]}`})
 		_, it := azureRun(t, a, []rules.Doc{azDoc("metricAlerts", "checkout-a", target)}, "az:shop-rg/checkout-*")
 		if it.State != Unknown || !strings.Contains(it.Why, "1 resource the alert rules name that isn't one under a resource group") ||
 			slices.ContainsFunc(a.asked, func(x string) bool {
-				return strings.Contains(x, "vvvv") || strings.HasPrefix(x, "GET "+azSub+"/providers/Microsoft.Authorization/permissions")
+				return strings.Contains(x, "vvvv") || strings.HasPrefix(x, "GET "+azSub+"/providers/Microsoft.Authorization/permissions") ||
+					strings.Contains(x, "/../") || strings.Contains(x, "/./") || strings.Contains(x, "other-rg")
 			}) {
 			t.Errorf("%.80s: %+v %v", target, it, a.asked)
 		}
@@ -1558,6 +1563,26 @@ func TestCloudSaidARNsWhole(t *testing.T) {
 		if got := p.cloudSaidText(said); !strings.Contains(got, want) {
 			t.Errorf("%q: %q, want %q", said, got, want)
 		}
+	}
+}
+
+// An OCID a cloud names is said by what it is when the run learned it,
+// whole, and as an OCID otherwise: another compartment's, a dynamic
+// group's, a policy's, of a region or of none.
+func TestCloudSaidOCIDs(t *testing.T) {
+	p := newRun(writesConfig(t))
+	p.hide("--changes-oci-config's tenancy", "ocid1.tenancy.oc1..aaaaexampletenancy0001")
+	p.hide("--changes-oci-config's region", "ap-seoul-1")
+	said := judged(p, Item{ID: "x", Why: p.cloudSaid(&answered{404, "NotAuthorizedOrNotFound: policy ocid1.policy.oc1..aaaaexamplepolicy0001 in " +
+		"ocid1.compartment.oc1..aaaaexampleotherteam0002 (dynamic group ocid1.dynamicgroup.oc1..aaaaexampledg0003) of " +
+		"ocid1.tenancy.oc1..aaaaexampletenancy0001; instance ocid1.instance.oc1.ap-seoul-1.anuwgexampleinstance0004."})})
+	for _, hidden := range []string{"ocid1", "aaaaexample", "anuwgexample"} {
+		if strings.Contains(said.Why, hidden) {
+			t.Errorf("says %q: %s", hidden, said.Why)
+		}
+	}
+	if !strings.Contains(said.Why, "of [--changes-oci-config's tenancy];") || strings.Count(said.Why, "[an OCID]") != 4 || !strings.HasSuffix(said.Why, "[an OCID].") {
+		t.Errorf("%s", said.Why)
 	}
 }
 
