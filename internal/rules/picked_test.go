@@ -473,3 +473,77 @@ func TestParseSelectorParity(t *testing.T) {
 		}
 	}
 }
+
+// A hidden file, one with a name in its path beginning with a dot, is read
+// when it holds rules, as Prometheus's rule_files glob loads it
+// (alerts/*.yaml reads alerts/.page.yaml), and passed over when it holds
+// none, or doesn't read, at the top too: a .gitignore, a workflow, a
+// .DS_Store. A ConfigMap volume's own, its names beginning with .., is
+// never read, so each rule is read once; nor is .git. A hidden file
+// Lapilli's reader refuses is said, as any other is.
+func TestReadPickedHidden(t *testing.T) {
+	rule := func(name string) string {
+		return "groups:\n  - name: g\n    rules:\n      - alert: " + name + "\n        expr: up == 0\n"
+	}
+	dir := t.TempDir()
+	for p, body := range map[string]string{
+		"alerts.yaml":                    rule("Shown"),
+		".page.yaml":                     rule("Page"),
+		".d/x.yaml":                      rule("Below"),
+		".gitignore":                     "*\n",
+		".github/workflows/x.yml":        "name: lint\non: [pull_request]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n",
+		".DS_Store":                      "\x00\x00\x00\x01Bud1\x00\x00\x10\x00\xff\xfe",
+		".git/rules.yaml":                rule("Git"),
+		"..2026_11_20_00_00_00.1/k.yaml": rule("Mounted"),
+	} {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.Symlink("..2026_11_20_00_00_00.1", filepath.Join(dir, "..data"))
+	os.Symlink(filepath.Join("..data", "k.yaml"), filepath.Join(dir, "k.yaml"))
+	rs, _, _, err := ReadPicked(dir, Picking{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range rs {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Below", "Mounted", "Page", "Shown"}) {
+		t.Errorf("rules %v, want Below, Mounted once, Page and Shown", names)
+	}
+	// One Lapilli's reader refuses, hidden or not, is said.
+	deep := "groups: " + strings.Repeat("[", 250) + strings.Repeat("]", 250) + "\n"
+	for _, p := range []string{".deep.yaml", ".d/deep.yaml"} {
+		full := filepath.Join(dir, p)
+		os.WriteFile(full, []byte(deep), 0o600)
+		if _, _, _, err := ReadPicked(dir, Picking{}); err == nil || !strings.Contains(err.Error(), p) {
+			t.Errorf("%s: %v", p, err)
+		}
+		os.Remove(full)
+	}
+	// As PickedFiles reads them, sent by a job.
+	var files []File
+	for _, p := range []string{"alerts.yaml", ".page.yaml", ".d/x.yaml", ".gitignore", ".github/workflows/x.yml", ".DS_Store"} {
+		b, _ := os.ReadFile(filepath.Join(dir, p))
+		files = append(files, File{Path: p, Data: b})
+	}
+	got, _, _, err := PickedFiles(files, Picking{})
+	names = nil
+	for _, r := range got {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	if err != nil || !slices.Equal(names, []string{"Below", "Page", "Shown"}) {
+		t.Errorf("PickedFiles: %v %v", names, err)
+	}
+	if _, _, _, err := PickedFiles([]File{{Path: ".deep.yaml", Data: []byte(deep)}}, Picking{}); err == nil {
+		t.Error("PickedFiles: a hidden file Lapilli's reader refuses was passed over")
+	}
+}

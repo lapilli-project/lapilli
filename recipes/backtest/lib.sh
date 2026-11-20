@@ -1260,9 +1260,13 @@ text() { jq -Rsj . "$1" | cmp -s - "$1"; }
 # --rules would read, named by its path under what PATHS names, as --rules
 # reads a directory (a file it holds is the directory's, one below it a
 # directory's below), a file PATHS names by its own name, and what RENDER
-# wrote as rules.yaml; files and directories whose names begin with a dot
-# passed over, as --rules passes them over. LOKI_PATHS's alike, each with
-# "loki": true, a Loki ruler's. WHAT names the commit.
+# wrote as rules.yaml. Hidden ones too, a name in their path beginning with
+# a dot, as Prometheus's rule_files glob loads alerts/.page.yaml and --rules
+# reads one holding rules: serve passes over those holding none. One that
+# isn't UTF-8 text, such as a .DS_Store, is no rule file, and isn't sent.
+# Never sent, as --rules never reads them: names beginning with .., a
+# ConfigMap volume's own, and a directory named .git. LOKI_PATHS's alike,
+# each with "loki": true, a Loki ruler's. WHAT names the commit.
 side() {
   s=$1 what=$2
   : >"$tmp/$s.jsonl"
@@ -1290,12 +1294,15 @@ side() {
     fi
     [ -e "$root" ] || continue
     # shellcheck disable=SC2016
-    if ! find "$root" ! -path "$root" -name '.*' -prune -o -type f -exec sh -c '
+    if ! find "$root" ! -path "$root" \( -name '..*' -o -type d -name .git \) -prune -o -type f -exec sh -c '
       root=$1 out=$2 loki=$3
       shift 3
       for f; do
         if [ -d "$root" ]; then rel=${f#"$root"/}; else rel=${f##*/}; fi
         if ! jq -Rsj . "$f" | cmp -s - "$f"; then
+          case /$rel in
+            */.*) continue ;; # hidden, and not text: no rule file
+          esac
           printf "%s" "$rel" >"$out.unsent"
           exit 1
         fi

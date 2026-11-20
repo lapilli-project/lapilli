@@ -947,8 +947,11 @@ Where step 1 does otherwise than the sections above say, or says more:
 - **The recipe's serve mode, as built.** The files are named by their path
   under what `PATHS` names, as `--rules` reads a directory (a file it holds
   is the directory's, and what doesn't read in it is said, not passed
-  over), and what `RENDER` wrote as `rules.yaml`; files whose names begin
-  with a dot are passed over, as `--rules` passes them over. Two of `PATHS`
+  over), and what `RENDER` wrote as `rules.yaml`. Hidden files (a name in
+  the path beginning with a dot) are sent too, since 0.63.1, as
+  Prometheus's `rule_files` glob loads them and `--rules` reads one that
+  holds rules: one that isn't UTF-8 text isn't, nor any under a name
+  beginning with `..` or a `.git` directory. Two of `PATHS`
   holding a file of one name, a file that isn't UTF-8 text, and a body past
   4 MiB are said in the comment before anything is sent. `--since` is
   taken in whole days, `1d` to `14d`; every argument but it, `--tz` and
