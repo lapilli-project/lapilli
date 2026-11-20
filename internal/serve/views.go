@@ -1041,6 +1041,9 @@ type ruleView struct {
 	// Expect is what it is held to, as last checked (docs/design/
 	// expectations.md); nil when it is held to nothing.
 	Expect *expectView
+	// Drafts are, on its expectations tab, the drafts of what it is held
+	// to, and the history's draft of it (step 3).
+	Drafts *draftsView
 
 	// The page (docs/design/ui.md): its own path; the tab shown, and each;
 	// the weeks it shows (1, 4 or 12), from From, and, when the ledger
@@ -1267,6 +1270,11 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 	}
 	if v.Expect, err = s.expectViewOf(ctx, lang(r), name); err != nil {
 		return ruleView{}, err
+	}
+	if html && v.Tab == "expectations" {
+		if v.Drafts, err = s.draftsViewOf(r, name, o.rule[name], o.byID[o.rule[name]].Name); err != nil {
+			return ruleView{}, err
+		}
 	}
 	caught, err := s.l.CaughtBy(ctx, name, 20)
 	if err != nil {
@@ -2777,7 +2785,16 @@ var funcs = template.FuncMap{
 	// stateBadge a proposal's state's badge, on any page that shows it.
 	"status":     statusClass,
 	"stateBadge": badgeOf,
+	"draftBadge": draftBadge,
 	"sign":       statusSign,
+	// draftState is what checking a draft found of an item, met, broken
+	// or not known, as an expectation's state is coloured.
+	"draftState": func(state string) string {
+		if state == verdict.ExpectUnknown {
+			return "unknown"
+		}
+		return state
+	},
 	// allClear is an empty state that says all is well (ok, with its
 	// sign): nothing to look at. Any other is said in no colour.
 	"allClear": func(e emptyView) emptyView {

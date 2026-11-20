@@ -130,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /goals", page("goals", s.goalsPage))
 	mux.HandleFunc("POST /goals/task", s.teamWrite(s.postGoalTask))
 	mux.HandleFunc("POST /expectations/task", s.teamWrite(s.postExpectTask))
+	s.draftRoutes(mux)
 	mux.HandleFunc("GET /search", page("search", s.searchPage))
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)

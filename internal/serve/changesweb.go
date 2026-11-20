@@ -127,6 +127,10 @@ type proposalsView struct {
 	// StaleLink is the list with the stale ones alone (stale=1), when some
 	// of those shown are.
 	StaleLink string
+	// Drafts are the drafts of expectations waiting to be accepted or
+	// dropped, of the team's rules with a team (docs/design/
+	// expectations.md, step 3).
+	Drafts []ledger.ExpectDraft
 }
 
 // inForce is what the rules in effect hash to, by the names the ledger
@@ -438,6 +442,9 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 		v.Empty = &emptyView{Kind: "done", Title: "No proposal is waiting for approval or under way.", Links: []emptyLink{{"Show the closed ones too", pickURL("/proposals", c, proposalFacets, q)}}}
 	case len(v.Lines) == 0:
 		v.Empty = &emptyView{Kind: "notfound", Title: "No proposal matches these filters.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
+	}
+	if v.Drafts, err = s.openDrafts(ctx, rules, c.Team != ""); err != nil {
+		return nil, err
 	}
 	if s.cfg.Changes && s.role(r) < admin {
 		label := "Pause changes"
@@ -1191,6 +1198,9 @@ func (s *Server) changesTokenRoutes(mux *http.ServeMux) {
 		[]string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken}, &s.changes.warned, 64 << 10, s.changes.rate, s.changes.busy}
 	mux.HandleFunc("GET /api/v1/changes", s.withToken(tk, s.apiChanges))
 	mux.HandleFunc("PATCH /api/v1/changes/{id}", s.withToken(tk, s.apiPatchChange))
+	// Drafts of expectations accepted by the git path, as changes to the
+	// expectations file (docs/design/expectations.md, step 3).
+	mux.HandleFunc("PATCH /api/v1/changes/expectations/{id}", s.withToken(tk, s.apiPatchDraft))
 }
 
 // handedOut is a change as a recipe reads it. Ledger names the ledger in
@@ -1247,8 +1257,15 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, h)
 	}
+	// Drafts of expectations accepted, as changes to the expectations file:
+	// a recipe from before them reads changes alone.
+	drafts, err := s.handedDrafts(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]any{"changes": out})
+	writeJSON(w, map[string]any{"changes": out, "expectations": drafts})
 }
 
 // prTitle is a proposal's pull request's title: one line, of printable

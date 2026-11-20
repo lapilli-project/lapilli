@@ -203,7 +203,7 @@ func TestShortNext(t *testing.T) {
 // toPage reports whether a link on this server goes to a page, not a file,
 // the sign-in, the API or the choice of a language.
 func toPage(href string) bool {
-	for _, not := range []string{"/static/", "/auth/", "/api/", "/settings.yaml", "/config.yaml", "/lang?", "/metrics", "/mcp"} {
+	for _, not := range []string{"/static/", "/auth/", "/api/", "/settings.yaml", "/config.yaml", "/expectations/draft.yaml", "/lang?", "/metrics", "/mcp"} {
 		if strings.HasPrefix(href, not) {
 			return false
 		}

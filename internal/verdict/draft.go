@@ -100,9 +100,13 @@ type DraftLeftOut struct {
 
 // Why a rule is left out of a draft.
 const (
-	DraftNoWeek    = "no_week"    // nothing counted of it yet
-	DraftPastBound = "past_bound" // past the expectations a file holds
+	DraftNoWeek     = "no_week"    // nothing counted of it yet
+	DraftPastBound  = "past_bound" // past the expectations a file holds
+	DraftUnreplayed = "unreplayed" // a rule Lapilli doesn't replay, nor copies in
 )
+
+// Counted is what a rule drafted was counted from; zero for one left out.
+func (d *Drafted) Counted(rule string) DraftRule { return d.counted[rule] }
 
 // Draft makes the expectations of rules as they are now: of each rule
 // counted, a budget of the most it fired in a week, while people slept
@@ -203,6 +207,9 @@ func (d *Drafted) YAML(about DraftAbout) ([]byte, error) {
 	}
 	if n := d.countLeft(DraftNoWeek); n > 0 {
 		head = append(head, fmt.Sprintf("%d rules with nothing counted yet are left out.", n))
+	}
+	if n := d.countLeft(DraftUnreplayed); n > 0 {
+		head = append(head, fmt.Sprintf("%d rules Lapilli doesn't replay, nor copies in, are left out.", n))
 	}
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	for _, x := range d.Expectations {

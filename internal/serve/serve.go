@@ -391,6 +391,10 @@ type Server struct {
 	rejudge atomic.Bool
 	// comparing is held while an agent's proposed change is replayed.
 	comparing sync.Mutex
+	// agentScenarios is held while promtool runs a test file an agent sent
+	// (docs/design/expectations.md, step 3): one at a time, whatever holds
+	// comparing.
+	agentScenarios sync.Mutex
 	// tries are, by reader, the proposals asked for in the last hour that
 	// read the rules again (propose); impactTries, the incident criteria
 	// tried or saved, which read Prometheus (impactTriesAnHour);

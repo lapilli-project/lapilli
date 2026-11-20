@@ -12,12 +12,11 @@ import (
 // one, losing no incident the rule catches, the text a person or the agent
 // may post on the pull request. Lapilli writes nothing there itself.
 
-// Rewritten is a rewrite's backtest, as its post says it: the rule, its
-// text as it is and as rewritten, the period replayed, its firings and
-// catches as it is and rewritten, and each expectation held.
+// Rewritten is a rewrite's backtest, as its post says it: the rule, the
+// period replayed, its firings and catches as it is and rewritten, and
+// each expectation held.
 type Rewritten struct {
 	Rule          string
-	Before, After string
 	From, To      time.Time
 	Fired, Caught [2]int
 	Results       []ExpectResult

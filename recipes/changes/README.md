@@ -36,6 +36,18 @@ Each also needs:
   `GIT_EMAIL` for the commits (default `Lapilli`, `lapilli@localhost`).
 - `MAX_CHANGES`, the most branches a run pushes (default 10): the changes
   past it wait for the next run, which the run says.
+- `EXPECT_FILE`, optional: the expectations file in the repository that
+  lapilli serve's `--expect` is made from (`alerts/expectations.yaml`). A
+  draft of what a rule is held to that a person accepted in Lapilli
+  (docs/design/expectations.md, step 3) gets a pull request to that file
+  alone (`lapilli/LEDGER/expectations-ID`), with the file as Lapilli wrote
+  it, the draft taken in: only while the file in the repository is the one
+  lapilli serve read (by its sha256), only when it is a tracked, non
+  executable `*.yml` or `*.yaml` that no CI system runs, and only when it
+  and what Lapilli wrote are each an expectations file, one document whose
+  only key is `expectations`. Otherwise Lapilli is told it failed, and
+  why, and nothing is pushed. Without `EXPECT_FILE`, those accepted wait,
+  and the run says how many.
 
 They need `sh`, `git`, `curl` and `jq`, and run every few minutes:
 

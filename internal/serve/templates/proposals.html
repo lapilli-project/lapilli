@@ -28,6 +28,11 @@
 {{if .Lines}}{{template "proposallist" (on $ .Lines)}}{{end}}
 {{if .More}}<p class="quiet">{{t "The first %d are shown: pick fewer to see the rest." (len .Lines)}}</p>{{end}}
 {{with .Empty}}{{template "empty" .}}{{end}}
+{{with .Drafts}}<section class="card" id="drafts">
+<h2>{{t "Drafts of expectations waiting"}}</h2>
+<p class="quiet">{{t "Drafts of what a rule is held to, the history's or an agent's, each accepted or dropped on its rule's expectations tab."}}</p>
+<ul class="plain">{{range .}}<li><a href="{{$.Link (print "/rules/" (path .Rule)) "tab" "expectations"}}#draft-{{.ID}}">{{t "Draft #%d" .ID}}</a>, <bdi>{{.Rule}}</bdi>: {{if .Agent}}<span class="status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent's, for %s" (who .MadeBy)}}</span>{{else}}{{t "the history's, kept by %s" (who .MadeBy)}}{{end}}, <span class="t">{{at $loc .Made}}</span></li>{{end}}</ul>
+</section>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "proposal"}}{{$head := .View.Head.Text .Lang}}{{template "top" (crumbed . (print "#" .View.ID " " $head) (print "#" .View.ID))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}{{$v := .}}

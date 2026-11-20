@@ -478,7 +478,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 	}
 
 	// MCP: no tool writes a team, a quiet window, a report or a role. Those
-	// that write are proposals' alone.
+	// that write are proposals' and drafts' alone.
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	cs := connect(t, srv.URL, "boss@example.com")
@@ -487,7 +487,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, x := range res.Tools {
-		if (x.Annotations == nil || !x.Annotations.ReadOnlyHint) && x.Name != "propose" && x.Name != "backtest_again" {
+		if (x.Annotations == nil || !x.Annotations.ReadOnlyHint) && x.Name != "propose" && x.Name != "backtest_again" && x.Name != "propose_expectation" {
 			t.Errorf("MCP tool %s writes", x.Name)
 		}
 	}
