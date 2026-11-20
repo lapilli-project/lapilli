@@ -1325,6 +1325,12 @@ func TestBacktestRecipeCaseFolded(t *testing.T) {
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	page := "groups:\n  - name: sneaky\n    rules:\n      - alert: PageEveryone\n        expr: vector(1)\n        labels: {severity: page}\n"
+	// Refused where the file system folds case (a macOS or Windows
+	// runner's); elsewhere both paths are written and read.
+	foldsAt := t.TempDir()
+	os.WriteFile(filepath.Join(foldsAt, "case-probe"), nil, 0o600)
+	_, err := os.Stat(filepath.Join(foldsAt, "CASE-PROBE"))
+	folds := err == nil
 	for name, c := range map[string]struct{ path, pair string }{
 		"two files":            {"alerts/Shop.yaml", "alerts/Shop.yaml and alerts/shop.yaml"},
 		"a file, a directory":  {"alerts/SHOP.yaml/page.yaml", "alerts/SHOP.yaml and alerts/shop.yaml"},
@@ -1335,6 +1341,23 @@ func TestBacktestRecipeCaseFolded(t *testing.T) {
 			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "logs/team/page.yaml": logs})
 			repo.pullRequestTree(map[string]string{c.path: page})
 			why := "the pull request's commit holds two paths that differ only in case, which a file system that folds case (macOS's, Windows') writes as one: not read (the job's log says which)"
+			if !folds {
+				if strings.HasPrefix(c.path, "alerts/") {
+					rr := newRecipeRun(t, backtestHosts[0], repo)
+					out, _ := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+					if strings.Contains(out, "differ only in case") || strings.Contains(rr.body(), "differ only in case") || !strings.Contains(rr.body(), "PageEveryone") {
+						t.Errorf("a file system that doesn't fold case: both read\n%s\n%s", rr.body(), out)
+					}
+				}
+				srv := newServeStandIn(t)
+				srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(`{"nothing_changed":false,"changed":0,"added":1,"removed":0,"same":1,"alike":0,"unreplayed":0,"expected":true,"expectations_broken":0,"unexpected":0}`))})
+				sr := serveRun(t, backtestHosts[0], repo, srv)
+				out, _ := sr.run([]string{"PATHS=alerts", "LOKI_PATHS=logs"})
+				if posts, _, _ := srv.counts(); posts != 1 || strings.Contains(out, "differ only in case") {
+					t.Errorf("through serve, a file system that doesn't fold case: %d POSTs\n%s", posts, out)
+				}
+				return
+			}
 			if strings.HasPrefix(c.path, "alerts/") {
 				rr := newRecipeRun(t, backtestHosts[0], repo)
 				out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL, "--tz", "UTC")

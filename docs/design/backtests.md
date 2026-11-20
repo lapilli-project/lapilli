@@ -1008,10 +1008,11 @@ Where step 1 does otherwise than the sections above say, or says more:
   given, as `--expect` takes it; the field is left out only when the
   commit has no file. `expect_before` is the file as `TARGET` itself has
   it, not as the commit the two share (since 0.63.2), as `INCIDENTS` is
-  read without serve. A commit with two paths under `PATHS` or
-  `LOKI_PATHS` that differ only in case, or of more files than the
-  runner's file system holds of it once written, isn't read (since
-  0.63.2): a macOS or Windows runner writes one over the other.
+  read without serve. Where the runner's file system folds case, a
+  commit with two paths under `PATHS` or `LOKI_PATHS` that differ only in
+  case isn't read, nor anywhere one of more files than the runner's file
+  system holds of it once written (since 0.63.2): a macOS or Windows
+  runner writes one over the other.
   `Retry-After` is waited, 5 minutes at most, 5 seconds at least (or
   `SERVE_POLL` if longer: a `Retry-After` of 0 isn't a loop;
   `SERVE_RETRY_MIN` lowers the 5 for tests, to a second at least since

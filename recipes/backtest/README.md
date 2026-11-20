@@ -107,11 +107,11 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    commit hasn't is a directory with no rules, so a pull request that adds
    the first rules, or takes the last away, is compared too. A commit with
    a symbolic link where the rules are read (anywhere, with `RENDER`) isn't
-   read: a link could lead to any file the job can read. Nor is one with
-   two paths under `PATHS` or `LOKI_PATHS` that differ only in case, or
-   files the runner's file system takes as one: a macOS or Windows runner
-   would write one over the other, and its rules would never be
-   backtested. The job's log names them.
+   read: a link could lead to any file the job can read. Nor, on a runner
+   whose file system folds case (macOS's, Windows'), is one with two paths
+   under `PATHS` or `LOKI_PATHS` that differ only in case, or one with
+   files the runner's file system takes as one: one would be written over
+   the other, and its rules never backtested. The job's log names them.
 3. With `RENDER`, runs `RENDER_PREPARE`, then `RENDER`, in each commit's
    files, the base's first, and takes what `RENDER` writes as that commit's
    rules.

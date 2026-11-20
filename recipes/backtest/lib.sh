@@ -923,6 +923,12 @@ commits() {
   fi
 }
 
+# folds_case: whether the file system the commits are written to takes two
+# names that differ only in case as one.
+folds_case() {
+  : >"$tmp/case-probe" && [ -e "$tmp/CASE-PROBE" ]
+}
+
 # files COMMIT DIR WHAT: COMMIT's files into DIR, as git keeps them: all of
 # them with RENDER, those PATHS names without, an empty directory in place
 # of each it hasn't. With the attributes of an empty work tree and an empty
@@ -954,12 +960,14 @@ files() {
     trouble "$what is too big to read: $big"
     return 1
   fi
-  if [ -z "${RENDER:-}" ]; then
+  if [ -z "${RENDER:-}" ] && folds_case; then
     # Two files whose paths differ only in case, or a file and a directory
     # so, are one on a file system that folds case (a macOS or Windows
     # runner's): written one over the other, one's rules would never be
-    # backtested, and the gates would pass. Refused wherever it runs, the
-    # pair in the job's log alone: their names are the pull request's.
+    # backtested, and the gates would pass. Refused where this machine's
+    # file system folds case, the pair in the job's log alone: their names
+    # are the pull request's. Elsewhere both are written, and read, as
+    # Prometheus reads them.
     pair=$(git -C "$repo" ls-tree -r --name-only "$c" -- "$@" | awk '
       {
         f = $0; k = tolower(f)

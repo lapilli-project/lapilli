@@ -144,10 +144,11 @@ failed before it; no schema change: the ledger stays at 026.
   on a file system that folds case: `git archive | tar -x` wrote one over
   the other, the first's rules were never backtested, and
   `EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS` and `FAIL_ON_ERROR` passed.
-  Such a commit isn't read now, on any runner, the pair named in the
-  job's log and not the comment; nor is one of more files than the
-  runner's file system holds of it once written (a letter past ASCII in
-  another case).
+  Where the runner's file system folds case, such a commit isn't read
+  now, the pair named in the job's log and not the comment; nor, on any
+  runner, is one of more files than its file system holds of it once
+  written (a letter past ASCII in another case). On Linux both are
+  written, and read, as Prometheus reads them.
 - **A pull request could pick the incidents and expectations it was
   judged by** (affected: `INCIDENTS`, 0.32.0 to 0.63.1; the expectations,
   0.47.0 to 0.63.1). `INCIDENTS`, and the expectations the rules in place
