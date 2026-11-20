@@ -30,18 +30,35 @@ ledger stays at 026.
 
 ### Fixed (security)
 
-- **A pull request's PromQL could hide what it read from the backtest
-  port's checks in a comment** (affected: 0.61.0 to 0.63.1). Prometheus
-  ends a `#` comment at a `\r` as at a `\n`, and reads one in a
-  selector's braces and a range's brackets as anywhere outside a string;
-  the port's checks ended one at `\n` alone, and read none in braces or
-  brackets. What followed a comment's `\r`, or a `}` or a `]` and a quote
-  in one, was a comment or a string to them, and code to Prometheus: a
-  rule backtested through the port could read every series
-  (`{__name__=~".+"}`), 1,400 days back, or at a time of its own (`@ 0`),
-  with serve's access, and be taken. The checks now read comments as
-  Prometheus does, and the port refuses a `\r` in PromQL whatever else it
-  holds. A rule's own comments are taken as before.
+- **A pull request's PromQL could read past the backtest port's bounds,
+  written as the history reads it otherwise than the port's checks did**
+  (affected: 0.61.0 to 0.63.1). Prometheus ends a `#` comment at a `\r`
+  as at a `\n`, and reads one in a selector's braces and a range's
+  brackets as anywhere outside a string; the port's checks ended one at
+  `\n` alone, and read none in braces or brackets, so that what followed a
+  comment's `\r`, or a `}` or a `]` and a quote in one, was a comment or a
+  string to them, and code to Prometheus. With VictoriaMetrics, a
+  `--prometheus` the docs name, MetricsQL reads a `\` in a name as
+  escaping the character after it, a backtick among them
+  (``up\` or {__name__=~".+"} or up\` `` was a string to the checks), `or`
+  in a selector's braces as joining its matchers
+  (`{__name__='up' or __name__=~'.+'}`, one string to the checks), an
+  offset after any expression (`rate(up[5m]) offset 1400d`), `WITH`
+  templates, `1doffset` as `1d offset` and `"__\name__"` as `__name__`;
+  and Prometheus with unquoted UTF-8 names reads a name that isn't ASCII
+  (`温度 offset 1400d`). Either way a rule backtested through the port
+  could read every series, 1,400 days back, or at a time of its own
+  (`@ 0`), with serve's access, and be taken. The checks now read comments
+  as Prometheus does, and the port takes only what every history reads
+  alike: no `\r`; outside its strings, ASCII names, numbers and durations
+  as Prometheus writes them, operators and brackets alone; an `offset` or
+  `@` right after a selector, a range or a subquery; and none of
+  MetricsQL's own (`WITH`, `or`, `and` or `unless` in a selector's braces,
+  `keep_metric_names`, `__graphite__`, a `\` in a label's name in
+  quotes). A string with an unescaped quote of its kind inside isn't one
+  string to the checks any more. A rule's own comments are taken as
+  before, and rules as alerting rules are written read alike, as checked
+  with Prometheus's parser and MetricsQL's.
 - **Anyone who could reach the backtest port could keep a job from reading
   or cancelling its backtest** (affected: 0.61.0 to 0.63.1). Each `GET`
   and `DELETE` was charged to the client's address before its key was
@@ -53,17 +70,22 @@ ledger stays at 026.
   second apart at most: a job's id and key, known, are read whatever else
   comes from its address. A pair not known waits up to 2 seconds for a
   listing begun after it came, so that a backtest queued through another
-  replica is found on its first poll; only those waits are charged to the
-  address, and past them a pair not known is a 404 at once. Guesses read
-  no backtest's row.
-- **A rule file whose name begins with a dot went past every gate of the
-  backtest recipes unbacktested** (affected: 0.47.0 to 0.63.1).
-  Prometheus's `rule_files` glob loads `alerts/.page.yaml` for
-  `alerts/*.yaml`, and `alerts/.d/page.yaml` for `alerts/*/*.yaml`, but
-  `--rules` passed over every name beginning with a dot, and the recipes'
-  serve mode sent none: a pull request adding a rule there passed
+  replica is found, on its first poll, or, when guesses from the address
+  everyone shares have taken its 20 waiting, on the next, after a 503 with
+  `Retry-After` and a listing begun, never said not found; only those
+  waits are charged to the address. Guesses read no backtest's row.
+- **A rule file whose name begins with a dot, or past 16 MiB, went past
+  every gate of the backtest recipes unbacktested** (affected: 0.47.0 to
+  0.63.1). Prometheus's `rule_files` glob loads `alerts/.page.yaml` and
+  `alerts/..page.yaml` for `alerts/*.yaml`, and `alerts/.d/page.yaml` for
+  `alerts/*/*.yaml`; its rulefmt reads a file in UTF-16 with its BOM, and
+  one of any size. But `--rules` passed over every name beginning with a
+  dot, and a rule file past 16 MiB below the top, and the recipes' serve
+  mode sent no hidden file: a pull request adding a rule so passed
   `EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS` and `FAIL_ON_ERROR`, and no
-  comment was posted. Such a file is read and backtested now (Changed).
+  comment was posted. Such a file is read and backtested now, a long one
+  refused, and a hidden one in UTF-16 said in serve mode as a rule file
+  that isn't UTF-8 text is (Changed).
 - **Answering only "needed action" took away another person's
   "unrelated"** (affected: 0.63.0 and 0.63.1). A client writing a verdict
   whole, `"unrelated": false` beside its answer, of a firing a run had
@@ -75,8 +97,9 @@ ledger stays at 026.
 - **`lapilli preflight` printed an OCID it hadn't learned whole**
   (affected: 0.60.0 to 0.63.1). Another compartment's, a dynamic group's
   or a policy's OCID in what OCI said was shown, though an ARN, a GUID and
-  a long number weren't. Each OCID is said by what it is when the run
-  learned it, and as `[an OCID]` otherwise.
+  a long number weren't. Each OCID, a word's character before it or not
+  (`%3Docid1…` in a URL), is said by what it is when the run learned it,
+  and as `[an OCID]` otherwise.
 - **`lapilli preflight` asked Azure of a resource id with `..` in its
   path** (affected: 0.60.0 to 0.63.1). An alert rule's document naming,
   in any of its strings, an id such as
@@ -87,16 +110,22 @@ ledger stays at 026.
 
 ### Changed
 
-- **A hidden rule file is read.** `--rules DIR`, the versions of
-  `--rules-history` and the backtest port read a file with a name in its
-  path beginning with a dot when it holds rules, as Prometheus's glob
-  loads it, and go into a directory so named; one that holds none, or
-  doesn't read, is passed over wherever it is, at the top too, so a
-  `.gitignore` or a `.github/` beside the rules breaks nothing, and one
-  Lapilli's reader refuses is said. Names beginning with `..` (a
-  ConfigMap volume's own, `..data`) and a `.git` directory are still never
-  read. The backtest recipes send hidden files to serve, but one that
-  isn't UTF-8 text (a `.DS_Store`).
+- **A hidden rule file is read, and a long one refused.** `--rules DIR`,
+  the versions of `--rules-history` and the backtest port read a file with
+  a name in its path beginning with a dot, `..` too, when it holds rules,
+  as Prometheus's glob loads it, and go into a directory so named; one
+  that holds none, or doesn't read, is passed over wherever it is, at the
+  top too, and isn't counted in what is said passed over, so a
+  `.gitignore`, a `.github/` or a version's `.commit` beside the rules
+  breaks and says nothing; one Lapilli's reader refuses is said. Never
+  read are a `.git` directory, and one whose name begins with `..` beside
+  a `..data` link, as a Kubernetes volume keeps a ConfigMap's files. A
+  file past 16 MiB named as rule files are (`.yml`, `.yaml`, `.json`,
+  `.rules`) is refused wherever it is, where one below the top, or
+  hidden, was passed over. The backtest recipes send hidden files to
+  serve, `..` names among them, but one that isn't UTF-8 text and has no
+  BOM (a `.DS_Store`); one in UTF-16 or UTF-32 is said, as a rule file
+  that isn't UTF-8 text is.
 
 ## [0.63.1] - 2026-11-20
 
