@@ -292,7 +292,7 @@ type testExpectOut struct {
 	Unfinished bool     `json:"not_finished,omitempty" jsonschema:"the replay ran out of time: its numbers are partial, and not known"`
 	// Meets says the rewrite meets each, losing no catch; Post, then, is
 	// the text to post on the pull request.
-	Meets bool   `json:"meets" jsonschema:"of a rewrite: held to one expectation at least, it meets each (not known is never met) and loses no incident the rule catches"`
+	Meets bool   `json:"meets" jsonschema:"of a rewrite: the rule as it is and rewritten each replayed to the end, held to one expectation at least, it meets each (not known is never met) and loses no incident the rule catches"`
 	Post  string `json:"post,omitempty" jsonschema:"of a rewrite that meets each: Markdown you or a person may post on the pull request, marked as an agent's rewrite backtested by Lapilli, with the numbers before and after. Lapilli posts nothing itself. Not given otherwise"`
 	Note  string `json:"note,omitempty"`
 }
@@ -309,6 +309,9 @@ type checked struct {
 	out     testExpectOut
 	entries []verdict.Expectation // the rule's, as given
 	tests   map[string]string
+	// sides are the rule replayed as it is and, of a rewrite, rewritten
+	// (as it is twice otherwise); nil where it wasn't.
+	sides [2]*verdict.RuleResult
 }
 
 // cleanTests are the test files an agent sent, each by a path an
@@ -457,20 +460,42 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 	if err != nil {
 		return nil, err
 	}
-	if len(gone) > 0 {
-		c.out.Meets = verdict.RewriteMeets(results, c.out.Lost)
-		if c.out.Meets {
-			c.out.Post = verdict.RewriteMarkdown(verdict.Rewritten{Rule: rule, From: c.out.From, To: c.out.To, Fired: c.out.Fired, Caught: c.out.Caught,
-				Results: results}, rules.Diff(rule, []byte(ruleText(r)), []byte(ruleText(came[0]))))
-		}
+	if len(gone) == 0 {
+		return c, nil
 	}
-	switch {
-	case c.out.Unfinished:
+	c.out.Meets = verdict.RewriteMeets(results, c.out.Lost, c.sides[0], c.sides[1])
+	if c.out.Meets {
+		c.out.Post = verdict.RewriteMarkdown(verdict.Rewritten{Rule: rule, From: c.out.From, To: c.out.To, Fired: c.out.Fired, Caught: c.out.Caught,
+			Results: results}, rules.Diff(rule, []byte(ruleText(r)), []byte(ruleText(came[0]))))
+	}
+	switch why := unreplayed(c.sides); {
 	case len(results) == 0:
-	case len(gone) > 0 && !c.out.Meets:
+	case why != "":
+		// A side cut short, or that couldn't be replayed, catches nothing
+		// it would have: a catch the rewrite loses would go unseen.
+		c.out.Note = strings.TrimSpace(c.out.Note + " There is nothing to post: " + why +
+			", so whether the rewrite meets each expectation and loses no catch the rule makes is not known.")
+	case !c.out.Meets:
 		c.out.Note = "The rewrite doesn't meet each expectation, or loses a catch: there is nothing to post."
 	}
 	return c, nil
+}
+
+// unreplayed says which side of a rewrite's check wasn't replayed to the
+// end, the rule as it is or rewritten, and why; "" when both were.
+func unreplayed(sides [2]*verdict.RuleResult) string {
+	for i, x := range sides {
+		which := [2]string{"the rule as it is", "the rewrite"}[i]
+		switch {
+		case x == nil:
+			return which + " wasn't replayed"
+		case x.Unsupported == replay.Unfinished:
+			return which + " wasn't replayed to the end (out of time)"
+		case x.Unsupported != "":
+			return which + " couldn't be replayed (" + x.Unsupported + ")"
+		}
+	}
+	return ""
 }
 
 // replayHeld replays the rules came (beside gone, the rule as it is, of a
@@ -546,6 +571,7 @@ func (s *Server) replayHeld(ctx context.Context, c *checked, held *verdict.Expec
 	if len(gone) == 0 {
 		before = after
 	}
+	c.sides = [2]*verdict.RuleResult{before, after}
 	for _, x := range []*verdict.RuleResult{before, after} {
 		if x != nil && x.Unsupported == replay.Unfinished {
 			c.out.Unfinished = true

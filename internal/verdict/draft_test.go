@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 )
 
 // A budget drafted is the most rounded up: as it is below 10, to the next
@@ -176,22 +177,31 @@ func TestDraftFromReport(t *testing.T) {
 }
 
 // A rewrite is posted only when it meets every expectation it is held
-// to, losing no catch; not known is never met.
+// to, losing no catch; not known is never met; and only beside the rule
+// as it is replayed to the end, and rewritten: a side cut short or not
+// replayed catches nothing, and a catch lost there goes unseen.
 func TestRewriteMeets(t *testing.T) {
 	met := ExpectResult{What: "budget week", AfterState: ExpectMet}
+	whole := &RuleResult{Rule: "R", Replayed: true}
 	for _, c := range []struct {
-		results []ExpectResult
-		lost    []string
-		want    bool
+		results       []ExpectResult
+		lost          []string
+		before, after *RuleResult
+		want          bool
 	}{
-		{[]ExpectResult{met}, nil, true},
-		{nil, nil, false}, // held to nothing
-		{[]ExpectResult{met}, []string{"INC-1"}, false},
-		{[]ExpectResult{met, {What: "catches INC-1", AfterState: ExpectBroken}}, nil, false},
-		{[]ExpectResult{met, {What: "scenario t.yaml", AfterState: ExpectUnknown}}, nil, false},
+		{[]ExpectResult{met}, nil, whole, whole, true},
+		{nil, nil, whole, whole, false}, // held to nothing
+		{[]ExpectResult{met}, []string{"INC-1"}, whole, whole, false},
+		{[]ExpectResult{met, {What: "catches INC-1", AfterState: ExpectBroken}}, nil, whole, whole, false},
+		{[]ExpectResult{met, {What: "scenario t.yaml", AfterState: ExpectUnknown}}, nil, whole, whole, false},
+		{[]ExpectResult{met}, nil, &RuleResult{Rule: "R", Unsupported: rules.Unfinished}, whole, false},
+		{[]ExpectResult{met}, nil, &RuleResult{Rule: "R", Unsupported: rules.QueryFailed + "HTTP 400"}, whole, false},
+		{[]ExpectResult{met}, nil, whole, &RuleResult{Rule: "R", Unsupported: rules.Unfinished}, false},
+		{[]ExpectResult{met}, nil, nil, whole, false},
+		{[]ExpectResult{met}, nil, whole, nil, false},
 	} {
-		if got := RewriteMeets(c.results, c.lost); got != c.want {
-			t.Errorf("%+v %v: %v", c.results, c.lost, got)
+		if got := RewriteMeets(c.results, c.lost, c.before, c.after); got != c.want {
+			t.Errorf("%+v %v %+v %+v: %v", c.results, c.lost, c.before, c.after, got)
 		}
 	}
 }

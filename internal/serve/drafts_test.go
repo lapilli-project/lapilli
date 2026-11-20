@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/scenario/scenariotest"
 	"lapilli.dev/internal/verdict"
 )
@@ -170,6 +172,54 @@ func TestTestExpectation(t *testing.T) {
 	}
 	if s.l.Gen() != gen {
 		t.Error("test_expectation wrote to the ledger")
+	}
+}
+
+// failingFor is a history whose queries of one expression fail as err
+// says; the others are h's.
+type failingFor struct {
+	replay.History
+	expr string
+	err  error
+}
+
+func (f failingFor) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr == f.expr {
+		return nil, f.err
+	}
+	return f.History.QueryRange(ctx, expr, start, end, step)
+}
+
+// A rewrite is posted only beside the rule as it is replayed to the end:
+// cut short by the deadline, or refused by the history, the rule as it is
+// catches nothing, so the incident the rewrite loses (a for of two hours
+// never fires, and misses INC-1) would go unseen. No post, and the note
+// says why.
+func TestTestExpectationUnreplayed(t *testing.T) {
+	s, _, _ := draftServer(t, "expectations: []\n", nil)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	agent := connect(t, ts.URL, "ed@example.com")
+	args := map[string]any{"rule": "Errors", "expectations": "expectations:\n  - rule: Errors\n    budget: {week: 10}\n",
+		"rewrite": "groups:\n  - name: shop\n    rules:\n      - alert: Errors\n        expr: errors > 1\n        for: 2h\n        labels: {severity: page}\n"}
+	h := s.h
+	for want, err := range map[string]error{
+		"the rule as it is wasn't replayed to the end": prom.ErrPastDeadline,
+		"the rule as it is couldn't be replayed":       &prom.APIError{Status: 400, Msg: "bad_data: refused"},
+	} {
+		s.h = failingFor{History: h, expr: "errors > 5", err: err}
+		var out testExpectOut
+		failed, text := call(t, agent, "test_expectation", args, &out)
+		if failed || out.Meets || out.Post != "" || len(out.Lost) != 0 || !strings.Contains(out.Note, "There is nothing to post: "+want) {
+			t.Errorf("%s: %s %+v", want, text, out)
+		}
+	}
+	// Replayed to the end, it loses INC-1: no post either.
+	s.h = h
+	var out testExpectOut
+	if failed, text := call(t, agent, "test_expectation", args, &out); failed || out.Meets || out.Post != "" || len(out.Lost) != 1 ||
+		!strings.Contains(out.Note, "loses a catch") {
+		t.Errorf("replayed to the end: %s %+v", text, out)
 	}
 }
 

@@ -22,13 +22,16 @@ type Rewritten struct {
 	Results       []ExpectResult
 }
 
-// RewriteMeets says whether a rewrite may be posted: held to one
-// expectation at least, it meets each after (met, never not known), and
+// RewriteMeets says whether a rewrite may be posted: the rule as it is
+// (before) and rewritten (after) each replayed to the end; held to one
+// expectation at least, it meets each after (met, never not known); and
 // lost names no incident the rule catches as it is that the rewrite
 // doesn't. A rewrite that meets the budget by losing a catch is never
-// shown.
-func RewriteMeets(results []ExpectResult, lost []string) bool {
-	if len(results) == 0 || len(lost) > 0 {
+// shown, nor one beside a rule whose replay was cut short or couldn't be
+// made: what it catches isn't known, and so neither is what the rewrite
+// loses.
+func RewriteMeets(results []ExpectResult, lost []string, before, after *RuleResult) bool {
+	if len(results) == 0 || len(lost) > 0 || before == nil || after == nil || before.Unsupported != "" || after.Unsupported != "" {
 		return false
 	}
 	for _, r := range results {
