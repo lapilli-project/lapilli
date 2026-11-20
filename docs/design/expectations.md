@@ -618,9 +618,12 @@ Step 3, drafts, as built:
   beside the proposals (`GET /api/v1/changes`'s `expectations`, `PATCH
   /api/v1/changes/expectations/{id}`). The recipes write `EXPECT_FILE`
   alone, a tracked, non-executable `*.yml` or `*.yaml` not of a CI system,
-  only while its sha256 is that hash, and only as an expectations file,
-  one document whose only key is `expectations`, before and after: a
-  Lapilli someone took over can't make them write anything else. The pull
+  only while its sha256 is that hash (or the file's with one newline more
+  or less at its end, as a chart's ConfigMap gives it to serve: a `|-`
+  block takes the last one off; nothing else), and only as an
+  expectations file, one document whose only key is `expectations`,
+  before and after: a Lapilli someone took over can't make them write
+  anything else. The pull
   request's description gives the rule, the agent's and approver's names
   and what checking found as code spans, a table's escaped as a pull
   request comment's are (a backslash before a `|` said `\u{5c}`, so no

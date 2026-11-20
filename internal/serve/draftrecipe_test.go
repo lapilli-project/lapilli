@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http/httptest"
@@ -23,9 +24,15 @@ const theirExpectations = "# Kept by the payments team.\nexpectations:\n  - rule
 // agent's for Errors, accepted by an approver by the git path.
 func draftRecipeServer(t *testing.T) (*Server, ledger.ExpectDraft) {
 	t.Helper()
+	return draftRecipeServerOf(t, theirExpectations)
+}
+
+// draftRecipeServerOf is draftRecipeServer with --expect reading served.
+func draftRecipeServerOf(t *testing.T, served string) (*Server, ledger.ExpectDraft) {
+	t.Helper()
 	ctx := context.Background()
 	file := filepath.Join(t.TempDir(), "expectations.yaml")
-	os.WriteFile(file, []byte(theirExpectations), 0o600)
+	os.WriteFile(file, []byte(served), 0o600)
 	s, _ := changesServer(t, func(c *Config) { c.Expect = file })
 	expectReadTwice(t, s)
 	target, hash := s.draftTarget()
@@ -57,7 +64,9 @@ func runDraftRecipe(t *testing.T, s *Server, host *prHost, bare string, env []st
 	hs := httptest.NewServer(host)
 	defer hs.Close()
 	host.url = hs.URL
-	cmd := exec.Command("sh", changeRecipes+"github.sh")
+	// sh is dash on Debian and Ubuntu, bash on macOS: RECIPE_SH=dash runs
+	// the recipe as Debian would.
+	cmd := exec.Command(cmp.Or(os.Getenv("RECIPE_SH"), "sh"), changeRecipes+"github.sh")
 	cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare, "RULES_PATHS=alerts",
 		"GITHUB_API="+hs.URL, "GITHUB_REPO=o/r", "GITHUB_TOKEN_FILE="+tokenFile(t, "host-token-0123456789")), more...)
 	out, err := cmd.CombinedOutput()
@@ -166,5 +175,57 @@ func TestChangeRecipeDraftRefuses(t *testing.T) {
 	bare := remote(t, env, map[string]string{".github/workflows/x.yml": theirExpectations})
 	if out, err := runDraftRecipe(t, s, host, bare, env, "EXPECT_FILE=.github/workflows/x.yml"); err == nil || !strings.Contains(out, "it is what a CI system runs") {
 		t.Errorf("a workflow as EXPECT_FILE: %v\n%s", err, out)
+	}
+}
+
+// A chart's ConfigMap gives lapilli serve the expectations file with a
+// newline more or less at its end than the file in git it is made from (a
+// |- block takes the last one off): the recipe takes the file in git as
+// the one serve read, a newline at its end aside, and nothing else.
+func TestChangeRecipeDraftTrailingNewline(t *testing.T) {
+	needTools(t)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	ctx := context.Background()
+	env := gitEnv(t)
+	host := &prHost{t: t, kind: "github", auth: "Bearer host-token-0123456789"}
+	bare := strings.TrimSuffix(theirExpectations, "\n")
+	for name, c := range map[string]struct {
+		served, inGit string
+		opened        bool
+	}{
+		"served without its last newline": {bare, theirExpectations, true},
+		"served with one more":            {theirExpectations + "\n", theirExpectations, true},
+		"in git without it":               {theirExpectations, bare, true},
+		"two more in git":                 {bare, theirExpectations + "\n", false},
+		"a space before it in git":        {theirExpectations, bare + " \n", false},
+		"a carriage return in git":        {theirExpectations, bare + "\r\n", false},
+		"a character after it in git":     {theirExpectations, theirExpectations + "#", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, d := draftRecipeServerOf(t, c.served)
+			repo := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile, "alerts/expectations.yaml": c.inGit})
+			if out, err := runDraftRecipe(t, s, host, repo, env, "EXPECT_FILE=alerts/expectations.yaml"); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			got, _ := s.l.DraftByID(ctx, d.ID)
+			branch := "lapilli/" + s.ledgerID + "/expectations-" + strconv.FormatInt(d.ID, 10)
+			if !c.opened {
+				if got.PR != ledger.DraftFailed || !strings.Contains(got.Why, "is not the expectations file lapilli serve read") {
+					t.Errorf("told: %+v", got)
+				}
+				if out := gitIn(t, env, repo, "branch", "--list", "lapilli/*"); strings.TrimSpace(out) != "" {
+					t.Errorf("pushed: %s", out)
+				}
+				return
+			}
+			if got.PR != ledger.DraftOpened {
+				t.Fatalf("not opened: %+v", got)
+			}
+			if file := gitIn(t, env, repo, "show", branch+":alerts/expectations.yaml"); file != d.Document || !strings.Contains(file, "week: 10") {
+				t.Errorf("the branch's file:\n%q", file)
+			}
+		})
 	}
 }
