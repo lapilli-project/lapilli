@@ -149,18 +149,20 @@ failed before it; no schema change: the ledger stays at 026.
   runner, is one of more files than its file system holds of it once
   written (a letter past ASCII in another case). On Linux both are
   written, and read, as Prometheus reads them.
-- **A pull request could pick the incidents and expectations it was
-  judged by** (affected: `INCIDENTS`, 0.32.0 to 0.63.1; the expectations,
-  0.47.0 to 0.63.1). `INCIDENTS`, and the expectations the rules in place
-  are held to (`--expect-before`, serve's `expect_before`), were read
-  from the commit the pull request and `TARGET` share last, which its
-  author picks by where they branch from: where the job checks out the
-  pull request's own commit, not a merge (`TARGET_BRANCH`, GitLab's
-  target branch's commit), a pull request branched from before an
-  incident was written down was judged without it, and one branched from
-  before a budget was lowered by the higher. Both are read from `TARGET`
-  itself now, the commit the pull request goes into as it is; the rules
-  are compared against those where it branched, as before.
+- **A pull request could pick the incidents it was judged by** (affected:
+  0.32.0 to 0.63.1). `INCIDENTS` was read from the commit the pull request
+  and `TARGET` share last, which its author picks by where they branch
+  from: where the job checks out the pull request's own commit, not a
+  merge (`TARGET_BRANCH`, GitLab without merged results), a pull request
+  branched from before an incident was written down was judged without
+  it. It is read from `TARGET` itself now, the commit the pull request
+  goes into as it is, and `gitlab.sh` without merged results takes the
+  target branch (`CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, fetched with the
+  job's credentials) for `TARGET` in place of the merge base. The rules
+  are compared against those where it branched, as before, and so are
+  the expectations of the rules in place: a pull request is held to the
+  expectations in its own commit, the target's where the job checks out
+  a merge (a merged results pipeline, or a branch rebased).
 - **Answering only "needed action" took away another person's
   "unrelated"** (affected: 0.63.0 and 0.63.1). A client writing a verdict
   whole, `"unrelated": false` beside its answer, of a firing a run had

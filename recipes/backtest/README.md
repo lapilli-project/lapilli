@@ -70,10 +70,11 @@ And, as wanted:
   `origin`, which needs the checkout's credentials kept. The rules compared
   against are those of the commit `HEAD` and the target share last (`git
   merge-base`): what the pull request itself changes, whether the checkout
-  is a merge or the pull request's own commit. `INCIDENTS`, and the
-  expectations the rules in place are held to, are the target's own, as it
-  is now: a pull request branched from before an incident was written
-  down is judged by it all the same. Each script defaults it from its CI.
+  is a merge or the pull request's own commit, and so are the
+  expectations the rules in place are held to. `INCIDENTS` is the
+  target's own, as it is now: a pull request branched from before an
+  incident was written down is judged by it all the same. Each script
+  defaults it from its CI.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
@@ -82,7 +83,11 @@ And, as wanted:
   rules that differ are held to it, the pull request's file for the rules
   it proposes and the commit it goes into's for those in place
   (`--expect`, `--expect-before`), and the comment has a table of what the
-  change broke. A pull request may add the file; one that takes it away is
+  change broke. A pull request is held to the expectations in its own
+  commit: where the job checks out the pull request's own commit, not a
+  merge, a budget the target changed since it branched isn't its until it
+  is rebased; a merge (GitHub's, GitLab's merged results pipelines) holds
+  it to the target's. A pull request may add the file; one that takes it away is
   read as holding none, what it held shown taken away. `FAIL_ON_EXPECTATIONS=true` fails the job when the change breaks
   an expectation the rules in place meet, and `EXPECT_REQUIRED=true` when
   it adds a rule no expectation holds, each once the comment is posted.
@@ -205,8 +210,14 @@ backtest-rules:
 In a merge request pipeline the script takes the merge request, its
 project (`CI_MERGE_REQUEST_PROJECT_ID`) and the API from GitLab's
 variables, and the target from `CI_MERGE_REQUEST_TARGET_BRANCH_SHA` (merged
-results) or `CI_MERGE_REQUEST_DIFF_BASE_SHA`; `GIT_DEPTH: 0` fetches the
-history they are in.
+results) or else the target branch, `CI_MERGE_REQUEST_TARGET_BRANCH_NAME`,
+which it fetches from `origin` with the job's own credentials, as a
+GitLab job's clone keeps them; `GIT_DEPTH: 0` fetches the history they
+are in. The rules are compared from where the two parted either way, and
+`INCIDENTS` is read from the target as it is. A target branch whose name
+holds more than letters, digits and `. _ / -` leaves the merge base
+(`CI_MERGE_REQUEST_DIFF_BASE_SHA`), `INCIDENTS` read from it, the job's
+log saying so.
 
 ### Bitbucket Pipelines
 

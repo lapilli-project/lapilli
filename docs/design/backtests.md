@@ -1006,9 +1006,10 @@ Where step 1 does otherwise than the sections above say, or says more:
   (act's) reads the command as GitHub's does (0.63.2 put right what this
   said before: that Forgejo has no such command). An expectations file of no bytes is sent as `"expect": ""`,
   given, as `--expect` takes it; the field is left out only when the
-  commit has no file. `expect_before` is the file as `TARGET` itself has
-  it, not as the commit the two share (since 0.63.2), as `INCIDENTS` is
-  read without serve. Where the runner's file system folds case, a
+  commit has no file. `expect_before` is the file as the commit the two
+  share has it, as the pull request's branch does: a pull request is held
+  to the expectations in its own commit, the target's where the job
+  checks out a merge. Where the runner's file system folds case, a
   commit with two paths under `PATHS` or `LOKI_PATHS` that differ only in
   case isn't read, nor anywhere one of more files than the runner's file
   system holds of it once written (since 0.63.2): a macOS or Windows

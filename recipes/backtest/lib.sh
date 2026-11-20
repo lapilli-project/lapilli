@@ -76,8 +76,8 @@
 #                    it (default HEAD^1: the merge commit's first parent, as
 #                    GitHub checks a pull request out); the rules compared
 #                    against are those of the commit HEAD and TARGET share
-#                    last (git merge-base), INCIDENTS and the expectations
-#                    of the rules in place TARGET's own
+#                    last (git merge-base), as are the expectations of the
+#                    rules in place; INCIDENTS is TARGET's own
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -1039,15 +1039,18 @@ incidents() {
 
 # expectations: EXPECT, as each commit has it, into
 # $tmp/expect.head.yaml (the pull request's, for the rules it proposes) and
-# $tmp/expect.base.yaml (the commit it goes into's, TARGET itself, for the
-# rules in place, as INCIDENTS is read): files, not links, of 1 MiB at
-# most. The pull request may add the file, and the rules in place are held
-# to its; or take it away, as if it held none: what it held is shown,
-# taken away. In neither commit, it is said.
+# $tmp/expect.base.yaml (the commit the rules are compared against's, for
+# the rules in place): files, not links, of 1 MiB at most. Both sides as
+# the pull request's branch has them, so that what it says changed is
+# what it changed: a pull request is held to the expectations of its own
+# commit, the target's where the job checks out a merge (merged results,
+# or a branch rebased). The pull request may add the file, and the rules
+# in place are held to its; or take it away, as if it held none: what it
+# held is shown, taken away. In neither commit, it is said.
 expectations() {
   [ -n "${EXPECT:-}" ] || return 0
   for side in head base; do
-    if [ "$side" = head ]; then commit=$head what="the pull request's commit"; else commit=$target what="the commit it goes into"; fi
+    if [ "$side" = head ]; then commit=$head what="the pull request's commit"; else commit=$base what="the commit it goes into"; fi
     mode=$(git -C "$repo" ls-tree "$commit" -- "$EXPECT" | awk '{ print $1 }')
     case $mode in
       100644 | 100755) ;;
