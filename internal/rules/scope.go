@@ -94,7 +94,7 @@ func Selectors(expr string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	for i, s := range x.sels {
-		s += selectorModifiers(expr[x.ends[i]:])
+		s += selectorModifiers(x.text[x.ends[i]:])
 		if !seen[s] {
 			seen[s] = true
 			out = append(out, s)
@@ -104,7 +104,8 @@ func Selectors(expr string) ([]string, error) {
 }
 
 // selectorModifiers are the offset and the @ a selector's text is followed
-// by in rest, past its range, as " offset 1w @ 1700000000".
+// by in rest, past its range, as " offset 1w @ 1700000000": rest read as
+// scopeScan reads it, its comments blanked (scanned.text).
 func selectorModifiers(rest string) string {
 	space := func() { rest = strings.TrimLeft(rest, " \t\n\r") }
 	token := func() string {
@@ -154,17 +155,30 @@ func Ranges(expr string) ([]string, error) {
 }
 
 // scanned is what scopeScan found: the selectors, where each ends, and the
-// ranges.
+// ranges, in text, the expression as it was read, its comments blanked.
 type scanned struct {
 	sels, ranges []string
 	ends         []int
+	text         string
 }
 
 // scopeScan reads expr as Scope does, writing it with matchers added into
 // b, unless b is nil, and says how much they add: the matchers, and the
 // commas and brackets around them. Each selector it adds them to, and each
-// range, is put in found, as written, unless found is nil.
-func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, error) {
+// range, is put in found, as read, unless found is nil.
+//
+// It reads expr with its comments blanked (blankComments), as Prometheus
+// reads past them, in braces and brackets as anywhere outside a string,
+// to a \r or a \n: what a comment holds is never a selector's end, a
+// range's, or a string's start. What it writes into b is expr as written,
+// its comments kept, the matchers added where they would be had the
+// comments been spaces: never within one, as a comment ends before the
+// } or the word they are added at.
+func scopeScan(src, matchers string, b *strings.Builder, found *scanned) (int, error) {
+	expr := blankComments(src) // the same length as src, read in its place
+	if found != nil {
+		found.text = expr
+	}
 	w := scopeOut{b}
 	added := 0
 	// A metric's name just read, which matchers may follow: where it
@@ -173,14 +187,9 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 	var parens []bool // for each open parenthesis, whether it holds label names
 	listNext := false // a label list's parenthesis comes next
 	i := 0
-	next := func() byte { // the next character that isn't space or a comment
+	next := func() byte { // the next character that isn't space
 		for j := i; j < len(expr); j++ {
-			switch c := expr[j]; {
-			case c == '#':
-				for j < len(expr) && expr[j] != '\n' {
-					j++
-				}
-			case c != ' ' && c != '\t' && c != '\n' && c != '\r':
+			if c := expr[j]; c != ' ' && c != '\t' && c != '\n' && c != '\r' {
 				return c
 			}
 		}
@@ -204,18 +213,13 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 	}
 	for i < len(expr) {
 		c := expr[i]
-		if listNext && c != '(' && c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '#' {
+		if listNext && c != '(' && c != ' ' && c != '\t' && c != '\n' && c != '\r' {
 			listNext = false // group_left with no labels
 		}
 		switch {
 		case c == '"' || c == '\'' || c == '`':
 			if err := str(); err != nil {
 				return 0, err
-			}
-		case c == '#':
-			for i < len(expr) && expr[i] != '\n' {
-				w.byte(expr[i])
-				i++
 			}
 		case c == '{':
 			// A selector's matchers: copy them, then add ours.
@@ -234,7 +238,7 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 				if expr[i] == '}' {
 					break
 				}
-				w.byte(expr[i])
+				w.byte(src[i])
 				i++
 			}
 			if found != nil {
@@ -261,7 +265,7 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 			if end < 0 {
 				return 0, errors.New("a [ isn't closed")
 			}
-			w.str(expr[i : i+end+1])
+			w.str(src[i : i+end+1])
 			if found != nil {
 				found.ranges = append(found.ranges, strings.TrimSpace(expr[i+1:i+end]))
 			}
@@ -326,7 +330,7 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 				nameStart, nameEnd = wordStart, i // its matchers come next
 			}
 		default:
-			w.byte(c)
+			w.byte(src[i])
 			i++
 		}
 	}

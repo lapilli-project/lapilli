@@ -266,12 +266,12 @@ func selectorsRead(expr string) ([]string, map[string]bool, error) {
 	if _, err := scopeScan(expr, "", nil, &x); err != nil {
 		return nil, nil, err
 	}
-	in := inAbsent(expr)
+	in := inAbsent(x.text)
 	var out []string
 	absent, seen := map[string]bool{}, map[string]bool{}
 	for i, s := range x.sels {
 		start := x.ends[i] - len(s)
-		s += selectorModifiers(expr[x.ends[i]:])
+		s += selectorModifiers(x.text[x.ends[i]:])
 		if !seen[s] {
 			seen[s] = true
 			out = append(out, s)
@@ -305,7 +305,8 @@ func nameByte(c byte) bool {
 
 // inAbsent says, of each byte of expr, whether it is within the
 // parentheses of an absent() or absent_over_time(), at any depth; quoted
-// strings are passed over.
+// strings are passed over. expr is read with its comments blanked
+// (scanned.text).
 func inAbsent(expr string) []bool {
 	out := make([]bool, len(expr))
 	var stack []bool // of each open parenthesis, whether an absent opened it
@@ -325,11 +326,6 @@ func inAbsent(expr string) []bool {
 		case quote != 0:
 		case c == '"' || c == '\'' || c == '`':
 			quote = c
-		case c == '#':
-			for i < len(expr) && expr[i] != '\n' { // a comment, to its line's end
-				out[i] = depth > 0
-				i++
-			}
 		case c == '(':
 			a := absentBefore(expr[:i])
 			stack = append(stack, a)

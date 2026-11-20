@@ -245,7 +245,11 @@ func reachOf(d time.Duration) string {
 // blankComments is expr with each comment, from a # outside a string to
 // the line's end, written as spaces, so that what is left is where it was
 // and no quote in a comment starts a string: strings read as scopeScan
-// reads them, \ escaping in "..." and '...', nothing in `...`.
+// reads them, \ escaping in "..." and '...', nothing in `...`. A line
+// ends at a \r as at a \n, as Prometheus's lexer ends a comment
+// (isEndOfLine); what follows a \r is read, not passed over. Prometheus
+// reads a comment anywhere outside a string, in a selector's braces and a
+// range's brackets too, and so does this.
 func blankComments(expr string) string {
 	if !strings.Contains(expr, "#") {
 		return expr
@@ -262,7 +266,7 @@ func blankComments(expr string) string {
 		case c == '"' || c == '\'' || c == '`':
 			quote = c
 		case c == '#':
-			for ; i < len(b) && b[i] != '\n'; i++ {
+			for ; i < len(b) && b[i] != '\n' && b[i] != '\r'; i++ {
 				b[i] = ' '
 			}
 		}

@@ -843,7 +843,15 @@ func (p *prepared) checkRule(r *rules.Rule) string {
 // evaluation, to what the port takes: one that doesn't read leaves the
 // rule unsupported, refused as written. A refusal says the query as name,
 // and, with quote, what of it is past the bounds; without, nothing of it.
+//
+// A \r is refused, whatever else: Prometheus ends a # comment at one, and
+// the checks here do too, but a rule's lines end in \n alone (YAML makes a
+// \r\n one), so none has a reason to hold one but to read otherwise than
+// it looks.
 func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Duration, quote bool) string {
+	if strings.Contains(expr, "\r") {
+		return name + " holds a carriage return (\\r): here a rule's PromQL ends its lines in \\n alone"
+	}
 	if _, err := rules.Selectors(expr); err != nil {
 		r.Unsupported = refusedAsWritten
 		p.reasons[r.Unsupported] = true

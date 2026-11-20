@@ -459,6 +459,63 @@ func TestBacktestRequestsRefused(t *testing.T) {
 	}
 }
 
+// A comment ends at a \r as at a \n, as Prometheus's lexer ends one, and
+// is read in braces and brackets as anywhere outside a string: a rule
+// whose comment, as these checks read it once, hid a wide selector, an @
+// or a range past the reach is refused, and asks the history nothing; a
+// \r is refused itself. A rule's own comment is taken, and reads what the
+// rule names.
+func TestBacktestCommentsHideNothing(t *testing.T) {
+	h := &history{}
+	b := btServer(t, h, "", nil)
+	hidden := map[string]string{
+		"vector(1) # \r or count({__name__=~\".+\"}) > 0":                    "carriage return",
+		"vector(1) # \r or max_over_time(errors[400d] @ 0 offset 1000d) > 0": "carriage return",
+		"vector(1) # \r or count_over_time({job=~\".+\"}[8d:1s]) > 0":        "carriage return",
+		"up{ # x=\"y\" } \"\n} or {__name__=~'.+'} # \"":                     "names no metric",
+		"rate(x[5m # ] \"\n]) or {__name__=~'.+'} # \")":                     "names no metric",
+		"rate(x[5m # ] \"\n] offset 9d) # \"\n> 0":                           "past 8d",
+	}
+	for expr, says := range hidden {
+		q, _ := json.Marshal(expr) // a YAML double-quoted scalar, its \r escaped
+		after := ruleFile + "      - alert: Hidden\n        expr: " + string(q) + "\n"
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btBody(ruleFile, after, nil))
+		why, _ := m["error"].(string)
+		if code != http.StatusBadRequest || !strings.Contains(why, says) || !strings.Contains(why, "Hidden") {
+			t.Errorf("%q: %d %q, want 400 %q", expr, code, why, says)
+		}
+	}
+	if n, _ := b.s.l.BacktestsWaiting(context.Background()); len(n) != 0 {
+		t.Errorf("queued: %v", n)
+	}
+	h.Lock()
+	for expr := range hidden {
+		if h.exprs[expr] > 0 {
+			t.Errorf("asked of the history: %q", expr)
+		}
+	}
+	h.Unlock()
+	// A rule's own comment.
+	honest := "# 5xx ratio\nsum(rate(x_total[5m])) > 1"
+	q, _ := json.Marshal(honest)
+	after := ruleFile + "      - alert: Ratio\n        expr: " + string(q) + "\n"
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btBody(ruleFile, after, nil)); code != http.StatusAccepted {
+		t.Fatalf("a commented rule: %d %v", code, m)
+	}
+	if got := laneOnce(t, b.s); got.State != ledger.BacktestDone {
+		t.Fatalf("lane: %+v", got)
+	}
+	h.Lock()
+	defer h.Unlock()
+	read := false
+	for expr := range h.exprs {
+		read = read || strings.Contains(expr, "x_total")
+	}
+	if !read {
+		t.Errorf("x_total not read: %v", h.exprs)
+	}
+}
+
 // A backtest that couldn't finish within --backtest-timeout at the lane's
 // rate is refused before it is queued, saying how many requests it needs
 // and how many days would fit.
