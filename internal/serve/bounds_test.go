@@ -977,3 +977,139 @@ func TestWithinChangesInFoldsBySource(t *testing.T) {
 		}
 	}
 }
+
+// proposeAddAs proposes a rule to add into a group of a rule file, as who:
+// errors > 1 under name, with labels (YAML lines under labels:, or none),
+// held to a budget it meets.
+func proposeAddAs(t *testing.T, s *Server, who, file, group, name, labels string) (int64, int, string) {
+	t.Helper()
+	rule := "alert: " + name + "\nexpr: errors > 1\nfor: 2m\n"
+	if labels != "" {
+		rule += "labels:\n" + labels
+	}
+	key := placeKeyOf(t, s, addPlace{Path: ledger.PathGit, File: file, Group: group})
+	return proposeAdding(t, s.Handler(), who, url.Values{"place": {key}, "rule": {rule}, "expectations": {strings.Replace(heldTo(60), "ErrorsLow", name, 1)}})
+}
+
+// A rule added is held by the boundaries of the team its name and labels
+// give it, as it will have them in effect: checkout's label makes it
+// checkout's, which payments's approver doesn't approve, a freeze of
+// checkout's holds and checkout's approver does; added in pay's group,
+// whose labels are payments's, one with no label of its own is payments's.
+func TestTeamBoundsAddByLabels(t *testing.T) {
+	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	s, _ := boundsServer(t, teamsConfig, nil)
+	s.wall = func() time.Time { return at }
+	h := s.Handler()
+	cart, code, body := proposeAddAs(t, s, bo, "shop.yaml", "shop", "CartErrors", "  team: checkout\n")
+	if cart == 0 {
+		t.Fatalf("proposing checkout's: %d %s", code, zzMsg(body))
+	}
+	if w := proposalEvidence(state(t, s, cart)).ownedBy; !w.Owned || len(w.Owners) != 1 || w.Owners[0].Name != "checkout" {
+		t.Errorf("kept as owned by %+v", w)
+	}
+	if code, _ := approveAs(t, s, cart, quinn); code != http.StatusForbidden {
+		t.Errorf("quinn approving checkout's: %d, want 403", code)
+	}
+	pay, code, body := proposeAddAs(t, s, bo, "pay.yaml", "pay", "PayErrors", "")
+	if pay == 0 {
+		t.Fatalf("proposing in pay's group: %d %s", code, zzMsg(body))
+	}
+	if w := proposalEvidence(state(t, s, pay)).ownedBy; len(w.Owners) != 1 || w.Owners[0].Name != "payments" {
+		t.Errorf("by its group's labels, owned by %+v", w)
+	}
+	if code, _ := approveAs(t, s, pay, rob); code != http.StatusForbidden {
+		t.Errorf("rob approving payments's: %d, want 403", code)
+	}
+	declare(t, s, teamsConfig+"freezes:\n  - {title: Cart week, team: checkout, start: 2026-11-27T00:00, end: 2026-11-30T00:00}\n")
+	if code, body := approveAs(t, s, cart, rob); code != http.StatusConflict || !strings.Contains(body, "Cart week") {
+		t.Errorf("rob approving during checkout's freeze: %d %s", code, zzMsg(body))
+	}
+	if code, body := approve(t, h, pay, quinn); code != http.StatusSeeOther {
+		t.Errorf("quinn approving payments's during checkout's freeze: %d %s", code, zzMsg(body))
+	}
+	declare(t, s, teamsConfig)
+	if code, body := approve(t, h, cart, rob); code != http.StatusSeeOther {
+		t.Errorf("rob approving checkout's: %d %s", code, zzMsg(body))
+	}
+	// One whose labels can't be read is held, and refused: its team can't
+	// be told.
+	ctx := context.Background()
+	unread, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Unread", Kind: ledger.KindAdd, Path: ledger.PathGit, MadeBy: "u@example.com", AfterHash: "h",
+		Expect: `{"text":"expectations:\n  - rule: Unread\n    budget:\n      week: 5\n"}`, Evidence: []byte(`{"add": {"rule": "x"}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.Approve(ctx, unread, ana, 1, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := s.heldByBounds(ctx, state(t, s, unread)); !held || err != nil {
+		t.Errorf("a rule added whose labels can't be read: held %v, %v", held, err)
+	}
+	if p := state(t, s, unread); p.State != ledger.StateRefused {
+		t.Errorf("a rule added whose labels can't be read: %s %q", p.State, p.Reason)
+	}
+}
+
+// A team's editor adds rules their team would own by the name and labels
+// given, and by the labels of the group it goes in: not one another
+// team's, nor no team's, refused before the rules are read again (no try
+// spent); and not one whose group's labels make it another team's, refused
+// once it is read back there.
+func TestTeamEditorAdds(t *testing.T) {
+	ctx := context.Background()
+	s, dir := boundsServer(t, teamsConfig, nil)
+	// checkout owns what has shop=cart, as the basket group does.
+	os.WriteFile(filepath.Join(dir, "basket.yaml"), []byte("groups:\n  - name: basket\n    labels: {shop: cart}\n    rules:\n      - alert: BasketSlow\n        expr: up == 0\n"), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	declare(t, s, strings.Replace(teamsConfig, "labels: {team: checkout}", "labels: {shop: cart}", 1))
+	tried := len(s.tries.at[triesKey(pat, false)])
+	for name, labels := range map[string]string{"CartErrors": "  shop: cart\n", "AnyErrors": ""} {
+		if _, code, body := proposeAddAs(t, s, pat, "shop.yaml", "shop", name, labels); code != http.StatusForbidden {
+			t.Errorf("pat adding %s: %d %s, want 403", name, code, zzMsg(body))
+		}
+	}
+	if n := len(s.tries.at[triesKey(pat, false)]); n != tried {
+		t.Errorf("a refused team's editor spent %d tries reading the rules again", n-tried)
+	}
+	id, code, body := proposeAddAs(t, s, pat, "shop.yaml", "shop", "PayErrors", "  team: payments\n")
+	if id == 0 {
+		t.Fatalf("pat adding payments's: %d %s", code, zzMsg(body))
+	}
+	if w := proposalEvidence(state(t, s, id)).ownedBy; len(w.Owners) != 1 || w.Owners[0].Name != "payments" {
+		t.Errorf("kept as owned by %+v", w)
+	}
+	if _, code, body := proposeAddAs(t, s, pat, "basket.yaml", "basket", "BasketErrors", "  team: payments\n"); code != http.StatusForbidden {
+		t.Errorf("pat adding to checkout's group: %d %s, want 403", code, zzMsg(body))
+	}
+}
+
+// A rule added, backtested again after its group's labels made it another
+// team's, is that team's: its proposal, payments's as it was proposed, is
+// approved by no one, and is proposed again.
+func TestTeamAddMovedByItsGroup(t *testing.T) {
+	ctx := context.Background()
+	s, dir := boundsServer(t, teamsConfig, nil)
+	id, code, body := proposeAddAs(t, s, bo, "pay.yaml", "pay", "PayErrors", "")
+	if id == 0 {
+		t.Fatalf("proposing: %d %s", code, zzMsg(body))
+	}
+	os.WriteFile(filepath.Join(dir, "pay.yaml"), []byte(strings.Replace(payRules, "{team: payments}", "{team: checkout}", 1)), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	was := semantics
+	semantics++
+	t.Cleanup(func() { semantics = was })
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if now, err := s.teamNow(ctx, state(t, s, id)); err != nil || now.Name != "checkout" {
+		t.Fatalf("backtested again, its team: %+v %v", now, err)
+	}
+	if code, body := approveAs(t, s, id, quinn); code == http.StatusSeeOther || !strings.Contains(body, "propose it again") {
+		t.Errorf("quinn approving what is checkout's now: %d %s", code, zzMsg(body))
+	}
+}

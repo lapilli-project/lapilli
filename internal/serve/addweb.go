@@ -81,7 +81,7 @@ func (s *Server) postAddProposal(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, ruleRefused(err))
 		return
 	}
-	if err := s.mayPropose(r.Context(), a.Alert, by, false); err != nil {
+	if err := s.mayProposeAdd(r.Context(), a, by, false); err != nil {
 		s.oops(w, r, err)
 		return
 	}

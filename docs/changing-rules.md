@@ -37,7 +37,9 @@ Grafana, one of their contact points where each of them names one, none
 where none does; in CloudWatch, an SNS topic, an OpsItem or a response
 plan, never a Lambda function or an automation; in a rule file or a ruler,
 no one: its labels route it through Alertmanager), and one expectation at
-least; its labels are plain text. Lapilli writes the rule itself where it
+least; its labels are plain text, and with its group's they say its team,
+whose editors may propose it and whose approvers, freezes and
+`changes_in` hold it. Lapilli writes the rule itself where it
 goes, replays it over the twelve weeks with nothing beside it, and holds
 it to each expectation; no one approves it while one is broken, or its
 backtest didn't replay it. It goes the way a change goes there; undone,

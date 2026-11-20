@@ -374,6 +374,19 @@ type addEvidence struct {
 	Note  string      `json:"note,omitempty"`
 	// Unreplayed says the backtest couldn't replay the rule: why.
 	Unreplayed string `json:"unreplayed,omitempty"`
+	// Labels are the labels the rule is read back with where it goes, its
+	// group's with its own, as it has them in effect: what its team is
+	// found by until it is (addLabels), never nil.
+	Labels map[string]string `json:"labels"`
+}
+
+// addedLabels are a rule added's labels as read back where it goes, for
+// its evidence: never nil, so that one with none says so.
+func addedLabels(r rules.Rule) map[string]string {
+	if l := maps.Clone(r.AlertLabels()); l != nil {
+		return l
+	}
+	return map[string]string{}
 }
 
 // addBuilt is a rule added, written where it goes and read back.
@@ -1055,7 +1068,9 @@ func (s *Server) proposeAdd(ctx context.Context, q addAsk, by string, agent bool
 	if err != nil {
 		return 0, ruleRefused(err)
 	}
-	if err := s.mayPropose(ctx, a.Alert, by, agent); err != nil {
+	// A team's editor, of a rule their team would own by its name and
+	// labels alone, asked again below of it as read back where it goes.
+	if err := s.mayProposeAdd(ctx, a, by, agent); err != nil {
 		return 0, err
 	}
 	if taken, err := s.nameInEffect(ctx, a.Alert); err != nil {
@@ -1082,6 +1097,13 @@ func (s *Server) proposeAdd(ctx context.Context, q addAsk, by string, agent bool
 	if err != nil {
 		return 0, err
 	}
+	// Who would own it, by its group's labels too, before it is replayed:
+	// kept, as a proposal for a rule in effect keeps it.
+	labels := addedLabels(b.rule)
+	owned, err := s.addOwners(ctx, a.Alert, labels)
+	if err != nil {
+		return 0, err
+	}
 	c, err := s.checkAdd(ctx, b, held, tests, agent, false)
 	if err != nil {
 		return 0, err
@@ -1094,7 +1116,7 @@ func (s *Server) proposeAdd(ctx context.Context, q addAsk, by string, agent bool
 	if err != nil {
 		return 0, err
 	}
-	ev := evidence{From: cmpOr(q.From, "person"), Reason: q.Reason, Version: s.versionOf(), Semantics: semantics, Edit: &b.edit}
+	ev := evidence{From: cmpOr(q.From, "person"), Reason: q.Reason, Version: s.versionOf(), Semantics: semantics, Edit: &b.edit, ownedBy: owned}
 	if ev.Impact, err = s.impactHeld(ctx); err != nil {
 		return 0, err
 	}
@@ -1102,7 +1124,7 @@ func (s *Server) proposeAdd(ctx context.Context, q addAsk, by string, agent bool
 		return 0, err
 	}
 	items, unreplayed := addItemsOf(c)
-	ev.Add = &addEvidence{Place: place, Rule: string(a.YAML()), Items: items, Weeks: c.out.Weeks, Note: c.out.Note, Unreplayed: unreplayed}
+	ev.Add = &addEvidence{Place: place, Rule: string(a.YAML()), Items: items, Weeks: c.out.Weeks, Note: c.out.Note, Unreplayed: unreplayed, Labels: labels}
 	if ev.Backtest != nil {
 		for _, in := range c.caughtBy() {
 			ev.Backtest.Gained = append(ev.Backtest.Gained, in)
@@ -1206,6 +1228,9 @@ func (s *Server) addAgain(ctx context.Context, p ledger.Proposal, ev evidence, w
 	items, unreplayed := addItemsOf(c)
 	add := *ev.Add
 	add.Items, add.Weeks, add.Note, add.Unreplayed = items, c.out.Weeks, c.out.Note, unreplayed
+	// As read back now: a group's labels changed since give it the team
+	// they give it, which approving asks of (teamMoved).
+	add.Labels = addedLabels(b.rule)
 	again.Add, again.Semantics, again.Version = &add, semantics, s.versionOf()
 	if again.Impact, err = s.impactHeld(ctx); err != nil {
 		return ev, nil, err

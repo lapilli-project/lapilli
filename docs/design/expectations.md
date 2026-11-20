@@ -881,6 +881,14 @@ Step 5, adding a rule, as built:
   and so isn't approved: what replays is what the place would load. No
   one approves their own, or one their agent made; an agent's counts
   toward its person's twenty an hour, as proposals do.
+- **Its team** (changes.md, "A team as the boundary of change"): until it
+  is in effect, the team its name and the labels it is added with give
+  it, as read back where it goes, its group's with its own, as they will
+  once it is. A team's editor adds only what their team would own so;
+  that team's approvers approve it, and its freezes and `changes_in` hold
+  it. Backtested again after its group's labels changed, it is the team
+  they give, and one another team owned as it was proposed is proposed
+  again; one whose labels can't be read is refused as it is carried out.
 - **Stale** as changes.md says of any backtest (an earlier lapilli's, a
   record changed since): held until it is backtested again, from its page,
   by MCP's `backtest_again` or by Lapilli itself, which writes it where its

@@ -263,7 +263,9 @@ Before upgrading:
   (another team's counted "not your team's"), backtest them again, and
   drop the ones they made; who owns the rule is asked of its name, of the
   rule as it is read again and of it as proposed, each with its note and
-  without it, each a team they edit.
+  without it, each a team they edit; a rule added (kind `add`) is the
+  team's its name and the labels it is added with give it, its group's
+  with its own, for proposing, approving, freezes and `changes_in` alike.
   Under a team in `--config` (`serve.config`): `approvers:`, as
   `user:NAME`, `group:NAME` or `*@DOMAIN` (not a bare name, nor `*`), who
   approve a proposal one team, theirs, owned as it was proposed and owns

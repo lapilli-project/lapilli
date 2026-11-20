@@ -735,7 +735,13 @@ pages work it out.
   isn't theirs. None of today's kinds renames or relabels a rule; the check is there for one that would. On the rules
   list, another team's rule picked is counted "not your team's", and the
   rest are proposed. A rule in effect that never fired is owned as one
-  that did, by a note, its name and its labels (`owners.owner`).
+  that did, by a note, its name and its labels (`owners.owner`). A rule
+  added (kind `add`) is owned, until it is in effect, by its name and the
+  labels it is added with as read back where it goes, its group's with
+  its own, as it will be once it is: a team's editor adds only what their
+  team would own so, asked of the labels given before anything is read
+  and again of them as read back; its approvers, freezes and `changes_in`
+  are that team's ([expectations.md](expectations.md), step 5).
   Agents keep today's rules: `--mcp-propose` is an editor's of every team,
   or an admin's, and an agent proposes as before.
 - **A team's approvers** (`approvers:` under a team) approve a proposal

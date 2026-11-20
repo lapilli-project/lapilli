@@ -568,6 +568,70 @@ func (s *Server) proposedOwners(ctx context.Context, f found, was, want rules.Ru
 	return out, nil
 }
 
+// addOwners are who would own a rule added, of a name and the labels it
+// is added with, as owners will once it is in effect and teamsNow says of
+// its proposal: the team they give it, its note first, and the team its
+// name and labels give it without its note, when they give one. A team's
+// editor is refused unless each is a team they edit, as a proposal for a
+// rule in effect is (proposedOwners).
+func (s *Server) addOwners(ctx context.Context, name string, labels map[string]string) (ownedBy, error) {
+	o, err := s.owners(ctx)
+	if err != nil {
+		return ownedBy{}, err
+	}
+	ids := []int64{o.ownerOf(name, labels)}
+	if id := o.bareOf(name, labels); id != 0 {
+		ids = append(ids, id)
+	}
+	if teams, limited := ledger.TeamsOf(ctx); limited {
+		for _, id := range ids {
+			if id == 0 || !slices.Contains(teams, id) {
+				return ownedBy{}, ledger.ErrNotYourTeam
+			}
+		}
+	}
+	out := ownedBy{Owned: true}
+	for _, id := range ids {
+		if id != 0 && !slices.ContainsFunc(out.Owners, func(t teamRef) bool { return t.ID == id }) {
+			out.Owners = append(out.Owners, o.refOf(id))
+		}
+	}
+	return out, nil
+}
+
+// addLabels are the labels a proposal adding a rule gives it, as it was
+// read back where it goes, its group's with its own, which the rule has
+// once it is in effect; kept before they were, its own as proposed. A
+// refusal when it holds no rule that reads (addedOf): its team can't be
+// told, and it isn't carried out (heldByBounds).
+func addLabels(p ledger.Proposal) (map[string]string, error) {
+	ev := proposalEvidence(p)
+	if ev.Add != nil && ev.Add.Labels != nil {
+		return ev.Add.Labels, nil
+	}
+	a, err := addedOf(ev)
+	if err != nil {
+		return nil, err
+	}
+	return a.Labels, nil
+}
+
+// addPending says a proposal adds a rule not in effect: one not carried
+// out yet, or carried out and not yet in the rules read since. Its team is
+// asked of its name and the labels it is added with (addLabels), as the
+// rules read hold neither.
+func addPending(p ledger.Proposal, o *owners) bool {
+	if p.Kind != ledger.KindAdd {
+		return false
+	}
+	switch p.State {
+	case ledger.StateApplied, ledger.StateMerged, ledger.StateAmended, ledger.StateUndone:
+		_, read := o.verLabels[p.Rule]
+		return !read
+	}
+	return true
+}
+
 // teamNow is the team that owns a proposal's rule now, as the pages name
 // it; ID 0 for none.
 func (s *Server) teamNow(ctx context.Context, p ledger.Proposal) (teamRef, error) {
@@ -577,11 +641,20 @@ func (s *Server) teamNow(ctx context.Context, p ledger.Proposal) (teamRef, error
 
 // teamsNow are the team that owns a proposal's rule now (teamNow), and the
 // team its name and labels give it without its note (bare); ID 0 for
-// none.
+// none. Of a rule added not yet in effect, those its name and the labels
+// it is added with give it, as they will once it is: an error, which holds
+// it, when they can't be read.
 func (s *Server) teamsNow(ctx context.Context, p ledger.Proposal) (now, bare teamRef, err error) {
 	o, err := s.owners(ctx)
 	if err != nil {
 		return teamRef{}, teamRef{}, err
+	}
+	if addPending(p, o) {
+		labels, err := addLabels(p)
+		if err != nil {
+			return teamRef{}, teamRef{}, err
+		}
+		return o.refOf(o.ownerOf(p.Rule, labels)), o.refOf(o.bareOf(p.Rule, labels)), nil
 	}
 	return o.refOf(o.owner(p.Rule)), o.refOf(o.bare(p.Rule)), nil
 }
@@ -773,11 +846,6 @@ func (s *Server) heldByBounds(ctx context.Context, p ledger.Proposal) (bool, err
 		s.log.Warn("an approved change waits: the change boundaries can't be read", "proposal", p.ID, "err", err)
 		return true, nil
 	}
-	now, bare, err := s.teamsNow(ctx, p)
-	if err != nil {
-		return true, err
-	}
-	ev := proposalEvidence(p)
 	refuse := func(why string) (bool, error) {
 		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: clip(why, 500)})
 		if errors.Is(err, ledger.ErrMoved) {
@@ -785,6 +853,15 @@ func (s *Server) heldByBounds(ctx context.Context, p ledger.Proposal) (bool, err
 		}
 		return true, err
 	}
+	now, bare, err := s.teamsNow(ctx, p)
+	var no refusal
+	switch {
+	case errors.As(err, &no):
+		return refuse(no.Error()) // a rule added whose team can't be told
+	case err != nil:
+		return true, err
+	}
+	ev := proposalEvidence(p)
 	if from, ok := teamMoved(ev.ownedBy, now); ok {
 		return refuse(teamMovedText(from.Name, now.Name))
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 )
 
 // triesAnHour are the proposals a reader may ask for in an hour that read
@@ -104,6 +105,21 @@ func (s *Server) mayPropose(ctx context.Context, rule, by string, agent bool) er
 	if err := s.mayProposeHere(ctx, rule); err != nil {
 		return err
 	}
+	return s.mayProposeBy(ctx, rule, by, agent)
+}
+
+// mayProposeAdd is mayPropose of a rule added: a team's editor's when the
+// team its name and labels would give it is theirs (addOwners), as no rule
+// in effect has its name for mayProposeHere to ask of.
+func (s *Server) mayProposeAdd(ctx context.Context, a rules.Added, by string, agent bool) error {
+	if _, err := s.addOwners(ctx, a.Alert, a.Labels); err != nil {
+		return err
+	}
+	return s.mayProposeBy(ctx, a.Alert, by, agent)
+}
+
+// mayProposeBy is mayPropose past the team: the ledger's, and the tries.
+func (s *Server) mayProposeBy(ctx context.Context, rule, by string, agent bool) error {
 	if err := s.l.MayPropose(ctx, rule, by); err != nil {
 		return err
 	}
