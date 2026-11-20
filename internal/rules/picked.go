@@ -276,7 +276,10 @@ var ErrNoneSelected = errors.New("no document of rules has the labels asked for"
 // writer keeps a ConfigMap's files (..2026_11_20_..., ..data a link to it,
 // and a link to each file through it), so that each rule would be read
 // twice; one named so otherwise is read (alerts/*/*.yaml matches
-// alerts/..d/x.yaml, and the recipes refuse a commit holding a link). A
+// alerts/..d/x.yaml, and the recipes refuse a commit holding a link). An
+// item of such a volume with a nested path (team/x.yaml) is read through
+// the link to its directory beside ..data (team -> ..data/team), once
+// (mountedDir): no other link to a directory is followed. A
 // file past MaxFile
 // named as rule files are (.yml, .yaml, .json, .rules) is refused
 // wherever it is, never passed over, as Prometheus would load it.
@@ -301,7 +304,11 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	root := filepath.Clean(path)
 	var out []Rule
 	var docs []Doc
-	err = filepath.WalkDir(walk, func(f string, e fs.DirEntry, err error) error {
+	// The directories a ConfigMap volume's links lead to, each read once
+	// (mountedDir).
+	followed := map[string]bool{}
+	var visit fs.WalkDirFunc
+	visit = func(f string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -312,6 +319,15 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, filepath.Clean(f))
+		if e.Type()&fs.ModeSymlink != 0 {
+			if to, ok := mountedDir(f); ok {
+				if followed[to] {
+					return nil
+				}
+				followed[to] = true
+				return filepath.WalkDir(f+string(filepath.Separator), visit)
+			}
+		}
 		if st, err := os.Stat(f); err != nil || !st.Mode().IsRegular() {
 			return nil
 		}
@@ -342,8 +358,8 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 		out = append(out, rs...)
 		docs = append(docs, d)
 		return nil
-	})
-	if err != nil {
+	}
+	if err := filepath.WalkDir(walk, visit); err != nil {
 		return nil, nil, picked, err
 	}
 	if len(out) == 0 {
@@ -427,6 +443,36 @@ func neverRead(dir string) bool {
 	}
 	l, err := os.Lstat(filepath.Join(filepath.Dir(dir), "..data"))
 	return err == nil && l.Mode()&os.ModeSymlink != 0
+}
+
+// mountedDir reports whether f, a link in a directory beside a ..data
+// link, as a Kubernetes volume keeps a ConfigMap's files, leads to a
+// directory right in the volume's own (..data's), and gives where: the
+// link kubelet makes beside ..data for the first part of an item's nested
+// path (team/x.yaml is team -> ..data/team). Such a directory is read
+// through the link, as its files are; ..data itself, a link elsewhere,
+// and one below the volume's own aren't followed, so nothing is read
+// twice, and no link leads back.
+func mountedDir(f string) (string, bool) {
+	dir := filepath.Dir(f)
+	if filepath.Base(f) == "..data" {
+		return "", false
+	}
+	if l, err := os.Lstat(filepath.Join(dir, "..data")); err != nil || l.Mode()&os.ModeSymlink == 0 {
+		return "", false
+	}
+	data, err := filepath.EvalSymlinks(filepath.Join(dir, "..data"))
+	if err != nil {
+		return "", false
+	}
+	to, err := filepath.EvalSymlinks(f)
+	if err != nil || filepath.Dir(to) != data {
+		return "", false
+	}
+	if st, err := os.Stat(to); err != nil || !st.IsDir() {
+		return "", false
+	}
+	return to, true
 }
 
 // ruleFileName reports whether a file is named as rule files are: .yml,

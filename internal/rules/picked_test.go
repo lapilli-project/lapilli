@@ -560,6 +560,51 @@ func TestReadPickedHidden(t *testing.T) {
 	}
 }
 
+// A ConfigMap volume's item with a nested path (team/x.yaml) is a link
+// beside ..data to a directory in the volume's own (team -> ..data/team):
+// its rules are read through it, each once, however many links lead
+// there; ..data itself, a link elsewhere, and a link below that leads
+// back aren't followed.
+func TestReadPickedConfigMapNested(t *testing.T) {
+	rule := func(name string) string {
+		return "groups:\n  - name: g\n    rules:\n      - alert: " + name + "\n        expr: up == 0\n"
+	}
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	data := "..2026_11_20_00_00_00.1"
+	for p, body := range map[string]string{
+		data + "/top.yaml":         rule("Top"),
+		data + "/team/x.yaml":      rule("Nested"),
+		data + "/team/deep/y.yaml": rule("Deeper"),
+	} {
+		full := filepath.Join(dir, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.WriteFile(filepath.Join(elsewhere, "z.yaml"), []byte(rule("Elsewhere")), 0o600)
+	for link, to := range map[string]string{
+		"..data": data, "top.yaml": filepath.Join("..data", "top.yaml"), "team": filepath.Join("..data", "team"),
+		"again": filepath.Join("..data", "team"), "all": "..data", "other": elsewhere, filepath.Join(data, "team", "back"): "..",
+	} {
+		if err := os.Symlink(to, filepath.Join(dir, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rs, _, _, err := ReadPicked(dir, Picking{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range rs {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Deeper", "Nested", "Top"}) {
+		t.Errorf("rules %v, want Deeper, Nested and Top, each once", names)
+	}
+}
+
 // utf16LE is s in UTF-16LE, with its BOM.
 func utf16LE(s string) string {
 	u := utf16.Encode(append([]rune{0xFEFF}, []rune(s)...))
