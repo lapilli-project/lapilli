@@ -2058,7 +2058,21 @@ schedule, a marked window's kind) is behind "How to write it" under it.
 Since bundle 67 a text a page shows as it was said, a refusal, serve's
 status line, a source's last failure, sets its flags as code too
 (`flagsAsCode`); a flag's name after `/` or `=`, in a URL's path or
-query, stays text (`TestRefusalFlagsAsCode`).
+query, stays text (`TestRefusalFlagsAsCode`). A sentence naming a flag is said
+with `tbdi`, which sets it as code, never with `t`, whose text the
+template escapes as it is: eight of the routes', the boundaries' of change
+and the activity log's said `--config` and `--keep-activity` as text
+before bundle 67, and `TestSentencesSetFlagsAsCode` fails on one. An
+argument given as `flagsAsCode`'s is kept as it is, in a `<bdi>`: why
+`--config`'s routes can't be used, and a destination they name that no
+flag gives.
+
+The Sources page fits a laptop's 1,280 px in each language, as the rules
+list does: a source's path or URL wraps in its row header, its kind keeps
+its words, and its last error breaks anywhere; under 1,280 px the table
+scrolls in its box. A table's caption reads from the start, as the
+heading of what is under it, a little apart from the table before it, and
+a row's own header is lined as its row.
 
 Since bundle 65 Korean says 알림 묶음 for an episode (같은 라벨의 알림이
 겹치거나 하루 안에 다시 울리면 한 묶음), not 에피소드, a word whoever is on

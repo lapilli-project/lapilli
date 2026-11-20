@@ -140,7 +140,8 @@ func movedText(lang, moved string) template.HTML {
 // sentence is: one written right to left, or holding what turns text
 // around, doesn't turn the sentence around it. The text is escaped, the
 // translation's and each argument's. A number is as its verb (%d) has it:
-// digits, nothing to set apart. One given as asCode is set in <code> too.
+// digits, nothing to set apart. One given as asCode is set in <code> too;
+// one given as template.HTML (flagsAsCode's) is kept as it is, in a <bdi>.
 func trBDI(lang, msg string, args ...any) template.HTML {
 	// Without arguments, the translation as it is, its verbs too, as tr
 	// gives it: a why of a team not found ("Only %s's editors") is said as
@@ -155,6 +156,10 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 			set[i] = a
 		case asCode:
 			set[i] = template.HTML("<code><bdi>" + template.HTMLEscapeString(string(a)) + "</bdi></code>")
+		case template.HTML:
+			// Already escaped, as flagsAsCode gives a text said: its own
+			// direction still set apart.
+			set[i] = template.HTML("<bdi>" + string(a) + "</bdi>")
 		default:
 			set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
 		}

@@ -96,9 +96,13 @@ type sentLine struct {
 	NoRecord bool `json:"no_record,omitempty"`
 	Unjudged bool `json:"unjudged,omitempty"`
 	// ByNothing says some of them are of rules an entry judges by
-	// nothing (judged: false), which Unjudged doesn't count: the line says
-	// so, not that they had no incident (bundle 67).
+	// nothing (judged: false), which Unjudged counts too, as it always
+	// has: the line says so, not that they had no incident (bundle 67).
 	ByNothing bool `json:"by_nothing,omitempty"`
+	// noIncident is Unjudged less those: some had no incident to judge
+	// them by. The line says why from it; the numbers keep Unjudged's
+	// meaning.
+	noIncident bool
 }
 
 type sentFor struct {
@@ -128,7 +132,8 @@ func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Ti
 		in[r.Rule] = true
 	}
 	out := &sentLine{ByReceiver: map[string]int{}, NoRecord: rep.NoRecord}
-	out.Unjudged, out.ByNothing = unjudgedWhy(rep.Rules)
+	out.Unjudged = slices.ContainsFunc(rep.Rules, func(r verdict.RuleResult) bool { return r.Unjudged > 0 })
+	out.noIncident, out.ByNothing = unjudgedWhy(rep.Rules)
 	for rule, x := range p.lines(from, to, sc.of) {
 		if !in[rule] {
 			continue
@@ -165,13 +170,13 @@ func (x *sentLine) text(l string) string {
 	case x.NoRecord:
 		line = tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings with no incident written down to judge them by.",
 			x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
-	case x.Unjudged && x.ByNothing:
+	case x.noIncident && x.ByNothing:
 		line = tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, had no incident written down to judge them by, or were judged by nothing.",
 			x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
 	case x.ByNothing:
 		line = tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.",
 			x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
-	case x.Unjudged:
+	case x.noIncident:
 		line = tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or had no incident written down to judge them by.",
 			x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
 	}

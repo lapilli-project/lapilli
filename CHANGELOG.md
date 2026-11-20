@@ -180,8 +180,27 @@ API. No schema change: the ledger stays at 026.
 - A refusal or a failure said on a page (a form refused, serve's status,
   a source's last read) sets a flag's name in it as code, as the pages'
   own sentences do; a flag's name in a URL's path or query stays text.
+- **The Sources page fits a laptop's 1,280 px** in each language: a
+  source's path or URL wraps in its row header, where it pushed the kinds
+  into a letter a line in Korean and the table past the screen; its kind
+  keeps its words and its last error breaks anywhere. Under 1,280 px it
+  scrolls in its box, as the rules list does.
+- A table's caption reads from the start, as the heading of what is under
+  it, a little apart from the table before it (the routes' two tables, the
+  Settings page's impact signals), and a row's own header is lined as its
+  row, not as the columns' headers.
+- Korean: the activity log's dates are a start and an end date, and a
+  team's or an entry's name takes its particle as the other sentences'
+  names do.
 
 ### Fixed
+
+- **Eight sentences of the routes, the boundaries of change and the
+  activity log said `--config` and `--keep-activity` as text**, read as a
+  dash in the pages' font, where every other sentence sets a flag as
+  code: they do too, and so do why the routes can't be used, a
+  destination they name that no flag gives, a route's last error and a
+  source's. A test fails on a sentence naming a flag said the other way.
 
 - **The digest said a judged-by-nothing rule's notifications were for
   firings with no incident to judge them by**: its line of notifications

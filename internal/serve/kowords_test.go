@@ -184,7 +184,7 @@ func TestDigestSaysWhyUnjudged(t *testing.T) {
 		if noRecord != c.noRecord || byNothing != c.byNothing {
 			t.Errorf("%+v: no record %v, by nothing %v", c.rules, noRecord, byNothing)
 		}
-		line := (&sentLine{Notifications: 9, Rules: 1, ForNothing: 5, Unjudged: noRecord, ByNothing: byNothing}).text("en")
+		line := (&sentLine{Notifications: 9, Rules: 1, ForNothing: 5, Unjudged: noRecord || byNothing, noIncident: noRecord, ByNothing: byNothing}).text("en")
 		if !strings.Contains(line, c.says) || strings.Contains(line, c.not) {
 			t.Errorf("%+v: %q", c.rules, line)
 		}

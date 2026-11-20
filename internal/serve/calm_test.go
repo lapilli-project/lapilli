@@ -6,6 +6,7 @@ package serve
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -558,5 +559,34 @@ func TestRefusalFlagsAsCode(t *testing.T) {
 		if got := string(flagsAsCode(in)); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestSentencesSetFlagsAsCode: a page's sentence naming a flag is said
+// with tbdi, which sets the flag as code, not with t, whose text the
+// template escapes as it is: --config read as "–config" in the pages'
+// font in eight sentences of 0.64's routes, boundaries and activity log
+// (bundle 67).
+func TestSentencesSetFlagsAsCode(t *testing.T) {
+	said := regexp.MustCompile(`\{\{-?\s*t "((?:[^"\\]|\\.)*)"`)
+	pages, err := fs.Glob(files, "templates/*.html")
+	if err != nil || len(pages) == 0 {
+		t.Fatalf("templates: %v %v", pages, err)
+	}
+	checked := 0
+	for _, f := range pages {
+		b, err := fs.ReadFile(files, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range said.FindAllStringSubmatch(string(b), -1) {
+			checked++
+			if flagName.MatchString(m[1]) {
+				t.Errorf("%s: %q names a flag: say it with tbdi", f, m[1])
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("read only %d sentences said with t", checked)
 	}
 }
