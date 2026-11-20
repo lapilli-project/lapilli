@@ -61,6 +61,10 @@ const (
 	// comparison of a day's range; backtestPoints, the most points a
 	// subquery has, as Prometheus holds a range query to.
 	backtestReach, backtestPoints = 8 * 24 * time.Hour, 11000
+	// backtestNoData is how far further back a Grafana rule's data source
+	// query is asked when it returns nothing: whether it returned
+	// anything in the day before (replay's probe).
+	backtestNoData = 24 * time.Hour
 	// backtestGrafanaQueries are the most queries of data sources a
 	// Grafana rule that differs has, backtestGrafanaNodes its queries and
 	// expressions in all: each query is asked a day at a time.
@@ -898,8 +902,10 @@ func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Dur
 // queries and expressions at most; each query's relativeTimeRange within
 // backtestReach; and each query the replay asks, PromQL or LogQL, as a
 // rule's query is held, read back as far again as its relativeTimeRange
-// ends before the evaluation, and, of a reduce over LogQL, as its window.
-// Its expressions are worked out by Lapilli, and read nothing. A refusal
+// ends before the evaluation, and, of a reduce over LogQL, as its window;
+// and each data source query a day further back again, as the replay asks
+// it when it returns nothing (backtestNoData). Its expressions are worked
+// out by Lapilli, and read nothing. A refusal
 // says the query by its refId and quotes nothing of it: what the replay
 // asks has the macros put in, $__rate_interval with serve's data source's
 // scrape interval among them, and isn't what the pull request wrote.
@@ -935,6 +941,29 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 			continue
 		}
 		if why := p.checkPromQL(r, query, expr, before, false); why != "" || r.Unsupported != "" {
+			return why
+		}
+	}
+	// A data source query that returns nothing is asked again over the day
+	// before (replay's before: a day's subquery of it, or, in LogQL, the
+	// query itself over the day), from as long before the evaluation as
+	// it is: a day further back than it reads otherwise. A classic
+	// condition's window is in what its asks write (Ask.PromQL), a half
+	// step past the window's first numbers, which the replay asks of the
+	// query from the window's start.
+	for _, ref := range slices.Sorted(maps.Keys(g.Data)) {
+		expr, ok := g.Queries[ref]
+		if !ok {
+			continue
+		}
+		query := name + "'s query " + clip(verdict.Clean(ref), 100) + ", looked through a day further back when it returns nothing,"
+		if g.Logs != "" {
+			if why := checkLogQL(query, expr, g.Shift[ref]+backtestNoData, false); why != "" {
+				return why
+			}
+			continue
+		}
+		if why := p.checkPromQL(r, query, expr, g.Shift[ref]+backtestNoData, false); why != "" || r.Unsupported != "" {
 			return why
 		}
 	}

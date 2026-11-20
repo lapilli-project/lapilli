@@ -306,6 +306,10 @@ func TestBacktestGrafanaLokiBounds(t *testing.T) {
 		"7d read, ending 2d before":   {gRule("p1", "Raised", "A", gRange("A", "prom-a", 2*86400, 2*86400, prom("rate(errors[7d]) > 1"))), "Raised's query A reads past what is taken: here"},
 		"for 49h":                     {strings.Replace(gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom("errors > 1"))), "        condition:", "        for: 49h\n        condition:", 1), "48h"},
 		"LogQL from 8d, a 5m range":   {gRule("p1", "Raised", "B", gRange("A", "loki-a", 8*86400, 0, `{expr: 'sum(count_over_time({app="x"}[5m]))', datasource: {type: loki}}`), gQuery("B", "__expr__", `{type: reduce, expression: A, reducer: max}`)), "Raised's query B reads past what is taken: here what a rule in LogQL reads"},
+		// Asked again over the day before when it returns nothing: 7.5
+		// days, and the day, past 8.
+		"7.5d, and the day before":       {gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom("rate(errors[7d] offset 12h) > 1"))), "Raised's query A, looked through a day further back when it returns nothing, reads past what is taken"},
+		"LogQL 7.5d, and the day before": {gRule("p1", "Raised", "A", gRange("A", "loki-a", 300, 0, `{expr: 'sum(count_over_time({app="x"}[7d] offset 12h)) > 1', queryType: instant, datasource: {type: loki}}`)), "Raised's query A, looked through a day further back when it returns nothing, reads past what is taken"},
 	}
 	for name, c := range grafana {
 		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btAdding(added("grafana.yaml", prGrafana(c.rule), false)))
