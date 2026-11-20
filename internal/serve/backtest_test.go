@@ -1634,3 +1634,21 @@ func TestPerKeyFullFailsClosed(t *testing.T) {
 		t.Error("buckets refilled to their burst weren't let go")
 	}
 }
+
+// A token whose repository's name isn't kept (past 200 bytes, or with
+// what doesn't show) supersedes nothing: two repositories one entry pins,
+// each named so, are both kept as "", and one's pull request 42 would
+// take the place of the other's.
+func TestBacktestSupersedeUnnamed(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	long := "example/" + strings.Repeat("a", 210)
+	for i, c := range []struct{ id, name string }{{"111", long}, {"123456789", "example/" + "alerts​"}, {"123456789", long}} {
+		tok := b.github(map[string]any{"jti": fmt.Sprint("u", i), "repository_id": c.id, "repository": c.name})
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 || m["position"] != float64(i) {
+			t.Fatalf("repository %s's pull request 42: %d %v", c.id, code, m)
+		}
+	}
+	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}]; n != 0 {
+		t.Errorf("%d superseded, by a repository whose name isn't kept", n)
+	}
+}

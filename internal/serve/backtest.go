@@ -1145,6 +1145,14 @@ func (a asker) repository() string {
 	return name
 }
 
+// supersedes reports whether a newer commit's backtest may take the place
+// of one waiting, matched by the entry, the repository's name and the pull
+// request's number: only when the token names its repository by a name
+// kept as it is. One kept as "" (past 200 bytes, or with what doesn't
+// show) is no repository's, and two repositories an entry pins so would
+// share it, one's pull request 5 superseding the other's.
+func (a asker) supersedes() bool { return a.repository() != "" }
+
 // pullRequest is the pull request's number: from GitHub's or Forgejo's
 // ref when the token says it (byToken), which the job's must agree with;
 // or the job's, which a newer backtest of it doesn't take the place of: a
@@ -1228,9 +1236,10 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The pull request a newer commit of would supersede the one waiting:
-	// the token's own, as the body can't say otherwise.
+	// the token's own, as the body can't say otherwise, of a repository
+	// it names (supersedes).
 	supersedes := int64(-1)
-	if n, byToken, ok := a.pullRequest(0); ok && byToken {
+	if n, byToken, ok := a.pullRequest(0); ok && byToken && a.supersedes() {
 		supersedes = n
 	}
 	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repository(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
@@ -1307,7 +1316,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
-		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken}
+		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes()}
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):
