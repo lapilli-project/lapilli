@@ -34,6 +34,11 @@ var expectWhyText = map[string]string{
 	whyReplayFailed:  "judging it again on the rule as it is failed",
 	whyAnnotationBad: "its annotation lapilli.dev/budget can't be read: want a budget such as \"10/week, 2 asleep, 3 refires\"",
 	whyAnnotationTwo: "passed over: the expectations file or serve's configuration give this rule this budget too",
+	whyNoPromtool:    "not run: serve has no --promtool",
+	whyNotProm:       "not a rule in Prometheus's format, which promtool runs",
+	whyNotRunYet:     "the rule's group or its test file changed since: to be run",
+	whyTestUnread:    "its test file can't be read",
+	whyRunFailed:     "promtool couldn't run it",
 }
 
 // expectHeldText is what an expectation holds a rule to, for a person.
@@ -47,6 +52,9 @@ func expectHeldText(l string, c ledger.ExpectCheck) string {
 		return tr(l, "at most %s re-fires a week", c.Held)
 	case "budget":
 		return tr(l, "a budget")
+	}
+	if c.Scenario() {
+		return tr(l, "passes the scenario %s", strings.TrimPrefix(c.What, "scenario "))
 	}
 	inc := strings.TrimPrefix(c.What, "catches ")
 	if c.Held == "caught" {
@@ -93,14 +101,16 @@ var expectResultText = map[string]string{
 
 // expectLine is one expectation of a rule on its tab: what it holds the
 // rule to, by what and from where; a budget's weeks, the earliest first,
-// or a catch's one result; its task open, and, broken, the row a task is
-// made of.
+// or a catch's or a scenario's one result (of a scenario, when it was
+// found, and what promtool said); its task open, and, broken, the row a
+// task is made of.
 type expectLine struct {
 	Expect, Held, Selector, Source string
-	Catch                          bool
+	Catch, Scenario                bool
 	Weeks                          []expectCell
 	Last                           expectCell
 	Incident, IncidentAt           string
+	Found, Detail                  string
 	Broken                         bool
 	Task                           int64
 	Week                           string // the row a task is made of: its week, as days
@@ -141,7 +151,8 @@ func (s *Server) expectViewOf(ctx context.Context, l, rule string) (*expectView,
 	for _, c := range cs {
 		x := by[c.Expect]
 		if x == nil {
-			x = &expectLine{Expect: c.Expect, Held: expectHeldText(l, c), Selector: c.Selector, Source: tr(l, expectSourceText[c.Source]), Catch: c.Catch()}
+			x = &expectLine{Expect: c.Expect, Held: expectHeldText(l, c), Selector: c.Selector, Source: tr(l, expectSourceText[c.Source]), Catch: c.Catch(),
+				Scenario: c.Scenario()}
 			by[c.Expect] = x
 			order = append(order, c.Expect)
 		}
@@ -159,6 +170,16 @@ func (s *Server) expectViewOf(ctx context.Context, l, rule string) (*expectView,
 			}
 			continue
 		}
+		if c.Scenario() {
+			x.Last, x.Detail = expectCellOf(l, c, ""), c.Detail
+			if !c.Checked.IsZero() {
+				x.Found = c.Checked.In(s.cfg.Loc).Format("2006-01-02 15:04")
+			}
+			if c.Result == ledger.ExpectBroken {
+				x.Broken, x.Week = true, strconv.FormatInt(c.Week, 10)
+			}
+			continue
+		}
 		x.Weeks = append(x.Weeks, expectCellOf(l, c, s.mondayOf(c.Week)))
 		// Broken in the last whole week or the week so far: the latest is
 		// what a task is made of.
@@ -170,7 +191,7 @@ func (s *Server) expectViewOf(ctx context.Context, l, rule string) (*expectView,
 		x := by[k]
 		// A budget's weeks before the rule was in effect have no check:
 		// their cells are left empty, so each column is one week.
-		if !x.Catch && len(x.Weeks) < len(v.Weeks) {
+		if !x.Catch && !x.Scenario && len(x.Weeks) < len(v.Weeks) {
 			pad := make([]expectCell, len(v.Weeks)-len(x.Weeks))
 			x.Weeks = append(pad, x.Weeks...)
 		}
@@ -350,7 +371,8 @@ func (s *Server) expectDigestOf(ctx context.Context, week int64, team *ledger.Te
 	d := &expectDigest{}
 	l := s.cfg.Lang
 	for _, c := range cs {
-		// Of a catch, the week its incident began in.
+		// Of a catch, the week its incident began in; of a scenario, the
+		// week it was found in.
 		if team != nil && o.rule[c.Rule] != team.ID || c.Week != week {
 			continue
 		}
@@ -429,8 +451,8 @@ func (s *Server) expectMetrics(ctx context.Context, b *bytes.Buffer) error {
 	for _, c := range broken {
 		byRule[c.Rule]++
 	}
-	fmt.Fprintf(b, "# HELP lapilli_expectations_held The expectations rules are held to, each rule to each budget and catch that holds it, as last checked (docs/design/expectations.md).\n# TYPE lapilli_expectations_held gauge\nlapilli_expectations_held %d\n", len(held))
-	fmt.Fprintf(b, "# HELP lapilli_expectations_broken Of lapilli_expectations_held, those broken: a budget in the week so far or the last whole week, or a catch.\n# TYPE lapilli_expectations_broken gauge\nlapilli_expectations_broken %d\n", len(broken))
+	fmt.Fprintf(b, "# HELP lapilli_expectations_held The expectations rules are held to, each rule to each budget, catch and scenario that holds it, as last checked (docs/design/expectations.md).\n# TYPE lapilli_expectations_held gauge\nlapilli_expectations_held %d\n", len(held))
+	fmt.Fprintf(b, "# HELP lapilli_expectations_broken Of lapilli_expectations_held, those broken: a budget in the week so far or the last whole week, a catch, or a scenario.\n# TYPE lapilli_expectations_broken gauge\nlapilli_expectations_broken %d\n", len(broken))
 	if len(byRule) > 0 {
 		b.WriteString("# HELP lapilli_rule_expectations_broken Each rule's expectations broken, as lapilli_expectations_broken counts them; 500 rules at most.\n# TYPE lapilli_rule_expectations_broken gauge\n")
 		for i, name := range slices.Sorted(maps.Keys(byRule)) {

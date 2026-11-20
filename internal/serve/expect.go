@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -18,18 +19,21 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/scenario"
 	"lapilli.dev/internal/verdict"
 )
 
-// Expectations after deploy (docs/design/expectations.md, step 2): what a
-// rule is held to, declared in --expect's file, under expectations: in
-// --config (for rules kept only in Grafana or a ruler), or in the rule's
-// own annotation lapilli.dev/budget, is checked by the leader after each
-// round over the week so far and the twelve whole weeks before: each
-// budget against the ledger's weeks (Monday, in --tz), each catch against
-// the incidents written down. What it finds is kept (expectation_checks);
-// a broken one is told once a rule, an expectation and a week, and, with
-// --expect-tasks, made a task for the rule's team.
+// Expectations after deploy (docs/design/expectations.md, steps 2 and 4):
+// what a rule is held to, declared in --expect's file, under
+// expectations: in --config (for rules kept only in Grafana or a ruler), or
+// in the rule's own annotation lapilli.dev/budget, is checked by the leader
+// after each round over the week so far and the twelve whole weeks before:
+// each budget against the ledger's weeks (Monday, in --tz), each catch
+// against the incidents written down, each scenario by running promtool
+// (--promtool) on its test file against the rule's group as the latest
+// version has it, again when either changes. What it finds is kept
+// (expectation_checks); a broken one is told once a rule, an expectation
+// and a week, and, with --expect-tasks, made a task for the rule's team.
 //
 // How the sources combine: --expect's file and --config's expectations are
 // one list, read as one file is (verdict.NewExpectations): a rule's, a
@@ -63,6 +67,12 @@ const (
 	whyReplayFailed  = "replay_failed"    // judging it again failed
 	whyAnnotationBad = "annotation_unread"
 	whyAnnotationTwo = "annotation_twice"
+	// A scenario's (step 4).
+	whyNoPromtool = "no_promtool"    // serve has no --promtool
+	whyNotProm    = "not_prometheus" // the rule isn't in Prometheus's format, or its definition isn't known
+	whyNotRunYet  = "not_run_yet"    // its group or test file changed since: to be run
+	whyTestUnread = "test_unread"    // its test file can't be read
+	whyRunFailed  = "run_failed"     // promtool couldn't run it: a time out, a crash, an answer it doesn't give
 )
 
 // expectWeeks is how many weeks a check reads: the week so far and the
@@ -82,6 +92,9 @@ var (
 	expectReplaysARun = 5
 	expectToldARun    = 50
 	expectTasksARun   = 20
+	// expectScenariosARun is how many scenarios are run in a round, each
+	// within promtool's own time limit; the rest in the rounds after.
+	expectScenariosARun = 5
 )
 
 // expectState is what the leader made of the expectations declared, and
@@ -111,6 +124,10 @@ type expectState struct {
 	// key is what the last check was of: the ledger's generation, the
 	// week and the expectations; "" to check again.
 	key string
+	// groups are, of the version of the rules groupsOf, each rule's group
+	// as promtool reads it, by the name it is judged under (scenarioGroups).
+	groupsOf int64
+	groups   map[string][]byte
 }
 
 // newTerm forgets what an earlier term read: the file is read twice again,
@@ -377,9 +394,6 @@ func heldBy(x *expectRule, e *verdict.Expectations, sources map[string]string) [
 				continue
 			}
 			for _, it := range ex.Items() {
-				if it.Scenario != "" {
-					continue // a scenario: serve runs none yet (step 4's checks after deploy)
-				}
 				out = append(out, heldItem{ExpectItem: it, selector: ex.Selector(), source: sources[ex.Selector()+"\n"+it.What]})
 				if ex.Rule == x.name {
 					given[it.What] = true
@@ -443,14 +457,17 @@ func (s *Server) expectAfter(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	key := fmt.Sprint(s.l.Gen(), "/", this, "/", ekey, "/", latest)
+	// The scenarios' test files, read each round: one changed is checked
+	// again, whatever else did.
+	tests, tkey := s.scenarioTests(e, sources)
+	key := fmt.Sprint(s.l.Gen(), "/", this, "/", ekey, "/", latest, "/", tkey)
 	s.expect.Lock()
 	same := s.expect.key == key
 	s.expect.Unlock()
 	if same {
 		return nil
 	}
-	again, err := s.checkExpectations(ctx, e, sources, this)
+	again, err := s.checkExpectations(ctx, e, sources, tests, this)
 	if err != nil {
 		return err
 	}
@@ -462,9 +479,135 @@ func (s *Server) expectAfter(ctx context.Context) error {
 	return nil
 }
 
+// scenarioTest is a scenario's test file as a check reads it: rewritten as
+// promtool runs it (scenario.Rewrite), or why it can't be.
+type scenarioTest struct {
+	test []byte
+	err  error
+}
+
+// scenarioTests are, with --promtool, the test files of the scenarios the
+// expectations name, by where each is declared and its path: each read in
+// the directory of the file that declares it, --expect's or --config's,
+// and nowhere else (scenario.ReadTest); and a key of what they hold. None
+// without --promtool: nothing is read.
+func (s *Server) scenarioTests(e *verdict.Expectations, sources map[string]string) (map[string]scenarioTest, string) {
+	if s.cfg.Promtool == "" || e == nil {
+		return nil, ""
+	}
+	roots := map[string]*os.Root{}
+	defer func() {
+		for _, r := range roots {
+			if r != nil {
+				r.Close()
+			}
+		}
+	}()
+	out := map[string]scenarioTest{}
+	h := sha256.New()
+	for _, x := range e.Expectations {
+		for _, p := range x.Scenarios {
+			src := sources[x.Selector()+"\n"+verdict.ScenarioWhat+p]
+			k := src + "\n" + p
+			if _, ok := out[k]; ok {
+				continue
+			}
+			root, ok := roots[src]
+			if !ok {
+				file := s.cfg.Expect
+				if src == expectFromConfig {
+					file = s.cfg.Config
+				}
+				root, _ = os.OpenRoot(filepath.Dir(file)) // nil: ReadTest says so
+				roots[src] = root
+			}
+			b, err := scenario.ReadTest(root, p)
+			var t []byte
+			if err == nil {
+				t, err = scenario.Rewrite(b)
+			}
+			out[k] = scenarioTest{t, err}
+			fmt.Fprintf(h, "%q %q %x %v\n", src, p, sha256.Sum256(t), err)
+		}
+	}
+	return out, hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// scenarioGroups are, of the rules in effect now (the latest version), the
+// group of each rule promtool runs, as scenario.Group writes it, by the
+// name the rule is judged under: its alert rules as the version keeps
+// them, and its recording rules. Read once a version.
+func (s *Server) scenarioGroups(ctx context.Context) (map[string][]byte, error) {
+	id, err := s.l.LatestID(ctx)
+	if err != nil || id == 0 {
+		return map[string][]byte{}, err
+	}
+	st := &s.expect
+	st.Lock()
+	if st.groupsOf == id && st.groups != nil {
+		g := st.groups
+		st.Unlock()
+		return g, nil
+	}
+	st.Unlock()
+	var recs []rules.Recording
+	all, names, err := s.namedRec(ctx, id, &recs)
+	if err != nil {
+		return nil, err
+	}
+	alerts := map[string][]rules.Rule{}
+	for _, r := range all {
+		k := scenario.GroupKey(r.Source, r.Namespace, r.Group)
+		alerts[k] = append(alerts[k], r)
+	}
+	recorded := map[[2]string][]rules.Recording{}
+	for _, r := range recs {
+		k := [2]string{r.Source, r.Group}
+		recorded[k] = append(recorded[k], r)
+	}
+	written := map[string][]byte{}
+	out := map[string][]byte{}
+	for j, r := range all {
+		if names[j] == "" || !scenario.Runs(r) {
+			continue
+		}
+		k := scenario.GroupKey(r.Source, r.Namespace, r.Group)
+		g, ok := written[k]
+		if !ok {
+			if g, err = scenario.Group(alerts[k], recorded[[2]string{r.Source, r.Group}]); err != nil {
+				continue
+			}
+			written[k] = g
+		}
+		out[names[j]] = g
+	}
+	st.Lock()
+	st.groupsOf, st.groups = id, out
+	st.Unlock()
+	return out, nil
+}
+
+// scenarioKey is what a scenario is run on: promtool, the group and the
+// test file, as its row's version keeps it.
+func scenarioKey(promtool string, group, test []byte) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%q\x00%d\x00%s\x00%s", promtool, len(group), group, test)
+	return hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// sameFound says two checks of a scenario found the same, whatever week.
+func sameFound(a, b ledger.ExpectCheck) bool {
+	return a.Result == b.Result && a.Why == b.Why && a.Value == b.Value && a.Version == b.Version && a.Detail == b.Detail
+}
+
+// maxDetail is the most bytes of what promtool said, or why it couldn't
+// run a scenario, a check keeps.
+const maxDetail = 2000
+
 // checkExpectations is a round's check; again says some of it was left for
-// the next round (rows past MaxExpectWrites, catches to judge again).
-func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations, sources map[string]string, this int64) (again bool, err error) {
+// the next round (rows past MaxExpectWrites, catches to judge again,
+// scenarios to run).
+func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations, sources map[string]string, tests map[string]scenarioTest, this int64) (again bool, err error) {
 	first := this - (expectWeeks-1)*7
 	start := s.l.Midnight(first)
 	table, err := s.l.RuleTable(ctx)
@@ -562,6 +705,24 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 		c   verdict.ExpectCatch
 	}
 	var pending []rejudge
+	// Scenarios: each rule's latest row, whatever its week; the groups
+	// of the rules in effect, read once a round there are any to run; those
+	// to run, expectScenariosARun a round.
+	lastOf := map[[2]string]ledger.ExpectCheck{}
+	for _, c := range old {
+		if k := [2]string{c.Rule, c.Expect}; c.Scenario() {
+			if p, ok := lastOf[k]; !ok || !p.Current && c.Current {
+				lastOf[k] = c
+			}
+		}
+	}
+	var groups map[string][]byte
+	type scenarioRun struct {
+		at          int // in found
+		group, test []byte
+		key         string
+	}
+	var runs []scenarioRun
 	for _, p := range pairs {
 		r, it := p.r, p.it
 		base := ledger.ExpectCheck{Rule: r.name, Expect: ledger.ExpectHash(it.selector, it.What, it.Held), What: it.What, Held: it.Held,
@@ -570,6 +731,48 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			// An annotation said, holding the rule to nothing.
 			base.Week, base.Result, base.Why = this, ledger.ExpectUnknown, it.why
 			found = append(found, base)
+			continue
+		}
+		if it.Scenario != "" {
+			// Of the week it is found in; run again only when promtool,
+			// the rule's group or its test file changed.
+			c := base
+			c.Week, c.Result = this, ledger.ExpectUnknown
+			prev, had := lastOf[[2]string{r.name, c.Expect}]
+			tf, read := tests[it.source+"\n"+it.Scenario]
+			switch {
+			case s.cfg.Promtool == "":
+				c.Why = whyNoPromtool
+			case r.def == nil || !scenario.Runs(*r.def):
+				c.Why = whyNotProm
+			case !read || tf.err != nil:
+				c.Why = whyTestUnread
+				if tf.err != nil {
+					c.Detail = cutText(rules.Shown(tf.err.Error()), maxDetail)
+				}
+			default:
+				if groups == nil {
+					if groups, err = s.scenarioGroups(ctx); err != nil {
+						return false, err
+					}
+				}
+				g, ok := groups[r.name]
+				if !ok {
+					c.Why = whyNotProm
+					break
+				}
+				key := scenarioKey(s.cfg.Promtool, g, tf.test)
+				if had && prev.Version == key {
+					c.Result, c.Value, c.Why, c.Detail, c.Version = prev.Result, prev.Value, prev.Why, prev.Detail, prev.Version
+					break
+				}
+				c.Why = whyNotRunYet
+				runs = append(runs, scenarioRun{len(found), g, tf.test, key})
+			}
+			if had && sameFound(prev, c) {
+				c.Week = prev.Week
+			}
+			found = append(found, c)
 			continue
 		}
 		if it.Catch != nil {
@@ -655,6 +858,26 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 		}
 		cancel()
 	}
+	// Scenarios to run: a few a round, each within promtool's own time
+	// limit, never while the ledger's writer is held.
+	p := scenario.Promtool{Path: s.cfg.Promtool}
+	for i, x := range runs {
+		if i == expectScenariosARun || ctx.Err() != nil {
+			again = true
+			break
+		}
+		res := scenario.Judged(p.Run(ctx, x.group, x.test))
+		c := &found[x.at]
+		c.Version, c.Week = x.key, this
+		switch res.State {
+		case verdict.ExpectMet:
+			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectMet, "passes", "", ""
+		case verdict.ExpectBroken:
+			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectBroken, "fails", "", cutText(res.Said, maxDetail)
+		default:
+			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, res.Why
+		}
+	}
 	left, err := s.l.KeepExpectChecks(ctx, found, old, first, this, now)
 	if err != nil {
 		return false, err
@@ -703,7 +926,8 @@ func (s *Server) judgeCatchAgain(ctx context.Context, r *expectRule, in ledger.I
 	return "–", ledger.ExpectUnknown, whyReplayFailed, nil
 }
 
-// expectNotice is what expectation.broken tells of an expectation broken.
+// expectNotice is what expectation.broken tells of an expectation broken:
+// of a scenario, its path (Scenario) and the week it was found failing in.
 type expectNotice struct {
 	Rule     string    `json:"rule"`
 	Team     string    `json:"team,omitempty"`
@@ -717,6 +941,7 @@ type expectNotice struct {
 	From     time.Time `json:"from"`
 	To       time.Time `json:"to"`
 	Incident string    `json:"incident,omitempty"`
+	Scenario string    `json:"scenario,omitempty"`
 }
 
 // check is the check a notice tells of, as expectSentence says it.
@@ -739,14 +964,14 @@ func (s *Server) expectThis(n *expectNotice) int64 {
 
 // expectShown are the checks of the expectations broken, in the order
 // they are said: the week so far first, then the last whole week, then
-// catches, each by rule; of a rule's budget broken in both weeks, the
-// latest alone.
+// catches and scenarios, broken whatever their week, each by rule; of a
+// rule's budget broken in both weeks, the latest alone.
 func expectShown(cs []ledger.ExpectCheck, this int64) []ledger.ExpectCheck {
 	var out []ledger.ExpectCheck
 	seen := map[[2]string]bool{}
 	slices.SortStableFunc(cs, func(a, b ledger.ExpectCheck) int {
 		rank := func(c ledger.ExpectCheck) int {
-			if c.Catch() {
+			if c.Weekless() {
 				return 2
 			}
 			if c.Week == this {
@@ -757,7 +982,7 @@ func expectShown(cs []ledger.ExpectCheck, this int64) []ledger.ExpectCheck {
 		return cmp.Or(cmp.Compare(rank(a), rank(b)), strings.Compare(a.Rule, b.Rule), strings.Compare(a.What, b.What))
 	})
 	for _, c := range cs {
-		if c.Result != ledger.ExpectBroken || !c.Current || !c.Catch() && c.Week < this-7 {
+		if c.Result != ledger.ExpectBroken || !c.Current || !c.Weekless() && c.Week < this-7 {
 			continue
 		}
 		k := [2]string{c.Rule, c.Expect}
@@ -791,14 +1016,18 @@ func (s *Server) tellExpect(ctx context.Context, cs []ledger.ExpectCheck, this i
 		if len(keys) == expectToldARun {
 			break
 		}
-		n := expectNotice{Rule: c.Rule, What: c.What, Held: c.Held, Selector: c.Selector, Source: c.Source, N: c.N, Value: c.Value, SoFar: !c.Catch() && c.Week == this}
+		n := expectNotice{Rule: c.Rule, What: c.What, Held: c.Held, Selector: c.Selector, Source: c.Source, N: c.N, Value: c.Value, SoFar: !c.Weekless() && c.Week == this}
 		if t, ok := own.byID[own.rule[c.Rule]]; ok {
 			n.Team = t.Name
 		}
-		if c.Catch() {
+		switch {
+		case c.Catch():
 			n.Incident, n.From = strings.TrimPrefix(c.What, "catches "), c.At.UTC()
 			n.To = n.From
-		} else {
+		case c.Scenario():
+			n.Scenario = strings.TrimPrefix(c.What, verdict.ScenarioWhat)
+			n.From, n.To = s.l.Midnight(c.Week).UTC(), s.l.Midnight(c.Week+7).UTC()
+		default:
 			n.From, n.To = s.l.Midnight(c.Week).UTC(), s.l.Midnight(c.Week+7).UTC()
 		}
 		var ts []ledger.Told
@@ -890,6 +1119,9 @@ func (s *Server) expectSentence(l string, c ledger.ExpectCheck, this int64) stri
 		}
 		return tr(l, "%s caught %s %s after it began, expected within %s", name, inc, strings.TrimPrefix(c.Value, "+"), strings.TrimPrefix(c.Held, "within "))
 	}
+	if c.Scenario() {
+		return tr(l, "%s fails the scenario %s, which it is expected to pass", name, verdict.Clean(strings.TrimPrefix(c.What, verdict.ScenarioWhat)))
+	}
 	n := 0
 	if c.N != nil {
 		n = *c.N
@@ -915,6 +1147,9 @@ func (s *Server) expectTitle(l string, c ledger.ExpectCheck, this int64) string 
 	name := verdict.Clean(c.Rule)
 	if c.Catch() {
 		return tr(l, "%s no longer catches %s as expected", name, verdict.Clean(strings.TrimPrefix(c.What, "catches ")))
+	}
+	if c.Scenario() {
+		return tr(l, "%s fails its scenario %s", name, verdict.Clean(strings.TrimPrefix(c.What, verdict.ScenarioWhat)))
 	}
 	return tr(l, "%s over its budget, week of %s", name, s.mondayOf(c.Week))
 }

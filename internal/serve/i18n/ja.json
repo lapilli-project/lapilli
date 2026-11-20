@@ -2375,7 +2375,7 @@
  "%s no longer catches %s as expected": "%s は期待どおりに %s を検知しなくなりました",
  "%s over its budget, week of %s": "%s が予算超過、%s の週",
  "(%s began %s)": "(%s の開始: %s)",
- "An expectation it is held to is broken: a budget in the week so far or the last whole week, or a catch.": "期待値のひとつが守られていません。今週これまでか直近の丸一週の予算、または検知すべきインシデントです。",
+ "An expectation it is held to is broken: a budget in the week so far or the last whole week, a catch, or a scenario.": "期待値のひとつが守られていません。今週これまでか直近の丸一週の予算、検知すべきインシデント、またはシナリオです。",
  "Broken": "違反",
  "Expectation broken": "期待値違反",
  "Expectations": "期待値",
@@ -2416,5 +2416,14 @@
  "within %s": "%s 以内に",
  "%d more expectations broken": "ほかに違反した期待値が %d 件",
  "in the week so far or the last whole week": "今週これまでか直近の丸一週",
- "expectations: %s": "expectations: %s"
+ "expectations: %s": "expectations: %s",
+ "not run: serve has no --promtool": "実行していません: serve に --promtool がありません",
+ "not a rule in Prometheus's format, which promtool runs": "promtool が実行する Prometheus 形式のルールではありません",
+ "the rule's group or its test file changed since: to be run": "その後ルールのグループかテストファイルが変わったため、実行し直します",
+ "its test file can't be read": "テストファイルを読めません",
+ "promtool couldn't run it": "promtool が実行できませんでした",
+ "passes the scenario %s": "シナリオ %s に合格",
+ "(found %s)": "(確認: %s)",
+ "%s fails the scenario %s, which it is expected to pass": "%s は合格するはずのシナリオ %s に失敗しました",
+ "%s fails its scenario %s": "%s がシナリオ %s に失敗しています"
 }

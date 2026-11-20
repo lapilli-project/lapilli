@@ -440,6 +440,30 @@ serve:
   # broken, once a rule, an expectation and a week, 20 a run at most, none
   # while one is open (--expect-tasks).
   expectTasks: false
+  # The scenarios the expectations name (scenarios:, promtool's own test
+  # files, docs/design/expectations.md): each file by its name, put beside
+  # expectations.yaml in its ConfigMap, so that a scenario's path is its
+  # name (scenarios: [restarts.test.yaml]); usually --set-file
+  # serve.scenarios.NAME=FILE. Needs expectations, and promtool below.
+  #   scenarios:
+  #     restarts.test.yaml: |
+  #       tests:
+  #         - input_series: ...
+  scenarios: {}
+  # promtool, which runs each scenario against its rule's group as the
+  # rules in effect have it, again when either changes (--promtool): it
+  # isn't in Lapilli's image. Either image, one that holds promtool and cp
+  # (Prometheus's own, pinned by digest: prom/prometheus:vX.Y.Z@sha256:...),
+  # from which an init container copies it (from) into an emptyDir only
+  # this pod has; or path, promtool's path in an image of your own built
+  # FROM Lapilli's. Neither, and each scenario is not known. promtool runs
+  # in lapilli's container, 30s a scenario, 5 a run, with no environment;
+  # its memory counts toward resources.limits.memory, and it writes under
+  # /tmp, an emptyDir of its own.
+  promtool:
+    image: ""
+    from: /bin/promtool
+    path: ""
   # Close a proposal no one approved that waited longer than this since it
   # began to wait (made, or backtested again), such as 30d, as expired, so
   # its rule takes another (--proposals-expire). Empty keeps it waiting.

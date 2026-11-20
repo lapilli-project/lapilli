@@ -81,7 +81,7 @@ func checksOf(t *testing.T, s *Server, rule string) map[string]ledger.ExpectChec
 	out := map[string]ledger.ExpectCheck{}
 	for _, c := range cs {
 		k := c.What
-		if !c.Catch() {
+		if !c.Weekless() {
 			k += " " + s.mondayOf(c.Week)
 		}
 		out[k] = c

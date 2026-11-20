@@ -2375,7 +2375,7 @@
  "%s no longer catches %s as expected": "%s ya no detecta %s como se espera",
  "%s over its budget, week of %s": "%s por encima de su presupuesto, semana del %s",
  "(%s began %s)": "(%s empezó el %s)",
- "An expectation it is held to is broken: a budget in the week so far or the last whole week, or a catch.": "Una expectativa que debe cumplir está incumplida: un presupuesto en lo que va de semana o en la última semana completa, o una detección.",
+ "An expectation it is held to is broken: a budget in the week so far or the last whole week, a catch, or a scenario.": "Una expectativa que debe cumplir está incumplida: un presupuesto en lo que va de semana o en la última semana completa, una detección o un escenario.",
  "Broken": "Incumplidas",
  "Expectation broken": "Expectativa incumplida",
  "Expectations": "Expectativas",
@@ -2416,5 +2416,14 @@
  "within %s": "en menos de %s",
  "%d more expectations broken": "%d expectativas incumplidas más",
  "in the week so far or the last whole week": "en lo que va de semana o en la última semana completa",
- "expectations: %s": "expectations: %s"
+ "expectations: %s": "expectations: %s",
+ "not run: serve has no --promtool": "no se ejecutó: serve no tiene --promtool",
+ "not a rule in Prometheus's format, which promtool runs": "no es una regla en el formato de Prometheus, que promtool ejecuta",
+ "the rule's group or its test file changed since: to be run": "el grupo de la regla o su archivo de prueba cambió desde entonces: se ejecutará",
+ "its test file can't be read": "no se puede leer su archivo de prueba",
+ "promtool couldn't run it": "promtool no pudo ejecutarlo",
+ "passes the scenario %s": "pasa el escenario %s",
+ "(found %s)": "(visto el %s)",
+ "%s fails the scenario %s, which it is expected to pass": "%s no pasa el escenario %s, que se espera que pase",
+ "%s fails its scenario %s": "%s no pasa su escenario %s"
 }

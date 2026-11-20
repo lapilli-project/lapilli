@@ -479,6 +479,43 @@ serve:
   expectTasks: true
 ```
 
+A scenario is a promtool test file a rule must pass (`scenarios:` in an
+expectation). `serve.scenarios` puts each test file beside
+`expectations.yaml` in its ConfigMap, by its name, which is the
+scenario's path. Lapilli's image has no promtool: `serve.promtool.image`
+names an image that holds it and `cp`, such as Prometheus's own pinned by
+digest, from which an init container copies `serve.promtool.from`
+(`/bin/promtool`) into an emptyDir only the pod has; or
+`serve.promtool.path` names it in an image of your own built from
+Lapilli's. After each run, each scenario is run against its rule's group
+as the rules in effect have it (`--promtool`), again only when the group
+or the test file changes, five a run, 30s each, with no environment; the
+root being read-only, `/tmp` is an emptyDir of its own, and promtool's
+memory counts toward `resources.limits.memory`. Without `serve.promtool`,
+each scenario is not known.
+
+```yaml
+serve:
+  expectations: |
+    expectations:
+      - rule: ContainerRestarts
+        scenarios: [restarts.test.yaml]
+  scenarios:
+    restarts.test.yaml: |   # or --set-file serve.scenarios.restarts\.test\.yaml=FILE
+      tests:
+        - interval: 1m
+          input_series:
+            - series: 'kube_pod_container_status_restarts_total{pod="api-0"}'
+              values: '0+1x30'
+          alert_rule_test:
+            - eval_time: 30m
+              alertname: ContainerRestarts
+              exp_alerts:
+                - exp_labels: {pod: api-0, severity: page}
+  promtool:
+    image: prom/prometheus:v3.5.0@sha256:...
+```
+
 `serve.proposalsExpire` closes a proposal that waited for approval longer
 since it began to wait (made, or backtested again), such as `30d`, and
 that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however

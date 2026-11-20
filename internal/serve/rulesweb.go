@@ -196,7 +196,7 @@ var badgeMeans = map[string][3]string{
 	"status/retire":    {"pill retire", "⊘", "Its note says to retire it."},
 	"has/proposal":     {"prog", "✎", "A change to it is proposed and not finished with."},
 	"has/facts":        {"check", "⚠\uFE0E", "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check."},
-	"expect/broken":    {"expect", "✕", "An expectation it is held to is broken: a budget in the week so far or the last whole week, or a catch."},
+	"expect/broken":    {"expect", "✕", "An expectation it is held to is broken: a budget in the week so far or the last whole week, a catch, or a scenario."},
 }
 
 // legendOf is the badges' legend: the facets' values that have a badge,

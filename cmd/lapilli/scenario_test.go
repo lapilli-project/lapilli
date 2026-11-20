@@ -178,3 +178,23 @@ func TestBacktestRecipeScenarios(t *testing.T) {
 		}
 	}
 }
+
+// serve takes --promtool beside the expectations it runs the scenarios
+// of, --expect's or --config's, resolved at start; alone, or one that
+// isn't there, it is refused.
+func TestServePromtool(t *testing.T) {
+	rulesFile := write(t, "rules.yaml", shopRules("5m"))
+	expect := write(t, "expect.yaml", "expectations:\n  - rule: CheckoutErrors\n    scenarios: [t.yaml]\n")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--promtool", scenariotest.Install(t)}, "--promtool runs the scenarios of the expectations, --expect's or --config's: give one"},
+		{[]string{"--expect", expect, "--promtool", filepath.Join(t.TempDir(), "none")}, "--promtool "},
+	} {
+		var out, errs strings.Builder
+		if code := run(append([]string{"serve", "--rules", rulesFile, "--prometheus", "http://p"}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
+			t.Errorf("%v: exit %d\n%s", c.args, code, errs.String())
+		}
+	}
+}

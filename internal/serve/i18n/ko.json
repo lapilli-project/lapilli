@@ -2375,7 +2375,7 @@
  "%s no longer catches %s as expected": "%s 규칙이 %s 인시던트를 기대치대로 잡지 못해요",
  "%s over its budget, week of %s": "%s 규칙의 알림 예산 초과, %s 주",
  "(%s began %s)": "(%s 시작: %s)",
- "An expectation it is held to is broken: a budget in the week so far or the last whole week, or a catch.": "규칙의 기대치를 어겼어요. 진행 중인 주나 지난 온전한 주의 알림 예산, 또는 잡아야 할 인시던트예요.",
+ "An expectation it is held to is broken: a budget in the week so far or the last whole week, a catch, or a scenario.": "규칙의 기대치를 어겼어요. 진행 중인 주나 지난 온전한 주의 알림 예산, 잡아야 할 인시던트, 또는 시나리오예요.",
  "Broken": "어김",
  "Expectation broken": "기대치 어김",
  "Expectations": "기대치",
@@ -2416,5 +2416,14 @@
  "within %s": "%s 안에",
  "%d more expectations broken": "어긴 기대치 %d개 더",
  "in the week so far or the last whole week": "진행 중인 주나 지난 온전한 주",
- "expectations: %s": "expectations: %s"
+ "expectations: %s": "expectations: %s",
+ "not run: serve has no --promtool": "실행하지 않았어요. serve에 --promtool이 없어요",
+ "not a rule in Prometheus's format, which promtool runs": "promtool이 실행하는 Prometheus 형식의 규칙이 아니에요",
+ "the rule's group or its test file changed since: to be run": "그 뒤로 규칙 그룹이나 테스트 파일이 바뀌어서 다시 실행할 예정이에요",
+ "its test file can't be read": "테스트 파일을 읽을 수 없어요",
+ "promtool couldn't run it": "promtool이 실행하지 못했어요",
+ "passes the scenario %s": "%s 시나리오를 통과함",
+ "(found %s)": "(확인 시각: %s)",
+ "%s fails the scenario %s, which it is expected to pass": "%s 규칙이 통과해야 할 %s 시나리오를 통과하지 못했어요",
+ "%s fails its scenario %s": "%s 규칙이 %s 시나리오를 통과하지 못해요"
 }

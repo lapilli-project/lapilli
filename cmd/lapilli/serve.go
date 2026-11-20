@@ -19,6 +19,7 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/report"
+	"lapilli.dev/internal/scenario"
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
@@ -306,6 +307,16 @@ The web UI and API:
                       each expectation broken, once a rule, an expectation
                       and a week, 20 a run at most, none while one is open.
                       Off unless turned on
+  --promtool PATH     run the scenarios the expectations hold rules to
+                      (scenarios:, promtool's own test files, read in the
+                      directory of the file that declares them) with
+                      promtool at PATH, against each rule's group as the
+                      rules in effect have it, again when either changes:
+                      5 a run, 30s each, with no environment and its
+                      rule_files the group alone. Only rules in
+                      Prometheus's format. Without it, each scenario is not
+                      known. Scenarios a pull request's backtest sends
+                      (--backtest-listen) are never run
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)
@@ -930,6 +941,10 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			cfg.Expect = val
 		case "--expect-tasks":
 			cfg.ExpectTasks = val == "true"
+		case "--promtool":
+			if cfg.Promtool, err = scenario.Resolve(val); err != nil {
+				return true, fmt.Errorf("--promtool %s: %v", val, err)
+			}
 		case "--proposals-expire":
 			// 0, 0s or 0d: off.
 			if d, perr := serve.ParseDuration(val); perr == nil && d == 0 {
@@ -1254,6 +1269,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = configFlag(cfg.Config)
 	case cfg.Expect != "" && expectFlag(cfg.Expect) != nil:
 		err = expectFlag(cfg.Expect)
+	case cfg.Promtool != "" && cfg.Expect == "" && cfg.Config == "":
+		err = fmt.Errorf("--promtool runs the scenarios of the expectations, --expect's or --config's: give one")
 	case yieldForSet && !cfg.Yield:
 		err = fmt.Errorf("--yield-for is how long --yield-on-429 leaves an API alone after a 429: give --yield-on-429")
 	case cfg.Guard != "" && f.promURL == "" && f.gcpProj == "":

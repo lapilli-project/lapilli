@@ -79,4 +79,16 @@ data:
   expectations.yaml: |
     {{- toYaml .Values.serve.expectations | nindent 4 }}
   {{- end }}
+  {{- /* The scenarios' test files, beside it: a scenario's path is its
+  name. */}}
+  {{- range $name, $body := .Values.serve.scenarios }}
+  {{- if or (eq $name "expectations.yaml") (not (regexMatch "^[-._a-zA-Z0-9]+$" $name)) }}
+  {{- fail (printf "serve.scenarios: %q: want a file's name of letters, digits, -, _ and ., not expectations.yaml" $name) }}
+  {{- end }}
+  {{ $name }}: |2
+    {{- $body | toString | trimSuffix "\n" | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.serve.scenarios (not .Values.serve.expectations) }}
+{{- fail "serve.scenarios are the test files serve.expectations names: give serve.expectations" }}
 {{- end }}

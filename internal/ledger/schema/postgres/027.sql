@@ -1,5 +1,5 @@
 -- What checking each rule's expectations found (docs/design/expectations.md,
--- step 2), as SQLite's 027.sql: what each column is for is said there. A
+-- steps 2 and 4), as SQLite's 027.sql: what each column is for is said there. A
 -- rule's name can be longer than a btree holds: SQLite's PRIMARY KEY
 -- (rule, expect, week) is a unique index on (md5(rule), expect, week), as
 -- checked's is (017.sql).
@@ -17,6 +17,7 @@ CREATE TABLE expectation_checks (
 	value TEXT COLLATE "C" NOT NULL DEFAULT '',
 	at BIGINT NOT NULL DEFAULT 0,
 	version TEXT COLLATE "C" NOT NULL DEFAULT '',
+	detail TEXT COLLATE "C" NOT NULL DEFAULT '',
 	current BIGINT NOT NULL DEFAULT 1,
 	checked BIGINT NOT NULL,
 	told BIGINT NOT NULL DEFAULT 0,

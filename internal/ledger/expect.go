@@ -16,7 +16,7 @@ import (
 )
 
 // What checking each rule's expectations found (docs/design/expectations.md,
-// step 2): expectations are declared, not made in the UI, and the ledger
+// steps 2 and 4): expectations are declared, not made in the UI, and the ledger
 // keeps what checking them found (expectation_checks, 027.sql), which the
 // leader writes after each round, and the pages, the digest and the API
 // read.
@@ -27,12 +27,14 @@ type ExpectCheck struct {
 	// Expect is the hash of what it is held to (ExpectHash).
 	Expect string `json:"expect"`
 	// Week is the week's Monday, as days: of a catch, the week its
-	// incident started in, 0 while the incident isn't written down.
+	// incident started in, 0 while the incident isn't written down; of a
+	// scenario, the week what it found was found in.
 	Week int64 `json:"week"`
-	// What is "budget week", "budget asleep", "budget refires" or
-	// "catches INC-43"; Held what it is held to ("10", "within 5m",
-	// "caught"); Selector what holds the rule ("rule: Restarts"); Source
-	// where it is declared (file, config, annotation).
+	// What is "budget week", "budget asleep", "budget refires", "catches
+	// INC-43" or "scenario tests/restarts.yaml"; Held what it is held to
+	// ("10", "within 5m", "caught", "passes"); Selector what holds the rule
+	// ("rule: Restarts"); Source where it is declared (file, config,
+	// annotation).
 	What     string `json:"what"`
 	Held     string `json:"held"`
 	Selector string `json:"selector"`
@@ -46,9 +48,12 @@ type ExpectCheck struct {
 	N     *int   `json:"n"`
 	Value string `json:"value"`
 	// At is a catch's incident's start; Version, of a catch judged again
-	// on a new version of the rule, what the rule was then.
+	// on a new version of the rule, what the rule was then, and of a
+	// scenario what it was run on. Detail is, of a scenario, what promtool
+	// said of it failing, or why it couldn't be run.
 	At      time.Time `json:"at,omitzero"`
 	Version string    `json:"version,omitempty"`
+	Detail  string    `json:"detail,omitempty"`
 	// Current says it is held now; Checked, when it was last written.
 	Current bool      `json:"current"`
 	Checked time.Time `json:"checked"`
@@ -73,6 +78,14 @@ const (
 // Catch says it is of a catch, not a budget.
 func (c ExpectCheck) Catch() bool { return strings.HasPrefix(c.What, "catches ") }
 
+// Scenario says it is of a scenario: a promtool test file.
+func (c ExpectCheck) Scenario() bool { return strings.HasPrefix(c.What, "scenario ") }
+
+// Weekless says it isn't a budget's week: a catch, of its incident's
+// week, or a scenario, of the week what it found was found in; one row a
+// rule and an expectation, held whatever its week.
+func (c ExpectCheck) Weekless() bool { return c.Catch() || c.Scenario() }
+
 // Key is what tells it apart: its rule, expectation and week.
 func (c ExpectCheck) Key() ExpectKey { return ExpectKey{c.Rule, c.Expect, c.Week} }
 
@@ -88,7 +101,7 @@ type ExpectKey struct {
 func (c ExpectCheck) same(d ExpectCheck) bool {
 	return c.What == d.What && c.Held == d.Held && c.Selector == d.Selector && c.Source == d.Source && c.Result == d.Result &&
 		c.Why == d.Why && (c.N == nil) == (d.N == nil) && (c.N == nil || *c.N == *d.N) && c.Value == d.Value && c.At.Equal(d.At) &&
-		c.Version == d.Version && c.Current == d.Current
+		c.Version == d.Version && c.Detail == d.Detail && c.Current == d.Current
 }
 
 // ExpectHash is the hash an expectation is kept by: of what holds the
@@ -100,7 +113,7 @@ func ExpectHash(selector, what, held string) string {
 
 // ExpectQuery picks checks: of one rule (Rule, when HasRule), the current
 // ones alone (Current), the broken alone (Broken), and of budgets the
-// weeks from From on (catches whatever their week).
+// weeks from From on (catches and scenarios whatever their week).
 type ExpectQuery struct {
 	Rule    string
 	HasRule bool
@@ -109,7 +122,7 @@ type ExpectQuery struct {
 	From    int64
 }
 
-const expectCols = "rule, expect, week, what, held, selector, source, result, why, n, value, at, version, current, checked, told, task, tasked"
+const expectCols = "rule, expect, week, what, held, selector, source, result, why, n, value, at, version, detail, current, checked, told, task, tasked"
 
 // ExpectChecks are the checks q picks, by rule, expectation and week.
 func (l *Ledger) ExpectChecks(ctx context.Context, q ExpectQuery) ([]ExpectCheck, error) {
@@ -124,11 +137,12 @@ func (l *Ledger) ExpectChecks(ctx context.Context, q ExpectQuery) ([]ExpectCheck
 	}
 	if q.Broken {
 		// Along expectation_checks_result: the broken of the weeks from
-		// From on, and the catches, whose week is their incident's.
-		where = append(where, "result = 'broken' AND (week >= ? OR what LIKE 'catches %')")
+		// From on, and the catches and scenarios, whose week is their
+		// incident's, or when what they found was found.
+		where = append(where, "result = 'broken' AND (week >= ? OR what LIKE 'catches %' OR what LIKE 'scenario %')")
 		args = append(args, q.From)
 	} else if q.From != 0 {
-		where = append(where, "(week >= ? OR what LIKE 'catches %')")
+		where = append(where, "(week >= ? OR what LIKE 'catches %' OR what LIKE 'scenario %')")
 		args = append(args, q.From)
 	}
 	if q.Current {
@@ -149,7 +163,7 @@ func (l *Ledger) ExpectChecks(ctx context.Context, q ExpectQuery) ([]ExpectCheck
 		var n sql.NullInt64
 		var at, checked, current int64
 		if err := rows.Scan(&c.Rule, &c.Expect, &c.Week, &c.What, &c.Held, &c.Selector, &c.Source, &c.Result, &c.Why, &n, &c.Value, &at, &c.Version,
-			&current, &checked, &c.Told, &c.Task, &c.Tasked); err != nil {
+			&c.Detail, &current, &checked, &c.Told, &c.Task, &c.Tasked); err != nil {
 			return nil, err
 		}
 		if n.Valid {
@@ -173,7 +187,8 @@ var MaxExpectWrites = 20000
 // KeepExpectChecks keeps what a round found, against what the ledger held
 // (old, as read before it): a row that changed is written, one held no
 // more is kept not current, a budget's week before from is let go, and a
-// catch keeps one row, of its incident's week. What was told of a row, and
+// catch keeps one row, of its incident's week, as a scenario keeps one, of
+// the week it was found in. What was told of a row, and
 // the task made of it, stay; a row turned met is told again when it is
 // next broken, in a later week than it was told in (this). It writes
 // nothing when nothing changed, and MaxExpectWrites rows at most: it
@@ -184,12 +199,12 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 		was[c.Key()] = c
 	}
 	is := make(map[ExpectKey]bool, len(found))
-	caught := map[[2]string]bool{} // the catches found, by rule and expectation
+	caught := map[[2]string]bool{} // the catches and scenarios found, by rule and expectation
 	var put []ExpectCheck
 	for _, c := range found {
 		c.Current = true
 		is[c.Key()] = true
-		if c.Catch() {
+		if c.Weekless() {
 			caught[[2]string{c.Rule, c.Expect}] = true
 		}
 		if o, ok := was[c.Key()]; ok && o.same(c) {
@@ -202,10 +217,11 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 		o := was[k]
 		switch {
 		case is[k]:
-		case !o.Catch() && o.Week < from,
-			o.Catch() && (caught[[2]string{o.Rule, o.Expect}] || !o.Current && o.Checked.Before(now.Add(-13*7*24*time.Hour))):
+		case !o.Weekless() && o.Week < from,
+			o.Weekless() && (caught[[2]string{o.Rule, o.Expect}] || !o.Current && o.Checked.Before(now.Add(-13*7*24*time.Hour))):
 			// Out of the weeks checked; a catch's row of another week
-			// than its incident's now; a catch held no more for 13 weeks.
+			// than its incident's now, a scenario's of another than it was
+			// found in; one held no more for 13 weeks.
 			gone = append(gone, k)
 		case o.Current:
 			stale = append(stale, k)
@@ -237,19 +253,20 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 			var vals []string
 			var args []any
 			for _, c := range part {
-				vals = append(vals, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")
+				vals = append(vals, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")
 				var n any
 				if c.N != nil {
 					n = int64(*c.N)
 				}
-				args = append(args, c.Rule, c.Expect, c.Week, c.What, c.Held, c.Selector, c.Source, c.Result, c.Why, n, c.Value, unixOr0(c.At), c.Version, now.Unix())
+				args = append(args, c.Rule, c.Expect, c.Week, c.What, c.Held, c.Selector, c.Source, c.Result, c.Why, n, c.Value, unixOr0(c.At), c.Version,
+					c.Detail, now.Unix())
 			}
 			args = append(args, this)
-			if _, err := t.ExecContext(t.ctx, `INSERT INTO expectation_checks (rule, expect, week, what, held, selector, source, result, why, n, value, at, version, current, checked)
+			if _, err := t.ExecContext(t.ctx, `INSERT INTO expectation_checks (rule, expect, week, what, held, selector, source, result, why, n, value, at, version, detail, current, checked)
 				VALUES `+strings.Join(vals, ", ")+`
 				ON CONFLICT `+t.d.pick("(rule, expect, week)", "(md5(rule), expect, week)")+` DO UPDATE SET what = excluded.what, held = excluded.held,
 					selector = excluded.selector, source = excluded.source, result = excluded.result, why = excluded.why, n = excluded.n,
-					value = excluded.value, at = excluded.at, version = excluded.version, current = 1, checked = excluded.checked,
+					value = excluded.value, at = excluded.at, version = excluded.version, detail = excluded.detail, current = 1, checked = excluded.checked,
 					told = CASE WHEN excluded.result = 'met' AND expectation_checks.told < ? THEN 0 ELSE expectation_checks.told END`, args...); err != nil {
 				return err
 			}

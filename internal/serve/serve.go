@@ -315,6 +315,11 @@ type Config struct {
 	// and a week: off unless turned on, as GoalTasks.
 	Expect      string
 	ExpectTasks bool
+	// Promtool is promtool's path (--promtool), resolved, which runs the
+	// scenarios the expectations hold rules to (docs/design/expectations.md,
+	// step 4), each again when the rule's group or its test file changes;
+	// "" for none, each scenario not known.
+	Promtool string
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and

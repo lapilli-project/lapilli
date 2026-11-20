@@ -149,8 +149,8 @@ checked them, from the ledger: no series with none held.
 
 | Metric | Labels | What it counts |
 |---|---|---|
-| `lapilli_expectations_held` | | The expectations rules are held to, each rule to each budget and catch that holds it |
-| `lapilli_expectations_broken` | | Of them, those broken: a budget in the week so far or the last whole week, or a catch |
+| `lapilli_expectations_held` | | The expectations rules are held to, each rule to each budget, catch and scenario that holds it |
+| `lapilli_expectations_broken` | | Of them, those broken: a budget in the week so far or the last whole week, a catch, or a scenario |
 | `lapilli_rule_expectations_broken` | `rule` | Each rule's expectations broken, as `lapilli_expectations_broken` counts them; 500 rules at most |
 
 ## What Lapilli came to

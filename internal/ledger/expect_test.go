@@ -182,7 +182,7 @@ func TestExpectQueriesIndexed(t *testing.T) {
 	l := open(t, time.UTC)
 	for _, c := range []struct{ q, table string }{
 		{"SELECT " + expectCols + " FROM expectation_checks WHERE " + l.d.pick("rule = ?1", "md5(rule) = md5(?1) AND rule = ?1"), "expectation_checks"},
-		{"SELECT " + expectCols + " FROM expectation_checks WHERE result = 'broken' AND (week >= ?1 OR what LIKE 'catches %')", "expectation_checks"},
+		{"SELECT " + expectCols + " FROM expectation_checks WHERE result = 'broken' AND (week >= ?1 OR what LIKE 'catches %' OR what LIKE 'scenario %')", "expectation_checks"},
 		{"SELECT i.id FROM incidents i WHERE " + l.d.pick("i.key IN (?1, ?2)", "md5(i.key) IN (md5(?1), md5(?2)) AND i.key IN (?1, ?2)"), "incidents"},
 	} {
 		args := []any{"Restarts"}
@@ -194,5 +194,57 @@ func TestExpectQueriesIndexed(t *testing.T) {
 		if p := plan(t, l, c.q, args...); scansAll(l, p, c.table) {
 			t.Errorf("%s reads %s whole: %s", c.q, c.table, p)
 		}
+	}
+}
+
+// A scenario keeps one row, as a catch does: of the week what it found was
+// found in, read as broken whatever that week, with what promtool said;
+// found otherwise in a later week, its row is that week's, the other let
+// go. In SQLite or, with LAPILLI_TEST_POSTGRES, in Postgres.
+func TestKeepExpectScenario(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	w := Week(l.Day(t0))
+	sc := ExpectCheck{Rule: "Restarts", Expect: ExpectHash("rule: Restarts", "scenario tests/restarts.yaml", "passes"), Week: w - 21,
+		What: "scenario tests/restarts.yaml", Held: "passes", Selector: "rule: Restarts", Source: "file", Result: ExpectBroken, Value: "fails",
+		Version: "abc", Detail: "    alertname: Restarts, time: 10m,\n        got:[]"}
+	keep := func(found []ExpectCheck, this int64) []ExpectCheck {
+		t.Helper()
+		old, err := l.ExpectChecks(ctx, ExpectQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.KeepExpectChecks(ctx, found, old, this-12*7, this, t0); err != nil {
+			t.Fatal(err)
+		}
+		all, err := l.ExpectChecks(ctx, ExpectQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return all
+	}
+	// Twelve weeks on, still held: not let go as a budget's week would be.
+	if all := keep([]ExpectCheck{sc}, w); len(all) != 1 || all[0].Week != w-21 || all[0].Detail != sc.Detail || !all[0].Scenario() || !all[0].Weekless() {
+		t.Fatalf("%+v", all)
+	}
+	if got, err := l.ExpectChecks(ctx, ExpectQuery{Broken: true, Current: true, From: w - 7}); err != nil || len(got) != 1 {
+		t.Errorf("broken, of a week before From: %+v %v", got, err)
+	}
+	// Run again on a new version, in this week: its row is this week's.
+	again := sc
+	again.Week, again.Result, again.Value, again.Version, again.Detail = w, ExpectMet, "passes", "def", ""
+	if all := keep([]ExpectCheck{again}, w); len(all) != 1 || all[0].Week != w || all[0].Result != ExpectMet || all[0].Detail != "" {
+		t.Errorf("run again: %+v", all)
+	}
+	// No longer held: kept, not current, then let go 13 weeks on.
+	if all := keep(nil, w); len(all) != 1 || all[0].Current {
+		t.Errorf("no longer held: %+v", all)
+	}
+	old, _ := l.ExpectChecks(ctx, ExpectQuery{})
+	if _, err := l.KeepExpectChecks(ctx, nil, old, w, w+14*7, t0.Add(14*7*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := l.ExpectChecks(ctx, ExpectQuery{}); len(all) != 0 {
+		t.Errorf("thirteen weeks on: %+v", all)
 	}
 }

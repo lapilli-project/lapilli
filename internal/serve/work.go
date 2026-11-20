@@ -918,12 +918,18 @@ var namedReads atomic.Int64
 // lapilli read the documents into other rules than the names were given
 // to, the rules are named afresh.
 func (s *Server) named(ctx context.Context, id int64) ([]rules.Rule, []string, error) {
+	return s.namedRec(ctx, id, nil)
+}
+
+// namedRec is named, adding to rec, when not nil, the version's recording
+// rules.
+func (s *Server) namedRec(ctx context.Context, id int64, rec *[]rules.Recording) ([]rules.Rule, []string, error) {
 	namedReads.Add(1)
 	full, err := s.l.VersionByID(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
-	all, err := rules.FromDocs(full.Docs)
+	all, err := rules.FromDocsRecorded(context.Background(), full.Docs, rec)
 	if err != nil {
 		return nil, nil, err
 	}
