@@ -879,7 +879,8 @@ func TestVerdictHeldTakenAwayNoted(t *testing.T) {
 }
 
 // A note rewritten alone, by another, takes away none of the verdicts
-// the firing holds: only "unrelated" written or undone does.
+// the firing holds, and nor does "unrelated" written again as the
+// firing's own verdict holds it: only "unrelated" changed, or undone, does.
 func TestVerdictHeldKeptByANote(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -912,8 +913,73 @@ func TestVerdictHeldKeptByANote(t *testing.T) {
 	if _, err := l.SetVerdict(ctx, keyOfFiring(merged), VerdictChange{Unrelated: yes()}, cy, opts); err != nil {
 		t.Fatal(err)
 	}
-	if vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil); len(vs) != 1 {
-		t.Errorf("\"unrelated\" written again took none away: %+v", vs)
+	if vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil); len(vs) != 2 {
+		t.Errorf("\"unrelated\" written again, as held, took one away: %+v", vs)
+	}
+}
+
+// One who answers only "needed action", sending "unrelated": false as a
+// client writing the whole object does, of a firing whose own verdict
+// says nothing of "unrelated", takes away no verdict another holds of it:
+// the firing stays black, by that one's word. Undo of "unrelated" on the
+// firing finds nothing of its own to undo; the verdict held is undone at
+// its own alert and start, as the page of verdicts to look at again
+// undoes it, and the firing is white.
+func TestVerdictHeldKeptByAnActionAnswer(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.Put(ctx, incident.Incident{ID: "INC-12", Title: "checkout 5xx", Start: vAt(14, 10), End: vAt(14, 40),
+		Labels: incident.Labels{"service": {"checkout"}}}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	lab := map[string]string{"service": "checkout", "instance": "db"}
+	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 8)},
+		{Rule: "Disk", Labels: lab, Start: vAt(14, 12), End: vAt(14, 20)},
+	})
+	fs, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour)})
+	if len(fs) != 2 {
+		t.Fatalf("firings: %+v", fs)
+	}
+	var later Firing
+	for _, f := range fs {
+		if f.Start.Equal(vAt(14, 5)) {
+			// The earlier firing: only "needed action", by carol.
+			if _, err := l.SetVerdict(ctx, keyOfFiring(f), VerdictChange{Action: text("no")}, VerdictBy{By: "carol", Now: vNow}, opts); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		later = f
+		if _, err := l.SetVerdict(ctx, keyOfFiring(f), VerdictChange{Unrelated: yes(), UnrelatedNote: text("rotation drill")}, VerdictBy{By: "alice", Now: vNow}, opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A run merges them: alice's verdict is held by the earlier firing.
+	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{{Rule: "Disk", Labels: lab, Start: vAt(14, 5), End: vAt(14, 20)}})
+	merged := firingsByRule(t, l)["Disk"]
+	if vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil); len(vs) != 2 || merged.White || !merged.SaidUnrelated() {
+		t.Fatalf("merged: %+v, %+v", vs, merged)
+	}
+	if err := l.DeleteVerdict(ctx, keyOfFiring(merged), "unrelated", VerdictBy{By: "dan", Now: vNow.Add(10 * time.Minute)}, opts); !errors.Is(err, ErrNoVerdict) {
+		t.Errorf("Undo of unrelated on the merged firing: %v", err)
+	}
+	bob := VerdictBy{By: "bob", Now: vNow.Add(time.Hour)}
+	if _, err := l.SetVerdict(ctx, keyOfFiring(merged), VerdictChange{Unrelated: no(), Action: text("yes")}, bob, opts); err != nil {
+		t.Fatal(err)
+	}
+	vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil)
+	after := firingsByRule(t, l)["Disk"]
+	if len(vs) != 2 || after.White || !after.SaidUnrelated() || after.Action() != "yes" {
+		t.Errorf("bob's needed-action answer: %d verdicts, white %t, unrelated %v, action %q", len(vs), after.White, after.Unrelated, after.Action())
+	}
+	// The verdict held, undone at its own alert and start.
+	k := FiringKey{Rule: "Disk", Labels: lab, Start: later.Start}
+	if err := l.DeleteVerdict(ctx, k, "unrelated", VerdictBy{By: "dan", Now: vNow.Add(2 * time.Hour)}, opts); err != nil {
+		t.Fatal(err)
+	}
+	if now := firingsByRule(t, l)["Disk"]; !now.White || now.SaidUnrelated() {
+		t.Errorf("the verdict held undone: white %t, unrelated %v", now.White, now.Unrelated)
 	}
 }
 

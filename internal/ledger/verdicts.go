@@ -252,8 +252,13 @@ func (l *Ledger) SetVerdict(ctx context.Context, k FiringKey, c VerdictChange, w
 			return err
 		}
 		out = now
+		// "Unrelated" is said when it differs from what the firing's own
+		// verdict holds: a client writing the whole object, "unrelated":
+		// false beside an answer of "needed action", says nothing of it,
+		// and takes away no verdict another holds of the firing.
 		_, limited := scopeOf(t.ctx)
-		return l.keepVerdict(t, f, was, now, c.Unrelated != nil && !limited, w, "verdict on "+firingName(f), o)
+		said := c.Unrelated != nil && !limited && *c.Unrelated != (len(was.Unrelated) > 0)
+		return l.keepVerdict(t, f, was, now, said, w, "verdict on "+firingName(f), o)
 	})
 	if errors.Is(err, errNothing) {
 		err = nil
@@ -426,7 +431,13 @@ func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, said bool, w Ve
 	if err := changeAt(t, w.now(), w.By, what, verdictShown(was), verdictShown(now)); err != nil {
 		return err
 	}
-	return l.judge(t, f.Start.Unix(), f.Start.Unix(), o)
+	// One held by another firing (movedHeld) is judged with it: the
+	// firing holding it starts elsewhere, and its stone is what changes.
+	lo, hi := f.Start.Unix(), f.Start.Unix()
+	if _, at, ok := heldOf(was.Moved); ok {
+		lo, hi = min(lo, at), max(hi, at)
+	}
+	return l.judge(t, lo, hi, o)
 }
 
 // writeVerdict writes now in place of was, or takes it away when it says
@@ -784,7 +795,12 @@ func (l *Ledger) SetVerdicts(ctx context.Context, ks []FiringKey, action string,
 // "needed action" alone: "unrelated" is refused them (ErrUnrelatedRole),
 // and both undoes theirs. It is found by the verdict's alert and start, a
 // firing there or not (one moved onto no firing is undone so too), and
-// counted against VerdictsAnHour.
+// counted against VerdictsAnHour. A verdict another firing holds
+// (movedHeld), a run having merged its own into it, is undone so, at its
+// own alert and start, as the page of verdicts to look at again undoes
+// it, and the firing holding it is judged again; Undo on that firing
+// undoes what the firing's own verdict says, which the firings page offers
+// alone, and finds nothing (ErrNoVerdict) when it says no "unrelated".
 func (l *Ledger) DeleteVerdict(ctx context.Context, k FiringKey, part string, w VerdictBy, o verdict.Options) error {
 	if !slices.Contains([]string{"", "unrelated", "action"}, part) {
 		return invalid("part is unrelated, action, or both when left out")
