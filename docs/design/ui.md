@@ -2097,7 +2097,7 @@ it at 91, 331 with a note, a rule's name broken a letter from its end, and
   px (1,200 px). Spanish, which didn't fit there before it, still
   doesn't (ACCESSIBILITY.md).
 - `a11yServer` has people's verdicts (`peopleSay`: Errors' white
-  firings on search said unrelated and answered no, one black one
+  firings on search said unrelated and answered no, one not white
   answered yes and moved, to look at again) and the episodes counted, so that
   `test/a11y/axe.mjs` reads their forms, words and columns on every
   change; they were read once by hand in Chromium and WebKit, 4

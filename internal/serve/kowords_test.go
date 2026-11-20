@@ -153,6 +153,8 @@ func TestMovedSaysWhatMoved(t *testing.T) {
 		{goalPeople{Unrelated: 2}, "en", "Moved by people: 2 said unrelated"},
 		{goalPeople{Real: 1, Answered: 3}, "en", "Moved by people: 1 This was real, 3 firings answered"},
 		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "ko", "사람이 바꿈: 무관 1건, “실제 문제였음” 2건, 판정 제외 발화 3건, 답한 발화 4건"},
+		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "ja", "人による変化: 無関係 1 件, 「実際の問題だった」 2 件, 判定対象外の発火 3 件, 回答した発火 4 件"},
+		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "es", "Movida por personas: 1 dichos no relacionados, 2 Esto fue real, 3 disparos fuera del juicio, 4 disparos respondidos"},
 		{goalPeople{}, "en", ""},
 	} {
 		if got := peopleMovedText(c.lang, &c.p); got != c.want {
