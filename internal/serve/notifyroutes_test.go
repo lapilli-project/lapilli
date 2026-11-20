@@ -387,7 +387,7 @@ func TestNotifyConfigRefused(t *testing.T) {
 // goes its own way: a kind added is a line in routeKinds.
 func TestRouteKindsKnown(t *testing.T) {
 	literal := regexp.MustCompile(`"([a-z]+\.[a-z_]+)"`)
-	told := regexp.MustCompile(`tell\(|TellOnce\(|routeTold\(|var events = map|StateFailed: "`)
+	told := regexp.MustCompile(`tell\(|TellOnce\(|routeTold\(|var events = map|StateFailed: "|event, value = "`)
 	var found []string
 	for _, dir := range []string{"../ledger", "."} {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.go"))
