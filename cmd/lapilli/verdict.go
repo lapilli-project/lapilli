@@ -157,6 +157,14 @@ Before a change to the rules:
                       Prometheus's format; promtool runs with no
                       environment, 30s a scenario, its rule_files the
                       group alone
+  --draft-expectations FILE
+                      write FILE, an expectations file drafted from the
+                      period judged, as each rule is now: the most it fired
+                      in a whole week of it, while people slept and
+                      re-fired, rounded up, and the incidents it caught
+                      (docs/design/expectations.md). Counted, never
+                      written by a model: the same period gives the same
+                      draft. Without --incidents or --impact, budgets alone
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
@@ -475,7 +483,10 @@ type verdictFlags struct {
 	expect, expectBefore       string
 	failExpect, expectRequired bool
 	// promtool is --promtool, resolved (scenario.Resolve).
-	promtool       string
+	promtool string
+	// draft is --draft-expectations: the file a draft from the history
+	// is written to.
+	draft          string
 	checkReplay    bool
 	checkReplaySet bool // --check-replay given, true or false
 	checkSeries    []string
@@ -725,6 +736,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.expect = val
 		case "--expect-before":
 			f.expectBefore = val
+		case "--draft-expectations":
+			f.draft = val
 		case "--promtool":
 			if f.promtool, err = scenario.Resolve(val); err != nil {
 				return nil, fmt.Errorf("--promtool %s: %w", val, err)
@@ -1023,6 +1036,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
+			{f.draft != "", "--draft-expectations: ask GET /api/v1/expectations/draft"},
 			{f.extrasSet, "--extras: each run's steps after the replays take what --timeout leaves"}} {
 			if no.on {
 				return nil, fmt.Errorf("lapilli serve doesn't take %s", no.flag)
@@ -1110,6 +1124,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--expect holds a change to the rules to what they are expected to do: it goes with --compare")
 	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired || f.promtool != ""):
 		return nil, errors.New("--expect-before, --fail-expectations, --expect-required and --promtool go with --expect")
+	case f.draft != "" && (len(f.compare) > 0 || f.checkReplay):
+		return nil, errors.New("--draft-expectations drafts what the rules judged are held to: it doesn't go with --compare or --check-replay")
+	case f.draft != "" && f.redact:
+		return nil, errors.New("--draft-expectations names each rule, which --redact gives an alias: give one")
 	case f.markdown && len(f.compare) == 0:
 		return nil, errors.New("--markdown writes --compare's report, for a pull request: it goes with --compare")
 	case f.markdown && f.json:
@@ -1122,7 +1140,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
 		return nil, errors.New("--to must be after --from")
-	case f.incidents == "" && !f.anyImpact() && !f.checkReplay && len(f.compare) == 0:
+	case f.incidents == "" && !f.anyImpact() && !f.checkReplay && len(f.compare) == 0 && f.draft == "":
 		// --compare counts the firings on each side even with nothing to
 		// judge them against: what a change to the rules does to how often
 		// they fire is worth knowing alone.
@@ -1693,6 +1711,19 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		return fail(err)
+	}
+	// A draft of the expectations, from the period judged: of the rules
+	// as the report has them, counted as --compare holds budgets.
+	if f.draft != "" && rep != nil {
+		d := verdict.Draft(verdict.DraftFromReport(rep, func(string) *verdict.Hours { return f.opts.Hours }))
+		b, err := d.YAML(verdict.DraftAbout{By: "lapilli verdict", From: rep.From, To: rep.To, Weeks: verdict.DraftPeriodWeeks, Loc: f.loc})
+		if err == nil {
+			err = os.WriteFile(f.draft, b, 0o644)
+		}
+		if err != nil {
+			return fail(fmt.Errorf("--draft-expectations %s: %w", f.draft, err))
+		}
+		fmt.Fprintf(stderr, "lapilli verdict: --draft-expectations: %d rules drafted in %s, %d left out\n", len(d.Expectations), f.draft, len(d.Left))
 	}
 	// Each place the report goes gets its own minute: the replay may have
 	// used up --timeout, and one slow place shouldn't keep it from another.

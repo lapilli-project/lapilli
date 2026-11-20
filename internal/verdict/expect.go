@@ -76,7 +76,8 @@ func (d *Within) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-func (d Within) MarshalText() ([]byte, error) { return []byte(time.Duration(d).String()), nil }
+// MarshalText writes it as a rule file writes a duration: 5m, 1h30m.
+func (d Within) MarshalText() ([]byte, error) { return []byte(Duration(time.Duration(d))), nil }
 
 // MaxExpectations is the most bytes an expectations file is read to, as
 // serve's declared configuration is.

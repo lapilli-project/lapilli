@@ -159,6 +159,14 @@ Before a change to the rules:
                       Prometheus's format; promtool runs with no
                       environment, 30s a scenario, its rule_files the
                       group alone
+  --draft-expectations FILE
+                      write FILE, an expectations file drafted from the
+                      period judged, as each rule is now: the most it fired
+                      in a whole week of it, while people slept and
+                      re-fired, rounded up, and the incidents it caught
+                      (docs/design/expectations.md). Counted, never
+                      written by a model: the same period gives the same
+                      draft. Without --incidents or --impact, budgets alone
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
