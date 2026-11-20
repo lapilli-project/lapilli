@@ -469,7 +469,10 @@ func (l *Ledger) decideDraft(ctx context.Context, id int64, by, to, document, do
 		if err := change(t, by, fmt.Sprintf("expectation draft #%d %s", id, to), nil, d.about()); err != nil {
 			return err
 		}
-		return l.tell(t, "expectation."+to, by, d.about())
+		if to == DraftDropped {
+			return l.tell(t, "expectation.dropped", by, d.about())
+		}
+		return l.tell(t, "expectation.accepted", by, d.about())
 	})
 	return d, err
 }

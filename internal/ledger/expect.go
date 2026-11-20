@@ -318,10 +318,20 @@ func expectKeys(m map[ExpectKey]ExpectCheck) []ExpectKey {
 }
 
 // TellExpectBroken puts what is told of expectations broken in the
-// outbox, each notice an expectation.broken to each place told, and marks
-// each row told in week this, in one write: a row marked told in this week
-// already, as by another leader a moment before, is told no more.
+// outbox, each notice an expectation.broken to each place the routes send
+// it to, and marks each row told in week this, in one write, whether the
+// routes sent it anywhere or not, as goal.missed is: a row marked told in
+// this week already, as by another leader a moment before, is told no
+// more.
 func (l *Ledger) TellExpectBroken(ctx context.Context, keys []ExpectKey, this int64, told [][]Told) error {
+	routed := make([][]Told, len(told))
+	for i, ts := range told {
+		var err error
+		if routed[i], err = l.routeTold("expectation.broken", ts); err != nil {
+			return err
+		}
+	}
+	told = routed
 	return l.writeAside(ctx, func(t *txn) error {
 		now := wallNow()
 		byKey := t.d.pick("rule = ? AND expect = ? AND week = ?", "md5(rule) = md5(?1) AND rule = ?1 AND expect = ?2 AND week = ?3")

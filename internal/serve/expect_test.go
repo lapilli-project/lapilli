@@ -204,6 +204,71 @@ func TestExpectationTasks(t *testing.T) {
 	}
 }
 
+// expectation.broken goes where the routes send it, as goal.missed does:
+// Paged's, payments's, to payments's route alone; Noise's, search's, which
+// no route takes, to the default; each told once (by the rule's labels,
+// TestRouteMatch). With --config and its
+// destinations but no routes, as before routes: to the webhook and Slack,
+// and with neither, nowhere, nothing marked told.
+func TestExpectationBrokenRouted(t *testing.T) {
+	routed := func(t *testing.T, config string, hooks bool) *Server {
+		t.Helper()
+		dir := t.TempDir()
+		url, file, cfg := filepath.Join(dir, "hook"), filepath.Join(dir, "expect.yaml"), filepath.Join(dir, "config.yaml")
+		os.WriteFile(url, []byte("https://hooks.example/x\n"), 0o600)
+		os.WriteFile(file, []byte(theExpectations), 0o600)
+		writeConfig(t, cfg, config)
+		s := goalServer(t, func(c *Config) {
+			c.Expect, c.Config = file, cfg
+			c.WebhookDests = map[string]string{"payments-hook": url}
+			if hooks {
+				c.NotifyWebhook, c.Slack, c.NotifySlack = url, url, true
+			}
+		})
+		s.startRoutes(context.Background())
+		expectReadTwice(t, s)
+		checkAgain(t, s)
+		return s
+	}
+	broken := func(t *testing.T, s *Server, d string) []string {
+		t.Helper()
+		var out []string
+		for _, n := range outbox(t, s)[d] {
+			var x struct {
+				Expectation expectNotice `json:"expectation"`
+			}
+			if n.Event == "expectation.broken" && json.Unmarshal(n.Body, &x) == nil {
+				out = append(out, x.Expectation.Rule)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	s := routed(t, "notify:\n  routes:\n    - kinds: [expectation.broken]\n      teams: [payments]\n      to: [payments-hook]\n  default: [slack]\n", true)
+	for d, want := range map[string][]string{"route:payments-hook": {"Paged"}, "slack": {"Noise"}, "webhook": nil} {
+		if got := broken(t, s, d); !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", d, got, want)
+		}
+	}
+	checkAgain(t, s)
+	if got := broken(t, s, "route:payments-hook"); len(got) != 1 {
+		t.Errorf("told again: %v", got)
+	}
+	// No routes: the webhook and Slack, as before routes.
+	s = routed(t, "teams: []\n", true)
+	if got := broken(t, s, "webhook"); !slices.Equal(got, []string{"Noise", "Paged"}) || len(broken(t, s, "route:payments-hook")) != 0 {
+		t.Errorf("without routes: %v", got)
+	}
+	// Neither: nowhere, and still to tell.
+	s = routed(t, "teams: []\n", false)
+	if got := outbox(t, s); len(got) != 0 {
+		t.Errorf("written: %v", slices.Sorted(mapsKeys(got)))
+	}
+	if c := checksOf(t, s, "Noise")["budget refires 2026-10-26"]; c.Result != ledger.ExpectBroken || c.Told != 0 {
+		t.Errorf("marked told with nowhere to tell it: %+v", c)
+	}
+}
+
 // --config's expectations hold rules as the file's do, one list: the same
 // budget given in both is refused, and what was held stays. A rule's
 // annotation holds it too, but where the file gives the same budget.

@@ -196,8 +196,9 @@ Before upgrading:
 - **Routes** (docs/design/notifications.md, "Who is told what").
   `--config`'s `notify:` sends each event by its kind (`task.created`, or a
   family, `task.*`), its team (a task's or a window's, a rule's owner, an
-  incident's by its labels, a goal's) and its labels (its rule's, a marked
-  window's, an incident's), each at one of the values given, to
+  incident's by its labels, a goal's, an expectation broken's rule's) and
+  its labels (its rule's, a marked window's, an incident's), each at one
+  of the values given, to
   destinations by name: the first route that takes it decides, unless it
   says `continue: true`, and what none takes goes to `default`, which
   routes need. Without routes, what happens is told as before, to the

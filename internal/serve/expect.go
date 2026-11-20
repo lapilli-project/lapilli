@@ -1130,9 +1130,10 @@ func expectShown(cs []ledger.ExpectCheck, this int64) []ledger.ExpectCheck {
 // tellExpect tells expectation.broken of each expectation broken in the
 // week so far or the last whole week, or a catch lost, not yet told:
 // once a rule, an expectation and a week, expectToldARun a round, the rest
-// in the rounds after.
+// in the rounds after. To where what is told once goes (toldTo), each
+// notice where the routes send it, by its rule's team and labels.
 func (s *Server) tellExpect(ctx context.Context, cs []ledger.ExpectCheck, this int64) error {
-	dests := s.dests()
+	dests := s.toldTo()
 	if len(dests) == 0 {
 		return nil
 	}

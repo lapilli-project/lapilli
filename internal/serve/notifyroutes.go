@@ -63,6 +63,8 @@ var routeKinds = []string{
 	"replay.differs",
 	"goal.missed",
 	"source.quiet", "source.down", "source.back",
+	"expectation.broken",
+	"expectation.drafted", "expectation.accepted", "expectation.dropped", "expectation.pull_request",
 }
 
 // ownWay are the kinds that go where their own settings send them, never
@@ -536,6 +538,18 @@ type toldOf struct {
 	Source *struct {
 		Name string `json:"name"`
 	} `json:"source"`
+	// An expectation broken (expectation.broken): its rule, and the
+	// rule's team as it was told.
+	Expectation *struct {
+		Rule string `json:"rule"`
+		Team string `json:"team"`
+		What string `json:"what"`
+	} `json:"expectation"`
+	// A draft of expectations (expectation.drafted and the rest).
+	Draft *struct {
+		ID   int64  `json:"id"`
+		Rule string `json:"rule"`
+	} `json:"draft"`
 	// A source serve reads, down or back (source.down, source.back).
 	SourceRead *struct {
 		ID   string `json:"id"`
@@ -621,6 +635,13 @@ func subjectOf(kind string, about []byte, o *owners) subject {
 		for _, t := range x.Goal.Teams {
 			team(t.Team)
 		}
+	case x.Expectation != nil:
+		sub.title = x.Expectation.What
+		team(x.Expectation.Team)
+		rule(x.Expectation.Rule, x.Expectation.Team != "")
+	case x.Draft != nil:
+		sub.id = strconv.FormatInt(x.Draft.ID, 10)
+		rule(x.Draft.Rule, false)
 	case x.Source != nil:
 		sub.title = x.Source.Name
 	case x.SourceRead != nil:

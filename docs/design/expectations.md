@@ -453,7 +453,9 @@ Step 2, serve's checks after deploy, as built:
   later week. It carries the rule, its team, what, held, the selector and
   the source, the count or the delay, whether it is the week so far, the
   week's span (a catch, its incident and its start), and links to the
-  rule's tab. Make it a task (`POST /expectations/task`, a team's editor's
+  rule's tab; with routes in `--config`'s `notify:`, it goes where they
+  send it by its rule's team and labels, as `goal.missed` goes by its
+  goal's. Make it a task (`POST /expectations/task`, a team's editor's
   of their own team's rule) works the row out again as the ledger last
   checked it, refuses one not broken, and goes to a task open about the
   expectation, of any week. `--expect-tasks` makes one of kind tune for
@@ -607,7 +609,7 @@ Step 3, drafts, as built:
   in, or, for `--config` or none, its entries, to put there by hand.
 - **Told**: `expectation.drafted`, `expectation.accepted`,
   `expectation.dropped` and `expectation.pull_request`, never a draft's
-  text, test files or reason. **Shown**: a Drafts part of the rule's
+  text, test files or reason, routed by the rule's team and labels. **Shown**: a Drafts part of the rule's
   Expectations tab, each draft with what it found, its reason as the
   agent's words, escaped, and its text; the open ones on the proposals
   page; `GET /api/v1/expectation-drafts` and `/{id}`.
