@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -703,7 +704,8 @@ func TestActionShareGoal(t *testing.T) {
 
 // An entry that says judged: false keeps its rules from being judged: the
 // summary says their firings not_judged beside unjudged, the rules list
-// "Not judged", and their stones catch nothing.
+// "Judged by nothing", apart from "? Not judged" (no record), and their
+// stones catch nothing.
 func TestNotJudgedServe(t *testing.T) {
 	no := false
 	s := verdictServer(t, func(c *Config) { c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Judged: &no}} })
@@ -720,12 +722,29 @@ func TestNotJudgedServe(t *testing.T) {
 		t.Errorf("the summary: firings %d, unjudged %d, not judged %d, precision %v, caught %d", row.Firings, row.Unjudged, row.NotJudged, row.Precision, row.Caught)
 	}
 	_, page := getAs(t, h, "/rules", vViewer)
-	if !strings.Contains(page, "Not judged") {
-		t.Error("the rules list doesn't say Errors is not judged")
+	if !strings.Contains(page, `<span aria-hidden="true">?</span> Judged by nothing</span>`) {
+		t.Error("the rules list doesn't say Errors is judged by nothing")
 	}
 	_, page = getAs(t, h, "/rules/Errors", vViewer)
-	if !strings.Contains(page, "Not judged: rule entry #1 says its rules are judged by nothing.") {
+	if !strings.Contains(page, "Judged by nothing, as rule entry #1 says: its firings are counted") {
 		t.Error("the rule's page doesn't say it is not judged")
+	}
+	// Its firings say why they aren't judged, not "no record" (bundle 66):
+	// each one's stone, its strip's legend, the day's.
+	_, page = getAs(t, h, "/rules/Errors?tab=firings", vViewer)
+	if !strings.Contains(page, `title="its rule entry judges it by nothing: counted, not judged">? judged by nothing</span>`) || strings.Contains(page, "? not judged</span>") {
+		t.Error("a firing of the rule says no record, not judged by nothing")
+	}
+	_, page = getAs(t, h, "/rules/Errors", vViewer)
+	if strings.Contains(page, "not judged: no record") || !strings.Contains(page, `height="11"/></svg>judged by nothing</li>`) {
+		t.Error("the rule's strip's legend says no record")
+	}
+	_, page = getAs(t, h, "/firings?day="+f.Start.In(s.cfg.Loc).Format("2006-01-02"), vViewer)
+	if !strings.Contains(page, "not judged: no record, or judged by nothing") {
+		t.Error("the day's legend doesn't say judged by nothing")
+	}
+	if !regexp.MustCompile(`<rect class="unjudged" x="\d+" y="`).MatchString(page) {
+		t.Error("the day's strip counts the firings judged by nothing as caught nothing")
 	}
 }
 

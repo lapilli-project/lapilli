@@ -2318,8 +2318,6 @@
  "Black: unrelated to %s, by %s on %s": "Negro: no relacionado con %s, por %s el %s",
  "Undo": "Deshacer",
  "said unrelated": "dicho no relacionado",
- "Not judged": "Fuera del juicio",
- "Not judged: rule entry #%d says its rules are judged by nothing. Its firings are counted, never white nor black, and catch nothing.": "Fuera del juicio: la entrada de regla #%d deja sus reglas fuera del juicio. Sus disparos se cuentan, nunca blancos ni negros, y no detectan nada.",
  "%s as Lapilli judged it: people said %d firings were unrelated, and This was real turned %d white": "%s como lo juzgó Lapilli: las personas dijeron que %d disparos no estaban relacionados, y Esto fue real volvió blancos %d",
  "Needed action: %d yes, %d no": "Necesitó acción: %d sí, %d no",
  "%d people's verdicts to look at again": "%d veredictos de personas para volver a mirar",
@@ -2373,6 +2371,10 @@
  "Moved by people: %s": "Movida por personas: %s",
  "%d said unrelated": "%d dichos no relacionados",
  "%d This was real": "%d Esto fue real",
- "%d firings not judged": "%d disparos fuera del juicio",
- "%d firings answered": "%d disparos respondidos"
+ "%d firings answered": "%d disparos respondidos",
+ "Judged by nothing": "Fuera del juicio",
+ "Judged by nothing, as rule entry #%d says: its firings are counted, never white nor black, and catch nothing.": "Fuera del juicio: la entrada de regla #%d deja sus reglas fuera del juicio. Sus disparos se cuentan, nunca blancos ni negros, y no detectan nada.",
+ "%d firings judged by nothing": "%d disparos fuera del juicio",
+ "not judged: no record, or judged by nothing": "sin juzgar: sin registro, o fuera del juicio",
+ "its rule entry judges it by nothing: counted, not judged": "su entrada de regla lo deja fuera del juicio: se cuenta, no se juzga"
 }

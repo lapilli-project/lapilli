@@ -2318,8 +2318,6 @@
  "Black: unrelated to %s, by %s on %s": "検知なし: %s とは無関係 (%s、%s)",
  "Undo": "取り消す",
  "said unrelated": "無関係と判定",
- "Not judged": "判定対象外",
- "Not judged: rule entry #%d says its rules are judged by nothing. Its firings are counted, never white nor black, and catch nothing.": "判定対象外: ルール項目 #%d がこれらのルールを判定から外しています。発火は数えますが、検知ありにも検知なしにもならず、何も検知しません。",
  "%s as Lapilli judged it: people said %d firings were unrelated, and This was real turned %d white": "Lapilli の判定のままでは %s: 人が %d 件の発火を無関係と判定し、「実際の問題だった」で %d 件が検知ありになりました",
  "Needed action: %d yes, %d no": "対応が必要: はい %d 件、いいえ %d 件",
  "%d people's verdicts to look at again": "見直す人の判定 %d 件",
@@ -2373,6 +2371,10 @@
  "Moved by people: %s": "人による変化: %s",
  "%d said unrelated": "無関係 %d 件",
  "%d This was real": "「実際の問題だった」 %d 件",
- "%d firings not judged": "判定対象外の発火 %d 件",
- "%d firings answered": "回答した発火 %d 件"
+ "%d firings answered": "回答した発火 %d 件",
+ "Judged by nothing": "判定対象外",
+ "Judged by nothing, as rule entry #%d says: its firings are counted, never white nor black, and catch nothing.": "判定対象外: ルール項目 #%d がこれらのルールを判定から外しています。発火は数えますが、検知ありにも検知なしにもならず、何も検知しません。",
+ "%d firings judged by nothing": "判定対象外の発火 %d 件",
+ "not judged: no record, or judged by nothing": "判定なし: 記録なし、または判定対象外",
+ "its rule entry judges it by nothing: counted, not judged": "ルール項目が判定から外しています: 数えますが判定しません"
 }

@@ -44,7 +44,7 @@
 <div class="cards">
 <figure class="card">
   <figcaption><h2>{{t "Firings by week"}}</h2>
-    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li>{{if .Stones.Unjudged}}<li><span class="key unjudged"></span>{{t "not judged: no record"}}</li>{{end}}{{template "marklegend" .Stones}}</ul></figcaption>
+    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li>{{if .Stones.Unjudged}}<li><span class="key unjudged"></span>{{t (notJudgedKey .ByNothing)}}</li>{{end}}{{template "marklegend" .Stones}}</ul></figcaption>
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Firings by week, caught something and caught nothing; the same numbers are in the table below"}}">
     {{range .Stones.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Stones.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
