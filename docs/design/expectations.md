@@ -1,6 +1,6 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: accepted; its first two steps built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; steps 1, 2 and 4 built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, and a backtest that can fail a
 pull request, so it was designed first, as a pull request (#81); it was
 merged on 2026-11-16, before its week was out, by the maintainer's
@@ -442,4 +442,124 @@ Step 2, serve's checks after deploy, as built:
   team's own hours too (`Comparison.ExpectBy`), as its design said it
   would once step 2 made it so; it still writes no checks, and doesn't
   read serve's own expectations.
+
+Step 4, scenarios, as built (step 3 isn't yet):
+
+- **The file.** `scenarios:`, paths of promtool test files relative to the
+  expectations file, inside its directory (`ScenarioPath`: no `.`, `..` or
+  empty part, no leading `/`, no `\`, nothing that doesn't show, 512
+  bytes), 200 in a file, the same path twice for one rule, group or
+  selector refused. A test file is read only where promtool is given, 1
+  MiB at most, inside the expectations file's directory through `os.Root`:
+  a symbolic link out of it isn't followed (in a ConfigMap's directory the
+  kubelet's own links stay inside, and are). Nothing in the file, a rule or
+  a test file names a binary or an argument: `--promtool` is the
+  operator's, resolved at start (on `PATH`, made absolute, a file that can
+  be executed).
+- **What promtool reads** (`internal/scenario`). The test file as promtool
+  reads it, its top-level keys promtool's alone (one it doesn't have is
+  refused here, rather than left to promtool, which would say `FAILED`),
+  with one test at least; its `rule_files` replaced by `rules.yaml`, the
+  group Lapilli writes, whatever it named, globs and paths outside
+  included; its `group_eval_order` left out, there being one group. The
+  group is the rule's as Lapilli has it on that side, by its file, its
+  ruler's namespace and its name: its settings (`interval`,
+  `query_offset`, `limit`, `labels`) as its rules share them, its
+  recording rules first, then its alert rules under the names their
+  alerts carry, each with what it says as Lapilli keeps it. That differs
+  from the file where Lapilli reads it otherwise: a character that doesn't
+  show is U+FFFD, an annotation is cut at 4 KiB and 32 besides summary and
+  description, and a recording rule's place among the alert rules is
+  lost; a test's `exp_annotations` can tell. A test that needs rules of
+  another group fails: the design said "as promtool runs them", and
+  promtool is given this group alone, so that no test file chooses what it
+  reads.
+- **How it is run.** In a directory of its own, removed after, holding
+  `test.yaml` and `rules.yaml`: promtool started directly, never through
+  a shell, as `promtool test rules test.yaml`, with nothing in its
+  environment but `TMPDIR`, a directory there (its test storage writes
+  under it); 30 s at most, killed past it; 64 KiB of what it says kept,
+  the rest neither kept nor read. Exit 0 saying `SUCCESS` is met; exit 1
+  saying `FAILED:` is broken, the lines after it kept (2,000 bytes);
+  anything else couldn't be run, and is not known: a time out, a crash,
+  another exit status, an answer promtool doesn't give. promtool also says
+  `FAILED` of a test it can't read past the top level, or rules it can't
+  load: those are broken, with promtool's words. On both sides, as such a
+  file is, it is "broken before too", and fails no pull request. The tests
+  run a stand-in for promtool (the test binary, through a link named
+  promtool, which refuses any other command line, environment or
+  `rule_files`), and promtool itself where one is on `PATH`
+  (`TestRealPromtool`, skipped in CI); the group and the rewritten test
+  file were checked with promtool 3.5.0.
+- **Which rules.** Those read from Prometheus's own format
+  (`rules.Rule.Prometheus`): a rule file, a PrometheusRule, a ConfigMap of
+  one, an Amazon namespace, a ruler, Google Cloud's `ClusterRules` and
+  `GlobalRules`, Prometheus's rules API. Not an Azure rule group (its own
+  format), nor Google Cloud's namespaced `Rules`, whose expression Lapilli
+  scopes to its namespace and so isn't the file's; a Grafana rule, a Loki
+  ruler's, a cloud's alarm: not known, open question 1 still open.
+- **In `lapilli verdict --compare --promtool PATH`.** Each scenario of a
+  rule the change touches, on each side the rule is on, read in the
+  directory of the file that names it (`--expect-before`'s, for what it
+  names); one new in the change is run before too, one taken away on both
+  sides from the file before, and a rule taken away fails its scenarios,
+  as it catches nothing. Each test file is run against each group once,
+  200 runs a comparison at most, the rest not known. Counted as budgets
+  and catches are, so `--fail-expectations` and the recipes'
+  `FAIL_ON_EXPECTATIONS` cover them; a test file the change edited is said
+  (`edited`). Not in the design: the summary's `scenarios_unrun`, those
+  that couldn't be run after the change, promtool given and the rule one
+  it runs (the test file unread, a time out, a crash, past the 200), which
+  the recipes' gate fails on, as on a rule not replayed: a gate that can't
+  judge doesn't pass. Without `--promtool`, each is not known (`not run:
+  no --promtool`) and counts nothing. The text and Markdown say what
+  promtool said after the table, each line a code span, eight at most;
+  the JSON has `before_why`, `after_why`, `said`, `edited`, `unrun`;
+  `--redact` aliases a scenario's path, and hides what promtool said.
+- **The recipes.** `PROMTOOL` (the action's `promtool`), with `EXPECT`:
+  passed as `--promtool`, found on the runner, refused in the checkout.
+  The directory `EXPECT` is in is read from each commit as `PATHS` is
+  (`git archive`, a symbolic link refused, `MAX_TREE_FILES`,
+  `MAX_TREE_BYTES`), so each commit's test files are read beside its
+  expectations file. In serve mode, chosen: the job runs no scenario, and
+  `PROMTOOL` is refused with `LAPILLI_SERVE`; serve reports each as not
+  run through lapilli serve (`NotThroughServe`), and its summary's
+  `scenarios_unrun` is 0, so the gate doesn't cover them there. Serve mode
+  installs and runs nothing in the job by design; running them there
+  would mean installing Lapilli and promtool in the job and joining two
+  reports and two summary lines into one comment and one gate, for what a
+  `promtool test rules` step of its own already gates.
+- **Through the backtest port** nothing of a scenario is read or run: a
+  request carries the expectations' text, never a test file, and
+  `Comparison.Scenarios` is `NotThroughServe` whatever `--promtool` serve
+  has.
+- **In serve** (`--promtool PATH`, the chart's `serve.promtool`). The
+  scenarios of `--expect`'s and `--config`'s expectations, each read in
+  the directory of its own file, every round (a test file edited is
+  checked again, though nothing else changed), against the rule's group
+  as the latest version has it, its recording rules read from the
+  version's documents. A scenario's row is of the week what it found was
+  found in, one a rule and an expectation, as a catch's is of its
+  incident's; its version is a hash of promtool's path, the group and the
+  test file, and it is run again only when that changes: the design's
+  "when the rule's version changes", and also when its test file, its
+  group's other rules or promtool do. One that couldn't be run is kept so
+  too, not run again each round. Five a round (`expectScenariosARun`),
+  before the rows are written, never under the ledger's writer; the rest
+  not known (`not_run_yet`) until a later round. Not known says why:
+  `no_promtool`, `not_prometheus`, `not_run_yet`, `test_unread`,
+  `run_failed`. Schema 027, unreleased, was changed in place for it: a
+  column `detail` (what promtool said, or why it couldn't run, 2,000
+  bytes). A broken one is told (`expectation.broken`, with `scenario`),
+  made a task, and shown on the rule's tab (with what promtool said), the
+  overview, the rules list, the digest (in the week it was found),
+  `GET /api/v1/expectations`, MCP's `rule` and `/metrics`, as a catch is.
+- **The chart.** `serve.scenarios` puts each test file beside
+  `expectations.yaml` in its ConfigMap, a scenario's path its name.
+  Lapilli's image stays without promtool: `serve.promtool.image`, an image
+  holding promtool and `cp` (Prometheus's own, pinned by digest), from
+  which an init container copies `serve.promtool.from` into an emptyDir
+  only the pod has; or `serve.promtool.path` in an image of one's own.
+  With either, `/tmp` is an emptyDir, the root being read-only. promtool
+  runs in serve's container: its memory counts toward serve's limit.
 

@@ -550,6 +550,10 @@ heading ("judged by lapilli serve's record"):
 - "While people slept" is by serve's `--sleep-hours` and `--shifts`, and
   the rule's team's own hours where it has them (since expectations' step
   2), not the job's flags.
+- Scenarios (expectations' step 4, promtool test files) aren't run: a
+  request carries no test file, and serve runs none a pull request names,
+  whatever its own `--promtool`. Each is said as not run through lapilli
+  serve, and the recipe refuses `PROMTOOL` with `LAPILLI_SERVE`.
 
 **Step 2** (serve's checks after deploy, `expectation_checks`, a schema of
 its own)

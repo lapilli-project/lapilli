@@ -2,15 +2,17 @@
 
 ## [Unreleased]
 
-Expectations, step 2 (docs/design/expectations.md): serve holds each rule
-to what is expected of it after it is deployed.
+Expectations, steps 2 and 4 (docs/design/expectations.md): serve holds
+each rule to what is expected of it after it is deployed; and scenarios,
+promtool's own test files, held to before a change is merged and after.
 
 Before upgrading:
 - **Ledger schema 027**, after 026: keep a copy of the ledger's disk, or
   of its database, first
   ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
   A lapilli before this one doesn't open the upgraded ledger. Nothing is
-  backfilled: the first round after the upgrade checks the thirteen weeks.
+  backfilled: the first round after the upgrade checks the thirteen weeks,
+  and runs the scenarios, five a run.
 
 ### Added
 
@@ -43,6 +45,30 @@ Before upgrading:
   carry, and a budget may bound re-fires (`refires`). Through serve's
   backtest port, while people slept is counted by the rule's team's own
   hours, as serve's checks count it.
+- **Scenarios** (`scenarios:` in an expectation: paths of promtool test
+  files, relative to the expectations file, inside its directory, 200 in
+  a file, 1 MiB each). `lapilli verdict --compare --expect FILE --promtool
+  PATH` runs each scenario of a rule the change touches, before and after,
+  against the rule's group as each side has it: met, broken (what promtool
+  said, in the report), or not known, and why (`not run: no --promtool`
+  without it; a rule not in Prometheus's format; a test file that can't be
+  read, a time out or a crash, which the summary counts as
+  `scenarios_unrun`). Counted with budgets and catches, so
+  `--fail-expectations` covers them; a test file the change edited is
+  said. `lapilli serve --promtool PATH` runs those of its own expectations
+  (`--expect`, `--config`) after a run, again when the rule's group or its
+  test file changes, five a run, never while holding the ledger's writer:
+  kept in `expectation_checks` (with what promtool said, `detail`), and
+  shown, told and made a task as a broken budget is. The chart's
+  `serve.scenarios` puts the test files beside `serve.expectations`;
+  `serve.promtool.image` copies promtool from an image of yours (Prometheus's
+  own) by an init container, or `serve.promtool.path` names it in an image
+  of your own. Lapilli's image has no promtool. The backtest recipes take
+  `PROMTOOL` (the action's `promtool`), refused with `LAPILLI_SERVE`: serve
+  runs no scenario a pull request sends, each said as not run through it.
+  promtool runs with a fixed command line, no environment, 30s and 64 KiB
+  of what it says at most, in a directory of its own, its `rule_files` the
+  group Lapilli wrote, whatever the test file named.
 
 ## [0.63.0] - 2026-11-20
 

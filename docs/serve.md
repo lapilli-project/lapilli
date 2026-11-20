@@ -250,8 +250,10 @@ in `--config`; a rule can carry its own budget in its annotation
 `lapilli.dev/budget: "10/week, 2 asleep, 3 refires"`. An expectation names
 its rules by `rule:`, `group:` or `labels:` (a selector, as
 `--rules-select` takes, of the rule's own labels), and holds them to a
-budget (`week`, `asleep`, `refires`) or to incidents they must keep
-catching (`catches`, `within`):
+budget (`week`, `asleep`, `refires`), to incidents they must keep
+catching (`catches`, `within`), or to scenarios they must pass
+(`scenarios`, promtool's own test files, paths relative to the file that
+declares them, inside its directory):
 
 ```yaml
 expectations:
@@ -259,6 +261,7 @@ expectations:
     budget: {week: 10, asleep: 2}
     catches:
       - {incident: INC-43, within: 5m}
+    scenarios: [restarts.test.yaml]
   - labels: severity=page
     budget: {refires: 3}
 ```
@@ -271,7 +274,23 @@ holds only part of; while people slept is by the rule's team's own hours,
 or the server's. A catch is judged against the incident written down,
 again on a new version of the rule by replaying it as it is over the
 incident, a few a run; with no incident written down it is not known. A
-budget needs no record. What is broken shows on the rule's Expectations
+budget needs no record. A scenario is run with `--promtool PATH` against
+the rule's group as the rules in effect have it, written to a file serve
+makes, the test file's `rule_files` rewritten to name that file alone:
+promtool is started directly, with no environment but its `TMPDIR`, 30s
+and 64 KiB of what it says at most, five a run, never while the ledger's
+writer is held, and again only when promtool, the group or the test file
+changed. It is met when promtool says SUCCESS, broken when it says FAILED
+(what it said is kept, and shown), and not known when it couldn't run
+(a time out, a crash), the test file can't be read, the rule isn't in
+Prometheus's format (a Grafana rule, a Loki ruler's, a cloud's alarm), or
+serve has no `--promtool`. Lapilli's image has no promtool: the chart's
+`serve.promtool.image` copies it from an image that holds it (Prometheus's
+own) with an init container, or `serve.promtool.path` names it in an image
+of your own; `serve.scenarios` puts the test files beside
+`serve.expectations`. The scenarios a pull request's backtest sends to
+`--backtest-listen` are never run: each is said as not run through
+lapilli serve. What is broken shows on the rule's Expectations
 tab, each expectation with its weeks; in the overview's What to look at,
 made a task with one press; on the rules list (`expect=broken`, and
 `expect=none` for the rules held to nothing); in the digest; in
