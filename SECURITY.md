@@ -139,6 +139,33 @@ repository credentials. Of particular interest:
   everyone is "anonymous" and shares them, as they share the twenty
   proposals an hour).
 
+With `--backtest-listen`, `lapilli serve` takes a pull request's rules from
+a CI job on a port of its own, and backtests them against the history with
+its own access: the job's ID token is checked against the issuers, the
+audiences and the claims `--backtest-trust` names, or a plain token against
+the file the trust file names, and the job reads its backtest back, or
+cancels it, by an id and a key given once. The backtest recipes
+(`recipes/backtest/`, and the action) run in the pull request's CI job: they
+read its files without running them (but for `RENDER`, which runs what it
+is told), and send them either to `lapilli` run there or to serve, with the
+job's ID token or `LAPILLI_SERVE_TOKEN_FILE`. Of particular interest:
+
+- a way to be taken at the backtest port without a token its trust file
+  names: another issuer's, another audience's, claims that don't match,
+  a token expired, replayed with another body, or made up;
+- a way for a pull request's rules to read past the port's bounds: a
+  metric named by a pattern or not at all, further back than the reach, at
+  a time of its own (`@`), a subquery of more points than it takes, or a
+  data source no rule in effect reads, however its text is written
+  (comments, quotes, escapes);
+- a way to keep another job from reading or cancelling its backtest, or to
+  read or cancel one without its key;
+- for the recipes: a way for a pull request's files or their names to run
+  a command in the CI job, to send the job's ID token or a token anywhere
+  but serve, or to get a rule Prometheus would load past the gates
+  (`EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS`, `FAIL_ON_ERROR`)
+  unbacktested.
+
 ## Versions
 
 Only the latest release gets fixes, in a patch release. Each release is

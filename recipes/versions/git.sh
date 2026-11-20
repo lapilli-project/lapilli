@@ -59,8 +59,9 @@
 #           whatever UNRENDERED says; one dated after now is named now; and
 #           of more than MAX, the newest MAX are written
 #
-# Each version holds .commit, the full name of the commit it is (lapilli
-# passes names starting with a dot over), for follow.sh to go on from.
+# Each version holds .commit, the full name of the commit it is (a hidden
+# file holding no rules, which lapilli passes over), for follow.sh to go on
+# from.
 #
 # A version is named by its commit's time, in UTC: for a merge, the merge's,
 # as only the commits on the branch are taken (git log --first-parent). A

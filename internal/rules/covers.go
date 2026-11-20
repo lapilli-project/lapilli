@@ -266,12 +266,12 @@ func selectorsRead(expr string) ([]string, map[string]bool, error) {
 	if _, err := scopeScan(expr, "", nil, &x); err != nil {
 		return nil, nil, err
 	}
-	in := inAbsent(expr)
+	in := inAbsent(x.text)
 	var out []string
 	absent, seen := map[string]bool{}, map[string]bool{}
 	for i, s := range x.sels {
 		start := x.ends[i] - len(s)
-		s += selectorModifiers(expr[x.ends[i]:])
+		s += selectorModifiers(x.text[x.ends[i]:])
 		if !seen[s] {
 			seen[s] = true
 			out = append(out, s)
@@ -305,7 +305,8 @@ func nameByte(c byte) bool {
 
 // inAbsent says, of each byte of expr, whether it is within the
 // parentheses of an absent() or absent_over_time(), at any depth; quoted
-// strings are passed over.
+// strings are passed over. expr is read with its comments blanked
+// (scanned.text).
 func inAbsent(expr string) []bool {
 	out := make([]bool, len(expr))
 	var stack []bool // of each open parenthesis, whether an absent opened it
@@ -325,11 +326,6 @@ func inAbsent(expr string) []bool {
 		case quote != 0:
 		case c == '"' || c == '\'' || c == '`':
 			quote = c
-		case c == '#':
-			for i < len(expr) && expr[i] != '\n' { // a comment, to its line's end
-				out[i] = depth > 0
-				i++
-			}
 		case c == '(':
 			a := absentBefore(expr[:i])
 			stack = append(stack, a)
@@ -418,16 +414,27 @@ func matchesEmpty(op, quoted string) bool {
 }
 
 // unquote is a PromQL string's value: double-quoted, single-quoted with
-// the same escapes, or raw in backticks.
+// the same escapes, or raw in backticks; false for what isn't one string,
+// a quote of its kind inside it not escaped ('a' or b='c', `a` or `b`),
+// which ends it where PromQL reads it.
 func unquote(q string) (string, bool) {
 	if len(q) < 2 || q[0] != q[len(q)-1] {
 		return "", false
 	}
+	inner := q[1 : len(q)-1]
 	switch q[0] {
 	case '`':
-		return q[1 : len(q)-1], true
+		return inner, !strings.Contains(inner, "`")
 	case '\'':
-		inner := strings.ReplaceAll(q[1:len(q)-1], `\'`, `'`)
+		for i := 0; i < len(inner); i++ {
+			switch inner[i] {
+			case '\\':
+				i++
+			case '\'':
+				return "", false
+			}
+		}
+		inner = strings.ReplaceAll(inner, `\'`, `'`)
 		q = `"` + strings.ReplaceAll(inner, `"`, `\"`) + `"`
 	}
 	v, err := strconv.Unquote(q)

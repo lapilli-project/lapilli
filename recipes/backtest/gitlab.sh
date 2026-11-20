@@ -14,10 +14,17 @@
 #                      https://gitlab.com/api/v4
 #   PR                 the merge request's iid (default: GitLab CI's
 #                      CI_MERGE_REQUEST_IID)
-#   TARGET             default, in a merge request pipeline, the target
-#                      branch's commit (CI_MERGE_REQUEST_TARGET_BRANCH_SHA,
-#                      in a merged results pipeline) or the merge base
-#                      (CI_MERGE_REQUEST_DIFF_BASE_SHA)
+#   TARGET             default, in a merged results pipeline, the target
+#                      branch's commit (CI_MERGE_REQUEST_TARGET_BRANCH_SHA)
+#   TARGET_BRANCH      default, in another merge request pipeline, the
+#                      target branch (CI_MERGE_REQUEST_TARGET_BRANCH_NAME),
+#                      fetched from origin with the job's own credentials
+#                      unless the clone has it: the rules are compared from
+#                      where the two parted, as before, and INCIDENTS is
+#                      the branch's as it is now. A name the recipe doesn't
+#                      take as a branch's (but letters, digits and . _ / -)
+#                      leaves the merge base (CI_MERGE_REQUEST_DIFF_BASE_SHA),
+#                      INCIDENTS its, the job's log saying so
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), the job names its ID
 # token for serve's audience under id_tokens:, as LAPILLI_ID_TOKEN:
@@ -34,7 +41,23 @@ GITLAB_PROJECT=${GITLAB_PROJECT:-${CI_MERGE_REQUEST_PROJECT_ID:-${CI_PROJECT_ID:
 api=${GITLAB_API:-${CI_API_V4_URL:-https://gitlab.com/api/v4}}
 PR=${PR:-${CI_MERGE_REQUEST_IID:-}}
 if [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ]; then
-  TARGET=${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}
+  if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-}" ]; then
+    TARGET=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA
+  else
+    # Without merged results, the target branch itself, not the merge base
+    # (CI_MERGE_REQUEST_DIFF_BASE_SHA): INCIDENTS is read from what the
+    # merge request goes into as it is, which where it branched from isn't.
+    # Its name is the target project's, held to what lib.sh takes as a
+    # branch's before it is used.
+    case ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-} in
+      '') TARGET=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-} ;;
+      -* | *[!A-Za-z0-9._/-]* | *..* | */ | /*)
+        echo "gitlab.sh: the target branch's name isn't one taken as TARGET_BRANCH: compared with the merge base, INCIDENTS read from it" >&2
+        TARGET=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}
+        ;;
+      *) TARGET_BRANCH=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME ;;
+    esac
+  fi
 fi
 case $GITLAB_PROJECT in *[!A-Za-z0-9._/-]* | /* | */) echo "gitlab.sh: GITLAB_PROJECT $GITLAB_PROJECT: want an id or a path" >&2; exit 1 ;; esac
 host_api=$api

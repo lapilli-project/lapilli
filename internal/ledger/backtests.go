@@ -301,6 +301,27 @@ func (l *Ledger) Backtests(ctx context.Context, limit int) ([]Backtest, error) {
 	return out, rows.Err()
 }
 
+// BacktestKeys are the key hashes of the backtests kept, by id, the latest
+// asked first, limit at most: what lapilli serve's port tells a job's id
+// and key from, a listing at a time, without reading a row of each id it
+// is asked about.
+func (l *Ledger) BacktestKeys(ctx context.Context, limit int) (map[string]string, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT id, key_hash FROM backtests ORDER BY n DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, hash string
+		if err := rows.Scan(&id, &hash); err != nil {
+			return nil, err
+		}
+		out[id] = hash
+	}
+	return out, rows.Err()
+}
+
 // BacktestsWaiting are how many backtests wait, by entry.
 func (l *Ledger) BacktestsWaiting(ctx context.Context) (map[string]int, error) {
 	rows, err := l.r.QueryContext(ctx, "SELECT trust, count(*) FROM backtests WHERE state = ? GROUP BY trust", BacktestWaiting)

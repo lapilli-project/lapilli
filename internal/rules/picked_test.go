@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 // rendered is a chart as helm template writes it: Grafana's rules in
@@ -471,5 +472,175 @@ func TestParseSelectorParity(t *testing.T) {
 		if got := sel.Matches(c.labels); got != c.want {
 			t.Errorf("%q on %v: %v, want %v", c.sel, c.labels, got, c.want)
 		}
+	}
+}
+
+// A hidden file, one with a name in its path beginning with a dot, is read
+// when it holds rules, as Prometheus's rule_files glob loads it
+// (alerts/*.yaml reads alerts/.page.yaml and alerts/..page.yaml, and
+// yaml.v3 a file in UTF-16 with its BOM), and passed over when it holds
+// none, or doesn't read, at the top too, and not counted in what is said
+// passed over: a .gitignore, a workflow, a .DS_Store, a version's
+// .commit. A ConfigMap volume's own directory, its name beginning with ..
+// beside a ..data link, is never read, so each rule is read once; nor is
+// .git; but a directory named .. with no ..data beside it is. A hidden
+// file Lapilli's reader refuses is said, as any other is.
+func TestReadPickedHidden(t *testing.T) {
+	rule := func(name string) string {
+		return "groups:\n  - name: g\n    rules:\n      - alert: " + name + "\n        expr: up == 0\n"
+	}
+	dir := t.TempDir()
+	for p, body := range map[string]string{
+		"alerts.yaml":                    rule("Shown"),
+		".page.yaml":                     rule("Page"),
+		"..page.yaml":                    rule("DotDot"),
+		".utf16.yaml":                    utf16LE(rule("InUTF16")),
+		".commit":                        "0123456789abcdef0123456789abcdef01234567\n",
+		"notes.yaml":                     "kind: Deployment\n",
+		".d/x.yaml":                      rule("Below"),
+		"team/..d/x.yaml":                rule("DotDotDir"),
+		".gitignore":                     "*\n",
+		".github/workflows/x.yml":        "name: lint\non: [pull_request]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n",
+		".DS_Store":                      "\x00\x00\x00\x01Bud1\x00\x00\x10\x00\xff\xfe",
+		".git/rules.yaml":                rule("Git"),
+		"..2026_11_20_00_00_00.1/k.yaml": rule("Mounted"),
+	} {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.Symlink("..2026_11_20_00_00_00.1", filepath.Join(dir, "..data"))
+	os.Symlink(filepath.Join("..data", "k.yaml"), filepath.Join(dir, "k.yaml"))
+	rs, _, picked, err := ReadPicked(dir, Picking{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range rs {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Below", "DotDot", "DotDotDir", "InUTF16", "Mounted", "Page", "Shown"}) {
+		t.Errorf("rules %v, want Below, DotDot, DotDotDir, InUTF16, Mounted once, Page and Shown", names)
+	}
+	if said := picked.String(); said != "1 document that holds no rules" {
+		t.Errorf("passed over: %q, want notes.yaml's document alone", said)
+	}
+	// One Lapilli's reader refuses, hidden or not, is said.
+	deep := "groups: " + strings.Repeat("[", 250) + strings.Repeat("]", 250) + "\n"
+	for _, p := range []string{".deep.yaml", ".d/deep.yaml"} {
+		full := filepath.Join(dir, p)
+		os.WriteFile(full, []byte(deep), 0o600)
+		if _, _, _, err := ReadPicked(dir, Picking{}); err == nil || !strings.Contains(err.Error(), p) {
+			t.Errorf("%s: %v", p, err)
+		}
+		os.Remove(full)
+	}
+	// As PickedFiles reads them, sent by a job.
+	var files []File
+	for _, p := range []string{"alerts.yaml", ".page.yaml", "..page.yaml", ".d/x.yaml", ".gitignore", ".github/workflows/x.yml", ".DS_Store", ".commit", "notes.yaml"} {
+		b, _ := os.ReadFile(filepath.Join(dir, p))
+		files = append(files, File{Path: p, Data: b})
+	}
+	got, _, picked, err := PickedFiles(files, Picking{})
+	names = nil
+	for _, r := range got {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	if err != nil || !slices.Equal(names, []string{"Below", "DotDot", "Page", "Shown"}) || picked.String() != "1 document that holds no rules" {
+		t.Errorf("PickedFiles: %v %q %v", names, picked.String(), err)
+	}
+	if _, _, _, err := PickedFiles([]File{{Path: ".deep.yaml", Data: []byte(deep)}}, Picking{}); err == nil {
+		t.Error("PickedFiles: a hidden file Lapilli's reader refuses was passed over")
+	}
+}
+
+// A ConfigMap volume's item with a nested path (team/x.yaml) is a link
+// beside ..data to a directory in the volume's own (team -> ..data/team):
+// its rules are read through it, each once, however many links lead
+// there; ..data itself, a link elsewhere, and a link below that leads
+// back aren't followed.
+func TestReadPickedConfigMapNested(t *testing.T) {
+	rule := func(name string) string {
+		return "groups:\n  - name: g\n    rules:\n      - alert: " + name + "\n        expr: up == 0\n"
+	}
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	data := "..2026_11_20_00_00_00.1"
+	for p, body := range map[string]string{
+		data + "/top.yaml":         rule("Top"),
+		data + "/team/x.yaml":      rule("Nested"),
+		data + "/team/deep/y.yaml": rule("Deeper"),
+	} {
+		full := filepath.Join(dir, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.WriteFile(filepath.Join(elsewhere, "z.yaml"), []byte(rule("Elsewhere")), 0o600)
+	for link, to := range map[string]string{
+		"..data": data, "top.yaml": filepath.Join("..data", "top.yaml"), "team": filepath.Join("..data", "team"),
+		"again": filepath.Join("..data", "team"), "all": "..data", "other": elsewhere, filepath.Join(data, "team", "back"): "..",
+	} {
+		if err := os.Symlink(to, filepath.Join(dir, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rs, _, _, err := ReadPicked(dir, Picking{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range rs {
+		names = append(names, r.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Deeper", "Nested", "Top"}) {
+		t.Errorf("rules %v, want Deeper, Nested and Top, each once", names)
+	}
+}
+
+// utf16LE is s in UTF-16LE, with its BOM.
+func utf16LE(s string) string {
+	u := utf16.Encode(append([]rune{0xFEFF}, []rune(s)...))
+	b := make([]byte, 0, 2*len(u))
+	for _, c := range u {
+		b = append(b, byte(c), byte(c>>8))
+	}
+	return string(b)
+}
+
+// A file past MaxFile named as rule files are (.yml, .yaml, .json,
+// .rules), which Prometheus would load, is refused wherever it is, hidden
+// or below the top, never passed over; another, a binary in .venv, is
+// passed over when hidden or below the top.
+func TestReadPickedLongFiles(t *testing.T) {
+	rule := "groups:\n  - name: g\n    rules:\n      - alert: Shown\n        expr: up == 0\n"
+	long := rule + "#" + strings.Repeat("x", MaxFile) + "\n"
+	for _, p := range []string{".big.yaml", "team/big.yaml", ".d/big.rules", "team/BIG.JSON"} {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "ok.yaml"), []byte(rule), 0o600)
+		os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o755)
+		os.WriteFile(filepath.Join(dir, p), []byte(long), 0o600)
+		if _, _, _, err := ReadPicked(dir, Picking{}); err == nil || !strings.Contains(err.Error(), "more than 16 MiB") {
+			t.Errorf("%s: %v", p, err)
+		}
+		if _, _, _, err := PickedFiles([]File{{Path: "ok.yaml", Data: []byte(rule)}, {Path: p, Data: []byte(long)}}, Picking{}); err == nil {
+			t.Errorf("PickedFiles, %s: passed over", p)
+		}
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "ok.yaml"), []byte(rule), 0o600)
+	os.MkdirAll(filepath.Join(dir, ".venv", "lib"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".venv", "lib", "x.so"), []byte(long), 0o600)
+	os.MkdirAll(filepath.Join(dir, "bin"), 0o755)
+	os.WriteFile(filepath.Join(dir, "bin", "tool"), []byte(long), 0o600)
+	if rs, _, _, err := ReadPicked(dir, Picking{}); err != nil || len(rs) != 1 {
+		t.Errorf("a binary passed over: %d %v", len(rs), err)
 	}
 }

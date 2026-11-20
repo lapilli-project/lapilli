@@ -80,8 +80,8 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   writes `OUT` only once every version is written: what fails leaves it as it
   was. More than `MAX` versions is refused: give a later `SINCE`.
 - Each version holds `.commit`, the full name of its commit, which lapilli
-  passes over (as every name starting with a dot) and `follow.sh` goes on
-  from.
+  passes over (a hidden file holding no rules, as every one is) and
+  `follow.sh` goes on from.
 
 ## Rules rendered from a chart
 

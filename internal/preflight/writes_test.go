@@ -858,15 +858,20 @@ func TestAzureLinkedReads(t *testing.T) {
 		t.Errorf("asked %v", a.asked)
 	}
 	// A target that isn't a resource under a resource group (the
-	// subscription itself), or an id past 1 KB, isn't asked, and is
-	// unknown, never passed over.
+	// subscription itself), an id past 1 KB, or one with a . or .. for a
+	// part of its path, which would ask of another resource than it names,
+	// another subscription's, isn't asked, and is unknown, never passed
+	// over.
 	long := azRG + "/providers/Microsoft.Compute/virtualMachines/" + strings.Repeat("v", 1100)
-	for _, target := range []string{azSub, "/providers/Microsoft.Management/managementGroups/example", long} {
+	for _, target := range []string{azSub, "/providers/Microsoft.Management/managementGroups/example", long,
+		"/subscriptions/00000000-0000-0000-0000-0000000000ff/resourceGroups/other-rg/providers/Microsoft.Insights/x/../../..",
+		azRG + "/providers/Microsoft.Compute/virtualMachines/./web-1"} {
 		a := newARM(t, map[string]string{azRG: `{"value":[{"actions":["*"]}]}`})
 		_, it := azureRun(t, a, []rules.Doc{azDoc("metricAlerts", "checkout-a", target)}, "az:shop-rg/checkout-*")
 		if it.State != Unknown || !strings.Contains(it.Why, "1 resource the alert rules name that isn't one under a resource group") ||
 			slices.ContainsFunc(a.asked, func(x string) bool {
-				return strings.Contains(x, "vvvv") || strings.HasPrefix(x, "GET "+azSub+"/providers/Microsoft.Authorization/permissions")
+				return strings.Contains(x, "vvvv") || strings.HasPrefix(x, "GET "+azSub+"/providers/Microsoft.Authorization/permissions") ||
+					strings.Contains(x, "/../") || strings.Contains(x, "/./") || strings.Contains(x, "other-rg")
 			}) {
 			t.Errorf("%.80s: %+v %v", target, it, a.asked)
 		}
@@ -1561,6 +1566,30 @@ func TestCloudSaidARNsWhole(t *testing.T) {
 	}
 }
 
+// An OCID a cloud names is said by what it is when the run learned it,
+// whole, and as an OCID otherwise: another compartment's, a dynamic
+// group's, a policy's, of a region or of none.
+func TestCloudSaidOCIDs(t *testing.T) {
+	p := newRun(writesConfig(t))
+	p.hide("--changes-oci-config's tenancy", "ocid1.tenancy.oc1..aaaaexampletenancy0001")
+	p.hide("--changes-oci-config's region", "ap-seoul-1")
+	said := judged(p, Item{ID: "x", Why: p.cloudSaid(&answered{404, "NotAuthorizedOrNotFound: policy ocid1.policy.oc1..aaaaexamplepolicy0001 in " +
+		"ocid1.compartment.oc1..aaaaexampleotherteam0002 (dynamic group ocid1.dynamicgroup.oc1..aaaaexampledg0003) of " +
+		"ocid1.tenancy.oc1..aaaaexampletenancy0001; instance ocid1.instance.oc1.ap-seoul-1.anuwgexampleinstance0004."})})
+	glued := p.cloudSaidText("vcn_ocid1.vcn.oc1.ap-seoul-1.aaaaexamplevcn0005 at /20231130/vcns?compartmentId=ocid1.compartment.oc1..aaaaexampleglued0006 or %3Docid1.subnet.oc1..aaaaexamplesubnet0007")
+	if strings.Contains(glued, "aaaaexample") || strings.Count(glued, "[an OCID]") != 3 {
+		t.Errorf("an OCID after a word's character: %s", glued)
+	}
+	for _, hidden := range []string{"ocid1", "aaaaexample", "anuwgexample"} {
+		if strings.Contains(said.Why, hidden) {
+			t.Errorf("says %q: %s", hidden, said.Why)
+		}
+	}
+	if !strings.Contains(said.Why, "of [--changes-oci-config's tenancy];") || strings.Count(said.Why, "[an OCID]") != 4 || !strings.HasSuffix(said.Why, "[an OCID].") {
+		t.Errorf("%s", said.Why)
+	}
+}
+
 // What a cloud said loses its ids; Lapilli's own words keep theirs.
 func TestCloudIDs(t *testing.T) {
 	for in, want := range map[string]string{
@@ -1594,5 +1623,14 @@ func TestCloudIDs(t *testing.T) {
 	p.redact()
 	if it := p.r.Items[0]; it.What != "past 1234567890 names" || it.Why != "project [a number]" {
 		t.Errorf("%+v", it)
+	}
+}
+
+// askClient gives up on a request of its own, after the time each of its
+// callers' contexts gives what they ask: one asked without a deadline
+// doesn't hang on an API that doesn't answer.
+func TestAskClientGivesUp(t *testing.T) {
+	if askClient.Timeout <= 0 || askClient.Timeout > eachTime {
+		t.Errorf("askClient gives up after %s, want within %s", askClient.Timeout, eachTime)
 	}
 }

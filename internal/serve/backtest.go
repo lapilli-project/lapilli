@@ -61,6 +61,10 @@ const (
 	// comparison of a day's range; backtestPoints, the most points a
 	// subquery has, as Prometheus holds a range query to.
 	backtestReach, backtestPoints = 8 * 24 * time.Hour, 11000
+	// backtestNoData is how far further back a Grafana rule's data source
+	// query is asked when it returns nothing: whether it returned
+	// anything in the day before (replay's probe).
+	backtestNoData = 24 * time.Hour
 	// backtestGrafanaQueries are the most queries of data sources a
 	// Grafana rule that differs has, backtestGrafanaNodes its queries and
 	// expressions in all: each query is asked a day at a time.
@@ -112,10 +116,16 @@ type backtestPort struct {
 	// it replayed.
 	asked    prom.Counts
 	progress replay.Progress
-	// reads are how fast a backtest is read (GET, DELETE) with its key,
-	// by its id; misses, how fast an id that isn't, or a key that's wrong,
-	// is answered, by the client's address: one who guesses can't keep a
-	// job from reading its own.
+	// keys are the backtests' key hashes, by id, as this process knows
+	// them: a job's id and key are told from them in memory, and only a
+	// pair they know is read from the ledger.
+	keys *btKeys
+	// reads are how fast a backtest is read (GET, DELETE) with its key, by
+	// its id, once the key is known right. misses are how many pairs keys
+	// doesn't know may wait for a listing of the ledger, by the client's
+	// address: past them, one is answered at once. A pair keys knows never
+	// touches misses, so that one who guesses, from the address everyone
+	// shares behind an ingress, can't keep a job from its own backtest.
 	reads, misses perKey
 	// wake is poked when a backtest is queued here, so the leader, if it
 	// is this process, takes it at once.
@@ -152,6 +162,7 @@ type trusted struct {
 // replicas; and the lane's history.
 func (s *Server) newBacktestPort() *backtestPort {
 	p := &backtestPort{reads: perKey{rate: 1, burst: 10}, misses: perKey{rate: 1, burst: 20}, wake: make(chan struct{}, 1), reading: make(chan struct{}, backtestReading), ended: map[[2]string]int{}, said: map[string]time.Time{}}
+	p.keys = newBTKeys(s.life, func(ctx context.Context) (map[string]string, error) { return s.l.BacktestKeys(ctx, backtestKeysListed) })
 	cis := map[[2]string]*signin.CI{}
 	for _, t := range s.cfg.Trust {
 		tr := &trusted{Trust: t, hourly: &limiter{rate: float64(t.Hourly) / 3600, burst: float64(t.Hourly)}, reading: make(chan struct{}, 1)}
@@ -843,7 +854,24 @@ func (p *prepared) checkRule(r *rules.Rule) string {
 // evaluation, to what the port takes: one that doesn't read leaves the
 // rule unsupported, refused as written. A refusal says the query as name,
 // and, with quote, what of it is past the bounds; without, nothing of it.
+//
+// A \r is refused, whatever else: Prometheus ends a # comment at one, and
+// the checks here do too, but a rule's lines end in \n alone (YAML makes a
+// \r\n one), so none has a reason to hold one but to read otherwise than
+// it looks. So is what a history --prometheus names may read otherwise
+// than these checks do (rules.Unalike): Prometheus with unquoted UTF-8
+// names, VictoriaMetrics' MetricsQL.
 func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Duration, quote bool) string {
+	if strings.Contains(expr, "\r") {
+		return name + " holds a carriage return (\\r): here a rule's PromQL ends its lines in \\n alone"
+	}
+	if what := rules.Unalike(expr); what != "" {
+		said := name + " holds what a history may read otherwise than Prometheus does"
+		if quote {
+			said = name + " holds " + clip(verdict.Clean(what), 200)
+		}
+		return said + ": here a rule's PromQL is read alike by Prometheus and the histories like it (VictoriaMetrics' MetricsQL): outside its strings, ASCII names, numbers, operators and brackets alone, an offset or @ right after a selector, a range or a subquery, and no WITH, nor or, and or unless in a selector's braces"
+	}
 	if _, err := rules.Selectors(expr); err != nil {
 		r.Unsupported = refusedAsWritten
 		p.reasons[r.Unsupported] = true
@@ -854,6 +882,9 @@ func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Dur
 			return name + " reads a selector that names no metric, or names it by a pattern: here each selector reads one metric, by its name"
 		}
 		return fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
+	}
+	if what := rules.Unnamed(expr); what != "" {
+		return name + " reads " + what + ": here a rule reads the metrics it names, and nothing beside them"
 	}
 	if what := rules.Reach(expr, backtestReach-before, backtestPoints); what != "" {
 		said := name + " reads past what is taken"
@@ -871,8 +902,10 @@ func (p *prepared) checkPromQL(r *rules.Rule, name, expr string, before time.Dur
 // queries and expressions at most; each query's relativeTimeRange within
 // backtestReach; and each query the replay asks, PromQL or LogQL, as a
 // rule's query is held, read back as far again as its relativeTimeRange
-// ends before the evaluation, and, of a reduce over LogQL, as its window.
-// Its expressions are worked out by Lapilli, and read nothing. A refusal
+// ends before the evaluation, and, of a reduce over LogQL, as its window;
+// and each data source query a day further back again, as the replay asks
+// it when it returns nothing (backtestNoData). Its expressions are worked
+// out by Lapilli, and read nothing. A refusal
 // says the query by its refId and quotes nothing of it: what the replay
 // asks has the macros put in, $__rate_interval with serve's data source's
 // scrape interval among them, and isn't what the pull request wrote.
@@ -908,6 +941,38 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 			continue
 		}
 		if why := p.checkPromQL(r, query, expr, before, false); why != "" || r.Unsupported != "" {
+			return why
+		}
+	}
+	// A data source query that returns nothing is asked again over the day
+	// before (replay's before: a day's subquery of it, or, in LogQL, the
+	// query itself over the day), from as long before the evaluation as
+	// it is: a day further back than it reads otherwise. A classic
+	// condition's window is in what its asks write (Ask.PromQL), a half
+	// step past the window's first numbers, which the replay asks of the
+	// query from the window's start.
+	// In PromQL, that day is a subquery at the rule's interval (a minute at
+	// most, a second at least: replay.ProbeStep), held to backtestPoints
+	// as any subquery is: a group evaluated every second would have
+	// 86,400 points a series.
+	if step := replay.ProbeStep(*r); g.Logs == "" && len(g.Data) > 0 && int64(backtestNoData/step) > backtestPoints {
+		least := time.Duration(math.Ceil(backtestNoData.Seconds()/backtestPoints)) * time.Second
+		return fmt.Sprintf("%s is evaluated every %s, and a query of it that returns nothing is looked through over the day before at that step, %d points a series: here a subquery has %d points at most, a Grafana rule's group an interval of %s or more",
+			name, verdict.Duration(r.Interval), int64(backtestNoData/step), backtestPoints, verdict.Duration(least))
+	}
+	for _, ref := range slices.Sorted(maps.Keys(g.Data)) {
+		expr, ok := g.Queries[ref]
+		if !ok {
+			continue
+		}
+		query := name + "'s query " + clip(verdict.Clean(ref), 100) + ", looked through a day further back when it returns nothing,"
+		if g.Logs != "" {
+			if why := checkLogQL(query, expr, g.Shift[ref]+backtestNoData, false); why != "" {
+				return why
+			}
+			continue
+		}
+		if why := p.checkPromQL(r, query, expr, g.Shift[ref]+backtestNoData, false); why != "" || r.Unsupported != "" {
 			return why
 		}
 	}
@@ -1121,6 +1186,14 @@ func (a asker) repository() string {
 	return name
 }
 
+// supersedes reports whether a newer commit's backtest may take the place
+// of one waiting, matched by the entry, the repository's name and the pull
+// request's number: only when the token names its repository by a name
+// kept as it is. One kept as "" (past 200 bytes, or with what doesn't
+// show) is no repository's, and two repositories an entry pins so would
+// share it, one's pull request 5 superseding the other's.
+func (a asker) supersedes() bool { return a.repository() != "" }
+
 // pullRequest is the pull request's number: from GitHub's or Forgejo's
 // ref when the token says it (byToken), which the job's must agree with;
 // or the job's, which a newer backtest of it doesn't take the place of: a
@@ -1167,8 +1240,11 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	// The entry's hour is taken before the body is read, so that past it a
 	// body costs nothing to send. What can be told without the body is
 	// asked first, each refused cheaply and its hour given back: the
-	// ledger not ready, a token that started a backtest already, no room
-	// in the queue for the entry, the reads full. Once the body is read,
+	// ledger not ready, no room in the queue for the entry, the reads
+	// full. But for a token that started a backtest already, which keeps
+	// it: its job has its backtest, and the same token sent again and
+	// again would otherwise cost a signature and the ledger's reads each
+	// time, for an hour, past the entry's hourly. Once the body is read,
 	// whatever is refused keeps the hour: a request refused after its
 	// rules were read and checked costs the port what it cost, and the
 	// hour bounds how often.
@@ -1201,9 +1277,10 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The pull request a newer commit of would supersede the one waiting:
-	// the token's own, as the body can't say otherwise.
+	// the token's own, as the body can't say otherwise, of a repository
+	// it names (supersedes).
 	supersedes := int64(-1)
-	if n, byToken, ok := a.pullRequest(0); ok && byToken {
+	if n, byToken, ok := a.pullRequest(0); ok && byToken && a.supersedes() {
 		supersedes = n
 	}
 	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repository(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
@@ -1214,6 +1291,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, http.StatusServiceUnavailable, "the queue couldn't be read: try again in a minute")
 		return
 	case used:
+		refund = false
 		refused(http.StatusConflict, "this token started a backtest already: a job asks once, with a token of its own")
 		return
 	case full:
@@ -1279,7 +1357,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
-		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken}
+		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes()}
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):
@@ -1294,6 +1372,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be queued: try again in a minute")
 		return
 	}
+	s.btPort.keys.put(b.ID, b.KeyHash)
 	for range superseded {
 		s.backtestEnded(a.t.Name, ledger.BacktestSuperseded)
 	}
@@ -1320,38 +1399,71 @@ var bodyHook func(asker)
 var backtestID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // kept is the backtest a job reads with its key: none, the same 404, for an
-// id that isn't and a key that's wrong, compared in constant time.
+// id that isn't and a key that's wrong. The pair is told from what this
+// process knows of the backtests' keys (btKeys), in memory and in constant
+// time: one it knows is read from the ledger, and charged to nothing but
+// its own reads. One it doesn't waits for a listing of the ledger begun
+// after it came, as another replica may have queued it, charged to the
+// address it comes from while it waits, and is a 404 if the listing
+// doesn't know it. Past what that address may wait, it is answered at
+// once: a 404 only if a listing begun after it came has ended without it,
+// otherwise a 503 with Retry-After, a listing begun all the same, so that
+// a job's backtest queued elsewhere, polled from an address others share,
+// is known by its next poll, never said not found, which the job takes as
+// the end of its backtest.
 func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, bool) {
 	id, key := r.PathValue("id"), bearerOf(r)
-	// Each lookup is charged to the address it comes from before the
-	// ledger is asked, and given back once the key is right: what isn't
-	// known costs the ledger no more than the bucket lets through.
-	addr := clientAddr(r)
-	if !s.btPort.misses.allow(addr, s.now()) {
-		w.Header().Set("Retry-After", "10")
-		backtestError(w, http.StatusTooManyRequests, "too many backtests not found from here: try again in a while")
-		return ledger.Backtest{}, false
-	}
-	var b ledger.Backtest
-	var found bool
-	if backtestID.MatchString(id) {
-		var err error
-		if b, found, err = s.l.Backtest(r.Context(), id); err != nil {
-			s.log.Error("backtest port: reading a backtest", "err", err)
-			backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be read: try again in a minute")
+	sum := sha256.Sum256([]byte(key))
+	hash := hex.EncodeToString(sum[:])
+	keys := s.btPort.keys
+	came := keys.begunNow()
+	if !keys.known(id, hash) {
+		if !backtestID.MatchString(id) || key == "" {
+			backtestError(w, http.StatusNotFound, "no such backtest")
 			return ledger.Backtest{}, false
 		}
+		addr := clientAddr(r)
+		if !s.btPort.misses.allow(addr, s.now()) {
+			if keys.listedSince(came) && !keys.known(id, hash) {
+				backtestError(w, http.StatusNotFound, "no such backtest")
+				return ledger.Backtest{}, false
+			}
+			keys.kick()
+			w.Header().Set("Retry-After", "1")
+			backtestError(w, http.StatusServiceUnavailable, "too many backtests not known yet asked from here: try again in a second")
+			return ledger.Backtest{}, false
+		}
+		listed, err := keys.await(r.Context())
+		switch {
+		case err != nil:
+			s.log.Error("backtest port: listing the backtests", "err", err)
+			backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be read: try again in a minute")
+			return ledger.Backtest{}, false
+		case !listed:
+			// The ledger slower than the wait: not said not found, which
+			// a job takes as the end of its backtest.
+			w.Header().Set("Retry-After", "1")
+			backtestError(w, http.StatusServiceUnavailable, "the backtests couldn't be listed in time: try again in a second")
+			return ledger.Backtest{}, false
+		}
+		if !keys.known(id, hash) {
+			backtestError(w, http.StatusNotFound, "no such backtest")
+			return ledger.Backtest{}, false
+		}
+		s.btPort.misses.give(addr)
 	}
-	got := sha256.Sum256([]byte(key))
-	want := b.KeyHash
+	b, found, err := s.l.Backtest(r.Context(), id)
+	if err != nil {
+		s.log.Error("backtest port: reading a backtest", "err", err)
+		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be read: try again in a minute")
+		return ledger.Backtest{}, false
+	}
 	if !found {
-		want = strings.Repeat("0", 64)
-	}
-	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(got[:])), []byte(want)) != 1 || !found || key == "" {
+		// Let go of since it was known: known here no longer.
+		keys.drop(id)
 		backtestError(w, http.StatusNotFound, "no such backtest")
 		return ledger.Backtest{}, false
 	}
-	s.btPort.misses.give(addr)
 	if !s.btPort.reads.allow(id, s.now()) {
 		w.Header().Set("Retry-After", "1")
 		backtestError(w, http.StatusTooManyRequests, "too many reads of this backtest: try again in a second")
@@ -1369,12 +1481,34 @@ func clientAddr(r *http.Request) string {
 	return host
 }
 
-// perKey are rate limits by a key, a bucket each, in this process; 4,096
-// buckets at most, all let go and begun afresh past them.
+// perKeyMost are the most buckets a perKey keeps.
+const perKeyMost = 4096
+
+// perKey are rate limits by a key, a bucket each, in this process;
+// perKeyMost buckets at most. Past them, only buckets that hold nothing
+// back, refilled to their burst, are let go, a second apart at most: one
+// with many addresses can't begin everyone's afresh. When none can go, a
+// key not kept is refused, as one past its bucket is.
 type perKey struct {
 	mu          sync.Mutex
 	rate, burst float64
 	m           map[string]*limiter
+	// swept is when the full buckets were last let go.
+	swept time.Time
+}
+
+// sweep lets go, at now, of the buckets refilled to their burst; with
+// p.mu held.
+func (p *perKey) sweep(now time.Time) {
+	p.swept = now
+	for k, l := range p.m {
+		l.mu.Lock()
+		full := !l.last.IsZero() && l.left+now.Sub(l.last).Seconds()*l.rate >= l.burst
+		l.mu.Unlock()
+		if full {
+			delete(p.m, k)
+		}
+	}
 }
 
 // give gives back what allow took from key's bucket.
@@ -1389,11 +1523,19 @@ func (p *perKey) give(key string) {
 
 func (p *perKey) allow(key string, now time.Time) bool {
 	p.mu.Lock()
-	if p.m == nil || len(p.m) >= 4096 {
+	if p.m == nil {
 		p.m = map[string]*limiter{}
 	}
 	l := p.m[key]
 	if l == nil {
+		if len(p.m) >= perKeyMost && now.Sub(p.swept) >= time.Second {
+			p.sweep(now)
+		}
+		if len(p.m) >= perKeyMost {
+			// Every bucket holds something back: closed, not begun afresh.
+			p.mu.Unlock()
+			return false
+		}
 		l = &limiter{rate: p.rate, burst: p.burst}
 		p.m[key] = l
 	}

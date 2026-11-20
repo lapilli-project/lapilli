@@ -252,8 +252,13 @@ func (l *Ledger) SetVerdict(ctx context.Context, k FiringKey, c VerdictChange, w
 			return err
 		}
 		out = now
+		// "Unrelated" is said when it differs from what the firing's own
+		// verdict holds: a client writing the whole object, "unrelated":
+		// false beside an answer of "needed action", says nothing of it,
+		// and takes away no verdict another holds of the firing.
 		_, limited := scopeOf(t.ctx)
-		return l.keepVerdict(t, f, was, now, c.Unrelated != nil && !limited, w, "verdict on "+firingName(f), o)
+		said := c.Unrelated != nil && !limited && *c.Unrelated != (len(was.Unrelated) > 0)
+		return l.keepVerdict(t, f, was, now, said, w, "verdict on "+firingName(f), o)
 	})
 	if errors.Is(err, errNothing) {
 		err = nil
@@ -426,7 +431,13 @@ func (l *Ledger) keepVerdict(t *txn, f Firing, was, now Verdict, said bool, w Ve
 	if err := changeAt(t, w.now(), w.By, what, verdictShown(was), verdictShown(now)); err != nil {
 		return err
 	}
-	return l.judge(t, f.Start.Unix(), f.Start.Unix(), o)
+	// One held by another firing (movedHeld) is judged with it: the
+	// firing holding it starts elsewhere, and its stone is what changes.
+	lo, hi := f.Start.Unix(), f.Start.Unix()
+	if _, at, ok := heldOf(was.Moved); ok {
+		lo, hi = min(lo, at), max(hi, at)
+	}
+	return l.judge(t, lo, hi, o)
 }
 
 // writeVerdict writes now in place of was, or takes it away when it says
@@ -621,6 +632,14 @@ const verdictCols = `v.id, v.series_id, s.labels, r.name, v.start_at, v.end_at, 
 	v.action, v.action_by, v.action_at, v.action_note, v.moved,
 	coalesce((SELECT min(f.id) FROM firings f WHERE f.series_id = v.series_id AND f.start_at = v.start_at), 0)`
 
+// verdictColsJudged are verdictCols as judging reads them, every replay of
+// every backtest, comparison and try (ReplayVerdicts): without the two
+// notes, up to MaxVerdictNote characters each, nor the firing of each
+// verdict, which judging takes nothing from (an empty string and 0 in
+// their place).
+const verdictColsJudged = `v.id, v.series_id, s.labels, r.name, v.start_at, v.end_at, v.unrelated, v.unrelated_by, v.unrelated_at, '',
+	v.action, v.action_by, v.action_at, '', v.moved, 0`
+
 // readVerdicts reads the verdicts where says, in order of their start.
 func (l *Ledger) readVerdicts(ctx context.Context, q queryer, where string, args ...any) ([]Verdict, error) {
 	return l.readVerdictsOrdered(ctx, q, where+` ORDER BY v.start_at, v.id`, args...)
@@ -629,7 +648,13 @@ func (l *Ledger) readVerdicts(ctx context.Context, q queryer, where string, args
 // readVerdictsOrdered reads the verdicts where says, its order and limit
 // with it.
 func (l *Ledger) readVerdictsOrdered(ctx context.Context, q queryer, where string, args ...any) ([]Verdict, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+verdictCols+` FROM verdicts v JOIN series s ON s.id = v.series_id JOIN rules r ON r.id = s.rule_id
+	return l.readVerdictsOf(ctx, q, verdictCols, where, args...)
+}
+
+// readVerdictsOf reads cols, verdictCols or verdictColsJudged, of the
+// verdicts where says, its order and limit with it.
+func (l *Ledger) readVerdictsOf(ctx context.Context, q queryer, cols, where string, args ...any) ([]Verdict, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+cols+` FROM verdicts v JOIN series s ON s.id = v.series_id JOIN rules r ON r.id = s.rule_id
 		`+where, args...)
 	if err != nil {
 		return nil, err
@@ -784,7 +809,12 @@ func (l *Ledger) SetVerdicts(ctx context.Context, ks []FiringKey, action string,
 // "needed action" alone: "unrelated" is refused them (ErrUnrelatedRole),
 // and both undoes theirs. It is found by the verdict's alert and start, a
 // firing there or not (one moved onto no firing is undone so too), and
-// counted against VerdictsAnHour.
+// counted against VerdictsAnHour. A verdict another firing holds
+// (movedHeld), a run having merged its own into it, is undone so, at its
+// own alert and start, as the page of verdicts to look at again undoes
+// it, and the firing holding it is judged again; Undo on that firing
+// undoes what the firing's own verdict says, which the firings page offers
+// alone, and finds nothing (ErrNoVerdict) when it says no "unrelated".
 func (l *Ledger) DeleteVerdict(ctx context.Context, k FiringKey, part string, w VerdictBy, o verdict.Options) error {
 	if !slices.Contains([]string{"", "unrelated", "action"}, part) {
 		return invalid("part is unrelated, action, or both when left out")
@@ -1012,7 +1042,7 @@ func (l *Ledger) SaidSince(ctx context.Context, from, to, since time.Time, in fu
 // ledger, but one another holds the firing of (movedHeld), which a replay
 // places again itself.
 func (l *Ledger) ReplayVerdicts(ctx context.Context, from, to time.Time) ([]verdict.Verdict, error) {
-	vs, err := l.readVerdicts(ctx, l.r, "WHERE v.start_at >= ? AND v.start_at < ?", from.Unix(), to.Unix())
+	vs, err := l.judgedVerdicts(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,6 +1051,13 @@ func (l *Ledger) ReplayVerdicts(ctx context.Context, from, to time.Time) ([]verd
 		out = append(out, ReplayVerdict(v))
 	}
 	return out, nil
+}
+
+// judgedVerdicts are the verdicts ReplayVerdicts reads, of the firings
+// that started in [from, to): what judging takes of them alone, never
+// their notes (verdictColsJudged).
+func (l *Ledger) judgedVerdicts(ctx context.Context, from, to time.Time) ([]Verdict, error) {
+	return l.readVerdictsOf(ctx, l.r, verdictColsJudged, "WHERE v.start_at >= ? AND v.start_at < ? ORDER BY v.start_at, v.id", from.Unix(), to.Unix())
 }
 
 // ReplayVerdict is v as judging takes it.

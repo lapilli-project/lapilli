@@ -87,7 +87,7 @@ func TestProbeSeesBetweenMinutes(t *testing.T) {
 	if ran[0].Unsupported != "" || len(fs) != 1 || fs[0].Labels[StateLabel] != NoDataState || !fs[0].Start.Equal(t0) {
 		t.Errorf("%q, %+v", ran[0].Unsupported, fs)
 	}
-	if got := probeStep(rules.Rule{Interval: 5 * time.Minute}); got != time.Minute {
+	if got := ProbeStep(rules.Rule{Interval: 5 * time.Minute}); got != time.Minute {
 		t.Errorf("a 5m rule probed every %s", got)
 	}
 }
