@@ -263,6 +263,26 @@ var ErrNoneSelected = errors.New("no document of rules has the labels asked for"
 // each have yaml.v3's bound, nor what an input may make. A file passed over
 // gives back what it counted, but for what the read makes in all
 // (Together), MaxMade at most.
+//
+// Of a directory, every regular file is read, a hidden one (a name in its
+// path beginning with a dot) too: Prometheus's rule_files glob loads
+// alerts/.page.yaml and alerts/..page.yaml for alerts/*.yaml, and
+// alerts/.d/x.yaml for alerts/*/*.yaml. One that holds no rules, or
+// doesn't read, is passed over wherever it is, and not counted in what
+// is said passed over, as a directory holds hidden files for other tools
+// (.gitignore, .github/, a version's .commit); one with rules is read as
+// any other is. Never read are a directory named .git, and one whose name
+// begins with .. beside a ..data link, as a Kubernetes volume's atomic
+// writer keeps a ConfigMap's files (..2026_11_20_..., ..data a link to it,
+// and a link to each file through it), so that each rule would be read
+// twice; one named so otherwise is read (alerts/*/*.yaml matches
+// alerts/..d/x.yaml, and the recipes refuse a commit holding a link). An
+// item of such a volume with a nested path (team/x.yaml) is read through
+// the link to its directory beside ..data (team -> ..data/team), once
+// (mountedDir): no other link to a directory is followed. A
+// file past MaxFile
+// named as rule files are (.yml, .yaml, .json, .rules) is refused
+// wherever it is, never passed over, as Prometheus would load it.
 func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	var picked Picked
 	in := reading{pick: OneInput(Together(context.Background())), parse: OneInput(Together(context.Background()))}
@@ -284,18 +304,29 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	root := filepath.Clean(path)
 	var out []Rule
 	var docs []Doc
-	err = filepath.WalkDir(walk, func(f string, e fs.DirEntry, err error) error {
+	// The directories a ConfigMap volume's links lead to, each read once
+	// (mountedDir).
+	followed := map[string]bool{}
+	var visit fs.WalkDirFunc
+	visit = func(f string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if filepath.Clean(f) != root && strings.HasPrefix(e.Name(), ".") {
-			if e.IsDir() {
+		if e.IsDir() {
+			if filepath.Clean(f) != root && neverRead(f) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if e.IsDir() {
-			return nil
+		rel, _ := filepath.Rel(root, filepath.Clean(f))
+		if e.Type()&fs.ModeSymlink != 0 {
+			if to, ok := mountedDir(f); ok {
+				if followed[to] {
+					return nil
+				}
+				followed[to] = true
+				return filepath.WalkDir(f+string(filepath.Separator), visit)
+			}
 		}
 		if st, err := os.Stat(f); err != nil || !st.Mode().IsRegular() {
 			return nil
@@ -306,11 +337,17 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 			inputOf(in.parse).undo(parseAt)
 			return nil
 		}
-		rs, d, err := in.load(f, p, &picked)
+		var its Picked
+		rs, d, err := in.load(f, p, &its)
+		if !hidden(rel) || err == nil || errors.Is(err, ErrNoneSelected) {
+			picked.Add(its) // a hidden file of no rules is no news
+		}
 		switch {
 		case errors.Is(err, errNoRules), errors.Is(err, ErrNoneSelected):
 			return passed()
-		case err != nil && filepath.Dir(f) != root && !refused(err) && !unreadRules(err):
+		case tooLong(err) && ruleFileName(f):
+			return err
+		case err != nil && (filepath.Dir(f) != root || hidden(rel)) && !refused(err) && !unreadRules(err):
 			// What the directory makes past what it may is said, as it
 			// is of every file in it, not of this one alone; and a rule
 			// file Lapilli's reader refuses, as Prometheus may load it.
@@ -321,8 +358,8 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 		out = append(out, rs...)
 		docs = append(docs, d)
 		return nil
-	})
-	if err != nil {
+	}
+	if err := filepath.WalkDir(walk, visit); err != nil {
 		return nil, nil, picked, err
 	}
 	if len(out) == 0 {
@@ -347,10 +384,13 @@ type File struct {
 // each at its Path under the directory: of each, the documents of rules,
 // and with a selector the labelled ones; a file that holds none, or none
 // the selector keeps, passed over; one in a directory below (a Path with
-// a slash) that doesn't read passed over too, as ReadPicked passes it
-// over, but one Lapilli's reader refuses. What aliases expand to, and what
-// the rules make, is counted for them all, as of one input. None of them
-// is read from, or written to, a disk.
+// a slash), or a hidden one, that doesn't read passed over too, as
+// ReadPicked passes it over, a hidden one not counted, but one Lapilli's
+// reader refuses, and one past MaxFile named as rule files are. Each is
+// read whatever its Path, which is a name: what ReadPicked never reads of
+// a directory, a ConfigMap volume's own and .git, a job doesn't send. What
+// aliases expand to, and what the rules make, is counted for them all, as
+// of one input. None of them is read from, or written to, a disk.
 func PickedFiles(files []File, p Picking) ([]Rule, []Doc, Picked, error) {
 	var picked Picked
 	in := reading{pick: OneInput(Together(context.Background())), parse: OneInput(Together(context.Background()))}
@@ -358,13 +398,20 @@ func PickedFiles(files []File, p Picking) ([]Rule, []Doc, Picked, error) {
 	var docs []Doc
 	for _, f := range files {
 		if len(f.Data) > MaxFile {
-			return nil, nil, picked, fmt.Errorf("%s: more than %d MiB: a file of rules is less", f.Path, MaxFile>>20)
+			if hidden(f.Path) && !ruleFileName(f.Path) {
+				continue // passed over, as ReadPicked passes it over
+			}
+			return nil, nil, picked, longFile(f.Path)
 		}
 		pickAt, parseAt := inputOf(in.pick).mark(), inputOf(in.parse).mark()
-		rs, d, err := in.loadBytes(f.Path, f.Data, p, &picked)
+		var its Picked
+		rs, d, err := in.loadBytes(f.Path, f.Data, p, &its)
+		if !hidden(f.Path) || err == nil || errors.Is(err, ErrNoneSelected) {
+			picked.Add(its)
+		}
 		switch {
 		case errors.Is(err, errNoRules), errors.Is(err, ErrNoneSelected),
-			err != nil && strings.Contains(f.Path, "/") && !refused(err) && !unreadRules(err):
+			err != nil && (strings.Contains(f.Path, "/") || hidden(f.Path)) && !refused(err) && !unreadRules(err):
 			inputOf(in.pick).undo(pickAt)
 			inputOf(in.parse).undo(parseAt)
 			continue
@@ -378,6 +425,80 @@ func PickedFiles(files []File, p Picking) ([]Rule, []Doc, Picked, error) {
 		return nil, nil, picked, fmt.Errorf("%w (%s): %d documents of rules have other labels", ErrNoneSelected, p.Select, picked.Unselected)
 	}
 	return out, docs, picked, nil
+}
+
+// neverRead reports whether a directory below a directory of rules is
+// never read: one named .git, and one whose name begins with .. beside a
+// ..data link, a Kubernetes volume's own (..2026_11_20_...), whose files
+// are read through the links beside it. A file named so, and a directory
+// with no ..data beside it, are read: alerts/*.yaml matches
+// alerts/..page.yaml.
+func neverRead(dir string) bool {
+	name := filepath.Base(dir)
+	if name == ".git" {
+		return true
+	}
+	if !strings.HasPrefix(name, "..") {
+		return false
+	}
+	l, err := os.Lstat(filepath.Join(filepath.Dir(dir), "..data"))
+	return err == nil && l.Mode()&os.ModeSymlink != 0
+}
+
+// mountedDir reports whether f, a link in a directory beside a ..data
+// link, as a Kubernetes volume keeps a ConfigMap's files, leads to a
+// directory right in the volume's own (..data's), and gives where: the
+// link kubelet makes beside ..data for the first part of an item's nested
+// path (team/x.yaml is team -> ..data/team). Such a directory is read
+// through the link, as its files are; ..data itself, a link elsewhere,
+// and one below the volume's own aren't followed, so nothing is read
+// twice, and no link leads back.
+func mountedDir(f string) (string, bool) {
+	dir := filepath.Dir(f)
+	if filepath.Base(f) == "..data" {
+		return "", false
+	}
+	if l, err := os.Lstat(filepath.Join(dir, "..data")); err != nil || l.Mode()&os.ModeSymlink == 0 {
+		return "", false
+	}
+	data, err := filepath.EvalSymlinks(filepath.Join(dir, "..data"))
+	if err != nil {
+		return "", false
+	}
+	to, err := filepath.EvalSymlinks(f)
+	if err != nil || filepath.Dir(to) != data {
+		return "", false
+	}
+	if st, err := os.Stat(to); err != nil || !st.IsDir() {
+		return "", false
+	}
+	return to, true
+}
+
+// ruleFileName reports whether a file is named as rule files are: .yml,
+// .yaml, .json or .rules, in any case.
+func ruleFileName(path string) bool {
+	return slices.Contains([]string{".yml", ".yaml", ".json", ".rules"}, strings.ToLower(filepath.Ext(path)))
+}
+
+// longFile is a file past MaxFile.
+type longFile string
+
+func (f longFile) Error() string {
+	return fmt.Sprintf("%s: more than %d MiB: a file of rules is less", string(f), MaxFile>>20)
+}
+
+// tooLong reports whether err is a file past MaxFile.
+func tooLong(err error) bool {
+	var f longFile
+	return errors.As(err, &f)
+}
+
+// hidden reports whether a path below a directory of rules has a name in
+// it beginning with a dot: read when it holds rules, passed over when it
+// holds none, or doesn't read, wherever it is.
+func hidden(rel string) bool {
+	return slices.ContainsFunc(strings.Split(filepath.ToSlash(rel), "/"), func(n string) bool { return strings.HasPrefix(n, ".") })
 }
 
 // unreadRules reports whether err is a document in the shape of rules
@@ -470,7 +591,7 @@ func readFile(path string) ([]byte, error) {
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, MaxFile+1))
 	if err == nil && len(b) > MaxFile {
-		err = fmt.Errorf("%s: more than %d MiB: a file of rules is less", path, MaxFile>>20)
+		err = longFile(path)
 	}
 	return b, err
 }

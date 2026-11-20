@@ -168,9 +168,235 @@ API. No schema change: the ledger stays at 026.
   `--mcp-propose`), and approving the proposal's page's.
 
 ### Changed
+
 - `--config`'s top-level keys are teams, windows, reports, grants, goals,
   marked, **freezes** and **notify**, and its refusals say so.
+- The sidebar's Administration has Sources after Settings.
 
+## [0.63.2] - 2026-11-20
+
+A security release, after a review of 0.63.0 from an attacker's point of
+view and the rest of the week's reviews, each fix of code with a test that
+failed before it; with it, "Judged by nothing" for a rule entry's
+`judged: false`, and Spanish's tables at a laptop's width. No schema
+change: the ledger stays at 026.
+
+### Fixed (security)
+
+- **A pull request's PromQL could read past the backtest port's bounds,
+  written as the history reads it otherwise than the port's checks did**
+  (affected: 0.61.0 to 0.63.1). Prometheus ends a `#` comment at a `\r` as
+  at a `\n`, and reads one in a selector's braces and a range's brackets
+  as anywhere outside a string; the port's checks ended one at `\n` alone,
+  and read none in braces or brackets, so that what followed a comment's
+  `\r`, or a `}` or a `]` and a quote in one, was a comment or a string to
+  them, and code to Prometheus. With VictoriaMetrics, a `--prometheus` the
+  docs name, MetricsQL reads a `\` in a name as escaping the character
+  after it, a backtick among them (``up\` or {__name__=~".+"} or up\` ``
+  was a string to the checks), `or` in a selector's braces as joining its
+  matchers (`{__name__='up' or __name__=~'.+'}`, one string to the
+  checks), an offset after any expression (`rate(up[5m]) offset 1400d`),
+  `WITH` templates, `1doffset` as `1d offset` and `"__\name__"` as
+  `__name__`; and Prometheus with unquoted UTF-8 names reads a name that
+  isn't ASCII (`温度 offset 1400d`). Either way a rule backtested through
+  the port could read every series, 1,400 days back, or at a time of its
+  own (`@ 0`), with serve's access, and be taken. The checks now read
+  comments as Prometheus does, and the port takes only what every history
+  reads alike: no `\r`; outside its strings, ASCII names, numbers and
+  durations as Prometheus writes them, operators and brackets alone; an
+  `offset` or `@` right after a selector, a range or a subquery; and none
+  of MetricsQL's own (`WITH`, `or`, `and` or `unless` in a selector's
+  braces, `default`, `if` and `ifnot` between two expressions, which made
+  `x ifnot {job=~".+"}` read every series with a job, `keep_metric_names`,
+  `__graphite__`, a `\` in a label's name in quotes). A string with an
+  unescaped quote of its kind inside isn't one string to the checks any
+  more. A rule's own comments are taken as before, and rules as alerting
+  rules are written read alike, as checked with Prometheus's parser and
+  MetricsQL's.
+- **Anyone who could reach the backtest port could keep a job from reading
+  or cancelling its backtest** (affected: 0.61.0 to 0.63.1). Each `GET`
+  and `DELETE` was charged to the client's address before its key was
+  checked, 20 at once and one a second after. Behind an ingress, or a
+  LoadBalancer, every request comes from one address: 20 requests with no
+  token, for an id made up, made every job's poll and cancel a 429 until
+  `SERVE_WAIT` ended it, its backtest running on. Each replica now holds
+  the backtests' key hashes, those it queued and the ledger's, listed a
+  second apart at least: a job's id and key, known, are read whatever else
+  comes from its address. A pair not known waits up to 2 seconds for a
+  listing begun after it came, so that a backtest queued through another
+  replica is found, on its first poll, or, when guesses from the address
+  everyone shares have taken its 20 waiting, on the next, after a 503 with
+  `Retry-After` and a listing begun, never said not found; only those
+  waits are charged to the address. Guesses read no backtest's row.
+- **A token that had started a backtest could be sent again and again,
+  past its entry's hour** (affected: 0.61.0 to 0.63.1). A request refused
+  before its body was read gave its entry's hour back, one whose token
+  had started a backtest already among them: whoever held such a token, a
+  job's for up to an hour, could send it as often as the port took
+  requests, each a 409 that cost a signature checked and four reads of the
+  ledger, the entry's `hourly` untouched. A token that started one keeps
+  the hour now; a full queue and full reads still give it back.
+- **One who could send from many addresses began everyone's limits at the
+  backtest port afresh** (affected: 0.61.0 to 0.63.1). The limits by
+  address (of a backtest not known yet, waiting for a listing) and by
+  backtest (its reads) were kept for 4,096 at most, and past them all let
+  go at once, the spent ones among them. Past them, only those refilled
+  to their burst go now, a second apart at most; while none can, an
+  address or a backtest not kept is refused, as one past its bucket is.
+- **A CI's token that names no key was tried against every key of its
+  issuer's** (affected: 0.61.0 to 0.63.1). A token sent to the backtest
+  port with no `kid`, of an issuer an entry names, was checked, before
+  anyone was known, against each of the issuer's keys, a hundred at most,
+  RSA of up to 4,096 bits. The CIs' tokens name their key: one that
+  doesn't is tried against the first three of its issuer's keys now.
+- **One repository's pull request could take the place of another's
+  backtest** (affected: 0.61.0 to 0.63.1). A newer commit's backtest
+  supersedes the one waiting for the same entry, repository and pull
+  request, the repository by the name its token gives, kept as "" past
+  200 bytes or with what doesn't show: two repositories an entry pins,
+  each named so, were one, and one's pull request 5 superseded the
+  other's. A token whose repository's name isn't kept supersedes none
+  now, as GitLab's doesn't.
+- **A pull request's rule could read `target_info` through `info()`**
+  (affected: 0.61.0 to 0.63.1). Prometheus's `info(rate(x[5m]))` reads
+  `target_info` beside the metric it names, to join its labels on, a
+  metric the rule never named: past the one metric a selector names that
+  the port holds a rule to. `info(` is refused at the port now, written in
+  any case, a comment or spaces before its `(`.
+- **A Grafana rule's query could read a day past the backtest port's
+  reach** (affected: 0.63.0 and 0.63.1). When a data source query of a
+  Grafana rule returns nothing, the replay asks it whether it returned
+  anything in the day before (a day's subquery of it, or, in LogQL, the
+  query itself over the day), which the port didn't count: a query that
+  read 8 days back read 9; and, in PromQL, a subquery at the group's
+  interval, 86,400 points a series at `interval: 1s`, past the 11,000 a
+  subquery is held to. That day is added to what each data source query
+  reads back now, 8 days in all, and its points counted: a Grafana rule's
+  group is evaluated every 8 seconds or more. A classic condition's
+  window was counted already, in the queries its reducers ask.
+- **The lane's requests to a Loki weren't given up on** (affected: 0.63.0
+  and 0.63.1). Each range query the lane asks a Prometheus carries
+  `timeout=1m`, so that a shared Prometheus gives up on a pull request's
+  query before its own default; a Loki takes no such parameter, and a
+  pull request's LogQL that Loki took long over held one of the lane's
+  turns, and the share kept for it, until `--backtest-timeout`. Each of
+  the lane's requests to a Loki is given up on after a minute now, from
+  when it is sent to its answer read.
+- **A rule file whose name begins with a dot, or past 16 MiB, went past
+  every gate of the backtest recipes unbacktested** (affected: 0.47.0 to
+  0.63.1). Prometheus's `rule_files` glob loads `alerts/.page.yaml` and
+  `alerts/..page.yaml` for `alerts/*.yaml`, and `alerts/.d/page.yaml` for
+  `alerts/*/*.yaml`; its rulefmt reads a file in UTF-16 with its BOM, and
+  one of any size. But `--rules` passed over every name beginning with a
+  dot, and a rule file past 16 MiB below the top, and the recipes' serve
+  mode sent no hidden file: a pull request adding a rule so passed
+  `EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS` and `FAIL_ON_ERROR`, and no
+  comment was posted. Such a file is read and backtested now, a long one
+  refused, and a hidden one in UTF-16 said in serve mode as a rule file
+  that isn't UTF-8 text is (Changed).
+- **A file of a pull request's rules could go unbacktested on a macOS or
+  Windows runner** (affected: 0.32.0 to 0.63.1). Two paths under `PATHS`
+  (and, from 0.63.0, `LOKI_PATHS`) that differ only in case are one file
+  on a file system that folds case: `git archive | tar -x` wrote one over
+  the other, the first's rules were never backtested, and
+  `EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS` and `FAIL_ON_ERROR` passed.
+  Where the runner's file system folds case, such a commit isn't read
+  now, the pair named in the job's log and not the comment; nor, on any
+  runner, is one of more files than its file system holds of it once
+  written (a letter past ASCII in another case). On Linux both are
+  written, and read, as Prometheus reads them.
+- **A pull request could pick the incidents it was judged by** (affected:
+  0.32.0 to 0.63.1). `INCIDENTS` was read from the commit the pull request
+  and `TARGET` share last, which its author picks by where they branch
+  from: where the job checks out the pull request's own commit, not a
+  merge (`TARGET_BRANCH`, GitLab without merged results), a pull request
+  branched from before an incident was written down was judged without
+  it. It is read from `TARGET` itself now, the commit the pull request
+  goes into as it is, and `gitlab.sh` without merged results takes the
+  target branch (`CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, fetched with the
+  job's credentials) for `TARGET` in place of the merge base. The rules
+  are compared against those where it branched, as before, and so are
+  the expectations of the rules in place: a pull request is held to the
+  expectations in its own commit, the target's where the job checks out
+  a merge (a merged results pipeline, or a branch rebased).
+- **Answering only "needed action" took away another person's
+  "unrelated"** (affected: 0.63.0 and 0.63.1). A client writing a verdict
+  whole, `"unrelated": false` beside its answer, of a firing a run had
+  merged another into, took away the verdict said of the other, which the
+  merged firing held, and the firing turned white. "Unrelated" is said now
+  only when it differs from what the firing's own verdict holds. A verdict
+  held, undone at its own alert and start as the page of verdicts to look
+  at again undoes it, judges the firing holding it again at once.
+- **Writes of one person could push the admins' changes of the settings
+  off the Settings page** (affected: 0.6.0 to 0.63.1). Its "Changes" were
+  those of a setting among the latest 100 changes of every kind: a
+  hundred writes of one editor, notes, comments or verdicts, left none to
+  show. The settings' changes are asked for apart now, the latest 20.
+- **`lapilli preflight` printed an OCID it hadn't learned whole**
+  (affected: 0.60.0 to 0.63.1). Another compartment's, a dynamic group's
+  or a policy's OCID in what OCI said was shown, though an ARN, a GUID and
+  a long number weren't. Each OCID, a word's character before it or not
+  (`%3Docid1…` in a URL), is said by what it is when the run learned it,
+  and as `[an OCID]` otherwise.
+- **`lapilli preflight` asked Azure of a resource id with `..` in its
+  path** (affected: 0.60.0 to 0.63.1). An alert rule's document naming,
+  in any of its strings, an id such as
+  `/subscriptions/…/resourceGroups/other-rg/providers/x/../../..` had the
+  write identity's permissions asked at what the path led to, another
+  subscription's among them (a read; nothing is written). An id with a `.`
+  or `..` for a part of its path is unknown now, and isn't asked.
+
+### Fixed
+
+- **Judging read every verdict's notes for nothing** (affected: 0.63.0
+  and 0.63.1). Each replay judged by people's verdicts, every backtest,
+  comparison and try among them, read both notes of each verdict of its
+  period, up to 500 characters each, and the firing it was kept by, none
+  of which judging takes. It reads a verdict's parts alone now.
+- **A ConfigMap's item with a nested path wasn't read** (affected: 0.5.0
+  to 0.63.1). Mounted, an item whose `path` is `team/x.yaml` is a link
+  beside `..data` to a directory of the volume's own (`team ->
+  ..data/team`), and `--rules` followed no link to a directory: its rules
+  were left out, and nothing said so. Such a link is followed now, beside
+  a `..data` link alone, to a directory right in the volume's data, each
+  once, however many links lead there.
+- **`lapilli preflight`'s questions of what an identity may write had no
+  time limit of their own** (affected: 0.60.0 to 0.63.1). Each was asked
+  within its caller's 10 seconds; the client gives up after as long
+  itself now.
+- **A `Retry-After` of 0 could loop the recipes' requests to serve**
+  (affected: 0.61.0 to 0.63.1). With `SERVE_RETRY_MIN=0` and
+  `SERVE_POLL=0`, as tests set them, a 429 or 503 with `Retry-After: 0`
+  was asked again at once, as often as `SERVE_WAIT` let. It is waited a
+  second at least now, whatever both say.
+- **`gitea.sh`, the recipes' README and docs/design/backtests.md said
+  Forgejo's runner reads no `::add-mask::`** (0.61.0 to 0.63.1). It does,
+  as act does, and they say so now; the recipe still doesn't send it, as
+  nothing it runs prints the token.
+- **A day's strip drew the firings of a rule judged by nothing as caught
+  nothing** (0.63.0), with no named signal: it read the day's starts
+  apart by rule only for named signals.
+
+### Changed
+
+- **A hidden rule file is read, and a long one refused.** `--rules DIR`,
+  the versions of `--rules-history` and the backtest port read a file with
+  a name in its path beginning with a dot, `..` too, when it holds rules,
+  as Prometheus's glob loads it, and go into a directory so named; one
+  that holds none, or doesn't read, is passed over wherever it is, at the
+  top too, and isn't counted in what is said passed over, so a
+  `.gitignore`, a `.github/` or a version's `.commit` beside the rules
+  breaks and says nothing; one Lapilli's reader refuses is said. Never
+  read are a `.git` directory, and one whose name begins with `..` beside
+  a `..data` link, as a Kubernetes volume keeps a ConfigMap's files. A
+  file past 16 MiB named as rule files are (`.yml`, `.yaml`, `.json`,
+  `.rules`) is refused wherever it is, where one below the top, or
+  hidden, was passed over: one in a `.venv` beside the rules too, when
+  `--rules` names the directory both are in; name the rules' own
+  directory to read them alone. The backtest recipes send hidden files to
+  serve, `..` names among them, but one that isn't UTF-8 text and has no
+  BOM (a `.DS_Store`); one in UTF-16 or UTF-32 is said, as a rule file
+  that isn't UTF-8 text is.
 - **A rule entry's `judged: false` is "Judged by nothing" in English**, on
   the rules list's badge, a rule's page and the Goals page, as the
   settings' table of entries says it: "Not judged" was a capital and a
@@ -182,13 +408,6 @@ API. No schema change: the ledger stays at 026.
   heatmap 1,200 px, as the other languages' do: its headers, single long
   words, are a little smaller. Under 1,280 px the rules list still
   scrolls in its box.
-- The sidebar's Administration has Sources after Settings.
-
-### Fixed
-
-- **A day's strip drew the firings of a rule judged by nothing as caught
-  nothing** (0.63.0), with no named signal: it read the day's starts
-  apart by rule only for named signals.
 
 ## [0.63.1] - 2026-11-20
 

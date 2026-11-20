@@ -13,7 +13,8 @@ import (
 // reads with serve's access, of a Prometheus others share, and is held to
 // one metric a selector: what it reads is what it names. An expression
 // that doesn't read as Selectors reads it is wide as a whole, said as
-// itself.
+// itself; so is a selector with a label's name that doesn't unquote, or
+// __graphite__, which VictoriaMetrics reads as a pattern of names.
 func Wide(expr string) (string, bool) {
 	sels, err := Selectors(expr)
 	if err != nil {
@@ -30,7 +31,14 @@ func Wide(expr string) (string, bool) {
 			if !ok {
 				return sel, true
 			}
-			if l, err := unquoteLabel(label); err || l != "__name__" {
+			// A label's name that doesn't unquote, a history may read
+			// otherwise ("\__name__" is __name__ to MetricsQL); and
+			// __graphite__ is VictoriaMetrics' pattern of names.
+			l, bad := unquoteLabel(label)
+			if bad || l == "__graphite__" {
+				return sel, true
+			}
+			if l != "__name__" {
 				continue
 			}
 			if op != "=" {
@@ -46,6 +54,41 @@ func Wide(expr string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Unnamed says the first thing in a PromQL expression that reads a metric
+// it doesn't name, "" when there is none: info(), which reads target_info
+// beside the series it is given (or the info metrics its second argument
+// matches), to join their labels on. A pull request's rule backtested
+// through lapilli serve reads what it names (Wide), and nothing beside it.
+// The name is read as Prometheus reads a function's, outside strings and
+// comments, before a (, spaces between them or not; MetricsQL's, in any
+// case.
+func Unnamed(expr string) string {
+	t := blankComments(expr)
+	var quote byte
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch {
+		case quote != 0 && c == '\\' && quote != '`':
+			i++
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case isWordByte(c):
+			j := i
+			for j < len(t) && isWordByte(t[j]) {
+				j++
+			}
+			if strings.EqualFold(t[i:j], "info") && nextOf(t, j) == '(' {
+				return "info(...), which reads target_info beside the metric it names"
+			}
+			i = j - 1
+		}
+	}
+	return ""
 }
 
 // unquoteLabel is a label's name as written, bare or quoted (Prometheus
@@ -245,7 +288,11 @@ func reachOf(d time.Duration) string {
 // blankComments is expr with each comment, from a # outside a string to
 // the line's end, written as spaces, so that what is left is where it was
 // and no quote in a comment starts a string: strings read as scopeScan
-// reads them, \ escaping in "..." and '...', nothing in `...`.
+// reads them, \ escaping in "..." and '...', nothing in `...`. A line
+// ends at a \r as at a \n, as Prometheus's lexer ends a comment
+// (isEndOfLine); what follows a \r is read, not passed over. Prometheus
+// reads a comment anywhere outside a string, in a selector's braces and a
+// range's brackets too, and so does this.
 func blankComments(expr string) string {
 	if !strings.Contains(expr, "#") {
 		return expr
@@ -262,7 +309,7 @@ func blankComments(expr string) string {
 		case c == '"' || c == '\'' || c == '`':
 			quote = c
 		case c == '#':
-			for ; i < len(b) && b[i] != '\n'; i++ {
+			for ; i < len(b) && b[i] != '\n' && b[i] != '\r'; i++ {
 				b[i] = ' '
 			}
 		}

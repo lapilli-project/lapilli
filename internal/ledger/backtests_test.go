@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -276,6 +277,14 @@ func TestBacktestKept(t *testing.T) {
 	all, _ := l.Backtests(ctx, 1000)
 	if len(all) != 200 || all[0].ID != "w" || all[len(all)-1].ID != "e006" {
 		t.Fatalf("%d kept, from %s to %s", len(all), all[0].ID, all[len(all)-1].ID)
+	}
+	// Their keys' hashes, by id, the latest asked first, as many as asked.
+	keys, err := l.BacktestKeys(ctx, 3)
+	if err != nil || !maps.Equal(keys, map[string]string{"w": "k-w", "e204": "k-e204", "e203": "k-e203"}) {
+		t.Errorf("the latest keys: %v %v", keys, err)
+	}
+	if keys, err := l.BacktestKeys(ctx, 2048); err != nil || len(keys) != 200 || keys["e006"] != "k-e006" {
+		t.Errorf("the keys of all kept: %d %v", len(keys), err)
 	}
 	// A day on, the ended go; the one waiting and its token's row stay
 	// until theirs.

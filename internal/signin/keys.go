@@ -83,6 +83,11 @@ type Keys struct {
 	// maxRSA, when set, is the most bits an RSA key may have to be taken,
 	// beside MinRSABits, the fewest: a CI's keys (CI).
 	maxRSA int
+	// noKid, when set, is how many keys a token that names none is tried
+	// against at most, the first the set holds: a CI's (CI), whose tokens
+	// name their key, and which anyone may send a token to before anyone
+	// is known. Unset, every key held is tried, as a sign-in's are.
+	noKid int
 
 	mu    sync.Mutex
 	keys  []jose.JSONWebKey
@@ -135,6 +140,9 @@ func (k *Keys) VerifySignature(ctx context.Context, raw string) ([]byte, error) 
 	keys, err := k.keysFor(ctx, kid)
 	if err != nil {
 		return nil, err
+	}
+	if kid == "" && k.noKid > 0 && len(keys) > k.noKid {
+		keys = keys[:k.noKid]
 	}
 	for i := range keys {
 		if kid != "" && keys[i].KeyID != kid {

@@ -1152,10 +1152,11 @@ func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map
 	return out, unknown, nil
 }
 
-// probeStep is how finely the day before is looked through: as often as
+// ProbeStep is how finely the day before is looked through: as often as
 // the rule is evaluated, a minute at most, so a query that returned
 // something for only a minute, between two of a coarser grid, is seen.
-func probeStep(r rules.Rule) time.Duration {
+// The backtest port holds a pull request's rule to the points it makes.
+func ProbeStep(r rules.Rule) time.Duration {
 	if r.Interval <= 0 || r.Interval > time.Minute {
 		return time.Minute
 	}
@@ -1205,7 +1206,7 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 		return false, nil
 	}
 	when := at.Add(-max(r.Graph.Shift[ref], r.Late))
-	q := probe(expr, probeStep(r))
+	q := probe(expr, ProbeStep(r))
 	from := when
 	if r.Logs != "" {
 		// LogQL has no subqueries: the query itself, over the day, at the
@@ -1225,7 +1226,7 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 	var err error
 	pstep := time.Minute
 	if r.Logs != "" {
-		pstep = probeStep(r)
+		pstep = ProbeStep(r)
 	}
 	if a, ok := h.(*asker); ok {
 		series, err = a.probe(ctx, q, from, when, pstep)

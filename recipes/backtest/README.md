@@ -54,8 +54,8 @@ serve](#through-lapilli-serve)). Each also needs:
 And, as wanted:
 
 - `INCIDENTS`, a file of incidents in the repository, read from the commit
-  the pull request goes into, never the pull request's own: a file, not a
-  link, of 8 MiB at most. Or `--incidents` with a file from outside the
+  the pull request goes into, `TARGET` itself, never the pull request's
+  own, nor where it branched from: a file, not a link, of 8 MiB at most. Or `--incidents` with a file from outside the
   checkout, such as one an earlier step wrote from your incident tool
   ([recipes/incidents](../incidents)).
 - `IMPACT`, a PromQL expression that returns something while users are
@@ -70,8 +70,11 @@ And, as wanted:
   `origin`, which needs the checkout's credentials kept. The rules compared
   against are those of the commit `HEAD` and the target share last (`git
   merge-base`): what the pull request itself changes, whether the checkout
-  is a merge or the pull request's own commit. Each script defaults it from
-  its CI.
+  is a merge or the pull request's own commit, and so are the
+  expectations the rules in place are held to. `INCIDENTS` is the
+  target's own, as it is now: a pull request branched from before an
+  incident was written down is judged by it all the same. Each script
+  defaults it from its CI.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
@@ -80,7 +83,11 @@ And, as wanted:
   rules that differ are held to it, the pull request's file for the rules
   it proposes and the commit it goes into's for those in place
   (`--expect`, `--expect-before`), and the comment has a table of what the
-  change broke. A pull request may add the file; one that takes it away is
+  change broke. A pull request is held to the expectations in its own
+  commit: where the job checks out the pull request's own commit, not a
+  merge, a budget the target changed since it branched isn't its until it
+  is rebased; a merge (GitHub's, GitLab's merged results pipelines) holds
+  it to the target's. A pull request may add the file; one that takes it away is
   read as holding none, what it held shown taken away. `FAIL_ON_EXPECTATIONS=true` fails the job when the change breaks
   an expectation the rules in place meet, and `EXPECT_REQUIRED=true` when
   it adds a rule no expectation holds, each once the comment is posted.
@@ -105,7 +112,11 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    commit hasn't is a directory with no rules, so a pull request that adds
    the first rules, or takes the last away, is compared too. A commit with
    a symbolic link where the rules are read (anywhere, with `RENDER`) isn't
-   read: a link could lead to any file the job can read.
+   read: a link could lead to any file the job can read. Nor, on a runner
+   whose file system folds case (macOS's, Windows'), is one with two paths
+   under `PATHS` or `LOKI_PATHS` that differ only in case, or one with
+   files the runner's file system takes as one: one would be written over
+   the other, and its rules never backtested. The job's log names them.
 3. With `RENDER`, runs `RENDER_PREPARE`, then `RENDER`, in each commit's
    files, the base's first, and takes what `RENDER` writes as that commit's
    rules.
@@ -199,8 +210,14 @@ backtest-rules:
 In a merge request pipeline the script takes the merge request, its
 project (`CI_MERGE_REQUEST_PROJECT_ID`) and the API from GitLab's
 variables, and the target from `CI_MERGE_REQUEST_TARGET_BRANCH_SHA` (merged
-results) or `CI_MERGE_REQUEST_DIFF_BASE_SHA`; `GIT_DEPTH: 0` fetches the
-history they are in.
+results) or else the target branch, `CI_MERGE_REQUEST_TARGET_BRANCH_NAME`,
+which it fetches from `origin` with the job's own credentials, as a
+GitLab job's clone keeps them; `GIT_DEPTH: 0` fetches the history they
+are in. The rules are compared from where the two parted either way, and
+`INCIDENTS` is read from the target as it is. A target branch whose name
+holds more than letters, digits and `. _ / -` leaves the merge base
+(`CI_MERGE_REQUEST_DIFF_BASE_SHA`), `INCIDENTS` read from it, the job's
+log saying so.
 
 ### Bitbucket Pipelines
 
@@ -463,8 +480,8 @@ has none, a plain token. One of:
   `LAPILLI_SERVE` (without a trailing slash): the port's URL is one no
   other service takes. In GitHub Actions, `github.sh` masks the token in
   the job's log (`::add-mask::`, on stdout) as soon as it has it, as
-  `core.getIDToken` does; `gitea.sh` doesn't, as Forgejo documents no such
-  command.
+  `core.getIDToken` does; `gitea.sh` doesn't, though Forgejo's runner reads
+  the command as GitHub's does: nothing the recipe runs prints the token.
 
 By CI:
 
@@ -546,9 +563,14 @@ By CI:
 **What is sent**, as `POST /v1/backtests`, a JSON body jq writes: each
 commit's files, as `--rules` would read them, named by their path under
 what `PATHS` names (`alerts/team/api.yaml` as `team/api.yaml`, a file
-`PATHS` names by its own name, what `RENDER` wrote as `rules.yaml`), those
-whose names begin with a dot passed over, as `--rules` passes them over;
-the expectations, the pull request's and the commit it goes into's (a
+`PATHS` names by its own name, what `RENDER` wrote as `rules.yaml`); hidden
+ones too (a name in the path beginning with a dot), as Prometheus's
+`rule_files` glob loads `alerts/.page.yaml` and `alerts/..page.yaml` and
+`--rules` reads one that holds rules, serve passing over those that hold
+none, but one that isn't UTF-8 text and has no BOM (a `.DS_Store`), and
+none under a `.git` directory; one in UTF-16 or UTF-32, its BOM first,
+which Prometheus reads as rules, is said as a file that isn't UTF-8 text
+is; the expectations, the pull request's and the commit it goes into's (a
 file of no bytes is sent, as `""`, as `--expect` takes one; a commit
 without the file sends none); the days `--since` gives; `--tz` and `--rules-select`; the pull request's
 number and the commit checked out. Its files are sent as text, so a rule
@@ -578,7 +600,8 @@ requests to the history it has asked, when that changes and every 30
 seconds. When serve says to wait (`Retry-After`: a full queue, the entry's
 hour, serve not ready yet), it waits so long, 5 minutes at most, and 5
 seconds at least, or `SERVE_POLL` if longer, so that a `Retry-After` of 0
-isn't a loop of requests (`SERVE_RETRY_MIN`, for tests, lowers the 5). Past
+isn't a loop of requests (`SERVE_RETRY_MIN`, for tests, lowers the 5, to a
+second at least, whatever it and `SERVE_POLL` say). Past
 `SERVE_WAIT` (`30m`; the action's `serve-wait`), the backtest is cancelled
 (`DELETE`), and the comment says it didn't come back; a job that stops
 first, cancelled say, cancels it as it exits.
