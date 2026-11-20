@@ -399,7 +399,9 @@ Step 2, serve's checks after deploy, as built:
   week under way and a week the runs haven't finished too, as soon as it
   is over; under it, a whole week is met, the week under way (and one past
   the runs' cursor) is so far (`open`), and the week the ledger's first
-  firing fell in, or the rule's first, is not known (`not_whole`). A rule
+  firing fell in, or the rule's first, is not known (`not_whole`), and a
+  week before the ledger's first firing is not known with no number
+  (`not_held`, "–"): no firing held isn't none fired. A rule
   only copied in is known where its source's copies cover it without a
   gap (the ledger's `Coverage` of it, the latest span): a week begun
   before the span began (in a gap, or before the first copy), a week past

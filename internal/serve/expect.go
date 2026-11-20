@@ -58,7 +58,10 @@ const annotationSelector = "annotation " + verdict.BudgetAnnotation
 
 // Why a check is not known, or open.
 const (
-	whyNoHours       = "no_hours"         // a budget while people slept, by hours with no sleep
+	whyNoHours = "no_hours" // a budget while people slept, by hours with no sleep
+	// whyNotHeld is a budget's week before the ledger's first firing: no
+	// firing held isn't none fired, so it has no number (bundle 67).
+	whyNotHeld       = "not_held"
 	whySoFar         = "so_far"           // the week under way, under budget so far
 	whyUnreplayed    = "unreplayed"       // a rule Lapilli can't replay, nor copies in
 	whyNoIncident    = "no_incident"      // a catch of an incident not written down
@@ -942,6 +945,8 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 				c.Result, c.Why = ledger.ExpectUnknown, whyNotCopied
 			case w == this || upTo.Before(wTo):
 				c.Result, c.Why = ledger.ExpectOpen, whySoFar
+			case firstFiring.IsZero() || !firstFiring.Before(wTo):
+				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyNotHeld, nil, "–"
 			case !whole:
 				c.Result, c.Why = ledger.ExpectUnknown, whyNotWhole
 			default:

@@ -2758,5 +2758,6 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, had no incident written down to judge them by, or were judged by nothing.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada, sin ningún incidente registrado con el que juzgarlos, o fuera del juicio.",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada, o fuera del juicio.",
  "%d caught nothing, %d judged by nothing, %d excused": "%d no detectaron nada, %d fuera del juicio, %d eximidos",
- "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "%d disparos, %d detectaron algo, %d no detectaron nada, %d fuera del juicio, %d eximidos"
+ "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "%d disparos, %d detectaron algo, %d no detectaron nada, %d fuera del juicio, %d eximidos",
+ "a week before the ledger's first firing": "una semana anterior al primer disparo del registro"
 }
