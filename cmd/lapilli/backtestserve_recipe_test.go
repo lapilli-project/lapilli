@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
@@ -853,19 +854,22 @@ const pageEveryone = `groups:
 
 // A rule file whose name, or a directory's in its path, begins with a dot
 // is one Prometheus's rule_files glob loads (alerts/*.yaml reads
-// alerts/.page.yaml, alerts/*/*.yaml alerts/.d/page.yaml): backtested as any
-// other, its rule held to the expectations, and the job failing as for a
-// file without a dot, in either mode. In serve mode it is sent; a hidden
-// file that isn't UTF-8 text, a .DS_Store, isn't, nor is one under a name
-// beginning with .., a ConfigMap volume's own, and neither is trouble.
+// alerts/.page.yaml and alerts/..page.yaml, alerts/*/*.yaml
+// alerts/.d/page.yaml and alerts/..d/page.yaml), and yaml.v3 reads one in
+// UTF-16 with its BOM: backtested as any other, its rule held to the
+// expectations, and the job failing as for a file without a dot, in
+// either mode. In serve mode each is sent, but one in UTF-16, which is
+// trouble, as any rule file that isn't UTF-8 text; a hidden file that
+// isn't text and has no BOM, a .DS_Store, isn't sent, and isn't trouble.
 func TestBacktestRecipeHiddenRuleFile(t *testing.T) {
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	base := map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"}
 	gates := []string{"PATHS=alerts", "EXPECT=expect.yaml", "EXPECT_REQUIRED=true", "FAIL_ON_EXPECTATIONS=true", "FAIL_ON_ERROR=true"}
-	for _, path := range []string{"alerts/page.yaml", "alerts/.page.yaml", "alerts/.d/page.yaml"} {
+	for path, content := range map[string]string{"alerts/page.yaml": pageEveryone, "alerts/.page.yaml": pageEveryone, "alerts/..page.yaml": pageEveryone,
+		"alerts/.d/page.yaml": pageEveryone, "alerts/..d/page.yaml": pageEveryone, "alerts/.u16.yaml": utf16LE(pageEveryone)} {
 		repo := newPRRepo(t, base)
-		repo.pullRequest(map[string]string{path: pageEveryone})
+		repo.pullRequest(map[string]string{path: content})
 		rr := newRecipeRun(t, backtestHosts[0], repo)
 		out, err := rr.run(gates, "--prometheus", prom.URL, "--tz", "UTC")
 		if err == nil || rr.host.posts == 0 || !strings.Contains(rr.body(), "PageEveryone") {
@@ -873,19 +877,41 @@ func TestBacktestRecipeHiddenRuleFile(t *testing.T) {
 		}
 	}
 	repo := newPRRepo(t, base)
-	repo.pullRequest(map[string]string{"alerts/.page.yaml": pageEveryone, "alerts/.d/page.yaml": pageEveryone,
+	repo.pullRequest(map[string]string{"alerts/.page.yaml": pageEveryone, "alerts/..page.yaml": pageEveryone, "alerts/.d/page.yaml": pageEveryone,
 		"alerts/.DS_Store": "\x00\x00\x00\x01Bud1\x00\xff\xfe", "alerts/..2026_11_20/shop.yaml": shopRules("1h")})
 	srv := newServeStandIn(t)
 	srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(`{"nothing_changed":false,"changed":0,"added":1,"removed":0,"same":2,"alike":0,"unreplayed":0,"expected":true,"expectations_broken":0,"unexpected":1}`))})
 	sr := serveRun(t, backtestHosts[0], repo, srv)
 	out, _ := sr.run(gates, "--since", "7d")
 	after := sentFiles(t, srv.sent()["after"])
-	if want := []string{".d/page.yaml", ".page.yaml", "shop.yaml"}; !slices.Equal(slices.Sorted(maps.Keys(after)), want) || after[".page.yaml"] != pageEveryone {
+	if want := []string{"..2026_11_20/shop.yaml", "..page.yaml", ".d/page.yaml", ".page.yaml", "shop.yaml"}; !slices.Equal(slices.Sorted(maps.Keys(after)), want) || after["..page.yaml"] != pageEveryone {
 		t.Errorf("sent %v, want %v\n%s", slices.Sorted(maps.Keys(after)), want, out)
 	}
 	if strings.Contains(out, "not UTF-8") {
 		t.Errorf("a hidden file that isn't text was trouble:\n%s", out)
 	}
+	// One in UTF-16, hidden: trouble, nothing sent.
+	repo = newPRRepo(t, base)
+	repo.pullRequest(map[string]string{"alerts/.u16.yaml": utf16LE(strings.ReplaceAll(pageEveryone, "PageEveryone", "PageInUTF16"))})
+	srv = newServeStandIn(t)
+	srv.answers(nil, nil)
+	sr = serveRun(t, backtestHosts[0], repo, srv)
+	out, err := sr.run(gates, "--since", "7d")
+	if posts, _, _ := srv.counts(); err == nil || posts != 0 || !strings.Contains(out, "not UTF-8 text, in the pull request's commit: .u16.yaml") {
+		t.Errorf("a hidden rule file in UTF-16, serve mode: %v, %d POSTs\n%s", err, posts, out)
+	}
+	failure(t, sr.body(), "a rule file in the pull request's commit isn't UTF-8 text, which lapilli serve takes alone: not sent (the job's log says which)")
+}
+
+// utf16LE is s in UTF-16LE with its BOM, which Prometheus's rulefmt
+// (yaml.v3) reads as it reads UTF-8.
+func utf16LE(s string) string {
+	u := utf16.Encode(append([]rune{0xFEFF}, []rune(s)...))
+	b := make([]byte, 0, 2*len(u))
+	for _, c := range u {
+		b = append(b, byte(c), byte(c>>8))
+	}
+	return string(b)
 }
 
 // LAPILLI_SERVE is https, or plain http to this machine or to a Service in

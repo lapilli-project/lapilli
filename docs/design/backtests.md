@@ -961,10 +961,11 @@ Where step 1 does otherwise than the sections above say, or says more:
   under what `PATHS` names, as `--rules` reads a directory (a file it holds
   is the directory's, and what doesn't read in it is said, not passed
   over), and what `RENDER` wrote as `rules.yaml`. Hidden files (a name in
-  the path beginning with a dot) are sent too, since 0.63.1, as
+  the path beginning with a dot, `..` too) are sent too, since 0.63.2, as
   Prometheus's `rule_files` glob loads them and `--rules` reads one that
-  holds rules: one that isn't UTF-8 text isn't, nor any under a name
-  beginning with `..` or a `.git` directory. Two of `PATHS`
+  holds rules: one that isn't UTF-8 text and has no BOM isn't, nor any
+  under a `.git` directory; one in UTF-16 or UTF-32, its BOM first, is
+  said, as Prometheus reads it. Two of `PATHS`
   holding a file of one name, a file that isn't UTF-8 text, and a body past
   4 MiB are said in the comment before anything is sent. `--since` is
   taken in whole days, `1d` to `14d`; every argument but it, `--tz` and

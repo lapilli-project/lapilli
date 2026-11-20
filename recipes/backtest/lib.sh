@@ -1261,12 +1261,15 @@ text() { jq -Rsj . "$1" | cmp -s - "$1"; }
 # reads a directory (a file it holds is the directory's, one below it a
 # directory's below), a file PATHS names by its own name, and what RENDER
 # wrote as rules.yaml. Hidden ones too, a name in their path beginning with
-# a dot, as Prometheus's rule_files glob loads alerts/.page.yaml and --rules
-# reads one holding rules: serve passes over those holding none. One that
-# isn't UTF-8 text, such as a .DS_Store, is no rule file, and isn't sent.
-# Never sent, as --rules never reads them: names beginning with .., a
-# ConfigMap volume's own, and a directory named .git. LOKI_PATHS's alike,
-# each with "loki": true, a Loki ruler's. WHAT names the commit.
+# a dot, as Prometheus's rule_files glob loads alerts/.page.yaml and
+# alerts/..page.yaml and --rules reads one holding rules: serve passes over
+# those holding none. A hidden one that isn't UTF-8 text, such as a
+# .DS_Store, is no rule file, and isn't sent; but one in UTF-16 or UTF-32,
+# its BOM first, Prometheus reads as rules, and is said as any file that
+# isn't UTF-8 text is. A directory named .git is never sent; names
+# beginning with .. are, as a commit's files hold no Kubernetes volume's
+# own (the recipe refuses a commit holding a link). LOKI_PATHS's alike, each with
+# "loki": true, a Loki ruler's. WHAT names the commit.
 side() {
   s=$1 what=$2
   : >"$tmp/$s.jsonl"
@@ -1294,14 +1297,21 @@ side() {
     fi
     [ -e "$root" ] || continue
     # shellcheck disable=SC2016
-    if ! find "$root" ! -path "$root" \( -name '..*' -o -type d -name .git \) -prune -o -type f -exec sh -c '
+    if ! find "$root" ! -path "$root" -type d -name .git -prune -o -type f -exec sh -c '
       root=$1 out=$2 loki=$3
       shift 3
       for f; do
         if [ -d "$root" ]; then rel=${f#"$root"/}; else rel=${f##*/}; fi
         if ! jq -Rsj . "$f" | cmp -s - "$f"; then
+          # Hidden, and not text: no rule file, unless its BOM says UTF-16
+          # or UTF-32, which Prometheus reads.
           case /$rel in
-            */.*) continue ;; # hidden, and not text: no rule file
+            */.*)
+              case $(od -An -tx1 -N4 "$f" | tr -d " \n") in
+                fffe* | feff* | 0000feff) ;;
+                *) continue ;;
+              esac
+              ;;
           esac
           printf "%s" "$rel" >"$out.unsent"
           exit 1

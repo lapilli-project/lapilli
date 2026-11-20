@@ -843,7 +843,7 @@ that says so without anything being written (`internal/preflight`,
   What a cloud says is redacted as the run redacts first, so that what it
   knows is said by what it is, then without any other ARN that names an
   account (the pod's own role, another account's), OCID (another
-  compartment's, a dynamic group's, a policy's; since 0.63.1), GUID (an
+  compartment's, a dynamic group's, a policy's; since 0.63.2), GUID (an
   Azure object id), or number of ten digits or more, or written `1234-5678-9012`,
   whatever is beside it but another digit (`acct_123456789012`, a Google
   project's number): a cloud's error names those beside what was asked.

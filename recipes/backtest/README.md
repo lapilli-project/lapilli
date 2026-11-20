@@ -548,11 +548,12 @@ commit's files, as `--rules` would read them, named by their path under
 what `PATHS` names (`alerts/team/api.yaml` as `team/api.yaml`, a file
 `PATHS` names by its own name, what `RENDER` wrote as `rules.yaml`); hidden
 ones too (a name in the path beginning with a dot), as Prometheus's
-`rule_files` glob loads `alerts/.page.yaml` and `--rules` reads one that
-holds rules, serve passing over those that hold none, but one that isn't
-UTF-8 text (a `.DS_Store`), and none under a name beginning with `..` (a
-ConfigMap volume's own) or a `.git` directory, as `--rules` never reads
-them; the expectations, the pull request's and the commit it goes into's (a
+`rule_files` glob loads `alerts/.page.yaml` and `alerts/..page.yaml` and
+`--rules` reads one that holds rules, serve passing over those that hold
+none, but one that isn't UTF-8 text and has no BOM (a `.DS_Store`), and
+none under a `.git` directory; one in UTF-16 or UTF-32, its BOM first,
+which Prometheus reads as rules, is said as a file that isn't UTF-8 text
+is; the expectations, the pull request's and the commit it goes into's (a
 file of no bytes is sent, as `""`, as `--expect` takes one; a commit
 without the file sends none); the days `--since` gives; `--tz` and `--rules-select`; the pull request's
 number and the commit checked out. Its files are sent as text, so a rule
