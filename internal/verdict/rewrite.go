@@ -14,12 +14,15 @@ import (
 
 // Rewritten is a rewrite's backtest, as its post says it: the rule, the
 // period replayed, its firings and catches as it is and rewritten, and
-// each expectation held.
+// each expectation held. Given says whose expectations they were: the
+// agent's, given with the rewrite (which it may have loosened, or left one
+// out of), not the ones the rule is held to.
 type Rewritten struct {
 	Rule          string
 	From, To      time.Time
 	Fired, Caught [2]int
 	Results       []ExpectResult
+	Given         bool
 }
 
 // RewriteMeets says whether a rewrite may be posted: the rule as it is
@@ -42,17 +45,23 @@ func RewriteMeets(results []ExpectResult, lost []string, before, after *RuleResu
 	return true
 }
 
-// RewriteMarkdown is the post of a rewrite that meets its rule's
-// expectations: marked as an agent's, backtested by Lapilli, with the
-// numbers before and after, and the change as a diff. What comes from the
-// rule or the agent is in code spans and a fenced block a backtick longer
-// than any run of them in it, so it formats, links and mentions nothing.
+// RewriteMarkdown is the post of a rewrite that meets the expectations it
+// was held to: marked as an agent's, backtested by Lapilli, saying whose
+// expectations they were (Lapilli's for the rule, or the agent's own),
+// with the numbers before and after, and the change as a diff. What comes
+// from the rule or the agent is in code spans and a fenced block a
+// backtick longer than any run of them in it, so it formats, links and
+// mentions nothing.
 func RewriteMarkdown(w Rewritten, diff string) string {
 	var b strings.Builder
 	b.WriteString("#### An agent's rewrite of " + md(w.Rule, 200, false) + ", backtested by Lapilli\n\n")
+	held, text := "every expectation Lapilli holds the rule to", "the agent's text"
+	if w.Given {
+		held, text = "every expectation the agent gave with it, which aren't necessarily the ones Lapilli holds the rule to", "the agent's text and expectations"
+	}
 	fmt.Fprintf(&b, "An agent wrote this rewrite, not Lapilli, and not a person. Lapilli replayed it against the metrics' history from %s to %s, beside the rule as it is: "+
-		"it meets every expectation the rule is held to, and loses no incident the rule catches. Review it as you would any change.\n\n",
-		w.From.UTC().Format("2006-01-02 15:04 UTC"), w.To.UTC().Format("2006-01-02 15:04 UTC"))
+		"it meets %s, and loses no incident the rule catches. Review it as you would any change.\n\n",
+		w.From.UTC().Format("2006-01-02 15:04 UTC"), w.To.UTC().Format("2006-01-02 15:04 UTC"), held)
 	b.WriteString(mdRow([]string{"Held to", "As it is", "Rewritten", ""}) + mdRow([]string{"---", "--:", "--:", "---"}))
 	code := func(s string) string { return md(s, 100, true) }
 	for _, r := range w.Results {
@@ -66,7 +75,7 @@ func RewriteMarkdown(w Rewritten, diff string) string {
 	if diff != "" {
 		b.WriteString(fenced(diff, "diff"))
 	}
-	b.WriteString("\n<sub>Posted from Lapilli's test_expectation: the agent's text, Lapilli's numbers.</sub>\n")
+	b.WriteString("\n<sub>Posted from Lapilli's test_expectation: " + text + ", Lapilli's numbers.</sub>\n")
 	return b.String()
 }
 

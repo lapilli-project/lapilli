@@ -235,3 +235,25 @@ func TestRewriteMarkdown(t *testing.T) {
 		t.Errorf("fences: %q\n%s", fences, got)
 	}
 }
+
+// A rewrite's post says whose expectations it meets: Lapilli's for the
+// rule, or the ones the agent gave with it, which it may have loosened or
+// left one out of, never as though they were the rule's.
+func TestRewriteMarkdownSaysWhose(t *testing.T) {
+	w := Rewritten{Rule: "Errors", Results: []ExpectResult{{What: "budget week", Limit: "10", Before: "41", After: "8", AfterState: ExpectMet}}}
+	own := RewriteMarkdown(w, "")
+	w.Given = true
+	given := RewriteMarkdown(w, "")
+	for _, c := range []struct {
+		post, want, not string
+	}{
+		{own, "it meets every expectation Lapilli holds the rule to,", "the agent gave"},
+		{own, "the agent's text, Lapilli's numbers", "text and expectations"},
+		{given, "it meets every expectation the agent gave with it, which aren't necessarily the ones Lapilli holds the rule to,", "the rule is held to"},
+		{given, "the agent's text and expectations, Lapilli's numbers", "\x00"},
+	} {
+		if !strings.Contains(c.post, c.want) || strings.Contains(c.post, c.not) {
+			t.Errorf("want %q, not %q, in\n%s", c.want, c.not, c.post)
+		}
+	}
+}

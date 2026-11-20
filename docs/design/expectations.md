@@ -543,7 +543,10 @@ Step 3, drafts, as built:
   or couldn't be made, catches nothing, so an incident the rewrite loses
   would go unseen: no post, and the answer's note says which side and
   why. The post says it is an agent's rewrite backtested by Lapilli,
-  gives the period, each expectation as it is and rewritten, the firings
+  whose expectations it meets (serve's own for the rule, or the ones the
+  agent gave, `held_by`, which it may have loosened or left one out of,
+  said as not necessarily the rule's), gives the period, each
+  expectation as it is and rewritten, the firings
   and catches before and after, and the diff, in a fence a backtick
   longer than any run of them in it. Lapilli posts nothing (open question
   5).
