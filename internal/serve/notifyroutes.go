@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -183,11 +184,18 @@ func parseNotify(n *yaml.Node) (*notifyConf, error) {
 				return badAt(v, "templates are a mapping of a destination's name to its template")
 			}
 			c.Templates, c.TemplateLines = map[string]*noticeTemplate{}, map[string]int{}
+			seen := map[string]int{}
 			for i := 0; i+1 < len(v.Content); i += 2 {
 				k, x := v.Content[i], v.Content[i+1]
 				if k.Kind != yaml.ScalarNode || !validDestName(k.Value) {
 					return badAt(k, "%q isn't a destination's name: want webhook, slack, team:NAME, or lowercase letters, digits and . _ -", k.Value)
 				}
+				// Given twice, refused as any key is (each), not the last
+				// one read kept unsaid.
+				if line, ok := seen[k.Value]; ok {
+					return badAt(k, "%s is given twice, on line %d too", k.Value, line)
+				}
+				seen[k.Value] = k.Line
 				if x.Kind != yaml.ScalarNode || null(x) {
 					return badAt(x, "the template for %s is a text", k.Value)
 				}
@@ -303,26 +311,45 @@ func kindIs(kind, named string) bool {
 	return kind == named
 }
 
-// notifyIn is what a --config file's notify: declares, nil for none: of a
-// file ParseConfig took.
+// notifyIn is what a --config file's notify: declares, nil for none: read
+// on its own, as each replica routes by it, so that what is wrong elsewhere
+// in the file (a window, a team), which the leader says and keeps the
+// ledger from, leaves the routes as they are declared. The file is to be
+// YAML, not empty (as a file cut short would take the routes away, as
+// ParseConfig refuses it), and notify: given once.
 func notifyIn(b []byte) (*notifyConf, error) {
 	var doc yaml.Node
-	if err := yaml.NewDecoder(bytes.NewReader(b)).Decode(&doc); err != nil {
+	empty := bad("the file declares nothing: an empty file would take away all it declared; to declare nothing, give teams: []")
+	if err := yaml.NewDecoder(bytes.NewReader(b)).Decode(&doc); errors.Is(err, io.EOF) {
+		return nil, empty
+	} else if err != nil {
 		return nil, bad("the file isn't YAML: %s", strings.TrimPrefix(err.Error(), "yaml: "))
 	}
 	root := &doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
 		root = root.Content[0]
 	}
+	if null(root) {
+		return nil, empty
+	}
 	if root.Kind != yaml.MappingNode {
 		return nil, nil
 	}
+	at := -1
 	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "notify" {
-			return parseNotify(root.Content[i+1])
+		k := root.Content[i]
+		if k.Kind != yaml.ScalarNode || k.Value != "notify" {
+			continue
 		}
+		if at >= 0 {
+			return nil, badAt(k, "%s is given twice, on line %d too", k.Value, root.Content[at].Line)
+		}
+		at = i
 	}
-	return nil, nil
+	if at < 0 {
+		return nil, nil
+	}
+	return parseNotify(root.Content[at+1])
 }
 
 // declaresNotify says a file that can't be used declares notify:, as far
@@ -338,11 +365,11 @@ func declaresNotify(b []byte) bool {
 
 // destination is a place a route can send to: its name, its row's in the
 // outbox, whether it takes JSON (a webhook) or a line (Slack's way), the
-// file holding its URL, the one holding its signing key, and the flag that
-// gave it, which its errors say.
+// file holding its URL, the one holding its signing key, and the flags that
+// gave them, which their errors say.
 type destination struct {
-	Name, Value, File, Secret, Flag string
-	JSON                            bool
+	Name, Value, File, Secret, Flag, SecretFlag string
+	JSON                                        bool
 }
 
 // destination is the one a name names; ok false for one the flags don't
@@ -352,14 +379,16 @@ func (s *Server) destination(name string) (destination, bool) {
 	d := destination{Name: name, Value: s.destValue(name)}
 	switch {
 	case name == "webhook":
-		d.JSON, d.File, d.Secret, d.Flag = true, c.NotifyWebhook, c.NotifyWebhookSecret, "--notify-webhook-file"
+		d.JSON, d.File, d.Flag = true, c.NotifyWebhook, "--notify-webhook-file"
+		d.Secret, d.SecretFlag = c.NotifyWebhookSecret, "--notify-webhook-secret-file"
 	case name == "slack":
 		d.File, d.Flag = c.Slack, "--slack-webhook-file"
 	case strings.HasPrefix(name, "team:"):
 		team := strings.TrimPrefix(name, "team:")
 		d.File, d.Flag = c.TeamDigests[team], "--team-digest "+team
 	case c.WebhookDests[name] != "":
-		d.JSON, d.File, d.Secret, d.Flag = true, c.WebhookDests[name], c.WebhookDestSecrets[name], "--webhook-dest "+name
+		d.JSON, d.File, d.Flag = true, c.WebhookDests[name], "--webhook-dest "+name
+		d.Secret, d.SecretFlag = c.WebhookDestSecrets[name], "--webhook-dest-secret "+name
 	default:
 		d.File, d.Flag = c.ReportDests[name], "--report-dest "+name
 	}
@@ -413,34 +442,40 @@ func (s *Server) routedDests() []string {
 	return out
 }
 
-// checkNotify refuses routes that name a destination the flags don't
-// give, at its line.
-func (s *Server) checkNotify(c *notifyConf) error {
+// unknownDests are the destinations routes name that this replica's flags
+// don't give, each once, at the first line naming it, in the file's order:
+// the flags are each replica's own. They are left out here, and the routes
+// kept: a route left with none still takes what it takes, which goes to
+// the default's (route).
+func (s *Server) unknownDests(c *notifyConf) []error {
 	if c == nil {
 		return nil
 	}
-	check := func(line int, names []string) error {
+	var out []error
+	first := map[string]int{}
+	check := func(line int, names []string) {
 		for _, name := range names {
-			if _, ok := s.destination(name); !ok {
-				return configError{line, "there is no destination called %q: --notify-webhook-file names webhook, --slack-webhook-file slack, --team-digest team:NAME, and --webhook-dest and --report-dest the rest", []any{name}}
+			if _, ok := s.destination(name); ok {
+				continue
 			}
+			if at, ok := first[name]; ok && at <= line {
+				continue
+			}
+			first[name] = line
 		}
-		return nil
 	}
 	for _, r := range c.Routes {
-		if err := check(r.ToLine, r.To); err != nil {
-			return err
-		}
+		check(r.ToLine, r.To)
 	}
-	if err := check(c.DefaultLine, c.Default); err != nil {
-		return err
-	}
+	check(c.DefaultLine, c.Default)
 	for _, name := range slices.Sorted(maps.Keys(c.Templates)) {
-		if err := check(c.TemplateLines[name], []string{name}); err != nil {
-			return err
-		}
+		check(c.TemplateLines[name], []string{name})
 	}
-	return nil
+	names := slices.SortedFunc(maps.Keys(first), func(a, b string) int { return cmp.Or(first[a]-first[b], strings.Compare(a, b)) })
+	for _, name := range names {
+		out = append(out, configError{first[name], "there is no destination called %q: --notify-webhook-file names webhook, --slack-webhook-file slack, --team-digest team:NAME, and --webhook-dest and --report-dest the rest", []any{name}})
+	}
+	return out
 }
 
 // subject is what routes and templates read of an event: its kind, the
@@ -501,6 +536,11 @@ type toldOf struct {
 	Source *struct {
 		Name string `json:"name"`
 	} `json:"source"`
+	// A source serve reads, down or back (source.down, source.back).
+	SourceRead *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"source_read"`
 	// A rule's replay that differs (replay.differs); a team, of a kind
 	// that says one.
 	Rule string `json:"rule"`
@@ -583,6 +623,8 @@ func subjectOf(kind string, about []byte, o *owners) subject {
 		}
 	case x.Source != nil:
 		sub.title = x.Source.Name
+	case x.SourceRead != nil:
+		sub.title, sub.id = x.SourceRead.Name, x.SourceRead.ID
 	case x.Rule != "":
 		rule(x.Rule, false)
 	}
@@ -636,11 +678,13 @@ func (c *notifyConf) match(sub subject) []string {
 }
 
 // routeTable is the routing in force: what notify: declared, in the file
-// with the hash, read at when.
+// with the hash, read at when; and the destinations it names that this
+// replica's flags don't give, each at its line, left out here.
 type routeTable struct {
-	conf *notifyConf
-	hash string
-	at   time.Time
+	conf    *notifyConf
+	hash    string
+	at      time.Time
+	unknown []error
 }
 
 // routingState is what this replica made of notify: last. The routing in
@@ -662,9 +706,40 @@ type routingState struct {
 	unroutedSaid int64
 }
 
+// beforeRoutes are the places what happens was told to before routes: the
+// webhook, and Slack with --notify-slack.
+func (s *Server) beforeRoutes() []string {
+	var out []string
+	if s.cfg.NotifyWebhook != "" {
+		out = append(out, "webhook")
+	}
+	if s.cfg.NotifySlack && s.cfg.Slack != "" {
+		out = append(out, "slack")
+	}
+	return out
+}
+
+// toldTo are the places what happens is told to as it happens now, as
+// what is told once (a task overdue, a source down, a goal missed) asks
+// before it is marked told: with routes in force, every place a route may
+// send to, which they pick among (route); without, the webhook and Slack
+// alone, as before routes, so that nothing is marked told where no notice
+// is written.
+func (s *Server) toldTo() []string {
+	if rt := s.routing.table.Load(); rt != nil && rt.conf.declared() {
+		return s.dests()
+	}
+	return s.beforeRoutes()
+}
+
 // route is the outbox's Router: of the places an event may go, those the
 // routes send it to. It reads the routing in force and the owners last
 // worked out, and nothing else: it is asked in the write that tells.
+//
+// It never sends an event to every place: what no route sends anywhere
+// there is goes to the default's, or else as without routes, to the
+// webhook and Slack; with neither, nowhere, no row written. Each such
+// event is counted.
 func (s *Server) route(event string, about []byte, dests []string) []string {
 	if slices.Contains(ownWay, event) {
 		return dests
@@ -674,22 +749,18 @@ func (s *Server) route(event string, about []byte, dests []string) []string {
 	rt := s.routing.table.Load()
 	if rt == nil || !rt.conf.declared() {
 		if rt == nil && s.routing.broken.Load() {
-			// Routes declared, none read: as without them, or, with no
-			// webhook or Slack to tell, everywhere, never nowhere.
+			// Routes declared, none read: as without them, counted.
 			s.routing.unrouted.Add(1)
-			if len(before) == 0 {
-				return dests
-			}
 		}
 		return before
 	}
+	// The names the flags don't give have no place among dests, and are
+	// left out here: a route left with none sent the event nowhere.
 	got := s.valuesIn(rt.conf.match(subjectOf(event, about, s.ownersNow())), dests)
 	if len(got) == 0 {
-		// No route, not even the default, sent it anywhere there is: to
-		// the default where it can go, or else everywhere.
 		s.routing.unrouted.Add(1)
 		if got = s.valuesIn(rt.conf.Default, dests); len(got) == 0 {
-			got = dests
+			got = before
 		}
 	}
 	return got
@@ -733,11 +804,27 @@ func readNotifyFile(path string) ([]byte, string, error) {
 	return b, hash, nil
 }
 
+// startRoutes reads --config's notify: as serve starts, before anything is
+// told (Run), and, with routes declared, works out the owners they read at
+// once: an event of a team's told in the first seconds goes where that
+// team's route sends it, not where an event of no team's goes.
+func (s *Server) startRoutes(ctx context.Context) {
+	s.loadRoutes(time.Now(), true)
+	if rt := s.routing.table.Load(); rt != nil && rt.conf.declared() {
+		if _, err := s.owners(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("working out the owners routes read", "err", err)
+		}
+	}
+}
+
 // loadRoutes reads --config's notify: and puts it in force: as serve
-// starts (first, in Run), at once; after, once the same file has been read twice
-// in a row, configEvery apart, as the leader keeps the ledger to it. A
-// file that can't be used, as a whole or for its notify:, leaves the
-// routing in force, and is said.
+// starts (first, in Run), at once; after, once the same file has been read
+// twice in a row, configEvery apart, as the leader keeps the ledger to it.
+// notify: is read on its own (notifyIn): what is wrong elsewhere in the
+// file leaves the routes be. A notify: that can't be read leaves the
+// routing in force, and is said; at the start, what happens is told as
+// without routes. A destination this replica's flags don't give is left
+// out, and said, and the routes kept.
 func (s *Server) loadRoutes(now time.Time, first bool) {
 	if s.cfg.Config == "" {
 		return
@@ -758,11 +845,7 @@ func (s *Server) loadRoutes(now time.Time, first bool) {
 	}
 	var c *notifyConf
 	if err == nil {
-		if _, err = ParseConfig(b, s.cfg.Loc); err == nil {
-			if c, err = notifyIn(b); err == nil {
-				err = s.checkNotify(c)
-			}
-		}
+		c, err = notifyIn(b)
 	}
 	if err != nil {
 		if hash != st.errHash {
@@ -782,11 +865,20 @@ func (s *Server) loadRoutes(now time.Time, first bool) {
 		}
 		return
 	}
-	st.table.Store(&routeTable{conf: c, hash: hash, at: now})
+	unknown := s.unknownDests(c)
+	st.table.Store(&routeTable{conf: c, hash: hash, at: now, unknown: unknown})
 	st.applied, st.pending = hash, ""
 	st.broken.Store(false)
 	if c.declared() {
 		s.log.Info("routes in force", "file", s.cfg.Config, "routes", len(c.Routes), "default", strings.Join(c.Default, ","))
+	}
+	if len(unknown) > 0 {
+		said := make([]string, len(unknown))
+		for i, e := range unknown {
+			said[i] = configText("en", e)
+		}
+		s.log.Warn("--config's notify: names destinations this replica's flags don't give: left out here, the routes kept",
+			"file", s.cfg.Config, "err", strings.Join(said, "; "))
 	}
 }
 
@@ -809,7 +901,8 @@ func (s *Server) watchRoutes(ctx context.Context) {
 			}
 		}
 		if n := s.routing.unrouted.Load(); n > s.routing.unroutedSaid {
-			s.log.Warn("events went where no route sent them: as without routes, or everywhere", "events", n-s.routing.unroutedSaid, "since start", n)
+			s.log.Warn("events went where no route sent them: to the default, or as without routes, or, with nowhere to go, nowhere",
+				"events", n-s.routing.unroutedSaid, "since start", n)
 			s.routing.unroutedSaid = n
 		}
 	}
@@ -865,7 +958,7 @@ func (s *Server) sendRouted(ctx context.Context, x ledger.Notice, n notice, link
 		if err != nil {
 			return err
 		}
-		return report.WebhookFrom(ctx, d.File, d.Flag, b, id, d.Secret, s.wall())
+		return report.WebhookFrom(ctx, d.File, d.Flag, b, id, d.Secret, d.SecretFlag, s.wall())
 	}
 	if t != nil {
 		return report.SlackMarkup(ctx, d.File, d.Flag, t.render(f, slackEscape))

@@ -267,17 +267,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
-	if len(s.dests()) > 0 {
-		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
-			s.fail("notifying", err)
-		}
-		if err := s.tellQuiet(ctx); err != nil {
-			s.fail("notifying", err)
-		}
-		if err := s.tellSources(ctx); err != nil {
-			s.fail("notifying", err)
-		}
-	}
+	s.tellDue(ctx)
 	// While the runs wait (--guard, --catch-up-hours, a 429 yielded to),
 	// what reads the history waits with them, for a later round: reviews
 	// of changes, the digest and what follows it, backtests again, and
@@ -2557,4 +2547,23 @@ func (s *Server) tasksLine(ctx context.Context, from, to time.Time, team int64) 
 		return "", err
 	}
 	return tr(s.cfg.Lang, "Tasks: %d open, %d overdue, %d done in the week.", open, late, done), nil
+}
+
+// tellDue tells what is told once as the leader comes round to it: tasks
+// gone overdue, sources quiet, down or back. With nowhere to tell it
+// (toldTo), nothing is looked at, so that none of it is marked told with
+// no notice written.
+func (s *Server) tellDue(ctx context.Context) {
+	if len(s.toldTo()) == 0 {
+		return
+	}
+	if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
+		s.fail("notifying", err)
+	}
+	if err := s.tellQuiet(ctx); err != nil {
+		s.fail("notifying", err)
+	}
+	if err := s.tellSources(ctx); err != nil {
+		s.fail("notifying", err)
+	}
 }

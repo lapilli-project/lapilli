@@ -577,7 +577,7 @@ func (d dayHistory) labelled(known []rules.Rule, replayed []firing.Firing) []fir
 // fired over the seven days to the midnight to, once a week at most while
 // it does.
 func (s *Server) tellDiffers(ctx context.Context, to time.Time) error {
-	dests := s.dests()
+	dests := s.toldTo()
 	if len(dests) == 0 {
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 )
 
 // Routes (docs/design/notifications.md, "Who is told what"): which of the
@@ -87,4 +88,45 @@ func (l *Ledger) LastError(ctx context.Context, dest string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// maxPlaces is how many of the outbox's places UnsentPlaces looks through
+// at most: a place is a destination's name, which the flags give, a few
+// dozen at most.
+const maxPlaces = 1000
+
+// UnsentPlaces are the outbox's places whose names begin with prefix that
+// hold a notice unsent, waiting or given up on, by name: those of a
+// destination the flags may no longer give. Read a place at a time by the
+// outbox's index on its place, the next name after the last and whether
+// it has one unsent, never row by row, so that what is read is bounded by
+// how many places there are, however many notices each holds. In the
+// database's order of names, the prefix looked at in each.
+func (l *Ledger) UnsentPlaces(ctx context.Context, prefix string) ([]string, error) {
+	var out []string
+	after := ""
+	for range maxPlaces {
+		var dest string
+		err := l.r.QueryRowContext(ctx, "SELECT dest FROM outbox WHERE dest > ? ORDER BY dest LIMIT 1", after).Scan(&dest)
+		if errors.Is(err, sql.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		after = dest
+		if !strings.HasPrefix(dest, prefix) {
+			continue
+		}
+		var one int
+		err = l.r.QueryRowContext(ctx, "SELECT 1 FROM outbox WHERE dest = ? AND sent_at IS NULL LIMIT 1", dest).Scan(&one)
+		switch {
+		case err == nil:
+			out = append(out, dest)
+		case !errors.Is(err, sql.ErrNoRows):
+			return nil, err
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }

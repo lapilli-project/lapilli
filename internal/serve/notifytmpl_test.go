@@ -3,9 +3,12 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/ledger"
@@ -54,6 +57,34 @@ func TestTemplateEscapes(t *testing.T) {
 	}
 	if len(back) != 2 || back["text"] != text || !strings.Contains(text, `"}],"x":{"`) || strings.ContainsAny(text, "\n\u2028") {
 		t.Errorf("JSON's text: %q from %s", back["text"], b)
+	}
+}
+
+// Each backquote of a value is a quote: fields side by side, each with a
+// backquote or two, make no code block between them, and the template's
+// own backquotes stay. Unicode's format characters (zero-width ones, bidi
+// overrides and isolates) are left out of every value, Slack's and JSON's,
+// so that none hides a word or shows a title's words in another order.
+func TestTemplateBackquotesAndFormat(t *testing.T) {
+	tp, err := parseTemplate("ops", "{{.Title}}{{.Rule}}{{.Team}} `{{.ID}}`")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tp.render(noticeFields{Title: "a`", Rule: "`", Team: "`b", ID: "c`d"}, slackEscape); got != "a'''b `c'd`" {
+		t.Errorf("backquotes: %q", got)
+	}
+	one, _ := parseTemplate("ops", "{{.Title}}|{{.Rule}}")
+	f := noticeFields{Title: "refunds\u202egnirotinom\u202c slow\u200b\u2066x\u2069\ufeff", Rule: "Pay\u200dErrors\u00ad"}
+	for name, esc := range map[string]func(string) string{"slack": slackEscape, "json": jsonEscape} {
+		got := one.render(f, esc)
+		if got != "refundsgnirotinom slowx|PayErrors" {
+			t.Errorf("%s: %q", name, got)
+		}
+		for _, r := range got {
+			if unicode.Is(unicode.Cf, r) {
+				t.Errorf("%s holds %U", name, r)
+			}
+		}
 	}
 }
 
@@ -146,6 +177,45 @@ func TestRoutedSendByRow(t *testing.T) {
 	}
 	if n := len(hs.ops.all()); n != 1 {
 		t.Errorf("ops posted %d times", n)
+	}
+}
+
+// A --webhook-dest whose key can't be used fails, posting nothing, and
+// says the flag that gave the key, not --notify-webhook-secret-file.
+func TestWebhookDestKeyNamed(t *testing.T) {
+	ctx := context.Background()
+	short := filepath.Join(t.TempDir(), "short")
+	os.WriteFile(short, []byte("too short"), 0o600)
+	s, hs, _ := routedServer(t, "notify:\n  default: [payments-hook]\n", func(c *Config) {
+		c.WebhookDestSecrets["payments-hook"] = short
+	})
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.sendDue(ctx, "route:payments-hook", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	why, err := s.l.LastError(ctx, "route:payments-hook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(why, "--webhook-dest-secret payments-hook: want a key of 32 bytes at least") || strings.Contains(why, "too short") {
+		t.Errorf("said: %q", why)
+	}
+	if n := len(hs.payments.all()); n != 0 {
+		t.Errorf("posted %d times unsigned", n)
+	}
+}
+
+// A source down or back is told by its name: a template's {{.Title}}.
+func TestSourceNoticeTitled(t *testing.T) {
+	s, _, _ := routedServer(t, "teams: []\n", nil)
+	for _, kind := range []string{"source.down", "source.back"} {
+		about := []byte(`{"event": "` + kind + `", "source_read": {"id": "prometheus", "kind": "prometheus", "name": "prometheus-main", "state": "error"}}`)
+		f := s.fieldsOf(context.Background(), ledger.Notice{Event: kind, Body: about}, notice{Event: kind}, "")
+		if f.Title != "prometheus-main" || f.ID != "prometheus" {
+			t.Errorf("%s: title %q, id %q", kind, f.Title, f.ID)
+		}
 	}
 }
 

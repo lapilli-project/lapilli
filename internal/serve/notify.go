@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,16 +19,12 @@ import (
 // link to the page; to Slack, as a line of text. It runs apart from the
 // worker, so a slow receiver holds up neither runs nor pages.
 
-// dests are where what happens is told.
+// dests are where what happens may be told: the webhook and Slack, as
+// before routes, and with --config, each place a route may send to, which
+// the routes pick among as each event is written (route). What asks
+// whether to tell at all asks toldTo.
 func (s *Server) dests() []string {
-	var out []string
-	if s.cfg.NotifyWebhook != "" {
-		out = append(out, "webhook")
-	}
-	if s.cfg.NotifySlack && s.cfg.Slack != "" {
-		out = append(out, "slack")
-	}
-	return append(out, s.routedDests()...)
+	return append(s.beforeRoutes(), s.routedDests()...)
 }
 
 // sendsTo are the places the outbox has anything for: where what happens is
@@ -70,11 +67,58 @@ func (s *Server) notify(ctx context.Context) {
 	wg.Wait()
 }
 
+// gonePlaces are the outbox's places of a destination a route named that
+// this replica's flags no longer give, with a notice unsent: no sender
+// starts for them (sendsTo).
+func (s *Server) gonePlaces(ctx context.Context) ([]string, error) {
+	places, err := s.l.UnsentPlaces(ctx, routedPrefix)
+	if err != nil {
+		return nil, err
+	}
+	senders := s.sendsTo()
+	return slices.DeleteFunc(places, func(d string) bool { return slices.Contains(senders, d) }), nil
+}
+
+// sweepGone tries, as the leader, what waits for a destination no flag of
+// this replica's gives any more (gonePlaces): each notice fails, posting
+// nothing (sendRouted), and is tried again later and given up on as any,
+// so that the pages count it, rather than wait unsent and unsaid. A
+// replica that gives it, leading later, sends what is still waiting.
+func (s *Server) sweepGone(ctx context.Context, now time.Time) error {
+	gone, err := s.gonePlaces(ctx)
+	if err != nil {
+		return err
+	}
+	for _, d := range gone {
+		if err := s.sendDue(ctx, d, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// watchGone sweeps what waits for a destination gone (sweepGone) every
+// minute, until ctx is done.
+func (s *Server) watchGone(ctx context.Context) {
+	for {
+		if err := s.sweepGone(ctx, time.Now()); err != nil && ctx.Err() == nil {
+			s.fail("notifying", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+	}
+}
+
 // sendDue sends the notices due to dest at now, the oldest first: the
 // outbox keeps the wall clock's time, not the runs'. At the first that
 // fails, the rest wait for the next round, rather than each wait out a
-// receiver that is down; except teams' and reports', each its own receiver.
+// receiver that is down; except teams' and reports', each its own
+// receiver, and a destination gone, which none is waited out for.
 func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error {
+	each := dest == teamDest || dest == reportDest || !slices.Contains(s.sendsTo(), dest)
 	var due []ledger.Notice
 	if !s.l.Shared() {
 		var err error
@@ -129,7 +173,7 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 			pctx, pcancel := s.posted(ctx)
 			err := s.l.Failed(pctx, n.ID, err.Error())
 			pcancel()
-			if err != nil || (dest != teamDest && dest != reportDest) {
+			if err != nil || !each {
 				return err
 			}
 			continue

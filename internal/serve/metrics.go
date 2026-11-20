@@ -385,7 +385,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(&b, "# HELP lapilli_serve_notices_unsent Notices not sent yet, or given up on.\n# TYPE lapilli_serve_notices_unsent gauge\nlapilli_serve_notices_unsent %d\n", unsent)
 		if s.cfg.Config != "" {
-			fmt.Fprintf(&b, "# HELP lapilli_serve_notices_unrouted_total Events since lapilli serve started that went where no route sent them: routes declared in --config's notify: that couldn't be read, or that sent an event nowhere there is. 0 with routes in force and a default.\n# TYPE lapilli_serve_notices_unrouted_total counter\nlapilli_serve_notices_unrouted_total %d\n", s.routing.unrouted.Load())
+			fmt.Fprintf(&b, "# HELP lapilli_serve_notices_unrouted_total Events since lapilli serve started that went where no route sent them: routes declared in --config's notify: that couldn't be read, or that sent an event nowhere there is; told to the default, or else as without routes, or with neither, not at all, never everywhere. 0 with routes in force, each destination they name given, and a default.\n# TYPE lapilli_serve_notices_unrouted_total counter\nlapilli_serve_notices_unrouted_total %d\n", s.routing.unrouted.Load())
 		}
 		w.Write(b.Bytes())
 	}

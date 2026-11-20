@@ -528,7 +528,7 @@ func toldKey(id string) string { return "source-told." + id }
 // was told back. Firings copied in are told of as source.quiet, as before.
 // What is told of a source's error is what anyone but an admin is shown.
 func (s *Server) tellSources(ctx context.Context) error {
-	dests := s.dests()
+	dests := s.toldTo()
 	if len(dests) == 0 {
 		return nil
 	}

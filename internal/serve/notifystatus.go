@@ -141,14 +141,20 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 	}
 	dests := s.sendsTo()
 	n.Sends = len(dests) > 0
+	// And what waits for a destination no flag gives any more, which fails
+	// and is given up on (sweepGone).
+	gone, err := s.gonePlaces(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// By the wall clock, as the outbox keeps when each notice was made.
-	st, err := s.l.Standing(ctx, dests, time.Now().Add(-24*time.Hour))
+	st, err := s.l.Standing(ctx, slices.Concat(dests, gone), time.Now().Add(-24*time.Hour))
 	if err != nil {
 		return nil, err
 	}
 	n.LastSent, n.Failed, n.Backlog, n.Counted = st.LastSent, st.Failed, st.More, ledger.FailedCounted
 	n.GivenUp, n.GivenUpMore = st.GivenUp, st.GivenUpMore
-	if n.Routes, err = s.routesView(ctx, lang); err != nil {
+	if n.Routes, err = s.routesView(ctx, lang, gone); err != nil {
 		return nil, err
 	}
 	return n, nil

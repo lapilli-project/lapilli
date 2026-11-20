@@ -180,7 +180,7 @@ func (x *sentLine) text(l string) string {
 // copied in from for longer than --source-quiet: the job copying from it
 // may have stopped.
 func (s *Server) tellQuiet(ctx context.Context) error {
-	dests := s.dests()
+	dests := s.toldTo()
 	if len(dests) == 0 || s.cfg.FiringsToken == "" {
 		return nil
 	}
