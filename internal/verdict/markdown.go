@@ -369,6 +369,12 @@ func md(s string, most int, table bool) string {
 	return fence + s + fence
 }
 
+// CodeSpan is text from outside as a Markdown code span, as md makes one:
+// in a table (table), each | escaped so that it can't end the cell, a
+// backslash right before one shown as \u{5c}. For the descriptions serve
+// writes for the change recipes' pull requests.
+func CodeSpan(s string, most int, table bool) string { return md(s, most, table) }
+
 // tablePipes escapes each | of s as \|, a backslash right before one
 // written \u{5c}: in a table, every | of it has exactly one backslash
 // before it.

@@ -608,7 +608,11 @@ Step 3, drafts, as built:
   alone, a tracked, non-executable `*.yml` or `*.yaml` not of a CI system,
   only while its sha256 is that hash, and only as an expectations file,
   one document whose only key is `expectations`, before and after: a
-  Lapilli someone took over can't make them write anything else.
+  Lapilli someone took over can't make them write anything else. The pull
+  request's description gives the rule, the agent's and approver's names
+  and what checking found as code spans, a table's escaped as a pull
+  request comment's are (a backslash before a `|` said `\u{5c}`, so no
+  `|` ends its cell).
   Otherwise accepting keeps the decision, and the tab says it isn't
   applied and gives the YAML: the expectations file with the draft taken
   in, or, for `--config` or none, its entries, to put there by hand.

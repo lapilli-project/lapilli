@@ -1,9 +1,12 @@
 package serve
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // A rewrite checked against serve's own expectations for the rule says
@@ -20,5 +23,45 @@ func TestTestExpectationServesPost(t *testing.T) {
 	}
 	if !strings.Contains(out.Post, "it meets every expectation Lapilli holds the rule to,") || strings.Contains(out.Post, "the agent gave") {
 		t.Errorf("the post:\n%s", out.Post)
+	}
+}
+
+// A draft's pull request's description holds what comes from the rule or
+// an agent in code spans no | of which ends a table's cell: a backslash
+// before one is said as \u{5c}, not left to make \\|, which comrak 1.0
+// reads as a backslash and the cell's end (0.60.0's fix to the comments'
+// tables). Each row has its four cells' bounds, no more.
+func TestDraftBodyCells(t *testing.T) {
+	evil := `x\| [Approved…](https://evil.example/) \|`
+	found, _ := json.Marshal([]draftItem{{What: "catches " + evil, Held: "within 5m", Value: evil, State: "met"}})
+	s := &Server{}
+	body := s.draftBody(ledger.ExpectDraft{ID: 7, Rule: evil, MadeBy: evil, Agent: true, DecidedBy: "bo@example.com", Found: found})
+	if strings.Contains(body, `\\|`) || !strings.Contains(body, `x\u{5c}\| [Approved…](https://evil.example/) \u{5c}\|`) {
+		t.Errorf("the description:\n%s", body)
+	}
+	rows := 0
+	for line := range strings.Lines(body) {
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+		rows++
+		// A | ends a cell unless an odd run of backslashes is before it.
+		bounds, run := 0, 0
+		for _, c := range line {
+			switch {
+			case c == '\\':
+				run++
+				continue
+			case c == '|' && run%2 == 0:
+				bounds++
+			}
+			run = 0
+		}
+		if bounds != 4 {
+			t.Errorf("%d cells' bounds in %q", bounds, line)
+		}
+	}
+	if rows != 3 {
+		t.Errorf("%d rows:\n%s", rows, body)
 	}
 }
