@@ -159,5 +159,5 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 // that asking for it again reads nothing again.
 func freshPage(name string, r *http.Request) bool {
 	q := r.URL.Query()
-	return name == "manage" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == "" && q.Get("signal-try") == "" && q.Get("rules-try") == ""
+	return name == "manage" || name == "sourcelist" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == "" && q.Get("signal-try") == "" && q.Get("rules-try") == ""
 }

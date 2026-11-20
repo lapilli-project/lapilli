@@ -165,6 +165,10 @@ serve:
   settle: 1h     # and replay this much before the last run's end again
   backfill: 28d  # on first start, replay this far back
   keep: 400d     # drop firings older than this
+  # Drop the activity log's changes older than this, never sooner than keep
+  # (--keep-activity): who changed what stays findable after the firings
+  # it was about are gone. Empty for serve's own, 800d; 0 keeps them all.
+  keepActivity: ""
   digest: mon@09:00  # the weekly digest, in timeZone, until an admin sets it in the UI
   # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day
   # at a time once the runs won't replay it again; a rule whose replay

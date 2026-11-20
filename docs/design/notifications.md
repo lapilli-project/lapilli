@@ -536,3 +536,25 @@ and these differences:
   https://docs.oracle.com/en-us/iaas/Content/Monitoring/alarm-message-format.htm,
   https://docs.oracle.com/en-us/iaas/Content/Monitoring/Concepts/monitoringoverview.htm,
   https://docs.oracle.com/en-us/iaas/Content/Monitoring/alarm-message-examples.htm
+
+## What Lapilli tells of its own sources (bundle 25)
+
+The other way round: what the outbox sends the webhook and Slack when a
+source `serve` reads goes down, and when it is back. Two kinds, beside
+`source.quiet` (firings copied in), `task.*`, `proposal.*`, `change.*` and
+the rest:
+
+| Kind | When | Its `source_read` |
+|---|---|---|
+| `source.down` | three reads in a row failed (the rules, a cloud's alarms, Loki's rules, Prometheus as the runs ask it, the deploys and marked files), or failing, or quiet, past its bound (the incidents file, the impact signals, an on-call feed, what a job writes through the incidents port); once while it stays down, and no sooner than an hour after it was told back | `id`, `kind`, `name`, `from` (its flag), `state` (`failing` or `quiet`), `last_ok`, `failures` (the reads in a row, -1 where not counted), `error` |
+| `source.back` | read well for 15 minutes since its last failure, once it was told down | the same, `state` `ok` |
+
+The `error` is what anyone but an admin reads on the Sources page: without
+the paths of `serve`'s files, nor why the ledger's database can't be
+reached, nor what may be a credential. Its page (`url`) is `/sources`.
+Slack's line says the source's name and flag, and, down, the reads that
+failed and why, or since when nothing was read; in `--lang`'s language.
+What was told is kept in `meta` (`source-told.ID`), so neither is told
+twice across restarts and leaders. Firings copied in stay `source.quiet`'s
+alone. The design and its bounds are in
+[serveops.md](serveops.md#down-and-back).

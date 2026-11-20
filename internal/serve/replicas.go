@@ -234,6 +234,8 @@ type sharedStatus struct {
 	// Goals is what the leader worked out of the goals after its last
 	// round (docs/design/goals.md), in brief: the rest is in the ledger.
 	Goals *goalsBrief `json:"goals,omitempty"`
+	// Reads are how the leader's reads of each source went (sourcelist.go).
+	Reads map[string]sourceRead `json:"reads,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -255,6 +257,7 @@ func (s *Server) ownStatus() sharedStatus {
 	st.Config = s.configShown()
 	st.Sources = s.sourcesNow()
 	st.Goals = s.goalsBriefNow()
+	st.Reads = s.readsNow()
 	return st
 }
 

@@ -183,7 +183,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		}
 	}
 	if s.cfg.Deploys != "" {
-		if err := s.syncDeploys(ctx, o); err != nil {
+		began := time.Now()
+		err := s.syncDeploys(ctx, o)
+		s.noteRead("deploys-file", began, -1, err)
+		if err != nil {
 			s.fail("deploys", err)
 		} else {
 			s.status.Lock()
@@ -205,7 +208,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// The marked file, as the deploys file; the expressions (--mark) read
 	// again over the last four weeks once their key is new.
 	if s.cfg.Marked != "" {
-		if err := s.syncMarked(ctx, o); err != nil {
+		began := time.Now()
+		err := s.syncMarked(ctx, o)
+		s.noteRead("marked-file", began, -1, err)
+		if err != nil {
 			s.fail("marked windows", err)
 		} else {
 			s.status.Lock()
@@ -266,6 +272,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("notifying", err)
 		}
 		if err := s.tellQuiet(ctx); err != nil {
+			s.fail("notifying", err)
+		}
+		if err := s.tellSources(ctx); err != nil {
 			s.fail("notifying", err)
 		}
 	}
@@ -952,6 +961,11 @@ func (s *Server) watch(ctx context.Context, raw string) {
 		if err := s.look(ctx, &raw); err != nil {
 			s.fail("reading the rules", err)
 		}
+		// A source of rules down, or back, told of as it is read, not
+		// at the next run.
+		if err := s.tellSources(ctx); err != nil {
+			s.fail("notifying", err)
+		}
 	}
 }
 
@@ -1276,6 +1290,10 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	var rs []rules.Rule
 	var docs []rules.Doc
 	var err error
+	// How the read went, for the Sources page and its notices
+	// (sourcelist.go): the rules where they are kept, then each source
+	// read beside them.
+	began, primary := time.Now(), s.cfg.Loaded || s.cfg.Grafana != "" || s.ruler != nil || s.following() || s.cfg.RulesPath != ""
 	switch {
 	case s.cfg.Loaded:
 		var d rules.Doc
@@ -1297,6 +1315,9 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})
 		s.sayPicked("--rules", picked)
 	}
+	if primary {
+		s.noteRead("rules", began, len(rs), err)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1315,11 +1336,13 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 	var rs []rules.Rule
 	var docs []rules.Doc
 	for _, a := range s.alarms {
+		began := time.Now()
 		d, err := a.Docs(ctx, s.alarmsEvery())
-		if err != nil {
-			return nil, nil, err
+		var r []rules.Rule
+		if err == nil {
+			r, err = rules.FromDocs(d)
 		}
-		r, err := rules.FromDocs(d)
+		s.noteRead("alarms/"+a.Source, began, len(r), err)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1327,9 +1350,11 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 	}
 	// A Loki's ruler's rules, beside them, the same way.
 	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant, Limit: s.cfg.LokiLimit}
+	began := time.Now()
 	switch {
 	case s.cfg.LokiLoaded:
 		r, d, err := source.LokiRules(ctx, l, agent, func(what string) { s.log.Warn(what) })
+		s.noteRead("loki", began, len(r), err)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1352,6 +1377,7 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 		rs, docs = append(rs, r...), append(docs, d...)
 	case s.cfg.LokiRules != "":
 		r, d, notes, err := source.LokiFiles(s.cfg.LokiRules)
+		s.noteRead("loki", began, len(r), err)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2517,7 +2543,7 @@ func (s *Server) prune(ctx context.Context) error {
 		return err
 	}
 	s.status.set("pruning")
-	if err := s.l.Prune(ctx, s.now().Add(-s.cfg.Keep)); err != nil {
+	if err := s.l.PruneKeeping(ctx, s.now().Add(-s.cfg.Keep), s.activityBefore()); err != nil {
 		return err
 	}
 	return s.l.SetMeta(ctx, "pruned", today)

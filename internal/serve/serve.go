@@ -165,6 +165,9 @@ type Config struct {
 	// SourceQuiet is how long a source may go without firings copied in
 	// before it is told of; 0 for sourceQuiet.
 	SourceQuiet time.Duration
+	// KeepActivity is how long the activity log is kept, past Keep: 0
+	// keeps it all (docs/design/serveops.md, "The activity log").
+	KeepActivity time.Duration
 	// NotifyListen, when set, is where notifications are taken as alert
 	// managers sent them, and nothing else: with the token in the file
 	// NotifyToken, Grafana's signature with the secret in the file
@@ -388,8 +391,10 @@ type Server struct {
 	settingsTries tries
 	// tried are the criteria a try read in full, lately (triedFor).
 	tried triedCache
-	// sources is what this replica saw of where incidents come from.
+	// sources is what this replica saw of where incidents come from;
+	// reads, how its reads of the rules and the files went (sourcelist.go).
 	sources sourcesState
+	reads   readsState
 	// turns are how each named signal's asks went, that each round shares
 	// --timeout by (inTurn).
 	turns turns

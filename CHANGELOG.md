@@ -2,6 +2,60 @@
 
 ## [Unreleased]
 
+Sources as objects, an audit trail, and the API for daily writes (bundle
+25, docs/design/serveops.md). No schema change: the ledger stays at 026.
+
+### Added
+
+- **The Sources page** (`/sources`, Administration, after Settings): every
+  source serve reads, as Argo CD shows its applications, a row each: the
+  rules where they are kept and what is read beside them (a cloud's
+  alarms, Loki's rules), Prometheus as the runs ask it, the incidents,
+  deploys and marked files, the impact signals, the on-call schedules,
+  incidents and firings jobs copy in. Each says its kind, when it was last
+  read well, its last error (as Run history says a run's: the paths of
+  serve's files to an admin alone), the reads in a row that failed, the
+  rules it gave, how far behind it is and how long its last read took, and
+  a state in the incident sources' words and colours: working, failing,
+  quiet, waiting, and down. A credential in an error or an address (a
+  URL's user and password, a query's token, key or signature, a bearer or
+  basic token) is `***` to everyone, an admin too. The status banner links
+  to it when its failure is a source's read, and Run history does too.
+  `GET /api/v1/sources?all=true` gives the same, never kept; without
+  `all`, the sources firings are copied in from, as before.
+- **`source.down` and `source.back`**, to the webhook and Slack, for every
+  source but firings copied in (which keep `source.quiet`): down once three
+  reads in a row failed, or once it has failed or been quiet past its
+  bound (two runs and more for what the runs read, two days for incidents
+  copied in); back once it has read well for 15 minutes. Told once while
+  down, across restarts and leaders, and down again no sooner than an hour
+  after it was told back, so a source that flaps is told of once. Each
+  carries `source_read`: its id, kind, name, flag, state, last read well,
+  the reads that failed, and its error as anyone but an admin reads it.
+- **The activity log** (`/activity`, from Run history): every change kept,
+  100 a page and on past them, filtered by who, kind (setting, incident,
+  verdict, proposal, task, comment, note, quiet window, marked window,
+  report, team, role, goal, firings, cleanup, other), team (its rules', its
+  tasks', its own) and period, each change's before and after a click
+  away; exported with the same filters by `GET /api/v1/activity`, as JSON
+  or as CSV, whose cells a spreadsheet never takes for a formula (one that
+  starts with `=`, `+`, `-`, `@`, a tab or a carriage return starts with
+  `'`). Who reads Run history reads it; the roles given and taken are an
+  admin's alone, as there.
+- **`--keep-activity DUR`** (`serve.keepActivity`, 800 days unless given;
+  `0` keeps it all): the activity log outlives the firings it is about,
+  never kept less than `--keep`, which a shorter one is refused beside.
+- **`POST /api/v1/incidents/{id}/decide`** and **`POST /api/v1/firings/real`**:
+  an impact window confirmed, dismissed or reopened, and a firing written
+  down as an incident it caught, through the API as their forms do them,
+  an editor's, with the forms' checks (a firing older than 14 days an
+  admin's). Proposing stays a rule's page's and MCP's (behind
+  `--mcp-propose`), and approving the proposal's page's.
+
+### Changed
+
+- The sidebar's Administration has Sources after Settings.
+
 ## [0.63.1] - 2026-11-20
 
 The forms for people's verdicts on firings (0.63.0) on a few lines a row,

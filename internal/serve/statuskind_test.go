@@ -292,7 +292,8 @@ var statusWant = []struct {
 	{regexp.MustCompile(`^✕ As proposed, it misses|^✕ Undone, it misses`), "bad", []string{"/proposals/3"}},
 	{regexp.MustCompile(`^✕ While it was off`), "bad", []string{"@proposal:off"}},
 	{regexp.MustCompile(` worse$|, worse$`), "bad", []string{"/proposals/2"}},
-	{regexp.MustCompile(`^✕ a run: boom$`), "bad", []string{"/"}},
+	// A source's read, the banner linking to the Sources page.
+	{regexp.MustCompile(`^✕ a run: boom Sources$`), "bad", []string{"/"}},
 	// info
 	{regexp.MustCompile(`^● active now$`), "info", []string{"/windows"}},
 	{regexp.MustCompile(`^✎ Proposed$`), "info", []string{"/rules/Errors"}},

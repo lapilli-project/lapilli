@@ -56,6 +56,7 @@
 {{define "runs"}}{{$title := t "Run history"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Firings are in up to %s." (at $loc .Cursor)}}{{with .Took}} {{t "The last run took %s." (dur .)}}{{end}}</p>
+<p class="row"><a href="{{$.Link "/sources"}}">{{t "Sources: how each was last read, and its errors"}}</a> <a href="{{$.Link "/activity"}}">{{t "Activity log"}}</a></p>
 {{with .Config}}{{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
@@ -91,6 +92,7 @@
 <p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+<p><a href="{{$.Link "/activity"}}">{{t "All of the activity log, with filters and export"}}</a></p>
 {{end}}{{template "bottom" .}}{{end}}
 
 {{/* Pull request backtests (docs/design/backtests.md), with

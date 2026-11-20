@@ -1,0 +1,24 @@
+{{/* The activity log (docs/design/serveops.md, "The activity log"):
+every change kept, filtered, a page at a time, and exported. */}}
+{{define "activity"}}{{$title := t "Activity log"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+<h1>{{$title}}</h1>
+<p class="lede">{{t "Every change made through the UI, the API, the config file and by Lapilli itself: who, when, what, and what it was before and after."}} {{if .KeepDays}}{{t "Kept for %d days (--keep-activity)." .KeepDays}}{{else}}{{t "Kept whole."}}{{end}}{{if .RolesHidden}} {{t "The roles given and taken are an admin's to read."}}{{end}}</p>
+<form method="get" action="/activity" class="row" aria-label="{{t "Filters"}}">{{range $.Hidden}}{{if ne .Name "team"}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+  <label>{{t "Who"}} <input name="who" value="{{.Who}}" maxlength="200" autocomplete="off"></label>
+  <label>{{t "Kind"}} <select name="kind"><option value="">{{t "Any kind"}}</option>{{range .Kinds}}<option value="{{.Value}}"{{if eq .Value $.View.Kind}} selected{{end}}>{{tin "activity kind" .Text}}</option>{{end}}</select></label>
+  {{if .Teams}}<label>{{t "Team"}} <select name="team"><option value="">{{t "All teams"}}</option>{{range .Teams}}<option value="{{.}}"{{if eq . $.View.Team}} selected{{end}}>{{.}}</option>{{end}}</select></label>{{end}}
+  <label>{{t "Since"}} <input name="since" type="date" value="{{.Since}}"></label>
+  <label>{{t "Until"}} <input name="until" type="date" value="{{.Until}}"></label>
+  <button>{{t "Show"}}</button>
+  <a href="{{$.Link "/activity"}}">{{t "Clear who, kind and dates"}}</a>
+</form>
+<p class="row">{{t "Export these changes:"}} <a href="{{.CSV}}" download>CSV</a> <a href="{{.JSON}}">JSON</a></p>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Activity log"}}"><table>
+<thead><tr><th scope="col">{{t "When"}}</th><th scope="col">{{t "Who"}}</th><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "What changed"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><td class="t">{{at $loc .At}}</td><td><bdi>{{.By}}</bdi></td><td>{{tin "activity kind" .KindText}}</td>
+<td><bdi>{{.What}}</bdi>{{if or .Before .After}}<details><summary>{{t "Before and after"}}</summary>{{with .Before}}<p class="quiet">{{t "Before"}}</p><pre>{{.}}</pre>{{end}}{{if .BeforeCut}}<p class="quiet">{{t "Cut here: the export has all of it."}}</p>{{end}}{{with .After}}<p class="quiet">{{t "After"}}</p><pre>{{.}}</pre>{{end}}{{if .AfterC}}<p class="quiet">{{t "Cut here: the export has all of it."}}</p>{{end}}</details>{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="quiet">{{t "No change matches these filters."}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if .Cut}}<p class="quiet">{{t "Stopped looking for changes that match here, to answer quickly: the older ones go on from there."}}</p>{{end}}
+<p class="row">{{if .Paged}}<a href="{{$.Link .First}}">{{t "The newest"}}</a>{{end}}{{with .Next}} <a href="{{$.Link .}}">{{t "Older"}}</a>{{end}}</p>
+{{end}}{{template "bottom" .}}{{end}}

@@ -82,6 +82,10 @@ func putSettings(t *txn, values map[string]string, by string, logged bool) error
 	return nil
 }
 
+// pruneChanges is the step of Prune that drops the activity log's changes,
+// by the time PruneKeeping keeps it to.
+const pruneChanges = "DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE at < ? LIMIT 5000)"
+
 // Change is a change made through the UI or API.
 type Change struct {
 	At            time.Time
@@ -251,6 +255,14 @@ func (l *Ledger) JudgeAll(ctx context.Context, o verdict.Options, done func(floa
 // thousand rows at a time, so other writes get their turn, and gives the
 // space back a little at a time.
 func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
+	return l.PruneKeeping(ctx, before, before)
+}
+
+// PruneKeeping is Prune with the activity log (changes) kept apart: its
+// changes made before activity go, none with activity zero
+// (docs/design/serveops.md, "The activity log"). The rest goes before
+// before, as Prune drops it.
+func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) error {
 	at := before.Unix()
 	steps := []string{
 		"DELETE FROM firings WHERE id IN (SELECT id FROM firings WHERE start_at < ? LIMIT 5000)",
@@ -261,7 +273,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM incidents WHERE id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? AND id NOT IN (SELECT incident_id FROM catches) LIMIT 5000)",
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
 		"DELETE FROM results WHERE id IN (SELECT id FROM results WHERE at < ? LIMIT 5000)",
-		"DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE at < ? LIMIT 5000)",
+		pruneChanges,
 		// A window --config declares stays while it does: the file would make
 		// it again, and tell of it, each time.
 		"DELETE FROM windows WHERE id IN (SELECT id FROM windows WHERE declared = 0 AND ((every = '' AND end_at < ?1) OR (every != '' AND until_at < ?1)) LIMIT 5000)",
@@ -286,6 +298,12 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 	}
 	for _, q := range steps {
 		arg := at
+		if q == pruneChanges {
+			if activity.IsZero() {
+				continue // the activity log kept whole
+			}
+			arg = activity.Unix()
+		}
 		for {
 			var n int64
 			err := l.write(ctx, func(t *txn) error {

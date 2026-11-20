@@ -119,6 +119,8 @@ The ledger:
                       most 3650d)
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
+  --keep-activity DUR drop the activity log's changes older than this, never
+                      sooner than --keep (default 800d; 0 keeps them all)
   --watch DUR         read the rules this often (default 1m)
   --alarms-every DUR  read each --alarms this often (default 10m), so the
                       clouds' request quotas hold
@@ -649,7 +651,7 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error) {
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
-		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, Watch: time.Minute,
+		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, KeepActivity: 800 * 24 * time.Hour, Watch: time.Minute,
 		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(),
 	}
 	timeoutSet := false
@@ -892,6 +894,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			}
 		case "--keep":
 			cfg.Keep, err = dur(0)
+		case "--keep-activity":
+			cfg.KeepActivity, err = dur(0)
 		case "--watch":
 			cfg.Watch, err = dur(10 * time.Second)
 		case "--alarms-every":
@@ -1138,6 +1142,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--alarms-every is how often --alarms is read: give --alarms")
 	case cfg.Keep > 0 && cfg.Keep < cfg.Backfill:
 		err = fmt.Errorf("--keep %s is shorter than --backfill %s", time.Duration(cfg.Keep), time.Duration(cfg.Backfill))
+	case cfg.Keep > 0 && cfg.KeepActivity > 0 && cfg.KeepActivity < cfg.Keep:
+		err = fmt.Errorf("--keep-activity %s is shorter than --keep %s: the activity log is kept as long as the firings at least", time.Duration(cfg.KeepActivity), time.Duration(cfg.Keep))
 	case cfg.EveryoneAdmin && (len(cfg.Editors) > 0 || len(cfg.Admins) > 0):
 		err = fmt.Errorf("--everyone-admin is for no roles: with --editors or --admins, they say who may change what")
 	case cfg.EveryoneAdmin && cfg.ReadOnly:
