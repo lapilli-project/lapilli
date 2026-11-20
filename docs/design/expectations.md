@@ -1,6 +1,6 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: accepted; steps 1 to 4 built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; steps 1 to 5 built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, and a backtest that can fail a
 pull request, so it was designed first, as a pull request (#81); it was
 merged on 2026-11-16, before its week was out, by the maintainer's
@@ -195,14 +195,20 @@ runs is the agent's, as which cloud a rule runs on is the rule's. An agent's
 drafts count toward the person's hourly limit, as its proposals do, and an
 agent can't accept its own draft ([0.38.0](../../CHANGELOG.md)).
 
-## Adding a rule, later
+## Adding a rule
 
 Proposals change rules that exist: a `for`, a threshold, turning one off,
 deleting it, what it says, undoing a change. A rule added, held to its
 expectations before it is approved, is the step after this one. It needs a
 place to go (a file, a group, a folder, a cloud's alarms), which the person
 proposing it gives, and then goes the four paths a change goes. This design
-names it so expectations are made with it in mind, and leaves it out.
+named it so expectations were made with it in mind, and left it out of the
+first four steps.
+
+Decided by the maintainer, 2026-11-20: **all four paths**, the git path,
+Grafana, the rulers and the clouds' alarms, each making the rule as undoing
+a deletion already makes one there, and taking it out, once added, as a
+deletion does. Built as step 5 ("As built").
 
 ## Not in this design
 
@@ -302,7 +308,8 @@ The first two need no incident written down.
    `propose_expectation`; agents' rewrites on a failed pull request.
 4. Scenarios: promtool test files, for Prometheus-format rules
    (`--promtool PATH`).
-5. Adding a rule, as a proposal held to its expectations.
+5. Adding a rule, as a proposal held to its expectations (all four paths,
+   decided 2026-11-20).
 
 ## As built
 
@@ -692,3 +699,159 @@ Step 4, scenarios, as built:
   only the pod has; or `serve.promtool.path` in an image of one's own.
   With either, `/tmp` is an emptyDir, the root being read-only. promtool
   runs in serve's container: its memory counts toward serve's limit.
+
+Step 5, adding a rule, as built:
+
+- **One form for every path.** The rule is one Prometheus alerting rule,
+  as a rule file's rules list holds one: `alert`, `expr`, `for`,
+  `keep_firing_for`, `labels`, `annotations`, nothing else (no recording
+  rule, no group, no file). Not each path's own form (a Grafana rule's
+  queries and expressions, a CloudWatch alarm's or a Google policy's
+  document): one text to read strictly, the same rule replayed wherever it
+  goes, and every field each path writes written by Lapilli. Read strictly
+  (`rules.ParseAdded`): one YAML document, a mapping of those keys, each
+  once, each value text as written (a number or a word YAML reads
+  otherwise, such as `team: 7`, is to be quoted), no anchor, alias, tag or
+  merge; bounded: 64 KiB in all, the expression 16 KiB, a `for` and a
+  `keep_firing_for` 48 hours at most, 20 labels and 20 annotations, a
+  label's value 1 KiB, an annotation's 4 KiB, nothing in them that doesn't
+  show but line breaks and tabs (and those only in the expression and the
+  annotations); its name letters, digits, `_`, `:`, `-` and `.`, 200 at
+  most, a letter or `_` first; a label or an annotation named as
+  Prometheus names one, not its own (`__`), and no label `alertname`. Its
+  labels and annotations are held as a change to what a rule says is
+  (changes.md, `says`): each a template that parses in the place's
+  template language, calling no `query`, nothing that grows without bound
+  each time the alert fires; a summary or a description 4 KB at most, a
+  runbook an https URL. Prometheus refuses a whole rule file for one that
+  doesn't parse, and every rule in it with it. It is written by Lapilli's
+  encoder, never as given: its keys in one order, its texts double-quoted,
+  an expression of more lines a literal block.
+- **Named apart from every rule in effect**, not only from its group's:
+  a proposal, its expectations and the ledger name a rule by its name, and
+  two rules of one name are told apart by labels that can change. A rule
+  in effect of its name since refuses it as it is carried out.
+- **Where it goes: a place serve offers, and nothing else.** Worked out
+  from the rules it read last (`addPlaces`, the new rule's form, MCP's
+  `places`), never from what a proposal says, which is only matched to
+  them; anything else is refused with one reason, whether it exists or
+  not. The git path: a group of a Prometheus rule file read under
+  `--rules` (a rule file, a PrometheusRule, Google Cloud's `ClusterRules`
+  or `GlobalRules`, a rule file a ConfigMap holds in a literal block), or
+  a new group after the last; not Google Cloud's namespaced `Rules`, whose
+  expressions Lapilli scopes to their namespace, nor a Grafana
+  provisioning file, nor a file a CI system runs,
+  by Lapilli's own copy of the change recipes' list, a first lock beside
+  theirs, nor a new file, which isn't a document Lapilli read, and so not
+  one a recipe finds by its hash. Grafana: a group of a folder whose rules
+  Lapilli replays as PromQL, its query one of the data sources they read;
+  not a new group, which Grafana would make with an interval of its own.
+  A ruler: a group, or a new group, in a Mimir's, a Cortex's or an Amazon
+  namespace `--changes-in` names; not an Azure rule group, whose rules
+  carry action groups of their own. A cloud's alarms: CloudWatch's or
+  Google Cloud's `--alarms` with alarms read, under a name `--changes-in`
+  names there; not Azure Monitor's alert rules (a PromQL metric alert takes
+  a workspace's scope and a location Lapilli would have to guess) nor
+  OCI's (MQL, which Lapilli doesn't replay, so one added couldn't be held
+  to anything). Those left out aren't offered.
+- **Whom it tells: no power over the account the rules there don't
+  already use.** A rule added to a rule file or a ruler names no one: its
+  labels route it, as every rule there is routed. In Grafana, one contact
+  point at most (`notification_settings`), of those the rules of its
+  folder name; in CloudWatch, actions (`AlarmActions` and `OKActions`) of
+  those the alarms of its `--alarms` take that only tell (an SNS topic, a
+  Lambda function, Systems Manager's OpsItems, Incident Manager's response
+  plans), never an action that does more (Auto Scaling, EC2: stopping or
+  terminating a machine), even where an alarm there takes one; in Google
+  Cloud, notification channels of those its policies tell. Anything else
+  is refused, as a place is; it is checked again, against the rules read
+  then, as it is carried out.
+- **Held to its expectations before approval.** An expectations text
+  holding it by `rule: NAME` alone, one expectation at least (a budget's
+  field, a catch or a scenario: an added rule held to nothing is refused,
+  and the ledger keeps none), with the test files its scenarios name,
+  bounded as an agent's are. The rule is written where it goes and read
+  back as Lapilli reads rules there (for Grafana, a group of its folder
+  with it alone, in the export's form; for a cloud, the alarm's document as
+  `--alarms` reads one), then replayed over the twelve weeks to now with
+  nothing beside it, and held by step 3's own check (`replayHeld`, what
+  `test_expectation` was split into, `verdict.CheckExpectationsBy`): a
+  budget by whole weeks back from the period's end, scaled when there is
+  none; a catch by the incidents written down; a scenario run by
+  `--promtool` against its group with it added (a rule file's and a
+  ruler's; Grafana's and a cloud's aren't promtool's, and are not known).
+  Its backtest is kept as other proposals' are, nothing before it.
+- **Approval** (the recommendation, taken): no one approves one that
+  breaks an expectation it is held to, or whose backtest didn't replay it
+  to the end, or that is held to nothing. Not known is shown, and is never
+  met, but doesn't hold it: a catch of an incident older than the twelve
+  weeks can't be known. Its page says why it waits and offers no form;
+  the server refuses a form shown before (400), and `--approvals` lowered
+  doesn't approve it. An expression the history refuses isn't replayed,
+  and so isn't approved: what replays is what the place would load. No
+  one approves their own, or one their agent made; an agent's counts
+  toward its person's twenty an hour, as proposals do.
+- **Stale** as changes.md says of any backtest (an earlier lapilli's, a
+  record changed since): held until it is backtested again, from its page,
+  by MCP's `backtest_again` or by Lapilli itself, which writes it where its
+  place says from the rules read again and holds it to its expectations
+  anew.
+- **Carried out** after it is checked again: its place still offered, its
+  name still free, held to its expectations again over the twelve weeks to
+  now, refused when it now breaks one or isn't replayed to the end. The git
+  path: the rule file's other lines changed since, the rule is added afresh
+  in it; the file as it was is kept for undo, and the change recipes write
+  it as any change, their own guards on which file and what of it. Grafana:
+  a `POST` of the rule with a uid of Lapilli's (`lapilli-` and twenty hex
+  digits), in the folder and group a rule there is in now (their uid and
+  name read from it), refused when another tool keeps that rule
+  (provenance), when its folder's rules no longer read its data source or
+  tell its contact point, or when a rule of its title is in its folder;
+  read back by its uid. A ruler: the group written as rulers.md writes
+  one, only the rule added to it as it is now (`rules.AddsRule`), a new
+  group only while it is still gone. CloudWatch: `PutMetricAlarm`, as
+  undoing a deletion makes one (its PromQL in
+  `EvaluationCriteria.PromQLCriteria`: `Query`, `PendingPeriod`,
+  `RecoveryPeriod`; `EvaluationInterval` 60), in the account the alarms
+  there are read in, which the write role's must be; refused when an alarm
+  of its name is there. Google Cloud: `alertPolicies.create`, a policy of
+  one condition, its display name, the condition's and `alertRule` the
+  rule's name, refused when a policy of that display name is there, read
+  back by the name the create answers with, or, that answer lost, by its
+  display name. An alarm is read back by what it holds (its rule as it
+  fires), not whole: the cloud adds fields of its own to one it makes.
+- **Undone, it is deleted**, only while it is as the add left it: the git
+  path, the file put back as it was (refused if it changed since, as any
+  undo there); Grafana, a `DELETE` by its uid, kept by no other tool; a
+  ruler, the rule taken out as a deletion takes one (a group made for it
+  goes with it; an Amazon namespace's last rule is a person's); a cloud,
+  `DeleteAlarms`, or the policy's `DELETE`, by the name the create gave.
+- **Its expectations, once it is added**, go where an accepted draft goes
+  (step 3): kept as a draft of origin `proposal` (`expectation_drafts`'
+  `proposal`), made by whoever proposed the rule and accepted by its first
+  approver, by the git path to `--expect`'s file when it can go there,
+  otherwise the YAML on its page and the rule's tab, for a person. Kept
+  once the rule is applied, not before: a rule not added holds nothing.
+  The proposal counted toward the hour, so the draft doesn't.
+- **In the ledger** (027, unreleased, in place): `proposals.expect`, what a
+  rule added is held to (the text as Lapilli wrote it, and its test files,
+  bounded as a draft's, and, once kept, the draft it was kept as, so that
+  it is kept once however many drafts are let go), read with its proposal
+  alone, never with a list; `expectation_drafts.proposal`.
+- **Grafana's `is_number`** is now replayed (`internal/sse`), as Grafana
+  evaluates it: the condition Grafana's own conversion of a Prometheus rule
+  writes, `is_number($A) || is_nan($A) || is_inf($A)`, firing on every
+  series the query returns, as a Prometheus rule does; no data is OK.
+- **Preflight** (step 2): a CloudWatch prefix of `--changes-in` is also
+  asked of one name under it no alarm read has, the alarm a rule added
+  there makes (`addedUnder`); Grafana's `:create` and Google's `create`
+  were asked already, for undoing a deletion.
+- **Tested** against the stand-ins the paths' own tests use: each path
+  made, read back and undone (a file's group, a Mimir group and a new
+  one, a Grafana folder's group, a CloudWatch alarm, a Google policy);
+  each guard (the place offered, a name in effect, the strict read and
+  Lapilli's own encoding, whom it tells, the templates, the roles and
+  self-approval, the hour, one expectation at least, a broken or
+  unreplayed one holding approval, the check again as it is carried out)
+  taken out in turn, a test failing for each; none against a real
+  account.

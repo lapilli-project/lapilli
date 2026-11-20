@@ -340,10 +340,13 @@ The schedules, the sections and the destinations are in
 | Route | Role | Takes | Gives |
 |---|---|---|---|
 | `GET /api/v1/proposals` | viewer | `rule`, `state` (comma-separated) | `proposals`, 200 at most, each with its `diff`, `evidence`, `approvals`, and, when it is stale, `stale`, why; `changes` (whether `--changes` is on) and `paused` |
-| `GET /api/v1/proposals/{id}` | viewer | | the proposal, with the `document` as changed |
+| `GET /api/v1/proposals/{id}` | viewer | | the proposal, with the `document` as changed; of a new rule (kind `add`), its `evidence.add` (where it goes, the rule as Lapilli wrote it, each expectation's `items`), `held` (why no one may approve it yet) and `expectations` and `tests`, what it is held to |
 
 None of the API makes, approves or applies a proposal: a person proposes
-on a rule's page (`POST /proposals`), an agent with MCP's `propose`, and a
+on a rule's page (`POST /proposals`), or a new rule on its form
+(`/proposals/new`, `POST /proposals` with `kind=add`), an agent with MCP's
+`propose` (kind `add` for a new rule, where MCP's `places` says it may
+go), and a
 person approves in a browser ([Changing rules](changing-rules.md)). Nor a
 draft of expectations: an agent drafts with MCP's `propose_expectation`, a
 person keeps the history's on the rule's tab, and an approver accepts in a

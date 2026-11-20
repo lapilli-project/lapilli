@@ -36,6 +36,13 @@ Each also needs:
   `GIT_EMAIL` for the commits (default `Lapilli`, `lapilli@localhost`).
 - `MAX_CHANGES`, the most branches a run pushes (default 10): the changes
   past it wait for the next run, which the run says.
+- A new rule (lapilli serve's proposals of kind `add`,
+  docs/design/expectations.md step 5) comes as any change does: the rule
+  file it goes in, found by the hash of the document Lapilli read, with
+  the rule added to a group of it, or a new group after the last. The same
+  guards hold it: only a rule file under `RULES_PATHS`, never what a CI
+  system runs, only its rules changed. A new file is never written: a rule
+  is added only to a file Lapilli read.
 - `EXPECT_FILE`, optional: the expectations file in the repository that
   lapilli serve's `--expect` is made from (`alerts/expectations.yaml`). A
   draft of what a rule is held to that a person accepted in Lapilli

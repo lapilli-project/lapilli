@@ -2,10 +2,12 @@
 
 ## [Unreleased]
 
-Expectations, steps 2 to 4 (docs/design/expectations.md): serve holds
+Expectations, steps 2 to 5 (docs/design/expectations.md): serve holds
 each rule to what is expected of it after it is deployed; drafts of what a
-rule is held to, from the history and from an agent; and scenarios,
-promtool's own test files, held to before a change is merged and after.
+rule is held to, from the history and from an agent; scenarios, promtool's
+own test files, held to before a change is merged and after; and a new
+rule, proposed held to its expectations before it is approved, added by
+the four paths a change goes.
 
 Before upgrading:
 - **Ledger schema 027**, after 026: keep a copy of the ledger's disk, or
@@ -14,7 +16,7 @@ Before upgrading:
   A lapilli before this one doesn't open the upgraded ledger. Nothing is
   backfilled: the first round after the upgrade checks the thirteen weeks,
   and runs the scenarios, five a run. 027 holds `expectation_checks` and
-  `expectation_drafts`.
+  `expectation_drafts`, and adds `proposals.expect`.
 - **Proposals and drafts share a person's hour**: the 20 proposals a
   person, with the agents acting for them, makes in an hour now count the
   drafts of expectations they make too.
@@ -119,6 +121,37 @@ Before upgrading:
   write it alone, only while it is the file serve read, only as an
   expectations file. Otherwise accepting keeps the decision, and the tab
   gives the YAML to put where the expectations are declared.
+- **A new rule, as a proposal held to its expectations** (kind `add`; the
+  proposals page's Propose a new rule, `/proposals/new`; MCP's `propose`
+  with kind `add`, and `places`). One Prometheus alerting rule, read
+  strictly (one document; `alert`, `expr`, `for`, `keep_firing_for`,
+  `labels`, `annotations`, each once, every value text; bounded) and
+  written by Lapilli where it goes, never as given, named apart from every
+  rule in effect; its labels and annotations held as a fix to what a rule
+  says is (templates that parse, no `query`, a runbook an https URL). It
+  goes only where serve offers: a group of a rule file under `--rules`, or
+  a new group in it (not a file a CI system runs); a Grafana folder's
+  group, its query reading a data source the folder's rules read; a group
+  of a Mimir's, a Cortex's or an Amazon namespace `--changes-in` names, or
+  a new group; CloudWatch's or Google Cloud's `--alarms`, under a name
+  `--changes-in` names there. It tells only whom the rules there already
+  tell (a Grafana contact point, a CloudWatch action that only tells, a
+  Google notification channel), never an automation action. It is held to
+  one expectation at least, replayed over the twelve weeks with nothing
+  beside it and checked as `test_expectation` checks one; no one approves
+  it while one is broken or its backtest didn't replay it to the end (not
+  known is shown, never met). Checked again as it is carried out, it goes
+  the way a change goes there: a pull request; Grafana's `POST`, with a
+  uid of Lapilli's; the ruler's group written with it; CloudWatch's
+  `PutMetricAlarm` or Google's `alertPolicies.create`. Undone, it is
+  deleted. Once added, its expectations go where an accepted draft goes
+  (origin `proposal`, accepted by its first approver). An agent's counts
+  toward its person's twenty an hour. Not offered: Azure's rule groups and
+  alert rules, OCI's alarms, a new Grafana group, a new rule file.
+- **Grafana's `is_number`** in a rule's math expression is replayed.
+- **lapilli preflight**'s `changes.aws` also asks, under each CloudWatch
+  prefix `--changes-in` gives, the name of an alarm a rule added there
+  would make.
 
 ## [0.63.0] - 2026-11-20
 

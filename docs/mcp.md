@@ -48,7 +48,7 @@ nothing; without `post`, the items say why. One check runs at a time, with
 
 Nothing an agent asks for changes anything: `compare` and
 `test_expectation` replay and keep nothing. With `--mcp-propose editors`
-(or `admins`), `propose` keeps a change to one rule, or to what it says, as a proposal ([Changing rules](changing-rules.md)),
+(or `admins`), `propose` keeps a change to one rule, or to what it says, or a new rule (kind `add`, where `places` says one may go, held to the expectations given: no one approves it while one is broken), as a proposal ([Changing rules](changing-rules.md)),
 marked as an agent's, for someone other than the person it acts for to
 approve in the UI, and `backtest_again` backtests a stale proposal again,
 as an editor does from its page. No tool approves or applies one. With it

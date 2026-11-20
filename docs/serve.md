@@ -331,6 +331,28 @@ expectations are declared: Lapilli doesn't write a ConfigMap or `--config`.
 Drafts count with proposals toward a person's 20 an hour; ten wait for a
 rule at most, and 1,000 are kept.
 
+A rule not yet written can be proposed too, held to what it is to do
+before anyone approves it (docs/design/expectations.md, step 5). **Propose
+a new rule** on the proposals page (`/proposals/new`, an editor's), or an
+agent with `propose`, kind `add`: one Prometheus alerting rule (`alert`,
+`expr`, `for`, `keep_firing_for`, `labels`, `annotations`), named apart
+from every rule; where it goes, among the places serve offers (a group of
+a rule file under `--rules`, or a new group in it; a Grafana folder's
+group, and the data source its query reads; a group of a ruler's
+namespace `--changes-in` names, or a new group in it; CloudWatch's or
+Google Cloud's `--alarms`, under a name `--changes-in` names there), and
+whom it tells, of whom the rules there already tell (a Grafana contact
+point, a CloudWatch action that only tells, a Google notification
+channel); and an expectations text holding it by `rule: NAME`, one
+expectation at least. Lapilli reads the rule strictly and writes it itself
+where it goes, replays it over the twelve weeks with nothing beside it,
+and checks each expectation as `test_expectation` does. No one approves it
+while one is broken, or its backtest didn't replay it; not known is shown
+and never met. Approved, it goes the way a change goes there (a pull
+request, Grafana's API, the ruler's, the cloud's), checked again first;
+undone, the rule is deleted. Once it is added, what it is held to goes
+where an accepted draft goes.
+
 Some weeks aren't like the others: a sale, a launch, a campaign. Marked
 windows (docs/design/marked.md) name them, each of a kind a team chooses,
 from a file (`--marked`), `--config`'s `marked:`, the Marked windows page,
