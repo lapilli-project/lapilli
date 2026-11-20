@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-11-20
+
 Who is told what, by routes in `--config`; a team as the boundary of
 change; and every source as an object, told down and back, with the
 activity log filtered and exported and the daily writes through the

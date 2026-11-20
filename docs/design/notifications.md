@@ -539,7 +539,7 @@ and these differences:
 
 ## Who is told what
 
-Status: built, for the next release. No schema change: the outbox already
+Status: built, in 0.64.0. No schema change: the outbox already
 keeps a row for each place a notice goes, so routes decide which rows are
 written. Under [GOVERNANCE.md](../../GOVERNANCE.md) this adds no new kind
 of data to the ledger, and comes as a change to how `serve` tells, not as
