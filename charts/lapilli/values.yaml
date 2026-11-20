@@ -394,6 +394,16 @@ serve:
   #       - group: payments-oncall
   #         team: payments
   #       - user: ana@example.com
+  #     notify:                      # who is told what, read by every replica
+  #       routes:                    # the first that takes an event decides
+  #         - kinds: [task.*, proposal.*]   # a kind or a family; any when left out
+  #           teams: [payments]      # any when left out
+  #           labels: {severity: page}      # each at one of its values
+  #           to: [team:payments, payments-hook]
+  #           continue: false        # true: the routes after it too
+  #       default: [slack]           # what no route takes; routes need one
+  #       templates:                 # a destination's own words
+  #         team:payments: "*{{.Event}}* {{.Title}} <{{.Link}}|open>"
   # An empty file is refused, and so is a key with nothing after it: to
   # declare nothing, give teams: [], and no roles, grants: []; for every
   # team, leave team out (team: "" is refused). A file is kept to once it
@@ -436,6 +446,18 @@ serve:
       signingKey: ""
     slack: false  # also post each, as a line, to report.slackWebhookSecret
     lang: en      # the language of what is posted to Slack: en, es, ja or ko
+    # JSON webhooks the routes in config's notify: send to by name
+    # (--webhook-dest; docs/design/notifications.md, "Who is told what"):
+    # each URL in a Secret's key, and, with signingKey, a key of the same
+    # Secret holding a key of 32 bytes or more that signs each post to it
+    # (--webhook-dest-secret), as webhookSecret.signingKey signs the
+    # webhook's. A name is lowercase letters, digits and . _ -, none that
+    # reports.destinations has; they need serve.config:
+    #   webhookDests:
+    #     - {name: payments-hook, secretName: lapilli-payments-hook, key: url, signingKey: key}
+    # Routes name these, webhook, slack, team:NAME (teamDigests.teams) and
+    # reports.destinations' names, never a URL.
+    webhookDests: []
   # A team's own weekly digest: its rules and the incidents it owns, posted to
   # a Slack-style incoming webhook. A Secret with a key for each team, and which
   # key is whose:

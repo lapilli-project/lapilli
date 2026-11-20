@@ -963,6 +963,38 @@ What it writes is noted as `tasks-token` and isn't counted as anyone's use.
 In the chart, `serve.trackers` names its Secret and, with `tracker`, runs the
 script as a CronJob.
 
+## Who is told what
+
+By default, every event (a task made, a proposal approved, a goal missed, a
+source gone quiet) goes to `--notify-webhook-file` and, with
+`--notify-slack`, to Slack. Routes in `--config`, under `notify:`, send
+each by its kind, its team and its labels instead, to destinations the
+flags name: `webhook`, `slack`, `team:NAME` (`--team-digest`), a
+`--report-dest`'s name, or a JSON webhook of its own,
+`--webhook-dest NAME=FILE`, signed with `--webhook-dest-secret NAME=FILE`.
+
+```yaml
+notify:
+  routes:
+    - kinds: [task.*, proposal.*]
+      teams: [payments]
+      to: [team:payments]
+    - labels: {severity: page}
+      to: [oncall-hook]
+  default: [slack]
+  templates:
+    team:payments: "*{{.Event}}* {{.Title}} <{{.Link}}|open>"
+```
+
+The first route that takes an event decides, unless it says
+`continue: true`; what none takes goes to `default`, which routes need, so
+nothing is dropped. A template is text and fields (`{{.Event}}`,
+`{{.Line}}`, `{{.Link}}`, `{{.Rule}}`, `{{.Team}}`, `{{.Title}}`,
+`{{.ID}}`, `{{.By}}`, `{{.Labels}}`, `{{.At}}`), each value escaped for
+where it goes. The Settings page shows the routes in force and how each
+destination's notices went; they are changed in the file
+([design/notifications.md](design/notifications.md#who-is-told-what)).
+
 ## Signed posts to the webhook
 
 Whoever learns the webhook's URL can post to it, and a receiver that turns
@@ -986,7 +1018,9 @@ it can't read, or without `--notify-webhook-file`. It is read for each post,
 so it can be rotated, and it and the signatures are never shown or logged.
 A key that can't be read later fails the post, which is tried again: nothing
 is sent unsigned. Without the flag, a post carries neither header, as
-before.
+before. A webhook routes send to by a name of its own, `--webhook-dest
+NAME=FILE`, is signed the same way with its own key,
+`--webhook-dest-secret NAME=FILE`.
 
 To check a post, read its body as it came, before parsing it:
 

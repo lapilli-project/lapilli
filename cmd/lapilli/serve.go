@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -278,7 +279,9 @@ The web UI and API:
                       A file that can't be used changes nothing, a thing it
                       declares that can't be kept is kept as it was, and the
                       Settings and Run history pages say why
-                      (docs/design/serveops.md)
+                      (docs/design/serveops.md). Under notify:, routes:
+                      who is told what, by kind, team and labels, and a
+                      default (docs/design/notifications.md)
   --config-prune      delete what --config no longer declares, once the file
                       is read the same twice in a row, but a team something
                       the UI made names; without it, that is the UI's again.
@@ -427,6 +430,18 @@ written down; quiet windows kept; comments):
                       . _ -. Reports can also go to slack (--slack-webhook-
                       file), webhook (--notify-webhook-file, as
                       report.ready) and team:TEAM (each --team-digest)
+  --webhook-dest NAME=FILE
+                      a destination routes in --config's notify: can send
+                      to: the webhook whose URL is in FILE, posted JSON as
+                      --notify-webhook-file is (repeatable). NAME is
+                      lowercase letters, digits and . _ -, none that
+                      --report-dest gives. It takes only what a route
+                      sends it; needs --config
+  --webhook-dest-secret NAME=FILE
+                      the file holding a key, 32 bytes at least, to sign
+                      each post to --webhook-dest NAME with, as
+                      --notify-webhook-secret-file signs the webhook's
+                      (repeatable)
 
 Notifications as they were sent, kept beside the firings: how many each rule
 sent, how many repeats, how many woke people, how many for nothing:
@@ -1060,6 +1075,36 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				cfg.ReportDests = map[string]string{}
 			}
 			cfg.ReportDests[name] = file
+		case "--webhook-dest":
+			name, file, ok := strings.Cut(val, "=")
+			if !ok || file == "" || !ledger.ValidDest(name) || name == "slack" || name == "webhook" || strings.HasPrefix(name, "team:") {
+				return true, fmt.Errorf("--webhook-dest %s: want a name (lowercase letters, digits and . _ -, not slack, webhook or team:) and a file, like payments-hook=/run/secrets/payments-hook", val)
+			}
+			if err := there(file); err != nil {
+				return true, fmt.Errorf("--webhook-dest: %v", err)
+			}
+			if cfg.WebhookDests == nil {
+				cfg.WebhookDests = map[string]string{}
+			}
+			cfg.WebhookDests[name] = file
+		case "--webhook-dest-secret":
+			name, file, ok := strings.Cut(val, "=")
+			if !ok || name == "" || file == "" {
+				return true, fmt.Errorf("--webhook-dest-secret %s: want a --webhook-dest's name and a file, like payments-hook=/run/secrets/payments-hook-key", val)
+			}
+			// Read once here, as --notify-webhook-secret-file is: serve
+			// reads it again for each post, and never shows it.
+			b, err := secret(file, report.SigningKeyLeast)
+			if err != nil {
+				return true, fmt.Errorf("--webhook-dest-secret %s: %v", name, err)
+			}
+			if n := len(report.TrimKey(b)); n < report.SigningKeyLeast {
+				return true, fmt.Errorf("--webhook-dest-secret %s: want a key of %d bytes at least, not %d", name, report.SigningKeyLeast, n)
+			}
+			if cfg.WebhookDestSecrets == nil {
+				cfg.WebhookDestSecrets = map[string]string{}
+			}
+			cfg.WebhookDestSecrets[name] = file
 		case "--backtest-listen":
 			cfg.BacktestListen = val
 		case "--backtest-trust":
@@ -1154,6 +1199,12 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
 	case cfg.NotifyWebhookSecret != "" && cfg.NotifyWebhook == "":
 		err = fmt.Errorf("--notify-webhook-secret-file signs the posts to --notify-webhook-file: give it too")
+	case len(cfg.WebhookDests) > 0 && cfg.Config == "":
+		err = fmt.Errorf("--webhook-dest takes what a route in --config's notify: sends it: give --config")
+	case webhookDestTwice(cfg) != "":
+		err = fmt.Errorf("--webhook-dest %s: --report-dest gives a destination of that name already: give each its own", webhookDestTwice(cfg))
+	case webhookSecretAlone(cfg) != "":
+		err = fmt.Errorf("--webhook-dest-secret %s signs the posts to --webhook-dest %s: give it too", webhookSecretAlone(cfg), webhookSecretAlone(cfg))
 	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "":
 		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file, --changes-token-file or more than one")
 	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != ""):
@@ -1483,6 +1534,28 @@ func thisMachine(host string) bool {
 // flag given wrong. One that can't be used is said once serve runs, as when
 // it changes to one: the ledger keeps what it last declared, and a pod
 // restarted on it serves, rather than loop.
+// webhookDestTwice is a --webhook-dest's name --report-dest gives too, ""
+// for none: a route names a destination by its name alone.
+func webhookDestTwice(cfg serve.Config) string {
+	for _, name := range slices.Sorted(maps.Keys(cfg.WebhookDests)) {
+		if _, ok := cfg.ReportDests[name]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
+// webhookSecretAlone is a --webhook-dest-secret's name no --webhook-dest
+// gives, "" for none.
+func webhookSecretAlone(cfg serve.Config) string {
+	for _, name := range slices.Sorted(maps.Keys(cfg.WebhookDestSecrets)) {
+		if _, ok := cfg.WebhookDests[name]; !ok {
+			return name
+		}
+	}
+	return ""
+}
+
 func configFlag(path string) error {
 	if _, err := os.ReadFile(path); err != nil {
 		return fmt.Errorf("--config: %w", err)

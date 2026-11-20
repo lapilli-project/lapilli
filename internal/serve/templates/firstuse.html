@@ -57,11 +57,11 @@ page. Counts and kinds, never a URL. */}}
 {{define "notifystatus"}}{{$p := .P}}{{with .V}}<h2 id="notifications">{{t "Notifications"}}</h2>
 {{template "notifywarn" .}}
 <ul class="plain">
-<li>{{if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{tbdi "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
+<li>{{if and .Routes .Routes.Declared}}{{t "What happens is told where the routes below send it."}}{{else if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{tbdi "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
 <li>{{tbdi "Places reports can go to by name (--report-dest): %d. Teams with a digest of their own (--team-digest): %d." .ReportDests .TeamDigests}}</li>
 <li>{{if not .DigestOn}}{{t "The weekly digest is off, as set on the Reports page."}}{{else if .DigestSet}}{{t "The weekly digest: %s, to %d of the places it names, as set on the Reports page." .DigestWhen .DigestTo}}{{else}}{{t "The weekly digest: %s, to %d places, as the flags set it." .DigestWhen .DigestTo}}{{end}}{{with .Reports}} {{t "Reports on: %d." .}}{{end}} <a href="{{$p.Link "/reports"}}">{{t "Reports"}}</a>{{with .Posted}}<br>{{template "slackposted" (on $p .)}}{{end}}</li>
 <li>{{template "notifysent" .}}</li>
-</ul>{{end}}{{end}}
+</ul>{{with .Routes}}{{template "notifyroutes" (on $p .)}}{{end}}{{end}}{{end}}
 
 {{/* Where notices go, and whether they went: a card of the Manage page. */}}
 {{define "notifycard"}}{{$p := .P}}{{with .V}}<li class="card">
@@ -69,6 +69,7 @@ page. Counts and kinds, never a URL. */}}
   <p>{{t "Where notices, the weekly digest and reports go, and whether they went."}}</p>
   {{if .DigestNowhere}}{{template "warnnotice"}}{{t "The weekly digest goes nowhere."}}</p>{{end}}
   {{- with .Posted}}{{if .Failed}}{{template "badnotice"}}{{t "The weekly digest failed."}}</p>{{end}}{{end}}
+  {{- with .Routes}}{{if .Err}}{{template "warnnotice"}}{{t "--config's notify: can't be used."}}</p>{{end}}{{with .Unrouted}}{{template "badnotice"}}{{if eq . 1}}{{t "1 event went where no route sent it."}}{{else}}{{t "%d events went where no route sent them." .}}{{end}}</p>{{end}}{{end}}
   {{- with .ReportsNowhere}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 report goes nowhere."}}{{else}}{{t "%d reports go nowhere." .}}{{end}}</p>{{end}}
   {{- if .Backlog}}{{template "warnnotice"}}{{t "More than %d notices wait to be sent." .Counted}}</p>{{else}}{{with .Failed}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 notice failed in the last day."}}{{else}}{{t "%d notices failed in the last day." .}}{{end}}</p>{{end}}{{end}}
   {{- if .GivenUpMore}}{{template "badnotice"}}{{t "More than %d notices were given up on in the last day." .Counted}}</p>{{else}}{{with .GivenUp}}{{template "badnotice"}}{{if eq . 1}}{{t "1 notice was given up on in the last day."}}{{else}}{{t "%d notices were given up on in the last day." .}}{{end}}</p>{{end}}{{end}}

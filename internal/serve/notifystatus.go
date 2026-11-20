@@ -55,6 +55,9 @@ type notifyStatus struct {
 	// through the outbox, how its posts went, as the ledger has it.
 	Posted *digestPosted
 	Loc    *time.Location
+	// Routes are the routes in force and each destination's state
+	// (notifyroutesview.go).
+	Routes *routesView
 }
 
 // digestPosted is how the weekly digest's posts to Slack went, as the
@@ -145,6 +148,9 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 	}
 	n.LastSent, n.Failed, n.Backlog, n.Counted = st.LastSent, st.Failed, st.More, ledger.FailedCounted
 	n.GivenUp, n.GivenUpMore = st.GivenUp, st.GivenUpMore
+	if n.Routes, err = s.routesView(ctx, lang); err != nil {
+		return nil, err
+	}
 	return n, nil
 }
 

@@ -605,6 +605,10 @@ func (l *Ledger) TellPeriodGoalMissed(ctx context.Context, name string, teams []
 }
 
 func (l *Ledger) tellGoalMissed(ctx context.Context, keyOf func(int64) string, teams []int64, week int64, told []Told) error {
+	told, err := l.routeTold("goal.missed", told)
+	if err != nil {
+		return err
+	}
 	return l.writeAside(ctx, func(t *txn) error {
 		now := wallNow()
 		for _, x := range told {

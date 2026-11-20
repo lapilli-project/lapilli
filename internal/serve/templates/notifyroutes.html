@@ -1,0 +1,32 @@
+{{/* The routes in force, as --config's notify: declares them, read-only,
+and each destination an event goes to, with how its notices went: names and
+counts, never a URL. Why the latest notice still unsent failed is an
+admin's to read. */}}
+{{define "notifyroutes"}}{{$p := .P}}{{$admin := $p.Status.Admin}}{{with .V}}
+<h3 id="routes">{{t "Routes"}}</h3>
+{{if .Err}}{{template "warnnotice"}}{{if $admin}}{{t "--config's notify: can't be used: %s." (.ErrText $p.Lang)}}{{else}}{{t "Line %d of --config's notify: can't be used: an admin sees why." .Line}}{{end}} {{if .Broken}}{{t "No routes have been read since lapilli serve started: what happens is told as without them."}}{{else if .Declared}}{{t "The routes read at %s stay in force." (at $p.Loc .At)}}{{end}}</p>{{end}}
+{{- with .Unrouted}}{{template "badnotice"}}{{if eq . 1}}{{t "1 event since lapilli serve started went where no route sent it: as without routes, or to every destination, rather than nowhere. The log says so as it happens."}}{{else}}{{t "%d events since lapilli serve started went where no route sent them: as without routes, or to every destination, rather than nowhere. The log says so as it happens." .}}{{end}}</p>{{end}}
+{{if .Declared}}
+<p>{{tbdi "Declared in %s, under notify:, and changed there, not here. The first route that takes an event sends it, and the routes after it too while one says to go on; what none takes goes to the default." (code "--config")}} {{t "In force since %s, the file's hash beginning %s." (at $p.Loc .At) .Hash}}</p>
+<div class="scroll"><table>
+<caption>{{t "Routes, in the order they are looked at"}}</caption>
+<thead><tr><th scope="col" class="n">{{t "Order"}}</th><th scope="col">{{t "Kinds"}}</th><th scope="col">{{t "Teams"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "To"}}</th><th scope="col">{{t "Then"}}</th></tr></thead>
+<tbody>{{range .Rows}}
+<tr><td class="n">{{.N}}</td><td>{{if .KindsAny}}{{t "any"}}{{else}}{{range $i, $x := .Kinds}}{{if $i}}, {{end}}<code>{{$x}}</code>{{end}}{{end}}</td><td>{{if .TeamsAny}}{{t "any"}}{{else}}{{range $i, $x := .Teams}}{{if $i}}, {{end}}<bdi>{{$x}}</bdi>{{end}}{{end}}</td><td>{{if .LabelsAny}}{{t "any"}}{{else}}{{range $i, $x := .Labels}}{{if $i}}, {{end}}<code>{{$x}}</code>{{end}}{{end}}</td><td>{{range $i, $x := .To}}{{if $i}}, {{end}}<code>{{$x}}</code>{{end}}</td><td>{{if .Continue}}{{t "goes on to the next"}}{{else}}{{t "stops"}}{{end}}</td></tr>{{end}}
+<tr><td class="n">{{t "last"}}</td><td colspan="3">{{t "what no route takes (the default)"}}</td><td>{{range $i, $x := .Default}}{{if $i}}, {{end}}<code>{{$x}}</code>{{end}}</td><td>–</td></tr>
+</tbody></table></div>
+{{else if .File}}
+<p>{{tbdi "No routes are declared: every event goes to --notify-webhook-file and, with --notify-slack, to Slack. Routes are declared in %s, under notify:." (code "--config")}}</p>
+{{else}}
+<p>{{tbdi "No routes: lapilli serve was started without --config, which declares them under notify:. Every event goes to --notify-webhook-file and, with --notify-slack, to Slack."}}</p>
+{{end}}
+{{- if not .Pending.IsZero}}<p class="quiet">{{t "A new file was read at %s, once: its routes are in force once it is read the same again." (at $p.Loc .Pending)}}</p>{{end}}
+{{- if .Dests}}
+<div class="scroll"><table>
+<caption>{{t "Where events go, and how their notices went"}}</caption>
+<thead><tr><th scope="col">{{t "Destination"}}</th><th scope="col">{{t "Takes"}}</th><th scope="col">{{t "Last sent"}}</th><th scope="col" class="n">{{t "Waiting"}}</th><th scope="col" class="n">{{t "Failed in the last day"}}</th><th scope="col">{{t "Last error"}}</th></tr></thead>
+<tbody>{{range .Dests}}
+<tr><td><code>{{.Name}}</code> <span class="quiet">(<code>{{.Flag}}</code>)</span>{{if .Template}}<br><span class="quiet">{{t "in words of its own"}}</span>{{end}}{{if .Unnamed}}<br><span class="quiet">{{t "no route names it, nor the default: it is sent nothing"}}</span>{{end}}</td><td>{{if .JSON}}{{t "JSON"}}{{else}}{{t "a line, Slack's way"}}{{end}}</td><td>{{if .LastSent.IsZero}}{{t "never"}}{{else}}<span class="status-ok"><span aria-hidden="true">✓</span> {{at $p.Loc .LastSent}}</span>{{end}}</td><td class="n">{{if .More}}{{t "more than %d" $.V.Counted}}{{else}}{{.Waiting}}{{end}}</td><td class="n">{{.Failed}}{{if .GivenUpMore}} <span class="status-bad"><span aria-hidden="true">✕</span> {{t "more than %d given up on" $.V.Counted}}</span>{{else}}{{with .GivenUp}} <span class="status-bad"><span aria-hidden="true">✕</span> {{t "%d given up on" .}}</span>{{end}}{{end}}</td><td>{{if not .LastErr}}–{{else if $admin}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{.LastErr}}</span>{{else}}{{t "failed: an admin sees why"}}{{end}}</td></tr>{{end}}
+</tbody></table></div>
+{{- end}}
+{{end}}{{end}}

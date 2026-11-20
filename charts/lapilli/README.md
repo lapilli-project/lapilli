@@ -779,6 +779,37 @@ the receiver to check that it came from Lapilli, as
 [Signed posts to the webhook](https://github.com/lapilli-project/lapilli/blob/main/docs/serve.md#signed-posts-to-the-webhook)
 says.
 
+`serve.config` decides who is told what too, under `notify:`: routes send
+each event by its kind (`task.created`, or a family, `task.*`), its team and
+its labels to destinations by name, the first that takes it deciding
+unless it says `continue: true`, and what none takes to `default`, which
+routes need, so that nothing is dropped. The names are `webhook`, `slack`,
+`team:NAME` (`serve.teamDigests.teams`), `serve.reports.destinations`'
+names, and `serve.notify.webhookDests`', JSON webhooks of their own, each
+URL in a Secret's key and, with `signingKey`, each signed with its own key;
+never a URL. `templates:` gives a destination words of its own, from
+`{{.Event}}`, `{{.Line}}`, `{{.Link}}`, `{{.Rule}}`, `{{.Team}}`,
+`{{.Title}}`, `{{.ID}}`, `{{.By}}`, `{{.Labels}}` and `{{.At}}`, each value
+escaped for where it goes. Every replica reads the routes, as it tells of
+what it writes; the Settings page shows them, read-only, and how each
+destination's notices went. Without routes, every event goes to the
+webhook and, with `serve.notify.slack`, Slack, as before
+([Who is told what](https://github.com/lapilli-project/lapilli/blob/main/docs/design/notifications.md#who-is-told-what)).
+
+```yaml
+serve:
+  notify:
+    webhookDests:
+      - {name: payments-hook, secretName: lapilli-payments-hook, key: url, signingKey: key}
+  config: |
+    notify:
+      routes:
+        - kinds: [task.*, proposal.*]
+          teams: [payments]
+          to: [team:payments, payments-hook]
+      default: [slack]
+```
+
 Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they
 propose. It is off by default, since it runs PromQL the agent writes, with

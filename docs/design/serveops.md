@@ -544,6 +544,14 @@ goal: one it no longer declares is deleted, with or without
 `--config-prune`, and without `--config` there are none. An export gives
 them back as the file declares them.
 
+A sixth key, `notify:`, declares who is told what: routes by an event's
+kind, team and labels to destinations the flags name, a default, and a
+destination's own words ([notifications.md](notifications.md#who-is-told-what)).
+It isn't kept in the ledger: every replica reads it, as each tells of what
+it writes, and puts it in force once it has read the same file twice in a
+row; an export doesn't give it. A `notify:` that can't be read refuses the
+file, as the rest does.
+
 **Read strictly, or not at all.** A key it doesn't know, a value of
 another kind, a key given twice, a second document, a file over 1 MiB (a
 ConfigMap's most), more things than the ledger keeps (1,000 teams, 500

@@ -33,7 +33,7 @@ func (l *Ledger) tell(t *txn, event, by string, about map[string]any) error {
 	if err != nil {
 		return err
 	}
-	for _, d := range *dests {
+	for _, d := range l.routed(event, body, *dests) {
 		if _, err := t.ExecContext(t.ctx, t.d.pick("INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)", outboxDue),
 			d, event, string(body), now.Unix(), now.Unix()); err != nil {
 			return err
@@ -65,6 +65,10 @@ type Told struct {
 // kept in the ledger, whatever is told and wherever it goes. A page shows none
 // of it, so pages kept stay.
 func (l *Ledger) TellOnce(ctx context.Context, key, value, event string, told []Told) error {
+	told, err := l.routeTold(event, told)
+	if err != nil {
+		return err
+	}
 	return l.writeAside(ctx, func(t *txn) error {
 		if have, err := l.meta(t.ctx, t, key); err != nil || have == value {
 			return err

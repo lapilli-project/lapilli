@@ -27,7 +27,7 @@ func (s *Server) dests() []string {
 	if s.cfg.NotifySlack && s.cfg.Slack != "" {
 		out = append(out, "slack")
 	}
-	return out
+	return append(out, s.routedDests()...)
 }
 
 // sendsTo are the places the outbox has anything for: where what happens is
@@ -241,6 +241,9 @@ func (s *Server) send(ctx context.Context, x ledger.Notice) error {
 		return err
 	}
 	link := s.pageOf(n)
+	if s.sendsRouted(x) {
+		return s.sendRouted(ctx, x, n, link)
+	}
 	switch x.Dest {
 	case "webhook":
 		var body map[string]any

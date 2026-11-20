@@ -183,6 +183,13 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		return d, empty
 	}
 	err := each(root, "", func(key string, v *yaml.Node) error {
+		if key == "notify" {
+			// Routes, which each replica reads apart (notifyroutes.go):
+			// read here too, so that a file whose notify: can't be read
+			// changes nothing.
+			_, err := parseNotify(v)
+			return err
+		}
 		// A key with nothing after it, as a file cut short reads: not a
 		// list of none, which [] says.
 		if null(v) {

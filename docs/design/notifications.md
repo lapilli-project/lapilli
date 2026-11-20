@@ -536,3 +536,156 @@ and these differences:
   https://docs.oracle.com/en-us/iaas/Content/Monitoring/alarm-message-format.htm,
   https://docs.oracle.com/en-us/iaas/Content/Monitoring/Concepts/monitoringoverview.htm,
   https://docs.oracle.com/en-us/iaas/Content/Monitoring/alarm-message-examples.htm
+
+## Who is told what
+
+Status: built, for the next release. No schema change: the outbox already
+keeps a row for each place a notice goes, so routes decide which rows are
+written. Under [GOVERNANCE.md](../../GOVERNANCE.md) this adds no new kind
+of data to the ledger, and comes as a change to how `serve` tells, not as
+a design first.
+
+### Why
+
+What happens (a task made, a proposal approved, a goal missed, a source
+gone quiet) went to one webhook and one Slack channel, every event to both.
+The weekly digest and the reports people schedule could already go to a
+team's own channel; nothing else could. A team that owns its rules wants
+its tasks, its proposals and its goals in its own channel, and a severity
+that pages wants another. Alertmanager's routes, Grafana's notification
+policies and Argo CD's notification subscriptions all answer this the same
+way: match on what the event is about, name a receiver, and fall back to a
+default so that nothing goes nowhere. This is that, small.
+
+### As built
+
+- **Routes are declared in `--config`, under `notify:`**, beside teams and
+  quiet windows, and nowhere else: the Settings page shows them, read-only,
+  and says to change them there.
+
+  ```yaml
+  notify:
+    routes:
+      - kinds: [task.*, proposal.*]      # a kind, or a family; any when left out
+        teams: [payments]                # any of them; any team, or none, when left out
+        labels: {severity: [page, critical]}   # each label at one of its values
+        to: [payments-hook, team:payments]
+        continue: true                   # go on to the routes after it
+      - kinds: [goal.missed]
+        to: [ops]
+    default: [slack]                     # what no route takes; routes need one
+    templates:                           # a destination's own words, optional
+      ops: "*{{.Event}}* {{.Title}} <{{.Link}}|open>"
+  ```
+
+  The first route that takes an event sends it, and each after it too while
+  the one before says `continue: true`; what none takes goes to `default`.
+  Routes without a default are refused, as the file is, so nothing is
+  dropped. A `default` alone sends every event there. Without routes and a
+  default, what happens is told as before: to `--notify-webhook-file` and,
+  with `--notify-slack`, to Slack, the same rows, byte for byte.
+- **Destinations are named by the flags**, which read their URLs from
+  files, as before; a route names destinations, never a URL. `webhook`
+  (`--notify-webhook-file`, signed with `--notify-webhook-secret-file`),
+  `slack` (`--slack-webhook-file`, with or without `--notify-slack`),
+  `team:NAME` (`--team-digest`), the names `--report-dest` gives
+  Slack-style webhooks, and those the new `--webhook-dest NAME=FILE` gives
+  JSON ones, each signed, when given, with its own key,
+  `--webhook-dest-secret NAME=FILE`. `--webhook-dest` needs `--config`. A
+  name the flags don't give is refused, at its line, by each replica: the
+  flags are each replica's own. In the chart, `serve.notify.webhookDests`
+  mounts each from a Secret.
+- **The kinds** a route can name are those the outbox tells, a line each in
+  `routeKinds` (`internal/serve/notifyroutes.go`), which a test holds to
+  what the code tells; a family is `task.*`. A kind added and not listed
+  there is routed all the same, by the routes that name no kind, or to the
+  default.
+
+  | Kind | Its team | Its labels |
+  |---|---|---|
+  | `task.created`, `task.assigned`, `task.status`, `task.overdue` | the task's, or its rule's owner | its rule's |
+  | `incident.written` | each team whose labels it has a value of | its own |
+  | `window.kept` | the window's | |
+  | `marked.kept` | the window's | its own |
+  | `comment.written` | on a rule, the rule's owner | on a rule, the rule's |
+  | `proposal.made`, `proposal.approved`, `proposal.backtested` | the rule's owner | the rule's |
+  | `change.opened`, `change.applied`, `change.refused`, `change.failed`, `change.undone`, `change.amended` | the rule's owner | the rule's |
+  | `replay.differs` | the rule's owner | the rule's |
+  | `goal.missed` | the goal's team, or each team named, for a goal of each team's | |
+  | `source.quiet` | | |
+
+  A rule's labels are its alerts', as its chips show them; its owner is the
+  team that owns it, as the Teams page says. A team's name matches in any
+  letter case; a label, exactly. `digest.ready` and `report.ready` aren't
+  routed: they go where the Reports page, the flags and each report send
+  them, as before.
+- **Routed as they are written.** The outbox's rows are written in the
+  same transaction as what they tell of; the ledger asks serve's router,
+  which reads the routing in force and the owners last worked out, and
+  nothing else, as it is asked inside the write. Each replica writes what
+  it is sent, so each reads the file, every 15 seconds, and puts a new one
+  in force once it has read it the same twice in a row, as the leader
+  keeps the ledger to it. A team made seconds before an event about it may
+  not be in the owners yet: the event is routed as of no team, by the
+  other routes, or to the default. The routes keep the owners worked out
+  every 15 seconds while they are in force.
+- **Kept in the outbox by name.** A notice to `webhook`, or to `slack` with
+  `--notify-slack`, keeps its place's name, as before; to any other
+  destination, `route:NAME`. With `--config`, each destination a route may
+  name has a sender of its own from the start, whether a route names it
+  yet or not, so that a route read later has one; it reads an empty index
+  range every five seconds until then. A notice is sent to the destination
+  its row names, the row's alone: what it tells (a title, a label, a `to`
+  or a `url` in it) never says where it goes, and a name the flags no
+  longer give fails, posting nothing, and is tried again and given up on as
+  any.
+- **Nothing dropped.** Routes in force always take an event, the default
+  at least. If none of the places they name is among those the event may
+  go to, it goes to the default's, or else to every place. Routes the file
+  declares that couldn't be read since `serve` started leave what happens
+  told as without routes, or, with no webhook and no Slack, to every
+  destination, and the Settings page says why, to an admin, with its line.
+  A `notify:` that can't be read (a kind misspelt, a key unknown, routes
+  without a default) refuses the file as a whole, teams and roles too, as
+  any part of it does; a destination the flags don't give refuses the
+  routes alone, on the replica whose flags don't give it, and the rest of
+  the file is kept to. Each such event is counted in
+  `lapilli_serve_notices_unrouted_total`, said on the Settings and
+  Administration pages and in the log; with routes in force and a default
+  it stays 0. A file that can't be used later leaves the routes in force.
+- **Templates are a destination's, not a route's.** A row keeps its place
+  and not the route that chose it, and two routes may send one event to
+  one place; a route that wants words of its own sends to a destination of
+  its own, a second `--report-dest` on the same Slack webhook. A template
+  is text and `{{.Field}}`, nothing else: `Event`, `Line` (the sentence
+  Lapilli writes, in `--lang`), `Link`, `Rule`, `Team`, `Title`, `ID`, `By`,
+  `Labels` (`name=value, …`) and `At`. Any other field, a function, a
+  pipeline or `{{` left open is refused when the file is read. A template
+  is 2,000 bytes at most, a field's value 500 in it, and what it gives
+  4,000, each cut at a letter's end. To a Slack-style destination, the
+  template is Slack's markup, as the admin wrote it, so its `<!here>` and
+  its links work; each field's value has `&`, `<` and `>` as Slack's
+  entities and three backquotes as three quotes, so that no value mentions
+  anyone, links anywhere or ends a code block; and every value is on one
+  line, each control character and Unicode's line separators a space. To a
+  JSON webhook, the template gives the post a `text`, a JSON string, beside
+  what it sent before; a receiver that reads it as markup escapes it. The
+  digest's and reports' posts are as they were.
+- **The Settings page** shows, under Notifications, the routes in force
+  (each route's kinds, teams, labels, destinations and whether it goes on,
+  and the default), when they were read and the file's hash, a file read
+  once and waiting, and why one can't be used; then each destination an
+  event goes to, its flag, whether it has its own template, when a notice
+  was last sent to it, how many wait, how many of the last day's failed or
+  were given up on, and, to an admin, why the latest still unsent failed,
+  the paths of files taken out. No form changes a route. The
+  Administration page's card says when the routes can't be used and when
+  an event went where no route sent it.
+- **`/metrics`**: `lapilli_serve_notices_total{to,result}` counts each
+  `route:NAME` as it counts the webhook, with a series at 0, `sent` and
+  `failed`, from the start; the webhook's, Slack's, teams' and reports'
+  are said as before, once they sent. `lapilli_serve_notices_unrouted_total`,
+  with `--config`, counts the above; without it, `/metrics` is as it was.
+- **Not in the export.** `GET /config.yaml` gives what the ledger holds;
+  routes aren't kept there, so a file pasted from it declares none. Keep
+  `notify:` in the file that declares it.

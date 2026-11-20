@@ -211,8 +211,9 @@ source ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)):
 | `lapilli_serve_notifications_since_timestamp_seconds` | gauge | | When the first notification kept came, in Unix seconds: `lapilli_rule_notifications` counts from then |
 | `lapilli_serve_notifications_last_timestamp_seconds` | gauge | `source` | When the latest notification taken came, by where it came from, in Unix seconds |
 | `lapilli_serve_notifications_refused_total` | counter | `source` | Notifications the notifications port was sent and couldn't keep, since the process started; the rest of a request is kept, and why is logged |
-| `lapilli_serve_notices_total` | counter | `to`, `result` | Notices since the process started, by where they went (`webhook`, `slack`, `team`, `report`) and whether they were `sent` or `failed` |
+| `lapilli_serve_notices_total` | counter | `to`, `result` | Notices since the process started, by where they went (`webhook`, `slack`, `team`, `report`, and `route:NAME` for a destination routes name) and whether they were `sent` or `failed` |
 | `lapilli_serve_notices_unsent` | gauge | | Notices not sent yet, or given up on |
+| `lapilli_serve_notices_unrouted_total` | counter | | Events since the process started that went where no route sent them: routes `--config`'s `notify:` declares that couldn't be read since the start, so told as without routes, or routes that sent an event nowhere there is, so to the default or everywhere. 0 with routes in force and a default |
 
 The first two are there once a notification is kept.
 `lapilli_serve_notifications_refused_total` is there with `--notify-listen`,
@@ -220,7 +221,12 @@ a series at 0 for each of the port's sources: `alertmanager`,
 `alertmanager-events`, `grafana`, `sns`, `azure`, `google` and `oci`
 ([Notifications as they were sent](notifications.md)). The notices' two are
 there when notices have somewhere to go: `--notify-webhook-file`,
-`--slack-webhook-file`, `--team-digest` or `--report-dest`.
+`--slack-webhook-file`, `--team-digest`, `--report-dest` or
+`--webhook-dest`. With `--config`, each destination a route may name is a
+place, `route:NAME`, whether a route names it or not, with a series at 0,
+`sent` and `failed`, from the start, and
+`lapilli_serve_notices_unrouted_total` is there
+([Who is told what](design/notifications.md#who-is-told-what)).
 
 ## Replicas
 

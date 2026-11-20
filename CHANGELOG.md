@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Routes** (docs/design/notifications.md, "Who is told what").
+  `--config`'s `notify:` sends each event by its kind (`task.created`, or a
+  family, `task.*`), its team (a task's or a window's, a rule's owner, an
+  incident's by its labels, a goal's) and its labels (its rule's, a marked
+  window's, an incident's), each at one of the values given, to
+  destinations by name: the first route that takes it decides, unless it
+  says `continue: true`, and what none takes goes to `default`, which
+  routes need. Without routes, what happens is told as before, to the
+  webhook and, with `--notify-slack`, Slack, the same rows; `digest.ready`
+  and `report.ready` go where their own settings send them, routes or
+  not. Every replica reads the routes, as it tells of what it writes, and
+  puts a file in force once it has read it the same twice in a row; a
+  `notify:` that can't be read refuses the file, as any part of it does,
+  and a destination the flags don't give refuses the routes alone.
+- **Destinations by name.** A route names `webhook`, `slack`, `team:NAME`
+  (`--team-digest`), a `--report-dest`'s name, or a JSON webhook of its
+  own, `--webhook-dest NAME=FILE`, each post signed, when given, with its
+  own key, `--webhook-dest-secret NAME=FILE` (32 bytes at least). URLs stay
+  in files, never in `--config`; a label picks among the routes, never a
+  destination, and a notice goes to the destination its outbox row names,
+  whatever it tells. `--webhook-dest` needs `--config`, and refuses a name
+  `--report-dest` gives. In the chart, `serve.notify.webhookDests`, each
+  from a Secret; `lapilli preflight` reads their files.
+- **A destination's own words**, under `notify:`'s `templates:`: text and
+  `{{.Field}}` alone, of `Event`, `Line`, `Link`, `Rule`, `Team`, `Title`,
+  `ID`, `By`, `Labels` and `At`; any other field, a function or a pipeline
+  is refused as the file is read. 2,000 bytes a template, 500 a value in
+  it, 4,000 what it gives. To a Slack-style destination, Slack's markup as
+  the admin wrote it, its `<!here>` and links working, each value's `&`,
+  `<` and `>` escaped and three backquotes made quotes, so that no title,
+  rule or label mentions anyone, links anywhere or ends a code block; to a
+  JSON webhook, a `text` beside the post's fields. Every value on one line.
+- **The Settings page's Notifications** shows the routes in force,
+  read-only, "changed there, not here", and each destination an event goes
+  to: when a notice to it was last sent, how many wait, how many of the
+  last day's failed or were given up on, and, to an admin, why the latest
+  still unsent failed. No form changes a route.
+- **`lapilli_serve_notices_unrouted_total`**, with `--config`: events that
+  went where no route sent them: routes that couldn't be read since the start, told as
+  without them, or everywhere with no webhook or Slack; routes that sent an
+  event nowhere there is, to the default, or everywhere. 0 with routes in
+  force and a default; said on the Settings and Administration pages too.
+- **Each destination a route may name** is, with `--config`, a place of
+  the outbox's, `route:NAME`, with a loop of its own that sends what the
+  outbox holds for it, whether a route names it yet or not, counted in
+  `lapilli_serve_notices_total{to="route:NAME"}`, at 0 from the start.
+
 ## [0.63.1] - 2026-11-20
 
 The forms for people's verdicts on firings (0.63.0) on a few lines a row,
