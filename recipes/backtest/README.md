@@ -107,7 +107,9 @@ And, as wanted:
   symbolic link refused, `MAX_TREE_FILES` and `MAX_TREE_BYTES`), and each
   test file there. promtool reads each, its `rule_files` the rule's group
   as Lapilli writes it whatever the file named, with no environment, 30s
-  at most, and runs nothing of the pull request's: it evaluates PromQL on
+  at most, on Linux within 256Mi of memory (`--promtool-memory SIZE` as
+  an argument gives another; give a promtool built with cgo 512Mi), and
+  runs nothing of the pull request's: it evaluates PromQL on
   test series of its own. A scenario that fails is broken as a budget is,
   what promtool said in the comment; one that couldn't be run after the
   change (its test file gone, a time out) fails the job with

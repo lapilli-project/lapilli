@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -157,6 +158,12 @@ Before a change to the rules:
                       Prometheus's format; promtool runs with no
                       environment, 30s a scenario, its rule_files the
                       group alone
+  --promtool-memory SIZE
+                      the memory one run of --promtool may take, as 256Mi
+                      or 1Gi, 64Mi at least (default 256Mi): on Linux,
+                      promtool's RLIMIT_DATA, past which the run stops and
+                      the scenario is not known. Not set on macOS, where
+                      promtool runs without a cap
   --draft-expectations FILE
                       write FILE, an expectations file drafted from the
                       period judged, as each rule is now: the most it fired
@@ -482,8 +489,11 @@ type verdictFlags struct {
 	// failExpect, --fail-expectations; expectRequired, --expect-required.
 	expect, expectBefore       string
 	failExpect, expectRequired bool
-	// promtool is --promtool, resolved (scenario.Resolve).
-	promtool string
+	// promtool is --promtool, resolved (scenario.Resolve); promtoolMemory,
+	// --promtool-memory, the memory one run may take, as serve's.
+	promtool          string
+	promtoolMemory    uint64
+	promtoolMemorySet bool
 	// draft is --draft-expectations: the file a draft from the history
 	// is written to.
 	draft          string
@@ -602,6 +612,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		loc:      time.Local,
 		timeout:  10 * time.Minute,
 		parallel: 8,
+		// As serve's: a quarter of the chart's memory limit.
+		promtoolMemory: defaultPromtoolMemory,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -742,6 +754,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			if f.promtool, err = scenario.Resolve(val); err != nil {
 				return nil, fmt.Errorf("--promtool %s: %w", val, err)
 			}
+		case "--promtool-memory":
+			if f.promtoolMemory, err = memorySize(val); err != nil {
+				return nil, fmt.Errorf("--promtool-memory %s: %v", val, err)
+			}
+			f.promtoolMemorySet = true
 		case "--check-series":
 			f.checkSeries = append(f.checkSeries, val)
 		case "--check-firings":
@@ -1124,6 +1141,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--expect holds a change to the rules to what they are expected to do: it goes with --compare")
 	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired || f.promtool != ""):
 		return nil, errors.New("--expect-before, --fail-expectations, --expect-required and --promtool go with --expect")
+	case f.promtoolMemorySet && f.promtool == "":
+		return nil, errors.New("--promtool-memory is the memory --promtool's runs may take: give --promtool")
 	case f.draft != "" && (len(f.compare) > 0 || f.checkReplay):
 		return nil, errors.New("--draft-expectations drafts what the rules judged are held to: it doesn't go with --compare or --check-replay")
 	case f.draft != "" && f.redact:
@@ -1359,6 +1378,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(fmt.Errorf("%s %s: %w", e.flag, e.path, err))
 		}
+	}
+	if f.promtool != "" && f.promtoolMemory > 0 && !scenario.CanCap {
+		// Said once, as serve logs it.
+		fmt.Fprintf(stderr, "lapilli verdict: promtool runs without a memory cap here (%s): --promtool-memory is set through RLIMIT_DATA, on Linux alone\n", runtime.GOOS)
 	}
 	var recordedIs []rules.Recording
 	if len(f.compare) > 0 {
@@ -1789,7 +1812,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 // as replayed, and its recording rules, by group; each test file read in
 // the directory of the expectations file that names it, and nowhere else.
 func (f *verdictFlags) scenarioSides(ctx context.Context, was, is []rules.Rule, recordedIs []rules.Recording) (*scenario.Sides, error) {
-	s := &scenario.Sides{Ctx: ctx, Promtool: scenario.Promtool{Path: f.promtool},
+	s := &scenario.Sides{Ctx: ctx, Promtool: scenario.Promtool{Path: f.promtool, Memory: f.promtoolMemory},
 		Rules: [2][]rules.Rule{was, is}, Recorded: [2][]rules.Recording{f.recorded, recordedIs}}
 	var err error
 	if s.After, err = os.OpenRoot(filepath.Dir(f.expect)); err != nil {

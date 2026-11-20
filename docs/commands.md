@@ -159,6 +159,12 @@ Before a change to the rules:
                       Prometheus's format; promtool runs with no
                       environment, 30s a scenario, its rule_files the
                       group alone
+  --promtool-memory SIZE
+                      the memory one run of --promtool may take, as 256Mi
+                      or 1Gi, 64Mi at least (default 256Mi): on Linux,
+                      promtool's RLIMIT_DATA, past which the run stops and
+                      the scenario is not known. Not set on macOS, where
+                      promtool runs without a cap
   --draft-expectations FILE
                       write FILE, an expectations file drafted from the
                       period judged, as each rule is now: the most it fired
@@ -762,6 +768,7 @@ The web UI and API:
                       the scenario is not known; promtool runs in serve's
                       container, so leave room for it under its memory
                       limit. Not set on macOS, where promtool runs without
+                      a cap
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)

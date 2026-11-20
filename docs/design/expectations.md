@@ -688,8 +688,13 @@ Step 4, scenarios, as built:
   (`pthread_create failed`, which is read as past the cap too), so the
   tests cap the stand-in at 512 MiB and the docs say so for a promtool
   built with cgo. macOS refuses RLIMIT_DATA: there promtool runs without
-  a cap, said once as serve starts. `lapilli verdict --promtool` runs it without one, in a
-  CI job whose own limits hold it. Exit 0 saying `SUCCESS` is met; exit 1
+  a cap, said once as serve starts. `lapilli verdict --promtool` takes
+  `--promtool-memory` too, alike (256Mi unless given, 64Mi at least,
+  Linux alone, said on its standard error elsewhere): 0.65.0 ran it
+  without one, leaving it to the CI job's own limits (a review's Low).
+  The wrapper is Lapilli started again, `lapilli` itself as serve's is: the
+  package's `init` that reads the name is linked into every binary that
+  runs a scenario. Exit 0 saying `SUCCESS` is met; exit 1
   saying `FAILED:` is broken, the lines after it kept (2,000 bytes);
   anything else couldn't be run, and is not known: a time out, a crash,
   another exit status, an answer promtool doesn't give. promtool also says
