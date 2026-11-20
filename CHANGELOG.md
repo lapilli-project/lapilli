@@ -23,8 +23,10 @@ and their words in Korean. No schema change: the ledger stays at 026.
   entry's `judged: false`, not 판정 안 함, a letter from 판정 안 됨 (no
   record); “실제 문제였음” quoted as a button's name; 무관: INC-111, not
   INC-111와 무관함; a rule's precision as Lapilli judged it says only what
-  people moved. Japanese and Spanish said the two not-judged states alike
-  too (判定対象外, "Fuera del juicio" now); Spanish's Notified is "Avisos".
+  people moved, as the Goals page's line of what people moved does now,
+  where it said every zero. Japanese and Spanish said the two not-judged
+  states alike too (判定対象外, "Fuera del juicio" now); Spanish's
+  Notified is "Avisos".
 - The Episodes column fits where the tables did before it: the rules list
   at 1,070 px, the overview's heatmap at 1,200 px (a rule's name cut
   sooner under 1,280 px).

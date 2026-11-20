@@ -2342,7 +2342,6 @@
  "rule entry %d: no signals: name the signals its rules are judged against, or say judged: false for none": "entrada de reglas %d: sin señales: nombra las señales contra las que se juzgan sus reglas, o di judged: false para ninguna",
  "rule entries say which rules are judged against which named signals: add a named signal first, or say judged: false of each": "las entradas de reglas dicen qué reglas se juzgan contra qué señales con nombre: añade primero una señal con nombre, o di judged: false de cada una",
  "With %d people's verdicts since it was told.": "Con %d veredictos de personas desde que se avisó.",
- "Moved by people: %d said unrelated, %d This was real, %d firings not judged, %d answered": "Movida por personas: %d dichos no relacionados, %d Esto fue real, %d disparos fuera del juicio, %d respondidos",
  "by its note": "por su nota",
  "by its name": "por su nombre",
  "by its labels": "por sus etiquetas",
@@ -2366,9 +2365,14 @@
  "Save for those picked": "Guardar en los elegidos",
  "%s as Lapilli judged it: people said %d firings were unrelated": "%s como lo juzgó Lapilli: las personas dijeron que %d disparos no estaban relacionados",
  "%s as Lapilli judged it: This was real turned %d white": "%s como lo juzgó Lapilli: Esto fue real volvió blancos %d",
- "pick whether they needed action, or clear the answer": "elija si necesitaron acción, o borrar la respuesta",
+ "pick whether they needed action, or clear the answer": "elija si necesitaron acción, o elija «borrar la respuesta»",
  "Whether it needed action": "Si necesitó acción",
  "Action: –": "Acción: –",
  "Action: yes": "Acción: sí",
- "Action: no": "Acción: no"
+ "Action: no": "Acción: no",
+ "Moved by people: %s": "Movida por personas: %s",
+ "%d said unrelated": "%d dichos no relacionados",
+ "%d This was real": "%d Esto fue real",
+ "%d firings not judged": "%d disparos fuera del juicio",
+ "%d firings answered": "%d disparos respondidos"
 }

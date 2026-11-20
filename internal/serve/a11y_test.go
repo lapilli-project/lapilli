@@ -39,14 +39,8 @@ func a11yServer(t *testing.T) (*Server, []string) {
 	ctx := context.Background()
 	s := pagesServer(t)
 	peopleSay(t, s)
-	for {
-		n, err := s.l.CountEpisodes(ctx, s.cfg.Options, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n == 0 {
-			break
-		}
+	if _, err := s.l.CountEpisodes(ctx, s.cfg.Options, nil); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.propose(ctx, ask{Rule: "Errors", Kind: ledger.KindFor, For: 15 * time.Minute}, "ana", false, true); err != nil {
 		t.Fatal(err)

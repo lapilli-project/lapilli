@@ -848,8 +848,8 @@ column, "What people said"), says what people said of it
 disclosure, with a note, for an editor of every team or an admin; one so
 made black says "Black: unrelated to INC-12, by NAME on DATE", the note
 after it in `<bdi>`, with Undo; one whose verdict moved says why, as a
-warning; and "Needed action", a select of none, yes and no with Answer,
-for whoever may answer it (a team's editor of its rule's team too), its
+warning; and "needed action", a select that says its answer ("Action: –",
+"Action: yes", "Action: no") with Save (bundle 65), for whoever may answer it (a team's editor of its rule's team too), its
 answer shown to everyone else. Its stone says `● said unrelated`. "This
 was real" isn't offered on a firing said unrelated. The bulk bar answers
 needed action for the firings picked, white ones among them. Every form
@@ -2012,9 +2012,12 @@ beside "sin juzgar", which differed by a capital alone). A button's name in
 a sentence is in quotes (“실제 문제였음”으로), as a badge's is; who said a
 firing was unrelated to what reads 무관: INC-111 (dana, …), with no particle
 after a value whose sound Korean can't know (INC-111와). A line of what
-people moved says only the parts that moved: no "0건이 정탐이 됐어요".
-`TestKoreanTerms` fails on 에피소드 and 판정 안 함; `TestJudgedApart` on the
-two said alike in any language.
+people moved says only the parts that moved, a rule's panel's ("0건이
+정탐이 됐어요" no more) and the Goals page's (`peopleMovedText`,
+`TestMovedSaysWhatMoved`). `TestKoreanTerms` fails on 에피소드 and 판정 안
+함; `TestJudgedApart` on a translation of the two said alike, or in each
+other's words. English keeps judging.md's: "Not judged" beside "? Not
+judged", a capital and a sign apart, for its design to weigh.
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only
@@ -2093,8 +2096,9 @@ it at 91, 331 with a note, a rule's name broken a letter from its end, and
   totals' headers wrapping and a rule's name cut at 11 rem under 1,280
   px (1,200 px). Spanish, which didn't fit there before it, still
   doesn't (ACCESSIBILITY.md).
-- `a11yServer` has people's verdicts (`peopleSay`: one said unrelated,
-  one answered, one to look at again) and the episodes counted, so that
+- `a11yServer` has people's verdicts (`peopleSay`: Errors' white
+  firings on search said unrelated and answered no, one black one
+  answered yes and moved, to look at again) and the episodes counted, so that
   `test/a11y/axe.mjs` reads their forms, words and columns on every
   change; they were read once by hand in Chromium and WebKit, 4
   languages, light and dark, at 1,280 and 320 px: no violation.

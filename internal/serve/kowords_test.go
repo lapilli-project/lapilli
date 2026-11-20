@@ -124,19 +124,39 @@ func TestKoreanTerms(t *testing.T) {
 	}
 }
 
-// TestJudgedApart: in every language, a firing with no record to judge it
-// by ("not judged") and a rule entry that judges its rules by nothing
-// ("Not judged", "judged by nothing") are said apart, not in words that
-// differ by a capital alone (TestKoreanTerms holds Korean's apart by more
-// than a letter).
+// TestJudgedApart: in each translation, a firing with no record to judge
+// it by ("not judged") and a rule entry that judges its rules by nothing
+// ("Not judged", "judged by nothing") are said apart, neither in the
+// other's words, whatever the case (bundle 65: Spanish said both "sin
+// juzgar", Korean 판정 안 됨 and 판정 안 함, Japanese 判定なし and 判定しない).
+// English keeps docs/design/judging.md's words.
 func TestJudgedApart(t *testing.T) {
-	for _, lang := range []string{"ko", "ja", "es"} {
-		none := tr(lang, "not judged")
+	for lang, want := range map[string]string{"ko": "판정 제외", "ja": "判定対象外", "es": "fuera del juicio"} {
+		none := strings.ToLower(tr(lang, "not judged"))
 		for _, off := range []string{"Not judged", "judged by nothing"} {
-			x := tr(lang, off)
-			if x == off || strings.EqualFold(x, none) {
-				t.Errorf("%s: %q is %q, beside %q for no record", lang, off, x, none)
+			x := strings.ToLower(tr(lang, off))
+			if x != strings.ToLower(want) || strings.Contains(x, none) || strings.Contains(none, x) {
+				t.Errorf("%s: %q is %q, want %q, apart from %q for no record", lang, off, x, want, none)
 			}
+		}
+	}
+}
+
+// TestMovedSaysWhatMoved: the Goals page's line of what people moved says
+// the parts that aren't zero alone, and nothing when none is (bundle 65).
+func TestMovedSaysWhatMoved(t *testing.T) {
+	for _, c := range []struct {
+		p    goalPeople
+		lang string
+		want string
+	}{
+		{goalPeople{Unrelated: 2}, "en", "Moved by people: 2 said unrelated"},
+		{goalPeople{Real: 1, Answered: 3}, "en", "Moved by people: 1 This was real, 3 firings answered"},
+		{goalPeople{Unrelated: 1, Real: 2, NotJudged: 3, Answered: 4}, "ko", "사람이 바꿈: 무관 1건, “실제 문제였음” 2건, 판정 제외 발화 3건, 답한 발화 4건"},
+		{goalPeople{}, "en", ""},
+	} {
+		if got := peopleMovedText(c.lang, &c.p); got != c.want {
+			t.Errorf("%+v in %s: %q, want %q", c.p, c.lang, got, c.want)
 		}
 	}
 }

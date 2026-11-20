@@ -2342,7 +2342,6 @@
  "rule entry %d: no signals: name the signals its rules are judged against, or say judged: false for none": "ルールエントリ %d: 指標がありません: そのルールを判定する指標を挙げるか、なければ judged: false と書いてください",
  "rule entries say which rules are judged against which named signals: add a named signal first, or say judged: false of each": "ルールエントリは、どのルールをどの名前付き指標で判定するかを決めます: 先に名前付き指標を追加するか、各項目に judged: false と書いてください",
  "With %d people's verdicts since it was told.": "通知の後、人の判定が %d 件ありました。",
- "Moved by people: %d said unrelated, %d This was real, %d firings not judged, %d answered": "人による変化: 無関係 %d 件、実際の問題だった %d 件、判定対象外の発火 %d 件、回答 %d 件",
  "by its note": "メモで",
  "by its name": "名前で",
  "by its labels": "ラベルで",
@@ -2370,5 +2369,10 @@
  "Whether it needed action": "対応の要否",
  "Action: –": "未回答",
  "Action: yes": "対応が必要",
- "Action: no": "対応は不要"
+ "Action: no": "対応は不要",
+ "Moved by people: %s": "人による変化: %s",
+ "%d said unrelated": "無関係 %d 件",
+ "%d This was real": "「実際の問題だった」 %d 件",
+ "%d firings not judged": "判定対象外の発火 %d 件",
+ "%d firings answered": "回答した発火 %d 件"
 }

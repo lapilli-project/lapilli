@@ -2342,7 +2342,6 @@
  "rule entry %d: no signals: name the signals its rules are judged against, or say judged: false for none": "규칙 항목 %d: 지표가 없어요: 그 규칙을 판정할 지표를 적거나, 없으면 judged: false라고 적으세요",
  "rule entries say which rules are judged against which named signals: add a named signal first, or say judged: false of each": "규칙 항목은 어떤 규칙을 어떤 이름 있는 지표로 판정할지 정해요: 먼저 이름 있는 지표를 추가하거나, 각 항목에 judged: false라고 적으세요",
  "With %d people's verdicts since it was told.": "알린 뒤 사람의 판정 %d건이 더해졌어요.",
- "Moved by people: %d said unrelated, %d This was real, %d firings not judged, %d answered": "사람이 바꿈: 무관 %d건, “실제 문제였음” %d건, 판정 제외 발화 %d건, 답한 발화 %d건",
  "by its note": "메모로",
  "by its name": "이름으로",
  "by its labels": "라벨로",
@@ -2370,5 +2369,10 @@
  "Whether it needed action": "조치 필요 여부",
  "Action: –": "답 없음",
  "Action: yes": "조치 필요",
- "Action: no": "조치 불필요"
+ "Action: no": "조치 불필요",
+ "Moved by people: %s": "사람이 바꿈: %s",
+ "%d said unrelated": "무관 %d건",
+ "%d This was real": "“실제 문제였음” %d건",
+ "%d firings not judged": "판정 제외 발화 %d건",
+ "%d firings answered": "답한 발화 %d건"
 }
