@@ -2543,6 +2543,8 @@
  "a CloudWatch alarm carries no labels: leave them out": "CloudWatch 알람에는 레이블이 없어요. 레이블을 빼 주세요",
  "a CloudWatch alarm's description is 1,024 characters at most": "CloudWatch 알람의 설명은 최대 1,024자예요",
  "a Google Cloud policy closes its alerts itself: leave keep_firing_for out": "Google Cloud 정책은 알림을 스스로 닫아요. keep_firing_for 를 빼 주세요",
+ "a CloudWatch alarm's for and keep_firing_for are whole seconds, 24h at most": "CloudWatch 알람의 for 와 keep_firing_for 는 초 단위로, 24h 까지예요",
+ "a Google Cloud policy's for is whole seconds": "Google Cloud 정책의 for 는 초 단위예요",
  "a Grafana rule tells one contact point at most": "Grafana 규칙은 연락 지점 하나에만 알릴 수 있어요",
  "a group of that name is in the namespace: pick it, or name the new one apart": "그 이름의 그룹이 네임스페이스에 이미 있어요. 그 그룹을 고르거나 새 그룹에 다른 이름을 주세요",
  "a new group's interval is whole seconds, an hour at most; a group there keeps its own": "새 그룹의 평가 주기는 초 단위로 최대 1시간이에요. 이미 있는 그룹은 자기 주기를 그대로 써요",

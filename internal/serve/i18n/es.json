@@ -2543,6 +2543,8 @@
  "a CloudWatch alarm carries no labels: leave them out": "una alarma de CloudWatch no lleva etiquetas: quítelas",
  "a CloudWatch alarm's description is 1,024 characters at most": "la descripción de una alarma de CloudWatch tiene 1.024 caracteres como mucho",
  "a Google Cloud policy closes its alerts itself: leave keep_firing_for out": "una política de Google Cloud cierra sus alertas por sí misma: quite keep_firing_for",
+ "a CloudWatch alarm's for and keep_firing_for are whole seconds, 24h at most": "el for y el keep_firing_for de una alarma de CloudWatch son segundos enteros, 24h como máximo",
+ "a Google Cloud policy's for is whole seconds": "el for de una política de Google Cloud son segundos enteros",
  "a Grafana rule tells one contact point at most": "una regla de Grafana avisa a un punto de contacto como mucho",
  "a group of that name is in the namespace: pick it, or name the new one apart": "hay un grupo con ese nombre en el namespace: elíjalo, o dé otro nombre al nuevo",
  "a new group's interval is whole seconds, an hour at most; a group there keeps its own": "el intervalo de un grupo nuevo son segundos enteros, una hora como mucho; un grupo existente conserva el suyo",

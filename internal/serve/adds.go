@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -104,6 +105,58 @@ func placeKey(p addPlace) string {
 	return hex.EncodeToString(h[:8])
 }
 
+// addRead is what a version of the rules gives a rule added, worked out
+// once a version (addReadOf): the names in effect (nameInEffect), and the
+// places of its rules, each named and sorted (addPlaces; a cloud's alarms
+// are read apart, as often as --alarms says).
+type addRead struct {
+	id     int64
+	digest string
+	since  time.Time
+	names  map[string]bool
+	offers []placeOffer
+}
+
+// addReadCache keeps the addRead of the latest version of the rules: what
+// the new rule's form, MCP's places and each proposal adding a rule ask
+// of, refused or not, before any try is taken, so that asking again and
+// again reads no version again.
+type addReadCache struct {
+	sync.Mutex
+	r *addRead
+}
+
+// addReadOf is the latest version's addRead; nil before the rules are read.
+func (s *Server) addReadOf(ctx context.Context) (*addRead, error) {
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	s.addsRead.Lock()
+	r := s.addsRead.r
+	s.addsRead.Unlock()
+	if r != nil && r.id == latest.ID && r.digest == latest.Digest {
+		return r, nil
+	}
+	all, names, docs, err := s.namedDocs(ctx, latest.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	r = &addRead{id: latest.ID, digest: latest.Digest, since: latest.Since, names: map[string]bool{}, offers: s.rulePlaces(all, docs)}
+	for i, x := range all {
+		base, _, _ := strings.Cut(names[i], " [")
+		for _, n := range []string{x.Name, base, x.AlertName()} {
+			if n != "" {
+				r.names[n] = true
+			}
+		}
+	}
+	s.addsRead.Lock()
+	s.addsRead.r = r
+	s.addsRead.Unlock()
+	return r, nil
+}
+
 // addPlaces are the places serve may add a rule to: of the rules it reads,
 // each group of a rule file under --rules (and a new group in it), each
 // Grafana folder's group, each group of a namespace --changes-in names on
@@ -111,62 +164,11 @@ func placeKey(p addPlace) string {
 // CloudWatch or Google Cloud --alarms with alarms read. Nothing else: no
 // path is ever taken from what a proposal says, only matched to these.
 func (s *Server) addPlaces(ctx context.Context) ([]placeOffer, error) {
-	latest, ok, err := s.l.Latest(ctx)
-	if err != nil || !ok {
+	read, err := s.addReadOf(ctx)
+	if err != nil || read == nil {
 		return nil, err
 	}
-	full, err := s.l.VersionByID(ctx, latest.ID)
-	if err != nil {
-		return nil, err
-	}
-	all, err := rules.FromDocs(full.Docs)
-	if err != nil {
-		return nil, err
-	}
-	var out []placeOffer
-	seen := map[string]int{}
-	add := func(o placeOffer) *placeOffer {
-		o.Key = placeKey(o.addPlace)
-		if i, ok := seen[o.Key]; ok {
-			return &out[i]
-		}
-		seen[o.Key] = len(out)
-		out = append(out, o)
-		return &out[len(out)-1]
-	}
-	fits := map[string]bool{} // a file a new group fits, by its source
-	for _, r := range all {
-		d := docOf(r, full.Docs)
-		switch {
-		case s.gitPlace(r, d):
-			file := s.docName(d.Source)
-			add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, Group: r.Group}})
-			ok, known := fits[d.Source]
-			if !known {
-				ok = rules.NewGroupFits(d.Data)
-				fits[d.Source] = ok
-			}
-			if ok {
-				add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, NewGroup: true}})
-			}
-		case s.grafanaPlace(r, d):
-			o := add(placeOffer{addPlace: addPlace{Path: ledger.PathGrafana, Folder: r.Folder, Group: strings.TrimPrefix(r.Group, r.Folder+"/")}})
-			for _, src := range r.Graph.Data {
-				if src.UID != "" && !slices.Contains(o.DataSources, src.UID) {
-					o.DataSources = append(o.DataSources, src.UID)
-				}
-			}
-			if r.Receiver != "" && !slices.Contains(o.Tells, r.Receiver) {
-				o.Tells = append(o.Tells, r.Receiver)
-			}
-			if r.Receiver == "" {
-				o.routed = true
-			}
-		case s.rulerPlace(r, d):
-			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, Group: r.Group}, kind: s.ruler.Kind})
-			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, NewGroup: true}, kind: s.ruler.Kind})
-		}
-	}
+	out := slices.Clone(read.offers)
 	for _, a := range s.alarms {
 		if a.Kind != source.AlarmsAWS && a.Kind != source.AlarmsGoogle {
 			continue
@@ -197,15 +199,103 @@ func (s *Server) addPlaces(ctx context.Context) ([]placeOffer, error) {
 		if a.Kind == source.AlarmsAWS && (o.account == "" || o.account == "?") {
 			continue
 		}
-		add(o)
+		o.Key = placeKey(o.addPlace)
+		if slices.ContainsFunc(out, func(x placeOffer) bool { return x.Key == o.Key }) {
+			continue
+		}
+		slices.Sort(o.Tells)
+		o.Name = o.where()
+		out = append(out, o)
+	}
+	slices.SortFunc(out, func(a, b placeOffer) int { return strings.Compare(a.Path+"\x00"+a.Name, b.Path+"\x00"+b.Name) })
+	return out, nil
+}
+
+// rulePlaces are the places of a version's rules, read from its documents
+// (addPlaces): each named, its data sources and whom it tells sorted. A
+// Grafana folder's title another folder has too is no place: a place is
+// named by its folder's title, and the rules Grafana's export gives carry
+// no folder's uid to tell the two apart (grafanaTitlesTwice).
+func (s *Server) rulePlaces(all []rules.Rule, docs []rules.Doc) []placeOffer {
+	var out []placeOffer
+	seen := map[string]int{}
+	add := func(o placeOffer) *placeOffer {
+		o.Key = placeKey(o.addPlace)
+		if i, ok := seen[o.Key]; ok {
+			return &out[i]
+		}
+		seen[o.Key] = len(out)
+		out = append(out, o)
+		return &out[len(out)-1]
+	}
+	var twice map[string]bool
+	if i := slices.IndexFunc(docs, func(d rules.Doc) bool { return s.cfg.Grafana != "" && d.Source == s.cfg.Grafana }); i >= 0 {
+		twice = grafanaTitlesTwice(docs[i].Data)
+	}
+	fits := map[string]bool{} // a file a new group fits, by its source
+	for _, r := range all {
+		d := docOf(r, docs)
+		switch {
+		case s.gitPlace(r, d):
+			file := s.docName(d.Source)
+			add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, Group: r.Group}})
+			ok, known := fits[d.Source]
+			if !known {
+				ok = rules.NewGroupFits(d.Data)
+				fits[d.Source] = ok
+			}
+			if ok {
+				add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, NewGroup: true}})
+			}
+		case s.grafanaPlace(r, d) && !twice[r.Folder]:
+			o := add(placeOffer{addPlace: addPlace{Path: ledger.PathGrafana, Folder: r.Folder, Group: strings.TrimPrefix(r.Group, r.Folder+"/")}})
+			for _, src := range r.Graph.Data {
+				if src.UID != "" && !slices.Contains(o.DataSources, src.UID) {
+					o.DataSources = append(o.DataSources, src.UID)
+				}
+			}
+			if r.Receiver != "" && !slices.Contains(o.Tells, r.Receiver) {
+				o.Tells = append(o.Tells, r.Receiver)
+			}
+			if r.Receiver == "" {
+				o.routed = true
+			}
+		case s.rulerPlace(r, d):
+			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, Group: r.Group}, kind: s.ruler.Kind})
+			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, NewGroup: true}, kind: s.ruler.Kind})
+		}
 	}
 	for i := range out {
 		slices.Sort(out[i].DataSources)
 		slices.Sort(out[i].Tells)
 		out[i].Name = out[i].where()
 	}
-	slices.SortFunc(out, func(a, b placeOffer) int { return strings.Compare(a.Path+"\x00"+a.Name, b.Path+"\x00"+b.Name) })
-	return out, nil
+	return out
+}
+
+// grafanaTitlesTwice are the folder titles a Grafana export holds a group
+// of twice: two folders of one title (nested folders, Payments/Alerts and
+// Security/Alerts, each with a group critical), whose rules read alike, a
+// folder named by its title alone. A folder doesn't hold two groups of a
+// name, so the export's second is another folder's.
+func grafanaTitlesTwice(data []byte) map[string]bool {
+	tree, err := rules.UnmarshalYAML(data)
+	if err != nil {
+		return nil
+	}
+	m, _ := tree.(map[string]any)
+	seen := map[[2]string]bool{}
+	out := map[string]bool{}
+	for _, g := range list(m["groups"]) {
+		gm, _ := g.(map[string]any)
+		// As the rules read have them: $$ read as $ (rules.provisioned).
+		k := [2]string{strings.ReplaceAll(str(gm["folder"]), "$$", "$"), strings.ReplaceAll(str(gm["name"]), "$$", "$")}
+		if seen[k] {
+			out[k[0]] = true
+		}
+		seen[k] = true
+	}
+	return out
 }
 
 // gitPlace reports whether a rule's file is one a rule may be added to by
@@ -839,6 +929,15 @@ func (s *Server) buildAlarm(ctx context.Context, b *addBuilt) error {
 	if !s.changesInAlarm(a.Source, b.added.Alert, a.Kind) {
 		return errNoPlace // --changes-in doesn't name it there
 	}
+	// Its for as the cloud takes one, as a for changed on an alarm there
+	// is held (rules.AlarmFor): refused as it is proposed, not by the cloud
+	// once approved; checked again as it is carried out.
+	switch {
+	case a.Kind == source.AlarmsAWS && (!rules.AlarmFor(cloudOf[a.Kind], b.added.For) || !rules.AlarmFor(cloudOf[a.Kind], b.added.KeepFiringFor)):
+		return bad(errAlarmForCW)
+	case a.Kind == source.AlarmsGoogle && !rules.AlarmFor(cloudOf[a.Kind], b.added.For):
+		return bad(errAlarmForGoogle)
+	}
 	var doc map[string]any
 	switch a.Kind {
 	case source.AlarmsAWS:
@@ -916,6 +1015,14 @@ func (s *Server) buildAlarm(ctx context.Context, b *addBuilt) error {
 	return nil
 }
 
+// A cloud's alarm added whose for the cloud doesn't take: CloudWatch's
+// PendingPeriod and RecoveryPeriod are whole seconds, 86,400 at most; a
+// Google policy's duration is whole seconds as Lapilli writes it.
+const (
+	errAlarmForCW     = "a CloudWatch alarm's for and keep_firing_for are whole seconds, 24h at most"
+	errAlarmForGoogle = "a Google Cloud policy's for is whole seconds"
+)
+
 // cwARNLike is a CloudWatch alarm's ARN in --alarms's partition and region,
 // as an alarm read there is written.
 func cwARNLike(ctx context.Context, a *source.Alarms, account, name string) string {
@@ -934,19 +1041,24 @@ func cwARNLike(ctx context.Context, a *source.Alarms, account, name string) stri
 // nameInEffect reports whether a rule in effect, or one read again where
 // rules are kept, is named so: an added rule is named apart from every one,
 // not its group's alone, as a proposal, its expectations and the ledger
-// name a rule by its name.
+// name a rule by its name. A rule added and applied since the rules were
+// read last (through Grafana's API, a ruler's or a cloud's, which make it
+// at once) is in effect too, though not yet read back: until a version of
+// the rules read after it says whether it is there.
 func (s *Server) nameInEffect(ctx context.Context, name string) (bool, error) {
-	latest, ok, err := s.l.Latest(ctx)
-	if err != nil || !ok {
+	read, err := s.addReadOf(ctx)
+	if err != nil || read == nil {
 		return false, err
 	}
-	all, names, err := s.named(ctx, latest.ID)
+	if read.names[name] {
+		return true, nil
+	}
+	applied, err := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: name, States: []string{ledger.StateApplied}})
 	if err != nil {
 		return false, err
 	}
-	for i, r := range all {
-		base, _, _ := strings.Cut(names[i], " [")
-		if r.Name == name || base == name || r.AlertName() == name {
+	for _, p := range applied {
+		if p.Kind == ledger.KindAdd && !read.since.After(p.Updated) {
 			return true, nil
 		}
 	}
@@ -1239,14 +1351,32 @@ func (s *Server) addAgain(ctx context.Context, p ledger.Proposal, ev evidence, w
 }
 
 // addWorse says how a rule added, checked again, is worse than what was
-// approved: an expectation broken now, or a backtest that didn't replay it
-// to the end.
-func addWorse(now evidence) string {
+// approved: an expectation broken now, a backtest that didn't replay it
+// to the end, or an expectation it met as it was approved that isn't met
+// now, not known (a scenario promtool doesn't run now, a catch of an
+// incident the twelve weeks no longer reach): no one approves one that
+// breaks an expectation, and what was met is what they approved.
+func addWorse(was, now evidence) string {
 	switch addHeldWhy(now) {
 	case addHeldBroken:
 		return "checked again, it now breaks an expectation it is held to"
 	case addHeldUnreplayed, addHeldNothing:
 		return "checked again, its backtest didn't replay it to the end, so it couldn't be held to its expectations"
+	}
+	if was.Add == nil || now.Add == nil {
+		return ""
+	}
+	key := func(it draftItem) string { return it.What + "\x00" + it.Selector + "\x00" + it.Held }
+	met := map[string]bool{}
+	for _, it := range now.Add.Items {
+		if it.State == verdict.ExpectMet {
+			met[key(it)] = true
+		}
+	}
+	for _, it := range was.Add.Items {
+		if it.State == verdict.ExpectMet && !met[key(it)] {
+			return "checked again, an expectation it met as it was approved is not known now (" + it.What + "), so it couldn't be held to it"
+		}
 	}
 	return ""
 }
