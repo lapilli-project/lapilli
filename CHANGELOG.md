@@ -32,8 +32,9 @@ Before upgrading:
   it is over, and to its catches against the incidents written down,
   judged again by a replay of the rule as it is when a new version of it
   came after the incident (five a run). Not known is never shown as met or
-  broken: a rule only copied in is known as far as its source's copies
-  reach, a week past them, or a catch of an incident past them, not known.
+  broken: a rule only copied in is known where its source's copies cover
+  it without a gap, their latest span; a week before or past it, or a
+  catch of an incident outside it, is not known.
   A check holds 10,000 rules and expectations, the expectations file's and
   `--config`'s first: a rule's annotation past what is left is not known,
   and never stops theirs. What it finds is kept (schema 027,
@@ -91,8 +92,9 @@ Before upgrading:
   which promtool expands at each evaluation of an alert that fires, could
   otherwise take gigabytes and the container with it. macOS sets no cap.
   serve keeps each run as begun before promtool starts, so that one that
-  never ends (serve stopped as promtool took its memory) isn't run again
-  each term, only once promtool, the group or the test file changes.
+  never ends (serve killed as promtool took its memory) isn't run again
+  each term, only once promtool, the group or the test file changes; one
+  serve stops itself, shutting down or no longer the leader, is run again.
 - **Drafts from the history.** A rule's Expectations tab shows what it is
   held to as it is now: the most it fired in a whole week of the twelve
   before this one, while people slept and re-fired, rounded up (1 to 9 as

@@ -87,6 +87,11 @@ const (
 const scenarioBegun = "promtool didn't finish: lapilli serve stopped while it ran (as when the container runs out of memory); " +
 	"it isn't run again until the rule's group, the test file or promtool changes"
 
+// scenarioStopped is what a scenario's check says when lapilli serve
+// stopped its run itself (shut down, or another leader took over): kept
+// with no version, so that the next leader runs it again.
+const scenarioStopped = "promtool didn't finish: lapilli serve stopped it as it stopped itself; it is run again"
+
 // expectWeeks is how many weeks a check reads: the week so far and the
 // twelve whole weeks before it.
 const expectWeeks = 13
@@ -295,9 +300,10 @@ type expectRule struct {
 	key         string
 	def         *rules.Rule
 	// copied says it is only copied in (its source's, as rules lists it);
-	// copiedTo, as far as its source's copies cover, without a gap.
-	copied   bool
-	copiedTo time.Time
+	// copiedFrom and copiedTo, what its source's copies cover without a
+	// gap, the latest span: a week or an incident outside it is not known.
+	copied               bool
+	copiedFrom, copiedTo time.Time
 }
 
 // expectRules are the rules in effect now: those of the latest version of
@@ -716,20 +722,20 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	}
 	// A rule only copied in is known as far as its source's copies cover:
 	// past it, a week no firing was copied in for isn't a week none fired.
-	covered := map[string]time.Time{}
+	covered := map[string][2]time.Time{}
 	for _, r := range rs {
 		row, ok := table[r.id]
 		if r.def != nil || !ok || r.id == 0 || row.Source == "" {
 			continue
 		}
-		to, seen := covered[row.Source]
+		span, seen := covered[row.Source]
 		if !seen {
-			if _, to, err = s.l.Coverage(ctx, row.Source); err != nil {
+			if span[0], span[1], err = s.l.Coverage(ctx, row.Source); err != nil {
 				return false, err
 			}
-			covered[row.Source] = to
+			covered[row.Source] = span
 		}
-		r.copied, r.copiedTo = true, to
+		r.copied, r.copiedFrom, r.copiedTo = true, span[0], span[1]
 	}
 	old, err := s.l.ExpectChecks(ctx, ledger.ExpectQuery{})
 	if err != nil {
@@ -877,9 +883,10 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			case r.unreplayed:
 				c.Week, c.At, c.Result, c.Why = ledger.Week(s.l.Day(in.Start)), in.Start, ledger.ExpectUnknown, whyUnreplayed
 			case r.copied && !slices.ContainsFunc(in.CaughtBy, func(k verdict.Catch) bool { return k.Rule == r.name }) &&
-				r.copiedTo.Before(in.Start.Add(time.Duration(it.Catch.Within))):
-				// Its copies don't reach the incident and its delay: not
-				// caught in them isn't missed.
+				(r.copiedTo.Before(in.Start.Add(time.Duration(it.Catch.Within))) || in.Start.Before(r.copiedFrom)):
+				// Its copies don't cover the incident and its delay, ending
+				// before, or beginning after, it began: not caught in them
+				// isn't missed.
 				c.Week, c.At, c.Result, c.Why = ledger.Week(s.l.Day(in.Start)), in.Start, ledger.ExpectUnknown, whyNotCopied
 			default:
 				c.Week, c.At = ledger.Week(s.l.Day(in.Start)), in.Start
@@ -928,9 +935,10 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			case n > *it.Limit:
 				// Over, in the week so far or a week held in part too.
 				c.Result = ledger.ExpectBroken
-			case r.copied && r.copiedTo.Before(wTo) && (w != this || r.copiedTo.Before(wFrom)):
-				// Past what its source's copies cover: a whole week, or the
-				// week so far that none of reached.
+			case r.copied && (wFrom.Before(r.copiedFrom) || r.copiedTo.Before(wTo) && (w != this || r.copiedTo.Before(wFrom))):
+				// Outside what its source's copies cover: a week begun
+				// before they began (in a gap, or before the first), a
+				// whole week past them, or the week so far none reached.
 				c.Result, c.Why = ledger.ExpectUnknown, whyNotCopied
 			case w == this || upTo.Before(wTo):
 				c.Result, c.Why = ledger.ExpectOpen, whySoFar
@@ -987,7 +995,19 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 		default:
 			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, res.Why
 		}
-		if err := s.l.KeepScenarioRun(ctx, *c, this, now); err != nil {
+		wctx, cancel := ctx, context.CancelFunc(func() {})
+		if ctx.Err() != nil {
+			// lapilli serve stopped the run itself, as it stops: not a
+			// run that died. Kept with no version, so that it is run
+			// again; what it found, if it ended first, kept as found.
+			wctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), s.cfg.Timeout)
+			if c.Result == ledger.ExpectUnknown {
+				c.Detail, c.Version = scenarioStopped, ""
+			}
+		}
+		err := s.l.KeepScenarioRun(wctx, *c, this, now)
+		cancel()
+		if err != nil {
 			return false, err
 		}
 	}

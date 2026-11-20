@@ -236,3 +236,97 @@ func TestScenarioRunsCapped(t *testing.T) {
 		t.Errorf("a check's run: %+v", r)
 	}
 }
+
+// A run lapilli serve stops itself, as it shuts down or another leader
+// takes over, isn't a run that died: kept with no version, so that the
+// next leader runs it again, rather than keep it as begun until the rule's
+// group, the test file or promtool changes.
+func TestScenarioStoppedRunAgain(t *testing.T) {
+	expect := "expectations:\n  - rule: Errors\n    scenarios: [tests/errors.yaml]\n"
+	s, _, _, count := scenarioServer(t, expect, map[string]string{"tests/errors.yaml": scenariotest.Test("wait")}, true)
+	s.expect.Lock()
+	s.expect.key = ""
+	s.expect.Unlock()
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	done := make(chan error, 1)
+	go func() { done <- s.expectAfter(ctx) }()
+	for begun := false; !begun || count() < 1; {
+		select {
+		case err := <-done:
+			t.Fatalf("the run ended (%v, %d runs) before it was stopped", err, count())
+		default:
+		}
+		cs, err := s.l.ExpectChecks(context.Background(), ledger.ExpectQuery{Rule: "Errors", HasRule: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cs {
+			begun = begun || c.Scenario() && c.Detail == scenarioBegun && c.Current
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	stop() // the leader stops, promtool running
+	<-done
+	c := checksOf(t, s, "Errors")["scenario tests/errors.yaml"]
+	if c.Result != ledger.ExpectUnknown || c.Detail != scenarioStopped || c.Version != "" {
+		t.Fatalf("stopped by lapilli serve: %+v", c)
+	}
+	// The next leader, nothing changed, promtool passing now.
+	os.WriteFile(filepath.Join(filepath.Dir(s.cfg.Promtool), "release"), nil, 0o600)
+	s.expect.Lock()
+	s.expect.key = ""
+	s.expect.Unlock()
+	if err := s.expectAfter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := checksOf(t, s, "Errors")["scenario tests/errors.yaml"]; c.Result != ledger.ExpectMet || count() != 2 {
+		t.Errorf("the next leader: %+v, %d runs", c, count())
+	}
+}
+
+// A rule only copied in is known only where its source's copies cover it
+// without a gap, the latest span: a week in a gap, or before the copies
+// began, isn't a week none fired, and an incident there isn't missed.
+func TestExpectCopiedOutsideSpan(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) { c.RulesPath, c.Impact = "", "" })
+	// Another source's firing, so that the ledger's history starts early.
+	early := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+	if _, err := s.l.PutFirings(ctx, "other", early, early.Add(7*24*time.Hour),
+		[]firing.Firing{{Rule: "Else", Start: early.Add(time.Hour), End: early.Add(2 * time.Hour)}}, ledger.FiringsCopier, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	// Two spans, three weeks apart: Aug 31 to Sep 14, and Oct 5 to 19.
+	a := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	b := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	for _, from := range []time.Time{a, b} {
+		f := []firing.Firing{{Rule: "Copied", Labels: map[string]string{"service": "x"}, Start: from.Add(26 * time.Hour), End: from.Add(27 * time.Hour)}}
+		if _, err := s.l.PutFirings(ctx, "pager", from, from.Add(14*24*time.Hour), f, ledger.FiringsCopier, s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(t.TempDir(), "expect.yaml")
+	os.WriteFile(file, []byte("expectations:\n  - rule: Copied\n    budget: {week: 5}\n    catches: [{incident: INC-9, within: 5m}]\n"), 0o600)
+	s.cfg.Expect = file
+	inc := filepath.Join(t.TempDir(), "incidents.yaml")
+	os.WriteFile(inc, []byte("incidents:\n  - {id: INC-9, title: In the gap, start: 2026-09-22T06:01:00Z, end: 2026-09-22T06:40:00Z, labels: {service: x}}\n"), 0o644)
+	s.cfg.Incidents = inc
+	s.jobs(ctx, true)
+	expectReadTwice(t, s)
+	checkAgain(t, s)
+	cs := checksOf(t, s, "Copied")
+	if c := cs["catches INC-9"]; c.Result != ledger.ExpectUnknown || c.Why != whyNotCopied {
+		t.Errorf("a catch of an incident in the gap: %+v", c)
+	}
+	for _, w := range []string{"2026-08-17", "2026-08-24", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-19"} {
+		if c := cs["budget week "+w]; c.Result != ledger.ExpectUnknown || c.Why != whyNotCopied {
+			t.Errorf("week %s, no copy covering it: %+v", w, c)
+		}
+	}
+	for _, w := range []string{"2026-10-05", "2026-10-12"} {
+		if c := cs["budget week "+w]; c.Result != ledger.ExpectMet {
+			t.Errorf("week %s, covered: %+v", w, c)
+		}
+	}
+}

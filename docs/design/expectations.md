@@ -400,13 +400,15 @@ Step 2, serve's checks after deploy, as built:
   is over; under it, a whole week is met, the week under way (and one past
   the runs' cursor) is so far (`open`), and the week the ledger's first
   firing fell in, or the rule's first, is not known (`not_whole`). A rule
-  only copied in is known as far as its source's copies cover (the
-  ledger's `Coverage` of it): a week past where they end, whole, or the
-  week so far none of reached, is not known (`not_copied`), however far
-  the runs' cursor is, so that a job that stopped copying doesn't read as
-  weeks of no firings; and a catch of an incident they don't reach, its
-  delay with it, not caught in them, is not known too, rather than broken.
-  Not in the design; a review found such weeks met. While people slept is
+  only copied in is known where its source's copies cover it without a
+  gap (the ledger's `Coverage` of it, the latest span): a week begun
+  before the span began (in a gap, or before the first copy), a week past
+  where it ends, whole, or the week so far none of reached, is not known
+  (`not_copied`), however far the runs' cursor is, so that a job that
+  stopped copying, or began late, doesn't read as weeks of no firings; and
+  a catch of an incident outside the span, its delay with it, not caught
+  in the copies, is not known too, rather than broken. Not in the design;
+  a review found such weeks met, and a second the weeks before the span. While people slept is
   by the rule's team's own hours, or the server's (as the tiles count it);
   by hours with no sleep, not known (`no_hours`). A rule Lapilli can't
   replay and doesn't copy in is not known (`unreplayed`). A budget needs
@@ -744,7 +746,10 @@ Step 4, scenarios, as built:
   container's memory, is so for the next leader, which runs it again only
   once promtool, the group or the test file changes, rather than each term
   (of a scenario's two rows, the run begun and the one it was to replace,
-  the later week's is read). The rest not known (`not_run_yet`) until a
+  the later week's is read). A run serve stops itself, its round's context
+  ended (shut down, or the lease lost), isn't one that died: it is kept
+  with no version, written past the ended context, and run again by the
+  next leader. The rest not known (`not_run_yet`) until a
   later round. Not known says why: `no_promtool`, `not_prometheus`,
   `not_run_yet`, `test_unread`, `run_failed`. Schema 027, unreleased, was
   changed in place for it: a column `detail` (what promtool said, or why

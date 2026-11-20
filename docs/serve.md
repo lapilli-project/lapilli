@@ -285,8 +285,9 @@ own killed whole at 30s, 64 KiB of what it says at most, and, on Linux,
 rule's annotation template can ask promtool for gigabytes; macOS sets no
 cap), five a run, never while the ledger's writer is held, each kept as
 begun before it starts, and again only when promtool, the group or the
-test file changed: one that never ended (serve stopped as promtool took
-its memory) isn't run again each term. It is met when promtool says
+test file changed: one that never ended (serve killed as promtool took
+its memory) isn't run again each term; one serve stopped itself, shutting
+down or no longer the leader, is run again. It is met when promtool says
 SUCCESS, broken when it says FAILED (what it said is kept, and shown), and
 not known when it couldn't run (a time out, a crash, past its memory), the
 test file can't be read, the rule isn't in Prometheus's format (a Grafana
