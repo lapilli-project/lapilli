@@ -189,7 +189,7 @@ changed by the wrong team's editors:
   incident their team owns.
 
 Not incidents (an incident turns firings white for every team), not
-settings, teams, the digest or roles. Since the release after 0.63.1
+settings, teams, the digest or roles. Since 0.64.0
 (below, "A team's boundaries of change"), **proposals** for a rule their
 team owns: made, backtested again, and dropped when they made them;
 checked in the request, as a proposal isn't a row of a team's.
@@ -842,7 +842,7 @@ page says when it would expire, while no one approved it.
 
 ### A team's boundaries of change
 
-As built for the release after 0.63.1 ([changes.md](changes.md), "A team
+As built in 0.64.0 ([changes.md](changes.md), "A team
 as the boundary of change"). A team declared in `--config` may say who of
 it approves its rules' changes, and where they are written; a file may
 declare change freezes:
@@ -909,7 +909,7 @@ freezes:
 
 ## Sources, the activity log, and the daily writes through the API
 
-Status: built, for the next release (bundle 25). No schema change: what a
+Status: built, in 0.64.0 (bundle 25). No schema change: what a
 source's reads came to is the leader's, said to the other replicas in its
 status as the impact signal's reads are; what was told of a source is kept
 in `meta`, as `source.quiet` keeps its own; the activity log is the
