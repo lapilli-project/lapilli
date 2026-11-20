@@ -200,10 +200,10 @@ func TestStonesChartUnjudgedTooThinToDraw(t *testing.T) {
 		{Start: now.AddDate(0, 0, -14), Firings: 600, Black: 600, Kept: true},
 		{Start: now.AddDate(0, 0, -7), Firings: 30, White: 10, Black: 20, Kept: true, Unjudged: 1},
 	}
-	if c := stonesChart("en", ws, time.UTC); !c.Unjudged {
+	if c := stonesChart("en", ws, time.UTC, false); !c.Unjudged {
 		t.Error("one firing not judged beside 600: no legend, no column")
 	}
-	if c := stonesChart("en", ws[:1], time.UTC); c.Unjudged {
+	if c := stonesChart("en", ws[:1], time.UTC, false); c.Unjudged {
 		t.Error("none not judged, and the legend names them")
 	}
 }

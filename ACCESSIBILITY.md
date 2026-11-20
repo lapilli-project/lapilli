@@ -61,9 +61,9 @@ found, and what it fixed.
 
 - The overview's heatmap cuts a long rule name short, sooner under 1,280
   CSS px; the whole name is in its link and on the rule's page ([#129](https://github.com/lapilli-project/lapilli/issues/129)).
-- In Spanish, the rules list and the overview's heatmap are a little
-  wider than their box from 1,070 to 1,280 CSS px, and scroll sideways in
-  it, where the other languages fit.
+- In Spanish, the rules list is a little wider than its box from 1,070 to
+  1,279 CSS px, and scrolls sideways in it, where the other languages
+  fit; from 1,280 it fits, as the heatmap does from 1,200.
 - The Spanish and Japanese were written with a machine's help and want a
   native speaker's review ([#131](https://github.com/lapilli-project/lapilli/issues/131),
   [#130](https://github.com/lapilli-project/lapilli/issues/130)).

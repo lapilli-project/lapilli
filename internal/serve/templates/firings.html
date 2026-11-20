@@ -27,7 +27,7 @@
 <ul class="legend">
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="hollow" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "caught something"}}</li>
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="nothing" x="1" y="0" width="8" height="12"/></svg>{{t "caught nothing"}}</li>
-{{if .Unjudged}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="unjudged" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "not judged: no record"}}</li>{{end}}
+{{if .Unjudged}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="unjudged" x="1.5" y="0.5" width="7" height="11"/></svg>{{t (notJudgedKey .ByNothing)}}</li>{{end}}
 {{if .Excused}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="excused" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "excused"}}</li>{{end}}
 </ul>
 {{if .Capped}}<p class="quiet">{{t "Of the day's firings, the latest %d were looked through for the labels picked." 20000}}</p>{{end}}
@@ -65,7 +65,7 @@ to say. */}}
 {{/* A firing's stone: ○ caught something, ● caught nothing, judged; one
 that caught nothing with no record to judge it by is neither, as the
 weeks and the summary count it. */}}
-{{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .SaidUnrelated}}● <span class="quiet">{{t "said unrelated"}}</span>{{else if .Unjudged}}<span class="unjudged" title="{{t "no record to judge it by: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
+{{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .SaidUnrelated}}● <span class="quiet">{{t "said unrelated"}}</span>{{else if .ByNothing}}<span class="unjudged" title="{{t "its rule entry judges it by nothing: counted, not judged"}}">? {{t "judged by nothing"}}</span>{{else if .Unjudged}}<span class="unjudged" title="{{t "no record to judge it by: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
 
 {{/* What people said of a firing (docs/design/judging.md, item 3): that
 it was unrelated to what it caught, with who and when, and Undo; or, on a

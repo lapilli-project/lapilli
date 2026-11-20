@@ -142,6 +142,9 @@ type dayStrip struct {
 	Hours                          []hourCell
 	Width                          int
 	Excused, Odd, Capped, Unjudged bool
+	// ByNothing says some rule entry judges its rules by nothing, so that
+	// the legend says those not judged may be so for that (bundle 66).
+	ByNothing bool
 }
 
 type firingsView struct {
@@ -298,12 +301,13 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		}
 	}
 	v.Strip = s.hourStrip(a.day, starts, v.Strip.Capped)
+	v.Strip.ByNothing = v.Strip.Unjudged && o.Signals.NotJudgedRules()
 
 	var lines []firingLine
 	for _, f := range fs {
 		lines = append(lines, s.firingLine(f))
 	}
-	judged(lines, judge)
+	judged(lines, judge, o)
 	if err := s.notifiedFirings(ctx, lines); err != nil {
 		return nil, err
 	}
@@ -365,8 +369,11 @@ type startCount struct {
 // signal, a day's firings are judged alike, by its week; with named
 // signals, by rule and by the signals tied to them, counted apart.
 func (s *Server) startsJudged(ctx context.Context, fq ledger.FiringQuery, o verdict.Options, judge firingJudge) ([]startCount, error) {
+	// Apart by rule where a rule's own entry may decide its judging:
+	// named signals, or an entry that judges its rules by nothing, whose
+	// firings the strip would count as caught nothing (bundle 66).
 	read := s.l.FiringStarts
-	if o.Signals.Named() {
+	if o.Signals.Named() || o.Signals.NotJudgedRules() {
 		read = s.l.FiringStartsBy
 	}
 	xs, err := read(ctx, fq)

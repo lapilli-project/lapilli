@@ -2379,8 +2379,6 @@
  "Black: unrelated to %s, by %s on %s": "오탐 · 무관: %s (%s, %s)",
  "Undo": "되돌리기",
  "said unrelated": "무관 판정",
- "Not judged": "판정 제외",
- "Not judged: rule entry #%d says its rules are judged by nothing. Its firings are counted, never white nor black, and catch nothing.": "판정 제외: 규칙 항목 #%d이 이 규칙들을 판정에서 빼요. 발화는 세지만 정탐도 오탐도 아니고, 아무것도 잡지 않아요.",
  "%s as Lapilli judged it: people said %d firings were unrelated, and This was real turned %d white": "Lapilli 판정 그대로는 %s: 사람이 발화 %d건을 무관하다고 했고, “실제 문제였음”으로 %d건이 정탐이 됐어요",
  "Needed action: %d yes, %d no": "조치 필요: 예 %d건, 아니요 %d건",
  "%d people's verdicts to look at again": "다시 볼 사람의 판정 %d건",
@@ -2434,6 +2432,10 @@
  "Moved by people: %s": "사람이 바꿈: %s",
  "%d said unrelated": "무관 %d건",
  "%d This was real": "“실제 문제였음” %d건",
- "%d firings not judged": "판정 제외 발화 %d건",
- "%d firings answered": "답한 발화 %d건"
+ "%d firings answered": "답한 발화 %d건",
+ "Judged by nothing": "판정 제외",
+ "Judged by nothing, as rule entry #%d says: its firings are counted, never white nor black, and catch nothing.": "판정 제외: 규칙 항목 #%d이 이 규칙들을 판정에서 빼요. 발화는 세지만 정탐도 오탐도 아니고, 아무것도 잡지 않아요.",
+ "%d firings judged by nothing": "판정 제외 발화 %d건",
+ "not judged: no record, or judged by nothing": "판정 안 됨: 기록 없음 또는 판정 제외",
+ "its rule entry judges it by nothing: counted, not judged": "규칙 항목이 판정에서 뺐어요: 세지만 판정하지 않아요"
 }
