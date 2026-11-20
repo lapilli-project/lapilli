@@ -65,11 +65,11 @@ ledger stays at 026.
   `EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS` and `FAIL_ON_ERROR`, and no
   comment was posted. Such a file is read and backtested now (Changed).
 - **Answering only "needed action" took away another person's
-  "unrelated"** (affected: 0.63.0 and 0.63.1). A client writing a verdict whole,
-  `"unrelated": false` beside its answer, of a firing a run had merged
-  another into, took away the verdict said of the other, which the merged
-  firing held, and the firing turned white. "Unrelated" is said now only
-  when it differs from what the firing's own verdict holds. A verdict
+  "unrelated"** (affected: 0.63.0 and 0.63.1). A client writing a verdict
+  whole, `"unrelated": false` beside its answer, of a firing a run had
+  merged another into, took away the verdict said of the other, which the
+  merged firing held, and the firing turned white. "Unrelated" is said now
+  only when it differs from what the firing's own verdict holds. A verdict
   held, undone at its own alert and start as the page of verdicts to look
   at again undoes it, judges the firing holding it again at once.
 - **`lapilli preflight` printed an OCID it hadn't learned whole**
