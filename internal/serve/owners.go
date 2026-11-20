@@ -22,6 +22,10 @@ type owners struct {
 	rule   map[string]int64 // rule name to team id
 	notes  map[string]ledger.Note
 	labels []map[string][]string // each team's labels, in teams' order
+	res    []*regexp.Regexp      // each team's pattern, in teams' order
+	// verLabels are the labels of every rule in effect, by its name, as
+	// its team is found by them: those that never fired too (owner).
+	verLabels map[string]map[string]string
 	// ruleLabels are each rule's labels, as its team was found by them.
 	ruleLabels map[string]map[string]string
 	// sched are the schedules worked out last, and the server's hours they
@@ -68,6 +72,7 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 		}
 		o.labels = append(o.labels, t.Labels)
 	}
+	o.res = res
 	// The rules' labels, from the latest version of them, its group's
 	// with its own, as its alerts carry them, its chips show them and
 	// label: matches them; a recorded rule's, those all its alerts have
@@ -84,6 +89,7 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 			}
 		}
 	}
+	o.verLabels = labels
 	o.ruleLabels = make(map[string]map[string]string, len(table))
 	for _, r := range table {
 		o.ruleLabels[r.Name] = labels[r.Name]

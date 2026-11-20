@@ -36,7 +36,9 @@ var bulkKinds = []string{"task", "team", "status", "real", "propose", "action"}
 // bulkResult is what a bulk write did, as the page it goes back to says it
 // once: how many were done; of the rest, how many weren't the reader's
 // team's, how many were refused for what they are, and how many because
-// only editors may do it (a team's editor's "Set the team"), how many, of
+// only editors may do it (a team's editor's "Set the team"), or only
+// admins (Admins: a rule's team moved while --config declares the
+// boundaries of change, ledger.ErrRuleTeam), how many, of
 // firings, had caught something already; and, when an error of another
 // kind stopped it, the one that failed and how many weren't tried after
 // it. None says nothing was picked; Kind is what was done. A bulk
@@ -49,7 +51,7 @@ var bulkKinds = []string{"task", "team", "status", "real", "propose", "action"}
 type bulkResult struct {
 	Kind                                   string
 	Done, Theirs, Refused, Already, Failed int
-	Untried, Editors                       int
+	Untried, Editors, Admins               int
 	Limit, Unreplayed, Absent, Same        int
 	NoSuggest, Tries, Late                 int
 	None                                   bool
@@ -58,7 +60,7 @@ type bulkResult struct {
 }
 
 // bulkParams are the parameters a bulk write's result is said by.
-var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried", "editors",
+var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried", "editors", "admins",
 	"limit", "unreplayed", "absent", "same", "nosuggest", "tries", "late", "made"}
 
 // bulkOf is the result a page was sent back with, read within bounds:
@@ -76,7 +78,7 @@ func bulkOf(q url.Values) *bulkResult {
 		return x, err == nil && x >= 0 && x <= maxBulk
 	}
 	b := bulkResult{Kind: q.Get("bulk")}
-	var ok [14]bool
+	var ok [15]bool
 	b.Done, ok[0] = n("done")
 	b.Theirs, ok[1] = n("theirs")
 	b.Refused, ok[2] = n("refused")
@@ -91,7 +93,8 @@ func bulkOf(q url.Values) *bulkResult {
 	b.NoSuggest, ok[11] = n("nosuggest")
 	b.Tries, ok[12] = n("tries")
 	b.Late, ok[13] = n("late")
-	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors + b.Limit + b.Unreplayed + b.Absent + b.Same + b.NoSuggest + b.Tries + b.Late
+	b.Admins, ok[14] = n("admins")
+	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors + b.Admins + b.Limit + b.Unreplayed + b.Absent + b.Same + b.NoSuggest + b.Tries + b.Late
 	if slices.Contains(ok[:], false) || all > maxBulk {
 		return nil
 	}
@@ -126,7 +129,7 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 		q.Del(k)
 	}
 	q.Set("bulk", kind)
-	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried, "editors": b.Editors,
+	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried, "editors": b.Editors, "admins": b.Admins,
 		"limit": b.Limit, "unreplayed": b.Unreplayed, "absent": b.Absent, "same": b.Same, "nosuggest": b.NoSuggest, "tries": b.Tries, "late": b.Late} {
 		if n > 0 {
 			q.Set(k, strconv.Itoa(n))
@@ -170,6 +173,8 @@ func (s *Server) bulkCount(b *bulkResult, r *http.Request, err error) (stop bool
 		b.Done++
 	case errors.Is(err, ledger.ErrNotYourTeam):
 		b.Theirs++
+	case errors.Is(err, ledger.ErrRuleTeam):
+		b.Admins++
 	case errors.As(err, &inv), errors.Is(err, ledger.ErrNotFound), errors.Is(err, ledger.ErrFiringChanged), errors.Is(err, ledger.ErrTooOld),
 		errors.Is(err, ledger.ErrSaidUnrelated):
 		// What it is (a firing changed since the page was read, older than

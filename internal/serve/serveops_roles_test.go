@@ -161,11 +161,17 @@ func TestTeamEditors(t *testing.T) {
 			t.Errorf("pat, %s: %d, want %d\n%s", c.what, code, c.want, body)
 		}
 	}
-	if code, _ := as(t, h, http.MethodPost, "/proposals", pat, "", url.Values{"rule": {"Errors"}, "kind": {"for"}, "for": {"10m"}}); code != http.StatusForbidden {
-		t.Errorf("pat, a proposal: %d", code)
+	// A proposal for a rule of payments's is pat's to make, and to drop
+	// (docs/design/changes.md, "A team as the boundary of change"); one of
+	// a rule no team owns isn't.
+	if code, _ := as(t, h, http.MethodPost, "/proposals", pat, "", url.Values{"rule": {"Errors"}, "kind": {"for"}, "for": {"10m"}}); code != http.StatusSeeOther {
+		t.Errorf("pat, a proposal for payments's rule: %d", code)
 	}
-	if code, _ := as(t, h, http.MethodPost, "/proposals/1/drop", pat, "", url.Values{}); code == http.StatusSeeOther {
-		t.Errorf("pat dropped a proposal")
+	if code, _ := as(t, h, http.MethodPost, "/proposals", pat, "", url.Values{"rule": {"Nobody"}, "kind": {"for"}, "for": {"10m"}}); code != http.StatusForbidden {
+		t.Errorf("pat, a proposal for no team's rule: %d", code)
+	}
+	if code, _ := as(t, h, http.MethodPost, "/proposals/1/drop", pat, "", url.Values{}); code != http.StatusSeeOther {
+		t.Errorf("pat didn't drop their own proposal: %d", code)
 	}
 	if code, _ := callAs(t, h, "DELETE", "/api/v1/reports/"+n(adminReport), "ed@example.com", "", "", ""); code != http.StatusForbidden {
 		t.Errorf("an editor deleting an admin's report to Slack: %d", code)

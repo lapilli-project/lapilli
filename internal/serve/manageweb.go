@@ -58,6 +58,10 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 	if !cursor.IsZero() {
 		v.Cards[3].Fact, v.Cards[3].At = "Firings are in up to %s.", cursor
 	}
+	if until := s.frozenUntil(ctx); !until.IsZero() {
+		// A change freeze holds now (bounds.go): until when.
+		v.Cards[2].Fact, v.Cards[2].At = "A change freeze holds changes to the rules until %s.", until
+	}
 	switch c := s.shownStatus().Config; {
 	case c == nil || len(c.Problems) == 0:
 	case c.Whole:

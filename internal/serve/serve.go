@@ -165,6 +165,9 @@ type Config struct {
 	// SourceQuiet is how long a source may go without firings copied in
 	// before it is told of; 0 for sourceQuiet.
 	SourceQuiet time.Duration
+	// KeepActivity is how long the activity log is kept, past Keep: 0
+	// keeps it all (docs/design/serveops.md, "The activity log").
+	KeepActivity time.Duration
 	// NotifyListen, when set, is where notifications are taken as alert
 	// managers sent them, and nothing else: with the token in the file
 	// NotifyToken, Grafana's signature with the secret in the file
@@ -226,6 +229,12 @@ type Config struct {
 	// ReportDests are files holding the Slack-style incoming webhooks the
 	// reports people schedule can go to, by the names they pick them by.
 	ReportDests map[string]string
+	// WebhookDests are files holding the URLs of webhooks that take what
+	// --config's notify: routes to them, as JSON, as NotifyWebhook takes
+	// it, by the names the routes send by; WebhookDestSecrets, by the same
+	// names, files holding the keys each one's posts are signed with
+	// (docs/design/notifications.md, "Who is told what").
+	WebhookDests, WebhookDestSecrets map[string]string
 
 	// MCPCompare is who an agent must be acting for to replay a change to
 	// the rules over MCP, which runs PromQL of its own: "editors",
@@ -388,8 +397,10 @@ type Server struct {
 	settingsTries tries
 	// tried are the criteria a try read in full, lately (triedFor).
 	tried triedCache
-	// sources is what this replica saw of where incidents come from.
+	// sources is what this replica saw of where incidents come from;
+	// reads, how its reads of the rules and the files went (sourcelist.go).
 	sources sourcesState
+	reads   readsState
 	// turns are how each named signal's asks went, that each round shares
 	// --timeout by (inTurn).
 	turns turns
@@ -409,6 +420,10 @@ type Server struct {
 	againFailed againFailed
 	// config is what the leader last made of --config.
 	config configState
+	// routing is what this replica made of --config's notify: last.
+	routing routingState
+	// bnd keeps the boundaries of change the ledger holds (bounds).
+	bnd boundsCache
 	// backtesting are the proposals being backtested again here, which
 	// expiry leaves.
 	backtesting inFlight
@@ -637,6 +652,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, err
 	}
 	l.TellTo(s.dests())
+	// Routed by --config's notify:, which Run reads before anything is
+	// told: until then, as without routes.
+	l.RouteBy(s.route)
 	s.shareLimits()
 	if cfg.Yield {
 		s.yield = &prom.Yield{For: cfg.YieldFor, Now: func() time.Time { return s.now() }}
@@ -876,6 +894,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// the workers stop with it.
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	// --config's notify:, as read now, before anything is told, and the
+	// owners its routes read.
+	s.startRoutes(ctx)
 	shared := s.l.Shared()
 	if !shared {
 		// The versions from before the ledger began, before anything
@@ -968,6 +989,11 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() { served <- bsrv.Serve(bln) }()
 		defer bsrv.Close()
 		go s.discoverIssuers(ctx)
+	}
+	if s.cfg.Config != "" {
+		// --config's notify:, read again by every replica, as each tells
+		// of what it writes.
+		go s.watchRoutes(ctx)
 	}
 	failed := make(chan error, 1)
 	var wg sync.WaitGroup

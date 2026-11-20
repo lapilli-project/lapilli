@@ -165,6 +165,11 @@ serve:
   settle: 1h     # and replay this much before the last run's end again
   backfill: 28d  # on first start, replay this far back
   keep: 400d     # drop firings older than this
+  # Drop the activity log's changes older than this, never sooner than keep
+  # (--keep-activity): who changed what stays findable after the firings
+  # it was about are gone. Empty for serve's own: 800d, or keep when longer;
+  # 0 keeps them all. With keep: 0, leave it empty.
+  keepActivity: ""
   digest: mon@09:00  # the weekly digest, in timeZone, until an admin sets it in the UI
   # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day
   # at a time once the runs won't replay it again; a rule whose replay
@@ -371,6 +376,8 @@ serve:
   #         tz: Asia/Seoul
   #         shifts: ""
   #         renamed_from: ""         # its name before, to rename it in place
+  #         approvers: [group:payments-leads]  # approve its rules' changes: user:, group: or *@DOMAIN
+  #         changes_in: [payments-*] # where its rules are written, within changes.in; [] for nowhere
   #     windows:                     # quiet windows
   #       - title: Nightly backup
   #         team: payments           # everyone's when left out
@@ -394,6 +401,22 @@ serve:
   #       - group: payments-oncall
   #         team: payments
   #       - user: ana@example.com
+  #     notify:                      # who is told what, read by every replica
+  #       routes:                    # the first that takes an event decides
+  #         - kinds: [task.*, proposal.*]   # a kind or a family; any when left out
+  #           teams: [payments]      # any when left out
+  #           labels: {severity: page}      # each at one of its values
+  #           to: [team:payments, payments-hook]
+  #           continue: false        # true: the routes after it too
+  #       default: [slack]           # what no route takes; routes need one
+  #       templates:                 # a destination's own words
+  #         team:payments: "*{{.Event}}* {{.Title}} <{{.Link}}|open>"
+  #     freezes:                     # no change approved or applied meanwhile
+  #       - title: Black Friday
+  #         team: payments           # everyone's when left out
+  #         start: 2026-11-27T00:00
+  #         end: 2026-11-30T00:00
+  #         every: ""                # as a quiet window's; once when left out
   # An empty file is refused, and so is a key with nothing after it: to
   # declare nothing, give teams: [], and no roles, grants: []; for every
   # team, leave team out (team: "" is refused). A file is kept to once it
@@ -436,6 +459,18 @@ serve:
       signingKey: ""
     slack: false  # also post each, as a line, to report.slackWebhookSecret
     lang: en      # the language of what is posted to Slack: en, es, ja or ko
+    # JSON webhooks the routes in config's notify: send to by name
+    # (--webhook-dest; docs/design/notifications.md, "Who is told what"):
+    # each URL in a Secret's key, and, with signingKey, a key of the same
+    # Secret holding a key of 32 bytes or more that signs each post to it
+    # (--webhook-dest-secret), as webhookSecret.signingKey signs the
+    # webhook's. A name is lowercase letters, digits and . _ -, none that
+    # reports.destinations has; they need serve.config:
+    #   webhookDests:
+    #     - {name: payments-hook, secretName: lapilli-payments-hook, key: url, signingKey: key}
+    # Routes name these, webhook, slack, team:NAME (teamDigests.teams) and
+    # reports.destinations' names, never a URL.
+    webhookDests: []
   # A team's own weekly digest: its rules and the incidents it owns, posted to
   # a Slack-style incoming webhook. A Secret with a key for each team, and which
   # key is whose:

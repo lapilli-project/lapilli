@@ -473,7 +473,7 @@ var goalToldARun = 20
 // so two occurrences ending at once are told apart. goalToldARun a run at
 // most.
 func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int64) error {
-	dests := s.dests()
+	dests := s.toldTo()
 	if len(dests) == 0 || !slices.ContainsFunc(lines, func(gl goalLine) bool { return gl.Goal.OverPeriod() }) {
 		return nil
 	}

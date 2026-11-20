@@ -33,7 +33,7 @@ func (l *Ledger) tell(t *txn, event, by string, about map[string]any) error {
 	if err != nil {
 		return err
 	}
-	for _, d := range *dests {
+	for _, d := range l.routed(event, body, *dests) {
 		if _, err := t.ExecContext(t.ctx, t.d.pick("INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)", outboxDue),
 			d, event, string(body), now.Unix(), now.Unix()); err != nil {
 			return err
@@ -65,8 +65,26 @@ type Told struct {
 // kept in the ledger, whatever is told and wherever it goes. A page shows none
 // of it, so pages kept stay.
 func (l *Ledger) TellOnce(ctx context.Context, key, value, event string, told []Told) error {
+	return l.tellIf(ctx, key, value, event, told, func(have string) bool { return have != value })
+}
+
+// TellFrom is TellOnce for a key its caller read as from, and tells by:
+// what is told is written, and value kept, only while the key holds from
+// still, so that two who read it alike, one a moment after the other,
+// tell once between them whatever value each would keep.
+func (l *Ledger) TellFrom(ctx context.Context, key, from, value, event string, told []Told) error {
+	return l.tellIf(ctx, key, value, event, told, func(have string) bool { return have == from && have != value })
+}
+
+// tellIf writes what is told of an event, and keeps value under key, when
+// tell says to of what the key holds, in the same write.
+func (l *Ledger) tellIf(ctx context.Context, key, value, event string, told []Told, tell func(have string) bool) error {
+	told, err := l.routeTold(event, told)
+	if err != nil {
+		return err
+	}
 	return l.writeAside(ctx, func(t *txn) error {
-		if have, err := l.meta(t.ctx, t, key); err != nil || have == value {
+		if have, err := l.meta(t.ctx, t, key); err != nil || !tell(have) {
 			return err
 		}
 		now := wallNow()

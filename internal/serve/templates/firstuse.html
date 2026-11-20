@@ -47,21 +47,24 @@ that no one can yet and an admin sees why. */}}
 {{define "mayapprove"}}<p id="may-approve"{{if or .In.No .Stuck}} class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{else}}>{{end}}
 {{- if not .Named}}{{if or .In.No .Stuck}}{{t "No one can approve this yet; an admin sees why on the Roles page."}}{{else}}{{t "Who may approve it: an approver other than the one it was made by or for."}}{{end}}
 {{- else if .In.No}}{{if eq .In.No "read-only"}}{{tbdi "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{tbdi "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
+{{- else if and .Team .Stuck}}{{tbdi "No one left may approve it: those who may, %s's approvers among them, made it or approved it already. Name more in its team's approvers in --config, or in --approvers." .Team}}
+{{- else if eq .In.From "team"}}{{tbdi "Who may approve it: %s's approvers, as --config declares them, but the one it was made by or for: %s." .Team (join .TeamLeft ", ")}}
 {{- else if .NoOne}}{{if eq .In.From "admins"}}{{tbdi "No one may approve it: only the admins approve, as --approvers isn't given, and the only admin is the one it was made by or for. Give --approvers to name who else may."}}{{else}}{{tbdi "No one may approve it: --approvers names only the one it was made by or for. Name others in --approvers."}}{{end}}
 {{- else if .Stuck}}{{if eq .Need 1}}{{tbdi "It needs 1 more approval, and everyone who may approve has made or approved it: name more in --approvers, or give --approvals 1."}}{{else}}{{tbdi "It needs %d more approvals, and only %d of those who may approve haven't made or approved it: name more in --approvers, or give --approvals 1." .Need (len .Left)}}{{end}}
 {{- else if eq .In.From "admins"}}{{tbdi "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for: %s." (join .Left ", ")}}
-{{- else}}{{tbdi "Who may approve it: those --approvers names, but the one it was made by or for: %s." (join .Left ", ")}}{{end}}</p>{{end}}
+{{- else}}{{tbdi "Who may approve it: those --approvers names, but the one it was made by or for: %s." (join .Left ", ")}}{{end}}
+{{- if and .Named .Team .TeamLeft (not .In.No) (ne .In.From "team") (not .Stuck)}} {{tbdi "And %s's approvers, as --config declares them: %s." .Team (join .TeamLeft ", ")}}{{end}}</p>{{end}}
 
 {{/* Where notices go, and whether they went: a section of the Settings
 page. Counts and kinds, never a URL. */}}
 {{define "notifystatus"}}{{$p := .P}}{{with .V}}<h2 id="notifications">{{t "Notifications"}}</h2>
 {{template "notifywarn" .}}
 <ul class="plain">
-<li>{{if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{tbdi "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
+<li>{{if and .Routes .Routes.Declared}}{{t "What happens is told where the routes below send it."}}{{else if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{tbdi "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
 <li>{{tbdi "Places reports can go to by name (--report-dest): %d. Teams with a digest of their own (--team-digest): %d." .ReportDests .TeamDigests}}</li>
 <li>{{if not .DigestOn}}{{t "The weekly digest is off, as set on the Reports page."}}{{else if .DigestSet}}{{t "The weekly digest: %s, to %d of the places it names, as set on the Reports page." .DigestWhen .DigestTo}}{{else}}{{t "The weekly digest: %s, to %d places, as the flags set it." .DigestWhen .DigestTo}}{{end}}{{with .Reports}} {{t "Reports on: %d." .}}{{end}} <a href="{{$p.Link "/reports"}}">{{t "Reports"}}</a>{{with .Posted}}<br>{{template "slackposted" (on $p .)}}{{end}}</li>
 <li>{{template "notifysent" .}}</li>
-</ul>{{end}}{{end}}
+</ul>{{with .Routes}}{{template "notifyroutes" (on $p .)}}{{end}}{{end}}{{end}}
 
 {{/* Where notices go, and whether they went: a card of the Manage page. */}}
 {{define "notifycard"}}{{$p := .P}}{{with .V}}<li class="card">
@@ -69,6 +72,7 @@ page. Counts and kinds, never a URL. */}}
   <p>{{t "Where notices, the weekly digest and reports go, and whether they went."}}</p>
   {{if .DigestNowhere}}{{template "warnnotice"}}{{t "The weekly digest goes nowhere."}}</p>{{end}}
   {{- with .Posted}}{{if .Failed}}{{template "badnotice"}}{{t "The weekly digest failed."}}</p>{{end}}{{end}}
+  {{- with .Routes}}{{if .Err}}{{template "warnnotice"}}{{t "--config's notify: can't be used."}}</p>{{end}}{{if or .Unknown .UnknownMore}}{{template "warnnotice"}}{{t "--config's notify: names destinations this replica's flags don't give."}}</p>{{end}}{{with .Unrouted}}{{template "badnotice"}}{{if eq . 1}}{{t "1 event went where no route sent it."}}{{else}}{{t "%d events went where no route sent them." .}}{{end}}</p>{{end}}{{end}}
   {{- with .ReportsNowhere}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 report goes nowhere."}}{{else}}{{t "%d reports go nowhere." .}}{{end}}</p>{{end}}
   {{- if .Backlog}}{{template "warnnotice"}}{{t "More than %d notices wait to be sent." .Counted}}</p>{{else}}{{with .Failed}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 notice failed in the last day."}}{{else}}{{t "%d notices failed in the last day." .}}{{end}}</p>{{end}}{{end}}
   {{- if .GivenUpMore}}{{template "badnotice"}}{{t "More than %d notices were given up on in the last day." .Counted}}</p>{{else}}{{with .GivenUp}}{{template "badnotice"}}{{if eq . 1}}{{t "1 notice was given up on in the last day."}}{{else}}{{t "%d notices were given up on in the last day." .}}{{end}}</p>{{end}}{{end}}

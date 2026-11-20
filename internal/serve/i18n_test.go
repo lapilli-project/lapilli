@@ -92,7 +92,11 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	// Marked windows: the page, one made here, the file's, a team's;
 	// the firings of a kind.
 	"/marked", "/marked?team=payments", "/marked/1", "/marked/2", "/marked/3", "/firings?day=2026-11-02&kind=sale",
-	"/rules?during=sale", "/rules?outside=sale&weeks=12", "/rules?during=deploy"}
+	"/rules?during=sale", "/rules?outside=sale&weeks=12", "/rules?during=deploy",
+
+	// Sources as objects, and the activity log, filtered, a page past
+	// the first (docs/design/serveops.md).
+	"/sources", "/activity", "/activity?kind=task&team=payments", "/activity?who=ana&since=2026-10-01&until=2026-11-30"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.

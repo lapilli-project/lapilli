@@ -944,7 +944,7 @@ func errCode(err error) (int, bool) {
 	switch {
 	case errors.As(err, &inv):
 		return http.StatusBadRequest, true
-	case errors.Is(err, ledger.ErrNotAuthor), errors.Is(err, ledger.ErrNotYourTeam), errors.Is(err, errTeamDest):
+	case errors.Is(err, ledger.ErrNotAuthor), errors.Is(err, ledger.ErrNotYourTeam), errors.Is(err, errTeamDest), errors.Is(err, ledger.ErrRuleTeam):
 		return http.StatusForbidden, true
 	case errors.Is(err, errBusy), errors.Is(err, errPagesBusy):
 		return http.StatusServiceUnavailable, true
@@ -958,7 +958,7 @@ func errCode(err error) (int, bool) {
 		return http.StatusServiceUnavailable, true
 	case errors.Is(err, errLongQuery):
 		return http.StatusRequestURITooLong, true
-	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
+	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed), errors.As(err, new(frozenErr)):
 		return http.StatusConflict, true
 	case errors.Is(err, ledger.ErrFiringChanged), errors.Is(err, ledger.ErrSaidUnrelated), errors.Is(err, ledger.ErrCaughtNothing),
 		errors.Is(err, ledger.ErrRealFiring):

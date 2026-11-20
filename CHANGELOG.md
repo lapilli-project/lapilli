@@ -2,6 +2,177 @@
 
 ## [Unreleased]
 
+Who is told what, by routes in `--config`; a team as the boundary of
+change; and every source as an object, told down and back, with the
+activity log filtered and exported and the daily writes through the
+API. No schema change: the ledger stays at 026.
+
+### Added
+
+- **Routes** (docs/design/notifications.md, "Who is told what").
+  `--config`'s `notify:` sends each event by its kind (`task.created`, or a
+  family, `task.*`), its team (a task's or a window's, a rule's owner, an
+  incident's by its labels, a goal's) and its labels (its rule's, a marked
+  window's, an incident's), each at one of the values given, to
+  destinations by name: the first route that takes it decides, unless it
+  says `continue: true`, and what none takes goes to `default`, which
+  routes need. Without routes, what happens is told as before, to the
+  webhook and, with `--notify-slack`, Slack, the same rows; `digest.ready`
+  and `report.ready` go where their own settings send them, routes or
+  not. Every replica reads the routes, as it tells of what it writes,
+  from `notify:` alone, so that an error elsewhere in the file leaves them
+  in force, and puts a file in force once it has read it the same twice
+  in a row, the owners worked out as it first reads them; a `notify:` that
+  can't be read refuses the file, as any part of it does, and at the start
+  leaves what happens told as without routes; a destination the flags
+  don't give is left out, on that replica, said with its line, and the
+  routes kept. Without routes in force, what is told once (a task overdue,
+  a source down) is marked told as before, by the webhook and Slack
+  alone.
+- **Destinations by name.** A route names `webhook`, `slack`, `team:NAME`
+  (`--team-digest`), a `--report-dest`'s name, or a JSON webhook of its
+  own, `--webhook-dest NAME=FILE`, each post signed, when given, with its
+  own key, `--webhook-dest-secret NAME=FILE` (32 bytes at least), whose
+  errors name that flag. URLs stay
+  in files, never in `--config`; a label picks among the routes, never a
+  destination, and a notice goes to the destination its outbox row names,
+  whatever it tells. `--webhook-dest` needs `--config`, and refuses a name
+  `--report-dest` gives. In the chart, `serve.notify.webhookDests`, each
+  from a Secret; `lapilli preflight` reads their files.
+- **A destination's own words**, under `notify:`'s `templates:`: text and
+  `{{.Field}}` alone, of `Event`, `Line`, `Link`, `Rule`, `Team`, `Title`,
+  `ID`, `By`, `Labels` and `At`; any other field, a function or a pipeline
+  is refused as the file is read. 2,000 bytes a template, 500 a value in
+  it, 4,000 what it gives; a destination given twice is refused. To a
+  Slack-style destination, Slack's markup as the admin wrote it, its
+  `<!here>` and links working, each value's `&`, `<` and `>` escaped and
+  each backquote made a quote, so that no title, rule or label mentions
+  anyone, links anywhere, ends a code block or makes one with the field
+  beside it; to a JSON webhook, a `text` beside the post's fields. Every
+  value on one line, Unicode's format characters (zero-width ones, bidi
+  controls) left out. A source's notice has its name as `{{.Title}}`.
+- **The Settings page's Notifications** shows the routes in force,
+  read-only, "changed there, not here", the destinations they name that
+  the flags don't give, and each destination an event goes to: when a
+  notice to it was last sent, how many wait, how many of the last day's
+  failed or were given up on, and, to an admin, why the latest still
+  unsent failed. No form changes a route.
+- **`lapilli_serve_notices_unrouted_total`**, with `--config`: events that
+  went where no route sent them: routes that couldn't be read since the
+  start, told as without them; routes that sent an event nowhere there is,
+  to the default, or else as without routes. With neither the webhook nor
+  Slack, no notice is written; never to every destination. 0 with routes
+  in force, each destination they name given, and a default; said on the
+  Settings and Administration pages too.
+- **Each destination a route may name** is, with `--config`, a place of
+  the outbox's, `route:NAME`, with a loop of its own that sends what the
+  outbox holds for it, whether a route names it yet or not, counted in
+  `lapilli_serve_notices_total{to="route:NAME"}`, at 0 from the start.
+  What waits for a name the flags no longer give is tried by the leader
+  every minute, fails, and is given up on as any, named on the Settings
+  page and counted on the Administration card.
+- **A team as the boundary of change** (docs/design/changes.md, "A team
+  as the boundary of change"; serveops.md, "A team's boundaries of
+  change"). A team's editors propose changes to the rules their team
+  owns, from a rule's page or for the rules picked on the rules list
+  (another team's counted "not your team's"), backtest them again, and
+  drop the ones they made; who owns the rule is asked of its name, of the
+  rule as it is read again and of it as proposed, each with its note and
+  without it, each a team they edit.
+  Under a team in `--config` (`serve.config`): `approvers:`, as
+  `user:NAME`, `group:NAME` or `*@DOMAIN` (not a bare name, nor `*`), who
+  approve a proposal one team, theirs, owned as it was proposed and owns
+  now, by its note and by its name and labels alike, and ask for its
+  applied change to be undone, beside the approvers of every team,
+  self-approval and `--approvals` as before; and `changes_in:`, where its
+  rules are written through a ruler's or a cloud's API, within
+  `--changes-in` (in the letter case its own source compares names in) or
+  the file is refused, `[]` for nowhere, a rule kept elsewhere for a
+  person to change. And `freezes:`,
+  for everyone or a team, once or repeating as a quiet window does, in
+  `--tz`: while one holds, nothing it covers is approved, approved as
+  `--approvals` is lowered, asked to be undone, carried out or handed to a
+  recipe; proposing and backtesting go on; one approved before waits,
+  approved, said once in its history, and is carried out at the first
+  round after the freeze's end. The buttons are drawn disabled with the
+  freeze's name, a proposal's page says until when, the Settings page
+  lists the freezes (frozen until, next, over) and the Administration
+  page's Settings card says until when changes are held. Approving and
+  carrying out each ask again who owns the rule: one a team owned as it
+  was proposed and another, or none, owns now is approved by no one, and
+  refused if approved before; carrying out asks the boundaries once more
+  just before the change is sent or handed out, after its backtest runs
+  again, so a freeze begun meanwhile holds it. While the file declares any
+  of these, a rule's team is an admin's to move (a note's form,
+  `PUT /api/v1/notes`, the rules list's "Set the team", the Cleanup page's
+  move), and a rule a note moved is held by the boundaries of the team its
+  name and labels give it too. A team's name is read without the spaces
+  around it; two teams of one name in another letter case are refused
+  where the boundaries name them, and the Settings page names a team given
+  boundaries that wasn't kept. Boundaries that can't be read are said on a
+  proposal's page and the Settings page, drawn all the same. Read twice,
+  as the rest of the file, and kept in the ledger's `meta` table in the
+  write that keeps it to the file, for every replica alike; `/config.yaml` gives them back. Agents
+  propose as before: `--mcp-propose` stays an editor's of every team, or
+  an admin's. No schema change: the ledger stays at 026.
+- **The Sources page** (`/sources`, Administration, after Settings): every
+  source serve reads, as Argo CD shows its applications, a row each: the
+  rules where they are kept and what is read beside them (a cloud's
+  alarms, Loki's rules), Prometheus as the runs ask it, the incidents,
+  deploys and marked files, the impact signals, the on-call schedules,
+  incidents and firings jobs copy in (an incidents id prefix nothing was
+  written to in 14 days, or `--keep` when shorter, left out). Each says its
+  kind, when it was last read well, its last error (as Run history says a
+  run's: the paths of serve's files to an admin alone), the reads in a row
+  that failed, the rules it gave, how far behind it is and how long its
+  last read took, and a state in the incident sources' words and colours:
+  working, failing, quiet, waiting, and down. Each is read, and judged, by
+  its own reads: the rules failing leave what is read beside them as they
+  read. A credential in an error or an address (a URL's user and password,
+  a query's token, key, signature or `code`, a `password=` or `token=`
+  between spaces, a JSON `"token"` or `"password"`, an `api-key:` header,
+  a bearer or basic token) is `***` to everyone, an admin too. The status
+  banner links to it when its failure is a source's read, and Run history
+  does too. `GET /api/v1/sources?all=true` gives the same, never kept;
+  without `all`, the sources firings are copied in from, as before.
+- **`source.down` and `source.back`**, to the webhook and Slack, for every
+  source but firings copied in (which keep `source.quiet`): down once three
+  reads in a row failed, or once it has failed or been quiet past its
+  bound (two runs and more for what the runs read, two days for incidents
+  copied in); back once it has read well for 15 minutes. Told once while
+  down, and once back, across restarts and leaders and however many look
+  at once, and down again no sooner than an hour after it was told back,
+  so a source that flaps is told of once. Each
+  carries `source_read`: its id, kind, name, flag, state, last read well,
+  the reads that failed, and its error as anyone but an admin reads it.
+- **The activity log** (`/activity`, from Run history): every change kept,
+  100 a page and on past them, filtered by who, kind (setting, incident,
+  verdict, proposal, task, comment, note, quiet window, marked window,
+  report, team, role, goal, firings, cleanup, other), team (its rules', its
+  tasks', its own) and period, each change's before and after a click
+  away; exported with the same filters by `GET /api/v1/activity`, as JSON
+  or as CSV, whose cells a spreadsheet never takes for a formula (one that
+  starts with `=`, `+`, `-`, `@`, a tab or a carriage return starts with
+  `'`), worked out a few at a time, as pages are. Who reads Run history
+  reads it; the roles given and taken are an admin's alone, as there.
+- **`--keep-activity DUR`** (`serve.keepActivity`; unless given, 800 days,
+  or `--keep` when longer, so a longer `--keep` starts as before; `0` keeps
+  it all): the activity log outlives the firings it is about, never kept
+  less than `--keep`: one given shorter is refused, and so is one given
+  beside `--keep 0`, which prunes nothing.
+- **`POST /api/v1/incidents/{id}/decide`** and **`POST /api/v1/firings/real`**:
+  an impact window confirmed, dismissed or reopened, and a firing written
+  down as an incident it caught, through the API as their forms do them,
+  an editor's, with the forms' checks (a firing older than 14 days an
+  admin's). Proposing stays a rule's page's and MCP's (behind
+  `--mcp-propose`), and approving the proposal's page's.
+
+### Changed
+
+- `--config`'s top-level keys are teams, windows, reports, grants, goals,
+  marked, **freezes** and **notify**, and its refusals say so.
+- The sidebar's Administration has Sources after Settings.
+
 ## [0.63.2] - 2026-11-20
 
 A security release, after a review of 0.63.0 from an attacker's point of

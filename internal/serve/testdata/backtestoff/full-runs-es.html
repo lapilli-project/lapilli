@@ -21,7 +21,7 @@
   <p class="nav-group" id="menu-report">Informes</p>
   <ul aria-labelledby="menu-report"><li><a href="/reports">Informes</a></li><li><a href="/outcomes">Resultados</a></li><li><a href="/goals">Objetivos</a></li></ul>
   <p class="nav-group" id="menu-manage"><a href="/manage">Administración</a></p>
-  <ul aria-labelledby="menu-manage"><li><a href="/teams">Equipos</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Ajustes</a></li><li><a href="/runs" aria-current="page">Historial de ejecuciones</a></li><li><a href="/orphans">Limpieza</a></li></ul>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Equipos</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Ajustes</a></li><li><a href="/sources">Fuentes</a></li><li><a href="/runs" aria-current="page">Historial de ejecuciones</a></li><li><a href="/orphans">Limpieza</a></li></ul>
 </nav>
   </details>
   <nav class="nav-side" aria-label="Páginas">
@@ -32,14 +32,14 @@
   <p class="nav-group" id="side-report">Informes</p>
   <ul aria-labelledby="side-report"><li><a href="/reports">Informes</a></li><li><a href="/outcomes">Resultados</a></li><li><a href="/goals">Objetivos</a></li></ul>
   <p class="nav-group" id="side-manage"><a href="/manage">Administración</a></p>
-  <ul aria-labelledby="side-manage"><li><a href="/teams">Equipos</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Ajustes</a></li><li><a href="/runs" aria-current="page">Historial de ejecuciones</a></li><li><a href="/orphans">Limpieza</a></li></ul>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Equipos</a></li><li><a href="/roles">Roles</a></li><li><a href="/settings">Ajustes</a></li><li><a href="/sources">Fuentes</a></li><li><a href="/runs" aria-current="page">Historial de ejecuciones</a></li><li><a href="/orphans">Limpieza</a></li></ul>
 </nav>
   <nav class="langs" aria-label="Idioma"><a href="/lang?to=en&amp;back=%2Fruns" lang="en" hreflang="en">English</a><span aria-hidden="true"> · </span><strong lang="es" aria-current="true">Español</strong><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Fruns" lang="ko" hreflang="ko">한국어</a></nav>
 </header>
 <div class="page">
 <section class="statuses" aria-label="Estado">
 
-<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> backtest de a → b</p><p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> una ejecución: boom</p>
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> backtest de a → b</p><p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> una ejecución: boom <a href="/sources">Fuentes</a></p>
 </section>
 <main id="main">
 <nav class="crumbs" aria-label="Ruta de navegación"><ol><li><a href="/manage">Administración</a></li><li><span aria-current="page">Historial de ejecuciones</span></li></ol></nav>
@@ -53,6 +53,7 @@
 
 <h1>Historial de ejecuciones</h1>
 <p class="lede">Hay disparos hasta 2026-11-03 12:00.</p>
+<p class="row"><a href="/sources">Fuentes: cómo se leyó cada una por última vez, y sus errores</a> <a href="/activity">Registro de actividad</a></p>
 
 <div class="scroll"><table>
 <thead><tr><th scope="col">Tipo</th><th scope="col">Iniciado</th><th scope="col">Periodo</th><th scope="col" class="n">Disparos</th><th scope="col">Sin backtest</th><th scope="col">Error</th></tr></thead>
@@ -96,6 +97,7 @@
 <p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> Se eliminó su equipo, así que no se envían hasta que nombren otro: gone daily. <a href="/reports">Informes</a></p>
 <h2>Cambios hechos aquí</h2>
 <ul class="plain"><li><clock> config: goal launch-missed kept</li><li><clock> config: goal sale-no-worse kept</li><li><clock> config: goal no-refire kept</li><li><clock> config: goal paged kept</li><li><clock> config: goal precise kept</li><li><clock> ana: marked window Newsletter kept</li><li><clock> ana: marked window Autumn sale kept</li><li><clock> firings-token: firings</li><li><clock> tasks-token: comment on task 1 copied in from its issue</li><li><clock> anonymous: comment on incident INC-1</li><li><clock> anonymous: comment on task 1</li><li><clock> anonymous: comment on rule Errors</li><li><clock> ana: team gone deleted</li><li><clock> ana: report gone daily kept</li><li><clock> ana: team gone kept</li><li><clock> ana: report payments weekly kept</li><li><clock> ana: the weekly digest kept</li><li><clock> ana: role given to group:sre</li><li><clock> ana: role given to user:pat</li><li><clock> ana: quiet window cron kept</li><li><clock> ana: quiet window monthly kept</li><li><clock> ana: task 1 made</li><li><clock> ana: quiet window w kept</li><li><clock> ana: note on Errors kept</li><li><clock> ana: team payments kept</li></ul>
+<p><a href="/activity">Todo el registro de actividad, con filtros y exportación</a></p>
 
 </main>
 <footer>lapilli test · horas en UTC</footer>

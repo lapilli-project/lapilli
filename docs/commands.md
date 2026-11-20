@@ -535,6 +535,9 @@ The ledger:
                       most 3650d)
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
+  --keep-activity DUR drop the activity log's changes older than this, never
+                      sooner than --keep (default 800d, or --keep when
+                      longer; 0 keeps them all, as with --keep 0)
   --watch DUR         read the rules this often (default 1m)
   --alarms-every DUR  read each --alarms this often (default 10m), so the
                       clouds' request quotas hold
@@ -694,7 +697,9 @@ The web UI and API:
                       A file that can't be used changes nothing, a thing it
                       declares that can't be kept is kept as it was, and the
                       Settings and Run history pages say why
-                      (docs/design/serveops.md)
+                      (docs/design/serveops.md). Under notify:, routes:
+                      who is told what, by kind, team and labels, and a
+                      default (docs/design/notifications.md)
   --config-prune      delete what --config no longer declares, once the file
                       is read the same twice in a row, but a team something
                       the UI made names; without it, that is the UI's again.
@@ -843,6 +848,18 @@ written down; quiet windows kept; comments):
                       . _ -. Reports can also go to slack (--slack-webhook-
                       file), webhook (--notify-webhook-file, as
                       report.ready) and team:TEAM (each --team-digest)
+  --webhook-dest NAME=FILE
+                      a destination routes in --config's notify: can send
+                      to: the webhook whose URL is in FILE, posted JSON as
+                      --notify-webhook-file is (repeatable). NAME is
+                      lowercase letters, digits and . _ -, none that
+                      --report-dest gives. It takes only what a route
+                      sends it; needs --config
+  --webhook-dest-secret NAME=FILE
+                      the file holding a key, 32 bytes at least, to sign
+                      each post to --webhook-dest NAME with, as
+                      --notify-webhook-secret-file signs the webhook's
+                      (repeatable)
 
 Notifications as they were sent, kept beside the firings: how many each rule
 sent, how many repeats, how many woke people, how many for nothing:

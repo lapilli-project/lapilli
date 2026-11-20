@@ -174,6 +174,12 @@ or the `series` given; a rule whose replay differs over a week (`differs`,
 `5/0.9` unless given) says so on its page and in `/metrics`. It is on;
 `enabled: false` turns it off.
 
+`serve.keep` (400 days) is how long firings, runs and what goes with them
+are kept; `serve.keepActivity` the activity log, who changed what, never
+less than `serve.keep` (`--keep-activity`; empty, or left out by a release
+upgraded with `--reuse-values`, for serve's own: 800 days, or `serve.keep`
+when longer; `0` keeps it all; with `serve.keep: 0`, left empty).
+
 `serve.ledger.postgres` keeps the ledger in a Postgres database, 15 or later,
 rather than on a PersistentVolumeClaim (`docs/design/postgres.md`):
 `secret.name` and `secret.key` name a Secret holding its connection string,
@@ -430,6 +436,17 @@ adds is made. To rename a team
 in place, keeping what names it, give the new `name` with the old as
 `renamed_from`, and change every `team:` that names it, in one change:
 renamed by its name alone, it is another team.
+
+A team in `serve.config` may say who of it approves its rules' changes
+(`approvers:`, as `user:NAME`, `group:NAME` or `*@DOMAIN`) and where they
+are written (`changes_in:`, within `serve.changes.in`; `[]` for nowhere),
+and the file may declare change freezes (`freezes:`, with a quiet
+window's times, for everyone or a team): a team's editors then propose
+changes to its rules, its approvers approve them, and while a freeze holds
+nothing it covers is approved, undone or applied; those approved before
+wait until it ends (`docs/design/changes.md`, "A team as the boundary of
+change", in the repository). They are read as the rest of the file is,
+twice before they are kept.
 
 `serve.config` declares goals too (`goals:`, `docs/design/goals.md` in
 the repository): what the alerting is held to, each a bound on one of the
@@ -778,6 +795,37 @@ is then signed with it, `X-Lapilli-Timestamp` and `X-Lapilli-Signature`, for
 the receiver to check that it came from Lapilli, as
 [Signed posts to the webhook](https://github.com/lapilli-project/lapilli/blob/main/docs/serve.md#signed-posts-to-the-webhook)
 says.
+
+`serve.config` decides who is told what too, under `notify:`: routes send
+each event by its kind (`task.created`, or a family, `task.*`), its team and
+its labels to destinations by name, the first that takes it deciding
+unless it says `continue: true`, and what none takes to `default`, which
+routes need, so that nothing is dropped. The names are `webhook`, `slack`,
+`team:NAME` (`serve.teamDigests.teams`), `serve.reports.destinations`'
+names, and `serve.notify.webhookDests`', JSON webhooks of their own, each
+URL in a Secret's key and, with `signingKey`, each signed with its own key;
+never a URL. `templates:` gives a destination words of its own, from
+`{{.Event}}`, `{{.Line}}`, `{{.Link}}`, `{{.Rule}}`, `{{.Team}}`,
+`{{.Title}}`, `{{.ID}}`, `{{.By}}`, `{{.Labels}}` and `{{.At}}`, each value
+escaped for where it goes. Every replica reads the routes, as it tells of
+what it writes; the Settings page shows them, read-only, and how each
+destination's notices went. Without routes, every event goes to the
+webhook and, with `serve.notify.slack`, Slack, as before
+([Who is told what](https://github.com/lapilli-project/lapilli/blob/main/docs/design/notifications.md#who-is-told-what)).
+
+```yaml
+serve:
+  notify:
+    webhookDests:
+      - {name: payments-hook, secretName: lapilli-payments-hook, key: url, signingKey: key}
+  config: |
+    notify:
+      routes:
+        - kinds: [task.*, proposal.*]
+          teams: [payments]
+          to: [team:payments, payments-hook]
+      default: [slack]
+```
 
 Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they

@@ -124,8 +124,9 @@ Admins give roles in the UI, on top of the flags:
 |---|---|---|
 | admin | `--admins` only | everything an editor may, and the settings, teams, reports, the digest and roles |
 | approver | `--approvers` only, or the admins | approve and undo a change to a rule |
+| approver of a team | `--config` only (`approvers:` under the team) | approve and undo a change to that team's rules |
 | editor | `--editors`, or an admin in the UI | incidents, tasks, comments, quiet windows, notes on rules; proposes changes |
-| editor of a team | an admin in the UI | that team's notes, tasks, quiet windows and reports, and comments on what is the team's |
+| editor of a team | an admin in the UI | that team's notes, tasks, quiet windows and reports, and comments on what is the team's; proposes changes to its rules |
 | viewer | everyone else | nothing |
 
 The Roles page says who may approve in effect (those `--approvers` names,
@@ -188,7 +189,10 @@ changed by the wrong team's editors:
   incident their team owns.
 
 Not incidents (an incident turns firings white for every team), not
-proposals, settings, teams, the digest or roles.
+settings, teams, the digest or roles. Since the release after 0.63.1
+(below, "A team's boundaries of change"), **proposals** for a rule their
+team owns: made, backtested again, and dropped when they made them;
+checked in the request, as a proposal isn't a row of a team's.
 
 ### A team's quiet window
 
@@ -544,6 +548,15 @@ goal: one it no longer declares is deleted, with or without
 `--config-prune`, and without `--config` there are none. An export gives
 them back as the file declares them.
 
+A sixth key, `notify:`, declares who is told what: routes by an event's
+kind, team and labels to destinations the flags name, a default, and a
+destination's own words ([notifications.md](notifications.md#who-is-told-what)).
+It isn't kept in the ledger: every replica reads it, as each tells of what
+it writes, and puts it in force once it has read the same file twice in a
+row; an export doesn't give it. A `notify:` that can't be read refuses the
+file, as the rest does; each replica reads `notify:` on its own, so what is
+wrong elsewhere in the file leaves the routes in force.
+
 **Read strictly, or not at all.** A key it doesn't know, a value of
 another kind, a key given twice, a second document, a file over 1 MiB (a
 ConfigMap's most), more things than the ledger keeps (1,000 teams, 500
@@ -826,3 +839,295 @@ again, its approvals withdrawn, it would wait anew; one being backtested again
 on the leader is left until it is done, and one backtested on another
 replica, closed meanwhile, has its backtest refused as moved. A proposal's
 page says when it would expire, while no one approved it.
+
+### A team's boundaries of change
+
+As built for the release after 0.63.1 ([changes.md](changes.md), "A team
+as the boundary of change"). A team declared in `--config` may say who of
+it approves its rules' changes, and where they are written; a file may
+declare change freezes:
+
+```yaml
+teams:
+  - name: payments
+    labels: {team: payments}
+    approvers: [user:ana@example.com, group:payments-leads]
+    changes_in: [payments-*]      # within --changes-in; [] for nowhere
+freezes:
+  - title: Black Friday
+    start: 2026-11-27T00:00       # in --tz, or with an offset
+    end: 2026-11-30T00:00
+  - title: Payments month end
+    team: payments                # everyone's when left out
+    start: 2026-11-30T18:00
+    end: 2026-12-01T06:00
+    every: month                  # as a quiet window: day, week, month or cron
+    repeat_on: last
+    until: 2027-06-30
+```
+
+- **Read strictly, as the rest of the file.** An approver is
+  `user:NAME`, `group:NAME` or `*@DOMAIN`, not a bare name or `*`;
+  `approvers: []` is refused (leave it out for none); a `changes_in` entry
+  is one `--changes-in` would take, within what `--changes-in` names (in
+  the letter case its own source compares names in), or the file is
+  refused as a whole, its line said; a freeze has a title, times a quiet
+  window could have (31 days at most, a repeat shorter than its period, a
+  month's or a cron's starting when it falls due), a team the same file
+  declares, 100 freezes at most. A team's name is read as the ledger keeps
+  it, without the spaces around it; two teams of one name in another
+  letter case, or with spaces around it, are refused where the boundaries
+  name them. A team that can't be kept, kept as it was, keeps the
+  boundaries the file gives under its name; one no team has holds nothing,
+  and the Settings page names it.
+- **A rule's team is an admin's to move.** While the file declares any
+  team's approvers or `changes_in`, or a freeze, a note that moves a rule
+  into a team or out of one (its form, `PUT /api/v1/notes`, the rules
+  list's "Set the team", the Cleanup page's move) is refused to anyone but
+  an admin, in the ledger's write; and a rule a note moved is held by the
+  boundaries of the team its name and labels give it too.
+- **Kept with the rest, read twice first.** Read, they are written as one
+  value in the ledger's `meta` table (`change_bounds`), in the write that
+  keeps the ledger to the file, a change noted in the activity log
+  ("change boundaries declared in config", by `config`): a file read half
+  written gives no one an approver's role and lifts no freeze, and every
+  replica reads the same. A file that says them as the ledger holds them
+  writes nothing. Without `--config`, there are none: no team's approvers,
+  sources or freezes, as nothing declares them; a role given in the UI is
+  never an approver's.
+- **Exported.** `/config.yaml` gives them back as the file takes them,
+  each freeze's times as RFC 3339 in `--tz`; read back, it writes nothing.
+- **Shown.** A proposal's page says its team; to an admin, who of every
+  team and of its team may approve it; a freeze that holds it, and until
+  when; a rule that another team owns now than when it was proposed. The
+  Settings page lists the freezes, under "Changes to the rules", each
+  frozen until, next, or over; the Administration page's Settings card
+  says until when a freeze holds changes. Boundaries that can't be read
+  are said on both pages, drawn all the same, nothing they would hold
+  going ahead. Who a team's approvers are is on a proposal's page to an
+  admin alone, as who holds a role is.
+
+## Sources, the activity log, and the daily writes through the API
+
+Status: built, for the next release (bundle 25). No schema change: what a
+source's reads came to is the leader's, said to the other replicas in its
+status as the impact signal's reads are; what was told of a source is kept
+in `meta`, as `source.quiet` keeps its own; the activity log is the
+`changes` table as it was.
+
+### Sources
+
+Each source `serve` reads is an object with a state, as Argo CD shows an
+application: `/sources` (Administration, after Settings, as ui.md lists
+it), and `GET /api/v1/sources?all=true`. A row each, by an id kept from one
+release to the next:
+
+| Id | What | Read |
+|---|---|---|
+| `rules` | the rules where they are kept: `--rules`, `--rules-history`, `--loaded-rules`, `--grafana` or `--ruler` | every `--watch`, counted |
+| `alarms/SOURCE` | each `--alarms` | as the rules are, counted |
+| `loki` | `--loki-loaded-rules` or `--loki-rules` | as the rules are, counted |
+| `prometheus` | Prometheus as the runs ask it | each run that isn't held, from the runs kept, counted |
+| `incidents-file` | `--incidents` | each run |
+| `deploys-file`, `marked-file` | `--deploys`, `--marked` | each run, counted |
+| `impact`, `signal/NAME` | the impact signal, or each named one | each run |
+| `on-call/NAME` | each schedule of `--on-call` | its feed's own clock |
+| `intake/PREFIX` | incidents a job copies in, by their ids' prefix | written to |
+| `firings/NAME` | firings a job copies in, by source | written to |
+
+Each has its kind, when it was last read (or written to) well, its last
+error and when, how many reads in a row failed (where they are counted),
+the rules the last read gave, how far behind it is where that is known
+(the runs' cursor; a source's furthest period copied in) and how long its
+last read took. Its state is one of the incident sources' (statusKinds'
+`source/…`): working, failing (its last read failed), quiet (nothing read
+or written past its bound), waiting (not read yet, the runs held by
+`--guard` or a 429, or a source beside the rules held, below). The rules
+and what is read beside them make one version, which a read that fails
+anywhere fails whole, so the version stays as it was; each is read all the
+same, its read noted, whichever of the others failed, so that one source
+failing never makes another look quiet or down. One the minute the reads
+get ran out on before its turn is held (`noteHeld`): not read, waiting,
+and not aging, until its next read.
+
+A source's error is said as Run history says a run's (`runsFor`): the
+paths of the files `serve` was started with to an admin alone, each by its
+flag to anyone else, and why the ledger's database can't be reached in a
+few fixed words. On this page, the API and in a notice, what may be a
+credential is `***` to everyone, an admin too: a URL's user and password,
+a query's token, key, secret, password, signature or credential, and its
+`code` (an Azure Function's key); such a name given as `name=value`
+between spaces (a connection string's `password=`) or as a JSON string
+(`"token":"…"`, escaped or not); a header such as `api-key:` or
+`x-api-key:`; a bearer or basic token of 12 characters or more
+(`scrubSecrets`). It goes by patterns, and takes out more than a
+credential where a name only looks like one's. Where a source
+is read (its path or address) is an admin's alone, scrubbed too. The page
+is worked out as it is asked, never kept (what a source's reads came to is
+no write a kept page would be told by), and so is the API's `all=true`;
+without `all`, the answer is the sources firings are copied in from, as
+before, kept as it was.
+
+The status banner's failure, when it is a source's read (the rules, a run,
+the incidents, deploys or marked file, the impact signal read again),
+links to the page; so does Run history.
+
+### Down and back
+
+A source is down when, of those whose reads are counted, three in a row
+failed (`sourceDownAfter`); of the others, when it has failed since it last
+read well past its bound, or, never having read well, since this replica
+first saw it failing; and when it is quiet. The bounds are the impact
+signal's (`impactStale`: two runs, the hours they settle, and one more),
+and for what a job writes, its own: two days for incidents through the
+port (`receivedQuiet`), `--source-quiet` for firings. An incidents id
+prefix nothing was written to in 14 days (`intakeForgotten`, or `--keep`
+when shorter) is left out of the list, and not told down: it was an id's
+one-off prefix, not a job's that stopped, and anyone with the incidents
+token can make 63 of them.
+
+The leader tells the webhook and Slack `source.down`, once, and
+`source.back` once it has read well for 15 minutes since its last failure
+(`sourceBackAfter`), each with `source_read` (its id, kind, name, flag,
+state, last read well, reads failed in a row, and its error as anyone but
+an admin is shown it). What was last told of each is kept in `meta`
+(`source-told.ID`: `down`, or `up` and when), so a source stays told down
+across restarts and leaders, and isn't told again while it is. What is
+told is written, and kept, only while `meta` holds what the look read, in
+the same write (`TellFrom`): the watch and the jobs each look, at once at
+times, and tell a source back once between them. A source
+told back is told down again no sooner than an hour after
+(`sourceRenotify`): one that fails three reads, reads one, and fails again,
+over and over, is told down once, and one that goes down every twenty
+minutes once an hour at most. It is looked at after each read of the rules
+and each run. Firings copied in keep `source.quiet`, as before, and are
+told of by nothing else.
+
+### The activity log
+
+`/activity` (under Run history, which still shows the latest 100 changes,
+each person's verdicts of an hour as one line, and links to it) lists every
+change kept, 100 a page, the latest first, each with its kind, and its
+before and after behind a `<details>` (the first 2,000 bytes; the export
+has all of it). It filters by query: `who` (the name a change is noted
+under, whole), `kind` (setting, incident, verdict, proposal, task, comment,
+note, window, marked, report, team, role, goal, firings, cleanup, other:
+told apart by how each change is noted, `ledger.ActivityKinds`), `team`
+(the changes of the team itself, of its rules, a verdict's, a note's, a
+comment's, a proposal's, and of its tasks), `since` and `until` (a day in
+`--tz`, `until` taking it whole, or an RFC 3339 time). A page goes on from
+where the last ended (`before`, its last change's time and id), so a
+change made meanwhile neither repeats one nor hides one. A team's changes
+are found by looking through the others: a request looks through 20,000
+at most, and looks up 200 tasks and proposals at most for their team,
+then says where it stopped, and the next request goes on from there; it
+reads the before and after of a change it keeps alone, not of each it
+looks through (but a bulk verdict's after, which says its rules).
+
+`GET /api/v1/activity` gives the same, with the same filters: `limit` (1
+to 1,000), as JSON (`activity`, each with its id, `at`, `by`, `kind`,
+`what`, and `before` and `after` as the JSON they were kept as; `next`) or,
+with `format=csv`, as CSV (`id, at, by, kind, what, before, after`), the
+next page's link in `Link`. No cell of it starts with `=`, `+`, `-`, `@`, a
+tab or a carriage return, or their full-width forms, after any spaces: such
+a cell starts with `'`, which a spreadsheet shows as text (CSV injection).
+Who reads Run history reads it: a viewer. The roles given and taken are an
+admin's, as there (`changesSeen`), and to anyone else the paths of `serve`'s
+files are their flags. Neither is kept by a cache: `Cache-Control:
+no-store`. The export is worked out as a page is, a few at a time: it
+takes a page's turn (`pageRenders`), 503 past the wait, and gives it back
+once the answer is written out, before it goes to the network.
+
+**Builder's decision: the activity log outlives the firings.**
+`--keep-activity` (`serve.keepActivity`) is how long it is kept: unless
+given, 800 days, or `--keep` when that is longer, so that an install with
+a longer `--keep` starts as it did; 0 keeps it all. One given shorter than
+`--keep` is refused as `serve` starts, and so is one given beside `--keep
+0`, which prunes nothing, the activity log neither: refused rather than
+pruned alone, which would drop who changed what before the firings it was
+about.
+Who changed a rule's threshold is asked long after its firings are gone,
+and a change is a row of a few hundred bytes: a person writing 30
+verdicts every hour of a year keeps some 260,000 rows, under 100 MB.
+Prune drops `changes` at its own time (`PruneKeeping`), the rest as before.
+
+### The daily writes through the API
+
+What a person did each day only through a form now has a route of its own,
+with the form's role, checks and limits, the ledger holding both to the
+same write:
+
+- `POST /api/v1/incidents/{id}/decide`: an impact window confirmed (as an
+  incident, `title` its own unless given), dismissed (`together` dismisses
+  the other named signals' windows at that time not decided yet), or
+  reopened; an editor's, as the form.
+- `POST /api/v1/firings/real`: the firing a report gives (`rule`,
+  `labels`, `start`) written down as an incident it caught, as "This was
+  real" writes it: an editor's of the last 14 days' firings, an admin's of
+  any; 201 with the incident, 200 with none once one was written from it.
+
+They take what every write on `--listen` takes: a role checked before the
+body is read, a body of 1 MB, `--read-only`, and the cross-origin check
+that refuses a browser's write from another site (a script's, with
+neither `Sec-Fetch-Site` nor `Origin`, goes on, as every API write's
+does). **Builder's decision: proposing stays off the API.** A proposal is
+made on a rule's page by a person, or through MCP's `propose` by an agent
+behind `--mcp-propose`, flagged as an agent's and counted apart; a script
+with a person's token is an agent by another name, and the API would make
+one unflagged, past that switch. Approving stays the proposal's page's
+alone. The settings and the bulk forms are an admin's, or not daily, and
+stay forms.
+
+### What the review found
+
+Read as an attacker would, once built:
+
+- **A notice storm.** A source that flaps would tell down and back each
+  minute: back waits 15 minutes of good reads, down again an hour after
+  back, and down isn't told twice (`TestSourceFlapping`,
+  `TestSourceDownAndBack`).
+- **Credentials in an error.** A client's error can quote a URL with its
+  user and password or a token in its query, which the paths' redaction
+  doesn't take out: scrubbed for every reader, the notices too
+  (`TestScrubSecrets`, `TestSourcesRedacted`).
+- **A filter that reads the ledger for each row.** A team's changes are
+  found by looking tasks and proposals up: 200 a request at most, then it
+  stops and says where (`TestActivityTeamBounded`).
+- **Roles in the export.** Who was given which role is an admin's on Run
+  history; the page, the JSON and the CSV hold to it, and `kind=role` gives
+  anyone else nothing (`TestActivityWhoReadsWhat`).
+- **A formula in a name.** A name or a title is a person's: a CSV cell is
+  never a formula (`TestActivityCSV`).
+- **A write past its form.** The routes take the form's role, a team's
+  editor refused as the form refuses them, and the ledger's checks
+  (`TestAPIDecide`, `TestAPIReal`).
+
+Read so again, once built:
+
+- **An upgrade that wouldn't start.** `--keep-activity` was 800 days unless
+  given, and refused shorter than `--keep`: a `--keep` past 800 days
+  stopped `serve` starting, naming a flag no one gave. Unless given, it is
+  `--keep` when longer; one given shorter is refused, and one given beside
+  `--keep 0` too, as it would do nothing (`TestServeKeepActivity`).
+- **One source making others look down.** The rules failing stopped what
+  is read beside them being read, and the first `--alarms` failing those
+  after it: five hours of broken rule files told Loki's files down, then
+  back. Each is read, and noted, by itself; one the time ran out on before
+  its turn is held (`TestSourceBesideAFailingOne`,
+  `TestAlarmsBesideAFailingOne`).
+- **An export with no turn.** `GET /api/v1/activity` took no page's turn:
+  any number at once could each look through 20,000 changes, before and
+  after with them. It takes one, and a team's changes are looked through
+  without their before and after (`TestActivityTakesATurn`,
+  `TestActivityLight`).
+- **Credentials in other forms.** An Azure Function's `?code=`, a
+  `password=` between spaces, a JSON `"token"`, an `x-api-key:` header
+  went through as said (`TestScrubSecrets`).
+- **Back told twice.** The watch and the jobs each look at the sources:
+  two looks a second apart each read `down`, and each told back with its
+  own time. Told only while `meta` holds what was read
+  (`TestSourceBackOnce`, `TestTellFrom`).
+- **One-off prefixes down for ever.** An incident id's one-off prefix,
+  of the 63 the incidents token can make, was down on the page for ever:
+  left out after 14 days, and never told down past it
+  (`TestSourceIntakeForgotten`).

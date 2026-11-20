@@ -129,7 +129,10 @@ comment (`comment.written`). To a webhook, with `--notify-webhook-file`, as
 JSON: the event, when, who, the row as the API gives it, and `url`, its page
 under `--external-url`. To Slack, with `--notify-slack`, as a line in
 `--lang`, with the link; `<`, `>` and `&` are escaped, so nothing in it can
-mention anyone.
+mention anyone. Routes in `--config`'s `notify:` send each event by its
+kind, team and labels to destinations the flags name, a team's channel
+among them, with a default
+([notifications.md](notifications.md#who-is-told-what)).
 
 Each notice is written to an outbox in the same transaction as what it
 tells of, one row for each place it goes, and sent after, every 5 seconds,

@@ -348,6 +348,27 @@ your own needs from. */ -}}
 {{- end }}
 {{- $_ := set $dests .name true }}
 {{- end }}
+{{- range ($s.notify).webhookDests }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9._-]{0,62}$" (toString .name)) }}
+{{- fail (printf "serve.notify.webhookDests: %q: a name is lowercase letters, digits and . _ -" (toString .name)) }}
+{{- end }}
+{{- if has .name (list "slack" "webhook") }}
+{{- fail (printf "serve.notify.webhookDests: %s is the name of report.slackWebhookSecret or notify.webhookSecret already" .name) }}
+{{- end }}
+{{- if hasKey $dests .name }}
+{{- fail (printf "serve.notify.webhookDests: %s twice, or a name serve.reports.destinations has: a route names a destination by its name alone" .name) }}
+{{- end }}
+{{- if not .secretName }}
+{{- fail (printf "serve.notify.webhookDests: %s needs a secretName" .name) }}
+{{- end }}
+{{- if and .signingKey (eq (toString .signingKey) (toString (.key | default "url"))) }}
+{{- fail (printf "serve.notify.webhookDests: %s's signingKey is the key holding the URL: give the signing key a key of its own" .name) }}
+{{- end }}
+{{- if and (eq $.Values.mode "serve") (not $s.config) }}
+{{- fail "serve.notify.webhookDests take what the routes in serve.config's notify: send them: give serve.config" }}
+{{- end }}
+{{- $_ := set $dests .name true }}
+{{- end }}
 {{- /* The languages --lang takes: internal/serve's Langs (TestChartLangs). */}}
 {{- if not (has ($s.notify.lang | default "en") (list "en" "es" "ja" "ko")) }}
 {{- fail "serve.notify.lang: en, es, ja or ko" }}
