@@ -554,7 +554,8 @@ destination's own words ([notifications.md](notifications.md#who-is-told-what)).
 It isn't kept in the ledger: every replica reads it, as each tells of what
 it writes, and puts it in force once it has read the same file twice in a
 row; an export doesn't give it. A `notify:` that can't be read refuses the
-file, as the rest does.
+file, as the rest does; each replica reads `notify:` on its own, so what is
+wrong elsewhere in the file leaves the routes in force.
 
 **Read strictly, or not at all.** A key it doesn't know, a value of
 another kind, a key given twice, a second document, a file over 1 MiB (a

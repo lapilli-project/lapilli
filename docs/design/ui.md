@@ -1933,7 +1933,9 @@ table, read-only, with "Declared in --config, under notify:, and changed
 there, not here", as declared teams and windows say it since bundle 22,
 and no form. A file read once and waiting is said; one that can't be used,
 with why and its line to an admin, its line alone to anyone else, and,
-none read since the start, that what happens is told as without routes.
+none read since the start, that what happens is told as without routes;
+each destination the routes name that this replica's flags don't give,
+left out here, with its line, to anyone (ten, and how many more).
 The events that went where no route sent them are a sentence with a sign
 (bad). Then each destination an event goes to: its name and flag, whether
 it has words of its own, JSON or a line, when a notice was last sent to
@@ -1942,8 +1944,11 @@ and were given up on (`ledger.Standing` of that place alone), and why the
 latest still unsent failed (`ledger.LastError`, read as `Standing` reads,
 1,001 rows at most), its files' paths taken out, to an admin; anyone else
 reads "failed: an admin sees why". Without routes, the webhook and Slack,
-where what happens goes. The card says, in a line each, routes that can't
-be used and events no route sent.
+where what happens goes. A destination gone, whose notices still wait or
+were given up on and that no flag gives any more, is a row of its own,
+with a sign (bad), by its name alone. The card says, in a line each,
+routes that can't be used, routes that name a destination not given, and
+events no route sent.
 
 It is read from the flags, the reports, the runs and the outbox
 (`ledger.Standing`: a place's last send by the outbox's index on its place

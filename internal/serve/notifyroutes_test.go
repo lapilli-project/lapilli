@@ -25,8 +25,16 @@ type routedHooks struct {
 }
 
 // routedServer is a serve with --config holding config, and every kind of
-// destination a route may name.
+// destination a route may name, started as Run starts it.
 func routedServer(t *testing.T, config string, change func(*Config)) (*Server, routedHooks, string) {
+	t.Helper()
+	s, hs, file := unstartedRoutedServer(t, config, change)
+	s.startRoutes(context.Background()) // as Run does
+	return s, hs, file
+}
+
+// unstartedRoutedServer is routedServer before Run reads its routes.
+func unstartedRoutedServer(t *testing.T, config string, change func(*Config)) (*Server, routedHooks, string) {
 	t.Helper()
 	hs := routedHooks{webhook: newSignedHook(t), slack: newSignedHook(t), payments: newSignedHook(t), checkout: newSignedHook(t),
 		ops: newSignedHook(t), teamPay: newSignedHook(t), paymentsKey: "payments-key-of-thirty-two-bytes"}
@@ -46,7 +54,6 @@ func routedServer(t *testing.T, config string, change func(*Config)) (*Server, r
 			change(c)
 		}
 	})
-	s.loadRoutes(time.Now(), true) // as Run does
 	return s, hs, cfgFile
 }
 
@@ -259,8 +266,9 @@ func TestRouteMatch(t *testing.T) {
 
 // The no-drop default: routes without a default are refused, as the file
 // is, and the routing in force stays. With routes in force, an event their
-// destinations can't take goes to the default, or else everywhere, never
-// nowhere, and is counted.
+// destinations can't take goes to the default's, or else as without
+// routes, to the webhook and Slack; with neither, nowhere, never to every
+// place; and is counted.
 func TestRoutesNeverDrop(t *testing.T) {
 	_, err := ParseConfig([]byte("notify:\n  routes:\n    - {kinds: [task.created], to: [ops]}\n"), time.UTC)
 	var ce configError
@@ -273,27 +281,247 @@ func TestRoutesNeverDrop(t *testing.T) {
 	if got := s.route("task.created", about, []string{"webhook", "slack"}); !slices.Equal(got, []string{"slack"}) {
 		t.Errorf("to the default: %v", got)
 	}
+	// The default not among them either: as without routes.
 	if got := s.route("task.created", about, []string{"webhook"}); !slices.Equal(got, []string{"webhook"}) {
-		t.Errorf("everywhere, the default not among the places: %v", got)
+		t.Errorf("as without routes, the default not among the places: %v", got)
 	}
-	if n := s.routing.unrouted.Load(); n != 2 {
-		t.Errorf("unrouted %d, want 2", n)
+	// Neither: nowhere, not to every place a route may send to.
+	if got := s.route("task.created", about, []string{"route:checkout-hook", "route:team:payments"}); len(got) != 0 {
+		t.Errorf("with no webhook or Slack: %v, not nowhere", got)
+	}
+	if n := s.routing.unrouted.Load(); n != 3 {
+		t.Errorf("unrouted %d, want 3", n)
 	}
 	// Routes declared, and none read since the start: as without routes,
-	// counted.
-	broken, _, _ := routedServer(t, "notify:\n  routes:\n    - {to: [nowhere]}\n  default: [slack]\n", nil)
+	// counted; with no webhook or Slack, nowhere.
+	broken, _, _ := routedServer(t, "notify:\n  routes:\n    - {kinds: [task.nope], to: [ops]}\n  default: [slack]\n", nil)
 	if broken.routing.table.Load() != nil || !broken.routing.broken.Load() {
-		t.Fatal("a notify: naming no destination there is was put in force")
+		t.Fatal("a notify: that can't be read was put in force")
 	}
 	if got := broken.route("task.created", about, broken.dests()); !slices.Equal(got, []string{"webhook", "slack"}) {
 		t.Errorf("broken: %v", got)
 	}
-	if got := broken.route("task.created", about, []string{"route:ops"}); !slices.Equal(got, []string{"route:ops"}) {
-		t.Errorf("broken, with no webhook or Slack: %v, not everywhere", got)
+	if got := broken.route("task.created", about, []string{"route:ops", "route:team:payments"}); len(got) != 0 {
+		t.Errorf("broken, with no webhook or Slack: %v, not nowhere", got)
 	}
 	if n := broken.routing.unrouted.Load(); n != 2 {
 		t.Errorf("broken: unrouted %d, want 2", n)
 	}
+	// A destination the flags don't give is left out, the routes kept: a
+	// route left with none takes what it takes, which goes to the
+	// default's; the default left with none, as without routes.
+	left, _, _ := routedServer(t, "notify:\n  routes:\n    - {kinds: [task.*], to: [nowhere]}\n    - {to: [ops]}\n  default: [slack, gone]\n", nil)
+	if rt := left.routing.table.Load(); rt == nil || !rt.conf.declared() || len(rt.unknown) != 2 || left.routing.broken.Load() {
+		t.Fatalf("routes naming a destination not given weren't kept: %+v", rt)
+	}
+	if got := left.route("task.created", about, left.dests()); !slices.Equal(got, []string{"slack"}) {
+		t.Errorf("a route left with no destination: %v, want the default's", got)
+	}
+	if got := left.route("window.kept", []byte(`{"window": {"id": 1}}`), left.dests()); !slices.Equal(got, []string{"route:ops"}) {
+		t.Errorf("the route after it: %v", got)
+	}
+	noSlack, _, _ := routedServer(t, "notify:\n  routes:\n    - {kinds: [task.*], to: [nowhere]}\n  default: [gone]\n", func(c *Config) {
+		c.NotifySlack = false
+	})
+	if got := noSlack.route("task.created", about, noSlack.dests()); !slices.Equal(got, []string{"webhook"}) {
+		t.Errorf("the default left with none: %v, want as without routes", got)
+	}
+	none, _, _ := routedServer(t, "notify:\n  routes:\n    - {kinds: [task.*], to: [nowhere]}\n  default: [gone]\n", func(c *Config) {
+		c.NotifyWebhook, c.NotifySlack = "", false
+	})
+	if got := none.route("task.created", about, none.dests()); len(got) != 0 {
+		t.Errorf("with nowhere to go: %v, want nowhere", got)
+	}
+	if left.routing.unrouted.Load() != 1 || noSlack.routing.unrouted.Load() != 1 || none.routing.unrouted.Load() != 1 {
+		t.Errorf("unrouted: %d, %d, %d, want 1 each", left.routing.unrouted.Load(), noSlack.routing.unrouted.Load(), none.routing.unrouted.Load())
+	}
+}
+
+// Routes are each replica's own, read from notify: alone: what is wrong
+// elsewhere in the file, which the leader refuses as a whole, leaves them
+// in force, and a team's event goes where its team's route sends it, not
+// to another team's destination, nor to every place.
+func TestRoutesPastAnotherError(t *testing.T) {
+	ctx := context.Background()
+	const file = `teams: []
+windows: nope
+notify:
+  routes:
+    - kinds: [task.*]
+      teams: [payments]
+      to: [team:payments]
+    - teams: [search]
+      to: [team:search]
+  default: [ops]
+`
+	if _, err := ParseConfig([]byte(file), time.UTC); err == nil {
+		t.Fatal("the file is taken by the leader")
+	}
+	s, hs, _ := routedServer(t, file, func(c *Config) {
+		// Neither the webhook nor Slack: nothing to fall back on.
+		c.NotifyWebhook, c.Slack, c.NotifySlack = "", "", false
+		c.TeamDigests["search"] = newSignedHook(t).file
+	})
+	if rt := s.routing.table.Load(); rt == nil || !rt.conf.declared() || s.routing.err != nil {
+		t.Fatalf("routes not in force past the file's other error: %v", s.routing.err)
+	}
+	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Pay"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "search", Rules: "^Search"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.owners(ctx); err != nil { // as watchRoutes keeps them
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "refunds slow", Kind: "tune", TeamID: pay}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	got := outbox(t, s)
+	if len(got) != 1 || !slices.Equal(events(got["route:team:payments"]), []string{"task.created"}) {
+		t.Errorf("payments' task went to %v, want route:team:payments alone", slices.Sorted(maps.Keys(got)))
+	}
+	if n := s.routing.unrouted.Load(); n != 0 {
+		t.Errorf("unrouted %d", n)
+	}
+	for _, h := range []*signedHook{hs.payments, hs.checkout, hs.ops} {
+		if n := len(h.all()); n != 0 {
+			t.Errorf("another destination was posted %d times", n)
+		}
+	}
+}
+
+// Without routes in force, what is told once asks whether to tell, and
+// marks it told, as before routes: by the webhook and Slack alone. A team's
+// digest or a --report-dest, which --config makes places a route may send
+// to, isn't somewhere to tell it, and a task overdue isn't marked told with
+// no notice written.
+func TestToldToAsBeforeRoutes(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := routedServer(t, "teams: []\n", func(c *Config) {
+		c.NotifyWebhook, c.Slack, c.NotifySlack = "", "", false
+	})
+	if len(s.dests()) == 0 {
+		t.Fatal("no place a route may send to")
+	}
+	if got := s.toldTo(); len(got) != 0 {
+		t.Errorf("told to %v without routes, webhook or Slack", got)
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "tune Errors", Kind: "tune", Due: now.AddDate(0, 0, -2)}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	s.tellDue(ctx)
+	if n, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil || n != 1 {
+		t.Errorf("the overdue task was marked told with nowhere to tell it: %d still to tell, %v", n, err)
+	}
+	if got := outbox(t, s); len(got) != 0 {
+		t.Errorf("written: %v", slices.Sorted(maps.Keys(got)))
+	}
+	// As before routes, with the webhook: there; with routes in force,
+	// every place they may send to.
+	hooked, _, _ := routedServer(t, "teams: []\n", nil)
+	if got := hooked.toldTo(); !slices.Equal(got, []string{"webhook", "slack"}) {
+		t.Errorf("told to %v, want the webhook and Slack", got)
+	}
+	routed, _, _ := routedServer(t, routesConfig, nil)
+	if got := routed.toldTo(); !slices.Equal(got, routed.dests()) || !slices.Contains(got, "route:team:payments") {
+		t.Errorf("with routes, told to %v", got)
+	}
+}
+
+// Routes read as serve starts read the owners at once: a team's event in
+// the first seconds, before the owners are kept every configEvery, goes
+// where its team's route sends it.
+func TestRoutesOwnersAtStart(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := unstartedRoutedServer(t, routesConfig, nil)
+	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Pay"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.startRoutes(ctx)
+	if s.ownersNow() == nil {
+		t.Fatal("no owners worked out as serve starts")
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "refunds slow", Kind: "tune", TeamID: pay}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	got := outbox(t, s)
+	for _, d := range []string{"route:payments-hook", "route:team:payments"} {
+		if !slices.Equal(events(got[d]), []string{"task.created"}) {
+			t.Errorf("%s: %v, as of no team", d, events(got[d]))
+		}
+	}
+}
+
+// What waits for a destination no flag gives any more, which no sender
+// starts for, is tried by the leader's sweep: it fails, posting nothing,
+// is tried again, and is given up on as any, and the pages count it and
+// name it.
+func TestGoneDestSwept(t *testing.T) {
+	ctx := context.Background()
+	s, hs, _ := routedServer(t, routesConfig, func(c *Config) {
+		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{ana}, []string{"*"}
+	})
+	// Written while a --webhook-dest refunds-hook was given.
+	s.l.RouteBy(nil)
+	if err := s.l.TellOnce(ctx, "gone-test", "1", "task.created", []ledger.Told{{Dest: "route:refunds-hook", About: map[string]any{"task": map[string]any{"id": 1}}}}); err != nil {
+		t.Fatal(err)
+	}
+	s.l.RouteBy(s.route)
+	if gone, err := s.gonePlaces(ctx); err != nil || !slices.Equal(gone, []string{"route:refunds-hook"}) {
+		t.Fatalf("gone: %v, %v", gone, err)
+	}
+	at := time.Now()
+	for i := range ledger.GiveUpAfter {
+		if err := s.sweepGone(ctx, at.Add(time.Duration(i)*7*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ns, err := s.l.Due(ctx, "route:refunds-hook", at.Add(1000*time.Hour), 10)
+	if err != nil || len(ns) != 0 {
+		t.Fatalf("still waiting: %+v, %v", ns, err)
+	}
+	if got := s.status.notices["route:refunds-hook failed"]; got != ledger.GiveUpAfter {
+		t.Errorf("tried %d times, want %d", got, ledger.GiveUpAfter)
+	}
+	for _, h := range []*signedHook{hs.webhook, hs.slack, hs.payments, hs.checkout, hs.ops, hs.teamPay} {
+		if n := len(h.all()); n != 0 {
+			t.Errorf("another destination was posted %d times", n)
+		}
+	}
+	st, err := s.notifyStatus(ctx, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.GivenUp != 1 {
+		t.Errorf("given up on, counted: %d", st.GivenUp)
+	}
+	var shown *destView
+	for i, d := range st.Routes.Dests {
+		if d.Name == "refunds-hook" {
+			shown = &st.Routes.Dests[i]
+		}
+	}
+	if shown == nil || !shown.Gone || shown.GivenUp != 1 || !strings.Contains(shown.LastErr, `no destination called "refunds-hook" any more`) {
+		t.Errorf("the gone destination on the page: %+v", shown)
+	}
+	h := s.Handler()
+	_, page := getAs(t, h, "/settings", ana)
+	if !strings.Contains(page, "<code>refunds-hook</code><br>") || !strings.Contains(page, "no flag gives it any more") {
+		t.Error("/settings doesn't name the gone destination")
+	}
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	pageA11y(t, h, ana, "/settings", "/manage")
+	missing.Lock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
+	missing.Unlock()
 }
 
 // A new file is in force once it is read the same twice in a row,
@@ -350,6 +578,7 @@ func TestNotifyConfigRefused(t *testing.T) {
 		{"notify:\n  default: [ops]\n  templates:\n    ops: \"{{.Rule\"\n", "line 4: the template for ops opens {{ and doesn't close it"},
 		{"notify:\n  default: [ops]\n  templates:\n    ops: \"" + strings.Repeat("x", maxTemplate+1) + "\"\n", "line 4: the template for ops is more than 2000 bytes"},
 		{"notify:\n  default: [ops]\n  templates:\n    ops: [a]\n", "line 4: the template for ops is a text"},
+		{"notify:\n  default: [ops]\n  templates:\n    ops: \"{{.Line}}\"\n    ops: \"{{.Title}}\"\n", "line 5: ops is given twice, on line 4 too"},
 	} {
 		_, err := ParseConfig([]byte(x.file), time.UTC)
 		if err == nil {
@@ -364,6 +593,15 @@ func TestNotifyConfigRefused(t *testing.T) {
 				t.Errorf("%s: %q isn't translated", lang, got)
 			}
 		}
+		// Each replica reads notify: alone, as strictly.
+		if _, err := notifyIn([]byte(x.file)); err == nil || !strings.HasPrefix(configText("en", err), x.want) {
+			t.Errorf("%q, read alone: %v", x.file, err)
+		}
+	}
+	for _, file := range []string{"", "~\n", "notify:\n  default: [ops]\nnotify:\n  default: [slack]\n"} {
+		if c, err := notifyIn([]byte(file)); err == nil {
+			t.Errorf("%q, read alone: taken, %+v", file, c)
+		}
 	}
 	// What the flags give is checked apart, by each replica, at the line.
 	s, _, _ := routedServer(t, "teams: []\n", nil)
@@ -371,8 +609,8 @@ func TestNotifyConfigRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := configText("en", s.checkNotify(c)); got != `line 3: there is no destination called "team:checkout": --notify-webhook-file names webhook, --slack-webhook-file slack, --team-digest team:NAME, and --webhook-dest and --report-dest the rest` {
-		t.Errorf("checked: %s", got)
+	if got := s.unknownDests(c); len(got) != 1 || configText("en", got[0]) != `line 3: there is no destination called "team:checkout": --notify-webhook-file names webhook, --slack-webhook-file slack, --team-digest team:NAME, and --webhook-dest and --report-dest the rest` {
+		t.Errorf("checked: %v", got)
 	}
 	for _, f := range notifyFormats {
 		for lang, cat := range catalogs {

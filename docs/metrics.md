@@ -213,7 +213,7 @@ source ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)):
 | `lapilli_serve_notifications_refused_total` | counter | `source` | Notifications the notifications port was sent and couldn't keep, since the process started; the rest of a request is kept, and why is logged |
 | `lapilli_serve_notices_total` | counter | `to`, `result` | Notices since the process started, by where they went (`webhook`, `slack`, `team`, `report`, and `route:NAME` for a destination routes name) and whether they were `sent` or `failed` |
 | `lapilli_serve_notices_unsent` | gauge | | Notices not sent yet, or given up on |
-| `lapilli_serve_notices_unrouted_total` | counter | | Events since the process started that went where no route sent them: routes `--config`'s `notify:` declares that couldn't be read since the start, so told as without routes, or routes that sent an event nowhere there is, so to the default or everywhere. 0 with routes in force and a default |
+| `lapilli_serve_notices_unrouted_total` | counter | | Events since the process started that went where no route sent them: routes `--config`'s `notify:` declares that couldn't be read since the start, so told as without routes, or routes that sent an event nowhere there is (a destination the flags don't give, left out), so to the default, or else as without routes; with neither the webhook nor Slack, no notice is written. Never to every destination. 0 with routes in force, each destination they name given, and a default |
 
 The first two are there once a notification is kept.
 `lapilli_serve_notifications_refused_total` is there with `--notify-listen`,

@@ -85,6 +85,13 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 			s.notify(ctx)
 		}()
 	}
+	// What waits for a destination a route named that no flag here gives
+	// any more: no sender above is started for it.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.watchGone(ctx)
+	}()
 	if s.btPort != nil {
 		// Pull request backtests, beside the worker: neither waits for
 		// the other.

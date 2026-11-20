@@ -132,11 +132,18 @@ func cutBytes(s string, n int) string {
 
 // oneLine is a value from outside on one line: each control character, a
 // line break among them, and Unicode's line and paragraph separators, a
-// space. A title can't start a line of its own that reads as Lapilli's.
+// space; and each of Unicode's format characters (zero-width spaces and
+// joiners, bidi overrides and isolates), which verdict.Clean shows a
+// terminal as \u{...}, left out. A title can't start a line of its own
+// that reads as Lapilli's, nor show its words in another order than they
+// are sent in.
 func oneLine(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+		switch {
+		case unicode.IsControl(r) || r == '\u2028' || r == '\u2029':
 			return ' '
+		case unicode.Is(unicode.Cf, r):
+			return -1
 		}
 		return r
 	}, s)
@@ -144,9 +151,10 @@ func oneLine(s string) string {
 
 // slackEscape is a value from outside as Slack's markup takes it: &, <
 // and > as the entities Slack reads them as, so no value makes a link, a
-// mention (<!channel>, <@U…>) or a channel's name; three backquotes as
-// three quotes, so none ends a code block the template opened; on one line.
-var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "```", "'''")
+// mention (<!channel>, <@U…>) or a channel's name; each backquote as a
+// quote, so none ends a code block the template opened, nor makes one
+// with the value of the field beside it; on one line.
+var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "`", "'")
 
 func slackEscape(s string) string { return slackEscaper.Replace(oneLine(s)) }
 

@@ -81,28 +81,21 @@ func TestRoutesShown(t *testing.T) {
 // on the page and in /metrics, beside each routed place's sent and failed
 // at 0 from the start.
 func TestRoutesBrokenShown(t *testing.T) {
-	s, _, _ := routedServer(t, "notify:\n  routes:\n    - {to: [nowhere]}\n  default: [slack]\n", func(c *Config) {
+	s, _, _ := routedServer(t, "notify:\n  routes:\n    - {kinds: [task.nope], to: [ops]}\n  default: [slack]\n", func(c *Config) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{ana}, []string{"*"}
 	})
 	if _, err := s.l.PutTask(context.Background(), ledger.Task{Title: "t", Kind: "tune"}, "ana"); err != nil {
 		t.Fatal(err)
 	}
 	h := s.Handler()
-	r := httptest.NewRequest(http.MethodGet, "/settings", nil)
-	r.Header.Set("X-Forwarded-Email", ana)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	admin := w.Body.String()
-	r.Header.Set("X-Forwarded-Email", cy)
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	editor := w.Body.String()
-	said := `there is no destination called &#34;nowhere&#34;`
+	_, admin := getAs(t, h, "/settings", ana)
+	_, editor := getAs(t, h, "/settings", cy)
+	said := `unknown kind &#34;task.nope&#34;`
 	if !strings.Contains(admin, "line 3: "+said) || strings.Contains(editor, said) || !strings.Contains(editor, "Line 3 of --config&#39;s notify: can&#39;t be used: an admin sees why.") {
 		t.Errorf("why: admin %v, editor %v", strings.Contains(admin, said), strings.Contains(editor, said))
 	}
 	for _, want := range []string{"No routes have been read since lapilli serve started: what happens is told as without them.",
-		"1 event since lapilli serve started went where no route sent it"} {
+		"1 event since lapilli serve started went where no route sent it: to the default, or else as without routes"} {
 		if !strings.Contains(admin, want) {
 			t.Errorf("/settings lacks %q", want)
 		}
@@ -122,4 +115,47 @@ func TestRoutesBrokenShown(t *testing.T) {
 	if strings.Contains(metrics, `to="webhook"`) {
 		t.Error("/metrics says the webhook before it sent")
 	}
+}
+
+// A destination the flags here don't give is left out, the routes kept in
+// force, and said, with its line, to anyone who may read the Settings
+// page, and on the card; what a route left with none took went to the
+// default, counted, in each language.
+func TestRoutesUnknownShown(t *testing.T) {
+	s, _, _ := routedServer(t, "notify:\n  routes:\n    - {to: [nowhere]}\n  default: [slack]\n", func(c *Config) {
+		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{ana}, []string{"*"}
+	})
+	if _, err := s.l.PutTask(context.Background(), ledger.Task{Title: "t", Kind: "tune"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if got := outbox(t, s); len(got) != 1 || len(got["slack"]) != 1 {
+		t.Errorf("told to %v, want the default's", got)
+	}
+	h := s.Handler()
+	said := "--config&#39;s notify: names a destination this replica&#39;s flags don&#39;t give, left out of the routes here: line 3: there is no destination called &#34;nowhere&#34;"
+	for _, who := range []string{ana, cy} {
+		_, page := getAs(t, h, "/settings", who)
+		for _, want := range []string{said, "What happens is told where the routes below send it.", "1 event since lapilli serve started went where no route sent it"} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s: /settings lacks %q", who, want)
+			}
+		}
+		if strings.Contains(page, "No routes have been read since") {
+			t.Errorf("%s: /settings says no routes were read", who)
+		}
+	}
+	_, card, _ := get(t, h, "/manage")
+	if !strings.Contains(card, "--config&#39;s notify: names destinations this replica&#39;s flags don&#39;t give.") || strings.Contains(card, "can&#39;t be used") {
+		t.Error("/manage doesn't say the routes name a destination not given")
+	}
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	pageA11y(t, h, ana, "/settings", "/manage")
+	missing.Lock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
+	missing.Unlock()
 }

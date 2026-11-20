@@ -33,6 +33,11 @@ type routesView struct {
 	ErrAt  time.Time
 	Line   int
 	Broken bool
+	// Unknown are the destinations the routes in force name that this
+	// replica's flags don't give, left out here, in each language, the
+	// first maxUnknownShown; UnknownMore, how many more.
+	Unknown     []langText
+	UnknownMore int
 	// Pending is when a new file was read once: in force once it is read
 	// the same again.
 	Pending time.Time
@@ -45,12 +50,22 @@ type routesView struct {
 }
 
 // ErrText is why the file can't be used, in a language.
-func (v *routesView) ErrText(lang string) string {
-	if t, ok := v.Err[lang]; ok {
+func (v *routesView) ErrText(lang string) string { return langText(v.Err).In(lang) }
+
+// langText is a text in each language.
+type langText map[string]string
+
+// In is the text in a language, or else in English.
+func (m langText) In(lang string) string {
+	if t, ok := m[lang]; ok {
 		return t
 	}
-	return v.Err["en"]
+	return m["en"]
 }
+
+// maxUnknownShown is how many destinations the flags don't give the page
+// names; the rest are counted.
+const maxUnknownShown = 10
 
 // routeRow is a route, as the table shows it.
 type routeRow struct {
@@ -69,21 +84,23 @@ type destView struct {
 	JSON bool
 	// Template says it has words of its own; Unnamed, that no event goes
 	// to it: no route names it, nor the default, or, without routes, it is
-	// neither the webhook nor Slack.
-	Template, Unnamed bool
-	LastSent          time.Time
-	Waiting, Failed   int
-	More              bool
-	GivenUp           int
-	GivenUpMore       bool
+	// neither the webhook nor Slack. Gone, that no flag here gives it any
+	// more: what waits for it fails, and is given up on (sweepGone).
+	Template, Unnamed, Gone bool
+	LastSent                time.Time
+	Waiting, Failed         int
+	More                    bool
+	GivenUp                 int
+	GivenUpMore             bool
 	// LastErr is why the latest still unsent failed, paths taken out: an
 	// admin's to read.
 	LastErr string
 }
 
 // routesView is what the page shows of routing; nil without --config and
-// without a destination a route could name.
-func (s *Server) routesView(ctx context.Context, lang string) (*routesView, error) {
+// without a destination a route could name or one gone with notices
+// unsent, the outbox's places gone (gonePlaces).
+func (s *Server) routesView(ctx context.Context, lang string, gone []string) (*routesView, error) {
 	st := &s.routing
 	v := &routesView{File: s.cfg.Config != "", Unrouted: st.unrouted.Load(), Broken: st.broken.Load(), Counted: ledger.FailedCounted}
 	rt := st.table.Load()
@@ -105,6 +122,13 @@ func (s *Server) routesView(ctx context.Context, lang string) (*routesView, erro
 		if len(rt.hash) >= 12 {
 			v.Hash = rt.hash[:12]
 		}
+		for i, err := range rt.unknown {
+			if i == maxUnknownShown {
+				v.UnknownMore = len(rt.unknown) - i
+				break
+			}
+			v.Unknown = append(v.Unknown, problemOf(err).Text)
+		}
 	}
 	var names []string
 	if c.declared() {
@@ -122,12 +146,7 @@ func (s *Server) routesView(ctx context.Context, lang string) (*routesView, erro
 		names = append(names, c.Default...)
 	} else {
 		// As before routes: the webhook, and Slack with --notify-slack.
-		if s.cfg.NotifyWebhook != "" {
-			names = append(names, "webhook")
-		}
-		if s.cfg.NotifySlack && s.cfg.Slack != "" {
-			names = append(names, "slack")
-		}
+		names = s.beforeRoutes()
 	}
 	// Where events go; and a destination with a template besides, which
 	// none may go to.
@@ -138,20 +157,33 @@ func (s *Server) routesView(ctx context.Context, lang string) (*routesView, erro
 		}
 	}
 	since := time.Now().Add(-24 * time.Hour)
+	var shown []destView
 	for _, name := range s.destNamesGiven() {
 		if !slices.Contains(names, name) {
 			continue
 		}
 		d, _ := s.destination(name)
-		dv := destView{Name: name, Flag: strings.Fields(d.Flag)[0], JSON: d.JSON, Template: c != nil && c.Templates[name] != nil,
-			Unnamed: !slices.Contains(told, name)}
-		standing, err := s.l.Standing(ctx, []string{d.Value}, since)
+		shown = append(shown, destView{Name: name, Flag: strings.Fields(d.Flag)[0], JSON: d.JSON, Template: c != nil && c.Templates[name] != nil,
+			Unnamed: !slices.Contains(told, name)})
+	}
+	// A destination gone, by the name its notices keep: no flag says
+	// what it took.
+	for _, place := range gone {
+		shown = append(shown, destView{Name: strings.TrimPrefix(place, routedPrefix), Gone: true})
+	}
+	for _, dv := range shown {
+		place := routedPrefix + dv.Name
+		if !dv.Gone {
+			d, _ := s.destination(dv.Name)
+			place = d.Value
+		}
+		standing, err := s.l.Standing(ctx, []string{place}, since)
 		if err != nil {
 			return nil, err
 		}
 		dv.LastSent, dv.Waiting, dv.Failed, dv.More = standing.LastSent, standing.Waiting, standing.Failed, standing.More
 		dv.GivenUp, dv.GivenUpMore = standing.GivenUp, standing.GivenUpMore
-		why, err := s.l.LastError(ctx, d.Value)
+		why, err := s.l.LastError(ctx, place)
 		if err != nil {
 			return nil, err
 		}

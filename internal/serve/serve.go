@@ -894,8 +894,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// the workers stop with it.
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
-	// --config's notify:, as read now, before anything is told.
-	s.loadRoutes(time.Now(), true)
+	// --config's notify:, as read now, before anything is told, and the
+	// owners its routes read.
+	s.startRoutes(ctx)
 	shared := s.l.Shared()
 	if !shared {
 		// The versions from before the ledger began, before anything
