@@ -73,6 +73,7 @@ var Undo022Postgres = slices.Concat(undo022meta, []string{
 // alike, for the tests of the migrations before it.
 var Undo027 = []string{
 	"DROP TABLE expectation_checks",
+	"DROP TABLE expectation_drafts",
 }
 
 // Undo026 takes back what schema 026 made, in SQLite and in Postgres

@@ -137,7 +137,8 @@ func (p Proposal) about() map[string]any {
 var ErrProposed = errors.New("this rule has a proposal not yet finished with: one at a time")
 
 // ProposalsAnHour is how many proposals one person, with the agents acting
-// for them, makes in an hour at most. Lapilli's own are bounded apart.
+// for them, makes in an hour at most, the drafts of expectations they make
+// among them (KeepDraft). Lapilli's own are bounded apart.
 const ProposalsAnHour = 20
 
 // ErrTooManyProposals is a proposal past ProposalsAnHour.
@@ -181,8 +182,9 @@ func proposable(ctx context.Context, q interface {
 	if by == Proposer {
 		return nil
 	}
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM proposals WHERE made_by = ? AND kind != ? AND made > ?`,
-		by, KindUndo, now.Add(-time.Hour).Unix()).Scan(&n); err != nil {
+	// Drafts of expectations count with them: one limit.
+	n, err := madeInHour(ctx, q, by, now)
+	if err != nil {
 		return err
 	}
 	if n >= ProposalsAnHour {

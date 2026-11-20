@@ -64,3 +64,58 @@ CREATE TABLE expectation_checks (
 -- What is broken, of the weeks after one: the overview, the digest, the
 -- rules list's filter.
 CREATE INDEX expectation_checks_result ON expectation_checks (result, week);
+
+-- Drafts of what a rule is held to (docs/design/expectations.md, step 3),
+-- for a person to accept or drop: an agent's, through MCP's
+-- propose_expectation, or the history's, the most the rule fired in a
+-- week rounded up and the incidents it caught, kept from its tab. Accepting
+-- one is a change like any other: the git path's pull request to the
+-- expectations file, through the change recipes, or, where serve can't
+-- write where they are declared, the YAML for a person to put there.
+--
+-- rule is the name the rule is judged under; origin, agent or history;
+-- made_by, who proposed it, as proposals keep a person's name
+-- (ledger.FoldName): the person, or the person the agent acts for, with
+-- agent 1; made, when (Unix seconds). text is the expectations, as Lapilli
+-- wrote them with the YAML encoder (64 KiB at most); tests, of an agent's,
+-- the scenarios' test files by path, as JSON (256 KiB at most in all);
+-- reason, why, in the agent's or the person's words (2,000 bytes); found,
+-- what checking it found, item by item, as JSON (64 KiB). target is where
+-- accepting it goes: file (--expect's, by the git path when it can), config
+-- or none; doc_hash, the SHA-256 of the expectations file it was made
+-- against, which the git path finds the file by; document, once accepted
+-- by the git path, the file with it taken in, as Lapilli wrote it (1 MiB).
+--
+-- state is open, accepted or dropped; decided_by and decided, who
+-- accepted or dropped it and when (0 while open). pr is, of one accepted by
+-- the git path, its pull request's: ready (for a recipe), opened, merged,
+-- closed or failed, '' for none; link, its pull request's; pr_reason, why
+-- it failed or was closed. Drafts are bounded: 10 open a rule, 1,000 kept
+-- in all, the oldest decided let go first.
+CREATE TABLE expectation_drafts (
+	id INTEGER PRIMARY KEY,
+	rule TEXT NOT NULL,
+	origin TEXT NOT NULL,
+	made_by TEXT NOT NULL,
+	agent INTEGER NOT NULL DEFAULT 0,
+	made INTEGER NOT NULL,
+	text TEXT NOT NULL,
+	tests TEXT NOT NULL DEFAULT '{}',
+	reason TEXT NOT NULL DEFAULT '',
+	found TEXT NOT NULL DEFAULT '[]',
+	target TEXT NOT NULL,
+	doc_hash TEXT NOT NULL DEFAULT '',
+	document TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL,
+	decided_by TEXT NOT NULL DEFAULT '',
+	decided INTEGER NOT NULL DEFAULT 0,
+	pr TEXT NOT NULL DEFAULT '',
+	link TEXT NOT NULL DEFAULT '',
+	pr_reason TEXT NOT NULL DEFAULT ''
+);
+-- A rule's drafts, its tab's; who made how many in the last hour, as the
+-- proposals they count with; those of a state, the list and the recipes'.
+CREATE INDEX expectation_drafts_rule ON expectation_drafts (rule, id);
+CREATE INDEX expectation_drafts_by ON expectation_drafts (made_by, made);
+CREATE INDEX expectation_drafts_state ON expectation_drafts (state, id);
+CREATE INDEX expectation_drafts_pr ON expectation_drafts (pr, id);
