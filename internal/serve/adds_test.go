@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -661,5 +662,56 @@ func TestAddCheckedAgain(t *testing.T) {
 	gs.jobs(ctx, false)
 	if p := state(t, gs, id); p.State != ledger.StateRefused || len(g.writes) != 0 {
 		t.Errorf("a group another tool keeps: %s %q %v", p.State, p.Reason, g.writes)
+	}
+}
+
+// A new rule by the git path, all the way through a change recipe: its
+// rule file's group with it added, and a new group after the last, each
+// pushed on a branch of its own and opened as a pull request, the
+// recipe's own guards holding each (only the rules of a rule file under
+// RULES_PATHS changed).
+func TestChangeRecipeAdds(t *testing.T) {
+	needTools(t)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	c := recipeHosts[0]
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	h := s.Handler()
+	in := placeKeyOf(t, s, addPlace{Path: ledger.PathGit, File: "shop.yaml", Group: "shop"})
+	apart := placeKeyOf(t, s, addPlace{Path: ledger.PathGit, File: "shop.yaml", NewGroup: true})
+	one, _, _ := proposeAdding(t, h, bo, url.Values{"place": {in}, "rule": {addedRule}, "expectations": {heldTo(60)}})
+	two, _, _ := proposeAdding(t, h, bo, url.Values{"place": {apart}, "group": {"slow"}, "rule": {strings.Replace(addedRule, "ErrorsLow", "ErrorsSlow", 1)},
+		"expectations": {strings.Replace(heldTo(60), "ErrorsLow", "ErrorsSlow", 1)}})
+	approve(t, h, one, ana)
+	approve(t, h, two, ana)
+	s.jobs(ctx, false)
+	lapilli := httptest.NewServer(s.IncidentsHandler())
+	defer lapilli.Close()
+	host := &prHost{t: t, kind: c.kind, auth: c.auth}
+	hs := httptest.NewServer(host)
+	defer hs.Close()
+	host.url = hs.URL
+	env := gitEnv(t)
+	bare := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile, "README.md": "rules\n"})
+	cmd := exec.Command("sh", changeRecipes+c.script)
+	cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare, "RULES_PATHS=alerts"),
+		c.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v\n%s", c.script, err, out)
+	}
+	for _, id := range []int64{one, two} {
+		p := state(t, s, id)
+		if p.State != ledger.StateOpened {
+			t.Errorf("#%d: %s %q", id, p.State, p.Reason)
+			continue
+		}
+		if got := gitIn(t, env, bare, "show", "lapilli/"+s.ledgerID+"/proposal-"+itoa(id)+":alerts/shop.yaml"); got != p.Document {
+			t.Errorf("#%d's branch:\n%s\nwant:\n%s", id, got, p.Document)
+		}
+	}
+	if len(host.opened) != 2 {
+		t.Errorf("pull requests: %v", host.opened)
 	}
 }
