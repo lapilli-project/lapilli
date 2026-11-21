@@ -86,6 +86,24 @@ func TestLinkedAlertsServe(t *testing.T) {
 		}
 	}
 	says(false)
+	// While every firing is judged again with a new --linked-only, the page
+	// and its API say so beside it; not before, nor once it is done.
+	judging := func(on bool) {
+		t.Helper()
+		_, page, _ := get(t, h, "/settings")
+		ko := pageIn(t, h, "/settings", "", "ko")
+		_, js, _ := get(t, h, "/api/v1/settings")
+		for i, body := range []string{page, ko, js} {
+			want := []string{"Every firing is being judged again with it", "이 값으로 모든 발화를 다시 판정하는 중이에요", `"linked_only_judging": true`}[i]
+			if strings.Contains(body, want) != on {
+				t.Errorf("judging again %v: %q in %s", on, want, body)
+			}
+		}
+		if !on && !strings.Contains(js, `"linked_only_judging": false`) {
+			t.Errorf("no linked_only_judging: %s", js)
+		}
+	}
+	judging(false)
 
 	n := 0
 	was := judgeAll
@@ -100,7 +118,9 @@ func TestLinkedAlertsServe(t *testing.T) {
 	}
 	s.cfg.Options.LinkedOnly = true
 	says(true)
+	judging(true)
 	s.jobs(ctx, false)
+	judging(false)
 	s.jobs(ctx, false)
 	if v, err := s.l.Meta(ctx, linkedMeta); n != 1 || v != "1" || err != nil {
 		t.Errorf("--linked-only given: judged all %d times, the ledger says %q (%v); want once", n, v, err)

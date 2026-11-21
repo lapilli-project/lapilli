@@ -122,7 +122,9 @@ page says whether it is in effect, beside the settings that are, and
 `GET /api/v1/settings` as `linked_only`. The ledger keeps
 what its stones were last all given by (`x.linked-only` in `meta`); a
 start with it given or taken away judges every firing again, once, as a
-changed lead does. The chart's `linkedOnly` gives it, to the CronJob and
+changed lead does. Until that is done, the Settings page says so beside
+it, and `GET /api/v1/settings` as `linked_only_judging`: the pages show
+what was judged before. The chart's `linkedOnly` gives it, to the CronJob and
 to serve alike. The incident's page marks a linked catch "(linked in
 the incident tool)", and the rule's page the incidents it caught so. The
 UI's form has no alerts: an incident written in the UI and given alerts

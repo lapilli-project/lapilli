@@ -2216,6 +2216,9 @@ type settingsView struct {
 	// LinkedOnly is --linked-only, a flag where serve is started, not a
 	// setting the UI changes (docs/design/links.md).
 	LinkedOnly bool `json:"linked_only"`
+	// LinkedOnlyJudging says every firing is still to be judged again with
+	// it: the ledger's stones were last all given by the other value.
+	LinkedOnlyJudging bool `json:"linked_only_judging"`
 	// Criteria are the incident criteria (criteria.go); Sources, where
 	// incidents come from (sources.go), the page's alone.
 	Criteria *criteriaView `json:"criteria,omitempty"`
@@ -2259,6 +2262,13 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 		return settingsView{}, err
 	}
 	v := settingsView{LinkedOnly: o.LinkedOnly}
+	// Until the round that judges every firing again with it is done, the
+	// stones are those of the other value (jobs).
+	was, err := s.l.Meta(ctx, linkedMeta)
+	if err != nil {
+		return settingsView{}, err
+	}
+	v.LinkedOnlyJudging = was != linkedText(o.LinkedOnly)
 	for _, st := range settable {
 		x := settingView{Key: st.key, Flag: st.flag, CommandLine: show(s.cfg.Options, st.key), Value: show(o, st.key)}
 		if c, ok := set[st.key]; ok {

@@ -28,6 +28,12 @@
   where it didn't in vmalert, or the other way round. A rules API answer
   whose groups say their `concurrency`, as vmalert's alone do, through
   VictoriaMetrics' proxy too, is placed so now.
+- **The Settings page said a new `--linked-only` before every firing was
+  judged with it** (0.68.0 to 0.68.1). Started with it given or taken
+  away, serve judges every firing again, once; until that is done, the
+  pages show what was judged before, and the page now says so beside it,
+  in every language, as `GET /api/v1/settings` does
+  (`linked_only_judging`).
 - The weekly digest read the notifications sent, and the firings that
   paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
   the webhook is told. Once now, everyone's and each team's.
