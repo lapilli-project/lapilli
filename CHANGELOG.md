@@ -135,8 +135,10 @@ Before upgrading:
   first line, and the description the rest of the message, where a code
   span is no Markdown: a rule named `Fixes #12` closed issue 12, and
   mentioned it. A word joiner (U+2060), which shows as nothing, goes
-  between `#` or `GH-` and a number, and inside a closing keyword, in the
-  title and in each name or text from outside the description quotes.
+  between `#`, `GH-` or an issue's or a pull request's URL and its number,
+  in the title and in each name or text from outside the description
+  quotes; words are left as they are, as a closing keyword with no
+  reference closes nothing.
 - **A cell of the activity log's CSV could be a formula after a space of
   Unicode's** (affected: 0.64.0 to 0.68.0). One that starts with `=`,
   `+`, `-` or `@` after spaces starts with `'`, which a spreadsheet shows

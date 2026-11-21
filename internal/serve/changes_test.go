@@ -1422,25 +1422,29 @@ func TestSaysInGrafanaDollars(t *testing.T) {
 }
 
 // A rule's name in a pull request's title, which the recipes make its
-// commit's first line too, links nothing: "Fixes #12" would close issue 12
-// once merged, and mention it. Shown as it was, but for word joiners.
+// commit's first line too, refers to no issue: "Fixes #12" would close
+// issue 12 once merged, and mention it. Shown as it was, but for word
+// joiners, Lapilli's own words among them as they are.
 func TestTitlesLinkNothing(t *testing.T) {
-	name := "Fixes #12, closes GH-3 and Resolved o/r#4: fixture closer 5"
-	ref := regexp.MustCompile(`(?i)(#|\bGH-)[0-9]`)
-	word := regexp.MustCompile(`(?i)\b(fixes|closes|resolved)\b`)
+	name := "Fixes #12, closes GH-3, Resolved o/r#4 and fixes https://github.com/o/r/issues/5 and https://gitlab.example.com/o/r/-/merge_requests/6: fixture closer 7"
+	ref := regexp.MustCompile(`(?i)(#|\bGH-|/issues/|/merge_requests/)[0-9]`)
 	for _, title := range []string{prTitle(ledger.Proposal{Kind: ledger.KindFor, Rule: name}), draftTitle(ledger.ExpectDraft{Rule: name})} {
-		if ref.MatchString(title) || word.MatchString(title) {
-			t.Errorf("%q links an issue", title)
+		if ref.MatchString(title) {
+			t.Errorf("%q refers to an issue", title)
 		}
-		if !strings.HasSuffix(strings.ReplaceAll(title, "⁠", ""), name) || !strings.Contains(title, "fixture closer 5") {
+		if !strings.HasSuffix(strings.ReplaceAll(title, "\u2060", ""), name) || !strings.Contains(title, "Fixes ") || !strings.Contains(title, "fixture closer 7") {
 			t.Errorf("%q isn't %q", title, name)
 		}
 	}
 	// Nor in the description, which a recipe makes the commit's message
 	// too, where a code span is no Markdown.
 	for _, said := range []string{mdCode(name), mdText(name), mdCell(name)} {
-		if ref.MatchString(said) || word.MatchString(said) || !strings.Contains(strings.ReplaceAll(said, "\u2060", ""), name) {
-			t.Errorf("%q links an issue, or isn't %q", said, name)
+		if ref.MatchString(said) || !strings.Contains(strings.ReplaceAll(said, "\u2060", ""), name) {
+			t.Errorf("%q refers to an issue, or isn't %q", said, name)
 		}
+	}
+	// Lapilli's own words have no word joiner in them.
+	if title := prTitle(ledger.Proposal{Kind: ledger.KindSays, Rule: "Errors"}); strings.Contains(title, "\u2060") {
+		t.Errorf("%q", title)
 	}
 }

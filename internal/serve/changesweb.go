@@ -1372,22 +1372,19 @@ func prTitle(p ledger.Proposal) string {
 }
 
 // Of a title a recipe makes a pull request's and its commit's first line,
-// what a host reads as a link to an issue: a number after # or GH-, and a
-// word that closes the issue it comes before once merged (GitHub's and
-// GitLab's closing keywords).
-var (
-	issueRef     = regexp.MustCompile(`(?i)(#|\bGH-)([0-9])`)
-	closingWords = regexp.MustCompile(`(?i)\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)\b`)
-)
+// what a host reads as a reference to an issue or a pull request, which a
+// closing keyword before it (GitHub's and GitLab's) closes once merged, and
+// which mentions it otherwise: a number after # or GH-, and an issue's or a
+// pull request's URL.
+var issueRef = regexp.MustCompile(`(?i)(#|\bGH-|/(?:issues|pull|pulls|merge_requests)/)([0-9])`)
 
-// linkFree is a title as a host reads it linking nothing: a word joiner
-// (U+2060), which shows as nothing, between # or GH- and a number after
-// it, and after the first letter of a closing keyword, so that a rule
-// named "Fixes #12" neither closes issue 12 once merged nor mentions it.
-func linkFree(t string) string {
-	t = issueRef.ReplaceAllString(t, "${1}\u2060${2}")
-	return closingWords.ReplaceAllStringFunc(t, func(w string) string { return w[:1] + "\u2060" + w[1:] })
-}
+// linkFree is a title as a host reads it referring to no issue: a word
+// joiner (U+2060), which shows as nothing, between # or GH-, or an issue's
+// or a pull request's path, and the number after it, so that a rule named
+// "Fixes #12" neither closes issue 12 once merged nor mentions it. Words
+// are left as they are: a closing keyword with no reference after it
+// closes nothing.
+func linkFree(t string) string { return issueRef.ReplaceAllString(t, "${1}\u2060${2}") }
 
 // apiPatchChange is a recipe saying what became of a change: a pull request
 // opened, merged or closed, or the change failed.
