@@ -222,7 +222,7 @@ source ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)):
 |---|---|---|---|
 | `lapilli_serve_notifications_since_timestamp_seconds` | gauge | | When the first notification kept came, in Unix seconds: `lapilli_rule_notifications` counts from then |
 | `lapilli_serve_notifications_last_timestamp_seconds` | gauge | `source` | When the latest notification taken came, by where it came from, in Unix seconds |
-| `lapilli_serve_notifications_refused_total` | counter | `source` | Notifications the notifications port was sent and couldn't keep, since the process started; the rest of a request is kept, and why is logged |
+| `lapilli_serve_notifications_refused_total` | counter | `source` | Notifications, and the event recorder's mutes, the notifications port was sent and couldn't keep, since the process started; the rest of a request is kept, and why is logged |
 | `lapilli_serve_notices_total` | counter | `to`, `result` | Notices since the process started, by where they went (`webhook`, `slack`, `team`, `report`, and `route:NAME` for a destination routes name) and whether they were `sent` or `failed` |
 | `lapilli_serve_notices_unsent` | gauge | | Notices not sent yet, or given up on |
 | `lapilli_serve_notices_unrouted_total` | counter | | Events since the process started that went where no route sent them: routes `--config`'s `notify:` declares that couldn't be read since the start, so told as without routes, or routes that sent an event nowhere there is (a destination the flags don't give, left out), so to the default, or else as without routes; with neither the webhook nor Slack, no notice is written. Never to every destination. 0 with routes in force, each destination they name given, and a default |

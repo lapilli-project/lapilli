@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+Before upgrading:
+- **Ledger schema 029**, after 027 and another change's 028: keep a copy
+  of the ledger's disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger. 029 holds
+  `mutes`; nothing is backfilled.
+
+### Added
+
+- **Why a firing paged no one.** `/v1/alertmanager/events` keeps the
+  event recorder's mutes: when a silence or an inhibition kept an alert
+  from a notification (`silenceMutedAlert`, `inhibitionMutedAlert`, and
+  0.35's `mutedAlerts` of a notification), the alert's name and labels,
+  and the silence's ID or the inhibiting alert's fingerprint; nothing else
+  of a silence, not its comment or who made it. Both of the recorder's
+  formats, 0.33 and 0.34's and 0.35's. Told of every few seconds, again
+  after a failure and by each replica, a mute is kept once an hour, from
+  the first to the last, and for `--keep`. A firing no notification told
+  of says "muted by a silence" with its ID, "inhibited by another alert",
+  or "muted by a silence or an inhibition", on the rule's page and the
+  day's firings; MCP's `rule` gives each latest firing `muted`. Mutes
+  come at the events' rate, 200,000 rows a day at most, and claim only
+  that a firing was muted ([docs/design/mutes.md](docs/design/mutes.md)).
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.
