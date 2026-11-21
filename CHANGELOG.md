@@ -12,9 +12,9 @@
   their pages say it; `digest.ready` and `report.ready` carry it as
   `notifications.paged_no_one`. Given once the ledger keeps a mute, and
   worked out when read: no schema change. Only rules with a mute about
-  such a firing have their mutes read, the hours about each firing's start
-  and end, 200,000 rows looked at at most; past that, the line says some
-  weren't counted ([docs/design/mutes.md](docs/design/mutes.md)).
+  such a firing have their firings and mutes read, the hours about each
+  firing's start and end, 200,000 rows of them at most; past that, the
+  line says some weren't counted ([docs/design/mutes.md](docs/design/mutes.md)).
 
 ## [0.67.0] - 2026-11-21
 

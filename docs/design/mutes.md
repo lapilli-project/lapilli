@@ -184,13 +184,15 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
   it was told of about them. Only a rule with one has its firings read
   with their labels, one rule at a time, and its mutes read as a firing's
   page reads them: the hours about each firing's start and end, each of a
-  rule once, 1,000 rows an hour at most. In all, 200,000 rows of mutes are
-  looked at at most, a row counted once for each firing it is looked at
-  for, and an hour not read yet as the most it can hold. Past that, the
-  firings of rules with mutes not looked at yet are in none of the
-  numbers, and the line says some weren't counted (`partial`). A rule's
-  mutes with no such firing, and its hours between a firing's start and
-  end, aren't read (`TestUnpagedBounded`, by the rows read).
+  rule once, 1,000 rows an hour at most. In all, 200,000 rows are read at
+  most: of firings read with their labels (a statement's `LIMIT`, so many
+  firings beside one forged mute read no more), and of mutes looked at, a
+  row counted once for each firing it is looked at for, and an hour not
+  read yet as the most it can hold. Past that, the firings not read or
+  looked at yet are in none of the numbers, and the line says some
+  weren't counted (`partial`). A rule's mutes with no such firing, and its
+  hours between a firing's start and end, aren't read
+  (`TestUnpagedBounded`, by the rows of firings and of mutes read).
 
 ## Attacker's look
 

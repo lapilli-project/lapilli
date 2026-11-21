@@ -318,8 +318,9 @@ func TestUnpaged(t *testing.T) {
 // What is read to count the firings that paged no one is what MutedOf
 // reads for those of rules with a mute about them, the hours about their
 // starts and ends: not a rule's mutes with no such firing, nor its hours
-// between, however many. Past UnpagedMost rows looked at, the rest of the
-// firings aren't looked at, and the count says so.
+// between, however many. Past UnpagedMost rows, of firings read with their
+// labels and of mutes looked at, the rest aren't read, and the count says
+// so: a forged mute beside many firings reads no more of them.
 func TestUnpagedBounded(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -373,11 +374,11 @@ func TestUnpagedBounded(t *testing.T) {
 	if u, read := count(); u != (Unpaged{Silence: 2}) || read != maxMutesPerRuleHour+2 {
 		t.Errorf("%+v, %d rows of mutes read, want %d", u, read, maxMutesPerRuleHour+2)
 	}
-	// Room for db-1's four hours, each as the most it can hold, and not
-	// db-2's four after them: db-2 isn't counted.
+	// Room for DiskFull's two firings and db-1's four hours, each as the
+	// most it can hold, and not db-2's four after them: db-2 isn't counted.
 	was := UnpagedMost
 	t.Cleanup(func() { UnpagedMost = was })
-	UnpagedMost = 4 * 2 * maxMutesPerRuleHour
+	UnpagedMost = 2 + 4*2*maxMutesPerRuleHour
 	if u, read := count(); u != (Unpaged{Silence: 1, Partial: true}) || read != maxMutesPerRuleHour+1 {
 		t.Errorf("past the most: %+v, %d rows read", u, read)
 	}
@@ -388,5 +389,47 @@ func TestUnpagedBounded(t *testing.T) {
 	}
 	if p := plan(t, l, qMutedAny, "Errors", 1, 10); scansAll(l, p, "mutes") || !strings.Contains(p, "mutes_rule") {
 		t.Errorf("whether a rule has mutes is looked up through: %s", p)
+	}
+
+	// Many firings of a rule, all but one told of, and one mute beside
+	// them: no more of them are read with their labels than there is room
+	// for, and one more to say there were more.
+	l = open(t, time.UTC)
+	var many []firing.Firing
+	for i := range 300 {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		many = append(many, firing.Firing{Rule: "Flapping", Labels: map[string]string{"instance": "web-" + strconv.Itoa(i)}, Start: at, End: at.Add(30 * time.Second)})
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), many)
+	if _, _, err := l.KeepMutes(ctx, []Mute{{At: t0.Add(time.Minute), Rule: "Flapping", Labels: map[string]string{"alertname": "Flapping", "instance": "web-0"}, Kind: MutedSilence, Ref: "s-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	fs, err = l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour)})
+	if err != nil || len(fs) != 300 {
+		t.Fatalf("%d firings: %v", len(fs), err)
+	}
+	var untold int64
+	for _, f := range fs {
+		if f.Labels["instance"] == "web-0" {
+			untold = f.ID
+		}
+	}
+	flapping := func() (Unpaged, int64, int64) {
+		t.Helper()
+		firings, mutes := unpagedFiringsRead.Load(), muteRowsRead.Load()
+		u, err := l.Unpaged(ctx, t0, t0.Add(24*time.Hour), func(string) bool { return true }, func(id int64) bool { return id != untold },
+			func(string, time.Time) bool { return true }, mutedWithin, t0.Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u, unpagedFiringsRead.Load() - firings, muteRowsRead.Load() - mutes
+	}
+	UnpagedMost = was
+	if u, firings, mutes := flapping(); u != (Unpaged{Silence: 1}) || firings != 300 || mutes != 1 {
+		t.Errorf("with room: %+v, %d rows of firings read, %d of mutes", u, firings, mutes)
+	}
+	UnpagedMost = 50
+	if u, firings, mutes := flapping(); u != (Unpaged{Partial: true}) || firings != 51 || mutes != 0 {
+		t.Errorf("past the most: %+v, %d rows of firings read, %d of mutes", u, firings, mutes)
 	}
 }
