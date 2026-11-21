@@ -26,13 +26,15 @@ case ${NEW_RELIC_REGION:-us} in
 esac
 api=${NEW_RELIC_API:-$api}
 # The key goes where api points: over https, or to this machine, for tests.
+# Neither is said: a user and key before @ would be in the log.
 case $api in
-  *@*) api=x ;;
-esac
-case $api in
+  *@*)
+    say "NEW_RELIC_API holds a user or key before @, refused"
+    exit 1
+    ;;
   https://* | http://127.0.0.1:* | http://localhost:*) ;;
   *)
-    say "NEW_RELIC_API $NEW_RELIC_API is not https"
+    say "NEW_RELIC_API is not https"
     exit 1
     ;;
 esac

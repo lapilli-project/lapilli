@@ -28,13 +28,15 @@ if ! printf '%s' "$c" | grep -Eq '^[a-z0-9-]+(\.[a-z0-9-]+)+$'; then
 fi
 api=${DATADOG_API:-https://api.$site}
 # The keys go where api points: over https, or to this machine, for tests.
+# Neither is said: a user and key before @ would be in the log.
 case $api in
-  *@*) api=x ;;
-esac
-case $api in
+  *@*)
+    say "DATADOG_API holds a user or key before @, refused"
+    exit 1
+    ;;
   https://* | http://127.0.0.1:* | http://localhost:*) ;;
   *)
-    say "DATADOG_API $DATADOG_API is not https"
+    say "DATADOG_API is not https"
     exit 1
     ;;
 esac

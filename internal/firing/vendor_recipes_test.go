@@ -240,6 +240,9 @@ func TestVendorRecipesFailLoudly(t *testing.T) {
 		{"same page", "datadog.sh", 200, `{"data": [` + event(1793589000000) + `], "meta": {"page": {"after": "again"}}}`, dd, "the same page again"},
 		{"pages", "datadog.sh", 200, `{"data": [` + event(1793589000000) + `], "meta": {"page": {"after": "next"}}}`, append([]string{"MAX_PAGES=1"}, dd...), "more than 1 pages"},
 		{"seconds", "datadog.sh", 200, `{"data": [` + event(1793589000) + `]}`, dd, "no time in milliseconds"},
+		// What the API says is said as JSON: no escape reaches a terminal.
+		{"escapes", "datadog.sh", 200, `{"data": [{"id": "e", "attributes": {"timestamp": "\u001b]0;owned\u0007",
+			"attributes": {"monitor_id": 1, "status": "error"}}}]}`, dd, `not a time: "\u001b]0;owned\u0007"`},
 		{"refused", "newrelic.sh", 403, `{"errors": [{"message": "Forbidden"}]}`, nr, "403"},
 		{"errors", "newrelic.sh", 200, `{"data": {"actor": {"account": null}}, "errors": [{"message": "Invalid query"}]}`, nr, `NerdGraph says ["Invalid query"]`},
 		{"no results", "newrelic.sh", 200, `{"data": {"actor": {"account": {"nrql": null}}}}`, nr, "no NRQL results"},
@@ -247,6 +250,8 @@ func TestVendorRecipesFailLoudly(t *testing.T) {
 		{"one millisecond", "newrelic.sh", 200, full(1793487600000), nr, "more than 1000 events in one millisecond"},
 		{"pages", "newrelic.sh", 200, full(1793589000000), append([]string{"MAX_PAGES=1"}, nr...), "more than 1 pages"},
 		{"seconds", "newrelic.sh", 200, nrql(row(1793589000)), nr, "no time in milliseconds"},
+		{"escapes", "newrelic.sh", 200, nrql(map[string]any{"incidentId": "\u001b]0;owned\u0007", "event": "open", "timestamp": 1793589000000,
+			"openTime": "soon", "conditionName": "c"}), nr, `incident "\u001b]0;owned\u0007": its openTime is no time`},
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(c.code)
@@ -264,6 +269,9 @@ func TestVendorRecipesFailLoudly(t *testing.T) {
 		srv.Close()
 		if err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), c.says) {
 			t.Errorf("%s %s: %v, wrote %q, said %q", c.script, c.name, err, stdout.String(), stderr.String())
+		}
+		if strings.ContainsAny(stderr.String(), "\x1b\x07") {
+			t.Errorf("%s %s said a control character: %q", c.script, c.name, stderr.String())
 		}
 		for _, k := range []string{"key1", "app1", "NRAK-TEST"} {
 			if strings.Contains(stderr.String(), k) {
@@ -324,7 +332,8 @@ func TestVendorRecipesRefuse(t *testing.T) {
 		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_SITE=datadoghq.com/x"}, dd...), "is not a site"},
 		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_SITE=datadoghq.com\nexample.com"}, dd...), "is not a site"},
 		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_API=http://example.com"}, dd...), "is not https"},
-		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_API=http://localhost:1@example.com"}, dd...), "is not https"},
+		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_API=http://localhost:1@example.com"}, dd...), "before @, refused"},
+		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_API=https://user:s3cret@api.datadoghq.com"}, dd...), "before @, refused"},
 		{"datadog.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "MAX_PAGES=all"}, dd...), "MAX_PAGES"},
 		{"datadog.sh", []string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_TOKEN_FILE=" + keys[3]}, "doesn't hold a key"},
 		{"datadog.sh", []string{"SINCE=2026-11-01T00:00:00Z", "DATADOG_TOKEN_FILE=", "DATADOG_API_KEY_FILE=" + keys[0], "DATADOG_APP_KEY_FILE=" + keys[3]}, "doesn't hold a key"},
@@ -333,6 +342,7 @@ func TestVendorRecipesRefuse(t *testing.T) {
 		{"newrelic.sh", []string{"SINCE=2026-11-01T00:00:00Z", "NEW_RELIC_API_KEY_FILE=" + keys[2], "NEW_RELIC_ACCOUNT_ID=1) { x"}, "is not an account id"},
 		{"newrelic.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "NEW_RELIC_REGION=moon"}, nr...), "is us, eu or jp"},
 		{"newrelic.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "NEW_RELIC_API=http://example.com/graphql"}, nr...), "is not https"},
+		{"newrelic.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "NEW_RELIC_API=https://user:s3cret@api.newrelic.com/graphql"}, nr...), "before @, refused"},
 		{"newrelic.sh", append([]string{"SINCE=2026-11-01T00:00:00Z", "MAX_PAGES=all"}, nr...), "MAX_PAGES"},
 		{"newrelic.sh", []string{"SINCE=2026-11-01T00:00:00Z", "NEW_RELIC_ACCOUNT_ID=1234567", "NEW_RELIC_API_KEY_FILE=" + keys[3]}, "doesn't hold a key"},
 	} {
@@ -346,8 +356,8 @@ func TestVendorRecipesRefuse(t *testing.T) {
 		if err == nil || stdout.Len() != 0 || called == nil || !strings.Contains(stderr.String(), c.says) {
 			t.Errorf("%s %q: %v, wrote %q, said %q, curl called: %v", c.script, c.env, err, stdout.String(), stderr.String(), called == nil)
 		}
-		if strings.Contains(stderr.String(), "lines") {
-			t.Errorf("%s %q said what the key file holds: %q", c.script, c.env, stderr.String())
+		if strings.Contains(stderr.String(), "lines") || strings.Contains(stderr.String(), "s3cret") {
+			t.Errorf("%s %q said what the key file or the API's URL holds: %q", c.script, c.env, stderr.String())
 		}
 	}
 }
