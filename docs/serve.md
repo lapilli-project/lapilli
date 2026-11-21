@@ -464,9 +464,9 @@ posts it, with mentions and links escaped. The other fields that name things
 Slack's markup is escaped in what Lapilli posts to a Slack-style webhook
 (`<!channel>`, `<@U…>`, `<URL|text>`): a chat that takes one and reads markup
 of its own, such as Mattermost, Rocket.Chat or Google Chat, may read a
-mention (`@channel`, `@all`, `@here`) or a Markdown link (`[text](URL)`) in a
-rule's name or an incident's title as one, notifying a channel or linking
-elsewhere. Post there through something that escapes it for that chat.
+mention (`@channel`, `@all`, `@here`) or a Markdown link (text in
+brackets, a URL after it in parentheses) in a rule's name or an
+incident's title as one, notifying a channel or linking elsewhere. Post there through something that escapes it for that chat.
 Over twelve weeks, the digest also names the rules that are spare.
 
 Reports go on schedules people set themselves, on the Reports page or with
