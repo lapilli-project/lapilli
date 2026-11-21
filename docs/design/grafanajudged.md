@@ -119,6 +119,12 @@ its data sources answered.
 - **Who writes.** Only serve writes the source `grafana`: the firings port
   refuses it, so a job's token can't write over Grafana's history, nor
   make a recorded rule that ties itself to a Grafana rule.
+- **Who writes the history.** It is taken as Grafana wrote it. Kept in
+  Loki, it is written by whoever can push to that tenant, Grafana or not:
+  they write these rules' record, their firings within the bounds above,
+  and can make every day a gap, with a change to a state Grafana has no
+  name for, or changes of more than 1,000 rules' names, which a read
+  can't say all of. SECURITY.md says so: guard the tenant as the Grafana.
 - **Names.** The history names a rule only by the title of one of the
   rules read from that Grafana; any other name's changes are passed over,
   never kept, so the history can't add a rule. A name it gives two of
