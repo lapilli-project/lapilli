@@ -663,6 +663,14 @@ func TestNoteTeamAdminsOnly(t *testing.T) {
 	if o, _ := s.owners(ctx); o.byID[o.owner("PayDown")].Name != "payments" {
 		t.Fatalf("PayDown is %s's", o.byID[o.owner("PayDown")].Name)
 	}
+	// Nor is the note deleted there, which takes PayDownOld out of
+	// checkout: an admin's.
+	if code, _, _ := ui(t, h, http.MethodPost, "/orphans/delete", rob, "same-origin", url.Values{"rule": {"PayDownOld"}}); code != http.StatusForbidden {
+		t.Errorf("rob deleting a note of checkout's: %d", code)
+	}
+	if n, err := s.l.NoteOf(ctx, "PayDownOld"); err != nil || n.TeamID != checkout.ID {
+		t.Errorf("deleted by rob: %+v %v", n, err)
+	}
 	// So bo's proposal is payments's, and rob doesn't approve it.
 	id, _ := proposeSaysAs(t, h, bo, "PayDown")
 	if code, _ := approveAs(t, s, id, rob); code != http.StatusForbidden {

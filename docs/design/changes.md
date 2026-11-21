@@ -827,8 +827,9 @@ note and approve its change, or move it out of payments's freeze and
 
 - While `--config` declares any team's approvers or `changes_in`, or a
   freeze, a rule's team is an admin's to move: the note's form, the API,
-  the rules list's "Set the team" and the Cleanup page's move of a note
-  onto a rule are refused to anyone else, in the ledger's write, which
+  the rules list's "Set the team", the Cleanup page's move of a note
+  onto a rule and its delete of a note in a team are refused to anyone
+  else, in the ledger's write, which
   reads the boundaries in it ("only an admin moves a rule into a team or
   out of one"). The rest of a note is an editor's, as before; without
   boundaries, its team too.

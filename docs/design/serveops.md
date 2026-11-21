@@ -883,7 +883,8 @@ freezes:
 - **A rule's team is an admin's to move.** While the file declares any
   team's approvers or `changes_in`, or a freeze, a note that moves a rule
   into a team or out of one (its form, `PUT /api/v1/notes`, the rules
-  list's "Set the team", the Cleanup page's move) is refused to anyone but
+  list's "Set the team", the Cleanup page's move, and its delete of a
+  note in a team) is refused to anyone but
   an admin, in the ledger's write; and a rule a note moved is held by the
   boundaries of the team its name and labels give it too.
 - **Kept with the rest, read twice first.** Read, they are written as one
