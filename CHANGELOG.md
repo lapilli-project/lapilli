@@ -154,7 +154,9 @@ Before upgrading:
 - **promtool could write a file past its volume** (affected: 0.65.0 to
   0.68.0). Its memory cap's wrapper set `RLIMIT_DATA` alone; promtool
   keeps its TSDB in its `TMPDIR`, the chart's `scenarios-tmp` volume of
-  256 MiB. It sets `RLIMIT_FSIZE` to 256 MiB beside it now, on Linux.
+  256 MiB. It sets `RLIMIT_FSIZE` to 256 MiB beside it now, on Linux: a
+  write to one file past it fails (EFBIG), and the volume's `sizeLimit`
+  bounds all of them.
 - **The Cleanup page's delete took a rule out of its team without an
   admin** (affected: 0.64.0 to 0.68.0). While `--config` declares the
   boundaries of change, a rule's team is an admin's to move; deleting
