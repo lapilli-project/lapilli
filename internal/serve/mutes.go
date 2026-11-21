@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -38,7 +40,9 @@ type mutesKept struct {
 	day  struct {
 		start, counted time.Time
 		n              int
-		warned         bool
+		// warned and fullWarned say the day's most, and a rule's hour
+		// full, were logged today.
+		warned, fullWarned bool
 	}
 }
 
@@ -114,7 +118,7 @@ func (s *Server) keepMutes(ctx context.Context, ms []ledger.Mute) error {
 			return err
 		}
 		if !k.day.start.Equal(start) {
-			k.day.warned = false
+			k.day.warned, k.day.fullWarned = false, false
 		}
 		k.day.start, k.day.n, k.day.counted = start, n, time.Now()
 	}
@@ -127,13 +131,28 @@ func (s *Server) keepMutes(ctx context.Context, ms []ledger.Mute) error {
 		return nil
 	}
 	k.Unlock()
-	added, _, err := s.l.KeepMutes(ctx, ms)
+	added, errs, err := s.l.KeepMutes(ctx, ms)
 	if err != nil {
 		return err
 	}
+	// A rule's hour that holds as many as it may: the rest of its mutes
+	// that hour are passed over, and not remembered as kept.
+	kept := ms[:0:0]
+	full := 0
+	for i, m := range ms {
+		if errors.Is(errs[i], ledger.ErrMutesFull) {
+			full++
+			continue
+		}
+		kept = append(kept, m)
+	}
 	k.Lock()
 	k.day.n += added
+	if full > 0 && !k.day.fullWarned {
+		k.day.fullWarned = true
+		s.log.Warn("passing over mutes of a rule's hour: as many were kept in it as an hour of a rule holds", "rule", ms[slices.IndexFunc(errs, func(e error) bool { return errors.Is(e, ledger.ErrMutesFull) })].Rule, "passed over", full)
+	}
 	k.Unlock()
-	k.kept(ms)
+	k.kept(kept)
 	return nil
 }
