@@ -48,9 +48,10 @@ stderr how many they left out:
   alert is one Alertmanager sent for a group of alerts, and from
   Alertmanager 0.30.0 its details list each of them, with its labels, in
   `firing` and `resolved` by default: each is one of the incident's
-  alerts. Before 0.30.0 they are text: add the rule and the labels you
-  match on, and the alert is the group's, with the labels all its alerts
-  have:
+  alerts. Before 0.30.0 they are text: add the rule, and the labels you
+  match on, and the alert is the group's. Its other details may be
+  anything (a description, a runbook), so it is linked by its rule alone
+  unless `ALERT_LABELS` names the labels to take from them:
 
   ```yaml
   receivers:

@@ -105,6 +105,31 @@ func (a *Alert) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// UnmarshalJSON takes an alert as {"rule": NAME, "labels": {"k": "v"}},
+// refusing, as UnmarshalYAML does, a key it doesn't know (a misspelt
+// "label" would link every firing of the rule) and a label whose value
+// isn't text.
+func (a *Alert) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return errors.New(`an alert is {"rule": NAME, "labels": {LABEL: VALUE}}`)
+	}
+	for k := range raw {
+		if k != "rule" && k != "labels" {
+			return fmt.Errorf("an alert has a rule and labels, not %q", k)
+		}
+	}
+	var x struct {
+		Rule   string            `json:"rule"`
+		Labels map[string]string `json:"labels"`
+	}
+	if err := json.Unmarshal(b, &x); err != nil {
+		return fmt.Errorf("an alert's rule is text, and its labels text: %w", err)
+	}
+	a.Rule, a.Labels = x.Rule, x.Labels
+	return nil
+}
+
 // Names reports whether the alert is of rule: rule is its name, or its
 // name told apart from others of that name (HighErrorRate
 // [severity=critical]), as the tool knows only the name its alerts carry.
@@ -292,10 +317,11 @@ func Load(path string) ([]Incident, error) {
 		case !in.End.IsZero() && in.End.Before(in.Start):
 			return nil, fmt.Errorf("%s: incident %s ends before it starts", path, in.ID)
 		}
-		if err := CheckAlerts(in.Alerts); err != nil {
+		// Each once before the bounds: the same alert twice is one.
+		doc.Incidents[i].Alerts = SortAlerts(in.Alerts)
+		if err := CheckAlerts(doc.Incidents[i].Alerts); err != nil {
 			return nil, fmt.Errorf("%s: incident %s: %w", path, in.ID, err)
 		}
-		doc.Incidents[i].Alerts = SortAlerts(in.Alerts)
 		seen[in.ID] = true
 	}
 	return doc.Incidents, nil

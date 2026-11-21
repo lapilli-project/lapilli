@@ -269,10 +269,11 @@ func merge(spans [][2]int64) [][2]int64 {
 // theirs.
 func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o verdict.Options) (string, error) {
 	origin := originOf(by)
+	// Each once before the bounds: the same alert twice is one.
+	in.Candidate, in.Alerts = false, incident.SortAlerts(in.Alerts)
 	if err := checkIncident(in); err != nil {
 		return "", err
 	}
-	in.Candidate, in.Alerts = false, incident.SortAlerts(in.Alerts)
 	if in.ID != "" {
 		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == origin && same(l.d, old.Incident, in) {
 			return in.ID, nil

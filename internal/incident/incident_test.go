@@ -2,6 +2,7 @@ package incident
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -328,5 +329,24 @@ func TestAlerts(t *testing.T) {
 	}
 	if got := SortAlerts([]Alert{{Rule: "B", Labels: map[string]string{}}, {Rule: "A"}, {Rule: "B"}}); !reflect.DeepEqual(got, []Alert{{Rule: "A"}, {Rule: "B"}}) {
 		t.Errorf("sorted %+v", got)
+	}
+	// As JSON, as the API takes them: the same keys, the same refusals.
+	var a Alert
+	if err := json.Unmarshal([]byte(`{"rule": "Disk", "labels": {"service": "checkout"}}`), &a); err != nil || a.Rule != "Disk" || a.Labels["service"] != "checkout" {
+		t.Errorf("%+v %v", a, err)
+	}
+	for _, bad := range []string{`{"rule": "Disk", "label": {"service": "checkout"}}`, `{"rule": "Disk", "Labels": {"service": "checkout"}}`,
+		`{"rule": "Disk", "labels": {"code": 500}}`, `{"rule": 7}`, `["Disk"]`} {
+		if err := json.Unmarshal([]byte(bad), &a); err == nil {
+			t.Errorf("%s: taken as %+v", bad, a)
+		}
+	}
+	// The same alert many times is one, within the bounds.
+	same := make([]Alert, MaxAlerts+5)
+	for i := range same {
+		same[i] = Alert{Rule: "R"}
+	}
+	if err := CheckAlerts(SortAlerts(same)); err != nil {
+		t.Errorf("one alert %d times: %v", len(same), err)
 	}
 }

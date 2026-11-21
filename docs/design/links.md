@@ -48,9 +48,10 @@ incidents:
 
 They are read from the incidents file, taken by `POST` and `PUT
 /api/v1/incidents` (the incidents port's token too), and kept in the
-ledger. Labels are text: a list, a map or nothing for a value is refused,
-and so is a key other than `rule` and `labels`, as a misspelt `label:`
-would link every firing of the rule. The alerts are kept sorted, each
+ledger. Labels are text: a list, a map or nothing for a value is refused
+(a number, too, in JSON), and so is a key other than `rule` and `labels`,
+in YAML and in JSON alike, as a misspelt `label:` would link every firing
+of the rule. The alerts are kept sorted, each
 once, so a tool giving them in another order the next hour changes
 nothing.
 
@@ -123,7 +124,7 @@ alerts and write those that carry an `alertname` as its `alerts`:
 
 | Tool | Where the labels are | Requests |
 |---|---|---|
-| PagerDuty | `body.details` (or `body.cef_details.details`): each alert of the group Alertmanager sent, with its labels, in `firing` and `resolved`, as 0.30.0 and later send them by default; or, from an older one given `alertname` in `pagerduty_configs`' `details`, that and the labels beside it, Alertmanager's own text left out | one a page of 100 of an incident's alerts |
+| PagerDuty | `body.details` (or `body.cef_details.details`): each alert of the group Alertmanager sent, with its labels, in `firing` and `resolved`, as 0.30.0 and later send them by default; or, from an older one given `alertname` in `pagerduty_configs`' `details`, the rule alone, with the details `ALERT_LABELS` names as labels (other details may be a description or a runbook) | one a page of 100 of an incident's alerts |
 | incident.io | the attributes the alert source takes from the payload, as `GET /v2/alerts/{id}` gives them: one named `alertname`, and the others of a literal value, named as labels are | one a page of 50 of an incident's alerts, and one an alert |
 | Rootly | the alert's `labels`, of which Alertmanager's carry `alertname`, `instance`, `dc` and `job`; `status` and `version` are the webhook's, `source_name` Rootly's | one a page of 100 of an incident's alerts |
 
@@ -138,8 +139,8 @@ answers with a server standing in, not against real accounts.
 
 - An incident lists 100 alerts at most, each a rule of 512 bytes at most
   and 32 labels of a name of 128 bytes and a value of 256, as a firing's
-  labels are kept; 16 KB in all as JSON. Past them the file, or the write,
-  is refused: the recipes keep within them, saying what they cut.
+  labels are kept; 16 KB in all as JSON, counted once each is listed
+  once. Past them the file, or the write, is refused: the recipes keep within them, saying what they cut.
 - Judging a firing against an incident is a loop over its alerts, none
   for an incident that lists none.
 - The recipes make at most `MAX_ALERT_REQUESTS` (2000) requests for alerts

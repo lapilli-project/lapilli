@@ -33,10 +33,20 @@ func TestLinkedAlertsServe(t *testing.T) {
 		"labels": {"service": ["search"]}, "alerts": [{"rule": "Latency"}]}`); code/100 != 2 || !strings.Contains(body, `"rule": "Errors"`) || strings.Contains(body, `"linked"`) {
 		t.Fatalf("incident caught by the time: %d %s", code, body)
 	}
-	for _, bad := range []string{`[{"labels": {"service": "search"}}]`, `[{"rule": "Errors", "labels": {"code": 500}}]`, `[{"rule": "Errors", "labels": {"service": ""}}]`} {
+	for _, bad := range []string{`[{"labels": {"service": "search"}}]`, `[{"rule": "Errors", "labels": {"code": 500}}]`, `[{"rule": "Errors", "labels": {"service": ""}}]`,
+		// A misspelt key would have every Errors firing in its span link.
+		`[{"rule": "Errors", "label": {"service": "checkout"}}]`, `[{"rule": "Errors", "Labels": {"service": "checkout"}}]`} {
 		if code, body := api(t, h, "PUT", "/api/v1/incidents/INC-11", `{"start": "2026-11-01T23:00:00Z", "alerts": `+bad+`}`); code != 400 {
 			t.Errorf("alerts %s: %d %s, want refused", bad, code, body)
 		}
+	}
+	if _, err := s.l.IncidentByID(ctx, "INC-11"); err == nil {
+		t.Error("INC-11 was written with alerts refused")
+	}
+	// The same alert 150 times is one: written (a week before any firing).
+	many := strings.Repeat(`{"rule": "Errors", "labels": {"service": "search"}}, `, 149) + `{"rule": "Errors", "labels": {"service": "search"}}`
+	if code, body := api(t, h, "PUT", "/api/v1/incidents/INC-12", `{"start": "2026-10-20T00:00:00Z", "alerts": [`+many+`]}`); code/100 != 2 || strings.Count(body, `"rule": "Errors"`) != 1 {
+		t.Errorf("one alert 150 times: %d %s", code, body)
 	}
 	if _, body, _ := get(t, h, "/incidents/INC-9"); !strings.Contains(body, "(linked in the incident tool)") {
 		t.Errorf("incident page: %s", body)
