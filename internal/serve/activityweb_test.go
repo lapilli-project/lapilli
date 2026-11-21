@@ -609,4 +609,23 @@ func TestActivityExportOneAPerson(t *testing.T) {
 	if code, body := getAs(t, h, "/api/v1/activity?limit=50", vViewer); code != http.StatusOK || len(body) > activitySmallBytes {
 		t.Errorf("a small export beside every turn taken: %d, %d bytes", code, len(body))
 	}
+	// So many small ones at once, of all readers, and past them, a 503.
+	was := renderWait
+	defer func() { renderWait = was }()
+	renderWait = time.Millisecond
+	for range activitySmalls {
+		s.smallExports <- struct{}{}
+	}
+	defer func() {
+		for range activitySmalls {
+			<-s.smallExports
+		}
+	}()
+	r = httptest.NewRequest(http.MethodGet, "/api/v1/activity?limit=50", nil)
+	r.Header.Set("X-Forwarded-Email", vEditor)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+		t.Errorf("a small export past %d at once: %d, Retry-After %q", activitySmalls, rec.Code, rec.Header().Get("Retry-After"))
+	}
 }

@@ -187,7 +187,8 @@ Bounds:
   `team`'s, looks through 20,000 changes and looks up 200 tasks and
   proposals at most, then says where it stopped (`next`, `cut`); it is
   written out four at a time, one a person, each holding its turn until it
-  is read, and one of 50 changes at most, held to a mebibyte, takes none.
+  is read, and one of 50 changes at most, held to a mebibyte, takes a
+  turn of the small ones', 16 at once.
   Only a
   tracker job's `GET /api/v1/tasks` goes on from where it stopped
   (`after`, `next`).

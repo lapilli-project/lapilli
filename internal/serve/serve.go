@@ -470,8 +470,9 @@ type Server struct {
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}
 	// renders are the turns to work out a page (pageRenders), exports
-	// those to write out an export of the activity log (activityExports).
-	renders, exports chan struct{}
+	// those to write out an export of the activity log (activityExports),
+	// and smallExports those of a small one (activitySmalls).
+	renders, exports, smallExports chan struct{}
 	// exporting are the readers with an export of the activity log going,
 	// one each at most (exportOf).
 	exporting struct {
@@ -655,7 +656,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, err
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wall: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
-		heavy: make(chan struct{}, 1), renders: make(chan struct{}, pageRenders), exports: make(chan struct{}, activityExports), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
+		heavy: make(chan struct{}, 1), renders: make(chan struct{}, pageRenders), exports: make(chan struct{}, activityExports),
+		smallExports: make(chan struct{}, activitySmalls), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,
 		// then one each five seconds at most.

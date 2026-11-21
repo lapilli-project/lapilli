@@ -65,10 +65,12 @@ const (
 	// holds its answer, activityBytes and a change at most, until its
 	// reader has read it.
 	activityExports = 4
-	// activitySmall is the most changes an export takes no turn for:
-	// activitySmallBytes at most of its answer.
+	// activitySmall is the most changes an export takes no export's turn
+	// for: activitySmallBytes at most of its answer, and activitySmalls
+	// such at once, of all its readers, turns of their own.
 	activitySmall      = 50
 	activitySmallBytes = 1 << 20
+	activitySmalls     = 16
 	// activityScan is how many changes a request looks through for those
 	// of a team, or those its reader may read, before it says where it
 	// stopped, so that a filter that matches little reads no more than
@@ -521,19 +523,19 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 	// one sent. The turn is one of the exports' own, not of the pages':
 	// those readers keep no page from being worked out. A person has one
 	// export at a time, so that one viewer can't hold every turn; a small
-	// one (activitySmall changes at most) takes no turn, and holds
-	// activitySmallBytes at most.
-	most := activityBytes
+	// one (activitySmall changes at most) takes a turn of the small ones'
+	// (activitySmalls), not an export's, and holds activitySmallBytes at
+	// most: many addresses, an IPv6 network's, hold no more than they.
+	most, turns := activityBytes, s.exports
 	if limit <= activitySmall {
-		most = activitySmallBytes
-	} else {
-		ex, err := s.exportTurn(r.Context())
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		defer ex.give()
+		most, turns = activitySmallBytes, s.smallExports
 	}
+	ex, err := takeTurn(r.Context(), turns)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer ex.give()
 	done, ok := s.exportOf(r)
 	if !ok {
 		s.oops(w, r, errPagesBusy)

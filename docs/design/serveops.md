@@ -1048,8 +1048,9 @@ at most, and one at a time a person (by their name, or the address of
 anyone not named; another of theirs meanwhile is 503): a reader who
 doesn't read holds an export's answer, 8 MiB and a change, not a page's
 turn, and one viewer holds one turn. An export of 50 changes at most takes
-no turn, and is held to a mebibyte: what each holds is bounded, not how
-many go out at once, as a page's isn't. The ledger is asked for 200
+a turn of the small ones' own, 16 at once of all readers, 503 past the
+wait, and is held to a mebibyte: many addresses (an IPv6 network's) hold
+no more than 16 of them. The ledger is asked for 200
 changes at a time, a team's too, a bulk verdict's after with each, and a
 team's before and after 200 at a time, until 8 MiB.
 
