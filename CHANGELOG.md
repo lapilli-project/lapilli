@@ -56,8 +56,9 @@ Before upgrading:
   a status of success was set on its head, and `INCIDENTS` was read from
   the pull request. `github.sh` gives the branch the pull request goes
   into (`GITHUB_BASE_REF`) and the event's head: `HEAD`'s first parent,
-  however `TARGET` writes it (`HEAD^1`, `HEAD~1`, `HEAD^`, its hash), is
-  taken only of GitHub's merge, `HEAD^2` the event's head, not of a head
+  however `TARGET` writes it (`HEAD^1`, `HEAD~1`, `HEAD^`, its hash in any
+  case or short, `HASH^0`, `NAME~1`, as git resolves it; a branch's name
+  alone is the one the job named), is taken only of GitHub's merge, `HEAD^2` the event's head, not of a head
   that is a merge of its own (an "Update branch"); otherwise the base
   branch is taken, and, with none, a gate or `STATUS` alone is refused and
   the job fails (Changed). Of a merge, the status goes on no commit the
@@ -222,7 +223,9 @@ Before upgrading:
   already); where it says none, a gate or `STATUS` is refused, and the job
   fails, saying to give `TARGET` or `TARGET_BRANCH` or to check out the
   merge. Without either, the comment is compared with `HEAD^1`, as before.
-  A shallow clone's messages say `fetch-depth: 0`.
+  A `TARGET` the job gives where the CI says the base (Gitea's Actions,
+  GitLab's merge requests, Bitbucket's and Azure's pull requests) is
+  taken as it is. A shallow clone's messages say `fetch-depth: 0`.
 - **The incident recipes take an address's scheme in capitals**
   (`HTTPS://`), `http://[::1]`, and this machine with no port, any other
   host over http still refused, and a token file ending in a carriage

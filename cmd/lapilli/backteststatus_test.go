@@ -432,3 +432,57 @@ func TestBacktestRecipeOwnParentMerged(t *testing.T) {
 		t.Errorf("GitHub's merge: %v, status %+v\n%s", err, st, out)
 	}
 }
+
+// A TARGET is HEAD's first parent however it is written, as git resolves
+// it: a hash of it in capitals or short, HASH^0, HASH~0, the branch's
+// name~1. With the event's head and no base branch, each is refused, never
+// a success. A TARGET the job gives where the CI says what the pull
+// request goes into (Gitea's Actions), the base's hash, which a pull
+// request of one commit's HEAD^1 is, is the job's, and taken.
+func TestBacktestRecipeTargetForms(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	base := repo.git("rev-parse", "main")
+	repo.git("checkout", "--quiet", "-B", "pr")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "hold CheckoutErrors longer")
+	one := repo.git("rev-parse", "HEAD")
+	repo.write(map[string]string{"README.md": "docs\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "docs")
+	sha := repo.git("rev-parse", "HEAD")
+	parent := repo.git("rev-parse", "HEAD^1")
+	repo.git("checkout", "--quiet", "--detach", sha)
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	ci, _ := headOf(t, "github", sha)
+	rr.env = append(rr.env, ci...)
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_MISSED=true"}
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	for _, target := range []string{strings.ToUpper(parent), parent[:12], parent + "^0", parent + "~0", "pr~1"} {
+		before := len(rr.host.statuses)
+		out, err := rr.run(append(slices.Clone(gates), "TARGET="+target), args...)
+		st, n := rr.host.lastStatus()
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State != "failure" {
+			t.Errorf("TARGET=%s: %v, status %+v\n%s", target, err, st, out)
+		}
+	}
+	// Gitea's Actions, the pull request of one commit checked out, TARGET
+	// the base's hash.
+	repo.git("checkout", "--quiet", "--detach", one)
+	gt := newRecipeRun(t, backtestHosts[1], repo)
+	gci, _ := headOf(t, "gitea", one)
+	gt.env = append(gt.env, gci...)
+	if out, err := gt.run([]string{"PATHS=alerts", "STATUS=true", "TARGET=" + base}, args...); err != nil || strings.Contains(out, "own commit") {
+		t.Errorf("Gitea, TARGET the base's hash: %v\n%s", err, out)
+	}
+	// Left at HEAD^1 there, the branch it goes into not said, it is
+	// refused all the same.
+	if out, err := gt.run([]string{"PATHS=alerts", "STATUS=true"}, args...); err == nil || !strings.Contains(out, "own commit") {
+		t.Errorf("Gitea, TARGET left at HEAD^1: %v\n%s", err, out)
+	}
+}

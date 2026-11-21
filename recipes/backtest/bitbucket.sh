@@ -59,6 +59,9 @@ PR=${PR:-${BITBUCKET_PR_ID:-}}
 if [ -z "${TARGET:-}" ]; then
   TARGET_BRANCH=${TARGET_BRANCH:-${BITBUCKET_PR_DESTINATION_BRANCH:-}}
 fi
+# A pull request's pipeline says what it goes into: a TARGET the job gives
+# is its own (lib.sh's ci_base).
+[ -z "${BITBUCKET_PR_DESTINATION_BRANCH:-}" ] || ci_base=1
 case $BITBUCKET_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "bitbucket.sh: BITBUCKET_REPO $BITBUCKET_REPO: want WORKSPACE/REPO" >&2; exit 1 ;; esac
 case $BITBUCKET_REPO in */*) ;; *) echo "bitbucket.sh: BITBUCKET_REPO $BITBUCKET_REPO: want WORKSPACE/REPO" >&2; exit 1 ;; esac
 case ${BITBUCKET_USER_UUID:-} in

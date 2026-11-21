@@ -18,7 +18,10 @@
 # says, and status_link, the job's page, for STATUS; and ci_branch, the
 # branch the pull request goes into as its CI says, and ci_head, the pull
 # request's head commit as it says, by which a TARGET of HEAD's first
-# parent is told the CI's merge's or the pull request's own (commits).
+# parent is told the CI's merge's or the pull request's own (commits); or
+# ci_base, that its CI says the commit or the branch the pull request goes
+# into, which the script gave as TARGET or TARGET_BRANCH, unless the job
+# gave its own TARGET: one given there is the job's, and taken as it is.
 #
 # In a clone of the repository with the pull request checked out, it
 # installs a pinned Lapilli release, checked against the release's
@@ -134,7 +137,10 @@
 #                    GITHUB_BASE_REF), or else, with a gate (FAIL_ON_ERROR,
 #                    FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED, FAIL_MISSED) or
 #                    STATUS, the run is refused and the job fails, as it
-#                    would judge the pull request against itself
+#                    would judge the pull request against itself. A TARGET
+#                    given where the CI says the base (Gitea's Actions,
+#                    GitLab's merge requests, Bitbucket's and Azure's pull
+#                    requests) is taken as it is
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -431,6 +437,10 @@ else
 fi
 repo=${REPO:-.}
 # HEAD^1, given or not, takes HEAD for a merge the CI made (commits).
+# Given otherwise, where the CI says what the pull request goes into
+# (ci_base), it is taken as it is.
+target_given=
+case ${TARGET:-HEAD^1} in HEAD^1) ;; *) target_given=1 ;; esac
 TARGET=${TARGET:-HEAD^1}
 case $TARGET in
   -* | *[!A-Za-z0-9._/^~-]*) say "TARGET $TARGET: want a commit or a ref, such as HEAD^1 or origin/main"; exit 1 ;;
@@ -1032,13 +1042,17 @@ fetch_lapilli() {
   say "installed Lapilli $LAPILLI_VERSION ($name.tar.gz, sha256 $got)"
 }
 
-# own_parent REF: whether REF, written from HEAD (HEAD~1, HEAD^) or as a
-# full hash, is HEAD's first parent. A branch's name is what its job named,
-# and taken as it is.
+# own_parent REF: whether REF is HEAD's first parent, written as one: from
+# HEAD or a hash (HEAD^1, HEAD~1, a hash in any case or short, HASH^0, a
+# branch's name~1), as git resolves both; and, of a HEAD with no parent the
+# clone has (a depth of 1), whether REF is HEAD^1 as written. A name alone
+# (main, origin/main) is the branch the job named, and taken as it is.
 own_parent() {
+  [ "$1" != HEAD^1 ] || return 0
   case $1 in
-    HEAD*) ;;
-    *) full_hash "$1" || return 1 ;;
+    *[~^]* | HEAD*) ;;
+    *[!0-9A-Fa-f]*) return 1 ;;
+    *) [ "${#1}" -ge 7 ] || return 1 ;;
   esac
   p=$(git -C "$repo" rev-parse --verify -q "HEAD^1^{commit}" 2>/dev/null) || return 1
   [ -n "$p" ] && [ "$(git -C "$repo" rev-parse --verify -q "$1^{commit}" 2>/dev/null)" = "$p" ]
@@ -1059,11 +1073,12 @@ commits() {
   # first parent, however written (HEAD^1, HEAD~1, HEAD^, its hash), is
   # taken for the CI's merge's only when it is one: HEAD^2 the pull
   # request's head as the CI says (ci_head), or, where the CI says none,
-  # HEAD a merge. Otherwise the branch the CI says it goes into is taken
+  # HEAD a merge. A TARGET the job gave where the CI says the base itself
+  # (ci_base) is the job's, as one the script took from the CI is. Otherwise the branch the CI says it goes into is taken
   # instead; or, with none, a gate or a status is refused: the job fails,
   # its status a failure saying why. A HEAD whose parent the clone hasn't (a depth of 1)
   # has no HEAD^1: said below.
-  if [ -z "${TARGET_BRANCH:-}" ] && { [ "$TARGET" = HEAD^1 ] || own_parent "$TARGET"; }; then
+  if [ -z "${TARGET_BRANCH:-}" ] && { [ -z "$target_given" ] || [ -z "${ci_base:-}" ]; } && own_parent "$TARGET"; then
     merged=
     if [ -n "${ci_head:-}" ]; then
       [ "$(git -C "$repo" rev-parse --verify -q "HEAD^2^{commit}" 2>/dev/null)" != "$ci_head" ] || merged=1

@@ -48,6 +48,9 @@ GITLAB_PROJECT=${GITLAB_PROJECT:-${CI_MERGE_REQUEST_PROJECT_ID:-${CI_PROJECT_ID:
 : "${GITLAB_PROJECT:?the project id or path, such as example/monitoring}"
 api=${GITLAB_API:-${CI_API_V4_URL:-https://gitlab.com/api/v4}}
 PR=${PR:-${CI_MERGE_REQUEST_IID:-}}
+# A merge request's pipeline says what it goes into: TARGET, the script's
+# or the job's, is taken as it is (lib.sh's ci_base).
+[ -z "${CI_MERGE_REQUEST_IID:-}" ] || ci_base=1
 if [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ]; then
   if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-}" ]; then
     TARGET=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA

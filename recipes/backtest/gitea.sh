@@ -49,6 +49,8 @@ if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   fi
   # Actions checks out the pull request's own commit, not a merge: the
   # branch it goes into is fetched, and compared from where they parted.
+  # A TARGET the job gives is its own, as the CI says the base (lib.sh).
+  ci_base=1
   if [ -z "${TARGET:-}" ]; then
     TARGET_BRANCH=${TARGET_BRANCH:-${GITHUB_BASE_REF:-}}
   fi

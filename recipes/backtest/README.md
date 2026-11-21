@@ -75,8 +75,10 @@ And, as wanted:
   target's own, as it is now: a pull request branched from before an
   incident was written down is judged by it all the same. Each script
   defaults it from its CI. `HEAD^1`, given or not, however written
-  (`HEAD~1`, `HEAD^`, its hash), is a merge's first parent, taken only of
-  the CI's merge: `HEAD^2` the pull request's head as the CI says
+  (`HEAD~1`, `HEAD^`, its hash in any case or short, `HASH^0`, the
+  branch's `NAME~1`, as git resolves it; a branch's name alone, such as
+  `main`, is the branch the job named), is a merge's first parent, taken
+  only of the CI's merge: `HEAD^2` the pull request's head as the CI says
   (GitHub's `pull_request.head.sha`), or, where it says none, `HEAD` a
   merge. Of the pull request's own commit, such as GitHub Actions' checkout
   of `pull_request.head.sha`, a merge of its own among them (an "Update
@@ -85,7 +87,11 @@ And, as wanted:
   taken (GitHub's `GITHUB_BASE_REF`, with `fetch-depth: 0`), and, where it
   says none, a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
   `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS` is refused, and the job
-  fails: give `TARGET` or `TARGET_BRANCH`, or check out the merge.
+  fails: give `TARGET` or `TARGET_BRANCH`, or check out the merge. A
+  `TARGET` the job gives where the CI says what the pull request goes into
+  (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
+  Azure's pull request builds) is the job's, and taken as it is, as one
+  the script takes from the CI is.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).

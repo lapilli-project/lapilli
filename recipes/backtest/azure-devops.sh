@@ -52,6 +52,9 @@ PR=${PR:-${SYSTEM_PULLREQUEST_PULLREQUESTID:-}}
 if [ -z "${TARGET:-}" ] && [ -n "${SYSTEM_PULLREQUEST_TARGETBRANCH:-}" ]; then
   TARGET_BRANCH=${TARGET_BRANCH:-${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}}
 fi
+# A pull request's build says what it goes into: a TARGET the job gives is
+# its own (lib.sh's ci_base).
+[ -z "${SYSTEM_PULLREQUEST_TARGETBRANCH:-}" ] || ci_base=1
 : "${AZURE_DEVOPS_ORG_URL:?such as https://dev.azure.com/example}"
 : "${AZURE_DEVOPS_PROJECT:?the project}"
 : "${AZURE_DEVOPS_REPO:?the repository}"
