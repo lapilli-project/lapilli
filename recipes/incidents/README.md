@@ -21,11 +21,14 @@ holds the token alone, on one line: PagerDuty's, incident.io's, Grafana IRM's,
 Rootly's and FireHydrant's, which go in a header as they are, of the
 characters a Bearer token is written in (letters, digits and `- . _ ~ + / =`);
 Jira's and Compass's, which Atlassian says nothing of and which go base64'd
-with the email, with no space. The address a token goes to (`JIRA_URL`,
+with the email, with no space. Spaces, tabs and a carriage return after the
+token, as an editor may leave them, are dropped; inside it they are refused,
+as is a second line. The address a token goes to (`JIRA_URL`, `JSM_API`,
 `GRAFANA_URL`, or the API a script asks, which `PAGERDUTY_API` and the like
-change) is `https://`, or this machine's over `http://` for tests, and `curl`
-speaks no other scheme; one with a user or token before `@` is refused.
-Neither the token nor the address is said.
+change) is `https://`, or this machine's over `http://` for tests
+(`127.0.0.1`, `[::1]` or `localhost`, with a port or not), and `curl` speaks
+no other scheme; the scheme may be in capitals. One with a user or token
+before `@` is refused. Neither the token nor the address is said.
 
 `pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, for
 Jira Service Management's incidents given `JSM_CLOUD_ID`, `jira.sh` also
@@ -276,7 +279,9 @@ The port takes one write at a time, 20 a second, with bursts of 40; past that it
 answers 429, and `put.sh` waits and tries again. The ledger keeps 20,000 copied
 incidents at most. A script stops after `MAX_PAGES` pages
 (1000), when the tool gives the same page again, or at an answer over 16 MiB,
-and then writes nothing.
+and then writes nothing. `curl` before 8.4 holds to that bound only an answer
+that says its length (`Content-Length`); a chunked one it reads whole. Use
+`curl` 8.4 or later.
 
 In the chart:
 

@@ -47,19 +47,28 @@ here=$(dirname "$0")
 # https NAME URL: the scheme curl speaks to URL, in proto. The token goes
 # where URL points: over https, or to this machine, for tests. Neither is
 # said: a user and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
 https() {
+  proto=
   case $2 in
     *@*)
       printf 'jira.sh: %s holds a user or token before @, refused\n' "$1" >&2
       exit 1
       ;;
-    https://*) proto='=https' ;;
-    http://127.0.0.1:* | http://localhost:*) proto='=http' ;;
-    *)
-      printf 'jira.sh: %s is not https\n' "$1" >&2
-      exit 1
+    [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+    [Hh][Tt][Tt][Pp]://*)
+      case ${2#*://} in
+        127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+        127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+      esac
       ;;
   esac
+  if [ -z "$proto" ]; then
+    printf 'jira.sh: %s is not https\n' "$1" >&2
+    exit 1
+  fi
 }
 https JIRA_URL "$JIRA_URL"
 site=$proto
@@ -109,6 +118,14 @@ esac
 # is said.
 secret() {
   s=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
   case $s in
     '' | *[[:space:][:cntrl:]]*)
       printf '%s\n' "jira.sh: $1 doesn't hold a token: one line, with no space" >&2

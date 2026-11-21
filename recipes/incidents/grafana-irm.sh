@@ -24,24 +24,41 @@ since=
 # The token goes where GRAFANA_URL points: over https, or to this machine, for
 # tests, and curl speaks no other scheme (proto). Neither is said: a user
 # and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+proto=
 case $GRAFANA_URL in
   *@*)
     printf 'grafana-irm.sh: GRAFANA_URL holds a user or token before @, refused\n' >&2
     exit 1
     ;;
-  https://*) proto='=https' ;;
-  http://127.0.0.1:* | http://localhost:*) proto='=http' ;;
-  *)
-    printf 'grafana-irm.sh: GRAFANA_URL is not https\n' >&2
-    exit 1
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${GRAFANA_URL#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
     ;;
 esac
+if [ -z "$proto" ]; then
+  printf 'grafana-irm.sh: GRAFANA_URL is not https\n' >&2
+  exit 1
+fi
 url="${GRAFANA_URL%/}/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidents"
 # secret NAME FILE: what FILE holds, one line of the characters a token
 # is written in (a Bearer token's, RFC 6750), as it goes in a header.
 # Neither the token nor what else the file holds is said.
 secret() {
   s=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
   case $s in
     '' | *[!A-Za-z0-9._~+/=-]*)
       printf '%s\n' "grafana-irm.sh: $1 doesn't hold a token: one line of letters, digits and - . _ ~ + / =" >&2

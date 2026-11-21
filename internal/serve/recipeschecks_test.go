@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,10 +46,13 @@ func tokenRecipes() []tokenRecipe {
 
 // TestIncidentRecipesRefuseWhereAndWhat: a recipe sends its token only
 // over https, or to this machine for tests, and curl speaks no other
-// scheme; an address with a user before @ is refused. A token file holding
-// more than a token on one line is refused, as a line break or a carriage
-// return in it would add header lines. Each is refused before curl runs,
-// and the refusal says neither the token nor the address.
+// scheme; an address with a user before @ is refused, and so is a name
+// that only starts with this machine's. A token file holding more than a
+// token on one line is refused, as a line break or a carriage return in it
+// would add header lines; so is a space or a tab inside it. Each is
+// refused before curl runs, and the refusal says neither the token nor the
+// address. The scheme in capitals, and this machine with a port or not,
+// are taken.
 func TestIncidentRecipesRefuseWhereAndWhat(t *testing.T) {
 	needTools(t)
 	bin := t.TempDir()
@@ -77,12 +81,25 @@ func TestIncidentRecipesRefuseWhereAndWhat(t *testing.T) {
 			{[]string{r.api + "=ftp://127.0.0.1:21", r.token + "=" + good}, r.api + " is not https"},
 			{[]string{r.api + "=https://ana:s3cret@example.com", r.token + "=" + good}, r.api + " holds a user or token before @, refused"},
 			{[]string{r.api + "=http://localhost:1@example.com", r.token + "=" + good}, r.api + " holds a user or token before @, refused"},
+			{[]string{r.api + "=http://localhost@example.com", r.token + "=" + good}, r.api + " holds a user or token before @, refused"},
+			{[]string{r.api + "=HTTP://example.com", r.token + "=" + good}, r.api + " is not https"},
+			{[]string{r.api + "=http://localhost.evil.example", r.token + "=" + good}, r.api + " is not https"},
+			{[]string{r.api + "=http://127.0.0.1.evil.example", r.token + "=" + good}, r.api + " is not https"},
+			{[]string{r.api + "=http://127.0.0.10:1", r.token + "=" + good}, r.api + " is not https"},
+			{[]string{r.api + "=http://[::1].evil.example", r.token + "=" + good}, r.api + " is not https"},
+			{[]string{r.api + "=http://[::2]:1", r.token + "=" + good}, r.api + " is not https"},
 			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "first-line\nsecond-line")}, r.token + " doesn't hold a token"},
-			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "first-line\r")}, r.token + " doesn't hold a token"},
+			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "first-line\r\nsecond-line\r")}, r.token + " doesn't hold a token"},
+			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "first-line\rsecond-line")}, r.token + " doesn't hold a token"},
+			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "first-line second-line")}, r.token + " doesn't hold a token"},
+			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "first-line\tsecond-line")}, r.token + " doesn't hold a token"},
 			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, "")}, r.token + " doesn't hold a token"},
+			{[]string{r.api + "=http://127.0.0.1:1", r.token + "=" + tokenFile(t, " \t\r")}, r.token + " doesn't hold a token"},
 		}
 		if r.script == "jira.sh" {
-			cases = append(cases, refused{[]string{"JIRA_URL=http://127.0.0.1:1", "JSM_API=http://example.com", r.token + "=" + good}, "JSM_API is not https"})
+			cases = append(cases,
+				refused{[]string{"JIRA_URL=http://127.0.0.1:1", "JSM_API=http://example.com", r.token + "=" + good}, "JSM_API is not https"},
+				refused{[]string{"JIRA_URL=http://127.0.0.1:1", "JSM_API=http://localhost.evil.example", r.token + "=" + good}, "JSM_API is not https"})
 		}
 		for _, c := range cases {
 			out, said, err := run(r.script, append(append([]string{}, r.env...), c.env...))
@@ -96,20 +113,104 @@ func TestIncidentRecipesRefuseWhereAndWhat(t *testing.T) {
 				}
 			}
 		}
-		// curl is told the scheme: https for a tool, http for this machine.
-		for _, c := range []struct{ url, proto string }{{"https://tool.example.com", "=https"}, {"http://127.0.0.1:1", "=http"}} {
+		// curl is told the scheme: https for a tool, http for this machine,
+		// in whatever case it's written, and is given the address as it is.
+		for _, c := range []struct{ url, proto string }{
+			{"https://tool.example.com", "=https"},
+			{"HTTPS://tool.example.com", "=https"},
+			{"hTTpS://tool.example.com", "=https"},
+			{"http://127.0.0.1:1", "=http"},
+			{"HTTP://127.0.0.1:1", "=http"},
+			{"http://127.0.0.1", "=http"},
+			{"http://127.0.0.1/", "=http"},
+			{"http://localhost", "=http"},
+			{"http://localhost/", "=http"},
+			{"HTTP://LOCALHOST:1", "=http"},
+			{"http://[::1]", "=http"},
+			{"http://[::1]/", "=http"},
+			{"http://[::1]:1", "=http"},
+		} {
 			env := append(append([]string{}, r.env...), r.api+"="+c.url, r.token+"="+good)
-			run(r.script, env)
+			_, said, _ := run(r.script, env)
 			b, _ := os.ReadFile(args)
-			if !strings.Contains(string(b), "-q\n") || !strings.Contains(string(b), "\n--proto\n"+c.proto+"\n") {
-				t.Errorf("%s %s: curl's arguments %q, want --proto %s", r.script, c.url, b, c.proto)
+			if !strings.Contains(string(b), "-q\n") || !strings.Contains(string(b), "\n--proto\n"+c.proto+"\n") || !strings.Contains(string(b), "\n"+c.url) {
+				t.Errorf("%s %s: curl's arguments %q, want --proto %s and the address; said %q", r.script, c.url, b, c.proto, said)
+			}
+		}
+		if r.script == "jira.sh" {
+			for _, jsm := range []string{"HTTPS://api.example.com", "http://[::1]", "http://localhost"} {
+				_, said, _ := run(r.script, append(append([]string{}, r.env...), "JIRA_URL=http://127.0.0.1:1", "JSM_API="+jsm, r.token+"="+good))
+				if _, err := os.Stat(args); err != nil {
+					t.Errorf("jira.sh JSM_API=%s: curl didn't run, said %q", jsm, said)
+				}
 			}
 		}
 	}
 }
 
+// askedStandIn runs r against a stand-in for its tool, listening at
+// listen, its address what where writes of the stand-in's port, and its
+// token in file: the Authorization each request carried, and what the
+// recipe said.
+func askedStandIn(t *testing.T, r tokenRecipe, listen string, where func(port string) string, file string) ([]string, string, error) {
+	t.Helper()
+	l, err := net.Listen("tcp", listen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var sent []string
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		sent = append(sent, req.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Write([]byte(r.empty))
+	}))
+	srv.Listener.Close()
+	srv.Listener = l
+	srv.Start()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	cmd := exec.Command("sh", recipes+r.script)
+	cmd.Env = append(append(os.Environ(), r.env...), r.api+"="+where(port), r.token+"="+file)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	_, err = cmd.Output()
+	srv.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	return sent, stderr.String(), err
+}
+
+// TestIncidentRecipesTakeThisMachineHoweverWritten: this machine is
+// 127.0.0.1, [::1] or localhost, in any case, and so is the scheme, as
+// curl takes it; a recipe asks the stand-in there, with its token.
+func TestIncidentRecipesTakeThisMachineHoweverWritten(t *testing.T) {
+	needTools(t)
+	for _, f := range []struct{ name, listen, url string }{
+		{"HTTP", "127.0.0.1:0", "HTTP://127.0.0.1:%s"},
+		{"LocalHost", "127.0.0.1:0", "Http://LocalHost:%s"},
+		{"[::1]", "[::1]:0", "http://[::1]:%s"},
+		{"[::1] in HTTP", "[::1]:0", "HTTP://[::1]:%s"},
+	} {
+		t.Run(f.name, func(t *testing.T) {
+			l, err := net.Listen("tcp", f.listen)
+			if err != nil {
+				t.Skipf("nothing listens at %s here: %v", f.listen, err)
+			}
+			l.Close()
+			for _, r := range tokenRecipes() {
+				sent, said, err := askedStandIn(t, r, f.listen, func(port string) string { return fmt.Sprintf(f.url, port) }, tokenFile(t, "x"))
+				if err != nil || len(sent) == 0 || sent[0] != r.auth("x") {
+					t.Errorf("%s %s: %v, sent %q, said %q", r.script, f.url, err, sent, said)
+				}
+			}
+		})
+	}
+}
+
 // TestIncidentRecipesTakeTheirTokens: a token as each tool writes one
-// (made up here) is taken, and sent as it is.
+// (made up here) is taken, and sent as it is; spaces, tabs and a carriage
+// return after it, as an editor may leave them, are dropped.
 func TestIncidentRecipesTakeTheirTokens(t *testing.T) {
 	needTools(t)
 	tokens := map[string]string{
@@ -123,25 +224,14 @@ func TestIncidentRecipesTakeTheirTokens(t *testing.T) {
 		"compass.sh": "ATATT3xFfGF0Ab!Cd:Ef=0A1B2C3D",
 	}
 	for _, r := range tokenRecipes() {
-		var mu sync.Mutex
-		var sent []string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			mu.Lock()
-			sent = append(sent, req.Header.Get("Authorization"))
-			mu.Unlock()
-			w.Write([]byte(r.empty))
-		}))
-		cmd := exec.Command("sh", recipes+r.script)
-		cmd.Env = append(append(os.Environ(), r.env...), r.api+"="+srv.URL, r.token+"="+tokenFile(t, tokens[r.script]))
-		var stderr strings.Builder
-		cmd.Stderr = &stderr
-		_, err := cmd.Output()
-		srv.Close()
-		mu.Lock()
-		if err != nil || len(sent) == 0 || sent[0] != r.auth(tokens[r.script]) {
-			t.Errorf("%s: %v, sent %q, said %q", r.script, err, sent, stderr.String())
+		// tokenFile ends each with a line break: "\r" is a Windows one.
+		for _, after := range []string{"", "\r", "  \t", " \t\r"} {
+			token := tokens[r.script]
+			sent, said, err := askedStandIn(t, r, "127.0.0.1:0", func(port string) string { return "http://127.0.0.1:" + port }, tokenFile(t, token+after))
+			if err != nil || len(sent) == 0 || sent[0] != r.auth(token) {
+				t.Errorf("%s, %q after the token: %v, sent %q, said %q", r.script, after, err, sent, said)
+			}
 		}
-		mu.Unlock()
 	}
 }
 
