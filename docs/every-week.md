@@ -38,4 +38,8 @@ The weekly run replays the rules as they are when it runs; a rule changed
 during the week is judged as it is now. `lapilli serve` doesn't: it records
 each version as it changes. It also sends reports on schedules people set
 themselves, in its UI: each morning over yesterday, each month, at a team's own
-nine o'clock (see [Keep judging](serve.md)).
+nine o'clock (see [Keep judging](serve.md)). With the notifications as they
+were sent, its digest and reports say what they came to, and, from
+Alertmanager's event recorder, how many firings paged no one because a
+silence or an inhibition muted them, and how many with no mute told of
+([Why a firing paged no one](notifications.md#why-a-firing-paged-no-one)).

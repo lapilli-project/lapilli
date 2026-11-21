@@ -1,10 +1,12 @@
 # Mutes: why a firing paged no one
 
-Status: built (schema 029). Under [GOVERNANCE.md](../../GOVERNANCE.md)
-this is a new kind of data in the ledger, so it is written down here, with
-the build, for review as a pull request. It changes no stone: a firing is
-judged as it is now. The companion to [inputs.md](inputs.md), section 1,
-whose "What it doesn't do: Mutes" it settles, and to
+Status: built (schema 029), and counted in the digest and the reports
+later, with no schema change ("Shown"). Under
+[GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
+ledger, so it is written down here, with the build, for review as a pull
+request. It changes no stone: a firing is judged as it is now. The
+companion to [inputs.md](inputs.md), section 1, whose "What it doesn't
+do: Mutes" it settles, and to
 [notifications.md](notifications.md), beside whose notifications it shows.
 
 ## Why
@@ -111,7 +113,17 @@ earliest first, 20 at most, counted after the labels are matched;
   were muted, and its own mute is among them
   (`TestMutedOfBounded`, by the rows read).
 
-The digest and the report don't count them yet (see "Later").
+- **The digest and the reports**, where they say what the notifications
+  sent came to (the weekly digest, a team's, a report's `notifications`,
+  and `digest.ready`'s and `report.ready`'s `notifications.paged_no_one`):
+  of the firings of their rules that started in the span and that no
+  notification told of, how many a silence muted, an inhibition, or
+  either, by what their pages say muted them first; and how many nothing
+  was told of muting, of rules whose notifications were counted by then,
+  those their pages say paged no one. Given once the ledger keeps a mute,
+  over the twelve weeks of notifications the pages tie, as the
+  notifications' own numbers are. Worked out when read, as the pages are:
+  no schema, no tally kept.
 
 ## In the ledger: schema 029
 
@@ -166,6 +178,19 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
   silence or inhibiting alert.
 - **Writes.** One write at a time, with the notifications' turn; a mute a
   replica kept already within a minute takes none.
+- **The count in the digest and the reports.** The span's firings are
+  read without their labels, and those a notification told of passed
+  over. For each rule left, one row of `mutes_rule` says whether a mute of
+  it was told of about them. Only a rule with one has its firings read
+  with their labels, one rule at a time, and its mutes read as a firing's
+  page reads them: the hours about each firing's start and end, each of a
+  rule once, 1,000 rows an hour at most. In all, 200,000 rows of mutes are
+  looked at at most, a row counted once for each firing it is looked at
+  for, and an hour not read yet as the most it can hold. Past that, the
+  firings of rules with mutes not looked at yet are in none of the
+  numbers, and the line says some weren't counted (`partial`). A rule's
+  mutes with no such firing, and its hours between a firing's start and
+  end, aren't read (`TestUnpagedBounded`, by the rows read).
 
 ## Attacker's look
 
@@ -191,13 +216,14 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
   dashes alone. The page escapes them as it does every label.
 - Nothing that can name a person is kept: a silence's comment and creator
   are never read into the ledger.
+- In the digest and the reports, a forged mute counts its firing as
+  muted, as its page says it was, and changes no other number. Mutes that
+  fill the hours of rules with firings that paged no one make the count
+  stop at its most: the line then says some weren't counted, rather than
+  read on.
 
 ## Later
 
-- **A count in the digest and the report**: of the firings that paged no
-  one, those muted. It needs each firing of the week tied to its
-  notifications and mutes, which the digest doesn't do today; a Low
-  follow-up.
 - **The file and Kafka outputs**, as for notifications.
 - **0.33's and 0.34's `mutedAlerts`**: by hash alone, they can't be tied
   to labels without the recorder's `alertGrouped` events, which aren't
