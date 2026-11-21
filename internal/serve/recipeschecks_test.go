@@ -211,3 +211,99 @@ func TestRootlyWaitsTenMinutesInAll(t *testing.T) {
 		}
 	}
 }
+
+// padded is answer with spaces after it, past 16 MiB, its length said
+// first: JSON still, which jq reads.
+func padded(answer string) []byte {
+	b := []byte(answer)
+	for len(b) <= 16<<20 {
+		b = append(b, ' ')
+	}
+	return b
+}
+
+// TestIncidentRecipesTakeNoAnswerOver16MiB: an answer over 16 MiB, a page
+// of incidents or of an incident's alerts, stops a recipe with nothing
+// written, rather than all of it read into the shell.
+func TestIncidentRecipesTakeNoAnswerOver16MiB(t *testing.T) {
+	needTools(t)
+	run := func(name string, handler http.HandlerFunc, env func(url string) []string, script string) {
+		srv := httptest.NewServer(handler)
+		defer srv.Close()
+		cmd := exec.Command("sh", recipes+script)
+		cmd.Env = append(os.Environ(), env(srv.URL)...)
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+			t.Errorf("%s: %v, wrote %d bytes, said %.200q", name, err, stdout.Len(), stderr.String())
+		}
+	}
+	answer := func(b []byte) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+			w.Write(b)
+		}
+	}
+	for _, r := range tokenRecipes() {
+		run(r.script, answer(padded(r.empty)), func(u string) []string {
+			return append(append([]string{}, r.env...), r.api+"="+u, r.token+"="+tokenFile(t, "x"))
+		}, r.script)
+	}
+	// Jira Service Management's list of an incident's alerts.
+	const cloud = "35273b54-3f06-40d2-880f-dd28cf8daafa"
+	big := padded(`{"values": {"alertIds": []}}`)
+	run("jira.sh's alerts", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/api/3/search/jql" {
+			jiraPages(t, w, r)
+			return
+		}
+		answer(big)(w, r)
+	}, func(u string) []string {
+		return []string{"JIRA_URL=" + u, "JIRA_EMAIL=ana@example.com", "JIRA_TOKEN_FILE=" + tokenFile(t, "x"),
+			"JIRA_JQL=project = OPS", "JSM_API=" + u, "JSM_CLOUD_ID=" + cloud}
+	}, "jira.sh")
+}
+
+// jiraPages answers Jira's search with the two pages of the recipes' test
+// data.
+func jiraPages(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	name := "jira-1.json"
+	if r.URL.Query().Get("nextPageToken") != "" {
+		name = "jira-2.json"
+	}
+	w.Write(fixture(t, name))
+}
+
+// TestJiraRefusesAPageOfAlertsAgain: Jira Service Management's incident
+// API pages an incident's alerts by a startKey. One it gave before, not
+// only the one just before, would go round until MAX_ALERT_REQUESTS: it
+// stops the script with nothing written.
+func TestJiraRefusesAPageOfAlertsAgain(t *testing.T) {
+	needTools(t)
+	const cloud = "35273b54-3f06-40d2-880f-dd28cf8daafa"
+	var mu sync.Mutex
+	var keys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/3/search/jql":
+			jiraPages(t, w, r)
+		case "/jsm/incidents/cloudId/" + cloud + "/v1/incident/10001/alert":
+			key := r.URL.Query().Get("startKey")
+			mu.Lock()
+			keys = append(keys, key)
+			mu.Unlock()
+			// 2, then 3, then 2 again.
+			next := map[string]string{"": "2", "2": "3", "3": "2"}[key]
+			fmt.Fprintf(w, `{"values": {"alertIds": []}, "startKey": %s}`, next)
+		default:
+			http.Error(w, `{"errors": [{"code": "BAD_REQUEST"}]}`, http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+	out, said, err := runJira(t, srv.URL, "JSM_API="+srv.URL, "JSM_CLOUD_ID="+cloud, "MAX_ALERT_REQUESTS=20")
+	mu.Lock()
+	defer mu.Unlock()
+	if err == nil || out != "" || !strings.Contains(said, "a page of alerts it gave before") || strings.Join(keys, ",") != ",2,3" {
+		t.Errorf("%v, wrote %q, said %q, asked for pages %q", err, out, said, keys)
+	}
+}

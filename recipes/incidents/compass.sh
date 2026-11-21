@@ -107,7 +107,7 @@ while :; do
   url="$api/alerts?size=100&offset=$offset&sort=createdAt&order=asc"
   [ "$from" = 0 ] || url="$url&from=$from"
   [ -z "${COMPASS_QUERY:-}" ] || url="$url&query=$(printf '%s' "$COMPASS_QUERY" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$proto" --max-time 30 -H @- -H 'Accept: application/json' "$url")
+  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
   printf '%s' "$page" | jq -c '.values[]' >>"$all"
   # The next page is the next offset: a link the API gives isn't followed.
   [ -n "$(printf '%s' "$page" | jq -r '.links.next // empty')" ] || break
@@ -138,7 +138,7 @@ for id in $(jq -s -r --arg from "$from" --slurpfile closes "$closes.json" -f "$h
     pages=$((pages + 1))
     url="$api/alerts/$id/logs?size=100"
     [ -z "$after" ] || url="$url&after=$after"
-    page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$proto" --max-time 30 -H @- -H 'Accept: application/json' "$url")
+    page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
     closed=$(printf '%s' "$page" | jq -r --arg since "$closed" -f "$here/compass-closed.jq")
     next=$(printf '%s' "$page" | jq -r '.links.next // empty')
     [ -n "$next" ] || break

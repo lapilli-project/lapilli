@@ -73,7 +73,7 @@ while :; do
     '{query: ({limit: 100, orderDirection: "ASC"} + (if $from == "" then {} else {dateFrom: $from} end))}
       + (if $next == "" then {} else {cursor: {nextValue: $next, hasMore: true}} end)')
   page=$(printf 'Authorization: Bearer %s\n' "$token" |
-    curl -q -fsS --proto "$proto" --max-time 30 -H @- -H 'Content-Type: application/json; charset=utf-8' --data-binary "$body" "$url")
+    curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Content-Type: application/json; charset=utf-8' --data-binary "$body" "$url")
   # The API can answer 200 and say what went wrong.
   err=$(printf '%s' "$page" | jq -r '.error // empty')
   if [ -n "$err" ]; then

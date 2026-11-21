@@ -68,13 +68,13 @@ trap 'exit 1' INT TERM HUP
 # get URL: a page, on stdout. Rootly takes five GETs a minute: a 429 is
 # waited out as its Retry-After says, or else a minute; two minutes at most
 # a wait, five waits a request and ten minutes in all a run. Past them, and
-# on any answer but a 2xx, it fails. Its waits are counted in a file, as
-# each $(get ...) is a shell of its own.
+# on any answer but a 2xx, or one over 16 MiB, it fails. Its waits are
+# counted in a file, as each $(get ...) is a shell of its own.
 get() {
   waits=0
   while :; do
     code=$(printf 'Authorization: Bearer %s\n' "$token" |
-      curl -q -sS --proto "$proto" --max-time 30 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+      curl -q -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
     case $code in
       2??)
         cat "$got"

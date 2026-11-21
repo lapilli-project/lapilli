@@ -146,7 +146,7 @@ while :; do
   fi
   url="$JIRA_URL/rest/api/3/search/jql?jql=$jql&maxResults=100&fields=$fields"
   [ -z "$next" ] || url="$url&nextPageToken=$(printf '%s' "$next" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$site" --max-time 30 -H @- -H 'Accept: application/json' "$url")
+  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$site" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
   printf '%s' "$page" | jq -c '.issues[]' >>"$all"
   was=$next
   next=$(printf '%s' "$page" | jq -r 'if .isLast then empty else .nextPageToken // empty end')
@@ -170,17 +170,17 @@ if [ "$alerts" = yes ]; then
       exit 1
     fi
   }
-  # get URL: JSM's answer in $got, its status in $code. A 429 is waited
-  # out as its Retry-After says, two minutes at most, five times a request
-  # and ten minutes in all a run; without one, 5 seconds, then twice as
-  # long each time. Called in this shell, not in $(...), which would
-  # forget the code.
+  # get URL: JSM's answer in $got, its status in $code; one over 16 MiB
+  # stops the script. A 429 is waited out as its Retry-After says, two
+  # minutes at most, five times a request and ten minutes in all a run;
+  # without one, 5 seconds, then twice as long each time. Called in this
+  # shell, not in $(...), which would forget the code.
   get() {
     waits=0
     backoff=5
     while :; do
       code=$(printf 'Authorization: Basic %s\n' "$auth" |
-        curl -q -sS --proto "$jsmproto" --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || exit 1
+        curl -q -sS --proto "$jsmproto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || exit 1
       [ "$code" = 429 ] || return 0
       waits=$((waits + 1))
       wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
@@ -215,6 +215,9 @@ if [ "$alerts" = yes ]; then
     esac
     : >"$alertIDs"
     key=
+    # The keys of the issue's pages so far: one given again would go round
+    # until MAX_ALERT_REQUESTS.
+    keys=' '
     while :; do
       url="$jsm/jsm/incidents/cloudId/$cloud/v1/incident/$issue/alert"
       [ -z "$key" ] || url="$url?startKey=$key"
@@ -237,7 +240,6 @@ if [ "$alerts" = yes ]; then
         exit 1
       fi
       jq -r '(.values.alertIds // [])[]' "$got" >>"$alertIDs"
-      was=$key
       key=$(jq -r '.startKey // empty' "$got")
       [ -n "$key" ] || break
       case $key in
@@ -246,10 +248,13 @@ if [ "$alerts" = yes ]; then
           exit 1
           ;;
       esac
-      if [ "$key" = "$was" ]; then
-        printf 'jira.sh: the incident API gave the same page of alerts again; stopping, writing nothing\n' >&2
-        exit 1
-      fi
+      case $keys in
+        *" $key "*)
+          printf 'jira.sh: the incident API gave a page of alerts it gave before; stopping, writing nothing\n' >&2
+          exit 1
+          ;;
+      esac
+      keys="$keys$key "
     done
     while IFS= read -r alert; do
       case $alert in

@@ -87,7 +87,7 @@ count() {
     exit 1
   fi
 }
-get() { printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 -H @- "$1"; }
+get() { printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$1"; }
 after=
 pages=0
 while :; do
@@ -99,7 +99,7 @@ while :; do
   url="$api/v2/incidents?page_size=100"
   [ -z "$after" ] || url="$url&after=$(printf '%s' "$after" | jq -sRr @uri)"
   [ -z "${SINCE:-}" ] || url="$url&created_at%5Bgte%5D=$(printf '%s' "$SINCE" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 -H @- "$url")
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$url")
   printf '%s' "$page" | jq -c '.incidents[]' >>"$all"
   was=$after
   after=$(printf '%s' "$page" | jq -r '.pagination_meta.after // empty')

@@ -160,8 +160,9 @@ others as its labels; the `details` you set are among them too, so
 
 An issue the incident API answers 400 for isn't an incident, as it says,
 and has no alerts read; an alert the operations API no longer has (404)
-is left out. Each is counted on stderr. Anything else it answers stops
-the script with nothing written; a 429 is waited out as its `Retry-After`
+is left out. Each is counted on stderr. Anything else it answers, and a
+page of alerts it gave before, stops the script with nothing written; a
+429 is waited out as its `Retry-After`
 says, two minutes at most, five times a request and ten minutes a run.
 `ALERTS=no` reads none.
 
@@ -274,7 +275,8 @@ exits non-zero.
 The port takes one write at a time, 20 a second, with bursts of 40; past that it
 answers 429, and `put.sh` waits and tries again. The ledger keeps 20,000 copied
 incidents at most. A script stops after `MAX_PAGES` pages
-(1000), or when the tool gives the same page again, and then writes nothing.
+(1000), when the tool gives the same page again, or at an answer over 16 MiB,
+and then writes nothing.
 
 In the chart:
 
