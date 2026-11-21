@@ -9,13 +9,18 @@
 # A job is reached by what its script builds, runs, sources or mounts:
 # lapilli itself, which each one builds (go.mod, go.sum, cmd/ and
 # internal/, but their tests and testdata), the script, and what it reads
-# of the repository. A path that reaches none is named so (Markdown, docs/,
-# site/, assets/, Go's tests and test/shard.sh, other workflows); a path
-# named nowhere here reaches every job.
+# of the repository. e2e-compat, which replays against Thanos and
+# VictoriaMetrics, is reached by the packages that read the history and
+# replay it alone (internal/prom, internal/replay, internal/rules and
+# internal/source), not by the rest of lapilli. A path that reaches none
+# is named so (Markdown, docs/, site/, assets/, Go's tests and
+# test/shard.sh, other workflows); a path named nowhere here reaches every
+# job.
 # shellcheck disable=SC2086 # a list of jobs, split into its ids
 set -euo pipefail
 
-jobs="e2e e2e-replicas e2e-serve-lb e2e-service e2e-postgres e2e-signin e2e-changes e2e-backtest e2e-loki e2e-rendered e2e-dashboard e2e-ratelimit"
+lapilli="e2e e2e-replicas e2e-serve-lb e2e-service e2e-postgres e2e-signin e2e-changes e2e-backtest e2e-loki e2e-rendered e2e-dashboard e2e-ratelimit"
+jobs="$lapilli e2e-compat"
 chart="e2e e2e-replicas e2e-serve-lb e2e-service e2e-rendered e2e-dashboard"
 image="e2e e2e-replicas e2e-serve-lb e2e-service"
 
@@ -31,7 +36,9 @@ while IFS= read -r f || [ -n "$f" ]; do
     go.mod | go.sum | .github/workflows/ci.yml | test/e2e/reached.sh) to $jobs ;;
     *.md | docs/* | site/* | assets/* | .github/* | LICENSE | .gitignore) ;;
     *_test.go | */testdata/* | test/shard.sh | test/screenshots/*) ;;
-    cmd/* | internal/*) to $jobs ;;
+    # what reads the history and replays it, which e2e-compat checks too
+    internal/prom/* | internal/replay/* | internal/rules/* | internal/source/*) to $jobs ;;
+    cmd/* | internal/*) to $lapilli ;;
     charts/*) to $chart ;;
     Dockerfile | .dockerignore) to $image ;;
     test/e2e/stack.yaml) to e2e e2e-replicas e2e-serve-lb ;;
@@ -50,6 +57,7 @@ while IFS= read -r f || [ -n "$f" ]; do
     test/e2e/rendered.sh | recipes/versions/*) to e2e-rendered ;;
     test/e2e/dashboard.sh) to e2e-dashboard ;;
     test/e2e/ratelimit.sh) to e2e-ratelimit ;;
+    test/e2e/compat.sh) to e2e-compat ;;
     # the other recipes are run by Go's tests, against stand-ins
     recipes/firings/* | recipes/incidents/* | recipes/trackers/*) ;;
     *) to $jobs ;;

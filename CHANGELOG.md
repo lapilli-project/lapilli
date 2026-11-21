@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Thanos and VictoriaMetrics, checked in CI.** A new job, `e2e-compat`
+  (`test/e2e/compat.sh`), runs `lapilli verdict` and `--check-replay`
+  against a real Thanos 0.42.5 (a sidecar and its query) and a real
+  VictoriaMetrics 1.156.0 with vmalert 1.156.0, beside the Prometheus they
+  read or are written by: the same firings, each its rule, labels, start
+  and end, as against Prometheus; every firing alike with `ALERTS`,
+  Prometheus's through Thanos and vmalert's in VictoriaMetrics; and
+  `--loaded-rules` reading vmalert's rules through VictoriaMetrics. A pull
+  request runs it when it changes `internal/prom`, `internal/replay`,
+  `internal/rules`, `internal/source` or the script. Not a required check.
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.

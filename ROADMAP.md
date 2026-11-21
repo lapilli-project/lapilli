@@ -143,6 +143,11 @@ Prometheus, CloudWatch's PromQL API, Azure Monitor and Google Cloud Managed
 Service for Prometheus.
 
 - The Google path has been run against a real project.
+- Thanos 0.42.5 (a sidecar and its query) and VictoriaMetrics 1.156.0,
+  with vmalert 1.156.0: the CI job `e2e-compat` runs `lapilli verdict`
+  and `--check-replay` against them, beside the Prometheus they read or
+  are written by, and `--loaded-rules` on vmalert's rules. Mimir 3.2.4
+  runs in `e2e-changes`.
 - AWS and Azure are tested against SigV4 and token checks written apart from
   the SDKs, but not yet against a real workspace.
 - CloudWatch PromQL alarms and Google Cloud PromQL policies are read from
@@ -155,7 +160,8 @@ Service for Prometheus.
 A contributor with an account could run `lapilli verdict --check-replay`
 there, report what differs, and keep a check that does it. It also needs
 finding out which of these keep a series of what really fired: `ALERTS` is
-documented for Amazon Managed Service for Prometheus, and not for the others.
+documented for Amazon Managed Service for Prometheus, and not for the others
+(vmalert writes it, and Thanos serves its Prometheus's, in `e2e-compat`).
 
 ## Pull request backtests
 
