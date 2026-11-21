@@ -145,3 +145,22 @@ func TestSeriesLimitMimir(t *testing.T) {
 		t.Error("one evaluation over the limit should fail")
 	}
 }
+
+// An error a client gives, of a history that couldn't be reached, says its
+// URL without its query's values, nor a password: a history's URL may
+// carry a token there (?token=), which the commands print as text and in
+// JSON.
+func TestRefusedURLRedacted(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	addr := srv.URL
+	srv.Close() // nothing listens there now
+	for _, base := range []string{addr + "/?token=S3CR3TVALUE", addr + "/?S3CR3TVALUE", strings.Replace(addr, "://", "://u:S3CR3TVALUE@", 1) + "/p?a=b&key=S3CR3TVALUE"} {
+		_, err := New(base, "test").QueryRange(context.Background(), "up", time.Now().Add(-time.Hour), time.Now(), time.Minute)
+		if err == nil || strings.Contains(err.Error(), "S3CR3T") || !strings.Contains(err.Error(), "[redacted]") {
+			t.Errorf("%s: %v", base, err)
+		}
+	}
+	if got := shownURL("https://prom.example/api/v1/query?query=up&token=S3CR3TVALUE#x"); got != "https://prom.example/api/v1/query?query=[redacted]&token=[redacted]" {
+		t.Errorf("shownURL: %s", got)
+	}
+}

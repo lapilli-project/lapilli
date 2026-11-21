@@ -361,6 +361,34 @@ func redact(msg string, secrets []string) string {
 	})
 }
 
+// shownURL is a request's URL as an error says it: each value of its query
+// said as [redacted], and a password in it as net/url redacts one. A
+// history's URL may carry a token in its query (?token=), which an error
+// a client gives, such as one that couldn't connect, says whole: the
+// commands print it, as text and in JSON.
+func shownURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		if i := strings.IndexAny(raw, "?#"); i >= 0 {
+			raw = raw[:i]
+		}
+		return raw
+	}
+	if u.RawQuery != "" {
+		var keys []string
+		for _, kv := range strings.Split(u.RawQuery, "&") {
+			if k, _, ok := strings.Cut(kv, "="); ok {
+				keys = append(keys, k+"=[redacted]")
+			} else {
+				keys = append(keys, "[redacted]")
+			}
+		}
+		u.RawQuery = strings.Join(keys, "&")
+	}
+	u.Fragment, u.RawFragment = "", ""
+	return u.Redacted()
+}
+
 // sent is what req carried to sign in: its Authorization header, and each
 // part of it (a token, a signature, a credential), an AWS session token,
 // and a password in its URL, which net/http sends as Basic; the longest
@@ -1076,6 +1104,9 @@ func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read fu
 	}
 	resp, err := c.http.Do(req)
 	countAnswer(ctx, c.kind(), resp)
+	if ue := (*url.Error)(nil); errors.As(err, &ue) {
+		ue.URL = shownURL(ue.URL)
+	}
 	if err != nil {
 		if dropped(err) {
 			// As an API shedding load does, by closing connections: as a
