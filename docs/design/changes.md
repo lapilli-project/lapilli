@@ -741,7 +741,14 @@ pages work it out.
   its own, as it will be once it is: a team's editor adds only what their
   team would own so, asked of the labels given before anything is read
   and again of them as read back; its approvers, freezes and `changes_in`
-  are that team's ([expectations.md](expectations.md), step 5).
+  are that team's ([expectations.md](expectations.md), step 5). Where it
+  goes isn't held to the team: a team's editor may add their team's rule
+  to a rule file's group, a Grafana folder's group or a cloud's alarms
+  that hold only another team's rules, and their approvers approve it
+  there; the place's own rules are left as they were, and a pull request
+  to the file shows the place's owners what came in. Through a ruler's or
+  a cloud's API, a team's `changes_in` holds it to the places it names;
+  in a rule file, nothing does but the pull request's review.
   Agents keep today's rules: `--mcp-propose` is an editor's of every team,
   or an admin's, and an agent proposes as before.
 - **A team's approvers** (`approvers:` under a team) approve a proposal
