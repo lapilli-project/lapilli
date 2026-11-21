@@ -308,7 +308,8 @@ as the rules in effect have it, written to a file serve makes, the test
 file's `rule_files` rewritten to name that file alone: promtool is started
 directly, with no environment but its `TMPDIR`, in a process group of its
 own killed whole at 30s, 64 KiB of what it says at most, and, on Linux,
-`--promtool-memory` (256Mi unless given) of memory (its RLIMIT_DATA: a
+`--promtool-memory` (256Mi unless given) of memory, and files of 256 MiB
+at most (its RLIMIT_DATA and RLIMIT_FSIZE: a
 rule's annotation template can ask promtool for gigabytes; promtool's
 release, built without cgo, starts in less than 64Mi, while one built
 with cgo maps 8 MiB more for each of its threads, so give it 512Mi; macOS

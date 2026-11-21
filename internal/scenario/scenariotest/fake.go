@@ -166,9 +166,11 @@ func fake() int {
 		}
 		return wrong("not released")
 	case mode == "see":
-		var lim syscall.Rlimit
+		var lim, file syscall.Rlimit
 		syscall.Getrlimit(syscall.RLIMIT_DATA, &lim)
-		return failed(fmt.Sprintf("args %q", os.Args[1:]), fmt.Sprintf("env %q", env), fmt.Sprintf("rlimit_data %d", lim.Cur), "rules.yaml:", string(group))
+		syscall.Getrlimit(syscall.RLIMIT_FSIZE, &file)
+		return failed(fmt.Sprintf("args %q", os.Args[1:]), fmt.Sprintf("env %q", env), fmt.Sprintf("rlimit_data %d", lim.Cur),
+			fmt.Sprintf("rlimit_fsize %d", file.Cur), "rules.yaml:", string(group))
 	}
 	return wrong("no such mode %q", mode)
 }

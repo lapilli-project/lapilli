@@ -711,8 +711,10 @@ Step 4, scenarios, as built:
   its own (`lapilli-promtool-capped`, never a command a person gives,
   which reads promtool's path and the cap from its environment and refuses
   any other argument or variable), which sets RLIMIT_DATA, hard and soft,
-  to the cap and executes promtool in its place with the same fixed
-  arguments and `TMPDIR` alone. Past it promtool's allocations fail, Go's
+  to the cap, and RLIMIT_FSIZE to 256 MiB, as much as the chart's
+  `scenarios-tmp` volume holds (promtool keeps its TSDB in `TMPDIR`, and
+  is stopped past it), and executes promtool in its place with the same
+  fixed arguments and `TMPDIR` alone. Past it promtool's allocations fail, Go's
   runtime says so, and the scenario is not known (`promtool took more
   memory than it may`). RLIMIT_DATA rather than RLIMIT_AS: since Linux 4.7
   it holds every private writable mapping, Go's heap among them, while

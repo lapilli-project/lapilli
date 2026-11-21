@@ -70,6 +70,14 @@ type Promtool struct {
 // of MiB as it starts, before reading a test.
 const MinMemory = 64 << 20
 
+// MaxFile is the most a file promtool writes may hold, RLIMIT_FSIZE, set
+// with its memory cap where one can be (CanCap): its TSDB is kept in its
+// TMPDIR, which in the chart is a volume of the pod's (scenarios-tmp,
+// 256 MiB), so that a test can't fill the node's disk with one file
+// before the volume's limit evicts the pod. Past it, promtool is stopped
+// (SIGXFSZ).
+const MaxFile = 256 << 20
+
 // The memory cap's wrapper: Lapilli started again under capName, told
 // promtool's path and the cap by capPath and capMemory, which it alone
 // reads; it exits capFailed, saying "lapilli: " and why, when it can't
