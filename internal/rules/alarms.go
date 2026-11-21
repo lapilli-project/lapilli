@@ -216,16 +216,28 @@ type query struct {
 	setFor func(time.Duration) error
 }
 
+// cloudWatchPeriod is the longest PendingPeriod, and RecoveryPeriod, a
+// CloudWatch PromQL alarm takes: 86,400 seconds (AlarmPromQLCriteria's
+// valid range, 0 to 86400).
+const cloudWatchPeriod = 86400 * time.Second
+
+// AlarmFor reports whether a cloud's alarm takes a duration as its for, as
+// it writes one: whole seconds, none less than nothing; CloudWatch's
+// PendingPeriod, and its RecoveryPeriod (keep_firing_for), a day at most.
+// A Google policy's duration is whole seconds ("600s"), as Lapilli writes
+// it.
+func AlarmFor(cloud string, d time.Duration) bool {
+	most := never
+	if cloud == "cloudwatch" {
+		most = cloudWatchPeriod
+	}
+	return d >= 0 && d <= most && d%time.Second == 0
+}
+
 // alarmQuery is where a PromQL alarm keeps its query and its for:
 // CloudWatch's PromQLCriteria, an Azure metric alert's one criterion and
 // its failingPeriods, a Google policy's condition.
 func alarmQuery(a map[string]any, r Rule) (query, error) {
-	whole := func(d time.Duration, most time.Duration) error {
-		if d < 0 || d > most || d%time.Second != 0 {
-			return ErrNotEditable
-		}
-		return nil
-	}
 	switch r.Cloud {
 	case "cloudwatch":
 		crit, _ := a["EvaluationCriteria"].(map[string]any)
@@ -234,8 +246,8 @@ func alarmQuery(a map[string]any, r Rule) (query, error) {
 			return query{}, ErrNotEditable
 		}
 		return query{pq, "Query", func(d time.Duration) error {
-			if err := whole(d, 86400*time.Second); err != nil {
-				return err
+			if !AlarmFor(r.Cloud, d) {
+				return ErrNotEditable
 			}
 			pq["PendingPeriod"] = json.Number(fmt.Sprint(int64(d / time.Second)))
 			return nil
@@ -271,8 +283,8 @@ func alarmQuery(a map[string]any, r Rule) (query, error) {
 			return query{}, ErrNotEditable
 		}
 		return query{pq, "query", func(d time.Duration) error {
-			if err := whole(d, never); err != nil {
-				return err
+			if !AlarmFor(r.Cloud, d) {
+				return ErrNotEditable
 			}
 			pq["duration"] = fmt.Sprintf("%ds", int64(d/time.Second))
 			return nil

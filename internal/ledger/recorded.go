@@ -464,6 +464,21 @@ func (l *Ledger) Coverage(ctx context.Context, source string) (from, to time.Tim
 	return unix(last[0]), unix(last[1]), nil
 }
 
+// Spans are what a source's copies cover, each span without a gap, the
+// earliest first, as many as the ledger keeps (maxSpans): Coverage is the
+// last. None for a source never written.
+func (l *Ledger) Spans(ctx context.Context, source string) ([][2]time.Time, error) {
+	spans, err := l.spans(ctx, l.r, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][2]time.Time, 0, len(spans))
+	for _, s := range spans {
+		out = append(out, [2]time.Time{unix(s[0]), unix(s[1])})
+	}
+	return out, nil
+}
+
 // checkRecorded checks a write of a source's firings before it is made, at
 // now.
 func checkRecorded(source string, from, to time.Time, fs []firing.Firing, now time.Time) error {

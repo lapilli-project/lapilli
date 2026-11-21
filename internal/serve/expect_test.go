@@ -426,7 +426,7 @@ func TestExpectationPages(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("%d %s", code, body)
 	}
-	for _, want := range []string{"at most 4 a week", "Held by rule: Paged, in the expectations file.", "catches INC-A within 5m", `action="/expectations/task"`,
+	for _, want := range []string{"at most 4 a week", "Held by rule: Paged, in the expectations file.", "catches <bdi>INC-A</bdi> within 5m", `action="/expectations/task"`,
 		"week of 2026-10-19: broken, 5", `aria-current="page">Expectations <span class="count">2</span>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the tab: no %q", want)

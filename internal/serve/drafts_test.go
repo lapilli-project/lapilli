@@ -120,7 +120,7 @@ func TestTestExpectation(t *testing.T) {
 		t.Errorf("the catch, rewritten: %+v", it)
 	}
 	for _, want := range []string{"#### An agent's rewrite of `Errors`, backtested by Lapilli", "An agent wrote this rewrite, not Lapilli",
-		"| at most 10 a week |", "-for: 2m", "+for: 15m", "```diff"} {
+		"every expectation the agent gave with it", "| at most 10 a week |", "-for: 2m", "+for: 15m", "```diff"} {
 		if !strings.Contains(out.Post, want) {
 			t.Errorf("the post: no %q in\n%s", want, out.Post)
 		}

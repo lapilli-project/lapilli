@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,26 +46,94 @@ var expectWhyText = map[string]string{
 	whyRunFailed:      "promtool couldn't run it",
 }
 
-// expectHeldText is what an expectation holds a rule to, for a person.
-func expectHeldText(l string, c ledger.ExpectCheck) string {
+// expectSaid are the reasons Lapilli writes itself beside a check or a
+// draft's item, kept in English in the ledger (a scenario's detail when
+// promtool didn't say it fails, a draft's items' why), as each is written:
+// shown in the reader's language by its words, with no schema change
+// (reasonText). What promtool or a YAML parser said is shown as it said it.
+var expectSaid = map[string]bool{
+	scenarioBegun: true, scenarioStopped: true,
+	// scenario.Run's.
+	"no directory to run it in": true, "its files couldn't be written": true, "promtool couldn't be started": true,
+	"stopped: the run's time ran out": true, "promtool crashed": true, "promtool's answer isn't one it gives": true,
+	// scenario.ReadTest's and scenario.Rewrite's, of a test file.
+	"no directory to read it in": true, "not a file": true, "no such file": true, "not let in": true,
+	"it leads outside the expectations file's directory": true, "it couldn't be read": true, "it is empty": true,
+	"one document only, as promtool reads one": true, "want a mapping, as promtool's test files are": true, "it holds no tests": true,
+	// A draft's items' (checkHeld, draftRun).
+	"the replay didn't finish in time": true, "no one's hours say when people sleep": true,
+	"the incident isn't written down in the period replayed": true, "not run: serve has no --promtool": true,
+	"its test file can't be read": true, "not run: another agent's scenario is running; try again in a minute": true,
+	"not a rule in Prometheus's format, which promtool runs": true, "its group couldn't be written": true,
+}
+
+// expectSaidAs are the reasons Lapilli writes with a number, a time or a
+// name in them: matched by their words, the rest put in.
+var expectSaidAs = []struct {
+	re  *regexp.Regexp
+	key string
+}{
+	{regexp.MustCompile(`^promtool took longer than (\S+)$`), "promtool took longer than %s"},
+	{regexp.MustCompile(`^promtool took more memory than it may \((\d+) MiB\)$`), "promtool took more memory than it may (%s MiB)"},
+	{regexp.MustCompile(`^promtool exited (-?\d+), saying what it doesn't say of a test$`), "promtool exited %s, saying what it doesn't say of a test"},
+	{regexp.MustCompile(`^more than (\d+) bytes$`), "more than %s bytes"},
+	{regexp.MustCompile(`^line (\d+): a key promtool's test files don't have: want (.+)$`), "line %s: a key promtool's test files don't have: want %s"},
+	{regexp.MustCompile(`^line (\d+): tests is a list of tests, one at least$`), "line %s: tests is a list of tests, one at least"},
+	{regexp.MustCompile(`^it couldn't be replayed: (.+)$`), "it couldn't be replayed: %s"},
+}
+
+// reasonText is a reason Lapilli wrote itself in language l (expectSaid,
+// expectSaidAs); any other text as it is.
+func reasonText(l, s string) string {
+	if expectSaid[s] {
+		return tr(l, s)
+	}
+	for _, x := range expectSaidAs {
+		if m := x.re.FindStringSubmatch(s); m != nil {
+			args := make([]any, len(m)-1)
+			for i, v := range m[1:] {
+				args[i] = v
+			}
+			return tr(l, x.key, args...)
+		}
+	}
+	return s
+}
+
+// expectValueText is a check's value in language l: a scenario's passes
+// or fails, Lapilli's words; a number or a delay as it is.
+func expectValueText(l, v string) string {
+	if v == "passes" || v == "fails" {
+		return tr(l, v)
+	}
+	return v
+}
+
+// expectHeldText is what an expectation holds a rule to, for a person: an
+// incident's id, which comes from outside, in a <bdi>, as a name in a
+// sentence is (trBDI), so that one written right to left doesn't turn
+// the words around it.
+func expectHeldText(l string, c ledger.ExpectCheck) template.HTML {
+	esc := template.HTMLEscapeString
+	plain := func(s string) template.HTML { return template.HTML(esc(s)) }
 	switch c.What {
 	case "budget week":
-		return tr(l, "at most %s a week", c.Held)
+		return plain(tr(l, "at most %s a week", c.Held))
 	case "budget asleep":
-		return tr(l, "at most %s a week while people slept", c.Held)
+		return plain(tr(l, "at most %s a week while people slept", c.Held))
 	case "budget refires":
-		return tr(l, "at most %s re-fires a week", c.Held)
+		return plain(tr(l, "at most %s re-fires a week", c.Held))
 	case "budget":
-		return tr(l, "a budget")
+		return plain(tr(l, "a budget"))
 	}
 	if c.Scenario() {
-		return tr(l, "passes the scenario %s", strings.TrimPrefix(c.What, "scenario "))
+		return plain(tr(l, "passes the scenario %s", strings.TrimPrefix(c.What, "scenario ")))
 	}
-	inc := strings.TrimPrefix(c.What, "catches ")
+	inc := "<bdi>" + esc(strings.TrimPrefix(c.What, "catches ")) + "</bdi>"
 	if c.Held == "caught" {
-		return tr(l, "catches %s", inc)
+		return template.HTML(fmt.Sprintf(esc(tr(l, "catches %s")), inc))
 	}
-	return tr(l, "catches %s %s", inc, tr(l, "within %s", strings.TrimPrefix(c.Held, "within ")))
+	return template.HTML(fmt.Sprintf(esc(tr(l, "catches %s %s")), inc, esc(tr(l, "within %s", strings.TrimPrefix(c.Held, "within ")))))
 }
 
 // expectCell is a check as a cell: its colour, sign, value and what it
@@ -74,7 +144,7 @@ type expectCell struct {
 }
 
 func expectCellOf(l string, c ledger.ExpectCheck, week string) expectCell {
-	x := expectCell{Week: week, Value: c.Value}
+	x := expectCell{Week: week, Value: expectValueText(l, c.Value)}
 	switch c.Result {
 	case ledger.ExpectMet:
 		x.Class, x.Sign = statusClass("expect", "met"), "✓"
@@ -108,15 +178,16 @@ var expectResultText = map[string]string{
 // found, and what promtool said); its task open, and, broken, the row a
 // task is made of.
 type expectLine struct {
-	Expect, Held, Selector, Source string
-	Catch, Scenario                bool
-	Weeks                          []expectCell
-	Last                           expectCell
-	Incident, IncidentAt           string
-	Found, Detail                  string
-	Broken                         bool
-	Task                           int64
-	Week                           string // the row a task is made of: its week, as days
+	Held                     template.HTML
+	Expect, Selector, Source string
+	Catch, Scenario          bool
+	Weeks                    []expectCell
+	Last                     expectCell
+	Incident, IncidentAt     string
+	Found, Detail            string
+	Broken                   bool
+	Task                     int64
+	Week                     string // the row a task is made of: its week, as days
 }
 
 // expectView is a rule's expectations: each, how many are broken, and
@@ -175,6 +246,11 @@ func (s *Server) expectViewOf(ctx context.Context, l, rule string) (*expectView,
 		}
 		if c.Scenario() {
 			x.Last, x.Detail = expectCellOf(l, c, ""), c.Detail
+			if c.Result != ledger.ExpectBroken {
+				// Lapilli's words, why it couldn't be run or its test
+				// file read; broken, promtool's, as it said them.
+				x.Detail = reasonText(l, c.Detail)
+			}
 			if !c.Checked.IsZero() {
 				x.Found = c.Checked.In(s.cfg.Loc).Format("2006-01-02 15:04")
 			}

@@ -29,20 +29,26 @@ A new rule is proposed too, from the proposals page's **Propose a new
 rule** or an agent's `propose` (kind `add`), held to what it is to do
 before anyone approves it
 ([docs/design/expectations.md](design/expectations.md), step 5): one
-Prometheus alerting rule, named apart from every rule, a place among those
-serve offers (a rule file's group or a new one, a Grafana folder's group,
-a ruler namespace's group or a new one, CloudWatch's or Google Cloud's
-alarms), whom it tells among whom the rules there already tell (in
+Prometheus alerting rule, named apart from every rule (one added and
+applied through an API counts before the rules are read again), a place
+among those serve offers (a rule file's group or a new one, a Grafana
+folder's group, not of a folder whose title another folder has too, a
+ruler namespace's group or a new one, CloudWatch's or Google Cloud's
+alarms, with a `for` the cloud takes: whole seconds, in CloudWatch a day
+at most), whom it tells among whom the rules there already tell (in
 Grafana, one of their contact points where each of them names one, none
 where none does; in CloudWatch, an SNS topic, an OpsItem or a response
 plan, never a Lambda function or an automation; in a rule file or a ruler,
 no one: its labels route it through Alertmanager), and one expectation at
 least; its labels are plain text, and with its group's they say its team,
-whose editors may propose it and whose approvers, freezes and
-`changes_in` hold it. Lapilli writes the rule itself where it
-goes, replays it over the twelve weeks with nothing beside it, and holds
-it to each expectation; no one approves it while one is broken, or its
-backtest didn't replay it. It goes the way a change goes there; undone,
+whose editors may propose it (and are shown its form) and whose
+approvers, freezes and `changes_in` hold it. Lapilli writes the rule
+itself where it goes, replays it over the twelve weeks with nothing
+beside it, and holds it to each expectation; no one approves it while
+one is broken, or its backtest didn't replay it, and it isn't carried
+out once checked again if one is broken, one it met as it was approved
+isn't known now, or its group's labels give it another team than as it
+was proposed. It goes the way a change goes there; undone,
 the rule is deleted; once added, its expectations go where an accepted
 draft of them goes ([Keep judging](serve.md)).
 

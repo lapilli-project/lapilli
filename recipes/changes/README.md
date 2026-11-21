@@ -49,8 +49,10 @@ Each also needs:
   (docs/design/expectations.md, step 3) gets a pull request to that file
   alone (`lapilli/LEDGER/expectations-ID`), with the file as Lapilli wrote
   it, the draft taken in: only while the file in the repository is the one
-  lapilli serve read (by its sha256), only when it is a tracked, non
-  executable `*.yml` or `*.yaml` that no CI system runs, and only when it
+  lapilli serve read (by its sha256, one newline more or less at its end
+  aside, as a chart's ConfigMap gives it, and nothing else), only when it
+  is a tracked, non executable `*.yml` or `*.yaml` that no CI system runs,
+  and only when it
   and what Lapilli wrote are each an expectations file, one document whose
   only key is `expectations`. Otherwise Lapilli is told it failed, and
   why, and nothing is pushed. Without `EXPECT_FILE`, those accepted wait,

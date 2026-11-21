@@ -293,7 +293,7 @@ type testExpectOut struct {
 	// Meets says the rewrite meets each, losing no catch; Post, then, is
 	// the text to post on the pull request.
 	Meets bool   `json:"meets" jsonschema:"of a rewrite: the rule as it is and rewritten each replayed to the end, held to one expectation at least, it meets each (not known is never met) and loses no incident the rule catches"`
-	Post  string `json:"post,omitempty" jsonschema:"of a rewrite that meets each: Markdown you or a person may post on the pull request, marked as an agent's rewrite backtested by Lapilli, with the numbers before and after. Lapilli posts nothing itself. Not given otherwise"`
+	Post  string `json:"post,omitempty" jsonschema:"of a rewrite that meets each: Markdown you or a person may post on the pull request, marked as an agent's rewrite backtested by Lapilli, saying whose expectations it meets (serve's own for the rule, or the ones given, as held_by says), with the numbers before and after. Lapilli posts nothing itself. Not given otherwise"`
 	Note  string `json:"note,omitempty"`
 }
 
@@ -466,7 +466,7 @@ func (s *Server) checkHeld(ctx context.Context, rule, text, rewrite string, test
 	c.out.Meets = verdict.RewriteMeets(results, c.out.Lost, c.sides[0], c.sides[1])
 	if c.out.Meets {
 		c.out.Post = verdict.RewriteMarkdown(verdict.Rewritten{Rule: rule, From: c.out.From, To: c.out.To, Fired: c.out.Fired, Caught: c.out.Caught,
-			Results: results}, rules.Diff(rule, []byte(ruleText(r)), []byte(ruleText(came[0]))))
+			Results: results, Given: c.out.HeldBy == "given"}, rules.Diff(rule, []byte(ruleText(r)), []byte(ruleText(came[0]))))
 	}
 	switch why := unreplayed(c.sides); {
 	case len(results) == 0:

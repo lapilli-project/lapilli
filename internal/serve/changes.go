@@ -1668,11 +1668,13 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 
 // checkAddAgain checks an approved proposal adding a rule against the
 // rules and the history as they are now (addAgain): refused when its
-// place is gone, a rule of its name is in effect, or, held to its
-// expectations again, it breaks one or isn't replayed to the end. On the
-// git path, a file whose other lines changed since gets the rule written
-// afresh in it, and the file as it was is kept for undo; through an API,
-// the rule is written where it goes as it is read there just before.
+// place is gone, a rule of its name is in effect, its group's labels read
+// back give it another team than owned it as it was proposed, or, held to
+// its expectations again, it breaks one, isn't replayed to the end, or
+// one it met as it was approved isn't known now. On the git path, a file
+// whose other lines changed since gets the rule written afresh in it, and
+// the file as it was is kept for undo; through an API, the rule is
+// written where it goes as it is read there just before.
 func (s *Server) checkAddAgain(ctx context.Context, p ledger.Proposal, ev evidence) (ledger.Step, string, error) {
 	var step ledger.Step
 	if p.Path == ledger.PathNone {
@@ -1682,7 +1684,12 @@ func (s *Server) checkAddAgain(ctx context.Context, p ledger.Proposal, ev eviden
 	if err != nil {
 		return step, "", err
 	}
-	if why := addWorse(again); why != "" {
+	if why, err := s.addMoved(ctx, p, ev, again.Add.Labels); err != nil {
+		return step, "", err
+	} else if why != "" {
+		return step, "", refusal{why}
+	}
+	if why := addWorse(ev, again); why != "" {
 		return step, "", refusal{why}
 	}
 	if p.Path != ledger.PathGit {

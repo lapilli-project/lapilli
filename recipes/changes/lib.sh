@@ -47,10 +47,11 @@
 #                       to open a pull request for each draft of expectations
 #                       a person accepted (docs/design/expectations.md):
 #                       written only to that file, only while it is the file
-#                       Lapilli read (by its hash), and only as an
-#                       expectations file, one document whose only key is
-#                       expectations, never what a CI system runs. Without
-#                       it, the drafts accepted wait
+#                       Lapilli read (by its hash, a newline more or less at
+#                       its end aside, as a chart's ConfigMap gives it), and
+#                       only as an expectations file, one document whose
+#                       only key is expectations, never what a CI system
+#                       runs. Without it, the drafts accepted wait
 #
 # A document no file in the clone is (rules rendered from a chart, read
 # back from a cluster) gets no edit: Lapilli is told it failed, and why, and
@@ -604,6 +605,19 @@ sha256() {
   fi
 }
 
+# same_doc FILE HASH: FILE is the document whose hash is HASH, or that
+# document with one newline more or less at its end and nothing else, as
+# a chart's ConfigMap gives a file to lapilli serve (a |- block takes its
+# last newline off, a | block gives it one).
+same_doc() {
+  [ "$(sha256 "$1")" = "$2" ] && return 0
+  { cat "$1" && printf '\n'; } >"$tmp/same-doc"
+  [ "$(sha256 "$tmp/same-doc")" = "$2" ] && return 0
+  [ "$(tail -c 1 "$1" | od -An -tx1 | tr -d ' \n')" = 0a ] || return 1
+  head -c "$(($(wc -c <"$1") - 1))" "$1" >"$tmp/same-doc"
+  [ "$(sha256 "$tmp/same-doc")" = "$2" ]
+}
+
 # on_remote BRANCH: the tree the branch holds on the remote; nothing when
 # there is no such branch.
 on_remote() {
@@ -852,7 +866,7 @@ drafts() {
       tell_draft "$id" '{"state":"failed","reason":"EXPECT_FILE is not a file a draft is written to: a tracked expectations file, one document whose only key is expectations, named *.yml or *.yaml, not executable, and not what a CI system runs. Take the draft in by hand; its page gives the file"}'
       continue
     fi
-    if [ "$(sha256 "$work/$EXPECT_FILE")" != "$want" ]; then
+    if ! same_doc "$work/$EXPECT_FILE" "$want"; then
       tell_draft "$id" '{"state":"failed","reason":"EXPECT_FILE in the repository is not the expectations file lapilli serve read when the draft was accepted: it changed since, or lapilli serve reads another. Take the draft in by hand; its page gives the file"}'
       continue
     fi

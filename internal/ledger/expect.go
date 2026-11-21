@@ -189,39 +189,46 @@ var MaxExpectWrites = 20000
 // more is kept not current, a budget's week before from is let go, and a
 // catch keeps one row, of its incident's week, as a scenario keeps one, of
 // the week it was found in. What was told of a row, and
-// the task made of it, stay; a row turned met is told again when it is
-// next broken, in a later week than it was told in (this). It writes
-// nothing when nothing changed, and MaxExpectWrites rows at most: it
-// returns how many it left for the next round.
+// the task made of it, stay, a catch's or a scenario's going with it to
+// the row of its week now (moveExpectRow); a row turned met is told again
+// when it is next broken, in a later week than it was told in (this). It
+// writes nothing when nothing changed, and MaxExpectWrites rows at most:
+// it returns how many it left for the next round.
 func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck, from, this int64, now time.Time) (left int, err error) {
 	was := make(map[ExpectKey]ExpectCheck, len(old))
 	for _, c := range old {
 		was[c.Key()] = c
 	}
 	is := make(map[ExpectKey]bool, len(found))
-	caught := map[[2]string]bool{} // the catches and scenarios found, by rule and expectation
+	caught := map[[2]string]int64{} // the catches and scenarios found, by rule and expectation: the week of each
 	var put []ExpectCheck
 	for _, c := range found {
 		c.Current = true
 		is[c.Key()] = true
 		if c.Weekless() {
-			caught[[2]string{c.Rule, c.Expect}] = true
+			caught[[2]string{c.Rule, c.Expect}] = c.Week
 		}
 		if o, ok := was[c.Key()]; ok && o.same(c) {
 			continue
 		}
 		put = append(put, c)
 	}
+	// gone are let go; of those, moved are a catch's or a scenario's of
+	// another week than it is of now, by the week it is of now.
 	var gone, stale []ExpectKey
+	moved := map[ExpectKey]int64{}
 	for _, k := range expectKeys(was) {
 		o := was[k]
+		w, held := caught[[2]string{o.Rule, o.Expect}]
 		switch {
 		case is[k]:
+		case o.Weekless() && held:
+			// A catch's row of another week than its incident's now, a
+			// scenario's of another than it was found in.
+			gone, moved[k] = append(gone, k), w
 		case !o.Weekless() && o.Week < from,
-			o.Weekless() && (caught[[2]string{o.Rule, o.Expect}] || !o.Current && o.Checked.Before(now.Add(-13*7*24*time.Hour))):
-			// Out of the weeks checked; a catch's row of another week
-			// than its incident's now, a scenario's of another than it was
-			// found in; one held no more for 13 weeks.
+			o.Weekless() && !o.Current && o.Checked.Before(now.Add(-13*7*24*time.Hour)):
+			// Out of the weeks checked; one held no more for 13 weeks.
 			gone = append(gone, k)
 		case o.Current:
 			stale = append(stale, k)
@@ -256,6 +263,11 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 		}
 		byKey := t.d.pick("rule = ? AND expect = ? AND week = ?", "md5(rule) = md5(?1) AND rule = ?1 AND expect = ?2 AND week = ?3")
 		for _, k := range gone {
+			if w, ok := moved[k]; ok {
+				if err := moveExpectRow(t, k, w, this); err != nil {
+					return err
+				}
+			}
 			if _, err := t.ExecContext(t.ctx, "DELETE FROM expectation_checks WHERE "+byKey, k.Rule, k.Expect, k.Week); err != nil {
 				return err
 			}
@@ -269,6 +281,41 @@ func (l *Ledger) KeepExpectChecks(ctx context.Context, found, old []ExpectCheck,
 		return nil
 	})
 	return left, err
+}
+
+// moveExpectRow carries what was told of a catch's or a scenario's row of
+// week k.Week, and the task made of it, to its row of week to, the week
+// it is of now, before the row is let go: so that it isn't told again,
+// nor made a second task while the first is open, for its week having
+// moved (its incident's start written down otherwise, a test file edited
+// and failing still), and the tab keeps its task. Read in the write, so
+// that a task made since the round read the ledger goes too. The row of
+// week to keeps a task of its own, if it has one, and the later week told;
+// a row turned met takes nothing told before this week, so that it is told
+// again when next broken.
+func moveExpectRow(t *txn, k ExpectKey, to, this int64) error {
+	var told, task, tasked int64
+	err := t.QueryRowContext(t.ctx, "SELECT told, task, tasked FROM expectation_checks WHERE "+t.d.pick("rule = ?1 AND expect = ?2 AND week = ?3",
+		"md5(rule) = md5(?1) AND rule = ?1 AND expect = ?2 AND week = ?3"), k.Rule, k.Expect, k.Week).Scan(&told, &task, &tasked)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	case told == 0 && task == 0:
+		return nil
+	}
+	// What a row turned met keeps of it: this week's alone.
+	toldMet := told
+	if told < this {
+		toldMet = 0
+	}
+	_, err = t.ExecContext(t.ctx, `UPDATE expectation_checks SET task = CASE WHEN task = 0 THEN ?1 ELSE task END,
+		tasked = CASE WHEN task = 0 THEN ?2 ELSE tasked END,
+		told = CASE WHEN result = 'met' THEN `+t.d.greatest("told", "?4")+` ELSE `+t.d.greatest("told", "?3")+` END
+		WHERE `+t.d.pick("rule = ?5 AND expect = ?6 AND week = ?7", "md5(rule) = md5(?5) AND rule = ?5 AND expect = ?6 AND week = ?7"),
+		task, tasked, told, toldMet, k.Rule, k.Expect, to)
+	return err
 }
 
 // putExpectChecks writes checks, each a row made or made again current,

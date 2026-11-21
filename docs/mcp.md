@@ -41,12 +41,16 @@ scenario's promtool test file, given in `tests` by its path, is run by
 serve's `--promtool`, once it is read as promtool would expand it and is
 within bounds, and within `--promtool-memory` on Linux (a rewrite's
 annotation template can ask promtool for more memory than a test file
-says: past it, the scenario is not known). Given a rewrite that meets
+says: past it, the scenario is not known), one promtool at a time across
+serve: one waiting for serve's own scenarios longer than the check's time
+is not known, saying so. Given a rewrite that meets
 every expectation, losing no incident the rule catches, the rule as it is
 and rewritten each replayed to the end, it answers with `post`: Markdown,
-marked as an agent's rewrite backtested by Lapilli, with the numbers
-before and after, which the agent or a person may post on the pull
-request. Lapilli posts nothing; without `post`, the items and the note say
+marked as an agent's rewrite backtested by Lapilli, saying whose
+expectations it meets (serve's own for the rule, or the ones the agent
+gave, which aren't necessarily what the rule is held to), with the
+numbers before and after, which the agent or a person may post on the
+pull request. Lapilli posts nothing; without `post`, the items and the note say
 why. One check runs at a time, with `compare`'s.
 
 Nothing an agent asks for changes anything: `compare` and

@@ -151,7 +151,7 @@
 {{range .Lines}}{{$x := .}}<div class="expect" id="expect-{{.Expect}}">
 <h3>{{.Held}}{{if .Broken}} <span class="badge {{status "expect" "broken"}}">✕ {{t "broken"}}</span>{{end}}</h3>
 <p class="quiet">{{t "Held by %s, in %s." .Selector .Source}}{{if .Task}} <a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>{{else if .Broken}} {{if edits $.Status $v.TeamID}}<form method="post" action="/expectations/task" class="track"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="expect" value="{{.Expect}}"><input type="hidden" name="week" value="{{.Week}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "expectations"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{template "off" (offTeam $ "Make it a task" (print "expect-why-" .Expect) $v.Team)}}{{end}}{{end}}</p>
-{{if .Catch}}<p><span class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}}</span> {{.Last.Text}}</span>{{with .IncidentAt}} <span class="quiet">{{t "(%s began %s)" $x.Incident .}}</span>{{end}} <a href="{{$.Link (print "/incidents/" (path .Incident))}}"><bdi>{{.Incident}}</bdi></a></p>
+{{if .Catch}}<p><span class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}}</span> {{.Last.Text}}</span>{{with .IncidentAt}} <span class="quiet">{{tbdi "(%s began %s)" $x.Incident .}}</span>{{end}} <a href="{{$.Link (print "/incidents/" (path .Incident))}}"><bdi>{{.Incident}}</bdi></a></p>
 {{else if .Scenario}}<p><span class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}}</span> {{.Last.Text}}</span>{{with .Found}} <span class="quiet">{{t "(found %s)" .}}</span>{{end}}</p>
 {{with .Detail}}<pre class="example"><code>{{.}}</code></pre>{{end}}
 {{else}}<div class="scroll" tabindex="0" role="region" aria-label="{{.Held}}"><table class="goals">
@@ -175,7 +175,7 @@
 {{with .Reason}}<blockquote class="said"><p>{{.}}</p></blockquote>{{end}}
 {{with .Items}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Held to"}}</th><th scope="col">{{t "As it is"}}</th><th scope="col">{{t "State"}}</th></tr></thead>
-<tbody>{{range .}}<tr><td><code>{{.What}}</code> {{.Held}}</td><td>{{.Value}}</td><td><span class="{{status "expect" (draftState .State)}}">{{t .State}}</span>{{with .Why}} <span class="quiet">({{.}})</span>{{end}}</td></tr>{{end}}</tbody>
+<tbody>{{range .}}<tr><td><code><bdi>{{.What}}</bdi></code> {{.Held}}</td><td>{{.Value}}</td><td><span class="{{status "expect" (draftState .State)}}">{{t .State}}</span>{{with .Why}} <span class="quiet">({{.}})</span>{{end}}</td></tr>{{end}}</tbody>
 </table></div>{{end}}
 <details><summary>{{t "What it holds the rule to"}}</summary><pre class="example"><code>{{.Text}}</code></pre>
 {{range .Tested}}<p class="quiet"><code>{{.Path}}</code></p><pre class="example"><code>{{.Text}}</code></pre>{{end}}</details>

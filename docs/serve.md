@@ -268,6 +268,7 @@ pull request's backtest holds it before (docs/design/expectations.md):
 `--expect FILE` takes the expectations file `lapilli verdict --expect`
 takes, read again every 15s and kept to once read the same twice in a
 row, as `--config` is (the chart's `serve.expectations`, a ConfigMap).
+One that can't be read is said on the status line, why to admins alone.
 Rules kept only in Grafana or a ruler can be held under `expectations:`
 in `--config`; a rule can carry its own budget in its annotation
 `lapilli.dev/budget: "10/week, 2 asleep, 3 refires"`. An expectation names
@@ -293,8 +294,8 @@ After each run the leader checks each rule over the week so far and the
 twelve whole weeks before, by the ledger's weeks (Monday, in `--tz`): a
 budget is broken in a week it went over, the week so far as soon as it
 does, met in a whole week it didn't, and not known in a week the ledger
-holds only part of, or, for a rule only copied in, a week past where its
-source's copies end; while people slept is by the rule's team's own hours,
+holds only part of, or, for a rule only copied in, a week no span of its
+source's copies covers whole (before the first, in a gap, past the last); while people slept is by the rule's team's own hours,
 or the server's. A catch is judged against the incident written down,
 again on a new version of the rule by replaying it as it is over the
 incident, a few a run; with no incident written down, or one a rule only
@@ -308,8 +309,10 @@ own killed whole at 30s, 64 KiB of what it says at most, and, on Linux,
 rule's annotation template can ask promtool for gigabytes; promtool's
 release, built without cgo, starts in less than 64Mi, while one built
 with cgo maps 8 MiB more for each of its threads, so give it 512Mi; macOS
-sets no cap), five a run, never while the ledger's writer is held, each kept as
-begun before it starts, and again only when promtool, the group or the
+sets no cap), five a run, never while the ledger's writer is held, and
+one at a time across serve, a run's and an agent's check alike (an
+agent's waits within its check's time, and is not known, saying so, past
+it), each kept as begun before it starts, and again only when promtool, the group or the
 test file changed: one that never ended (serve killed as promtool took
 its memory) isn't run again each term; one serve stopped itself, shutting
 down or no longer the leader, is run again. It is met when promtool says
@@ -334,7 +337,10 @@ digest; in `/api/v1/expectations`, MCP's `rule` and `/metrics`
 `lapilli_rule_expectations_broken`). It is told (`expectation.broken`)
 once a rule, an expectation and a week, and with `--expect-tasks` made a
 task for the rule's team, once a rule, an expectation and a week, none
-while one is open.
+while one is open; a catch or a scenario is of one week (its incident's,
+or when what it found was found), and one that moves to another week,
+still broken, isn't told again, nor made a second task, its task kept on
+its tab.
 
 Nobody writes expectations for rules that already page them, so serve
 drafts them (docs/design/expectations.md, step 3). **From the history**: a
@@ -364,7 +370,8 @@ request to `EXPECT_FILE`, the file in git `--expect` is made from
 keeps the decision, and the tab gives the YAML to put where the
 expectations are declared: Lapilli doesn't write a ConfigMap or `--config`.
 Drafts count with proposals toward a person's 20 an hour; ten wait for a
-rule at most, and 1,000 are kept.
+rule at most, and 1,000 are kept, the oldest decided let go first, never
+one whose pull request is waiting for a recipe or open.
 
 A rule not yet written can be proposed too, held to what it is to do
 before anyone approves it (docs/design/expectations.md, step 5). **Propose

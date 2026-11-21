@@ -137,6 +137,24 @@ func TestDraftBounded(t *testing.T) {
 	}
 }
 
+// The history's draft leaves out an incident whose id spans lines, or
+// holds what doesn't show: an expectations file can't name it, and the
+// draft reads back.
+func TestDraftLeavesOutIDsThatDontShow(t *testing.T) {
+	d := Draft([]DraftRule{{Rule: "R", Weeks: 12, Most: 3, Caught: []DraftCatch{
+		{Incident: "INC-1\n  - rule: Other", Delay: time.Minute}, {Incident: "INC-2\u202e", Delay: time.Minute}, {Incident: "INC-3", Delay: time.Minute}}}})
+	if cs := d.Expectations[0].Catches; len(cs) != 1 || cs[0].Incident != "INC-3" {
+		t.Fatalf("catches: %+v", cs)
+	}
+	b, err := d.YAML(DraftAbout{By: "lapilli verdict"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadExpectations(bytes.NewReader(b)); err != nil {
+		t.Fatalf("the draft doesn't read back: %v\n%s", err, b)
+	}
+}
+
 // From a report, a rule is counted by whole weeks back from the period's
 // end, as a comparison holds budgets, and its catches the latest first;
 // one that wasn't replayed is left out; with no whole week, scaled.
@@ -233,5 +251,27 @@ func TestRewriteMarkdown(t *testing.T) {
 	}
 	if len(fences) != 2 || fences[0] != "`````diff" || fences[1] != "`````" {
 		t.Errorf("fences: %q\n%s", fences, got)
+	}
+}
+
+// A rewrite's post says whose expectations it meets: Lapilli's for the
+// rule, or the ones the agent gave with it, which it may have loosened or
+// left one out of, never as though they were the rule's.
+func TestRewriteMarkdownSaysWhose(t *testing.T) {
+	w := Rewritten{Rule: "Errors", Results: []ExpectResult{{What: "budget week", Limit: "10", Before: "41", After: "8", AfterState: ExpectMet}}}
+	own := RewriteMarkdown(w, "")
+	w.Given = true
+	given := RewriteMarkdown(w, "")
+	for _, c := range []struct {
+		post, want, not string
+	}{
+		{own, "it meets every expectation Lapilli holds the rule to,", "the agent gave"},
+		{own, "the agent's text, Lapilli's numbers", "text and expectations"},
+		{given, "it meets every expectation the agent gave with it, which aren't necessarily the ones Lapilli holds the rule to,", "the rule is held to"},
+		{given, "the agent's text and expectations, Lapilli's numbers", "\x00"},
+	} {
+		if !strings.Contains(c.post, c.want) || strings.Contains(c.post, c.not) {
+			t.Errorf("want %q, not %q, in\n%s", c.want, c.not, c.post)
+		}
 	}
 }

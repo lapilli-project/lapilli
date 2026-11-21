@@ -48,9 +48,14 @@ func (s *Server) grafanaAdd(ctx context.Context, p ledger.Proposal, ev evidence,
 	} else if !gone {
 		return refusal{"a rule of its uid is in Grafana already"}
 	}
-	rs, _, err := s.readRules(ctx)
+	rs, docs, err := s.readRules(ctx)
 	if err != nil {
 		return err
+	}
+	// Another folder of its folder's title since: which of the two it goes
+	// in isn't told by a title, nor are their rules apart (rulePlaces).
+	if i := slices.IndexFunc(docs, func(d rules.Doc) bool { return d.Source == s.cfg.Grafana }); i >= 0 && grafanaTitlesTwice(docs[i].Data)[place.Folder] {
+		return refusal{"another Grafana folder has its folder's title now, which doesn't say which of the two it goes in: propose it again once the titles differ"}
 	}
 	var sibling string
 	var srcs, tells []string

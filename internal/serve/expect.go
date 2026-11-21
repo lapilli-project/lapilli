@@ -303,10 +303,27 @@ type expectRule struct {
 	key         string
 	def         *rules.Rule
 	// copied says it is only copied in (its source's, as rules lists it);
-	// copiedFrom and copiedTo, what its source's copies cover without a
-	// gap, the latest span: a week or an incident outside it is not known.
-	copied               bool
-	copiedFrom, copiedTo time.Time
+	// spans, what its source's copies cover, each span without a gap, the
+	// earliest first: a week or an incident not inside one is not known.
+	copied bool
+	spans  [][2]time.Time
+}
+
+// copiedOver says a rule only copied in is known from from to to: its
+// source's copies cover them within one span, with no gap between. Of the
+// week under way (soFar), to is where it ends, and the copies are known so
+// far as they reach into it, from its start: from the latest span, which
+// no gap follows.
+func (x *expectRule) copiedOver(from, to time.Time, soFar bool) bool {
+	for i, s := range x.spans {
+		if s[0].After(from) {
+			continue
+		}
+		if !s[1].Before(to) || soFar && i == len(x.spans)-1 && !s[1].Before(from) {
+			return true
+		}
+	}
+	return false
 }
 
 // expectRules are the rules in effect now: those of the latest version of
@@ -669,10 +686,59 @@ func (s *Server) scenarioGroups(ctx context.Context) (map[string][]byte, error) 
 
 // promtool is --promtool as a scenario runs it: each run within its time
 // limit, the output it keeps and the memory it may take
-// (--promtool-memory).
-func (s *Server) promtool() scenario.Promtool {
-	return scenario.Promtool{Path: s.cfg.Promtool, Memory: s.cfg.PromtoolMemory}
+// (--promtool-memory), one at a time across serve.
+func (s *Server) promtool() servePromtool {
+	return servePromtool{scenario.Promtool{Path: s.cfg.Promtool, Memory: s.cfg.PromtoolMemory}, &s.promtoolTurn}
 }
+
+// servePromtool is promtool as serve runs it: one run at a time, a
+// round's scenario and an agent's alike (test_expectation,
+// propose_expectation, a new rule's check), so that no two take
+// --promtool-memory each beside serve's own under the container's one
+// limit. Each waits its turn within its own context (an agent's check,
+// its deadline), never holding the ledger's writer, and one whose turn
+// didn't come is not run, saying so.
+type servePromtool struct {
+	scenario.Promtool
+	turn *oneTurn
+}
+
+// whyPromtoolBusy is a run whose turn didn't come within its time.
+const whyPromtoolBusy = "not run: another scenario was running, and serve runs promtool one at a time; its turn didn't come within this check's time"
+
+// Run runs promtool as scenario.Promtool.Run does, once its turn comes.
+func (p servePromtool) Run(ctx context.Context, group, test []byte) scenario.Result {
+	if !p.turn.take(ctx) {
+		return scenario.Result{State: scenario.Unrun, Why: whyPromtoolBusy}
+	}
+	defer p.turn.give()
+	return p.Promtool.Run(ctx, group, test)
+}
+
+// oneTurn is one turn, taken within a context: a channel of one, made as
+// it is first taken.
+type oneTurn struct {
+	once sync.Once
+	c    chan struct{}
+}
+
+// take waits for the turn, as long as ctx lasts: false when it ended
+// first.
+func (t *oneTurn) take(ctx context.Context) bool {
+	t.once.Do(func() { t.c = make(chan struct{}, 1) })
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case t.c <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// give gives back the turn taken.
+func (t *oneTurn) give() { <-t.c }
 
 // scenarioKey is what a scenario is run on: promtool, the group and the
 // test file, as its row's version keeps it.
@@ -723,22 +789,23 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			catches[p.it.Catch.Incident] = true
 		}
 	}
-	// A rule only copied in is known as far as its source's copies cover:
-	// past it, a week no firing was copied in for isn't a week none fired.
-	covered := map[string][2]time.Time{}
+	// A rule only copied in is known where its source's copies cover it,
+	// in any span the ledger keeps of them: elsewhere, a week no firing was
+	// copied in for isn't a week none fired.
+	covered := map[string][][2]time.Time{}
 	for _, r := range rs {
 		row, ok := table[r.id]
 		if r.def != nil || !ok || r.id == 0 || row.Source == "" {
 			continue
 		}
-		span, seen := covered[row.Source]
+		spans, seen := covered[row.Source]
 		if !seen {
-			if span[0], span[1], err = s.l.Coverage(ctx, row.Source); err != nil {
+			if spans, err = s.l.Spans(ctx, row.Source); err != nil {
 				return false, err
 			}
-			covered[row.Source] = span
+			covered[row.Source] = spans
 		}
-		r.copied, r.copiedFrom, r.copiedTo = true, span[0], span[1]
+		r.copied, r.spans = true, spans
 	}
 	old, err := s.l.ExpectChecks(ctx, ledger.ExpectQuery{})
 	if err != nil {
@@ -886,10 +953,10 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			case r.unreplayed:
 				c.Week, c.At, c.Result, c.Why = ledger.Week(s.l.Day(in.Start)), in.Start, ledger.ExpectUnknown, whyUnreplayed
 			case r.copied && !slices.ContainsFunc(in.CaughtBy, func(k verdict.Catch) bool { return k.Rule == r.name }) &&
-				(r.copiedTo.Before(in.Start.Add(time.Duration(it.Catch.Within))) || in.Start.Before(r.copiedFrom)):
-				// Its copies don't cover the incident and its delay, ending
-				// before, or beginning after, it began: not caught in them
-				// isn't missed.
+				!r.copiedOver(in.Start, in.Start.Add(time.Duration(it.Catch.Within)), false):
+				// No span of its copies covers the incident and its delay
+				// (one ending before, or beginning after, it began; a gap
+				// within it): not caught in them isn't missed.
 				c.Week, c.At, c.Result, c.Why = ledger.Week(s.l.Day(in.Start)), in.Start, ledger.ExpectUnknown, whyNotCopied
 			default:
 				c.Week, c.At = ledger.Week(s.l.Day(in.Start)), in.Start
@@ -938,10 +1005,11 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			case n > *it.Limit:
 				// Over, in the week so far or a week held in part too.
 				c.Result = ledger.ExpectBroken
-			case r.copied && (wFrom.Before(r.copiedFrom) || r.copiedTo.Before(wTo) && (w != this || r.copiedTo.Before(wFrom))):
-				// Outside what its source's copies cover: a week begun
-				// before they began (in a gap, or before the first), a
-				// whole week past them, or the week so far none reached.
+			case r.copied && !r.copiedOver(wFrom, wTo, w == this):
+				// Not inside a span of its source's copies: a week before
+				// the first, one touching a gap, a whole week past the
+				// last, or the week so far the last didn't reach from its
+				// start.
 				c.Result, c.Why = ledger.ExpectUnknown, whyNotCopied
 			case w == this || upTo.Before(wTo):
 				c.Result, c.Why = ledger.ExpectOpen, whySoFar
@@ -974,44 +1042,53 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 		cancel()
 	}
 	// Scenarios to run: a few a round, each within promtool's own time
-	// limit and memory cap, never while the ledger's writer is held. Each
-	// is kept as begun before promtool starts, and as found once it ends:
-	// a run that never ends (lapilli serve killed as promtool took its
-	// memory) is kept so, and not run again by the next leader until what
-	// it is run on changes.
+	// limit and memory cap, never while the ledger's writer is held, and
+	// one at a time across serve: each waits its turn (an agent's check
+	// may be running), and is then kept as begun before promtool starts,
+	// and as found once it ends: a run that never ends (lapilli serve
+	// killed as promtool took its memory) is kept so, and not run again by
+	// the next leader until what it is run on changes; one that waited and
+	// never began isn't.
 	p := s.promtool()
 	for i, x := range runs {
 		if i == expectScenariosARun || ctx.Err() != nil {
 			again = true
 			break
 		}
-		c := &found[x.at]
-		c.Version, c.Week = x.key, this
-		c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, scenarioBegun
-		if err := s.l.KeepScenarioRun(ctx, *c, this, now); err != nil {
-			return false, err
+		if !p.turn.take(ctx) {
+			again = true
+			break
 		}
-		res := scenario.Judged(p.Run(ctx, x.group, x.test))
-		switch res.State {
-		case verdict.ExpectMet:
-			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectMet, "passes", "", ""
-		case verdict.ExpectBroken:
-			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectBroken, "fails", "", cutText(res.Said, maxDetail)
-		default:
-			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, res.Why
-		}
-		wctx, cancel := ctx, context.CancelFunc(func() {})
-		if ctx.Err() != nil {
-			// lapilli serve stopped the run itself, as it stops: not a
-			// run that died. Kept with no version, so that it is run
-			// again; what it found, if it ended first, kept as found.
-			wctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), s.cfg.Timeout)
-			if c.Result == ledger.ExpectUnknown {
-				c.Detail, c.Version = scenarioStopped, ""
+		err := func() error {
+			defer p.turn.give()
+			c := &found[x.at]
+			c.Version, c.Week = x.key, this
+			c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, scenarioBegun
+			if err := s.l.KeepScenarioRun(ctx, *c, this, now); err != nil {
+				return err
 			}
-		}
-		err := s.l.KeepScenarioRun(wctx, *c, this, now)
-		cancel()
+			res := scenario.Judged(p.Promtool.Run(ctx, x.group, x.test))
+			switch res.State {
+			case verdict.ExpectMet:
+				c.Result, c.Value, c.Why, c.Detail = ledger.ExpectMet, "passes", "", ""
+			case verdict.ExpectBroken:
+				c.Result, c.Value, c.Why, c.Detail = ledger.ExpectBroken, "fails", "", cutText(res.Said, maxDetail)
+			default:
+				c.Result, c.Value, c.Why, c.Detail = ledger.ExpectUnknown, "–", whyRunFailed, res.Why
+			}
+			wctx, cancel := ctx, context.CancelFunc(func() {})
+			if ctx.Err() != nil {
+				// lapilli serve stopped the run itself, as it stops: not a
+				// run that died. Kept with no version, so that it is run
+				// again; what it found, if it ended first, kept as found.
+				wctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), s.cfg.Timeout)
+				if c.Result == ledger.ExpectUnknown {
+					c.Detail, c.Version = scenarioStopped, ""
+				}
+			}
+			defer cancel()
+			return s.l.KeepScenarioRun(wctx, *c, this, now)
+		}()
 		if err != nil {
 			return false, err
 		}

@@ -89,8 +89,13 @@ func (s *Server) draftsViewOf(r *http.Request, rule string, team int64, teamName
 	target, _ := s.draftTarget()
 	v := &draftsView{Approver: s.approver(r) && !bearer, On: s.cfg.Changes, Target: target}
 	mayDrop := !s.cfg.ReadOnly && (s.role(r) >= editor || s.approver(r))
+	lg := lang(r)
 	for _, d := range ds {
 		l := draftLine{ExpectDraft: d, Items: draftItemsOf(d.Found), Own: ledger.FoldName(d.MadeBy) == ledger.FoldName(user)}
+		for i, it := range l.Items {
+			// What checking it found, in Lapilli's words, kept in English.
+			l.Items[i].Value, l.Items[i].Why = expectValueText(lg, it.Value), reasonText(lg, it.Why)
+		}
 		for _, p := range sortedKeys(d.Tests) {
 			l.Tested = append(l.Tested, draftTest{p, d.Tests[p]})
 		}
@@ -439,9 +444,9 @@ func (s *Server) draftBody(d ledger.ExpectDraft) string {
 	var b strings.Builder
 	origin := "the history's: the most the rule fired in a week, rounded up, and the incidents it caught"
 	if d.Agent {
-		origin = "an agent's, for " + mdCell(d.MadeBy) + ": its words are its own"
+		origin = "an agent's, for " + mdText(d.MadeBy) + ": its words are its own"
 	}
-	fmt.Fprintf(&b, "A draft of what %s is held to, %s, accepted by %s in Lapilli (#%d).\n\n", mdCell(d.Rule), origin, mdCell(d.DecidedBy), d.ID)
+	fmt.Fprintf(&b, "A draft of what %s is held to, %s, accepted by %s in Lapilli (#%d).\n\n", mdText(d.Rule), origin, mdText(d.DecidedBy), d.ID)
 	b.WriteString("| Held to | As it is | |\n|---|--:|---|\n")
 	for _, it := range draftItemsOf(d.Found) {
 		fmt.Fprintf(&b, "| %s %s | %s | %s |\n", mdCell(it.What), mdCell(it.Held), mdCell(it.Value), mdCell(it.State))
@@ -452,17 +457,14 @@ func (s *Server) draftBody(d ledger.ExpectDraft) string {
 	return b.String()
 }
 
-// mdCell is text from a rule or an agent as a code span in a table:
-// what doesn't show taken out, its pipes escaped (mdCode).
-func mdCell(s string) string {
-	s = strings.Map(func(c rune) rune {
-		if unicode.IsControl(c) || unicode.In(c, unicode.Cf, unicode.Zl, unicode.Zp) {
-			return ' '
-		}
-		return c
-	}, s)
-	return strings.ReplaceAll(mdCode(s), "|", `\|`)
-}
+// mdCell is text from a rule or an agent as a code span in a table, as a
+// pull request comment's table has it (verdict.CodeSpan): what doesn't
+// show said as \u{...}, each | escaped and a backslash right before one
+// said as \u{5c}, so that no | of it ends the cell, however a host reads
+// a run of backslashes (0.60.0's fix). mdText is one in a sentence.
+func mdCell(s string) string { return verdict.CodeSpan(s, mdMost, true) }
+
+func mdText(s string) string { return verdict.CodeSpan(s, mdMost, false) }
 
 // apiPatchDraft is a recipe saying what became of a draft's pull request:
 // opened, merged, closed, or failed with why.

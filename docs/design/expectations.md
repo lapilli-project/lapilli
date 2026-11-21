@@ -357,6 +357,15 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   made one when read; the same budget or incident twice is refused. A rule
   moved out of a group that held it is said: the group's expectation no
   longer holds it, failing nothing.
+- **An incident's id** is one line of characters that show: one with a
+  line break, another control character, a format character (a direction
+  mark, a zero-width space) or a line or paragraph separator is refused
+  wherever expectations are read (the file, `--config`'s, an agent's
+  through MCP), as the ledger refuses such a name from outside; the
+  history's draft leaves such an incident out. A draft's catches are
+  written into the file and a pull request's description, where an id
+  spanning lines would read as the file's own lines. A rule's
+  Expectations tab sets each id apart in a `<bdi>`.
 - **Serve** takes none of it yet (step 2).
 
 Step 2, serve's checks after deploy, as built:
@@ -365,7 +374,9 @@ Step 2, serve's checks after deploy, as built:
   `serve.expectations`, a ConfigMap of its own) is read every 15 s and
   kept to once read the same twice in a row, 15 s apart, as `--config` is;
   one that can't be read changes nothing and is said (the status line,
-  logged once). `expectations:` in `--config` is read as an expectations
+  logged once): why, to an admin; to anyone else only that the file, by
+  its path as they read it, can't be read, as a `--config` file's problem
+  is said, and so what it and `--config`'s can't hold together. `expectations:` in `--config` is read as an expectations
   file is, strictly (a key an entry doesn't have is refused with its line
   in the config), and kept to as the ledger is kept to the config. The two
   are one list, read as one file (`verdict.NewExpectations`): a rule's, a
@@ -403,14 +414,17 @@ Step 2, serve's checks after deploy, as built:
   week before the ledger's first firing is not known with no number
   (`not_held`, "–"): no firing held isn't none fired. A rule
   only copied in is known where its source's copies cover it without a
-  gap (the ledger's `Coverage` of it, the latest span): a week begun
-  before the span began (in a gap, or before the first copy), a week past
-  where it ends, whole, or the week so far none of reached, is not known
-  (`not_copied`), however far the runs' cursor is, so that a job that
-  stopped copying, or began late, doesn't read as weeks of no firings; and
-  a catch of an incident outside the span, its delay with it, not caught
-  in the copies, is not known too, rather than broken. Not in the design;
-  a review found such weeks met, and a second the weeks before the span. While people slept is
+  gap, in any of the spans the ledger keeps of them (`Spans`, the latest
+  64): a week inside one is judged; a week touching a gap, before the
+  first copy or, whole, past the last, or the week so far the latest span
+  didn't reach from its start, is not known (`not_copied`), however far
+  the runs' cursor is, so that a job that stopped copying, or began late,
+  doesn't read as weeks of no firings; and a catch of an incident no span
+  covers, its delay with it, not caught in the copies, is not known too,
+  rather than broken. Not in the design; a review found such weeks met,
+  and a second the weeks before the span; 0.65.0 held a rule to the
+  latest span alone, and a week inside an earlier one was not known (a
+  review's Low). While people slept is
   by the rule's team's own hours, or the server's (as the tiles count it);
   by hours with no sleep, not known (`no_hours`). A rule Lapilli can't
   replay and doesn't copy in is not known (`unreplayed`). A budget needs
@@ -452,7 +466,12 @@ Step 2, serve's checks after deploy, as built:
   broken in the week so far or the last whole week, or a catch broken,
   once a rule, an expectation and a week, 50 a round, the rest the rounds
   after; a catch met again is told again once it is next broken, in a
-  later week. It carries the rule, its team, what, held, the selector and
+  later week. A catch's row moving to another week, its incident's start
+  written down otherwise, takes what was told of it and its task with it,
+  read in the write that lets the old row go, and the new row keeps a
+  task of its own; in 0.65.0 it was told again, and made a second task
+  while the first was open (a review's Low), as a scenario's was (step
+  4). It carries the rule, its team, what, held, the selector and
   the source, the count or the delay, whether it is the week so far, the
   week's span (a catch, its incident and its start), and links to the
   rule's tab; with routes in `--config`'s `notify:`, it goes where they
@@ -543,7 +562,10 @@ Step 3, drafts, as built:
   or couldn't be made, catches nothing, so an incident the rewrite loses
   would go unseen: no post, and the answer's note says which side and
   why. The post says it is an agent's rewrite backtested by Lapilli,
-  gives the period, each expectation as it is and rewritten, the firings
+  whose expectations it meets (serve's own for the rule, or the ones the
+  agent gave, `held_by`, which it may have loosened or left one out of,
+  said as not necessarily the rule's), gives the period, each
+  expectation as it is and rewritten, the firings
   and catches before and after, and the diff, in a fence a backtick
   longer than any run of them in it. Lapilli posts nothing (open question
   5).
@@ -566,7 +588,8 @@ Step 3, drafts, as built:
   64 KiB, its test files 20 and 256 KiB in all, its reason 2,000 bytes,
   what it found 64 KiB, the file it makes 1 MiB; ten wait for a rule at
   most, and 1,000 are kept, the oldest decided let go to keep another,
-  none kept while as many wait.
+  never one accepted whose pull request is ready for a recipe or opened
+  (as keeping a new rule's lets none go), none kept while as many wait.
 - **What an agent sends**, beyond what `compare` bounds: the rule's name 1
   KiB, the expectations 256 KiB, the rewrite 64 KiB, the test files as a
   draft keeps them, each by a path an expectations file may name, those
@@ -590,7 +613,9 @@ Step 3, drafts, as built:
   promtool read labels there). Each is plain text: a tag such as
   `!!binary`, which promtool's YAML would decode into another text, is
   refused. An agent's scenarios run one at a time across serve, whatever
-  else holds the comparison's turn.
+  else holds the comparison's turn (another agent's running, one is not
+  run, saying so), and each waits for promtool's one turn, which a
+  round's scenario may hold (step 4), within the check's deadline.
 - **Accepting** is an approver's, in a browser, as approving a proposal is
   (same site, no bearer token, `--changes` on, the page's form). Where
   serve's expectations come from `--expect`, with the change recipes'
@@ -603,9 +628,16 @@ Step 3, drafts, as built:
   beside the proposals (`GET /api/v1/changes`'s `expectations`, `PATCH
   /api/v1/changes/expectations/{id}`). The recipes write `EXPECT_FILE`
   alone, a tracked, non-executable `*.yml` or `*.yaml` not of a CI system,
-  only while its sha256 is that hash, and only as an expectations file,
-  one document whose only key is `expectations`, before and after: a
-  Lapilli someone took over can't make them write anything else.
+  only while its sha256 is that hash (or the file's with one newline more
+  or less at its end, as a chart's ConfigMap gives it to serve: a `|-`
+  block takes the last one off; nothing else), and only as an
+  expectations file, one document whose only key is `expectations`,
+  before and after: a Lapilli someone took over can't make them write
+  anything else. The pull
+  request's description gives the rule, the agent's and approver's names
+  and what checking found as code spans, a table's escaped as a pull
+  request comment's are (a backslash before a `|` said `\u{5c}`, so no
+  `|` ends its cell).
   Otherwise accepting keeps the decision, and the tab says it isn't
   applied and gives the YAML: the expectations file with the draft taken
   in, or, for `--config` or none, its entries, to put there by hand.
@@ -678,8 +710,13 @@ Step 4, scenarios, as built:
   (`pthread_create failed`, which is read as past the cap too), so the
   tests cap the stand-in at 512 MiB and the docs say so for a promtool
   built with cgo. macOS refuses RLIMIT_DATA: there promtool runs without
-  a cap, said once as serve starts. `lapilli verdict --promtool` runs it without one, in a
-  CI job whose own limits hold it. Exit 0 saying `SUCCESS` is met; exit 1
+  a cap, said once as serve starts. `lapilli verdict --promtool` takes
+  `--promtool-memory` too, alike (256Mi unless given, 64Mi at least,
+  Linux alone, said on its standard error elsewhere): 0.65.0 ran it
+  without one, leaving it to the CI job's own limits (a review's Low).
+  The wrapper is Lapilli started again, `lapilli` itself as serve's is: the
+  package's `init` that reads the name is linked into every binary that
+  runs a scenario. Exit 0 saying `SUCCESS` is met; exit 1
   saying `FAILED:` is broken, the lines after it kept (2,000 bytes);
   anything else couldn't be run, and is not known: a time out, a crash,
   another exit status, an answer promtool doesn't give. promtool also says
@@ -710,7 +747,17 @@ Step 4, scenarios, as built:
   200 runs a comparison at most, the rest not known. Counted as budgets
   and catches are, so `--fail-expectations` and the recipes'
   `FAIL_ON_EXPECTATIONS` cover them; a test file the change edited is said
-  (`edited`). Not in the design: the summary's `scenarios_unrun`, those
+  (`edited`). **A test file edited, its rule alike** on both sides: the
+  scenario is run too, before and after, each side's test file as its
+  expectations file's directory has it (with `--expect-before`, which the
+  recipes give; without it, one file is read for both, so nothing is
+  edited), compared by what it holds; nothing else of the rule is held,
+  as it isn't replayed (`Comparison.Alike`, `scenario.Sides.TestEdited`).
+  So with no rule changed: the report says nothing changed, and then the
+  expectations, the summary's `expected` true; the recipes post it and
+  gate on it (a report that says nothing changed and holds nothing is
+  posted as before: not at all). 0.65.0 ran no scenario of a pull request
+  that edited only its test file (a review's Low). Not in the design: the summary's `scenarios_unrun`, those
   that couldn't be run after the change, promtool given and the rule one
   it runs (the test file unread, a time out, a crash, past the 200), and
   one run before the change and not known after it (the change moved the
@@ -760,14 +807,29 @@ Step 4, scenarios, as built:
   ended (shut down, or the lease lost), isn't one that died: it is kept
   with no version, written past the ended context, and run again by the
   next leader. The rest not known (`not_run_yet`) until a
-  later round. Not known says why: `no_promtool`, `not_prometheus`,
+  later round. **One promtool at a time across serve**, a round's and an
+  agent's (`test_expectation`, `propose_expectation`, a new rule's
+  check) alike, each taking `--promtool-memory` beside serve's own under
+  one container's limit: each waits its turn within its own context,
+  never holding the ledger's writer; a round's before its run is kept as
+  begun (one that waited and never began isn't kept so), an agent's
+  within its check's deadline, past which it is not known, saying so (not
+  in the design: 0.65.0 could run two at once, a review's Low). Not known says why: `no_promtool`, `not_prometheus`,
   `not_run_yet`, `test_unread`, `run_failed`. Schema 027, unreleased, was
   changed in place for it: a column `detail` (what promtool said, or why
-  it couldn't run, 2,000 bytes). A broken one is told
+  it couldn't run, 2,000 bytes). Why it couldn't run, or its test file
+  couldn't be read, is Lapilli's words, kept in English and shown on the
+  tab in the reader's language by those words (as are a draft's items'
+  whys, and a scenario's passes and fails), with no schema change; what
+  promtool, or the YAML parser reading a test file, said is shown as it
+  said it. A broken one is told
   (`expectation.broken`, with `scenario`), made a task, and shown on the
   rule's tab (with what promtool said), the overview, the rules list, the
   digest (in the week it was found), `GET /api/v1/expectations`, MCP's
-  `rule` and `/metrics`, as a catch is.
+  `rule` and `/metrics`, as a catch is. Its row moving to another week,
+  what it found found again in a later week, takes what was told of it
+  and its task with it, as a catch's does (step 2): told once while it
+  stays broken, and no second task while the first is open.
 - **The chart.** `serve.scenarios` puts each test file beside
   `expectations.yaml` in its ConfigMap, a scenario's path its name.
   Lapilli's image stays without promtool: `serve.promtool.image`, an image
@@ -812,7 +874,15 @@ Step 5, adding a rule, as built:
 - **Named apart from every rule in effect**, not only from its group's:
   a proposal, its expectations and the ledger name a rule by its name, and
   two rules of one name are told apart by labels that can change. A rule
-  in effect of its name since refuses it as it is carried out.
+  added and applied through Grafana's API, a ruler's or a cloud's, which
+  make it at once, is in effect before the rules are read again: its name
+  is taken until a version of the rules read after it says whether it is
+  there (one applied by the git path is unfinished until it is read
+  back). A rule in effect of its name since refuses it as it is carried
+  out. The names in effect and the places (below) are worked out once a
+  version of the rules (`addReadOf`): the form, `places`, and a proposal
+  refused before its try is taken (a place not offered, a name in
+  effect) read no version again however often they are asked.
 - **Where it goes: a place serve offers, and nothing else.** Worked out
   from the rules it read last (`addPlaces`, the new rule's form, MCP's
   `places`), never from what a proposal says, which is only matched to
@@ -829,7 +899,12 @@ Step 5, adding a rule, as built:
   theirs, nor a new file, which isn't a document Lapilli read, and so not
   one a recipe finds by its hash. Grafana: a group of a folder whose rules
   Lapilli replays as PromQL, its query one of the data sources they read;
-  not a new group, which Grafana would make with an interval of its own. A
+  not a new group, which Grafana would make with an interval of its own;
+  not a folder whose title another folder has too (nested folders,
+  `Payments/Alerts` and `Security/Alerts`): a place is named by its
+  folder's title, and the rules Grafana's export gives carry no folder's
+  uid to tell the two apart, so the place would offer both folders'
+  contact points and the rule could land in either. A
   ruler: a group, or a new group, in a Mimir's, a Cortex's or an Amazon
   namespace `--changes-in` names; not an Azure rule group, whose rules
   carry action groups of their own. A cloud's alarms: CloudWatch's or
@@ -857,7 +932,13 @@ Step 5, adding a rule, as built:
   counts a Lambda function as telling, as released). In Google Cloud,
   notification channels of those its policies tell. Anything else is
   refused, as a place is; it is checked again, against the rules read
-  then, as it is carried out.
+  then, as it is carried out. A cloud's alarm's `for` is one the cloud
+  takes, as a `for` changed on an alarm there is (`rules.AlarmFor`):
+  CloudWatch's `PendingPeriod` and `RecoveryPeriod` (its `for` and
+  `keep_firing_for`) whole seconds, 86,400 at most (the API reference's
+  range, 0 to 86400; Lapilli's own bound is 48 hours), a Google policy's
+  `duration` whole seconds; refused as it is proposed, not by the cloud
+  once approved, and checked again as it is carried out.
 - **Held to its expectations before approval.** An expectations text
   holding it by `rule: NAME` alone, one expectation at least (a budget's
   field, a catch or a scenario: an added rule held to nothing is refused,
@@ -886,11 +967,16 @@ Step 5, adding a rule, as built:
 - **Its team** (changes.md, "A team as the boundary of change"): until it
   is in effect, the team its name and the labels it is added with give
   it, as read back where it goes, its group's with its own, as they will
-  once it is. A team's editor adds only what their team would own so;
+  once it is. A team's editor adds only what their team would own so, and
+  is shown the new rule's form, as they may post it (its places what serve
+  offers anyone, what they add asked of their team as it is posted);
   that team's approvers approve it, and its freezes and `changes_in` hold
   it. Backtested again after its group's labels changed, it is the team
   they give, and one another team owned as it was proposed is proposed
-  again; one whose labels can't be read is refused as it is carried out.
+  again; carried out after they changed, read back again as it is, one
+  whose team they give isn't the one that owned it as it was proposed is
+  refused with the same reason; one whose labels can't be read is refused
+  as it is carried out.
 - **Stale** as changes.md says of any backtest (an earlier lapilli's, a
   record changed since): held until it is backtested again, from its page,
   by MCP's `backtest_again` or by Lapilli itself, which writes it where its
@@ -898,7 +984,10 @@ Step 5, adding a rule, as built:
   anew.
 - **Carried out** after it is checked again: its place still offered, its
   name still free, held to its expectations again over the twelve weeks to
-  now, refused when it now breaks one or isn't replayed to the end. It
+  now, refused when it now breaks one, isn't replayed to the end, or one
+  it met as it was approved isn't known now (a scenario promtool doesn't
+  run now, a catch of an incident the twelve weeks no longer reach): what
+  was met is what its approver approved, and not known is never met. It
   waits for a comparison running (an agent's `compare` or
   `test_expectation`), as a change's backtest does, rather than failing.
   The git path: the rule file's other lines changed since, the rule is
@@ -908,8 +997,10 @@ Step 5, adding a rule, as built:
   and twenty hex digits), in the folder and group a rule there is in now
   (their uid and name read from it), refused when another tool keeps that
   rule (provenance), when its folder's rules no longer read its data
-  source or tell its contact point, or when a rule of its title is in its
-  folder; read back by its uid. A ruler: the group written as rulers.md
+  source or tell its contact point, when a rule of its title is in its
+  folder, or when another folder has its folder's title now, as Grafana
+  is read just before (which of the two the title names isn't known);
+  read back by its uid. A ruler: the group written as rulers.md
   writes one, only the rule added to it as it is now (`rules.AddsRule`), a
   new group only while it is still gone. CloudWatch: `PutMetricAlarm`, as
   undoing a deletion makes one (its PromQL in
@@ -968,4 +1059,11 @@ Step 5, adding a rule, as built:
   expectations can't be kept ahead of one that can, a file of two
   PrometheusRules, a Grafana group whose every rule names a contact point,
   a Lambda function and an automation among CloudWatch's actions, a
-  label's template; each fails with its guard taken out.
+  label's template; each fails with its guard taken out. After a review
+  of 0.65.0: two Grafana folders of one title, offered and carried out;
+  the rules read once a version, asked again and again; a scenario met as
+  it was approved and not known as it is carried out; a group's labels
+  making it another team's between approval and carrying out; a team's
+  editor's form; a cloud's `for` it doesn't take; a name taken by an add
+  applied and not yet read back, and free once a version read after it
+  holds it no more; each fails with its guard taken out.

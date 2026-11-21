@@ -409,6 +409,9 @@ type Server struct {
 	// (docs/design/expectations.md, step 3): one at a time, whatever holds
 	// comparing.
 	agentScenarios sync.Mutex
+	// promtoolTurn is the one turn there is to run promtool, a round's
+	// scenario and an agent's alike (servePromtool).
+	promtoolTurn oneTurn
 	// tries are, by reader, the proposals asked for in the last hour that
 	// read the rules again (propose); impactTries, the incident criteria
 	// tried or saved, which read Prometheus (impactTriesAnHour);
@@ -419,6 +422,9 @@ type Server struct {
 	settingsTries tries
 	// tried are the criteria a try read in full, lately (triedFor).
 	tried triedCache
+	// addsRead is what the latest version of the rules gives a rule added:
+	// the names in effect and the places of its rules (adds.go).
+	addsRead addReadCache
 	// sources is what this replica saw of where incidents come from;
 	// reads, how its reads of the rules and the files went (sourcelist.go).
 	sources sourcesState
