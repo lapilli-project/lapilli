@@ -1,11 +1,20 @@
 #!/bin/sh
 # Writes Rootly's incidents to stdout, as Lapilli's incidents file takes
-# them. Their services become the label service, for --match service.
+# them. Their services become the label service, for --match service, and
+# the alerts linked to each that Alertmanager sent, its alerts
+# (docs/design/links.md).
 #
 #   ROOTLY_TOKEN_FILE  a file holding an API key that can read incidents
+#                      and alerts
 #   SINCE              only incidents created on or after this: a date such
 #                      as 2026-10-01, or an RFC 3339 time
 #   MAX_PAGES          of 100 incidents, at most (default 1000)
+#   ALERTS             yes (default) to read each incident's alerts, or no:
+#                      one request an incident more, at Rootly's five a
+#                      minute
+#   ALERT_LABELS       the labels an alert keeps, comma-separated, such as
+#                      job (default all its labels give)
+#   MAX_ALERT_REQUESTS for alerts, at most (default 2000)
 set -eu
 here=$(dirname "$0")
 api=${ROOTLY_API:-https://api.rootly.com}
@@ -22,7 +31,10 @@ token=$(cat "$ROOTLY_TOKEN_FILE")
 all=$(mktemp)
 got=$(mktemp)
 heads=$(mktemp)
-trap 'rm -f "$all" "$got" "$heads"' EXIT
+ids=$(mktemp)
+linked=$(mktemp)
+out=$(mktemp)
+trap 'rm -f "$all" "$got" "$heads" "$ids" "$linked" "$out"' EXIT
 trap 'exit 1' INT TERM HUP
 # get URL: a page. Rootly takes five GETs a minute: a 429 is waited out as
 # its Retry-After says (two minutes at most), five times at most; anything
@@ -62,6 +74,21 @@ case $max in
     exit 1
     ;;
 esac
+alerts=${ALERTS:-yes}
+maxreq=${MAX_ALERT_REQUESTS:-2000}
+case $alerts in
+  yes | no) ;;
+  *)
+    printf 'rootly.sh: ALERTS is yes or no\n' >&2
+    exit 1
+    ;;
+esac
+case $maxreq in
+  '' | *[!0-9]*)
+    printf 'rootly.sh: MAX_ALERT_REQUESTS is a number of requests\n' >&2
+    exit 1
+    ;;
+esac
 number=1
 pages=0
 while :; do
@@ -88,4 +115,42 @@ while :; do
   fi
   number=$next
 done
-jq -s -f "$here/rootly.jq" "$all"
+if [ "$alerts" = yes ]; then
+  jq -r -s -L "$here" -f "$here/rootly.jq" --argjson ids true "$all" >"$ids"
+  requests=0
+  while IFS= read -r id; do
+    # An id goes in a path: Rootly's are letters, digits and dashes.
+    case $id in
+      '' | *[!A-Za-z0-9-]*)
+        printf 'rootly.sh: an incident id that is not letters, digits and dashes; stopping, writing nothing\n' >&2
+        exit 1
+        ;;
+    esac
+    number=1
+    while :; do
+      requests=$((requests + 1))
+      if [ "$requests" -gt "$maxreq" ]; then
+        printf 'rootly.sh: more than %s requests for alerts; stopping, writing nothing (raise MAX_ALERT_REQUESTS, set SINCE later, or set ALERTS=no)\n' "$maxreq" >&2
+        exit 1
+      fi
+      page=$(get "$api/v1/incidents/$id/alerts?page%5Bnumber%5D=$number&page%5Bsize%5D=100")
+      printf '%s' "$page" | jq -c --arg id "$id" '{id: $id, alerts: [.data[]?]}' >>"$linked"
+      next=$(printf '%s' "$page" | jq -r '.meta.next_page // empty')
+      [ -n "$next" ] || break
+      case $next in
+        *[!0-9]*)
+          printf 'rootly.sh: the API gave a next page of alerts that is not a number; stopping, writing nothing\n' >&2
+          exit 1
+          ;;
+      esac
+      if [ "$next" -le "$number" ]; then
+        printf 'rootly.sh: the API gave the same page of alerts again; stopping, writing nothing\n' >&2
+        exit 1
+      fi
+      number=$next
+    done
+  done <"$ids"
+fi
+jq -s -L "$here" -f "$here/rootly.jq" --slurpfile linked "$linked" --arg labels "${ALERT_LABELS:-}" "$all" >"$out"
+jq -r -L "$here" 'include "alerts"; said("rootly.sh"; "their labels carry no alertname")' "$out" >&2
+jq '{incidents}' "$out"

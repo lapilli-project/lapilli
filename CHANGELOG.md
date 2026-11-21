@@ -23,6 +23,12 @@ Before upgrading:
   incident that lists alerts is caught by them alone; one that lists none
   is judged as before. serve judges every firing again once when it is
   given or taken away at a start.
+- **The PagerDuty, incident.io and Rootly recipes write each incident's
+  alerts**, those whose alert carries an `alertname` with its labels
+  (PagerDuty's details as Alertmanager put them there, incident.io's
+  attributes, Rootly's labels), saying how many they left out;
+  `ALERT_LABELS` keeps some labels alone, `ALERTS=no` reads none, and
+  `MAX_ALERT_REQUESTS` (2000) bounds what they ask for.
 
 ## [0.66.0] - 2026-11-21
 

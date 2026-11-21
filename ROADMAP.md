@@ -196,6 +196,12 @@ is built in and none is favoured.
 - Compass keeps alerts, not incidents; its recipe reads a closed alert's
   log for its close since 0.27. Compass doesn't document a close's words:
   checking them against a real account.
+- The alerts an incident's tool linked to it judge it (built,
+  [docs/design/links.md](docs/design/links.md)): the PagerDuty, incident.io
+  and Rootly recipes copy them where an alert carries its `alertname` and
+  labels. Still to do: Grafana IRM's, FireHydrant's and Jira Service
+  Management's linked alerts; near misses looked for by a link; which
+  labels a recipe keeps by default.
 
 ## lapilli serve
 

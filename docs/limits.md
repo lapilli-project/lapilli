@@ -40,6 +40,12 @@
   are marked "replayed in part" until `--late` covers them.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
+- A firing catches an incident by time and labels, or by the alerts the
+  incident's tool linked to it, where a recipe copied them: PagerDuty's,
+  incident.io's and Rootly's, and only those alerts that carry their
+  `alertname` and labels. A linked alert's labels must all be the
+  firing's, so a label the replay doesn't have (Prometheus's external
+  labels) keeps it from matching unless `ALERT_LABELS` leaves it out.
 - `lapilli serve` runs as one replica on a ledger file, or as several on
   one Postgres database, one of them leading (docs/design/replicas.md).
   Who is who comes

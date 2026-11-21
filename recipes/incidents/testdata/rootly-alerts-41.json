@@ -1,0 +1,13 @@
+{"data": [
+  {"id": "6f1b2c3d-0000-4000-8000-000000000a01", "type": "alerts", "source": "alertmanager",
+   "attributes": {"short_id": "A1", "source": "alertmanager", "summary": "CheckoutErrors", "status": "resolved", "noise": "not_noise",
+     "labels": [{"key": "alertname", "value": "CheckoutErrors"}, {"key": "instance", "value": "checkout-1:9090"}, {"key": "job", "value": "checkout"},
+                {"key": "status", "value": "firing"}, {"key": "version", "value": "4"}, {"key": "source_name", "value": "Alertmanager"}],
+     "data": {"status": "firing"}, "external_id": "CheckoutErrors", "started_at": "2026-10-28T03:01:00Z", "ended_at": "2026-10-28T03:40:00Z",
+     "created_at": "2026-10-28T03:01:05Z", "updated_at": "2026-10-28T03:40:05Z"}},
+  {"id": "6f1b2c3d-0000-4000-8000-000000000a02", "type": "alerts", "source": "email",
+   "attributes": {"short_id": "A2", "source": "email", "summary": "Checkout is slow", "status": "resolved",
+     "labels": [{"key": "env", "value": "production"}], "data": null, "external_id": null, "started_at": "2026-10-28T03:02:00Z",
+     "created_at": "2026-10-28T03:02:05Z", "updated_at": "2026-10-28T03:40:05Z"}}
+], "links": {"self": "x", "first": "x", "prev": null, "next": "x", "last": "x"},
+ "meta": {"current_page": 1, "next_page": 2, "prev_page": null, "total_count": 3, "total_pages": 2}}

@@ -46,11 +46,20 @@ func fixture(t *testing.T, name string) []byte {
 // --incidents does.
 func runRecipe(t *testing.T, script string, env ...string) []incident.Incident {
 	t.Helper()
+	incs, _ := runRecipeSaid(t, script, env...)
+	return incs
+}
+
+// runRecipeSaid is runRecipe, and what the recipe said on stderr.
+func runRecipeSaid(t *testing.T, script string, env ...string) ([]incident.Incident, string) {
+	t.Helper()
 	cmd := exec.Command("sh", recipes+script)
 	cmd.Env = append(os.Environ(), env...)
-	out, err := cmd.CombinedOutput()
+	var said strings.Builder
+	cmd.Stderr = &said
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("%s: %v\n%s", script, err, out)
+		t.Fatalf("%s: %v\n%s%s", script, err, out, said.String())
 	}
 	file := filepath.Join(t.TempDir(), "incidents.yaml")
 	os.WriteFile(file, out, 0o600)
@@ -58,7 +67,7 @@ func runRecipe(t *testing.T, script string, env ...string) []incident.Incident {
 	if err != nil {
 		t.Fatalf("what %s wrote doesn't load: %v\n%s", script, err, out)
 	}
-	return incs
+	return incs, said.String()
 }
 
 func tokenFile(t *testing.T, token string) string {
@@ -77,7 +86,9 @@ func wantIncidents(t *testing.T, got []incident.Incident, want ...incident.Incid
 		g := got[i]
 		a, _ := json.Marshal(g.Labels)
 		b, _ := json.Marshal(w.Labels)
-		if g.ID != w.ID || g.Title != w.Title || !g.Start.Equal(w.Start) || !g.End.Equal(w.End) || string(a) != string(b) {
+		x, _ := json.Marshal(g.Alerts)
+		y, _ := json.Marshal(w.Alerts)
+		if g.ID != w.ID || g.Title != w.Title || !g.Start.Equal(w.Start) || !g.End.Equal(w.End) || string(a) != string(b) || string(x) != string(y) {
 			t.Errorf("incident %d: %+v, want %+v", i, g, w)
 		}
 	}
@@ -98,6 +109,29 @@ func TestPagerDutyRecipe(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Each high-urgency incident's alerts, from the documented
+		// answer's shape: one of Alertmanager's, its group's alerts in
+		// its details as Alertmanager 0.30.0 sends them, one from email
+		// with none, one from an Alertmanager whose details say
+		// alertname, in cef_details; and the second incident's over two
+		// pages, two alerts firing and one of them resolved.
+		switch r.URL.Path {
+		case "/incidents":
+		case "/incidents/Q0AAAAAAAAAAA1/alerts":
+			w.Write(fixture(t, "pagerduty-alerts-1.json"))
+			return
+		case "/incidents/Q0AAAAAAAAAAA3/alerts":
+			if r.URL.Query().Get("offset") == "100" {
+				w.Write(fixture(t, "pagerduty-alerts-3b.json"))
+			} else {
+				w.Write(fixture(t, "pagerduty-alerts-3.json"))
+			}
+			return
+		default:
+			t.Errorf("asked for %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		if got := r.URL.Query().Get("since"); got != "2026-10-01" {
 			t.Errorf("since = %q", got)
 		}
@@ -108,30 +142,89 @@ func TestPagerDutyRecipe(t *testing.T) {
 		w.Write(fixture(t, name))
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "pagerduty.sh", "PAGERDUTY_API="+srv.URL, "PAGERDUTY_TOKEN_FILE="+tokenFile(t, "pd-secret"), "SINCE=2026-10-01")
+	env := []string{"PAGERDUTY_API=" + srv.URL, "PAGERDUTY_TOKEN_FILE=" + tokenFile(t, "pd-secret"), "SINCE=2026-10-01"}
+	got, said := runRecipeSaid(t, "pagerduty.sh", env...)
 	wantIncidents(t, got,
-		incident.Incident{ID: "PD-101", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
-		incident.Incident{ID: "PD-103", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search"}}})
+		incident.Incident{ID: "PD-101", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}},
+			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout", "severity": "critical"}}, {Rule: "CheckoutLatency", Labels: map[string]string{"service": "checkout"}}}},
+		incident.Incident{ID: "PD-103", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search"}},
+			Alerts: []incident.Alert{{Rule: "SearchTimeouts", Labels: map[string]string{"namespace": "shop", "pod": "search-1", "service": "search"}},
+				{Rule: "SearchTimeouts", Labels: map[string]string{"namespace": "shop", "pod": "search-2", "service": "search"}}}})
+	if want := "pagerduty.sh: left out 1 of the 6 alerts linked to the incidents: their details carry no alertname\n"; said != want {
+		t.Errorf("said %q, want %q", said, want)
+	}
+	// The labels ALERT_LABELS names alone; with ALERTS=no, none asked for.
+	got = runRecipe(t, "pagerduty.sh", append(env, "ALERT_LABELS=service")...)
+	if a := got[1].Alerts; len(a) != 1 || len(a[0].Labels) != 1 || a[0].Labels["service"] != "search" {
+		t.Errorf("ALERT_LABELS=service: %+v", a)
+	}
+	got = runRecipe(t, "pagerduty.sh", append(env, "ALERTS=no")...)
+	if len(got) != 2 || got[0].Alerts != nil || got[1].Alerts != nil {
+		t.Errorf("ALERTS=no: %+v", got)
+	}
 }
 
 func TestIncidentIORecipe(t *testing.T) {
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer iio-secret" || r.URL.Path != "/v2/incidents" {
+		if r.Header.Get("Authorization") != "Bearer iio-secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		q := r.URL.Query()
+		// The alerts linked to the incidents kept, INC-41's over two
+		// pages and INC-43's none, and each alert by its id: the
+		// documented answers' shapes, attributes and all.
+		switch r.URL.Path {
+		case "/v2/incidents":
+		case "/v2/incident_alerts":
+			switch {
+			case q.Get("page_size") != "50":
+				t.Errorf("page_size %q", q.Get("page_size"))
+			case q.Get("incident_id") == "01FCNDV6P870EA6S7TK1DSYD5H" && q.Get("after") == "":
+				w.Write(fixture(t, "incident-io-incident-alerts-1.json"))
+			case q.Get("incident_id") == "01FCNDV6P870EA6S7TK1DSYD5H" && q.Get("after") == "01GW2G3V0S59R238FAHPDS1A62":
+				w.Write(fixture(t, "incident-io-incident-alerts-2.json"))
+			case q.Get("incident_id") == "01FCNDV6P870EA6S7TK1DSYD5K":
+				w.Write(fixture(t, "incident-io-incident-alerts-none.json"))
+			default:
+				t.Errorf("asked for the alerts of %v", q)
+				http.NotFound(w, r)
+			}
+			return
+		default:
+			n, ok := map[string]string{"/v2/alerts/01GW2G3V0S59R238FAHPDS1R61": "1", "/v2/alerts/01GW2G3V0S59R238FAHPDS1R62": "2", "/v2/alerts/01GW2G3V0S59R238FAHPDS1R63": "3"}[r.URL.Path]
+			if !ok {
+				t.Errorf("asked for %s", r.URL.Path)
+				http.NotFound(w, r)
+				return
+			}
+			w.Write(fixture(t, "incident-io-alert-"+n+".json"))
+			return
+		}
 		name := "incident-io-1.json"
-		if r.URL.Query().Get("after") != "" {
+		if q.Get("after") != "" {
 			name = "incident-io-2.json"
 		}
 		w.Write(fixture(t, name))
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "incident-io.sh", "INCIDENT_IO_API="+srv.URL, "INCIDENT_IO_TOKEN_FILE="+tokenFile(t, "iio-secret"))
+	got, said := runRecipeSaid(t, "incident-io.sh", "INCIDENT_IO_API="+srv.URL, "INCIDENT_IO_TOKEN_FILE="+tokenFile(t, "iio-secret"))
 	wantIncidents(t, got,
-		incident.Incident{ID: "INC-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00.801578Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout", "cart"}}},
+		incident.Incident{ID: "INC-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00.801578Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout", "cart"}},
+			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout"}}, {Rule: "CheckoutLatency", Labels: map[string]string{"service": "checkout"}}}},
 		incident.Incident{ID: "INC-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z")})
+	if want := "incident-io.sh: left out 1 of the 3 alerts linked to the incidents: no attribute of theirs is named alertname\n"; said != want {
+		t.Errorf("said %q, want %q", said, want)
+	}
+	// Past MAX_ALERT_REQUESTS, nothing is written.
+	cmd := exec.Command("sh", recipes+"incident-io.sh")
+	cmd.Env = append(os.Environ(), "INCIDENT_IO_API="+srv.URL, "INCIDENT_IO_TOKEN_FILE="+tokenFile(t, "iio-secret"), "MAX_ALERT_REQUESTS=3")
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+		t.Errorf("past MAX_ALERT_REQUESTS: %v, wrote %q", err, stdout.String())
+	}
 }
 
 func TestJiraRecipe(t *testing.T) {
@@ -1032,11 +1125,30 @@ func TestGrafanaIRMRecipe(t *testing.T) {
 func TestRootlyRecipe(t *testing.T) {
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer rootly-secret" || r.URL.Path != "/v1/incidents" {
+		if r.Header.Get("Authorization") != "Bearer rootly-secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		q := r.URL.Query()
+		// The alerts of the incidents kept, RL-41's over two pages,
+		// as the documented list of an incident's alerts gives them.
+		switch r.URL.Path {
+		case "/v1/incidents":
+		case "/v1/incidents/bbb4a6ce-4ee9-4c43-8e33-0b1c2d3e4f50/alerts":
+			if q.Get("page[number]") == "2" {
+				w.Write(fixture(t, "rootly-alerts-41b.json"))
+			} else {
+				w.Write(fixture(t, "rootly-alerts-41.json"))
+			}
+			return
+		case "/v1/incidents/c1f0e2d3-0000-4000-8000-000000000043/alerts":
+			w.Write(fixture(t, "rootly-alerts-43.json"))
+			return
+		default:
+			t.Errorf("asked for %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		if q.Get("filter[created_at][gte]") != "2026-10-01" || q.Get("page[size]") != "100" {
 			t.Errorf("query = %v", q)
 		}
@@ -1047,10 +1159,14 @@ func TestRootlyRecipe(t *testing.T) {
 		w.Write(fixture(t, name))
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "rootly.sh", "ROOTLY_API="+srv.URL, "ROOTLY_TOKEN_FILE="+tokenFile(t, "rootly-secret"), "SINCE=2026-10-01")
+	got, said := runRecipeSaid(t, "rootly.sh", "ROOTLY_API="+srv.URL, "ROOTLY_TOKEN_FILE="+tokenFile(t, "rootly-secret"), "SINCE=2026-10-01")
 	wantIncidents(t, got,
-		incident.Incident{ID: "RL-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout", "cart"}}},
+		incident.Incident{ID: "RL-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout", "cart"}},
+			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"instance": "checkout-1:9090", "job": "checkout"}}, {Rule: "CheckoutLatency", Labels: map[string]string{"job": "checkout"}}}},
 		incident.Incident{ID: "RL-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search"}}})
+	if want := "rootly.sh: left out 1 of the 3 alerts linked to the incidents: their labels carry no alertname\n"; said != want {
+		t.Errorf("said %q, want %q", said, want)
+	}
 }
 
 func TestFireHydrantRecipe(t *testing.T) {
