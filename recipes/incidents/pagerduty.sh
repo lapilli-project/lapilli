@@ -15,8 +15,36 @@
 set -eu
 here=$(dirname "$0")
 api=${PAGERDUTY_API:-https://api.pagerduty.com}
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+case $api in
+  *@*)
+    printf 'pagerduty.sh: PAGERDUTY_API holds a user or token before @, refused\n' >&2
+    exit 1
+    ;;
+  https://*) proto='=https' ;;
+  http://127.0.0.1:* | http://localhost:*) proto='=http' ;;
+  *)
+    printf 'pagerduty.sh: PAGERDUTY_API is not https\n' >&2
+    exit 1
+    ;;
+esac
 : "${PAGERDUTY_TOKEN_FILE:?a file holding a PagerDuty API key}"
-token=$(cat "$PAGERDUTY_TOKEN_FILE")
+# secret NAME FILE: what FILE holds, one line of the characters a token
+# is written in (a Bearer token's, RFC 6750), as it goes in a header.
+# Neither the token nor what else the file holds is said.
+secret() {
+  s=$(cat "$2")
+  case $s in
+    '' | *[!A-Za-z0-9._~+/=-]*)
+      printf '%s\n' "pagerduty.sh: $1 doesn't hold a token: one line of letters, digits and - . _ ~ + / =" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret PAGERDUTY_TOKEN_FILE "$PAGERDUTY_TOKEN_FILE")
 all=$(mktemp)
 ids=$(mktemp)
 linked=$(mktemp)
@@ -58,7 +86,7 @@ while :; do
   [ -z "${UNTIL:-}" ] || url="$url&until=$(printf '%s' "$UNTIL" | jq -sRr @uri)"
   # The token goes on stdin, not the command line, where ps would show it.
   page=$(printf 'Authorization: Token token=%s\n' "$token" |
-    curl -q -fsS --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$url")
+    curl -q -fsS --proto "$proto" --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$url")
   printf '%s' "$page" | jq -c '.incidents[]' >>"$all"
   [ "$(printf '%s' "$page" | jq -r '.more')" = true ] || break
   offset=$((offset + 100))
@@ -82,7 +110,7 @@ if [ "$alerts" = yes ]; then
         exit 1
       fi
       page=$(printf 'Authorization: Token token=%s\n' "$token" |
-        curl -q -fsS --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$api/incidents/$id/alerts?limit=100&offset=$offset")
+        curl -q -fsS --proto "$proto" --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$api/incidents/$id/alerts?limit=100&offset=$offset")
       printf '%s' "$page" | jq -c --arg id "$id" '{id: $id, alerts: [.alerts[]?]}' >>"$linked"
       [ "$(printf '%s' "$page" | jq -r '.more')" = true ] || break
       offset=$((offset + 100))

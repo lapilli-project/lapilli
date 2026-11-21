@@ -18,8 +18,36 @@
 set -eu
 here=$(dirname "$0")
 api=${INCIDENT_IO_API:-https://api.incident.io}
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+case $api in
+  *@*)
+    printf 'incident-io.sh: INCIDENT_IO_API holds a user or token before @, refused\n' >&2
+    exit 1
+    ;;
+  https://*) proto='=https' ;;
+  http://127.0.0.1:* | http://localhost:*) proto='=http' ;;
+  *)
+    printf 'incident-io.sh: INCIDENT_IO_API is not https\n' >&2
+    exit 1
+    ;;
+esac
 : "${INCIDENT_IO_TOKEN_FILE:?a file holding an incident.io API key}"
-token=$(cat "$INCIDENT_IO_TOKEN_FILE")
+# secret NAME FILE: what FILE holds, one line of the characters a token
+# is written in (a Bearer token's, RFC 6750), as it goes in a header.
+# Neither the token nor what else the file holds is said.
+secret() {
+  s=$(cat "$2")
+  case $s in
+    '' | *[!A-Za-z0-9._~+/=-]*)
+      printf '%s\n' "incident-io.sh: $1 doesn't hold a token: one line of letters, digits and - . _ ~ + / =" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret INCIDENT_IO_TOKEN_FILE "$INCIDENT_IO_TOKEN_FILE")
 all=$(mktemp)
 ids=$(mktemp)
 linked=$(mktemp)
@@ -59,7 +87,7 @@ count() {
     exit 1
   fi
 }
-get() { printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- "$1"; }
+get() { printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 -H @- "$1"; }
 after=
 pages=0
 while :; do
@@ -71,7 +99,7 @@ while :; do
   url="$api/v2/incidents?page_size=100"
   [ -z "$after" ] || url="$url&after=$(printf '%s' "$after" | jq -sRr @uri)"
   [ -z "${SINCE:-}" ] || url="$url&created_at%5Bgte%5D=$(printf '%s' "$SINCE" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- "$url")
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 -H @- "$url")
   printf '%s' "$page" | jq -c '.incidents[]' >>"$all"
   was=$after
   after=$(printf '%s' "$page" | jq -r '.pagination_meta.after // empty')

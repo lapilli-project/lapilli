@@ -15,6 +15,21 @@
 set -eu
 here=$(dirname "$0")
 api=${FIREHYDRANT_API:-https://api.firehydrant.io}
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+case $api in
+  *@*)
+    printf 'firehydrant.sh: FIREHYDRANT_API holds a user or token before @, refused\n' >&2
+    exit 1
+    ;;
+  https://*) proto='=https' ;;
+  http://127.0.0.1:* | http://localhost:*) proto='=http' ;;
+  *)
+    printf 'firehydrant.sh: FIREHYDRANT_API is not https\n' >&2
+    exit 1
+    ;;
+esac
 : "${FIREHYDRANT_TOKEN_FILE:?a file holding a FireHydrant bot token}"
 # SINCE checked before it reaches a query.
 since=
@@ -24,7 +39,20 @@ since=
   printf 'firehydrant.sh: SINCE is a date such as 2026-10-01, or an RFC 3339 time\n' >&2
   exit 1
 }
-token=$(cat "$FIREHYDRANT_TOKEN_FILE")
+# secret NAME FILE: what FILE holds, one line of the characters a token
+# is written in (a Bearer token's, RFC 6750), as it goes in a header.
+# Neither the token nor what else the file holds is said.
+secret() {
+  s=$(cat "$2")
+  case $s in
+    '' | *[!A-Za-z0-9._~+/=-]*)
+      printf '%s\n' "firehydrant.sh: $1 doesn't hold a token: one line of letters, digits and - . _ ~ + / =" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret FIREHYDRANT_TOKEN_FILE "$FIREHYDRANT_TOKEN_FILE")
 all=$(mktemp)
 ids=$(mktemp)
 linked=$(mktemp)
@@ -45,7 +73,7 @@ get() {
   backoff=5
   while :; do
     code=$(printf 'Authorization: Bearer %s\n' "$token" |
-      curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+      curl -q -sS --proto "$proto" --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
     case $code in
       2??)
         cat "$got"
