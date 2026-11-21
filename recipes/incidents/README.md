@@ -24,7 +24,10 @@ linked to each incident, where an alert carries its `alertname` and labels
 linked"). `alerts.jq` is what they share; give `jq` `-L` this directory to run
 their `.jq` files yourself. Each alert keeps every label it carries: in
 judging, one the firing doesn't carry (an external label Prometheus added)
-is passed over, and one both carry must agree. `ALERTS=no` reads none,
+is passed over, and one both carry must agree. A PagerDuty alert from an
+Alertmanager before 0.30.0, whose details say `alertname` beside text that
+may be anything, is its rule alone, with the labels `ALERT_LABELS` names
+from its details. `ALERTS=no` reads none,
 `ALERT_LABELS` keeps the labels it names alone, to narrow them, and
 `MAX_ALERT_REQUESTS` (2000) is the most they ask for a run, past which they
 stop and write nothing.

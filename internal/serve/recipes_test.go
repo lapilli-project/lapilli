@@ -146,7 +146,9 @@ func TestPagerDutyRecipe(t *testing.T) {
 	got, said := runRecipeSaid(t, "pagerduty.sh", env...)
 	wantIncidents(t, got,
 		incident.Incident{ID: "PD-101", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}},
-			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout", "severity": "critical"}}, {Rule: "CheckoutLatency", Labels: map[string]string{"service": "checkout"}}}},
+			// CheckoutLatency's details say alertname beside text that
+			// may be anything: its rule alone.
+			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout", "severity": "critical"}}, {Rule: "CheckoutLatency"}}},
 		incident.Incident{ID: "PD-103", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search"}},
 			Alerts: []incident.Alert{{Rule: "SearchTimeouts", Labels: map[string]string{"namespace": "shop", "pod": "search-1", "service": "search"}},
 				{Rule: "SearchTimeouts", Labels: map[string]string{"namespace": "shop", "pod": "search-2", "service": "search"}}}})
@@ -157,6 +159,9 @@ func TestPagerDutyRecipe(t *testing.T) {
 	got = runRecipe(t, "pagerduty.sh", append(env, "ALERT_LABELS=service")...)
 	if a := got[1].Alerts; len(a) != 1 || len(a[0].Labels) != 1 || a[0].Labels["service"] != "search" {
 		t.Errorf("ALERT_LABELS=service: %+v", a)
+	}
+	if a := got[0].Alerts; len(a) != 2 || a[1].Rule != "CheckoutLatency" || len(a[1].Labels) != 1 || a[1].Labels["service"] != "checkout" {
+		t.Errorf("ALERT_LABELS=service, the labels beside alertname it names: %+v", a)
 	}
 	got = runRecipe(t, "pagerduty.sh", append(env, "ALERTS=no")...)
 	if len(got) != 2 || got[0].Alerts != nil || got[1].Alerts != nil {
