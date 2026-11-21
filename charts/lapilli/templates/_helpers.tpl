@@ -1,8 +1,28 @@
+{{/* lapilli.bool sets in.key, given as true or false, or quoted so, to the
+bool it says: a template's if reads the text "false" as true, so
+linkedOnly: "false" was --linked-only, and serve.everyoneAdmin: "false"
+everyone an admin. Anything else fails, named as name; missing is false. */}}
+{{- define "lapilli.bool" -}}
+{{- $v := index .in .key -}}
+{{- if kindIs "string" $v -}}
+{{- if has (lower $v) (list "true" "false") -}}
+{{- $_ := set .in .key (eq (lower $v) "true") -}}
+{{- else -}}
+{{- fail (printf "%s: true or false, not %q" .name $v) -}}
+{{- end -}}
+{{- else if not (or (kindIs "bool" $v) (kindIs "invalid" $v)) -}}
+{{- fail (printf "%s: true or false" .name) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The values added since 0.28.1, filled in where they are missing, as
 they are after an upgrade with --reuse-values (which keeps the old release's
 values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
 {{- $s := .Values.serve -}}
+{{- include "lapilli.bool" (dict "in" .Values "key" "linkedOnly" "name" "linkedOnly") -}}
+{{- include "lapilli.bool" (dict "in" $s "key" "everyoneAdmin" "name" "serve.everyoneAdmin") -}}
+{{- include "lapilli.bool" (dict "in" $s "key" "exposeWithoutSignIn" "name" "serve.exposeWithoutSignIn") -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "service" "with" (dict "type" "ClusterIP" "port" 80 "annotations" (dict) "loadBalancerClass" "" "loadBalancerSourceRanges" (list) "externalTrafficPolicy" "" "nodePort" nil "sourceRangesAreTheProxy" false)) -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "ingress" "with" (dict "enabled" false "className" "" "annotations" (dict) "hosts" (list) "path" "/" "pathType" "Prefix" "tls" (list) "https" true "serviceAnnotations" (dict))) -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "httpRoute" "with" (dict "enabled" false "annotations" (dict) "parentRefs" (list) "hostnames" (list) "https" true)) -}}
