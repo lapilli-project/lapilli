@@ -121,7 +121,8 @@ Before upgrading:
   team, or of the one team that owns the rule.
 - **An agent's rewrite in `test_expectation` reached promtool with
   templates an added rule is refused for** (affected: 0.65.0 to 0.68.0).
-  Its labels and annotations went into the group promtool runs a
+  Its labels and annotations, and its group's labels, which Prometheus
+  gives each of the group's alerts, went into the group promtool runs a
   scenario with as the agent wrote them: a template that called a
   query, didn't parse, or grew without bound in serve's container. They
   are held as an added rule's are now (`templateOK`).

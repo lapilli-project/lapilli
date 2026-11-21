@@ -676,10 +676,12 @@ func rewritten(current []rules.Rule, r rules.Rule, text string) (rules.Rule, err
 	}
 	// Its labels and annotations are templates promtool works out each
 	// time the rule fires in a scenario, as Prometheus would where it is
-	// kept: each held as an added rule's is (addedTemplates), so that none
-	// calls a query or grows without bound in serve's container.
+	// kept, its group's labels among them, which Prometheus gives each of
+	// the group's alerts: each held as an added rule's is (addedTemplates),
+	// so that none calls a query or grows without bound in serve's
+	// container.
 	texts := []string{g.Says.Summary, g.Says.Description}
-	for _, m := range []map[string]string{g.Labels, g.Says.Annotations} {
+	for _, m := range []map[string]string{g.Labels, g.GroupLabels, g.Says.Annotations} {
 		for _, k := range slices.Sorted(maps.Keys(m)) {
 			texts = append(texts, m[k])
 		}

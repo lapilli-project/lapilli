@@ -150,6 +150,8 @@ func TestTestExpectation(t *testing.T) {
 		"calls query":                  rewrite("15m") + "        annotations: {summary: '{{ with query \"up\" }}{{ . }}{{ end }}'}\n",
 		"isn't a template that parses": rewrite("15m") + "        annotations: {runbook_url: '{{ .Labels.x '}\n",
 		"can't grow":                   strings.Replace(rewrite("15m"), "{severity: page}", `{severity: '{{ reReplaceAll "a" "aa" (reReplaceAll "a" "aa" .Labels.x) }}'}`, 1),
+		// Its group's labels too, which Prometheus gives each alert.
+		"which would run PromQL": strings.Replace(rewrite("15m"), "  - name: shop\n", "  - name: shop\n    labels: {x: '{{ with query \"up\" }}{{ . }}{{ end }}'}\n", 1),
 	} {
 		if failed, text, _ := test(map[string]any{"rule": "Errors", "expectations": errorsHeld, "rewrite": bad}); !failed || !strings.Contains(text, want) {
 			t.Errorf("%s: %s", want, text)
