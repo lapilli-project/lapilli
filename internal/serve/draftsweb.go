@@ -469,7 +469,7 @@ func (s *Server) draftBody(d ledger.ExpectDraft) string {
 	if d.Agent {
 		origin = "an agent's, for " + mdText(d.MadeBy) + ": its words are its own"
 	}
-	fmt.Fprintf(&b, "A draft of what %s is held to, %s, accepted by %s in Lapilli (#%d).\n\n", mdText(d.Rule), origin, mdText(d.DecidedBy), d.ID)
+	fmt.Fprintf(&b, "A draft of what %s is held to, %s, accepted by %s in Lapilli (draft %d).\n\n", mdText(d.Rule), origin, mdText(d.DecidedBy), d.ID)
 	b.WriteString("| Held to | As it is | |\n|---|--:|---|\n")
 	for _, it := range draftItemsOf(d.Found) {
 		fmt.Fprintf(&b, "| %s %s | %s | %s |\n", mdCell(it.What), mdCell(it.Held), mdCell(it.Value), mdCell(it.State))

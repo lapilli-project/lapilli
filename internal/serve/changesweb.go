@@ -678,12 +678,14 @@ func (s *Server) prBody(l proposalLine) string {
 	// The rule's name, as every name and text from a rule's source here, as
 	// code: one chosen by whoever writes that source mentions no one, and
 	// shows no image or link, in the pull request or the task made of it.
-	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), mdCode(p.Rule))
+	// Lapilli's own numbers are said without #, which the host reads as
+	// its own issue of that number.
+	fmt.Fprintf(&b, "Lapilli proposal %d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), mdCode(p.Rule))
 	if p.Kind == ledger.KindUndo {
 		// Nothing of why the change was made, nor its backtest, which says
 		// what it did: an undo made before kept them.
 		ev = undoEvidence(ev)
-		fmt.Fprintf(&b, "It puts back the rule as it was before Lapilli proposal #%d changed it.\n\n", p.Follows)
+		fmt.Fprintf(&b, "It puts back the rule as it was before Lapilli proposal %d changed it.\n\n", p.Follows)
 	}
 	if p.Agent {
 		b.WriteString("Proposed by an agent, for a person to check.\n\n")
@@ -1372,19 +1374,33 @@ func prTitle(p ledger.Proposal) string {
 }
 
 // Of a title a recipe makes a pull request's and its commit's first line,
-// what a host reads as a reference to an issue or a pull request, which a
-// closing keyword before it (GitHub's and GitLab's) closes once merged, and
-// which mentions it otherwise: a number after # or GH-, and an issue's or a
-// pull request's URL.
-var issueRef = regexp.MustCompile(`(?i)(#|\bGH-|/(?:issues|pull|pulls|merge_requests)/)([0-9])`)
+// and of what its description quotes, what a host or a tracker it is tied
+// to reads as a reference, or a command: a number after #, ! or GH-, an
+// issue's or a pull request's URL, a Jira key (ABC-12), a smart commit's
+// command (#close, #resolve, #time); and a closing keyword before one,
+// which closes it once merged (GitHub's and GitLab's, Fixes ABC-12 through
+// GitLab's Jira integration).
+var (
+	issueRef     = regexp.MustCompile(`(?i)(#|!|\bGH-|/(?:issues|pull|pulls|merge_requests)/)([0-9])`)
+	jiraKey      = regexp.MustCompile(`\b([A-Z][A-Z0-9_]+-)([0-9])`)
+	smartCommand = regexp.MustCompile(`(#)([A-Za-z])`)
+	closingRef   = regexp.MustCompile(`(?i)\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)[\s:]+` +
+		`(?:\S*(?:#|!|GH-)[0-9]|[A-Z][A-Z0-9_]+-[0-9]|https?://\S*/(?:issues|pull|pulls|merge_requests|browse)/)`)
+)
 
-// linkFree is a title as a host reads it referring to no issue: a word
-// joiner (U+2060), which shows as nothing, between # or GH-, or an issue's
-// or a pull request's path, and the number after it, so that a rule named
-// "Fixes #12" neither closes issue 12 once merged nor mentions it. Words
-// are left as they are: a closing keyword with no reference after it
-// closes nothing.
-func linkFree(t string) string { return issueRef.ReplaceAllString(t, "${1}\u2060${2}") }
+// linkFree is a title as a host reads it referring to nothing: a word
+// joiner (U+2060), which shows as nothing, after the first letter of a
+// closing keyword before a reference, and between each reference's # !
+// GH-, URL path or Jira key and its number, and a smart commit's # and its
+// command, so that a rule named "Fixes #12" neither closes issue 12 once
+// merged nor mentions it. A keyword with no reference after it closes
+// nothing, and is left as it is, as Lapilli's own words are.
+func linkFree(t string) string {
+	t = closingRef.ReplaceAllStringFunc(t, func(m string) string { return m[:1] + "\u2060" + m[1:] })
+	t = issueRef.ReplaceAllString(t, "${1}\u2060${2}")
+	t = jiraKey.ReplaceAllString(t, "${1}\u2060${2}")
+	return smartCommand.ReplaceAllString(t, "${1}\u2060${2}")
+}
 
 // apiPatchChange is a recipe saying what became of a change: a pull request
 // opened, merged or closed, or the change failed.

@@ -145,11 +145,16 @@ Before upgrading:
   change recipes make the title its pull request's title and its commit's
   first line, and the description the rest of the message, where a code
   span is no Markdown: a rule named `Fixes #12` closed issue 12, and
-  mentioned it. A word joiner (U+2060), which shows as nothing, goes
-  between `#`, `GH-` or an issue's or a pull request's URL and its number,
-  in the title and in each name or text from outside the description
-  quotes; words are left as they are, as a closing keyword with no
-  reference closes nothing.
+  mentioned it; `Fixes ABC-12` closed a Jira issue through GitLab's Jira
+  integration, `ABC-1 #close` through Jira's smart commits, and `!12`
+  mentioned a merge request. A word joiner (U+2060), which shows as
+  nothing, goes between `#`, `!`, `GH-`, an issue's or a pull request's
+  URL or a Jira key and its number, between a smart commit's `#` and its
+  command, and inside a closing keyword before a reference, in the title
+  and in each name or text from outside the description quotes; a keyword
+  with no reference after it is left as it is, as Lapilli's own words
+  are. Lapilli's own numbers are said without `#` (`Lapilli proposal 12`,
+  `in Lapilli (draft 12)`), which mentioned the host's issue 12.
 - **A cell of the activity log's CSV could be a formula after a space of
   Unicode's** (affected: 0.64.0 to 0.68.0). One that starts with `=`,
   `+`, `-` or `@` after spaces starts with `'`, which a spreadsheet shows
