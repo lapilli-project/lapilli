@@ -1277,6 +1277,8 @@
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "Disparos que no avisaron a nadie: %d acallados por un silencio, %d inhibidos por otra alerta, %d sin ningún silencio ni inhibición recibidos.",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "Disparos que no avisaron a nadie: %d acallados por un silencio, %d inhibidos por otra alerta, %d acallados por un silencio o una inhibición, %d sin ningún silencio ni inhibición recibidos.",
  "Mutes were too many to look through for every firing: those of some rules weren't counted.": "Había demasiados silencios e inhibiciones para revisarlos con cada disparo: los de algunas reglas no se contaron.",
+ "Counted from %s on: notifications are read for the last twelve weeks.": "Contado desde %s: las notificaciones se leen de las últimas doce semanas.",
+ "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.": "Las notificaciones se leen de las últimas doce semanas, desde %s: no se contó ninguna del periodo.",
  "The most for nothing: %s.": "Las que más avisaron en vano: %s.",
  "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: no se ha copiado nada de %s desde %s; puede que el job que copia sus disparos se haya detenido",
  "from and to are whole seconds, such as 2026-11-02T00:00:00Z": "from y to son segundos enteros, como 2026-11-02T00:00:00Z",

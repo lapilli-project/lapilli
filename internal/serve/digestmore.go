@@ -108,6 +108,14 @@ type sentLine struct {
 	// by a silence, an inhibition or either, or not (docs/design/mutes.md):
 	// given once the ledger keeps a mute.
 	PagedNoOne *ledger.Unpaged `json:"paged_no_one,omitempty"`
+	// CountedFrom, of a span that starts before the twelve weeks the
+	// notifications are read for (shownFrom), is when those weeks start:
+	// what is counted above, and what paged no one, is from then on; none,
+	// with before, of a span that ends by then. Zero otherwise.
+	CountedFrom time.Time `json:"counted_from,omitzero"`
+	before      bool
+	// loc is the zone CountedFrom is said in: the ledger's, or a report's.
+	loc *time.Location
 }
 
 type sentFor struct {
@@ -141,7 +149,10 @@ func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Ti
 	for _, r := range rep.Rules {
 		in[r.Rule] = true
 	}
-	out := &sentLine{ByReceiver: map[string]int{}, NoRecord: rep.NoRecord}
+	out := &sentLine{ByReceiver: map[string]int{}, NoRecord: rep.NoRecord, loc: s.cfg.Loc}
+	if from.Before(p.from) {
+		out.CountedFrom, out.before = p.from, !p.from.Before(to)
+	}
 	out.Unjudged = slices.ContainsFunc(rep.Rules, func(r verdict.RuleResult) bool { return r.Unjudged > 0 })
 	out.noIncident, out.ByNothing = unjudgedWhy(rep.Rules)
 	for rule, x := range p.lines(from, to, sc.of) {
@@ -194,6 +205,21 @@ func (x *sentLine) text(l string) string {
 			line += " " + tr(l, "Mutes were too many to look through for every firing: those of some rules weren't counted.")
 		}
 		parts = append(parts, line)
+	}
+	// From when, of a span longer ago than the notifications are read for.
+	if !x.CountedFrom.IsZero() {
+		loc := x.loc
+		if loc == nil {
+			loc = time.UTC
+		}
+		when := x.CountedFrom.In(loc).Format("2006-01-02 15:04")
+		if x.before {
+			return tr(l, "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.", when)
+		}
+		if len(parts) == 0 {
+			parts = append(parts, tr(l, "No notifications were taken for the span."))
+		}
+		parts = append(parts, tr(l, "Counted from %s on: notifications are read for the last twelve weeks.", when))
 	}
 	return strings.Join(parts, " ")
 }

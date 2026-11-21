@@ -341,6 +341,9 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 		case "notifications":
 			var sent *sentLine
 			if sent, err = s.sent(ctx, rep, from, to); err == nil {
+				if sent != nil {
+					sent.loc = loc // the report's zone
+				}
 				if line = sent.text(l); line == "" {
 					line = tr(l, "No notifications were taken for the span.")
 				}

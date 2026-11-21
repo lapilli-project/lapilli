@@ -1277,6 +1277,8 @@
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "誰も呼び出さなかった発火: サイレンスで %d 件、別のアラートの抑制で %d 件、届いたサイレンス・抑制の記録なしで %d 件。",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "誰も呼び出さなかった発火: サイレンスで %d 件、別のアラートの抑制で %d 件、サイレンスか抑制で %d 件、届いたサイレンス・抑制の記録なしで %d 件。",
  "Mutes were too many to look through for every firing: those of some rules weren't counted.": "サイレンス・抑制の記録が多すぎて、すべての発火を調べられませんでした。一部のルールの発火は数えていません。",
+ "Counted from %s on: notifications are read for the last twelve weeks.": "%s 以降の件数です。通知は直近 12 週間分だけを読みます。",
+ "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.": "通知は直近 12 週間、%s 以降の分だけを読みます。この期間の通知は数えていません。",
  "The most for nothing: %s.": "無駄な通知が最も多いルール: %s。",
  "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: %s から %s 以降何も取り込まれていません。発火を取り込む job が停止している可能性があります",
  "from and to are whole seconds, such as 2026-11-02T00:00:00Z": "from と to は 2026-11-02T00:00:00Z のように秒単位で指定します",

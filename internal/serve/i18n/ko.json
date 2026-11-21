@@ -1277,6 +1277,8 @@
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "아무도 안 부른 발화: 침묵으로 %d건, 다른 알림의 억제로 %d건, 받은 침묵·억제 기록 없이 %d건.",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "아무도 안 부른 발화: 침묵으로 %d건, 다른 알림의 억제로 %d건, 침묵이나 억제로 %d건, 받은 침묵·억제 기록 없이 %d건.",
  "Mutes were too many to look through for every firing: those of some rules weren't counted.": "침묵·억제 기록이 너무 많아 모든 발화를 살펴보지 못했어요. 일부 규칙의 발화는 세지 않았어요.",
+ "Counted from %s on: notifications are read for the last twelve weeks.": "%s 부터 센 숫자예요. 알림은 최근 12주만 읽어요.",
+ "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.": "알림은 최근 12주, %s 부터만 읽어요. 이 기간의 알림은 세지 않았어요.",
  "The most for nothing: %s.": "오탐 알림이 가장 많은 규칙: %s.",
  "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: %s 출처에서 %s 이후로 받아 온 발화가 없어요. 발화를 보내는 job이 멈췄을 수 있어요",
  "from and to are whole seconds, such as 2026-11-02T00:00:00Z": "from과 to는 2026-11-02T00:00:00Z처럼 초 단위여야 해요",

@@ -42,6 +42,14 @@
   judges what it runs with its own flag, as before, and nothing again;
   each says in its log, at start and as it leads, when its flag isn't
   what the ledger was last judged by, with both values.
+- **A report from before the twelve weeks notifications are read for
+  didn't say its notifications were counted from then** (affected: 0.22.0
+  to 0.68.1; the firings that paged no one from 0.68.0). Its
+  `notifications` section counted the notifications sent, and the firings
+  that paged no one, from the twelve weeks' first Monday alone, and said
+  them as the span's, or, of a span that ended before them, that none were
+  taken. It says from when they count now, in the report's zone, and its
+  numbers carry it as `counted_from`.
 - The weekly digest read the notifications sent, and the firings that
   paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
   the webhook is told. Once now, everyone's and each team's.
