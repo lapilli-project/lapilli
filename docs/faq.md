@@ -4,13 +4,15 @@
 
 Read access to the history the rules are evaluated against, a
 Prometheus-compatible API (`--prometheus`: Prometheus, Thanos, Mimir,
-VictoriaMetrics, or a cloud's managed Prometheus with `--auth`); the
-rules, as files or from the API that holds them; and a record of what went
-wrong. Of the history it asks `/api/v1/query_range`, and, where they are
-served, `/api/v1/status/config` and `/api/v1/targets` for the scrape
-intervals; `--loaded-rules` asks `/api/v1/rules` too. `--grafana` needs a
-service account token with Viewer, and each cloud the read permission in
-the table in [Use `lapilli verdict`](verdict.md).
+VictoriaMetrics, or a cloud's managed Prometheus with `--auth`; CI's
+`e2e-compat` runs verdict and `--check-replay` against Thanos 0.42.5 and
+VictoriaMetrics 1.156.0); the rules, as files or from the API that holds
+them; and a record of what went wrong. Of the history it asks
+`/api/v1/query_range`, and, where they are served, `/api/v1/status/config`
+and `/api/v1/targets` for the scrape intervals; `--loaded-rules` asks
+`/api/v1/rules` too. `--grafana` needs a service account token with
+Viewer, and each cloud the read permission in the table in
+[Use `lapilli verdict`](verdict.md).
 
 ### Do I need a list of incidents?
 
@@ -106,8 +108,9 @@ Rules: Prometheus rule files, `PrometheusRule` resources, Grafana alerting
 provisioning files, each cloud's managed rule groups and its alarms written
 in PromQL, ConfigMaps holding any of them, Loki ruler rule files
 (`--loki-rules`), and directories of them; or as an API holds them:
-`--loaded-rules` (Prometheus, Thanos, Mimir, vmalert, Amazon Managed
-Service for Prometheus), `--grafana`, `--ruler` (Mimir, Cortex, Amazon's,
+`--loaded-rules` (Prometheus, Thanos, Mimir, vmalert through
+VictoriaMetrics' `-vmalert.proxyURL`, Amazon Managed Service for
+Prometheus), `--grafana`, `--ruler` (Mimir, Cortex, Amazon's,
 Azure's), a Loki's ruler (`--loki-loaded-rules`), and a cloud's own alarms
 (`--alarms`). What
 Prometheus fired (`--alerts`) and firings recorded elsewhere (`--firings`)

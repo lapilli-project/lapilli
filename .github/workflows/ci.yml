@@ -131,6 +131,7 @@ jobs:
       e2e-rendered: ${{ steps.reached.outputs.e2e-rendered }}
       e2e-dashboard: ${{ steps.reached.outputs.e2e-dashboard }}
       e2e-ratelimit: ${{ steps.reached.outputs.e2e-ratelimit }}
+      e2e-compat: ${{ steps.reached.outputs.e2e-compat }}
     steps:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -379,6 +380,26 @@ jobs:
         with:
           go-version-file: go.mod
       - run: test/e2e/ratelimit.sh
+
+  e2e-compat:
+    # lapilli verdict and --check-replay against a real Thanos (a sidecar
+    # and its query) and a real VictoriaMetrics with vmalert in Docker,
+    # beside the Prometheus they read or are written by. Not a required
+    # check: it pulls images, and the rules must fire for some minutes
+    # first.
+    name: Thanos and VictoriaMetrics on real servers
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-compat == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/compat.sh
 
   vulnerabilities:
     name: govulncheck

@@ -33,7 +33,9 @@ What really fired comes from a series, or from Grafana's own history:
 | Amazon Managed Service for Prometheus | `ALERTS{alertstate="firing"}` | [documented](https://docs.aws.amazon.com/prometheus/latest/userguide/troubleshoot-rule-evaluations.html) |
 | Grafana, with `--grafana` or `--check-grafana` | Grafana's own [alert state history](https://grafana.com/docs/grafana/latest/alerting/set-up/configure-alert-state-history/), read through its API | kept in annotations, its default, from Grafana 12.4 on, or in Loki. Kept in Prometheus too, the series below while it holds anything |
 | Grafana | `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}` | once state history is written to Prometheus. Its error alerts are left out: a query that failed can't be replayed |
-| Thanos, Mimir, Azure Monitor, Google Cloud | ask for `ALERTS` and see | their docs don't say; `--check-series` names another series |
+| vmalert, writing to VictoriaMetrics (`-remoteWrite.url`) | `ALERTS{alertstate="firing"}` | [documented](https://docs.victoriametrics.com/victoriametrics/vmalert/); checked in CI (`e2e-compat`) |
+| Thanos, over a Prometheus's sidecar | that Prometheus's `ALERTS{alertstate="firing"}` | checked in CI (`e2e-compat`) |
+| Mimir, Azure Monitor, Google Cloud | ask for `ALERTS` and see | their docs don't say; `--check-series` names another series |
 
 Grafana keeps its alert state history in annotations unless told
 otherwise, and writes `GRAFANA_ALERTS` only when told to, so most

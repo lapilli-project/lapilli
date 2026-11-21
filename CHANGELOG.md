@@ -8,7 +8,8 @@ Incidents judged by the alerts their tool linked to them, and why a
 firing paged no one, from Alertmanager's event recorder. `lapilli impact
 suggest` for a team with no incidents written down. Datadog's monitors and
 New Relic's alert conditions judged from their history. A backtest that
-can stop a merge, and set a commit status. Ledger schema 028 and 029.
+can stop a merge, and set a commit status. Thanos and VictoriaMetrics
+checked in CI. Ledger schema 028 and 029.
 
 Before upgrading:
 - **Ledger schema 028 and 029**, after 027: keep a copy of the ledger's
@@ -101,6 +102,16 @@ Before upgrading:
   the hours about the firing's start and end. Mutes come at the events'
   rate, 1,000 rows of a rule's hour and 200,000 a day at most, and claim
   only that a firing was muted ([docs/design/mutes.md](docs/design/mutes.md)).
+- **Thanos and VictoriaMetrics, checked in CI.** A new job, `e2e-compat`
+  (`test/e2e/compat.sh`), runs `lapilli verdict` and `--check-replay`
+  against a real Thanos 0.42.5 (a sidecar and its query) and a real
+  VictoriaMetrics 1.156.0 with vmalert 1.156.0, beside the Prometheus they
+  read or are written by: the same firings, each its rule, labels, start
+  and end, as against Prometheus; every firing alike with `ALERTS`,
+  Prometheus's through Thanos and vmalert's in VictoriaMetrics; and
+  `--loaded-rules` reading vmalert's rules through VictoriaMetrics. A pull
+  request runs it when it changes `internal/prom`, `internal/replay`,
+  `internal/rules`, `internal/source` or the script. Not a required check.
 
 ## [0.66.0] - 2026-11-21
 
