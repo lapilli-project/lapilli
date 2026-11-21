@@ -220,7 +220,9 @@ func (l *Ledger) MoveRuleKept(ctx context.Context, from, to, by string) error {
 // DeleteRuleKept deletes what the ledger keeps of a rule's name: its note,
 // its tasks with the comments on them, and the comments on it. Its
 // proposals stay. Each task deleted is noted as DeleteTask notes it, and
-// the whole in the activity log.
+// the whole in the activity log. A note that puts the rule in a team takes
+// it out of the team deleted, as a note's team changed does (teamMovable):
+// an admin's while the boundaries of change are declared.
 func (l *Ledger) DeleteRuleKept(ctx context.Context, rule, by string) error {
 	if !ruleName(rule) {
 		return invalid("a note is on a rule")
@@ -234,6 +236,9 @@ func (l *Ledger) DeleteRuleKept(ctx context.Context, rule, by string) error {
 			return err
 		}
 		if was != nil && was.TeamID != 0 {
+			if err := l.teamMovable(t); err != nil {
+				return err
+			}
 			if err := l.pendTeamWindows(t); err != nil {
 				return err
 			}

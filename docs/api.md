@@ -183,9 +183,13 @@ Bounds:
   weeks.
 - `GET /api/v1/tasks` gives 500 tasks at most, the latest changed first;
   `GET /api/v1/proposals` 200; `GET /api/v1/runs` the last 100;
-  `GET /api/v1/activity` 1,000, and, for a `team`'s, looks through
-  20,000 changes and looks up 200 tasks and proposals at most, then says
-  where it stopped (`next`, `cut`). Only a
+  `GET /api/v1/activity` 1,000, or 8 MiB of their text, and, for a
+  `team`'s, looks through 20,000 changes and looks up 200 tasks and
+  proposals at most, then says where it stopped (`next`, `cut`); it is
+  written out four at a time, one a person, each holding its turn until it
+  is read, and one of 50 changes at most, held to a mebibyte, takes a
+  turn of the small ones', 16 at once.
+  Only a
   tracker job's `GET /api/v1/tasks` goes on from where it stopped
   (`after`, `next`).
 - A heavy request takes the one turn there is for one: a report with its
@@ -210,7 +214,7 @@ Bounds:
 | `GET /api/v1/rules` | viewer | `weeks` (`1`, `4` or `12`; 4 by default), `team`, `sort` (`refired`, `deploys`), `during` or `outside` (a marked window's kind) | the rules list: `Lines`, a rule each, with `Firings`, `White`, `Black`, `Precision`, `Noisy`, `Team`, `Suggestion`, ...; `Silent`, the rules that didn't fire in the twelve weeks kept |
 | `GET /api/v1/runs` | viewer | | the last 100 runs, the latest first: `Kind`, `From`, `To`, `Firings`, `Error`, `Failed`; to anyone but an admin, without the paths of serve's files |
 | `GET /api/v1/sources` | viewer | `all` (`true` for every source) | the sources firings are copied in from: `name`, `written`, `by`, `from`, `to`, `firings`, `rules`; with `all=true`, `sources`, every source serve reads as the Sources page shows it: `id`, `kind`, `name`, `from` (its flag), `state` (`ok`, `failing`, `quiet`, `pending`), `down`, `last_ok`, `last_failed`, `last_error` (as `GET /api/v1/runs` says an error, and without a credential to anyone), `failures` (reads in a row, -1 where not counted), `rules`, `lag_seconds`, `took_seconds`, and, to an admin, `where`; never kept ([docs/design/serveops.md](design/serveops.md#sources)) |
-| `GET /api/v1/activity` | viewer | `who`, `kind` (`setting`, `incident`, `verdict`, `proposal`, `task`, `comment`, `note`, `window`, `marked`, `report`, `team`, `role`, `goal`, `firings`, `cleanup`, `other`), `team`, `since`, `until` (a day, `2026-11-02`, in `--tz`, `until` taking it whole, or an RFC 3339 time), `before` (where a page ended), `limit` (1 to 1,000; 1,000 unless given), `format` (`json`, `csv`) | `activity`, the changes kept, the latest first: `id`, `at`, `by`, `kind`, `what`, `before`, `after`; `next`, the `before` to go on from; `cut`, that it stopped looking. With `format=csv`, the same as CSV (`id,at,by,kind,what,before,after`), the next page in `Link`, no cell a formula. The roles given and taken to an admin alone, and to anyone else the paths of serve's files as their flags; never kept ([docs/design/serveops.md](design/serveops.md#the-activity-log)) |
+| `GET /api/v1/activity` | viewer | `who`, `kind` (`setting`, `incident`, `verdict`, `proposal`, `task`, `comment`, `note`, `window`, `marked`, `report`, `team`, `role`, `goal`, `firings`, `cleanup`, `other`), `team`, `since`, `until` (a day, `2026-11-02`, in `--tz`, `until` taking it whole, or an RFC 3339 time), `before` (where a page ended), `limit` (1 to 1,000; 1,000 unless given, and as many as 8 MiB of their text holds), `format` (`json`, `csv`) | `activity`, the changes kept, the latest first: `id`, `at`, `by`, `kind`, `what`, `before`, `after`; `next`, the `before` to go on from; `cut`, that it stopped looking. With `format=csv`, the same as CSV (`id,at,by,kind,what,before,after`), the next page in `Link`, no cell a formula. The roles given and taken to an admin alone, and to anyone else the paths of serve's files as their flags; never kept ([docs/design/serveops.md](design/serveops.md#the-activity-log)) |
 | `GET /api/v1/settings` | viewer | | the judging settings, each with its flag and value (`Settings`), whether `--linked-only` is given (`linked_only`), the incident criteria (`criteria`), and what `--config` came to (`config`; to anyone but an admin, without the file's name) |
 | `GET /api/v1/me` | anyone let in | | `user`, `groups`, `role`, `teams` |
 

@@ -15,6 +15,30 @@
 set -eu
 here=$(dirname "$0")
 api=${FIREHYDRANT_API:-https://api.firehydrant.io}
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+proto=
+case $api in
+  *@*)
+    printf 'firehydrant.sh: FIREHYDRANT_API holds a user or token before @, refused\n' >&2
+    exit 1
+    ;;
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
+    ;;
+esac
+if [ -z "$proto" ]; then
+  printf 'firehydrant.sh: FIREHYDRANT_API is not https\n' >&2
+  exit 1
+fi
 : "${FIREHYDRANT_TOKEN_FILE:?a file holding a FireHydrant bot token}"
 # SINCE checked before it reaches a query.
 since=
@@ -24,7 +48,28 @@ since=
   printf 'firehydrant.sh: SINCE is a date such as 2026-10-01, or an RFC 3339 time\n' >&2
   exit 1
 }
-token=$(cat "$FIREHYDRANT_TOKEN_FILE")
+# secret NAME FILE: what FILE holds, one line of the characters a token
+# is written in (a Bearer token's, RFC 6750), as it goes in a header.
+# Neither the token nor what else the file holds is said.
+secret() {
+  s=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
+  case $s in
+    '' | *[!A-Za-z0-9._~+/=-]*)
+      printf '%s\n' "firehydrant.sh: $1 doesn't hold a token: one line of letters, digits and - . _ ~ + / =" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret FIREHYDRANT_TOKEN_FILE "$FIREHYDRANT_TOKEN_FILE")
 all=$(mktemp)
 ids=$(mktemp)
 linked=$(mktemp)
@@ -38,14 +83,14 @@ trap 'exit 1' INT TERM HUP
 # every 10 seconds: a 429 is waited out as its Retry-After says, or else 5
 # seconds, then twice as long each time; two minutes at most a wait, five
 # waits a request and ten minutes in all a run. Past them, and on any
-# answer but a 2xx, it fails. Its waits are counted in a file, as each
-# $(get ...) is a shell of its own.
+# answer but a 2xx, or one over 16 MiB, it fails. Its waits are counted in
+# a file, as each $(get ...) is a shell of its own.
 get() {
   waits=0
   backoff=5
   while :; do
     code=$(printf 'Authorization: Bearer %s\n' "$token" |
-      curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+      curl -q -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
     case $code in
       2??)
         cat "$got"

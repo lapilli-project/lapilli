@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -203,12 +204,16 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	}
 	// A rule the history can't say all it fired of makes the day of no
 	// use: taken out alone, its firings already copied in would go, and
-	// the day would read as one it was quiet.
+	// the day would read as one it was quiet, as the source's record is
+	// every rule's. So does one whose name the history gives another of
+	// Grafana's rules too (one title in two folders), which it never says
+	// which of them fired: a rule of the same title, even paused, made in
+	// any folder Lapilli reads, would otherwise take its firings away.
 	if len(j.Unsure) > 0 {
-		return fmt.Errorf("%w: it passed over changes of %d of the rules, or doesn't tell their alerts apart", source.ErrUnusable, len(j.Unsure))
+		return fmt.Errorf("%w: it passed over changes of %d of the rules, or doesn't tell their alerts apart: %s", source.ErrUnusable, len(j.Unsure), someNames(j.Unsure))
 	}
 	if len(j.Shared) > 0 {
-		s.log.Warn("Grafana's rules whose name its alert state history gives another rule too aren't judged by it", "rules", len(j.Shared))
+		return fmt.Errorf("%w: it gives the name of %d of the rules to another of Grafana's rules too, and doesn't say which fired: %s", source.ErrUnusable, len(j.Shared), someNames(j.Shared))
 	}
 	// A firing a write can't hold (more than 32 labels, labels past 4 KB,
 	// a name that doesn't show) makes the day of no use, as it would the
@@ -280,9 +285,9 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			from = p
 		}
 	}
+	var before []firing.Firing
 	if from.Before(p) {
-		before, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, from, p)
-		if err != nil {
+		if before, err = s.l.RecordedFirings(ctx, ledger.GrafanaSource, from, p); err != nil {
 			return err
 		}
 		for i, x := range before {
@@ -291,13 +296,103 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 				before[i].End = end
 			}
 		}
-		send = append(before, send...)
 	}
-	got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, from, b, send, ledger.GrafanaCopier, o)
-	if err == nil && got.Changed() {
-		s.log.Info("Grafana's alert state history copied in", "from", from, "to", b, "firings", got.Firings, "added", got.Added, "removed", got.Removed)
+	// A rule judged so no more, paused, deleted or renamed, keeps what was
+	// copied in for it: the write is of the rules judged now alone.
+	judging := make(map[string]bool, len(rs))
+	for _, r := range rs {
+		judging[r.Name] = true
 	}
-	return err
+	had, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, p, b)
+	if err != nil {
+		return err
+	}
+	var kept []firing.Firing
+	for _, x := range had {
+		if !judging[x.Rule] {
+			kept = append(kept, x)
+		}
+	}
+	// What is written before the day is what the copies cover of it, span
+	// by span as the ledger keeps them, and the day itself from a: a firing
+	// ended, written again from its start, is written within the spans it
+	// lies across, and a gap between them stays one, as what began in it
+	// was never read whole; a change the history gave in a gap is left out
+	// with it, but for an alert still on after it.
+	spans, err := s.l.Spans(ctx, ledger.GrafanaSource)
+	if err != nil {
+		return err
+	}
+	// A firing that began in a gap, still on where the copies cover again,
+	// is written from there, as the first day after a gap writes one on at
+	// its start: not left out, which would take away the copy of it a
+	// round before made from there.
+	writes := coveredWrites(spans, from, a, b)
+	of := make([][]firing.Firing, len(writes))
+	for _, x := range slices.Concat(before, send, kept) {
+		for i, w := range writes {
+			if x.Start.Before(w[0]) {
+				if x.End.IsZero() || x.End.After(w[0]) {
+					x.Start = w[0]
+					of[i] = append(of[i], x)
+				}
+				break
+			}
+			if x.Start.Before(w[1]) {
+				of[i] = append(of[i], x)
+				break
+			}
+		}
+	}
+	for i, w := range writes {
+		fs := of[i]
+		got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, w[0], w[1], fs, ledger.GrafanaCopier, o)
+		if err != nil {
+			return err
+		}
+		if got.Changed() {
+			s.log.Info("Grafana's alert state history copied in", "from", w[0], "to", w[1], "firings", got.Firings, "added", got.Added, "removed", got.Removed)
+		}
+	}
+	return nil
+}
+
+// coveredWrites are the periods a copy of [from, b) writes, the day it
+// copies beginning at a: before a, those of spans, what the copies cover,
+// within [from, a); then [a, b), joined to the last when it ends at a.
+func coveredWrites(spans [][2]time.Time, from, a, b time.Time) [][2]time.Time {
+	var out [][2]time.Time
+	for _, sp := range spans {
+		lo, hi := sp[0], sp[1]
+		if lo.Before(from) {
+			lo = from
+		}
+		if hi.After(a) {
+			hi = a
+		}
+		if lo.Before(hi) {
+			out = append(out, [2]time.Time{lo, hi})
+		}
+	}
+	if a.Before(b) {
+		if n := len(out); n > 0 && out[n-1][1].Equal(a) {
+			out[n-1][1] = b
+		} else {
+			out = append(out, [2]time.Time{a, b})
+		}
+	}
+	return out
+}
+
+// someNames are the first few of names, for a log: as Grafana titles
+// them, cut.
+func someNames(names []string) string {
+	shown := names[:min(len(names), 5)]
+	out := verdict.Clean(clip(strings.Join(shown, ", "), 300))
+	if n := len(names) - len(shown); n > 0 {
+		out += fmt.Sprintf(" and %d more", n)
+	}
+	return out
 }
 
 // recordable is ledger.Recordable; replaced in tests, to count.

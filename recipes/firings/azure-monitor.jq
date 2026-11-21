@@ -13,10 +13,16 @@
 # needs, such as service. Azure writes a
 # resource's name and its group's in either case, so both are lower-cased,
 # as lapilli serve's /v1/azure writes them for the alert's notifications.
+# The name is as serve takes a rule's: the characters that don't show
+# taken out, and 512 at most; with nothing left, the id.
+# A rule's name as serve takes it: the characters that don't show (a line
+# break, a zero-width space) taken out, and cut to 512 characters. One
+# serve wouldn't take would stop the whole copy.
+def rulename: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | .[:512];
 def name: split("/") | .[-1];
 def dims: (.dimensions | fromjson? // []) | if type == "array" then map({key: .name, value: (.value | tostring)}) | from_entries else {} end;
-.[] | select(.start != "")
-| {rule: (.rule | name),
+.[] | select(.start != "") | . as $r
+| {rule: (.rule | name | rulename | if . != "" then . else $r.rule | rulename end),
    labels: (({severity: .severity, resource: (.resource // "" | ascii_downcase), resource_group: (.resourceGroup // "" | ascii_downcase)}
              | with_entries(select(.value != ""))) + dims + (if (.rule // "") != "" then {alarm_id: .rule} else {} end)),
    start: .start}

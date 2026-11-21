@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -231,6 +232,17 @@ func TestActivityCSV(t *testing.T) {
 	if csvCell("ana") != "ana" || csvCell("") != "" || csvCell("\r=1") != "'\r=1" || csvCell("＋1") != "'＋1" {
 		t.Error("csvCell")
 	}
+	// After a space of Unicode's, or one of no width.
+	for _, v := range []string{"\u00a0=1+1", "\u3000@SUM(A1)", "\u2003-1", " \u00a0 +1", "\u202f=1", "\u200b=1", "\ufeff=1"} {
+		if got := csvCell(v); got != "'"+v {
+			t.Errorf("csvCell(%q) = %q", v, got)
+		}
+	}
+	for _, v := range []string{"\u00a0ana", "\u3000", "ana = 1", "a-b"} {
+		if got := csvCell(v); got != v {
+			t.Errorf("csvCell(%q) = %q", v, got)
+		}
+	}
 }
 
 // --keep-activity keeps the activity log past --keep: a change older than
@@ -338,5 +350,282 @@ func TestActivityTakesATurn(t *testing.T) {
 	}
 	for range pageRenders - 1 {
 		<-s.renders
+	}
+}
+
+// An export ends where its changes' text passes activityBytes, and says
+// where to go on from: paged through, as JSON and as CSV alike, every
+// change is given once, a team's too, whose before and after are read
+// after it is looked through.
+func TestActivityBytesBounded(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	ctx := context.Background()
+	for i := range 20 {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: fmt.Sprintf("%02d %s", i, strings.Repeat("n", 4000))}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, query := range []string{"", "team=payments"} {
+		whole, next := activityOf(t, h, query, vViewer)
+		if next != "" || len(whole) < 20 {
+			t.Fatalf("%q under 8 MiB: %d changes, next %q", query, len(whole), next)
+		}
+		func() {
+			was := activityBytes
+			defer func() { activityBytes = was }()
+			activityBytes = 30_000
+			var ids []int64
+			before := ""
+			for pages := 0; ; pages++ {
+				if pages > len(whole) {
+					t.Fatalf("%q: no end to the pages", query)
+				}
+				q := query
+				if before != "" {
+					q += "&before=" + url.QueryEscape(before)
+				}
+				code, body := getAs(t, h, "/api/v1/activity?"+q, vViewer)
+				if code != http.StatusOK {
+					t.Fatalf("%q: %d %s", q, code, body)
+				}
+				// Three notes' changes of 8 KB, and what JSON adds, on one
+				// line: not indented.
+				if len(body) > activityBytes+2_000 || strings.Count(body, "\n") != 1 {
+					t.Errorf("%q: a page of %d bytes, past %d, or of %d lines", q, len(body), activityBytes, strings.Count(body, "\n"))
+				}
+				var out struct {
+					Activity []apiLogged `json:"activity"`
+					Next     string      `json:"next"`
+				}
+				if err := json.Unmarshal([]byte(body), &out); err != nil {
+					t.Fatal(err)
+				}
+				for _, c := range out.Activity {
+					ids = append(ids, c.ID)
+				}
+				csvQ := q + "&format=csv"
+				_, rows, head := getAsWithHeaders(t, h, "/api/v1/activity?"+strings.TrimPrefix(csvQ, "&"), vViewer)
+				records, err := csv.NewReader(strings.NewReader(rows)).ReadAll()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(records)-1 != len(out.Activity) || (out.Next != "") != (head.Get("Link") != "") {
+					t.Errorf("%q: CSV of %d changes, link %q; JSON of %d, next %q", q, len(records)-1, head.Get("Link"), len(out.Activity), out.Next)
+				}
+				if out.Next == "" {
+					break
+				}
+				before = out.Next
+			}
+			if len(ids) != len(whole) {
+				t.Errorf("%q: paged through %d changes, not %d", query, len(ids), len(whole))
+			}
+			for i, c := range whole {
+				if i < len(ids) && ids[i] != c.ID {
+					t.Errorf("%q: change %d is %d paged through, %d whole", query, i, ids[i], c.ID)
+					break
+				}
+			}
+		}()
+	}
+}
+
+// unread is a reader who doesn't read: its first write waits until goOn
+// is closed, after writing is.
+type unread struct {
+	*httptest.ResponseRecorder
+	once          sync.Once
+	writing, goOn chan struct{}
+}
+
+func (w *unread) Write(b []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.writing)
+		<-w.goOn
+	})
+	return w.ResponseRecorder.Write(b)
+}
+
+// An export holds one of the exports' turns until its reader has read it,
+// and no page's: what readers who don't read make serve hold is a few
+// exports', and pages are worked out meanwhile.
+func TestActivityExportHeldUntilRead(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	for _, format := range []string{"json", "csv"} {
+		w := &unread{ResponseRecorder: httptest.NewRecorder(), writing: make(chan struct{}), goOn: make(chan struct{})}
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/activity?format="+format, nil)
+		r.Header.Set("X-Forwarded-Email", vViewer)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h.ServeHTTP(w, r)
+		}()
+		<-w.writing
+		if len(s.exports) != 1 || len(s.renders) != 0 {
+			t.Errorf("%s being read: %d exports' turns held, %d pages'; want 1 and 0", format, len(s.exports), len(s.renders))
+		}
+		close(w.goOn)
+		<-done
+		if len(s.exports) != 0 || w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "pay's") {
+			t.Errorf("%s read: %d exports' turns held, %d %s", format, len(s.exports), w.Code, w.Body.String())
+		}
+	}
+	if cap(s.exports) != activityExports {
+		t.Errorf("%d exports' turns, not %d", cap(s.exports), activityExports)
+	}
+	// All taken, the next waits, then is told to come back.
+	was := renderWait
+	defer func() { renderWait = was }()
+	renderWait = time.Millisecond
+	for range activityExports {
+		s.exports <- struct{}{}
+	}
+	if code, body := getAs(t, h, "/api/v1/activity", vViewer); code != http.StatusServiceUnavailable {
+		t.Errorf("every export's turn taken: %d %s", code, body)
+	}
+	for range activityExports {
+		<-s.exports
+	}
+}
+
+// An export is held to activityBytes as written, not as kept: JSON writes
+// < as six bytes, and CSV a quote as two. Past them it ends, but for its
+// first change, and goes on from there, every change given once. A team's
+// changes are asked of the ledger 200 at a time, as the others' are.
+func TestActivityBytesAsWritten(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	ctx := context.Background()
+	for i := range 12 {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: fmt.Sprintf("%02d %s", i, strings.Repeat(`<"`, 1000))}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	whole, _ := activityOf(t, h, "", vViewer)
+	was := activityBytes
+	defer func() { activityBytes = was }()
+	activityBytes = 30_000
+	for _, format := range []string{"json", "csv"} {
+		seen := 0
+		before := ""
+		for pages := 0; ; pages++ {
+			if pages > len(whole) {
+				t.Fatalf("%s: no end to the pages", format)
+			}
+			q := "format=" + format
+			if before != "" {
+				q += "&before=" + url.QueryEscape(before)
+			}
+			code, body, head := getAsWithHeaders(t, h, "/api/v1/activity?"+q, vViewer)
+			if code != http.StatusOK {
+				t.Fatalf("%s: %d %s", q, code, body)
+			}
+			n, next := 0, ""
+			if format == "json" {
+				var out struct {
+					Activity []apiLogged `json:"activity"`
+					Next     string      `json:"next"`
+				}
+				if err := json.Unmarshal([]byte(body), &out); err != nil {
+					t.Fatal(err)
+				}
+				n, next = len(out.Activity), out.Next
+			} else {
+				records, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+				if err != nil {
+					t.Fatal(err)
+				}
+				n = len(records) - 1
+				if l := head.Get("Link"); l != "" {
+					u, _ := url.Parse(strings.Trim(strings.SplitN(l, ";", 2)[0], "<>"))
+					next = u.Query().Get("before")
+				}
+			}
+			if n > 1 && len(body) > activityBytes {
+				t.Errorf("%s: %d changes in %d bytes, past %d", q, n, len(body), activityBytes)
+			}
+			seen += n
+			if next == "" {
+				break
+			}
+			before = next
+		}
+		if seen != len(whole) {
+			t.Errorf("%s: paged through %d changes, not %d", format, seen, len(whole))
+		}
+	}
+	// A team's, 200 a read.
+	defer func(r func(*ledger.Ledger, context.Context, ledger.ActivityQuery) ([]ledger.LogEntry, error)) {
+		readActivity = r
+	}(readActivity)
+	most := 0
+	readActivity = func(l *ledger.Ledger, ctx context.Context, q ledger.ActivityQuery) ([]ledger.LogEntry, error) {
+		most = max(most, q.Limit)
+		return l.Activity(ctx, q)
+	}
+	activityOf(t, h, "team=payments", vViewer)
+	if most != activityBatch {
+		t.Errorf("a team's export asked the ledger for %d changes at once, not %d", most, activityBatch)
+	}
+}
+
+// One export at a time a person: another of theirs is told to come back
+// while one goes out, someone else's isn't. A small one, 50 changes at
+// most, takes no export's turn, and holds a mebibyte at most.
+func TestActivityExportOneAPerson(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	w := &unread{ResponseRecorder: httptest.NewRecorder(), writing: make(chan struct{}), goOn: make(chan struct{})}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/activity", nil)
+	r.Header.Set("X-Forwarded-Email", vViewer)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(w, r)
+	}()
+	<-w.writing
+	if code, body := getAs(t, h, "/api/v1/activity?format=csv", vViewer); code != http.StatusServiceUnavailable {
+		t.Errorf("a second export of one person's: %d %s", code, body)
+	}
+	if code, body := getAs(t, h, "/api/v1/activity", vEditor); code != http.StatusOK {
+		t.Errorf("another person's: %d %s", code, body)
+	}
+	close(w.goOn)
+	<-done
+	if code, body := getAs(t, h, "/api/v1/activity", vViewer); code != http.StatusOK {
+		t.Errorf("once the first was read: %d %s", code, body)
+	}
+	// Every export's turn taken: a small one goes out all the same.
+	for range activityExports {
+		s.exports <- struct{}{}
+	}
+	defer func() {
+		for range activityExports {
+			<-s.exports
+		}
+	}()
+	if code, body := getAs(t, h, "/api/v1/activity?limit=50", vViewer); code != http.StatusOK || len(body) > activitySmallBytes {
+		t.Errorf("a small export beside every turn taken: %d, %d bytes", code, len(body))
+	}
+	// So many small ones at once, of all readers, and past them, a 503.
+	was := renderWait
+	defer func() { renderWait = was }()
+	renderWait = time.Millisecond
+	for range activitySmalls {
+		s.smallExports <- struct{}{}
+	}
+	defer func() {
+		for range activitySmalls {
+			<-s.smallExports
+		}
+	}()
+	r = httptest.NewRequest(http.MethodGet, "/api/v1/activity?limit=50", nil)
+	r.Header.Set("X-Forwarded-Email", vEditor)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+		t.Errorf("a small export past %d at once: %d, Retry-After %q", activitySmalls, rec.Code, rec.Header().Get("Retry-After"))
 	}
 }

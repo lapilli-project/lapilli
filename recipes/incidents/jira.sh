@@ -44,6 +44,37 @@ here=$(dirname "$0")
 : "${JIRA_EMAIL:?the email of the account}"
 : "${JIRA_TOKEN_FILE:?a file holding its API token}"
 : "${JIRA_JQL:?the search that finds your incidents}"
+# https NAME URL: the scheme curl speaks to URL, in proto. The token goes
+# where URL points: over https, or to this machine, for tests. Neither is
+# said: a user and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+https() {
+  proto=
+  case $2 in
+    *@*)
+      printf 'jira.sh: %s holds a user or token before @, refused\n' "$1" >&2
+      exit 1
+      ;;
+    [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+    [Hh][Tt][Tt][Pp]://*)
+      case ${2#*://} in
+        127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+        127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+      esac
+      ;;
+  esac
+  if [ -z "$proto" ]; then
+    printf 'jira.sh: %s is not https\n' "$1" >&2
+    exit 1
+  fi
+}
+https JIRA_URL "$JIRA_URL"
+site=$proto
+jsm=${JSM_API:-https://api.atlassian.com}
+https JSM_API "$jsm"
+jsmproto=$proto
 start=${JIRA_START_FIELD:-created}
 end=${JIRA_END_FIELD:-resolutiondate}
 labels=${JIRA_LABELS-service=components}
@@ -81,7 +112,30 @@ case $maxreq in
     exit 1
     ;;
 esac
-auth=$(printf '%s:%s' "$JIRA_EMAIL" "$(cat "$JIRA_TOKEN_FILE")" | base64 | tr -d '\n')
+# secret NAME FILE: what FILE holds, one line with no space. Atlassian
+# says nothing of what its tokens are written in, and this one goes
+# base64'd, with the email. Neither the token nor what else the file holds
+# is said.
+secret() {
+  s=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
+  case $s in
+    '' | *[[:space:][:cntrl:]]*)
+      printf '%s\n' "jira.sh: $1 doesn't hold a token: one line, with no space" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret JIRA_TOKEN_FILE "$JIRA_TOKEN_FILE")
+auth=$(printf '%s:%s' "$JIRA_EMAIL" "$token" | base64 | tr -d '\n')
 jql=$(printf '%s' "$JIRA_JQL" | jq -sRr @uri)
 all=$(mktemp)
 out=$(mktemp)
@@ -109,7 +163,7 @@ while :; do
   fi
   url="$JIRA_URL/rest/api/3/search/jql?jql=$jql&maxResults=100&fields=$fields"
   [ -z "$next" ] || url="$url&nextPageToken=$(printf '%s' "$next" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
+  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$site" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
   printf '%s' "$page" | jq -c '.issues[]' >>"$all"
   was=$next
   next=$(printf '%s' "$page" | jq -r 'if .isLast then empty else .nextPageToken // empty end')
@@ -120,7 +174,6 @@ while :; do
   fi
 done
 if [ "$alerts" = yes ]; then
-  jsm=${JSM_API:-https://api.atlassian.com}
   requests=0
   naps=0
   waited=0
@@ -134,17 +187,17 @@ if [ "$alerts" = yes ]; then
       exit 1
     fi
   }
-  # get URL: JSM's answer in $got, its status in $code. A 429 is waited
-  # out as its Retry-After says, two minutes at most, five times a request
-  # and ten minutes in all a run; without one, 5 seconds, then twice as
-  # long each time. Called in this shell, not in $(...), which would
-  # forget the code.
+  # get URL: JSM's answer in $got, its status in $code; one over 16 MiB
+  # stops the script. A 429 is waited out as its Retry-After says, two
+  # minutes at most, five times a request and ten minutes in all a run;
+  # without one, 5 seconds, then twice as long each time. Called in this
+  # shell, not in $(...), which would forget the code.
   get() {
     waits=0
     backoff=5
     while :; do
       code=$(printf 'Authorization: Basic %s\n' "$auth" |
-        curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || exit 1
+        curl -q -sS --proto "$jsmproto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || exit 1
       [ "$code" = 429 ] || return 0
       waits=$((waits + 1))
       wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
@@ -179,6 +232,9 @@ if [ "$alerts" = yes ]; then
     esac
     : >"$alertIDs"
     key=
+    # The keys of the issue's pages so far: one given again would go round
+    # until MAX_ALERT_REQUESTS.
+    keys=' '
     while :; do
       url="$jsm/jsm/incidents/cloudId/$cloud/v1/incident/$issue/alert"
       [ -z "$key" ] || url="$url?startKey=$key"
@@ -201,7 +257,6 @@ if [ "$alerts" = yes ]; then
         exit 1
       fi
       jq -r '(.values.alertIds // [])[]' "$got" >>"$alertIDs"
-      was=$key
       key=$(jq -r '.startKey // empty' "$got")
       [ -n "$key" ] || break
       case $key in
@@ -210,10 +265,13 @@ if [ "$alerts" = yes ]; then
           exit 1
           ;;
       esac
-      if [ "$key" = "$was" ]; then
-        printf 'jira.sh: the incident API gave the same page of alerts again; stopping, writing nothing\n' >&2
-        exit 1
-      fi
+      case $keys in
+        *" $key "*)
+          printf 'jira.sh: the incident API gave a page of alerts it gave before; stopping, writing nothing\n' >&2
+          exit 1
+          ;;
+      esac
+      keys="$keys$key "
     done
     while IFS= read -r alert; do
       case $alert in

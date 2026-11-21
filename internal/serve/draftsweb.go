@@ -203,6 +203,14 @@ func (s *Server) postAcceptDraft(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errNotAForm)
 		return
 	}
+	// An approver now: the form's key says who saw it, not that they may
+	// still accept it. Of every team, or of the one team that owns the
+	// draft's rule now, as a proposal's approvers are (approverOf): one
+	// no longer an approver, or one of another team's, is refused.
+	if !s.approver(r) && !s.draftTeamApprover(r, d.Rule) {
+		s.oops(w, r, errNotApprover)
+		return
+	}
 	doc, hash := "", ""
 	if s.gitPath(d) {
 		text, h, whole, err := s.takenIn(d)
@@ -217,6 +225,21 @@ func (s *Server) postAcceptDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	back(w, r, "/rules/"+url.PathEscape(d.Rule)+"?tab=expectations#draft-"+strconv.FormatInt(d.ID, 10))
+}
+
+// draftTeamApprover reports whether the reader is an approver of the one
+// team that owns rule now, with its note and without it, as teamApproved
+// has it of a proposal.
+func (s *Server) draftTeamApprover(r *http.Request, rule string) bool {
+	o, err := s.owners(r.Context())
+	if err != nil {
+		return false
+	}
+	now, bare := o.refOf(o.owner(rule)), o.refOf(o.bare(rule))
+	if now.ID == 0 || bare.ID != 0 && bare != now {
+		return false
+	}
+	return s.teamApprover(r, now.Name)
 }
 
 // postDropDraft drops an open draft: an editor's, or an approver's, its
@@ -426,7 +449,7 @@ func (s *Server) handedDrafts(ctx context.Context) ([]handedDraft, error) {
 }
 
 // draftTitle is a draft's pull request's title: one line, of printable
-// text.
+// text, linking nothing (linkFree).
 func draftTitle(d ledger.ExpectDraft) string {
 	t := strings.Map(func(c rune) rune {
 		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
@@ -434,7 +457,7 @@ func draftTitle(d ledger.ExpectDraft) string {
 		}
 		return c
 	}, "Lapilli: expectations of "+d.Rule)
-	return clip(t, 200)
+	return clip(linkFree(t), 200)
 }
 
 // draftBody is a draft's pull request's description: what it holds the
@@ -446,7 +469,7 @@ func (s *Server) draftBody(d ledger.ExpectDraft) string {
 	if d.Agent {
 		origin = "an agent's, for " + mdText(d.MadeBy) + ": its words are its own"
 	}
-	fmt.Fprintf(&b, "A draft of what %s is held to, %s, accepted by %s in Lapilli (#%d).\n\n", mdText(d.Rule), origin, mdText(d.DecidedBy), d.ID)
+	fmt.Fprintf(&b, "A draft of what %s is held to, %s, accepted by %s in Lapilli (draft %d).\n\n", mdText(d.Rule), origin, mdText(d.DecidedBy), d.ID)
 	b.WriteString("| Held to | As it is | |\n|---|--:|---|\n")
 	for _, it := range draftItemsOf(d.Found) {
 		fmt.Fprintf(&b, "| %s %s | %s | %s |\n", mdCell(it.What), mdCell(it.Held), mdCell(it.Value), mdCell(it.State))
@@ -461,10 +484,12 @@ func (s *Server) draftBody(d ledger.ExpectDraft) string {
 // pull request comment's table has it (verdict.CodeSpan): what doesn't
 // show said as \u{...}, each | escaped and a backslash right before one
 // said as \u{5c}, so that no | of it ends the cell, however a host reads
-// a run of backslashes (0.60.0's fix). mdText is one in a sentence.
-func mdCell(s string) string { return verdict.CodeSpan(s, mdMost, true) }
+// a run of backslashes (0.60.0's fix). mdText is one in a sentence. Each
+// links nothing in the commit's message the description is made too
+// (linkFree).
+func mdCell(s string) string { return linkFree(verdict.CodeSpan(s, mdMost, true)) }
 
-func mdText(s string) string { return verdict.CodeSpan(s, mdMost, false) }
+func mdText(s string) string { return linkFree(verdict.CodeSpan(s, mdMost, false)) }
 
 // apiPatchDraft is a recipe saying what became of a draft's pull request:
 // opened, merged, closed, or failed with why.

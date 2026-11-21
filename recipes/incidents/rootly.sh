@@ -18,6 +18,30 @@
 set -eu
 here=$(dirname "$0")
 api=${ROOTLY_API:-https://api.rootly.com}
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+proto=
+case $api in
+  *@*)
+    printf 'rootly.sh: ROOTLY_API holds a user or token before @, refused\n' >&2
+    exit 1
+    ;;
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
+    ;;
+esac
+if [ -z "$proto" ]; then
+  printf 'rootly.sh: ROOTLY_API is not https\n' >&2
+  exit 1
+fi
 : "${ROOTLY_TOKEN_FILE:?a file holding a Rootly API key}"
 # SINCE checked before it reaches a query.
 since=
@@ -27,44 +51,72 @@ since=
   printf 'rootly.sh: SINCE is a date such as 2026-10-01, or an RFC 3339 time\n' >&2
   exit 1
 }
-token=$(cat "$ROOTLY_TOKEN_FILE")
+# secret NAME FILE: what FILE holds, one line of the characters a token
+# is written in (a Bearer token's, RFC 6750), as it goes in a header.
+# Neither the token nor what else the file holds is said.
+secret() {
+  s=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
+  case $s in
+    '' | *[!A-Za-z0-9._~+/=-]*)
+      printf '%s\n' "rootly.sh: $1 doesn't hold a token: one line of letters, digits and - . _ ~ + / =" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret ROOTLY_TOKEN_FILE "$ROOTLY_TOKEN_FILE")
 all=$(mktemp)
 got=$(mktemp)
 heads=$(mktemp)
 ids=$(mktemp)
 linked=$(mktemp)
 out=$(mktemp)
-trap 'rm -f "$all" "$got" "$heads" "$ids" "$linked" "$out"' EXIT
+naps=$(mktemp)
+trap 'rm -f "$all" "$got" "$heads" "$ids" "$linked" "$out" "$naps"' EXIT
 trap 'exit 1' INT TERM HUP
-# get URL: a page. Rootly takes five GETs a minute: a 429 is waited out as
-# its Retry-After says (two minutes at most), five times at most; anything
-# else that isn't a 2xx fails.
+# get URL: a page, on stdout. Rootly takes five GETs a minute: a 429 is
+# waited out as its Retry-After says, or else a minute; two minutes at most
+# a wait, five waits a request and ten minutes in all a run. Past them, and
+# on any answer but a 2xx, or one over 16 MiB, it fails. Its waits are
+# counted in a file, as each $(get ...) is a shell of its own.
 get() {
   waits=0
   while :; do
     code=$(printf 'Authorization: Bearer %s\n' "$token" |
-      curl -q -sS --max-time 30 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+      curl -q -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
     case $code in
       2??)
         cat "$got"
         return 0
         ;;
-      429)
-        waits=$((waits + 1))
-        if [ "$waits" -gt 5 ]; then
-          printf 'rootly.sh: Rootly still says too many requests after five waits\n' >&2
-          return 1
-        fi
-        wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { print $2 }' | tail -n 1)
-        case $wait in '' | *[!0-9]*) wait=60 ;; esac
-        [ "$wait" -le 120 ] || wait=120
-        sleep "$wait"
-        ;;
+      429) ;;
       *)
         printf 'rootly.sh: Rootly answered %s\n' "$code" >&2
         return 1
         ;;
     esac
+    waits=$((waits + 1))
+    wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
+    case $wait in '' | *[!0-9]*) wait=60 ;; esac
+    # Leading zeros off: $((...)) would read 08 as octal, and fail.
+    wait=${wait#"${wait%%[!0]*}"}
+    wait=${wait:-0}
+    [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
+    waited=$(awk '{ s += $1 } END { print s + 0 }' "$naps")
+    if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
+      printf 'rootly.sh: Rootly still says too many requests after %s waits, %s seconds in all; stopping, writing nothing\n' "$(wc -l <"$naps" | tr -d ' ')" "$waited" >&2
+      return 1
+    fi
+    sleep "$wait"
+    printf '%s\n' "$wait" >>"$naps"
   done
 }
 max=${MAX_PAGES:-1000}

@@ -23,7 +23,8 @@ import (
 // killed whole at the time limit.
 
 // Guard: capped, promtool is started through the memory cap's wrapper,
-// which sets RLIMIT_DATA to the cap and gives promtool what it is given
+// which sets RLIMIT_DATA to the cap, and RLIMIT_FSIZE to MaxFile, and
+// gives promtool what it is given
 // uncapped, nothing more: test rules test.yaml, TMPDIR alone. Past the cap,
 // a run that takes memory stops, and is unrun, saying so. Uncapped, no
 // limit is set. Skipped where no cap can be set (macOS). The stand-in is
@@ -41,7 +42,8 @@ func TestRunMemoryCap(t *testing.T) {
 	p := Promtool{Path: link, Memory: cap}
 	r := run(t, p, "see")
 	if r.State != Failed || !strings.Contains(r.Said, `args ["test" "rules" "test.yaml"]`) || !strings.Contains(r.Said, `env ["TMPDIR=`) ||
-		strings.Contains(r.Said, "s3cret") || strings.Contains(r.Said, capPath) || !strings.Contains(r.Said, "rlimit_data "+strconv.Itoa(cap)+"\n") {
+		strings.Contains(r.Said, "s3cret") || strings.Contains(r.Said, capPath) || !strings.Contains(r.Said, "rlimit_data "+strconv.Itoa(cap)+"\n") ||
+		!strings.Contains(r.Said, "rlimit_fsize "+strconv.Itoa(MaxFile)+"\n") {
 		t.Errorf("capped, promtool was given:\n%s", r.Said)
 	}
 	if r := run(t, Promtool{Path: link}, "see"); strings.Contains(r.Said, "rlimit_data "+strconv.Itoa(cap)+"\n") {

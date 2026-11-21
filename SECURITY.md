@@ -166,6 +166,17 @@ job's ID token or `LAPILLI_SERVE_TOKEN_FILE`. Of particular interest:
   (`EXPECT_REQUIRED`, `FAIL_ON_EXPECTATIONS`, `FAIL_ON_ERROR`)
   unbacktested.
 
+With `--grafana`, `lapilli serve` copies in what Grafana's own alert state
+history says the rules it can't replay fired, and judges them by it
+(docs/design/grafanajudged.md), unless `--grafana-history=false`. That
+history is taken as Grafana wrote it. Where Grafana keeps it in Loki,
+whoever can push to that Loki tenant writes these rules' record: their
+firings, and, with changes to a state Grafana has no name for, or of more
+than 1,000 rules' names, every day a gap. Whoever may make a rule in a
+folder Lapilli reads can make every day a gap too, with a rule of a judged
+rule's title, paused or not. Guard the tenant as you guard the Grafana;
+neither is a way past what this says, which a report is welcome of.
+
 ## Versions
 
 Only the latest release gets fixes, in a patch release. Each release is

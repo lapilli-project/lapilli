@@ -13,7 +13,9 @@
 # conditions of one name, in two policies, are one rule: tell them apart
 # here if yours are. Labels serve wouldn't take are left out: a name or
 # value with a character that doesn't show, a value over 256 bytes, past
-# 32 labels or 4 KB of them.
+# 32 labels or 4 KB of them. The rule's name is as serve takes it too: the
+# characters that don't show taken out, and 512 at most; with nothing
+# left, "condition ID".
 # RFC 3339, in UTC, of milliseconds since 1970.
 def time: floor | (. / 1000 | floor) as $s | (. - $s * 1000) as $f
   | ($s | todate) | if $f == 0 then . else .[:-1] + "." + ("00" + ($f | tostring))[-3:] + "Z" end;
@@ -22,6 +24,10 @@ def time: floor | (. / 1000 | floor) as $s | (. - $s * 1000) as $f
 def msof($name): . as $r | .[$name]
   | if type == "number" and . >= 1e12 then floor
     else error("incident \($r.incidentId | tojson): its \($name) is no time in milliseconds") end;
+# A rule's name as serve takes it: the characters that don't show (a line
+# break, a zero-width space) taken out, and cut to 512 characters. One
+# serve wouldn't take would stop the whole copy.
+def rulename: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | .[:512];
 # {key, value}s as labels, the first of each name, as serve takes them.
 def bounded:
   reduce .[] as $l ({};
@@ -46,8 +52,8 @@ def bounded:
    | {o: $open, start: $start, end: $end}]
 | sort_by(.start, (.o.conditionName // "" | tostring), (.o.incidentId | tostring))[]
 | .o as $o
-| {rule: ($o.conditionName // "" | tostring
-          | if . != "" then . elif $o.conditionId != null then "condition \($o.conditionId)"
+| {rule: ($o.conditionName // "" | rulename
+          | if . != "" then . elif $o.conditionId != null then "condition \($o.conditionId)" | rulename
             else error("incident \($o.incidentId | tojson) names no condition") end),
    labels: ([{key: "alarm_id", value: ($o.conditionId // "")},
              {key: "severity", value: ($o.priority // "" | tostring | ascii_downcase)},
