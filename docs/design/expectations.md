@@ -629,7 +629,10 @@ Step 3, drafts, as built:
   run, saying so), and each waits for promtool's one turn, which a
   round's scenario may hold (step 4), within the check's deadline.
 - **Accepting** is an approver's, in a browser, as approving a proposal is
-  (same site, no bearer token, `--changes` on, the page's form). Where
+  (same site, no bearer token, `--changes` on, the page's form), asked
+  again as it is accepted: an approver of every team, or of the one team
+  that owns the rule now, whatever the form's key, which says only who saw
+  the page. Where
   serve's expectations come from `--expect`, with the change recipes'
   token, and the draft holds no scenario (whose test file is another
   file), it goes **the git path**: the file is read again, the draft taken

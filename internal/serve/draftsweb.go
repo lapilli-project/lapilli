@@ -203,6 +203,14 @@ func (s *Server) postAcceptDraft(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errNotAForm)
 		return
 	}
+	// An approver now: the form's key says who saw it, not that they may
+	// still accept it. Of every team, or of the one team that owns the
+	// draft's rule now, as a proposal's approvers are (approverOf): one
+	// no longer an approver, or one of another team's, is refused.
+	if !s.approver(r) && !s.draftTeamApprover(r, d.Rule) {
+		s.oops(w, r, errNotApprover)
+		return
+	}
 	doc, hash := "", ""
 	if s.gitPath(d) {
 		text, h, whole, err := s.takenIn(d)
@@ -217,6 +225,21 @@ func (s *Server) postAcceptDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	back(w, r, "/rules/"+url.PathEscape(d.Rule)+"?tab=expectations#draft-"+strconv.FormatInt(d.ID, 10))
+}
+
+// draftTeamApprover reports whether the reader is an approver of the one
+// team that owns rule now, with its note and without it, as teamApproved
+// has it of a proposal.
+func (s *Server) draftTeamApprover(r *http.Request, rule string) bool {
+	o, err := s.owners(r.Context())
+	if err != nil {
+		return false
+	}
+	now, bare := o.refOf(o.owner(rule)), o.refOf(o.bare(rule))
+	if now.ID == 0 || bare.ID != 0 && bare != now {
+		return false
+	}
+	return s.teamApprover(r, now.Name)
 }
 
 // postDropDraft drops an open draft: an editor's, or an approver's, its
