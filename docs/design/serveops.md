@@ -1031,8 +1031,9 @@ page too, as JSON (`activity`, each with its id, `at`, `by`, `kind`,
 `what`, and `before` and `after` as the JSON they were kept as; `next`) or,
 with `format=csv`, as CSV (`id, at, by, kind, what, before, after`), the
 next page's link in `Link`. No cell of it starts with `=`, `+`, `-`, `@`, a
-tab or a carriage return, or their full-width forms, after any spaces: such
-a cell starts with `'`, which a spreadsheet shows as text (CSV injection).
+tab or a carriage return, or their full-width forms, after any spaces,
+Unicode's (a no-break space, an ideographic one) and those of no width
+too: such a cell starts with `'`, which a spreadsheet shows as text (CSV injection).
 Who reads Run history reads it: a viewer. The roles given and taken are an
 admin's, as there (`changesSeen`), and to anyone else the paths of `serve`'s
 files are their flags. Neither is kept by a cache: `Cache-Control:

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/ledger"
@@ -593,10 +594,14 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 // csvCell is a cell of the CSV export a spreadsheet won't take for a
 // formula (CSV injection, OWASP): one that starts with =, +, -, @, a tab
 // or a carriage return, or their full-width forms, after any spaces, starts
-// with ' instead, which a spreadsheet shows as text. Who and what come
-// from people: a name, a title, a rule's.
+// with ' instead, which a spreadsheet shows as text. A space is any of
+// Unicode's (a no-break space, an ideographic one) and those of no width,
+// as a spreadsheet may take them off before it reads the cell. Who and
+// what come from people: a name, a title, a rule's.
 func csvCell(v string) string {
-	t := strings.TrimLeft(v, " ")
+	t := strings.TrimLeftFunc(v, func(r rune) bool {
+		return unicode.Is(unicode.Zs, r) || r == '\u200b' || r == '\u200c' || r == '\u200d' || r == '\u2060' || r == '\ufeff'
+	})
 	if t == "" {
 		return v
 	}

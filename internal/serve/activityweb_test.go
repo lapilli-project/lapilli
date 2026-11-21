@@ -232,6 +232,17 @@ func TestActivityCSV(t *testing.T) {
 	if csvCell("ana") != "ana" || csvCell("") != "" || csvCell("\r=1") != "'\r=1" || csvCell("＋1") != "'＋1" {
 		t.Error("csvCell")
 	}
+	// After a space of Unicode's, or one of no width.
+	for _, v := range []string{"\u00a0=1+1", "\u3000@SUM(A1)", "\u2003-1", " \u00a0 +1", "\u202f=1", "\u200b=1", "\ufeff=1"} {
+		if got := csvCell(v); got != "'"+v {
+			t.Errorf("csvCell(%q) = %q", v, got)
+		}
+	}
+	for _, v := range []string{"\u00a0ana", "\u3000", "ana = 1", "a-b"} {
+		if got := csvCell(v); got != v {
+			t.Errorf("csvCell(%q) = %q", v, got)
+		}
+	}
 }
 
 // --keep-activity keeps the activity log past --keep: a change older than
