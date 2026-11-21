@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-11-21
+
+Incidents judged by the alerts their tool linked to them, and why a
+firing paged no one, from Alertmanager's event recorder. `lapilli impact
+suggest` for a team with no incidents written down. Datadog's monitors and
+New Relic's alert conditions judged from their history. A backtest that
+can stop a merge, and set a commit status. Ledger schema 028 and 029.
+
+Before upgrading:
+- **Ledger schema 028 and 029**, after 027: keep a copy of the ledger's
+  disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger. Nothing is
+  backfilled. 028 adds `incidents.alerts` and `catches.linked`; 029 holds
+  `mutes`.
+
 ### Added
 
 - **`lapilli impact suggest`** says which of the stacks in
@@ -50,15 +66,6 @@
   statuses, on the iteration at that commit. The comment is still posted
   first. The action takes `fail-missed` and `status`; the token needs
   more for a status (docs/pr-backtests.md, "Stopping a merge").
-Before upgrading:
-- **Ledger schema 028**, after 027: keep a copy of the ledger's disk, or
-  of its database, first
-  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
-  A lapilli before this one doesn't open the upgraded ledger. Nothing is
-  backfilled. 028 adds `incidents.alerts` and `catches.linked`.
-
-### Added
-
 - **Incidents judged by the alerts their tool linked to them**
   (docs/design/links.md). An incident takes `alerts`, each `{rule: NAME,
   labels: {...}}`, in the incidents file and in `POST` and `PUT
@@ -79,15 +86,6 @@ Before upgrading:
   attributes, Rootly's labels), saying how many they left out;
   `ALERT_LABELS` keeps some labels alone, `ALERTS=no` reads none, and
   `MAX_ALERT_REQUESTS` (2000) bounds what they ask for.
-Before upgrading:
-- **Ledger schema 029**, after 027 and another change's 028: keep a copy
-  of the ledger's disk, or of its database, first
-  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
-  A lapilli before this one doesn't open the upgraded ledger. 029 holds
-  `mutes`; nothing is backfilled.
-
-### Added
-
 - **Why a firing paged no one.** `/v1/alertmanager/events` keeps the
   event recorder's mutes: when a silence or an inhibition kept an alert
   from a notification (`silenceMutedAlert`, `inhibitionMutedAlert`, and
