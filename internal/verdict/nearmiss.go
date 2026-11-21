@@ -97,8 +97,9 @@ func (nm NearMiss) Kept() float64 {
 // Nearly finds, of the stretches a rule's condition held (firings with no
 // "for", from the first evaluation that held to after the last), the one
 // that would have caught the incident with the longest "for" short of the
-// rule's own. every is how often the rule was evaluated. ok is false when no
-// shorter "for" would have caught it.
+// rule's own, of those about the incident (About). every is how often the
+// rule was evaluated. ok is false when no shorter "for" would have caught
+// it.
 func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Duration, o Options) (NearMiss, bool) {
 	var best NearMiss
 	found := false
@@ -106,7 +107,7 @@ func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Dura
 	// The longest "for" short of the rule's own, in whole evaluations.
 	longest := (ruleFor - 1) / every * every
 	for _, f := range held {
-		if f.End.IsZero() || !o.Agrees(f.Rule, f.Labels, in) {
+		if f.End.IsZero() || !o.About(f.Rule, f.Labels, in) {
 			continue
 		}
 		// From the rule's own lead for the incident.
@@ -164,7 +165,7 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 		maps.Copy(l, r.AlertLabels())
 		// A value that isn't a number doesn't hold: it breaks a stretch.
 		smp := slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return math.IsNaN(x.V) })
-		if len(smp) == 0 || !o.Agrees(r.Name, l, in) {
+		if len(smp) == 0 || !o.About(r.Name, l, in) {
 			continue
 		}
 		// For a range, a value its other end alone decides is as near holding,
@@ -255,9 +256,9 @@ func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules
 		Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Unless: b.Unless, New: n}}, true
 }
 
-// FiringDuring reports whether, of fired, one with labels that agree with
-// the incident's is firing at some time it could catch it: from its lead to
-// its end. A rule holding more fires at more times, so this holds for any
+// FiringDuring reports whether, of fired, one about the incident (About:
+// one of the alerts it lists, or one whose labels agree with it) is firing
+// at some time it could catch it: from its lead to its end. A rule holding more fires at more times, so this holds for any
 // number further than one it holds for, as catching it needn't: a number
 // further may fire before the incident instead, and one further still fire
 // again within it.
@@ -265,7 +266,7 @@ func FiringDuring(in incident.Incident, fired []firing.Firing, o Options) bool {
 	to := in.EndOr(o.UnknownLen)
 	for _, f := range fired {
 		from := in.Start.Add(-o.LeadFor(f.Rule, in))
-		if !f.Start.After(to) && (f.End.IsZero() || f.End.After(from)) && o.Agrees(f.Rule, f.Labels, in) {
+		if !f.Start.After(to) && (f.End.IsZero() || f.End.After(from)) && o.About(f.Rule, f.Labels, in) {
 			return true
 		}
 	}

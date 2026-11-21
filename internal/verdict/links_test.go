@@ -9,6 +9,8 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/rules"
 )
 
 // linkedWorld is an incident in checkout whose tool linked an alert of
@@ -153,5 +155,59 @@ func TestLinkedOnly(t *testing.T) {
 	r = Judge(nil, late, incs[:1], o)
 	if fa := r.Incidents[0].FiredAfter; len(fa) != 1 || fa[0].Rule != "CartErrors" {
 		t.Errorf("fired after INC-7: %+v, want the linked CartErrors alone", fa)
+	}
+}
+
+// Near misses are looked for by the link too: a rule the incident lists
+// nearly caught it whatever --match says, and with --linked-only, of an
+// incident that lists alerts, only a rule it lists did; one that lists
+// none is looked at by labels, as before. By its "for" (Nearly), by its
+// value (NearlyBy) and by a replay with a nearer number (FiringDuring).
+func TestLinkedNearMisses(t *testing.T) {
+	linked := incident.Incident{ID: "INC-1", Start: m(100), End: m(130), Labels: incident.Labels{"service": {"checkout"}},
+		Alerts: []incident.Alert{{Rule: "CartErrors", Labels: map[string]string{"service": "cart"}}}}
+	plain := linked
+	plain.Alerts = nil
+	held := func(rule, service string) []firing.Firing {
+		return []firing.Firing{{Rule: rule, Labels: map[string]string{"service": service}, Start: m(102), End: m(105)}}
+	}
+	values := func(service string) []prom.Series {
+		s := prom.Series{Labels: map[string]string{"service": service}}
+		for i := 0; i <= 200; i++ {
+			v := 0.1
+			if i >= 100 && i < 110 {
+				v = 0.88
+			}
+			s.Samples = append(s.Samples, prom.Sample{T: m(i), V: v})
+		}
+		return []prom.Series{s}
+	}
+	above := rules.Bound{Op: ">", Value: 0.9}
+	for _, c := range []struct {
+		name          string
+		in            incident.Incident
+		rule, service string
+		linkedOnly    bool
+		want          bool
+	}{
+		{"linked, about another service", linked, "CartErrors", "cart", false, true},
+		{"linked, about another service, --linked-only", linked, "CartErrors", "cart", true, true},
+		{"its rule, labels not the alert's", linked, "CartErrors", "search", false, false},
+		{"not listed, about another service", plain, "CartErrors", "cart", false, false},
+		{"agreeing, not listed", linked, "CheckoutErrors", "checkout", false, true},
+		{"agreeing, not listed, --linked-only", linked, "CheckoutErrors", "checkout", true, false},
+		{"agreeing, of one listing none, --linked-only", plain, "CheckoutErrors", "checkout", true, true},
+	} {
+		o := opts()
+		o.LinkedOnly = c.linkedOnly
+		if _, ok := Nearly(c.in, held(c.rule, c.service), 5*time.Minute, time.Minute, o); ok != c.want {
+			t.Errorf("%s: by its for %v, want %v", c.name, ok, c.want)
+		}
+		if _, ok := NearlyBy(c.in, values(c.service), rules.Rule{Name: c.rule, For: 5 * time.Minute}, above, time.Time{}, time.Minute, o); ok != c.want {
+			t.Errorf("%s: by its value %v, want %v", c.name, ok, c.want)
+		}
+		if ok := FiringDuring(c.in, held(c.rule, c.service), o); ok != c.want {
+			t.Errorf("%s: firing during it %v, want %v", c.name, ok, c.want)
+		}
 	}
 }

@@ -2798,5 +2798,8 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못했거나 판정 제외인 발화에 대한 알림 %[5]d건.",
  "%d caught nothing, %d judged by nothing, %d excused": "오탐 %d건, 판정 제외 %d건, 면제 %d건",
  "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "발화 %d건, 정탐 %d건, 오탐 %d건, 판정 제외 %d건, 면제 %d건",
- "a week before the ledger's first firing": "기록된 첫 발화보다 앞선 주예요"
+ "a week before the ledger's first firing": "기록된 첫 발화보다 앞선 주예요",
+ "On: an incident that lists the alerts its tool linked to it is caught by those alone; one that lists none, by the time and labels.": "켜짐: 인시던트 도구가 연결한 알림이 있는 인시던트는 연결된 알림만 잡은 것으로 봐요. 연결된 알림이 없는 인시던트는 지금처럼 시간과 라벨로 봐요.",
+ "Off: an incident that lists the alerts its tool linked to it is caught by those, and by any other firing at the time whose labels agree.": "꺼짐: 인시던트 도구가 연결한 알림이 있는 인시던트는 연결된 알림과, 그 시간에 라벨이 일치하는 다른 발화도 잡은 것으로 봐요.",
+ "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "여기서가 아니라 lapilli serve 를 시작할 때 정해요. 이 플래그를 더하거나 빼고 시작하면 모든 발화를 한 번 다시 판정해요."
 }

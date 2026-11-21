@@ -81,10 +81,17 @@ The same holds of "an alert after the incident": a firing the incident
 lists that came after its end, its condition having held in it, is its
 alert too late, labels or not; with `--linked-only`, no other firing is.
 
+Near misses are looked for by the link too. A rule the incident lists,
+its own labels not ruling out the alert's, is looked at whatever `--match`
+says, and a stretch of it whose labels agree with the alert's nearly
+caught it, by a shorter `for` or a nearer number, as a firing of it would
+catch it; with `--linked-only`, an incident that lists alerts has only the
+rules it lists looked at. One that lists none is looked at by labels, as
+before. lapilli verdict and lapilli serve look for them alike.
+
 What doesn't change: which rules are noisy and how (a catch by a link is
 a catch, and counts toward precision as any other), the record a firing
-is judged by, near misses (looked for by labels, as before), what each
-rule adds.
+is judged by, what each rule adds.
 
 ### In the report
 
@@ -109,10 +116,13 @@ again, as any change to an incident does.
 
 ### In lapilli serve
 
-`--linked-only` is a flag, not a setting the UI changes. The ledger keeps
+`--linked-only` is a flag, not a setting the UI changes; the Settings
+page says whether it is in effect, beside the settings that are, and
+`GET /api/v1/settings` as `linked_only`. The ledger keeps
 what its stones were last all given by (`x.linked-only` in `meta`); a
 start with it given or taken away judges every firing again, once, as a
-changed lead does. The incident's page marks a linked catch "(linked in
+changed lead does. The chart's `linkedOnly` gives it, to the CronJob and
+to serve alike. The incident's page marks a linked catch "(linked in
 the incident tool)", and the rule's page the incidents it caught so. The
 UI's form has no alerts: an incident written in the UI and given alerts
 through the API keeps them when the form changes it.
@@ -182,12 +192,15 @@ Decided on 2026-11-21, by the maintainer:
   label the firing lacks is passed over in judging, as `--match` passes
   one over; `ALERT_LABELS` narrows them.
 
+Done since:
+
+- **Near misses by link** (above, "How a firing is judged").
+- **The chart** passes `--linked-only` with `linkedOnly: true`, and the
+  **Settings page** says whether it is in effect.
+
 Open:
 
 1. **Grafana IRM, FireHydrant, Jira Service Management.** Each keeps alerts
    beside incidents; their recipes don't read them yet.
-2. **Near misses** are still looked for by labels: a rule the incident
-   lists whose condition held but not for its `for` could be looked for
-   by its link too.
-3. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
+2. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
    rather than a flag.

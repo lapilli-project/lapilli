@@ -2798,5 +2798,8 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada, o fuera del juicio.",
  "%d caught nothing, %d judged by nothing, %d excused": "%d no detectaron nada, %d fuera del juicio, %d eximidos",
  "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "%d disparos, %d detectaron algo, %d no detectaron nada, %d fuera del juicio, %d eximidos",
- "a week before the ledger's first firing": "una semana anterior al primer disparo del registro"
+ "a week before the ledger's first firing": "una semana anterior al primer disparo del registro",
+ "On: an incident that lists the alerts its tool linked to it is caught by those alone; one that lists none, by the time and labels.": "Activado: a un incidente que lista las alertas que su herramienta le vinculó solo lo detectan esas; a uno que no lista ninguna, el tiempo y las etiquetas.",
+ "Off: an incident that lists the alerts its tool linked to it is caught by those, and by any other firing at the time whose labels agree.": "Desactivado: a un incidente que lista las alertas que su herramienta le vinculó lo detectan esas, y cualquier otro disparo de ese momento cuyas etiquetas coincidan.",
+ "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "Se da al iniciar lapilli serve, no aquí: un inicio con ella añadida o quitada vuelve a juzgar todos los disparos, una vez."
 }

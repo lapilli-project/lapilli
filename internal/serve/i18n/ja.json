@@ -2798,5 +2798,8 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "アラートマネージャーが実際に送った通知: ルール %[2]d 件で %[1]d 件。繰り返し %[3]d 件、睡眠時間中 %[4]d 件、何も検知しなかったか判定対象外の発火への通知 %[5]d 件。",
  "%d caught nothing, %d judged by nothing, %d excused": "検知なし %d 件、判定対象外 %d 件、免除 %d 件",
  "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "発火 %d 件、検知 %d 件、検知なし %d 件、判定対象外 %d 件、免除 %d 件",
- "a week before the ledger's first firing": "台帳の最初の発火より前の週です"
+ "a week before the ledger's first firing": "台帳の最初の発火より前の週です",
+ "On: an incident that lists the alerts its tool linked to it is caught by those alone; one that lists none, by the time and labels.": "オン: インシデントツールが紐付けたアラートのあるインシデントは、紐付けられたアラートだけで検知したとみなします。紐付けのないインシデントは、時間とラベルで判定します。",
+ "Off: an incident that lists the alerts its tool linked to it is caught by those, and by any other firing at the time whose labels agree.": "オフ: インシデントツールが紐付けたアラートのあるインシデントは、そのアラートに加え、その時間にラベルが一致する他の発火でも検知したとみなします。",
+ "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "ここではなく lapilli serve の起動時に指定します。付けたり外したりして起動すると、すべての発火を一度だけ再判定します。"
 }

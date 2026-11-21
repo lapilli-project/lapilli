@@ -116,6 +116,12 @@ incidents: []
 impact: null
 # Labels a firing and an incident must agree on, such as [service].
 match: []
+# true passes --linked-only, in both modes: an incident that lists the
+# alerts its tool linked to it (alerts:, which the PagerDuty, incident.io
+# and Rootly recipes write) is caught by those alone, not by any other
+# firing at the time; one that lists none is caught by the time and match
+# as ever. In serve mode a change judges every firing again, once.
+linkedOnly: false
 # When people are at work, and asleep, in timeZone: the firings that caught
 # nothing are counted by when they came, those that woke people first. Like
 # mon-fri@08:00-18:00 and 22:00-08:00, which is what empty means; or none.

@@ -605,6 +605,20 @@ func TestChartMaxSamples(t *testing.T) {
 	}
 }
 
+// linkedOnly is --linked-only, in both modes; none by default.
+func TestChartLinkedOnly(t *testing.T) {
+	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {
+		out, err := helmTemplate(t, mode...)
+		if err != nil || strings.Contains(out, "--linked-only") {
+			t.Errorf("by default: %v\n%s", err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set", "linkedOnly=true")...)
+		if err != nil || strings.Count(out, "- --linked-only\n") != 1 {
+			t.Errorf("linkedOnly: %v\n%s", err, out)
+		}
+	}
+}
+
 // TestChartServeRuleConfigMaps: lapilli serve reads one directory of rules,
 // so with several ConfigMaps it has them all in one, a projected volume of
 // each one's keys side by side, and one --rules; the CronJob, which takes a

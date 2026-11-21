@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`linkedOnly`** in the Helm chart passes `--linked-only`, to the
+  CronJob and to serve alike (charts/lapilli/README.md).
+- **The Settings page says whether `--linked-only` is in effect**, beside
+  the judging settings, in every language, and `GET /api/v1/settings` as
+  `linked_only`.
+
+### Changed
+
+- **Near misses are looked for by the link too** (docs/design/links.md).
+  Of an incident that lists the alerts its tool linked to it, a rule it
+  lists is looked at for a shorter `for` or a nearer number whatever
+  `--match` says, nearly catching it where its labels agree with the
+  alert's; with `--linked-only`, only the rules it lists are. One that
+  lists none is looked at by labels, as before. In `lapilli verdict` and
+  `lapilli serve` alike.
+
 ## [0.67.0] - 2026-11-21
 
 Incidents judged by the alerts their tool linked to them, and why a

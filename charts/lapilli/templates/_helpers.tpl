@@ -557,6 +557,9 @@ the rules and the incidents are, and how to judge. */}}
 {{- range .Values.match }}
 - {{ printf "--match=%s" . | quote }}
 {{- end }}
+{{- if .Values.linkedOnly }}
+- --linked-only
+{{- end }}
 {{- with .Values.hours.work }}
 - {{ printf "--work-hours=%s" . | quote }}
 {{- end }}
