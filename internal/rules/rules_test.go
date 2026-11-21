@@ -777,3 +777,22 @@ func TestCloudWatchActionsOff(t *testing.T) {
 		t.Errorf("a PromQL alarm off keeps its query: %+v", rs[1])
 	}
 }
+
+// vmalert names a rule's keep_firing_for in snake case
+// (app/vmalert/rule/web.go), where Prometheus says keepFiringFor.
+func TestFromAPIVMAlertKeepFiringFor(t *testing.T) {
+	b := []byte(`{"status":"success","data":{"groups":[{"name":"g","interval":30,"rules":[
+		{"type":"alerting","name":"VM","query":"up == 0","duration":60,"keep_firing_for":300,"labels":{},"annotations":{}},
+		{"type":"alerting","name":"Prom","query":"up == 0","duration":60,"keepFiringFor":120,"labels":{},"annotations":{}}]}]}}`)
+	rs, err := FromAPI(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]time.Duration{}
+	for _, r := range rs {
+		got[r.Name] = r.KeepFiringFor
+	}
+	if got["VM"] != 5*time.Minute || got["Prom"] != 2*time.Minute {
+		t.Errorf("keep_firing_for read as %v, want VM 5m and Prom 2m", got)
+	}
+}

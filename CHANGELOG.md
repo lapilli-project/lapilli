@@ -113,6 +113,13 @@ Before upgrading:
   request runs it when it changes `internal/prom`, `internal/replay`,
   `internal/rules`, `internal/source` or the script. Not a required check.
 
+### Fixed
+
+- **`--loaded-rules` reading vmalert's rules** takes each rule's
+  `keep_firing_for`, which vmalert names so where Prometheus says
+  `keepFiringFor`: it was read as none, so a vmalert rule's firing was
+  replayed as resolving sooner than it did.
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.
