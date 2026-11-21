@@ -1025,7 +1025,9 @@ reads the before and after of a change it keeps alone, not of each it
 looks through (but a bulk verdict's after, which says its rules).
 
 `GET /api/v1/activity` gives the same, with the same filters: `limit` (1
-to 1,000), as JSON (`activity`, each with its id, `at`, `by`, `kind`,
+to 1,000), and as many as 8 MiB of their text holds (who, what, before and
+after; a change bigger alone is given whole, as the first of its page), a
+page too, as JSON (`activity`, each with its id, `at`, `by`, `kind`,
 `what`, and `before` and `after` as the JSON they were kept as; `next`) or,
 with `format=csv`, as CSV (`id, at, by, kind, what, before, after`), the
 next page's link in `Link`. No cell of it starts with `=`, `+`, `-`, `@`, a
@@ -1036,7 +1038,12 @@ admin's, as there (`changesSeen`), and to anyone else the paths of `serve`'s
 files are their flags. Neither is kept by a cache: `Cache-Control:
 no-store`. The export is worked out as a page is, a few at a time: it
 takes a page's turn (`pageRenders`), 503 past the wait, and gives it back
-once the answer is written out, before it goes to the network.
+once the answer is written out, before it goes to the network. It is
+written out four at a time (`activityExports`), each holding a turn of the
+exports' own, 503 past the wait, until its reader has read it, 30 seconds
+at most: a reader who doesn't read holds an export's answer, 8 MiB and a
+change, not a page's turn. The ledger is asked for 200 changes at a time,
+and a team's before and after 200 at a time, until 8 MiB.
 
 **Builder's decision: the activity log outlives the firings.**
 `--keep-activity` (`serve.keepActivity`) is how long it is kept: unless
@@ -1120,6 +1127,13 @@ Read so again, once built:
   after with them. It takes one, and a team's changes are looked through
   without their before and after (`TestActivityTakesATurn`,
   `TestActivityLight`).
+- **An export held whole by a reader who doesn't read.** An
+  export gave its turn back before it went out, and gave a thousand
+  changes, before and after whole, indented: 58 MB of a ledger's
+  incidents changed a thousand times, and 16 readers who read nothing held
+  1.6 GB until the server's `WriteTimeout`. It gives 8 MiB of their text at
+  most, not indented, and holds a turn of the exports' own until it is
+  read (`TestActivityBytesBounded`, `TestActivityExportHeldUntilRead`).
 - **Credentials in other forms.** An Azure Function's `?code=`, a
   `password=` between spaces, a JSON `"token"`, an `x-api-key:` header
   went through as said (`TestScrubSecrets`).

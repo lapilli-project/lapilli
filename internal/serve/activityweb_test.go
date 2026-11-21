@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -338,5 +339,142 @@ func TestActivityTakesATurn(t *testing.T) {
 	}
 	for range pageRenders - 1 {
 		<-s.renders
+	}
+}
+
+// An export ends where its changes' text passes activityBytes, and says
+// where to go on from: paged through, as JSON and as CSV alike, every
+// change is given once, a team's too, whose before and after are read
+// after it is looked through.
+func TestActivityBytesBounded(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	ctx := context.Background()
+	for i := range 20 {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: fmt.Sprintf("%02d %s", i, strings.Repeat("n", 4000))}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, query := range []string{"", "team=payments"} {
+		whole, next := activityOf(t, h, query, vViewer)
+		if next != "" || len(whole) < 20 {
+			t.Fatalf("%q under 8 MiB: %d changes, next %q", query, len(whole), next)
+		}
+		func() {
+			was := activityBytes
+			defer func() { activityBytes = was }()
+			activityBytes = 30_000
+			var ids []int64
+			before := ""
+			for pages := 0; ; pages++ {
+				if pages > len(whole) {
+					t.Fatalf("%q: no end to the pages", query)
+				}
+				q := query
+				if before != "" {
+					q += "&before=" + url.QueryEscape(before)
+				}
+				code, body := getAs(t, h, "/api/v1/activity?"+q, vViewer)
+				if code != http.StatusOK {
+					t.Fatalf("%q: %d %s", q, code, body)
+				}
+				// Three notes' changes of 8 KB, and what JSON adds, on one
+				// line: not indented.
+				if len(body) > activityBytes+2_000 || strings.Count(body, "\n") != 1 {
+					t.Errorf("%q: a page of %d bytes, past %d, or of %d lines", q, len(body), activityBytes, strings.Count(body, "\n"))
+				}
+				var out struct {
+					Activity []apiLogged `json:"activity"`
+					Next     string      `json:"next"`
+				}
+				if err := json.Unmarshal([]byte(body), &out); err != nil {
+					t.Fatal(err)
+				}
+				for _, c := range out.Activity {
+					ids = append(ids, c.ID)
+				}
+				csvQ := q + "&format=csv"
+				_, rows, head := getAsWithHeaders(t, h, "/api/v1/activity?"+strings.TrimPrefix(csvQ, "&"), vViewer)
+				records, err := csv.NewReader(strings.NewReader(rows)).ReadAll()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(records)-1 != len(out.Activity) || (out.Next != "") != (head.Get("Link") != "") {
+					t.Errorf("%q: CSV of %d changes, link %q; JSON of %d, next %q", q, len(records)-1, head.Get("Link"), len(out.Activity), out.Next)
+				}
+				if out.Next == "" {
+					break
+				}
+				before = out.Next
+			}
+			if len(ids) != len(whole) {
+				t.Errorf("%q: paged through %d changes, not %d", query, len(ids), len(whole))
+			}
+			for i, c := range whole {
+				if i < len(ids) && ids[i] != c.ID {
+					t.Errorf("%q: change %d is %d paged through, %d whole", query, i, ids[i], c.ID)
+					break
+				}
+			}
+		}()
+	}
+}
+
+// unread is a reader who doesn't read: its first write waits until goOn
+// is closed, after writing is.
+type unread struct {
+	*httptest.ResponseRecorder
+	once          sync.Once
+	writing, goOn chan struct{}
+}
+
+func (w *unread) Write(b []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.writing)
+		<-w.goOn
+	})
+	return w.ResponseRecorder.Write(b)
+}
+
+// An export holds one of the exports' turns until its reader has read it,
+// and no page's: what readers who don't read make serve hold is a few
+// exports', and pages are worked out meanwhile.
+func TestActivityExportHeldUntilRead(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	for _, format := range []string{"json", "csv"} {
+		w := &unread{ResponseRecorder: httptest.NewRecorder(), writing: make(chan struct{}), goOn: make(chan struct{})}
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/activity?format="+format, nil)
+		r.Header.Set("X-Forwarded-Email", vViewer)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h.ServeHTTP(w, r)
+		}()
+		<-w.writing
+		if len(s.exports) != 1 || len(s.renders) != 0 {
+			t.Errorf("%s being read: %d exports' turns held, %d pages'; want 1 and 0", format, len(s.exports), len(s.renders))
+		}
+		close(w.goOn)
+		<-done
+		if len(s.exports) != 0 || w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "pay's") {
+			t.Errorf("%s read: %d exports' turns held, %d %s", format, len(s.exports), w.Code, w.Body.String())
+		}
+	}
+	if cap(s.exports) != activityExports {
+		t.Errorf("%d exports' turns, not %d", cap(s.exports), activityExports)
+	}
+	// All taken, the next waits, then is told to come back.
+	was := renderWait
+	defer func() { renderWait = was }()
+	renderWait = time.Millisecond
+	for range activityExports {
+		s.exports <- struct{}{}
+	}
+	if code, body := getAs(t, h, "/api/v1/activity", vViewer); code != http.StatusServiceUnavailable {
+		t.Errorf("every export's turn taken: %d %s", code, body)
+	}
+	for range activityExports {
+		<-s.exports
 	}
 }

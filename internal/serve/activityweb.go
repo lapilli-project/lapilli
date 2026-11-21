@@ -57,6 +57,13 @@ const (
 	// activityMost is the most an export gives at once: past it, it says
 	// where to go on from.
 	activityMost = 1000
+	// activityBatch is how many changes, with their before and after, a
+	// request asks the ledger for at once.
+	activityBatch = 200
+	// activityExports is how many exports are written out at once: each
+	// holds its answer, activityBytes and a change at most, until its
+	// reader has read it.
+	activityExports = 4
 	// activityScan is how many changes a request looks through for those
 	// of a team, or those its reader may read, before it says where it
 	// stopped, so that a filter that matches little reads no more than
@@ -67,6 +74,16 @@ const (
 	// changes asks the ledger this many rows at most besides.
 	activityLookups = 200
 )
+
+// activityBytes is how much of the changes' text, who, what, before and
+// after, a page or an export holds at most: past it, it ends at the change
+// before and says where to go on from, so that a thousand changes of an
+// incident's labels and alerts, tens of megabytes, are a few pages. A
+// change bigger than it alone is given whole, as the first of its page.
+var activityBytes = 8 << 20
+
+// changeText is how much of a change's text a page holds.
+func changeText(c ledger.LogEntry) int { return len(c.By) + len(c.What) + len(c.Before) + len(c.After) }
 
 // errLookedUp is a request of a team's changes past activityLookups.
 var errLookedUp = errors.New("looked up as many tasks and proposals as a request may")
@@ -140,9 +157,10 @@ func (s *Server) activityAsked(ctx context.Context, q url.Values) (activityAsk, 
 }
 
 // activityRead is a page of the activity log: its changes, the latest
-// first; where the next page goes on from (zero for none); and Cut, that
-// the request looked through activityScan changes without filling the
-// page, so that more may be past Next.
+// first, limit of them or activityBytes of their text at most; where the
+// next page goes on from (zero for none); and Cut, that the request looked
+// through activityScan changes without filling the page, so that more may
+// be past Next.
 type activityRead struct {
 	Changes []ledger.LogEntry
 	Next    ledger.ActivityCursor
@@ -217,14 +235,30 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 		return false, nil
 	}
 	q := a.q
-	q.Limit = max(limit+1, 200)
 	// A team's changes are a few of those looked through: each one's before
-	// and after are read once it is kept, not for every one looked at.
+	// and after are read once it is kept, not for every one looked at, a
+	// batch at a time, until activityBytes. Every change's otherwise, a
+	// batch a read.
 	q.Light = a.team != ""
+	q.Limit = activityBatch
+	if q.Light {
+		q.Limit = max(limit+1, activityBatch)
+	}
+	held := 0 // the text of the changes kept
 	done := func() (activityRead, error) {
 		if q.Light {
-			if err := s.l.ActivityBodies(ctx, out.Changes); err != nil {
-				return out, err
+			for i := 0; i < len(out.Changes); i += activityBatch {
+				part := out.Changes[i:min(i+activityBatch, len(out.Changes))]
+				if err := s.l.ActivityBodies(ctx, part); err != nil {
+					return out, err
+				}
+				for j, c := range part {
+					if held += changeText(c); held > activityBytes && i+j > 0 {
+						out.Changes = out.Changes[:i+j]
+						out.Next, out.Cut = out.Changes[i+j-1].Cursor(), false
+						return s.activitySaid(out, adminReads, l), nil
+					}
+				}
 			}
 		}
 		return s.activitySaid(out, adminReads, l), nil
@@ -254,10 +288,13 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 			if !ok {
 				continue
 			}
-			if len(out.Changes) == limit {
-				// One more than the page: the page ends at its last.
-				out.Next = out.Changes[limit-1].Cursor()
+			if len(out.Changes) == limit || !q.Light && len(out.Changes) > 0 && held+changeText(c) > activityBytes {
+				// One more than the page holds: the page ends at its last.
+				out.Next = out.Changes[len(out.Changes)-1].Cursor()
 				return done()
+			}
+			if !q.Light {
+				held += changeText(c)
 			}
 			out.Changes = append(out.Changes, c)
 		}
@@ -471,9 +508,21 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("format %q: want json or csv", format))
 		return
 	}
+	// Written out a few at a time (activityExports): an export holds its
+	// answer until its reader has read it, which one who doesn't read makes
+	// take until the write's deadline, and its turn with it, so that what
+	// such readers make serve hold is that of a few exports, not of each
+	// one sent. The turn is one of the exports' own, not of the pages':
+	// those readers keep no page from being worked out.
+	ex, err := s.exportTurn(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer ex.give()
 	// Worked out as a page is, a few at a time (pageRenders): it takes a
-	// page's turn, and gives it back once the answer is written out, before
-	// it goes to the network.
+	// page's turn too, and gives it back once the answer is written out,
+	// before it goes to the network.
 	tn, err := s.renderTurn(r.Context())
 	if err != nil {
 		s.oops(w, r, err)
@@ -497,7 +546,8 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 		nq.Set("before", got.Next.String())
 		next = "/api/v1/activity?" + nq.Encode()
 	}
-	// Written out whole, then the turn given back, then sent.
+	// Written out whole, then the page's turn given back, then sent, the
+	// export's turn held until it is.
 	var body bytes.Buffer
 	if format == "csv" {
 		if next != "" {
@@ -524,14 +574,19 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 			out.Activity = append(out.Activity, apiLogged{c.ID, c.At.UTC(), c.By, c.Kind, c.What, rawOf(c.Before), rawOf(c.After)})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		enc := json.NewEncoder(&body)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(out); err != nil {
+		// Not indented: a change's before and after are JSON of their own,
+		// which an indent made a third bigger.
+		if err := json.NewEncoder(&body).Encode(out); err != nil {
 			s.oops(w, r, err)
 			return
 		}
 	}
+	got.Changes = nil
 	tn.give()
+	// A reader who doesn't read holds the export's turn as long as a page
+	// too big to keep may take to go out (spillWithin), not the server's
+	// WriteTimeout.
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(spillWithin))
 	w.Write(body.Bytes())
 }
 
