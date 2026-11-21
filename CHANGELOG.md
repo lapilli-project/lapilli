@@ -12,7 +12,9 @@
   and the summary counts them (`missed_checked`, `incidents_missed`, new
   fields). With `--changed-only`, the rules left alone are replayed too
   when a rule that differs stops catching one, to see whether one still
-  does. With `--fail-expectations`, either failing fails the run.
+  does. An incident a rule after the change that couldn't be replayed may
+  still catch is not known (`missed_not_known`), said, and fails nothing.
+  With `--fail-expectations`, either failing fails the run.
 - **The backtest recipes stop a merge**: `FAIL_MISSED=true` gives lapilli
   `--fail-missed` and fails the job on it, once the comment says which
   (refused through `lapilli serve`, whose report doesn't say yet); and
