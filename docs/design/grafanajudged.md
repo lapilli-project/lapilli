@@ -59,9 +59,11 @@ history (recorded.md), such a rule can get from Grafana's.
   Each is left a gap, logged with the rules' names, never taken for a
   quiet day, and nothing already copied in is written over: neither by
   such a day, nor for a rule judged so no more (paused, deleted, renamed),
-  whose firings a write keeps as they are. A firing ended after a gap is
-  written again up to where the copies got to before it, apart from the
-  day, so the gap stays one. An alert on since before a
+  whose firings a write keeps as they are. A firing ended, written again
+  from its start, is written within the spans the copies cover, each
+  apart, whichever round after a gap it ends in, so each gap stays one;
+  what the history says began in a gap is left out with it. An alert on
+  since before a
   write, which the ledger has as on and the history says ended, is
   written again from its start with what the ledger has from there,
   within 31 days and 100,000 firings. The firings are kept as copied-in

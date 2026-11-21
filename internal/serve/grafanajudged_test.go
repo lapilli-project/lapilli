@@ -473,3 +473,64 @@ func TestServeGrafanaJudgedLeftOut(t *testing.T) {
 		t.Errorf("the renamed rule's firing copied in: %+v %v", fs, err)
 	}
 }
+
+// A firing on across a gap, or two, that the history says ended a round
+// or more after the copies went on past them is written again from its
+// start within the spans it lies across, ended: each gap stays one, never
+// read as days with a record.
+func TestServeGrafanaJudgedGapsStay(t *testing.T) {
+	for name, c := range map[string]struct {
+		rounds []bool // a round each two hours, a title shared or not
+		ended  int    // hours past now the firing ends
+	}{
+		// The day the firing ends follows a gap, a round on.
+		"a gap, ended a round after": {[]bool{false, true, false, false}, 5},
+		// Two gaps, the firing ending in the second.
+		"two gaps":              {[]bool{false, true, false, true, false}, 5},
+		"two gaps, ended after": {[]bool{false, true, false, true, false}, 7},
+	} {
+		rounds := c.rounds
+		ctx := context.Background()
+		g := &dupGrafana{ordersGrafana: &ordersGrafana{}}
+		s := judgingServer(t, g)
+		raw := ""
+		for i, dup := range rounds {
+			if i == len(rounds)-1 {
+				// orders, on since 07:00, ends before this round.
+				g.ordersGrafana.mu.Lock()
+				g.more = append(g.more, alertChange{"Alerting", "Normal", "orders", now.Add(time.Duration(c.ended) * time.Hour)})
+				g.ordersGrafana.mu.Unlock()
+			}
+			g.mu.Lock()
+			g.dup = dup
+			g.mu.Unlock()
+			at := now.Add(time.Duration(2*i) * time.Hour)
+			s.now = func() time.Time { return at }
+			if err := s.look(ctx, &raw); err != nil {
+				t.Fatal(err)
+			}
+			s.jobs(ctx, true)
+			if s.status.errWhat != "" {
+				t.Fatalf("%s: round %d failed: %s: %s", name, i, s.status.errWhat, s.status.err)
+			}
+		}
+		if open, err := s.l.OpenFirings(ctx, ledger.GrafanaSource, now.Add(24*time.Hour)); err != nil || len(open) != 0 {
+			t.Errorf("%s: still open: %+v %v", name, open, err)
+		}
+		spans, err := s.l.Spans(ctx, ledger.GrafanaSource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, dup := range rounds {
+			if !dup {
+				continue
+			}
+			in := now.Add(time.Duration(2*i-1) * time.Hour) // inside the round's gap
+			for _, sp := range spans {
+				if !sp[0].After(in) && sp[1].After(in) {
+					t.Errorf("%s: the gap of round %d (%s) is covered: %v", name, i, in, spans)
+				}
+			}
+		}
+	}
+}
