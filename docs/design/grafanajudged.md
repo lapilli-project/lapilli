@@ -47,21 +47,28 @@ history (recorded.md), such a rule can get from Grafana's.
   the rule is listed as before, and stderr says why.
 - **`lapilli serve`.** Each round, after the runs and the check, the
   history from where the copies got to, up to the runs' cursor, is copied
-  in under the source `grafana`, a day a write, seven a round: the first
-  read from a day before it, the rest from the `--settle` before their
-  start, written again, so a change Grafana kept late is seen. Before the
-  first, a day the history holds no change up to (it begins after it,
-  kept so far back no more, or not yet) is passed over, not taken for a
-  quiet one. An alert on
-  since before a write, which the ledger has as on and the history says
-  ended, is written again from its start with what the ledger has from
-  there, within 31 days and 100,000 firings. The firings are kept as
-  copied-in ones are: rows of `firings` under a recorded rule of the
-  source. The rule and its history are one rule, tied by name, as a
+  in under the source `grafana`, a day a write, seven a round: the first,
+  and the first after a gap, read from a day before it, each alert on at
+  its start from then; the rest from the `--settle` before their start,
+  written again, so a change Grafana kept late is seen. A day the history
+  holds no change up to (it begins after it, kept so far back no more, or
+  not yet) is passed over, asked each day; so is a day it is of no use
+  for: refused, more than is read at once, changes of a rule judged by it
+  passed over or its alerts not told apart, or a firing a write can't
+  hold. Each is left a gap, logged, never taken for a quiet day, and
+  nothing already copied in is written over. An alert on since before a
+  write, which the ledger has as on and the history says ended, is
+  written again from its start with what the ledger has from there,
+  within 31 days and 100,000 firings. The firings are kept as copied-in
+  ones are: rows of `firings` under a recorded rule of the source, one a
+  rule by its name, whatever severities its alerts carry, written as
+  `grafana-history`. The rule and its history are one rule, tied by name, as a
   cloud's alarm and its history are ([alarms.md](alarms.md)): the names of
   the rules judged so are kept in the ledger's meta (`grafana.judged`)
   before each run, and each run, version and copy ties them. Its page says
-  so, and its record is what the copies cover.
+  so, and its record is what the copies cover. A source `grafana` a job
+  wrote to before 0.68 isn't written over: serve says so once, and copies
+  nothing (docs/upgrading.md).
 - **One flag.** `--grafana-history=false`, for both commands, lists them as
   before.
 
@@ -97,10 +104,10 @@ its data sources answered.
   on from the day after; so is a day of more than 100,000 firings, which
   no write holds. Only a failure worth asking again fails the round.
 - **What is kept.** A firing a write can't hold (more than 32 labels,
-  labels past 4 KB, a name that doesn't show) is left out before anything
-  is made of its labels: the flipping alert of
-  `TestCheckReplayGrafanaHistoryMisses`, 14,401 firings of 128 labels, is
-  read and none of its labels is made into a key
+  labels past 4 KB, a name that doesn't show) makes its day of no use
+  before anything is made of its labels: the flipping alert of
+  `TestCheckReplayGrafanaHistoryMisses`, 14,401 firings of 128 labels,
+  leaves its days a gap, and none of its labels is made into a key
   (`TestServeGrafanaJudgedFlipping` counts). An alert is compared by a hash
   of its labels. What is kept goes through the checks a copy through the
   port does, and where a copied-in firing goes.
@@ -109,15 +116,21 @@ its data sources answered.
   make a recorded rule that ties itself to a Grafana rule.
 - **Names.** The history names a rule only by the title of one of the
   rules read from that Grafana; any other name's changes are passed over,
-  never kept, so the history can't add a rule.
+  never kept, so the history can't add a rule. A name it gives two of
+  them, counted over every rule read before `--rule` picks, is neither's.
+- **What it can make serve miss.** One rule whose changes the history
+  can't say all of, or whose alerts no write holds, makes each day it is
+  in of no use, for every rule judged so: a gap rather than a wrong
+  record, but one such rule holds the copies up while it fires.
 
 ## Questions
 
-- A rule whose severity label changed has two recorded rules of its name,
-  and is tied to neither: keep its severity with its name, as an alarm's
-  tie does?
+- A rule whose alerts no write holds, or whose changes the history can't
+  say all of, holds the source's copies up: leave that rule out alone,
+  remembered, rather than the day?
+- One recorded rule a name keeps no severity: the report gives such a rule
+  none, where a replayed rule has its labels'.
 - One title in two folders: the tags hold `grafana_folder`; tie by it too?
 - Judge the rules `--check-grafana`'s Grafana runs, read from files, the
   same way?
-- The source's writer shows as `firings-token`: a name of its own?
 - A value in the chart for `--grafana-history=false` (today `extraArgs`).

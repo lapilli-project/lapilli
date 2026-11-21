@@ -23,6 +23,11 @@ import (
 // can't replay is copied in under.
 const GrafanaSource = verdict.GrafanaSource
 
+// GrafanaCopier is who lapilli serve copies Grafana's history in as: a
+// source of the name a job wrote to before, as one could before 0.68,
+// isn't serve's to write over.
+const GrafanaCopier = "grafana-history"
+
 // judgedKey is the meta key the names of the rules judged from Grafana's
 // history are kept under, as JSON.
 const judgedKey = "grafana.judged"

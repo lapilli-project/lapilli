@@ -52,6 +52,9 @@ type judgedGrafana struct {
 	mu     sync.Mutex
 	refuse bool
 	asked  []string
+	// rules, when set, are its rules, and tag the name its history gives
+	// Orders slow.
+	rules, tag string
 }
 
 func (g *judgedGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +63,10 @@ func (g *judgedGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Unlock()
 	switch r.URL.Path {
 	case "/api/v1/provisioning/alert-rules/export":
+		if g.rules != "" {
+			io.WriteString(w, g.rules)
+			return
+		}
 		io.WriteString(w, judgedRules)
 	case "/api/datasources/uid/prom":
 		io.WriteString(w, `{"uid": "prom", "type": "prometheus", "jsonData": {"prometheusType": "Prometheus"}}`)
@@ -77,8 +84,12 @@ func (g *judgedGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal([]byte(r.URL.Query().Get("to")), &to)
 		json.Unmarshal([]byte(r.URL.Query().Get("limit")), &limit)
 		note := func(id int, rule, prev, next string, at time.Time) map[string]any {
+			tag := rule
+			if g.tag != "" && rule == "Orders slow" {
+				tag = g.tag
+			}
 			return map[string]any{"id": id, "alertName": rule, "prevState": prev, "newState": next, "time": at.UnixMilli(),
-				"tags": []string{"alertname:" + rule, "grafana_folder:Ops", "service:orders"}}
+				"tags": []string{"alertname:" + tag, "grafana_folder:Ops", "service:orders"}}
 		}
 		var all []map[string]any
 		for k := 1; k <= 6; k++ { // newest first
@@ -217,5 +228,34 @@ func TestVerdictGrafanaJudged(t *testing.T) {
 	if code := run([]string{"verdict", "--rules", write(t, "r.yaml", judgedRules), "--prometheus", "http://p", "--incidents", incidents, "--grafana-history=false"}, io.Discard, &errs); code != 2 ||
 		!strings.Contains(errs.String(), "--grafana-history judges the rules --grafana reads") {
 		t.Errorf("exit %d: %s", code, errs.String())
+	}
+}
+
+// A name Grafana's history gives two of its rules, "Orders: slow" and
+// "Orders_ slow" alike in an annotation's tags, judges neither, though
+// --rule picks one: the history doesn't say which fired.
+func TestVerdictGrafanaJudgedShared(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
+	now = func() time.Time { return t0 }
+	two := strings.Replace(judgedRules, "title: Orders slow", `title: "Orders: slow"`, 1) + `      - uid: orders2
+        title: Orders_ slow
+        condition: B
+        for: 0s
+        data:
+          - {refId: A, datasourceUid: orders, relativeTimeRange: {from: 600, to: 0}, model: {refId: A, rawSql: "SELECT 2"}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [5]}}]}
+`
+	srv := httptest.NewServer(&judgedGrafana{rules: two, tag: "Orders_ slow"})
+	defer srv.Close()
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-9, title: Orders slow, start: 2026-11-01T19:00:00Z, end: 2026-11-01T19:30:00Z, labels: {service: orders}}\n")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--grafana", srv.URL, "--prometheus", "http://p", "--incidents", incidents, "--rule", "^Orders: slow$", "--tz", "UTC"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Could not replay 1 rules:\n  Orders: slow: its condition reads a mysql data source") ||
+		!strings.Contains(stderr.String(), "1 Grafana rules aren't judged from its alert state history, which gives their name to another of Grafana's rules too") {
+		t.Errorf("judged by another rule's history:\n%s\n%s", stdout.String(), stderr.String())
 	}
 }

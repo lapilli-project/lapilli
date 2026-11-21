@@ -969,7 +969,7 @@ func (s *Server) signedName(u string) string {
 	}
 	// Nor take the names changes made with a token are noted under, or
 	// Lapilli's own, in any case: the ledger folds names.
-	if f := ledger.FoldName(u); u == "" || slices.ContainsFunc([]string{tokenUser, ledger.FiringsCopier, ledger.TaskTracker,
+	if f := ledger.FoldName(u); u == "" || slices.ContainsFunc([]string{tokenUser, ledger.FiringsCopier, ledger.GrafanaCopier, ledger.TaskTracker,
 		ledger.ChangesCopier, ledger.Proposer}, func(n string) bool { return f == ledger.FoldName(n) }) {
 		return "anonymous"
 	}

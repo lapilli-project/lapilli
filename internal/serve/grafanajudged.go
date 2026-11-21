@@ -29,7 +29,8 @@ const maxCopyDays = 7
 
 // fromHistory are the rules of the version in effect now that are judged
 // from Grafana's history, each under the name it is judged under, and all
-// of that version's rules.
+// the rules of that version's documents, --rule or not: what a name in
+// the history may be of.
 func (s *Server) fromHistory(ctx context.Context) (judged, all []rules.Rule, err error) {
 	if s.cfg.JudgedHistory == nil || s.cfg.Grafana == "" {
 		return nil, nil, nil
@@ -39,13 +40,17 @@ func (s *Server) fromHistory(ctx context.Context) (judged, all []rules.Rule, err
 	if err != nil || len(vs) == 0 {
 		return nil, nil, err
 	}
-	all = vs[len(vs)-1].Rules
-	for _, r := range all {
+	v := vs[len(vs)-1]
+	for _, r := range v.Rules {
 		if r.FromHistory() && r.Source == s.cfg.Grafana {
 			judged = append(judged, r)
 		}
 	}
-	return judged, all, nil
+	if len(judged) == 0 {
+		return nil, nil, nil
+	}
+	all, _, err = s.named(ctx, v.ID)
+	return judged, all, err
 }
 
 // noteFromHistory keeps, before a run, the names of the rules judged from
@@ -66,14 +71,20 @@ func (s *Server) noteFromHistory(ctx context.Context) error {
 // copyFromHistory copies in what Grafana's alert state history says the
 // rules judged by it fired, from where the copies got to, or else where
 // the runs began, up to the runs' cursor: a day at a time, maxCopyDays a
-// round. Before the first copy, a day the history holds no change up to
-// is passed over. A day the history is of no use for (refused, more than
-// is read at once, answers that can't be used, firings a write can't
-// hold) is passed over, its firings left out, and logged; only a failure
-// worth asking again fails the round, which asks again the next.
+// round. A day the history holds no change up to (it begins after it,
+// kept so far back no more, or not yet) is passed over, and so is one it
+// is of no use for (refused, more than is read at once, answers that
+// can't be used, changes of the rules it passed over or alerts it doesn't
+// tell apart, firings a write can't hold): left a gap, not taken for a
+// quiet day, logged, and the day after copied as a first one is. Only a
+// failure worth asking again fails the round, which asks again the next.
+// A source of its name a job wrote to before isn't written over.
 func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
 	rs, all, err := s.fromHistory(ctx)
 	if err != nil || len(rs) == 0 {
+		return err
+	}
+	if theirs, err := s.sourceTheirs(ctx); err != nil || theirs {
 		return err
 	}
 	hw, err := s.historyWhere(ctx)
@@ -88,17 +99,20 @@ func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
 	if err != nil {
 		return err
 	}
-	first := a.IsZero()
-	if first {
+	s.status.Lock()
+	past := s.status.copyFrom
+	s.status.Unlock()
+	// The first day, or the first after a gap: alerts on at its start are
+	// read from a day before it.
+	first := a.IsZero() || past.After(a)
+	if a.IsZero() {
 		if a, err = s.l.RunsFrom(ctx); err != nil || a.IsZero() {
 			return err
 		}
 	}
-	s.status.Lock()
-	if s.status.copyFrom.After(a) {
-		a = s.status.copyFrom
+	if past.After(a) {
+		a = past
 	}
-	s.status.Unlock()
 	a = a.Truncate(time.Second)
 	skip := func(to time.Time) {
 		s.status.Lock()
@@ -113,13 +127,7 @@ func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
 		if !b.After(a) {
 			return nil
 		}
-		// Before the first copy, a day the history holds no change up to
-		// says nothing of what fired then (it begins after it, kept so far
-		// back no more, or not yet): passed over, not taken for a quiet one.
-		reaches, err := true, error(nil)
-		if first {
-			reaches, err = s.cfg.JudgedHistory.Reaches(ctx, hw.Serves, b)
-		}
+		reaches, err := s.cfg.JudgedHistory.Reaches(ctx, hw.Serves, b)
 		if err == nil && reaches {
 			s.status.set("copying in what Grafana's alert state history says its rules fired, %s", a.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 			err = s.copyDay(ctx, hw.Serves, rs, all, a, b, first, o)
@@ -128,10 +136,12 @@ func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
 		switch {
 		case err == nil && !reaches:
 			skip(b)
+			first = true
 		case errors.Is(err, source.ErrUnusable) || errors.As(err, &invalid):
-			s.log.Warn("Grafana's alert state history of the rules Lapilli can't replay wasn't copied in for a day: their firings then are left out",
+			s.log.Warn("Grafana's alert state history of the rules Lapilli can't replay wasn't copied in for a day: it is left a gap",
 				"from", a, "to", b, "err", err)
 			skip(b)
+			first = true
 		case err != nil:
 			return err
 		default:
@@ -140,6 +150,29 @@ func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
 		a = b
 	}
 	return nil
+}
+
+// sourceTheirs reports whether the source Grafana's history is copied in
+// under was written by a job, as one could before 0.68: it isn't serve's
+// to write over, and it says so once.
+func (s *Server) sourceTheirs(ctx context.Context) (bool, error) {
+	srcs, err := s.l.Sources(ctx)
+	if err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(srcs, func(x ledger.Source) bool { return x.Name == ledger.GrafanaSource })
+	if i < 0 || srcs[i].By == ledger.GrafanaCopier {
+		return false, nil
+	}
+	s.status.Lock()
+	said := s.status.copyTheirs
+	s.status.copyTheirs = true
+	s.status.Unlock()
+	if !said {
+		s.log.Error("Grafana's alert state history isn't copied in: a job copied firings in under the source grafana, now lapilli serve's own, before 0.68 (docs/upgrading.md)",
+			"written_by", srcs[i].By)
+	}
+	return true, nil
 }
 
 // copyDay copies in what the history says the rules fired from a to b:
@@ -168,24 +201,24 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	if j.Passed > 0 {
 		s.log.Warn("changes of state in Grafana's alert state history passed over, past what lapilli reads of one", "changes", j.Passed)
 	}
+	// A rule the history can't say all it fired of makes the day of no
+	// use: taken out alone, its firings already copied in would go, and
+	// the day would read as one it was quiet.
 	if len(j.Unsure) > 0 {
-		s.log.Warn("Grafana's rules its alert state history doesn't tell apart, or passed over changes of, aren't copied in for a day",
-			"rules", len(j.Unsure), "from", p, "to", b)
+		return fmt.Errorf("%w: it passed over changes of %d of the rules, or doesn't tell their alerts apart", source.ErrUnusable, len(j.Unsure))
 	}
-	// What a write can't hold of a firing (more than 32 labels, a name
-	// that doesn't show) leaves it out, as it would the write; the rest are
-	// as many as one write holds at most.
-	passed := 0
-	fs := slices.DeleteFunc(j.Firings, func(x firing.Firing) bool {
-		if recordable(x) != nil {
-			passed++
-			return true
+	if len(j.Shared) > 0 {
+		s.log.Warn("Grafana's rules whose name its alert state history gives another rule too aren't judged by it", "rules", len(j.Shared))
+	}
+	// A firing a write can't hold (more than 32 labels, labels past 4 KB,
+	// a name that doesn't show) makes the day of no use, as it would the
+	// write; looked at before anything is made of its labels.
+	for _, x := range j.Firings {
+		if err := recordable(x); err != nil {
+			return fmt.Errorf("%w: a firing a write can't hold: %v", source.ErrUnusable, err)
 		}
-		return false
-	})
-	if passed > 0 {
-		s.log.Warn("firings in Grafana's alert state history a write can't hold left out", "firings", passed, "from", p, "to", b)
 	}
+	fs := j.Firings
 	if len(fs) > ledger.MaxRecorded {
 		return fmt.Errorf("%w: more than %d firings in a day", source.ErrTooManyChanges, ledger.MaxRecorded)
 	}
@@ -260,7 +293,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		}
 		send = append(before, send...)
 	}
-	got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, from, b, send, ledger.FiringsCopier, o)
+	got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, from, b, send, ledger.GrafanaCopier, o)
 	if err == nil && got.Changed() {
 		s.log.Info("Grafana's alert state history copied in", "from", from, "to", b, "firings", got.Firings, "added", got.Added, "removed", got.Removed)
 	}

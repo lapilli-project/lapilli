@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+Before upgrading:
+- A source named `grafana`, written by a job, is no longer one a job may
+  write to: `lapilli serve` copies Grafana's own alert state history in
+  under it. A ledger where one already has firings keeps them, and serve
+  copies nothing under it until it is gone
+  ([docs/upgrading.md](docs/upgrading.md#a-source-named-grafana)).
+
 ### Added
 
 - **Grafana's rules Lapilli can't replay, judged from Grafana's own alert
@@ -17,7 +24,9 @@
   `--json` gives it `source: "grafana"`. `lapilli serve` copies the history
   in each round under the source `grafana`, a day a write, and ties each
   such rule to it by name, as a cloud's alarm is tied to its own: one rule,
-  its page saying so. No new ledger schema. `--grafana-history=false` lists
+  its page saying so. A day the history can't say all of (refused, too
+  much, changes passed over, a firing a write can't hold, or behind its
+  retention) is left a gap, never a quiet day. No new ledger schema. `--grafana-history=false` lists
   them as before (docs/design/grafanajudged.md).
 
 ### Changed

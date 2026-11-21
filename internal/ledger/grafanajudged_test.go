@@ -90,3 +90,36 @@ func TestTiedGrafanaHistory(t *testing.T) {
 		t.Errorf("no longer judged from the history: %q", got)
 	}
 }
+
+// A Grafana rule whose alerts carry two severities, templated or changed
+// once, is one recorded rule, tied to it.
+func TestTiedGrafanaHistorySeverities(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if err := l.SetFromHistory(ctx, []string{"Orders slow"}); err != nil {
+		t.Fatal(err)
+	}
+	grafanaVersion(t, l, t0, "Orders slow")
+	f := Found{From: t0, To: t0.Add(3 * time.Hour), Rules: []Rule{{Name: "Orders slow", Unsupported: "its condition reads a mysql data source: only PromQL and LogQL are replayed"},
+		{Name: "Replayed"}}, Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(3 * time.Hour)}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	putFirings(t, l, GrafanaSource, t0, t0.Add(3*time.Hour), []firing.Firing{
+		{Rule: "Orders slow", Labels: map[string]string{"severity": "critical"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)},
+		{Rule: "Orders slow", Labels: map[string]string{"severity": "warning", "pod": "b"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}})
+	if got := names(t, l); !slices.Equal(got, []string{"Orders slow <grafana>", "Replayed <>"}) {
+		t.Errorf("names %q", got)
+	}
+	ties, err := l.Ties(ctx)
+	if err != nil || ties["Orders slow"].Source != GrafanaSource {
+		t.Errorf("ties: %+v %v", ties, err)
+	}
+	rep, err := l.Report(ctx, t0, t0.Add(3*time.Hour), opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(rep.Rules, func(r verdict.RuleResult) bool { return r.Rule == "Orders slow" }); i < 0 || rep.Rules[i].Firings != 2 || !rep.Rules[i].ByHistory() {
+		t.Errorf("report: %+v", rep.Rules)
+	}
+}

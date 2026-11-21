@@ -238,6 +238,18 @@ with `serve.replicas: 1` first, then raise it
 CronJob mode the chart runs `lapilli verdict`, which keeps nothing to
 upgrade.
 
+## A source named `grafana`
+
+From 0.68, `lapilli serve` copies in what Grafana's own alert state
+history says the rules `--grafana` holds that can't be replayed fired,
+under the source `grafana`, written as `grafana-history`
+([design/grafanajudged.md](design/grafanajudged.md)); the firings port
+refuses that name. A ledger where a job copied firings in under
+`grafana` before keeps them as they were, and serve copies nothing under
+it, saying so once in its log. Send the job's firings under another name,
+and let `grafana` go: a source nothing is written to for `--keep` is
+forgotten. Or give `--grafana-history=false`.
+
 ## Release notes
 
 Each release has its section in [CHANGELOG.md](../CHANGELOG.md), and its
