@@ -34,6 +34,14 @@
   pages show what was judged before, and the page now says so beside it,
   in every language, as `GET /api/v1/settings` does
   (`linked_only_judging`).
+- **Replicas with different `--linked-only` judged every firing again at
+  each change of leader** (0.68.0 to 0.68.1), each undoing the other, as
+  in a rolling update that changes it. A leader judges everything again
+  now only while the ledger's value is still the one it found at start:
+  once for each change of value. A replica a newer change has passed
+  judges what it runs with its own flag, as before, and nothing again;
+  each says in its log, at start and as it leads, when its flag isn't
+  what the ledger was last judged by, with both values.
 - The weekly digest read the notifications sent, and the firings that
   paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
   the webhook is told. Once now, everyone's and each team's.

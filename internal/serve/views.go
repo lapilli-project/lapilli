@@ -2263,12 +2263,11 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	}
 	v := settingsView{LinkedOnly: o.LinkedOnly}
 	// Until the round that judges every firing again with it is done, the
-	// stones are those of the other value (jobs).
-	was, err := s.l.Meta(ctx, linkedMeta)
-	if err != nil {
+	// stones are those of the other value (jobs); not said of a replica
+	// whose flag another's newer change has passed (linkedAgain).
+	if _, v.LinkedOnlyJudging, err = s.linkedAgain(ctx, linkedText(o.LinkedOnly)); err != nil {
 		return settingsView{}, err
 	}
-	v.LinkedOnlyJudging = was != linkedText(o.LinkedOnly)
 	for _, st := range settable {
 		x := settingView{Key: st.key, Flag: st.flag, CommandLine: show(s.cfg.Options, st.key), Value: show(o, st.key)}
 		if c, ok := set[st.key]; ok {

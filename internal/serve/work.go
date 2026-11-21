@@ -74,6 +74,52 @@ func linkedText(on bool) string {
 	return ""
 }
 
+// linkedSaid is linkedText's as the log says it.
+func linkedSaid(v string) string {
+	if v == "1" {
+		return "on"
+	}
+	return "off"
+}
+
+// linkedAgain reads what the ledger's stones were last all given by
+// (linkedMeta), and says whether this replica, leading, judges every
+// firing again with its own --linked-only: when the ledger's is the other
+// value and still the one this replica knew, as it found it at start or
+// as it last agreed with its flag. One another replica wrote since is a
+// change newer than this replica's flag, as in a rolling update: leading,
+// this replica judges what it runs with its own, and leaves the rest as
+// judged, so that replicas that differ judge everything again once for
+// each change of value, not at each change of leader.
+func (s *Server) linkedAgain(ctx context.Context, own string) (was string, again bool, err error) {
+	if was, err = s.l.Meta(ctx, linkedMeta); err != nil {
+		return "", false, err
+	}
+	s.linkedKnown.Lock()
+	defer s.linkedKnown.Unlock()
+	if !s.linkedKnown.read || was == own {
+		s.linkedKnown.read, s.linkedKnown.v = true, was
+	}
+	return was, was != own && was == s.linkedKnown.v, nil
+}
+
+// logLinked says in the log, at start and on becoming the leader, when
+// this replica's --linked-only isn't what the ledger was last judged by:
+// both values, and whether it judges every firing again (linkedAgain).
+func (s *Server) logLinked(ctx context.Context) {
+	own := linkedText(s.cfg.Options.LinkedOnly)
+	was, again, err := s.linkedAgain(ctx, own)
+	switch {
+	case err != nil || was == own:
+	case again:
+		s.log.Info("--linked-only isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
+	default:
+		s.log.Warn("--linked-only isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
+	}
+}
+
 // jobs does each job in turn, each only while this replica still leads
 // (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
@@ -105,12 +151,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// --linked-only other than the ledger was last judged with, as after
 	// a start with it given or taken away: every firing judged again
 	// with it, and the ledger told so once that is done
-	// (docs/design/links.md).
+	// (docs/design/links.md); not to undo another replica's newer change
+	// (linkedAgain).
 	linked := linkedText(o.LinkedOnly)
 	relinked := false
-	if was, err := s.l.Meta(ctx, linkedMeta); err != nil {
+	if _, again, err := s.linkedAgain(ctx, linked); err != nil {
 		s.fail("settings", err)
-	} else if was != linked {
+	} else if again {
 		rejudge, relinked = true, true
 	}
 	judged := func() {
@@ -119,7 +166,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		}
 		if err := s.l.SetMeta(ctx, linkedMeta, linked); err != nil {
 			s.fail("judging again", err)
+			return
 		}
+		s.linkedKnown.Lock()
+		s.linkedKnown.read, s.linkedKnown.v = true, linked
+		s.linkedKnown.Unlock()
 	}
 	// Once, on the upgrade to this release: the windows of signals not in
 	// effect kept from before, which rules with an entry may have caught,

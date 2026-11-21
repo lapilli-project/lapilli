@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -131,5 +132,90 @@ func TestLinkedAlertsServe(t *testing.T) {
 	}
 	if nine, _ := s.l.IncidentByID(ctx, "INC-9"); len(nine.CaughtBy) != 1 || !nine.CaughtBy[0].Linked {
 		t.Errorf("INC-9 with --linked-only: %+v", nine.CaughtBy)
+	}
+}
+
+// Replicas started with different --linked-only judge every firing again
+// once for each change of value, not at each change of leader: one whose
+// flag another replica's newer change has passed judges what it runs with
+// its own and nothing again, and says so in its log, at start and as it
+// leads, with both values. The leader's flag judges what it runs either
+// way.
+func TestLinkedOnlyReplicasDiffer(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	n := 0
+	was := judgeAll
+	judgeAll = func(l *ledger.Ledger, ctx context.Context, o verdict.Options, done func(float64)) error {
+		n++
+		return was(l, ctx, o, done)
+	}
+	t.Cleanup(func() { judgeAll = was })
+	var logged strings.Builder
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	started := func() {
+		// A process started afresh: what it knew is what it finds.
+		s.linkedKnown.Lock()
+		s.linkedKnown.read = false
+		s.linkedKnown.Unlock()
+		s.logLinked(ctx)
+	}
+	h := s.Handler()
+	judging := func() bool {
+		_, js, _ := get(t, h, "/api/v1/settings")
+		return strings.Contains(js, `"linked_only_judging": true`)
+	}
+
+	// Replica A, with --linked-only, on a ledger judged without it.
+	s.cfg.Options.LinkedOnly = true
+	started()
+	if !strings.Contains(logged.String(), "every firing is judged again with this replica's, once") || !strings.Contains(logged.String(), "linked_only=on ledger=off") {
+		t.Errorf("at start: %s", logged.String())
+	}
+	if !judging() {
+		t.Error("the Settings page doesn't say every firing is to be judged again")
+	}
+	s.jobs(ctx, false)
+	if v, _ := s.l.Meta(ctx, linkedMeta); n != 1 || v != "1" || judging() {
+		t.Fatalf("A leading: judged all %d times, the ledger says %q", n, v)
+	}
+
+	// Replica B, without it, started since, leads and judges every firing
+	// again: A, leading again, doesn't undo it.
+	if err := s.l.SetMeta(ctx, linkedMeta, ""); err != nil {
+		t.Fatal(err)
+	}
+	logged.Reset()
+	s.logLinked(ctx) // as lead does
+	s.jobs(ctx, false)
+	s.jobs(ctx, false)
+	if v, _ := s.l.Meta(ctx, linkedMeta); n != 1 || v != "" {
+		t.Errorf("A leading after B: judged all %d times, the ledger says %q; want once in all, B's left", n, v)
+	}
+	if !strings.Contains(logged.String(), "another replica judged every firing with since this one started") || !strings.Contains(logged.String(), "linked_only=on ledger=off") {
+		t.Errorf("A leading after B: %s", logged.String())
+	}
+	if judging() {
+		t.Error("A's Settings page says every firing is being judged again, which A doesn't do")
+	}
+
+	// A started again with it, after B: a change of value, judged once.
+	logged.Reset()
+	started()
+	s.jobs(ctx, false)
+	s.jobs(ctx, false)
+	if v, _ := s.l.Meta(ctx, linkedMeta); n != 2 || v != "1" {
+		t.Errorf("A started again: judged all %d times, the ledger says %q; want twice in all", n, v)
+	}
+	// Agreeing, it says nothing.
+	logged.Reset()
+	s.logLinked(ctx)
+	if strings.Contains(logged.String(), "linked-only") {
+		t.Errorf("agreeing: %s", logged.String())
 	}
 }
