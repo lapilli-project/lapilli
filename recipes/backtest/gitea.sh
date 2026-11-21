@@ -18,6 +18,11 @@
 #                     pull request's own commit. Fetched only when the
 #                     checkout didn't, which needs its credentials kept
 #
+# With STATUS=true (see lib.sh), a commit status (POST
+# /repos/OWNER/REPO/statuses/SHA) on the pull request's head commit, the
+# event's in Actions (pull_request.head.sha): the token needs
+# write:repository, its account write access to the repository.
+#
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks Forgejo Actions for the job's ID token for that audience, which the
 # workflow's enable-openid-connect: true allows, as GitHub Actions is asked
@@ -37,6 +42,10 @@ if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   GITEA_REPO=${GITEA_REPO:-${GITHUB_REPOSITORY:-}}
   if [ -z "${PR:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
     PR=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
+  fi
+  # For STATUS: the pull request's head commit, as the event says.
+  if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
+    status_commit=$(jq -r '.pull_request.head.sha // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || status_commit=
   fi
   # Actions checks out the pull request's own commit, not a merge: the
   # branch it goes into is fetched, and compared from where they parted.
@@ -84,6 +93,14 @@ edit_comment() {
   jq -Rs '{body: .}' "$2" >"$tmp/body"
   code=$(host PATCH "$GITEA_API/repos/$GITEA_REPO/issues/comments/$1" "$tmp/body")
   case $code in 2??) ;; *) say "Gitea didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
+}
+
+# A commit status: success or failure, as lib.sh says.
+post_status() {
+  jq -n --arg state "$1" --arg text "$2" --arg context "$status_context" --arg url "$status_url" \
+    '{state: $state, description: $text, context: $context} + (if $url != "" then {target_url: $url} else {} end)' >"$tmp/body"
+  code=$(host POST "$GITEA_API/repos/$GITEA_REPO/statuses/$status_sha" "$tmp/body")
+  case $code in 2??) ;; *) say "Gitea didn't take the status ($code): $(shown "$out")"; return 1 ;; esac
 }
 
 # shellcheck source=lib.sh

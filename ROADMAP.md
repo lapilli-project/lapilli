@@ -168,19 +168,23 @@ and as Gitea renders it against a real Gitea in CI; GitHub's rendering was
 checked by hand. A job can backtest through `lapilli serve` instead, with
 no metric credential, judged by serve's record, by the ID token of GitHub
 Actions, GitLab CI or Forgejo Actions or a plain token
-([docs/design/backtests.md](docs/design/backtests.md), step 1). Still to
-do:
+([docs/design/backtests.md](docs/design/backtests.md), step 1). A job can
+stop a merge: it fails when the change leaves an incident a rule caught
+before it caught by no rule (`FAIL_MISSED`, `--fail-missed`) or breaks an
+expectation, and sets a commit status on the pull request's head commit
+(`STATUS`): commit statuses on every host (Bitbucket's build statuses,
+Azure DevOps' pull request statuses), not GitHub check runs, for a branch
+rule to require. Still to do:
 
 - Through serve: Bitbucket Pipelines' ID token, and Azure Pipelines' if
-  decided (step 2); Grafana-managed and Loki rules, if decided (step 3).
+  decided (step 2); Grafana-managed and Loki rules, if decided (step 3);
+  `FAIL_MISSED`, which serve's report doesn't say yet: serve would judge
+  the rules left alone by its record.
 
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
-  DevOps accounts, and how each renders the comment. Today each is tested
-  against its API's documented answers, with a server standing in; Gitea
-  against a real one.
-- A check of the pull request's own (a GitHub check run, a commit status
-  on the others) beside the comment, for a team that wants a backtest that
-  went badly to stop a merge.
+  DevOps accounts: how each renders the comment, and takes the status.
+  Today each is tested against its API's documented answers, with a
+  server standing in; Gitea against a real one.
 
 ## Incidents in
 

@@ -541,6 +541,11 @@ status. This design moves where that comparison runs, and nothing else:
   be judged", closed, as #86's second review made it.
 - `--fail-expectations` and `--expect-required` aren't sent: the recipe
   decides, as it does today.
+- `FAIL_MISSED` (`--fail-missed`) is refused with `LAPILLI_SERVE`: serve's
+  lane replays the rules that differ alone, and its summary's
+  `missed_checked` is false. Holding a change to the incidents there needs
+  the rules left alone judged too, by serve's record of them, which isn't
+  built.
 
 **What reads differently through serve**, and is said so in the comment's
 heading ("judged by lapilli serve's record"):

@@ -18,6 +18,11 @@
 #                      the job's own, github-actions[bot]
 #   PR                 the pull request's number (default: the event's)
 #
+# With STATUS=true (see lib.sh), a commit status (POST
+# /repos/OWNER/REPO/statuses/SHA) on the event's head commit
+# (pull_request.head.sha), linking to the run: the token needs statuses:
+# write (a fine-grained token: commit statuses, write).
+#
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks GitHub Actions for the job's ID token for that audience, as
 # core.getIDToken does, which the job's permissions: id-token: write
@@ -44,6 +49,16 @@ case $GITHUB_REPO in */*) ;; *) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want 
 host_api=$api
 if [ -z "${PR:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
   PR=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
+fi
+# For STATUS: the pull request's head commit, as the event says, and the
+# run's page.
+status_commit=
+if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
+  status_commit=$(jq -r '.pull_request.head.sha // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || status_commit=
+fi
+status_link=
+if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+  status_link=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 fi
 
 host_auth() {
@@ -98,6 +113,14 @@ edit_comment() {
   jq -Rs '{body: .}' "$2" >"$tmp/body"
   code=$(host PATCH "$api/repos/$GITHUB_REPO/issues/comments/$1" "$tmp/body")
   case $code in 2??) ;; *) say "GitHub didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
+}
+
+# A commit status: success or failure, as lib.sh says.
+post_status() {
+  jq -n --arg state "$1" --arg text "$2" --arg context "$status_context" --arg url "$status_url" \
+    '{state: $state, description: $text, context: $context} + (if $url != "" then {target_url: $url} else {} end)' >"$tmp/body"
+  code=$(host POST "$api/repos/$GITHUB_REPO/statuses/$status_sha" "$tmp/body")
+  case $code in 2??) ;; *) say "GitHub didn't take the status ($code): $(shown "$out")"; return 1 ;; esac
 }
 
 # shellcheck source=lib.sh

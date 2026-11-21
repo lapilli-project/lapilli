@@ -185,6 +185,78 @@ it, the machine's own is named as `TZ` or `/etc/localtime` says, through
 every link. A zone file copied rather than linked has no name: its
 abbreviations are said, `CEST (+02:00) → CET (+01:00)`.
 
+## Stopping a merge
+
+A comment stops nothing. To stop a merge on what the backtest finds, have
+the job fail on it, and require the job, or the commit status it sets, in
+the branch's rules:
+
+- `FAIL_MISSED=true` (the action's `fail-missed`), with `INCIDENTS` or
+  `IMPACT`: the job fails when the change leaves an incident a rule
+  caught before it caught by no rule after it (`--fail-missed`,
+  [compare.md](compare.md#an-incident-no-rule-catches-after-the-change)),
+  and when a rule that differs couldn't be replayed, as what it catches
+  can't be judged. It needs no expectations file.
+- `FAIL_ON_EXPECTATIONS=true` and `EXPECT_REQUIRED=true`, with `EXPECT`:
+  the job fails when the change breaks an expectation, or adds a rule none
+  holds. Each gate fails the job on its own.
+- `STATUS=true` (the action's `status`): the job also sets a commit status
+  on the pull request's head commit, `lapilli/backtest`
+  (`lapilli/backtest/KEY` with a `KEY` of its own), success or failure as
+  the job ends, its description saying why, linking to the job. It is a
+  commit status, not a GitHub check run: one API on every host, for a
+  branch rule to require by its name. The comment is posted first,
+  whatever the status, and the job's exit follows the run, not the
+  status: a status the host refuses is said in the job's log, and fails
+  the job only with `FAIL_ON_ERROR=true`.
+
+The status goes on the commit the CI names as the pull request's head
+(`STATUS_SHA` to give another), and only when that is the commit the
+backtest read, or a parent of the merge the CI made of it; with neither,
+`HEAD` when it isn't a merge. A required status is set only by a job
+that runs: on a pull request that changes no rule, the job posts no
+comment but sets the status, so run it on every pull request, without a
+`paths:` filter, if the status is required. A fork's pull request, which
+the job skips (below), gets none.
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+jobs:
+  backtest:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2, persist-credentials: false}
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          paths: alerts
+          incidents: incidents.yaml
+          prometheus-url: ${{ vars.PROMETHEUS_URL }}
+          since: 14d
+          fail-missed: true
+          status: true
+```
+
+Each host sets it through its own API, and the token needs more than the
+comment does:
+
+| Host | Status | The token |
+|---|---|---|
+| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, on the event's `pull_request.head.sha` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
+| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit | the Developer role (the comment's Reporter can't), scope `api` |
+| Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, key `lapilli-backtest`, its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
+| Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
+| Azure DevOps | a pull request status, `POST .../pullRequests/{id}/statuses`, genre `lapilli` and name `backtest`, on the iteration at the head commit (`GET .../iterations`): none when there is no such iteration, as one on the pull request alone would stay after a later push | a personal access token's Code (status), `vso.code_status`, or the build service's Contribute to pull requests (not checked against an account) |
+
+Each is tested against its reference's documented answers, with a server
+standing in; Gitea's also in CI's run against a real Gitea
+(`test/e2e/backtest.sh`).
+
 ## Through lapilli serve
 
 A CI job can send a pull request's rules to `lapilli serve` instead of
@@ -230,7 +302,9 @@ don't: a fork's run in the repository carries the repository's own
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate
 (`fail-on-expectations`, `expect-required`) reads the summary line as it
-reads Lapilli's. Serve runs no scenario a pull request's expectations name
+reads Lapilli's. `fail-missed` is refused with `serve-url`: serve's
+report doesn't say yet which incidents a change leaves caught by no rule.
+`status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through
 lapilli serve, and `promtool` is refused with `serve-url`; run `promtool
 test rules` in a step of its own. Serve decides where the history is and what judges the

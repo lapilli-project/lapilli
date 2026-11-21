@@ -13,6 +13,16 @@
   fields). With `--changed-only`, the rules left alone are replayed too
   when a rule that differs stops catching one, to see whether one still
   does. With `--fail-expectations`, either failing fails the run.
+- **The backtest recipes stop a merge**: `FAIL_MISSED=true` gives lapilli
+  `--fail-missed` and fails the job on it, once the comment says which
+  (refused through `lapilli serve`, whose report doesn't say yet); and
+  `STATUS=true` sets a commit status, `lapilli/backtest`, on the pull
+  request's head commit, success or failure as the job ends, for a branch
+  rule to require: GitHub's and Gitea's commit statuses, GitLab's,
+  Bitbucket Cloud's build statuses and Azure DevOps' pull request
+  statuses, on the iteration at that commit. The comment is still posted
+  first. The action takes `fail-missed` and `status`; the token needs
+  more for a status (docs/pr-backtests.md, "Stopping a merge").
 
 ## [0.66.0] - 2026-11-21
 

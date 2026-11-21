@@ -150,7 +150,8 @@ func withoutCI(env []string) []string {
 			}
 		}
 		switch k {
-		case "CI", "TF_BUILD", "PR", "PATHS", "INCIDENTS", "KEY", "REPO", "TARGET", "TARGET_BRANCH", "FAIL_ON_ERROR", "IMPACT", "IMPACT_FOR", "MATCH":
+		case "CI", "TF_BUILD", "PR", "PATHS", "INCIDENTS", "KEY", "REPO", "TARGET", "TARGET_BRANCH", "FAIL_ON_ERROR", "IMPACT", "IMPACT_FOR", "MATCH",
+			"FAIL_MISSED", "STATUS", "STATUS_SHA", "STATUS_URL":
 			ci = true
 		}
 		if !ci {
@@ -267,6 +268,23 @@ type commentHost struct {
 	sent atomic.Int64
 	// cut answers a listing with the start of it, then hangs up.
 	cut bool
+	// statuses are the commit statuses set, as each host's API took them;
+	// failStatus refuses one. iterations are, on Azure DevOps, the source
+	// commit of each of the pull request's iterations, the first 1.
+	statuses   []hostStatus
+	failStatus bool
+	iterations []string
+}
+
+// hostStatus is a commit status a stand-in host took, in each host's
+// words: State as it was sent, Context its name (Azure DevOps'
+// genre/name), and what else the host's API reference names.
+type hostStatus struct {
+	SHA, State, Context, Text, URL string
+	// Ref is Bitbucket's refname; Iteration Azure DevOps' iterationId;
+	// Pipeline GitLab's pipeline_id.
+	Ref                 string
+	Iteration, Pipeline int
 }
 
 // The account the stand-ins' token is, as each host names it.
@@ -396,7 +414,26 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s, _ := in["body"].(string)
 		return s
 	}
+	// Commit statuses, as each host's reference has them: GitHub's and
+	// Gitea's POST /repos/{owner}/{repo}/statuses/{sha}, GitLab's POST
+	// /projects/:id/statuses/:sha, Bitbucket's POST .../commit/{commit}/
+	// statuses/build, each 201; Azure DevOps' POST .../pullRequests/{id}/
+	// statuses, 200, on an iteration GET .../iterations lists.
+	statusPath := map[string]string{"github": "/repos/o/r/statuses/", "gitea": "/repos/o/r/statuses/", "gitlab": "/projects/o%2Fr/statuses/",
+		"bitbucket": "/repositories/ws/repo/commit/", "azure": "/org/my%20project/_apis/git/repositories/rules/pullRequests/7/statuses"}[h.kind]
+	if r.Method == http.MethodPost && strings.HasPrefix(path, statusPath) {
+		h.status(w, r, strings.TrimPrefix(path, statusPath))
+		return
+	}
 	switch {
+	case r.Method == http.MethodGet && h.kind == "bitbucket" && path == "/repositories/ws/repo/pullrequests/7":
+		reply(map[string]any{"id": 7, "source": map[string]any{"branch": map[string]any{"name": "pr"}, "commit": map[string]any{"hash": "0123456789ab"}}})
+	case r.Method == http.MethodGet && h.kind == "azure" && path == "/org/my%20project/_apis/git/repositories/rules/pullRequests/7/iterations":
+		var its []any
+		for i, c := range h.iterations {
+			its = append(its, map[string]any{"id": i + 1, "sourceRefCommit": map[string]any{"commitId": c}})
+		}
+		reply(map[string]any{"value": its, "count": len(its)})
 	case r.Method == http.MethodGet && path == me:
 		if h.anonymous || h.kind == "bitbucket" {
 			http.Error(w, "Resource not accessible by integration", http.StatusForbidden)
@@ -480,6 +517,76 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.t.Errorf("%s: %s %s", h.kind, r.Method, r.URL)
 		http.NotFound(w, r)
 	}
+}
+
+// status takes a commit status, h.mu held, as h's host does: rest is
+// what follows the path statuses are set at; a status the host's
+// reference wouldn't take is an error of the test's.
+func (h *commentHost) status(w http.ResponseWriter, r *http.Request, rest string) {
+	var in map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		h.t.Errorf("%s: a status that isn't JSON: %v", h.kind, err)
+	}
+	str := func(k string) string { s, _ := in[k].(string); return s }
+	num := func(k string) int { n, _ := in[k].(float64); return int(n) }
+	st := hostStatus{SHA: rest, State: str("state"), Context: str("context"), Text: str("description"), URL: str("target_url")}
+	states := []string{"success", "failure"}
+	known := []string{"state", "context", "description", "target_url"}
+	code := http.StatusCreated
+	switch h.kind {
+	case "gitlab":
+		st.Context, st.Pipeline = str("name"), num("pipeline_id")
+		states, known = []string{"success", "failed"}, []string{"state", "name", "description", "target_url", "pipeline_id"}
+		if len(st.Text) > 255 || len(st.URL) > 255 {
+			http.Error(w, `{"message":"must be 255 characters or fewer"}`, http.StatusBadRequest)
+			return
+		}
+	case "bitbucket":
+		sha, ok := strings.CutSuffix(rest, "/statuses/build")
+		st.SHA, st.Context, st.URL, st.Ref = sha, str("name"), str("url"), str("refname")
+		states, known = []string{"SUCCESSFUL", "FAILED"}, []string{"key", "state", "name", "description", "url", "refname"}
+		if !ok || str("key") != strings.ReplaceAll(st.Context, "/", "-") {
+			h.t.Errorf("bitbucket: a build status at %s, key %q", rest, str("key"))
+		}
+	case "azure":
+		c, _ := in["context"].(map[string]any)
+		genre, _ := c["genre"].(string)
+		name, _ := c["name"].(string)
+		st.SHA, st.Context, st.URL, st.Iteration = "", genre+"/"+name, str("targetUrl"), num("iterationId")
+		states, known = []string{"succeeded", "failed"}, []string{"state", "description", "context", "targetUrl", "iterationId"}
+		code = http.StatusOK
+		if rest != "" || r.URL.Query().Get("api-version") != "7.1" || st.Iteration < 1 || st.Iteration > len(h.iterations) {
+			h.t.Errorf("azure: a status at %s, iteration %d", r.URL, st.Iteration)
+		}
+		if st.Iteration >= 1 && st.Iteration <= len(h.iterations) {
+			st.SHA = h.iterations[st.Iteration-1]
+		}
+	}
+	for k := range in {
+		if !slices.Contains(known, k) {
+			h.t.Errorf("%s: a status with %s, which the host's reference doesn't name", h.kind, k)
+		}
+	}
+	if !slices.Contains(states, st.State) {
+		h.t.Errorf("%s: a status of state %q", h.kind, st.State)
+	}
+	if h.failStatus {
+		http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+		return
+	}
+	h.statuses = append(h.statuses, st)
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]any{"id": len(h.statuses), "state": in["state"]})
+}
+
+// lastStatus is the commit status set last, and how many were.
+func (h *commentHost) lastStatus() (hostStatus, int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.statuses) == 0 {
+		return hostStatus{}, 0
+	}
+	return h.statuses[len(h.statuses)-1], len(h.statuses)
 }
 
 // backtestHost is a backtest recipe, and what it is run with.
