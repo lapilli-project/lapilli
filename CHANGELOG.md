@@ -19,6 +19,15 @@
   group gave a label a signal's entry requires (`require:`) was passed
   over. A rule is looked at by the labels its firings carry now, its own
   over its group's, in `lapilli verdict` and `lapilli serve` alike.
+- **vmalert's groups were replayed when vmalert started them, not when it
+  asks their rules** (affected: 0.26.0 to 0.68.1). `--loaded-rules` placed
+  a group in its interval by its `lastEvaluation`, as Prometheus's; vmalert
+  starts a group at a random moment, but asks its rules, and stamps what
+  fires, at a multiple of the interval, or `eval_offset` past one: a
+  condition that held for less than an interval could fire in the replay
+  where it didn't in vmalert, or the other way round. A rules API answer
+  whose groups say their `concurrency`, as vmalert's alone do, through
+  VictoriaMetrics' proxy too, is placed so now.
 - The weekly digest read the notifications sent, and the firings that
   paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
   the webhook is told. Once now, everyone's and each team's.

@@ -306,9 +306,21 @@ Prometheus loaded the file from, which a file on Lapilli's disk doesn't
 say (`/etc/prometheus/rules/prometheus-k8s-rulefiles-0/...` for the
 Prometheus Operator), and the hash is Prometheus's internal hash of a
 label set, which it doesn't promise to keep. A flag would ask a person for a
-number per group that the rules API already gives. Thanos Ruler, Mimir,
-vmalert and the managed services may place groups their own way;
+number per group that the rules API already gives. Thanos Ruler, Mimir
+and the managed services may place groups their own way;
 `lastEvaluation` says where, whichever.
+
+vmalert is the exception, told apart by the `concurrency` only its groups
+say. It starts a group a while into its interval, at random by the group,
+and `lastEvaluation` says when, but it asks each rule, and stamps what
+fires, at a time of its own: `eval_offset` past a multiple of the interval
+where the group has one, which the API says, or else the time less
+`eval_delay`, truncated to a multiple of the interval (`eval_alignment`,
+its default). So its groups are placed at `eval_offset`, or on the
+interval's own grid, whatever `lastEvaluation` says (Go's `Truncate`
+counts from the year 1: a seven-minute group falls six minutes past the
+Unix epoch's multiples). A group whose file turns `eval_alignment` off,
+which the API doesn't say, is taken as aligned.
 
 Grafana places a rule on its interval's own grid, by default, which the
 replay already uses.
