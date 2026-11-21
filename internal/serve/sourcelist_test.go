@@ -263,6 +263,9 @@ func TestScrubSecrets(t *testing.T) {
 // is. An error that only names a credential, or a header, and an address
 // without one, an @ in its path too, read as they were.
 func TestScrubSecretsEveryForm(t *testing.T) {
+	// fake is a made-up value, s and as many x after it as make n
+	// characters, as long as its maker's token is.
+	fake := func(s string, n int) string { return s + strings.Repeat("x", n-len(s)) }
 	for _, c := range []struct{ in, want string }{
 		// name: value, as YAML and Go's %+v write a field.
 		{`password: S3CR3TVALUE9`, `password: ***`},
@@ -327,11 +330,13 @@ func TestScrubSecretsEveryForm(t *testing.T) {
 		{`"pem": "-----BEGIN OPENSSH PRIVATE KEY-----\nS3CR3T`, `"pem": "-----BEGIN OPENSSH PRIVATE KEY-----***`},
 		// A Slack webhook, and tokens their makers prefix as theirs.
 		{`POST https://hooks.slack.com/services/T000/B000/S3CR3TVALUE12: 404`, `POST https://hooks.slack.com/services/***: 404`},
-		{`sk-ant-S3CR3TVALUE30 glpat-S3CR3TVALUE31 ghp_S3CR3TVALUE32 xoxb-S3CR3TVALUE33`, `sk-ant-*** glpat-*** ghp_*** xoxb-***`},
-		{`gho_S3CR3T1, github_pat_S3CR3T_2 and xoxp-1-S3CR3T`, `gho_***, github_pat_*** and xoxp-***`},
+		{"sk-ant-api03-" + fake("S3CR3TVALUE30", 93) + "AA glpat-" + fake("S3CR3TVALUE31", 20) + " ghp_" + fake("S3CR3TVALUE32", 36) + " xoxb-1234567890-1234567890123-" + fake("S3CR3TVALUE33", 24), `sk-ant-*** glpat-*** ghp_*** xoxb-***`},
+		{"gho_" + fake("S3CR3T1", 36) + ", github_pat_" + fake("S3CR3T", 22) + "_" + fake("S3CR3T2", 59) + " and xoxp-1234567890-1234567890-1234567890-" + fake("S3CR3T", 32), `gho_***, github_pat_*** and xoxp-***`},
+		{"glpat-" + fake("S3CR3T", 27) + ".010abcdef refused", `glpat-*** refused`},
+		{"ya29.c." + fake("S3CR3T", 40), `ya29.***`},
 		// Grafana's and Google's, alone in a text.
 		{`token glsa_FAKEFAKEFAKEFAKEFAKE_deadbeef refused`, `token *** refused`},
-		{`Get "https://x.example/?q=1": glsa_FAKEFAKEFAKEFAKEFAKE_deadbeef`, `Get "https://x.example/?q=1": glsa_***`},
+		{`Get "https://x.example/?q=1": glsa_` + fake("FAKE", 32) + `_deadbeef`, `Get "https://x.example/?q=1": glsa_***`},
 		{`glc_eyJvIjoiMTIzIiwibiI6ImZha2UifQ==`, `glc_***`},
 		{`ya29.a0FakeFakeFakeFakeFakeFake`, `ya29.***`},
 		// A URL's password with a / and a ? in it, before a host.
@@ -356,6 +361,25 @@ func TestScrubSecretsEveryForm(t *testing.T) {
 		{`x-api-key: abcdef`, `x-api-key: ***`},
 		{`password=hunter2 sslmode=require`, `password=*** sslmode=require`},
 		{`DSN user=lapilli password='p w' host=db`, `DSN user=lapilli password=*** host=db`},
+		// A header or a field's name and a : anywhere in a line, its value
+		// to the line's end or a mark that ends a sentence, its words
+		// all: with a capital, after curl's >, after the word header, or
+		// with what doesn't start as prose does.
+		{`header Authorization: S3CR3TVALUE50 rejected`, `header Authorization: ***`},
+		{`request failed: Authorization: MyScheme S3CR3TVALUE51`, `request failed: Authorization: ***`},
+		{`401 with Authorization: S3CR3TVALUE52`, `401 with Authorization: ***`},
+		{`> Authorization: S3CR3TVALUE53`, `> Authorization: ***`},
+		{`login: Password: S3CR3T54 refused`, `login: Password: ***`},
+		{`push: cookie: S3CR3TSESSION56`, `push: cookie: ***`},
+		{`401 with Authorization: S3CR3TVALUE57. Retrying in 5s`, `401 with Authorization: ***. Retrying in 5s`},
+		{`login: password: S3CR3T58 two, retrying`, `login: password: ***, retrying`},
+		{`header authorization: fakevalue rejected`, `header authorization: ***`},
+		{"< Set-Cookie: sid=S3CR3T59; Path=/\n< Location: /", "< Set-Cookie: ***\n< Location: /"},
+		{`(Authorization: Bearer S3CR3T60) rejected`, `(Authorization: Bearer ***) rejected`},
+		// A password of digits and then a /, which reads as a port and a
+		// path, before a host and its port.
+		{`dial postgres://lap:1234/S3CR3T55@db:5432/l: refused`, `dial postgres://***@db:5432/l: refused`},
+		{`postgres://lap:1234/S3CR3T61@[fd00::1]:5432/l`, `postgres://***@[fd00::1]:5432/l`},
 	} {
 		got := scrubSecrets(c.in)
 		leaked := slices.ContainsFunc([]string{"S3CR3T", "AKIAS3", "FAKE", "hunter2", "pa/ss", "abc123", "abcdef", "deadbeef", "0123abcd", "eyJvIjoi", "a0Fake", "'p w'"},
@@ -397,6 +421,20 @@ func TestScrubSecretsEveryForm(t *testing.T) {
 		`the session cookie: expired after 10m`,
 		`invalid password: check the file`,
 		`Get "https://grafana.example/api/search": no Password: given`,
+		`push: authorization: the token has expired. Log in again`,
+		// A word after a token's prefix, shorter than a token or not in
+		// its shape.
+		`metric glc_requests_total rose`,
+		`see https://example.com/ya29.png`,
+		`ghp_x`,
+		`glsa_x`,
+		`glsa_requests_total`,
+		`gho_st, ghs_ and ghr_cache`,
+		`github_pat_docs`,
+		`glpat-example`,
+		`xoxb-test and xoxp-1-x`,
+		`sk-ant-api03-example`,
+		`ya29.png and ya29.example.com`,
 	} {
 		if got := scrubSecrets(in); got != in {
 			t.Errorf("%q: %q, want it as it was", in, got)
