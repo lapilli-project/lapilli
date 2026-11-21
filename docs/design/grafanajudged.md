@@ -54,9 +54,14 @@ history (recorded.md), such a rule can get from Grafana's.
   holds no change up to (it begins after it, kept so far back no more, or
   not yet) is passed over, asked each day; so is a day it is of no use
   for: refused, more than is read at once, changes of a rule judged by it
-  passed over or its alerts not told apart, or a firing a write can't
-  hold. Each is left a gap, logged, never taken for a quiet day, and
-  nothing already copied in is written over. An alert on since before a
+  passed over or its alerts not told apart, a rule judged by it whose name
+  another of Grafana's rules has too, or a firing a write can't hold.
+  Each is left a gap, logged with the rules' names, never taken for a
+  quiet day, and nothing already copied in is written over: neither by
+  such a day, nor for a rule judged so no more (paused, deleted, renamed),
+  whose firings a write keeps as they are. A firing ended after a gap is
+  written again up to where the copies got to before it, apart from the
+  day, so the gap stays one. An alert on since before a
   write, which the ledger has as on and the history says ended, is
   written again from its start with what the ledger has from there,
   within 31 days and 100,000 firings. The firings are kept as copied-in
@@ -117,11 +122,19 @@ its data sources answered.
 - **Names.** The history names a rule only by the title of one of the
   rules read from that Grafana; any other name's changes are passed over,
   never kept, so the history can't add a rule. A name it gives two of
-  them, counted over every rule read before `--rule` picks, is neither's.
+  them, counted over every rule read before `--rule` picks, paused ones
+  among them, is neither's: `lapilli verdict` lists such a rule as before,
+  and serve leaves each day a gap while it is shared. Before 0.68.1 serve
+  wrote the day without the rule's firings: anyone who could make a rule
+  in a folder Lapilli reads, one of the same title, paused, took a judged
+  rule's firings away, those copied in within the `--settle` too, and its
+  days read as quiet ones (`TestServeGrafanaJudgedShared`).
 - **What it can make serve miss.** One rule whose changes the history
   can't say all of, or whose alerts no write holds, makes each day it is
   in of no use, for every rule judged so: a gap rather than a wrong
-  record, but one such rule holds the copies up while it fires.
+  record, but one such rule holds the copies up while it fires. So does a
+  rule of a judged rule's title, while it is there, paused or not: a gap
+  for every rule judged so, which the log names the rule of.
 
 ## Questions
 
@@ -131,6 +144,8 @@ its data sources answered.
 - One recorded rule a name keeps no severity: the report gives such a rule
   none, where a replayed rule has its labels'.
 - One title in two folders: the tags hold `grafana_folder`; tie by it too?
+  It would judge such a rule, rather than leave every day a gap while the
+  title is shared.
 - Judge the rules `--check-grafana`'s Grafana runs, read from files, the
   same way?
 - A value in the chart for `--grafana-history=false` (today `extraArgs`).

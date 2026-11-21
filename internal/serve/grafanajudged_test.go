@@ -101,6 +101,12 @@ func (g *ordersGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // those it can't replay from its history.
 func ordersServer(t *testing.T, g *ordersGrafana) *Server {
 	t.Helper()
+	return judgingServer(t, g)
+}
+
+// judgingServer is ordersServer, of any stand-in for a Grafana.
+func judgingServer(t *testing.T, g http.Handler) *Server {
+	t.Helper()
 	ts := httptest.NewServer(g)
 	t.Cleanup(ts.Close)
 	tok := tokenFile(t, "glsa_viewer")
@@ -340,5 +346,130 @@ func TestServeGrafanaJudgedTheirs(t *testing.T) {
 	srcs, _ := s.l.Sources(ctx)
 	if len(srcs) != 1 || srcs[0].By != ledger.FiringsCopier || !s.status.copyTheirs {
 		t.Errorf("sources %+v", srcs)
+	}
+}
+
+// dupGrafana is ordersGrafana with, once dup is set, a second rule titled
+// Orders slow in another folder, paused or not: what anyone who may write
+// a rule in a folder Lapilli reads can make, as Grafana keeps a title
+// unique in a folder alone, and two teams may make by chance.
+type dupGrafana struct {
+	*ordersGrafana
+	mu          sync.Mutex
+	dup, paused bool
+}
+
+func (d *dupGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	d.mu.Lock()
+	dup, paused := d.dup, d.paused
+	d.mu.Unlock()
+	if r.URL.Path != "/api/v1/provisioning/alert-rules/export" || !dup {
+		d.ordersGrafana.ServeHTTP(w, r)
+		return
+	}
+	rule := func(uid string) map[string]any {
+		return map[string]any{"uid": uid, "title": "Orders slow", "condition": "B", "for": "0s", "labels": map[string]any{"severity": "page"}, "isPaused": paused && uid != "orders",
+			"data": []any{
+				map[string]any{"refId": "A", "datasourceUid": "orders", "relativeTimeRange": map[string]any{"from": 600, "to": 0}, "model": map[string]any{"refId": "A", "rawSql": "SELECT 1"}},
+				map[string]any{"refId": "B", "datasourceUid": "__expr__", "model": map[string]any{"refId": "B", "type": "threshold", "expression": "A",
+					"conditions": []any{map[string]any{"evaluator": map[string]any{"type": "gt", "params": []any{5}}}}}}}}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"apiVersion": 1, "groups": []any{
+		map[string]any{"orgId": 1, "name": "shop", "folder": "Ops", "interval": "1m", "rules": []any{rule("orders")}},
+		map[string]any{"orgId": 1, "name": "mine", "folder": "Elsewhere", "interval": "1m", "rules": []any{rule("elsewhere")}},
+	}})
+}
+
+// A second rule of the same title, even paused, makes each day the history
+// is read of no use: it never says which of the two fired. The judged
+// rule's firings copied in already stay, nothing is written, and the
+// copies reach no further, a gap rather than a quiet day. Once it is gone,
+// the copy goes on, the firing that ended meanwhile ended, and the gap
+// stays one.
+func TestServeGrafanaJudgedShared(t *testing.T) {
+	for _, paused := range []bool{false, true} {
+		ctx := context.Background()
+		// A firing of search's within the --settle the next round reads
+		// again.
+		g := &dupGrafana{ordersGrafana: &ordersGrafana{more: []alertChange{
+			{"Normal", "Alerting", "search", now.Add(-40 * time.Minute)},
+			{"Alerting", "Normal", "search", now.Add(-35 * time.Minute)},
+		}}, paused: paused}
+		s := judgingServer(t, g)
+		s.jobs(ctx, true)
+		before, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(5*time.Hour))
+		if err != nil || len(before) != 3 {
+			t.Fatalf("paused %v: copied in: %+v %v", paused, before, err)
+		}
+		_, covered, _ := s.l.Coverage(ctx, ledger.GrafanaSource)
+		// Two hours on, the other rule made: payments fires, orders ends.
+		g.mu.Lock()
+		g.dup = true
+		g.mu.Unlock()
+		g.ordersGrafana.mu.Lock()
+		g.ended = true
+		g.more = append(g.more, alertChange{"Normal", "Alerting", "payments", now.Add(30 * time.Minute)}, alertChange{"Alerting", "Normal", "payments", now.Add(40 * time.Minute)})
+		g.ordersGrafana.mu.Unlock()
+		s.now = func() time.Time { return now.Add(2 * time.Hour) }
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		s.jobs(ctx, true)
+		if s.status.errWhat != "" {
+			t.Fatalf("paused %v: a round failed: %s: %s", paused, s.status.errWhat, s.status.err)
+		}
+		after, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(5*time.Hour))
+		if err != nil || len(after) != 3 || slices.ContainsFunc(after, func(f firing.Firing) bool { return f.Labels["service"] == "payments" }) {
+			t.Errorf("paused %v: beside a rule of the same title: %+v %v", paused, after, err)
+		}
+		if _, to, _ := s.l.Coverage(ctx, ledger.GrafanaSource); !to.Equal(covered) {
+			t.Errorf("paused %v: copied up to %s beside a rule of the same title, not %s", paused, to, covered)
+		}
+		// The other rule gone, two hours on.
+		g.mu.Lock()
+		g.dup = false
+		g.mu.Unlock()
+		s.now = func() time.Time { return now.Add(4 * time.Hour) }
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		s.jobs(ctx, true)
+		if open, err := s.l.OpenFirings(ctx, ledger.GrafanaSource, now.Add(5*time.Hour)); err != nil || len(open) != 0 {
+			t.Errorf("paused %v: still open: %+v %v", paused, open, err)
+		}
+		spans, err := s.l.Spans(ctx, ledger.GrafanaSource)
+		if err != nil || len(spans) < 2 || spans[len(spans)-2][1].After(covered) || !spans[len(spans)-1][0].After(covered) {
+			t.Errorf("paused %v: the gap beside a rule of the same title isn't one: %v %v", paused, spans, err)
+		}
+	}
+}
+
+// A rule judged so no more (renamed, here; paused or deleted alike) keeps
+// what was copied in for it within the --settle the next round reads
+// again: the write is of the rules judged now alone.
+func TestServeGrafanaJudgedLeftOut(t *testing.T) {
+	ctx := context.Background()
+	g := &ordersGrafana{more: []alertChange{
+		{"Normal", "Alerting", "search", now.Add(-40 * time.Minute)},
+		{"Alerting", "Normal", "search", now.Add(-35 * time.Minute)},
+	}}
+	s := ordersServer(t, g)
+	s.jobs(ctx, true)
+	g.mu.Lock()
+	g.title = "Orders slower"
+	g.mu.Unlock()
+	s.now = func() time.Time { return now.Add(2 * time.Hour) }
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	if s.status.errWhat != "" {
+		t.Fatalf("a round failed: %s: %s", s.status.errWhat, s.status.err)
+	}
+	fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-time.Hour), now.Add(3*time.Hour))
+	if err != nil || len(fs) != 1 || fs[0].Rule != "Orders slow" || fs[0].Labels["service"] != "search" {
+		t.Errorf("the renamed rule's firing copied in: %+v %v", fs, err)
 	}
 }

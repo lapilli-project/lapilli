@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -203,12 +204,16 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	}
 	// A rule the history can't say all it fired of makes the day of no
 	// use: taken out alone, its firings already copied in would go, and
-	// the day would read as one it was quiet.
+	// the day would read as one it was quiet, as the source's record is
+	// every rule's. So does one whose name the history gives another of
+	// Grafana's rules too (one title in two folders), which it never says
+	// which of them fired: a rule of the same title, even paused, made in
+	// any folder Lapilli reads, would otherwise take its firings away.
 	if len(j.Unsure) > 0 {
-		return fmt.Errorf("%w: it passed over changes of %d of the rules, or doesn't tell their alerts apart", source.ErrUnusable, len(j.Unsure))
+		return fmt.Errorf("%w: it passed over changes of %d of the rules, or doesn't tell their alerts apart: %s", source.ErrUnusable, len(j.Unsure), someNames(j.Unsure))
 	}
 	if len(j.Shared) > 0 {
-		s.log.Warn("Grafana's rules whose name its alert state history gives another rule too aren't judged by it", "rules", len(j.Shared))
+		return fmt.Errorf("%w: it gives the name of %d of the rules to another of Grafana's rules too, and doesn't say which fired: %s", source.ErrUnusable, len(j.Shared), someNames(j.Shared))
 	}
 	// A firing a write can't hold (more than 32 labels, labels past 4 KB,
 	// a name that doesn't show) makes the day of no use, as it would the
@@ -280,6 +285,10 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			from = p
 		}
 	}
+	// After a gap, the firing ended is written again up to where the copies
+	// got to before it, apart, and the day from where it begins: the gap
+	// between stays one, as what began in it isn't read here.
+	upTo := p
 	if from.Before(p) {
 		before, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, from, p)
 		if err != nil {
@@ -291,13 +300,57 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 				before[i].End = end
 			}
 		}
-		send = append(before, send...)
+		if first {
+			if _, to, err := s.l.Coverage(ctx, ledger.GrafanaSource); err != nil {
+				return err
+			} else if to.After(from) && to.Before(p) {
+				upTo = to
+			}
+		}
+		if upTo.Before(p) {
+			got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, from, upTo, before, ledger.GrafanaCopier, o)
+			if err != nil {
+				return err
+			}
+			if got.Changed() {
+				s.log.Info("Grafana's alert state history copied in", "from", from, "to", upTo, "firings", got.Firings, "added", got.Added, "removed", got.Removed)
+			}
+			from = p
+		} else {
+			send = append(before, send...)
+		}
+	}
+	// A rule judged so no more, paused, deleted or renamed, keeps what was
+	// copied in for it: the write is of the rules judged now alone.
+	judging := make(map[string]bool, len(rs))
+	for _, r := range rs {
+		judging[r.Name] = true
+	}
+	had, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, p, b)
+	if err != nil {
+		return err
+	}
+	for _, x := range had {
+		if !judging[x.Rule] {
+			send = append(send, x)
+		}
 	}
 	got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, from, b, send, ledger.GrafanaCopier, o)
 	if err == nil && got.Changed() {
 		s.log.Info("Grafana's alert state history copied in", "from", from, "to", b, "firings", got.Firings, "added", got.Added, "removed", got.Removed)
 	}
 	return err
+}
+
+// someNames are the first few of names, for a log: as Grafana titles
+// them, cut.
+func someNames(names []string) string {
+	shown := names[:min(len(names), 5)]
+	out := verdict.Clean(clip(strings.Join(shown, ", "), 300))
+	if n := len(names) - len(shown); n > 0 {
+		out += fmt.Sprintf(" and %d more", n)
+	}
+	return out
 }
 
 // recordable is ledger.Recordable; replaced in tests, to count.
