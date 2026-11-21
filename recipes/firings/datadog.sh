@@ -98,8 +98,57 @@ until=$now
 from=$((since - 86400000))
 all=$(mktemp)
 page=$(mktemp)
-trap 'rm -f "$all" "$page"' EXIT
+heads=$(mktemp)
+trap 'rm -f "$all" "$page" "$heads"' EXIT
 trap 'exit 1' INT TERM HUP
+# header NAME: the whole seconds the last header NAME (lowercase) of the
+# answer says, or nothing.
+header() {
+  v=$(tr -d '\r' <"$heads" | awk -v h="$1:" 'tolower($1) == h { v = $2 } END { print v }')
+  case $v in '' | *[!0-9]*) v= ;; esac
+  printf '%s' "$v"
+}
+# fetch URL: the Events API's answer in $page. Past its rate limit it
+# answers 429: waited out as its Retry-After says, or else its
+# X-RateLimit-Reset, the seconds until the limit resets; without either,
+# 5 seconds, then twice as long each time. Two minutes at most a wait,
+# five waits a request and ten minutes in all a run; past them, and on any
+# answer but a 2xx, it stops. Called in this shell, not in $(...), which
+# would forget the waits.
+naps=0
+waited=0
+fetch() {
+  waits=0
+  backoff=5
+  while :; do
+    # The keys go on stdin, not the command line, where ps would show them.
+    code=$(printf '%s\n' "$headers" |
+      curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$page" -w '%{http_code}' "$1") || exit 1
+    case $code in
+      2??) return 0 ;;
+      429) ;;
+      *)
+        say "the Events API answered $code; writing nothing"
+        exit 1
+        ;;
+    esac
+    waits=$((waits + 1))
+    wait=$(header retry-after)
+    [ -n "$wait" ] || wait=$(header x-ratelimit-reset)
+    if [ -z "$wait" ]; then
+      wait=$backoff
+      backoff=$((backoff * 2))
+    fi
+    [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
+    if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
+      say "the Events API still says too many requests after $naps waits, $waited seconds in all; stopping, writing nothing"
+      exit 1
+    fi
+    sleep "$wait"
+    naps=$((naps + 1))
+    waited=$((waited + wait))
+  done
+}
 cursor=
 pages=0
 while :; do
@@ -111,8 +160,7 @@ while :; do
   # filter[query]=@monitor.id:*, the events a monitor wrote.
   url="$api/api/v2/events?filter%5Bquery%5D=%40monitor.id%3A%2A&filter%5Bfrom%5D=$from&filter%5Bto%5D=$now&sort=timestamp&page%5Blimit%5D=1000"
   [ -z "$cursor" ] || url="$url&page%5Bcursor%5D=$(printf '%s' "$cursor" | jq -sRr @uri)"
-  # The keys go on stdin, not the command line, where ps would show them.
-  printf '%s\n' "$headers" | curl -q -fsS --max-time 30 -H @- -H 'Accept: application/json' -o "$page" "$url"
+  fetch "$url"
   if ! jq -e 'type == "object" and (.data == null or (.data | type) == "array")' "$page" >/dev/null 2>&1; then
     say "the Events API answered something that isn't a list of events; writing nothing"
     exit 1

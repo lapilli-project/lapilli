@@ -89,6 +89,6 @@ if [ "$alerts" = yes ]; then
     done
   done <"$ids"
 fi
-jq -s -L "$here" -f "$here/pagerduty.jq" --slurpfile linked "$linked" --arg labels "${ALERT_LABELS:-}" "$all" >"$out"
+jq -s -L "$here" -f "$here/pagerduty.jq" --slurpfile linked "$linked" --arg alert_labels "${ALERT_LABELS:-}" "$all" >"$out"
 jq -r -L "$here" 'include "alerts"; said("pagerduty.sh"; "their details carry no alertname")' "$out" >&2
 jq '{incidents}' "$out"

@@ -92,8 +92,52 @@ from=$((since - 3600000))
 all=$(mktemp)
 page=$(mktemp)
 body=$(mktemp)
-trap 'rm -f "$all" "$page" "$body"' EXIT
+heads=$(mktemp)
+trap 'rm -f "$all" "$page" "$body" "$heads"' EXIT
 trap 'exit 1' INT TERM HUP
+# fetch: NerdGraph's answer to the query in $body, in $page. Past its
+# limits (25 requests of a user's at once, NRQL's queries a minute) it
+# answers 429, naming no wait: one is waited out as a Retry-After says,
+# else 5 seconds, then twice as long each time. Two minutes at most a
+# wait, five waits a request and ten minutes in all a run; past them, and
+# on any answer but a 2xx, it stops. Called in this shell, not in $(...),
+# which would forget the waits.
+naps=0
+waited=0
+fetch() {
+  waits=0
+  backoff=5
+  while :; do
+    # The key goes on stdin, not the command line, where ps would show it.
+    code=$(printf 'API-Key: %s\n' "$key" |
+      curl -q -sS --max-time 60 -H @- -H 'Content-Type: application/json' --data-binary "@$body" \
+        -D "$heads" -o "$page" -w '%{http_code}' "$api") || exit 1
+    case $code in
+      2??) return 0 ;;
+      429) ;;
+      *)
+        say "NerdGraph answered $code; writing nothing"
+        exit 1
+        ;;
+    esac
+    waits=$((waits + 1))
+    wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
+    case $wait in
+      '' | *[!0-9]*)
+        wait=$backoff
+        backoff=$((backoff * 2))
+        ;;
+    esac
+    [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
+    if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
+      say "NerdGraph still says too many requests after $naps waits, $waited seconds in all; stopping, writing nothing"
+      exit 1
+    fi
+    sleep "$wait"
+    naps=$((naps + 1))
+    waited=$((waited + wait))
+  done
+}
 # NRQL has no cursor: each page is the next 1000 events by time, from the
 # last one's millisecond, which is read again.
 pages=0
@@ -105,9 +149,7 @@ while :; do
   fi
   nrql="SELECT * FROM NrAiIncident WHERE event IN ('open', 'close') SINCE $from UNTIL $now ORDER BY timestamp ASC LIMIT 1000"
   jq -nc --arg q "{ actor { account(id: $NEW_RELIC_ACCOUNT_ID) { nrql(query: \"$nrql\") { results } } } }" '{query: $q}' >"$body"
-  # The key goes on stdin, not the command line, where ps would show it.
-  printf 'API-Key: %s\n' "$key" |
-    curl -q -fsS --max-time 60 -H @- -H 'Content-Type: application/json' --data-binary "@$body" -o "$page" "$api"
+  fetch
   # NerdGraph can answer 200 and say what went wrong.
   if ! jq -e 'type == "object"' "$page" >/dev/null 2>&1; then
     say "NerdGraph answered something that isn't JSON; writing nothing"

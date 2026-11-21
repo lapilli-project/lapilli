@@ -1,0 +1,33 @@
+{
+  "id": "e0caa0ce-d52f-4500-81b9-d592d06970b6",
+  "tinyId": "1235",
+  "createdAt": "2024-01-05T07:06:47.958Z",
+  "updatedAt": "2024-01-05T07:06:47.958Z",
+  "message": "The CPU usage on Server XYZ has exceeded 80% for over 5 minutes.",
+  "entity": "DatabaseServer1",
+  "source": "DBMonitoringTool",
+  "status": "closed",
+  "alias": "DatabaseConnectionFailure_DatabaseServer1",
+  "tags": ["OverwriteQuietHours", "Critical"],
+  "extraProperties": {
+    "backend": false,
+    "browser": "Firefox 113.0",
+    "browser.name": "Firefox",
+    "bundler": "parcel@2.10.3",
+    "environment": "production"
+  },
+  "acknowledged": true,
+  "ackTime": "2024-01-05T07:08:47.958Z",
+  "closeTime": "2024-01-05T09:06:47.958Z",
+  "count": 3,
+  "owner": "John Smith",
+  "snoozed": false,
+  "snoozedUntil": "2022-05-01T00:00:00Z",
+  "lastOccuredAt": "2022-04-01T00:00:00Z",
+  "integrationType": "API",
+  "integrationName": "Default API",
+  "priority": "P3",
+  "responders": [{"id": "4513b7ea-3b91-438f-b7e4-e3e54af9147c", "type": "team"}],
+  "actions": ["RestartServer"],
+  "seen": true
+}

@@ -1,15 +1,15 @@
-# What pagerduty.jq, incident-io.jq and rootly.jq share to write the alerts
-# a tool linked to an incident as Lapilli takes them (docs/design/links.md):
-# each {rule, labels}, the rule by the name its alerts carry (alertname) and
-# its Prometheus labels, all or those ALERT_LABELS names. Read with
-# include "alerts"; and jq -L DIR.
+# What pagerduty.jq, incident-io.jq, rootly.jq, jira.jq and firehydrant.jq
+# share to write the alerts a tool linked to an incident as Lapilli takes
+# them (docs/design/links.md): each {rule, labels}, the rule by the name its
+# alerts carry (alertname) and its Prometheus labels, all or those
+# ALERT_LABELS names. Read with include "alerts"; and jq -L DIR.
 
 # label_name: a label's name as Prometheus writes one, 128 bytes at most.
 def label_name: type == "string" and test("\\A[a-zA-Z_][a-zA-Z0-9_]{0,127}\\z");
 
-# kept_names: ALERT_LABELS, as --arg labels gives it: the label names an
-# alert keeps, [] for all of them.
-def kept_names: ($ARGS.named.labels // "") | split(",") | map(gsub("\\s"; "")) | map(select(. != ""));
+# kept_names: ALERT_LABELS, as --arg alert_labels gives it (jira.jq's
+# labels are JIRA_LABELS): the label names an alert keeps, [] for all.
+def kept_names: ($ARGS.named.alert_labels // "") | split(",") | map(gsub("\\s"; "")) | map(select(. != ""));
 
 # as_alert: of {rule, labels} worked out of one of a tool's alerts, the alert
 # Lapilli takes, or null when it isn't one: no rule's name, or one past 512

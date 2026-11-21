@@ -361,3 +361,112 @@ func TestVendorRecipesRefuse(t *testing.T) {
 		}
 	}
 }
+
+// TestVendorRecipesWaitOut429: past a rate limit both APIs answer 429. Each
+// recipe waits as the answer says (Datadog's X-RateLimit-Reset, the seconds
+// until its limit resets, or a Retry-After), or else 5 seconds and twice as
+// long each time; two minutes at most a wait, five waits a request and ten
+// minutes in all a run, past which it stops with nothing written. sleep
+// stands in, so the waits are counted, not waited.
+func TestVendorRecipesWaitOut429(t *testing.T) {
+	needTools(t)
+	keys := keyFiles(t, "key1", "app1", "NRAK-TEST")
+	dd := []string{"DATADOG_TOKEN_FILE=", "DATADOG_API_KEY_FILE=" + keys[0], "DATADOG_APP_KEY_FILE=" + keys[1],
+		"SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z"}
+	nr := []string{"NEW_RELIC_API_KEY_FILE=" + keys[2], "NEW_RELIC_ACCOUNT_ID=1234567",
+		"SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z"}
+	empty := map[string]string{"datadog.sh": `{"data": []}`,
+		"newrelic.sh": `{"data": {"actor": {"account": {"nrql": {"results": []}}}}}`}
+	// limited answers 429 with these headers, a map a request in turn.
+	type limited []map[string]string
+	for _, c := range []struct {
+		name, script string
+		answers      limited
+		ok           bool
+		sleeps       string
+	}{
+		{"as it says", "datadog.sh", limited{{"X-RateLimit-Limit": "1000", "X-RateLimit-Period": "60", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "7"},
+			{"Retry-After": "3", "X-RateLimit-Reset": "9"}, {}, {"X-RateLimit-Reset": "soon"}}, true, "7 3 5 10"},
+		{"as it says", "newrelic.sh", limited{{}, {}, {"Retry-After": "2"}, {"Retry-After": "Fri, 31 Dec 1999 23:59:59 GMT"}}, true, "5 10 2 20"},
+		{"two minutes at most", "datadog.sh", limited{{"X-RateLimit-Reset": "86400"}, {"Retry-After": "99999999999999999999"}}, true, "120 120"},
+		{"five waits", "datadog.sh", limited{{}, {}, {}, {}, {}, {}}, false, "5 10 20 40 80"},
+		{"five waits", "newrelic.sh", limited{{}, {}, {}, {}, {}, {}}, false, "5 10 20 40 80"},
+	} {
+		var mu sync.Mutex
+		asked := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			n := asked
+			asked++
+			mu.Unlock()
+			if n < len(c.answers) {
+				for k, v := range c.answers[n] {
+					w.Header().Set(k, v)
+				}
+				http.Error(w, `{"errors": ["Too many requests"]}`, http.StatusTooManyRequests)
+				return
+			}
+			w.Write([]byte(empty[c.script]))
+		}))
+		path, calls := fakeCLI(t, "sleep", ":")
+		env := append([]string{"PATH=" + path, "DATADOG_API=" + srv.URL}, dd...)
+		if c.script == "newrelic.sh" {
+			env = append([]string{"PATH=" + path, "NEW_RELIC_API=" + srv.URL + "/graphql"}, nr...)
+		}
+		cmd := exec.Command("sh", recipes+c.script)
+		cmd.Env = append(os.Environ(), env...)
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		srv.Close()
+		slept, _ := os.ReadFile(calls)
+		if got := strings.Join(strings.Fields(string(slept)), " "); got != c.sleeps {
+			t.Errorf("%s %s: slept %q, want %q", c.script, c.name, got, c.sleeps)
+		}
+		if c.ok && (err != nil || stdout.Len() != 0) {
+			t.Errorf("%s %s: %v, wrote %q, said %q", c.script, c.name, err, stdout.String(), stderr.String())
+		}
+		if !c.ok && (err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "still says too many requests after 5 waits")) {
+			t.Errorf("%s %s: %v, wrote %q, said %q", c.script, c.name, err, stdout.String(), stderr.String())
+		}
+		// Each 429 and, once they stop, the answer; or the sixth 429.
+		want := len(c.answers) + 1
+		if !c.ok {
+			want = 6
+		}
+		mu.Lock()
+		if asked != want {
+			t.Errorf("%s %s: asked %d times, want %d", c.script, c.name, asked, want)
+		}
+		mu.Unlock()
+	}
+
+	// Ten minutes in all a run: each page of Datadog's answered 429 first,
+	// two minutes asked for, the sixth wait isn't waited.
+	var mu sync.Mutex
+	asked := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n := asked
+		asked++
+		mu.Unlock()
+		if n%2 == 0 {
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprintf(w, `{"data": [{"id": "e%d", "attributes": {"attributes": {"monitor_id": 1, "status": "error", "timestamp": 1793589000000}}}], "meta": {"page": {"after": "page-%d"}}}`, n, n)
+	}))
+	defer srv.Close()
+	path, calls := fakeCLI(t, "sleep", ":")
+	cmd := exec.Command("sh", recipes+"datadog.sh")
+	cmd.Env = append(append(os.Environ(), "PATH="+path, "DATADOG_API="+srv.URL), dd...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	slept, _ := os.ReadFile(calls)
+	if got := strings.Join(strings.Fields(string(slept)), " "); err == nil || stdout.Len() != 0 || got != "120 120 120 120 120" ||
+		!strings.Contains(stderr.String(), "after 5 waits, 600 seconds in all") {
+		t.Errorf("ten minutes in all: %v, slept %q, wrote %q, said %q", err, got, stdout.String(), stderr.String())
+	}
+}

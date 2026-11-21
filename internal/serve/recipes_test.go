@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -263,8 +264,8 @@ func TestJiraRecipe(t *testing.T) {
 		incident.Incident{ID: "OPS-42", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00-05:00")})
 
 	// jira.jq on its own reads as jira.sh does with nothing set.
-	cmd := exec.Command("sh", "-c", `jq -s '[.[].issues[]]' "$1" "$2" | jq -f "$3"`, "sh",
-		recipes+"testdata/jira-1.json", recipes+"testdata/jira-2.json", recipes+"jira.jq")
+	cmd := exec.Command("sh", "-c", `jq -s '[.[].issues[]]' "$1" "$2" | jq -L "$4" -f "$3"`, "sh",
+		recipes+"testdata/jira-1.json", recipes+"testdata/jira-2.json", recipes+"jira.jq", recipes)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -276,6 +277,152 @@ func TestJiraRecipe(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wantIncidents(t, alone, got...)
+}
+
+// Jira Service Management's incidents, with the alerts linked to each: the
+// incident API's list of their ids, over two pages, and each alert from the
+// operations API, as their references show them. One Alertmanager sent,
+// its group's labels in its extra properties, is one of the incident's;
+// one with no alertname, and one deleted since, are left out, and so is
+// an issue the API says isn't an incident. A 429 is waited out.
+func TestJiraRecipeLinkedAlerts(t *testing.T) {
+	needTools(t)
+	const cloud = "35273b54-3f06-40d2-880f-dd28cf8daafa"
+	var mu sync.Mutex
+	jsm := 0
+	// limit: how many requests for alerts are answered 429 first.
+	limit := 1
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "ana@example.com" || pass != "jira-secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		incidents := "/jsm/incidents/cloudId/" + cloud + "/v1/incident/"
+		ops := "/jsm/ops/api/" + cloud + "/v1/alerts/"
+		p := r.URL.Path
+		if p == "/rest/api/3/search/jql" {
+			name := "jira-1.json"
+			if r.URL.Query().Get("nextPageToken") != "" {
+				name = "jira-2.json"
+			}
+			w.Write(fixture(t, name))
+			return
+		}
+		mu.Lock()
+		jsm++
+		limited := jsm <= limit
+		mu.Unlock()
+		if limited {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, `{"errors": [{"title": "Too many requests"}]}`, http.StatusTooManyRequests)
+			return
+		}
+		switch {
+		case p == incidents+"10001/alert":
+			switch r.URL.Query().Get("startKey") {
+			case "":
+				w.Write(fixture(t, "jsm-linked-1.json"))
+			case "2":
+				w.Write(fixture(t, "jsm-linked-1b.json"))
+			default:
+				t.Errorf("startKey %q", r.URL.Query().Get("startKey"))
+			}
+		case p == incidents+"10002/alert":
+			// "Returned if the Jira issue corresponding to the given
+			// issue Id is not of type incident."
+			http.Error(w, `{"errors": [{"code": "BAD_REQUEST"}]}`, http.StatusBadRequest)
+		case strings.HasPrefix(p, ops):
+			n, ok := map[string]string{"8dd24912-a0ad-41cd-ac80-535eaf649ed7": "1", "e0caa0ce-d52f-4500-81b9-d592d06970b6": "2",
+				"28517c02-e621-4d51-9435-a7fe693b93dd-1770130534412": "3"}[strings.TrimPrefix(p, ops)]
+			if !ok {
+				http.Error(w, `{"errors": [{"title": "Alert not found"}]}`, http.StatusNotFound)
+				return
+			}
+			w.Write(fixture(t, "jsm-alert-"+n+".json"))
+		case !strings.Contains(p, cloud):
+			// Another site's, as a wrong JSM_CLOUD_ID would ask.
+			http.Error(w, `{"errors": [{"title": "Not found"}]}`, http.StatusNotFound)
+		default:
+			t.Errorf("asked for %s", p)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	env := []string{"JSM_API=" + srv.URL, "JSM_CLOUD_ID=" + cloud}
+	out, said, err := runJira(t, srv.URL, env...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, said)
+	}
+	wantIncidents(t, loadIncidents(t, out),
+		incident.Incident{ID: "OPS-41", Title: "Checkout errors", Start: utc("2026-10-28T12:01:00+09:00"), End: utc("2026-10-28T12:40:00+09:00"), Labels: incident.Labels{"service": {"checkout", "cart"}},
+			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout", "severity": "critical"}},
+				{Rule: "CheckoutLatency", Labels: map[string]string{"cluster": "eu-1", "service": "checkout"}}}},
+		incident.Incident{ID: "OPS-42", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00-05:00")})
+	if want := "jira.sh: 1 of the issues are not incidents, as the incident API says: their alerts were not read\n" +
+		"jira.sh: left out 1 alerts linked to the incidents that the operations API no longer has\n" +
+		"jira.sh: left out 1 of the 3 alerts linked to the incidents: their extra properties carry no alertname\n"; said != want {
+		t.Errorf("said %q, want %q", said, want)
+	}
+	// set sets how many requests for alerts are answered 429 first, and
+	// gives how many were asked for since it was last called.
+	set := func(n int) int {
+		mu.Lock()
+		defer mu.Unlock()
+		asked := jsm
+		limit, jsm = n, 0
+		return asked
+	}
+	// One 429 waited out, and seven requests for alerts besides: two pages
+	// of 10001's, 10002's, and 10001's four alerts.
+	if n := set(0); n != 8 {
+		t.Errorf("%d requests for alerts, want 8", n)
+	}
+
+	// The labels ALERT_LABELS names alone; with ALERTS=no, or without
+	// JSM_CLOUD_ID, none asked for.
+	out, said, err = runJira(t, srv.URL, append(env, "ALERT_LABELS=service")...)
+	if got := loadIncidents(t, out); err != nil || len(got[0].Alerts) != 2 || len(got[0].Alerts[1].Labels) != 1 || got[0].Alerts[1].Labels["service"] != "checkout" {
+		t.Errorf("ALERT_LABELS=service: %v %+v\n%s", err, got, said)
+	}
+	for _, no := range [][]string{append(env, "ALERTS=no"), nil} {
+		set(0)
+		out, said, err = runJira(t, srv.URL, no...)
+		if got, n := loadIncidents(t, out), set(0); err != nil || len(got) != 2 || got[0].Alerts != nil || n != 0 || said != "" {
+			t.Errorf("%q: %v, %d requests for alerts, %+v, said %q", no, err, n, got, said)
+		}
+	}
+
+	// Settings that can't be: refused before Jira is asked anything.
+	for _, bad := range [][]string{{"ALERTS=yes"}, {"ALERTS=maybe", "JSM_CLOUD_ID=" + cloud}, {"JSM_CLOUD_ID=" + cloud + "/../x"},
+		{"JSM_CLOUD_ID=" + cloud, "MAX_ALERT_REQUESTS=all"}} {
+		cmd := exec.Command("sh", recipes+"jira.sh")
+		cmd.Env = append(os.Environ(), append([]string{"JIRA_URL=http://127.0.0.1:1", "JIRA_EMAIL=ana@example.com",
+			"JIRA_TOKEN_FILE=" + tokenFile(t, "jira-secret"), "JIRA_JQL=project = OPS"}, bad...)...)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		if out, err := cmd.Output(); err == nil || len(out) != 0 || strings.Contains(stderr.String(), "curl") {
+			t.Errorf("%q: %v, wrote %q, said %q", bad, err, out, stderr.String())
+		}
+	}
+
+	// Past MAX_ALERT_REQUESTS, past five 429s, and an answer the API
+	// shouldn't give: nothing written.
+	for _, c := range []struct {
+		env   []string
+		limit int
+		says  string
+	}{
+		{[]string{"MAX_ALERT_REQUESTS=3"}, 0, "more than 3 requests for alerts"},
+		{nil, 6, "still says too many requests after 5 waits"},
+		{[]string{"JSM_CLOUD_ID=00000000-0000-0000-0000-000000000000"}, 0, "answered 404 for the alerts of issue 10001"},
+	} {
+		set(c.limit)
+		out, said, err := runJira(t, srv.URL, append(append([]string{}, env...), c.env...)...)
+		if err == nil || out != "" || !strings.Contains(said, c.says) {
+			t.Errorf("%q: %v, wrote %q, said %q", c.env, err, out, said)
+		}
+	}
 }
 
 // Where a team keeps an incident's times and services in fields of its own,
@@ -1177,11 +1324,32 @@ func TestRootlyRecipe(t *testing.T) {
 func TestFireHydrantRecipe(t *testing.T) {
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer fhb-secret" || r.URL.Path != "/v1/incidents" {
+		if r.Header.Get("Authorization") != "Bearer fhb-secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		q := r.URL.Query()
+		// The alerts attached to the incidents kept, FH-41's over two
+		// pages, as the documented list of an incident's alerts gives
+		// them: one from Alertmanager's source, its labels as it names
+		// them, one by email, and one with alertname as it is.
+		switch r.URL.Path {
+		case "/v1/incidents":
+		case "/v1/incidents/6f3c2a10-1b2c-4d5e-8f90-a1b2c3d4e5f6/alerts":
+			if q.Get("page") == "2" {
+				w.Write(fixture(t, "firehydrant-alerts-41b.json"))
+			} else {
+				w.Write(fixture(t, "firehydrant-alerts-41.json"))
+			}
+			return
+		case "/v1/incidents/8b5e4c32-3d4e-4f60-ab12-c3d4e5f6a7b8/alerts":
+			w.Write(fixture(t, "firehydrant-alerts-43.json"))
+			return
+		default:
+			t.Errorf("asked for %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		if q.Get("start_date") != "2026-10-01" || q.Get("per_page") != "200" {
 			t.Errorf("query = %v", q)
 		}
@@ -1192,10 +1360,29 @@ func TestFireHydrantRecipe(t *testing.T) {
 		w.Write(fixture(t, name))
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "firehydrant.sh", "FIREHYDRANT_API="+srv.URL, "FIREHYDRANT_TOKEN_FILE="+tokenFile(t, "fhb-secret"), "SINCE=2026-10-01")
+	env := []string{"FIREHYDRANT_API=" + srv.URL, "FIREHYDRANT_TOKEN_FILE=" + tokenFile(t, "fhb-secret"), "SINCE=2026-10-01"}
+	got, said := runRecipeSaid(t, "firehydrant.sh", env...)
 	wantIncidents(t, got,
-		incident.Incident{ID: "FH-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
+		incident.Incident{ID: "FH-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}},
+			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout", "severity": "critical"}}, {Rule: "CheckoutLatency", Labels: map[string]string{"job": "checkout"}}}},
 		incident.Incident{ID: "FH-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), End: utc("2026-10-30T09:50:00Z")})
+	if want := "firehydrant.sh: left out 1 of the 3 alerts linked to the incidents: their labels carry no alertname\n"; said != want {
+		t.Errorf("said %q, want %q", said, want)
+	}
+	got = runRecipe(t, "firehydrant.sh", append(env, "ALERT_LABELS=service")...)
+	if a := got[0].Alerts; len(a) != 2 || len(a[0].Labels) != 1 || a[0].Labels["service"] != "checkout" || a[1].Labels != nil {
+		t.Errorf("ALERT_LABELS=service: %+v", a)
+	}
+	got = runRecipe(t, "firehydrant.sh", append(env, "ALERTS=no")...)
+	if len(got) != 2 || got[0].Alerts != nil {
+		t.Errorf("ALERTS=no: %+v", got)
+	}
+	// Past MAX_ALERT_REQUESTS, nothing is written.
+	cmd := exec.Command("sh", recipes+"firehydrant.sh")
+	cmd.Env = append(os.Environ(), append(env, "MAX_ALERT_REQUESTS=2")...)
+	if out, err := cmd.Output(); err == nil || len(out) != 0 {
+		t.Errorf("past MAX_ALERT_REQUESTS: %v, wrote %q", err, out)
+	}
 }
 
 // The newer recipes, alike: a SINCE that isn't a time is refused before any

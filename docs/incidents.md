@@ -20,9 +20,10 @@ that a script that failed doesn't read as a week with no incidents. Write
 ## The alerts a tool linked
 
 An incident tool often knows which alerts an incident came from: PagerDuty
-groups them under it, incident.io routes them to it, Rootly lists them. The
-PagerDuty, incident.io and Rootly scripts write those as the incident's
-`alerts`, each the rule it is of, by its `alertname`, and its labels:
+groups them under it, incident.io routes them to it, Rootly, FireHydrant and
+Jira Service Management list them. The PagerDuty, incident.io, Rootly,
+FireHydrant and Jira scripts write those as the incident's `alerts`, each
+the rule it is of, by its `alertname`, and its labels:
 
 ```yaml
 incidents:
@@ -68,14 +69,24 @@ stderr how many they left out:
   each label you match on, named as the label.
 - **Rootly** keeps `alertname`, `instance`, `dc` and `job` of an alert
   Alertmanager sent among its labels.
+- **FireHydrant** keeps an alert's labels as arbitrary pairs; its
+  Alertmanager source names the labels a group's alerts share
+  `alertmanager/labels-NAME`, and both are read.
+- **Jira Service Management** keeps what Alertmanager's Opsgenie notifier
+  (`opsgenie_configs`) puts in an alert's `details` as its extra
+  properties: from 0.22.0, the labels the group's alerts share, so group
+  by `alertname`. `jira.sh` reads them with `JSM_CLOUD_ID`, the site's
+  cloud id, from the incident API Atlassian has in beta
+  ([recipes/incidents](../recipes/incidents/README.md#jira-service-managements-linked-alerts)).
 
 An alert's labels hold a firing to them only where it carries them too, as
 `--match` does: a label Prometheus adds as it sends an alert (an external
 label such as `cluster`), or one only the tool has, is passed over, and a
 label both have must agree. `ALERT_LABELS=service,namespace` keeps those
 labels of each alert alone, to narrow them. `ALERTS=no` reads no alerts. Reading them
-is a request or more an incident, `MAX_ALERT_REQUESTS` (2000) a run at most;
-at Rootly's five requests a minute, set `SINCE` close.
+is a request or more an incident (and one an alert, for incident.io and
+Jira Service Management), `MAX_ALERT_REQUESTS` (2000) a run at most; at
+Rootly's five requests a minute, set `SINCE` close.
 
 `lapilli serve` can also take them as they come. With `--incidents-listen ADDR`
 and `--incidents-token-file FILE`, it opens a port that takes incidents from

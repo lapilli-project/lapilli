@@ -29,7 +29,19 @@
 # labels in all, as Go writes them. Those are in cut. Jira writes zones as
 # +0900; RFC 3339 wants +09:00.
 #
+# With --slurpfile linked, each Jira Service Management incident's alerts
+# too ({id, alerts} a line, by the issue's id), each as the operations API's
+# GET /v1/alerts/{id} gives it, of those the incident API's GET
+# /v1/incident/{issueID}/alert lists: an alert Alertmanager's Opsgenie
+# notifier sent (0.22.0 and later) has the labels its group's alerts share
+# as its details, which the alert keeps as its extra properties, alertname
+# among them when they share it. alertname is its rule, the others its
+# labels; one with no alertname is left out. --arg alert_labels is
+# ALERT_LABELS (alerts.jq). With --argjson ids true, the ids of the issues
+# kept, whose alerts are to be read.
+#
 # Given null (jq -n), it checks the settings and gives the fields to ask for.
+include "alerts";
 def stop($msg): "jira.sh: \($msg)\n" | halt_error(1);
 def strip: sub("\\A\\s+"; "") | sub("\\s+\\z"; "");
 def uniq: reduce .[] as $v ({seen: {}, out: []}; if .seen[$v] then . else .seen[$v] = true | .out += [$v] end) | .out;
@@ -103,12 +115,19 @@ def labelled($f; $labels):
       if .many > 0 then "\(.many) past 64 a label" else empty end,
       if .big > 0 then "\(.big) past 4 KB in all" else empty end] | join(", "))};
 
-($ARGS.named.start // "created" | fields("JIRA_START_FIELD")) as $start
+def alert:
+  .extraProperties as $p
+  | if ($p | type) != "object" then null
+    else {rule: $p.alertname, labels: ($p | del(.alertname))} | as_alert end;
+
+(($ARGS.named.linked // []) | group_by(.id) | map({key: .[0].id, value: [.[].alerts[]? | alert]}) | from_entries) as $by
+| ($ARGS.named.start // "created" | fields("JIRA_START_FIELD")) as $start
 | ($ARGS.named.end // "resolutiondate" | fields("JIRA_END_FIELD")) as $end
 | ($ARGS.named.labels // "service=components" | mapping) as $labels
 | if . == null then ["summary"] + $start + $end + [$labels[].field] | uniq | join(",")
   else [.[]
     | .key as $key
+    | (.id | tostring) as $issue
     | (.fields // {}) as $f
     | pick($f; $start; "start") as $s
     | pick($f; $end; "end") as $e
@@ -119,10 +138,14 @@ def labelled($f; $labels):
         | labelled($f; $labels) as $l
         | {incident: ({id: $key, title: ($f.summary // "")[:120], start: $s.time}
             + (if $e.time then {end: $e.time} else {} end)
-            + (if $l.labels == {} then {} else {labels: $l.labels} end))}
+            + (if $l.labels == {} then {} else {labels: $l.labels} end)
+            | with_alerts($by; $issue)), issue: $issue}
         + (if $e.why then {noend: {key: $key, why: $e.why}} else {} end)
         + (if $l.cut != "" then {cut: {key: $key, why: $l.cut}} else {} end)
       end] as $all
-  | {incidents: [$all[].incident | values], skipped: [$all[].skip | values],
-     noend: [$all[].noend | values], cut: [$all[].cut | values], found: length}
+  | if $ARGS.named.ids then $all[].issue | values
+    else {incidents: [$all[].incident | values], skipped: [$all[].skip | values],
+      noend: [$all[].noend | values], cut: [$all[].cut | values], found: length,
+      alerts_said: alerts_said($by)}
+    end
   end
