@@ -421,11 +421,15 @@ func (u Unpaged) Total() int { return u.Silence + u.Inhibition + u.Either + u.No
 // mutes_rule.
 const qMutedAny = `SELECT 1 FROM mutes WHERE rule = ? AND hour >= ? AND hour <= ? LIMIT 1`
 
-// UnpagedMost is how many rows of mutes Unpaged looks at, at most, a row
-// counted once for each firing it is looked at for: as many as a day
-// keeps (the notifications port's most), what a day's firings page can
-// read.
+// UnpagedMost is how many rows Unpaged reads with their labels, at most:
+// of firings, and of mutes, a row of mutes counted once for each firing
+// it is looked at for. As many as a day of mutes keeps (the notifications
+// port's most), what a day's firings page can read.
 var UnpagedMost = 200_000
+
+// unpagedFiringsRead counts the rows of firings Unpaged reads with their
+// labels: for tests of what a digest reads.
+var unpagedFiringsRead atomic.Int64
 
 // Unpaged counts the firings that started in [from, to) of the rules in
 // says, that told doesn't say a notification told of: muted, by kind, or
@@ -434,7 +438,9 @@ var UnpagedMost = 200_000
 // only when a mute of it was told of about them (one row of mutes_rule
 // looked up), one rule at a time. Its mutes are read as MutedOf reads a
 // firing's, the hours about each firing's start and its end, each of a
-// rule once, UnpagedMost rows looked at in all.
+// rule once. UnpagedMost rows in all, of firings read with their labels
+// and of mutes looked at: past it, the rest aren't read, and Partial
+// says so.
 func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule string) bool, told func(firing int64) bool,
 	counted func(rule string, start time.Time) bool, within Within, now time.Time) (Unpaged, error) {
 	var out Unpaged
@@ -497,7 +503,15 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 		}
 		ids, _ := json.Marshal(x.ids)
 		var fs []Firing
+		// Those left room for, read in their order, and one more to say
+		// whether there were more; its labels aren't read.
+		n, more := 0, false
 		if err := l.eachRow(ctx, func(r scanner) error {
+			unpagedFiringsRead.Add(1)
+			if n++; n > left {
+				more = true
+				return nil
+			}
 			var f Firing
 			var sid, start int64
 			var end sql.NullInt64
@@ -516,9 +530,15 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 			fs = append(fs, f)
 			return nil
 		}, `SELECT f.id, s.id, s.labels, f.start_at, f.end_at FROM firings f JOIN series s ON s.id = f.series_id
-			WHERE f.rule_id IN (`+l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at < ? ORDER BY f.start_at, f.id`,
-			string(ids), from.Unix(), to.Unix()); err != nil {
+			WHERE f.rule_id IN (`+l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at < ? ORDER BY f.start_at, f.id LIMIT ?`,
+			string(ids), from.Unix(), to.Unix(), left+1); err != nil {
 			return out, err
+		}
+		if left -= min(n, left); more || left <= 0 && len(fs) > 0 {
+			out.Partial = true
+		}
+		if left <= 0 {
+			fs = nil // no room for their mutes: in none of the counts
 		}
 		muted, looked, used, err := l.mutedOf(ctx, fs, within, now, left)
 		if err != nil {

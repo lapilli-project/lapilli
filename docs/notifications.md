@@ -185,7 +185,7 @@ the other, or with no mute told of, as their pages say it.
 `digest.ready` and `report.ready` carry it as
 `notifications.paged_no_one`: `silence`, `inhibition`, `either`,
 `nothing`, and `partial` when there were too many mutes to look through
-for every firing. It looks at 200,000 rows of mutes at most
+for every firing. It reads 200,000 rows of firings and mutes at most
 ([design/mutes.md](design/mutes.md#bounds)).
 
 Mutes come at the events' rate (200 a second, bursts of 1,000), not the
