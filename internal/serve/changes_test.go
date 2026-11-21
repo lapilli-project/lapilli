@@ -1430,7 +1430,7 @@ func TestSaysInGrafanaDollars(t *testing.T) {
 // them, as it is.
 func TestTitlesLinkNothing(t *testing.T) {
 	name := "Fixes #12, closes GH-3, Resolved o/r#4, fixes https://github.com/o/r/issues/5, see !6, Fixes ABC-12, OPS-1 #close: fixture closer 7"
-	ref := regexp.MustCompile(`(?i)(#|!|\bGH-|/issues/|\b[A-Z][A-Z0-9_]+-)[0-9]|#[A-Za-z]`)
+	ref := regexp.MustCompile(`(?i)(#|!|\bGH-|/issues/)[0-9]|#[A-Za-z]`)
 	keyword := regexp.MustCompile(`(?i)\b(fixes|closes|resolved)[\s:]+\S`)
 	for _, title := range []string{prTitle(ledger.Proposal{Kind: ledger.KindFor, Rule: name}), draftTitle(ledger.ExpectDraft{Rule: name})} {
 		if ref.MatchString(title) || keyword.MatchString(title) {
@@ -1446,6 +1446,10 @@ func TestTitlesLinkNothing(t *testing.T) {
 		if ref.MatchString(said) || keyword.MatchString(said) || !strings.Contains(strings.ReplaceAll(said, "\u2060", ""), name) {
 			t.Errorf("%q refers to an issue, or isn't %q", said, name)
 		}
+	}
+	// A Jira key alone, an incident's id as often, is said as it is.
+	if said := mdCode("INC-1"); said != "`INC-1`" {
+		t.Errorf("an incident's id: %q", said)
 	}
 	// Lapilli's own words have no word joiner in them, nor its numbers a #.
 	if title := prTitle(ledger.Proposal{Kind: ledger.KindSays, Rule: "Errors"}); strings.Contains(title, "\u2060") {

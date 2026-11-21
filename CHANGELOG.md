@@ -155,12 +155,12 @@ Before upgrading:
   mentioned it; `Fixes ABC-12` closed a Jira issue through GitLab's Jira
   integration, `ABC-1 #close` through Jira's smart commits, and `!12`
   mentioned a merge request. A word joiner (U+2060), which shows as
-  nothing, goes between `#`, `!`, `GH-`, an issue's or a pull request's
-  URL or a Jira key and its number, between a smart commit's `#` and its
-  command, and inside a closing keyword before a reference, in the title
+  nothing, goes between `#`, `!`, `GH-` or an issue's or a pull request's
+  URL and its number, between a smart commit's `#` and its command, and
+  inside a closing keyword before a reference or a Jira key, in the title
   and in each name or text from outside the description quotes; a keyword
   with no reference after it is left as it is, as Lapilli's own words
-  are. Lapilli's own numbers are said without `#` (`Lapilli proposal 12`,
+  are, and so is a Jira key alone, an incident's id as often (`INC-1`). Lapilli's own numbers are said without `#` (`Lapilli proposal 12`,
   `in Lapilli (draft 12)`), which mentioned the host's issue 12.
 - **A cell of the activity log's CSV could be a formula after a space of
   Unicode's** (affected: 0.64.0 to 0.68.0). One that starts with `=`,

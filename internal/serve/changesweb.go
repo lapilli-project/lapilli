@@ -1376,13 +1376,14 @@ func prTitle(p ledger.Proposal) string {
 // Of a title a recipe makes a pull request's and its commit's first line,
 // and of what its description quotes, what a host or a tracker it is tied
 // to reads as a reference, or a command: a number after #, ! or GH-, an
-// issue's or a pull request's URL, a Jira key (ABC-12), a smart commit's
-// command (#close, #resolve, #time); and a closing keyword before one,
-// which closes it once merged (GitHub's and GitLab's, Fixes ABC-12 through
-// GitLab's Jira integration).
+// issue's or a pull request's URL, a smart commit's command (#close,
+// #resolve, #time, after a Jira key); and a closing keyword before one, or
+// before a Jira key (ABC-12), which closes it once merged (GitHub's and
+// GitLab's, Fixes ABC-12 through GitLab's Jira integration). A Jira key
+// alone, an incident's id as often (INC-1), links and closes nothing,
+// and is said as it is.
 var (
 	issueRef     = regexp.MustCompile(`(?i)(#|!|\bGH-|/(?:issues|pull|pulls|merge_requests)/)([0-9])`)
-	jiraKey      = regexp.MustCompile(`\b([A-Z][A-Z0-9_]+-)([0-9])`)
 	smartCommand = regexp.MustCompile(`(#)([A-Za-z])`)
 	closingRef   = regexp.MustCompile(`(?i)\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)[\s:]+` +
 		`(?:\S*(?:#|!|GH-)[0-9]|[A-Z][A-Z0-9_]+-[0-9]|https?://\S*/(?:issues|pull|pulls|merge_requests|browse)/)`)
@@ -1390,15 +1391,15 @@ var (
 
 // linkFree is a title as a host reads it referring to nothing: a word
 // joiner (U+2060), which shows as nothing, after the first letter of a
-// closing keyword before a reference, and between each reference's # !
-// GH-, URL path or Jira key and its number, and a smart commit's # and its
-// command, so that a rule named "Fixes #12" neither closes issue 12 once
-// merged nor mentions it. A keyword with no reference after it closes
-// nothing, and is left as it is, as Lapilli's own words are.
+// closing keyword before a reference or a Jira key, between each
+// reference's # ! GH- or URL path and its number, and between a smart
+// commit's # and its command, so that a rule named "Fixes #12" neither
+// closes issue 12 once merged nor mentions it. A keyword with no reference
+// after it closes nothing, and is left as it is, as Lapilli's own words
+// are.
 func linkFree(t string) string {
 	t = closingRef.ReplaceAllStringFunc(t, func(m string) string { return m[:1] + "\u2060" + m[1:] })
 	t = issueRef.ReplaceAllString(t, "${1}\u2060${2}")
-	t = jiraKey.ReplaceAllString(t, "${1}\u2060${2}")
 	return smartCommand.ReplaceAllString(t, "${1}\u2060${2}")
 }
 
