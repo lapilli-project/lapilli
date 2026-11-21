@@ -13,6 +13,12 @@
   `--fail-expectations=false`, `--expect-required=false` and
   `--fail-missed=false`, in serve too where it takes them. Each is off as
   `=false` says now, and `--redact-key` with `--redact=false` is refused.
+- **Near misses were looked for by a rule's own labels, not its group's**
+  (affected: 0.32.0 to 0.68.1). A rule whose group gave another service's
+  label was asked about an incident it could never be about, and one whose
+  group gave a label a signal's entry requires (`require:`) was passed
+  over. A rule is looked at by the labels its firings carry now, its own
+  over its group's, in `lapilli verdict` and `lapilli serve` alike.
 
 ### Changed
 

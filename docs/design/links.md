@@ -82,7 +82,8 @@ lists that came after its end, its condition having held in it, is its
 alert too late, labels or not; with `--linked-only`, no other firing is.
 
 Near misses are looked for by the link too. A rule the incident lists,
-its own labels not ruling out the alert's, is looked at whatever `--match`
+the labels its alerts carry (its own over its group's) not ruling out the
+alert's, is looked at whatever `--match`
 says, and a stretch of it whose labels agree with the alert's nearly
 caught it, by a shorter `for` or a nearer number, as a firing of it would
 catch it; with `--linked-only`, an incident that lists alerts has only the

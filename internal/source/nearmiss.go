@@ -62,8 +62,9 @@ func nearBounds(r rules.Rule) []rules.Bound {
 // version with the shorter "for", or the new number. A rule is passed over
 // that is noisy, couldn't be replayed, has neither a "for" nor such a
 // number, has a "for" over a week, shares its name with another, or whose
-// own labels disagree with the incident's and that the incident doesn't
-// list among its alerts; with --linked-only, an incident that lists alerts
+// alerts' labels (its own over its group's, as a firing of it carries
+// them) disagree with the incident's and that the incident doesn't list
+// among its alerts; with --linked-only, an incident that lists alerts
 // has only the rules it lists looked at (verdict.Options.About). excuse, when not nil, says which
 // firings that caught nothing a quiet window excuses, as the ledger does.
 func NearMisses(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report, incs []incident.Incident,
@@ -123,7 +124,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 			case r.For < 0, r.For > nearFor,
 				r.Unsupported != "" || !ok || rr.Noisy || rr.Unsupported != "" || named[r.Name] > 1,
 				slices.ContainsFunc(ir.CaughtBy, func(c verdict.Catch) bool { return c.Rule == r.Name }),
-				!o.About(r.Name, r.Labels, ir.Incident),
+				!o.About(r.Name, r.AlertLabels(), ir.Incident),
 				r.For == 0 && !numbers(r):
 				continue
 			}
