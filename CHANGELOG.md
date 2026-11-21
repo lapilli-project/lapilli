@@ -101,9 +101,13 @@ Before upgrading:
   `private_key`, its newlines written `\n`), a JSON number, a quoted
   libpq password, a Slack webhook's path, and a `ghp_`, `github_pat_`,
   `glpat-`, `xoxb-` or `sk-ant-` token were shown, to anyone who could
-  read the page, an address to an admin. Each is `***` now; an error
-  that only names a credential (`cannot fetch token: 400`, `invalid
-  bearer`) reads as it was.
+  read the page, an address to an admin; so were Grafana's service
+  account (`glsa_`) and Grafana Cloud (`glc_`) tokens, Google's (`ya29.`)
+  and a URL's password with a `/` and a `?` in it. Each is `***` now; an
+  error that only names a credential (`cannot fetch token: 400`, `invalid
+  bearer`, `authorization: the token has expired`, `invalid password:
+  check the file`) reads as it was, and so does an address with an `@` in
+  its path (`https://grafana.example/d/abc/team@ops`).
 - **An incident recipe sent its token wherever its address pointed, and
   read its token file whole** (affected: 0.15.0 to 0.68.0).
   `pagerduty.sh`, `incident-io.sh` and `jira.sh` from 0.15.0,
