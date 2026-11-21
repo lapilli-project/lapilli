@@ -52,7 +52,8 @@ Of each such event, a mute is read, and nothing else of it:
   minutes after, as a notification's; otherwise now;
 - **the alert**: its `alertname`, as the rule, and its labels, bounded as
   a notification's alert's are (512 characters of rule name, 64 labels, 4
-  KB of them, none that don't show);
+  KB of them, none that don't show), its labels 4 KB at most as kept too
+  (JSON writes `<`, `>`, `&` and controls in six bytes each);
 - **the kind**: `silence`, `inhibition`, or `either`, for a notification's
   `mutedAlerts` (0.35.0's, which carry labels), by what it doesn't say;
 - **what muted it**: the silence's `id` (letters, digits and dashes, 64 at
@@ -84,7 +85,13 @@ A firing is muted by the mutes of its rule whose labels are all of the
 firing's and more (the alert carries external labels the replay doesn't),
 told of from two evaluations before its start to two after its end, or
 now while it is on: the span within which a notification's alert ties to
-it. A silence comes first, then an inhibition, each the earliest first;
+it. Only the hours about its start and its end are read (each within two
+evaluations of it, six hours at most), not those between: a silence that
+keeps a firing from paging anyone is told of as the firing starts, and
+goes on being told of until it ends. A silence made in the middle of a
+long firing isn't found, and such a firing was told of by its first
+notification anyway. A silence comes first, then an inhibition, each the
+earliest first, 20 at most, counted after the labels are matched;
 `either` is left out where one that says which is there.
 
 - **The rule's page** (its latest firings) and **the day's firings**: in
@@ -95,10 +102,14 @@ it. A silence comes first, then an inhibition, each the earliest first;
   kept, whether or not notifications are counted for the rule yet.
 - **MCP's `rule`**: each of its latest firings has `muted`, a list of
   `{by, silence, inhibited_by, from, to}`, beside `notified`.
-- They are read for the firings shown, a query each through
-  `mutes_rule`, never cached: a page kept for the ledger's generation
-  shows a mute kept after it from the next change to the ledger, a new
-  mute's row among them; a row only made longer isn't one.
+- They are read for the firings shown, each hour of a rule once, its
+  rows through `mutes_rule`, never cached: a page kept for the ledger's
+  generation shows a mute kept after it from the next change to the
+  ledger, a new mute's row among them; a row only made longer isn't one.
+  An hour of a rule holds 1,000 rows at most (below), so a firing reads
+  some thousands of rows at most, however many other alerts of its rule
+  were muted, and its own mute is among them
+  (`TestMutedOfBounded`, by the rows read).
 
 The digest and the report don't count them yet (see "Later").
 
@@ -140,10 +151,19 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
   a second), as every event that carries no notification is: a burst of
   mutes doesn't use up the rate deliveries are kept at. Mutes that come
   with a notification come at its rate.
-- **A day.** 200,000 rows of mutes a day (UTC) at most, about 100 MB; past
-  that, mutes are passed over until the next day, and that is logged once.
-  A notification with them is still kept. A muted alert makes 24 rows a
-  day at most, for each silence or inhibiting alert.
+- **An hour of a rule.** 1,000 rows at most: a thousand alerts each muted
+  by one silence, or five hundred a notification told of too. Past that,
+  a new row of that rule's hour is passed over, and that is logged once a
+  day; a row kept goes on being made longer. It bounds what a firing's
+  page reads, with the disk.
+- **A day.** 200,000 rows of mutes a day (UTC) at most. A row of an
+  ordinary alert (a short rule name, a few labels) is some 450 bytes with
+  its indexes, about 90 MB a day; at most, a rule's name of 512
+  characters (up to 2 KB, kept in the row and in `mutes_rule`) and 4 KB
+  of labels as kept, some 8.5 KB, 1.7 GB a day. Past it, mutes are passed
+  over until the next day, and that is logged once. A notification with
+  them is still kept. A muted alert makes 24 rows a day at most, for each
+  silence or inhibiting alert.
 - **Writes.** One write at a time, with the notifications' turn; a mute a
   replica kept already within a minute takes none.
 
@@ -151,8 +171,14 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
 
 - Nothing is read before the token, as on every token path of the port:
   a request without it is answered 401 before its body is read.
-- The bounds above hold the disk and the rate; a body of mutes is read
-  within the same budget of bytes as every event.
+- The bounds above hold the disk, the rate and what a page reads; a body
+  of mutes is read within the same budget of bytes as every event.
+  Someone who fills a rule's hour with mutes of other alerts (the token's
+  holder, or anyone who can send alerts to an Alertmanager that takes them
+  unchecked, under a silence that matches) can keep a real mute of that
+  hour from being kept, not hide one kept: the page then says "paged no
+  one", as it did before mutes were kept, and the log says so once a
+  day.
 - Someone with the notifications token can post mutes that never were,
   within those bounds. What a forged mute can claim is only that a firing
   was muted: the page and MCP say so beside a firing no notification told

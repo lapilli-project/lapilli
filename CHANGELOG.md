@@ -22,9 +22,10 @@ Before upgrading:
   the first to the last, and for `--keep`. A firing no notification told
   of says "muted by a silence" with its ID, "inhibited by another alert",
   or "muted by a silence or an inhibition", on the rule's page and the
-  day's firings; MCP's `rule` gives each latest firing `muted`. Mutes
-  come at the events' rate, 200,000 rows a day at most, and claim only
-  that a firing was muted ([docs/design/mutes.md](docs/design/mutes.md)).
+  day's firings; MCP's `rule` gives each latest firing `muted`, read in
+  the hours about the firing's start and end. Mutes come at the events'
+  rate, 1,000 rows of a rule's hour and 200,000 a day at most, and claim
+  only that a firing was muted ([docs/design/mutes.md](docs/design/mutes.md)).
 
 ## [0.66.0] - 2026-11-21
 

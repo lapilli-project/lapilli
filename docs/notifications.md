@@ -173,13 +173,15 @@ by another alert", or "muted by a silence or an inhibition"; MCP's `rule`
 gives each latest firing `muted`. A mute is tied to a firing as a
 notification's alert is: its rule's, with all of the firing's labels,
 told of from two evaluations before the firing started to two after it
-ended. A firing that paged no one with nothing muting it was routed
-nowhere, or never reached the alert manager.
+ended, as read in the hours about its start and its end. A firing that
+paged no one with nothing muting it was routed nowhere, or never reached
+the alert manager.
 
 Mutes come at the events' rate (200 a second, bursts of 1,000), not the
-notifications', so a storm of them can't keep a delivery out; 200,000 rows
-of them a day (UTC) at most, past which they are passed over until the
-next day and a notification with them is still kept. An event that can't
+notifications', so a storm of them can't keep a delivery out; 1,000 rows
+of a rule's hour and 200,000 rows a day (UTC) at most, past which they are
+passed over (until the next hour, or day) and a notification with them is
+still kept. An event that can't
 be read as the recorder's (a silence with no ID, a mute of an alert with no
 `alertname`) is refused, that event alone, and counted in
 `lapilli_serve_notifications_refused_total`. Someone with the token can
