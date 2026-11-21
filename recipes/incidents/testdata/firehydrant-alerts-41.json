@@ -1,0 +1,54 @@
+{
+  "data": [
+    {
+      "id": "0c2d1e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+      "primary": true,
+      "alert": {
+        "id": "1d3e2f40-5b6c-4d7e-9f80-a1b2c3d4e5f6",
+        "summary": "Checkout answers 5xx",
+        "description": "More than 5% of checkout's requests fail",
+        "priority": "HIGH",
+        "integration_name": "Alertmanager",
+        "starts_at": "2026-10-28T03:01:00Z",
+        "ends_at": "2026-10-28T03:40:00Z",
+        "duration_ms": 2340000,
+        "duration_iso8601": "PT39M",
+        "status": "RESOLVED",
+        "remote_id": "25f9e794323b453885f5181f1b624d0b",
+        "remote_url": "http://prometheus:9090/graph",
+        "labels": {
+          "alertmanager/groupKey": "{}:{alertname=\"CheckoutErrors\"}",
+          "alertmanager/grouped-by-alertname": "CheckoutErrors",
+          "alertmanager/labels-alertname": "CheckoutErrors",
+          "alertmanager/labels-service": "checkout",
+          "alertmanager/labels-severity": "critical",
+          "alertmanager/annotations-summary": "Checkout answers 5xx"
+        },
+        "environments": [],
+        "services": [{"id": "a1b2c3d4-0000-4000-8000-000000000001", "name": "checkout"}],
+        "tags": ["service:checkout"],
+        "signal_id": "2e4f3051-6c7d-4e8f-a091-b2c3d4e5f6a7",
+        "team_name": "Shop",
+        "position": 1,
+        "is_expired": false,
+        "is_noise": false
+      }
+    },
+    {
+      "id": "3f5a4162-7d8e-4f90-b1a2-c3d4e5f6a7b8",
+      "primary": false,
+      "alert": {
+        "id": "40615273-8e9f-4a01-82b3-d4e5f6a7b8c9",
+        "summary": "Checkout is slow",
+        "priority": "LOW",
+        "integration_name": "Email",
+        "starts_at": "2026-10-28T03:02:00Z",
+        "status": "RESOLVED",
+        "labels": {"env": "production"},
+        "tags": [],
+        "is_noise": false
+      }
+    }
+  ],
+  "pagination": {"count": 3, "page": 1, "items": 2, "pages": 2, "last": 2, "prev": null, "next": 2}
+}

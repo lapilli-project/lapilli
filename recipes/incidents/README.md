@@ -8,7 +8,7 @@ form `--incidents` takes:
 |---|---|---|
 | `pagerduty.sh` | PagerDuty | `PAGERDUTY_TOKEN_FILE`; `SINCE`, `UNTIL` |
 | `incident-io.sh` | incident.io | `INCIDENT_IO_TOKEN_FILE`; `SINCE` |
-| `jira.sh` | Jira Cloud, Jira Service Management | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_JQL`; `JIRA_START_FIELD`, `JIRA_END_FIELD`, `JIRA_LABELS` |
+| `jira.sh` | Jira Cloud, Jira Service Management | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_JQL`; `JIRA_START_FIELD`, `JIRA_END_FIELD`, `JIRA_LABELS`, `JSM_CLOUD_ID` |
 | `github.sh` | GitHub issues | `gh`, signed in; `GITHUB_REPO`; `GITHUB_LABEL`, `LIMIT` |
 | `compass.sh` | Compass alerts | `COMPASS_CLOUD_ID`, `COMPASS_EMAIL`, `COMPASS_TOKEN_FILE`; `SINCE`, `COMPASS_QUERY`, `MAX_LOGS` |
 | `grafana-irm.sh` | Grafana IRM | `GRAFANA_URL`, `GRAFANA_IRM_TOKEN_FILE`; `SINCE` |
@@ -18,8 +18,10 @@ form `--incidents` takes:
 They need `sh`, `curl` and `jq`. Tokens are read from files and passed to `curl`
 on stdin, so `ps` doesn't show them. Give them read-only access.
 
-`pagerduty.sh`, `incident-io.sh` and `rootly.sh` also write the alerts the tool
-linked to each incident, where an alert carries its `alertname` and labels
+`pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, for
+Jira Service Management's incidents given `JSM_CLOUD_ID`, `jira.sh` also
+write the alerts the tool linked to each incident, where an alert carries
+its `alertname` and labels
 ([Incidents kept elsewhere](../../docs/incidents.md), "The alerts a tool
 linked"). `alerts.jq` is what they share; give `jq` `-L` this directory to run
 their `.jq` files yourself. Each alert keeps every label it carries: in
@@ -127,13 +129,41 @@ and succeeds.
 The ids are the issues' keys, `OPS-41`, whatever the settings: change
 them, and the incidents copied in before are the same incidents.
 
+### Jira Service Management's linked alerts
+
+With `JSM_CLOUD_ID`, the site's cloud id (as `compass.sh` takes it), each
+issue's linked alerts are read as the same account, from Jira Service
+Management's incident API, which Atlassian says is **in beta** and may
+change: `GET /jsm/incidents/cloudId/{cloudId}/v1/incident/{issueID}/alert`
+lists their ids, a page at a time by its `startKey`, and the operations
+API's `GET /jsm/ops/api/{cloudId}/v1/alerts/{id}` gives each, one request
+an alert. An API token with scopes needs `read:incident:jira-service-management`
+and `read:ops-alert:jira-service-management` besides Jira's.
+
+Alertmanager sends Jira Service Management its alerts through its
+Opsgenie notifier (`opsgenie_configs`, as Atlassian's Prometheus
+integration says), an alert a group, and from 0.22.0 puts the labels the
+group's alerts share in its `details`, which the alert keeps as its extra
+properties. One with `alertname` among them is of that rule, with the
+others as its labels; the `details` you set are among them too, so
+`ALERT_LABELS` narrows them to the labels you match on. Group by
+`alertname`, or alerts of two rules share none and are left out.
+
+An issue the incident API answers 400 for isn't an incident, as it says,
+and has no alerts read; an alert the operations API no longer has (404)
+is left out. Each is counted on stderr. Anything else it answers stops
+the script with nothing written; a 429 is waited out as its `Retry-After`
+says, two minutes at most, five times a request and ten minutes a run.
+`ALERTS=no` reads none.
+
 ### Compass, and Opsgenie's users
 
 Opsgenie's support ends on 5 April 2027. Its incidents, with their linked
 alerts and post-incident reviews, move to Jira Service Management, where
 `jira.sh` reads them: `JIRA_JQL='project = "Opsgenie Migrated Incidents" AND
-issuetype = Incident'`, or the service project yours went to. Its alerting
-and on-call move to Jira Service Management or to Compass.
+issuetype = Incident'`, or the service project yours went to, and with
+`JSM_CLOUD_ID` their linked alerts. Its alerting and on-call move to Jira
+Service Management or to Compass.
 
 Compass keeps alerts, not incidents, so `compass.sh` takes Compass's alerts
 through its operations API (`/compass/cloud/{cloudId}/ops/v1/alerts`, basic
@@ -158,6 +188,15 @@ a service account token), Rootly's `GET /v1/incidents` and FireHydrant's
 both are read. Rootly takes five requests a minute: a 429 is waited out as
 its `Retry-After` says, five times at most. Rootly and FireHydrant number
 their pages with no order of their own, so an incident on two pages is one.
+
+FireHydrant's alerts are those `GET /v1/incidents/{incident_id}/alerts`
+lists for an incident. Its reference says only that an alert's `labels`
+are "arbitrary key:value pairs"; its Alertmanager source names the labels
+a group's alerts share `alertmanager/labels-NAME` on the event an alert
+comes from. Both are read, the prefix taken off, so an alert with
+`alertname` among them is of that rule. The reference gives the list
+pages but no way to ask for the next: it is asked for with `page`, as the
+incidents' are.
 
 These are tested against each API's published schema with a server standing in
 for it (`internal/serve/recipes_test.go`), not against real accounts. If one

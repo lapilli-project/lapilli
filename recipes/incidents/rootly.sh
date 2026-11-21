@@ -151,6 +151,6 @@ if [ "$alerts" = yes ]; then
     done
   done <"$ids"
 fi
-jq -s -L "$here" -f "$here/rootly.jq" --slurpfile linked "$linked" --arg labels "${ALERT_LABELS:-}" "$all" >"$out"
+jq -s -L "$here" -f "$here/rootly.jq" --slurpfile linked "$linked" --arg alert_labels "${ALERT_LABELS:-}" "$all" >"$out"
 jq -r -L "$here" 'include "alerts"; said("rootly.sh"; "their labels carry no alertname")' "$out" >&2
 jq '{incidents}' "$out"

@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "5172a384-9f0a-4b12-93c4-e5f6a7b8c9d0",
+      "primary": false,
+      "alert": {
+        "id": "6283b495-a01b-4c23-a4d5-f6a7b8c9d0e1",
+        "summary": "CheckoutLatency",
+        "integration_name": "Alertmanager",
+        "starts_at": "2026-10-28T03:05:00Z",
+        "status": "RESOLVED",
+        "labels": {"alertname": "CheckoutLatency", "job": "checkout"},
+        "tags": []
+      }
+    }
+  ],
+  "pagination": {"count": 3, "page": 2, "items": 1, "pages": 2, "last": 2, "prev": 1, "next": null}
+}

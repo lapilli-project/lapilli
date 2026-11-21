@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Jira Service Management's linked alerts** (`recipes/incidents/jira.sh`,
+  with `JSM_CLOUD_ID`, the site's cloud id): each incident's alert ids from
+  JSM's incident API, which Atlassian has in beta, and each alert from its
+  operations API, as the same account. One that Alertmanager's Opsgenie
+  notifier sent, the labels its group's alerts share in its extra
+  properties (0.22.0 and later), is one of the incident's `alerts`. An
+  issue the API says isn't an incident, and an alert it no longer has, are
+  counted on stderr; a 429 is waited out as its `Retry-After` says.
+  `ALERTS`, `ALERT_LABELS` and `MAX_ALERT_REQUESTS` as the other recipes
+  take them.
+- **FireHydrant's incident alerts** (`firehydrant.sh`): those `GET
+  /v1/incidents/{incident_id}/alerts` lists, of the rule `alertname` names
+  among their labels, or `alertmanager/labels-alertname`, as FireHydrant's
+  Alertmanager source names it. `ALERTS`, `ALERT_LABELS` and
+  `MAX_ALERT_REQUESTS` too.
+
+### Changed
+
+- The incident recipes' `.jq` files take `ALERT_LABELS` as `--arg
+  alert_labels`, not `--arg labels`, which `jira.jq` has for `JIRA_LABELS`;
+  `jira.jq` and `firehydrant.jq`, run by hand, now want `jq -L
+  recipes/incidents`, as the others do.
+
 ## [0.67.0] - 2026-11-21
 
 Incidents judged by the alerts their tool linked to them, and why a

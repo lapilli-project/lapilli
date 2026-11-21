@@ -119,14 +119,17 @@ through the API keeps them when the form changes it.
 
 ### The recipes
 
-`pagerduty.sh`, `incident-io.sh` and `rootly.sh` read each kept incident's
-alerts and write those that carry an `alertname` as its `alerts`:
+`pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, with
+`JSM_CLOUD_ID`, `jira.sh` read each kept incident's alerts and write those
+that carry an `alertname` as its `alerts`:
 
 | Tool | Where the labels are | Requests |
 |---|---|---|
 | PagerDuty | `body.details` (or `body.cef_details.details`): each alert of the group Alertmanager sent, with its labels, in `firing` and `resolved`, as 0.30.0 and later send them by default; or, from an older one given `alertname` in `pagerduty_configs`' `details`, the rule alone, with the details `ALERT_LABELS` names as labels (other details may be a description or a runbook) | one a page of 100 of an incident's alerts |
 | incident.io | the attributes the alert source takes from the payload, as `GET /v2/alerts/{id}` gives them: one named `alertname`, and the others of a literal value, named as labels are | one a page of 50 of an incident's alerts, and one an alert |
 | Rootly | the alert's `labels`, of which Alertmanager's carry `alertname`, `instance`, `dc` and `job`; `status` and `version` are the webhook's, `source_name` Rootly's | one a page of 100 of an incident's alerts |
+| FireHydrant | the alert's `labels` (`GET /v1/incidents/{incident_id}/alerts`), arbitrary pairs; its Alertmanager source names the labels a group's alerts share `alertmanager/labels-NAME`, read with the prefix taken off | one a page of an incident's alerts |
+| Jira Service Management | the alert's `extraProperties`, which keep the `details` Alertmanager's Opsgenie notifier sends: from 0.22.0, the labels its group's alerts share. The incident API that lists an incident's alerts is in beta | one a page of an incident's alert ids, and one an alert (the operations API) |
 
 An alert with no `alertname` is left out, and how many were is said on
 stderr, as counts alone. Every label an alert carries is kept: one a
@@ -170,9 +173,11 @@ answers with a server standing in, not against real accounts.
   of them goes to `/metrics`; MCP's `caught_by` says `linked`, as the
   report does.
 - **The recipes.** What a tool answers goes into a URL only as an id
-  checked to be letters and digits (and dashes, Rootly's); the token is
-  read from its file and sent on stdin, never on a command line. What they
-  say on stderr is counts, never a name a tool gave.
+  checked to be letters and digits (and dashes, Rootly's, FireHydrant's
+  and Jira Service Management's alerts'; digits, a Jira issue's and its
+  page key); the token is read from its file and sent on stdin, never on
+  a command line. What they say on stderr is counts, never a name a tool
+  gave.
 
 ## Questions for review
 
@@ -184,8 +189,9 @@ Decided on 2026-11-21, by the maintainer:
 
 Open:
 
-1. **Grafana IRM, FireHydrant, Jira Service Management.** Each keeps alerts
-   beside incidents; their recipes don't read them yet.
+1. **Grafana IRM** keeps alerts beside incidents; its recipe doesn't read
+   them yet. FireHydrant's and Jira Service Management's are read (the
+   latter from an API in beta).
 2. **Near misses** are still looked for by labels: a rule the incident
    lists whose condition held but not for its `for` could be looked for
    by its link too.
