@@ -433,30 +433,91 @@ var sourceErrors = []string{"reading the rules", "a run", "incidents", "deploys"
 func errOfSource(what string) bool { return slices.Contains(sourceErrors, what) }
 
 // secrets are what may stand for a credential in an error or an address:
-// a URL's user and password; a query's token, key, secret, password,
-// signature or code (an Azure Function's key); the same name given as
-// name=value between spaces, or as a JSON string; a header such as
-// api-key or x-api-key; and a bearer or basic token.
+// a private key's PEM block, in JSON's escapes too, or cut short; a URL's
+// user and password, an @ or a / in the password too; a Slack webhook's
+// path; a query's token, key, secret, password (pass too, as a word of
+// the name), signature, JWT or code (an Azure Function's key), its ? & and
+// = written %3F %26 and %3D too, as an address quoted in another's query
+// writes them; an Authorization header's value, its scheme kept when it
+// is one HTTP's clients send (another, or none, and the value's next word
+// is taken out with it); a Cookie or Set-Cookie header's; the same names
+// given as name=value between spaces or after a quote, its value quoted
+// as libpq quotes one, or as name: value, as YAML and Go write a field,
+// for a password, a client's secret, an API, access, secret or private
+// key, or an access token (a bare token, key or secret is a word as
+// often, as in "cannot fetch token: 400"); a JSON string, read with its
+// escapes, as is and escaped in a Go string, or a JSON number, and a
+// Python dict's string; a header such as api-key or x-api-key; a bearer,
+// basic, token, API key, GenieKey or SSWS token of 12 characters or more,
+// and a bearer one shorter with a digit in it; and a token GitHub,
+// GitLab, Slack or Anthropic writes with a prefix of its own.
 var (
-	secretUser  = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@"'<>]+@`)
-	secretQuery = regexp.MustCompile(`(?i)([?&;](?:[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|sig|credential)[A-Za-z0-9_.-]*|code)=)[^&\s"'<>]+`)
-	secretSaid  = regexp.MustCompile(`(?i)((?:^|[\s,(])[A-Za-z0-9_.-]*(?:token|secret|passw|pwd|credential|api[_-]?key|access[_-]?key)[A-Za-z0-9_.-]*=)[^\s&"'<>,;)]+`)
-	secretJSON  = regexp.MustCompile(`(?i)(\\?"[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|credential)[A-Za-z0-9_.-]*\\?"\s*:\s*\\?")[^"\\]*`)
-	secretHead  = regexp.MustCompile(`(?i)\b((?:[A-Za-z0-9]+-)+(?:key|token|secret|password|signature)\s*:\s*)[^\s"'<>,;]+`)
-	secretToken = regexp.MustCompile(`(?i)\b(bearer|basic|token)(\s+|=|:\s*)[A-Za-z0-9._~+/=-]{12,}`)
+	secretPEM      = regexp.MustCompile(`(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)(?:[A-Za-z0-9+/=\s\\:,.]|-[A-Za-z0-9])*(-----END [A-Z0-9 ]*PRIVATE KEY-----)?`)
+	secretUser     = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)(?:[^/:\s@"'<>]*:[^\s"'<>?#]*|[^/\s@"'<>]+)@`)
+	secretSlack    = regexp.MustCompile(`(?i)(hooks\.slack(?:-gov)?\.com/(?:services|workflows|triggers)/)[A-Za-z0-9/_-]+`)
+	secretQuery    = regexp.MustCompile(`(?i)((?:[?&;]|%3F|%26)(?:[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|sig|credential|jwt)[A-Za-z0-9_.-]*|(?:[A-Za-z0-9_.-]*[_.-])?pass|code)(?:=|%3D))[^&\s"'<>]+`)
+	secretAuth     = regexp.MustCompile(`(?i)\b((?:proxy-)?authorization[ \t]*[:=][ \t]*\[?)([^\s"'<>,;&\]]+)(?:([ \t]+["']?|%20)([^\s"'<>,;&\]]+))?`)
+	secretCookie   = regexp.MustCompile(`(?i)\b((?:set-)?cookie[ \t]*:[ \t]*\[?)[^\s"'<>;\]]+(?:;[ \t]*[^\s"'<>;\]]+)*`)
+	secretSaid     = regexp.MustCompile(`(?i)((?:^|[\s,("'])[A-Za-z0-9_.-]*(?:token|secret|passw|pwd|credential|api[_-]?key|access[_-]?key)[A-Za-z0-9_.-]*=)(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s&"'<>,;)]+)`)
+	secretField    = regexp.MustCompile(`(?i)((?:^|[\s,({\["'])(?:[A-Za-z0-9_.-]*(?:passw|pwd|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*|[A-Za-z0-9_.-]*[_.-](?:secret|token))[ \t]*:[ \t]*)(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s"'<>,;)}\]]+)`)
+	secretJSON     = regexp.MustCompile(`(?i)("` + secretName + `"\s*:\s*")(?:[^"\\]|\\.)*`)
+	secretGoJSON   = regexp.MustCompile(`(?i)(\\"` + secretName + `\\"\s*:\s*\\")(?:[^"\\]|\\\\(?:\\["\\]|[^"\\]))*`)
+	secretNumber   = regexp.MustCompile(`(?i)(\\?"` + secretName + `\\?"\s*:\s*)-?[0-9][0-9.eE+-]*`)
+	secretDict     = regexp.MustCompile(`(?i)('` + secretName + `'\s*:\s*')(?:[^'\\]|\\.)*`)
+	secretHead     = regexp.MustCompile(`(?i)\b((?:[A-Za-z0-9]+-)+(?:key|token|secret|password|signature)\s*:\s*)[^\s"'<>,;]+`)
+	secretToken    = regexp.MustCompile(`(?i)\b(bearer|basic|token|api-?key|geniekey|ssws)(\s+|=|:\s*)[A-Za-z0-9._~+/=-]{12,}`)
+	secretBearer   = regexp.MustCompile(`(?i)\b(bearer)([ \t]+|=|:[ \t]*)[A-Za-z._~+/=-]*[0-9][A-Za-z0-9._~+/=-]*`)
+	secretPrefixed = regexp.MustCompile(`\b(gh[pousr]_|github_pat_|xox[abposr]-|glpat-|sk-ant-)[A-Za-z0-9_-]+`)
 )
+
+// secretName is a JSON or a Python dict's name that may stand for a
+// credential's.
+const secretName = `[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|credential|jwt)[A-Za-z0-9_.-]*`
+
+// authSchemes are the Authorization header's schemes HTTP's clients send,
+// in lower case: a value after one is the credential, and the scheme is
+// said as it was.
+var authSchemes = map[string]bool{"bearer": true, "basic": true, "digest": true, "token": true,
+	"apikey": true, "api-key": true, "geniekey": true, "ssws": true, "negotiate": true, "ntlm": true,
+	"dpop": true, "aws4-hmac-sha256": true}
 
 // scrubSecrets is a text with what may be a credential in it said as ***,
 // for every reader, an admin too: a source's error or address shows none.
 // It goes by patterns, and takes out more than a credential where a name
 // only looks like one's.
 func scrubSecrets(text string) string {
+	text = secretPEM.ReplaceAllString(text, "${1}***${2}")
 	text = secretUser.ReplaceAllString(text, "${1}***@")
+	text = secretSlack.ReplaceAllString(text, "${1}***")
 	text = secretQuery.ReplaceAllString(text, "${1}***")
+	text = secretAuth.ReplaceAllStringFunc(text, scrubAuthorization)
+	text = secretCookie.ReplaceAllString(text, "${1}***")
 	text = secretSaid.ReplaceAllString(text, "${1}***")
+	text = secretField.ReplaceAllString(text, "${1}***")
 	text = secretJSON.ReplaceAllString(text, "${1}***")
+	text = secretGoJSON.ReplaceAllString(text, "${1}***")
+	text = secretNumber.ReplaceAllString(text, "${1}***")
+	text = secretDict.ReplaceAllString(text, "${1}***")
 	text = secretHead.ReplaceAllString(text, "${1}***")
-	return secretToken.ReplaceAllString(text, "${1}${2}***")
+	text = secretToken.ReplaceAllString(text, "${1}${2}***")
+	text = secretBearer.ReplaceAllString(text, "${1}${2}***")
+	return secretPrefixed.ReplaceAllString(text, "${1}***")
+}
+
+// scrubAuthorization is an Authorization header as secretAuth found it,
+// its value said as ***: after a scheme HTTP's clients send, the scheme
+// kept, and a scheme alone as it was, as an error that names one says it;
+// with another scheme, or none, what follows the header's name is ***,
+// the value and the word after it both, as either may be the credential.
+func scrubAuthorization(header string) string {
+	m := secretAuth.FindStringSubmatch(header)
+	if authSchemes[strings.ToLower(m[2])] {
+		if m[4] == "" {
+			return header
+		}
+		return m[1] + m[2] + m[3] + "***"
+	}
+	return m[1] + "***"
 }
 
 // shownError is a source's error as its reader may read it, in language

@@ -258,6 +258,112 @@ func TestScrubSecrets(t *testing.T) {
 	}
 }
 
+// The forms a credential took that the scrubber let through, each made up
+// with S3CR3T in it: none is left, and what is around it is. An error that
+// only names a credential, or an address without one, reads as it was.
+func TestScrubSecretsEveryForm(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		// name: value, as YAML and Go's %+v write a field.
+		{`password: S3CR3TVALUE9`, `password: ***`},
+		{`client_secret: S3CR3TVALUE10`, `client_secret: ***`},
+		{`apikey: S3CR3TVALUE8`, `apikey: ***`},
+		{`{User:ana Password:S3CR3T1 Host:db}`, `{User:ana Password:*** Host:db}`},
+		{`access_token: "S3CR3T two"`, `access_token: ***`},
+		{`'token': 'S3CR3TVALUE24'`, `'token': '***'`},
+		// An Authorization header, whatever its scheme, or none.
+		{`Authorization: Bearer shortS3C`, `Authorization: Bearer ***`},
+		{`Authorization: GenieKey S3CR3TVALUE3`, `Authorization: GenieKey ***`},
+		{`Authorization: SSWS S3CR3TVALUE28xxxxxx`, `Authorization: SSWS ***`},
+		{`Authorization: S3CR3TVALUE4xxxxxxxxx`, `Authorization: ***`},
+		{`Authorization: S3CR3TVALUE4 rejected`, `Authorization: ***`},
+		{`Authorization: Klaviyo-API-Key S3CR3T5`, `Authorization: ***`},
+		{`map[Authorization:[Bearer S3CR3T6]]`, `map[Authorization:[Bearer ***]]`},
+		{`Authorization=Bearer%20S3CR3TVALUE36`, `Authorization=***`},
+		{`ApiKey S3CR3TVALUE27xxxxxxxxx`, `ApiKey ***`},
+		{`token S3CR3TVALUE25short`, `token ***`},
+		{`Authorization: Bearer S3CR3TVALUE2abc`, `Authorization: Bearer ***`},
+		{`Authorization: Bearer "S3CR3T7"`, `Authorization: Bearer "***"`},
+		{`retried with Bearer S3CR3T7`, `retried with Bearer ***`},
+		// Headers named for a key or a token.
+		{`DD-API-KEY: S3CR3TVALUE5`, `DD-API-KEY: ***`},
+		{`DD-APPLICATION-KEY: S3CR3TVALUE6`, `DD-APPLICATION-KEY: ***`},
+		{`Api-Key: NRAK-S3CR3TVALUE7`, `Api-Key: ***`},
+		{`X-Api-Key: S3CR3TVALUE22`, `X-Api-Key: ***`},
+		{`PRIVATE-TOKEN: S3CR3TVALUE23`, `PRIVATE-TOKEN: ***`},
+		{`x-goog-api-key: S3CR3TVALUE26`, `x-goog-api-key: ***`},
+		{`Cookie: session=S3CR3TVALUE21`, `Cookie: ***`},
+		{`Cookie: session=S3CR3TVALUE21; theme=dark`, `Cookie: ***`},
+		{`set-cookie: sid=S3CR3T8; Path=/; HttpOnly`, `set-cookie: ***`},
+		// A query's keys, and its = and & written as an address quotes them.
+		{`Get "https://prom.example/api/v1/query?access_token=S3CR3TVALUE1": EOF`, `Get "https://prom.example/api/v1/query?access_token=***": EOF`},
+		{`?X-Amz-Signature=S3CR3TVALUE13&X-Amz-Credential=AKIAS3CR3T14`, `?X-Amz-Signature=***&X-Amz-Credential=***`},
+		{`?pass=S3CR3TVALUE15&u=admin`, `?pass=***&u=admin`},
+		{`?db_pass=S3CR3T9&u=admin`, `?db_pass=***&u=admin`},
+		{`?jwt=S3CR3TVALUE17`, `?jwt=***`},
+		{`?sig%3DS3CR3TVALUE37`, `?sig%3D***`},
+		{`?url=https%3A%2F%2Fx.example%2Fb%3Fsv%3D1%26sig%3DS3CR3T10`, `?url=https%3A%2F%2Fx.example%2Fb%3Fsv%3D1%26sig%3D***`},
+		{`&amp;token=S3CR3TVALUE38`, `&amp;token=***`},
+		// A URL's password with an @ or a / in it.
+		{`https://user:p@ssS3CR3TVALUE11@prom.example/`, `https://***@prom.example/`},
+		{`postgres://lap:S3CR3T/VAL34@db.example:5432/l`, `postgres://***@db.example:5432/l`},
+		{`Get "https://ana:S3CR3T@x@prom.example/api?query=up": EOF`, `Get "https://***@prom.example/api?query=up": EOF`},
+		// A connection string's quoted password.
+		{`user=lap password='S3CR3T VAL35' host=db`, `user=lap password=*** host=db`},
+		{`user=lap password="S3CR3T VAL\"36" host=db`, `user=lap password=*** host=db`},
+		{`parse "password=S3CR3T host=db": refused`, `parse "password=*** host=db": refused`},
+		{`yaml: "client_secret: S3CR3T"`, `yaml: "client_secret: ***"`},
+		// JSON: a string with escapes in it, a PEM block in one, a number.
+		{`{"private_key":"-----BEGIN PRIVATE KEY-----\nS3CR3TVALUE18\n-----END PRIVATE KEY-----\n","client_email":"x@y.example"}`, `{"private_key":"***","client_email":"x@y.example"}`},
+		{`{"client_secret": "S3CR3TVALUE19"}`, `{"client_secret": "***"}`},
+		{`{"private_key":"-----BEGIN PRIVATE KEY-----\nS3CR3TVALUE18\n-----END PRIVATE KEY-----\n"}`, `{"private_key":"***"}`},
+		{`{"password": "a\"S3CR3TVALUE20"}`, `{"password": "***"}`},
+		{`{"password": "a\"S3CR3TVALUE20", "user": "ana"}`, `{"password": "***", "user": "ana"}`},
+		{`body "{\"password\":\"a\\\"S3CR3T\\\\\",\"user\":\"ana\"}"`, `body "{\"password\":\"***\",\"user\":\"ana\"}"`},
+		{`server said: {"error":"bad key","api_key":"S3CR3TVALUE29"}`, `server said: {"error":"bad key","api_key":"***"}`},
+		{`{"token":12345678901234,"user":"ana"}`, `{"token":***,"user":"ana"}`},
+		// A private key's PEM block outside JSON, whole or cut short.
+		{"key: -----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nS3CR3T+/=\n-----END RSA PRIVATE KEY-----\nnext", "key: -----BEGIN RSA PRIVATE KEY-----***-----END RSA PRIVATE KEY-----\nnext"},
+		{`"pem": "-----BEGIN OPENSSH PRIVATE KEY-----\nS3CR3T`, `"pem": "-----BEGIN OPENSSH PRIVATE KEY-----***`},
+		// A Slack webhook, and tokens their makers prefix as theirs.
+		{`POST https://hooks.slack.com/services/T000/B000/S3CR3TVALUE12: 404`, `POST https://hooks.slack.com/services/***: 404`},
+		{`sk-ant-S3CR3TVALUE30 glpat-S3CR3TVALUE31 ghp_S3CR3TVALUE32 xoxb-S3CR3TVALUE33`, `sk-ant-*** glpat-*** ghp_*** xoxb-***`},
+		{`gho_S3CR3T1, github_pat_S3CR3T_2 and xoxp-1-S3CR3T`, `gho_***, github_pat_*** and xoxp-***`},
+	} {
+		got := scrubSecrets(c.in)
+		if got != c.want || strings.Contains(got, "S3CR3T") || strings.Contains(got, "AKIAS3") {
+			t.Errorf("%q: %q, want %q", c.in, got, c.want)
+		}
+	}
+	for _, in := range []string{
+		`token bucket full`,
+		`the key was not found`,
+		`password reset failed`,
+		`pq: password authentication failed for user "lap"`,
+		`Authorization header missing`,
+		`invalid bearer`,
+		`invalid bearer token`,
+		"invalid bearer\n2 retries left",
+		`want Authorization: Bearer <token>`,
+		`oauth2: cannot fetch token: 400 Bad Request`,
+		`unexpected token: line 3`,
+		`secret "lapilli" not found`,
+		`Get "https://prom.example/api/v1/query?query=up": EOF`,
+		`Get "http://prom.example:9090/api/v1/query_range?query=rate(up[5m])&start=1&step=60": EOF`,
+		`read tcp 10.0.0.1:443: i/o timeout`,
+		`dial tcp prom.example:9090: connect: connection refused`,
+		`https://prom.example/path`,
+		`open /etc/lapilli/keys/key.pem: permission denied`,
+		`ghost_host is up, task-ant-1 too`,
+		`GET /x?bypass=1&compass=n`,
+		`-----BEGIN CERTIFICATE-----`,
+		`{"error":"bad key","code":3}`,
+	} {
+		if got := scrubSecrets(in); got != in {
+			t.Errorf("%q: %q, want it as it was", in, got)
+		}
+	}
+}
+
 // GET /api/v1/sources without all is the sources firings are copied in
 // from, as before; with all=true, every source; anything else, 400. The
 // status banner's failure to read a source links to the page.
