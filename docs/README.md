@@ -27,7 +27,8 @@ Lapilli is, and how to install it.
 - [The numbers](numbers.md): what each number is, and how to count it again
   from the report, without Lapilli
 - [A cloud's own alarms](cloud-alarms.md): judging what CloudWatch, Azure
-  Monitor, Google Cloud and OCI alarms fired
+  Monitor, Google Cloud and OCI alarms fired, and Datadog's monitors and
+  New Relic's alert conditions
 - [Rules on logs: Loki](loki.md): LogQL rules replayed against Loki
 - [Is the replay right?](check-replay.md): `--check-replay`, the replay
   beside what really fired

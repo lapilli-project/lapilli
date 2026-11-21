@@ -1,0 +1,346 @@
+{
+  "data": [
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-1001",
+          "evt": {
+            "id": "AAAA8",
+            "name": "Checkout 5xx on checkout",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 1001,
+            "name": "Checkout 5xx on checkout",
+            "templated_name": "Checkout 5xx on {{service.name}}",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:shop"
+            ],
+            "type": "query alert",
+            "groups": [
+              "env:prod,service:checkout"
+            ]
+          },
+          "monitor_groups": [
+            "env:prod,service:checkout"
+          ],
+          "monitor_id": 1001,
+          "priority": "2",
+          "status": "ok",
+          "sourcecategory": "monitor_alert",
+          "title": "[ok] Checkout 5xx on checkout"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:shop",
+          "env:prod,service:checkout"
+        ],
+        "timestamp": "2026-11-02T03:40:00.000Z"
+      },
+      "id": "AAAA8",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-1001",
+          "evt": {
+            "id": "AAAA9",
+            "name": "Checkout 5xx on cart",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 1001,
+            "name": "Checkout 5xx on cart",
+            "templated_name": "Checkout 5xx on {{service.name}}",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:shop"
+            ],
+            "type": "query alert",
+            "groups": [
+              "env:prod,service:cart"
+            ]
+          },
+          "monitor_groups": [
+            "env:prod,service:cart"
+          ],
+          "monitor_id": 1001,
+          "priority": "2",
+          "status": "warn",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793682000000,
+          "title": "[warn] Checkout 5xx on cart"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:shop",
+          "env:prod,service:cart"
+        ],
+        "timestamp": "2026-11-03T05:00:00Z"
+      },
+      "id": "AAAA9",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-1001",
+          "evt": {
+            "id": "AAAB0",
+            "name": "Checkout 5xx on cart",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 1001,
+            "name": "Checkout 5xx on cart",
+            "templated_name": "Checkout 5xx on {{service.name}}",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:shop"
+            ],
+            "type": "query alert",
+            "groups": [
+              "env:prod,service:cart"
+            ]
+          },
+          "monitor_groups": [
+            "env:prod,service:cart"
+          ],
+          "monitor_id": 1001,
+          "priority": "2",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793682600000,
+          "title": "[error] Checkout 5xx on cart"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:shop",
+          "env:prod,service:cart"
+        ],
+        "timestamp": "2026-11-03T05:10:00Z"
+      },
+      "id": "AAAB0",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-1001",
+          "evt": {
+            "id": "AAAB1",
+            "name": "Checkout 5xx on cart",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 1001,
+            "name": "Checkout 5xx on cart",
+            "templated_name": "Checkout 5xx on {{service.name}}",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:shop"
+            ],
+            "type": "query alert",
+            "groups": [
+              "env:prod,service:cart"
+            ]
+          },
+          "monitor_groups": [
+            "env:prod,service:cart"
+          ],
+          "monitor_id": 1001,
+          "priority": "2",
+          "status": "ok",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793683800000,
+          "title": "[ok] Checkout 5xx on cart"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:shop",
+          "env:prod,service:cart"
+        ],
+        "timestamp": "2026-11-03T05:30:00Z"
+      },
+      "id": "AAAB1",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-4004",
+          "evt": {
+            "id": "AAAB2",
+            "name": "Disk full",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 4004,
+            "name": "Disk full",
+            "templated_name": "",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [],
+            "type": "query alert",
+            "groups": []
+          },
+          "monitor_groups": [],
+          "monitor_id": 4004,
+          "priority": "normal",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793754000000,
+          "title": "[error] Disk full"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor"
+        ],
+        "timestamp": "2026-11-04T01:00:00Z"
+      },
+      "id": "AAAB2",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-6006",
+          "evt": {
+            "id": "AAAB3",
+            "name": "CPU high",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 6006,
+            "name": "CPU high",
+            "templated_name": "CPU high",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [],
+            "type": "query alert",
+            "groups": [
+              "host:web-1",
+              "host:web-2"
+            ]
+          },
+          "monitor_groups": [
+            "host:web-1",
+            "host:web-2"
+          ],
+          "monitor_id": 6006,
+          "priority": "5",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793836800000,
+          "title": "[error] CPU high"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "host:web-1",
+          "host:web-2"
+        ],
+        "timestamp": "2026-11-05T00:00:00Z"
+      },
+      "id": "AAAB3",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-6006",
+          "evt": {
+            "id": "AAAB4",
+            "name": "CPU high",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 6006,
+            "name": "CPU high",
+            "templated_name": "CPU high",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [],
+            "type": "query alert",
+            "groups": [
+              "host:web-1",
+              "host:web-2"
+            ]
+          },
+          "monitor_groups": [
+            "host:web-1",
+            "host:web-2"
+          ],
+          "monitor_id": 6006,
+          "priority": "5",
+          "status": "ok",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793837100000,
+          "title": "[ok] CPU high"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "host:web-1",
+          "host:web-2"
+        ],
+        "timestamp": "2026-11-05T00:05:00Z"
+      },
+      "id": "AAAB4",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-5005",
+          "evt": {
+            "id": "AAAB5",
+            "name": "Login errors",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 5005,
+            "name": "Login errors",
+            "templated_name": "Login errors",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [],
+            "type": "query alert",
+            "groups": []
+          },
+          "monitor_groups": [],
+          "monitor_id": 5005,
+          "priority": "1",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1794096600000,
+          "title": "[error] Login errors"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor"
+        ],
+        "timestamp": "2026-11-08T00:10:00Z"
+      },
+      "id": "AAAB5",
+      "type": "event"
+    }
+  ],
+  "links": {},
+  "meta": {
+    "elapsed": 98,
+    "page": {},
+    "request_id": "req-2",
+    "status": "done"
+  }
+}

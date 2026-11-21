@@ -1,0 +1,306 @@
+{
+  "data": [
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-2002",
+          "evt": {
+            "id": "AAAA1",
+            "name": "Queue backlog",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 2002,
+            "name": "Queue backlog",
+            "templated_name": "Queue backlog",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:data"
+            ],
+            "type": "query alert",
+            "groups": [
+              "queue:orders"
+            ]
+          },
+          "monitor_groups": [
+            "queue:orders"
+          ],
+          "monitor_id": 2002,
+          "priority": "3",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793476800000,
+          "title": "[error] Queue backlog"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:data",
+          "queue:orders"
+        ],
+        "timestamp": "2026-10-31T20:00:00Z"
+      },
+      "id": "AAAA1",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-2002",
+          "evt": {
+            "id": "AAAA2",
+            "name": "Queue backlog",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 2002,
+            "name": "Queue backlog",
+            "templated_name": "Queue backlog",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:data"
+            ],
+            "type": "query alert",
+            "groups": [
+              "queue:orders"
+            ]
+          },
+          "monitor_groups": [
+            "queue:orders"
+          ],
+          "monitor_id": 2002,
+          "priority": "3",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793498400000,
+          "title": "[error] Queue backlog"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:data",
+          "queue:orders"
+        ],
+        "timestamp": "2026-11-01T02:00:00Z"
+      },
+      "id": "AAAA2",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-2002",
+          "evt": {
+            "id": "AAAA3",
+            "name": "Queue backlog",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 2002,
+            "name": "Queue backlog",
+            "templated_name": "Queue backlog",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:data"
+            ],
+            "type": "query alert",
+            "groups": [
+              "queue:orders"
+            ]
+          },
+          "monitor_groups": [
+            "queue:orders"
+          ],
+          "monitor_id": 2002,
+          "priority": "3",
+          "status": "ok",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793502000000,
+          "title": "[ok] Queue backlog"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:data",
+          "queue:orders"
+        ],
+        "timestamp": "2026-11-01T03:00:00Z"
+      },
+      "id": "AAAA3",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "evt": {
+            "id": "AAAA4",
+            "name": "deploy",
+            "source_id": 1,
+            "type": "api"
+          },
+          "priority": "normal",
+          "status": "info",
+          "timestamp": 1793509200000,
+          "title": "Deployed checkout"
+        },
+        "message": "deployed",
+        "tags": [
+          "service:checkout"
+        ],
+        "timestamp": "2026-11-01T05:00:00.000Z"
+      },
+      "id": "AAAA4",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-3003",
+          "evt": {
+            "id": "AAAA5",
+            "name": "Latency",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 3003,
+            "name": "Latency",
+            "templated_name": "Latency",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [],
+            "type": "query alert",
+            "groups": []
+          },
+          "monitor_groups": [],
+          "monitor_id": 3003,
+          "priority": "4",
+          "status": "ok",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793512800000,
+          "title": "[ok] Latency"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor"
+        ],
+        "timestamp": "2026-11-01T06:00:00Z"
+      },
+      "id": "AAAA5",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-1001",
+          "evt": {
+            "id": "AAAA6",
+            "name": "Checkout 5xx on checkout",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 1001,
+            "name": "Checkout 5xx on checkout",
+            "templated_name": "Checkout 5xx on {{service.name}}",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:shop",
+              "service:storefront",
+              "critical",
+              "owner:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "type": "query alert",
+            "groups": [
+              "env:prod,service:checkout"
+            ]
+          },
+          "monitor_groups": [
+            "env:prod,service:checkout"
+          ],
+          "monitor_id": 1001,
+          "priority": "2",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793589000250,
+          "title": "[error] Checkout 5xx on checkout"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:shop",
+          "service:storefront",
+          "critical",
+          "owner:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "env:prod,service:checkout"
+        ],
+        "timestamp": "2026-11-02T03:10:00Z"
+      },
+      "id": "AAAA6",
+      "type": "event"
+    },
+    {
+      "attributes": {
+        "attributes": {
+          "aggregation_key": "agg-1001",
+          "evt": {
+            "id": "AAAA7",
+            "name": "Checkout 5xx on checkout",
+            "source_id": 36,
+            "type": "query_alert_monitor"
+          },
+          "monitor": {
+            "id": 1001,
+            "name": "Checkout 5xx on checkout",
+            "templated_name": "Checkout 5xx on {{service.name}}",
+            "query": "avg(last_5m):sum:example{*} > 1",
+            "tags": [
+              "team:shop",
+              "service:storefront",
+              "critical",
+              "owner:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "type": "query alert",
+            "groups": [
+              "env:prod,service:checkout"
+            ]
+          },
+          "monitor_groups": [
+            "env:prod,service:checkout"
+          ],
+          "monitor_id": 1001,
+          "priority": "2",
+          "status": "error",
+          "sourcecategory": "monitor_alert",
+          "timestamp": 1793589900000,
+          "title": "[error] Checkout 5xx on checkout"
+        },
+        "message": "%%%\nexample\n%%%",
+        "tags": [
+          "monitor",
+          "team:shop",
+          "service:storefront",
+          "critical",
+          "owner:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "env:prod,service:checkout"
+        ],
+        "timestamp": "2026-11-02T03:25:00Z"
+      },
+      "id": "AAAA7",
+      "type": "event"
+    }
+  ],
+  "links": {
+    "next": "https://api.datadoghq.com/api/v2/events?filter[query]=%40monitor.id%3A%2A&page[cursor]=page-2"
+  },
+  "meta": {
+    "elapsed": 132,
+    "page": {
+      "after": "page-2"
+    },
+    "request_id": "req-1",
+    "status": "done"
+  }
+}

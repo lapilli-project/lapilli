@@ -66,6 +66,11 @@
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from
   their history, with `--firings` or copied into `lapilli serve`, and have
   no change reviews, longer `for`s or near misses.
+- Datadog's monitors and New Relic's alert conditions aren't read as rules
+  at all, in whatever language they are written: they are judged from their
+  history only, as a cloud's alarms that aren't PromQL are, written by
+  `recipes/firings/datadog.sh` and `newrelic.sh`. Both are checked against
+  the answers each tool's documentation shows, not against real accounts.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired: their replay is checked against their history only
   where it is copied in (or given with `--check-firings`), and CloudWatch's

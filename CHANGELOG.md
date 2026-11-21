@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Datadog's monitors and New Relic's alert conditions, judged from
+  their history** (`recipes/firings/datadog.sh`, `newrelic.sh`), as a
+  cloud's alarms that aren't PromQL are: neither tool's rules are read or
+  replayed. Datadog's from the events its monitors write (the Events API),
+  each group from its Alert or Warn to its recovery; New Relic's from its
+  `NrAiIncident` events (NRQL through NerdGraph), each incident from its
+  open to its close. Each labels a firing with its tags, its priority as
+  `severity` and the monitor's or condition's ID as `alarm_id`, bounded as
+  `lapilli serve` takes labels; reads its keys from files and gives them
+  to `curl` on stdin; stops past `MAX_PAGES`; and refuses an answer that
+  may hold part of the history. `put.sh` copies them into serve. Checked
+  against the answers each tool's documentation shows, not against real
+  accounts.
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.

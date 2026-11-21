@@ -1,0 +1,130 @@
+{
+  "data": {
+    "actor": {
+      "account": {
+        "nrql": {
+          "results": [
+            {
+              "conditionName": "Checkout errors",
+              "conditionId": 685305,
+              "policyName": "Shop",
+              "policyId": 40053,
+              "priority": "critical",
+              "entity.name": "checkout-api",
+              "entity.guid": "MXxBUE18QVBQTElDQVRJT058MTIzNA",
+              "entity.type": "APPLICATION",
+              "tags.team": "shop",
+              "tags.service": "checkout",
+              "tags.note": "two\nlines",
+              "accountId": 1234567,
+              "evaluationType": "threshold",
+              "title": "Error rate > 5.0 for 5 minutes on 'checkout-api'",
+              "type": "Incident",
+              "muted": false,
+              "incidentId": "i-1",
+              "event": "close",
+              "timestamp": 1793591070000,
+              "openTime": 1793589000000,
+              "closeTime": 1793591070000,
+              "closeCause": "EVALUATOR"
+            },
+            {
+              "incidentId": "i-2",
+              "event": "open",
+              "timestamp": 1793667600000,
+              "openTime": 1793667600000,
+              "conditionName": "Host not reporting",
+              "conditionId": 701,
+              "policyName": "Infra",
+              "priority": "HIGH",
+              "targetName": "web-7",
+              "evaluationType": "expiration",
+              "accountId": 1234567,
+              "type": "Incident"
+            },
+            {
+              "conditionName": "Checkout errors",
+              "conditionId": 685305,
+              "policyName": "Shop",
+              "policyId": 40053,
+              "priority": "critical",
+              "entity.name": "checkout-api",
+              "entity.guid": "MXxBUE18QVBQTElDQVRJT058MTIzNA",
+              "entity.type": "APPLICATION",
+              "tags.team": "shop",
+              "tags.service": "checkout",
+              "tags.note": "two\nlines",
+              "accountId": 1234567,
+              "evaluationType": "threshold",
+              "title": "Error rate > 5.0 for 5 minutes on 'checkout-api'",
+              "type": "Incident",
+              "muted": false,
+              "incidentId": "i-3",
+              "event": "open",
+              "timestamp": 1793782800000,
+              "openTime": 1793782799500
+            },
+            {
+              "conditionName": "Checkout errors",
+              "conditionId": 685305,
+              "policyName": "Shop",
+              "policyId": 40053,
+              "priority": "critical",
+              "entity.name": "checkout-api",
+              "entity.guid": "MXxBUE18QVBQTElDQVRJT058MTIzNA",
+              "entity.type": "APPLICATION",
+              "tags.team": "shop",
+              "tags.service": "checkout",
+              "tags.note": "two\nlines",
+              "accountId": 1234567,
+              "evaluationType": "threshold",
+              "title": "Error rate > 5.0 for 5 minutes on 'checkout-api'",
+              "type": "Incident",
+              "muted": false,
+              "incidentId": "i-3",
+              "event": "close",
+              "timestamp": 1793784000000,
+              "openTime": 1793782799500,
+              "closeTime": 1793784000000,
+              "closeCause": "EVALUATOR"
+            },
+            {
+              "incidentId": "i-5",
+              "event": "open",
+              "timestamp": 1794096000100,
+              "openTime": 1794095999900,
+              "conditionName": "Queue depth",
+              "conditionId": 700,
+              "policyName": "Data",
+              "priority": "high",
+              "accountId": 1234567,
+              "type": "Incident"
+            },
+            {
+              "conditionName": "Checkout errors",
+              "conditionId": 685305,
+              "policyName": "Shop",
+              "policyId": 40053,
+              "priority": "critical",
+              "entity.name": "checkout-api",
+              "entity.guid": "MXxBUE18QVBQTElDQVRJT058MTIzNA",
+              "entity.type": "APPLICATION",
+              "tags.team": "shop",
+              "tags.service": "checkout",
+              "tags.note": "two\nlines",
+              "accountId": 1234567,
+              "evaluationType": "threshold",
+              "title": "Error rate > 5.0 for 5 minutes on 'checkout-api'",
+              "type": "Incident",
+              "muted": false,
+              "incidentId": "i-4",
+              "event": "open",
+              "timestamp": 1794096300000,
+              "openTime": 1794096300000
+            }
+          ]
+        }
+      }
+    }
+  }
+}

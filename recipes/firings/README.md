@@ -1,10 +1,11 @@
-# Firings from a cloud's own alarms
+# Firings from alarms Lapilli doesn't replay
 
 Alarms kept in a cloud's own monitoring are mostly written in that cloud's
-terms, against metrics no PromQL API serves, so Lapilli can't replay them.
-What they fired, it can judge. Each script here reads a cloud's alarm history
-and writes it to stdout in the form `lapilli verdict --firings` takes, one
-firing a line:
+terms, against metrics no PromQL API serves, so Lapilli can't replay them;
+Datadog's monitors and New Relic's alert conditions aren't read as rules at
+all. What they fired, it can judge. Each script here reads one tool's alarm
+history and writes it to stdout in the form `lapilli verdict --firings`
+takes, one firing a line:
 
 ```json
 {"rule":"checkout-5xx","labels":{"service":"checkout"},"start":"2026-11-02T03:10:00Z","end":"2026-11-02T03:40:00Z"}
@@ -16,6 +17,8 @@ firing a line:
 | `azure-monitor.sh` | Azure Monitor alerts: metric, log search, activity log, smart detection, Prometheus | 30 days | `az` with its `resource-graph` extension; `SINCE`, `UNTIL` (UTC), `SUBSCRIPTIONS` |
 | `google-cloud.sh` | Google Cloud Monitoring alerting policies, every kind | 13 months, closed | `curl`, and `gcloud` or `GOOGLE_TOKEN_FILE`; `GOOGLE_CLOUD_PROJECT`, `SINCE`, `UNTIL` |
 | `oci.sh` | OCI Monitoring alarms | 90 days | `oci`; `COMPARTMENT_ID`, `SUBTREE`, `SINCE`, `UNTIL` |
+| `datadog.sh` | Datadog monitors | 15 months | `curl`; `DATADOG_API_KEY_FILE` and `DATADOG_APP_KEY_FILE`, or `DATADOG_TOKEN_FILE`; `DATADOG_SITE`, `SINCE`, `UNTIL` |
+| `newrelic.sh` | New Relic alert conditions | what the account keeps of `NrAiIncident` | `curl`; `NEW_RELIC_ACCOUNT_ID`, `NEW_RELIC_API_KEY_FILE`; `NEW_RELIC_REGION`, `SINCE`, `UNTIL` |
 
 They need `sh` and `jq` besides, and only read: each script's header says
 which permissions. Where an alarm is written in PromQL (a CloudWatch PromQL
@@ -38,6 +41,7 @@ writing to it has started, and a script that fails leaves it empty.
 ## What each counts as a firing
 
 The conversion is in the `.jq` file beside each script, for you to change.
+Datadog and New Relic have [a section of their own](#datadog-and-new-relic).
 
 - **When.** CloudWatch and OCI keep moves between states: a firing is from a
   move into ALARM (OCI: Firing) until the next move out of it. An alarm
@@ -85,7 +89,8 @@ The conversion is in the `.jq` file beside each script, for you to change.
 
 These are tested against each cloud's documented answers, with stand-ins for
 the CLIs (`internal/firing/recipes_test.go`), not against real accounts. What
-the documentation doesn't show:
+the documentation doesn't show (for Datadog and New Relic, see
+[their section](#not-checked-against-real-accounts-either)):
 
 - the key the Azure CLI gives Resource Graph's skip token under, taken either
   way;
@@ -95,6 +100,105 @@ the documentation doesn't show:
   so a filter read differently costs only more pages;
 - whether Resource Graph's `datetime()` takes a zone other than UTC: Azure's
   times must be given in UTC.
+
+If one doesn't work with yours, please say so.
+
+## Datadog and New Relic
+
+`datadog.sh` reads the events Datadog's monitors write, from the Events API
+(`GET /api/v2/events`, the events of `@monitor.id:*`). `newrelic.sh` reads
+New Relic's `NrAiIncident` events, an incident's open and its close, with an
+NRQL query through NerdGraph. Both read from before `SINCE` (a day for
+Datadog, an hour for New Relic, as below) to now, so a firing that started
+in the period has its end if it has ended, and each writes only firings that
+start in `[SINCE, UNTIL)`, as `put.sh` sends them.
+
+- **When.** Datadog: a monitor's group fires from an event of status `error`
+  (Alert) or `warn` (Warn) until its next of status `ok`. Another `error` or
+  `warn` between them, a notification again or Warn to Alert, changes
+  nothing, and other statuses are passed over. Warn counts, since it
+  notifies; take `warn` out of `datadog.jq` to count Alert only. A group
+  already on when `SINCE` comes is left out: the day before `SINCE` is read
+  to know it, so a monitor that notifies again in the period isn't taken to
+  start then. New Relic: an incident fires from its `openTime` until its
+  `closeTime`; one opened before `SINCE` is left out, though it closed in
+  the period. The hour before `SINCE` is read, as an incident's open event
+  can be written after it opened. One still on has no end, on both.
+- **Which series.** Datadog's events are each of a monitor's group, so each
+  group is its own firing; a monitor without groups is one. An event naming
+  two groups is taken as a group of its own. Each New Relic incident is its
+  own firing, one for each signal its condition opened one for.
+- **Labels.** Datadog: the group's tags (the group `env:prod,service:checkout`
+  gives `env` and `service`), the monitor's priority as `severity` (`P1` to
+  `P5`), and the monitor's own tags where the group's don't say. New Relic:
+  the incident's priority as `severity` (`critical`, `high`, `medium`,
+  `low`), the policy's name as `policy`, the entity's name as `entity` (or,
+  without one, the incident's target), and the incident's tags (`tags.team`
+  gives `team`). Rename them in the `.jq` file to what `--match` needs,
+  usually `service`. A tag of no value is left out, and so are labels
+  `lapilli serve` wouldn't take: a name or a value with a character that
+  doesn't show, a value over 256 bytes, past 32 labels or 4 KB of them.
+- **Names.** Datadog: the monitor's name before its template variables are
+  filled in (`templated_name`), so one monitor is one rule whatever each
+  group's notification says. New Relic: the condition's name; two
+  conditions of one name, in two policies, are one rule unless
+  `newrelic.jq` tells them apart.
+- **The ID**, as `alarm_id`, as the clouds' are: the monitor's (Datadog),
+  the condition's (New Relic). `--alarms` doesn't read either tool, so in
+  `lapilli serve` it ties nothing yet.
+- **Keys.** Read from files and given to `curl` on stdin, so `ps` doesn't
+  show them, and never printed. Datadog takes an API key and an
+  application key (`DATADOG_API_KEY_FILE`, `DATADOG_APP_KEY_FILE`), or a
+  personal or service access token (`DATADOG_TOKEN_FILE`), with
+  `events_read`; `DATADOG_SITE` is your site, such as `datadoghq.eu`. New
+  Relic takes a user key (`NEW_RELIC_API_KEY_FILE`) that can query the
+  account; `NEW_RELIC_REGION` is `us`, `eu` or `jp`.
+- **Pages.** Datadog's are 1000 events, by its cursor. NRQL has no cursor:
+  each page is the next 1000 events by time, from the last one's
+  millisecond, read again. Each stops past `MAX_PAGES` (1000), and so does
+  more than 1000 New Relic events in one millisecond. An answer that can't be
+  read, a Datadog page with warnings (it may hold part of the events) and a
+  NerdGraph answer with errors (it answers 200 with them) are refused, and
+  nothing is written.
+
+New Relic's NerdGraph also has `aiIssues`, issues and incidents. It isn't
+used: it is experimental (asked for with an opt-in header, and subject to
+breaking changes), and names an incident's condition and policy only in its
+description's words. `NrAiIncident` has them as attributes.
+
+Written from each tool's documentation:
+
+- Datadog: [Get a list of events](https://docs.datadoghq.com/api/latest/events/get-a-list-of-events/),
+  [`@monitor.id` in the Event API](https://docs.datadoghq.com/api/latest/events/),
+  [the API's keys](https://docs.datadoghq.com/api/latest/),
+  [search syntax](https://docs.datadoghq.com/logs/explorer/search_syntax/)
+  (events search is the logs'),
+  [pages of 1000](https://docs.datadoghq.com/logs/guide/collect-multiple-logs-with-pagination/)
+  (events are paged as logs are),
+  [tags](https://docs.datadoghq.com/getting_started/tagging/) (no commas),
+  [retention](https://docs.datadoghq.com/data_security/data_retention_periods/).
+- New Relic: [NerdGraph's endpoints and key](https://docs.newrelic.com/docs/apis/nerdgraph/get-started/introduction-new-relic-nerdgraph/),
+  [NRQL through NerdGraph](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-nrql-tutorial/),
+  [`NrAiIncident`'s attributes](https://docs.newrelic.com/attribute-dictionary/?event=NrAiIncident),
+  [NRQL's clauses](https://docs.newrelic.com/docs/nrql/nrql-syntax-clauses-functions/)
+  (`LIMIT`, `ORDER BY`, `SINCE` and `UNTIL`),
+  [times in milliseconds](https://docs.newrelic.com/docs/query-your-data/nrql-new-relic-query-language/get-started/query-time-range/),
+  [`aiIssues`](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-issues-api-via-github/).
+
+### Not checked against real accounts either
+
+Both are tested against the answers each tool's documentation shows, with a
+server standing in for its API (`internal/firing/vendor_recipes_test.go`),
+not against real accounts. What the documentation doesn't show:
+
+- Datadog: how `monitor_groups` writes a group (read as `key:value` tags,
+  one an item or comma-separated); whether a notification again is an event
+  of its own (if it is, one more than a day after its monitor triggered is
+  taken for a trigger); which status a No Data event has (passed over unless
+  `error`, `warn` or `ok`); that `page[limit]` takes 1000, as the logs' does.
+- New Relic: the unit of `openTime` and `closeTime` (read as milliseconds, as
+  `timestamp`; a smaller number stops the script); the names `SELECT *`
+  gives tags under (read as `tags.team`).
 
 If one doesn't work with yours, please say so.
 
