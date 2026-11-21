@@ -2,6 +2,263 @@
 
 ## [Unreleased]
 
+## [0.68.1] - 2026-11-21
+
+A security release, after a review of 0.67.0 from an attacker's point of
+view and one of 0.68.0's changes, each fix of code with a test that failed
+before it. No schema change: the ledger stays at 029.
+
+Before upgrading:
+- **A backtest job that checks out the pull request's own commit**, not
+  the CI's merge (its head a merge of its own too), with a gate
+  (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`, `EXPECT_REQUIRED`,
+  `FAIL_MISSED`) or `STATUS`, and `TARGET` left at `HEAD^1` or written as
+  `HEAD`'s first parent otherwise, fails, refused, where its CI doesn't
+  say the branch the pull request goes into: give `TARGET` or
+  `TARGET_BRANCH`, or check out the merge. In GitHub Actions `github.sh`
+  and the action take `GITHUB_BASE_REF`, which needs `fetch-depth: 0` or
+  the branch fetched (Changed).
+- **The incident recipes take https alone**, or http to this machine, and
+  a token file of one line (Fixed (security)).
+- **The chart's `linkedOnly`, `serve.everyoneAdmin` and
+  `serve.exposeWithoutSignIn`** are `true` or `false`, quoted or not;
+  anything else fails the install, naming it.
+
+### Fixed (security)
+
+- **A viewer could make serve hold memory without bound through the
+  activity log's export** (affected: 0.64.0 to 0.68.0). `GET
+  /api/v1/activity` gave a thousand changes unless told fewer, each
+  change's before and after whole, indented, asked of the ledger all at
+  once, and gave its page's turn back before it went out: a ledger's
+  incident changed a thousand times, its labels and alerts, was an export
+  of 58 MB that took 625 MB to work out, and sixteen readers who read
+  nothing held 1.6 GB until the server's `WriteTimeout`, each holding its
+  own. An export, and a page of the activity log, end now where their
+  changes' text passes 8 MiB, as kept and, of an export, as written (JSON
+  writes `<` as six bytes, CSV a quote as two), a change bigger than it
+  given whole as the first of its page, and say where to go on from
+  (`next`, `Link`), CSV and JSON alike; the ledger is read 200 changes at
+  a time, a team's too, and a team's before and after 200 at a time; the
+  JSON isn't indented; and an export holds a turn of the exports' own,
+  four at once and one a person, until its reader has read it, 30 seconds
+  at most, no page's. One of 50 changes at most takes a turn of the small
+  ones', sixteen at once of all readers, and is held to a mebibyte.
+- **The backtest gate could pass a pull request judged against its own
+  commit** (affected: 0.32.0 to 0.68.0; the gates that stop a merge, and
+  the status, from 0.67.0). `TARGET` is `HEAD^1` unless given, a merge's
+  first parent, as GitHub checks a pull request out; where the job checks
+  out the pull request's own commit (actions/checkout with `ref:
+  pull_request.head.sha`), `HEAD^1` is the pull request's earlier commit,
+  and `github.sh`, unlike the other hosts' scripts, took no branch from
+  its CI: a pull request of two commits, a rule's change and anything,
+  was compared against its first, nothing changed, `FAIL_MISSED` passed,
+  a status of success was set on its head, and `INCIDENTS` was read from
+  the pull request. `github.sh` gives the branch the pull request goes
+  into (`GITHUB_BASE_REF`) and the event's head: `HEAD`'s first parent,
+  however `TARGET` writes it (`HEAD^1`, `HEAD~1`, `HEAD^`, its hash in any
+  case or short, `HASH^0`, `NAME~1`, as git resolves it; a branch's name
+  alone is the one the job named), is taken only of GitHub's merge, `HEAD^2` the event's head, not of a head
+  that is a merge of its own (an "Update branch"); otherwise the base
+  branch is taken, and, with none, a gate or `STATUS` alone is refused and
+  the job fails (Changed). Of a merge, the status goes on no commit the
+  pull request goes into, nor the one it was compared against.
+- **An agent's test file could make promtool load a hundred million
+  values past `scenario.Bound`** (affected: 0.65.0 to 0.68.0). Bound read
+  the file with yaml.v3, which keeps a mapping's own keys over a merge,
+  and promtool reads it with yaml.v2, which lets a merge after them
+  override them: `values: '1'` then `<<: {values: '0+0x100000000'}` was
+  one value counted and a hundred million loaded, in serve's container,
+  and the same took an `eval_time`, a series' line break and a tag past
+  the checks. An agent's test file (`test_expectation`,
+  `propose_expectation`, `propose`'s kind `add`) holds no merge, anchor,
+  alias or tag now, but `!!str` on a text, as an added rule doesn't. An
+  operator's test files, read from where `--expect` or `--config` is, or
+  in a pull request's checkout, may, as before.
+- **One Grafana rule of a judged rule's title took that rule's firings
+  away, and left its days quiet** (affected: 0.68.0). The history names a
+  rule by its title alone, and a title two of Grafana's rules have (one
+  in two folders) is neither's: serve wrote the day without the judged
+  rule's firings, so that anyone who could make a rule in a folder
+  Lapilli reads, paused or not, or two teams by chance, took away its
+  firings copied in within `--settle`, kept new ones from being written,
+  and its days read as ones with a record and nothing fired; a firing
+  that ended meanwhile stayed on. Such a day is of no use now, a gap, as
+  one with a rule the history can't say all of is, logged with the rules'
+  names; a rule judged so no more (paused, deleted, renamed) keeps what
+  was copied in for it. A day is a gap for every rule judged from the
+  history while any of them shares its title, as the record of Grafana's
+  history is kept for the source and not each rule: name the rules
+  apart, and the days after are written again.
+- **The Sources page showed credentials its scrubber didn't read as one**
+  (affected: 0.64.0 to 0.68.0). It took out a URL's user and password, a
+  query's token or key, `name=value` between spaces, a JSON string, an
+  `api-key:` header and a bearer or basic token of 12 characters or
+  more: `password:`, `client_secret:` and `apikey:` as YAML and Go write
+  a field, an Authorization header of another scheme (`GenieKey`, `SSWS`)
+  or none, a shorter bearer token, a query's `pass` and `jwt`, or its `=`
+  written `%3D`, a `Cookie:` header, a URL's password with an `@` or a
+  `/` in it, a JSON string with an escape in it (a service account's
+  `private_key`, its newlines written `\n`), a JSON number, a quoted
+  libpq password, a Slack webhook's path, and a `ghp_`, `github_pat_`,
+  `glpat-`, `xoxb-` or `sk-ant-` token were shown, to anyone who could
+  read the page, an address to an admin; so were Grafana's service
+  account (`glsa_`) and Grafana Cloud (`glc_`) tokens, Google's (`ya29.`)
+  and a URL's password with a `/` and a `?` in it. Each is `***` now: an
+  Authorization or Cookie header's value, or a password's or a key's,
+  anywhere in a line (mid-text, after curl's `>`, after "header"), to the
+  line's end or the sentence's, and a prefixed token at its real shape and
+  length alone. An error that only names a credential reads as it was
+  (`cannot fetch token: 400`, `invalid bearer`, and, its value a word of
+  small letters in a sentence, `authorization: the token has expired`,
+  `invalid password: check the file`), as do `glc_requests_total`,
+  `ya29.png` and an address with an `@` in its path
+  (`https://grafana.example/d/abc/team@ops`). Still shown: a value that
+  starts with a word of small letters in a sentence (`cookie: abcdef`),
+  and a password of digits and a `/` before a host with no port.
+- **An incident recipe sent its token wherever its address pointed, and
+  read its token file whole** (affected: 0.15.0 to 0.68.0).
+  `pagerduty.sh`, `incident-io.sh` and `jira.sh` from 0.15.0,
+  `rootly.sh`, `firehydrant.sh`, `grafana-irm.sh` and `compass.sh` from
+  0.21.0, and Jira Service Management's `JSM_API` from 0.68.0 sent it
+  over plain http, or to an address with a user and password before `@`,
+  and a second line or a carriage return in the token file went into
+  curl's headers as headers of their own. Each takes `https://` now, or
+  this machine over http, for tests, refuses `@`, gives curl that one
+  scheme (`--proto`), and takes a token file of one line: of a bearer
+  token's characters where it goes in a header as it is, and of any but
+  a space or a control character for Atlassian's, which go base64'd.
+  Neither the token nor the address is said.
+- **An incident recipe read an answer of any size** (affected: 0.15.0 to
+  0.68.0). Each answer is 16 MiB at most now (`--max-filesize`, with curl
+  8.4 or later for an answer that doesn't give its length); past it, the
+  script stops, writing nothing.
+- **A draft of what a rule is held to could be accepted by one no longer
+  its approver** (affected: 0.65.0 to 0.68.0). The accept form's key is
+  tied to the draft, its state and who saw the page, and the route asked
+  only that its person approved some team's changes: one an approver of
+  every team when the page was shown, now another team's approver alone,
+  accepted it. It is asked as it is accepted now: an approver of every
+  team, or of the one team that owns the rule.
+- **An agent's rewrite in `test_expectation` reached promtool with
+  templates an added rule is refused for** (affected: 0.65.0 to 0.68.0).
+  Its labels and annotations, and its group's labels, which Prometheus
+  gives each of the group's alerts, went into the group promtool runs a
+  scenario with as the agent wrote them: a template that called a
+  query, didn't parse, or grew without bound in serve's container. They
+  are held as an added rule's are now (`templateOK`).
+- **A rule's name in a change's pull request could close an issue once
+  merged** (affected: 0.22.0 to 0.68.0; a draft's from 0.65.0). The
+  change recipes make the title its pull request's title and its commit's
+  first line, and the description the rest of the message, where a code
+  span is no Markdown: a rule named `Fixes #12` closed issue 12, and
+  mentioned it; `Fixes ABC-12` closed a Jira issue through GitLab's Jira
+  integration, `ABC-1 #close` through Jira's smart commits, and `!12`
+  mentioned a merge request. A word joiner (U+2060), which shows as
+  nothing, goes between `#`, `!`, `GH-` or an issue's or a pull request's
+  URL and its number, between a smart commit's `#` and its command, and
+  inside a closing keyword before a reference or a Jira key, in the title
+  and in each name or text from outside the description quotes; a keyword
+  with no reference after it is left as it is, as Lapilli's own words
+  are, and so is a Jira key alone, an incident's id as often (`INC-1`). Lapilli's own numbers are said without `#` (`Lapilli proposal 12`,
+  `in Lapilli (draft 12)`), which mentioned the host's issue 12.
+- **A cell of the activity log's CSV could be a formula after a space of
+  Unicode's** (affected: 0.64.0 to 0.68.0). One that starts with `=`,
+  `+`, `-` or `@` after spaces starts with `'`, which a spreadsheet shows
+  as text; a no-break space (U+00A0), an ideographic one (U+3000) or
+  another of Unicode's wasn't counted as one, and a spreadsheet that takes
+  them off read a formula. They are now, and those of no width.
+- **`lapilli impact suggest` and `lapilli verdict` printed a history URL's
+  query** (affected: 0.1.0 to 0.68.0; `impact suggest` from 0.67.0). An
+  error of a history that couldn't be reached quoted the request's URL
+  whole, as text and in `--json`: a `--prometheus` URL with a token in its
+  query (`?token=`) showed it. Each of the query's values is `[redacted]`
+  now, and a password as net/url redacts one, in serve's errors too.
+- **promtool could write a file past its volume** (affected: 0.65.0 to
+  0.68.0). Its memory cap's wrapper set `RLIMIT_DATA` alone; promtool
+  keeps its TSDB in its `TMPDIR`, the chart's `scenarios-tmp` volume of
+  256 MiB. It sets `RLIMIT_FSIZE` to 256 MiB beside it now, on Linux: a
+  write to one file past it fails (EFBIG), and the volume's `sizeLimit`
+  bounds all of them.
+- **The Cleanup page's delete took a rule out of its team without an
+  admin** (affected: 0.64.0 to 0.68.0). While `--config` declares the
+  boundaries of change, a rule's team is an admin's to move; deleting
+  what the ledger keeps of a rule's name deleted its note, and the team
+  it put the rule in, for an editor of every team. A note in a team is an
+  admin's to delete there now.
+- **The chart read `"false"` as true** (affected: 0.28.1 to 0.68.0). A
+  template's `if` reads any text as true: `serve.everyoneAdmin: "false"`
+  (from 0.28.1) made everyone who reached serve an admin,
+  `serve.exposeWithoutSignIn: "false"` (from 0.30.0) let it be exposed
+  with no sign-in, and `linkedOnly: "false"` (0.68.0) added
+  `--linked-only`. Each is read as the bool it says now, quoted or not, in
+  any letter case, and anything else fails, naming it.
+
+### Fixed
+
+- **A firing recipe passed a rule's name as the tool gave it, and serve
+  refused the whole copy for one** (affected: 0.20.0 to 0.68.0; Datadog's
+  and New Relic's from 0.67.0). A name with a character that doesn't show
+  (Cc, Cf, Zl, Zp), or past 512 characters, stopped every firing of the
+  period. The recipes take those characters out and cut the name to 512
+  characters now, and a name with nothing left is named by its id
+  (`monitor ID`, `condition ID`, an alarm's ARN or id).
+- **`rootly.sh` had no end to its waits but `MAX_PAGES`** (affected:
+  0.21.0 to 0.68.0). Each 429 was waited out in a shell of its own, so a
+  run's waits were never added up. Each wait is two minutes at most now,
+  five a request and ten minutes in all a run, and a `Retry-After` of `08`
+  is read as eight.
+- **`jira.sh` went round Jira Service Management's pages of alerts**
+  (0.68.0). Two `startKey`s given in turn went on until
+  `MAX_ALERT_REQUESTS`; a key given before stops it now, said, with
+  nothing written.
+- **A firing of Grafana's history ended after a gap was written over the
+  gap** (0.68.0). It is written again from its start, and the write, from
+  there to the day's end, covered every gap between, taken for days with a
+  record, whichever round after them it ended in. It is written within
+  the spans the copies cover now, each apart, and each gap stays one; an
+  alert that began in a gap and stays on is written from where the copies
+  cover again, in every round, as the first after the gap writes it.
+- **The backtest recipes said a URL they take over http was refused for
+  not being https** (0.32.0 to 0.68.0). `STATUS_URL`, the host's API,
+  `LAPILLI_RELEASES` and `ACTIONS_ID_TOKEN_REQUEST_URL` take http to this
+  machine too, and their messages say so.
+
+### Changed
+
+- **A backtest of the pull request's own commit is compared with the
+  branch it goes into.** Where `TARGET` is `HEAD`'s first parent, given or
+  not, however written, and `HEAD` isn't the CI's merge (`HEAD^2` the pull
+  request's head as the CI says, or, where it says none, `HEAD` a merge),
+  the branch the CI says the pull request goes into is `TARGET_BRANCH`
+  (GitHub's `GITHUB_BASE_REF`; the other hosts' scripts gave theirs
+  already); where it says none, a gate or `STATUS` is refused, and the job
+  fails, saying to give `TARGET` or `TARGET_BRANCH` or to check out the
+  merge. Without either, the comment is compared with `HEAD^1`, as before.
+  A `TARGET` the job gives where the CI says the base (Gitea's Actions,
+  GitLab's merge requests, Bitbucket's and Azure's pull requests) is
+  taken as it is. A shallow clone's messages say `fetch-depth: 0`.
+- **The incident recipes take an address's scheme in capitals**
+  (`HTTPS://`), `http://[::1]`, and this machine with no port, any other
+  host over http still refused, and a token file ending in a carriage
+  return or spaces. Their README says to use curl 8.4 or later: earlier
+  curl holds to the 16 MiB bound only an answer that gives its length.
+- **The activity log's export, and its page, end at 8 MiB of their
+  changes' text**, and say where to go on from, as at a thousand
+  changes; its JSON isn't indented.
+- **An agent's promtool test file is refused with a merge (`<<`), an
+  anchor, an alias or a tag** but `!!str` on a text: write it out.
+- A day of Grafana's history in which a judged rule's title is another
+  rule's too is a gap, for every rule judged so, while it is: rename one,
+  as the log says which.
+- SECURITY.md and the docs say who writes the record of Grafana's rules
+  judged from its history (whoever can push to its Loki tenant), that only
+  Slack's markup is escaped in what serve posts (Mattermost, Rocket.Chat
+  and Google Chat read their own), that a template's value in a link isn't
+  URL-encoded unless the template says so, that a commit status is a
+  commit's, not a pull request's, and that a team may add a rule to a
+  place holding only another team's rules.
+
 ## [0.68.0] - 2026-11-21
 
 Grafana's rules on data sources Lapilli can't replay (SQL,

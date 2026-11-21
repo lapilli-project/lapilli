@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -677,12 +678,14 @@ func (s *Server) prBody(l proposalLine) string {
 	// The rule's name, as every name and text from a rule's source here, as
 	// code: one chosen by whoever writes that source mentions no one, and
 	// shows no image or link, in the pull request or the task made of it.
-	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), mdCode(p.Rule))
+	// Lapilli's own numbers are said without #, which the host reads as
+	// its own issue of that number.
+	fmt.Fprintf(&b, "Lapilli proposal %d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), mdCode(p.Rule))
 	if p.Kind == ledger.KindUndo {
 		// Nothing of why the change was made, nor its backtest, which says
 		// what it did: an undo made before kept them.
 		ev = undoEvidence(ev)
-		fmt.Fprintf(&b, "It puts back the rule as it was before Lapilli proposal #%d changed it.\n\n", p.Follows)
+		fmt.Fprintf(&b, "It puts back the rule as it was before Lapilli proposal %d changed it.\n\n", p.Follows)
 	}
 	if p.Agent {
 		b.WriteString("Proposed by an agent, for a person to check.\n\n")
@@ -766,13 +769,15 @@ func mdIDs(ids []string) string {
 // mdCode is a name or a text from outside as one code span (mdID), so
 // that nothing in it (a mention, a link, an image, HTML) is read as
 // Markdown; one with nothing in it is "(none)". It is cut to mdMost bytes
-// first, so that the span is a line's part, never a line cut in two.
+// first, so that the span is a line's part, never a line cut in two. A
+// recipe makes the description the commit's message too, which isn't
+// Markdown: it links nothing there either (linkFree).
 func mdCode(s string) string {
 	if len(s) > mdMost {
 		s = clip(s, mdMost) + "…"
 	}
 	if x := mdID.Replace(s); strings.TrimSpace(x) != "" {
-		return "`" + x + "`"
+		return "`" + linkFree(x) + "`"
 	}
 	return "(none)"
 }
@@ -1356,7 +1361,7 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 // prTitle is a proposal's pull request's title: one line, of printable
-// text, as a rule's name may not be.
+// text, as a rule's name may not be, linking nothing (linkFree).
 func prTitle(p ledger.Proposal) string {
 	t := fmt.Sprintf("Lapilli: %s, %s", kindText(p.Kind), p.Rule)
 	t = strings.Map(func(c rune) rune {
@@ -1365,7 +1370,37 @@ func prTitle(p ledger.Proposal) string {
 		}
 		return c
 	}, t)
-	return clip(t, 200)
+	return clip(linkFree(t), 200)
+}
+
+// Of a title a recipe makes a pull request's and its commit's first line,
+// and of what its description quotes, what a host or a tracker it is tied
+// to reads as a reference, or a command: a number after #, ! or GH-, an
+// issue's or a pull request's URL, a smart commit's command (#close,
+// #resolve, #time, after a Jira key); and a closing keyword before one, or
+// before a Jira key (ABC-12), which closes it once merged (GitHub's and
+// GitLab's, Fixes ABC-12 through GitLab's Jira integration). A Jira key
+// alone, an incident's id as often (INC-1), links and closes nothing,
+// and is said as it is.
+var (
+	issueRef     = regexp.MustCompile(`(?i)(#|!|\bGH-|/(?:issues|pull|pulls|merge_requests)/)([0-9])`)
+	smartCommand = regexp.MustCompile(`(#)([A-Za-z])`)
+	closingRef   = regexp.MustCompile(`(?i)\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)[\s:]+` +
+		`(?:\S*(?:#|!|GH-)[0-9]|[A-Z][A-Z0-9_]+-[0-9]|https?://\S*/(?:issues|pull|pulls|merge_requests|browse)/)`)
+)
+
+// linkFree is a title as a host reads it referring to nothing: a word
+// joiner (U+2060), which shows as nothing, after the first letter of a
+// closing keyword before a reference or a Jira key, between each
+// reference's # ! GH- or URL path and its number, and between a smart
+// commit's # and its command, so that a rule named "Fixes #12" neither
+// closes issue 12 once merged nor mentions it. A keyword with no reference
+// after it closes nothing, and is left as it is, as Lapilli's own words
+// are.
+func linkFree(t string) string {
+	t = closingRef.ReplaceAllStringFunc(t, func(m string) string { return m[:1] + "\u2060" + m[1:] })
+	t = issueRef.ReplaceAllString(t, "${1}\u2060${2}")
+	return smartCommand.ReplaceAllString(t, "${1}\u2060${2}")
 }
 
 // apiPatchChange is a recipe saying what became of a change: a pull request

@@ -12,7 +12,9 @@
 # its OCID, alarm_id, by which lapilli serve's /v1/oci ties the alarm's
 # notifications to its firings, whatever their title, and an alarm it reads
 # with --alarms to its history; rename the others to what --match needs. The history is for the alarm as a whole, not
-# for each metric stream: firing while any stream is.
+# for each metric stream: firing while any stream is. The display name is
+# as serve takes a rule's: the characters that don't show taken out, and
+# 512 at most; with nothing left, the OCID.
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.
 def epoch: . as $t
@@ -20,6 +22,10 @@ def epoch: . as $t
      // error("not a time: \($t)"))
   | ((.d + "Z") | fromdateiso8601) + (("0" + (.f // "")) | tonumber)
     - (if .z == "Z" then 0 else (.z[0:1] + "1" | tonumber) * ((.z[1:3] | tonumber) * 3600 + (.z[-2:] | tonumber) * 60) end);
+# A rule's name as serve takes it: the characters that don't show (a line
+# break, a zero-width space) taken out, and cut to 512 characters. One
+# serve wouldn't take would stop the whole copy.
+def rulename: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | .[:512];
 def lower: ascii_downcase;
 (($alarms[0].data // []) | map({key: .id, value: .}) | from_entries) as $byId
 | [$entries[]
@@ -35,5 +41,5 @@ def lower: ascii_downcase;
     else . end)
 | (.out + (if .open then [{start: .open}] else [] end))[]
 | select((.start | epoch) >= ($since | epoch) and ($until == "" or (.start | epoch) < ($until | epoch)))
-| {rule: ($a["display-name"] // $id),
+| {rule: ($a["display-name"] // "" | rulename | if . != "" then . else $id | rulename end),
    labels: ({severity: (($a.severity // "") | lower), namespace: ($a.namespace // ""), alarm_id: $id} | with_entries(select(.value != "")))} + .

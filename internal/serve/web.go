@@ -323,20 +323,28 @@ func (t *turn) take(ctx context.Context) error {
 
 // renderTurn takes a turn to work out a page, waiting for one up to
 // renderWait.
-func (s *Server) renderTurn(ctx context.Context) (*turn, error) {
-	if s.renders == nil {
+func (s *Server) renderTurn(ctx context.Context) (*turn, error) { return takeTurn(ctx, s.renders) }
+
+// exportTurn takes a turn to write out an export of the activity log
+// (activityExports), waiting for one up to renderWait.
+func (s *Server) exportTurn(ctx context.Context) (*turn, error) { return takeTurn(ctx, s.exports) }
+
+// takeTurn takes one of the turns of, waiting for one up to renderWait; nil
+// is no turns, and one needn't be taken.
+func takeTurn(ctx context.Context, of chan struct{}) (*turn, error) {
+	if of == nil {
 		return &turn{}, nil
 	}
 	select {
-	case s.renders <- struct{}{}:
-		return &turn{of: s.renders, held: true}, nil
+	case of <- struct{}{}:
+		return &turn{of: of, held: true}, nil
 	default:
 	}
 	t := time.NewTimer(renderWait)
 	defer t.Stop()
 	select {
-	case s.renders <- struct{}{}:
-		return &turn{of: s.renders, held: true}, nil
+	case of <- struct{}{}:
+		return &turn{of: of, held: true}, nil
 	case <-t.C:
 		return nil, errPagesBusy
 	case <-ctx.Done():

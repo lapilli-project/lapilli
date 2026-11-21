@@ -23,7 +23,13 @@ It doesn't change when the rule fires, so it has no backtest, and the rest
 of the rule comes out as it was, byte for byte. The text must be a template
 that parses in the rule's language, calling only the functions it has
 (Prometheus's since 2.45; Grafana's, with its own) and never `query`:
-Prometheus refuses a whole file for a function it hasn't.
+Prometheus refuses a whole file for a function it hasn't. What a template
+fills in is written as the alert's labels and values have it: in a link
+(a `runbook_url` of `https://wiki.example.com/{{ .Labels.service }}`), a
+value isn't URL-encoded unless the text says so (`urlquery`), so one with
+a `/`, a `?` or a `#` in it changes where the link goes. Lapilli checks
+that the template parses, not what it makes of a link; the content check
+shows the runbook as a link only with nothing a template fills in.
 
 A new rule is proposed too, from the proposals page's **Propose a new
 rule** or an agent's `propose` (kind `add`), held to what it is to do

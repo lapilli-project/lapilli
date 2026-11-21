@@ -50,9 +50,17 @@ const (
 // reads what promtool parses as values notation: each input series, which
 // promtool writes as a line of its load command, "  <series> <values>",
 // and each histogram an expected sample gives. A file it can't read as
-// promtool's is refused too: what isn't read here isn't run.
+// promtool's is refused too: what isn't read here isn't run; and so is one
+// that YAML could read past what is written (plain).
 func Bound(b []byte) error {
 	if _, err := rules.DecodeYAML(context.Background(), b); err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.NewDecoder(bytes.NewReader(b)).Decode(&doc); err != nil {
+		return fmt.Errorf("it can't be read as promtool's test file: %w", err)
+	}
+	if err := plain(&doc); err != nil {
 		return err
 	}
 	var f struct {
@@ -165,6 +173,36 @@ func Bound(b []byte) error {
 		}
 		if latest/every > MaxSteps {
 			return fmt.Errorf("test %d: evaluated %d times, every %s to its latest eval_time: %d at most", i+1, latest/every, every, MaxSteps)
+		}
+	}
+	return nil
+}
+
+// plain refuses what YAML could read past what is written, which this
+// package's YAML (yaml.v3) and promtool's (yaml.v2, read strictly) read
+// otherwise, so that what Bound counts is what promtool loads: a merge
+// (<<), which v2 applies where it stands, a later one over the keys
+// before it, and v3 under the mapping's own keys (values: '1', then <<:
+// {values: '0+0x100000000'}, is a value to one and a hundred million to
+// the other); an anchor or an alias; a tag, but !!str on a text, as both
+// read it. rules.ParseAdded holds an added rule to the same (plainNodes).
+// An operator's test files are the operator's, and may use them: Bound
+// reads an agent's alone.
+func plain(n *yaml.Node) error {
+	switch {
+	case n.Kind == yaml.AliasNode, n.Anchor != "":
+		return fmt.Errorf("line %d: an anchor or an alias isn't read in a test file sent: write it out", n.Line)
+	case n.Style&yaml.TaggedStyle != 0 && (n.Kind != yaml.ScalarNode || n.ShortTag() != "!!str"):
+		return fmt.Errorf("line %d: a tag isn't read in a test file sent, but !!str on a text", n.Line)
+	}
+	for i, c := range n.Content {
+		// A merge is a mapping's key: <<, in any style, which promtool's
+		// YAML reads strictly as a merge or as a key no test file has.
+		if n.Kind == yaml.MappingNode && i%2 == 0 && c.Kind == yaml.ScalarNode && c.Value == "<<" {
+			return fmt.Errorf("line %d: a merge (<<) isn't read in a test file sent: write it out", c.Line)
+		}
+		if err := plain(c); err != nil {
+			return err
 		}
 	}
 	return nil

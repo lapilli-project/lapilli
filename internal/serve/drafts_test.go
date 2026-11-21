@@ -145,6 +145,13 @@ func TestTestExpectation(t *testing.T) {
 		"keeps the rule's name and group":         strings.Replace(rewrite("15m"), "alert: Errors", "alert: Other", 1),
 		"holds 2 rules":                           rewrite("15m") + "      - alert: Errors2\n        expr: up == 0\n",
 		"for and keep_firing_for are 48h at most": rewrite("72h"),
+		// Its labels and annotations, which promtool works out, held as an
+		// added rule's are.
+		"calls query":                  rewrite("15m") + "        annotations: {summary: '{{ with query \"up\" }}{{ . }}{{ end }}'}\n",
+		"isn't a template that parses": rewrite("15m") + "        annotations: {runbook_url: '{{ .Labels.x '}\n",
+		"can't grow":                   strings.Replace(rewrite("15m"), "{severity: page}", `{severity: '{{ reReplaceAll "a" "aa" (reReplaceAll "a" "aa" .Labels.x) }}'}`, 1),
+		// Its group's labels too, which Prometheus gives each alert.
+		"which would run PromQL": strings.Replace(rewrite("15m"), "  - name: shop\n", "  - name: shop\n    labels: {x: '{{ with query \"up\" }}{{ . }}{{ end }}'}\n", 1),
 	} {
 		if failed, text, _ := test(map[string]any{"rule": "Errors", "expectations": errorsHeld, "rewrite": bad}); !failed || !strings.Contains(text, want) {
 			t.Errorf("%s: %s", want, text)
@@ -263,6 +270,12 @@ func TestTestExpectationScenarios(t *testing.T) {
 		"values expand to more than 100000": strings.Replace(scenariotest.Test("pass"), "'0+10x20'",
 			"'{{buckets:["+strings.TrimSpace(strings.Repeat("1 ", 2000))+"]}}+{{buckets:[1]}}x100'", 1),
 		"a key promtool's test files don't have": "rule_files: [x]\nnot_promtool: 1\ntests: [{name: pass}]\n",
+		// A merge after the series' own values, and after its eval_time:
+		// promtool's YAML lets it override them, a hundred million values
+		// and steps, not those counted.
+		"line 9: a merge (<<) isn't read":  strings.Replace(scenariotest.Test("pass"), "values: '0+10x20'\n", "values: '0+10x20'\n        <<: {values: '0+0x100000000'}\n", 1),
+		"line 11: a merge (<<) isn't read": strings.Replace(scenariotest.Test("pass"), "eval_time: 10m\n", "eval_time: 10m\n        <<: {eval_time: 100000000h}\n", 1),
+		"an anchor or an alias isn't read": strings.Replace(scenariotest.Test("pass"), "values: '0+10x20'\n", "values: &v '0+10x20'\n      - {series: up, values: *v}\n", 1),
 	} {
 		failed, text := call(t, agent, "test_expectation", map[string]any{"rule": "Errors", "expectations": held, "tests": map[string]any{"tests/errors.yaml": test}}, &out)
 		if !failed || !strings.Contains(text, want) {

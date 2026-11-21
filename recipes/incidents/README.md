@@ -16,7 +16,19 @@ form `--incidents` takes:
 | `firehydrant.sh` | FireHydrant | `FIREHYDRANT_TOKEN_FILE`; `SINCE` |
 
 They need `sh`, `curl` and `jq`. Tokens are read from files and passed to `curl`
-on stdin, so `ps` doesn't show them. Give them read-only access.
+on stdin, so `ps` doesn't show them. Give them read-only access. A token file
+holds the token alone, on one line: PagerDuty's, incident.io's, Grafana IRM's,
+Rootly's and FireHydrant's, which go in a header as they are, of the
+characters a Bearer token is written in (letters, digits and `- . _ ~ + / =`);
+Jira's and Compass's, which Atlassian says nothing of and which go base64'd
+with the email, with no space. Spaces, tabs and a carriage return after the
+token, as an editor may leave them, are dropped; inside it they are refused,
+as is a second line. The address a token goes to (`JIRA_URL`, `JSM_API`,
+`GRAFANA_URL`, or the API a script asks, which `PAGERDUTY_API` and the like
+change) is `https://`, or this machine's over `http://` for tests
+(`127.0.0.1`, `[::1]` or `localhost`, with a port or not), and `curl` speaks
+no other scheme; the scheme may be in capitals. One with a user or token
+before `@` is refused. Neither the token nor the address is said.
 
 `pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, for
 Jira Service Management's incidents given `JSM_CLOUD_ID`, `jira.sh` also
@@ -151,8 +163,9 @@ others as its labels; the `details` you set are among them too, so
 
 An issue the incident API answers 400 for isn't an incident, as it says,
 and has no alerts read; an alert the operations API no longer has (404)
-is left out. Each is counted on stderr. Anything else it answers stops
-the script with nothing written; a 429 is waited out as its `Retry-After`
+is left out. Each is counted on stderr. Anything else it answers, and a
+page of alerts it gave before, stops the script with nothing written; a
+429 is waited out as its `Retry-After`
 says, two minutes at most, five times a request and ten minutes a run.
 `ALERTS=no` reads none.
 
@@ -185,11 +198,11 @@ These four were written from each tool's API reference: Compass's
 operations API, Grafana IRM's incident API (`IncidentsService.QueryIncidents`,
 a service account token), Rootly's `GET /v1/incidents` and FireHydrant's
 `GET /v1/incidents` (a bot token). Where a reference shows a shape two ways,
-both are read. Rootly takes five requests a minute: a 429 is waited out as
-its `Retry-After` says, five times at most. FireHydrant takes 50 an
-account every 10 seconds: a 429 is waited out as its `Retry-After` says
-too, two minutes at most a wait, five waits a request and ten minutes a
-run. Rootly and FireHydrant number
+both are read. Rootly takes five requests a minute, and FireHydrant 50 an
+account every 10 seconds: a 429 is waited out as its `Retry-After` says (or
+else a minute for Rootly, and 5 seconds, then twice as long each time, for
+FireHydrant), two minutes at most a wait, five waits a request and ten
+minutes a run. Rootly and FireHydrant number
 their pages with no order of their own, so an incident on two pages is one.
 
 FireHydrant's alerts are those `GET /v1/incidents/{incident_id}/alerts`
@@ -265,7 +278,10 @@ exits non-zero.
 The port takes one write at a time, 20 a second, with bursts of 40; past that it
 answers 429, and `put.sh` waits and tries again. The ledger keeps 20,000 copied
 incidents at most. A script stops after `MAX_PAGES` pages
-(1000), or when the tool gives the same page again, and then writes nothing.
+(1000), when the tool gives the same page again, or at an answer over 16 MiB,
+and then writes nothing. `curl` before 8.4 holds to that bound only an answer
+that says its length (`Content-Length`); a chunked one it reads whole. Use
+`curl` 8.4 or later.
 
 In the chart:
 

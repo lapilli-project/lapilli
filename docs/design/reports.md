@@ -97,7 +97,10 @@ names:
 
 A Slack-style incoming webhook is what Slack, Mattermost and Rocket.Chat
 take, and what others take through their own automations, so this is no one
-chat's feature.
+chat's feature. What is escaped is Slack's markup alone: Mattermost,
+Rocket.Chat and Google Chat read mentions (`@channel`, `@all`) and Markdown
+links of their own, which a rule's name or an incident's title can hold
+(docs/serve.md says so).
 
 ## Sending
 

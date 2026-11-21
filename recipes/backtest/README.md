@@ -74,7 +74,24 @@ And, as wanted:
   expectations the rules in place are held to. `INCIDENTS` is the
   target's own, as it is now: a pull request branched from before an
   incident was written down is judged by it all the same. Each script
-  defaults it from its CI.
+  defaults it from its CI. `HEAD^1`, given or not, however written
+  (`HEAD~1`, `HEAD^`, its hash in any case or short, `HASH^0`, the
+  branch's `NAME~1`, as git resolves it; a branch's name alone, such as
+  `main`, is the branch the job named), is a merge's first parent, taken
+  only of the CI's merge: `HEAD^2` the pull request's head as the CI says
+  (GitHub's `pull_request.head.sha`), or, where it says none, `HEAD` a
+  merge. Of the pull request's own commit, such as GitHub Actions' checkout
+  of `pull_request.head.sha`, a merge of its own among them (an "Update
+  branch"), it is the pull request's own earlier commit, so with no
+  `TARGET_BRANCH` the branch the CI says the pull request goes into is
+  taken (GitHub's `GITHUB_BASE_REF`, with `fetch-depth: 0`), and, where it
+  says none, a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
+  `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS` is refused, and the job
+  fails: give `TARGET` or `TARGET_BRANCH`, or check out the merge. A
+  `TARGET` the job gives where the CI says what the pull request goes into
+  (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
+  Azure's pull request builds) is the job's, and taken as it is, as one
+  the script takes from the CI is.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
@@ -140,9 +157,13 @@ And, as wanted:
   `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` or `CI_COMMIT_SHA`,
   `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,
   or `HEAD` when it isn't a merge, and sets it only when that is the
-  commit read or a parent of it. `STATUS_URL` links elsewhere, https. A
-  status the host refuses is said in the job's log, and fails the job
-  only with `FAIL_ON_ERROR=true`. The token needs more for it
+  commit read or a parent of it, never the commit the pull request goes
+  into nor the one compared against. `STATUS_URL` links elsewhere, https,
+  or http to this machine. A status is a commit's, not a pull request's:
+  two pull requests of one branch into two bases, each with its job, set
+  the same status on the same commit, the last one's standing for both;
+  give each its own `KEY`. A status the host refuses is said in the job's
+  log, and fails the job only with `FAIL_ON_ERROR=true`. The token needs more for it
   ([Stopping a merge](../../docs/pr-backtests.md#stopping-a-merge) has
   each host's API and scopes).
 

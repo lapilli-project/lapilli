@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -257,7 +258,7 @@ func TestBacktestRecipeFailMissed(t *testing.T) {
 		{[]string{"PATHS=alerts", "FAIL_MISSED=true", "LAPILLI_SERVE=https://lapilli-ci.example.com"}, nil, "FAIL_MISSED: lapilli serve's report doesn't say yet"},
 		{[]string{"PATHS=alerts", "STATUS=yes"}, nil, "STATUS yes: want true or false"},
 		{[]string{"PATHS=alerts", "STATUS=true", "STATUS_SHA=abc123"}, nil, "STATUS_SHA abc123: want the commit's full hash"},
-		{[]string{"PATHS=alerts", "STATUS=true", "STATUS_URL=http://ci.example.com/job/1"}, nil, "STATUS_URL http://ci.example.com/job/1: want an https URL"},
+		{[]string{"PATHS=alerts", "STATUS=true", "STATUS_URL=http://ci.example.com/job/1"}, nil, "STATUS_URL http://ci.example.com/job/1: want an https URL, or http to this machine, of 255 characters at most"},
 		{[]string{"PATHS=alerts", "STATUS_SHA=" + strings.Repeat("ab", 20)}, nil, "STATUS_SHA is for the commit status: give STATUS=true too"},
 	} {
 		out, err := rr.run(c.settings, append([]string{"--prometheus", prom.URL}, c.args...)...)
@@ -284,5 +285,204 @@ func TestBacktestActionStatus(t *testing.T) {
 		"fail-missed": "true", "status": "true"}, ci...)
 	if st, n := rr.host.lastStatus(); err == nil || n != 1 || st.SHA != sha || st.State != "failure" || !strings.Contains(st.Text, "FAIL_MISSED=true") {
 		t.Errorf("%v: %d, %+v\n%s", err, n, st, out)
+	}
+}
+
+// A checkout of the pull request's own commit, as actions/checkout with
+// ref: pull_request.head.sha makes, has TARGET HEAD^1, its default, the
+// pull request's own earlier commit: of two commits, the rule change and
+// another, nothing changed against it, the gate passed and a status of
+// success was set, INCIDENTS read from the pull request. GitHub's branch
+// the pull request goes into (GITHUB_BASE_REF) is taken instead now, and,
+// with none, a gate or a status is refused. Of a merge, the status goes
+// on the pull request's parent alone, never the commit it goes into.
+func TestBacktestRecipeOwnParent(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	repo.git("remote", "add", "origin", repo.dir)
+	repo.git("fetch", "--quiet", "origin")
+	// The pull request: its first commit holds CheckoutErrors to 2h, which
+	// then catches INC-7 no more; its second touches nothing that matters.
+	repo.git("checkout", "--quiet", "-B", "pr")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "hold CheckoutErrors longer")
+	repo.write(map[string]string{"README.md": "docs\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "docs")
+	sha := repo.git("rev-parse", "HEAD")
+	repo.git("checkout", "--quiet", "--detach", sha)
+	h := backtestHosts[0] // github
+	rr := newRecipeRun(t, h, repo)
+	ci, _ := headOf(t, h.kind, sha)
+	rr.env = append(rr.env, ci...)
+	settings := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_MISSED=true"}
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+
+	// TARGET left at HEAD^1, or given so as the action gives it, and no
+	// branch the CI says: refused, never a success.
+	for _, given := range [][]string{nil, {"TARGET=HEAD^1"}} {
+		before := len(rr.host.statuses)
+		out, err := rr.run(append(slices.Clone(settings), given...), args...)
+		st, n := rr.host.lastStatus()
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State == "success" {
+			t.Errorf("%v: %v, status %+v\n%s", given, err, st, out)
+		}
+	}
+	// Without a gate or a status, compared as before.
+	if out, err := rr.run([]string{"PATHS=alerts"}, args...); err != nil || strings.Contains(out, "own commit") {
+		t.Errorf("no gate: %v\n%s", err, out)
+	}
+	// GitHub's base branch: compared with main, INC-7 lost, a failure.
+	out, err := rr.run(append(slices.Clone(settings), "GITHUB_BASE_REF=main"), args...)
+	st, _ := rr.host.lastStatus()
+	if err == nil || st.State != "failure" || st.SHA != sha || !strings.Contains(out, "compared with the branch it goes into, main") ||
+		!strings.Contains(out, "caught by no rule") {
+		t.Errorf("GITHUB_BASE_REF: %v, status %+v\n%s", err, st, out)
+	}
+	if out, err := rr.run(append(slices.Clone(settings), "GITHUB_BASE_REF=main;x"), args...); err == nil || !strings.Contains(out, "isn't one taken as TARGET_BRANCH") {
+		t.Errorf("a branch not taken: %v\n%s", err, out)
+	}
+
+	// A merge of it into main, the status asked for on main's commit: not
+	// the pull request's, none set.
+	repo.git("checkout", "--quiet", "--detach", "main")
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
+	main := repo.git("rev-parse", "main")
+	before := len(rr.host.statuses)
+	out, err = rr.run(append(slices.Clone(settings), "STATUS_SHA="+main), args...)
+	if _, n := rr.host.lastStatus(); n != before || !strings.Contains(out, "is the commit the pull request goes into") {
+		t.Errorf("a status on the commit it goes into: %v, %d statuses\n%s", err, n-before, out)
+	}
+	// Its parent that is the pull request's, linking to a page on this
+	// machine, which STATUS_URL takes over http as it says.
+	out, err = rr.run(append(slices.Clone(settings), "STATUS_URL=http://127.0.0.1:8080/job/1"), args...)
+	if st, _ := rr.host.lastStatus(); err == nil || !strings.Contains(out, "set the commit status lapilli/backtest on "+sha+": failure") || st.URL != "http://127.0.0.1:8080/job/1" {
+		t.Errorf("a merge: %v, status %+v\n%s", err, st, out)
+	}
+}
+
+// A pull request's head that is a merge of its own (GitHub's "Update
+// branch", a merge --no-ff), checked out as it is (ref:
+// pull_request.head.sha), has two parents: HEAD^1 is its own earlier
+// commit, which the parents alone didn't tell from GitHub's merge. HEAD is
+// the event's head, so GITHUB_BASE_REF is taken. A TARGET of HEAD's first
+// parent written otherwise (HEAD~1, HEAD^, its hash) is too; and STATUS
+// alone, refused, fails the job, never a success.
+func TestBacktestRecipeOwnParentMerged(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	repo.git("remote", "add", "origin", repo.dir)
+	repo.git("fetch", "--quiet", "origin")
+	repo.git("checkout", "--quiet", "-B", "side", "main")
+	repo.write(map[string]string{"NOTES.md": "x\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "side")
+	// The pull request: the rule change, then a merge of the side branch.
+	repo.git("checkout", "--quiet", "-B", "pr", "main")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "hold CheckoutErrors longer")
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", "side")
+	sha := repo.git("rev-parse", "HEAD")
+	parent := repo.git("rev-parse", "HEAD^1")
+	repo.git("checkout", "--quiet", "--detach", sha)
+	h := backtestHosts[0] // github
+	rr := newRecipeRun(t, h, repo)
+	ci, _ := headOf(t, h.kind, sha)
+	rr.env = append(rr.env, ci...)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_MISSED=true"}
+	for _, target := range []string{"", "TARGET=HEAD^1", "TARGET=HEAD~1", "TARGET=HEAD^", "TARGET=" + parent} {
+		settings := append(slices.Clone(gates), "GITHUB_BASE_REF=main")
+		if target != "" {
+			settings = append(settings, target)
+		}
+		out, err := rr.run(settings, args...)
+		st, _ := rr.host.lastStatus()
+		if err == nil || st.State != "failure" || st.SHA != sha || !strings.Contains(out, "compared with the branch it goes into, main") ||
+			!strings.Contains(out, "caught by no rule") {
+			t.Errorf("%q: %v, status %+v\n%s", target, err, st, out)
+		}
+	}
+	// No base branch: refused, the job failed, with a gate or STATUS alone.
+	for _, settings := range [][]string{gates, {"PATHS=alerts", "STATUS=true"}, {"PATHS=alerts", "STATUS=true", "TARGET=HEAD~1"}} {
+		before := len(rr.host.statuses)
+		out, err := rr.run(slices.Clone(settings), args...)
+		st, n := rr.host.lastStatus()
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State != "failure" {
+			t.Errorf("%v: %v, status %+v\n%s", settings, err, st, out)
+		}
+	}
+	// GitHub's own merge of it into main: HEAD^2 the event's head, HEAD^1
+	// main's commit, taken as it is.
+	repo.git("checkout", "--quiet", "--detach", "main")
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
+	out, err := rr.run(slices.Clone(gates), args...)
+	if st, _ := rr.host.lastStatus(); err == nil || st.State != "failure" || st.SHA != sha || strings.Contains(out, "compared with the branch") ||
+		!strings.Contains(out, "caught by no rule") {
+		t.Errorf("GitHub's merge: %v, status %+v\n%s", err, st, out)
+	}
+}
+
+// A TARGET is HEAD's first parent however it is written, as git resolves
+// it: a hash of it in capitals or short, HASH^0, HASH~0, the branch's
+// name~1. With the event's head and no base branch, each is refused, never
+// a success. A TARGET the job gives where the CI says what the pull
+// request goes into (Gitea's Actions), the base's hash, which a pull
+// request of one commit's HEAD^1 is, is the job's, and taken.
+func TestBacktestRecipeTargetForms(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	base := repo.git("rev-parse", "main")
+	repo.git("checkout", "--quiet", "-B", "pr")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "hold CheckoutErrors longer")
+	one := repo.git("rev-parse", "HEAD")
+	repo.write(map[string]string{"README.md": "docs\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "docs")
+	sha := repo.git("rev-parse", "HEAD")
+	parent := repo.git("rev-parse", "HEAD^1")
+	repo.git("checkout", "--quiet", "--detach", sha)
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	ci, _ := headOf(t, "github", sha)
+	rr.env = append(rr.env, ci...)
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_MISSED=true"}
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	for _, target := range []string{strings.ToUpper(parent), parent[:12], parent + "^0", parent + "~0", "pr~1"} {
+		before := len(rr.host.statuses)
+		out, err := rr.run(append(slices.Clone(gates), "TARGET="+target), args...)
+		st, n := rr.host.lastStatus()
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State != "failure" {
+			t.Errorf("TARGET=%s: %v, status %+v\n%s", target, err, st, out)
+		}
+	}
+	// Gitea's Actions, the pull request of one commit checked out, TARGET
+	// the base's hash.
+	repo.git("checkout", "--quiet", "--detach", one)
+	gt := newRecipeRun(t, backtestHosts[1], repo)
+	gci, _ := headOf(t, "gitea", one)
+	gt.env = append(gt.env, gci...)
+	if out, err := gt.run([]string{"PATHS=alerts", "STATUS=true", "TARGET=" + base}, args...); err != nil || strings.Contains(out, "own commit") {
+		t.Errorf("Gitea, TARGET the base's hash: %v\n%s", err, out)
+	}
+	// Left at HEAD^1 there, the branch it goes into not said, it is
+	// refused all the same.
+	if out, err := gt.run([]string{"PATHS=alerts", "STATUS=true"}, args...); err == nil || !strings.Contains(out, "own commit") {
+		t.Errorf("Gitea, TARGET left at HEAD^1: %v\n%s", err, out)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/ledger"
@@ -57,6 +58,19 @@ const (
 	// activityMost is the most an export gives at once: past it, it says
 	// where to go on from.
 	activityMost = 1000
+	// activityBatch is how many changes, with their before and after, a
+	// request asks the ledger for at once.
+	activityBatch = 200
+	// activityExports is how many exports are written out at once: each
+	// holds its answer, activityBytes and a change at most, until its
+	// reader has read it.
+	activityExports = 4
+	// activitySmall is the most changes an export takes no export's turn
+	// for: activitySmallBytes at most of its answer, and activitySmalls
+	// such at once, of all its readers, turns of their own.
+	activitySmall      = 50
+	activitySmallBytes = 1 << 20
+	activitySmalls     = 16
 	// activityScan is how many changes a request looks through for those
 	// of a team, or those its reader may read, before it says where it
 	// stopped, so that a filter that matches little reads no more than
@@ -67,6 +81,19 @@ const (
 	// changes asks the ledger this many rows at most besides.
 	activityLookups = 200
 )
+
+// activityBytes is how much of the changes' text, who, what, before and
+// after, a page or an export holds at most: past it, it ends at the change
+// before and says where to go on from, so that a thousand changes of an
+// incident's labels and alerts, tens of megabytes, are a few pages. A
+// change bigger than it alone is given whole, as the first of its page.
+var activityBytes = 8 << 20
+
+// changeText is how much of a change's text a page holds.
+func changeText(c ledger.LogEntry) int { return len(c.By) + len(c.What) + len(c.Before) + len(c.After) }
+
+// readActivity is the ledger's Activity; replaced in tests, to count.
+var readActivity = (*ledger.Ledger).Activity
 
 // errLookedUp is a request of a team's changes past activityLookups.
 var errLookedUp = errors.New("looked up as many tasks and proposals as a request may")
@@ -140,9 +167,10 @@ func (s *Server) activityAsked(ctx context.Context, q url.Values) (activityAsk, 
 }
 
 // activityRead is a page of the activity log: its changes, the latest
-// first; where the next page goes on from (zero for none); and Cut, that
-// the request looked through activityScan changes without filling the
-// page, so that more may be past Next.
+// first, limit of them or activityBytes of their text at most; where the
+// next page goes on from (zero for none); and Cut, that the request looked
+// through activityScan changes without filling the page, so that more may
+// be past Next.
 type activityRead struct {
 	Changes []ledger.LogEntry
 	Next    ledger.ActivityCursor
@@ -217,14 +245,28 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 		return false, nil
 	}
 	q := a.q
-	q.Limit = max(limit+1, 200)
 	// A team's changes are a few of those looked through: each one's before
-	// and after are read once it is kept, not for every one looked at.
+	// and after are read once it is kept, not for every one looked at, a
+	// batch at a time, until activityBytes. Every change's otherwise. A
+	// batch a read either way, as a bulk verdict's after, which says its
+	// rules, is read with each looked through.
 	q.Light = a.team != ""
+	q.Limit = activityBatch
+	held := 0 // the text of the changes kept
 	done := func() (activityRead, error) {
 		if q.Light {
-			if err := s.l.ActivityBodies(ctx, out.Changes); err != nil {
-				return out, err
+			for i := 0; i < len(out.Changes); i += activityBatch {
+				part := out.Changes[i:min(i+activityBatch, len(out.Changes))]
+				if err := s.l.ActivityBodies(ctx, part); err != nil {
+					return out, err
+				}
+				for j, c := range part {
+					if held += changeText(c); held > activityBytes && i+j > 0 {
+						out.Changes = out.Changes[:i+j]
+						out.Next, out.Cut = out.Changes[i+j-1].Cursor(), false
+						return s.activitySaid(out, adminReads, l), nil
+					}
+				}
 			}
 		}
 		return s.activitySaid(out, adminReads, l), nil
@@ -232,7 +274,7 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 	scanned := 0
 	last := q.Before // the last change looked at
 	for {
-		got, err := s.l.Activity(ctx, q)
+		got, err := readActivity(s.l, ctx, q)
 		if err != nil {
 			return out, err
 		}
@@ -254,10 +296,13 @@ func (s *Server) activity(ctx context.Context, a activityAsk, limit int, adminRe
 			if !ok {
 				continue
 			}
-			if len(out.Changes) == limit {
-				// One more than the page: the page ends at its last.
-				out.Next = out.Changes[limit-1].Cursor()
+			if len(out.Changes) == limit || !q.Light && len(out.Changes) > 0 && held+changeText(c) > activityBytes {
+				// One more than the page holds: the page ends at its last.
+				out.Next = out.Changes[len(out.Changes)-1].Cursor()
 				return done()
+			}
+			if !q.Light {
+				held += changeText(c)
 			}
 			out.Changes = append(out.Changes, c)
 		}
@@ -471,9 +516,35 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("format %q: want json or csv", format))
 		return
 	}
+	// Written out a few at a time (activityExports): an export holds its
+	// answer until its reader has read it, which one who doesn't read makes
+	// take until the write's deadline, and its turn with it, so that what
+	// such readers make serve hold is that of a few exports, not of each
+	// one sent. The turn is one of the exports' own, not of the pages':
+	// those readers keep no page from being worked out. A person has one
+	// export at a time, so that one viewer can't hold every turn; a small
+	// one (activitySmall changes at most) takes a turn of the small ones'
+	// (activitySmalls), not an export's, and holds activitySmallBytes at
+	// most: many addresses, an IPv6 network's, hold no more than they.
+	most, turns := activityBytes, s.exports
+	if limit <= activitySmall {
+		most, turns = activitySmallBytes, s.smallExports
+	}
+	ex, err := takeTurn(r.Context(), turns)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer ex.give()
+	done, ok := s.exportOf(r)
+	if !ok {
+		s.oops(w, r, errPagesBusy)
+		return
+	}
+	defer done()
 	// Worked out as a page is, a few at a time (pageRenders): it takes a
-	// page's turn, and gives it back once the answer is written out, before
-	// it goes to the network.
+	// page's turn too, and gives it back once the answer is written out,
+	// before it goes to the network.
 	tn, err := s.renderTurn(r.Context())
 	if err != nil {
 		s.oops(w, r, err)
@@ -488,60 +559,123 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 	// Who did what is read as it is now: never kept by a browser or a
 	// proxy between.
 	w.Header().Set("Cache-Control", "no-store")
-	next := ""
-	if got.Next.ID != 0 {
-		nq := url.Values{}
-		for k, v := range q {
-			nq[k] = v
-		}
-		nq.Set("before", got.Next.String())
-		next = "/api/v1/activity?" + nq.Encode()
-	}
-	// Written out whole, then the turn given back, then sent.
+	// Written out whole, then the page's turn given back, then sent, the
+	// export's turn held until it is. The answer is held to most bytes as
+	// written, not as kept: JSON writes < > & and U+2028 as six bytes each,
+	// and CSV a quote as two. A change past them ends it, but the first,
+	// which is given whole, and the answer says where to go on from.
 	var body bytes.Buffer
+	nextAt, cut := got.Next, got.Cut
+	fits := func(i, was int) bool {
+		if i == 0 || body.Len() <= most {
+			return true
+		}
+		body.Truncate(was)
+		nextAt, cut = got.Changes[i-1].Cursor(), false
+		return false
+	}
 	if format == "csv" {
-		if next != "" {
-			w.Header().Set("Link", "<"+next+`>; rel="next"`)
+		cw := csv.NewWriter(&body)
+		cw.Write([]string{"id", "at", "by", "kind", "what", "before", "after"})
+		cw.Flush()
+		for i, c := range got.Changes {
+			was := body.Len()
+			cw.Write([]string{strconv.FormatInt(c.ID, 10), c.At.UTC().Format(time.RFC3339), csvCell(c.By), c.Kind, csvCell(c.What), csvCell(c.Before), csvCell(c.After)})
+			if cw.Flush(); !fits(i, was) {
+				break
+			}
+		}
+		if nextAt.ID != 0 {
+			w.Header().Set("Link", "<"+s.activityNext(q, nextAt)+`>; rel="next"`)
 		}
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="lapilli-activity.csv"`)
-		cw := csv.NewWriter(&body)
-		cw.Write([]string{"id", "at", "by", "kind", "what", "before", "after"})
-		for _, c := range got.Changes {
-			cw.Write([]string{strconv.FormatInt(c.ID, 10), c.At.UTC().Format(time.RFC3339), csvCell(c.By), c.Kind, csvCell(c.What), csvCell(c.Before), csvCell(c.After)})
-		}
-		cw.Flush()
 	} else {
-		out := struct {
-			Activity []apiLogged `json:"activity"`
-			Next     string      `json:"next,omitempty"`
-			Cut      bool        `json:"cut,omitempty"`
-		}{Activity: []apiLogged{}, Cut: got.Cut}
-		if got.Next.ID != 0 {
-			out.Next = got.Next.String()
+		// Written a change at a time, as encoding/json would write the
+		// whole, not indented: a change's before and after are JSON of
+		// their own, which an indent made a third bigger.
+		body.WriteString(`{"activity":[`)
+		for i, c := range got.Changes {
+			was := body.Len()
+			b, err := json.Marshal(apiLogged{c.ID, c.At.UTC(), c.By, c.Kind, c.What, rawOf(c.Before), rawOf(c.After)})
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			if i > 0 {
+				body.WriteByte(',')
+			}
+			if body.Write(b); !fits(i, was) {
+				break
+			}
 		}
-		for _, c := range got.Changes {
-			out.Activity = append(out.Activity, apiLogged{c.ID, c.At.UTC(), c.By, c.Kind, c.What, rawOf(c.Before), rawOf(c.After)})
+		body.WriteByte(']')
+		if nextAt.ID != 0 {
+			n, _ := json.Marshal(nextAt.String())
+			body.WriteString(`,"next":`)
+			body.Write(n)
 		}
+		if cut {
+			body.WriteString(`,"cut":true`)
+		}
+		body.WriteString("}\n")
 		w.Header().Set("Content-Type", "application/json")
-		enc := json.NewEncoder(&body)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(out); err != nil {
-			s.oops(w, r, err)
-			return
-		}
 	}
+	got.Changes = nil
 	tn.give()
+	// A reader who doesn't read holds the export's turn as long as a page
+	// too big to keep may take to go out (spillWithin), not the server's
+	// WriteTimeout.
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(spillWithin))
 	w.Write(body.Bytes())
+}
+
+// activityNext is the export's link to the page after the one that ends at
+// c, with the same query.
+func (s *Server) activityNext(q url.Values, c ledger.ActivityCursor) string {
+	nq := url.Values{}
+	for k, v := range q {
+		nq[k] = v
+	}
+	nq.Set("before", c.String())
+	return "/api/v1/activity?" + nq.Encode()
+}
+
+// exportOf marks an export as its reader's: the person, as signed in, or
+// the address it came from for anyone not named; false when they have one
+// going already. done ends it.
+func (s *Server) exportOf(r *http.Request) (done func(), ok bool) {
+	who := "user\x00" + ledger.FoldName(s.user(r))
+	if s.user(r) == "anonymous" {
+		who = "addr\x00" + clientAddr(r)
+	}
+	s.exporting.Lock()
+	defer s.exporting.Unlock()
+	if s.exporting.by == nil {
+		s.exporting.by = map[string]bool{}
+	}
+	if s.exporting.by[who] {
+		return nil, false
+	}
+	s.exporting.by[who] = true
+	return func() {
+		s.exporting.Lock()
+		delete(s.exporting.by, who)
+		s.exporting.Unlock()
+	}, true
 }
 
 // csvCell is a cell of the CSV export a spreadsheet won't take for a
 // formula (CSV injection, OWASP): one that starts with =, +, -, @, a tab
 // or a carriage return, or their full-width forms, after any spaces, starts
-// with ' instead, which a spreadsheet shows as text. Who and what come
-// from people: a name, a title, a rule's.
+// with ' instead, which a spreadsheet shows as text. A space is any of
+// Unicode's (a no-break space, an ideographic one) and those of no width,
+// as a spreadsheet may take them off before it reads the cell. Who and
+// what come from people: a name, a title, a rule's.
 func csvCell(v string) string {
-	t := strings.TrimLeft(v, " ")
+	t := strings.TrimLeftFunc(v, func(r rune) bool {
+		return unicode.Is(unicode.Zs, r) || r == '\u200b' || r == '\u200c' || r == '\u200d' || r == '\u2060' || r == '\ufeff'
+	})
 	if t == "" {
 		return v
 	}

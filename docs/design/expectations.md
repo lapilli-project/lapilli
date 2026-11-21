@@ -554,7 +554,11 @@ Step 3, drafts, as built:
 - **A rewrite** is one alert rule, as `compare` takes one (a Prometheus
   rule, `for` and `keep_firing_for` 48h at most, an interval of an hour
   at most), keeping the rule's name and group; where several share both,
-  the labels given pick it. A warning split from a critical is two rules,
+  the labels given pick it. Its labels and annotations, and its group's
+  labels, which Prometheus gives each of the group's alerts, all of which
+  promtool works out each time it fires in a scenario, are held as an
+  added rule's are: templates that parse, call no query and can't grow without bound.
+  A warning split from a critical is two rules,
   one of them new: adding a rule is step 5's. It is posted (`post`) only
   when the rule as it is and rewritten were each replayed to the end, it
   is held to one expectation at least, meets each, and loses no incident
@@ -612,12 +616,24 @@ Step 3, drafts, as built:
   nor anything but values notation (a quote or a lone brace would have
   promtool read labels there). Each is plain text: a tag such as
   `!!binary`, which promtool's YAML would decode into another text, is
-  refused. An agent's scenarios run one at a time across serve, whatever
+  refused. So is what YAML reads past what is written, anywhere in the
+  file, as an added rule's (`plainNodes`): a merge (`<<`), which
+  promtool's YAML (yaml.v2, read strictly) applies where it stands, a
+  later one over the keys before it, where Lapilli's (yaml.v3) keeps the
+  mapping's own (`values: '1'` then `<<: {values: '0+0x100000000'}` was a
+  value counted and a hundred million loaded); an anchor or an alias; a
+  tag but `!!str` on a text. An operator's test files, read from where
+  `--expect` or `--config` is, or by `lapilli verdict` in a pull request's
+  checkout, may use them: they are the operator's, or the pull request's,
+  run with the memory cap, as before. An agent's scenarios run one at a time across serve, whatever
   else holds the comparison's turn (another agent's running, one is not
   run, saying so), and each waits for promtool's one turn, which a
   round's scenario may hold (step 4), within the check's deadline.
 - **Accepting** is an approver's, in a browser, as approving a proposal is
-  (same site, no bearer token, `--changes` on, the page's form). Where
+  (same site, no bearer token, `--changes` on, the page's form), asked
+  again as it is accepted: an approver of every team, or of the one team
+  that owns the rule now, whatever the form's key, which says only who saw
+  the page. Where
   serve's expectations come from `--expect`, with the change recipes'
   token, and the draft holds no scenario (whose test file is another
   file), it goes **the git path**: the file is read again, the draft taken
@@ -696,8 +712,12 @@ Step 4, scenarios, as built:
   its own (`lapilli-promtool-capped`, never a command a person gives,
   which reads promtool's path and the cap from its environment and refuses
   any other argument or variable), which sets RLIMIT_DATA, hard and soft,
-  to the cap and executes promtool in its place with the same fixed
-  arguments and `TMPDIR` alone. Past it promtool's allocations fail, Go's
+  to the cap, and RLIMIT_FSIZE to 256 MiB, as much as the chart's
+  `scenarios-tmp` volume holds (promtool keeps its TSDB in `TMPDIR`; Go
+  ignores SIGXFSZ, so a write to one file past it fails, EFBIG, and the
+  test with it; the volume's `sizeLimit` bounds all of them), and executes
+  promtool in its place with the same
+  fixed arguments and `TMPDIR` alone. Past it promtool's allocations fail, Go's
   runtime says so, and the scenario is not known (`promtool took more
   memory than it may`). RLIMIT_DATA rather than RLIMIT_AS: since Linux 4.7
   it holds every private writable mapping, Go's heap among them, while

@@ -663,6 +663,14 @@ func TestNoteTeamAdminsOnly(t *testing.T) {
 	if o, _ := s.owners(ctx); o.byID[o.owner("PayDown")].Name != "payments" {
 		t.Fatalf("PayDown is %s's", o.byID[o.owner("PayDown")].Name)
 	}
+	// Nor is the note deleted there, which takes PayDownOld out of
+	// checkout: an admin's.
+	if code, _, _ := ui(t, h, http.MethodPost, "/orphans/delete", rob, "same-origin", url.Values{"rule": {"PayDownOld"}}); code != http.StatusForbidden {
+		t.Errorf("rob deleting a note of checkout's: %d", code)
+	}
+	if n, err := s.l.NoteOf(ctx, "PayDownOld"); err != nil || n.TeamID != checkout.ID {
+		t.Errorf("deleted by rob: %+v %v", n, err)
+	}
 	// So bo's proposal is payments's, and rob doesn't approve it.
 	id, _ := proposeSaysAs(t, h, bo, "PayDown")
 	if code, _ := approveAs(t, s, id, rob); code != http.StatusForbidden {
@@ -1111,5 +1119,40 @@ func TestTeamAddMovedByItsGroup(t *testing.T) {
 	}
 	if code, body := approveAs(t, s, id, quinn); code == http.StatusSeeOther || !strings.Contains(body, "propose it again") {
 		t.Errorf("quinn approving what is checkout's now: %d %s", code, zzMsg(body))
+	}
+}
+
+// Accepting a draft asks whether its person may approve its rule now:
+// a team's approver, of the team that owns it, or of every team. The
+// form's key, which says who saw the page, lets in no one an approver of
+// another team: one demoted, or who saw the form before.
+func TestDraftAcceptedByItsTeamsApprover(t *testing.T) {
+	ctx := context.Background()
+	s, _ := boundsServer(t, teamsConfig, nil)
+	h := s.Handler()
+	id, err := s.l.KeepDraft(ctx, ledger.ExpectDraft{Rule: "PayDown", Origin: ledger.DraftAgent, MadeBy: pat, Agent: true,
+		Text: "expectations:\n  - rule: PayDown\n    budget: {week: 10}\n", Target: ledger.DraftToNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := func(who string) int {
+		d, err := s.l.DraftByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, _, _ := ui(t, h, http.MethodPost, "/expectations/drafts/"+itoa(id)+"/accept", who, "same-origin", url.Values{"key": {s.draftFormKey(d, who)}})
+		return code
+	}
+	if code := accept("rob@example.com"); code != http.StatusForbidden {
+		t.Errorf("checkout's approver accepted payments' draft: %d", code)
+	}
+	if d, _ := s.l.DraftByID(ctx, id); d.State != ledger.DraftOpen {
+		t.Fatalf("accepted by another team's approver: %+v", d)
+	}
+	if code := accept("quinn@example.com"); code != http.StatusSeeOther {
+		t.Errorf("payments' approver: %d", code)
+	}
+	if d, _ := s.l.DraftByID(ctx, id); d.State != ledger.DraftAccepted || d.DecidedBy != "quinn@example.com" {
+		t.Errorf("accepted: %+v", d)
 	}
 }

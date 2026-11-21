@@ -616,6 +616,29 @@ func TestChartLinkedOnly(t *testing.T) {
 		if err != nil || strings.Count(out, "- --linked-only\n") != 1 {
 			t.Errorf("linkedOnly: %v\n%s", err, out)
 		}
+		// Quoted, as a values file may give it: "false" is no flag, which a
+		// template's if read as true.
+		out, err = helmTemplate(t, append(mode, "--set-string", "linkedOnly=false")...)
+		if err != nil || strings.Contains(out, "--linked-only") {
+			t.Errorf(`linkedOnly: "false": %v\n%s`, err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set-string", "linkedOnly=True")...)
+		if err != nil || strings.Count(out, "- --linked-only\n") != 1 {
+			t.Errorf(`linkedOnly: "True": %v\n%s`, err, out)
+		}
+		if out, err = helmTemplate(t, append(mode, "--set-string", "linkedOnly=no")...); err == nil || !strings.Contains(out, `linkedOnly: true or false, not "no"`) {
+			t.Errorf(`linkedOnly: "no": %v\n%s`, err, out)
+		}
+	}
+	// So are the two that let anyone in: "false" is neither.
+	out, err := helmTemplate(t, append(serveValues, "--set-string", "serve.everyoneAdmin=false", "--set", "serve.service.type=LoadBalancer",
+		"--set-string", "serve.exposeWithoutSignIn=false")...)
+	if err == nil || strings.Contains(out, "--everyone-admin") || !strings.Contains(out, "say it is meant with serve.exposeWithoutSignIn") {
+		t.Errorf(`everyoneAdmin and exposeWithoutSignIn: "false": %v\n%s`, err, out)
+	}
+	out, err = helmTemplate(t, append(serveValues, "--set-string", "serve.everyoneAdmin=false")...)
+	if err != nil || strings.Contains(out, "--everyone-admin") {
+		t.Errorf(`everyoneAdmin: "false": %v\n%s`, err, out)
 	}
 }
 

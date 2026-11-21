@@ -308,7 +308,8 @@ as the rules in effect have it, written to a file serve makes, the test
 file's `rule_files` rewritten to name that file alone: promtool is started
 directly, with no environment but its `TMPDIR`, in a process group of its
 own killed whole at 30s, 64 KiB of what it says at most, and, on Linux,
-`--promtool-memory` (256Mi unless given) of memory (its RLIMIT_DATA: a
+`--promtool-memory` (256Mi unless given) of memory, and files of 256 MiB
+at most (its RLIMIT_DATA and RLIMIT_FSIZE: a
 rule's annotation template can ask promtool for gigabytes; promtool's
 release, built without cgo, starts in less than 64Mi, while one built
 with cgo maps 8 MiB more for each of its threads, so give it 512Mi; macOS
@@ -459,7 +460,13 @@ the numbers as JSON and the report as `text`, for any chat or script to pass on.
 wrote, so escape it for where it goes; `slack_text` is it as the Slack digest
 posts it, with mentions and links escaped. The other fields that name things
 (`noisy_rules`, `spare_rules`, `sources`, `notifications.most_for_nothing`,
-`notifications.by_receiver`) are as written too: escape them as well.
+`notifications.by_receiver`) are as written too: escape them as well. Only
+Slack's markup is escaped in what Lapilli posts to a Slack-style webhook
+(`<!channel>`, `<@U…>`, `<URL|text>`): a chat that takes one and reads markup
+of its own, such as Mattermost, Rocket.Chat or Google Chat, may read a
+mention (`@channel`, `@all`, `@here`) or a Markdown link (text in
+brackets, a URL after it in parentheses) in a rule's name or an
+incident's title as one, notifying a channel or linking elsewhere. Post there through something that escapes it for that chat.
 Over twelve weeks, the digest also names the rules that are spare.
 
 Reports go on schedules people set themselves, on the Reports page or with
