@@ -199,19 +199,52 @@ func TestBound(t *testing.T) {
 		{"tests:\n  - promql_expr_test:\n      - expr: up\n        exp_samples:\n          - {labels: 'up', histogram: '0+0x100000000'}\n", "test 1: line 5: values repeat 100000000 times"},
 		{"tests:\n  - input_series:\n      - {series: a, values: '0+1x60000'}\n    promql_expr_test:\n      - expr: up\n        exp_samples:\n          - {labels: 'up', histogram: '0+0x60000'}\n",
 			"expand to more than 100000 values in all"},
-		{"tests:\n  - promql_expr_test:\n      - expr: up\n        exp_samples:\n          - {labels: 'up', histogram: !!binary " + binary + "}\n", "histogram is a text"},
+		{"tests:\n  - promql_expr_test:\n      - expr: up\n        exp_samples:\n          - {labels: 'up', histogram: !!binary " + binary + "}\n", "line 5: a tag isn't read"},
 		// A tag promtool's YAML decodes into another text.
-		{"tests:\n  - input_series:\n      - {series: a, values: !!binary " + binary + "}\n", "values is a text, as promtool reads it"},
-		{"tests:\n  - input_series:\n      - {series: !!binary " + base64.StdEncoding.EncodeToString([]byte("big 0+0x100000000")) + ", values: '1'}\n", "series is a text, as promtool reads it"},
+		{"tests:\n  - input_series:\n      - {series: a, values: !!binary " + binary + "}\n", "line 3: a tag isn't read"},
+		{"tests:\n  - input_series:\n      - {series: !!binary " + base64.StdEncoding.EncodeToString([]byte("big 0+0x100000000")) + ", values: '1'}\n", "line 3: a tag isn't read"},
 	} {
 		if err := Bound([]byte(c.file)); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%q: %v, want %q", c.want, err, c.want)
 		}
 	}
-	// An alias is read as promtool reads it, its expansion bounded as the
-	// rules' is; a value that is one is refused, as not plain text.
-	if err := Bound([]byte("x: &v '0+1x10'\ntests:\n  - input_series:\n      - {series: a, values: *v}\n")); err == nil || !strings.Contains(err.Error(), "values is a text") {
+	// An alias, its anchor first, is refused, as YAML reads it past what
+	// is written (TestBoundPlain).
+	if err := Bound([]byte("x: &v '0+1x10'\ntests:\n  - input_series:\n      - {series: a, values: *v}\n")); err == nil || !strings.Contains(err.Error(), "line 1: an anchor or an alias") {
 		t.Errorf("an alias: %v", err)
+	}
+}
+
+// TestBoundPlain: what YAML reads past what is written, which Bound's YAML
+// and promtool's read otherwise, is refused: a merge after a series' own
+// values, which promtool's yaml.v2 lets override them (a hundred million
+// values, not the one counted), after its eval_time, its series, or with
+// a tag; an anchor, an alias; a tag but !!str on a text.
+func TestBoundPlain(t *testing.T) {
+	head := "tests:\n  - interval: 1m\n    input_series:\n"
+	for _, c := range []struct{ file, want string }{
+		{head + "      - series: 'up{job=\"x\"}'\n        values: '1'\n        <<: {values: '0+0x100000000'}\n", "line 6: a merge (<<)"},
+		{head + "      - {series: up, values: '1', <<: {values: '0+0x100000000'}}\n", "line 4: a merge (<<)"},
+		{head + "      - series: up\n        values: '1'\n    alert_rule_test:\n      - alertname: X\n        eval_time: 1m\n        <<: {eval_time: 100000000h}\n", "line 9: a merge (<<)"},
+		{head + "      - series: up\n        values: '1'\n        <<: {series: \"up\\nbig 0+0x100000000\"}\n", "a merge (<<)"},
+		{head + "      - series: up\n        values: '1'\n        \"<<\": {values: '0+0x100000000'}\n", "a merge (<<)"},
+		{head + "      - series: up\n        values: '1'\n        !!merge <<: {values: '0+0x100000000'}\n", "line 6: a merge (<<)"},
+		{head + "      - &s {series: up, values: '1'}\n      - *s\n", "line 4: an anchor or an alias"},
+		{head + "      - {series: up, values: !!binary MSAy}\n", "line 4: a tag"},
+		{head + "      - !!map {series: up, values: '1'}\n", "line 4: a tag"},
+	} {
+		if err := Bound([]byte(c.file)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: %v, want %q", c.file, err, c.want)
+		}
+	}
+	// A key's or a value's text that holds << is text.
+	for _, file := range []string{
+		head + "      - {series: up, values: !!str 1 2}\n",
+		head + "      - {series: 'up{a=\"<<\"}', values: '1'}\n",
+	} {
+		if err := Bound([]byte(file)); err != nil {
+			t.Errorf("%q: %v", file, err)
+		}
 	}
 }
 

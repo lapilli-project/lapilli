@@ -612,7 +612,16 @@ Step 3, drafts, as built:
   nor anything but values notation (a quote or a lone brace would have
   promtool read labels there). Each is plain text: a tag such as
   `!!binary`, which promtool's YAML would decode into another text, is
-  refused. An agent's scenarios run one at a time across serve, whatever
+  refused. So is what YAML reads past what is written, anywhere in the
+  file, as an added rule's (`plainNodes`): a merge (`<<`), which
+  promtool's YAML (yaml.v2, read strictly) applies where it stands, a
+  later one over the keys before it, where Lapilli's (yaml.v3) keeps the
+  mapping's own (`values: '1'` then `<<: {values: '0+0x100000000'}` was a
+  value counted and a hundred million loaded); an anchor or an alias; a
+  tag but `!!str` on a text. An operator's test files, read from where
+  `--expect` or `--config` is, or by `lapilli verdict` in a pull request's
+  checkout, may use them: they are the operator's, or the pull request's,
+  run with the memory cap, as before. An agent's scenarios run one at a time across serve, whatever
   else holds the comparison's turn (another agent's running, one is not
   run, saying so), and each waits for promtool's one turn, which a
   round's scenario may hold (step 4), within the check's deadline.

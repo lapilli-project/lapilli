@@ -263,6 +263,12 @@ func TestTestExpectationScenarios(t *testing.T) {
 		"values expand to more than 100000": strings.Replace(scenariotest.Test("pass"), "'0+10x20'",
 			"'{{buckets:["+strings.TrimSpace(strings.Repeat("1 ", 2000))+"]}}+{{buckets:[1]}}x100'", 1),
 		"a key promtool's test files don't have": "rule_files: [x]\nnot_promtool: 1\ntests: [{name: pass}]\n",
+		// A merge after the series' own values, and after its eval_time:
+		// promtool's YAML lets it override them, a hundred million values
+		// and steps, not those counted.
+		"line 9: a merge (<<) isn't read":  strings.Replace(scenariotest.Test("pass"), "values: '0+10x20'\n", "values: '0+10x20'\n        <<: {values: '0+0x100000000'}\n", 1),
+		"line 11: a merge (<<) isn't read": strings.Replace(scenariotest.Test("pass"), "eval_time: 10m\n", "eval_time: 10m\n        <<: {eval_time: 100000000h}\n", 1),
+		"an anchor or an alias isn't read": strings.Replace(scenariotest.Test("pass"), "values: '0+10x20'\n", "values: &v '0+10x20'\n      - {series: up, values: *v}\n", 1),
 	} {
 		failed, text := call(t, agent, "test_expectation", map[string]any{"rule": "Errors", "expectations": held, "tests": map[string]any{"tests/errors.yaml": test}}, &out)
 		if !failed || !strings.Contains(text, want) {
