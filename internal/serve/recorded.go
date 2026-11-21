@@ -75,6 +75,12 @@ func (s *Server) apiPutFirings(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("a source is lowercase letters, digits and dashes, 40 at most, such as cloudwatch-prod"))
 		return
 	}
+	// Lapilli's own: what Grafana's history says the rules Lapilli can't
+	// replay fired, which a job can't write over.
+	if source == ledger.GrafanaSource {
+		s.oops(w, r, bad("%s is the source lapilli serve copies Grafana's own alert state history in under: name another", source))
+		return
+	}
 	// Read whole first: cut off at the limit, the last line would read as
 	// a broken one.
 	body, err := io.ReadAll(r.Body)

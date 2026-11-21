@@ -43,8 +43,13 @@ Still to do:
   files to mount); and
   changing a Loki ruler's rules through its API, as Mimir's are (today a
   proposal for one is for a person). SQL and the other data sources stay out: a
-  database keeps no history of what a query returned (the design says why);
-  their rules are listed, by the type Grafana gives.
+  database keeps no history of what a query returned (the design says why).
+  Their rules, read with `--grafana`, are judged from Grafana's own alert
+  state history instead, with no backtest
+  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)); still to
+  do: a rule whose title another folder has too (tie by `grafana_folder`),
+  one whose severity changed, those `--check-grafana`'s Grafana runs from
+  files, and a value for it in the chart.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
 - A firing on when a period starts, of a group placed within its interval

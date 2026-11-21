@@ -64,7 +64,9 @@ it), or tells a rule's alerts apart by nothing it keeps; each says why.
 On Grafana 12.4 and 13.3, every firing read from the history was alike
 with `GRAFANA_ALERTS`, starting and ending at the same evaluation
 ([docs/design/grafanahistory.md](design/grafanahistory.md)).
-`--check-series` reads series instead.
+`--check-series` reads series instead. The same history judges the rules
+`--grafana` holds that can't be replayed at all
+([docs/verdict.md](verdict.md)).
 
 When the series hold nothing for the period, or no rule could be replayed, it
 says so and exits 1, since nothing was checked. If a rule replays differently from how it

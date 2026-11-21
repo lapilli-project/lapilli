@@ -75,8 +75,15 @@ Where the firings come from (pick one):
                       Grafana puts $__rate_interval in with
   --grafana-token-file FILE
                       a Grafana service account token, to read them with,
-                      and, for --check-replay, its alert state history: a
-                      Viewer's reads both
+                      and its alert state history: a Viewer's reads both
+  --grafana-history   judge the rules --grafana holds that can't be replayed
+                      (a condition on SQL, Elasticsearch, TestData and the
+                      like) by what Grafana's own alert state history says
+                      they fired, read from a day before the period, where
+                      it keeps one it serves: in annotations, its default,
+                      from Grafana 12.4 on, or in Loki. On by default; no
+                      longer "for", near misses or --compare for them.
+                      =false lists them, with why
   --ruler URL         replay the alert rules a managed Prometheus ruler
                       holds, as written, from the API that writes them:
                         Mimir     http://mimir:8080/prometheus/config/v1/rules
@@ -530,6 +537,10 @@ type verdictFlags struct {
 	scrapeInterval     time.Duration
 	alerts             bool
 	firings, incidents string
+	// noGrafanaHistory is --grafana-history=false: the rules --grafana
+	// holds that can't be replayed are listed, not judged from Grafana's
+	// own alert state history; grafanaHistorySet, --grafana-history given.
+	noGrafanaHistory, grafanaHistorySet bool
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
 	// copied in may be all there is.
 	firingsToken bool
@@ -708,6 +719,16 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		case "--linked-only":
 			f.opts.LinkedOnly = true
+			continue
+		case "--grafana-history":
+			f.grafanaHistorySet = true
+			if hasVal {
+				b, err := strconv.ParseBool(val)
+				if err != nil {
+					return nil, fmt.Errorf("--grafana-history=%s: want true or false", val)
+				}
+				f.noGrafanaHistory = !b
+			}
 			continue
 		case "--progress":
 			f.progressSet = true
@@ -1078,6 +1099,9 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	rulesToo := sources > 0 || len(f.alarms) > 0 || lokiToo
 	if err := validLoki(f, serve != nil); err != nil {
 		return nil, err
+	}
+	if f.grafanaHistorySet && f.grafana == "" {
+		return nil, errors.New("--grafana-history judges the rules --grafana reads that can't be replayed: it goes with --grafana")
 	}
 	if serve == nil && f.extrasSet && len(f.compare) > 0 {
 		return nil, errors.New("--extras: --compare has no steps after the replays to bound")
@@ -1588,6 +1612,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var known []rules.Rule
 	var fs []firing.Firing
 	var cmp *verdict.Comparison
+	// byHistory are the rules judged from Grafana's own alert state
+	// history, not replayed (judgeFromHistory).
+	var byHistory map[string]bool
 	// leftAlone is, with --fail-missed and --changed-only, the verdict of
 	// the rules left alone, when they were replayed to see whether one
 	// still catches an incident.
@@ -1654,6 +1681,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
+		// The rules a Grafana holds that can't be replayed, judged from
+		// its own history of what they fired.
+		var more []firing.Firing
+		more, byHistory = f.judgeFromHistory(ctx, known, stderr)
+		fs = append(fs, more...)
 	case f.alerts:
 		series, err := h.QueryRange(ctx, `ALERTS{alertstate="firing"}`, f.opts.From, f.opts.To, f.step)
 		if err != nil {
@@ -1706,6 +1738,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		rep = verdict.Judge(known, fs, incs, f.opts)
+		for i := range rep.Rules {
+			if byHistory[rep.Rules[i].Rule] {
+				rep.Rules[i].Source = verdict.GrafanaSource
+			}
+		}
 		for _, v := range versions {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)

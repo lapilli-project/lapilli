@@ -9,7 +9,9 @@
 # token), are merged, and are read back as applied; the deletion is undone.
 # On the Grafana path, a longer for is applied and undone byte for byte, a
 # rule is turned off, and a rule edited in Grafana since, or kept by another
-# tool, is refused. On the ruler path, through Mimir's configuration API, a
+# tool, is refused; and a rule on Grafana's TestData data source, which
+# Lapilli can't replay, is judged by `lapilli verdict` from Grafana's own
+# alert state history. On the ruler path, through Mimir's configuration API, a
 # longer for is applied (one line of its namespace, loaded by Mimir's ruler)
 # and undone byte for byte; a runbook link is applied; a change made afresh
 # when another rule in its group changed, and refused when the rule itself
@@ -180,6 +182,20 @@ grule() { # title, expression, comparison, threshold, provenance header
 slow=$(grule GrafanaScrapeSlow 'scrape_duration_seconds{job="prometheus"}' gt 0.000001 'X-Disable-Provenance: true')
 low=$(grule GrafanaUpLow up lt 0.5 'X-Disable-Provenance: true')
 grule KeptByAnotherTool up lt 0.5 >/dev/null # provenance api
+# A rule on Grafana's built-in TestData data source, which Lapilli can't
+# replay: a pulse on for a minute of every two, judged from Grafana's own
+# alert state history, which this Grafana keeps in annotations, its default
+# (docs/design/grafanajudged.md).
+curl -sf "${ga[@]}" -X POST "$gf/api/datasources" \
+  -d '{"name":"testdata","uid":"testdata","type":"grafana-testdata-datasource","access":"proxy"}' >/dev/null
+jq -n '{folderUID: "shop", ruleGroup: "pulse", title: "Pulse", condition: "C",
+  data: [{refId: "A", relativeTimeRange: {from: 600, to: 0}, datasourceUid: "testdata",
+      model: {refId: "A", scenarioId: "predictable_pulse", pulseWave: {timeStep: 60, onCount: 1, offCount: 1, onValue: 1, offValue: 0}}},
+    {refId: "B", datasourceUid: "__expr__", model: {type: "reduce", expression: "A", reducer: "last", refId: "B"}},
+    {refId: "C", datasourceUid: "__expr__", model: {type: "threshold", expression: "B", refId: "C",
+      conditions: [{evaluator: {type: "gt", params: [0.5]}}]}}],
+  noDataState: "OK", execErrState: "Error", for: "0s", labels: {severity: "page", service: "pulse"}}' |
+  curl -sf "${ga[@]}" -H 'X-Disable-Provenance: true' -X POST "$gf/api/v1/provisioning/alert-rules" -d @- >/dev/null
 
 # Mimir's rules, written as Grafana's UI or a person would write them: the
 # shop's namespace (a group of two alert rules and a recording rule, and a
@@ -397,6 +413,25 @@ act "$sf" ana@example.com "$id" approve
 until_true 60 is "$sf" "$id" refused || true
 check "kept by another tool: refused" "$(reason "$sf" "$id")" 'another tool keeps this rule'
 
+# The TestData rule, judged from Grafana's history: from a minute past the
+# history's first change, once Pulse has fired twice since.
+notes() { curl -s -H "Authorization: Bearer $(cat "$work/secrets/grafana-Viewer")" "$gf/api/annotations?type=alert&limit=5000"; }
+noted() { [ "$(notes | jq length)" -gt 0 ]; }
+until_true 120 noted
+minute=$(($(notes | jq '[.[].time] | min') / 60000))
+since=$((minute * 60 + 60))
+pulsed() { [ "$(notes | jq --argjson s "$since" '[.[] | select(.alertName == "Pulse" and .newState == "Alerting" and .time >= $s * 1000)] | length')" -ge 2 ]; }
+until_true 420 pulsed || true
+to=$(($(date +%s) / 60 * 60))
+iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+printf 'incidents:\n  - {id: INC-1, title: Long ago, start: 2026-01-01T00:00:00Z, end: 2026-01-01T01:00:00Z}\n' >"$work/incidents.yaml"
+judge=("$work/lapilli" verdict --grafana "$gf" --grafana-token-file "$work/secrets/grafana-Viewer" --prometheus "$pu"
+  --incidents "$work/incidents.yaml" --from "$(iso "$since")" --to "$(iso "$to")" --tz UTC)
+check "Pulse, on TestData, judged from Grafana's history" \
+  "$("${judge[@]}" --json 2>"$work/verdict.log" | jq -r '.rules[] | select(.rule == "Pulse") | "\(.source) \(.replayed) \(.firings)"')" '^grafana false ([2-9]|[1-9][0-9]+)$'
+check "the report says so" "$("${judge[@]}" 2>/dev/null | grep -c "^  Pulse, from Grafana's alert state history: ")" '^1$'
+check "off, it is listed" "$("${judge[@]}" --grafana-history=false 2>/dev/null | grep -cE '^  Pulse: ')" '^1$'
+
 # The ruler path, through Mimir's configuration API.
 mns() { curl -s "$mrules/$1"; }
 mloaded() { # namespace, alert: the rule as Mimir's ruler has loaded it
@@ -469,5 +504,6 @@ if [ "$fail" != 0 ]; then
   echo "--- serve (Grafana)"; tail -20 "$work/serve-grafana.log"
   echo "--- serve (Mimir)"; tail -20 "$work/serve-mimir.log"
   echo "--- recipe"; tail -20 "$work/recipe.log"
+  echo "--- verdict"; tail -20 "$work/verdict.log"
 fi
 exit "$fail"

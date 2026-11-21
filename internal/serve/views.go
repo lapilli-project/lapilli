@@ -1247,7 +1247,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 			}
 		}
 	}
-	if len(s.alarms) > 0 {
+	if len(s.alarms) > 0 || s.cfg.JudgedHistory != nil {
 		ties, err := s.l.Ties(ctx)
 		if err != nil {
 			return ruleView{}, err

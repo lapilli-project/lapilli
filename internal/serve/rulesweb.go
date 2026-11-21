@@ -873,7 +873,7 @@ type checking struct {
 // checkingOf is what the rules list reads, once, of what to check.
 func (s *Server) checkingOf(r *http.Request) (checking, error) {
 	w := checking{ties: map[string]*tieView{}, stale: map[string]int{}}
-	if len(s.alarms) > 0 {
+	if len(s.alarms) > 0 || s.cfg.JudgedHistory != nil {
 		ties, err := s.l.Ties(r.Context())
 		if err != nil {
 			return w, err

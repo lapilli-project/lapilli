@@ -230,6 +230,8 @@ func condsOf(c condsIn) []ruleCond {
 		out = append(out, ruleCond{Kind: "unseen", Text: u})
 	}
 	switch {
+	case c.Tie != nil && c.Tie.Source == ledger.GrafanaSource:
+		out = append(out, ruleCond{Kind: "grafana"})
 	case c.Tie != nil && c.Tie.Source != "":
 		out = append(out, ruleCond{Kind: "alarm"})
 	case c.Tie != nil:

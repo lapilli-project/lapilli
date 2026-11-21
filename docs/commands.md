@@ -80,8 +80,15 @@ Where the firings come from (pick one):
                       Grafana puts $__rate_interval in with
   --grafana-token-file FILE
                       a Grafana service account token, to read them with,
-                      and, for --check-replay, its alert state history: a
-                      Viewer's reads both
+                      and its alert state history: a Viewer's reads both
+  --grafana-history   judge the rules --grafana holds that can't be replayed
+                      (a condition on SQL, Elasticsearch, TestData and the
+                      like) by what Grafana's own alert state history says
+                      they fired, read from a day before the period, where
+                      it keeps one it serves: in annotations, its default,
+                      from Grafana 12.4 on, or in Loki. On by default; no
+                      longer "for", near misses or --compare for them.
+                      =false lists them, with why
   --ruler URL         replay the alert rules a managed Prometheus ruler
                       holds, as written, from the API that writes them:
                         Mimir     http://mimir:8080/prometheus/config/v1/rules
@@ -659,6 +666,14 @@ each history API (lapilli_serve_history_*). Off by default:
   --check-grafana URL the Grafana that runs the Grafana rules --rules or
                       --rules-history gives, whose alert state history says
                       what they really fired, read with --grafana-token-file
+  --grafana-history=false
+                      don't judge the rules --grafana holds that can't be
+                      replayed by Grafana's own alert state history. It is on
+                      with --grafana, where it keeps one it serves: each
+                      round, what it says they fired up to where the runs got
+                      is copied in under the source grafana, which no job may
+                      write to, and each such rule is judged by it, under its
+                      own name, as a cloud's alarm is by its history
   --check-differs N/RATIO
                       a rule differs when, over a week, it had N firings
                       either way and fewer than RATIO of them were alike

@@ -66,10 +66,13 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
 
-	var fired, silent, unsupported []RuleResult
+	var fired, silent, unsupported, byHistory []RuleResult
 	for _, rr := range r.Rules {
+		if rr.ByHistory() {
+			byHistory = append(byHistory, rr)
+		}
 		switch {
-		case rr.Unsupported != "":
+		case rr.Unsupported != "" && !rr.ByHistory():
 			unsupported = append(unsupported, rr)
 		case rr.Firings+rr.Excused+rr.Incidents == 0:
 			silent = append(silent, rr)
@@ -131,6 +134,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, "\nCould not replay %d rules:\n", len(unsupported))
 		for _, rr := range unsupported {
 			fmt.Fprintf(w, "  %s: %s\n", Clean(rr.Rule), Clean(rr.Unsupported))
+		}
+	}
+	if len(byHistory) > 0 {
+		fmt.Fprintf(w, "\nJudged from what their history says they fired, not replayed, %d rules: no longer \"for\", near misses or backtests for them.\n", len(byHistory))
+		for _, rr := range byHistory {
+			fmt.Fprintf(w, "  %s, from %s: %s\n", Clean(rr.Rule), historyOf(rr.Source), Clean(rr.Unsupported))
 		}
 	}
 	unseen(w, r.Rules)
@@ -467,6 +476,15 @@ func adds(w io.Writer, rs []RuleResult, unreplayed int) error {
 	return nil
 }
 
+// historyOf says where the firings of a rule judged from its history come
+// from: Grafana's own alert state history, or a source copied in.
+func historyOf(source string) string {
+	if source == GrafanaSource {
+		return "Grafana's alert state history"
+	}
+	return "the history copied in under " + Clean(source)
+}
+
 // withSeverity is a row, without its severity cell when no rule has one.
 func withSeverity(sev bool, rule, severity string, rest ...string) []string {
 	if sev {
@@ -765,7 +783,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	}
 	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught, action []string
 	for _, rr := range r.Rules {
-		if rr.Unsupported != "" {
+		if rr.Unsupported != "" && !rr.ByHistory() {
 			continue
 		}
 		l := fmt.Sprintf(`{rule="%s"`, escape(rr.Rule))

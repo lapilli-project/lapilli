@@ -2798,5 +2798,9 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못했거나 판정 제외인 발화에 대한 알림 %[5]d건.",
  "%d caught nothing, %d judged by nothing, %d excused": "오탐 %d건, 판정 제외 %d건, 면제 %d건",
  "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "발화 %d건, 정탐 %d건, 오탐 %d건, 판정 제외 %d건, 면제 %d건",
- "a week before the ledger's first firing": "기록된 첫 발화보다 앞선 주예요"
+ "a week before the ledger's first firing": "기록된 첫 발화보다 앞선 주예요",
+ "A Grafana rule Lapilli can't replay: what Grafana's own alert state history says it fired, copied in from %s on, is its record, so Lapilli can't say what a change to it would do.": "Lapilli 가 백테스트할 수 없는 Grafana 규칙이에요. Grafana 의 알림 상태 이력에 남은 %s 이후의 알림을 복사해 와서 이 규칙의 기록으로 삼기 때문에, 규칙을 바꾸면 어떻게 될지는 말할 수 없어요.",
+ "copying in what Grafana's alert state history says its rules fired, %s": "Grafana 알림 상태 이력의 알림을 복사해 오는 중: %s",
+ "copying in Grafana's alert state history": "Grafana 알림 상태 이력 복사해 오기",
+ "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s 는 lapilli serve 가 Grafana 의 알림 상태 이력을 복사해 오는 출처예요. 다른 이름을 써 주세요"
 }
