@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -440,7 +442,7 @@ func TestMutesCounted(t *testing.T) {
 	}
 	// As the webhook and a report's numbers have it.
 	about := map[string]any{}
-	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+	if err := s.aboutMore(ctx, about, rep, from, to, nil, x); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = json.Marshal(about["notifications"])
@@ -485,4 +487,43 @@ func TestMutesCounted(t *testing.T) {
 		t.Errorf("no translation: %q", k)
 	}
 	missing.Unlock()
+}
+
+// A digest reads what the notifications came to, and the firings that
+// paged no one, once: for its text and what the webhook is told alike,
+// everyone's and each team's.
+func TestDigestReadsSentOnce(t *testing.T) {
+	ctx := context.Background()
+	s, silenced, _, _ := mutedServer(t)
+	hook := filepath.Join(t.TempDir(), "hook")
+	if err := os.WriteFile(hook, []byte("http://127.0.0.1:1/x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.NotifyWebhook = hook
+	s.l.TellTo(s.dests())
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "search", Rules: "^Errors$"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	o, err := s.options(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := s.l.Midnight(ledger.Week(s.l.Day(silenced.Start)))
+	to := from.AddDate(0, 0, 7)
+	was := sentRead.Load()
+	if err := s.tellDigest(ctx, digestIn{On: true, Dests: []string{"webhook"}}, "w", true, from, to, o); err != nil {
+		t.Fatal(err)
+	}
+	if n := sentRead.Load() - was; n != 2 {
+		t.Errorf("worked out what the notifications came to %d times for two digests, everyone's and search's", n)
+	}
+	due, err := s.l.Due(ctx, "webhook", time.Now(), 10)
+	if err != nil || len(due) != 2 {
+		t.Fatalf("%d told: %v", len(due), err)
+	}
+	for _, d := range due {
+		if !strings.Contains(string(d.Body), `"paged_no_one":{"silence":1,`) || !strings.Contains(string(d.Body), "Firings that paged no one: 1 muted by a silence") {
+			t.Errorf("told without what paged no one: %s", d.Body)
+		}
+	}
 }

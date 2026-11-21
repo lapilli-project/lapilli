@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"lapilli.dev/internal/ledger"
@@ -114,10 +115,15 @@ type sentFor struct {
 	N    int    `json:"notifications"`
 }
 
+// sentRead counts the spans sent works out: for tests that a digest reads
+// its notifications, and the firings that paged no one, once.
+var sentRead atomic.Int64
+
 // sent is what the notifications that came in [from, to) came to, for the
 // rules in the report, counted asleep by each rule's team's hours; nil
 // when none had come by to.
 func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Time) (*sentLine, error) {
+	sentRead.Add(1)
 	p, err := s.notified(ctx)
 	if err != nil || p.first.IsZero() || !p.first.Before(to) {
 		return nil, err
@@ -259,8 +265,9 @@ func (s *Server) tellQuiet(ctx context.Context) error {
 // aboutMore adds to what is told of a digest, everyone's (team nil) or a
 // team's, the sources firings were copied in from (for everyone's), what
 // the notifications sent came to, the re-fires, and the marked windows on
-// in the week.
-func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdict.Report, from, to time.Time, team *ledger.Team) error {
+// in the week. sent is what the notifications came to, as sent worked it
+// out for the digest's text: read once for both.
+func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdict.Report, from, to time.Time, team *ledger.Team, sent *sentLine) error {
 	if team == nil {
 		cs, err := s.copied(ctx, rep)
 		if err != nil {
@@ -278,10 +285,6 @@ func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdi
 				about["replay_check"] = checks
 			}
 		}
-	}
-	sent, err := s.sent(ctx, rep, from, to)
-	if err != nil {
-		return err
 	}
 	if sent != nil {
 		about["notifications"] = sent

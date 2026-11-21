@@ -19,6 +19,9 @@
   group gave a label a signal's entry requires (`require:`) was passed
   over. A rule is looked at by the labels its firings carry now, its own
   over its group's, in `lapilli verdict` and `lapilli serve` alike.
+- The weekly digest read the notifications sent, and the firings that
+  paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
+  the webhook is told. Once now, everyone's and each team's.
 
 ### Changed
 

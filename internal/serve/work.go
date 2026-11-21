@@ -2234,6 +2234,16 @@ const digestMax = 256 << 10
 // digestText is the week's report, and how things stand: for everyone, or
 // for one team.
 func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []string, from, to time.Time, team *ledger.Team) (string, error) {
+	sent, err := s.sent(ctx, rep, from, to)
+	if err != nil {
+		return "", err
+	}
+	return s.digestTextSent(ctx, rep, spare, from, to, team, sent)
+}
+
+// digestTextSent is digestText, with what the notifications came to as
+// sent worked it out: a digest's text and what is told of it read it once.
+func (s *Server) digestTextSent(ctx context.Context, rep *verdict.Report, spare []string, from, to time.Time, team *ledger.Team, sent *sentLine) (string, error) {
 	shown := *rep
 	shown.Rules = slices.Clone(rep.Rules)
 	for i := range shown.Rules {
@@ -2278,10 +2288,6 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 				}
 			}
 		}
-	}
-	sent, err := s.sent(ctx, rep, from, to)
-	if err != nil {
-		return "", err
 	}
 	// Re-fires and firings during deploys (docs/design/noc.md).
 	rf, err := s.refiresOf(ctx, rep, from, to)
@@ -2561,13 +2567,19 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 	}
 	var told []ledger.Told
 	if webhook || len(named) > 0 {
-		text, err := s.digestText(ctx, rep, spare, from, to, nil)
+		// What the notifications came to, and the firings that paged no
+		// one: read once, for the text and what is told of it.
+		sent, err := s.sent(ctx, rep, from, to)
+		if err != nil {
+			return err
+		}
+		text, err := s.digestTextSent(ctx, rep, spare, from, to, nil, sent)
 		if err != nil {
 			return err
 		}
 		if webhook {
 			about := digestAbout(rep, text, "", spare)
-			if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+			if err := s.aboutMore(ctx, about, rep, from, to, nil, sent); err != nil {
 				return err
 			}
 			if err := s.aboutGoals(ctx, about, from, nil); err != nil {
@@ -2598,12 +2610,16 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 			continue // nothing happened to it, nor fired on what it owns
 		}
 		mine := slices.DeleteFunc(slices.Clone(spare), func(name string) bool { return own.rule[name] != t.ID })
-		text, err := s.digestText(ctx, part, mine, from, to, &t)
+		sent, err := s.sent(ctx, part, from, to)
+		if err != nil {
+			return err
+		}
+		text, err := s.digestTextSent(ctx, part, mine, from, to, &t, sent)
 		if err != nil {
 			return err
 		}
 		about := digestAbout(part, text, t.Name, mine)
-		if err := s.aboutMore(ctx, about, part, from, to, &t); err != nil {
+		if err := s.aboutMore(ctx, about, part, from, to, &t, sent); err != nil {
 			return err
 		}
 		if err := s.aboutGoals(ctx, about, from, &t); err != nil {

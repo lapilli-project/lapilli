@@ -431,7 +431,11 @@ func TestDigestTellsCopiedAndSent(t *testing.T) {
 		}
 	}
 	about := digestAbout(rep, text, "", nil)
-	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+	sent, err := s.sent(ctx, rep, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.aboutMore(ctx, about, rep, from, to, nil, sent); err != nil {
 		t.Fatal(err)
 	}
 	if cs, ok := about["sources"].([]copiedIn); !ok || len(cs) != 1 || cs[0].Firings != 2 {
