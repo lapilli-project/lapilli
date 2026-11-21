@@ -104,11 +104,18 @@ Before upgrading:
   `glpat-`, `xoxb-` or `sk-ant-` token were shown, to anyone who could
   read the page, an address to an admin; so were Grafana's service
   account (`glsa_`) and Grafana Cloud (`glc_`) tokens, Google's (`ya29.`)
-  and a URL's password with a `/` and a `?` in it. Each is `***` now; an
-  error that only names a credential (`cannot fetch token: 400`, `invalid
-  bearer`, `authorization: the token has expired`, `invalid password:
-  check the file`) reads as it was, and so does an address with an `@` in
-  its path (`https://grafana.example/d/abc/team@ops`).
+  and a URL's password with a `/` and a `?` in it. Each is `***` now: an
+  Authorization or Cookie header's value, or a password's or a key's,
+  anywhere in a line (mid-text, after curl's `>`, after "header"), to the
+  line's end or the sentence's, and a prefixed token at its real shape and
+  length alone. An error that only names a credential reads as it was
+  (`cannot fetch token: 400`, `invalid bearer`, and, its value a word of
+  small letters in a sentence, `authorization: the token has expired`,
+  `invalid password: check the file`), as do `glc_requests_total`,
+  `ya29.png` and an address with an `@` in its path
+  (`https://grafana.example/d/abc/team@ops`). Still shown: a value that
+  starts with a word of small letters in a sentence (`cookie: abcdef`),
+  and a password of digits and a `/` before a host with no port.
 - **An incident recipe sent its token wherever its address pointed, and
   read its token file whole** (affected: 0.15.0 to 0.68.0).
   `pagerduty.sh`, `incident-io.sh` and `jira.sh` from 0.15.0,
