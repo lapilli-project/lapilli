@@ -9,13 +9,15 @@ view and one of 0.68.0's changes, each fix of code with a test that failed
 before it. No schema change: the ledger stays at 029.
 
 Before upgrading:
-- **A backtest job that checks out the pull request's own commit**, not a
-  merge, with a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
-  `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS`, and `TARGET` left at
-  `HEAD^1`, is refused where its CI doesn't say the branch the pull request
-  goes into: give `TARGET` or `TARGET_BRANCH`, or check out the merge. In
-  GitHub Actions `github.sh` and the action take `GITHUB_BASE_REF`, which
-  needs `fetch-depth: 0` or the branch fetched (Changed).
+- **A backtest job that checks out the pull request's own commit**, not
+  the CI's merge (its head a merge of its own too), with a gate
+  (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`, `EXPECT_REQUIRED`,
+  `FAIL_MISSED`) or `STATUS`, and `TARGET` left at `HEAD^1` or written as
+  `HEAD`'s first parent otherwise, fails, refused, where its CI doesn't
+  say the branch the pull request goes into: give `TARGET` or
+  `TARGET_BRANCH`, or check out the merge. In GitHub Actions `github.sh`
+  and the action take `GITHUB_BASE_REF`, which needs `fetch-depth: 0` or
+  the branch fetched (Changed).
 - **The incident recipes take https alone**, or http to this machine, and
   a token file of one line (Fixed (security)).
 - **The chart's `linkedOnly`, `serve.everyoneAdmin` and
@@ -53,10 +55,13 @@ Before upgrading:
   was compared against its first, nothing changed, `FAIL_MISSED` passed,
   a status of success was set on its head, and `INCIDENTS` was read from
   the pull request. `github.sh` gives the branch the pull request goes
-  into (`GITHUB_BASE_REF`), which is taken where `HEAD` isn't a merge;
-  with none, a gate or `STATUS` is refused (Changed). Of a merge, the
-  status goes on no commit the pull request goes into, nor the one it was
-  compared against.
+  into (`GITHUB_BASE_REF`) and the event's head: `HEAD`'s first parent,
+  however `TARGET` writes it (`HEAD^1`, `HEAD~1`, `HEAD^`, its hash), is
+  taken only of GitHub's merge, `HEAD^2` the event's head, not of a head
+  that is a merge of its own (an "Update branch"); otherwise the base
+  branch is taken, and, with none, a gate or `STATUS` alone is refused and
+  the job fails (Changed). Of a merge, the status goes on no commit the
+  pull request goes into, nor the one it was compared against.
 - **An agent's test file could make promtool load a hundred million
   values past `scenario.Bound`** (affected: 0.65.0 to 0.68.0). Bound read
   the file with yaml.v3, which keeps a mapping's own keys over a merge,
@@ -113,8 +118,9 @@ Before upgrading:
   a space or a control character for Atlassian's, which go base64'd.
   Neither the token nor the address is said.
 - **An incident recipe read an answer of any size** (affected: 0.15.0 to
-  0.68.0). Each answer is 16 MiB at most now (`--max-filesize`); past it,
-  the script stops, writing nothing.
+  0.68.0). Each answer is 16 MiB at most now (`--max-filesize`, with curl
+  8.4 or later for an answer that doesn't give its length); past it, the
+  script stops, writing nothing.
 - **A draft of what a rule is held to could be accepted by one no longer
   its approver** (affected: 0.65.0 to 0.68.0). The accept form's key is
   tied to the draft, its state and who saw the page, and the route asked
@@ -202,12 +208,20 @@ Before upgrading:
 ### Changed
 
 - **A backtest of the pull request's own commit is compared with the
-  branch it goes into.** Where `TARGET` is `HEAD^1`, given or not, and
-  `HEAD` isn't a merge, the branch the CI says the pull request goes into
-  is `TARGET_BRANCH` (GitHub's `GITHUB_BASE_REF`; the other hosts' scripts
-  gave theirs already); where it says none, a gate or `STATUS` is
-  refused, saying to give `TARGET` or `TARGET_BRANCH` or to check out the
+  branch it goes into.** Where `TARGET` is `HEAD`'s first parent, given or
+  not, however written, and `HEAD` isn't the CI's merge (`HEAD^2` the pull
+  request's head as the CI says, or, where it says none, `HEAD` a merge),
+  the branch the CI says the pull request goes into is `TARGET_BRANCH`
+  (GitHub's `GITHUB_BASE_REF`; the other hosts' scripts gave theirs
+  already); where it says none, a gate or `STATUS` is refused, and the job
+  fails, saying to give `TARGET` or `TARGET_BRANCH` or to check out the
   merge. Without either, the comment is compared with `HEAD^1`, as before.
+  A shallow clone's messages say `fetch-depth: 0`.
+- **The incident recipes take an address's scheme in capitals**
+  (`HTTPS://`), `http://[::1]`, and this machine with no port, any other
+  host over http still refused, and a token file ending in a carriage
+  return or spaces. Their README says to use curl 8.4 or later: earlier
+  curl holds to the 16 MiB bound only an answer that gives its length.
 - **The activity log's export, and its page, end at 8 MiB of their
   changes' text**, and say where to go on from, as at a thousand
   changes; its JSON isn't indented.
