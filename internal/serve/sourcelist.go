@@ -434,32 +434,57 @@ func errOfSource(what string) bool { return slices.Contains(sourceErrors, what) 
 
 // secrets are what may stand for a credential in an error or an address:
 // a private key's PEM block, in JSON's escapes too, or cut short; a URL's
-// user and password, an @ or a / in the password too; a Slack webhook's
-// path; a query's token, key, secret, password (pass too, as a word of
-// the name), signature, JWT or code (an Azure Function's key), its ? & and
-// = written %3F %26 and %3D too, as an address quoted in another's query
-// writes them; an Authorization header's value, its scheme kept when it
-// is one HTTP's clients send (another, or none, and the value's next word
-// is taken out with it); a Cookie or Set-Cookie header's; the same names
-// given as name=value between spaces or after a quote, its value quoted
-// as libpq quotes one, or as name: value, as YAML and Go write a field,
-// for a password, a client's secret, an API, access, secret or private
-// key, or an access token (a bare token, key or secret is a word as
-// often, as in "cannot fetch token: 400"); a JSON string, read with its
-// escapes, as is and escaped in a Go string, or a JSON number, and a
-// Python dict's string; a header such as api-key or x-api-key; a bearer,
-// basic, token, API key, GenieKey or SSWS token of 12 characters or more,
-// and a bearer one shorter with a digit in it; and a token GitHub,
-// GitLab, Slack or Anthropic writes with a prefix of its own.
+// user and password, read as a URL's parser reads them, between its // and
+// the last @ before the first /, ? or # after it, so an @ in the password
+// is taken out and an @ in the path is left (as in Grafana's
+// /d/abc/team@ops); a password with a / ? or # in it, when the address
+// before its first / ? or # has a : that isn't a port's (user:pa/ss, not
+// host:3000) and what follows the first @ after it is a host, a name or
+// an address with or without its port and then a / ? # or another mark
+// that ends an address (: , ; ) ] > & \), a quote, a space or the end (a
+// password with both an @ and a / ? or # is read as the parser reads it,
+// and what follows its @ shows); a Slack webhook's path; a
+// query's token, key, secret, password (pass too, as a word of the name),
+// signature, JWT or code (an Azure Function's key), its ? & and = written
+// %3F %26 and %3D too, as an address quoted in another's query writes
+// them; an Authorization header's value, its scheme kept when it is one
+// HTTP's clients send (another, or none, and the value's next word is
+// taken out with it), where the header is written as one: at the start
+// of the text or of a line, after a quote, a {, a [ or a comma, or as Go
+// prints a header's map (Authorization:[...]); elsewhere only after a
+// scheme HTTP's clients send, so "push: authorization: the token has
+// expired" reads as it was; a Cookie or Set-Cookie header's, in the same
+// places, or anywhere with a name=value after it, so "the session cookie:
+// expired" reads as it was; the same names given as name=value between
+// spaces or after a quote, its value quoted as libpq quotes one, or as
+// name: value, as YAML and Go write a field, for a password, a client's
+// secret, an API, access, secret or private key, or an access token (a
+// bare token, key or secret is a word as often, as in "cannot fetch token:
+// 400"), at the start of a line, after a {, a [, a (, a comma or a quote,
+// or after a space when the name is written as code writes one (with a _
+// . or -, or a capital after its first letter, as api_key or apiKey) or
+// with no space after its colon, as Go's %+v writes a field (a lone word
+// such as password after another, a space after its colon, is prose as
+// often, as in "invalid password: check the file"); a JSON string, read
+// with its escapes, as is and escaped in a Go string, or a JSON number,
+// and a Python dict's string; a header such as api-key or x-api-key; a
+// bearer, basic, token, API key, GenieKey or SSWS token of 12 characters
+// or more, and a bearer one shorter with a digit in it; and a token
+// GitHub, GitLab, Grafana, Google, Slack or Anthropic writes with a prefix
+// of its own (glsa_ for a Grafana service account's, glc_ for Grafana
+// Cloud's, ya29. for a Google access token), anywhere in the text.
 var (
 	secretPEM      = regexp.MustCompile(`(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)(?:[A-Za-z0-9+/=\s\\:,.]|-[A-Za-z0-9])*(-----END [A-Z0-9 ]*PRIVATE KEY-----)?`)
-	secretUser     = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)(?:[^/:\s@"'<>]*:[^\s"'<>?#]*|[^/\s@"'<>]+)@`)
+	secretUser     = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/?#\s"'<>]*@`)
+	secretUserPath = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/:?#\s"'<>@\[\]]*:[^/?#\s"'<>@]*[^/?#\s"'<>@0-9][^\s"'<>@]*@((?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*|\[[0-9A-Fa-f:.]+\])(?::[0-9]+)?(?:[/?#"'\s:,;)\]>&\\]|$))`)
 	secretSlack    = regexp.MustCompile(`(?i)(hooks\.slack(?:-gov)?\.com/(?:services|workflows|triggers)/)[A-Za-z0-9/_-]+`)
 	secretQuery    = regexp.MustCompile(`(?i)((?:[?&;]|%3F|%26)(?:[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|sig|credential|jwt)[A-Za-z0-9_.-]*|(?:[A-Za-z0-9_.-]*[_.-])?pass|code)(?:=|%3D))[^&\s"'<>]+`)
-	secretAuth     = regexp.MustCompile(`(?i)\b((?:proxy-)?authorization[ \t]*[:=][ \t]*\[?)([^\s"'<>,;&\]]+)(?:([ \t]+["']?|%20)([^\s"'<>,;&\]]+))?`)
-	secretCookie   = regexp.MustCompile(`(?i)\b((?:set-)?cookie[ \t]*:[ \t]*\[?)[^\s"'<>;\]]+(?:;[ \t]*[^\s"'<>;\]]+)*`)
+	secretAuth     = regexp.MustCompile(`(?im)((?:^|["'{\[,])[ \t]*(?:proxy-)?authorization[ \t]*[:=][ \t]*\[?|\b(?:proxy-)?authorization:\[)([^\s"'<>,;&\]}]+)(?:([ \t]+["']?|%20)([^\s"'<>,;&\]}]+))?`)
+	secretAuthSaid = regexp.MustCompile(`(?i)\b((?:proxy-)?authorization[ \t]*[:=][ \t]*\[?)([A-Za-z0-9-]+)([ \t]+["']?|%20)([^\s"'<>,;&\]}]+)`)
+	secretCookie   = regexp.MustCompile(`(?im)((?:^|["'{\[,])[ \t]*(?:set-)?cookie[ \t]*:[ \t]*\[?|\b(?:set-)?cookie:\[)[^\s"'<>;\]}]+(?:;[ \t]*[^\s"'<>;\]}]+)*|\b((?:set-)?cookie[ \t]*:[ \t]*\[?)[^\s"'<>;\]}=]+=[^\s"'<>;\]}]*(?:;[ \t]*[^\s"'<>;\]}]+)*`)
 	secretSaid     = regexp.MustCompile(`(?i)((?:^|[\s,("'])[A-Za-z0-9_.-]*(?:token|secret|passw|pwd|credential|api[_-]?key|access[_-]?key)[A-Za-z0-9_.-]*=)(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s&"'<>,;)]+)`)
-	secretField    = regexp.MustCompile(`(?i)((?:^|[\s,({\["'])(?:[A-Za-z0-9_.-]*(?:passw|pwd|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*|[A-Za-z0-9_.-]*[_.-](?:secret|token))[ \t]*:[ \t]*)(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s"'<>,;)}\]]+)`)
+	secretField    = regexp.MustCompile(`(?im)((?:^[ \t]*(?:-[ \t]+)?|[,({\["'][ \t]*)` + secretFieldName + `[ \t]*:[ \t]*)` + secretFieldValue)
+	secretFieldMid = regexp.MustCompile(`(?i)(\s(` + secretFieldName + `)[ \t]*:([ \t]*))` + secretFieldValue)
 	secretJSON     = regexp.MustCompile(`(?i)("` + secretName + `"\s*:\s*")(?:[^"\\]|\\.)*`)
 	secretGoJSON   = regexp.MustCompile(`(?i)(\\"` + secretName + `\\"\s*:\s*\\")(?:[^"\\]|\\\\(?:\\["\\]|[^"\\]))*`)
 	secretNumber   = regexp.MustCompile(`(?i)(\\?"` + secretName + `\\?"\s*:\s*)-?[0-9][0-9.eE+-]*`)
@@ -467,12 +492,23 @@ var (
 	secretHead     = regexp.MustCompile(`(?i)\b((?:[A-Za-z0-9]+-)+(?:key|token|secret|password|signature)\s*:\s*)[^\s"'<>,;]+`)
 	secretToken    = regexp.MustCompile(`(?i)\b(bearer|basic|token|api-?key|geniekey|ssws)(\s+|=|:\s*)[A-Za-z0-9._~+/=-]{12,}`)
 	secretBearer   = regexp.MustCompile(`(?i)\b(bearer)([ \t]+|=|:[ \t]*)[A-Za-z._~+/=-]*[0-9][A-Za-z0-9._~+/=-]*`)
-	secretPrefixed = regexp.MustCompile(`\b(gh[pousr]_|github_pat_|xox[abposr]-|glpat-|sk-ant-)[A-Za-z0-9_-]+`)
+	secretPrefixed = regexp.MustCompile(`\b(gh[pousr]_|github_pat_|xox[abposr]-|glpat-|glsa_|sk-ant-)[A-Za-z0-9_-]+|\b(glc_|ya29\.)[A-Za-z0-9_.+/=-]+`)
 )
 
 // secretName is a JSON or a Python dict's name that may stand for a
 // credential's.
 const secretName = `[A-Za-z0-9_.-]*(?:token|key|secret|passw|pwd|auth|signature|credential|jwt)[A-Za-z0-9_.-]*`
+
+// secretFieldName is a name: value field's name that may stand for a
+// credential's, and secretFieldValue its value, quoted or not.
+const (
+	secretFieldName  = `(?:[A-Za-z0-9_.-]*(?:passw|pwd|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*|[A-Za-z0-9_.-]*[_.-](?:secret|token))`
+	secretFieldValue = `(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s"'<>,;)}\]]+)`
+)
+
+// wordName is a field's name written as a word is, all in small letters
+// but the first: password or Password, not api_key, apiKey or PASSWORD.
+var wordName = regexp.MustCompile(`^[A-Za-z][a-z]*$`)
 
 // authSchemes are the Authorization header's schemes HTTP's clients send,
 // in lower case: a value after one is the credential, and the scheme is
@@ -488,12 +524,15 @@ var authSchemes = map[string]bool{"bearer": true, "basic": true, "digest": true,
 func scrubSecrets(text string) string {
 	text = secretPEM.ReplaceAllString(text, "${1}***${2}")
 	text = secretUser.ReplaceAllString(text, "${1}***@")
+	text = secretUserPath.ReplaceAllString(text, "${1}***@${2}")
 	text = secretSlack.ReplaceAllString(text, "${1}***")
 	text = secretQuery.ReplaceAllString(text, "${1}***")
 	text = secretAuth.ReplaceAllStringFunc(text, scrubAuthorization)
-	text = secretCookie.ReplaceAllString(text, "${1}***")
+	text = secretAuthSaid.ReplaceAllStringFunc(text, scrubAuthorizationSaid)
+	text = secretCookie.ReplaceAllString(text, "${1}${2}***")
 	text = secretSaid.ReplaceAllString(text, "${1}***")
 	text = secretField.ReplaceAllString(text, "${1}***")
+	text = secretFieldMid.ReplaceAllStringFunc(text, scrubFieldMid)
 	text = secretJSON.ReplaceAllString(text, "${1}***")
 	text = secretGoJSON.ReplaceAllString(text, "${1}***")
 	text = secretNumber.ReplaceAllString(text, "${1}***")
@@ -501,14 +540,15 @@ func scrubSecrets(text string) string {
 	text = secretHead.ReplaceAllString(text, "${1}***")
 	text = secretToken.ReplaceAllString(text, "${1}${2}***")
 	text = secretBearer.ReplaceAllString(text, "${1}${2}***")
-	return secretPrefixed.ReplaceAllString(text, "${1}***")
+	return secretPrefixed.ReplaceAllString(text, "${1}${2}***")
 }
 
 // scrubAuthorization is an Authorization header as secretAuth found it,
-// its value said as ***: after a scheme HTTP's clients send, the scheme
-// kept, and a scheme alone as it was, as an error that names one says it;
-// with another scheme, or none, what follows the header's name is ***,
-// the value and the word after it both, as either may be the credential.
+// written as a header is, its value said as ***: after a scheme HTTP's
+// clients send, the scheme kept, and a scheme alone as it was, as an error
+// that names one says it; with another scheme, or none, what follows the
+// header's name is ***, the value and the word after it both, as either
+// may be the credential.
 func scrubAuthorization(header string) string {
 	m := secretAuth.FindStringSubmatch(header)
 	if authSchemes[strings.ToLower(m[2])] {
@@ -516,6 +556,29 @@ func scrubAuthorization(header string) string {
 			return header
 		}
 		return m[1] + m[2] + m[3] + "***"
+	}
+	return m[1] + "***"
+}
+
+// scrubAuthorizationSaid is an Authorization header as secretAuthSaid
+// found it, in the middle of a text: after a scheme HTTP's clients send,
+// its value said as ***, the scheme kept; after any other word, as it was,
+// as that is prose as often ("authorization: the token has expired").
+func scrubAuthorizationSaid(said string) string {
+	m := secretAuthSaid.FindStringSubmatch(said)
+	if !authSchemes[strings.ToLower(m[2])] {
+		return said
+	}
+	return m[1] + m[2] + m[3] + "***"
+}
+
+// scrubFieldMid is a name: value field as secretFieldMid found it, after a
+// space: its value said as ***, but for a name written as a word is with a
+// space after its colon, which is as it was.
+func scrubFieldMid(field string) string {
+	m := secretFieldMid.FindStringSubmatch(field)
+	if m[3] != "" && wordName.MatchString(m[2]) {
+		return field
 	}
 	return m[1] + "***"
 }

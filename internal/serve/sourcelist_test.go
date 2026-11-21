@@ -259,8 +259,9 @@ func TestScrubSecrets(t *testing.T) {
 }
 
 // The forms a credential took that the scrubber let through, each made up
-// with S3CR3T in it: none is left, and what is around it is. An error that
-// only names a credential, or an address without one, reads as it was.
+// (S3CR3T, FAKE and the like in it): none is left, and what is around it
+// is. An error that only names a credential, or a header, and an address
+// without one, an @ in its path too, read as they were.
 func TestScrubSecretsEveryForm(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		// name: value, as YAML and Go's %+v write a field.
@@ -328,9 +329,38 @@ func TestScrubSecretsEveryForm(t *testing.T) {
 		{`POST https://hooks.slack.com/services/T000/B000/S3CR3TVALUE12: 404`, `POST https://hooks.slack.com/services/***: 404`},
 		{`sk-ant-S3CR3TVALUE30 glpat-S3CR3TVALUE31 ghp_S3CR3TVALUE32 xoxb-S3CR3TVALUE33`, `sk-ant-*** glpat-*** ghp_*** xoxb-***`},
 		{`gho_S3CR3T1, github_pat_S3CR3T_2 and xoxp-1-S3CR3T`, `gho_***, github_pat_*** and xoxp-***`},
+		// Grafana's and Google's, alone in a text.
+		{`token glsa_FAKEFAKEFAKEFAKEFAKE_deadbeef refused`, `token *** refused`},
+		{`Get "https://x.example/?q=1": glsa_FAKEFAKEFAKEFAKEFAKE_deadbeef`, `Get "https://x.example/?q=1": glsa_***`},
+		{`glc_eyJvIjoiMTIzIiwibiI6ImZha2UifQ==`, `glc_***`},
+		{`ya29.a0FakeFakeFakeFakeFakeFake`, `ya29.***`},
+		// A URL's password with a / and a ? in it, before a host.
+		{`postgres://user:pa/ss?x@db.example:5432/l`, `postgres://***@db.example:5432/l`},
+		{`dial postgres://lap:S3CR3T/x#y@db: connection refused`, `dial postgres://***@db: connection refused`},
+		{`postgres://lap:S3CR3T/x@[fd00::1]:5432/l`, `postgres://***@[fd00::1]:5432/l`},
+		// An Authorization or Cookie header where a header is written, or
+		// after a scheme, or with a name=value after it.
+		{`Authorization: Bearer abc123`, `Authorization: Bearer ***`},
+		{`authorization: Token glsa_FAKEFAKEFAKEFAKE_0123abcd`, `authorization: Token ***`},
+		{"GET /x\nAuthorization: S3CR3TVALUE40", "GET /x\nAuthorization: ***"},
+		{`Accept: */*, authorization: S3CR3TVALUE41`, `Accept: */*, authorization: ***`},
+		{`map[Accept:[*/*] Authorization:[S3CR3TVALUE42]]`, `map[Accept:[*/*] Authorization:[***]]`},
+		{`push failed: authorization: Bearer S3CR3TVALUE43`, `push failed: authorization: Bearer ***`},
+		{`{Authorization: S3CR3TVALUE48} {Cookie: sid=S3CR3T49}`, `{Authorization: ***} {Cookie: ***}`},
+		{`sent with cookie: session=S3CR3TVALUE44; theme=dark`, `sent with cookie: ***`},
+		// A field after a word, its name written as code writes one, or
+		// with no space after its colon; one on its own line.
+		{`error: 403 api_key: FAKEKEY123`, `error: 403 api_key: ***`},
+		{`config apiKey: S3CR3TVALUE45`, `config apiKey: ***`},
+		{"db:\n  password: S3CR3TVALUE46\n  - passwd: S3CR3TVALUE47", "db:\n  password: ***\n  - passwd: ***"},
+		{`x-api-key: abcdef`, `x-api-key: ***`},
+		{`password=hunter2 sslmode=require`, `password=*** sslmode=require`},
+		{`DSN user=lapilli password='p w' host=db`, `DSN user=lapilli password=*** host=db`},
 	} {
 		got := scrubSecrets(c.in)
-		if got != c.want || strings.Contains(got, "S3CR3T") || strings.Contains(got, "AKIAS3") {
+		leaked := slices.ContainsFunc([]string{"S3CR3T", "AKIAS3", "FAKE", "hunter2", "pa/ss", "abc123", "abcdef", "deadbeef", "0123abcd", "eyJvIjoi", "a0Fake", "'p w'"},
+			func(s string) bool { return strings.Contains(got, s) })
+		if got != c.want || leaked {
 			t.Errorf("%q: %q, want %q", c.in, got, c.want)
 		}
 	}
@@ -357,6 +387,16 @@ func TestScrubSecretsEveryForm(t *testing.T) {
 		`GET /x?bypass=1&compass=n`,
 		`-----BEGIN CERTIFICATE-----`,
 		`{"error":"bad key","code":3}`,
+		// An @ in an address's path or query, not in its authority.
+		`Get "http://prometheus.example:9090/api/v1/query@x": EOF`,
+		`http://host:9090/x@y`,
+		`https://grafana.example:3000/d/abc/team@ops?orgId=1`,
+		`https://grafana.example/d/abc/team@ops?orgId=1`,
+		// Prose that names a header or a credential's field.
+		`read https://loki.example:3100/loki/api/v1/push: authorization: the token has expired`,
+		`the session cookie: expired after 10m`,
+		`invalid password: check the file`,
+		`Get "https://grafana.example/api/search": no Password: given`,
 	} {
 		if got := scrubSecrets(in); got != in {
 			t.Errorf("%q: %q, want it as it was", in, got)
