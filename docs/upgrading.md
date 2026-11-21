@@ -101,6 +101,7 @@ turn.
 | 026 | 0.63.0 | People's verdicts on firings (`verdicts`, kept by alert and start, each part with who, when and a note), what judging keeps of them on each firing (`person`, `unrelated`) and their tallies by day and week (`unrelated`, `unrelated_excused`, `real_white`, `real_excused`, `action_yes`, `action_no`); the firing "This was real" wrote an incident from (`real_of`), and `judged` on rule entries, reserved and unused; no stone changed until a person says something |
 | 027 | 0.65.0 | What checking each rule's expectations found (`expectation_checks`): by rule, expectation (a hash of what it is held to) and week, met, broken, not known or so far, with the numbers, what was told of it and the task made of it; drafts of expectations (`expectation_drafts`); what a proposal adding a rule is held to, and what became of it once added (`proposals.expect`, `proposals.expect_kept`); nothing to backfill |
 | 028 | 0.67.0 | The alerts an incident's tool linked to it (`incidents.alerts`, JSON, `''` for none), and whether a catch was by one of them (`catches.linked`); nothing to backfill |
+| 029 | 0.67.0 | Mutes from Alertmanager's event recorder (`mutes`): a row an alert, a silence or an inhibiting alert, and an hour, with when it was first and last told of; nothing to backfill |
 
 The image has no shell and no `sqlite3`, so the schema a ledger is at is
 read where its data can be reached: `sqlite3 COPY/ledger.db 'PRAGMA

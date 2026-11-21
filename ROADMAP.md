@@ -72,8 +72,10 @@ Still to do:
   Monitor's action groups and Google Cloud's webhook channels, each on a path
   of its own ([docs/design/notifications.md](docs/design/notifications.md)).
   Alertmanager's event recorder, every delivery, PagerDuty's and Slack's
-  too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md));
-  still to do: keeping its mutes, which say why a firing paged no one;
+  too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md)),
+  and its mutes, which say why a firing paged no one, since 0.67
+  ([docs/design/mutes.md](docs/design/mutes.md)); still to do: counting
+  the muted in the digest and the report;
   checking the SNS, Azure and Google Cloud paths against real accounts; and a cloud alarm's own notifications,
   every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
   Google Cloud's other policies, OCI through Notifications), tied to the

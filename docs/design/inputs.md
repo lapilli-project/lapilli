@@ -100,7 +100,10 @@ event_recorder:
   the instance, the group's `groupUuid`, the `flushId` and the receiver.
   Another replica's delivery of the same is the same notification when it
   comes within a minute, as today.
-- **Every other event** (alerts created and grouped, silences, mutes,
+- **Mutes** (`silenceMutedAlert`, `inhibitionMutedAlert`, a
+  notification's `mutedAlerts`) are kept since schema 029, as
+  [mutes.md](mutes.md) says.
+- **Every other event** (alerts created and grouped, silences made,
   start and shutdown) is answered 200 with nothing kept.
 - **Lapilli's own webhook receiver**, kept beside the recorder, would count
   each notification twice: once as it reached Lapilli, once as the
@@ -113,8 +116,8 @@ event_recorder:
 - **Mutes.** The recorder says when a silence or an inhibition kept an
   alert from a notification (`silenceMutedAlert`, `inhibitionMutedAlert`,
   a notification's `mutedAlerts`). That answers "firings that paged no one:
-  why", which today Lapilli can't. It isn't kept here: it is a new kind of
-  data, and wants a design of its own (a question for review).
+  why". It wasn't kept here: it is a new kind of data, with a design of its
+  own, [mutes.md](mutes.md), built since (schema 029).
 - **The file and Kafka outputs.** A recipe could send a JSONL file's
   notifications on later; not built.
 
@@ -133,7 +136,9 @@ event_recorder:
   its name, an index past 1,000) is refused, not kept as something else:
   that event alone, the rest of a batch kept (as built, after the reviews).
 - Someone with the token can post deliveries that never were, within those
-  bounds, as on `/v1/alertmanager` today.
+  bounds, as on `/v1/alertmanager` today; and mutes that never were, which
+  claim only that a firing was muted ([mutes.md](mutes.md), "Attacker's
+  look").
 
 ## 2. Shifts read from on-call schedules
 

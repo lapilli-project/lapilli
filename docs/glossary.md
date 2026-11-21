@@ -145,6 +145,12 @@ only once it was over is missed too, and the report names the rule
 (`✗ nothing in time; after its end`). See
 [The numbers](numbers.md#incidents-missed-and-caught-only-by-noisy-rules).
 
+### Mute
+
+An alert a silence or an inhibition kept from a notification, as
+Alertmanager's event recorder tells of it: why a firing paged no one. See
+[Why a firing paged no one](notifications.md#why-a-firing-paged-no-one).
+
 ### Near miss
 
 For an incident nothing caught, or only noisy rules did, a rule whose

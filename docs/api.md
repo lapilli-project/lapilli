@@ -445,7 +445,8 @@ nothing else, each source on a path of its own:
 A notification is 1 MB at most; each source is taken at 20 a second,
 bursts of 100, and up to 200,000 alerts a day (UTC). It answers
 `{"kept": N, "same_as_kept": N}`, with `refused` when some couldn't be
-kept. Host names aren't checked here: each request carries its own proof.
+kept; `/v1/alertmanager/events` adds `mutes`, the silences' and
+inhibitions' mutes it read and kept ([notifications.md](notifications.md#why-a-firing-paged-no-one)). Host names aren't checked here: each request carries its own proof.
 [Notifications as they were sent](notifications.md) says what each
 source sends and how.
 

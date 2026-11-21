@@ -66,8 +66,11 @@
   silenced, inhibited and routed nowhere look the same from the receiving
   end. Notifications to PagerDuty, Slack and the like are seen only where the
   alert manager also sends them to Lapilli, or, from Alertmanager 0.33.0 on,
-  its event recorder tells of them; the recorder's mutes, which say why a
-  firing paged no one, aren't kept yet.
+  its event recorder tells of them. The recorder's mutes say when a silence
+  or an inhibition kept a firing from a notification, and are kept; a
+  firing routed nowhere still can't say so, and 0.33 and 0.34 name the
+  alerts a notification says were muted by a hash alone, so only their own
+  mute events say which.
 - Alarms kept in a cloud's own monitoring are replayed only where they are
   written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from

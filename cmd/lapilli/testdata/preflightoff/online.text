@@ -11,7 +11,7 @@ ok       history.alerts      1 alert name fired in the last day, 120 samples in 
 ok       inputs.files        --incidents read, as serve reads them
 ok       secrets.files       2 secret files read: --incidents-token-file incidents-token: 26
                              characters; --firings-token-file firings-token: 24 characters
-ok       ledger.sqlite       schema 028, this release's
+ok       ledger.sqlite       schema 029, this release's
                              why: <free> free
 ok       signin              --oidc-issuer's configuration read, its issuer as given, 1 public key
 ok       access              roles: those --editors and --admins name change what their role allows;
