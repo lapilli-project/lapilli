@@ -77,7 +77,10 @@ Before upgrading:
   that ended meanwhile stayed on. Such a day is of no use now, a gap, as
   one with a rule the history can't say all of is, logged with the rules'
   names; a rule judged so no more (paused, deleted, renamed) keeps what
-  was copied in for it.
+  was copied in for it. A day is a gap for every rule judged from the
+  history while any of them shares its title, as the record of Grafana's
+  history is kept for the source and not each rule: name the rules
+  apart, and the days after are written again.
 - **The Sources page showed credentials its scrubber didn't read as one**
   (affected: 0.64.0 to 0.68.0). It took out a URL's user and password, a
   query's token or key, `name=value` between spaces, a JSON string, an
