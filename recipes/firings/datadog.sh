@@ -102,10 +102,17 @@ heads=$(mktemp)
 trap 'rm -f "$all" "$page" "$heads"' EXIT
 trap 'exit 1' INT TERM HUP
 # header NAME: the whole seconds the last header NAME (lowercase) of the
-# answer says, or nothing.
+# answer says, or nothing; its leading zeros off, as $((...)) would read
+# 08 as octal, and fail.
 header() {
   v=$(tr -d '\r' <"$heads" | awk -v h="$1:" 'tolower($1) == h { v = $2 } END { print v }')
-  case $v in '' | *[!0-9]*) v= ;; esac
+  case $v in
+    '' | *[!0-9]*) v= ;;
+    *)
+      v=${v#"${v%%[!0]*}"}
+      v=${v:-0}
+      ;;
+  esac
   printf '%s' "$v"
 }
 # fetch URL: the Events API's answer in $page. Past its rate limit it

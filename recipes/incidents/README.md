@@ -186,7 +186,10 @@ operations API, Grafana IRM's incident API (`IncidentsService.QueryIncidents`,
 a service account token), Rootly's `GET /v1/incidents` and FireHydrant's
 `GET /v1/incidents` (a bot token). Where a reference shows a shape two ways,
 both are read. Rootly takes five requests a minute: a 429 is waited out as
-its `Retry-After` says, five times at most. Rootly and FireHydrant number
+its `Retry-After` says, five times at most. FireHydrant takes 50 an
+account every 10 seconds: a 429 is waited out as its `Retry-After` says
+too, two minutes at most a wait, five waits a request and ten minutes a
+run. Rootly and FireHydrant number
 their pages with no order of their own, so an incident on two pages is one.
 
 FireHydrant's alerts are those `GET /v1/incidents/{incident_id}/alerts`

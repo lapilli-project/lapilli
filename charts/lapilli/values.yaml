@@ -117,8 +117,8 @@ impact: null
 # Labels a firing and an incident must agree on, such as [service].
 match: []
 # true passes --linked-only, in both modes: an incident that lists the
-# alerts its tool linked to it (alerts:, which the PagerDuty, incident.io
-# and Rootly recipes write) is caught by those alone, not by any other
+# alerts its tool linked to it (alerts:, which the PagerDuty, incident.io,
+# Rootly, FireHydrant and Jira Service Management recipes write) is caught by those alone, not by any other
 # firing at the time; one that lists none is caught by the time and match
 # as ever. In serve mode a change judges every firing again, once.
 linkedOnly: false

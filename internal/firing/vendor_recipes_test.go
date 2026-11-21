@@ -389,6 +389,9 @@ func TestVendorRecipesWaitOut429(t *testing.T) {
 			{"Retry-After": "3", "X-RateLimit-Reset": "9"}, {}, {"X-RateLimit-Reset": "soon"}}, true, "7 3 5 10"},
 		{"as it says", "newrelic.sh", limited{{}, {}, {"Retry-After": "2"}, {"Retry-After": "Fri, 31 Dec 1999 23:59:59 GMT"}}, true, "5 10 2 20"},
 		{"two minutes at most", "datadog.sh", limited{{"X-RateLimit-Reset": "86400"}, {"Retry-After": "99999999999999999999"}}, true, "120 120"},
+		// Decimal, not octal, whatever zeros lead.
+		{"leading zeros", "datadog.sh", limited{{"Retry-After": "08"}, {"X-RateLimit-Reset": "09"}, {"Retry-After": "000"}, {"Retry-After": "0000000000120"}}, true, "8 9 0 120"},
+		{"leading zeros", "newrelic.sh", limited{{"Retry-After": "08"}, {"Retry-After": "09"}, {"Retry-After": "00"}}, true, "8 9 0"},
 		{"five waits", "datadog.sh", limited{{}, {}, {}, {}, {}, {}}, false, "5 10 20 40 80"},
 		{"five waits", "newrelic.sh", limited{{}, {}, {}, {}, {}, {}}, false, "5 10 20 40 80"},
 	} {

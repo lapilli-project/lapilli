@@ -37,7 +37,8 @@ It needs:
 - what went wrong: `incidents`, `impact`, or both.
 
 An incident may list the alerts its tool linked to it (`alerts:`, which the
-PagerDuty, incident.io and Rootly recipes write; `docs/incidents.md` in the
+PagerDuty, incident.io, Rootly, FireHydrant and Jira Service Management
+recipes write; `docs/incidents.md` in the
 repository): a firing of one catches it whatever `match` says. With
 `linkedOnly: true` (`--linked-only`, in both modes), such an incident is
 caught by those alone, not by any other firing at the time; one that lists

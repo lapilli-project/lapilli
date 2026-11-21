@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -69,6 +70,26 @@ func runRecipeSaid(t *testing.T, script string, env ...string) ([]incident.Incid
 		t.Fatalf("what %s wrote doesn't load: %v\n%s", script, err, out)
 	}
 	return incs, said.String()
+}
+
+// fakeSleep puts a sleep first on PATH that waits for nothing, and writes
+// its argument, a line, to the file it gives: PATH for a recipe's
+// environment, and that file.
+func fakeSleep(t *testing.T) (path, slept string) {
+	t.Helper()
+	bin := t.TempDir()
+	slept = filepath.Join(bin, "slept")
+	if err := os.WriteFile(filepath.Join(bin, "sleep"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >>"+slept+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return "PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), slept
+}
+
+// sleeps reads what fakeSleep's sleep was given, space-separated.
+func sleeps(t *testing.T, slept string) string {
+	t.Helper()
+	b, _ := os.ReadFile(slept)
+	return strings.Join(strings.Fields(string(b)), " ")
 }
 
 func tokenFile(t *testing.T, token string) string {
@@ -314,7 +335,8 @@ func TestJiraRecipeLinkedAlerts(t *testing.T) {
 		limited := jsm <= limit
 		mu.Unlock()
 		if limited {
-			w.Header().Set("Retry-After", "0")
+			// Eight seconds, which a shell would read as octal.
+			w.Header().Set("Retry-After", "08")
 			http.Error(w, `{"errors": [{"title": "Too many requests"}]}`, http.StatusTooManyRequests)
 			return
 		}
@@ -349,10 +371,14 @@ func TestJiraRecipeLinkedAlerts(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	env := []string{"JSM_API=" + srv.URL, "JSM_CLOUD_ID=" + cloud}
+	path, slept := fakeSleep(t)
+	env := []string{"JSM_API=" + srv.URL, "JSM_CLOUD_ID=" + cloud, path}
 	out, said, err := runJira(t, srv.URL, env...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, said)
+	}
+	if got := sleeps(t, slept); got != "8" {
+		t.Errorf("slept %q, want 8", got)
 	}
 	wantIncidents(t, loadIncidents(t, out),
 		incident.Incident{ID: "OPS-41", Title: "Checkout errors", Start: utc("2026-10-28T12:01:00+09:00"), End: utc("2026-10-28T12:40:00+09:00"), Labels: incident.Labels{"service": {"checkout", "cart"}},
@@ -1323,9 +1349,23 @@ func TestRootlyRecipe(t *testing.T) {
 
 func TestFireHydrantRecipe(t *testing.T) {
 	needTools(t)
+	var mu sync.Mutex
+	limited := 1
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer fhb-secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// The first request answered as its reference says a rate
+		// limited one is, its wait of eight seconds written 08.
+		mu.Lock()
+		limit := limited > 0
+		limited--
+		mu.Unlock()
+		if limit {
+			w.Header().Set("RateLimit-Limit", "50")
+			w.Header().Set("Retry-After", "08")
+			http.Error(w, `{"error": "rate limit exceeded"}`, http.StatusTooManyRequests)
 			return
 		}
 		q := r.URL.Query()
@@ -1360,8 +1400,12 @@ func TestFireHydrantRecipe(t *testing.T) {
 		w.Write(fixture(t, name))
 	}))
 	defer srv.Close()
-	env := []string{"FIREHYDRANT_API=" + srv.URL, "FIREHYDRANT_TOKEN_FILE=" + tokenFile(t, "fhb-secret"), "SINCE=2026-10-01"}
+	path, slept := fakeSleep(t)
+	env := []string{"FIREHYDRANT_API=" + srv.URL, "FIREHYDRANT_TOKEN_FILE=" + tokenFile(t, "fhb-secret"), "SINCE=2026-10-01", path}
 	got, said := runRecipeSaid(t, "firehydrant.sh", env...)
+	if got := sleeps(t, slept); got != "8" {
+		t.Errorf("slept %q, want 8", got)
+	}
 	wantIncidents(t, got,
 		incident.Incident{ID: "FH-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}},
 			Alerts: []incident.Alert{{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout", "severity": "critical"}}, {Rule: "CheckoutLatency", Labels: map[string]string{"job": "checkout"}}}},
@@ -1382,6 +1426,45 @@ func TestFireHydrantRecipe(t *testing.T) {
 	cmd.Env = append(os.Environ(), append(env, "MAX_ALERT_REQUESTS=2")...)
 	if out, err := cmd.Output(); err == nil || len(out) != 0 {
 		t.Errorf("past MAX_ALERT_REQUESTS: %v, wrote %q", err, out)
+	}
+
+	// Five waits a request, and ten minutes in all a run, though each
+	// page answers after its 429: past them, nothing is written.
+	for _, c := range []struct {
+		name, wait string
+		every      int
+		sleeps     string
+	}{
+		{"five waits", "", 0, "5 10 20 40 80"},
+		{"ten minutes", "300", 2, "120 120 120 120 120"},
+	} {
+		asked := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			n := asked
+			asked++
+			mu.Unlock()
+			if c.every == 0 || n%c.every == 0 {
+				if c.wait != "" {
+					w.Header().Set("Retry-After", c.wait)
+				}
+				http.Error(w, `{"error": "rate limit exceeded"}`, http.StatusTooManyRequests)
+				return
+			}
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			fmt.Fprintf(w, `{"data": [], "pagination": {"page": %d, "next": %d}}`, page, max(page, 1)+1)
+		}))
+		path, slept := fakeSleep(t)
+		cmd := exec.Command("sh", recipes+"firehydrant.sh")
+		cmd.Env = append(os.Environ(), "FIREHYDRANT_API="+srv.URL, "FIREHYDRANT_TOKEN_FILE="+tokenFile(t, "fhb-secret"), path)
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		srv.Close()
+		if got := sleeps(t, slept); err == nil || stdout.Len() != 0 || got != c.sleeps ||
+			!strings.Contains(stderr.String(), "still says too many requests after 5 waits") {
+			t.Errorf("%s: %v, slept %q, wrote %q, said %q", c.name, err, got, stdout.String(), stderr.String())
+		}
 	}
 }
 
