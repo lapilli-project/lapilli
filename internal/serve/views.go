@@ -2044,6 +2044,9 @@ type firingLine struct {
 	// it paged no one.
 	Notified int
 	Counted  bool
+	// Muted is what muted it, a silence first (docs/design/mutes.md): what
+	// the page says of it when no notification told of it.
+	Muted []ledger.Mute
 	// Unjudged says it caught nothing in a week with no record to judge it
 	// by: counted, not judged, neither ○ nor ● (judged). ByNothing says
 	// why, when it isn't for want of a record: its rule entry judges it
