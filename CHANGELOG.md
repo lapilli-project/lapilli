@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A flag that is on or off was on whatever it was given** (affected:
+  0.1.0 to 0.68.1). `--json=false` was `--json`, in `lapilli verdict` and
+  `lapilli impact suggest`, and so were `--linked-only=false`,
+  `--redact=false`, `--alerts=false`, `--csv=false`, `--markdown=false`,
+  `--metrics=false`, `--changed-only=false`, `--loaded-rules=false`,
+  `--loki-loaded-rules=false`, `--fail-unreplayed=false`,
+  `--fail-expectations=false`, `--expect-required=false` and
+  `--fail-missed=false`, in serve too where it takes them. Each is off as
+  `=false` says now, and `--redact-key` with `--redact=false` is refused.
+
+### Changed
+
+- **A flag that is on or off takes `=true` or `=false`, and nothing
+  else**, in every command: `=1`, `=t` or `=TRUE`, which
+  `--check-replay`, `--check-content`, `--grafana-history`, `--progress`,
+  serve's own and preflight's took, are refused, as `=yes` was.
+
 ## [0.68.1] - 2026-11-21
 
 A security release, after a review of 0.67.0 from an attacker's point of

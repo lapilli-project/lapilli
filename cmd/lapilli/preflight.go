@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -88,13 +87,9 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stdout, preflightUsage)
 			return 0
 		case "--json", "--fail-unknown", "--offline":
-			on := true
-			if hasVal {
-				b, err := strconv.ParseBool(val)
-				if err != nil {
-					return refuse(fmt.Errorf("%s=%s: want true or false", name, val))
-				}
-				on = b
+			on, err := onOff(name, val, hasVal)
+			if err != nil {
+				return refuse(err)
 			}
 			switch name {
 			case "--json":

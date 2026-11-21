@@ -657,103 +657,53 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 		// As serve's: a quarter of the chart's memory limit.
 		promtoolMemory: defaultPromtoolMemory,
 	}
+	// The flags that are on or off, each read by onOff: on by itself, as
+	// =true or =false says, and refused with anything else.
+	onOffs := map[string]*bool{
+		"--alerts": &f.alerts, "--json": &f.json, "--csv": &f.csv, "--markdown": &f.markdown, "--metrics": &f.metrics,
+		"--changed-only": &f.changedOnly, "--fail-expectations": &f.failExpect, "--expect-required": &f.expectRequired,
+		"--fail-missed": &f.failMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
+		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly,
+	}
+	// redactOff is --redact=false, which --redact-key can't go with.
+	redactOff := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		name, val, hasVal := strings.Cut(a, "=")
+		if p, ok := onOffs[name]; ok {
+			on, err := onOff(name, val, hasVal)
+			if err != nil {
+				return nil, err
+			}
+			*p = on
+			continue
+		}
 		switch name {
-		case "--alerts":
-			f.alerts = true
-			continue
-		case "--json":
-			f.json = true
-			continue
-		case "--csv":
-			f.csv = true
-			continue
-		case "--markdown":
-			f.markdown = true
-			continue
-		case "--redact":
-			f.redact = true
-			continue
-		case "--metrics":
-			f.metrics = true
-			continue
-		case "--changed-only":
-			f.changedOnly = true
-			continue
-		case "--fail-expectations":
-			f.failExpect = true
-			continue
-		case "--expect-required":
-			f.expectRequired = true
-			continue
-		case "--fail-missed":
-			f.failMissed = true
-			continue
-		case "--check-replay":
-			f.checkReplay, f.checkReplaySet = true, true
-			if hasVal {
-				b, err := strconv.ParseBool(val)
-				if err != nil {
-					return nil, fmt.Errorf("--check-replay=%s: want true or false", val)
-				}
-				f.checkReplay = b
+		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress":
+			on, err := onOff(name, val, hasVal)
+			if err != nil {
+				return nil, err
 			}
-			continue
-		case "--check-content":
-			f.checkContent, f.checkContentSet = true, true
-			if hasVal {
-				b, err := strconv.ParseBool(val)
-				if err != nil {
-					return nil, fmt.Errorf("--check-content=%s: want true or false", val)
-				}
-				f.checkContent = b
-			}
-			continue
-		case "--loaded-rules":
-			f.loadedRules = true
-			continue
-		case "--loki-loaded-rules":
-			f.lokiLoaded = true
-			continue
-		case "--fail-unreplayed":
-			f.failUnreplayed = true
-			continue
-		case "--linked-only":
-			f.opts.LinkedOnly = true
-			continue
-		case "--grafana-history":
-			f.grafanaHistorySet = true
-			if hasVal {
-				b, err := strconv.ParseBool(val)
-				if err != nil {
-					return nil, fmt.Errorf("--grafana-history=%s: want true or false", val)
-				}
-				f.noGrafanaHistory = !b
-			}
-			continue
-		case "--progress":
-			f.progressSet = true
-			if hasVal {
-				b, err := strconv.ParseBool(val)
-				if err != nil {
-					return nil, fmt.Errorf("--progress=%s: want true or false", val)
-				}
-				f.noProgress = !b
+			switch name {
+			case "--redact":
+				f.redact, redactOff = on, !on
+			case "--check-replay":
+				f.checkReplay, f.checkReplaySet = on, true
+			case "--check-content":
+				f.checkContent, f.checkContentSet = on, true
+			case "--grafana-history":
+				f.noGrafanaHistory, f.grafanaHistorySet = !on, true
+			default:
+				f.noProgress, f.progressSet = !on, true
 			}
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin" || name == "--oidc-bearer" ||
 			name == "--config-prune" || name == "--goal-tasks" || name == "--expect-tasks" || name == "--yield-on-429") {
 			// On by itself; =false turns it off, as --check-content=false does.
-			on := true
-			if hasVal {
-				b, err := strconv.ParseBool(val)
-				if err != nil {
-					return nil, fmt.Errorf("%s=%s: want true or false", name, val)
-				}
-				on = b
+			on, err := onOff(name, val, hasVal)
+			if err != nil {
+				return nil, err
 			}
 			if _, err := serve(name, strconv.FormatBool(on)); err != nil {
 				return nil, err
@@ -901,7 +851,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			if rerr != nil {
 				return nil, rerr
 			}
-			f.redact, f.redactKey = true, key
+			f.redactKey = key
 		case "--incidents":
 			f.incidents = val
 		case "--impact", "--impact-for", "--impact-match", "--impact-record", "--impact-lead", "--impact-file":
@@ -1026,7 +976,25 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			return nil, err
 		}
 	}
+	if f.redactKey != nil {
+		if redactOff {
+			return nil, errors.New("--redact-key redacts: leave out --redact=false")
+		}
+		f.redact = true
+	}
 	return f, nil
+}
+
+// onOff reads a flag that is on or off: on by itself, and as =true or
+// =false says; any other value is refused, so that no word turns it on.
+func onOff(name, val string, hasVal bool) (bool, error) {
+	switch {
+	case !hasVal || val == "true":
+		return true, nil
+	case val == "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s=%s: want true or false", name, val)
 }
 
 // checkFlags checks the flags readFlags read, each against the others.

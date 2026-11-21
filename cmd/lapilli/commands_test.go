@@ -40,6 +40,9 @@ Each command's options, as ` + "`lapilli COMMAND -h`" + ` prints them. The pages
 under each say what the options are for; this page is all of them in one
 place, to look one up. These pages follow the main branch: ` + "`lapilli version`" + `
 says which version you have, and its own ` + "`-h`" + ` is the one to go by.
+
+A flag that is on or off, such as ` + "`--json`" + `, is on by itself, and takes
+` + "`=true`" + ` or ` + "`=false`" + ` too; any other value is refused.
 `)
 	for _, c := range []struct{ name, about, help string }{
 		{"lapilli", "", usage},
