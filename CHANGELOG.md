@@ -22,6 +22,12 @@
 
 ### Changed
 
+- **`datadog.sh` and `newrelic.sh` wait out a 429**, as `rootly.sh`
+  does: as Datadog's `X-RateLimit-Reset` or a `Retry-After` says, or else
+  5 seconds and twice as long each time; two minutes at most a wait, five
+  waits a request and ten minutes in all a run, past which they stop with
+  nothing written. Any other answer that isn't a 2xx stops them, as
+  before, now saying its status.
 - The incident recipes' `.jq` files take `ALERT_LABELS` as `--arg
   alert_labels`, not `--arg labels`, which `jira.jq` has for `JIRA_LABELS`;
   `jira.jq` and `firehydrant.jq`, run by hand, now want `jq -L
