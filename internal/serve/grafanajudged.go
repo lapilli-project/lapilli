@@ -318,19 +318,34 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	// ended, written again from its start, is written within the spans it
 	// lies across, and a gap between them stays one, as what began in it
 	// was never read whole; a change the history gave in a gap is left out
-	// with it.
+	// with it, but for an alert still on after it.
 	spans, err := s.l.Spans(ctx, ledger.GrafanaSource)
 	if err != nil {
 		return err
 	}
-	written := slices.Concat(before, send, kept)
-	for _, w := range coveredWrites(spans, from, a, b) {
-		var fs []firing.Firing
-		for _, x := range written {
-			if !x.Start.Before(w[0]) && x.Start.Before(w[1]) {
-				fs = append(fs, x)
+	// A firing that began in a gap, still on where the copies cover again,
+	// is written from there, as the first day after a gap writes one on at
+	// its start: not left out, which would take away the copy of it a
+	// round before made from there.
+	writes := coveredWrites(spans, from, a, b)
+	of := make([][]firing.Firing, len(writes))
+	for _, x := range slices.Concat(before, send, kept) {
+		for i, w := range writes {
+			if x.Start.Before(w[0]) {
+				if x.End.IsZero() || x.End.After(w[0]) {
+					x.Start = w[0]
+					of[i] = append(of[i], x)
+				}
+				break
+			}
+			if x.Start.Before(w[1]) {
+				of[i] = append(of[i], x)
+				break
 			}
 		}
+	}
+	for i, w := range writes {
+		fs := of[i]
 		got, err := s.l.PutFirings(context.WithoutCancel(ctx), ledger.GrafanaSource, w[0], w[1], fs, ledger.GrafanaCopier, o)
 		if err != nil {
 			return err

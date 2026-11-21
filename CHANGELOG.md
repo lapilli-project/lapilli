@@ -203,7 +203,9 @@ Before upgrading:
   gap** (0.68.0). It is written again from its start, and the write, from
   there to the day's end, covered every gap between, taken for days with a
   record, whichever round after them it ended in. It is written within
-  the spans the copies cover now, each apart, and each gap stays one.
+  the spans the copies cover now, each apart, and each gap stays one; an
+  alert that began in a gap and stays on is written from where the copies
+  cover again, in every round, as the first after the gap writes it.
 - **The backtest recipes said a URL they take over http was refused for
   not being https** (0.32.0 to 0.68.0). `STATUS_URL`, the host's API,
   `LAPILLI_RELEASES` and `ACTIONS_ID_TOKEN_REQUEST_URL` take http to this

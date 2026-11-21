@@ -534,3 +534,62 @@ func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 		}
 	}
 }
+
+// An alert that began in a gap and stays on is written from where the
+// copies cover again, in every round after it: the first after the gap,
+// shorter than --settle, writes it from its start, and the next, which
+// reads it again from where it truly began, in the gap, writes it from
+// there too, rather than taking the copy away. The gap stays one.
+func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
+	ctx := context.Background()
+	g := &dupGrafana{ordersGrafana: &ordersGrafana{more: []alertChange{
+		{"Normal", "Alerting", "search", now.Add(time.Hour + 45*time.Minute)},
+	}}}
+	s := judgingServer(t, g)
+	raw := ""
+	for i, r := range []struct {
+		at  time.Duration
+		dup bool
+	}{{0, false}, {2 * time.Hour, true}, {2*time.Hour + 30*time.Minute, false}, {4 * time.Hour, false}, {6 * time.Hour, false}} {
+		g.mu.Lock()
+		g.dup = r.dup
+		g.mu.Unlock()
+		at := now.Add(r.at)
+		s.now = func() time.Time { return at }
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		s.jobs(ctx, true)
+		if s.status.errWhat != "" {
+			t.Fatalf("round %d failed: %s: %s", i, s.status.errWhat, s.status.err)
+		}
+		if i < 2 {
+			continue
+		}
+		fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-48*time.Hour), now.Add(48*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, f := range fs {
+			if f.Labels["service"] == "search" {
+				n++
+				if !f.Start.Equal(now.Add(2*time.Hour)) || !f.End.IsZero() {
+					t.Errorf("round %d: search's firing %s to %s, not from the gap's end, on", i, f.Start, f.End)
+				}
+			}
+		}
+		if n != 1 {
+			t.Errorf("round %d: %d firings of search's alert, on since in the gap: %+v", i, n, fs)
+		}
+	}
+	spans, err := s.l.Spans(ctx, ledger.GrafanaSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sp := range spans {
+		if in := now.Add(time.Hour); !sp[0].After(in) && sp[1].After(in) {
+			t.Errorf("the gap is covered: %v", spans)
+		}
+	}
+}

@@ -62,7 +62,9 @@ history (recorded.md), such a rule can get from Grafana's.
   whose firings a write keeps as they are. A firing ended, written again
   from its start, is written within the spans the copies cover, each
   apart, whichever round after a gap it ends in, so each gap stays one;
-  what the history says began in a gap is left out with it. An alert on
+  what the history says began in a gap is left out with it, but an alert
+  still on where the copies cover again, written from there in every
+  round, as the first after the gap writes it. An alert on
   since before a
   write, which the ledger has as on and the history says ended, is
   written again from its start with what the ledger has from there,
