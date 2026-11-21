@@ -21,7 +21,7 @@
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included.
 def epoch: . as $t
   | (capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})$")
-     // error("not a time: \($t)"))
+     // error("not a time: \($t | tojson)"))
   | ((.d + "Z") | fromdateiso8601) + (("0" + (.f // "")) | tonumber)
     - (if .z == "Z" then 0 else (.z[0:1] + "1" | tonumber) * ((.z[1:3] | tonumber) * 3600 + (.z[-2:] | tonumber) * 60) end);
 # RFC 3339, in UTC, of milliseconds since 1970.
@@ -34,7 +34,7 @@ def evtime: . as $v
   | (if (.attributes.attributes.timestamp | type) == "number" then .attributes.attributes.timestamp
      elif (.attributes.timestamp | type) == "string" then (.attributes.timestamp | epoch) * 1000
      else error("event \($v.id | tojson) has no time") end)
-  | if . < 1e12 then error("event \($v.id | tojson): \(.) is no time in milliseconds") else floor end;
+  | if . < 1e12 then error("event \($v.id | tojson): \(tojson) is no time in milliseconds") else floor end;
 # key:value tags, a group's written key:value,key:value, as {key, value}s.
 def pairs: [.[]? | strings | split(",")[] | index(":") as $i | select($i != null and $i > 0)
   | {key: .[:$i], value: .[$i + 1:]}];
