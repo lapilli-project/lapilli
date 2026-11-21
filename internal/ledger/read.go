@@ -170,7 +170,7 @@ func (l *Ledger) IncidentByID(ctx context.Context, key string) (Incident, error)
 }
 
 // incidentCols are the columns of incidents l.incidents reads, in order.
-const incidentCols = "i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by, i.signal, i.match_labels, i.real_of"
+const incidentCols = "i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by, i.signal, i.match_labels, i.real_of, i.alerts"
 
 func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incident, error) {
 	rows, err := l.r.QueryContext(ctx, q, args...)
@@ -183,9 +183,13 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		var in Incident
 		var id, start, updated int64
 		var end sql.NullInt64
-		var labels string
+		var labels, alerts string
 		var match sql.NullString
-		if err := rows.Scan(&id, &in.ID, &in.Origin, &in.Title, &start, &end, &labels, &in.State, &in.Counts, &updated, &in.By, &in.Signal, &match, &in.RealOf); err != nil {
+		if err := rows.Scan(&id, &in.ID, &in.Origin, &in.Title, &start, &end, &labels, &in.State, &in.Counts, &updated, &in.By, &in.Signal, &match, &in.RealOf, &alerts); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if in.Alerts, err = alertsOf(alerts); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -212,7 +216,7 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		index[id] = i
 	}
 	idsJSON, _ := json.Marshal(ids)
-	rows, err = l.r.QueryContext(ctx, `SELECT c.incident_id, r.name, c.delay FROM catches c JOIN rules r ON r.id = c.rule_id
+	rows, err = l.r.QueryContext(ctx, `SELECT c.incident_id, r.name, c.delay, c.linked FROM catches c JOIN rules r ON r.id = c.rule_id
 		WHERE c.incident_id IN (`+l.d.ints("?")+`)`, string(idsJSON))
 	if err != nil {
 		return nil, err
@@ -221,11 +225,12 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 	for rows.Next() {
 		var id, delay int64
 		var name string
-		if err := rows.Scan(&id, &name, &delay); err != nil {
+		var linked bool
+		if err := rows.Scan(&id, &name, &delay, &linked); err != nil {
 			return nil, err
 		}
 		in := &out[index[id]]
-		in.CaughtBy = append(in.CaughtBy, verdict.Catch{Rule: name, Delay: time.Duration(delay) * time.Second})
+		in.CaughtBy = append(in.CaughtBy, verdict.Catch{Rule: name, Delay: time.Duration(delay) * time.Second, Linked: linked})
 	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)

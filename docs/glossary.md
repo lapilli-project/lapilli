@@ -124,6 +124,13 @@ and by week, the versions of the rules, and what people write (incidents,
 tasks, notes, comments, proposals). One SQLite file in `--ledger DIR`, or
 a Postgres database. See [Keep judging](serve.md).
 
+### Linked
+
+A catch by one of the alerts the incident's tool linked to it (the
+incident's `alerts`): it catches in the same span, whatever `--match` says.
+With `--linked-only`, an incident that lists alerts is caught by those
+alone. See [How it judges](how-it-judges.md).
+
 ### Marked window
 
 A sale, a launch, a campaign: a window of a kind a team chooses. A firing

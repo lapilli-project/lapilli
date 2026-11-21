@@ -321,7 +321,12 @@ Judging:
                       still catches it (default 15m)
   --match LABEL       a label a firing and an incident must agree on when
                       both have it, such as service (repeatable); an
-                      incident can list several values
+                      incident can list several values. A firing of an
+                      alert the incident's tool linked to it (alerts: in
+                      the incidents file) catches it whatever they say
+  --linked-only       an incident that lists the alerts its tool linked to
+                      it is caught by those alone, not by any other firing
+                      at the time; one that lists none is caught as ever
   --refire DUR        a firing this soon after the same alert resolved counts
                       as refired (default 1h)
   --rule REGEX        only rules whose name matches
@@ -433,6 +438,8 @@ The incidents file:
       start: 2026-10-30T17:00:00+09:00
       end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
       labels: {service: [checkout, cart]} # optional, for --match
+      alerts:                             # optional: those its tool linked
+        - {rule: CheckoutErrors, labels: {service: checkout}}
 
 The impact file:
 
@@ -676,6 +683,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--fail-unreplayed":
 			f.failUnreplayed = true
+			continue
+		case "--linked-only":
+			f.opts.LinkedOnly = true
 			continue
 		case "--progress":
 			f.progressSet = true

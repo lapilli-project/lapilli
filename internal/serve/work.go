@@ -61,6 +61,19 @@ func (s *Server) work(ctx context.Context) {
 // count how often.
 var judgeAll = (*ledger.Ledger).JudgeAll
 
+// linkedMeta is the key in meta of the --linked-only the ledger's stones
+// were last all given by: linkedText's.
+const linkedMeta = "linked-only"
+
+// linkedText is --linked-only as meta keeps it: "1", or "" as a ledger
+// before it was judged.
+func linkedText(on bool) string {
+	if on {
+		return "1"
+	}
+	return ""
+}
+
 // jobs does each job in turn, each only while this replica still leads
 // (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
@@ -88,6 +101,25 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.rejudge.Store(rejudge || s.rejudge.Load())
 		s.fail("settings", err)
 		return
+	}
+	// --linked-only other than the ledger was last judged with, as after
+	// a start with it given or taken away: every firing judged again
+	// with it, and the ledger told so once that is done
+	// (docs/design/links.md).
+	linked := linkedText(o.LinkedOnly)
+	relinked := false
+	if was, err := s.l.Meta(ctx, linkedMeta); err != nil {
+		s.fail("settings", err)
+	} else if was != linked {
+		rejudge, relinked = true, true
+	}
+	judged := func() {
+		if !relinked {
+			return
+		}
+		if err := s.l.SetMeta(ctx, linkedMeta, linked); err != nil {
+			s.fail("judging again", err)
+		}
 	}
 	// Once, on the upgrade to this release: the windows of signals not in
 	// effect kept from before, which rules with an entry may have caught,
@@ -126,6 +158,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		// The signals' change pended every firing, judged just now with
 		// these settings: what was asked (a match changed, with named
 		// signals) is done, once.
+		judged()
 		if s.l.Shared() {
 			if err := s.l.SetMeta(ctx, "rejudged", fmt.Sprint(asked)); err != nil {
 				s.fail("judging again", err)
@@ -144,7 +177,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err != nil {
 			s.rejudge.Store(true)
 			s.fail("judging again", err)
-		} else if s.l.Shared() {
+		} else if judged(); s.l.Shared() {
 			// What was asked is done: the next leader doesn't do it again.
 			if err := s.l.SetMeta(ctx, "rejudged", fmt.Sprint(asked)); err != nil {
 				s.fail("judging again", err)

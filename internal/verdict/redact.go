@@ -201,6 +201,17 @@ func (n *names) label(k, v string) {
 	n.labels[k][v] = true
 }
 
+// alerts are the names in the alerts an incident lists: their rules', and
+// their labels' values.
+func (n *names) alerts(as []incident.Alert) {
+	for _, a := range as {
+		n.rules[a.Rule] = true
+		for k, v := range a.Labels {
+			n.label(k, v)
+		}
+	}
+}
+
 func (n *names) rule(rr RuleResult) {
 	n.rules[rr.Rule] = true
 	n.groups[rr.Group] = true
@@ -236,6 +247,7 @@ func (n *names) report(r *Report) {
 	for _, in := range r.Incidents {
 		n.incidents = append(n.incidents, in.Incident)
 		n.signals[in.Signal] = true
+		n.alerts(in.Alerts)
 		for k, vs := range in.Labels {
 			for _, v := range vs {
 				n.label(k, v)
@@ -295,6 +307,7 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 		for _, ic := range c.Incidents {
 			n.incidents = append(n.incidents, ic.Incident)
 			n.signals[ic.Signal] = true
+			n.alerts(ic.Alerts)
 			for k, vs := range ic.Labels {
 				for _, v := range vs {
 					n.label(k, v)
@@ -376,6 +389,13 @@ func (x *Redactor) incident(in incident.Incident) incident.Incident {
 	in.Signal = x.alias("signal", in.Signal)
 	in.Match = slices.Clone(in.Match) // labels' names, which stay
 	in.Labels = x.incidentLabels(in.Labels)
+	if in.Alerts != nil {
+		as := make([]incident.Alert, len(in.Alerts))
+		for i, a := range in.Alerts {
+			as[i] = incident.Alert{Rule: x.alias("rule", a.Rule), Labels: x.labels(a.Labels)}
+		}
+		in.Alerts = incident.SortAlerts(as) // by alias: no name decides the order
+	}
 	in.Start, in.End = utc(in.Start), utc(in.End)
 	if in.Spans != nil {
 		spans := make([]incident.Span, len(in.Spans))

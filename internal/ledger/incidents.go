@@ -78,7 +78,7 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 	err := l.write(ctx, func(t *txn) error {
 		taken = nil
 		have := map[string]incidentRow{}
-		rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of FROM incidents WHERE origin = 'file'")
+		rows, err := t.QueryContext(t.ctx, "SELECT "+incidentRowCols+" FROM incidents WHERE origin = 'file'")
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,30 @@ func same(d dialect, a, b incident.Incident) bool {
 	x, _ := json.Marshal(orEmpty(a.Labels))
 	y, _ := json.Marshal(orEmpty(b.Labels))
 	return text(a.ID) == text(b.ID) && text(a.Title) == text(b.Title) && a.Start.Unix() == b.Start.Unix() && a.End.IsZero() == b.End.IsZero() &&
-		(a.End.IsZero() || a.End.Unix() == b.End.Unix()) && string(x) == string(y)
+		(a.End.IsZero() || a.End.Unix() == b.End.Unix()) && string(x) == string(y) && text(alertsText(a.Alerts)) == text(alertsText(b.Alerts))
+}
+
+// alertsText is an incident's alerts as incidents.alerts keeps them:
+// sorted, each once, as JSON; empty for none.
+func alertsText(as []incident.Alert) string {
+	as = incident.SortAlerts(as)
+	if len(as) == 0 {
+		return ""
+	}
+	b, _ := marshal(as)
+	return string(b)
+}
+
+// alertsOf reads incidents.alerts, as alertsText wrote it.
+func alertsOf(text string) ([]incident.Alert, error) {
+	if text == "" {
+		return nil, nil
+	}
+	var as []incident.Alert
+	if err := json.Unmarshal([]byte(text), &as); err != nil {
+		return nil, fmt.Errorf("an incident's alerts: %w", err)
+	}
+	return incident.SortAlerts(as), nil
 }
 
 // marshal is JSON as written: Go's escaping of < > & would make a label
@@ -200,11 +223,12 @@ func put(t *txn, in incident.Incident, origin, by string, now int64) error {
 		match = matchText(in.Match)
 	}
 	// What "This was real" wrote it from (t.realOf), kept once written.
-	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by, signal, match_labels, real_of)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by, signal, match_labels, real_of, alerts)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
-			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by, signal = excluded.signal, match_labels = excluded.match_labels`,
-		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by, in.Signal, match, t.realOf)
+			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by, signal = excluded.signal, match_labels = excluded.match_labels,
+			alerts = excluded.alerts`,
+		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by, in.Signal, match, t.realOf, alertsText(in.Alerts))
 	return err
 }
 
@@ -248,7 +272,7 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 	if err := checkIncident(in); err != nil {
 		return "", err
 	}
-	in.Candidate = false
+	in.Candidate, in.Alerts = false, incident.SortAlerts(in.Alerts)
 	if in.ID != "" {
 		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == origin && same(l.d, old.Incident, in) {
 			return in.ID, nil
@@ -279,6 +303,9 @@ func checkIncident(in incident.Incident) error {
 		return invalid("an incident's labels are 4 KB at most in all, as JSON")
 	case !sane(in.Start) || (!in.End.IsZero() && !sane(in.End)):
 		return invalid("an incident's times are from 1970 to 9999")
+	}
+	if err := incident.CheckAlerts(in.Alerts); err != nil {
+		return invalid(err.Error())
 	}
 	for k, vs := range in.Labels {
 		if len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return len(v) > 256 }) {
@@ -409,7 +436,7 @@ func oldOrNil(err error, old incidentRow) any {
 }
 
 func (l *Ledger) get(t *txn, key string) (incidentRow, error) {
-	r, err := scanIncident(t.QueryRowContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of FROM incidents WHERE key = ?", key))
+	r, err := scanIncident(t.QueryRowContext(t.ctx, "SELECT "+incidentRowCols+" FROM incidents WHERE key = ?", key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}

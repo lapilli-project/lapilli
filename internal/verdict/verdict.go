@@ -29,6 +29,11 @@ type Options struct {
 	// have them, for the firing to catch the incident: service, team. An
 	// incident's label can have several values, any of which agrees.
 	Match []string
+	// LinkedOnly says an incident that lists the alerts its tool linked to
+	// it (incident.Incident.Alerts) is caught by those alone
+	// (--linked-only, docs/design/links.md); one that lists none is
+	// caught as any other.
+	LinkedOnly bool
 	// RefireWithin is how soon after resolving a firing again counts as the
 	// alert flapping.
 	RefireWithin time.Duration
@@ -305,6 +310,9 @@ type Catch struct {
 	// Noisy is a catch by a rule that fires whatever happens, which would
 	// likely have fired at that time anyway.
 	Noisy bool `json:"noisy"`
+	// Linked says a firing of the rule that caught it is one of the alerts
+	// the incident tool linked to it (incident.Incident.Alerts).
+	Linked bool `json:"linked,omitempty"`
 }
 
 func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White, at) }
@@ -437,6 +445,9 @@ type Settings struct {
 	Lead time.Duration `json:"lead_ns"`
 	// Match are the labels a firing and an incident must agree on.
 	Match []string `json:"match"`
+	// LinkedOnly says an incident that lists its linked alerts is caught
+	// by them alone (--linked-only).
+	LinkedOnly bool `json:"linked_only,omitempty"`
 	// Refire is how soon after the same alert resolved a firing re-fired.
 	Refire time.Duration `json:"refire_ns"`
 	// UnknownLength is how long an incident with no end is taken to last.
@@ -483,7 +494,7 @@ func (o Options) Settings() *Settings {
 	if match == nil {
 		match = []string{}
 	}
-	s := &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
+	s := &Settings{Lead: o.Lead, Match: match, LinkedOnly: o.LinkedOnly, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
 		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil,
 		Zone: o.zone().String()}
 	if o.Signals.Named() {
@@ -568,8 +579,10 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	}
 	catches := make([]map[string]time.Duration, len(inPeriod))
 	after := make([]map[string]time.Duration, len(inPeriod))
+	// The rules a firing the incident lists caught it with.
+	linked := make([]map[string]bool, len(inPeriod))
 	for i := range catches {
-		catches[i], after[i] = map[string]time.Duration{}, map[string]time.Duration{}
+		catches[i], after[i], linked[i] = map[string]time.Duration{}, map[string]time.Duration{}, map[string]bool{}
 	}
 
 	last := map[string]time.Time{} // rule and labels to when it last resolved
@@ -605,7 +618,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		j.NotJudged = nj
 		lapilli := false // white as Lapilli judged it: caught an incident "This was real" didn't write
 		for i, in := range inPeriod {
-			if nj || !Catches(f, in, o) {
+			if nj {
+				continue
+			}
+			caught, link := CatchesLinked(f, in, o)
+			if !caught {
 				continue
 			}
 			lapilli = lapilli || !in.Real
@@ -616,6 +633,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			}
 			j.White = true
 			j.Incidents = append(j.Incidents, in.ID)
+			if link {
+				linked[i][f.Rule] = true
+			}
 			d := f.Start.Sub(in.Start)
 			if have, ok := catches[i][f.Rule]; !ok || d < have {
 				catches[i][f.Rule] = d
@@ -683,7 +703,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	for i, in := range inPeriod {
 		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
-			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy})
+			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule]})
 		}
 		sortCatches(ir.CaughtBy)
 		for rule, d := range after[i] {
@@ -736,7 +756,7 @@ func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches
 	var ids []string
 	for i, in := range ins {
 		end := in.EndOr(o.UnknownLen)
-		if _, caught := catches[i][f.Rule]; caught || !f.Start.After(end) || held.After(end) || !o.Agrees(f.Rule, f.Labels, in) {
+		if _, caught := catches[i][f.Rule]; caught || !f.Start.After(end) || held.After(end) || !o.about(f.Rule, f.Labels, in) {
 			continue
 		}
 		ids = append(ids, in.ID)
@@ -750,25 +770,53 @@ func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches
 
 // Catches reports whether a firing catches an incident: it started between
 // the lead it is judged by before the incident (Options.LeadFor: Lead, or
-// a signal's or a rule entry's) and its end, and their labels agree on the
-// labels it is matched on (Options.Agrees: Match, or a signal's or a rule
-// entry's). One already firing before that caught nothing: it was on
-// anyway.
+// a signal's or a rule entry's) and its end, and it is one of the alerts
+// the incident lists (incident.Incident.Links), or, of one that lists none
+// or without --linked-only, their labels agree on the labels it is matched
+// on (Options.Agrees: Match, or a signal's or a rule entry's). One already
+// firing before that caught nothing: it was on anyway.
 func Catches(f firing.Firing, in incident.Incident, o Options) bool {
+	caught, _ := CatchesLinked(f, in, o)
+	return caught
+}
+
+// CatchesLinked is Catches, and whether it caught it as one of the alerts
+// the incident lists: such a firing catches it whatever their labels say
+// on the labels matched on (docs/design/links.md).
+func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, linked bool) {
 	to := in.EndOr(o.UnknownLen)
 	// A rule judged by nothing catches nothing, written incidents
 	// included (docs/design/judging.md, "Rules judged by nothing").
 	if o.Signals.NotJudgedRules() && o.NotJudged(f.Rule) {
-		return false
+		return false, false
 	}
 	if f.Start.After(to) || f.Start.Before(in.Start.Add(-o.MaxLead())) {
-		return false
+		return false, false
 	}
 	j := o.judgingOf(f.Rule, in)
 	if f.Start.Before(in.Start.Add(-o.leadOf(j, in))) {
+		return false, false
+	}
+	if in.Links(f.Rule, f.Labels) {
+		return true, true
+	}
+	if o.LinkedOnly && len(in.Alerts) > 0 {
+		return false, false
+	}
+	return o.agrees(j, f.Labels, in), false
+}
+
+// about reports whether a firing of rule with labels is about an incident,
+// whenever it came: one of the alerts it lists, or, as Catches has it, one
+// whose labels agree with it.
+func (o Options) about(rule string, labels map[string]string, in incident.Incident) bool {
+	if in.Links(rule, labels) {
+		return true
+	}
+	if o.LinkedOnly && len(in.Alerts) > 0 {
 		return false
 	}
-	return o.agrees(j, f.Labels, in)
+	return o.Agrees(rule, labels, in)
 }
 
 // Refired reports whether a firing that started at start came within

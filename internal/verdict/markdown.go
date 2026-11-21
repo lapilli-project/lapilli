@@ -200,11 +200,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 				}
 				var out []string
 				for _, k := range cs {
-					one := md(k.Rule, 200, true) + " " + Delay(k.Delay)
-					if k.Noisy {
-						one += " (noisy)"
-					}
-					out = append(out, one)
+					out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marks())
 				}
 				return strings.Join(out, ", ")
 			}
