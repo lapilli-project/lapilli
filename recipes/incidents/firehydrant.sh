@@ -29,8 +29,55 @@ all=$(mktemp)
 ids=$(mktemp)
 linked=$(mktemp)
 out=$(mktemp)
-trap 'rm -f "$all" "$ids" "$linked" "$out"' EXIT
+got=$(mktemp)
+heads=$(mktemp)
+naps=$(mktemp)
+trap 'rm -f "$all" "$ids" "$linked" "$out" "$got" "$heads" "$naps"' EXIT
 trap 'exit 1' INT TERM HUP
+# get URL: a page, on stdout. FireHydrant takes 50 requests an account
+# every 10 seconds: a 429 is waited out as its Retry-After says, or else 5
+# seconds, then twice as long each time; two minutes at most a wait, five
+# waits a request and ten minutes in all a run. Past them, and on any
+# answer but a 2xx, it fails. Its waits are counted in a file, as each
+# $(get ...) is a shell of its own.
+get() {
+  waits=0
+  backoff=5
+  while :; do
+    code=$(printf 'Authorization: Bearer %s\n' "$token" |
+      curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+    case $code in
+      2??)
+        cat "$got"
+        return 0
+        ;;
+      429) ;;
+      *)
+        printf 'firehydrant.sh: FireHydrant answered %s; writing nothing\n' "$code" >&2
+        return 1
+        ;;
+    esac
+    waits=$((waits + 1))
+    wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
+    case $wait in
+      '' | *[!0-9]*)
+        wait=$backoff
+        backoff=$((backoff * 2))
+        ;;
+    esac
+    # Leading zeros off: $((...)) would read 08 as octal, and fail.
+    wait=${wait#"${wait%%[!0]*}"}
+    wait=${wait:-0}
+    [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
+    waited=$(awk '{ s += $1 } END { print s + 0 }' "$naps")
+    if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
+      printf 'firehydrant.sh: FireHydrant still says too many requests after %s waits, %s seconds in all; stopping, writing nothing\n' "$(wc -l <"$naps" | tr -d ' ')" "$waited" >&2
+      return 1
+    fi
+    sleep "$wait"
+    printf '%s\n' "$wait" >>"$naps"
+  done
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -63,7 +110,7 @@ while :; do
   fi
   url="$api/v1/incidents?page=$number&per_page=200"
   [ -z "$since" ] || url="$url&start_date=$(printf '%s' "$since" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
+  page=$(get "$url")
   printf '%s' "$page" | jq -c '(.data // [])[]' >>"$all"
   next=$(printf '%s' "$page" | jq -r '.pagination.next // empty')
   [ -n "$next" ] || break
@@ -101,7 +148,7 @@ if [ "$alerts" = yes ]; then
       # answers with pages: a next one is asked for as the incidents' are.
       url="$api/v1/incidents/$id/alerts"
       [ "$number" = 1 ] || url="$url?page=$number"
-      page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
+      page=$(get "$url")
       if ! printf '%s' "$page" | jq -e 'type == "object" and ((.data // []) | type == "array")' >/dev/null 2>&1; then
         printf 'firehydrant.sh: the API answered something that is not a list of an incident'"'"'s alerts; writing nothing\n' >&2
         exit 1

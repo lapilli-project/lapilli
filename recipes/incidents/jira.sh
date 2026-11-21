@@ -154,6 +154,9 @@ if [ "$alerts" = yes ]; then
           backoff=$((backoff * 2))
           ;;
       esac
+      # Leading zeros off: $((...)) would read 08 as octal, and fail.
+      wait=${wait#"${wait%%[!0]*}"}
+      wait=${wait:-0}
       [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
       if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
         printf 'jira.sh: Jira Service Management still says too many requests after %s waits, %s seconds in all; stopping, writing nothing\n' "$naps" "$waited" >&2
