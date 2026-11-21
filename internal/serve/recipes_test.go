@@ -451,6 +451,85 @@ func TestJiraRecipeLinkedAlerts(t *testing.T) {
 	}
 }
 
+// Jira's search waits out a 429 as Jira Service Management's requests do:
+// as its Retry-After says (08 is eight), or else 5 seconds and twice as
+// long each time; past five waits a request, it stops with nothing
+// written, and any other answer that isn't a 2xx stops it, saying its
+// status. Under sh and dash alike.
+func TestJiraRecipeSearchWaits(t *testing.T) {
+	needTools(t)
+	shells := []string{"sh"}
+	if _, err := exec.LookPath("dash"); err == nil {
+		shells = append(shells, "dash")
+	}
+	for _, shell := range shells {
+		for _, c := range []struct {
+			name string
+			// answer gives the status for the nth search request, and its
+			// Retry-After; 200 for the page.
+			answer func(n int) (int, string)
+			sleeps string
+			says   string
+		}{
+			{"waited out", func(n int) (int, string) {
+				switch n {
+				case 0:
+					return http.StatusTooManyRequests, "08"
+				case 2:
+					return http.StatusTooManyRequests, ""
+				}
+				return http.StatusOK, ""
+			}, "8 5", ""},
+			{"past five waits", func(int) (int, string) { return http.StatusTooManyRequests, "" }, "5 10 20 40 80", "jira.sh: Jira still says too many requests after 5 waits, 155 seconds in all; stopping, writing nothing"},
+			{"refused", func(int) (int, string) { return http.StatusUnauthorized, "" }, "", "jira.sh: Jira's search answered 401; writing nothing"},
+		} {
+			var mu sync.Mutex
+			asked := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				code, after := c.answer(asked)
+				asked++
+				mu.Unlock()
+				if r.URL.Path != "/rest/api/3/search/jql" {
+					t.Errorf("asked for %s", r.URL.Path)
+				}
+				if code != http.StatusOK {
+					if after != "" {
+						w.Header().Set("Retry-After", after)
+					}
+					http.Error(w, `{"errorMessages": ["no"]}`, code)
+					return
+				}
+				name := "jira-1.json"
+				if r.URL.Query().Get("nextPageToken") != "" {
+					name = "jira-2.json"
+				}
+				w.Write(fixture(t, name))
+			}))
+			path, slept := fakeSleep(t)
+			cmd := exec.Command(shell, recipes+"jira.sh")
+			cmd.Env = append(os.Environ(), "JIRA_URL="+srv.URL, "JIRA_EMAIL=ana@example.com", "JIRA_TOKEN_FILE="+tokenFile(t, "jira-secret"),
+				"JIRA_JQL=project = OPS", path)
+			var stdout, stderr strings.Builder
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			srv.Close()
+			got := sleeps(t, slept)
+			if c.says == "" {
+				if err != nil || got != c.sleeps || stderr.Len() != 0 {
+					t.Errorf("%s, %s: %v, slept %q, said %q", shell, c.name, err, got, stderr.String())
+				} else if incs := loadIncidents(t, stdout.String()); len(incs) != 2 || incs[1].ID != "OPS-42" {
+					t.Errorf("%s, %s: %+v", shell, c.name, incs)
+				}
+				continue
+			}
+			if err == nil || stdout.Len() != 0 || got != c.sleeps || strings.TrimSpace(stderr.String()) != c.says {
+				t.Errorf("%s, %s: %v, slept %q, wrote %q, said %q", shell, c.name, err, got, stdout.String(), stderr.String())
+			}
+		}
+	}
+}
+
 // Where a team keeps an incident's times and services in fields of its own,
 // they are read from there, and only the fields named are asked for. A date
 // is never taken for a time, nor is a time Go wouldn't read: an issue whose

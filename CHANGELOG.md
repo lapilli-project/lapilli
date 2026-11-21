@@ -50,6 +50,12 @@
   them as the span's, or, of a span that ended before them, that none were
   taken. It says from when they count now, in the report's zone, and its
   numbers carry it as `counted_from`.
+- **`jira.sh`'s issue search stopped at a 429** (affected: 0.15.0 to
+  0.68.1), where its requests for Jira Service Management's alerts wait
+  one out. It waits as they do now: as its `Retry-After` says, or else 5
+  seconds and twice as long each time, five waits a request and ten
+  minutes in all a run, theirs and its together. Any other answer that
+  isn't a 2xx stops it, as before, now saying its status.
 - The weekly digest read the notifications sent, and the firings that
   paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
   the webhook is told. Once now, everyone's and each team's.
