@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -766,13 +767,15 @@ func mdIDs(ids []string) string {
 // mdCode is a name or a text from outside as one code span (mdID), so
 // that nothing in it (a mention, a link, an image, HTML) is read as
 // Markdown; one with nothing in it is "(none)". It is cut to mdMost bytes
-// first, so that the span is a line's part, never a line cut in two.
+// first, so that the span is a line's part, never a line cut in two. A
+// recipe makes the description the commit's message too, which isn't
+// Markdown: it links nothing there either (linkFree).
 func mdCode(s string) string {
 	if len(s) > mdMost {
 		s = clip(s, mdMost) + "…"
 	}
 	if x := mdID.Replace(s); strings.TrimSpace(x) != "" {
-		return "`" + x + "`"
+		return "`" + linkFree(x) + "`"
 	}
 	return "(none)"
 }
@@ -1356,7 +1359,7 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 // prTitle is a proposal's pull request's title: one line, of printable
-// text, as a rule's name may not be.
+// text, as a rule's name may not be, linking nothing (linkFree).
 func prTitle(p ledger.Proposal) string {
 	t := fmt.Sprintf("Lapilli: %s, %s", kindText(p.Kind), p.Rule)
 	t = strings.Map(func(c rune) rune {
@@ -1365,7 +1368,25 @@ func prTitle(p ledger.Proposal) string {
 		}
 		return c
 	}, t)
-	return clip(t, 200)
+	return clip(linkFree(t), 200)
+}
+
+// Of a title a recipe makes a pull request's and its commit's first line,
+// what a host reads as a link to an issue: a number after # or GH-, and a
+// word that closes the issue it comes before once merged (GitHub's and
+// GitLab's closing keywords).
+var (
+	issueRef     = regexp.MustCompile(`(?i)(#|\bGH-)([0-9])`)
+	closingWords = regexp.MustCompile(`(?i)\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)\b`)
+)
+
+// linkFree is a title as a host reads it linking nothing: a word joiner
+// (U+2060), which shows as nothing, between # or GH- and a number after
+// it, and after the first letter of a closing keyword, so that a rule
+// named "Fixes #12" neither closes issue 12 once merged nor mentions it.
+func linkFree(t string) string {
+	t = issueRef.ReplaceAllString(t, "${1}\u2060${2}")
+	return closingWords.ReplaceAllStringFunc(t, func(w string) string { return w[:1] + "\u2060" + w[1:] })
 }
 
 // apiPatchChange is a recipe saying what became of a change: a pull request

@@ -1420,3 +1420,27 @@ func TestSaysInGrafanaDollars(t *testing.T) {
 		t.Errorf("applied: %s %v %v", p.State, a, l)
 	}
 }
+
+// A rule's name in a pull request's title, which the recipes make its
+// commit's first line too, links nothing: "Fixes #12" would close issue 12
+// once merged, and mention it. Shown as it was, but for word joiners.
+func TestTitlesLinkNothing(t *testing.T) {
+	name := "Fixes #12, closes GH-3 and Resolved o/r#4: fixture closer 5"
+	ref := regexp.MustCompile(`(?i)(#|\bGH-)[0-9]`)
+	word := regexp.MustCompile(`(?i)\b(fixes|closes|resolved)\b`)
+	for _, title := range []string{prTitle(ledger.Proposal{Kind: ledger.KindFor, Rule: name}), draftTitle(ledger.ExpectDraft{Rule: name})} {
+		if ref.MatchString(title) || word.MatchString(title) {
+			t.Errorf("%q links an issue", title)
+		}
+		if !strings.HasSuffix(strings.ReplaceAll(title, "⁠", ""), name) || !strings.Contains(title, "fixture closer 5") {
+			t.Errorf("%q isn't %q", title, name)
+		}
+	}
+	// Nor in the description, which a recipe makes the commit's message
+	// too, where a code span is no Markdown.
+	for _, said := range []string{mdCode(name), mdText(name), mdCell(name)} {
+		if ref.MatchString(said) || word.MatchString(said) || !strings.Contains(strings.ReplaceAll(said, "\u2060", ""), name) {
+			t.Errorf("%q links an issue, or isn't %q", said, name)
+		}
+	}
+}

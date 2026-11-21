@@ -449,7 +449,7 @@ func (s *Server) handedDrafts(ctx context.Context) ([]handedDraft, error) {
 }
 
 // draftTitle is a draft's pull request's title: one line, of printable
-// text.
+// text, linking nothing (linkFree).
 func draftTitle(d ledger.ExpectDraft) string {
 	t := strings.Map(func(c rune) rune {
 		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
@@ -457,7 +457,7 @@ func draftTitle(d ledger.ExpectDraft) string {
 		}
 		return c
 	}, "Lapilli: expectations of "+d.Rule)
-	return clip(t, 200)
+	return clip(linkFree(t), 200)
 }
 
 // draftBody is a draft's pull request's description: what it holds the
@@ -484,10 +484,12 @@ func (s *Server) draftBody(d ledger.ExpectDraft) string {
 // pull request comment's table has it (verdict.CodeSpan): what doesn't
 // show said as \u{...}, each | escaped and a backslash right before one
 // said as \u{5c}, so that no | of it ends the cell, however a host reads
-// a run of backslashes (0.60.0's fix). mdText is one in a sentence.
-func mdCell(s string) string { return verdict.CodeSpan(s, mdMost, true) }
+// a run of backslashes (0.60.0's fix). mdText is one in a sentence. Each
+// links nothing in the commit's message the description is made too
+// (linkFree).
+func mdCell(s string) string { return linkFree(verdict.CodeSpan(s, mdMost, true)) }
 
-func mdText(s string) string { return verdict.CodeSpan(s, mdMost, false) }
+func mdText(s string) string { return linkFree(verdict.CodeSpan(s, mdMost, false)) }
 
 // apiPatchDraft is a recipe saying what became of a draft's pull request:
 // opened, merged, closed, or failed with why.
