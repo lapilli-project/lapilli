@@ -41,6 +41,31 @@ type paged struct {
 	// that came while people slept: worked out once (wokenBy).
 	wokenOnce sync.Once
 	woken     map[int64]map[string]int
+	// from is when the notifications read start, the twelve weeks shown;
+	// told, the firings they tell of, worked out once (toldOf).
+	from     time.Time
+	toldOnce sync.Once
+	told     map[int64]bool
+}
+
+// toldOf reports whether a notification read told of a firing.
+func (p *paged) toldOf(id int64) bool {
+	p.toldOnce.Do(func() {
+		p.told = map[int64]bool{}
+		for _, pg := range p.pages {
+			for _, f := range pg.Firings {
+				p.told[f] = true
+			}
+		}
+	})
+	return p.told[id]
+}
+
+// counted reports whether notifications were counted for a rule by a
+// firing's start: as a firing's page has it, "paged no one" or not.
+func (p *paged) counted(rule string, start time.Time) bool {
+	since, ok := p.since[rule]
+	return ok && !start.Before(since)
 }
 
 // wokenWalks counts the walks wokenBy makes over the notifications kept:
@@ -88,7 +113,7 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 	if s.paged.p != nil && s.paged.gen == gen && s.paged.from.Equal(from) {
 		return s.paged.p, nil
 	}
-	p := &paged{}
+	p := &paged{from: from}
 	var err error
 	if p.first, err = s.l.FirstNotification(ctx); err != nil {
 		return nil, err
@@ -252,8 +277,7 @@ func (s *Server) notifiedFirings(ctx context.Context, lines []firingLine) error 
 		return err
 	}
 	for i := range lines {
-		since, ok := p.since[lines[i].Rule]
-		lines[i].Counted = ok && !lines[i].Start.Before(since)
+		lines[i].Counted = p.counted(lines[i].Rule, lines[i].Start)
 		lines[i].Notified = of[lines[i].ID]
 	}
 	return nil

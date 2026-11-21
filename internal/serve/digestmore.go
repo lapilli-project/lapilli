@@ -103,6 +103,10 @@ type sentLine struct {
 	// them by. The line says why from it; the numbers keep Unjudged's
 	// meaning.
 	noIncident bool
+	// PagedNoOne are the span's firings no notification told of, muted
+	// by a silence, an inhibition or either, or not (docs/design/mutes.md):
+	// given once the ledger keeps a mute.
+	PagedNoOne *ledger.Unpaged `json:"paged_no_one,omitempty"`
 }
 
 type sentFor struct {
@@ -153,14 +157,43 @@ func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Ti
 	}
 	slices.SortFunc(out.Most, func(a, b sentFor) int { return cmp.Or(cmp.Compare(b.N, a.N), cmp.Compare(a.Rule, b.Rule)) })
 	out.Most = out.Most[:min(len(out.Most), 5)]
+	// The firings that paged no one, of the weeks the notifications read
+	// tell of (docs/design/mutes.md).
+	if from := later(from, p.from); p.mutes && from.Before(to) {
+		u, err := s.l.Unpaged(ctx, from, to, func(rule string) bool { return in[rule] }, p.toldOf, p.counted, p.within, s.now())
+		if err != nil {
+			return nil, err
+		}
+		out.PagedNoOne = &u
+	}
 	return out, nil
 }
 
 // text says it in a line, in --lang's language: nothing for none.
 func (x *sentLine) text(l string) string {
-	if x == nil || x.Notifications == 0 {
+	if x == nil {
 		return ""
 	}
+	var parts []string
+	if x.Notifications > 0 {
+		parts = append(parts, x.sentText(l))
+	}
+	if u := x.PagedNoOne; u != nil && u.Total() > 0 {
+		line := tr(l, "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.", u.Silence, u.Inhibition, u.Nothing)
+		if u.Either > 0 {
+			line = tr(l, "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.",
+				u.Silence, u.Inhibition, u.Either, u.Nothing)
+		}
+		if u.Partial {
+			line += " " + tr(l, "Mutes were too many to look through for every firing: those of some rules weren't counted.")
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, " ")
+}
+
+// sentText says what the notifications sent came to.
+func (x *sentLine) sentText(l string) string {
 	line := tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.",
 		x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
 	switch {

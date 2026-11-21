@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **How many firings paged no one, and why, in the digest and the
+  reports.** Beside the notifications sent, the weekly digest, a team's,
+  and a report's `notifications` section say how many of the span's
+  firings no notification told of: muted by a silence, inhibited by
+  another alert, muted by one or the other, or with no mute told of, as
+  their pages say it; `digest.ready` and `report.ready` carry it as
+  `notifications.paged_no_one`. Given once the ledger keeps a mute, and
+  worked out when read: no schema change. Only rules with a mute about
+  such a firing have their mutes read, the hours about each firing's start
+  and end, 200,000 rows looked at at most; past that, the line says some
+  weren't counted ([docs/design/mutes.md](docs/design/mutes.md)).
+
 ## [0.67.0] - 2026-11-21
 
 Incidents judged by the alerts their tool linked to them, and why a

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"sync/atomic"
@@ -272,6 +273,17 @@ var muteRowsRead atomic.Int64
 // one of a notification's that doesn't say which is left out where one
 // that does is there. Firings nothing muted are left out.
 func (l *Ledger) MutedOf(ctx context.Context, fs []Firing, within Within, now time.Time) (map[int64][]Mute, error) {
+	out, _, _, err := l.mutedOf(ctx, fs, within, now, 0)
+	return out, err
+}
+
+// mutedOf is MutedOf looking at most rows of mutes, none when most is 0: a
+// row is counted once for each firing it is looked at for, and a row of
+// an hour not read yet as the most it can be (2 * maxMutesPerRuleHour). It
+// looks at the firings in their order and stops before one that could
+// take it past most: looked is how many it looked at, the first of fs,
+// and used how many rows it looked at.
+func (l *Ledger) mutedOf(ctx context.Context, fs []Firing, within Within, now time.Time, most int) (out map[int64][]Mute, looked, used int, err error) {
 	type muteRow struct {
 		labels      map[string]string
 		kind, ref   string
@@ -303,8 +315,8 @@ func (l *Ledger) MutedOf(ctx context.Context, fs []Firing, within Within, now ti
 		read[rh] = rows
 		return rows, err
 	}
-	out := map[int64][]Mute{}
-	for _, f := range fs {
+	out = map[int64][]Mute{}
+	for i, f := range fs {
 		w := within(f.Rule)
 		end := f.End
 		if end.IsZero() {
@@ -323,6 +335,19 @@ func (l *Ledger) MutedOf(ctx context.Context, fs []Firing, within Within, now ti
 				}
 			}
 		}
+		if most > 0 {
+			cost := 0
+			for _, h := range hours {
+				if rows, ok := read[ruleHour{f.Rule, h}]; ok {
+					cost += len(rows)
+				} else {
+					cost += 2 * maxMutesPerRuleHour
+				}
+			}
+			if used+cost > most {
+				return out, i, used, nil
+			}
+		}
 		var ms []Mute
 		// Alerts with more labels than the firing's, one muted as
 		// another, are one mute of it: from the first to the last.
@@ -330,8 +355,9 @@ func (l *Ledger) MutedOf(ctx context.Context, fs []Firing, within Within, now ti
 		for _, h := range hours {
 			rows, err := rowsOf(ruleHour{f.Rule, h})
 			if err != nil {
-				return nil, err
+				return nil, 0, 0, err
 			}
+			used += len(rows)
 			for _, x := range rows {
 				if x.last < lo || x.first > hi || !among(f.Labels, x.labels) {
 					continue
@@ -361,7 +387,7 @@ func (l *Ledger) MutedOf(ctx context.Context, fs []Firing, within Within, now ti
 		})
 		out[f.ID] = ms[:min(len(ms), mutesOfFiring)]
 	}
-	return out, nil
+	return out, len(fs), used, nil
 }
 
 // floorHour is the hour a Unix time is in, as mutes keep it.
@@ -370,4 +396,153 @@ func floorHour(t int64) int64 {
 		return (t - 3599) / 3600
 	}
 	return t / 3600
+}
+
+// Unpaged is what the firings of a span that no notification told of came
+// to (docs/design/mutes.md, "Shown" and "Bounds"): those muted,
+// by what their pages say muted them, MutedOf's first; and Nothing, those
+// nothing was told of muting, of rules whose notifications were counted
+// by their start, which their pages say paged no one.
+type Unpaged struct {
+	Silence    int `json:"silence"`
+	Inhibition int `json:"inhibition"`
+	Either     int `json:"either"`
+	Nothing    int `json:"nothing"`
+	// Partial says the mutes looked at came to their most (UnpagedMost)
+	// before every firing of a rule with mutes was looked at: those not
+	// looked at are in none of the counts.
+	Partial bool `json:"partial,omitempty"`
+}
+
+// Total is how many paged no one, muted or not.
+func (u Unpaged) Total() int { return u.Silence + u.Inhibition + u.Either + u.Nothing }
+
+// qMutedAny looks up whether a rule has a mute in some hours: one row of
+// mutes_rule.
+const qMutedAny = `SELECT 1 FROM mutes WHERE rule = ? AND hour >= ? AND hour <= ? LIMIT 1`
+
+// UnpagedMost is how many rows of mutes Unpaged looks at, at most, a row
+// counted once for each firing it is looked at for: as many as a day
+// keeps (the notifications port's most), what a day's firings page can
+// read.
+var UnpagedMost = 200_000
+
+// Unpaged counts the firings that started in [from, to) of the rules in
+// says, that told doesn't say a notification told of: muted, by kind, or
+// not, those of them counted says notifications were counted for by
+// then. The firings are read without their labels; a rule's with them,
+// only when a mute of it was told of about them (one row of mutes_rule
+// looked up), one rule at a time. Its mutes are read as MutedOf reads a
+// firing's, the hours about each firing's start and its end, each of a
+// rule once, UnpagedMost rows looked at in all.
+func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule string) bool, told func(firing int64) bool,
+	counted func(rule string, start time.Time) bool, within Within, now time.Time) (Unpaged, error) {
+	var out Unpaged
+	// By rule's name: its ids, the hours its firings no notification told
+	// of span, and how many of them notifications were counted for.
+	type ofRule struct {
+		ids     []int64
+		lo, hi  int64
+		counted int
+	}
+	byName := map[string]*ofRule{}
+	err := l.eachRow(ctx, func(r scanner) error {
+		var id, rid, start int64
+		var end sql.NullInt64
+		var name string
+		if err := r.Scan(&id, &rid, &name, &start, &end); err != nil {
+			return err
+		}
+		if !in(name) || told(id) {
+			return nil
+		}
+		w := int64(within(name) / time.Second)
+		hi := now.Unix()
+		if end.Valid {
+			hi = end.Int64
+		}
+		x := byName[name]
+		if x == nil {
+			x = &ofRule{lo: start - w, hi: hi + w}
+			byName[name] = x
+		}
+		if !slices.Contains(x.ids, rid) {
+			x.ids = append(x.ids, rid)
+		}
+		x.lo, x.hi = min(x.lo, start-w), max(x.hi, hi+w)
+		if counted(name, unix(start)) {
+			x.counted++
+		}
+		return nil
+	}, `SELECT f.id, f.rule_id, r.name, f.start_at, f.end_at FROM firings f JOIN rules r ON r.id = f.rule_id
+		WHERE f.start_at >= ? AND f.start_at < ?`, from.Unix(), to.Unix())
+	if err != nil {
+		return out, err
+	}
+	left := UnpagedMost
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		x := byName[name]
+		var one int
+		err := l.r.QueryRowContext(ctx, qMutedAny, name, floorHour(x.lo), floorHour(x.hi)).Scan(&one)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			out.Nothing += x.counted // nothing muted any
+			continue
+		case err != nil:
+			return out, err
+		}
+		if left <= 0 {
+			out.Partial = true
+			continue
+		}
+		ids, _ := json.Marshal(x.ids)
+		var fs []Firing
+		if err := l.eachRow(ctx, func(r scanner) error {
+			var f Firing
+			var sid, start int64
+			var end sql.NullInt64
+			var text string
+			if err := r.Scan(&f.ID, &sid, &text, &start, &end); err != nil {
+				return err
+			}
+			if told(f.ID) {
+				return nil
+			}
+			var err error
+			if f.Labels, err = l.labels(sid, text); err != nil {
+				return err
+			}
+			f.Rule, f.Series, f.Start, f.End = name, sid, unix(start), fromNull(end)
+			fs = append(fs, f)
+			return nil
+		}, `SELECT f.id, s.id, s.labels, f.start_at, f.end_at FROM firings f JOIN series s ON s.id = f.series_id
+			WHERE f.rule_id IN (`+l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at < ? ORDER BY f.start_at, f.id`,
+			string(ids), from.Unix(), to.Unix()); err != nil {
+			return out, err
+		}
+		muted, looked, used, err := l.mutedOf(ctx, fs, within, now, left)
+		if err != nil {
+			return out, err
+		}
+		left -= used
+		if looked < len(fs) {
+			out.Partial, left = true, 0
+		}
+		for _, f := range fs[:looked] {
+			ms := muted[f.ID]
+			switch {
+			case len(ms) == 0:
+				if counted(name, f.Start) {
+					out.Nothing++
+				}
+			case ms[0].Kind == MutedSilence:
+				out.Silence++
+			case ms[0].Kind == MutedInhibition:
+				out.Inhibition++
+			default:
+				out.Either++
+			}
+		}
+	}
+	return out, nil
 }
