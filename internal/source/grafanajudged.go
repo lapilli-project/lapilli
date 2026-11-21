@@ -28,10 +28,12 @@ type FromHistory struct {
 	// name its rule is judged under: one on since before it starting at
 	// its start, as firing.FromTransitions has it.
 	Firings []firing.Firing
-	// Unsure are the rules, by name, the history judges none of: it
-	// passed over changes of them, doesn't tell their alerts apart, or
-	// names another of Grafana's rules alike.
-	Unsure []string
+	// Unsure are the rules, by name, the history judges none of over
+	// what was read: it passed over changes of them, or doesn't tell their
+	// alerts apart. Shared are those whose alert name, as the history
+	// names it, another of Grafana's rules has too: it never says which of
+	// them fired.
+	Unsure, Shared []string
 	// Passed is how many changes the read passed over, past what is read
 	// of one (HistoryRead.Passed).
 	Passed int
@@ -40,8 +42,9 @@ type FromHistory struct {
 // Judge reads the history kept where over [from, to] and gives the firings
 // of rs, the rules to judge by it, each under its Name. An annotation's
 // tags name a rule as AnnotationName writes its alert name, Loki's as it
-// is; a name the history gives two of Grafana's rules among all, which
-// holds rs, is neither's (rs alone, when all is nil). A read past its
+// is; a name the history gives two of Grafana's rules among all, every
+// rule read from the Grafana, before any --rule, is neither's (rs alone,
+// when all is nil). A read past its
 // bounds fails, as ErrTooManyChanges, and one whose answers can't be
 // used, as ErrUnusable: none of rs is judged then.
 func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all []rules.Rule, from, to time.Time) (FromHistory, error) {
@@ -67,14 +70,16 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all []rules
 		}
 	}
 	byKey := map[string]string{}
-	unsure := map[string]bool{}
+	unsure, twice := map[string]bool{}, map[string]bool{}
 	for _, r := range rs {
-		k := key(r)
-		if read.UnsureMore || shared[k] > 1 {
+		switch k := key(r); {
+		case shared[k] > 1:
+			twice[r.Name] = true
+		case read.UnsureMore:
 			unsure[r.Name] = true
-			continue
+		default:
+			byKey[k] = r.Name
 		}
-		byKey[k] = r.Name
 	}
 	fs, odd := firing.FromTransitions(ts, from)
 	for _, n := range slices.Concat(read.Unsure, odd) {
@@ -89,6 +94,6 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all []rules
 			j.Firings = append(j.Firings, f)
 		}
 	}
-	j.Unsure = slices.Sorted(maps.Keys(unsure))
+	j.Unsure, j.Shared = slices.Sorted(maps.Keys(unsure)), slices.Sorted(maps.Keys(twice))
 	return j, nil
 }

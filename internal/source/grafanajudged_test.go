@@ -54,13 +54,12 @@ func TestRealGrafanaJudged(t *testing.T) {
 			if err != nil || j.Passed != 0 {
 				t.Fatalf("%+v %v", j.Passed, err)
 			}
-			wantUnsure := []string{named(twin)}
+			var wantUnsure []string
 			for _, u := range c.unsure {
 				wantUnsure = append(wantUnsure, named(u))
 			}
-			slices.Sort(wantUnsure)
-			if !slices.Equal(j.Unsure, wantUnsure) {
-				t.Errorf("unsure: %v, want %v", j.Unsure, wantUnsure)
+			if !slices.Equal(j.Unsure, wantUnsure) || !slices.Equal(j.Shared, []string{named(twin)}) {
+				t.Errorf("unsure: %v, want %v; shared %v", j.Unsure, wantUnsure, j.Shared)
 			}
 			// GRAFANA_ALERTS as the history keeps an alert's labels: in
 			// annotations, as their tags write them, tags_length too.
@@ -93,7 +92,7 @@ func TestRealGrafanaJudged(t *testing.T) {
 			if len(differ) > 0 || len(got) == 0 {
 				t.Errorf("%d judged, %d in GRAFANA_ALERTS; %d differ:\n%s", len(got), len(wanted), len(differ), strings.Join(differ, "\n"))
 			} else {
-				t.Logf("%d firings of %d rules judged, every one as GRAFANA_ALERTS has it", len(got), len(titles)-len(wantUnsure))
+				t.Logf("%d firings of %d rules judged, every one as GRAFANA_ALERTS has it", len(got), len(titles)-len(wantUnsure)-1)
 			}
 			for _, f := range j.Firings {
 				if !strings.HasSuffix(f.Rule, " [judged]") || f.Rule == named(twin) {

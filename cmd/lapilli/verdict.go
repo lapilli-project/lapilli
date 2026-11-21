@@ -541,6 +541,9 @@ type verdictFlags struct {
 	// holds that can't be replayed are listed, not judged from Grafana's
 	// own alert state history; grafanaHistorySet, --grafana-history given.
 	noGrafanaHistory, grafanaHistorySet bool
+	// grafanaRules are every rule --grafana holds, as read, before --rule
+	// picks among them.
+	grafanaRules []rules.Rule
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
 	// copied in may be all there is.
 	firingsToken bool
@@ -2290,6 +2293,9 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		}
 	case f.grafana != "":
 		rs, _, err = source.Grafana(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), stderr)
+		// Every rule it holds, --rule or not: what a name in its history
+		// may be of (judgeFromHistory).
+		f.grafanaRules = slices.Clone(rs)
 	}
 	if err != nil {
 		return nil, err

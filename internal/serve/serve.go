@@ -626,8 +626,10 @@ type status struct {
 	// history: once checked, they are told of as a day just checked is.
 	checkHeld map[int64]bool
 	// copyFrom is where copying Grafana's history of the rules Lapilli
-	// can't replay goes on from, past a day it was of no use for.
-	copyFrom time.Time
+	// can't replay goes on from, past a day it was of no use for; and
+	// copyTheirs says the source a job wrote to was said to be its.
+	copyFrom   time.Time
+	copyTheirs bool
 }
 
 func (st *status) set(doing string, args ...any) {

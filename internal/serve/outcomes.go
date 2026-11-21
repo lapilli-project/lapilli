@@ -574,7 +574,7 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 	}
 	for _, c := range cs {
 		i := int((ledger.Week(s.l.Day(c.At)) - first) / 7)
-		if i < 0 || i >= weeks || c.By == tokenUser || c.By == ledger.FiringsCopier || c.By == ledger.TaskTracker || c.By == ledger.ChangesCopier || c.By == ledger.Proposer {
+		if i < 0 || i >= weeks || c.By == tokenUser || c.By == ledger.FiringsCopier || c.By == ledger.GrafanaCopier || c.By == ledger.TaskTracker || c.By == ledger.ChangesCopier || c.By == ledger.Proposer {
 			continue
 		}
 		u.Weeks[i].Edits++

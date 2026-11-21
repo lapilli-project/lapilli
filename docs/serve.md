@@ -1108,8 +1108,10 @@ a day a write, the `--settle` before each written again. The rule and its
 history are one rule, under the rule's name, as a cloud's alarm read with
 `--alarms` and its history are: its page says so, and its record is what
 the copies cover. No job may write to `grafana`: the port refuses it. A
-day the history can't be used for (refused, more than is read at once)
-leaves that day's firings out, logged, and the copy goes on;
+day the history can't say all of (refused, more than is read at once,
+changes of a rule it passed over, a firing a write can't hold, or no
+longer kept) is left a gap, logged, never taken for a quiet day, and the
+copy goes on;
 `--grafana-history=false` turns it off
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
 

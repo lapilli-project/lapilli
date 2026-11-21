@@ -55,25 +55,36 @@ func (f *verdictFlags) judgeFromHistory(ctx context.Context, known []rules.Rule,
 	case !reaches:
 		return not("it holds no change of state from before the period, as one keeping none that far back holds none: shorten it (--since)")
 	}
-	j, err := gh.Judge(ctx, hw.Serves, rs, known, f.opts.From.Add(-source.JudgedLead), f.opts.To)
+	all := f.grafanaRules
+	if len(all) == 0 {
+		all = known
+	}
+	j, err := gh.Judge(ctx, hw.Serves, rs, all, f.opts.From.Add(-source.JudgedLead), f.opts.To)
 	if err != nil {
 		return not(err.Error())
 	}
 	if j.Passed > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d changes of state in Grafana's history passed over, past what lapilli reads of one (docs/design/grafanahistory.md).\n", j.Passed)
 	}
-	if len(j.Unsure) > 0 {
-		names := j.Unsure[:min(len(j.Unsure), 10)]
+	for _, c := range []struct {
+		names []string
+		why   string
+	}{{j.Unsure, "which passed over changes of them, or doesn't tell their alerts apart"},
+		{j.Shared, "which gives their name to another of Grafana's rules too, and doesn't say which fired"}} {
+		if len(c.names) == 0 {
+			continue
+		}
+		names := c.names[:min(len(c.names), 10)]
 		more := ""
-		if n := len(j.Unsure) - len(names); n > 0 {
+		if n := len(c.names) - len(names); n > 0 {
 			more = fmt.Sprintf(" and %d more", n)
 		}
-		fmt.Fprintf(stderr, "lapilli verdict: %d Grafana rules aren't judged from its alert state history, which passed over changes of them, doesn't tell their alerts apart, or gives their name to another rule too: %s%s\n",
-			len(j.Unsure), verdict.Clean(strings.Join(names, ", ")), more)
+		fmt.Fprintf(stderr, "lapilli verdict: %d Grafana rules aren't judged from its alert state history, %s: %s%s\n",
+			len(c.names), c.why, verdict.Clean(strings.Join(names, ", ")), more)
 	}
 	judged := map[string]bool{}
 	for _, r := range rs {
-		if !slices.Contains(j.Unsure, r.Name) {
+		if !slices.Contains(j.Unsure, r.Name) && !slices.Contains(j.Shared, r.Name) {
 			judged[r.Name] = true
 		}
 	}

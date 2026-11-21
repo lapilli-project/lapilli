@@ -32,6 +32,16 @@ type ordersGrafana struct {
 	asked []string
 	// title is the rule's, Orders slow when "".
 	title string
+	// more are changes of Orders slow besides; gone are those before it,
+	// as a history's retention drops them.
+	more []alertChange
+	gone time.Time
+}
+
+// alertChange is a change of Orders slow's alert for a service.
+type alertChange struct {
+	prev, next, service string
+	at                  time.Time
 }
 
 func (g *ordersGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -71,9 +81,13 @@ func (g *ordersGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if g.ended {
 			all = append([]map[string]any{note(4, "Alerting", "Normal", "orders", now.Add(10*time.Minute))}, all...)
 		}
+		for i, c := range g.more {
+			all = append(all, note(10+i, c.prev, c.next, c.service, c.at))
+		}
+		slices.SortStableFunc(all, func(a, b map[string]any) int { return int(b["time"].(int64) - a["time"].(int64)) })
 		out := []map[string]any{}
 		for _, n := range all {
-			if ms := n["time"].(int64); ms >= from && ms <= to && int64(len(out)) < limit {
+			if ms := n["time"].(int64); ms >= from && ms <= to && ms >= g.gone.UnixMilli() && int64(len(out)) < limit {
 				out = append(out, n)
 			}
 		}
@@ -177,9 +191,9 @@ func TestServeGrafanaJudged(t *testing.T) {
 
 // An alert of a rule Lapilli can't replay flipping between Alerting and
 // NoData every 500ms for two hours, with 128 labels: thousands of firings,
-// within every bound of a read, none of which a write holds. Each is
-// passed over before anything is made of its labels, and the round goes
-// on.
+// within every bound of a read, none of which a write holds. The days
+// that read them are of no use, left a gap rather than taken for quiet
+// ones, before anything is made of the firings' labels; the round goes on.
 func TestServeGrafanaJudgedFlipping(t *testing.T) {
 	ctx := context.Background()
 	g := &ordersGrafana{title: gErrors}
@@ -204,46 +218,127 @@ func TestServeGrafanaJudgedFlipping(t *testing.T) {
 	if s.status.errWhat != "" {
 		t.Fatalf("a round failed: %s: %s", s.status.errWhat, s.status.err)
 	}
-	if n, k := seen.Load(), keyed.Load(); n < 14000 || k != 0 {
-		t.Errorf("%d firings read, %d of them made into keys", n, k)
+	if n, k := seen.Load(), keyed.Load(); n == 0 || k != 0 {
+		t.Errorf("%d firings looked at, %d of them made into keys", n, k)
 	}
 	if fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(time.Hour)); err != nil || len(fs) != 0 {
 		t.Errorf("copied in: %d %v", len(fs), err)
+	}
+	if from, to, _ := s.l.Coverage(ctx, ledger.GrafanaSource); !from.IsZero() || !to.IsZero() {
+		t.Errorf("taken as copied from %s to %s", from, to)
+	}
+}
+
+// A rule the history can't say all it fired of (a state Grafana has no
+// name for, here) makes the day of no use: nothing of it is written, so
+// what is copied in already stays, and the copies reach no further.
+func TestServeGrafanaJudgedUnsure(t *testing.T) {
+	ctx := context.Background()
+	g := &ordersGrafana{}
+	s := ordersServer(t, g)
+	s.jobs(ctx, true)
+	before, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(time.Hour))
+	if err != nil || len(before) != 2 {
+		t.Fatalf("copied in: %+v %v", before, err)
+	}
+	g.mu.Lock()
+	g.more = []alertChange{{"Normal", "Firing", "orders", now.Add(30 * time.Minute)}}
+	g.mu.Unlock()
+	s.now = func() time.Time { return now.Add(2 * time.Hour) }
+	s.jobs(ctx, true)
+	if s.status.errWhat != "" {
+		t.Fatalf("a round failed: %s: %s", s.status.errWhat, s.status.err)
+	}
+	after, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(3*time.Hour))
+	if err != nil || len(after) != 2 {
+		t.Errorf("after a day of no use: %+v %v", after, err)
 	}
 	if _, to, _ := s.l.Coverage(ctx, ledger.GrafanaSource); !to.Equal(now) {
 		t.Errorf("copied up to %s", to)
 	}
 }
 
+// A copy behind the history's retention passes over the days it no
+// longer holds, a gap, rather than taking them for quiet ones.
+func TestServeGrafanaJudgedRetention(t *testing.T) {
+	ctx := context.Background()
+	g := &ordersGrafana{}
+	s := ordersServer(t, g)
+	s.jobs(ctx, true)
+	// Three days on, the history keeps only the last day, an alert of the
+	// search in it.
+	later := now.Add(3 * 24 * time.Hour)
+	g.mu.Lock()
+	g.gone = later.Add(-24 * time.Hour)
+	g.more = []alertChange{{"Normal", "Alerting", "search", later.Add(-20 * time.Hour)}}
+	g.mu.Unlock()
+	s.now = func() time.Time { return later }
+	s.jobs(ctx, true)
+	spans, err := s.l.Spans(ctx, ledger.GrafanaSource)
+	if err != nil || len(spans) != 2 || !spans[0][1].Equal(now) || !spans[1][0].Equal(later.Add(-24*time.Hour)) || !spans[1][1].Equal(later) {
+		t.Errorf("copies cover %v %v", spans, err)
+	}
+	fs, _ := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now, later)
+	if len(fs) != 1 || fs[0].Labels["service"] != "search" {
+		t.Errorf("copied in: %+v", fs)
+	}
+}
+
 // A day the history holds more of than is read at once is passed over,
-// counted by its changes (one here), its firings left out and logged, and
-// the copy goes on from the day after; the round doesn't fail for it.
+// counted by its changes (one here), left a gap, and logged; the round
+// doesn't fail for it. The day after is copied as a first one: an alert
+// that started in the day passed over, and is still on, is seen from its
+// start.
 func TestServeGrafanaJudgedTooMany(t *testing.T) {
 	ctx := context.Background()
 	was := source.MaxChanges
 	t.Cleanup(func() { source.MaxChanges = was })
+	g := &ordersGrafana{}
+	s := ordersServer(t, g)
+	s.jobs(ctx, true)
+	// The next day, the search fires two hours on, and is still on.
+	g.mu.Lock()
+	g.more = []alertChange{{"Normal", "Alerting", "search", now.Add(2 * time.Hour)}}
+	g.ended = true
+	g.mu.Unlock()
 	source.MaxChanges = 1
-	s := ordersServer(t, &ordersGrafana{})
+	s.now = func() time.Time { return now.Add(24 * time.Hour) }
 	s.jobs(ctx, true)
 	if s.status.errWhat != "" {
 		t.Fatalf("a round failed: %s: %s", s.status.errWhat, s.status.err)
 	}
-	if fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(time.Hour)); err != nil || len(fs) != 0 {
-		t.Errorf("copied in past the bounds: %+v %v", fs, err)
+	if _, to, _ := s.l.Coverage(ctx, ledger.GrafanaSource); !to.Equal(now) {
+		t.Errorf("copied up to %s past the bounds", to)
 	}
 	s.status.Lock()
 	from := s.status.copyFrom
 	s.status.Unlock()
-	if !from.Equal(now) {
+	if !from.Equal(now.Add(24 * time.Hour)) {
 		t.Errorf("goes on from %s", from)
 	}
-	// Within the bounds again, it goes on from there: the alert on since
-	// 07:00 is seen from then.
 	source.MaxChanges = was
-	s.now = func() time.Time { return now.Add(time.Hour) }
+	s.now = func() time.Time { return now.Add(25 * time.Hour) }
 	s.jobs(ctx, true)
-	fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(2*time.Hour))
-	if err != nil || len(fs) != 1 || !fs[0].Start.Equal(now) || !fs[0].End.IsZero() || fs[0].Labels["service"] != "orders" {
-		t.Errorf("copied in: %+v %v", fs, err)
+	fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(24*time.Hour), now.Add(26*time.Hour))
+	if err != nil || len(fs) != 1 || fs[0].Labels["service"] != "search" || !fs[0].Start.Equal(now.Add(24*time.Hour)) || !fs[0].End.IsZero() {
+		t.Errorf("the search, on since the day passed over: %+v %v", fs, err)
+	}
+}
+
+// A source of its name a job copied firings in under, before 0.68, isn't
+// written over: Grafana's history isn't copied in, and it is said once.
+func TestServeGrafanaJudgedTheirs(t *testing.T) {
+	ctx := context.Background()
+	s := ordersServer(t, &ordersGrafana{})
+	if _, err := s.l.PutFirings(ctx, ledger.GrafanaSource, now.Add(-2*time.Hour), now.Add(-time.Hour), nil, ledger.FiringsCopier, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	if fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-7*24*time.Hour), now.Add(time.Hour)); err != nil || len(fs) != 0 {
+		t.Errorf("copied in under a job's source: %+v %v", fs, err)
+	}
+	srcs, _ := s.l.Sources(ctx)
+	if len(srcs) != 1 || srcs[0].By != ledger.FiringsCopier || !s.status.copyTheirs {
+		t.Errorf("sources %+v", srcs)
 	}
 }

@@ -12,9 +12,12 @@ FireHydrant's linked alerts, and near misses looked for by the link too.
 No schema change: the ledger stays at 029.
 
 Before upgrading:
-- **The source `grafana` is `lapilli serve`'s own** from this release: a
-  job copying firings in under that name (`PUT /api/v1/firings/grafana`)
-  is refused, and names another.
+- **The source `grafana` is `lapilli serve`'s own** from this release:
+  serve copies Grafana's own alert state history in under it, and a job
+  copying firings in under that name (`PUT /api/v1/firings/grafana`) is
+  refused. A ledger where a job already has firings under it keeps them,
+  and serve copies nothing under it until they are gone
+  ([docs/upgrading.md](docs/upgrading.md#a-source-named-grafana)).
 
 ### Added
 
@@ -31,7 +34,9 @@ Before upgrading:
   `--json` gives it `source: "grafana"`. `lapilli serve` copies the history
   in each round under the source `grafana`, a day a write, and ties each
   such rule to it by name, as a cloud's alarm is tied to its own: one rule,
-  its page saying so. No new ledger schema. `--grafana-history=false` lists
+  its page saying so. A day the history can't say all of (refused, too
+  much, changes passed over, a firing a write can't hold, or behind its
+  retention) is left a gap, never a quiet day. No new ledger schema. `--grafana-history=false` lists
   them as before (docs/design/grafanajudged.md).
 - **How many firings paged no one, and why, in the digest and the
   reports.** Beside the notifications sent, the weekly digest, a team's,

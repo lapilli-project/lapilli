@@ -153,6 +153,11 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			return out, err
 		}
 		rk := recordedKey{f.Rule, labels["severity"]}
+		if source == GrafanaSource {
+			// Grafana's history is of its rules, by name, whatever the
+			// severities their alerts carry: one recorded rule a rule.
+			rk.severity = ""
+		}
 		text := l.d.kept(string(b))
 		k := key{rk, text, f.Start.Unix()}
 		end := nullable(f.End)
