@@ -29,6 +29,25 @@
   may hold part of the history. `put.sh` copies them into serve. Checked
   against the answers each tool's documentation shows, not against real
   accounts.
+- **`lapilli verdict --compare --fail-missed`** exits 1 when the change
+  leaves an incident a rule caught before it caught by no rule after it,
+  by `--incidents` or `--impact`, which it is refused without: a merge
+  gate with no expectations file. The report says which incidents, and
+  that the run fails for them (text, `--markdown`, `--json`'s `"missed"`),
+  and the summary counts them (`missed_checked`, `incidents_missed`, new
+  fields). With `--changed-only`, the rules left alone are replayed too
+  when a rule that differs stops catching one, to see whether one still
+  does. With `--fail-expectations`, either failing fails the run.
+- **The backtest recipes stop a merge**: `FAIL_MISSED=true` gives lapilli
+  `--fail-missed` and fails the job on it, once the comment says which
+  (refused through `lapilli serve`, whose report doesn't say yet); and
+  `STATUS=true` sets a commit status, `lapilli/backtest`, on the pull
+  request's head commit, success or failure as the job ends, for a branch
+  rule to require: GitHub's and Gitea's commit statuses, GitLab's,
+  Bitbucket Cloud's build statuses and Azure DevOps' pull request
+  statuses, on the iteration at that commit. The comment is still posted
+  first. The action takes `fail-missed` and `status`; the token needs
+  more for a status (docs/pr-backtests.md, "Stopping a merge").
 
 ## [0.66.0] - 2026-11-21
 

@@ -9,6 +9,13 @@
 #                        nothing; fails when the host does
 #   post_comment FILE    posts the Markdown in FILE as a comment on PR
 #   edit_comment ID FILE puts the Markdown in FILE in comment ID's place
+#   post_status STATE TEXT
+#                        sets the status $status_context, STATE success or
+#                        failure and TEXT its description, on the commit
+#                        $status_sha, linking to $status_url if not empty
+#
+# and may set status_commit, the pull request's head commit as its CI
+# says, and status_link, the job's page, for STATUS.
 #
 # In a clone of the repository with the pull request checked out, it
 # installs a pinned Lapilli release, checked against the release's
@@ -74,6 +81,28 @@
 #                    also when it adds a rule no expectation holds; with
 #                    PROMTOOL, also when a scenario of a rule that differs
 #                    couldn't be run after the change (scenarios_unrun)
+#   FAIL_MISSED      true (or 1), with INCIDENTS or IMPACT: the job fails
+#                    when the change leaves an incident a rule caught
+#                    before it caught by no rule after it, once the comment
+#                    says which (lapilli's --fail-missed; default false).
+#                    Also when a rule that differs couldn't be replayed,
+#                    as what it catches can't be judged. Refused with
+#                    LAPILLI_SERVE
+#   STATUS           true (or 1): also sets a commit status on the pull
+#                    request's head commit, lapilli/backtest (with KEY,
+#                    lapilli/backtest/KEY), success or failure as the job
+#                    ends, with a short description: the host's commit
+#                    statuses (Bitbucket's build statuses, Azure DevOps'
+#                    pull request statuses, on the iteration at that
+#                    commit), which a branch rule can require. Set after
+#                    the comment, whatever became of it
+#   STATUS_SHA       optional: the commit the status goes on, its full
+#                    hash; default the pull request's head commit as the
+#                    CI says, or HEAD when it isn't a merge. Either way the
+#                    commit the backtest read, or a parent of it, a merge
+#                    the CI made of the pull request
+#   STATUS_URL       optional: the page the status links to, https
+#                    (default the job's, as the CI says)
 #   PROMTOOL         optional, with EXPECT: promtool on this machine, a
 #                    path or a name on PATH, outside the checkout, which
 #                    runs the scenarios EXPECT names (scenarios:,
@@ -335,6 +364,54 @@ case ${EXPECT_REQUIRED:-false} in
   false | '') required= ;;
   *) say "EXPECT_REQUIRED $EXPECT_REQUIRED: want true or false"; exit 1 ;;
 esac
+case ${FAIL_MISSED:-false} in
+  true | 1) missed_gate=1 ;;
+  false | 0 | '') missed_gate= ;;
+  *) say "FAIL_MISSED $FAIL_MISSED: want true or false"; exit 1 ;;
+esac
+case ${STATUS:-false} in
+  true | 1) status_on=1 ;;
+  false | 0 | '') status_on= ;;
+  *) say "STATUS $STATUS: want true or false"; exit 1 ;;
+esac
+# full_hash HASH: whether HASH is a commit's full hash, SHA-1's or
+# SHA-256's, in lowercase hex.
+full_hash() {
+  case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
+}
+# The status's name: one a job, as the comment's KEY is.
+status_context=lapilli/backtest
+[ "$KEY" = default ] || status_context=lapilli/backtest/$KEY
+status_url=
+if [ -n "$status_on" ]; then
+  if [ -n "${STATUS_SHA:-}" ] && ! full_hash "$STATUS_SHA"; then
+    say "STATUS_SHA $STATUS_SHA: want the commit's full hash, in lowercase hex"
+    exit 1
+  fi
+  # The CI's head commit is said as it is, and refused as STATUS_SHA is.
+  if [ -z "${STATUS_SHA:-}" ] && [ -n "${status_commit:-}" ] && ! full_hash "$status_commit"; then
+    say "the pull request's head commit, as the CI says, isn't a full hash: give STATUS_SHA"
+    exit 1
+  fi
+  status_url=${STATUS_URL:-${status_link:-}}
+  if [ -n "$status_url" ] && { ! safe_url "$status_url" || [ "${#status_url}" -gt 255 ] || [ -n "$(printf '%s' "$status_url" | tr -d '\041-\176')" ]; }; then
+    if [ -n "${STATUS_URL:-}" ]; then
+      say "STATUS_URL $STATUS_URL: want an https URL of 255 characters at most"
+      exit 1
+    fi
+    # The job's page, as the CI says it: a link alone, left out.
+    say "the job's page, as the CI says, isn't an https URL: the status links to none"
+    status_url=
+  fi
+else
+  for v in "STATUS_SHA ${STATUS_SHA:-}" "STATUS_URL ${STATUS_URL:-}"; do
+    if [ -n "${v#* }" ]; then
+      say "${v%% *} is for the commit status: give STATUS=true too"
+      exit 1
+    fi
+  done
+fi
 repo=${REPO:-.}
 TARGET=${TARGET:-HEAD^1}
 case $TARGET in
@@ -401,6 +478,10 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
   done
   if [ -n "${PROMTOOL:-}" ]; then
     say "PROMTOOL: lapilli serve runs no scenario a pull request sends, each said as not run, and nothing is run here: run promtool test rules in a step of its own, or the recipe without LAPILLI_SERVE"
+    exit 1
+  fi
+  if [ -n "$missed_gate" ]; then
+    say "FAIL_MISSED: lapilli serve's report doesn't say yet which incidents a change leaves caught by no rule: run the recipe without LAPILLI_SERVE to fail the job on it"
     exit 1
   fi
 else
@@ -745,6 +826,10 @@ while [ "$n" -gt 0 ]; do
       say "$a: the recipe fails the job itself, with FAIL_ON_ERROR=true, when a rule that differs couldn't be replayed"
       exit 1
       ;;
+    --fail-missed | --fail-missed=*)
+      say "$a: the recipe gives lapilli --fail-missed itself, and fails the job: give FAIL_MISSED=true"
+      exit 1
+      ;;
     --expect | --expect=* | --expect-before | --expect-before=* | --fail-expectations* | --expect-required*)
       say "$a: the recipe reads the expectations from both commits itself: give EXPECT, and FAIL_ON_EXPECTATIONS or EXPECT_REQUIRED"
       exit 1
@@ -778,6 +863,10 @@ if [ -n "$want" ]; then
 fi
 if [ -n "$match" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
   say "MATCH is what a firing and an incident must agree on: give IMPACT or INCIDENTS too"
+  exit 1
+fi
+if [ -n "$missed_gate" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
+  say "FAIL_MISSED fails the job when the change leaves an incident caught by no rule: give the incidents, INCIDENTS or IMPACT"
   exit 1
 fi
 
@@ -824,9 +913,13 @@ ask_host() {
 }
 
 # unmet: what the change does to the expectations that fails the job
-# (FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED), said once the comment is posted.
+# (FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED), said once the comment is posted;
+# lost, what it does to the incidents (FAIL_MISSED). judged and
+# missed_judged: the report says what became of each.
 unmet=
 judged=
+lost=
+missed_judged=
 # trouble WHAT [LOG]: the backtest can't be what the comment shows: WHAT,
 # said in the comment, with LOG's last lines.
 problem=
@@ -1293,6 +1386,9 @@ run_lapilli() {
   if [ -n "${INCIDENTS:-}" ]; then
     set -- --incidents "$tmp/incidents.yaml" "$@"
   fi
+  if [ -n "$missed_gate" ]; then
+    set -- --fail-missed "$@"
+  fi
   if [ -n "$promtool" ] && [ -f "$tmp/expect.head.yaml" ]; then
     # Read beside their test files, as each commit has them.
     set -- --expect "$tmp/expect/head/$EXPECT" --promtool "$promtool" "$@"
@@ -1319,6 +1415,15 @@ run_lapilli() {
   rm -f "$tmp/verdict.status"
   { "$bin" verdict "$@" --changed-only --markdown 2>&1 >"$tmp/report.md" || echo "$?" >"$tmp/verdict.status"; } | live "$tmp/lapilli.log"
   [ ! -s "$tmp/verdict.status" ] || verdict=$(cat "$tmp/verdict.status")
+  # Held to the incidents (FAIL_MISSED), lapilli exits 1 once its report
+  # says the change leaves one caught by no rule, and says so: that is the
+  # gate's, which judge reads from the report, not a run that failed.
+  # Unless a rule's replay didn't finish too, which it says.
+  if [ "$verdict" = 1 ] && [ -n "$missed_gate" ] && [ -s "$tmp/report.md" ] &&
+    grep -qE '^lapilli verdict: the change leaves [0-9]+ incidents a rule caught before it caught by no rule \(--fail-missed\)$' "$tmp/lapilli.log" &&
+    ! grep -q "didn't finish within --timeout" "$tmp/lapilli.log"; then
+    verdict=0
+  fi
   # What of it the comment may show: not why a rule couldn't be replayed,
   # which --markdown keeps to the job's log ("query failed: " begins every
   # reason a query gives, the history unread or the query refused), nor
@@ -1332,6 +1437,8 @@ run_lapilli() {
     2)
       if grep -q -e 'unknown flag --expect' "$tmp/lapilli.log"; then
         trouble "the lapilli run has no --expect: give LAPILLI_VERSION (or LAPILLI) a release with it" "$tmp/lapilli.said"
+      elif grep -q -e 'unknown flag --fail-missed' "$tmp/lapilli.log"; then
+        trouble "the lapilli run has no --fail-missed: give LAPILLI_VERSION (or LAPILLI) a release with it" "$tmp/lapilli.said"
       elif grep -q -e 'unknown flag --promtool' "$tmp/lapilli.log"; then
         trouble "the lapilli run has no --promtool: give LAPILLI_VERSION (or LAPILLI) a release with it" "$tmp/lapilli.said"
       elif grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log" && [ -n "${LAPILLI:-}" ]; then
@@ -1396,6 +1503,26 @@ judge() {
         fi
         ;;
     esac
+  fi
+  # Held to the incidents (FAIL_MISSED), a change that leaves one a rule
+  # caught before caught by no rule fails the job, once the comment says
+  # which; so does a rule that differs not replayed, as what it catches
+  # can't be judged, and a report that doesn't say.
+  if [ -n "$missed_gate" ] && [ "$verdict" = 0 ]; then
+    n=$(summary incidents_missed)
+    unreplayed=$(summary unreplayed)
+    case $(summary missed_checked)/$n/$unreplayed in
+      true/[0-9]*/[0-9]*)
+        case $n$unreplayed in *[!0-9]*) ;; *) missed_judged=1 ;; esac
+        ;;
+    esac
+    if [ -z "$missed_judged" ]; then
+      trouble "the report doesn't say which incidents the change leaves caught by no rule: give LAPILLI_VERSION a release with --fail-missed" "$tmp/lapilli.said"
+    elif [ "$n" -gt 0 ]; then
+      lost="the change leaves $n incidents a rule caught before it caught by no rule (FAIL_MISSED=true)"
+    elif [ "$unreplayed" -gt 0 ]; then
+      lost="$unreplayed of the rules that differ couldn't be replayed, so what they catch can't be judged (FAIL_MISSED=true)"
+    fi
   fi
   if [ "$verdict" = 0 ] && [ -n "$strict" ]; then
     n=$(summary unreplayed)
@@ -2049,27 +2176,95 @@ main() {
     fi
   fi
   compose
-  # Held to the expectations, a run that couldn't judge them (the file
-  # unreadable, a rule that differs not replayed, no report) fails the
-  # job, as does one that broke them whose comment couldn't be posted: a
-  # gate that can't judge doesn't pass. What else goes wrong fails it only
-  # with FAIL_ON_ERROR, as before.
+  # Held to the expectations, or to the incidents, a run that couldn't
+  # judge them (the file unreadable, a rule that differs not replayed, no
+  # report) fails the job, as does one that broke them whose comment
+  # couldn't be posted: a gate that can't judge doesn't pass. What else
+  # goes wrong fails it only with FAIL_ON_ERROR, as before. why says it,
+  # for the status.
   gate=$held$required
+  rc='' why=''
   if ! post; then
     say "the comment couldn't be posted"
-    [ -z "$unmet" ] || say "$unmet"
-    [ -z "$strict$unmet" ] || exit 1
+    for m in "$unmet" "$lost"; do [ -z "$m" ] || say "$m"; done
+    if [ -n "$strict$unmet$lost" ]; then
+      rc=1 why=${unmet:-$lost}
+      [ -n "$why" ] || why="the comment couldn't be posted"
+    fi
   fi
-  if [ -n "$problem" ] && [ -n "$strict" ]; then
-    exit 1
+  if [ -z "$rc" ] && [ -n "$problem" ] && [ -n "$strict" ]; then
+    rc=1 why="the backtest failed: the comment says why"
   fi
-  if [ -n "$gate" ] && [ -z "$judged" ]; then
+  if [ -z "$rc" ] && [ -n "$gate" ] && [ -z "$judged" ]; then
     say "the expectations couldn't be judged (FAIL_ON_EXPECTATIONS or EXPECT_REQUIRED)"
-    exit 1
+    rc=1 why="the expectations couldn't be judged: the comment says why"
   fi
-  if [ -n "$unmet" ]; then
-    say "$unmet"
-    exit 1
+  if [ -z "$rc" ] && [ -n "$missed_gate" ] && [ -z "$missed_judged" ]; then
+    say "the incidents the change leaves caught by no rule couldn't be judged (FAIL_MISSED)"
+    rc=1 why="the incidents the change leaves caught by no rule couldn't be judged: the comment says why"
   fi
-  exit 0
+  if [ -z "$rc" ] && [ -n "$unmet$lost" ]; then
+    for m in "$unmet" "$lost"; do [ -z "$m" ] || say "$m"; done
+    rc=1 why=${unmet:-$lost}
+  fi
+  if [ -z "$rc" ]; then
+    rc=0
+    if [ -n "$problem" ]; then
+      why="the backtest failed, which fails no job without FAIL_ON_ERROR: the comment says why"
+    elif nothing_changed; then
+      why="nothing that decides when a rule fires changed"
+    else
+      why="backtested: $(summary changed) changed, $(summary added) added, $(summary removed) taken away"
+    fi
+  fi
+  if ! status "$rc" "$why" && [ -n "$strict" ]; then
+    rc=1
+  fi
+  exit "$rc"
+}
+
+# status RC WHY: with STATUS, the commit status on the pull request's head
+# commit, success when the job ends with RC 0, failure otherwise, WHY its
+# description, 140 characters at most; it fails when none could be set.
+status() {
+  [ -n "$status_on" ] || return 0
+  if ! status_on_commit; then
+    say "the commit status $status_context wasn't set"
+    return 1
+  fi
+  state=success
+  [ "$1" = 0 ] || state=failure
+  desc=$(printf '%s' "$2" | cut -c 1-140)
+  if ! post_status "$state" "$desc"; then
+    say "the commit status $status_context couldn't be set on $status_sha"
+    return 1
+  fi
+  say "set the commit status $status_context on $status_sha: $state, $desc"
+}
+
+# status_on_commit: the commit the status goes on, into status_sha:
+# STATUS_SHA, or the pull request's head commit as the CI says
+# (status_commit), or else HEAD when it isn't a merge. Of a run that read
+# the commits, it must be the commit read, or a parent of it, which a
+# merge the CI made of the pull request is: no other commit is said to be
+# what it judged.
+status_on_commit() {
+  status_sha=${STATUS_SHA:-${status_commit:-}}
+  if [ -z "$status_sha" ] && [ -n "${head:-}" ]; then
+    if [ "$(git -C "$repo" rev-list --parents -n 1 "$head" | wc -w)" -gt 2 ]; then
+      say "HEAD is a merge, and the CI doesn't say which of its parents is the pull request's: give STATUS_SHA"
+      return 1
+    fi
+    status_sha=$head
+  fi
+  if [ -z "$status_sha" ]; then
+    say "no commit to set the status on: give STATUS_SHA"
+    return 1
+  fi
+  [ -n "${head:-}" ] || return 0
+  for c in $(git -C "$repo" rev-list --parents -n 1 "$head"); do
+    [ "$c" != "$status_sha" ] || return 0
+  done
+  say "$status_sha isn't the commit the backtest read, $head, nor a parent of it: no status set on it"
+  return 1
 }

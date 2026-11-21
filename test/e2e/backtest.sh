@@ -5,7 +5,11 @@
 # of a pull request as a CI job runs it, with a bot's token, comments the
 # report on a pull request that slows a rule; run again after another push,
 # it edits that comment; it posts nothing on a pull request that changes no
-# rule. A rule a pull request names to mention, reference and break things
+# rule. Held to an incident its change leaves caught by no rule
+# (FAIL_MISSED), the job fails once the comment says which, and the
+# commit status it sets (STATUS) says so, Gitea taking it from a token
+# that may write to the repository and refusing the comment's. A rule a
+# pull request names to mention, reference and break things
 # is rendered by Gitea itself: no mention, no link, no HTML, the table
 # whole. A symbolic link whose path mentions a user and references an issue
 # is refused, its path only in the job's log: the user is notified of
@@ -122,20 +126,23 @@ pr() {
   git -C "$work/seed" push -q -f "$authed" "HEAD:refs/heads/$1"
   gapi -X POST "$gt/api/v1/repos/reviewer/monitoring/pulls" -d "{\"head\":\"$1\",\"base\":\"main\",\"title\":\"$2\"}" | jq -r .number
 }
-# backtest N: checks pull request N out as a CI job does, its own commit,
-# and runs the recipe there; the history is the last few minutes.
+# backtest N [NAME=VALUE...]: checks pull request N out as a CI job does,
+# its own commit, and runs the recipe there, with those settings more; the
+# history is the last few minutes.
 backtest() {
+  local n=$1
+  shift
   rm -rf "$work/ci"
   # Each line the job's log has of RENDER and lapilli is after a "| ".
   git clone -q "$authed" "$work/ci"
-  git -C "$work/ci" fetch -q origin "refs/pull/$1/head"
+  git -C "$work/ci" fetch -q origin "refs/pull/$n/head"
   git -C "$work/ci" checkout -q --detach FETCH_HEAD
   # As actions/checkout leaves a clone with fetch-depth: 0 and
   # persist-credentials: false: every branch fetched, and an origin
   # without the credentials a fetch of this private repository needs.
   git -C "$work/ci" remote set-url origin "$gt/reviewer/monitoring.git"
-  (cd "$work/ci" && PR=$1 GITEA_API=$gt/api/v1 GITEA_REPO=reviewer/monitoring GITEA_TOKEN_FILE=$work/secrets/bot \
-    LAPILLI=$work/lapilli PATHS=alerts TARGET_BRANCH=main \
+  (cd "$work/ci" && env PR="$n" GITEA_API="$gt/api/v1" GITEA_REPO=reviewer/monitoring GITEA_TOKEN_FILE="$work/secrets/bot" \
+    LAPILLI="$work/lapilli" PATHS=alerts TARGET_BRANCH=main "$@" \
     sh "$repo/recipes/backtest/gitea.sh" --prometheus "$pu" --since "$(($(date +%s) - started + 5))s" --step 5s --tz UTC)
 }
 comments() { gapi "$gt/api/v1/repos/reviewer/monitoring/issues/$1/comments"; }
@@ -178,6 +185,45 @@ n=$(pr docs "Docs only")
 backtest "$n" 2>"$work/run3.log" || { cat "$work/run3.log"; exit 1; }
 check "no comment when nothing changed" "$(comments "$n" | jq -r length)" '^0$'
 check "said why" "$(cat "$work/run3.log")" 'nothing that decides when a rule fires changed, and there is no comment to update: none posted'
+
+# A pull request that slows ScrapeSlow past an incident it caught, held to
+# the incidents, with a commit status: the comment's token can't set one,
+# said; one with write:repository, of an account that may write, sets
+# failure on the pull request's commit, and the job fails, once the
+# comment says which. Not held to them, success.
+git -C "$work/seed" checkout -q main
+iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+printf 'incidents:\n  - id: INC-1\n    title: Scrapes slow\n    start: %s\n    end: %s\n' "$(iso "$started")" "$(iso "$(date +%s)")" >"$work/seed/incidents.yaml"
+git -C "$work/seed" add incidents.yaml
+git -C "$work/seed" commit -qm "INC-1"
+git -C "$work/seed" push -q "$authed" HEAD:main
+git -C "$work/seed" checkout -q -b missed
+rules 1h "" >"$work/seed/alerts/shop.yaml"
+git -C "$work/seed" commit -qam "ScrapeSlow waits an hour, past INC-1"
+missed_head=$(git -C "$work/seed" rev-parse HEAD)
+n=$(pr missed "Miss INC-1")
+# The commit's statuses, the newest first by id, each as Gitea's
+# CommitStatus has it (context, status, description).
+statuses() { gapi "$gt/api/v1/repos/reviewer/monitoring/commits/$missed_head/statuses" | jq 'sort_by(-.id)'; }
+if backtest "$n" INCIDENTS=incidents.yaml FAIL_MISSED=1 STATUS=1 2>"$work/run6.log"; then
+  echo "FAILED: held to INC-1, the job passed"
+  fail=1
+fi
+check "the comment's token sets no status" "$(cat "$work/run6.log")" "Gitea didn't take the status \(40[13]\)"
+check "none set" "$(statuses | jq -r length)" '^0$'
+docker exec "$p-gitea" gitea admin user generate-access-token --username lapilli-bot --token-name s \
+  --scopes write:issue,write:repository,read:user --raw | tail -1 >"$work/secrets/bot-status"
+gapi -X PUT "$gt/api/v1/repos/reviewer/monitoring/collaborators/lapilli-bot" -d '{"permission":"write"}' >/dev/null
+if backtest "$n" INCIDENTS=incidents.yaml FAIL_MISSED=1 STATUS=1 GITEA_TOKEN_FILE="$work/secrets/bot-status" 2>"$work/run7.log"; then
+  echo "FAILED: held to INC-1, the job passed"
+  fail=1
+fi
+check "the comment says which" "$(comments "$n" | jq -r '.[0].body')" '\*\*This run fails\*\* \(`--fail-missed`\): 1 incidents .*'
+check "the comment names INC-1" "$(comments "$n" | jq -r '.[0].body')" '^\| `INC-1` `Scrapes slow` \| '
+check "the job says why" "$(cat "$work/run7.log")" 'the change leaves 1 incidents a rule caught before it caught by no rule \(FAIL_MISSED=true\)'
+check "the status, failure" "$(statuses | jq -r '.[0] | "\(.context) \(.status) \(.description)"')" '^lapilli/backtest failure the change leaves 1 incidents'
+backtest "$n" INCIDENTS=incidents.yaml STATUS=1 GITEA_TOKEN_FILE="$work/secrets/bot-status" 2>"$work/run8.log" || { cat "$work/run8.log"; exit 1; }
+check "not held to it, success" "$(statuses | jq -r '.[0] | "\(.context) \(.status)"')" '^lapilli/backtest success$'
 
 # A rule named to mention, reference, link, break the table and hide what
 # follows, as Gitea renders the comment.

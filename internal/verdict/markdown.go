@@ -126,6 +126,11 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	if c.Expectations != nil {
 		parts = append(parts, expectationsPart(c.Expectations))
 	}
+	// And whether it leaves an incident caught by no rule, which fails the
+	// run (--fail-missed).
+	if s.MissedChecked {
+		parts = append(parts, missedPart(c, loc))
+	}
 
 	if len(p.shown) > 0 {
 		sev := slices.ContainsFunc(p.shown, func(rc RuleChange) bool {
@@ -198,15 +203,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 				if len(cs) == 0 {
 					return "✗ nothing fired"
 				}
-				var out []string
-				for _, k := range cs {
-					one := md(k.Rule, 200, true) + " " + Delay(k.Delay)
-					if k.Noisy {
-						one += " (noisy)"
-					}
-					out = append(out, one)
-				}
-				return strings.Join(out, ", ")
+				return mdCatches(cs)
 			}
 			incs := mdPart{head: "#### Incidents caught differently\n\n" + mdRow([]string{"Incident", "Start", "Before", "After"}) +
 				mdRow([]string{"---", "---", "---", "---"}), foot: "\n", noun: "incidents"}
@@ -227,6 +224,40 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		text("\nPassed over, reading the rules: " + said + ".\n")
 	}
 	return writeParts(w, parts, MarkdownLimit)
+}
+
+// mdCatches is the rules that caught an incident, each with how long it
+// took, for a cell of a table.
+func mdCatches(cs []Catch) string {
+	var out []string
+	for _, k := range cs {
+		one := md(k.Rule, 200, true) + " " + Delay(k.Delay)
+		if k.Noisy {
+			one += " (noisy)"
+		}
+		out = append(out, one)
+	}
+	return strings.Join(out, ", ")
+}
+
+// missedPart says what HoldMissed found (--fail-missed): the incidents a
+// rule caught before the change that no rule catches after it, which fail
+// the run, or that there is none.
+func missedPart(c *Comparison, loc *time.Location) mdPart {
+	if len(c.Missed) == 0 {
+		return mdPart{head: "Every incident a rule caught before the change is caught after it too (`--fail-missed`).\n\n"}
+	}
+	head := fmt.Sprintf("#### Caught before, by no rule after\n\n**This run fails** (`--fail-missed`): %d incidents a rule caught before the change are caught by no rule after it%s.\n\n",
+		len(c.Missed), c.leftAloneToo()) + mdRow([]string{"Incident", "Start", "Caught before by"}) + mdRow([]string{"---", "---", "---"})
+	part := mdPart{head: head, foot: "\n", noun: "incidents caught by no rule after"}
+	for _, ic := range c.Missed {
+		name := md(ic.ID, 100, true)
+		if ic.Title != "" {
+			name += " " + md(ic.Title, 200, true)
+		}
+		part.rows = append(part.rows, mdRow([]string{name, ic.Start.In(loc).Format("2006-01-02 15:04"), mdCatches(ic.Before)}))
+	}
+	return part
 }
 
 // passedOver says what reading each set's files passed over, as

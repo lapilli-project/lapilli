@@ -153,6 +153,12 @@ Before a change to the rules:
                       nothing)
   --expect-required   exit 1 when the change adds a rule no expectation
                       holds
+  --fail-missed       with --compare and --incidents or --impact, exit 1
+                      when the change leaves an incident a rule caught
+                      before it caught by no rule after it; the report
+                      says which. With --changed-only, the rules left
+                      alone are replayed too when a rule that differs
+                      stops catching one, to see whether one still does
   --promtool PATH     with --expect, run each scenario (scenarios:,
                       promtool's own test files, read in the directory of
                       the expectations file that names them) of a rule the

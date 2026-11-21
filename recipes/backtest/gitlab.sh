@@ -26,6 +26,14 @@
 #                      leaves the merge base (CI_MERGE_REQUEST_DIFF_BASE_SHA),
 #                      INCIDENTS its, the job's log saying so
 #
+# With STATUS=true (see lib.sh), a commit status (POST
+# /projects/ID/statuses/SHA) on the merge request's source commit
+# (CI_MERGE_REQUEST_SOURCE_BRANCH_SHA in a merged results pipeline, else
+# CI_COMMIT_SHA), as GitLab's reference says to for a commit of a merge
+# request, linking to the job (CI_JOB_URL): an external job of the
+# pipeline (CI_PIPELINE_ID) when it is that pipeline's commit, or else of
+# the one GitLab finds or makes for it. The token needs the Developer role.
+#
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), the job names its ID
 # token for serve's audience under id_tokens:, as LAPILLI_ID_TOKEN:
 #
@@ -62,6 +70,9 @@ fi
 case $GITLAB_PROJECT in *[!A-Za-z0-9._/-]* | /* | */) echo "gitlab.sh: GITLAB_PROJECT $GITLAB_PROJECT: want an id or a path" >&2; exit 1 ;; esac
 host_api=$api
 project=$(printf '%s' "$GITLAB_PROJECT" | jq -sRr @uri)
+# For STATUS: the merge request's source commit, and the job's page.
+status_commit=${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-${CI_COMMIT_SHA:-}}
+status_link=${CI_JOB_URL:-}
 
 host_auth() {
   printf 'PRIVATE-TOKEN: %s\n' "$(cat "$GITLAB_TOKEN_FILE")"
@@ -103,6 +114,26 @@ edit_comment() {
   jq -Rs '{body: .}' "$2" >"$tmp/body"
   code=$(host PUT "$api/projects/$project/merge_requests/$PR/notes/$1" "$tmp/body")
   case $code in 2??) ;; *) say "GitLab didn't take the note ($code): $(shown "$out")"; return 1 ;; esac
+}
+
+# A commit status: success, or failed, as lib.sh says. Asked again once
+# when GitLab answers 409: another status of the commit was being set.
+post_status() {
+  st=success
+  [ "$1" = success ] || st=failed
+  pipeline=
+  if [ "$status_sha" = "${CI_COMMIT_SHA:-}" ]; then
+    case ${CI_PIPELINE_ID:-} in '' | *[!0-9]*) ;; *) pipeline=$CI_PIPELINE_ID ;; esac
+  fi
+  jq -n --arg state "$st" --arg text "$2" --arg name "$status_context" --arg url "$status_url" --arg pipeline "$pipeline" \
+    '{state: $state, description: $text, name: $name} + (if $url != "" then {target_url: $url} else {} end)
+      + (if $pipeline != "" then {pipeline_id: ($pipeline | tonumber)} else {} end)' >"$tmp/body"
+  code=$(host POST "$api/projects/$project/statuses/$status_sha" "$tmp/body")
+  if [ "$code" = 409 ]; then
+    sleep 1
+    code=$(host POST "$api/projects/$project/statuses/$status_sha" "$tmp/body")
+  fi
+  case $code in 2??) ;; *) say "GitLab didn't take the status ($code): $(shown "$out")"; return 1 ;; esac
 }
 
 # shellcheck source=lib.sh
