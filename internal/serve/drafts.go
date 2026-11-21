@@ -674,6 +674,21 @@ func rewritten(current []rules.Rule, r rules.Rule, text string) (rules.Rule, err
 	case g.Name != base || g.Group != r.Group:
 		return rules.Rule{}, fmt.Errorf("a rewrite keeps the rule's name and group: alert %s in group %s", verdict.Clean(base), verdict.Clean(r.Group))
 	}
+	// Its labels and annotations are templates promtool works out each
+	// time the rule fires in a scenario, as Prometheus would where it is
+	// kept: each held as an added rule's is (addedTemplates), so that none
+	// calls a query or grows without bound in serve's container.
+	texts := []string{g.Says.Summary, g.Says.Description}
+	for _, m := range []map[string]string{g.Labels, g.Says.Annotations} {
+		for _, k := range slices.Sorted(maps.Keys(m)) {
+			texts = append(texts, m[k])
+		}
+	}
+	for _, v := range texts {
+		if err := templateOK(v, rules.TemplatePrometheus); err != nil {
+			return rules.Rule{}, fmt.Errorf("the rewrite: %w", err)
+		}
+	}
 	given[0].Labels = g.Labels
 	// Where several share its name and group, the labels given pick it.
 	for k, v := range r.Labels {

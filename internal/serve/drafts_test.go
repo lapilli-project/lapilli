@@ -145,6 +145,11 @@ func TestTestExpectation(t *testing.T) {
 		"keeps the rule's name and group":         strings.Replace(rewrite("15m"), "alert: Errors", "alert: Other", 1),
 		"holds 2 rules":                           rewrite("15m") + "      - alert: Errors2\n        expr: up == 0\n",
 		"for and keep_firing_for are 48h at most": rewrite("72h"),
+		// Its labels and annotations, which promtool works out, held as an
+		// added rule's are.
+		"calls query":                  rewrite("15m") + "        annotations: {summary: '{{ with query \"up\" }}{{ . }}{{ end }}'}\n",
+		"isn't a template that parses": rewrite("15m") + "        annotations: {runbook_url: '{{ .Labels.x '}\n",
+		"can't grow":                   strings.Replace(rewrite("15m"), "{severity: page}", `{severity: '{{ reReplaceAll "a" "aa" (reReplaceAll "a" "aa" .Labels.x) }}'}`, 1),
 	} {
 		if failed, text, _ := test(map[string]any{"rule": "Errors", "expectations": errorsHeld, "rewrite": bad}); !failed || !strings.Contains(text, want) {
 			t.Errorf("%s: %s", want, text)

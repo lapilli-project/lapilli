@@ -554,7 +554,10 @@ Step 3, drafts, as built:
 - **A rewrite** is one alert rule, as `compare` takes one (a Prometheus
   rule, `for` and `keep_firing_for` 48h at most, an interval of an hour
   at most), keeping the rule's name and group; where several share both,
-  the labels given pick it. A warning split from a critical is two rules,
+  the labels given pick it. Its labels and annotations, which promtool
+  works out each time it fires in a scenario, are held as an added rule's
+  are: templates that parse, call no query and can't grow without bound.
+  A warning split from a critical is two rules,
   one of them new: adding a rule is step 5's. It is posted (`post`) only
   when the rule as it is and rewritten were each replayed to the end, it
   is held to one expectation at least, meets each, and loses no incident
