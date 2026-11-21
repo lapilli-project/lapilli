@@ -122,6 +122,11 @@ type Config struct {
 	CheckReplay  bool
 	CheckSeries  []string
 	CheckDiffers Differs
+	// JudgedHistory is the Grafana whose alert state history judges the
+	// rules it holds that Lapilli can't replay, copied in each round
+	// under ledger.GrafanaSource (docs/design/grafanajudged.md):
+	// --grafana's, unless --grafana-history=false; nil for none.
+	JudgedHistory *source.GrafanaHistory
 	// History is the Grafana whose alert state history says what its
 	// rules really fired, read in place of GRAFANA_ALERTS where it keeps
 	// one it serves (docs/design/grafanahistory.md): --check-grafana's, or
@@ -620,6 +625,9 @@ type status struct {
 	// checkHeld are the days whose check waited for a cloud's alarms'
 	// history: once checked, they are told of as a day just checked is.
 	checkHeld map[int64]bool
+	// copyFrom is where copying Grafana's history of the rules Lapilli
+	// can't replay goes on from, past a day it was of no use for.
+	copyFrom time.Time
 }
 
 func (st *status) set(doing string, args ...any) {

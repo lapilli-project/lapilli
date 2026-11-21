@@ -2804,5 +2804,9 @@
  "a week before the ledger's first firing": "台帳の最初の発火より前の週です",
  "On: an incident that lists the alerts its tool linked to it is caught by those alone; one that lists none, by the time and labels.": "オン: インシデントツールが紐付けたアラートのあるインシデントは、紐付けられたアラートだけで検知したとみなします。紐付けのないインシデントは、時間とラベルで判定します。",
  "Off: an incident that lists the alerts its tool linked to it is caught by those, and by any other firing at the time whose labels agree.": "オフ: インシデントツールが紐付けたアラートのあるインシデントは、そのアラートに加え、その時間にラベルが一致する他の発火でも検知したとみなします。",
- "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "ここではなく lapilli serve の起動時に指定します。付けたり外したりして起動すると、すべての発火を一度だけ再判定します。"
+ "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "ここではなく lapilli serve の起動時に指定します。付けたり外したりして起動すると、すべての発火を一度だけ再判定します。",
+ "A Grafana rule Lapilli can't replay: what Grafana's own alert state history says it fired, copied in from %s on, is its record, so Lapilli can't say what a change to it would do.": "Lapilli がバックテストできない Grafana のルールです。Grafana 自身のアラート状態の履歴が示す発火を %s 以降取り込み、このルールの記録としているため、ルールを変えたらどうなるかは分かりません。",
+ "copying in what Grafana's alert state history says its rules fired, %s": "Grafana のアラート状態の履歴が示す発火を取り込み中: %s",
+ "copying in Grafana's alert state history": "Grafana のアラート状態の履歴の取り込み",
+ "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s は lapilli serve が Grafana 自身のアラート状態の履歴を取り込む取り込み元です。別の名前にしてください"
 }

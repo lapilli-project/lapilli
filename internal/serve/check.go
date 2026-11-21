@@ -439,10 +439,12 @@ func (s *Server) checkEmpty(empty []string, history, historyOff string, day time
 	s.status.checkDay = day
 }
 
-// historyWhere is where the Grafana of Config.History keeps its alert
-// state history, as it said within the hour. Settings that can't be used
-// are taken as none it serves, GRAFANA_ALERTS read as before, and logged;
-// only a failure worth asking again fails the check, to be asked again.
+// historyWhere is where the Grafana of Config.History, or else of
+// Config.JudgedHistory, the same Grafana when both are given, keeps its
+// alert state history, as it said within the hour. Settings that can't be
+// used are taken as none it serves, GRAFANA_ALERTS read as before, and
+// logged; only a failure worth asking again fails the check, to be asked
+// again.
 func (s *Server) historyWhere(ctx context.Context) (source.HistoryWhere, error) {
 	s.status.Lock()
 	where, at := s.status.historyWhere, s.status.historyAt
@@ -450,7 +452,11 @@ func (s *Server) historyWhere(ctx context.Context) (source.HistoryWhere, error) 
 	if !at.IsZero() && s.now().Sub(at) < time.Hour {
 		return where, nil
 	}
-	where, err := s.cfg.History.Where(ctx)
+	g := s.cfg.History
+	if g == nil {
+		g = s.cfg.JudgedHistory
+	}
+	where, err := g.Where(ctx)
 	switch {
 	case errors.Is(err, source.ErrUnusable):
 		s.log.Warn("where Grafana keeps its alert state history wasn't read: GRAFANA_ALERTS is", "err", err)

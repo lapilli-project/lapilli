@@ -155,6 +155,22 @@ show, and without the token, the signature or the password lapilli sent,
 should the API echo it back; `lapilli serve` keeps a reason without how often
 its request was asked.
 
+A rule `--grafana` holds that can't be replayed, its condition on MySQL,
+Elasticsearch, InfluxDB, a cloud's monitoring or TestData, is judged from
+what Grafana's own alert state history says it fired, read as
+[`--check-replay`](check-replay.md) reads it: in annotations, Grafana's
+default from 12.4 on, or in Loki, from a day before the period, with the
+token `--grafana-token-file` holds (a Viewer's). Its stones, precision,
+re-firings, hours and the incidents it caught are counted as any rule's.
+It stays not replayed, with why, so it has no longer `for`, near miss or
+`--compare`, and the report says so under its table; `--json` gives it
+`source` `grafana`. Its labels are as the history keeps them, in
+annotations a colon an underscore. Where the history can't be read, holds
+nothing from before the period, or doesn't tell the rule apart (passed
+over changes of it, or gives its title to another rule too), it is listed
+as before, and stderr says why. `--grafana-history=false` lists them all
+([docs/design/grafanajudged.md](design/grafanajudged.md)).
+
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
 Mimir, VictoriaMetrics, or a cloud's managed Prometheus. The CI job
 `e2e-compat` (`test/e2e/compat.sh`) runs `lapilli verdict` and

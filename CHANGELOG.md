@@ -58,6 +58,35 @@
   alert_labels`, not `--arg labels`, which `jira.jq` has for `JIRA_LABELS`;
   `jira.jq` and `firehydrant.jq`, run by hand, now want `jq -L
   recipes/incidents`, as the others do.
+- **Grafana's rules Lapilli can't replay, judged from Grafana's own alert
+  state history.** A rule `--grafana` holds whose condition reads a data
+  source that is neither PromQL nor LogQL (SQL, Elasticsearch, InfluxDB, a
+  cloud's monitoring, TestData) was only listed. Where Grafana keeps a
+  history it serves (annotations, its default from 12.4 on, or Loki), its
+  firings now come from that history, read as `--check-replay` reads it,
+  within the same bounds, and are judged as copied-in firings are: stones,
+  precision, re-firings, hours, incidents caught and missed, linked
+  alerts. It stays not replayed, so no longer `for`, near misses or
+  `--compare` for it; `lapilli verdict` says so under its table, and
+  `--json` gives it `source: "grafana"`. `lapilli serve` copies the history
+  in each round under the source `grafana`, a day a write, and ties each
+  such rule to it by name, as a cloud's alarm is tied to its own: one rule,
+  its page saying so. No new ledger schema. `--grafana-history=false` lists
+  them as before (docs/design/grafanajudged.md).
+
+### Changed
+
+- The firings port refuses the source `grafana`, now `lapilli serve`'s
+  own: a job copying firings in under that name names another.
+- A rule judged from its history, a cloud's alarm tied to what is copied in
+  for it among them, is counted in the report's table and in `--metrics`,
+  and said under the table, where it was listed under "Could not replay".
+
+### Fixed
+
+- A cloud's alarm tied to its history by a copy read as replayed until the
+  next run: the tie now carries the reason it isn't replayed, and its
+  group, at once.
 
 ## [0.67.0] - 2026-11-21
 

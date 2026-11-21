@@ -203,6 +203,14 @@ each history API (lapilli_serve_history_*). Off by default:
   --check-grafana URL the Grafana that runs the Grafana rules --rules or
                       --rules-history gives, whose alert state history says
                       what they really fired, read with --grafana-token-file
+  --grafana-history=false
+                      don't judge the rules --grafana holds that can't be
+                      replayed by Grafana's own alert state history. It is on
+                      with --grafana, where it keeps one it serves: each
+                      round, what it says they fired up to where the runs got
+                      is copied in under the source grafana, which no job may
+                      write to, and each such rule is judged by it, under its
+                      own name, as a cloud's alarm is by its history
   --check-differs N/RATIO
                       a rule differs when, over a week, it had N firings
                       either way and fewer than RATIO of them were alike
@@ -1426,6 +1434,13 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	if f.historyGrafana() != "" && cfg.CheckReplay {
 		h := f.grafanaHistory()
 		cfg.History = &h
+	}
+	// The rules --grafana holds that can't be replayed, judged from its
+	// own history (docs/design/grafanajudged.md).
+	if f.grafana != "" && !f.noGrafanaHistory {
+		h := f.grafanaHistory()
+		h.URL = f.grafana
+		cfg.JudgedHistory = &h
 	}
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval
 	if ocSet {

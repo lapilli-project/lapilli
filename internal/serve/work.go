@@ -269,6 +269,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// With no rules to replay, there is nothing to run for but --impact:
 	// what is copied in is judged as it comes.
 	if run && s.running(ctx) {
+		// The rules judged from Grafana's history, kept before the run,
+		// which ties each to what is copied in for it.
+		if s.replaying() {
+			if err := s.noteFromHistory(ctx); err != nil {
+				s.fail("copying in Grafana's alert state history", err)
+			}
+		}
 		s.runs(ctx, o)
 		// Where the data of the criterion the runs read begins, once they
 		// read it: the record never starts before it.
@@ -294,6 +301,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if s.checking() && s.still(ctx) && !s.runsWait() {
 			if err := s.checkReplay(ctx); err != nil {
 				s.fail("setting the replay beside what really fired", err)
+			}
+		}
+		// What Grafana's history says the rules Lapilli can't replay
+		// fired, up to where the runs got.
+		if s.still(ctx) {
+			if err := s.copyFromHistory(ctx, o); err != nil {
+				s.fail("copying in Grafana's alert state history", err)
 			}
 		}
 	}

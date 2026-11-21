@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"lapilli.dev/internal/rules"
@@ -71,7 +72,13 @@ func (l *Ledger) AddVersion(ctx context.Context, v Version) (int64, error) {
 				break
 			}
 		}
-		kept, err := l.tie(t, list)
+		// And those of its rules judged from Grafana's history, as they
+		// were judged before it.
+		more, err := l.grafanaTies(t.ctx, t, v.Names)
+		if err != nil {
+			return err
+		}
+		kept, err := l.tie(t, slices.Concat(list, more))
 		if err != nil {
 			return err
 		}
