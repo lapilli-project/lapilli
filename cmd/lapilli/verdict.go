@@ -608,6 +608,16 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 // parseFlags reads lapilli verdict's flags; serve, when not nil, takes the
 // flags only lapilli serve has, and says it is serve's.
 func parseFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
+	f, err := readFlags(args, serve)
+	if err != nil {
+		return nil, err
+	}
+	return checkFlags(f, serve)
+}
+
+// readFlags reads each flag into its value, as parseFlags does, and checks
+// none against another: lapilli impact suggest reads the few it takes so.
+func readFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
 	f := &verdictFlags{
 		impactFor: 5 * time.Minute, since: 7 * 24 * time.Hour, step: time.Minute,
 		opts:     verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
@@ -970,6 +980,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, err
 		}
 	}
+	return f, nil
+}
+
+// checkFlags checks the flags readFlags read, each against the others.
+func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
 	// The named impact signals, once --step and --match are known, wherever
 	// they came.
 	if err := f.signalsRead(); err != nil {

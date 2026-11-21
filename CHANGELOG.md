@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`lapilli impact suggest`** says which of the stacks in
+  docs/impact.md's table (Istio, Linkerd, Envoy, ingress-nginx, Traefik,
+  OpenTelemetry HTTP server metrics) the history has the metrics of, and
+  for each found its series, the windows its `--impact` finds over the
+  period with `--impact-for` 5m, and the `--impact '...'` to give
+  `lapilli verdict`: for a team with no incidents written down. One
+  request a stack counts its metric's series, and each found has its
+  `--impact` read, a day a request. It takes verdict's flags for the
+  history and the period, and `--json`; it only reads, and chooses none
+  (docs/design/suggest.md). A test holds the table and the command's list
+  alike. The table's "Envoy, Envoy Gateway" row is "Envoy or Envoy
+  Gateway".
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.

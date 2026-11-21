@@ -32,10 +32,14 @@ Usage:
                                      deployed: reads, writes nothing
   lapilli ledger copy --ledger DIR --to-url-file FILE
                                      copy a ledger into Postgres
+  lapilli impact suggest --prometheus URL
+                                     which --impact queries the history
+                                     has the metrics of: reads, chooses
+                                     nothing
   lapilli version
 
-Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h" or
-"lapilli ledger -h" for the options.
+Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h",
+"lapilli ledger -h" or "lapilli impact -h" for the options.
 `
 
 func main() {
@@ -56,6 +60,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPreflight(rest, stdout, stderr)
 	case "ledger":
 		return runLedger(rest, stdout, stderr)
+	case "impact":
+		return runImpact(rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "lapilli", buildVersion())
 		return 0
@@ -69,6 +75,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stdout, preflightUsage)
 		case len(rest) > 0 && rest[0] == "ledger":
 			fmt.Fprint(stdout, ledgerUsage)
+		case len(rest) > 0 && rest[0] == "impact":
+			fmt.Fprint(stdout, impactUsage)
 		default:
 			fmt.Fprint(stdout, usage)
 		}

@@ -51,6 +51,32 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 		return nil, ctx.Err()
 	case expr == "impact":
 		return run(6*time.Hour, 6*time.Hour-10*time.Minute), nil
+	case expr == `count(istio_requests_total{reporter="destination"})`:
+		// Istio's metric, for lapilli impact suggest: 412 series at most,
+		// fewer once.
+		s := run(7*24*time.Hour, 0)
+		for i := range s[0].Samples {
+			s[0].Samples[i].V = 412
+		}
+		s[0].Samples[0].V, s[0].Labels = 400, nil
+		return s, nil
+	case strings.Contains(expr, "rate(istio_requests_total"):
+		// Its 5xx share above 1%: checkout's from 6h ago for 20m, cart's
+		// from 2h ago for 10m, and a 3m blip, shorter than --impact-for.
+		out := run(6*time.Hour, 6*time.Hour-19*time.Minute)
+		out[0].Labels = map[string]string{"destination_service_name": "checkout"}
+		cart := run(2*time.Hour, 2*time.Hour-9*time.Minute)
+		cart[0].Labels = map[string]string{"destination_service_name": "cart"}
+		blip := run(4*time.Hour, 4*time.Hour-2*time.Minute)
+		blip[0].Labels = map[string]string{"destination_service_name": "search"}
+		return append(append(out, cart...), blip...), nil
+	case expr == "count(nginx_ingress_controller_requests)":
+		// ingress-nginx's, whose 5xx share stays under 1%.
+		s := run(3*24*time.Hour, 0)
+		for i := range s[0].Samples {
+			s[0].Samples[i].V = 36
+		}
+		return s, nil
 	case expr == `ALERTS{alertstate="firing"}`:
 		// CheckoutErrors, as it really fired, 5m after it went pending; and
 		// an alert from a rule not in the files.

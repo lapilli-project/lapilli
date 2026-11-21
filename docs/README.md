@@ -69,7 +69,7 @@ Lapilli is, and how to install it.
 ## Reference
 
 - [Commands](commands.md): every option of `lapilli verdict`, `serve`,
-  `preflight` and `ledger`, as `-h` prints it
+  `preflight`, `ledger` and `impact`, as `-h` prints it
 - [The HTTP API](api.md): every endpoint `lapilli serve` answers on, and the
   role each needs
 - [Metrics](metrics.md): every metric `lapilli serve` exposes at `/metrics`
