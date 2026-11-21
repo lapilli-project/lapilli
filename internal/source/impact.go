@@ -40,8 +40,7 @@ func FirstSample(ctx context.Context, h replay.History, sel string, lo, hi time.
 	if !hi.After(lo) {
 		return x, nil
 	}
-	step := max(time.Hour, (hi.Sub(lo)/1000).Truncate(time.Minute)+time.Minute)
-	series, err := h.QueryRange(ctx, "count("+sel+")", lo, hi, step)
+	series, err := h.QueryRange(ctx, "count("+sel+")", lo, hi, countStep(lo, hi))
 	if err != nil {
 		return x, err
 	}
@@ -54,4 +53,35 @@ func FirstSample(ctx context.Context, h replay.History, sel string, lo, hi time.
 	}
 	x.AtStart = atStart && !x.First.IsZero() && !x.First.After(lo)
 	return x, nil
+}
+
+// SeriesCount is the most series one selector had at once in [lo, hi],
+// counted as FirstSample counts them: one request, of a thousand points at
+// most, whatever the selector holds. 0 for none. A series that came and
+// went between two counts isn't seen; one scraped all along is.
+func SeriesCount(ctx context.Context, h replay.History, sel string, lo, hi time.Time) (int, error) {
+	if !hi.After(lo) {
+		return 0, nil
+	}
+	series, err := h.QueryRange(ctx, "count("+sel+")", lo, hi, countStep(lo, hi))
+	if err != nil {
+		return 0, err
+	}
+	most := 0
+	for _, se := range series {
+		for _, smp := range se.Samples {
+			// What a server says is read as a count: NaN, infinite or
+			// past any count, nothing.
+			if smp.V > float64(most) && smp.V < 1e15 {
+				most = int(smp.V)
+			}
+		}
+	}
+	return most, nil
+}
+
+// countStep is the step a selector's series are counted at over [lo, hi]:
+// an hour, or coarser over a long span.
+func countStep(lo, hi time.Time) time.Duration {
+	return max(time.Hour, (hi.Sub(lo)/1000).Truncate(time.Minute)+time.Minute)
 }

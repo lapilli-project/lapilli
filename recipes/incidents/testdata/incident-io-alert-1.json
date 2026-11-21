@@ -1,0 +1,13 @@
+{"alert": {"alert_group_ids": [], "alert_source_id": "01GW2G3V0S59R238FAHPDS1R66", "created_at": "2026-10-28T03:01:00.801578Z",
+  "deduplication_key": "4293868629", "description": "Errors on checkout above 5% for 2 minutes", "id": "01GW2G3V0S59R238FAHPDS1R61",
+  "status": "resolved", "title": "CheckoutErrors", "updated_at": "2026-10-28T03:40:00Z",
+  "attributes": [
+    {"attribute": {"array": false, "id": "01GW2G3V0S59R238FAHPDS1T01", "name": "alertname", "required": false, "type": "String"},
+     "value": {"label": "CheckoutErrors", "literal": "CheckoutErrors"}},
+    {"attribute": {"array": false, "id": "01GW2G3V0S59R238FAHPDS1T02", "name": "service", "required": false, "type": "String"},
+     "value": {"label": "checkout", "literal": "checkout"}},
+    {"attribute": {"array": false, "id": "01GW2G3V0S59R238FAHPDS1T03", "name": "Team", "required": false, "type": "CatalogEntry[\"01GW2G3V0S59R238FAHPDS1R67\"]"},
+     "value": {"catalog_entry": {"catalog_type_id": "01FCNDV6P870EA6S7TK1DSYDG0", "id": "01FCNDV6P870EA6S7TK1DSYDG0", "name": "Payments Team"}, "label": "Payments Team"}},
+    {"attribute": {"array": false, "id": "01GW2G3V0S59R238FAHPDS1T04", "name": "Affected service", "required": false, "type": "String"},
+     "value": {"label": "checkout", "literal": "checkout"}}
+  ]}}

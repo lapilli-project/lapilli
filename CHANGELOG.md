@@ -2,6 +2,124 @@
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-11-21
+
+Incidents judged by the alerts their tool linked to them, and why a
+firing paged no one, from Alertmanager's event recorder. `lapilli impact
+suggest` for a team with no incidents written down. Datadog's monitors and
+New Relic's alert conditions judged from their history. A backtest that
+can stop a merge, and set a commit status. Thanos and VictoriaMetrics
+checked in CI. Ledger schema 028 and 029.
+
+Before upgrading:
+- **Ledger schema 028 and 029**, after 027: keep a copy of the ledger's
+  disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger. Nothing is
+  backfilled. 028 adds `incidents.alerts` and `catches.linked`; 029 holds
+  `mutes`.
+
+### Added
+
+- **`lapilli impact suggest`** says which of the stacks in
+  docs/impact.md's table (Istio, Linkerd, Envoy, ingress-nginx, Traefik,
+  OpenTelemetry HTTP server metrics) the history has the metrics of, and
+  for each found its series, the windows its `--impact` finds over the
+  period with `--impact-for` 5m, and the `--impact '...'` to give
+  `lapilli verdict`: for a team with no incidents written down. One
+  request a stack counts its metric's series, and each found has its
+  `--impact` read, a day a request. It takes verdict's flags for the
+  history and the period, and `--json`; it only reads, and chooses none
+  (docs/design/suggest.md). A test holds the table and the command's list
+  alike. The table's "Envoy, Envoy Gateway" row is "Envoy or Envoy
+  Gateway".
+- **Datadog's monitors and New Relic's alert conditions, judged from
+  their history** (`recipes/firings/datadog.sh`, `newrelic.sh`), as a
+  cloud's alarms that aren't PromQL are: neither tool's rules are read or
+  replayed. Datadog's from the events its monitors write (the Events API),
+  each group from its Alert or Warn to its recovery; New Relic's from its
+  `NrAiIncident` events (NRQL through NerdGraph), each incident from its
+  open to its close. Each labels a firing with its tags, its priority as
+  `severity` and the monitor's or condition's ID as `alarm_id`, bounded as
+  `lapilli serve` takes labels; reads its keys from files and gives them
+  to `curl` on stdin; stops past `MAX_PAGES`; and refuses an answer that
+  may hold part of the history. `put.sh` copies them into serve. Checked
+  against the answers each tool's documentation shows, not against real
+  accounts.
+- **`lapilli verdict --compare --fail-missed`** exits 1 when the change
+  leaves an incident a rule caught before it caught by no rule after it,
+  by `--incidents` or `--impact`, which it is refused without: a merge
+  gate with no expectations file. The report says which incidents, and
+  that the run fails for them (text, `--markdown`, `--json`'s `"missed"`),
+  and the summary counts them (`missed_checked`, `incidents_missed`, new
+  fields). With `--changed-only`, the rules left alone are replayed too
+  when a rule that differs stops catching one, to see whether one still
+  does. An incident a rule after the change that couldn't be replayed may
+  still catch is not known (`missed_not_known`), said, and fails nothing.
+  With `--fail-expectations`, either failing fails the run.
+- **The backtest recipes stop a merge**: `FAIL_MISSED=true` gives lapilli
+  `--fail-missed` and fails the job on it, once the comment says which
+  (refused through `lapilli serve`, whose report doesn't say yet); and
+  `STATUS=true` sets a commit status, `lapilli/backtest`, on the pull
+  request's head commit, success or failure as the job ends, for a branch
+  rule to require: GitHub's and Gitea's commit statuses, GitLab's,
+  Bitbucket Cloud's build statuses and Azure DevOps' pull request
+  statuses, on the iteration at that commit. The comment is still posted
+  first. The action takes `fail-missed` and `status`; the token needs
+  more for a status (docs/pr-backtests.md, "Stopping a merge").
+- **Incidents judged by the alerts their tool linked to them**
+  (docs/design/links.md). An incident takes `alerts`, each `{rule: NAME,
+  labels: {...}}`, in the incidents file and in `POST` and `PUT
+  /api/v1/incidents`: a firing of the rule whose labels agree with the
+  alert's where both carry one (an external label it lacks passed over,
+  as `--match` does) catches the incident when it starts between `--lead` before it
+  and its end, whatever `--match` says. The report marks such a catch
+  `linked` (`(linked)` in the text and in `--compare`'s Markdown, and in
+  MCP's `caught_by`), and the incident's page and the rule's say "linked
+  in the incident tool".
+- **`--linked-only`**, in `lapilli verdict` and `lapilli serve`: an
+  incident that lists alerts is caught by them alone; one that lists none
+  is judged as before. serve judges every firing again once when it is
+  given or taken away at a start.
+- **The PagerDuty, incident.io and Rootly recipes write each incident's
+  alerts**, those whose alert carries an `alertname` with its labels
+  (PagerDuty's details as Alertmanager put them there, incident.io's
+  attributes, Rootly's labels), saying how many they left out;
+  `ALERT_LABELS` keeps some labels alone, `ALERTS=no` reads none, and
+  `MAX_ALERT_REQUESTS` (2000) bounds what they ask for.
+- **Why a firing paged no one.** `/v1/alertmanager/events` keeps the
+  event recorder's mutes: when a silence or an inhibition kept an alert
+  from a notification (`silenceMutedAlert`, `inhibitionMutedAlert`, and
+  0.35's `mutedAlerts` of a notification), the alert's name and labels,
+  and the silence's ID or the inhibiting alert's fingerprint; nothing else
+  of a silence, not its comment or who made it. Both of the recorder's
+  formats, 0.33 and 0.34's and 0.35's. Told of every few seconds, again
+  after a failure and by each replica, a mute is kept once an hour, from
+  the first to the last, and for `--keep`. A firing no notification told
+  of says "muted by a silence" with its ID, "inhibited by another alert",
+  or "muted by a silence or an inhibition", on the rule's page and the
+  day's firings; MCP's `rule` gives each latest firing `muted`, read in
+  the hours about the firing's start and end. Mutes come at the events'
+  rate, 1,000 rows of a rule's hour and 200,000 a day at most, and claim
+  only that a firing was muted ([docs/design/mutes.md](docs/design/mutes.md)).
+- **Thanos and VictoriaMetrics, checked in CI.** A new job, `e2e-compat`
+  (`test/e2e/compat.sh`), runs `lapilli verdict` and `--check-replay`
+  against a real Thanos 0.42.5 (a sidecar and its query) and a real
+  VictoriaMetrics 1.156.0 with vmalert 1.156.0, beside the Prometheus they
+  read or are written by: the same firings, each its rule, labels, start
+  and end, as against Prometheus; every firing alike with `ALERTS`,
+  Prometheus's through Thanos and vmalert's in VictoriaMetrics; and
+  `--loaded-rules` reading vmalert's rules through VictoriaMetrics. A pull
+  request runs it when it changes `internal/prom`, `internal/replay`,
+  `internal/rules`, `internal/source` or the script. Not a required check.
+
+### Fixed
+
+- **`--loaded-rules` reading vmalert's rules** takes each rule's
+  `keep_firing_for`, which vmalert names so where Prometheus says
+  `keepFiringFor`: it was read as none, so a vmalert rule's firing was
+  replayed as resolving sooner than it did.
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.

@@ -21,6 +21,15 @@
 #                         fetched: Bitbucket Pipelines clones the pull
 #                         request's branch alone, and lets the step fetch
 #
+# With STATUS=true (see lib.sh), a build status (POST
+# /repositories/WORKSPACE/REPO/commit/SHA/statuses/build) on the commit the
+# pipeline ran for (BITBUCKET_COMMIT), its key lapilli-backtest, its
+# refname the pull request's source branch, as GET .../pullrequests/ID
+# says, which associates it with the pull request, as Bitbucket's
+# reference says; linking to the pipeline's result. The token's pull
+# requests scope covers it (Bitbucket's reference asks the repository
+# scope, which pull requests implies).
+#
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), the step's ID token,
 # from a step that asks for serve's audience alone, given as
 # LAPILLI_ID_TOKEN:
@@ -59,6 +68,12 @@ case ${BITBUCKET_USER_UUID:-} in
   *) echo "bitbucket.sh: BITBUCKET_USER_UUID $BITBUCKET_USER_UUID: want {UUID}" >&2; exit 1 ;;
 esac
 host_api=$api
+# For STATUS: the commit the pipeline ran for, and its result's page.
+status_commit=${BITBUCKET_COMMIT:-}
+status_link=
+case ${BITBUCKET_BUILD_NUMBER:-}/${BITBUCKET_REPO_FULL_NAME:-} in
+  [0-9]*/?*/?*) status_link=https://bitbucket.org/$BITBUCKET_REPO_FULL_NAME/pipelines/results/$BITBUCKET_BUILD_NUMBER ;;
+esac
 
 host_auth() {
   printf 'Authorization: Bearer %s\nAccept: application/json\n' "$(cat "$BITBUCKET_TOKEN_FILE")"
@@ -119,6 +134,26 @@ edit_comment() {
   for_bitbucket "$2"
   code=$(host PUT "$api/repositories/$BITBUCKET_REPO/pullrequests/$PR/comments/$1" "$tmp/body")
   case $code in 2??) ;; *) say "Bitbucket didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
+}
+
+# A build status: SUCCESSFUL or FAILED, as lib.sh says, keyed by the
+# status's name (lapilli-backtest, lapilli-backtest-KEY), on the pull
+# request's source branch.
+post_status() {
+  st=SUCCESSFUL
+  [ "$1" = success ] || st=FAILED
+  code=$(host GET "$api/repositories/$BITBUCKET_REPO/pullrequests/$PR")
+  case $code in 2??) ;; *) say "Bitbucket didn't give the pull request ($code): $(shown "$out")"; return 1 ;; esac
+  ref=$(jq -r '.source.branch.name // empty | strings' "$out" 2>/dev/null) || ref=
+  if [ -z "$ref" ] || [ "${#ref}" -gt 255 ]; then
+    say "Bitbucket didn't say the pull request's source branch"
+    return 1
+  fi
+  jq -n --arg state "$st" --arg key "$(printf '%s' "$status_context" | tr / -)" --arg name "$status_context" --arg text "$2" \
+    --arg ref "$ref" --arg url "$status_url" \
+    '{key: $key, state: $state, name: $name, description: $text, refname: $ref} + (if $url != "" then {url: $url} else {} end)' >"$tmp/body"
+  code=$(host POST "$api/repositories/$BITBUCKET_REPO/commit/$status_sha/statuses/build" "$tmp/body")
+  case $code in 2??) ;; *) say "Bitbucket didn't take the status ($code): $(shown "$out")"; return 1 ;; esac
 }
 
 # shellcheck source=lib.sh

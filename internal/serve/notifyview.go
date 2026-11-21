@@ -13,9 +13,10 @@ import (
 
 // What the pages show of notifications as they were sent: for each rule,
 // how many, how many repeats, how many while people slept, how many for
-// firings that caught nothing; for each firing, how many told of it.
-// Notifications can't be replayed for history: each number counts from the
-// first notification kept.
+// firings that caught nothing; for each firing, how many told of it, or,
+// told of by none, what muted it (docs/design/mutes.md). Notifications
+// can't be replayed for history: each number counts from the first
+// notification kept.
 
 // pagedCache keeps the notifications that came in the weeks shown, tied to
 // the firings they tell of, for a generation of the ledger.
@@ -34,6 +35,8 @@ type paged struct {
 	since  map[string]time.Time
 	first  time.Time
 	within ledger.Within
+	// mutes says the ledger keeps a mute.
+	mutes bool
 	// woken are, by week and rule, those for firings that caught nothing
 	// that came while people slept: worked out once (wokenBy).
 	wokenOnce sync.Once
@@ -91,6 +94,9 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 		return nil, err
 	}
 	if p.within, err = s.within(ctx); err != nil {
+		return nil, err
+	}
+	if p.mutes, err = s.l.HasMutes(ctx); err != nil {
 		return nil, err
 	}
 	if !p.first.IsZero() {
@@ -218,15 +224,28 @@ func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLin
 }
 
 // notifiedFirings gives firing lines how many notifications told of each,
-// and whether notifications were counted for the rule by then.
+// and whether notifications were counted for the rule by then; and what
+// muted each, read for the lines alone, never cached.
 func (s *Server) notifiedFirings(ctx context.Context, lines []firingLine) error {
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() || len(lines) == 0 {
+	if err != nil || len(lines) == 0 {
 		return err
 	}
 	fs := make([]ledger.Firing, len(lines))
 	for i, l := range lines {
 		fs[i] = l.Firing
+	}
+	if p.mutes {
+		muted, err := s.l.MutedOf(ctx, fs, p.within, s.now())
+		if err != nil {
+			return err
+		}
+		for i := range lines {
+			lines[i].Muted = muted[lines[i].ID]
+		}
+	}
+	if p.first.IsZero() {
+		return nil
 	}
 	of, err := s.l.NotifiedOf(ctx, fs, p.within)
 	if err != nil {

@@ -27,10 +27,14 @@ Usage:
                                      deployed: reads, writes nothing
   lapilli ledger copy --ledger DIR --to-url-file FILE
                                      copy a ledger into Postgres
+  lapilli impact suggest --prometheus URL
+                                     which --impact queries the history
+                                     has the metrics of: reads, chooses
+                                     nothing
   lapilli version
 
-Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h" or
-"lapilli ledger -h" for the options.
+Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h",
+"lapilli ledger -h" or "lapilli impact -h" for the options.
 ```
 
 ## `lapilli verdict`
@@ -149,6 +153,12 @@ Before a change to the rules:
                       nothing)
   --expect-required   exit 1 when the change adds a rule no expectation
                       holds
+  --fail-missed       with --compare and --incidents or --impact, exit 1
+                      when the change leaves an incident a rule caught
+                      before it caught by no rule after it; the report
+                      says which. With --changed-only, the rules left
+                      alone are replayed too when a rule that differs
+                      stops catching one, to see whether one still does
   --promtool PATH     with --expect, run each scenario (scenarios:,
                       promtool's own test files, read in the directory of
                       the expectations file that names them) of a rule the
@@ -322,7 +332,12 @@ Judging:
                       still catches it (default 15m)
   --match LABEL       a label a firing and an incident must agree on when
                       both have it, such as service (repeatable); an
-                      incident can list several values
+                      incident can list several values. A firing of an
+                      alert the incident's tool linked to it (alerts: in
+                      the incidents file) catches it whatever they say
+  --linked-only       an incident that lists the alerts its tool linked to
+                      it is caught by those alone, not by any other firing
+                      at the time; one that lists none is caught as ever
   --refire DUR        a firing this soon after the same alert resolved counts
                       as refired (default 1h)
   --rule REGEX        only rules whose name matches
@@ -434,6 +449,8 @@ The incidents file:
       start: 2026-10-30T17:00:00+09:00
       end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
       labels: {service: [checkout, cart]} # optional, for --match
+      alerts:                             # optional: those its tool linked
+        - {rule: CheckoutErrors, labels: {service: checkout}}
 
 The impact file:
 
@@ -542,6 +559,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       the rule's page links to it
   --lead, --match, --refire, --noisy-firings, --noisy-precision
                       the defaults; the UI can change them
+  --linked-only       an incident that lists the alerts its tool linked to
+                      it is caught by those alone; changed at a start,
+                      every firing is judged again with it
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)
@@ -1204,4 +1224,58 @@ kept. Then both are read back, table by table, and a copy that differs
 fails. The ledger copied from is brought to this lapilli's schema first, as
 lapilli serve would, and its days and weeks stay counted in its time zone:
 serve counts them again if --tz says another.
+```
+
+## `lapilli impact`
+
+What it's for: [Incidents nobody wrote down](impact.md#which-of-them-your-history-has).
+
+```text
+lapilli impact suggest says which of the stacks in front of services that
+docs/impact.md lists have their metrics in the history, and how many
+windows of user impact each one's --impact finds over the period: an
+--impact to choose from, for a team with no incidents written down. It
+chooses none, and writes and sends nothing: it reads
+(docs/design/suggest.md).
+
+Usage:
+  lapilli impact suggest --prometheus URL [flags]
+
+Where the history is, as lapilli verdict takes it:
+  --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
+                      VictoriaMetrics, or a cloud's managed Prometheus
+  --auth CLOUD        send the credentials that cloud's managed Prometheus
+                      wants (aws, azure or google), from those the machine
+                      or pod already has
+  --aws-region REGION the region to sign for, when the URL doesn't say
+  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+                      Service for Prometheus's URL for this project and
+                      --auth google
+  --bearer-token-file FILE
+                      send this token with each query
+  --max-rate N        ask the API N requests a second at most, from 0.001
+  --max-samples N     read the answers to one query to N samples in all at
+                      most (default 10000000)
+
+When, as lapilli verdict takes it:
+  --since DUR         the last DUR (default 7d)
+  --from TIME, --to TIME
+                      an RFC 3339 period instead
+  --step DUR          the step the windows are found at (default 1m)
+  --tz ZONE           show the period in this zone
+
+Output:
+  --json              the same, as JSON
+  --timeout DUR       give up after this long (default 10m)
+
+For each stack, one request counts its metric's series, as its --impact
+reads every request (not only those that failed), at an hour's step, or
+coarser over a long period: the most at once. For a stack found, its --impact is read over the period, a day a request, and
+its windows found as lapilli verdict --impact finds them, with
+--impact-for 5m. The stacks are listed in docs/impact.md's order,
+whatever they found. A stack that couldn't be asked is not known, with
+why: a query the history refused as written, that stack alone; a history
+not reached, not let in or turned away, or the timeout, every stack from
+it on, unasked. It exits 0 when every stack was asked, 1 when one wasn't,
+and 2 when the flags are wrong.
 ```

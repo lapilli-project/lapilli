@@ -72,8 +72,10 @@ Still to do:
   Monitor's action groups and Google Cloud's webhook channels, each on a path
   of its own ([docs/design/notifications.md](docs/design/notifications.md)).
   Alertmanager's event recorder, every delivery, PagerDuty's and Slack's
-  too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md));
-  still to do: keeping its mutes, which say why a firing paged no one;
+  too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md)),
+  and its mutes, which say why a firing paged no one, since 0.67
+  ([docs/design/mutes.md](docs/design/mutes.md)); still to do: counting
+  the muted in the digest and the report;
   checking the SNS, Azure and Google Cloud paths against real accounts; and a cloud alarm's own notifications,
   every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
   Google Cloud's other policies, OCI through Notifications), tied to the
@@ -143,6 +145,11 @@ Prometheus, CloudWatch's PromQL API, Azure Monitor and Google Cloud Managed
 Service for Prometheus.
 
 - The Google path has been run against a real project.
+- Thanos 0.42.5 (a sidecar and its query) and VictoriaMetrics 1.156.0,
+  with vmalert 1.156.0: the CI job `e2e-compat` runs `lapilli verdict`
+  and `--check-replay` against them, beside the Prometheus they read or
+  are written by, and `--loaded-rules` on vmalert's rules. Mimir 3.2.4
+  runs in `e2e-changes`.
 - AWS and Azure are tested against SigV4 and token checks written apart from
   the SDKs, but not yet against a real workspace.
 - CloudWatch PromQL alarms and Google Cloud PromQL policies are read from
@@ -155,7 +162,8 @@ Service for Prometheus.
 A contributor with an account could run `lapilli verdict --check-replay`
 there, report what differs, and keep a check that does it. It also needs
 finding out which of these keep a series of what really fired: `ALERTS` is
-documented for Amazon Managed Service for Prometheus, and not for the others.
+documented for Amazon Managed Service for Prometheus, and not for the others
+(vmalert writes it, and Thanos serves its Prometheus's, in `e2e-compat`).
 
 ## Pull request backtests
 
@@ -168,19 +176,23 @@ and as Gitea renders it against a real Gitea in CI; GitHub's rendering was
 checked by hand. A job can backtest through `lapilli serve` instead, with
 no metric credential, judged by serve's record, by the ID token of GitHub
 Actions, GitLab CI or Forgejo Actions or a plain token
-([docs/design/backtests.md](docs/design/backtests.md), step 1). Still to
-do:
+([docs/design/backtests.md](docs/design/backtests.md), step 1). A job can
+stop a merge: it fails when the change leaves an incident a rule caught
+before it caught by no rule (`FAIL_MISSED`, `--fail-missed`) or breaks an
+expectation, and sets a commit status on the pull request's head commit
+(`STATUS`): commit statuses on every host (Bitbucket's build statuses,
+Azure DevOps' pull request statuses), not GitHub check runs, for a branch
+rule to require. Still to do:
 
 - Through serve: Bitbucket Pipelines' ID token, and Azure Pipelines' if
-  decided (step 2); Grafana-managed and Loki rules, if decided (step 3).
+  decided (step 2); Grafana-managed and Loki rules, if decided (step 3);
+  `FAIL_MISSED`, which serve's report doesn't say yet: serve would judge
+  the rules left alone by its record.
 
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
-  DevOps accounts, and how each renders the comment. Today each is tested
-  against its API's documented answers, with a server standing in; Gitea
-  against a real one.
-- A check of the pull request's own (a GitHub check run, a commit status
-  on the others) beside the comment, for a team that wants a backtest that
-  went badly to stop a merge.
+  DevOps accounts: how each renders the comment, and takes the status.
+  Today each is tested against its API's documented answers, with a
+  server standing in; Gitea against a real one.
 
 ## Incidents in
 
@@ -196,6 +208,11 @@ is built in and none is favoured.
 - Compass keeps alerts, not incidents; its recipe reads a closed alert's
   log for its close since 0.27. Compass doesn't document a close's words:
   checking them against a real account.
+- The alerts an incident's tool linked to it judge it (built,
+  [docs/design/links.md](docs/design/links.md)): the PagerDuty, incident.io
+  and Rootly recipes copy them where an alert carries its `alertname` and
+  labels. Still to do: Grafana IRM's, FireHydrant's and Jira Service
+  Management's linked alerts; near misses looked for by a link.
 
 ## lapilli serve
 

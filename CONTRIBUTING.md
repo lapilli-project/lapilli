@@ -34,6 +34,7 @@ test/e2e/rendered.sh     # rules a chart renders, from a real Gitea, replayed an
 test/e2e/dashboard.sh    # the chart's Grafana dashboard on a real Grafana and Prometheus; needs Docker, jq, python3
 test/e2e/service.sh      # the whole service on kind: Grafana's alerts, Lapilli at a LoadBalancer, Dex, a browser; Linux
 test/e2e/ratelimit.sh    # runs at once against a real Prometheus behind nginx's rate limit (429); needs Docker
+test/e2e/compat.sh       # verdict and --check-replay against a real Thanos, and VictoriaMetrics with vmalert; needs Docker, jq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 
@@ -101,7 +102,10 @@ tests, so a change that slows a run or a page fails.
   On a pull request, an end-to-end job runs only when the changes reach
   it: lapilli itself, which each one builds (`go.mod`, `go.sum`, `cmd/`
   and `internal/`, but their tests and testdata), or its script and what
-  the script reads (`test/e2e/reached.sh` says which). A change to the
+  the script reads (`test/e2e/reached.sh` says which). Of lapilli,
+  `e2e-compat` is reached only by what reads the history and replays it
+  (`internal/prom`, `internal/replay`, `internal/rules`,
+  `internal/source`), and `go.mod` and `go.sum`. A change to the
   docs alone runs none of them. A new push to a pull request cancels the
   run in progress. On each push to main every job runs, and weekly the
   fuzzing too. All of what runs must pass.

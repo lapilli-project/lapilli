@@ -218,8 +218,8 @@ Bounds:
 
 | Route | Role | Takes | Gives |
 |---|---|---|---|
-| `GET /api/v1/incidents` | viewer | `from`, `to` | the incidents that started in the period, the earliest first, impact windows among them (`origin` `impact`, `state`, `counts`), each with `caught_by` |
-| `POST /api/v1/incidents` | editor | `id` (the next `L-n` when left out), `title`, `start`, `end`, `labels` (`{"service": ["checkout"]}`) | 201, the incident |
+| `GET /api/v1/incidents` | viewer | `from`, `to` | the incidents that started in the period, the earliest first, impact windows among them (`origin` `impact`, `state`, `counts`), each with `caught_by` (`linked` of a catch by an alert it lists) |
+| `POST /api/v1/incidents` | editor | `id` (the next `L-n` when left out), `title`, `start`, `end`, `labels` (`{"service": ["checkout"]}`), `alerts`, those its tool linked to it (`[{"rule": "CheckoutErrors", "labels": {"service": "checkout"}}]`, 100 at most, docs/design/links.md) | 201, the incident |
 | `PUT /api/v1/incidents/{id}` | editor | as `POST` | the incident with that id, made or replaced |
 | `DELETE /api/v1/incidents/{id}` | editor | | 204 |
 | `POST /api/v1/incidents/{id}/decide` | editor | `state` (`confirmed`, `dismissed`, or `""` to reopen), `title` (of the incident a window confirmed becomes; its own when left out), `together` (`true` dismisses the other named signals' windows at that time not decided yet) | `id`, `state`, and `incident`, the one it was confirmed as |
@@ -445,7 +445,8 @@ nothing else, each source on a path of its own:
 A notification is 1 MB at most; each source is taken at 20 a second,
 bursts of 100, and up to 200,000 alerts a day (UTC). It answers
 `{"kept": N, "same_as_kept": N}`, with `refused` when some couldn't be
-kept. Host names aren't checked here: each request carries its own proof.
+kept; `/v1/alertmanager/events` adds `mutes`, the silences' and
+inhibitions' mutes it read and kept ([notifications.md](notifications.md#why-a-firing-paged-no-one)). Host names aren't checked here: each request carries its own proof.
 [Notifications as they were sent](notifications.md) says what each
 source sends and how.
 

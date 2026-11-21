@@ -71,6 +71,18 @@ job that failed doesn't read as a week with nothing wrong: write
 - [Incidents nobody wrote down](impact.md): `--impact PROMQL`, windows of a
   signal of user impact taken as incidents, beside the file or alone.
 
+### No incidents written down? Start here
+
+`lapilli impact suggest --prometheus http://prometheus:9090` asks your
+Prometheus which of the stacks in front of services that
+[Incidents nobody wrote down](impact.md#which-of-them-your-history-has)
+lists it has the metrics of: Istio, Linkerd, Envoy, ingress-nginx,
+Traefik, OpenTelemetry's HTTP server metrics. For each one found it says
+how many series, how many windows of user impact its `--impact` finds
+over the last week, and the `--impact '...'` to give `lapilli verdict` in
+place of `--incidents`. It only reads, and chooses none: check the labels
+and the threshold first.
+
 ## Judge last week
 
 ```sh

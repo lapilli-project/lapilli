@@ -156,10 +156,17 @@ should the API echo it back; `lapilli serve` keeps a reason without how often
 its request was asked.
 
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
-Mimir, VictoriaMetrics, or a cloud's managed Prometheus. `--bearer-token-file`
-adds a token. For a cloud's, `--auth` sends the credentials it wants, taken
-from those the machine or pod already has (environment, workload identity,
-instance or managed identity, the cloud's CLI):
+Mimir, VictoriaMetrics, or a cloud's managed Prometheus. The CI job
+`e2e-compat` (`test/e2e/compat.sh`) runs `lapilli verdict` and
+`--check-replay` against Thanos 0.42.5, a sidecar and its query, and
+VictoriaMetrics 1.156.0, with vmalert 1.156.0 evaluating the same rules
+there: the same firings as against the Prometheus beside them, and every
+firing alike with `ALERTS`. For `--loaded-rules` on vmalert, give
+`--prometheus` the VictoriaMetrics that answers `/api/v1/rules` from it
+(`-vmalert.proxyURL`). `--bearer-token-file` adds a token. For a cloud's,
+`--auth` sends the credentials it wants, taken from those the machine or
+pod already has (environment, workload identity, instance or managed
+identity, the cloud's CLI):
 
 | Managed Prometheus | `--prometheus` | `--auth` | Read permission |
 |---|---|---|---|

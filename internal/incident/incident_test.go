@@ -2,6 +2,7 @@ package incident
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -266,5 +267,86 @@ func TestFromImpactStopsWhenDone(t *testing.T) {
 	series := []prom.Series{{Samples: []prom.Sample{{T: t0, V: 1}}}}
 	if ws, err := FromImpact(ctx, series, time.Minute, time.Minute); !errors.Is(err, context.Canceled) || ws != nil {
 		t.Errorf("%d windows, %v", len(ws), err)
+	}
+}
+
+// The alerts a tool linked to an incident are read from the incidents file,
+// sorted and each once, a label's value as written; a misspelt key, a rule
+// missing, a label that isn't a value, and what is past the bounds are
+// refused.
+func TestAlerts(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.yaml")
+	os.WriteFile(good, []byte(`incidents:
+  - id: INC-1
+    start: 2026-10-30T17:00:00Z
+    alerts:
+      - {rule: Slow, labels: {code: 500}}
+      - rule: Errors
+        labels: {service: checkout}
+      - {rule: Slow, labels: {code: "500"}}
+`), 0o600)
+	got, err := Load(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Alert{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}}, {Rule: "Slow", Labels: map[string]string{"code": "500"}}}
+	if !reflect.DeepEqual(got[0].Alerts, want) {
+		t.Errorf("alerts %+v, want %+v", got[0].Alerts, want)
+	}
+	if !got[0].Links("Errors", map[string]string{"service": "checkout", "pod": "a"}) || got[0].Links("Errors", map[string]string{"service": "cart"}) ||
+		!got[0].Links("Slow [severity=page]", map[string]string{"code": "500"}) || got[0].Links("Slower", map[string]string{"code": "500"}) ||
+		!got[0].Links("Errors", map[string]string{"pod": "a"}) {
+		t.Error("Links: want the rule by its name, as written or told apart, its labels agreeing where both have them")
+	}
+	for body, want := range map[string]string{
+		"    alerts: [{rule: X, label: {a: b}}]\n":       `not "label"`,
+		"    alerts: [{labels: {a: b}}]\n":               "needs a rule",
+		"    alerts: [{rule: X, labels: {a: {b: c}}}]\n": "want a value",
+		"    alerts: [{rule: X, labels: {a: }}]\n":       "want a value",
+		"    alerts: [{rule: X, labels: {a: ''}}]\n":     "neither empty",
+		"    alerts: [X]\n":                              "an alert is",
+	} {
+		p := filepath.Join(dir, "bad.yaml")
+		os.WriteFile(p, []byte("incidents:\n  - id: INC-1\n    start: 2026-10-30T17:00:00Z\n"+body), 0o600)
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err %v, want %q", body, err, want)
+		}
+	}
+	many := make([]Alert, MaxAlerts+1)
+	for i := range many {
+		many[i] = Alert{Rule: fmt.Sprint("R", i)}
+	}
+	for _, bad := range [][]Alert{
+		{{Rule: strings.Repeat("r", MaxAlertRule+1)}},
+		{{Rule: "R", Labels: map[string]string{"": "v"}}},
+		{{Rule: "R", Labels: map[string]string{"x": strings.Repeat("v", 257)}}},
+		many,
+	} {
+		if CheckAlerts(bad) == nil {
+			t.Errorf("%.80v: taken", bad)
+		}
+	}
+	if got := SortAlerts([]Alert{{Rule: "B", Labels: map[string]string{}}, {Rule: "A"}, {Rule: "B"}}); !reflect.DeepEqual(got, []Alert{{Rule: "A"}, {Rule: "B"}}) {
+		t.Errorf("sorted %+v", got)
+	}
+	// As JSON, as the API takes them: the same keys, the same refusals.
+	var a Alert
+	if err := json.Unmarshal([]byte(`{"rule": "Disk", "labels": {"service": "checkout"}}`), &a); err != nil || a.Rule != "Disk" || a.Labels["service"] != "checkout" {
+		t.Errorf("%+v %v", a, err)
+	}
+	for _, bad := range []string{`{"rule": "Disk", "label": {"service": "checkout"}}`, `{"rule": "Disk", "Labels": {"service": "checkout"}}`,
+		`{"rule": "Disk", "labels": {"code": 500}}`, `{"rule": 7}`, `["Disk"]`} {
+		if err := json.Unmarshal([]byte(bad), &a); err == nil {
+			t.Errorf("%s: taken as %+v", bad, a)
+		}
+	}
+	// The same alert many times is one, within the bounds.
+	same := make([]Alert, MaxAlerts+5)
+	for i := range same {
+		same[i] = Alert{Rule: "R"}
+	}
+	if err := CheckAlerts(SortAlerts(same)); err != nil {
+		t.Errorf("one alert %d times: %v", len(same), err)
 	}
 }

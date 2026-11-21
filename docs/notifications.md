@@ -14,7 +14,7 @@ nothing else, each source on a path of its own:
 | Where the rules run | Send to | Proved by |
 |---|---|---|
 | Prometheus, Thanos, Mimir, VictoriaMetrics, with an Alertmanager (on any cloud, OKE among them); Google Cloud Managed Service for Prometheus's managed Alertmanager | `/v1/alertmanager`, a `webhook_config` | the token in `--notify-token-file`, as `http_config.authorization`'s bearer token |
-| An Alertmanager of 0.33.0 or later, its event recorder (`--enable-feature=event-recorder`): every delivery, PagerDuty's, Slack's and email's too, to `RECEIVER/INTEGRATION`; alerts a silence or an inhibition muted aren't counted as delivered | `/v1/alertmanager/events`, an `event_recorder` `webhook_outputs` entry (`batch: true` is fine). Drop a webhook receiver that sends to Lapilli, or name it in `?skip=NAME`: the recorder tells of its deliveries too, and each would count twice | as above |
+| An Alertmanager of 0.33.0 or later, its event recorder (`--enable-feature=event-recorder`): every delivery, PagerDuty's, Slack's and email's too, to `RECEIVER/INTEGRATION`; alerts a silence or an inhibition muted aren't counted as delivered, and are kept as mutes ([below](#why-a-firing-paged-no-one)) | `/v1/alertmanager/events`, an `event_recorder` `webhook_outputs` entry (`batch: true` is fine). Drop a webhook receiver that sends to Lapilli, or name it in `?skip=NAME`: the recorder tells of its deliveries too, and each would count twice | as above |
 | Grafana Alerting | `/v1/grafana`, a webhook contact point | the token as its Authorization header, or its HMAC signature with the secret in `--notify-grafana-secret-file` (timestamp header `X-Grafana-Alerting-Timestamp`, five minutes at most) |
 | Amazon Managed Service for Prometheus | `/v1/sns`, an HTTPS subscription to the SNS topic its alert manager sends to, with AWS's JSON template for SNS | SNS's signature, from a topic `--notify-sns` names; the subscription is confirmed by fetching its `SubscribeURL`, from an SNS host only |
 | Azure Monitor managed service for Prometheus | `/v1/azure`, an action group's webhook with the common alert schema | the token as the password in the URL: `https://lapilli:TOKEN@host/v1/azure` |
@@ -87,7 +87,7 @@ another replica. Notifications don't change the stones.
 Each rule's page then says how many notifications it sent over twelve weeks,
 how many were repeats, how many came while people slept, how many were for
 firings that caught nothing, and to which receivers; each firing, how many
-told of it, or that it paged no one. The dashboard's "Woken for nothing"
+told of it, or that it paged no one, or why ([below](#why-a-firing-paged-no-one)). The dashboard's "Woken for nothing"
 counts notifications instead of firings, and says so. With no incident
 written down to judge them by, it shows no number, as precision doesn't,
 and says how many came while people slept; the report's and the digest's
@@ -152,6 +152,41 @@ Lapilli signs what it posts to its own webhook in the same shape, an
 HMAC-SHA256 of a timestamp and the body, with `--notify-webhook-secret-file`,
 for the receiver to check: [Signed posts to the
 webhook](serve.md#signed-posts-to-the-webhook).
+
+## Why a firing paged no one
+
+Alertmanager's event recorder also says when a silence or an inhibition
+kept an alert from a notification: `silenceMutedAlert`,
+`inhibitionMutedAlert`, and, in 0.35, a notification's `mutedAlerts`.
+`/v1/alertmanager/events` keeps them as mutes: when, the alert's name and
+labels (bounded as a notification's alert's), whether a silence, an
+inhibition, or either (a notification doesn't say which), and the
+silence's ID or the inhibiting alert's fingerprint. Nothing else of a
+silence is kept: not its comment, nor who made it. The recorder tells of a
+mute every few seconds, again after a failure, and from each replica;
+each is kept once an hour, from the first to the last, and kept for
+`--keep`.
+
+A firing no notification told of then says what muted it, on the rule's
+page and the day's firings: "muted by a silence" with its ID, "inhibited
+by another alert", or "muted by a silence or an inhibition"; MCP's `rule`
+gives each latest firing `muted`. A mute is tied to a firing as a
+notification's alert is: its rule's, with all of the firing's labels,
+told of from two evaluations before the firing started to two after it
+ended, as read in the hours about its start and its end. A firing that
+paged no one with nothing muting it was routed nowhere, or never reached
+the alert manager.
+
+Mutes come at the events' rate (200 a second, bursts of 1,000), not the
+notifications', so a storm of them can't keep a delivery out; 1,000 rows
+of a rule's hour and 200,000 rows a day (UTC) at most, past which they are
+passed over (until the next hour, or day) and a notification with them is
+still kept. An event that can't
+be read as the recorder's (a silence with no ID, a mute of an alert with no
+`alertname`) is refused, that event alone, and counted in
+`lapilli_serve_notifications_refused_total`. Someone with the token can
+post mutes that never were: they claim only that a firing was muted, and
+change no stone or count ([design/mutes.md](design/mutes.md)).
 
 Annotations aren't kept. Who was on call, and whether they acknowledged, is
 for PagerDuty, incident.io or Grafana IRM. Each path is tested against its

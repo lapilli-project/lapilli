@@ -42,7 +42,7 @@ exit 0
     {
       "id": "ledger.sqlite",
       "state": "ok",
-      "what": "schema 027, this release's",
+      "what": "schema 029, this release's",
       "why": "<free> free"
     },
     {

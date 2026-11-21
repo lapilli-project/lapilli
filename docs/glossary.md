@@ -124,6 +124,13 @@ and by week, the versions of the rules, and what people write (incidents,
 tasks, notes, comments, proposals). One SQLite file in `--ledger DIR`, or
 a Postgres database. See [Keep judging](serve.md).
 
+### Linked
+
+A catch by one of the alerts the incident's tool linked to it (the
+incident's `alerts`): it catches in the same span, whatever `--match` says.
+With `--linked-only`, an incident that lists alerts is caught by those
+alone. See [How it judges](how-it-judges.md).
+
 ### Marked window
 
 A sale, a launch, a campaign: a window of a kind a team chooses. A firing
@@ -137,6 +144,12 @@ An incident no firing caught (`✗ nothing fired`). One whose alert came
 only once it was over is missed too, and the report names the rule
 (`✗ nothing in time; after its end`). See
 [The numbers](numbers.md#incidents-missed-and-caught-only-by-noisy-rules).
+
+### Mute
+
+An alert a silence or an inhibition kept from a notification, as
+Alertmanager's event recorder tells of it: why a firing paged no one. See
+[Why a firing paged no one](notifications.md#why-a-firing-paged-no-one).
 
 ### Near miss
 

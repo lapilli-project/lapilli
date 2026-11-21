@@ -1356,6 +1356,13 @@ func (s *Server) postIncident(w http.ResponseWriter, r *http.Request) {
 	if kept, same := s.sameTitle(r, in.ID, in.Title); same {
 		in.Title = kept
 	}
+	// The form has no alerts: those given through the API stay
+	// (docs/design/links.md).
+	if in.ID != "" {
+		if old, err := s.l.IncidentByID(r.Context(), in.ID); err == nil {
+			in.Alerts = old.Alerts
+		}
+	}
 	o, err := s.options(r.Context())
 	if err != nil {
 		s.oops(w, r, err)
@@ -1838,17 +1845,20 @@ func (s *Server) reportCSV(w http.ResponseWriter, r *http.Request, rep *verdict.
 
 // apiIncident is an incident as the API gives and takes it.
 type apiIncident struct {
-	ID       string          `json:"id"`
-	Title    string          `json:"title,omitempty"`
-	Start    time.Time       `json:"start"`
-	End      time.Time       `json:"end,omitzero"`
-	Labels   incident.Labels `json:"labels,omitempty"`
-	Origin   string          `json:"origin,omitempty"`
-	State    string          `json:"state,omitempty"`
-	Counts   bool            `json:"counts"`
-	Updated  time.Time       `json:"updated,omitzero"`
-	By       string          `json:"by,omitempty"`
-	CaughtBy []verdict.Catch `json:"caught_by"`
+	ID     string          `json:"id"`
+	Title  string          `json:"title,omitempty"`
+	Start  time.Time       `json:"start"`
+	End    time.Time       `json:"end,omitzero"`
+	Labels incident.Labels `json:"labels,omitempty"`
+	// Alerts are those the incident's tool linked to it
+	// (docs/design/links.md).
+	Alerts   []incident.Alert `json:"alerts,omitempty"`
+	Origin   string           `json:"origin,omitempty"`
+	State    string           `json:"state,omitempty"`
+	Counts   bool             `json:"counts"`
+	Updated  time.Time        `json:"updated,omitzero"`
+	By       string           `json:"by,omitempty"`
+	CaughtBy []verdict.Catch  `json:"caught_by"`
 }
 
 func (s *Server) apiIncidents(w http.ResponseWriter, r *http.Request) {
@@ -1864,7 +1874,7 @@ func (s *Server) apiIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []apiIncident{}
 	for _, in := range incs {
-		out = append(out, apiIncident{in.ID, in.Title, in.Start, in.End, in.Labels, in.Origin, in.State, in.Counts, in.Updated, in.By, in.CaughtBy})
+		out = append(out, apiIncident{in.ID, in.Title, in.Start, in.End, in.Labels, in.Alerts, in.Origin, in.State, in.Counts, in.Updated, in.By, in.CaughtBy})
 	}
 	writeJSON(w, out)
 }
@@ -1883,7 +1893,7 @@ func (s *Server) apiPutIncident(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	id, err := s.l.Put(r.Context(), incident.Incident{ID: in.ID, Title: in.Title, Start: in.Start, End: in.End, Labels: in.Labels}, s.user(r), o)
+	id, err := s.l.Put(r.Context(), incident.Incident{ID: in.ID, Title: in.Title, Start: in.Start, End: in.End, Labels: in.Labels, Alerts: in.Alerts}, s.user(r), o)
 	if err != nil {
 		s.oops(w, r, wrapBad(err))
 		return
@@ -1901,7 +1911,7 @@ func (s *Server) apiPutIncident(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "/api/v1/incidents/"+url.PathEscape(id))
 		w.WriteHeader(http.StatusCreated)
 	}
-	writeJSON(w, apiIncident{got.ID, got.Title, got.Start, got.End, got.Labels, got.Origin, got.State, got.Counts, got.Updated, got.By, got.CaughtBy})
+	writeJSON(w, apiIncident{got.ID, got.Title, got.Start, got.End, got.Labels, got.Alerts, got.Origin, got.State, got.Counts, got.Updated, got.By, got.CaughtBy})
 }
 
 func (s *Server) apiDeleteIncident(w http.ResponseWriter, r *http.Request) {

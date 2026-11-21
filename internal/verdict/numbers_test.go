@@ -20,14 +20,15 @@ import (
 var stableFields = map[string][]string{
 	"":                          {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings"},
 	"noisy_at":                  {"firings", "precision"},
-	"settings":                  {"lead_ns", "match", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by_week", "impact_signals", "impact_rules", "zone"},
+	"settings":                  {"lead_ns", "match", "linked_only", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by_week", "impact_signals", "impact_rules", "zone"},
 	"settings.impact_signals[]": {"name", "for_ns", "match", "record", "start", "lead_ns"},
 	"settings.impact_rules[]":   {"rules", "labels", "signals", "match", "lead_ns", "require", "judged"},
 	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged"},
 	"rules[].marked.*":          {"firings", "caught", "refired", "unjudged"},
 	"rules[].episodes":          {"total", "white", "unjudged", "noisy"},
-	"incidents[]":               {"id", "title", "start", "end", "labels", "candidate", "caught_by", "signal", "real"},
-	"incidents[].caught_by[]":   {"rule", "delay_ns", "noisy"},
+	"incidents[]":               {"id", "title", "start", "end", "labels", "alerts", "candidate", "caught_by", "signal", "real"},
+	"incidents[].alerts[]":      {"rule", "labels"},
+	"incidents[].caught_by[]":   {"rule", "delay_ns", "noisy", "linked"},
 	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals", "marked", "episode", "day", "unrelated", "action", "not_judged"},
 }
 
@@ -38,7 +39,7 @@ func fullReport() *Report {
 	lead, no := 5*time.Minute, false
 	return &Report{
 		From: t0, To: t0.Add(7 * 24 * time.Hour), NoisyAt: NoisyAt{Firings: 10, Precision: 0.2}, NoRecord: true, Unjudged: 1, SomeRules: true,
-		Settings: &Settings{Lead: time.Minute, Match: []string{"service"}, Refire: time.Hour, UnknownLength: time.Hour, RecordLookback: RecordLookback,
+		Settings: &Settings{Lead: time.Minute, Match: []string{"service"}, LinkedOnly: true, Refire: time.Hour, UnknownLength: time.Hour, RecordLookback: RecordLookback,
 			ImpactFrom: t0, ImpactNoData: true, ByWeek: true, // every field, though no data leaves impact_from out
 			ImpactSignals: []Signal{{Name: "probe", For: 2 * time.Minute, Match: []string{"service"}, Record: true, Start: t0, Lead: &lead}},
 			ImpactRules: []RuleEntry{{Rules: "^BackendMissing$", Labels: incident.Labels{"team": {"platform"}}, Signals: []string{"probe"}, Match: []string{"backend"},
@@ -49,7 +50,8 @@ func fullReport() *Report {
 			Marked:   map[string]MarkedCount{"sale": {Firings: 1, Caught: 1, Refired: 1, Unjudged: 1}},
 			Episodes: EpisodeCount{Total: 2, White: 1, Unjudged: 1, Noisy: true}, Unrelated: 1, ActionYes: 1, ActionNo: 1, NotJudged: 1}},
 		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Title: "Errors", Start: t0, End: t0.Add(time.Hour),
-			Labels: incident.Labels{"service": {"api"}}, Candidate: true, Signal: "probe"}, Real: true, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true}}}},
+			Labels: incident.Labels{"service": {"api"}}, Alerts: []incident.Alert{{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}}},
+			Candidate: true, Signal: "probe"}, Real: true, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true, Linked: true}}}},
 		Firings: []Judged{{Firing: firing.Firing{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}, Start: t0, End: t0.Add(time.Hour)},
 			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true, Signals: []string{"probe"}, Marked: []string{"sale"},
 			Episode: 1, Day: "2026-11-02", Unrelated: []string{"INC-2"}, Action: ActionYes, NotJudged: true}},

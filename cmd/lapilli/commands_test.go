@@ -47,6 +47,7 @@ says which version you have, and its own ` + "`-h`" + ` is the one to go by.
 		{"lapilli serve", "[Keep judging](serve.md)", serveUsage},
 		{"lapilli preflight", "[Before it is deployed](serve.md#before-it-is-deployed)", preflightUsage},
 		{"lapilli ledger", "[The ledger in Postgres](serve.md#the-ledger-in-postgres)", ledgerUsage},
+		{"lapilli impact", "[Incidents nobody wrote down](impact.md#which-of-them-your-history-has)", impactUsage},
 	} {
 		b.WriteString("\n## `" + c.name + "`\n\n")
 		if c.about != "" {

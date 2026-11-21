@@ -3,13 +3,17 @@
 package incident
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"os"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -25,6 +29,10 @@ type Incident struct {
 	End   time.Time `yaml:"end" json:"end,omitzero"` // zero: not written down
 	// Labels say where it went wrong, such as the services it hit.
 	Labels Labels `yaml:"labels" json:"labels,omitempty"`
+	// Alerts are those the incident tool linked to it, when it says
+	// (docs/design/links.md): a firing of one catches it whatever its
+	// labels say on the labels matched on. Sorted, each once (SortAlerts).
+	Alerts []Alert `yaml:"alerts" json:"alerts,omitempty"`
 	// Candidate is a window found in the impact signal, not one a person
 	// wrote down.
 	Candidate bool `yaml:"-" json:"candidate"`
@@ -43,6 +51,173 @@ type Incident struct {
 	// Real says, in lapilli serve, that a person's "This was real" wrote it
 	// from a firing (docs/design/judging.md, item 3).
 	Real bool `yaml:"-" json:"-"`
+}
+
+// Alert is one of the alerts an incident tool linked to an incident: the
+// rule it is of, by the name its alerts carry (alertname), and the labels
+// it had, all or some, which hold a firing to them where it has them too
+// (In).
+type Alert struct {
+	Rule   string            `yaml:"rule" json:"rule"`
+	Labels map[string]string `yaml:"labels" json:"labels,omitempty"`
+}
+
+// The bounds of an incident's alerts, as an incident's labels have theirs:
+// what a tool or a token can make every firing be held to.
+const (
+	MaxAlerts      = 100      // alerts an incident lists
+	MaxAlertRule   = 512      // bytes of a rule's name
+	MaxAlertLabels = 32       // labels an alert has
+	MaxAlertBytes  = 16 << 10 // the alerts in all, as JSON
+)
+
+// UnmarshalYAML takes an alert as {rule: NAME, labels: {k: v}}, refusing
+// a key it doesn't know (a misspelt labels would link every firing of the
+// rule) and a label whose value isn't a value.
+func (a *Alert) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.MappingNode {
+		return errors.New("an alert is {rule: NAME, labels: {LABEL: VALUE}}")
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		switch k := n.Content[i].Value; k {
+		case "rule", "labels":
+		default:
+			return fmt.Errorf("an alert has a rule and labels, not %q", k)
+		}
+	}
+	var raw struct {
+		Rule   string               `yaml:"rule"`
+		Labels map[string]yaml.Node `yaml:"labels"`
+	}
+	if err := n.Decode(&raw); err != nil {
+		return err
+	}
+	a.Rule, a.Labels = raw.Rule, nil
+	for k, v := range raw.Labels {
+		if v.Kind != yaml.ScalarNode || v.Tag == "!!null" {
+			return fmt.Errorf("alert %s: label %s: want a value", raw.Rule, k)
+		}
+		if a.Labels == nil {
+			a.Labels = map[string]string{}
+		}
+		a.Labels[k] = v.Value
+	}
+	return nil
+}
+
+// UnmarshalJSON takes an alert as {"rule": NAME, "labels": {"k": "v"}},
+// refusing, as UnmarshalYAML does, a key it doesn't know (a misspelt
+// "label" would link every firing of the rule) and a label whose value
+// isn't text.
+func (a *Alert) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return errors.New(`an alert is {"rule": NAME, "labels": {LABEL: VALUE}}`)
+	}
+	for k := range raw {
+		if k != "rule" && k != "labels" {
+			return fmt.Errorf("an alert has a rule and labels, not %q", k)
+		}
+	}
+	var x struct {
+		Rule   string            `json:"rule"`
+		Labels map[string]string `json:"labels"`
+	}
+	if err := json.Unmarshal(b, &x); err != nil {
+		return fmt.Errorf("an alert's rule is text, and its labels text: %w", err)
+	}
+	a.Rule, a.Labels = x.Rule, x.Labels
+	return nil
+}
+
+// Names reports whether the alert is of rule: rule is its name, or its
+// name told apart from others of that name (HighErrorRate
+// [severity=critical]), as the tool knows only the name its alerts carry.
+func (a Alert) Names(rule string) bool {
+	return rule == a.Rule || strings.HasPrefix(rule, a.Rule+" [") && strings.HasSuffix(rule, "]")
+}
+
+// In reports whether labels agree with the alert's, as --match has a label
+// one side lacks: each the firing carries has the alert's value; one it
+// doesn't carry (an external label Prometheus added as it sent the alert,
+// one the receiver added) is passed over.
+func (a Alert) In(labels map[string]string) bool {
+	for k, v := range a.Labels {
+		if w, ok := labels[k]; ok && w != v {
+			return false
+		}
+	}
+	return true
+}
+
+// Links reports whether a firing of rule with labels is one of the alerts
+// the incident lists (docs/design/links.md).
+func (in Incident) Links(rule string, labels map[string]string) bool {
+	for _, a := range in.Alerts {
+		if a.Names(rule) && a.In(labels) {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckAlerts says what is wrong with an incident's alerts, nil for
+// nothing: a rule's name and each label's are there, and the bounds kept.
+func CheckAlerts(as []Alert) error {
+	if len(as) > MaxAlerts {
+		return fmt.Errorf("an incident lists %d alerts at most", MaxAlerts)
+	}
+	for _, a := range as {
+		switch {
+		case a.Rule == "":
+			return errors.New("an alert needs a rule: the name its alerts carry")
+		case len(a.Rule) > MaxAlertRule:
+			return fmt.Errorf("an alert's rule is %d bytes at most", MaxAlertRule)
+		case len(a.Labels) > MaxAlertLabels:
+			return fmt.Errorf("an alert has %d labels at most", MaxAlertLabels)
+		}
+		for k, v := range a.Labels {
+			if k == "" || v == "" || len(k) > 128 || len(v) > 256 {
+				return errors.New("an alert's label is a name of up to 128 bytes and a value of up to 256, neither empty")
+			}
+		}
+	}
+	// As the ledger writes them, < > & as they are.
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if enc.Encode(as); b.Len()-1 > MaxAlertBytes {
+		return fmt.Errorf("an incident's alerts are %d KB at most in all, as JSON", MaxAlertBytes>>10)
+	}
+	return nil
+}
+
+// SortAlerts is as, sorted by rule and labels, each once, nil for none: an
+// incident copied again from its tool, its alerts in another order, is the
+// same incident.
+func SortAlerts(as []Alert) []Alert {
+	if len(as) == 0 {
+		return nil
+	}
+	type keyed struct {
+		k string
+		a Alert
+	}
+	ks := make([]keyed, 0, len(as))
+	for _, a := range as {
+		if len(a.Labels) == 0 {
+			a.Labels = nil
+		}
+		b, _ := json.Marshal(a.Labels) // keys sorted
+		ks = append(ks, keyed{a.Rule + "\x00" + string(b), a})
+	}
+	slices.SortFunc(ks, func(x, y keyed) int { return strings.Compare(x.k, y.k) })
+	ks = slices.CompactFunc(ks, func(x, y keyed) bool { return x.k == y.k })
+	out := make([]Alert, len(ks))
+	for i, k := range ks {
+		out[i] = k.a
+	}
+	return out
 }
 
 // Span is one series' window of impact, by its labels.
@@ -100,6 +275,7 @@ const MaxFile = 64 << 20
 //	    start: 2026-10-30T17:00:00+09:00
 //	    end: 2026-10-30T17:40:00+09:00
 //	    labels: {service: [checkout, payments]}
+//	    alerts: [{rule: CheckoutErrors, labels: {service: checkout}}]
 func Load(path string) ([]Incident, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -140,6 +316,11 @@ func Load(path string) ([]Incident, error) {
 			return nil, fmt.Errorf("%s: incident %s has no start", path, in.ID)
 		case !in.End.IsZero() && in.End.Before(in.Start):
 			return nil, fmt.Errorf("%s: incident %s ends before it starts", path, in.ID)
+		}
+		// Each once before the bounds: the same alert twice is one.
+		doc.Incidents[i].Alerts = SortAlerts(in.Alerts)
+		if err := CheckAlerts(doc.Incidents[i].Alerts); err != nil {
+			return nil, fmt.Errorf("%s: incident %s: %w", path, in.ID, err)
 		}
 		seen[in.ID] = true
 	}

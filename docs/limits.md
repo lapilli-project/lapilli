@@ -40,6 +40,13 @@
   are marked "replayed in part" until `--late` covers them.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
+- A firing catches an incident by time and labels, or by the alerts the
+  incident's tool linked to it, where a recipe copied them: PagerDuty's,
+  incident.io's and Rootly's, and only those alerts that carry their
+  `alertname` and labels. A linked alert's label the replayed firing
+  doesn't carry is passed over, so one that told the firings of a rule
+  apart only by it (two Prometheus replicas' external labels) links them
+  both.
 - `lapilli serve` runs as one replica on a ledger file, or as several on
   one Postgres database, one of them leading (docs/design/replicas.md).
   Who is who comes
@@ -59,13 +66,21 @@
   silenced, inhibited and routed nowhere look the same from the receiving
   end. Notifications to PagerDuty, Slack and the like are seen only where the
   alert manager also sends them to Lapilli, or, from Alertmanager 0.33.0 on,
-  its event recorder tells of them; the recorder's mutes, which say why a
-  firing paged no one, aren't kept yet.
+  its event recorder tells of them. The recorder's mutes say when a silence
+  or an inhibition kept a firing from a notification, and are kept; a
+  firing routed nowhere still can't say so, and 0.33 and 0.34 name the
+  alerts a notification says were muted by a hash alone, so only their own
+  mute events say which.
 - Alarms kept in a cloud's own monitoring are replayed only where they are
   written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from
   their history, with `--firings` or copied into `lapilli serve`, and have
   no change reviews, longer `for`s or near misses.
+- Datadog's monitors and New Relic's alert conditions aren't read as rules
+  at all, in whatever language they are written: they are judged from their
+  history only, as a cloud's alarms that aren't PromQL are, written by
+  `recipes/firings/datadog.sh` and `newrelic.sh`. Both are checked against
+  the answers each tool's documentation shows, not against real accounts.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired: their replay is checked against their history only
   where it is copied in (or given with `--check-firings`), and CloudWatch's

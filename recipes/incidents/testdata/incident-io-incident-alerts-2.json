@@ -1,0 +1,7 @@
+{"incident_alerts": [
+  {"alert": {"alert_group_ids": [], "alert_source_id": "01GW2G3V0S59R238FAHPDS1R66", "created_at": "2026-10-28T03:05:00Z",
+     "deduplication_key": "4293868631", "id": "01GW2G3V0S59R238FAHPDS1R63", "status": "resolved", "title": "CheckoutLatency",
+     "updated_at": "2026-10-28T03:40:00Z"},
+   "alert_route_id": "01GW2G3V0S59R238FAHPDS1R67", "id": "01GW2G3V0S59R238FAHPDS1A63",
+   "incident": {"id": "01FCNDV6P870EA6S7TK1DSYD5H", "name": "Checkout errors", "reference": "INC-41", "status_category": "closed", "visibility": "public"}}
+], "pagination_meta": {"page_size": 50}}

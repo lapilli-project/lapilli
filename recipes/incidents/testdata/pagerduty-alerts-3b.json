@@ -1,0 +1,11 @@
+{"alerts": [
+  {"id": "PXPGF52", "type": "alert", "summary": "[RESOLVED] SearchTimeouts (search shop)", "created_at": "2026-10-30T09:20:00Z",
+   "status": "resolved", "alert_key": "f0f7cf21b1da41b4b0221008339ff361",
+   "service": {"id": "P2", "type": "service_reference", "summary": "search"},
+   "body": {"type": "alert_body", "contexts": [],
+     "details": {"num_firing": 0, "num_resolved": 1, "firing": [],
+       "resolved": [{"status": "resolved", "labels": {"alertname": "SearchTimeouts", "service": "search", "namespace": "shop", "pod": "search-1"},
+         "annotations": {}, "startsAt": "2026-10-30T09:15:30Z", "endsAt": "2026-10-30T09:19:30Z", "generatorURL": "", "fingerprint": "a1"}]}},
+   "incident": {"id": "Q0AAAAAAAAAAA3", "type": "incident_reference"}, "suppressed": false, "severity": "critical",
+   "integration": {"id": "PQ12345", "type": "events_api_v2_inbound_integration_reference", "summary": "Alertmanager"}}
+], "limit": 100, "offset": 100, "more": false, "total": null}

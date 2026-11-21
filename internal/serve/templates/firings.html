@@ -85,4 +85,9 @@ holds to the firing's own: a run gives its firings again, and an id to
 another. */}}
 {{define "firingref"}}<input type="hidden" name="series" value="{{.Series}}"><input type="hidden" name="start" value="{{.Start.Unix}}">{{end}}
 
-{{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}
+{{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Muted}}{{template "muted" index .Muted 0}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}
+
+{{/* What muted a firing no notification told of: a silence, by its ID;
+another alert, by an inhibition; or one of the two, as a notification of
+its group said (docs/design/mutes.md). */}}
+{{define "muted"}}<span class="quiet">{{if eq .Kind "silence"}}{{t "muted by a silence"}} <code>{{.Ref}}</code>{{else if eq .Kind "inhibition"}}{{t "inhibited by another alert"}}{{else}}{{t "muted by a silence or an inhibition"}}{{end}}</span>{{end}}

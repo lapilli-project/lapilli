@@ -320,11 +320,11 @@ func TestEventRecorderReads(t *testing.T) {
 }
 
 // Events that carry no notification don't use up the rate notifications
-// are taken at: a burst of them, and a delivery after it is still kept.
+// are taken at: a burst of mutes, and a delivery after it is still kept.
 func TestEventRecorderRate(t *testing.T) {
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
-	other := []byte(`{"@timestamp":"2026-11-03T11:59:00Z","instance":"am-0","data":{"silenceMutedAlert":{}}}`)
+	other := []byte(`{"@timestamp":"2026-11-03T11:59:00Z","instance":"am-0","data":{"silenceMutedAlert":{"silence":{"id":"s-1"},"mutedAlert":{"labels":{"alertname":"Errors"}}}}}`)
 	for i := range 300 {
 		if code, body, _ := send(t, h, "/v1/alertmanager/events", other, bearer(notifyToken)); code != http.StatusOK {
 			t.Fatalf("event %d: %d %s", i+1, code, body)

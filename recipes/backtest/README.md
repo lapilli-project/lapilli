@@ -120,6 +120,31 @@ And, as wanted:
   `FAIL_ON_EXPECTATIONS=true`, as it can't be judged. Without `PROMTOOL`,
   each scenario is not known, never met. Refused with `LAPILLI_SERVE`:
   serve runs none a pull request sends.
+- `FAIL_MISSED=true` (or `1`), with `INCIDENTS`, `IMPACT` or
+  `--incidents`: the job fails when the change leaves an incident a rule
+  caught before it caught by no rule after it, once the comment says which
+  (`lapilli verdict --fail-missed`, which the recipe gives it). A rule left
+  alone that still catches it keeps it caught: lapilli replays those too,
+  then. Like `FAIL_ON_EXPECTATIONS`, it isn't a failure of the backtest,
+  and a run that can't judge it fails the job: a rule that differs not
+  replayed, an incident lapilli can't tell caught or missed as a rule
+  after the change couldn't be replayed (`missed_not_known`), no report, a
+  lapilli without `--fail-missed`. Either gate
+  failing fails the job. Refused with `LAPILLI_SERVE`, whose report
+  doesn't say yet.
+- `STATUS=true` (or `1`): a commit status on the pull request's head
+  commit too, `lapilli/backtest` (`lapilli/backtest/KEY` with a `KEY` of
+  its own), success or failure as the job ends, with why, linking to the
+  job; set after the comment, whatever became of it. Each script takes
+  the head commit from its CI (GitHub's and Gitea's event, GitLab's
+  `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` or `CI_COMMIT_SHA`,
+  `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,
+  or `HEAD` when it isn't a merge, and sets it only when that is the
+  commit read or a parent of it. `STATUS_URL` links elsewhere, https. A
+  status the host refuses is said in the job's log, and fails the job
+  only with `FAIL_ON_ERROR=true`. The token needs more for it
+  ([Stopping a merge](../../docs/pr-backtests.md#stopping-a-merge) has
+  each host's API and scopes).
 
 They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
 
@@ -154,6 +179,8 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    which no host shows. It edits that one, or posts one. When nothing that
    decides when a rule fires changed and there is no comment yet, it posts
    none; when there is one, it says that nothing changes now.
+6. With `STATUS`, sets the commit status on the pull request's head
+   commit, success or failure as the job is about to end, and ends it.
 
 ## In each CI
 
@@ -198,7 +225,8 @@ the release the action is at), `sha256`, `paths` or `render` and
 `prometheus-url`, `auth`, `gcp-project`, `aws-region`, `since` (default
 `7d`), `args` (more flags, split at spaces and never expanded by a shell),
 `target`, `key`, `fail-on-error`, `expect`, `fail-on-expectations`,
-`expect-required`, `promtool`, `token` (default the job's own) and `login` (the
+`expect-required`, `promtool`, `fail-missed`, `status` (which needs the
+job's `statuses: write`), `token` (default the job's own) and `login` (the
 account a GitHub App's token comments as, `NAME[bot]`); and, to backtest
 through `lapilli serve`, `serve-url`, `audience` and `serve-wait`
 ([below](#through-lapilli-serve)). For a cloud's
@@ -434,8 +462,9 @@ to serve, and posts the report serve gives back, which is the one
 same summary line. Serve replays the rules that differ with its own access
 to the history, at its share of the rate, and judges them by its record:
 the job needs no credential for the metrics, and no cloud sign-in. The
-comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS` and `EXPECT_REQUIRED` are
-as they are without it. Serve runs no scenario `EXPECT` names: each is
+comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`, `EXPECT_REQUIRED` and
+`STATUS` are as they are without it; `FAIL_MISSED` is refused, as serve's
+report doesn't say yet which incidents a change leaves caught by no rule. Serve runs no scenario `EXPECT` names: each is
 said as not run through lapilli serve, and `PROMTOOL` is refused; run
 `promtool test rules` in a step of its own to gate on them. The design is
 [docs/design/backtests.md](../../docs/design/backtests.md).
@@ -908,4 +937,9 @@ Give the token what commenting needs, and no more: GitHub Actions'
 GitLab, a project access token with the Reporter role and the `api` scope;
 Bitbucket, a repository access token with pull requests (write); Azure
 DevOps, the build service's "Contribute to pull requests"; Gitea and
-Forgejo, `write:issue`, `read:repository` and `read:user`.
+Forgejo, `write:issue`, `read:repository` and `read:user`. With `STATUS`,
+also what a status needs: GitHub's `statuses: write` (commit statuses,
+write); GitLab's Developer role; nothing more on Bitbucket; Gitea's and
+Forgejo's `write:repository`, the account able to write to the
+repository; Azure DevOps' Code (status)
+([Stopping a merge](../../docs/pr-backtests.md#stopping-a-merge)).

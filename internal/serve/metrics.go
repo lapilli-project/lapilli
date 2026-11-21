@@ -358,7 +358,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		refused := maps.Clone(s.status.refused)
 		s.status.Unlock()
 		var b bytes.Buffer
-		b.WriteString("# HELP lapilli_serve_notifications_refused_total Notifications the notifications port was sent and couldn't keep, by source, since lapilli serve started: the rest of a request is kept, and why is logged.\n# TYPE lapilli_serve_notifications_refused_total counter\n")
+		b.WriteString("# HELP lapilli_serve_notifications_refused_total Notifications, and the event recorder's mutes, the notifications port was sent and couldn't keep, by source, since lapilli serve started: the rest of a request is kept, and why is logged.\n# TYPE lapilli_serve_notifications_refused_total counter\n")
 		for _, src := range slices.Sorted(maps.Keys(s.port.rates)) {
 			fmt.Fprintf(&b, "lapilli_serve_notifications_refused_total{source=%q} %d\n", src, refused[src])
 		}

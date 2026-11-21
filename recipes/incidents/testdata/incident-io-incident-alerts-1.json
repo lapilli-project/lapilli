@@ -1,0 +1,12 @@
+{"incident_alerts": [
+  {"alert": {"alert_group_ids": [], "alert_source_id": "01GW2G3V0S59R238FAHPDS1R66", "created_at": "2026-10-28T03:01:00.801578Z",
+     "deduplication_key": "4293868629", "description": "Errors on checkout above 5% for 2 minutes", "id": "01GW2G3V0S59R238FAHPDS1R61",
+     "status": "resolved", "title": "CheckoutErrors", "updated_at": "2026-10-28T03:40:00Z"},
+   "alert_route_id": "01GW2G3V0S59R238FAHPDS1R67", "id": "01GW2G3V0S59R238FAHPDS1A61",
+   "incident": {"id": "01FCNDV6P870EA6S7TK1DSYD5H", "name": "Checkout errors", "reference": "INC-41", "status_category": "closed", "visibility": "public"}},
+  {"alert": {"alert_group_ids": [], "alert_source_id": "01GW2G3V0S59R238FAHPDS1R68", "created_at": "2026-10-28T03:02:00Z",
+     "deduplication_key": "4293868630", "id": "01GW2G3V0S59R238FAHPDS1R62", "status": "resolved", "title": "Checkout is slow (from email)",
+     "updated_at": "2026-10-28T03:40:00Z"},
+   "alert_route_id": "01GW2G3V0S59R238FAHPDS1R67", "id": "01GW2G3V0S59R238FAHPDS1A62",
+   "incident": {"id": "01FCNDV6P870EA6S7TK1DSYD5H", "name": "Checkout errors", "reference": "INC-41", "status_category": "closed", "visibility": "public"}}
+], "pagination_meta": {"after": "01GW2G3V0S59R238FAHPDS1A62", "page_size": 50}}

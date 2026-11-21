@@ -1496,13 +1496,15 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 				Limit          float64   `json:"limit"`
 				LastEvaluation time.Time `json:"lastEvaluation"`
 				Rules          []struct {
-					Type          string            `json:"type"`
-					Name          string            `json:"name"`
-					Query         string            `json:"query"`
-					Duration      float64           `json:"duration"`
-					KeepFiringFor float64           `json:"keepFiringFor"`
-					Labels        map[string]string `json:"labels"`
-					Annotations   map[string]string `json:"annotations"`
+					Type          string  `json:"type"`
+					Name          string  `json:"name"`
+					Query         string  `json:"query"`
+					Duration      float64 `json:"duration"`
+					KeepFiringFor float64 `json:"keepFiringFor"`
+					// vmalert's name for it (app/vmalert/rule/web.go).
+					KeepFiringForVM float64           `json:"keep_firing_for"`
+					Labels          map[string]string `json:"labels"`
+					Annotations     map[string]string `json:"annotations"`
 				} `json:"rules"`
 			} `json:"groups"`
 		} `json:"data"`
@@ -1562,7 +1564,7 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 				limit = int(g.Limit)
 			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
-				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Limit: limit, Phase: phase, Labels: l,
+				KeepFiringFor: secs(max(x.KeepFiringFor, x.KeepFiringForVM)), Interval: secs(g.Interval), Limit: limit, Phase: phase, Labels: l,
 				Says: annotated(a, TemplatePrometheus), Prometheus: true})
 		}
 	}

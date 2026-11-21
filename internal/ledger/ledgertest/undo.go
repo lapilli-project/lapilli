@@ -69,6 +69,19 @@ var Undo022Postgres = slices.Concat(undo022meta, []string{
 	"ALTER TABLE marked_weeks ADD PRIMARY KEY (week, rule_id, kind_id)",
 })
 
+// Undo029 takes back what schema 029 made, in SQLite and in Postgres
+// alike, for the tests of the migrations before it.
+var Undo029 = []string{
+	"DROP TABLE mutes",
+}
+
+// Undo028 takes back what schema 028 made, in SQLite and in Postgres
+// alike, for the tests of the migrations before it.
+var Undo028 = []string{
+	"ALTER TABLE catches DROP COLUMN linked",
+	"ALTER TABLE incidents DROP COLUMN alerts",
+}
+
 // Undo027 takes back what schema 027 made, in SQLite and in Postgres
 // alike, for the tests of the migrations before it.
 var Undo027 = []string{

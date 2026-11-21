@@ -179,25 +179,33 @@ func (n Notification) check() error {
 		return fmt.Errorf("%w: a source is lowercase letters, digits and dashes, 40 at most, such as cloudwatch-prod", ErrBadNotification)
 	}
 	for i, a := range n.Alerts {
-		k := i + 1
-		switch {
-		case a.Rule == "" || !a.Start.IsZero() && !sane(a.Start):
-			return fmt.Errorf("%w: alert %d needs a rule, and a start that is a time", ErrBadNotification, k)
-		case !plain(a.Rule) || utf8.RuneCountInString(a.Rule) > maxRuleName:
-			return fmt.Errorf("%w: alert %d: a rule's name is %d characters at most, with none that don't show", ErrBadNotification, k, maxRuleName)
-		case len(a.Labels) > maxAlertLabels:
-			return fmt.Errorf("%w: alert %d has more than %d labels", ErrBadNotification, k, maxAlertLabels)
+		if err := a.check(fmt.Sprintf("alert %d", i+1)); err != nil {
+			return fmt.Errorf("%w: %w", ErrBadNotification, err)
 		}
-		size := 0
-		for name, v := range a.Labels {
-			if name == "" || !plain(name) || !utf8.ValidString(v) {
-				return fmt.Errorf("%w: alert %d: a label needs a name that shows, and labels are UTF-8", ErrBadNotification, k)
-			}
-			size += len(name) + len(v) + 6
+	}
+	return nil
+}
+
+// check checks an alert's rule, start and labels, as a notification and a
+// mute carry them: what names it in what is said.
+func (a Alert) check(what string) error {
+	switch {
+	case a.Rule == "" || !a.Start.IsZero() && !sane(a.Start):
+		return fmt.Errorf("%s needs a rule, and a start that is a time", what)
+	case !plain(a.Rule) || utf8.RuneCountInString(a.Rule) > maxRuleName:
+		return fmt.Errorf("%s: a rule's name is %d characters at most, with none that don't show", what, maxRuleName)
+	case len(a.Labels) > maxAlertLabels:
+		return fmt.Errorf("%s has more than %d labels", what, maxAlertLabels)
+	}
+	size := 0
+	for name, v := range a.Labels {
+		if name == "" || !plain(name) || !utf8.ValidString(v) {
+			return fmt.Errorf("%s: a label needs a name that shows, and labels are UTF-8", what)
 		}
-		if size > maxLabelBytes {
-			return fmt.Errorf("%w: alert %d: its labels are 4 KB at most in all", ErrBadNotification, k)
-		}
+		size += len(name) + len(v) + 6
+	}
+	if size > maxLabelBytes {
+		return fmt.Errorf("%s: its labels are 4 KB at most in all", what)
 	}
 	return nil
 }

@@ -58,6 +58,10 @@ type Comparison struct {
 	// scenarios whose test files the change edited, when Scenarios reads
 	// each side's (TestEditor), and to nothing else.
 	Alike []AlikeRule `json:"-"`
+	// Missed are the incidents a rule caught before the change that no
+	// rule catches after it, as HoldMissed found them (--fail-missed): nil
+	// when it didn't look.
+	Missed []IncidentChange `json:"missed,omitempty"`
 	// JudgedBy names whose record judged the firings, when it isn't the
 	// incidents the comparison was given: lapilli serve's, for a pull
 	// request backtested through it (JudgedByServe). CompareMarkdown's
@@ -168,6 +172,15 @@ type Summary struct {
 	// rule one it runs: the test file unreadable, a time out, a crash. They
 	// can't be judged, as a rule that couldn't be replayed can't.
 	ScenariosUnrun int `json:"scenarios_unrun"`
+	// MissedChecked says the run looked for the incidents a rule caught
+	// before the change that no rule catches after it (--fail-missed);
+	// IncidentsMissed are those it found, 0 when it didn't look.
+	// MissedNotKnown are those it couldn't tell caught or missed: caught
+	// by no rule replayed after the change, while a rule after it
+	// couldn't be replayed, which may catch them. They fail nothing.
+	MissedChecked   bool `json:"missed_checked"`
+	IncidentsMissed int  `json:"incidents_missed"`
+	MissedNotKnown  int  `json:"missed_not_known"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether
@@ -185,6 +198,109 @@ func (c *Comparison) Summarize(incidents bool) {
 		s.FiringsAfter = len(c.After.Firings)
 	}
 	c.Summary = s
+}
+
+// Lost reports whether an incident a rule replayed caught before the
+// change is caught by none replayed after it. With ChangedOnly, the rules
+// left alone weren't replayed, and one of them may still catch it: see
+// HoldMissed.
+func (c *Comparison) Lost() bool {
+	return slices.ContainsFunc(c.Incidents, func(ic IncidentChange) bool { return len(ic.Before) > 0 && len(ic.After) == 0 })
+}
+
+// HoldMissed sets Missed, and the summary's count of them: the incidents a
+// rule caught before the change that no rule catches after it. alike is
+// the verdict of the rules left alone over the same period and incidents,
+// when they weren't replayed with the others (ChangedOnly), or nil: an
+// incident one of them catches is caught on both sides, and isn't missed.
+// When a rule after the change couldn't be replayed (the history unread,
+// a query refused, out of time), whether it would catch one isn't known:
+// such an incident is counted as not known (MissedNotKnown), not missed.
+func (c *Comparison) HoldMissed(alike *Report) {
+	c.Missed = []IncidentChange{}
+	notKnown := 0
+	unreplayed := func(r *Report) bool {
+		return r != nil && slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" })
+	}
+	// After the change: the rules replayed after it, and the rules left
+	// alone, replayed with them or apart.
+	unsure := unreplayed(c.After) || unreplayed(alike)
+	stillCaught := func(i int, in incident.Incident) bool {
+		if alike == nil {
+			return false
+		}
+		same := func(x IncidentResult) bool { return x.ID == in.ID && x.Start.Equal(in.Start) }
+		if i < len(alike.Incidents) && same(alike.Incidents[i]) {
+			return len(alike.Incidents[i].CaughtBy) > 0
+		}
+		for _, x := range alike.Incidents {
+			if same(x) && len(x.CaughtBy) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+	// Both sides were judged against the same incidents, which come in the
+	// same order.
+	if c.Before != nil && c.After != nil && len(c.Before.Incidents) == len(c.After.Incidents) {
+		for i, b := range c.Before.Incidents {
+			if len(b.CaughtBy) == 0 || len(c.After.Incidents[i].CaughtBy) > 0 || stillCaught(i, b.Incident) {
+				continue
+			}
+			if unsure {
+				notKnown++
+				continue
+			}
+			c.Missed = append(c.Missed, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: []Catch{}})
+		}
+	}
+	if c.Summary != nil {
+		c.Summary.MissedChecked, c.Summary.IncidentsMissed, c.Summary.MissedNotKnown = true, len(c.Missed), notKnown
+	}
+}
+
+// MissedNotKnownText says how many incidents HoldMissed couldn't tell
+// caught or missed, and why, or nothing.
+func (c *Comparison) MissedNotKnownText() string {
+	if c.Summary == nil || c.Summary.MissedNotKnown == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule replayed after it, but a rule after it couldn't be replayed: "+
+		"whether they are missed isn't known, and they fail nothing (--fail-unreplayed fails a run whose history couldn't be read).", c.Summary.MissedNotKnown)
+}
+
+// MissedText writes, for a person, what HoldMissed found (--fail-missed),
+// times in loc: nothing when it didn't look, or nothing changed.
+func MissedText(w io.Writer, c *Comparison, loc *time.Location) error {
+	if c.Summary == nil || !c.Summary.MissedChecked || c.Summary.NothingChanged {
+		return nil
+	}
+	if s := c.MissedNotKnownText(); s != "" {
+		fmt.Fprintf(w, "\n%s\n", s)
+	}
+	if len(c.Missed) == 0 {
+		if c.Summary.MissedNotKnown > 0 {
+			return nil
+		}
+		_, err := fmt.Fprintln(w, "\nEvery incident a rule caught before the change is caught after it too (--fail-missed).")
+		return err
+	}
+	fmt.Fprintf(w, "\nThe run fails (--fail-missed): %d incidents a rule caught before the change are caught by no rule after it%s.\n", len(c.Missed), c.leftAloneToo())
+	rows := [][]string{{"INCIDENT", "START", "CAUGHT BEFORE BY"}}
+	for _, ic := range c.Missed {
+		rows = append(rows, []string{incidentName(ic.Incident), ic.Start.In(loc).Format("2006-01-02 15:04"), caughtBy(IncidentResult{CaughtBy: ic.Before}, 0)})
+	}
+	return table(w, rows)
+}
+
+// leftAloneToo says, of the incidents Missed holds, that no rule left
+// alone catches them either, when those weren't replayed with the others
+// (ChangedOnly) but were for them (HoldMissed).
+func (c *Comparison) leftAloneToo() string {
+	if c.ChangedOnly && c.Same > 0 {
+		return ", the rules left alone among them"
+	}
+	return ""
 }
 
 // judged says the firings were judged against incidents: always, unless

@@ -148,6 +148,12 @@ Before a change to the rules:
                       nothing)
   --expect-required   exit 1 when the change adds a rule no expectation
                       holds
+  --fail-missed       with --compare and --incidents or --impact, exit 1
+                      when the change leaves an incident a rule caught
+                      before it caught by no rule after it; the report
+                      says which. With --changed-only, the rules left
+                      alone are replayed too when a rule that differs
+                      stops catching one, to see whether one still does
   --promtool PATH     with --expect, run each scenario (scenarios:,
                       promtool's own test files, read in the directory of
                       the expectations file that names them) of a rule the
@@ -321,7 +327,12 @@ Judging:
                       still catches it (default 15m)
   --match LABEL       a label a firing and an incident must agree on when
                       both have it, such as service (repeatable); an
-                      incident can list several values
+                      incident can list several values. A firing of an
+                      alert the incident's tool linked to it (alerts: in
+                      the incidents file) catches it whatever they say
+  --linked-only       an incident that lists the alerts its tool linked to
+                      it is caught by those alone, not by any other firing
+                      at the time; one that lists none is caught as ever
   --refire DUR        a firing this soon after the same alert resolved counts
                       as refired (default 1h)
   --rule REGEX        only rules whose name matches
@@ -433,6 +444,8 @@ The incidents file:
       start: 2026-10-30T17:00:00+09:00
       end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
       labels: {service: [checkout, cart]} # optional, for --match
+      alerts:                             # optional: those its tool linked
+        - {rule: CheckoutErrors, labels: {service: checkout}}
 
 The impact file:
 
@@ -491,6 +504,9 @@ type verdictFlags struct {
 	// failExpect, --fail-expectations; expectRequired, --expect-required.
 	expect, expectBefore       string
 	failExpect, expectRequired bool
+	// failMissed is --fail-missed: exit 1 when the change leaves an
+	// incident caught before it caught by no rule after it.
+	failMissed bool
 	// promtool is --promtool, resolved (scenario.Resolve); promtoolMemory,
 	// --promtool-memory, the memory one run may take, as serve's.
 	promtool          string
@@ -608,6 +624,16 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 // parseFlags reads lapilli verdict's flags; serve, when not nil, takes the
 // flags only lapilli serve has, and says it is serve's.
 func parseFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
+	f, err := readFlags(args, serve)
+	if err != nil {
+		return nil, err
+	}
+	return checkFlags(f, serve)
+}
+
+// readFlags reads each flag into its value, as parseFlags does, and checks
+// none against another: lapilli impact suggest reads the few it takes so.
+func readFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
 	f := &verdictFlags{
 		impactFor: 5 * time.Minute, since: 7 * 24 * time.Hour, step: time.Minute,
 		opts:     verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
@@ -648,6 +674,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		case "--expect-required":
 			f.expectRequired = true
 			continue
+		case "--fail-missed":
+			f.failMissed = true
+			continue
 		case "--check-replay":
 			f.checkReplay, f.checkReplaySet = true, true
 			if hasVal {
@@ -676,6 +705,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--fail-unreplayed":
 			f.failUnreplayed = true
+			continue
+		case "--linked-only":
+			f.opts.LinkedOnly = true
 			continue
 		case "--progress":
 			f.progressSet = true
@@ -970,6 +1002,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, err
 		}
 	}
+	return f, nil
+}
+
+// checkFlags checks the flags readFlags read, each against the others.
+func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
 	// The named impact signals, once --step and --match are known, wherever
 	// they came.
 	if err := f.signalsRead(); err != nil {
@@ -1050,7 +1087,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired, "--expect, --expect-before, --fail-expectations or --expect-required: they hold a change to the rules, which --compare backtests"},
+			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired || f.failMissed, "--expect, --expect-before, --fail-expectations, --expect-required or --fail-missed: they hold a change to the rules, which --compare backtests"},
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
@@ -1139,6 +1176,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--compare doesn't go with --metrics or --push")
 	case f.changedOnly && len(f.compare) == 0:
 		return nil, errors.New("--changed-only goes with --compare")
+	case f.failMissed && len(f.compare) == 0:
+		return nil, errors.New("--fail-missed holds a change to the rules to the incidents those in place catch: it goes with --compare")
+	case f.failMissed && f.incidents == "" && !f.anyImpact():
+		return nil, errors.New("--fail-missed fails the run when the change leaves an incident caught by no rule: give the incidents, --incidents FILE or --impact PROMQL")
 	case f.expect != "" && len(f.compare) == 0:
 		return nil, errors.New("--expect holds a change to the rules to what they are expected to do: it goes with --compare")
 	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired || f.promtool != ""):
@@ -1484,6 +1525,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 					c.Summarize(f.incidents != "" || f.anyImpact())
 				}
 			}
+			// Nothing replayed: no incident caught before is missed after.
+			if f.failMissed {
+				c.HoldMissed(nil)
+			}
 			checked := c.Expectations
 			if f.redact {
 				c = verdict.NewRedactor(f.redactKey).Comparison(c)
@@ -1543,6 +1588,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var known []rules.Rule
 	var fs []firing.Firing
 	var cmp *verdict.Comparison
+	// leftAlone is, with --fail-missed and --changed-only, the verdict of
+	// the rules left alone, when they were replayed to see whether one
+	// still catches an incident.
+	var leftAlone *verdict.Report
 	switch {
 	case len(f.compare) > 0:
 		// Rules alike in both are replayed once, for both; or not at all.
@@ -1590,6 +1639,19 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 				return fail(fmt.Errorf("--expect %s: %w", f.expect, err))
 			}
 		}
+		if f.failMissed {
+			// With --changed-only, an incident the rules that differ
+			// caught before and none of them catches after may still be
+			// caught by a rule left alone, alike on both sides: those are
+			// replayed too, once, only then, to see.
+			if f.changedOnly && len(alike) > 0 && cmp.Lost() {
+				ranAlike, firedAlike := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: alike}}}, f.opts.From, f.opts.To, f.step, f.parallel)
+				ol := o
+				ol.Signals = indexRules(o.Signals, alike, firedAlike[0])
+				leftAlone = verdict.Judge(ranAlike[0], firedAlike[0], incs, ol)
+			}
+			cmp.HoldMissed(leftAlone)
+		}
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
@@ -1627,6 +1689,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var rep *verdict.Report
 	if cmp != nil {
 		reports = append(reports, cmp.Before, cmp.After)
+		// The rules left alone, replayed for --fail-missed, finish within
+		// --timeout as the others do.
+		if leftAlone != nil {
+			reports = append(reports, leftAlone)
+		}
 	} else {
 		// Each rule's entry, found once, by the rules' labels or its
 		// firings'.
@@ -1745,6 +1812,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if err := verdict.CompareText(w, shownCmp, shownLoc); err != nil {
 				return err
 			}
+			if err := verdict.MissedText(w, shownCmp, shownLoc); err != nil {
+				return err
+			}
 			return verdict.ExpectationsText(w, shownCmp.Expectations)
 		}
 		return verdict.Text(w, shown, shownLoc)
@@ -1822,20 +1892,35 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)\n", len(dropped), len(all))
 		return 1
 	}
+	// Each gate that fails says so, and fails the run.
+	gated := false
 	if cmp != nil && cmp.Expectations != nil {
 		if n := cmp.Expectations.Broken(); f.failExpect && n > 0 {
 			fmt.Fprintf(stderr, "lapilli verdict: the change breaks %d expectations the rules in place meet (--fail-expectations)\n", n)
-			return 1
+			gated = true
 		}
 		if n := len(cmp.Expectations.Unexpected); f.expectRequired && n > 0 {
 			fmt.Fprintf(stderr, "lapilli verdict: the change adds %d rules no expectation holds (--expect-required)\n", n)
-			return 1
+			gated = true
 		}
+	}
+	if cmp != nil && f.failMissed && len(cmp.Missed) > 0 {
+		fmt.Fprintf(stderr, "lapilli verdict: %s\n", missedSaid(len(cmp.Missed)))
+		gated = true
+	}
+	if gated {
+		return 1
 	}
 	if failed {
 		return 1
 	}
 	return 0
+}
+
+// missedSaid is what lapilli verdict says when --fail-missed fails the
+// run, n incidents missed; the backtest recipes read it from its stderr.
+func missedSaid(n int) string {
+	return fmt.Sprintf("the change leaves %d incidents a rule caught before it caught by no rule (--fail-missed)", n)
 }
 
 // scenarioSides runs the scenarios of --expect and --expect-before with

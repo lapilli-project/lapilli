@@ -123,6 +123,8 @@ type notifyPort struct {
 	// events is how many requests carrying no notification the event
 	// recorder's path takes; eventBytes, how much of its bodies it reads.
 	events, eventBytes *limiter
+	// mutes are the rows of the recorder's mutes kept lately, and today.
+	mutes mutesKept
 	// snsWarned is when a refused SNS message was last logged: once a
 	// minute at most, as anyone can send one.
 	snsWarned atomic.Int64
@@ -251,16 +253,17 @@ type proof struct {
 	// is answered 503, for a source that gives an answer little time; 0 is
 	// five seconds, then 429.
 	turn time.Duration
-	// events says the path takes every event of a recorder: a request that
-	// carries no notification gives back what it took of the rate.
-	events bool
+	// events, set, reads the path's bodies in place of parse: every event
+	// of a recorder, its notifications and its mutes. A request that
+	// carries no notification is taken at the events' rate.
+	events func(r *http.Request, body []byte, now time.Time) ([]ledger.Notification, []ledger.Mute, error)
 }
 
 // NotifyHandler is the notifications port.
 func (s *Server) NotifyHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/alertmanager", s.takeNotifications("alertmanager", proof{header: s.bearerOK, refuse: refuseBearer}, parseAlertmanager))
-	mux.HandleFunc("POST /v1/alertmanager/events", s.takeNotifications("alertmanager-events", proof{header: s.bearerOK, refuse: refuseBearer, events: true}, parseEvents))
+	mux.HandleFunc("POST /v1/alertmanager/events", s.takeNotifications("alertmanager-events", proof{header: s.bearerOK, refuse: refuseBearer, events: parseEvents}, nil))
 	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", proof{header: s.bearerOK, could: s.grafanaCould, refuse: refuseBearer, body: s.grafanaSigned}, parseGrafana))
 	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{could: s.snsCould, refuse: s.refuseSNS, body: s.snsSigned}, s.parseSNS))
 	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", proof{header: s.basicOK, refuse: refuseBasic}, parseAzure))
@@ -349,13 +352,19 @@ func (s *Server) takeNotifications(source string, p proof,
 		// read within a budget of bytes first: whether they carry
 		// notifications, and so which rate they are taken at, is known only
 		// once they are read.
-		if p.events && !s.port.eventBytes.allowN(time.Now(), float64(len(body)+1024)) ||
-			!p.events && !s.port.rates[source].allow(time.Now()) {
+		if p.events != nil && !s.port.eventBytes.allowN(time.Now(), float64(len(body)+1024)) ||
+			p.events == nil && !s.port.rates[source].allow(time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "too many notifications: try again in a second", http.StatusTooManyRequests)
 			return
 		}
-		ns, err := parse(r, body, s.now())
+		var ns []ledger.Notification
+		var mutes []ledger.Mute
+		if p.events != nil {
+			ns, mutes, err = p.events(r, body, s.now())
+		} else {
+			ns, err = parse(r, body, s.now())
+		}
 		// What the source sent that can't be kept is said and counted; the
 		// rest is kept (a batch of the event recorder's).
 		refused, why := 0, error(nil)
@@ -377,12 +386,23 @@ func (s *Server) takeNotifications(source string, p proof,
 			}
 			valid = append(valid, n)
 		}
+		validMutes := mutes[:0:0]
+		for _, m := range mutes {
+			if verr := m.Validate(); verr != nil {
+				refused++
+				if why == nil {
+					why = verr
+				}
+				continue
+			}
+			validMutes = append(validMutes, m)
+		}
 		if refused > 0 {
 			s.status.Lock()
 			s.status.refused[source] += refused
 			s.status.Unlock()
 		}
-		if err == nil && len(valid) == 0 && why != nil {
+		if err == nil && len(valid) == 0 && len(validMutes) == 0 && why != nil {
 			err = why // nothing to keep: the request is refused, for that
 		}
 		var many tooMany
@@ -400,7 +420,10 @@ func (s *Server) takeNotifications(source string, p proof,
 		if refused > 0 {
 			s.log.Warn("some of a request's notifications can't be kept, and aren't; the rest are", "source", source, "refused", refused, "why", why)
 		}
-		if p.events {
+		// Mutes come at the events' rate, or a notification's when they
+		// come with one; those this replica kept already take no turn.
+		var fresh []ledger.Mute
+		if p.events != nil {
 			limit, what := s.port.rates[source], "notifications"
 			if len(valid) == 0 {
 				limit, what = s.port.events, "events"
@@ -410,10 +433,12 @@ func (s *Server) takeNotifications(source string, p proof,
 				http.Error(w, "too many "+what+": try again in a second", http.StatusTooManyRequests)
 				return
 			}
-			if len(valid) == 0 {
-				// Events of something else: read, and nothing to keep.
+			fresh = s.port.mutes.fresh(validMutes)
+			if len(valid) == 0 && len(fresh) == 0 {
+				// Events of something else, or mutes kept already: read,
+				// and nothing to keep.
 				w.Header().Set("Content-Type", "application/json")
-				io.WriteString(w, "{\"kept\":0,\"same_as_kept\":0}\n")
+				fmt.Fprintf(w, "{\"kept\":0,\"same_as_kept\":0%s}\n", mutesSaid(len(validMutes), refused))
 				return
 			}
 		}
@@ -434,6 +459,20 @@ func (s *Server) takeNotifications(source string, p proof,
 			http.Error(w, "busy keeping other notifications: try again in a second", busy)
 			return
 		case <-r.Context().Done():
+			return
+		}
+		if len(fresh) > 0 {
+			if err := s.keepMutes(r.Context(), fresh); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					s.log.Error("keeping mutes", "source", source, "err", err)
+					http.Error(w, "the mutes couldn't be kept: try again", http.StatusInternalServerError)
+				}
+				return
+			}
+		}
+		if len(ns) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, "{\"kept\":0,\"same_as_kept\":0%s}\n", mutesSaid(len(validMutes), refused))
 			return
 		}
 		alerts := 0
@@ -481,12 +520,31 @@ func (s *Server) takeNotifications(source string, p proof,
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if p.events != nil {
+			fmt.Fprintf(w, "{\"kept\":%d,\"same_as_kept\":%d%s}\n", kept, len(ns)-kept, mutesSaid(len(validMutes), refused))
+			return
+		}
 		if refused > 0 {
 			fmt.Fprintf(w, "{\"kept\":%d,\"same_as_kept\":%d,\"refused\":%d}\n", kept, len(ns)-kept, refused)
 			return
 		}
 		fmt.Fprintf(w, "{\"kept\":%d,\"same_as_kept\":%d}\n", kept, len(ns)-kept)
 	}
+}
+
+// mutesSaid is what the event recorder's path answers of a request's
+// mutes beside its notifications: how many were read and kept, or found
+// kept, and how many of the request's notifications and mutes were
+// refused.
+func mutesSaid(mutes, refused int) string {
+	out := ""
+	if mutes > 0 {
+		out += fmt.Sprintf(",\"mutes\":%d", mutes)
+	}
+	if refused > 0 {
+		out += fmt.Sprintf(",\"refused\":%d", refused)
+	}
+	return out
 }
 
 // dayRoom reports whether the alerts of a notification from a source fit in

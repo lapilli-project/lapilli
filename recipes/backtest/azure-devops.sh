@@ -28,6 +28,16 @@
 # (connectionData's authenticatedUser) and a comment's author are told
 # apart by their id, as Azure DevOps documents both.
 #
+# With STATUS=true (see lib.sh), a pull request status (POST
+# .../pullRequests/ID/statuses) on the iteration whose source commit is
+# the pull request's (SYSTEM_PULLREQUEST_SOURCECOMMITID), as GET
+# .../pullRequests/ID/iterations says: genre lapilli, name backtest, which
+# a branch policy's status check names lapilli/backtest; linking to the
+# build. None is set when no iteration is at that commit: one on the pull
+# request alone would stay after a later push. The token needs Code
+# (status) (vso.code_status), or the build service Contribute to pull
+# requests; not checked against an account.
+#
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), a plain token,
 # LAPILLI_SERVE_TOKEN_FILE: a job's ID token in Azure Pipelines is for a
 # service connection, made for Microsoft Entra (docs/design/backtests.md).
@@ -50,6 +60,13 @@ host_api=$org
 project=$(printf '%s' "$AZURE_DEVOPS_PROJECT" | jq -sRr @uri)
 repo_name=$(printf '%s' "$AZURE_DEVOPS_REPO" | jq -sRr @uri)
 threads=$org/$project/_apis/git/repositories/$repo_name/pullRequests
+# For STATUS: the pull request's source commit, and the build's page.
+status_commit=${SYSTEM_PULLREQUEST_SOURCECOMMITID:-}
+status_link=
+case ${BUILD_BUILDID:-} in
+  '' | *[!0-9]*) ;;
+  *) status_link="$org/$project/_build/results?buildId=$BUILD_BUILDID" ;;
+esac
 
 host_auth() {
   printf 'Authorization: Basic %s\nAccept: application/json\n' "$(printf ':%s' "$(cat "$AZURE_DEVOPS_TOKEN_FILE")" | base64 | tr -d '\n')"
@@ -88,6 +105,28 @@ edit_comment() {
   jq -Rs '{content: .}' "$2" >"$tmp/body"
   code=$(host PATCH "$threads/$PR/threads/${1%/*}/comments/${1#*/}?api-version=7.1" "$tmp/body")
   case $code in 2??) ;; *) say "Azure DevOps didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
+}
+
+# A pull request status: succeeded or failed, as lib.sh says, on the
+# latest iteration at the commit.
+post_status() {
+  st=succeeded
+  [ "$1" = success ] || st=failed
+  code=$(host GET "$threads/$PR/iterations?api-version=7.1")
+  case $code in 2??) ;; *) say "Azure DevOps didn't list the pull request's iterations ($code): $(shown "$out")"; return 1 ;; esac
+  it=$(jq -r --arg c "$status_sha" '[(if type == "object" then .value else . end)[]? | objects
+    | select((.sourceRefCommit.commitId // "" | ascii_downcase) == $c) | .id | numbers] | max // empty' "$out" 2>/dev/null) || it=
+  case $it in
+    '' | *[!0-9]*)
+      say "no iteration of the pull request is at $status_sha: no status set, as one on the pull request alone would stay after a later push"
+      return 1
+      ;;
+  esac
+  jq -n --arg state "$st" --arg text "$2" --arg name "${status_context#lapilli/}" --arg url "$status_url" --argjson it "$it" \
+    '{state: $state, description: $text, context: {genre: "lapilli", name: $name}, iterationId: $it}
+      + (if $url != "" then {targetUrl: $url} else {} end)' >"$tmp/body"
+  code=$(host POST "$threads/$PR/statuses?api-version=7.1" "$tmp/body")
+  case $code in 2??) ;; *) say "Azure DevOps didn't take the status ($code): $(shown "$out")"; return 1 ;; esac
 }
 
 # shellcheck source=lib.sh

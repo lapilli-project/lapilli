@@ -1281,7 +1281,10 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		return ruleView{}, err
 	}
 	for _, in := range caught {
-		v.Caught = append(v.Caught, s.incidentLine(lang(r), in, t))
+		l := s.incidentLine(lang(r), in, t)
+		// Caught by an alert its tool linked to it (docs/design/links.md).
+		l.Linked = slices.ContainsFunc(in.CaughtBy, func(c verdict.Catch) bool { return c.Rule == name && c.Linked })
+		v.Caught = append(v.Caught, l)
 	}
 	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: time.Unix(0, 0), To: s.now().Add(time.Hour), Rule: name, Limit: 50})
 	if err != nil {
@@ -1442,6 +1445,9 @@ type incidentLine struct {
 	First   string
 	Earlier string
 	Catches []catchLine
+	// Linked says, on a rule's page, that the rule caught it by an alert
+	// its tool linked to it.
+	Linked bool `json:"-"`
 	// lead is, of one caught, how long before its start First fired.
 	lead time.Duration
 	Mine bool // written in the UI, so it can be changed there
@@ -2044,6 +2050,9 @@ type firingLine struct {
 	// it paged no one.
 	Notified int
 	Counted  bool
+	// Muted is what muted it, a silence first (docs/design/mutes.md): what
+	// the page says of it when no notification told of it.
+	Muted []ledger.Mute
 	// Unjudged says it caught nothing in a week with no record to judge it
 	// by: counted, not judged, neither ○ nor ● (judged). ByNothing says
 	// why, when it isn't for want of a record: its rule entry judges it

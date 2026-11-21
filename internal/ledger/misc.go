@@ -264,7 +264,7 @@ func (l *Ledger) JudgeAll(ctx context.Context, o verdict.Options, done func(floa
 }
 
 // Prune drops what started before a time: firings, impact windows, runs,
-// results, changes and notifications. Incidents written down are kept. It deletes a few
+// results, changes, notifications and mutes. Incidents written down are kept. It deletes a few
 // thousand rows at a time, so other writes get their turn, and gives the
 // space back a little at a time.
 func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
@@ -299,6 +299,8 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 		"DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE created < ?1 LIMIT 5000)",
 		// Their alerts go with them.
 		"DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE at < ?1 LIMIT 5000)",
+		// And the mutes, as the notifications.
+		"DELETE FROM mutes WHERE id IN (SELECT id FROM mutes WHERE last_at < ?1 LIMIT 5000)",
 		// A source nothing was written to since is forgotten.
 		"DELETE FROM sources WHERE written < ?",
 		// And what its copies covered.
