@@ -74,14 +74,18 @@ And, as wanted:
   expectations the rules in place are held to. `INCIDENTS` is the
   target's own, as it is now: a pull request branched from before an
   incident was written down is judged by it all the same. Each script
-  defaults it from its CI. `HEAD^1`, given or not, is a merge's first
-  parent: of a `HEAD` that isn't a merge, such as GitHub Actions' checkout
-  of `pull_request.head.sha`, it is the pull request's own earlier commit,
-  so with no `TARGET_BRANCH` the branch the CI says the pull request goes
-  into is taken (GitHub's `GITHUB_BASE_REF`, with `fetch-depth: 0`), and,
-  where it says none, a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
-  `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS` is refused: give `TARGET`
-  or `TARGET_BRANCH`, or check out the merge.
+  defaults it from its CI. `HEAD^1`, given or not, however written
+  (`HEAD~1`, `HEAD^`, its hash), is a merge's first parent, taken only of
+  the CI's merge: `HEAD^2` the pull request's head as the CI says
+  (GitHub's `pull_request.head.sha`), or, where it says none, `HEAD` a
+  merge. Of the pull request's own commit, such as GitHub Actions' checkout
+  of `pull_request.head.sha`, a merge of its own among them (an "Update
+  branch"), it is the pull request's own earlier commit, so with no
+  `TARGET_BRANCH` the branch the CI says the pull request goes into is
+  taken (GitHub's `GITHUB_BASE_REF`, with `fetch-depth: 0`), and, where it
+  says none, a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
+  `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS` is refused, and the job
+  fails: give `TARGET` or `TARGET_BRANCH`, or check out the merge.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).

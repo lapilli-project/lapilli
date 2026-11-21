@@ -329,7 +329,7 @@ func TestBacktestRecipeOwnParent(t *testing.T) {
 		before := len(rr.host.statuses)
 		out, err := rr.run(append(slices.Clone(settings), given...), args...)
 		st, n := rr.host.lastStatus()
-		if err == nil || !strings.Contains(out, "HEAD^1 is the pull request's own commit") || n > before && st.State == "success" {
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State == "success" {
 			t.Errorf("%v: %v, status %+v\n%s", given, err, st, out)
 		}
 	}
@@ -340,7 +340,7 @@ func TestBacktestRecipeOwnParent(t *testing.T) {
 	// GitHub's base branch: compared with main, INC-7 lost, a failure.
 	out, err := rr.run(append(slices.Clone(settings), "GITHUB_BASE_REF=main"), args...)
 	st, _ := rr.host.lastStatus()
-	if err == nil || st.State != "failure" || st.SHA != sha || !strings.Contains(out, "compared with the branch the pull request goes into, main") ||
+	if err == nil || st.State != "failure" || st.SHA != sha || !strings.Contains(out, "compared with the branch it goes into, main") ||
 		!strings.Contains(out, "caught by no rule") {
 		t.Errorf("GITHUB_BASE_REF: %v, status %+v\n%s", err, st, out)
 	}
@@ -363,5 +363,72 @@ func TestBacktestRecipeOwnParent(t *testing.T) {
 	out, err = rr.run(append(slices.Clone(settings), "STATUS_URL=http://127.0.0.1:8080/job/1"), args...)
 	if st, _ := rr.host.lastStatus(); err == nil || !strings.Contains(out, "set the commit status lapilli/backtest on "+sha+": failure") || st.URL != "http://127.0.0.1:8080/job/1" {
 		t.Errorf("a merge: %v, status %+v\n%s", err, st, out)
+	}
+}
+
+// A pull request's head that is a merge of its own (GitHub's "Update
+// branch", a merge --no-ff), checked out as it is (ref:
+// pull_request.head.sha), has two parents: HEAD^1 is its own earlier
+// commit, which the parents alone didn't tell from GitHub's merge. HEAD is
+// the event's head, so GITHUB_BASE_REF is taken. A TARGET of HEAD's first
+// parent written otherwise (HEAD~1, HEAD^, its hash) is too; and STATUS
+// alone, refused, fails the job, never a success.
+func TestBacktestRecipeOwnParentMerged(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	repo.git("remote", "add", "origin", repo.dir)
+	repo.git("fetch", "--quiet", "origin")
+	repo.git("checkout", "--quiet", "-B", "side", "main")
+	repo.write(map[string]string{"NOTES.md": "x\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "side")
+	// The pull request: the rule change, then a merge of the side branch.
+	repo.git("checkout", "--quiet", "-B", "pr", "main")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "hold CheckoutErrors longer")
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", "side")
+	sha := repo.git("rev-parse", "HEAD")
+	parent := repo.git("rev-parse", "HEAD^1")
+	repo.git("checkout", "--quiet", "--detach", sha)
+	h := backtestHosts[0] // github
+	rr := newRecipeRun(t, h, repo)
+	ci, _ := headOf(t, h.kind, sha)
+	rr.env = append(rr.env, ci...)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_MISSED=true"}
+	for _, target := range []string{"", "TARGET=HEAD^1", "TARGET=HEAD~1", "TARGET=HEAD^", "TARGET=" + parent} {
+		settings := append(slices.Clone(gates), "GITHUB_BASE_REF=main")
+		if target != "" {
+			settings = append(settings, target)
+		}
+		out, err := rr.run(settings, args...)
+		st, _ := rr.host.lastStatus()
+		if err == nil || st.State != "failure" || st.SHA != sha || !strings.Contains(out, "compared with the branch it goes into, main") ||
+			!strings.Contains(out, "caught by no rule") {
+			t.Errorf("%q: %v, status %+v\n%s", target, err, st, out)
+		}
+	}
+	// No base branch: refused, the job failed, with a gate or STATUS alone.
+	for _, settings := range [][]string{gates, {"PATHS=alerts", "STATUS=true"}, {"PATHS=alerts", "STATUS=true", "TARGET=HEAD~1"}} {
+		before := len(rr.host.statuses)
+		out, err := rr.run(slices.Clone(settings), args...)
+		st, n := rr.host.lastStatus()
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State != "failure" {
+			t.Errorf("%v: %v, status %+v\n%s", settings, err, st, out)
+		}
+	}
+	// GitHub's own merge of it into main: HEAD^2 the event's head, HEAD^1
+	// main's commit, taken as it is.
+	repo.git("checkout", "--quiet", "--detach", "main")
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
+	out, err := rr.run(slices.Clone(gates), args...)
+	if st, _ := rr.host.lastStatus(); err == nil || st.State != "failure" || st.SHA != sha || strings.Contains(out, "compared with the branch") ||
+		!strings.Contains(out, "caught by no rule") {
+		t.Errorf("GitHub's merge: %v, status %+v\n%s", err, st, out)
 	}
 }

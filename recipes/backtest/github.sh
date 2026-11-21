@@ -60,6 +60,9 @@ fi
 # where HEAD isn't the merge GitHub makes, as a checkout of the pull
 # request's own commit (ref: pull_request.head.sha) has (lib.sh).
 ci_branch=${GITHUB_BASE_REF:-}
+# ... and its head, as the event says: HEAD^2 of the merge GitHub makes of
+# it, or HEAD itself where the job checks the head out.
+ci_head=$status_commit
 status_link=
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
   status_link=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
