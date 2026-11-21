@@ -45,7 +45,7 @@
 <ul class="plain">{{range .}}<li><a href="{{$.Incident .ID}}">{{.ID}}</a> <bdi>{{.Signal}}</bdi>, {{at $loc .Start}} → {{at $loc .End}}: {{if eq .Status "caught"}}<span class="{{status "incident" .Status}}"><span aria-hidden="true">○</span> {{t "caught by %s" (join .Caught ", ")}}</span>{{else if eq .Status "noisy"}}<span class="{{status "incident" .Status}}"><span aria-hidden="true">◐</span> {{t "caught by %s" (join .Caught ", ")}}, {{t "noisy"}}</span>{{else if eq .Status "missed"}}<span class="{{status "incident" .Status}}"><span aria-hidden="true">✗</span> {{t "nothing caught it"}}</span>{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else if .Caught}}{{t "caught by %s" (join .Caught ", ")}}{{else}}{{t "nothing caught it"}}{{end}}{{with .State}} · {{t .}}{{end}}</li>{{end}}</ul>{{end}}
 {{end}}
 <h2>{{t "Caught by"}}</h2>
-{{if .Catches}}<ul class="plain">{{range .Catches}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}{{if .Noisy}} <span class="quiet">({{t "noisy that week"}})</span>{{end}}</li>{{end}}</ul>
+{{if .Catches}}<ul class="plain">{{range .Catches}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}{{if .Linked}} <span class="quiet">({{t "linked in the incident tool"}})</span>{{end}}{{if .Noisy}} <span class="quiet">({{t "noisy that week"}})</span>{{end}}</li>{{end}}</ul>
 {{else if .Counts}}<p class="{{status "incident" "missed"}}"><span aria-hidden="true">✗</span> {{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
 {{with .Timeline}}{{if .Rows}}<section class="card timeline" id="timeline">

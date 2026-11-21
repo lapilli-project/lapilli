@@ -1,0 +1,11 @@
+{"alert": {"alert_group_ids": [], "alert_source_id": "01GW2G3V0S59R238FAHPDS1R66", "created_at": "2026-10-28T03:05:00Z",
+  "deduplication_key": "4293868631", "id": "01GW2G3V0S59R238FAHPDS1R63", "status": "resolved", "title": "CheckoutLatency",
+  "updated_at": "2026-10-28T03:40:00Z",
+  "attributes": [
+    {"attribute": {"array": false, "id": "01GW2G3V0S59R238FAHPDS1T01", "name": "alertname", "required": false, "type": "String"},
+     "value": {"label": "CheckoutLatency", "literal": "CheckoutLatency"}},
+    {"attribute": {"array": false, "id": "01GW2G3V0S59R238FAHPDS1T02", "name": "service", "required": false, "type": "String"},
+     "value": {"label": "checkout", "literal": "checkout"}},
+    {"attribute": {"array": true, "id": "01GW2G3V0S59R238FAHPDS1T06", "name": "pods", "required": false, "type": "String"},
+     "array_value": [{"label": "checkout-1", "literal": "checkout-1"}, {"label": "checkout-2", "literal": "checkout-2"}]}
+  ]}}

@@ -40,7 +40,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 ```
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
-`refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
+`linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
 `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
 and the zone days are counted in (`zone`†, which parts episodes, below):
 the flags, or in
@@ -577,7 +577,10 @@ An incident is **missed** when no firing caught it (`caught_by` empty). It
 was **caught only by noisy rules** when every rule that caught it is noisy:
 little better than missed. `caught_by[]` lists each rule that caught it,
 with `delay_ns`, from the incident's start to the rule's first firing that
-caught it (negative when the alert came first), the earliest first.
+caught it (negative when the alert came first), the earliest first, and
+`linked`† when a firing of the rule that caught it is one of the alerts the
+incident's tool linked to it (the incident's `alerts`†,
+[How it judges](how-it-judges.md)).
 
 ```jq
 # missed: as the report has it
@@ -857,14 +860,15 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
+| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
-| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`†, `real`† |
-| `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy` |
+| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`† |
+| `incidents[].alerts[]` | `rule`, `labels`† |
+| `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`† |
 | `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`† |
 
 ### The metrics

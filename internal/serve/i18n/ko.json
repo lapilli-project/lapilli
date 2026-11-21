@@ -2280,6 +2280,7 @@
  "the impact signals were changed meanwhile, by another admin or another replica: look at them again, and save again": "그 사이 다른 관리자나 다른 레플리카가 영향 지표를 바꿨어요: 다시 확인하고 다시 저장하세요",
  "a label's name and values are text: valid UTF-8, with no control character": "라벨 이름과 값은 텍스트여야 해요: 올바른 UTF-8 이고 제어 문자가 없어야 해요",
  "noisy that week": "그 주에는 노이즈 규칙",
+ "linked in the incident tool": "인시던트 도구에서 연결된 알림",
  "the rule entries use a YAML tag other than !!str, such as !!binary: write each value as text": "규칙 항목이 !!binary 처럼 !!str 이 아닌 YAML 태그를 써요: 값을 텍스트로 적으세요",
  "No incident written down for the week of %s or the two weeks before: precision isn't known, and no rule is called noisy.": "%s 주와 그 앞 2주에 기록된 인시던트가 없어 정탐률을 알 수 없고, 노이즈 규칙도 정하지 않아요.",
  "No incident written down for these weeks or the two weeks before: precision isn't known, and no rule is called noisy.": "이 기간과 그 앞 2주에 기록된 인시던트가 없어 정탐률을 알 수 없고, 노이즈 규칙도 정하지 않아요.",

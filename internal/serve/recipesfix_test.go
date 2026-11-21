@@ -29,7 +29,8 @@ func TestRootlyWaitsOutTooMany(t *testing.T) {
 		w.Write(fixture(t, name))
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "rootly.sh", "ROOTLY_API="+srv.URL, "ROOTLY_TOKEN_FILE="+tokenFile(t, "x"), "SINCE=2026-10-01")
+	// The incidents' pages alone: their alerts are more requests.
+	got := runRecipe(t, "rootly.sh", "ROOTLY_API="+srv.URL, "ROOTLY_TOKEN_FILE="+tokenFile(t, "x"), "SINCE=2026-10-01", "ALERTS=no")
 	if len(got) != 2 || asked.Load() != 3 {
 		t.Errorf("%d incidents in %d requests", len(got), asked.Load())
 	}

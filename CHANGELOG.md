@@ -48,6 +48,35 @@
   statuses, on the iteration at that commit. The comment is still posted
   first. The action takes `fail-missed` and `status`; the token needs
   more for a status (docs/pr-backtests.md, "Stopping a merge").
+Before upgrading:
+- **Ledger schema 028**, after 027: keep a copy of the ledger's disk, or
+  of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger. Nothing is
+  backfilled. 028 adds `incidents.alerts` and `catches.linked`.
+
+### Added
+
+- **Incidents judged by the alerts their tool linked to them**
+  (docs/design/links.md). An incident takes `alerts`, each `{rule: NAME,
+  labels: {...}}`, in the incidents file and in `POST` and `PUT
+  /api/v1/incidents`: a firing of the rule whose labels agree with the
+  alert's where both carry one (an external label it lacks passed over,
+  as `--match` does) catches the incident when it starts between `--lead` before it
+  and its end, whatever `--match` says. The report marks such a catch
+  `linked` (`(linked)` in the text and in `--compare`'s Markdown, and in
+  MCP's `caught_by`), and the incident's page and the rule's say "linked
+  in the incident tool".
+- **`--linked-only`**, in `lapilli verdict` and `lapilli serve`: an
+  incident that lists alerts is caught by them alone; one that lists none
+  is judged as before. serve judges every firing again once when it is
+  given or taken away at a start.
+- **The PagerDuty, incident.io and Rootly recipes write each incident's
+  alerts**, those whose alert carries an `alertname` with its labels
+  (PagerDuty's details as Alertmanager put them there, incident.io's
+  attributes, Rootly's labels), saying how many they left out;
+  `ALERT_LABELS` keeps some labels alone, `ALERTS=no` reads none, and
+  `MAX_ALERT_REQUESTS` (2000) bounds what they ask for.
 
 ## [0.66.0] - 2026-11-21
 

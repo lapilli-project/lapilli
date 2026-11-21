@@ -78,6 +78,8 @@ incidents:
     start: 2026-10-28T12:01:00+09:00
     end: 2026-10-28T12:40:00+09:00   # optional; an hour when missing
     labels: {service: checkout}      # optional, for --match; [a, b] for several
+    alerts:                          # optional: those its tool linked to it
+      - {rule: CheckoutErrors, labels: {service: checkout}}
 ```
 
 `--impact PROMQL` turns every window where the expression returns something,
@@ -146,6 +148,22 @@ lists several values agrees with any of them, and an alert without the label
 (a database or a node) is not held to it. An alert that was already firing before that caught nothing: it was on
 anyway. A firing that comes within `--refire` (1h) of the same alert resolving
 is counted as refired.
+
+**The alerts its tool linked.** An incident may list the alerts its tool
+linked to it (`alerts`, which the PagerDuty, incident.io and Rootly recipes
+write; [Incidents kept elsewhere](incidents.md)). A firing of one, its rule
+the alert's (or that rule told apart from others of its name,
+`HighErrorRate [severity=critical]`) and its labels agreeing with the
+alert's on those both carry (one of the alert's it lacks, such as an
+external label, passed over, as `--match` does),
+catches the incident when it starts between `--lead` before it and its
+end, whatever their labels say on `--match`: the link is better evidence
+than the labels. The report marks the catch linked (`(linked)`, `linked`
+in `--json`). Other firings still catch it by time and labels, unless
+`--linked-only`: then an incident that lists alerts is caught by those
+alone, and one that lists none as above. A firing it lists that came after
+its end is its alert too late (below), labels or not. Which rules are
+noisy, the record and near misses are worked out as ever.
 
 **Noisy rules.** A rule that fired 10 times or more in the period, with under
 20% of its firings catching anything, fires whatever happens; when it lands on

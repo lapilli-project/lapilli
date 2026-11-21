@@ -647,13 +647,25 @@ func caughtBy(in IncidentResult, unknownLen time.Duration) string {
 	}
 	var parts []string
 	for _, c := range in.CaughtBy {
-		part := fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))
-		if c.Noisy {
-			part += " (noisy)"
-		}
-		parts = append(parts, part)
+		parts = append(parts, fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))+c.marks())
 	}
 	return strings.Join(parts, ", ")
+}
+
+// marks are what a catch is said with: by an alert the incident lists
+// (linked), by a noisy rule (noisy), or both.
+func (c Catch) marks() string {
+	var m []string
+	if c.Linked {
+		m = append(m, "linked")
+	}
+	if c.Noisy {
+		m = append(m, "noisy")
+	}
+	if len(m) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(m, ", ") + ")"
 }
 
 // lateEach is how many of the rules that fired after an incident was over

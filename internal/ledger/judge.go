@@ -255,7 +255,7 @@ type queryer interface {
 
 func (l *Ledger) incidentsMeeting(ctx context.Context, q queryer, lo, hi int64, o verdict.Options, where string) ([]counted, error) {
 	lead, unknown := int64(o.MaxLead()/time.Second), int64(o.UnknownLen/time.Second)
-	rows, err := q.QueryContext(ctx, `SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of FROM incidents
+	rows, err := q.QueryContext(ctx, `SELECT `+incidentRowCols+` FROM incidents
 		WHERE `+where+` AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ? ORDER BY start_at, key`,
 		hi+lead, unknown, lo)
 	if err != nil {
@@ -275,6 +275,9 @@ func (l *Ledger) incidentsMeeting(ctx context.Context, q queryer, lo, hi int64, 
 
 type scanner interface{ Scan(...any) error }
 
+// incidentRowCols are the columns of incidents scanIncident reads, in order.
+const incidentRowCols = "id, key, origin, title, start_at, end_at, labels, signal, match_labels, real_of, alerts"
+
 type incidentRow struct {
 	row    int64
 	origin string
@@ -288,14 +291,18 @@ func scanIncident(s scanner) (incidentRow, error) {
 	var r incidentRow
 	var start int64
 	var end sql.NullInt64
-	var labels string
+	var labels, alerts string
 	var match sql.NullString
-	if err := s.Scan(&r.row, &r.ID, &r.origin, &r.Title, &start, &end, &labels, &r.Signal, &match, &r.realOf); err != nil {
+	if err := s.Scan(&r.row, &r.ID, &r.origin, &r.Title, &start, &end, &labels, &r.Signal, &match, &r.realOf, &alerts); err != nil {
 		return r, err
 	}
 	r.Start, r.End, r.Match, r.Real = unix(start), fromNull(end), matchOf(match), r.realOf != ""
 	r.Candidate = r.origin == "impact"
 	if err := json.Unmarshal([]byte(labels), &r.Labels); err != nil {
+		return r, err
+	}
+	var err error
+	if r.Alerts, err = alertsOf(alerts); err != nil {
 		return r, err
 	}
 	if len(r.Labels) == 0 {
@@ -624,7 +631,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		return err
 	}
 	defer del.Close()
-	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay) VALUES (?, ?, ?)")
+	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -636,6 +643,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			return err
 		}
 		first := map[int64]int64{}
+		linked := map[int64]bool{} // the rules a firing it lists caught it with
 		for rows.Next() {
 			var rule, sid, start int64
 			var text, name, unrelated string
@@ -655,9 +663,11 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			}
 			// With its rule, whose entry may keep it from a signal's
 			// windows (docs/design/signals.md, "Judged by its own match").
-			if !verdict.Catches(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o) {
+			caught, link := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			if !caught {
 				continue
 			}
+			linked[rule] = linked[rule] || link
 			d := start - in.Start.Unix()
 			if have, ok := first[rule]; !ok || d < have {
 				first[rule] = d
@@ -671,7 +681,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			return err
 		}
 		for _, rule := range slices.Sorted(maps.Keys(first)) {
-			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule]); err != nil {
+			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule]); err != nil {
 				return err
 			}
 		}

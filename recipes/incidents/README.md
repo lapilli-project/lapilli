@@ -18,6 +18,17 @@ form `--incidents` takes:
 They need `sh`, `curl` and `jq`. Tokens are read from files and passed to `curl`
 on stdin, so `ps` doesn't show them. Give them read-only access.
 
+`pagerduty.sh`, `incident-io.sh` and `rootly.sh` also write the alerts the tool
+linked to each incident, where an alert carries its `alertname` and labels
+([Incidents kept elsewhere](../../docs/incidents.md), "The alerts a tool
+linked"). `alerts.jq` is what they share; give `jq` `-L` this directory to run
+their `.jq` files yourself. Each alert keeps every label it carries: in
+judging, one the firing doesn't carry (an external label Prometheus added)
+is passed over, and one both carry must agree. `ALERTS=no` reads none,
+`ALERT_LABELS` keeps the labels it names alone, to narrow them, and
+`MAX_ALERT_REQUESTS` (2000) is the most they ask for a run, past which they
+stop and write nothing.
+
 Each tool's script is a few lines of paging; what it means by an incident is in
 the `.jq` file beside it, for you to change:
 
@@ -277,4 +288,6 @@ Write a script that gives this, as JSON, and it works with `--incidents` and
 ```
 
 An id is letters, digits and `. _ : / # -`, up to 64, starting with a letter or
-digit. Times are RFC 3339. `end` and `labels` are optional. Please send it here.
+digit. Times are RFC 3339. `end`, `labels` and `alerts` are optional: `alerts`
+are those the tool linked to it, each `{"rule": "CheckoutErrors", "labels":
+{"service": "checkout"}}`, 100 at most. Please send it here.
