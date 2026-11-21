@@ -1,0 +1,31 @@
+{
+  "id": "8dd24912-a0ad-41cd-ac80-535eaf649ed7",
+  "tinyId": "1234",
+  "createdAt": "2026-10-28T03:01:05.958Z",
+  "updatedAt": "2026-10-28T03:40:05.958Z",
+  "message": "CheckoutErrors",
+  "entity": "",
+  "source": "http://alertmanager:9093",
+  "status": "closed",
+  "alias": "6a5f3c0e1f5b9c1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899a",
+  "tags": [],
+  "extraProperties": {
+    "alertname": "CheckoutErrors",
+    "service": "checkout",
+    "severity": "critical"
+  },
+  "description": "Checkout answers 5xx",
+  "acknowledged": true,
+  "ackTime": "2026-10-28T03:08:47.958Z",
+  "closeTime": "2026-10-28T03:40:05.958Z",
+  "count": 3,
+  "owner": "",
+  "snoozed": false,
+  "lastOccuredAt": "2026-10-28T03:30:00Z",
+  "integrationType": "Prometheus",
+  "integrationName": "Prometheus",
+  "priority": "P1",
+  "responders": [{"id": "4513b7ea-3b91-438f-b7e4-e3e54af9147c", "type": "team"}],
+  "actions": [],
+  "seen": true
+}

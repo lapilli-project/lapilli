@@ -14,7 +14,8 @@ import (
 // it is caught by a firing of one, its labels disagreeing on --match, and
 // the incident's page, the rule's and the API say the catch is linked. A
 // start with --linked-only judges every firing again, once: an incident
-// that lists alerts is then caught by them alone.
+// that lists alerts is then caught by them alone. The Settings page says
+// which is in effect.
 func TestLinkedAlertsServe(t *testing.T) {
 	ctx := context.Background()
 	s, _ := server(t, nil)
@@ -67,6 +68,25 @@ func TestLinkedAlertsServe(t *testing.T) {
 		t.Errorf("/api/v1/incidents: %v %s", err, body)
 	}
 
+	// The Settings page, in each language, and its API say whether
+	// --linked-only is in effect.
+	says := func(on bool) {
+		t.Helper()
+		_, page, _ := get(t, h, "/settings")
+		ko := pageIn(t, h, "/settings", "", "ko")
+		_, js, _ := get(t, h, "/api/v1/settings")
+		want := map[bool][3]string{
+			true:  {"<code>--linked-only</code>: On: an incident that lists", "연결된 알림만 잡은 것으로", `"linked_only": true`},
+			false: {"<code>--linked-only</code>: Off: an incident that lists", "연결된 알림과,", `"linked_only": false`},
+		}
+		for i, body := range []string{page, ko, js} {
+			if !strings.Contains(body, want[on][i]) || strings.Contains(body, want[!on][i]) {
+				t.Errorf("--linked-only %v: want %q, not %q, in %s", on, want[on][i], want[!on][i], body)
+			}
+		}
+	}
+	says(false)
+
 	n := 0
 	was := judgeAll
 	judgeAll = func(l *ledger.Ledger, ctx context.Context, o verdict.Options, done func(float64)) error {
@@ -79,6 +99,7 @@ func TestLinkedAlertsServe(t *testing.T) {
 		t.Fatalf("judged all %d times with --linked-only as it was", n)
 	}
 	s.cfg.Options.LinkedOnly = true
+	says(true)
 	s.jobs(ctx, false)
 	s.jobs(ctx, false)
 	if v, err := s.l.Meta(ctx, linkedMeta); n != 1 || v != "1" || err != nil {

@@ -1247,7 +1247,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 			}
 		}
 	}
-	if len(s.alarms) > 0 {
+	if len(s.alarms) > 0 || s.cfg.JudgedHistory != nil {
 		ties, err := s.l.Ties(ctx)
 		if err != nil {
 			return ruleView{}, err
@@ -2213,6 +2213,9 @@ type settingView struct {
 
 type settingsView struct {
 	Settings []settingView
+	// LinkedOnly is --linked-only, a flag where serve is started, not a
+	// setting the UI changes (docs/design/links.md).
+	LinkedOnly bool `json:"linked_only"`
 	// Criteria are the incident criteria (criteria.go); Sources, where
 	// incidents come from (sources.go), the page's alone.
 	Criteria *criteriaView `json:"criteria,omitempty"`
@@ -2255,7 +2258,7 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	if err != nil {
 		return settingsView{}, err
 	}
-	var v settingsView
+	v := settingsView{LinkedOnly: o.LinkedOnly}
 	for _, st := range settable {
 		x := settingView{Key: st.key, Flag: st.flag, CommandLine: show(s.cfg.Options, st.key), Value: show(o, st.key)}
 		if c, ok := set[st.key]; ok {

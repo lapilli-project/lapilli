@@ -126,12 +126,14 @@ func TiesOf(rs []rules.Rule, names []string) ([]Tie, Untied) {
 	return out, untied
 }
 
-// ties are the latest version's, worked out once a version.
+// ties are the latest version's, worked out once a version, and the
+// names its rules are judged under.
 type ties struct {
 	sync.Mutex
 	version int64
 	list    []Tie
 	untied  Untied
+	names   []string
 }
 
 // reader reads the ledger: in a write, or apart from one.
@@ -140,7 +142,9 @@ type reader interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// latestTies are the ties of the latest version.
+// latestTies are the ties of the latest version: its alarms', and those
+// of its rules judged from Grafana's own alert state history
+// (grafanaTies), which aren't kept with it.
 func (l *Ledger) latestTies(ctx context.Context, q reader) ([]Tie, Untied, error) {
 	var id int64
 	var docText, names string
@@ -151,18 +155,32 @@ func (l *Ledger) latestTies(ctx context.Context, q reader) ([]Tie, Untied, error
 	if err != nil {
 		return nil, nil, err
 	}
+	list, untied, ns, err := l.versionTies(ctx, q, id, docText, names)
+	if err != nil {
+		return nil, nil, err
+	}
+	more, err := l.grafanaTies(ctx, q, ns)
+	if err != nil {
+		return nil, nil, err
+	}
+	return slices.Concat(list, more), untied, nil
+}
+
+// versionTies are the ties a version's alarms make, worked out once a
+// version, and the names its rules are judged under.
+func (l *Ledger) versionTies(ctx context.Context, q reader, id int64, docText, names string) ([]Tie, Untied, []string, error) {
 	l.ties.Lock()
 	defer l.ties.Unlock()
 	if l.ties.version == id {
-		return l.ties.list, l.ties.untied, nil
+		return l.ties.list, l.ties.untied, l.ties.names, nil
 	}
 	var refs []docRef
 	var ns []string
 	if err := json.Unmarshal([]byte(docText), &refs); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := json.Unmarshal([]byte(names), &ns); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// Only a version that reads alarms through --alarms makes ties.
 	alarms := false
@@ -174,16 +192,16 @@ func (l *Ledger) latestTies(ctx context.Context, q reader) ([]Tie, Untied, error
 	if alarms {
 		docs, err := l.docsIn(ctx, q, refs)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		rs, err := rules.FromDocs(docs)
 		if err != nil || len(rs) != len(ns) {
-			return nil, nil, nil // read afresh by serve, which names it again
+			return nil, nil, ns, nil // read afresh by serve, which names it again
 		}
 		list, untied = TiesOf(rs, ns)
 	}
-	l.ties.version, l.ties.list, l.ties.untied = id, list, untied
-	return list, untied, nil
+	l.ties.version, l.ties.list, l.ties.untied, l.ties.names = id, list, untied, ns
+	return list, untied, ns, nil
 }
 
 // heldBy are a source's recorded rules, each with the one alarm ID its
@@ -247,7 +265,9 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 	}
 	byID, byName := map[string]string{}, map[string]string{}
 	for _, x := range list {
-		byID[x.Source+"\x00"+AlarmKey(x.ID)] = x.Rule
+		if x.ID != "" {
+			byID[x.Source+"\x00"+AlarmKey(x.ID)] = x.Rule
+		}
 		if x.Name != "" {
 			byName[x.Source+"\x00"+x.Name] = x.Rule
 		}
@@ -257,6 +277,10 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 		for _, h := range hs {
 			var rule string
 			switch {
+			case src == GrafanaSource:
+				// Grafana's history is of its rules by name: an alert's
+				// alarm_id is a label of its own.
+				rule = byName[src+"\x00"+h.sent]
 			case h.many:
 				continue // the alerts of two alarms
 			case h.alarm != "":
@@ -301,6 +325,9 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 		switch {
 		case len(hs) == 1:
 			out[x.Rule] = hs[0]
+		case x.Source == GrafanaSource:
+			// Nothing copied in for it yet, as it hasn't fired; or two of
+			// its name, at two severities: not replayed, with no record.
 		case len(hs) > 1:
 			untied[x.Rule] = UntiedTwo
 		case x.Name == "":
@@ -332,20 +359,23 @@ func (l *Ledger) tie(t *txn, list []Tie) (map[string]bool, error) {
 			continue
 		}
 		var other int64
-		var source string
+		var source, grp, unsupported string
 		var series int
-		err := t.QueryRowContext(t.ctx, "SELECT r.id, r.source, (SELECT count(*) FROM series WHERE rule_id = r.id) FROM rules r WHERE r.name = ?", rule).
-			Scan(&other, &source, &series)
+		err := t.QueryRowContext(t.ctx, "SELECT r.id, r.source, r.grp, r.unsupported, (SELECT count(*) FROM series WHERE rule_id = r.id) FROM rules r WHERE r.name = ?", rule).
+			Scan(&other, &source, &grp, &unsupported, &series)
+		carry := false
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
 			return nil, err
 		case source == "" && series == 0:
-			// What a run kept of the alarm, with nothing judged under it.
+			// What a run kept of the alarm, with nothing judged under it:
+			// what it said of it, its group and why it isn't replayed, goes
+			// with the name.
 			if _, err := t.ExecContext(t.ctx, "DELETE FROM rules WHERE id = ?", other); err != nil {
 				return nil, err
 			}
-			t.idsChanged = true
+			t.idsChanged, carry = true, true
 		case source == "":
 			delete(keep, rule) // a rule that fired under the name: not tied
 			continue
@@ -364,6 +394,11 @@ func (l *Ledger) tie(t *txn, list []Tie) (map[string]bool, error) {
 		}
 		if err := l.rename(t, h.id, h.name, rule); err != nil {
 			return nil, err
+		}
+		if carry {
+			if _, err := t.ExecContext(t.ctx, "UPDATE rules SET grp = ?, unsupported = ? WHERE id = ?", grp, unsupported, h.id); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return keep, nil
@@ -425,15 +460,17 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 	type cover struct{ since, to int64 }
 	covers := map[string]cover{}
 	for rule, h := range found {
-		if h.name != rule {
-			why[rule] = UntiedNone // not yet named as the alarm: the next copy or version names it
-			continue
-		}
 		src := ""
 		for _, x := range list {
 			if x.Rule == rule {
 				src = x.Source
 			}
+		}
+		if h.name != rule {
+			if src != GrafanaSource {
+				why[rule] = UntiedNone // not yet named as the alarm: the next copy or version names it
+			}
+			continue
 		}
 		c, ok := covers[src]
 		if !ok {

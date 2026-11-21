@@ -3,13 +3,16 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // allMutes are the mutes the ledger keeps.
@@ -230,15 +233,15 @@ func TestEventRecorderMutesPerDay(t *testing.T) {
 	}
 }
 
-// A firing no notification told of says what muted it, where its
-// notifications are shown: on the day's firings, the rule's page and MCP's
-// rule. A silence by its ID, an inhibition, and a notification's word that
-// doesn't say which; a firing nothing muted says what it said before. It
-// shows with no notification kept at all.
-func TestMutesShown(t *testing.T) {
+// mutedServer is a server whose three latest firings of Errors no
+// notification told of: a silence muted the first, an inhibition the
+// second, and a notification of the third's group said it was muted, by
+// what it doesn't say.
+func mutedServer(t *testing.T) (s *Server, silenced, inhibited, either ledger.Firing) {
+	t.Helper()
 	ctx := context.Background()
-	s := notifyServer(t, nil)
-	h, nh := s.Handler(), s.NotifyHandler()
+	s = notifyServer(t, nil)
+	nh := s.NotifyHandler()
 	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: time.Unix(0, 0), To: now.Add(time.Hour), Rule: "Errors", Limit: 50})
 	if err != nil || len(fs) < 3 {
 		t.Fatalf("%d firings: %v", len(fs), err)
@@ -261,7 +264,7 @@ func TestMutesShown(t *testing.T) {
 			t.Fatalf("%d %s", code, body)
 		}
 	}
-	silenced, inhibited, either := fs[0], fs[1], fs[2]
+	silenced, inhibited, either = fs[0], fs[1], fs[2]
 	mute(silenced, "silence", nil)
 	mute(inhibited, "inhibition", nil)
 	// A notification of the group of the third that delivered another
@@ -281,6 +284,18 @@ func TestMutesShown(t *testing.T) {
 		t.Fatalf("%d %s", code, body)
 	}
 	s.now = func() time.Time { return now }
+	return s, silenced, inhibited, either
+}
+
+// A firing no notification told of says what muted it, where its
+// notifications are shown: on the day's firings, the rule's page and MCP's
+// rule. A silence by its ID, an inhibition, and a notification's word that
+// doesn't say which; a firing nothing muted says what it said before. It
+// shows with no notification kept at all.
+func TestMutesShown(t *testing.T) {
+	ctx := context.Background()
+	s, silenced, inhibited, either := mutedServer(t)
+	h := s.Handler()
 
 	_, body, _ := get(t, h, "/rules/Errors?tab=firings")
 	for _, want := range []string{"muted by a silence <code>0b5e4a1c-3f2d-4e8a-9c71-2a6d5f0e9b13</code>", "inhibited by another alert", "muted by a silence or an inhibition"} {
@@ -318,6 +333,152 @@ func TestMutesShown(t *testing.T) {
 			r.Header.Set("Accept-Language", lang)
 			h.ServeHTTP(httptest.NewRecorder(), r)
 		}
+	}
+	missing.Lock()
+	for k := range missing.m {
+		t.Errorf("no translation: %q", k)
+	}
+	missing.Unlock()
+}
+
+// The digest and the reports count the firings of the span that paged no
+// one as their pages say it: those muted, by what muted them first, and
+// those nothing was told of muting, of a rule notifications were counted
+// for; of the rules they cover alone. Without a mute kept, they say
+// nothing of it, as before. In each language.
+func TestMutesCounted(t *testing.T) {
+	ctx := context.Background()
+	o := func(s *Server) verdict.Options {
+		o, err := s.options(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	plain := notifyServer(t, nil)
+	if code, body, _ := send(t, plain.NotifyHandler(), "/v1/alertmanager/events", oneEvent(nil), bearer(notifyToken)); code != http.StatusOK {
+		t.Fatalf("%d %s", code, body)
+	}
+	from := plain.l.Midnight(ledger.Week(plain.l.Day(now)))
+	to := from.AddDate(0, 0, 7)
+	rep, err := plain.ledgerReportFor(ctx, from, to, o(plain), false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x, err := plain.sent(ctx, rep, from, to); err != nil || x == nil || x.PagedNoOne != nil {
+		t.Fatalf("no mute kept: %+v %v", x, err)
+	}
+
+	s, silenced, _, either := mutedServer(t)
+	if from = s.l.Midnight(ledger.Week(s.l.Day(silenced.Start))); !from.Before(silenced.Start) {
+		t.Fatal(from)
+	}
+	// A notification of the earliest of Errors' firings, the first to
+	// come: those after it that none told of, and nothing muted, paged no
+	// one.
+	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: from, To: either.Start, Rule: "Errors"})
+	if err != nil || len(fs) < 2 {
+		t.Fatalf("%d firings: %v", len(fs), err)
+	}
+	first := fs[len(fs)-1]
+	b := oneEvent(func(e map[string]any) {
+		e["@timestamp"] = first.Start.Add(time.Minute).Format(time.RFC3339Nano)
+		labels := map[string]any{"alertname": "Errors", "cluster": "eu-1"}
+		for k, v := range first.Labels {
+			labels[k] = v
+		}
+		notif(e)["alerts"] = []any{map[string]any{"fingerprint": "7", "details": map[string]any{"name": "Errors", "labels": labels, "startsAt": first.Start.Format(time.RFC3339)}}}
+		notif(e)["groupInfo"].(map[string]any)["groupKey"] = `{}:{alertname="Errors",service="search"}`
+		notif(e)["flushId"] = "2"
+	})
+	s.now = func() time.Time { return first.Start.Add(10 * time.Minute) }
+	if code, body, _ := send(t, s.NotifyHandler(), "/v1/alertmanager/events", b, bearer(notifyToken)); code != http.StatusOK {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.now = func() time.Time { return now }
+	to = from.AddDate(0, 0, 7)
+	rep, err = s.ledgerReportFor(ctx, from, to, o(s), false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What the pages say of each firing of the span.
+	fs, err = s.l.Firings(ctx, ledger.FiringQuery{From: from, To: to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := make([]firingLine, len(fs))
+	for i, f := range fs {
+		lines[i].Firing = f
+	}
+	if err := s.notifiedFirings(ctx, lines); err != nil {
+		t.Fatal(err)
+	}
+	var want ledger.Unpaged
+	for _, l := range lines {
+		switch {
+		case l.Notified > 0:
+		case len(l.Muted) > 0 && l.Muted[0].Kind == ledger.MutedSilence:
+			want.Silence++
+		case len(l.Muted) > 0 && l.Muted[0].Kind == ledger.MutedInhibition:
+			want.Inhibition++
+		case len(l.Muted) > 0:
+			want.Either++
+		case l.Counted:
+			want.Nothing++
+		}
+	}
+	if want.Silence != 1 || want.Inhibition != 1 || want.Either != 1 || want.Nothing == 0 {
+		t.Fatalf("the pages: %+v", want)
+	}
+	x, err := s.sent(ctx, rep, from, to)
+	if err != nil || x == nil || x.PagedNoOne == nil || *x.PagedNoOne != want {
+		t.Fatalf("counted %+v, want %+v (%v)", x, want, err)
+	}
+	line := fmt.Sprintf("Firings that paged no one: 1 muted by a silence, 1 inhibited by another alert, 1 muted by a silence or an inhibition, %d with no mute told of.", want.Nothing)
+	if got := x.text("en"); !strings.Contains(got, line) {
+		t.Errorf("the line: %s", got)
+	}
+	// As the webhook and a report's numbers have it.
+	about := map[string]any{}
+	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = json.Marshal(about["notifications"])
+	if !strings.Contains(string(b), fmt.Sprintf(`"paged_no_one":{"silence":1,"inhibition":1,"either":1,"nothing":%d}`, want.Nothing)) {
+		t.Errorf("digest.ready: %s", b)
+	}
+	// A report of rules other than Errors counts none of its.
+	other := *rep
+	other.Rules = slices.DeleteFunc(slices.Clone(rep.Rules), func(r verdict.RuleResult) bool { return r.Rule == "Errors" })
+	if x, err := s.sent(ctx, &other, from, to); err != nil || x.PagedNoOne == nil || x.PagedNoOne.Silence+x.PagedNoOne.Inhibition+x.PagedNoOne.Either != 0 {
+		t.Errorf("without Errors: %+v %v", x, err)
+	}
+	// The report's section and the digest say it.
+	r := ledger.Scheduled{Name: "weekly", Schedule: "weekly mon@09:00", Sections: []string{"notifications"}}
+	sch, err := r.When()
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := s.buildReport(ctx, r, nil, sch, time.UTC, to, from, to, o(s), to, to)
+	if err != nil || !strings.Contains(built.Text, line) {
+		t.Errorf("the report: %v\n%s", err, built.Text)
+	}
+	digest, err := s.digestText(ctx, rep, nil, from, to, nil)
+	if err != nil || !strings.Contains(digest, line) {
+		t.Errorf("the digest: %v\n%s", err, digest)
+	}
+
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	partial := *x.PagedNoOne
+	partial.Partial = true
+	x.PagedNoOne = &partial
+	for _, lang := range []string{"ko", "ja", "es"} {
+		x.text(lang)
+		x.PagedNoOne.Either = 0
+		x.text(lang)
+		x.PagedNoOne.Either = 1
 	}
 	missing.Lock()
 	for k := range missing.m {

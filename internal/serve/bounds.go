@@ -232,7 +232,7 @@ func approverOK(x string) error {
 	case kind == "group" && strings.Contains(who, ","):
 		return bad("approver %s: a group's name has no comma", x)
 	}
-	if f := ledger.FoldName(who); kind == "user" && slices.ContainsFunc([]string{"anonymous", ledger.Copier, ledger.FiringsCopier, ledger.TaskTracker,
+	if f := ledger.FoldName(who); kind == "user" && slices.ContainsFunc([]string{"anonymous", ledger.Copier, ledger.FiringsCopier, ledger.GrafanaCopier, ledger.TaskTracker,
 		ledger.ChangesCopier, ledger.Proposer, ledger.ConfigBy}, func(n string) bool { return f == ledger.FoldName(n) }) {
 		return bad("approver %s: a name Lapilli keeps for itself", x)
 	}

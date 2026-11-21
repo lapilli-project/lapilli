@@ -2,6 +2,106 @@
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-11-21
+
+Grafana's rules on data sources Lapilli can't replay (SQL,
+Elasticsearch, InfluxDB, a cloud's monitoring, TestData) judged from
+Grafana's own alert state history. How many firings paged no one, and
+why, in the digest and the reports. Jira Service Management's and
+FireHydrant's linked alerts, and near misses looked for by the link too.
+No schema change: the ledger stays at 029.
+
+Before upgrading:
+- **The source `grafana` is `lapilli serve`'s own** from this release:
+  serve copies Grafana's own alert state history in under it, and a job
+  copying firings in under that name (`PUT /api/v1/firings/grafana`) is
+  refused. A ledger where a job already has firings under it keeps them,
+  and serve copies nothing under it until they are gone
+  ([docs/upgrading.md](docs/upgrading.md#a-source-named-grafana)).
+
+### Added
+
+- **Grafana's rules Lapilli can't replay, judged from Grafana's own alert
+  state history.** A rule `--grafana` holds whose condition reads a data
+  source that is neither PromQL nor LogQL (SQL, Elasticsearch, InfluxDB, a
+  cloud's monitoring, TestData) was only listed. Where Grafana keeps a
+  history it serves (annotations, its default from 12.4 on, or Loki), its
+  firings now come from that history, read as `--check-replay` reads it,
+  within the same bounds, and are judged as copied-in firings are: stones,
+  precision, re-firings, hours, incidents caught and missed, linked
+  alerts. It stays not replayed, so no longer `for`, near misses or
+  `--compare` for it; `lapilli verdict` says so under its table, and
+  `--json` gives it `source: "grafana"`. `lapilli serve` copies the history
+  in each round under the source `grafana`, a day a write, and ties each
+  such rule to it by name, as a cloud's alarm is tied to its own: one rule,
+  its page saying so. A day the history can't say all of (refused, too
+  much, changes passed over, a firing a write can't hold, or behind its
+  retention) is left a gap, never a quiet day. No new ledger schema. `--grafana-history=false` lists
+  them as before (docs/design/grafanajudged.md).
+- **How many firings paged no one, and why, in the digest and the
+  reports.** Beside the notifications sent, the weekly digest, a team's,
+  and a report's `notifications` section say how many of the span's
+  firings no notification told of: muted by a silence, inhibited by
+  another alert, muted by one or the other, or with no mute told of, as
+  their pages say it; `digest.ready` and `report.ready` carry it as
+  `notifications.paged_no_one`. Given once the ledger keeps a mute, and
+  worked out when read: no schema change. Only rules with a mute about
+  such a firing have their firings and mutes read, the hours about each
+  firing's start and end, 200,000 rows of them at most; past that, the
+  line says some weren't counted ([docs/design/mutes.md](docs/design/mutes.md)).
+- **Jira Service Management's linked alerts** (`recipes/incidents/jira.sh`,
+  with `JSM_CLOUD_ID`, the site's cloud id): each incident's alert ids from
+  JSM's incident API, which Atlassian has in beta, and each alert from its
+  operations API, as the same account. One that Alertmanager's Opsgenie
+  notifier sent, the labels its group's alerts share in its extra
+  properties (0.22.0 and later), is one of the incident's `alerts`. An
+  issue the API says isn't an incident, and an alert it no longer has, are
+  counted on stderr; a 429 is waited out as its `Retry-After` says.
+  `ALERTS`, `ALERT_LABELS` and `MAX_ALERT_REQUESTS` as the other recipes
+  take them.
+- **FireHydrant's incident alerts** (`firehydrant.sh`): those `GET
+  /v1/incidents/{incident_id}/alerts` lists, of the rule `alertname` names
+  among their labels, or `alertmanager/labels-alertname`, as FireHydrant's
+  Alertmanager source names it. `ALERTS`, `ALERT_LABELS` and
+  `MAX_ALERT_REQUESTS` too.
+- **`linkedOnly`** in the Helm chart passes `--linked-only`, to the
+  CronJob and to serve alike (charts/lapilli/README.md).
+- **The Settings page says whether `--linked-only` is in effect**, beside
+  the judging settings, in every language, and `GET /api/v1/settings` as
+  `linked_only`.
+
+### Changed
+
+- **Near misses are looked for by the link too** (docs/design/links.md).
+  Of an incident that lists the alerts its tool linked to it, a rule it
+  lists is looked at for a shorter `for` or a nearer number whatever
+  `--match` says, nearly catching it where its labels agree with the
+  alert's; with `--linked-only`, only the rules it lists are. One that
+  lists none is looked at by labels, as before. In `lapilli verdict` and
+  `lapilli serve` alike.
+- **`datadog.sh`, `newrelic.sh` and `firehydrant.sh` wait out a 429**,
+  as `rootly.sh` does: as Datadog's `X-RateLimit-Reset` or a `Retry-After`
+  says (a wait written `08` is eight seconds), or else 5 seconds and
+  twice as long each time; two minutes at most a wait, five waits a
+  request and ten minutes in all a run, past which they stop with nothing
+  written. Any other answer that isn't a 2xx stops them, as before, now
+  saying its status.
+- The incident recipes' `.jq` files take `ALERT_LABELS` as `--arg
+  alert_labels`, not `--arg labels`, which `jira.jq` has for `JIRA_LABELS`;
+  `jira.jq` and `firehydrant.jq`, run by hand, now want `jq -L
+  recipes/incidents`, as the others do.
+- The firings port refuses the source `grafana`, now `lapilli serve`'s
+  own: a job copying firings in under that name names another.
+- A rule judged from its history, a cloud's alarm tied to what is copied in
+  for it among them, is counted in the report's table and in `--metrics`,
+  and said under the table, where it was listed under "Could not replay".
+
+### Fixed
+
+- A cloud's alarm tied to its history by a copy read as replayed until the
+  next run: the tie now carries the reason it isn't replayed, and its
+  group, at once.
+
 ## [0.67.0] - 2026-11-21
 
 Incidents judged by the alerts their tool linked to them, and why a

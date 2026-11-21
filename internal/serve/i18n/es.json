@@ -1274,6 +1274,9 @@
  "setting the replay beside what really fired, %s": "contrastando el backtest con lo que realmente se disparó, %s",
  "setting the replay beside what really fired": "contrastando el backtest con lo que realmente se disparó",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada.",
+ "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "Disparos que no avisaron a nadie: %d acallados por un silencio, %d inhibidos por otra alerta, %d sin ningún silencio ni inhibición recibidos.",
+ "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "Disparos que no avisaron a nadie: %d acallados por un silencio, %d inhibidos por otra alerta, %d acallados por un silencio o una inhibición, %d sin ningún silencio ni inhibición recibidos.",
+ "Mutes were too many to look through for every firing: those of some rules weren't counted.": "Había demasiados silencios e inhibiciones para revisarlos con cada disparo: los de algunas reglas no se contaron.",
  "The most for nothing: %s.": "Las que más avisaron en vano: %s.",
  "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: no se ha copiado nada de %s desde %s; puede que el job que copia sus disparos se haya detenido",
  "from and to are whole seconds, such as 2026-11-02T00:00:00Z": "from y to son segundos enteros, como 2026-11-02T00:00:00Z",
@@ -2798,5 +2801,12 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or were judged by nothing.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada, o fuera del juicio.",
  "%d caught nothing, %d judged by nothing, %d excused": "%d no detectaron nada, %d fuera del juicio, %d eximidos",
  "%d fired, %d caught something, %d caught nothing, %d judged by nothing, %d excused": "%d disparos, %d detectaron algo, %d no detectaron nada, %d fuera del juicio, %d eximidos",
- "a week before the ledger's first firing": "una semana anterior al primer disparo del registro"
+ "a week before the ledger's first firing": "una semana anterior al primer disparo del registro",
+ "On: an incident that lists the alerts its tool linked to it is caught by those alone; one that lists none, by the time and labels.": "Activado: a un incidente que lista las alertas que su herramienta le vinculó solo lo detectan esas; a uno que no lista ninguna, el tiempo y las etiquetas.",
+ "Off: an incident that lists the alerts its tool linked to it is caught by those, and by any other firing at the time whose labels agree.": "Desactivado: a un incidente que lista las alertas que su herramienta le vinculó lo detectan esas, y cualquier otro disparo de ese momento cuyas etiquetas coincidan.",
+ "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "Se da al iniciar lapilli serve, no aquí: un inicio con ella añadida o quitada vuelve a juzgar todos los disparos, una vez.",
+ "A Grafana rule Lapilli can't replay: what Grafana's own alert state history says it fired, copied in from %s on, is its record, so Lapilli can't say what a change to it would do.": "Una regla de Grafana a la que Lapilli no puede hacer backtest: lo que el historial de estados de alerta del propio Grafana dice que disparó, copiado desde %s, es su registro, así que Lapilli no puede decir qué haría un cambio en ella.",
+ "copying in what Grafana's alert state history says its rules fired, %s": "copiando lo que el historial de estados de alerta de Grafana dice que dispararon sus reglas, %s",
+ "copying in Grafana's alert state history": "copiando el historial de estados de alerta de Grafana",
+ "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s es la fuente bajo la que lapilli serve copia el historial de estados de alerta del propio Grafana: usa otro nombre"
 }

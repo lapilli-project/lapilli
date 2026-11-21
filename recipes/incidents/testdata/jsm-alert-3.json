@@ -1,0 +1,27 @@
+{
+  "id": "28517c02-e621-4d51-9435-a7fe693b93dd-1770130534412",
+  "tinyId": "1236",
+  "createdAt": "2026-10-28T03:02:05.958Z",
+  "updatedAt": "2026-10-28T03:40:05.958Z",
+  "message": "CheckoutLatency",
+  "source": "http://alertmanager:9093",
+  "status": "closed",
+  "alias": "0f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff00",
+  "tags": [],
+  "extraProperties": {
+    "alertname": "CheckoutLatency",
+    "cluster": "eu-1",
+    "service": "checkout"
+  },
+  "acknowledged": false,
+  "closeTime": "2026-10-28T03:40:05.958Z",
+  "count": 1,
+  "snoozed": false,
+  "lastOccuredAt": "2026-10-28T03:02:00Z",
+  "integrationType": "Prometheus",
+  "integrationName": "Prometheus",
+  "priority": "P3",
+  "responders": [],
+  "actions": [],
+  "seen": false
+}

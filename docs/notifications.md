@@ -95,10 +95,11 @@ lines say the same, not "for nothing". `/metrics` has
 `lapilli_rule_notifications{rule, receiver, reason}` over seven days; MCP's
 `rules` and `rule` carry the same, and the weekly digest, to Slack and the
 webhook, a line of it: how many were sent, repeats, those while people
-slept, those for nothing, and the rules that sent the most for nothing; a
-team's digest, for its rules. Notifications can't be replayed for history,
-so each number counts from the first that came. In the chart:
-`serve.notificationsAPI`.
+slept, those for nothing, and the rules that sent the most for nothing,
+and, once mutes are kept, how many firings paged no one and why
+([below](#why-a-firing-paged-no-one)); a team's digest, for its rules.
+Notifications can't be replayed for history, so each number counts from
+the first that came. In the chart: `serve.notificationsAPI`.
 
 The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's
 `max_alerts` keeps it under), 20 a second from each source, one write at a
@@ -176,6 +177,16 @@ told of from two evaluations before the firing started to two after it
 ended, as read in the hours about its start and its end. A firing that
 paged no one with nothing muting it was routed nowhere, or never reached
 the alert manager.
+
+The weekly digest, a team's, and a report's `notifications` section then
+say, beside the notifications sent, how many of the span's firings paged
+no one: muted by a silence, inhibited by another alert, muted by one or
+the other, or with no mute told of, as their pages say it.
+`digest.ready` and `report.ready` carry it as
+`notifications.paged_no_one`: `silence`, `inhibition`, `either`,
+`nothing`, and `partial` when there were too many mutes to look through
+for every firing. It reads 200,000 rows of firings and mutes at most
+([design/mutes.md](design/mutes.md#bounds)).
 
 Mutes come at the events' rate (200 a second, bursts of 1,000), not the
 notifications', so a storm of them can't keep a delivery out; 1,000 rows

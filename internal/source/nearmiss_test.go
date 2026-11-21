@@ -151,3 +151,55 @@ func TestNearMissesSignals(t *testing.T) {
 		t.Errorf("asked %d questions, %d without Slow: Slow was looked at", with, without)
 	}
 }
+
+// A rule an incident lists among the alerts its tool linked to it is looked
+// at for a near miss of it whatever --match says, and what a shorter "for"
+// would cost counts its catch by the link; one the alert's labels rule out
+// isn't. With --linked-only, an incident that lists alerts has only those
+// it lists looked at, and one that lists none is looked at as before. The
+// same for lapilli verdict and lapilli serve, which both look by this.
+func TestNearMissesLinked(t *testing.T) {
+	tue := t0.Add(24 * time.Hour)
+	rs := []rules.Rule{
+		{Name: "Errors", Expr: "errors", For: 5 * time.Minute},
+		{Name: "Slow", Expr: "slow", For: time.Hour},
+		{Name: "Search", Expr: "errors", For: 5 * time.Minute, Labels: map[string]string{"service": "search"}}, // another service's
+	}
+	versions := []replay.Version{{Rules: rs}}
+	near := func(alerts []incident.Alert, linkedOnly bool) map[string]verdict.NearMiss {
+		t.Helper()
+		o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+			RefireWithin: time.Hour, UnknownLen: time.Hour, LinkedOnly: linkedOnly}
+		incs := []incident.Incident{{ID: "INC-1", Start: tue.Add(10 * time.Hour), End: tue.Add(10*time.Hour + 30*time.Minute),
+			Labels: incident.Labels{"service": {"checkout"}}, Alerts: alerts}}
+		h := &held{}
+		_, fs := replay.Run(context.Background(), h, versions, o.From, o.To, time.Minute, 4)
+		rep := verdict.Judge(rs, fs, incs, o)
+		if !rep.Incidents[0].Missed() {
+			t.Fatalf("INC-1 caught: %+v", rep.Incidents[0])
+		}
+		nms, done, err := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
+		if !done || err != nil {
+			t.Fatalf("not done: %v", err)
+		}
+		out := map[string]verdict.NearMiss{}
+		for _, nm := range nms {
+			out[nm.Rule] = nm
+		}
+		return out
+	}
+	search := []incident.Alert{{Rule: "Search"}}
+	got := near(search, false)
+	if s, ok := got["Search"]; len(got) != 3 || !ok || s.NewFor != 2*time.Minute || s.After == nil || s.After.White != 1 {
+		t.Errorf("Search linked: %+v, want Search with a for of 2m catching INC-1 by the link, beside Errors and Slow", got)
+	}
+	if got := near([]incident.Alert{{Rule: "Search", Labels: map[string]string{"service": "checkout"}}}, false); len(got) != 2 || got["Search"].Rule != "" {
+		t.Errorf("Search linked about checkout, which its firings never are: %+v, want Errors and Slow alone", got)
+	}
+	if got := near(search, true); len(got) != 1 || got["Search"].Rule == "" {
+		t.Errorf("--linked-only: %+v, want Search alone", got)
+	}
+	if got := near(nil, true); len(got) != 2 || got["Search"].Rule != "" {
+		t.Errorf("--linked-only, listing no alerts: %+v, want Errors and Slow", got)
+	}
+}

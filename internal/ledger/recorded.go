@@ -153,6 +153,11 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			return out, err
 		}
 		rk := recordedKey{f.Rule, labels["severity"]}
+		if source == GrafanaSource {
+			// Grafana's history is of its rules, by name, whatever the
+			// severities their alerts carry: one recorded rule a rule.
+			rk.severity = ""
+		}
 		text := l.d.kept(string(b))
 		k := key{rk, text, f.Start.Unix()}
 		end := nullable(f.End)
@@ -500,38 +505,46 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing, now ti
 		return invalid("one write holds %d firings at most: send a shorter period", MaxRecorded)
 	}
 	for i, f := range fs {
-		n := i + 1
-		switch {
-		case f.Rule == "" || utf8.RuneCountInString(f.Rule) > maxRuleName || !utf8.ValidString(f.Rule):
-			return invalid("firing %d: a rule's name is 1 to 512 characters", n)
-		case !plain(f.Rule):
-			return invalid("firing %d: a rule's name has a character that doesn't show, such as a line break or a zero-width space", n)
-		case f.Start.Before(from) || !f.Start.Before(to):
-			return invalid("firing %d starts at %s, outside the period: send it with a period it starts in", n, f.Start.UTC().Format(time.RFC3339))
-		case f.Start.After(ahead):
-			return invalid("firing %d starts in the future", n)
-		case !f.End.IsZero() && f.End.Before(f.Start):
-			return invalid("firing %d ends before it starts", n)
-		case !f.End.IsZero() && !sane(f.End):
-			return invalid("firing %d: its end is from 1970 to 9999", n)
-		case f.End.After(ahead):
-			return invalid("firing %d ends in the future: send it without an end while it is on", n)
-		case len(f.Labels) > 32:
-			return invalid("firing %d has more than 32 labels", n)
+		if err := recordable(i+1, f, ahead, from, to); err != nil {
+			return err
 		}
-		size := 0
-		for k, v := range f.Labels {
-			if k == "" || !utf8.ValidString(k) || !utf8.ValidString(v) {
-				return invalid("firing %d: a label needs a name, and labels are UTF-8", n)
-			}
-			if !plain(k) || k == "severity" && !plain(v) {
-				return invalid("firing %d: a label's name, or its severity, has a character that doesn't show", n)
-			}
-			size += len(k) + len(v) + 6
+	}
+	return nil
+}
+
+// recordable checks firing n of a write of the period [from, to), which
+// may run up to ahead; with no period, its start is checked against none.
+func recordable(n int, f firing.Firing, ahead, from, to time.Time) error {
+	switch {
+	case f.Rule == "" || utf8.RuneCountInString(f.Rule) > maxRuleName || !utf8.ValidString(f.Rule):
+		return invalid("firing %d: a rule's name is 1 to 512 characters", n)
+	case !plain(f.Rule):
+		return invalid("firing %d: a rule's name has a character that doesn't show, such as a line break or a zero-width space", n)
+	case !from.IsZero() && (f.Start.Before(from) || !f.Start.Before(to)):
+		return invalid("firing %d starts at %s, outside the period: send it with a period it starts in", n, f.Start.UTC().Format(time.RFC3339))
+	case f.Start.After(ahead):
+		return invalid("firing %d starts in the future", n)
+	case !f.End.IsZero() && f.End.Before(f.Start):
+		return invalid("firing %d ends before it starts", n)
+	case !f.End.IsZero() && !sane(f.End):
+		return invalid("firing %d: its end is from 1970 to 9999", n)
+	case f.End.After(ahead):
+		return invalid("firing %d ends in the future: send it without an end while it is on", n)
+	case len(f.Labels) > 32:
+		return invalid("firing %d has more than 32 labels", n)
+	}
+	size := 0
+	for k, v := range f.Labels {
+		if k == "" || !utf8.ValidString(k) || !utf8.ValidString(v) {
+			return invalid("firing %d: a label needs a name, and labels are UTF-8", n)
 		}
-		if size > maxLabelBytes {
-			return invalid("firing %d: its labels are 4 KB at most in all", n)
+		if !plain(k) || k == "severity" && !plain(v) {
+			return invalid("firing %d: a label's name, or its severity, has a character that doesn't show", n)
 		}
+		size += len(k) + len(v) + 6
+	}
+	if size > maxLabelBytes {
+		return invalid("firing %d: its labels are 4 KB at most in all", n)
 	}
 	return nil
 }

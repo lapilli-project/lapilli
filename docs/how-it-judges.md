@@ -163,7 +163,8 @@ in `--json`). Other firings still catch it by time and labels, unless
 `--linked-only`: then an incident that lists alerts is caught by those
 alone, and one that lists none as above. A firing it lists that came after
 its end is its alert too late (below), labels or not. Which rules are
-noisy, the record and near misses are worked out as ever.
+noisy and the record are worked out as ever; near misses are looked for by
+the link too (below).
 
 **Noisy rules.** A rule that fired 10 times or more in the period, with under
 20% of its firings catching anything, fires whatever happens; when it lands on
@@ -353,7 +354,11 @@ with that, and how often for nothing. A noisy rule, or one with a `for` longer
 than a week, or with neither a `for` nor such a number, isn't looked at. It is
 bounded: twenty incidents, five rules for each, 2,000 questions of the
 history, within the period and `--timeout`; the report says when the time ran
-out.
+out. The rules looked at for an incident are those whose labels agree with
+it, as a firing's must to catch it; of one that lists the alerts its tool
+linked to it, a rule it lists is looked at whatever `--match` says, a
+stretch or a value of it nearly catching it where its labels agree with the
+alert's, and with `--linked-only` only the rules it lists are.
 
 **The steps after the replays**, a longer `for` for the noisy rules, near
 misses, and what fired with no record, ask the history again, and can take as

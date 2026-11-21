@@ -36,6 +36,16 @@ It needs:
   Monitoring's, each named by the source its history is copied in under);
 - what went wrong: `incidents`, `impact`, or both.
 
+An incident may list the alerts its tool linked to it (`alerts:`, which the
+PagerDuty, incident.io, Rootly, FireHydrant and Jira Service Management
+recipes write; `docs/incidents.md` in the
+repository): a firing of one catches it whatever `match` says. With
+`linkedOnly: true` (`--linked-only`, in both modes), such an incident is
+caught by those alone, not by any other firing at the time; one that lists
+none is caught by the time and `match` as ever. In serve mode, a change to
+it judges every firing again, once, and the Settings page says which is in
+effect.
+
 With `mode: serve` it runs `lapilli serve` instead: every hour into a ledger
 on a PersistentVolumeClaim, or in Postgres (below), with a web UI, an API and `/metrics`, behind a
 ClusterIP Service, or at a URL people open, with a sign-in (below). Incidents can then be written down in the UI, so

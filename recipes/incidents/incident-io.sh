@@ -120,6 +120,6 @@ if [ "$alerts" = yes ]; then
     done <"$alertIDs"
   done <"$ids"
 fi
-jq -s -L "$here" -f "$here/incident-io.jq" --slurpfile linked "$linked" --arg labels "${ALERT_LABELS:-}" "$all" >"$out"
+jq -s -L "$here" -f "$here/incident-io.jq" --slurpfile linked "$linked" --arg alert_labels "${ALERT_LABELS:-}" "$all" >"$out"
 jq -r -L "$here" 'include "alerts"; said("incident-io.sh"; "no attribute of theirs is named alertname")' "$out" >&2
 jq '{incidents}' "$out"

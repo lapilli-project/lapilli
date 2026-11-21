@@ -160,6 +160,12 @@ start in `[SINCE, UNTIL)`, as `put.sh` sends them.
   read, a Datadog page with warnings (it may hold part of the events) and a
   NerdGraph answer with errors (it answers 200 with them) are refused, and
   nothing is written.
+- **Rate limits.** Past one, both answer 429, and the request is asked
+  again after a wait: as Datadog's `X-RateLimit-Reset` says (the seconds
+  until its limit resets), or a `Retry-After`; New Relic names none, so 5
+  seconds, then twice as long each time. Two minutes at most a wait, five
+  waits a request and ten minutes in all a run: past them, and on any
+  other answer that isn't a 2xx, nothing is written.
 
 New Relic's NerdGraph also has `aiIssues`, issues and incidents. It isn't
 used: it is experimental (asked for with an opt-in header, and subject to
@@ -176,14 +182,17 @@ Written from each tool's documentation:
   [pages of 1000](https://docs.datadoghq.com/logs/guide/collect-multiple-logs-with-pagination/)
   (events are paged as logs are),
   [tags](https://docs.datadoghq.com/getting_started/tagging/) (no commas),
-  [retention](https://docs.datadoghq.com/data_security/data_retention_periods/).
+  [retention](https://docs.datadoghq.com/data_security/data_retention_periods/),
+  [rate limits](https://docs.datadoghq.com/api/latest/rate-limits/).
 - New Relic: [NerdGraph's endpoints and key](https://docs.newrelic.com/docs/apis/nerdgraph/get-started/introduction-new-relic-nerdgraph/),
   [NRQL through NerdGraph](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-nrql-tutorial/),
   [`NrAiIncident`'s attributes](https://docs.newrelic.com/attribute-dictionary/?event=NrAiIncident),
   [NRQL's clauses](https://docs.newrelic.com/docs/nrql/nrql-syntax-clauses-functions/)
   (`LIMIT`, `ORDER BY`, `SINCE` and `UNTIL`),
   [times in milliseconds](https://docs.newrelic.com/docs/query-your-data/nrql-new-relic-query-language/get-started/query-time-range/),
-  [`aiIssues`](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-issues-api-via-github/).
+  [`aiIssues`](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-issues-api-via-github/),
+  [NerdGraph's limits](https://docs.newrelic.com/docs/apis/nerdgraph/nerdgraph-usage-limits/)
+  and [NRQL's](https://docs.newrelic.com/docs/nrql/using-nrql/rate-limits-nrql-queries/).
 
 ### Not checked against real accounts either
 

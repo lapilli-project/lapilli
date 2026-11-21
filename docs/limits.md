@@ -1,8 +1,13 @@
 # What it doesn't do yet
 
 - Queries to data sources that are neither PromQL nor LogQL (SQL,
-  Elasticsearch, InfluxDB, a cloud's own logs) can't be replayed; such rules
-  are listed with the reason. A Loki ruler's group runs a fraction of a
+  Elasticsearch, InfluxDB, a cloud's own logs) can't be replayed. Read with
+  `--grafana`, such a rule is judged from what Grafana's own alert state
+  history says it fired, with no longer `for`, near misses or backtests,
+  its labels as the history keeps them; read from files, or where the
+  history can't be read or doesn't tell it apart, it is listed with the
+  reason ([docs/design/grafanajudged.md](design/grafanajudged.md)). A Loki
+  ruler's group runs a fraction of a
   second past a second, which the replay evaluates on: a log line written in
   that fraction is counted an evaluation later.
 - Query errors aren't replayed: history can't say when a query failed.

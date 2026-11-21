@@ -311,6 +311,18 @@ func ReplayFailed(unsupported string) bool {
 	return unsupported == Unfinished || strings.HasPrefix(unsupported, HistoryUnread)
 }
 
+// FromHistory reports whether r is a Grafana rule that can't be replayed
+// for a reason of its own: its condition reads a data source that is
+// neither PromQL nor LogQL (SQL, Elasticsearch, TestData), or is written
+// in a way the replay doesn't take. Read from a Grafana, such a rule is
+// judged from what Grafana's own alert state history says it fired
+// (docs/design/grafanajudged.md). Not one paused, which fires nothing,
+// nor one a replay gave no answer for (Unanswered), which another run may
+// replay.
+func (r Rule) FromHistory() bool {
+	return r.UID != "" && r.Unsupported != "" && r.Unsupported != Paused && !Unanswered(r.Unsupported)
+}
+
 // AlertName is the name the rule's alerts carry, alertname: its name as
 // written, before any to tell it apart.
 func (r Rule) AlertName() string {

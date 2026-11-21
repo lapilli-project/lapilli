@@ -210,7 +210,9 @@ type RuleResult struct {
 	Outlasts *Outlast `json:"for_outlasts,omitempty"`
 	// Source is, in lapilli serve, where a rule's firings were recorded
 	// before they were copied in: a rule not replayed, whose condition
-	// Lapilli doesn't have.
+	// Lapilli doesn't have. In lapilli verdict, GrafanaSource for a
+	// Grafana rule Lapilli can't replay, judged from Grafana's own alert
+	// state history (docs/design/grafanajudged.md).
 	Source string `json:"source,omitempty"`
 	// Excused are firings a quiet window excused (lapilli serve): not
 	// judged, and not in Firings.
@@ -268,6 +270,19 @@ type MarkedCount struct {
 	Refired  int `json:"refired"`
 	Unjudged int `json:"unjudged,omitempty"`
 }
+
+// GrafanaSource is the Source of a Grafana rule Lapilli can't replay,
+// judged from what Grafana's own alert state history says it fired: in
+// lapilli serve, the source its history is copied in under, which no job
+// may write to (docs/design/grafanajudged.md).
+const GrafanaSource = "grafana"
+
+// ByHistory reports whether the rule isn't replayed and its firings come
+// from its history (Source): a Grafana rule judged from Grafana's own, a
+// cloud's alarm tied to the history copied in for it. It is judged as a
+// replayed rule is, but for what needs its condition: a longer "for", near
+// misses, a backtest.
+func (r RuleResult) ByHistory() bool { return r.Unsupported != "" && r.Source != "" }
 
 // Judged is how many of its firings were judged: those with a record at
 // their time.
@@ -756,7 +771,7 @@ func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches
 	var ids []string
 	for i, in := range ins {
 		end := in.EndOr(o.UnknownLen)
-		if _, caught := catches[i][f.Rule]; caught || !f.Start.After(end) || held.After(end) || !o.about(f.Rule, f.Labels, in) {
+		if _, caught := catches[i][f.Rule]; caught || !f.Start.After(end) || held.After(end) || !o.About(f.Rule, f.Labels, in) {
 			continue
 		}
 		ids = append(ids, in.ID)
@@ -806,10 +821,15 @@ func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, li
 	return o.agrees(j, f.Labels, in), false
 }
 
-// about reports whether a firing of rule with labels is about an incident,
-// whenever it came: one of the alerts it lists, or, as Catches has it, one
-// whose labels agree with it.
-func (o Options) about(rule string, labels map[string]string, in incident.Incident) bool {
+// About reports whether a firing of rule with labels is about an incident,
+// whenever it came, as Catches has it: one of the alerts it lists, or, of
+// one that lists none or without --linked-only, one whose labels agree
+// with it; never of a rule judged by nothing. Near misses are looked for
+// by it, so a rule the incident lists is looked at whatever --match says.
+func (o Options) About(rule string, labels map[string]string, in incident.Incident) bool {
+	if o.Signals.NotJudgedRules() && o.NotJudged(rule) {
+		return false
+	}
 	if in.Links(rule, labels) {
 		return true
 	}

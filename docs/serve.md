@@ -35,8 +35,8 @@ whole ledger, without asking Prometheus. The settings that only judge the
 ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds) can be
 changed there and tried on the last week first (`--linked-only`, which
 has an incident that lists the alerts its tool linked to it caught by
-those alone, is a flag: given or taken away at a start, every firing is
-judged again with it); so can the impact signal,
+those alone, is a flag the Settings page says is on or off: given or
+taken away at a start, every firing is judged again with it); so can the impact signal,
 `--impact` and `--impact-for`, by an admin, under Incident criteria, tried
 on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,
@@ -1098,6 +1098,22 @@ been copied in from for `--source-quiet` (26 hours unless given; give a
 weekly job's 8d) is told of once, to the webhook and, with `--notify-slack`,
 to Slack. The weekly digest says which sources firings were copied in from,
 how many each brought that week, and which has gone quiet.
+
+Grafana's own history is copied in by `lapilli serve` itself. With
+`--grafana`, each rule it holds that can't be replayed is judged from what
+Grafana's alert state history says it fired (as
+[`lapilli verdict`](verdict.md) judges it): each round, after the runs,
+the history up to where they got is copied in under the source `grafana`,
+a day a write, the `--settle` before each written again. The rule and its
+history are one rule, under the rule's name, as a cloud's alarm read with
+`--alarms` and its history are: its page says so, and its record is what
+the copies cover. No job may write to `grafana`: the port refuses it. A
+day the history can't say all of (refused, more than is read at once,
+changes of a rule it passed over, a firing a write can't hold, or no
+longer kept) is left a gap, logged, never taken for a quiet day, and the
+copy goes on;
+`--grafana-history=false` turns it off
+([docs/design/grafanajudged.md](design/grafanajudged.md)).
 
 With the firings token, `--rules` and `--prometheus` are optional: a team
 with only cloud alarms runs `lapilli serve --incidents-listen :8082

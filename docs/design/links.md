@@ -81,10 +81,17 @@ The same holds of "an alert after the incident": a firing the incident
 lists that came after its end, its condition having held in it, is its
 alert too late, labels or not; with `--linked-only`, no other firing is.
 
+Near misses are looked for by the link too. A rule the incident lists,
+its own labels not ruling out the alert's, is looked at whatever `--match`
+says, and a stretch of it whose labels agree with the alert's nearly
+caught it, by a shorter `for` or a nearer number, as a firing of it would
+catch it; with `--linked-only`, an incident that lists alerts has only the
+rules it lists looked at. One that lists none is looked at by labels, as
+before. lapilli verdict and lapilli serve look for them alike.
+
 What doesn't change: which rules are noisy and how (a catch by a link is
 a catch, and counts toward precision as any other), the record a firing
-is judged by, near misses (looked for by labels, as before), what each
-rule adds.
+is judged by, what each rule adds.
 
 ### In the report
 
@@ -109,24 +116,30 @@ again, as any change to an incident does.
 
 ### In lapilli serve
 
-`--linked-only` is a flag, not a setting the UI changes. The ledger keeps
+`--linked-only` is a flag, not a setting the UI changes; the Settings
+page says whether it is in effect, beside the settings that are, and
+`GET /api/v1/settings` as `linked_only`. The ledger keeps
 what its stones were last all given by (`x.linked-only` in `meta`); a
 start with it given or taken away judges every firing again, once, as a
-changed lead does. The incident's page marks a linked catch "(linked in
+changed lead does. The chart's `linkedOnly` gives it, to the CronJob and
+to serve alike. The incident's page marks a linked catch "(linked in
 the incident tool)", and the rule's page the incidents it caught so. The
 UI's form has no alerts: an incident written in the UI and given alerts
 through the API keeps them when the form changes it.
 
 ### The recipes
 
-`pagerduty.sh`, `incident-io.sh` and `rootly.sh` read each kept incident's
-alerts and write those that carry an `alertname` as its `alerts`:
+`pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, with
+`JSM_CLOUD_ID`, `jira.sh` read each kept incident's alerts and write those
+that carry an `alertname` as its `alerts`:
 
 | Tool | Where the labels are | Requests |
 |---|---|---|
 | PagerDuty | `body.details` (or `body.cef_details.details`): each alert of the group Alertmanager sent, with its labels, in `firing` and `resolved`, as 0.30.0 and later send them by default; or, from an older one given `alertname` in `pagerduty_configs`' `details`, the rule alone, with the details `ALERT_LABELS` names as labels (other details may be a description or a runbook) | one a page of 100 of an incident's alerts |
 | incident.io | the attributes the alert source takes from the payload, as `GET /v2/alerts/{id}` gives them: one named `alertname`, and the others of a literal value, named as labels are | one a page of 50 of an incident's alerts, and one an alert |
 | Rootly | the alert's `labels`, of which Alertmanager's carry `alertname`, `instance`, `dc` and `job`; `status` and `version` are the webhook's, `source_name` Rootly's | one a page of 100 of an incident's alerts |
+| FireHydrant | the alert's `labels` (`GET /v1/incidents/{incident_id}/alerts`), arbitrary pairs; its Alertmanager source names the labels a group's alerts share `alertmanager/labels-NAME`, read with the prefix taken off | one a page of an incident's alerts |
+| Jira Service Management | the alert's `extraProperties`, which keep the `details` Alertmanager's Opsgenie notifier sends: from 0.22.0, the labels its group's alerts share. The incident API that lists an incident's alerts is in beta | one a page of an incident's alert ids, and one an alert (the operations API) |
 
 An alert with no `alertname` is left out, and how many were is said on
 stderr, as counts alone. Every label an alert carries is kept: one a
@@ -170,9 +183,11 @@ answers with a server standing in, not against real accounts.
   of them goes to `/metrics`; MCP's `caught_by` says `linked`, as the
   report does.
 - **The recipes.** What a tool answers goes into a URL only as an id
-  checked to be letters and digits (and dashes, Rootly's); the token is
-  read from its file and sent on stdin, never on a command line. What they
-  say on stderr is counts, never a name a tool gave.
+  checked to be letters and digits (and dashes, Rootly's, FireHydrant's
+  and Jira Service Management's alerts'; digits, a Jira issue's and its
+  page key); the token is read from its file and sent on stdin, never on
+  a command line. What they say on stderr is counts, never a name a tool
+  gave.
 
 ## Questions for review
 
@@ -182,12 +197,16 @@ Decided on 2026-11-21, by the maintainer:
   label the firing lacks is passed over in judging, as `--match` passes
   one over; `ALERT_LABELS` narrows them.
 
+Done since:
+
+- **Near misses by link** (above, "How a firing is judged").
+- **The chart** passes `--linked-only` with `linkedOnly: true`, and the
+  **Settings page** says whether it is in effect.
+
 Open:
 
-1. **Grafana IRM, FireHydrant, Jira Service Management.** Each keeps alerts
-   beside incidents; their recipes don't read them yet.
-2. **Near misses** are still looked for by labels: a rule the incident
-   lists whose condition held but not for its `for` could be looked for
-   by its link too.
-3. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
+1. **Grafana IRM** keeps alerts beside incidents; its recipe doesn't read
+   them yet. FireHydrant's and Jira Service Management's are read (the
+   latter from an API in beta).
+2. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
    rather than a flag.

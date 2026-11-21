@@ -272,6 +272,9 @@ What was built differs from the above, or settles it, here:
   report sent to the team's own destination.
 - **`/metrics`** has no series of its own for reports: what is sent is
   counted as notices are, `lapilli_serve_notices_total{to="report"}`.
+- **`notifications`** also counts, once mutes are kept, the span's
+  firings that paged no one: muted by a silence, an inhibition or either,
+  or with no mute told of ([mutes.md](mutes.md)), as `paged_no_one`.
 - **`firings`,** a section added later, last in order: the firings that
   started in the span, one by one, for a receiver that makes something of
   its own of each. Its numbers are `items`, each as `/api/v1/report`'s
