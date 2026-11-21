@@ -56,6 +56,10 @@ status_commit=
 if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
   status_commit=$(jq -r '.pull_request.head.sha // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || status_commit=
 fi
+# The branch the pull request goes into, in a pull request's run: TARGET
+# where HEAD isn't the merge GitHub makes, as a checkout of the pull
+# request's own commit (ref: pull_request.head.sha) has (lib.sh).
+ci_branch=${GITHUB_BASE_REF:-}
 status_link=
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
   status_link=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID

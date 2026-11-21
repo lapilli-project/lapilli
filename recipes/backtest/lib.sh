@@ -15,7 +15,9 @@
 #                        $status_sha, linking to $status_url if not empty
 #
 # and may set status_commit, the pull request's head commit as its CI
-# says, and status_link, the job's page, for STATUS.
+# says, and status_link, the job's page, for STATUS; and ci_branch, the
+# branch the pull request goes into as its CI says, which is TARGET_BRANCH
+# where TARGET is left at HEAD^1 and HEAD isn't a merge.
 #
 # In a clone of the repository with the pull request checked out, it
 # installs a pinned Lapilli release, checked against the release's
@@ -101,9 +103,12 @@
 #                    hash; default the pull request's head commit as the
 #                    CI says, or HEAD when it isn't a merge. Either way the
 #                    commit the backtest read, or a parent of it, a merge
-#                    the CI made of the pull request
-#   STATUS_URL       optional: the page the status links to, https
-#                    (default the job's, as the CI says)
+#                    the CI made of the pull request: of a merge, the
+#                    parent that is the pull request's, never TARGET nor
+#                    the commit compared against
+#   STATUS_URL       optional: the page the status links to, https, or
+#                    http to this machine (default the job's, as the CI
+#                    says)
 #   PROMTOOL         optional, with EXPECT: promtool on this machine, a
 #                    path or a name on PATH, outside the checkout, which
 #                    runs the scenarios EXPECT names (scenarios:,
@@ -118,7 +123,14 @@
 #                    GitHub checks a pull request out); the rules compared
 #                    against are those of the commit HEAD and TARGET share
 #                    last (git merge-base), as are the expectations of the
-#                    rules in place; INCIDENTS is TARGET's own
+#                    rules in place; INCIDENTS is TARGET's own. HEAD^1 of
+#                    a HEAD that isn't a merge is the pull request's own
+#                    commit: there, with no TARGET_BRANCH, the branch the
+#                    CI says it goes into is taken (GitHub's
+#                    GITHUB_BASE_REF), or else, with a gate (FAIL_ON_ERROR,
+#                    FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED, FAIL_MISSED) or
+#                    STATUS, the run is refused, as it would judge the pull
+#                    request against itself
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -339,7 +351,7 @@ case ${PR:-} in
   '' | *[!0-9]* | 0*) say "PR ${PR:-}: want the pull request's number"; exit 1 ;;
 esac
 if ! safe_url "${host_api:-}"; then
-  say "the host's API ${host_api:-}: want an https URL"
+  say "the host's API ${host_api:-}: want an https URL, or http to this machine"
   exit 1
 fi
 KEY=${KEY:-default}
@@ -398,11 +410,11 @@ if [ -n "$status_on" ]; then
   status_url=${STATUS_URL:-${status_link:-}}
   if [ -n "$status_url" ] && { ! safe_url "$status_url" || [ "${#status_url}" -gt 255 ] || [ -n "$(printf '%s' "$status_url" | tr -d '\041-\176')" ]; }; then
     if [ -n "${STATUS_URL:-}" ]; then
-      say "STATUS_URL $STATUS_URL: want an https URL of 255 characters at most"
+      say "STATUS_URL $STATUS_URL: want an https URL, or http to this machine, of 255 characters at most"
       exit 1
     fi
     # The job's page, as the CI says it: a link alone, left out.
-    say "the job's page, as the CI says, isn't an https URL: the status links to none"
+    say "the job's page, as the CI says, isn't an https URL, or http to this machine, of 255 characters at most: the status links to none"
     status_url=
   fi
 else
@@ -414,12 +426,21 @@ else
   done
 fi
 repo=${REPO:-.}
+# HEAD^1, given or not, takes HEAD for a merge the CI made (commits).
 TARGET=${TARGET:-HEAD^1}
+target_merged=
+[ "$TARGET" != "HEAD^1" ] || target_merged=1
 case $TARGET in
   -* | *[!A-Za-z0-9._/^~-]*) say "TARGET $TARGET: want a commit or a ref, such as HEAD^1 or origin/main"; exit 1 ;;
 esac
 case ${TARGET_BRANCH:-} in
   -* | *[!A-Za-z0-9._/-]*) say "TARGET_BRANCH $TARGET_BRANCH: want a branch's name"; exit 1 ;;
+esac
+case ${ci_branch:-} in
+  -* | *[!A-Za-z0-9._/-]*)
+    say "the branch the pull request goes into, as the CI says, isn't one taken as TARGET_BRANCH: give TARGET or TARGET_BRANCH"
+    ci_branch=
+    ;;
 esac
 tree_files=${MAX_TREE_FILES:-20000}
 tree_bytes=${MAX_TREE_BYTES:-268435456}
@@ -631,7 +652,7 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
       exit 1
     fi
     if ! safe_url "$ACTIONS_ID_TOKEN_REQUEST_URL"; then
-      say "ACTIONS_ID_TOKEN_REQUEST_URL: want an https URL"
+      say "ACTIONS_ID_TOKEN_REQUEST_URL: want an https URL, or http to this machine"
       exit 1
     fi
     if [ "${#LAPILLI_SERVE_AUDIENCE}" -gt 1024 ] || [ -n "$(printf '%s' "$LAPILLI_SERVE_AUDIENCE" | tr -d '\041-\176')" ]; then
@@ -692,7 +713,7 @@ elif [ -z "${LAPILLI:-}" ]; then
     # Over plain http, or from a mirror, whoever gives the archive could
     # give a SHA256SUMS that agrees: the sum pinned is what holds.
     if ! safe_url "$LAPILLI_RELEASES"; then
-      say "LAPILLI_RELEASES $LAPILLI_RELEASES: want an https URL"
+      say "LAPILLI_RELEASES $LAPILLI_RELEASES: want an https URL, or http to this machine"
       exit 1
     fi
     if [ -z "${LAPILLI_SHA256:-}" ]; then
@@ -1012,6 +1033,22 @@ commits() {
   if ! gitdir=$(git -C "$repo" rev-parse --absolute-git-dir 2>"$tmp/git.log"); then
     trouble "REPO isn't a git clone" "$tmp/git.log"
     return 1
+  fi
+  # HEAD^1 is the first parent of a merge the CI made: of HEAD that isn't
+  # one, the pull request's own commit, which it would be judged against,
+  # INCIDENTS read from it, a gate passed and a status set by it. The
+  # branch the CI says it goes into is taken instead; or, with none, a
+  # gate or a status is refused. A HEAD whose parent the clone hasn't (a
+  # depth of 1) has no HEAD^1: said below.
+  if [ -n "$target_merged" ] && [ -z "${TARGET_BRANCH:-}" ] &&
+    [ "$(git -C "$repo" rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)" -eq 2 ]; then
+    if [ -n "${ci_branch:-}" ]; then
+      TARGET_BRANCH=$ci_branch
+      say "HEAD isn't a merge: compared with the branch the pull request goes into, $TARGET_BRANCH"
+    elif [ -n "$strict$held$required$missed_gate$status_on" ]; then
+      trouble "TARGET is HEAD^1, a merge commit's first parent, but HEAD isn't a merge: HEAD^1 is the pull request's own commit, which the gates and the status would judge it against. Give TARGET or TARGET_BRANCH, the branch it goes into, or check out the merge commit"
+      return 1
+    fi
   fi
   if [ -n "${TARGET_BRANCH:-}" ]; then
     # As the checkout fetched it, when it did (a full clone fetches every
@@ -2255,8 +2292,9 @@ status() {
 # STATUS_SHA, or the pull request's head commit as the CI says
 # (status_commit), or else HEAD when it isn't a merge. Of a run that read
 # the commits, it must be the commit read, or a parent of it, which a
-# merge the CI made of the pull request is: no other commit is said to be
-# what it judged.
+# merge the CI made of the pull request is, but the one it goes into,
+# TARGET, or the one compared against: no other commit is said to be what
+# it judged.
 status_on_commit() {
   status_sha=${STATUS_SHA:-${status_commit:-}}
   if [ -z "$status_sha" ] && [ -n "${head:-}" ]; then
@@ -2271,6 +2309,10 @@ status_on_commit() {
     return 1
   fi
   [ -n "${head:-}" ] || return 0
+  if [ "$status_sha" != "$head" ] && { [ "$status_sha" = "${target:-}" ] || [ "$status_sha" = "${base:-}" ]; }; then
+    say "$status_sha is the commit the pull request goes into, or the one it was compared against, not the pull request's: no status set on it"
+    return 1
+  fi
   for c in $(git -C "$repo" rev-list --parents -n 1 "$head"); do
     [ "$c" != "$status_sha" ] || return 0
   done
