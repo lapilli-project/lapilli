@@ -37,6 +37,35 @@ sides: a longer `--since` judges against more incidents, and takes longer.
 In CI, run it on each pull request that changes the rules
 ([Pull request backtests in CI](pr-backtests.md)).
 
+## An incident no rule catches after the change
+
+`--fail-missed` exits 1 when the change leaves an incident a rule caught
+before it caught by no rule after it: a merge gate that needs no
+expectations file, only the incidents, `--incidents`, `--impact` or both,
+and is refused without them. The report says which incidents, and that
+the run fails for them, after its totals; `--json` lists them as
+`"missed"`, and the summary counts them (`missed_checked`,
+`incidents_missed`):
+
+```
+#### Caught before, by no rule after
+
+**This run fails** (`--fail-missed`): 1 incidents a rule caught before the change are caught by no rule after it.
+
+| Incident | Start | Caught before by |
+| --- | --- | --- |
+| `INC-43` `Batch stuck` | 2026-10-31 02:40 | `ExportJobStuck` +4m |
+```
+
+An incident another rule catches after the change, or the same rule later,
+is still caught: the gate is for catches lost, not slower ones, which an
+expectation's `catches:` with `within:` holds (below). With
+`--changed-only`, only the rules that differ are replayed, so an incident
+one of them caught before and none of them catches after may still be
+caught by a rule left alone: those are replayed too then, once, to see,
+and only then. A rule that couldn't be replayed catches nothing. With
+`--fail-expectations`, either failing fails the run, each said on stderr.
+
 ## What a rule is expected to do
 
 `--expect FILE` holds the rules that differ to what is expected of them,

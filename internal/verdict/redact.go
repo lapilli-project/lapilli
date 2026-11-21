@@ -710,6 +710,14 @@ func (x *Redactor) Comparison(c *Comparison) *Comparison {
 		out.Incidents[i] = IncidentChange{Incident: x.incident(ic.Incident), Before: x.catches(ic.Before), After: x.catches(ic.After)}
 	}
 	slices.SortStableFunc(out.Incidents, func(a, b IncidentChange) int { return byStart(a.Incident, b.Incident) })
+	// Those missed are of those caught differently: their aliases.
+	if c.Missed != nil {
+		out.Missed = make([]IncidentChange, len(c.Missed))
+		for i, ic := range c.Missed {
+			out.Missed[i] = IncidentChange{Incident: x.incident(ic.Incident), Before: x.catches(ic.Before), After: x.catches(ic.After)}
+		}
+		slices.SortStableFunc(out.Missed, func(a, b IncidentChange) int { return byStart(a.Incident, b.Incident) })
+	}
 	if c.Recording != nil {
 		out.Recording = make([]RecordingChange, len(c.Recording))
 		for i, rc := range c.Recording {

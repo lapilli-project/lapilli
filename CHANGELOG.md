@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`lapilli verdict --compare --fail-missed`** exits 1 when the change
+  leaves an incident a rule caught before it caught by no rule after it,
+  by `--incidents` or `--impact`, which it is refused without: a merge
+  gate with no expectations file. The report says which incidents, and
+  that the run fails for them (text, `--markdown`, `--json`'s `"missed"`),
+  and the summary counts them (`missed_checked`, `incidents_missed`, new
+  fields). With `--changed-only`, the rules left alone are replayed too
+  when a rule that differs stops catching one, to see whether one still
+  does. With `--fail-expectations`, either failing fails the run.
+
 ## [0.66.0] - 2026-11-21
 
 The expectations' (0.65.0) follow-ups: what a review left as Low, fixed.

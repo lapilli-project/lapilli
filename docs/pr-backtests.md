@@ -151,6 +151,8 @@ What a tool reads is stable:
   | `expectations_already_broken` | expectations broken on both sides, which aren't the change's |
   | `unexpected` | rules the change adds that no expectation holds |
   | `scenarios_unrun` | scenarios of the rules that differ that couldn't be run after the change, `--promtool` given and the rule one promtool runs: the test file unreadable, a time out, a crash. They can't be judged, as a rule that couldn't be replayed can't; through lapilli serve, which runs none, always 0 |
+  | `missed_checked` | the run looked for incidents a rule caught before the change that no rule catches after it, `--fail-missed`; through lapilli serve, which doesn't yet, always false |
+  | `incidents_missed` | those it found, listed as `"missed"`; 0 when `missed_checked` is false |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -170,8 +172,9 @@ What a tool reads is stable:
   or, with `--fail-unreplayed`, the history couldn't be read for one or
   its labels on its series were too many to replay, or, with
   `--fail-expectations`, the change broke an expectation (and with
-  `--expect-required`, it added a rule none holds); 2
-  when the flags are wrong. Nothing changing has no exit status of its
+  `--expect-required`, it added a rule none holds), or, with
+  `--fail-missed`, it left an incident a rule caught before it caught by
+  no rule after it; 2 when the flags are wrong. Nothing changing has no exit status of its
   own: a CI step takes anything but 0 as a failure, and a pull request that
   changes no rule isn't one. Read `nothing_changed`.
 
