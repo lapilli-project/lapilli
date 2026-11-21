@@ -186,7 +186,9 @@ Bounds:
   `GET /api/v1/activity` 1,000, or 8 MiB of their text, and, for a
   `team`'s, looks through 20,000 changes and looks up 200 tasks and
   proposals at most, then says where it stopped (`next`, `cut`); it is
-  written out four at a time, each holding its turn until it is read. Only a
+  written out four at a time, one a person, each holding its turn until it
+  is read, and one of 50 changes at most, held to a mebibyte, takes none.
+  Only a
   tracker job's `GET /api/v1/tasks` goes on from where it stopped
   (`after`, `next`).
 - A heavy request takes the one turn there is for one: a report with its

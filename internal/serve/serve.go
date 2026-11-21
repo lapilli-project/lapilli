@@ -472,6 +472,12 @@ type Server struct {
 	// renders are the turns to work out a page (pageRenders), exports
 	// those to write out an export of the activity log (activityExports).
 	renders, exports chan struct{}
+	// exporting are the readers with an export of the activity log going,
+	// one each at most (exportOf).
+	exporting struct {
+		sync.Mutex
+		by map[string]bool
+	}
 	// refused is set once a request to an unknown host name was logged.
 	refused atomic.Bool
 	// tokenWarned is set once an incidents token that can't be used was

@@ -489,3 +489,124 @@ func TestActivityExportHeldUntilRead(t *testing.T) {
 		<-s.exports
 	}
 }
+
+// An export is held to activityBytes as written, not as kept: JSON writes
+// < as six bytes, and CSV a quote as two. Past them it ends, but for its
+// first change, and goes on from there, every change given once. A team's
+// changes are asked of the ledger 200 at a time, as the others' are.
+func TestActivityBytesAsWritten(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	ctx := context.Background()
+	for i := range 12 {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: fmt.Sprintf("%02d %s", i, strings.Repeat(`<"`, 1000))}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	whole, _ := activityOf(t, h, "", vViewer)
+	was := activityBytes
+	defer func() { activityBytes = was }()
+	activityBytes = 30_000
+	for _, format := range []string{"json", "csv"} {
+		seen := 0
+		before := ""
+		for pages := 0; ; pages++ {
+			if pages > len(whole) {
+				t.Fatalf("%s: no end to the pages", format)
+			}
+			q := "format=" + format
+			if before != "" {
+				q += "&before=" + url.QueryEscape(before)
+			}
+			code, body, head := getAsWithHeaders(t, h, "/api/v1/activity?"+q, vViewer)
+			if code != http.StatusOK {
+				t.Fatalf("%s: %d %s", q, code, body)
+			}
+			n, next := 0, ""
+			if format == "json" {
+				var out struct {
+					Activity []apiLogged `json:"activity"`
+					Next     string      `json:"next"`
+				}
+				if err := json.Unmarshal([]byte(body), &out); err != nil {
+					t.Fatal(err)
+				}
+				n, next = len(out.Activity), out.Next
+			} else {
+				records, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+				if err != nil {
+					t.Fatal(err)
+				}
+				n = len(records) - 1
+				if l := head.Get("Link"); l != "" {
+					u, _ := url.Parse(strings.Trim(strings.SplitN(l, ";", 2)[0], "<>"))
+					next = u.Query().Get("before")
+				}
+			}
+			if n > 1 && len(body) > activityBytes {
+				t.Errorf("%s: %d changes in %d bytes, past %d", q, n, len(body), activityBytes)
+			}
+			seen += n
+			if next == "" {
+				break
+			}
+			before = next
+		}
+		if seen != len(whole) {
+			t.Errorf("%s: paged through %d changes, not %d", format, seen, len(whole))
+		}
+	}
+	// A team's, 200 a read.
+	defer func(r func(*ledger.Ledger, context.Context, ledger.ActivityQuery) ([]ledger.LogEntry, error)) {
+		readActivity = r
+	}(readActivity)
+	most := 0
+	readActivity = func(l *ledger.Ledger, ctx context.Context, q ledger.ActivityQuery) ([]ledger.LogEntry, error) {
+		most = max(most, q.Limit)
+		return l.Activity(ctx, q)
+	}
+	activityOf(t, h, "team=payments", vViewer)
+	if most != activityBatch {
+		t.Errorf("a team's export asked the ledger for %d changes at once, not %d", most, activityBatch)
+	}
+}
+
+// One export at a time a person: another of theirs is told to come back
+// while one goes out, someone else's isn't. A small one, 50 changes at
+// most, takes no export's turn, and holds a mebibyte at most.
+func TestActivityExportOneAPerson(t *testing.T) {
+	s := activityServer(t)
+	h := s.Handler()
+	w := &unread{ResponseRecorder: httptest.NewRecorder(), writing: make(chan struct{}), goOn: make(chan struct{})}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/activity", nil)
+	r.Header.Set("X-Forwarded-Email", vViewer)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(w, r)
+	}()
+	<-w.writing
+	if code, body := getAs(t, h, "/api/v1/activity?format=csv", vViewer); code != http.StatusServiceUnavailable {
+		t.Errorf("a second export of one person's: %d %s", code, body)
+	}
+	if code, body := getAs(t, h, "/api/v1/activity", vEditor); code != http.StatusOK {
+		t.Errorf("another person's: %d %s", code, body)
+	}
+	close(w.goOn)
+	<-done
+	if code, body := getAs(t, h, "/api/v1/activity", vViewer); code != http.StatusOK {
+		t.Errorf("once the first was read: %d %s", code, body)
+	}
+	// Every export's turn taken: a small one goes out all the same.
+	for range activityExports {
+		s.exports <- struct{}{}
+	}
+	defer func() {
+		for range activityExports {
+			<-s.exports
+		}
+	}()
+	if code, body := getAs(t, h, "/api/v1/activity?limit=50", vViewer); code != http.StatusOK || len(body) > activitySmallBytes {
+		t.Errorf("a small export beside every turn taken: %d, %d bytes", code, len(body))
+	}
+}

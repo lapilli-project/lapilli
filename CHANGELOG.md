@@ -33,12 +33,15 @@ Before upgrading:
   of 58 MB that took 625 MB to work out, and sixteen readers who read
   nothing held 1.6 GB until the server's `WriteTimeout`, each holding its
   own. An export, and a page of the activity log, end now where their
-  changes' text passes 8 MiB, a change bigger than it given whole as the
-  first of its page, and say where to go on from (`next`, `Link`), CSV and
-  JSON alike; the ledger is read 200 changes at a time, and a team's
-  before and after 200 at a time; the JSON isn't indented; and an export
-  holds a turn of the exports' own, four at once, until its reader has
-  read it, 30 seconds at most, no page's.
+  changes' text passes 8 MiB, as kept and, of an export, as written (JSON
+  writes `<` as six bytes, CSV a quote as two), a change bigger than it
+  given whole as the first of its page, and say where to go on from
+  (`next`, `Link`), CSV and JSON alike; the ledger is read 200 changes at
+  a time, a team's too, and a team's before and after 200 at a time; the
+  JSON isn't indented; and an export holds a turn of the exports' own,
+  four at once and one a person, until its reader has read it, 30 seconds
+  at most, no page's. One of 50 changes at most takes no turn, and is held
+  to a mebibyte.
 - **The backtest gate could pass a pull request judged against its own
   commit** (affected: 0.32.0 to 0.68.0; the gates that stop a merge, and
   the status, from 0.67.0). `TARGET` is `HEAD^1` unless given, a merge's
