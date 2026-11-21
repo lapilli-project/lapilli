@@ -175,8 +175,12 @@ type Summary struct {
 	// MissedChecked says the run looked for the incidents a rule caught
 	// before the change that no rule catches after it (--fail-missed);
 	// IncidentsMissed are those it found, 0 when it didn't look.
+	// MissedNotKnown are those it couldn't tell caught or missed: caught
+	// by no rule replayed after the change, while a rule after it
+	// couldn't be replayed, which may catch them. They fail nothing.
 	MissedChecked   bool `json:"missed_checked"`
 	IncidentsMissed int  `json:"incidents_missed"`
+	MissedNotKnown  int  `json:"missed_not_known"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether
@@ -209,9 +213,18 @@ func (c *Comparison) Lost() bool {
 // the verdict of the rules left alone over the same period and incidents,
 // when they weren't replayed with the others (ChangedOnly), or nil: an
 // incident one of them catches is caught on both sides, and isn't missed.
-// A rule that couldn't be replayed catches nothing.
+// When a rule after the change couldn't be replayed (the history unread,
+// a query refused, out of time), whether it would catch one isn't known:
+// such an incident is counted as not known (MissedNotKnown), not missed.
 func (c *Comparison) HoldMissed(alike *Report) {
 	c.Missed = []IncidentChange{}
+	notKnown := 0
+	unreplayed := func(r *Report) bool {
+		return r != nil && slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" })
+	}
+	// After the change: the rules replayed after it, and the rules left
+	// alone, replayed with them or apart.
+	unsure := unreplayed(c.After) || unreplayed(alike)
 	stillCaught := func(i int, in incident.Incident) bool {
 		if alike == nil {
 			return false
@@ -234,12 +247,26 @@ func (c *Comparison) HoldMissed(alike *Report) {
 			if len(b.CaughtBy) == 0 || len(c.After.Incidents[i].CaughtBy) > 0 || stillCaught(i, b.Incident) {
 				continue
 			}
+			if unsure {
+				notKnown++
+				continue
+			}
 			c.Missed = append(c.Missed, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: []Catch{}})
 		}
 	}
 	if c.Summary != nil {
-		c.Summary.MissedChecked, c.Summary.IncidentsMissed = true, len(c.Missed)
+		c.Summary.MissedChecked, c.Summary.IncidentsMissed, c.Summary.MissedNotKnown = true, len(c.Missed), notKnown
 	}
+}
+
+// MissedNotKnownText says how many incidents HoldMissed couldn't tell
+// caught or missed, and why, or nothing.
+func (c *Comparison) MissedNotKnownText() string {
+	if c.Summary == nil || c.Summary.MissedNotKnown == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule replayed after it, but a rule after it couldn't be replayed: "+
+		"whether they are missed isn't known, and they fail nothing (--fail-unreplayed fails a run whose history couldn't be read).", c.Summary.MissedNotKnown)
 }
 
 // MissedText writes, for a person, what HoldMissed found (--fail-missed),
@@ -248,7 +275,13 @@ func MissedText(w io.Writer, c *Comparison, loc *time.Location) error {
 	if c.Summary == nil || !c.Summary.MissedChecked || c.Summary.NothingChanged {
 		return nil
 	}
+	if s := c.MissedNotKnownText(); s != "" {
+		fmt.Fprintf(w, "\n%s\n", s)
+	}
 	if len(c.Missed) == 0 {
+		if c.Summary.MissedNotKnown > 0 {
+			return nil
+		}
 		_, err := fmt.Fprintln(w, "\nEvery incident a rule caught before the change is caught after it too (--fail-missed).")
 		return err
 	}

@@ -63,7 +63,11 @@ expectation's `catches:` with `within:` holds (below). With
 `--changed-only`, only the rules that differ are replayed, so an incident
 one of them caught before and none of them catches after may still be
 caught by a rule left alone: those are replayed too then, once, to see,
-and only then. A rule that couldn't be replayed catches nothing. With
+and only then. When a rule after the change couldn't be replayed (the
+history unread, a query refused, out of time), an incident no rule
+replayed catches after it may still be caught by that one: it is counted
+as not known (`missed_not_known`), said in the report, and fails nothing;
+`--fail-unreplayed` fails a run whose history couldn't be read. With
 `--fail-expectations`, either failing fails the run, each said on stderr.
 
 ## What a rule is expected to do

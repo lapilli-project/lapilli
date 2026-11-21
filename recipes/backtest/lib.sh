@@ -86,8 +86,9 @@
 #                    before it caught by no rule after it, once the comment
 #                    says which (lapilli's --fail-missed; default false).
 #                    Also when a rule that differs couldn't be replayed,
-#                    as what it catches can't be judged. Refused with
-#                    LAPILLI_SERVE
+#                    or an incident can't be told caught or missed (the
+#                    summary's missed_not_known), as neither can be
+#                    judged. Refused with LAPILLI_SERVE
 #   STATUS           true (or 1): also sets a commit status on the pull
 #                    request's head commit, lapilli/backtest (with KEY,
 #                    lapilli/backtest/KEY), success or failure as the job
@@ -756,6 +757,7 @@ serve_days='' serve_tz='' serve_select=''
 # serve, want is the flag the next argument is the value of, and taken
 # says the argument is one serve is sent.
 incidents_given=
+sends=
 want=
 n=$#
 while [ "$n" -gt 0 ]; do
@@ -801,6 +803,8 @@ while [ "$n" -gt 0 ]; do
   fi
   case $a in
     --incidents | --incidents=* | --impact | --impact=*) incidents_given=1 ;;
+    # A report sent elsewhere, whose failure lapilli says as exit 1 too.
+    --slack-webhook-file | --slack-webhook-file=*) sends=1 ;;
   esac
   case $a in
     --impact | --impact=*)
@@ -1418,8 +1422,10 @@ run_lapilli() {
   # Held to the incidents (FAIL_MISSED), lapilli exits 1 once its report
   # says the change leaves one caught by no rule, and says so: that is the
   # gate's, which judge reads from the report, not a run that failed.
-  # Unless a rule's replay didn't finish too, which it says.
-  if [ "$verdict" = 1 ] && [ -n "$missed_gate" ] && [ -s "$tmp/report.md" ] &&
+  # Unless a rule's replay didn't finish too, which it says, or a report
+  # was sent elsewhere (--slack-webhook-file), whose failure it says only
+  # in its own words: then exit 1 can't be told the gate's alone.
+  if [ "$verdict" = 1 ] && [ -n "$missed_gate" ] && [ -z "$sends" ] && [ -s "$tmp/report.md" ] &&
     grep -qE '^lapilli verdict: the change leaves [0-9]+ incidents a rule caught before it caught by no rule \(--fail-missed\)$' "$tmp/lapilli.log" &&
     ! grep -q "didn't finish within --timeout" "$tmp/lapilli.log"; then
     verdict=0
@@ -1511,9 +1517,10 @@ judge() {
   if [ -n "$missed_gate" ] && [ "$verdict" = 0 ]; then
     n=$(summary incidents_missed)
     unreplayed=$(summary unreplayed)
-    case $(summary missed_checked)/$n/$unreplayed in
-      true/[0-9]*/[0-9]*)
-        case $n$unreplayed in *[!0-9]*) ;; *) missed_judged=1 ;; esac
+    unknown=$(summary missed_not_known)
+    case $(summary missed_checked)/$n/$unreplayed/$unknown in
+      true/[0-9]*/[0-9]*/[0-9]*)
+        case $n$unreplayed$unknown in *[!0-9]*) ;; *) missed_judged=1 ;; esac
         ;;
     esac
     if [ -z "$missed_judged" ]; then
@@ -1522,6 +1529,8 @@ judge() {
       lost="the change leaves $n incidents a rule caught before it caught by no rule (FAIL_MISSED=true)"
     elif [ "$unreplayed" -gt 0 ]; then
       lost="$unreplayed of the rules that differ couldn't be replayed, so what they catch can't be judged (FAIL_MISSED=true)"
+    elif [ "$unknown" -gt 0 ]; then
+      lost="$unknown incidents a rule caught before the change can't be told caught or missed, as a rule after it couldn't be replayed (FAIL_MISSED=true)"
     fi
   fi
   if [ "$verdict" = 0 ] && [ -n "$strict" ]; then

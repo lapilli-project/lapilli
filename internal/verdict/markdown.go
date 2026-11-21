@@ -240,11 +240,18 @@ func mdCatches(cs []Catch) string {
 // rule caught before the change that no rule catches after it, which fail
 // the run, or that there is none.
 func missedPart(c *Comparison, loc *time.Location) mdPart {
+	notKnown := ""
+	if s := c.MissedNotKnownText(); s != "" {
+		notKnown = strings.Replace(s, "(--fail-unreplayed ", "(`--fail-unreplayed` ", 1) + "\n\n"
+	}
 	if len(c.Missed) == 0 {
+		if notKnown != "" {
+			return mdPart{head: notKnown}
+		}
 		return mdPart{head: "Every incident a rule caught before the change is caught after it too (`--fail-missed`).\n\n"}
 	}
 	head := fmt.Sprintf("#### Caught before, by no rule after\n\n**This run fails** (`--fail-missed`): %d incidents a rule caught before the change are caught by no rule after it%s.\n\n",
-		len(c.Missed), c.leftAloneToo()) + mdRow([]string{"Incident", "Start", "Caught before by"}) + mdRow([]string{"---", "---", "---"})
+		len(c.Missed), c.leftAloneToo()) + notKnown + mdRow([]string{"Incident", "Start", "Caught before by"}) + mdRow([]string{"---", "---", "---"})
 	part := mdPart{head: head, foot: "\n", noun: "incidents caught by no rule after"}
 	for _, ic := range c.Missed {
 		name := md(ic.ID, 100, true)

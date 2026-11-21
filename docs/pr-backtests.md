@@ -153,6 +153,7 @@ What a tool reads is stable:
   | `scenarios_unrun` | scenarios of the rules that differ that couldn't be run after the change, `--promtool` given and the rule one promtool runs: the test file unreadable, a time out, a crash. They can't be judged, as a rule that couldn't be replayed can't; through lapilli serve, which runs none, always 0 |
   | `missed_checked` | the run looked for incidents a rule caught before the change that no rule catches after it, `--fail-missed`; through lapilli serve, which doesn't yet, always false |
   | `incidents_missed` | those it found, listed as `"missed"`; 0 when `missed_checked` is false |
+  | `missed_not_known` | of the incidents a rule caught before the change, those no rule replayed catches after it while a rule after it couldn't be replayed: not known to be missed, failing nothing; 0 when `missed_checked` is false |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -195,8 +196,9 @@ the branch's rules:
   `IMPACT`: the job fails when the change leaves an incident a rule
   caught before it caught by no rule after it (`--fail-missed`,
   [compare.md](compare.md#an-incident-no-rule-catches-after-the-change)),
-  and when a rule that differs couldn't be replayed, as what it catches
-  can't be judged. It needs no expectations file.
+  and when a rule that differs couldn't be replayed, or an incident can't
+  be told caught or missed (`missed_not_known`), as a gate that can't
+  judge doesn't pass. It needs no expectations file.
 - `FAIL_ON_EXPECTATIONS=true` and `EXPECT_REQUIRED=true`, with `EXPECT`:
   the job fails when the change breaks an expectation, or adds a rule none
   holds. Each gate fails the job on its own.

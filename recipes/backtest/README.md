@@ -127,7 +127,9 @@ And, as wanted:
   alone that still catches it keeps it caught: lapilli replays those too,
   then. Like `FAIL_ON_EXPECTATIONS`, it isn't a failure of the backtest,
   and a run that can't judge it fails the job: a rule that differs not
-  replayed, no report, a lapilli without `--fail-missed`. Either gate
+  replayed, an incident lapilli can't tell caught or missed as a rule
+  after the change couldn't be replayed (`missed_not_known`), no report, a
+  lapilli without `--fail-missed`. Either gate
   failing fails the job. Refused with `LAPILLI_SERVE`, whose report
   doesn't say yet.
 - `STATUS=true` (or `1`): a commit status on the pull request's head

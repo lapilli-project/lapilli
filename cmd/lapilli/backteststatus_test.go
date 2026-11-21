@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,6 +211,39 @@ func TestBacktestRecipeFailMissed(t *testing.T) {
 	if out, err := rr.run(append(settings, "LAPILLI="+old), "--prometheus", prom.URL); err == nil ||
 		!strings.Contains(rr.body(), "the lapilli run has no --fail-missed") {
 		t.Errorf("an older lapilli: %v\n%s\n%s", err, rr.body(), out)
+	}
+
+	// A report sent to Slack too, which fails: lapilli's exit 1 isn't the
+	// gate's alone, and the comment says the backtest failed.
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("http://127.0.0.1:1/hook\n"), 0o600)
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	if out, err := rr.run(settings, "--prometheus", prom.URL, "--slack-webhook-file", hook); err == nil ||
+		!strings.Contains(rr.body(), "### Lapilli backtest failed") {
+		t.Errorf("a send failed beside the gate: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// A rule left alone whose query the history refuses: whether INC-7 is
+	// missed isn't known, which fails the job held to it.
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		if r.Form.Get("query") == "refused_total > 0" {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"status":"error","errorType":"bad_data","error":"refused"}`)
+			return
+		}
+		prom.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(refusing.Close)
+	refused := "      - alert: Refused\n        expr: refused_total > 0\n"
+	repo.git("checkout", "--quiet", "main")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("5m") + refused})
+	repo.git("commit", "--quiet", "-am", "a rule refused")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h") + refused})
+	if out, err := rr.run(settings, "--prometheus", refusing.URL); err == nil ||
+		!strings.Contains(out, "1 incidents a rule caught before the change can't be told caught or missed, as a rule after it couldn't be replayed (FAIL_MISSED=true)") ||
+		!strings.Contains(rr.body(), "whether they are missed isn't known") {
+		t.Errorf("not known: %v\n%s\n%s", err, rr.body(), out)
 	}
 
 	for _, c := range []struct {
