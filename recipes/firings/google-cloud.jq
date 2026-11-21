@@ -8,7 +8,9 @@
 # policy's user labels where those don't say, and its severity (critical,
 # error, warning); rename them to what --match needs, such as service. The
 # policy's name (projects/P/alertPolicies/ID) is alarm_id, by which lapilli
-# serve ties a policy it reads with --alarms to its history.
+# serve ties a policy it reads with --alarms to its history. The display
+# name is as serve takes a rule's: the characters that don't show taken
+# out, and 512 at most; with nothing left, the policy's name.
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.
 def epoch: . as $t
@@ -16,13 +18,19 @@ def epoch: . as $t
      // error("not a time: \($t)"))
   | ((.d + "Z") | fromdateiso8601) + (("0" + (.f // "")) | tonumber)
     - (if .z == "Z" then 0 else (.z[0:1] + "1" | tonumber) * ((.z[1:3] | tonumber) * 3600 + (.z[-2:] | tonumber) * 60) end);
+# A rule's name as serve takes it: the characters that don't show (a line
+# break, a zero-width space) taken out, and cut to 512 characters. One
+# serve wouldn't take would stop the whole copy.
+def rulename: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | .[:512];
 def lower: ascii_downcase;
 # The API is asked for the period, and the period is kept here too: the
 # filter's syntax is shown only by example.
 ($since | epoch) as $from | (if $until == "" then null else $until | epoch end) as $to
 | .[] | (.openTime // .open_time) as $open | select($open != null)
 | ($open | epoch) as $o | select($o >= $from and ($to == null or $o < $to))
-| {rule: (.policy.displayName // .policy.name // "unknown"),
+| . as $p
+| {rule: (.policy.displayName // "" | rulename
+           | if . != "" then . else $p.policy.name // "" | rulename | if . != "" then . else "unknown" end end),
    labels: ((.policy.userLabels // {}) + (.resource.labels // {}) + (.metric.labels // {})
             + (if (.policy.severity // "") | IN("", "SEVERITY_UNSPECIFIED") then {} else {severity: (.policy.severity | lower)} end)
             + (if (.policy.name // "") != "" then {alarm_id: .policy.name} else {} end)

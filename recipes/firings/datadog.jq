@@ -17,7 +17,9 @@
 # where the group's don't say; rename them to what --match needs, such as
 # service. A tag of no value is left out, and so are labels serve wouldn't
 # take: a name or value with a character that doesn't show, a value over
-# 256 bytes, past 32 labels or 4 KB of them.
+# 256 bytes, past 32 labels or 4 KB of them. So is the rule's name, as
+# serve takes it: the characters that don't show taken out, and 512 at
+# most; with nothing left, the name filled in, and then "monitor ID".
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included.
 def epoch: . as $t
   | (capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})$")
@@ -41,6 +43,10 @@ def pairs: [.[]? | strings | split(",")[] | index(":") as $i | select($i != null
 # A group's tags, of the names it gives one value: an event of two groups
 # names neither's.
 def group: pairs | group_by(.key) | map(select(map(.value) | unique | length == 1) | .[0]);
+# A rule's name as serve takes it: the characters that don't show (a line
+# break, a zero-width space) taken out, and cut to 512 characters. One
+# serve wouldn't take would stop the whole copy.
+def rulename: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | .[:512];
 # {key, value}s as labels, the first of each name, as serve takes them.
 def bounded:
   reduce .[] as $l ({};
@@ -55,7 +61,7 @@ def bounded:
   | ($e.monitor_id // $e.monitor.id) as $id | select($id != null and $id != "")
   | {id: ($id | tostring), event: (.id // "" | tostring), t: evtime, status: ($e.status // ""),
      group: (($e.monitor_groups // []) | map(tostring) | sort),
-     name: ($e.monitor.templated_name // "" | if . == "" then $e.monitor.name // "" else . end),
+     name: ($e.monitor.templated_name // "" | rulename | if . == "" then $e.monitor.name // "" | rulename else . end),
      priority: ($e.priority // "" | tostring), tags: ($e.monitor.tags // [])}]
 | [sort_by(.id, .group, .t, .event) | group_by([.id, .group])[]
   | reduce .[] as $v ({open: null, out: []};
@@ -66,7 +72,7 @@ def bounded:
   | select(.on.t >= $since and .on.t < $until)]
 | sort_by(.on.t, .on.id, .on.group)[]
 | .on as $o
-| {rule: (if $o.name != "" then $o.name else "monitor \($o.id)" end),
+| {rule: (if $o.name != "" then $o.name else "monitor \($o.id)" | rulename end),
    labels: ([{key: "alarm_id", value: $o.id}]
             + (if $o.priority | test("^[1-5]$") then [{key: "severity", value: "P\($o.priority)"}] else [] end)
             + ($o.group | group) + ($o.tags | pairs)

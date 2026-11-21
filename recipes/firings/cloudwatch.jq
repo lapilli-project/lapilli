@@ -8,7 +8,9 @@
 # lapilli serve ties an alarm it reads with --alarms to its history,
 # whatever it is named. CloudWatch alarms have no severity. For an alarm on
 # several series (PromQL, Metrics Insights GROUP BY), this is the alarm as a
-# whole: in ALARM while any series is.
+# whole: in ALARM while any series is. The alarm's name is the rule's, as
+# serve takes one: the characters that don't show taken out, and 512 at
+# most; with nothing left, "alarm ARN".
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.
 def epoch: . as $t
@@ -16,6 +18,10 @@ def epoch: . as $t
      // error("not a time: \($t)"))
   | ((.d + "Z") | fromdateiso8601) + (("0" + (.f // "")) | tonumber)
     - (if .z == "Z" then 0 else (.z[0:1] + "1" | tonumber) * ((.z[1:3] | tonumber) * 3600 + (.z[-2:] | tonumber) * 60) end);
+# A rule's name as serve takes it: the characters that don't show (a line
+# break, a zero-width space) taken out, and cut to 512 characters. One
+# serve wouldn't take would stop the whole copy.
+def rulename: tostring | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | .[:512];
 def dims: reduce (.Dimensions // [])[] as $d ({}; .[$d.Name] = ($d.Value | tostring));
 # The move an item records: from HistoryData, or else its summary ("Alarm
 # updated from OK to ALARM"). One that says neither stops the conversion,
@@ -42,4 +48,5 @@ def move: (try (.HistoryData | fromjson | {from: .oldState.stateValue, to: .newS
 # The period's end is in describe-alarm-history's, and a move at it is the
 # next period's.
 | select((.start | epoch) >= ($since | epoch) and (.start | epoch) < ($until | epoch))
-| {rule: $alarm, labels: ($labels[$alarm] // {})} + .
+| {rule: ($alarm | rulename | if . != "" then . else ["alarm", $labels[$alarm].alarm_id // empty] | join(" ") | rulename end),
+   labels: ($labels[$alarm] // {})} + .

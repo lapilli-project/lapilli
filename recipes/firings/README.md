@@ -72,7 +72,11 @@ Datadog and New Relic have [a section of their own](#datadog-and-new-relic).
   `--match` needs, usually `service`.
 - **Names.** The alarm's name; for Azure, the alert rule's; for Google Cloud,
   the policy's display name. A Google Cloud policy replayed with `--rules` is
-  named by its PromQL condition's `alertRule` when it has one.
+  named by its PromQL condition's `alertRule` when it has one. Each is taken
+  as `lapilli serve` takes a rule's name, since one it refused would stop
+  the whole copy: the characters that don't show (a line break, a
+  zero-width space) taken out, and 512 characters at most. One with nothing
+  left is named by the alarm's own ID (below), on CloudWatch `alarm ARN`.
 - **The alarm's own ID**, as the label `alarm_id`, on every cloud: the
   alarm's ARN (CloudWatch), the alert rule's resource id (Azure), the
   policy's name, `projects/P/alertPolicies/ID` (Google Cloud), the alarm's
@@ -142,7 +146,8 @@ start in `[SINCE, UNTIL)`, as `put.sh` sends them.
   filled in (`templated_name`), so one monitor is one rule whatever each
   group's notification says. New Relic: the condition's name; two
   conditions of one name, in two policies, are one rule unless
-  `newrelic.jq` tells them apart.
+  `newrelic.jq` tells them apart. Both are taken as the clouds' are (above):
+  one with nothing left is `monitor ID` or `condition ID`.
 - **The ID**, as `alarm_id`, as the clouds' are: the monitor's (Datadog),
   the condition's (New Relic). `--alarms` doesn't read either tool, so in
   `lapilli serve` it ties nothing yet.
