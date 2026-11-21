@@ -207,6 +207,42 @@ func TestImpactSuggest(t *testing.T) {
 	}
 }
 
+// TestImpactSuggestDocumented holds docs/impact.md's example of lapilli
+// impact suggest to what it prints, run as the page runs it, on a machine
+// in UTC, against the history TestImpactSuggest asks: go test
+// ./cmd/lapilli -run TestImpactSuggestDocumented -write-docs writes it
+// again.
+func TestImpactSuggestDocumented(t *testing.T) {
+	now = func() time.Time { return t0 }
+	var asked []string
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return askedHistory{asked: &asked}, nil }
+	path := filepath.Join("..", "..", "docs", "impact.md")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const command = "lapilli impact suggest --prometheus http://prometheus:9090"
+	before, rest, ok := strings.Cut(string(b), "```sh\n"+command+"\n```\n\n```\n")
+	shown, after, ok2 := strings.Cut(rest, "```\n")
+	if !ok || !ok2 {
+		t.Fatalf("docs/impact.md has no example of %q and what it prints", command)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(append(strings.Fields(command)[1:], "--tz", "UTC"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if *writeDocs {
+		page := before + "```sh\n" + command + "\n```\n\n```\n" + stdout.String() + "```\n" + after
+		if err := os.WriteFile(path, []byte(page), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if shown != stdout.String() {
+		t.Errorf("docs/impact.md's example isn't what %s prints: go test ./cmd/lapilli -run TestImpactSuggestDocumented -write-docs\n--- the page\n%s--- printed\n%s", command, shown, stdout.String())
+	}
+}
+
 func TestImpactSuggestNoneFound(t *testing.T) {
 	now = func() time.Time { return t0 }
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return unreachableNone{}, nil }
