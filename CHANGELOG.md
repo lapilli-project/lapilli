@@ -14,11 +14,13 @@ Before upgrading:
 - **Incidents judged by the alerts their tool linked to them**
   (docs/design/links.md). An incident takes `alerts`, each `{rule: NAME,
   labels: {...}}`, in the incidents file and in `POST` and `PUT
-  /api/v1/incidents`: a firing of the rule whose labels include the
-  alert's catches the incident when it starts between `--lead` before it
+  /api/v1/incidents`: a firing of the rule whose labels agree with the
+  alert's where both carry one (an external label it lacks passed over,
+  as `--match` does) catches the incident when it starts between `--lead` before it
   and its end, whatever `--match` says. The report marks such a catch
-  `linked` (`(linked)` in the text and in `--compare`'s Markdown), and the
-  incident's page and the rule's say "linked in the incident tool".
+  `linked` (`(linked)` in the text and in `--compare`'s Markdown, and in
+  MCP's `caught_by`), and the incident's page and the rule's say "linked
+  in the incident tool".
 - **`--linked-only`**, in `lapilli verdict` and `lapilli serve`: an
   incident that lists alerts is caught by them alone; one that lists none
   is judged as before. serve judges every firing again once when it is

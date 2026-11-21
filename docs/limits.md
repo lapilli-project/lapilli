@@ -43,9 +43,10 @@
 - A firing catches an incident by time and labels, or by the alerts the
   incident's tool linked to it, where a recipe copied them: PagerDuty's,
   incident.io's and Rootly's, and only those alerts that carry their
-  `alertname` and labels. A linked alert's labels must all be the
-  firing's, so a label the replay doesn't have (Prometheus's external
-  labels) keeps it from matching unless `ALERT_LABELS` leaves it out.
+  `alertname` and labels. A linked alert's label the replayed firing
+  doesn't carry is passed over, so one that told the firings of a rule
+  apart only by it (two Prometheus replicas' external labels) links them
+  both.
 - `lapilli serve` runs as one replica on a ledger file, or as several on
   one Postgres database, one of them leading (docs/design/replicas.md).
   Who is who comes

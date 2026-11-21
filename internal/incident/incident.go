@@ -55,7 +55,8 @@ type Incident struct {
 
 // Alert is one of the alerts an incident tool linked to an incident: the
 // rule it is of, by the name its alerts carry (alertname), and the labels
-// it had, all or some.
+// it had, all or some, which hold a firing to them where it has them too
+// (In).
 type Alert struct {
 	Rule   string            `yaml:"rule" json:"rule"`
 	Labels map[string]string `yaml:"labels" json:"labels,omitempty"`
@@ -111,10 +112,13 @@ func (a Alert) Names(rule string) bool {
 	return rule == a.Rule || strings.HasPrefix(rule, a.Rule+" [") && strings.HasSuffix(rule, "]")
 }
 
-// In reports whether labels have every label of the alert, with its value.
+// In reports whether labels agree with the alert's, as --match has a label
+// one side lacks: each the firing carries has the alert's value; one it
+// doesn't carry (an external label Prometheus added as it sent the alert,
+// one the receiver added) is passed over.
 func (a Alert) In(labels map[string]string) bool {
 	for k, v := range a.Labels {
-		if w, ok := labels[k]; !ok || w != v {
+		if w, ok := labels[k]; ok && w != v {
 			return false
 		}
 	}

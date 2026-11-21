@@ -22,9 +22,12 @@ on stdin, so `ps` doesn't show them. Give them read-only access.
 linked to each incident, where an alert carries its `alertname` and labels
 ([Incidents kept elsewhere](../../docs/incidents.md), "The alerts a tool
 linked"). `alerts.jq` is what they share; give `jq` `-L` this directory to run
-their `.jq` files yourself. `ALERTS=no` reads none, `ALERT_LABELS` keeps the
-labels it names alone, and `MAX_ALERT_REQUESTS` (2000) is the most they ask
-for a run, past which they stop and write nothing.
+their `.jq` files yourself. Each alert keeps every label it carries: in
+judging, one the firing doesn't carry (an external label Prometheus added)
+is passed over, and one both carry must agree. `ALERTS=no` reads none,
+`ALERT_LABELS` keeps the labels it names alone, to narrow them, and
+`MAX_ALERT_REQUESTS` (2000) is the most they ask for a run, past which they
+stop and write nothing.
 
 Each tool's script is a few lines of paging; what it means by an incident is in
 the `.jq` file beside it, for you to change:

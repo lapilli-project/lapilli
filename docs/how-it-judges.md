@@ -153,7 +153,9 @@ is counted as refired.
 linked to it (`alerts`, which the PagerDuty, incident.io and Rootly recipes
 write; [Incidents kept elsewhere](incidents.md)). A firing of one, its rule
 the alert's (or that rule told apart from others of its name,
-`HighErrorRate [severity=critical]`) and its labels including the alert's,
+`HighErrorRate [severity=critical]`) and its labels agreeing with the
+alert's on those both carry (one of the alert's it lacks, such as an
+external label, passed over, as `--match` does),
 catches the incident when it starts between `--lead` before it and its
 end, whatever their labels say on `--match`: the link is better evidence
 than the labels. The report marks the catch linked (`(linked)`, `linked`

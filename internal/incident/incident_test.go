@@ -294,8 +294,9 @@ func TestAlerts(t *testing.T) {
 		t.Errorf("alerts %+v, want %+v", got[0].Alerts, want)
 	}
 	if !got[0].Links("Errors", map[string]string{"service": "checkout", "pod": "a"}) || got[0].Links("Errors", map[string]string{"service": "cart"}) ||
-		!got[0].Links("Slow [severity=page]", map[string]string{"code": "500"}) || got[0].Links("Slower", map[string]string{"code": "500"}) {
-		t.Error("Links: want the rule by its name, as written or told apart, with the alert's labels among its own")
+		!got[0].Links("Slow [severity=page]", map[string]string{"code": "500"}) || got[0].Links("Slower", map[string]string{"code": "500"}) ||
+		!got[0].Links("Errors", map[string]string{"pod": "a"}) {
+		t.Error("Links: want the rule by its name, as written or told apart, its labels agreeing where both have them")
 	}
 	for body, want := range map[string]string{
 		"    alerts: [{rule: X, label: {a: b}}]\n":       `not "label"`,

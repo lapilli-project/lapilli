@@ -200,8 +200,7 @@ is built in and none is favoured.
   [docs/design/links.md](docs/design/links.md)): the PagerDuty, incident.io
   and Rootly recipes copy them where an alert carries its `alertname` and
   labels. Still to do: Grafana IRM's, FireHydrant's and Jira Service
-  Management's linked alerts; near misses looked for by a link; which
-  labels a recipe keeps by default.
+  Management's linked alerts; near misses looked for by a link.
 
 ## lapilli serve
 

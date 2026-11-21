@@ -23,6 +23,9 @@ func linkedWorld() ([]firing.Firing, []incident.Incident) {
 		// Of the rule linked, another service's: not linked, and
 		// disagreeing.
 		{Rule: "CartErrors", Labels: map[string]string{"service": "search"}, Start: m(102), End: m(104)},
+		// Of the rule linked, about cart, but in another cluster: a key
+		// both have, disagreeing.
+		{Rule: "CartErrors", Labels: map[string]string{"service": "cart", "cluster": "us-1"}, Start: m(106), End: m(108)},
 		// Linked, but before the lead: it was on anyway.
 		{Rule: "CartErrors", Labels: map[string]string{"service": "cart", "severity": "page"}, Start: m(60), End: m(70)},
 		// A rule told apart from another of its name, of the name the
@@ -30,8 +33,10 @@ func linkedWorld() ([]firing.Firing, []incident.Incident) {
 		{Rule: "DiskFull [severity=critical]", Labels: map[string]string{"severity": "critical", "node": "n1"}, Start: m(105), End: m(130)},
 	}
 	incs := []incident.Incident{
+		// cluster is an external label Prometheus added as it sent the
+		// alert, which no replayed firing carries: passed over.
 		{ID: "INC-7", Start: m(100), End: m(140), Labels: incident.Labels{"service": {"checkout"}},
-			Alerts: []incident.Alert{{Rule: "CartErrors", Labels: map[string]string{"service": "cart"}}, {Rule: "DiskFull"}}},
+			Alerts: []incident.Alert{{Rule: "CartErrors", Labels: map[string]string{"service": "cart", "cluster": "eu-1"}}, {Rule: "DiskFull"}}},
 		// No alerts listed: judged as ever, with --linked-only too.
 		{ID: "INC-8", Start: m(1000), End: m(1030), Labels: incident.Labels{"service": {"checkout"}}},
 	}
@@ -48,9 +53,11 @@ func catchesOf(in IncidentResult) map[string]Catch {
 }
 
 // A firing of an alert the incident lists catches it, labels disagreeing on
-// --match or not, marked linked; a firing of its rule with other labels
-// doesn't, nor one before the lead; a rule told apart is linked by its
-// name as written. The rest catch by the time and labels as before.
+// --match or not, marked linked, the alert's labels it doesn't carry (an
+// external label) passed over; a firing of its rule whose label the
+// alert's disagrees with doesn't, nor one before the lead; a rule told
+// apart is linked by its name as written. The rest catch by the time and
+// labels as before.
 func TestLinkedAlertsCatch(t *testing.T) {
 	fs, incs := linkedWorld()
 	r := Judge(nil, fs, incs, opts())
@@ -73,6 +80,9 @@ func TestLinkedAlertsCatch(t *testing.T) {
 		}
 		if f.Rule == "CartErrors" && f.Start.Equal(m(60)) && f.White {
 			t.Errorf("CartErrors before the lead caught %v", f.Incidents)
+		}
+		if f.Rule == "CartErrors" && f.Labels["cluster"] == "us-1" && f.White {
+			t.Errorf("CartErrors in another cluster caught %v: the alert's cluster disagrees", f.Incidents)
 		}
 	}
 	if c := catchesOf(r.Incidents[1]); len(c) != 1 || c["CheckoutLatency"].Linked {

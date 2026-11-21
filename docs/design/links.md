@@ -59,8 +59,12 @@ nothing.
 A firing of an alert the incident lists is one whose rule is the alert's
 rule, or that rule told apart from others of its name (`HighErrorRate
 [severity=critical]` is of `HighErrorRate`, the only name the tool knows),
-and whose labels include every label of the alert's, with its value. Such
-a firing catches the incident when it starts between the lead it is
+and whose labels agree with the alert's, as `--match` has a label one
+side lacks: a label of the alert's the firing carries too has the alert's
+value; one it doesn't carry, such as an external label Prometheus added as
+it sent the alert, or one the receiver added, is passed over (decided by
+the maintainer, 2026-11-21: a replayed firing never has those, and the
+tool's alert keeps them). Such a firing catches the incident when it starts between the lead it is
 judged by before it and its end, whatever their labels say on the labels
 matched on: the link is stronger evidence than the labels. It still
 doesn't catch when it was on before that (it was on anyway), or when its
@@ -86,7 +90,7 @@ rule adds.
 A catch by a firing the incident lists is marked: `linked` on
 `caught_by[]` in `--json` and `/api/v1/report`, `(linked)` after the
 rule's delay in the text and in `--compare`'s Markdown (`(linked, noisy)`
-with a noisy rule). An incident's `alerts` are in the report as given, and
+with a noisy rule), and `linked` in MCP's `caught_by`. An incident's `alerts` are in the report as given, and
 `settings.linked_only` says how it was judged. `--redact` gives alert
 rules and label values aliases, as it gives the rules' and the labels'.
 docs/numbers.md lists the fields, as `TestReportFieldsStable` holds them.
@@ -124,10 +128,10 @@ alerts and write those that carry an `alertname` as its `alerts`:
 | Rootly | the alert's `labels`, of which Alertmanager's carry `alertname`, `instance`, `dc` and `job`; `status` and `version` are the webhook's, `source_name` Rootly's | one a page of 100 of an incident's alerts |
 
 An alert with no `alertname` is left out, and how many were is said on
-stderr, as counts alone. `ALERT_LABELS` keeps only the labels it names: a
-label a replayed firing doesn't have, such as an external label Prometheus
-adds when it sends alerts, would keep every firing from matching.
-`ALERTS=no` reads none. They are tested against each API's documented
+stderr, as counts alone. Every label an alert carries is kept: one a
+replayed firing doesn't have is passed over in judging, above.
+`ALERT_LABELS` narrows them to those it names, and `ALERTS=no` reads
+none. They are tested against each API's documented
 answers with a server standing in, not against real accounts.
 
 ## Cost and bounds
@@ -162,7 +166,8 @@ answers with a server standing in, not against real accounts.
   (`incident.written`, never of one the token copies in), escaped as JSON;
   `--redact` aliases them; no page shows their rules or labels, only
   "(linked in the incident tool)" by a rule Lapilli already knows. Nothing
-  of them goes to `/metrics` or MCP.
+  of them goes to `/metrics`; MCP's `caught_by` says `linked`, as the
+  report does.
 - **The recipes.** What a tool answers goes into a URL only as an id
   checked to be letters and digits (and dashes, Rootly's); the token is
   read from its file and sent on stdin, never on a command line. What they
@@ -170,16 +175,18 @@ answers with a server standing in, not against real accounts.
 
 ## Questions for review
 
-1. **Which labels a recipe keeps by default.** All an alert carries, which
-   may include labels no replayed firing has (Prometheus's external
-   labels, Alertmanager's own); or none, linking by the rule alone, which
-   links every firing of it in the span. All, with `ALERT_LABELS` to
-   narrow, is built.
-2. **Grafana IRM, FireHydrant, Jira Service Management.** Each keeps alerts
+Decided on 2026-11-21, by the maintainer:
+
+- **Which labels a recipe keeps by default**: all an alert carries, and a
+  label the firing lacks is passed over in judging, as `--match` passes
+  one over; `ALERT_LABELS` narrows them.
+
+Open:
+
+1. **Grafana IRM, FireHydrant, Jira Service Management.** Each keeps alerts
    beside incidents; their recipes don't read them yet.
-3. **Near misses** are still looked for by labels: a rule the incident
+2. **Near misses** are still looked for by labels: a rule the incident
    lists whose condition held but not for its `for` could be looked for
    by its link too.
-4. **MCP** says nothing of links yet: its `caught_by` could carry `linked`.
-5. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
+3. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
    rather than a flag.

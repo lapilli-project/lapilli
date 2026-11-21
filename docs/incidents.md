@@ -33,8 +33,9 @@ incidents:
       - {rule: PaymentsDBConnections, labels: {service: payments-db}}
 ```
 
-A firing of one catches the incident when it starts between `--lead` before
-it and its end, its labels agreeing on `--match` or not: the tool's link is
+A firing of one, its labels agreeing with the alert's on those both carry,
+catches the incident when it starts between `--lead` before it and its end,
+its labels agreeing on `--match` or not: the tool's link is
 better evidence than a label. The report marks the catch `linked`. With
 `--linked-only`, an incident that lists alerts is caught by those alone, and
 one that lists none as before ([How it judges](how-it-judges.md)).
@@ -67,10 +68,11 @@ stderr how many they left out:
 - **Rootly** keeps `alertname`, `instance`, `dc` and `job` of an alert
   Alertmanager sent among its labels.
 
-`ALERT_LABELS=service,namespace` keeps those labels of each alert alone. Keep
-to labels the rules' own firings carry: a label Prometheus adds as it sends
-an alert (an external label such as `cluster`), or one only the tool has,
-keeps every firing from matching. `ALERTS=no` reads no alerts. Reading them
+An alert's labels hold a firing to them only where it carries them too, as
+`--match` does: a label Prometheus adds as it sends an alert (an external
+label such as `cluster`), or one only the tool has, is passed over, and a
+label both have must agree. `ALERT_LABELS=service,namespace` keeps those
+labels of each alert alone, to narrow them. `ALERTS=no` reads no alerts. Reading them
 is a request or more an incident, `MAX_ALERT_REQUESTS` (2000) a run at most;
 at Rootly's five requests a minute, set `SINCE` close.
 
