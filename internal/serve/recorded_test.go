@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -54,6 +55,38 @@ func TestFiringsThroughThePort(t *testing.T) {
 		w.Write(b)
 	}))
 	defer google.Close()
+	datadog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := "datadog-1.json"
+		if r.URL.Query().Get("page[cursor]") == "page-2" {
+			page = "datadog-2.json"
+		}
+		b, _ := os.ReadFile(firingRecipes + "testdata/" + page)
+		w.Write(b)
+	}))
+	defer datadog.Close()
+	// Both pages' results as one, fewer than a full page.
+	newrelic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rows []any
+		for _, page := range []string{"newrelic-1.json", "newrelic-2.json"} {
+			var p struct {
+				Data struct {
+					Actor struct {
+						Account struct {
+							NRQL struct {
+								Results []any `json:"results"`
+							} `json:"nrql"`
+						} `json:"account"`
+					} `json:"actor"`
+				} `json:"data"`
+			}
+			b, _ := os.ReadFile(firingRecipes + "testdata/" + page)
+			json.Unmarshal(b, &p)
+			rows = append(rows, p.Data.Actor.Account.NRQL.Results...)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"actor": map[string]any{"account": map[string]any{
+			"nrql": map[string]any{"results": rows}}}}})
+	}))
+	defer newrelic.Close()
 	period := []string{"SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z"}
 	sources := []struct {
 		source, script string
@@ -78,6 +111,9 @@ esac`)}, 4},
   *bbbb*) cat "$d/oci-history-b.json" ;;
   *) exit 2 ;;
 esac`)}, 3},
+		{"datadog-shop", "datadog.sh", []string{"DATADOG_API=" + datadog.URL, "DATADOG_TOKEN_FILE=" + tokenFile(t, "tok")}, 4},
+		{"newrelic-shop", "newrelic.sh", []string{"NEW_RELIC_API=" + newrelic.URL + "/graphql", "NEW_RELIC_API_KEY_FILE=" + tokenFile(t, "NRAK-TEST"),
+			"NEW_RELIC_ACCOUNT_ID=1234567"}, 4},
 	}
 	put := func(source, firings, tok string) (string, error) {
 		cmd := exec.Command("sh", firingRecipes+"put.sh", port.URL, source)
@@ -137,8 +173,8 @@ esac`)}, 3},
 	if msg, err := put("cloudwatch-prod", "", "not the token at all"); err == nil || !strings.Contains(msg, "401") {
 		t.Errorf("the wrong token: %v\n%s", err, msg)
 	}
-	if fs, _ := s.l.Firings(ctx, ledger.FiringQuery{From: utc("2026-11-01T00:00:00Z"), To: utc("2026-11-08T00:00:00Z")}); len(fs) != 13 {
-		t.Errorf("%d firings in the ledger, want 13", len(fs))
+	if fs, _ := s.l.Firings(ctx, ledger.FiringQuery{From: utc("2026-11-01T00:00:00Z"), To: utc("2026-11-08T00:00:00Z")}); len(fs) != 21 {
+		t.Errorf("%d firings in the ledger, want 21", len(fs))
 	}
 	// What isn't firings is refused before anything is sent.
 	if msg, err := put("cloudwatch-prod", "{\"incidents\": []}\n", token); err == nil || !strings.Contains(msg, "want firings") {

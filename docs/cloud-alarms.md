@@ -45,3 +45,22 @@ copied in (each write's period is kept); a job copying weekly needs
 history at another severity fired within twelve weeks, it has none. With
 none tied to it, it has no record: it isn't among the rules that never
 fired, and retiring it isn't proposed.
+
+## Other monitoring tools
+
+Datadog's monitors and New Relic's alert conditions aren't read as rules,
+so they are neither replayed nor listed; what they fired is judged the same
+way, from two more scripts in [recipes/firings](../recipes/firings):
+
+| Tool | Script | Its history |
+|---|---|---|
+| Datadog | `datadog.sh` (the Events API, the events monitors write) | 15 months |
+| New Relic | `newrelic.sh` (`NrAiIncident` events, with NRQL through NerdGraph) | what the account keeps |
+
+Each firing is one of a monitor's groups (Datadog), or one incident of a
+condition (New Relic), from when it triggered until it recovered or closed,
+labelled with its tags, its priority as `severity` and the monitor's or
+condition's ID as `alarm_id`. Both read their keys from files and are
+copied into `lapilli serve` by `put.sh`, as the clouds' are. They are
+checked against the answers each tool's documentation shows, not against
+real accounts; the scripts' README says what that leaves unknown.
