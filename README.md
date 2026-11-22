@@ -71,6 +71,18 @@ impact-1 user impact (--impact)  2026-11-01 21:27  24m     ✗ nothing fired
 > counts of critical alerts came within 10% of theirs in three of the four
 > weeks.
 
+## Try it
+
+```sh
+go install lapilli.dev/cmd/lapilli@latest
+lapilli demo
+```
+
+`lapilli demo` replays seven made-up rules over a week of history made up
+in the process, and prints a report like the one above: nothing to
+connect, nothing read or sent. Then
+[Getting started](docs/getting-started.md) does the same on your own rules.
+
 ## Why
 
 Alert rules pile up. One is added after each incident, few are taken away, and

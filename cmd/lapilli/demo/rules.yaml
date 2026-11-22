@@ -1,0 +1,35 @@
+# lapilli demo's rules: seven alert rules of a made-up shop, as a
+# Prometheus rule file has them. demo/sample.yaml is their history.
+groups:
+  - name: shop
+    rules:
+      - alert: CheckoutErrors
+        expr: sum by (service) (rate(http_requests_total{service="checkout",code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total{service="checkout"}[5m])) > 0.05
+        for: 2m
+        labels: {severity: critical}
+      - alert: CheckoutLatencyP99
+        expr: histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket{service="checkout"}[5m]))) > 0.8
+        for: 1m
+        labels: {severity: warning}
+      - alert: SearchErrors
+        expr: sum by (service) (rate(http_requests_total{service="search",code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total{service="search"}[5m])) > 0.05
+        for: 5m
+        labels: {severity: critical}
+      - alert: OrdersQueueBacklog
+        expr: sum by (service) (queue_depth{service="orders"}) > 500
+        for: 15m
+        labels: {severity: warning}
+      - alert: PaymentsDown
+        expr: up{job="payments"} == 0
+        for: 1m
+        labels: {severity: critical}
+  - name: platform
+    rules:
+      - alert: NodeCPUHigh
+        expr: avg by (instance) (rate(node_cpu_seconds_total{mode!="idle"}[5m])) > 0.9
+        for: 10m
+        labels: {severity: warning}
+      - alert: CertificateExpiring
+        expr: (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 7
+        for: 1h
+        labels: {severity: warning}

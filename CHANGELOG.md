@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`lapilli demo`: a first report, with nothing to connect.** It runs
+  `lapilli verdict`'s own code over a sample built in: seven made-up
+  rules of a small shop, a week of their history made up in the process,
+  and three incidents. Its report shows a noisy rule and the longer `for`
+  that would quiet it, the rules that caught an incident, one nothing
+  caught and the rule that nearly did, and the firings that woke people;
+  then how to run the same on your own rules. The same report every run:
+  the sample's week, from Monday 9 November 2026, is laid in `--tz`'s
+  zone, or the machine's. `--json` gives it as JSON. It reads no
+  Prometheus and sends nothing anywhere (docs/design/demo.md).
 ### Fixed
 
 - **A flag that is on or off was on whatever it was given** (affected:
