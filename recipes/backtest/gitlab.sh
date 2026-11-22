@@ -119,11 +119,15 @@ edit_comment() {
   case $code in 2??) ;; *) say "GitLab didn't take the note ($code): $(shown "$out")"; return 1 ;; esac
 }
 
-# A commit status: success, or failed, as lib.sh says. Asked again once
-# when GitLab answers 409: another status of the commit was being set.
+# A commit status: running, success, or failed, as lib.sh says pending,
+# success or failure. Asked again once when GitLab answers 409: another
+# status of the commit was being set.
 post_status() {
-  st=success
-  [ "$1" = success ] || st=failed
+  case $1 in
+    success) st=success ;;
+    pending) st=running ;;
+    *) st=failed ;;
+  esac
   pipeline=
   if [ "$status_sha" = "${CI_COMMIT_SHA:-}" ]; then
     case ${CI_PIPELINE_ID:-} in '' | *[!0-9]*) ;; *) pipeline=$CI_PIPELINE_ID ;; esac

@@ -10,8 +10,9 @@
 #   post_comment FILE    posts the Markdown in FILE as a comment on PR
 #   edit_comment ID FILE puts the Markdown in FILE in comment ID's place
 #   post_status STATE TEXT
-#                        sets the status $status_context, STATE success or
-#                        failure and TEXT its description, on the commit
+#                        sets the status $status_context, STATE pending,
+#                        success or failure, in the host's own words for
+#                        them, and TEXT its description, on the commit
 #                        $status_sha, linking to $status_url if not empty
 #
 # and may set status_commit, the pull request's head commit as its CI
@@ -102,7 +103,11 @@
 #                    statuses (Bitbucket's build statuses, Azure DevOps'
 #                    pull request statuses, on the iteration at that
 #                    commit), which a branch rule can require. Set after
-#                    the comment, whatever became of it
+#                    the comment, whatever became of it; and pending
+#                    (GitLab's running, Bitbucket's INPROGRESS) once the
+#                    commits are found, until then: a job that dies
+#                    leaves it pending, or failure when it ends on a
+#                    signal or an error of its own, never a success
 #   STATUS_SHA       optional: the commit the status goes on, its full
 #                    hash; default the pull request's head commit as the
 #                    CI says, or HEAD when it isn't a merge. Either way the
@@ -909,9 +914,12 @@ fi
 
 tmp=$(mktemp -d)
 # A backtest serve took and hasn't ended is cancelled when the job ends
-# first (bt_live), so that serve doesn't run what no one waits for.
+# first (bt_live), so that serve doesn't run what no one waits for; and a
+# status set pending, and not yet set to how the job ends (status_left),
+# is set failure (status_died).
 bt_live=
-trap '[ -z "$bt_live" ] || serve_cancel || :; rm -rf "$tmp"' EXIT
+status_left=
+trap '[ -z "$bt_live" ] || serve_cancel || :; [ -z "$status_left" ] || status_died || :; rm -rf "$tmp"' EXIT
 trap 'exit 1' INT TERM HUP
 out=$tmp/out
 mkdir "$tmp/empty"
@@ -2258,8 +2266,9 @@ main() {
   # Where lapilli serve is, too: an address inside a cluster, say.
   [ -z "$serve" ] || hidden --prometheus "$serve" >>"$tmp/hidden"
   # The base first, then the pull request's: what the pull request runs
-  # comes last.
-  if commits && fetch_lapilli && files "$base" "$tmp/base" "the commit it goes into" &&
+  # comes last. Once the commits are found, the status says the backtest
+  # runs, until it ends.
+  if commits && status_start && fetch_lapilli && files "$base" "$tmp/base" "the commit it goes into" &&
     files "$head" "$tmp/head" "the pull request's commit" && incidents && expectations; then
     if [ -z "${RENDER:-}" ] || { render base "the commit it goes into" && render head "the pull request's commit"; }; then
       backtest "$@"
@@ -2323,6 +2332,8 @@ main() {
 # description, 140 characters at most; it fails when none could be set.
 status() {
   [ -n "$status_on" ] || return 0
+  # Ended, as the job does: the trap leaves the status to this.
+  status_left=
   if ! status_on_commit; then
     say "the commit status $status_context wasn't set"
     return 1
@@ -2335,6 +2346,39 @@ status() {
     return 1
   fi
   say "set the commit status $status_context on $status_sha: $state, $desc"
+}
+
+# status_start: with STATUS, the commit status pending (in the host's
+# words: GitHub's, Gitea's and Azure DevOps' pending, GitLab's running,
+# Bitbucket's INPROGRESS) once the commits are found, so that while the
+# job runs, and once it died, the status reads as no verdict: not an
+# earlier run's success on the same commit. On a commit status would
+# refuse, none (status says why, at the end). One the host refuses is
+# said, and the run goes on: the end's is set all the same. Never fails.
+status_start() {
+  [ -n "$status_on" ] || return 0
+  status_on_commit 2>/dev/null || return 0
+  # Left before it is asked: a signal while it is set ends the job with a
+  # failure, not with a status that may be pending.
+  status_left=1
+  if post_status pending "the backtest is running"; then
+    say "set the commit status $status_context on $status_sha: pending, until the backtest ends"
+  else
+    status_left=
+    say "the commit status $status_context couldn't be set pending on $status_sha: the job's end sets it all the same"
+  fi
+}
+
+# status_died: the job ends before it set the status to how it ends (a
+# signal, a command that failed outside a test), the status pending: set
+# failure, saying so. A job killed outright leaves it pending.
+status_died() {
+  status_left=
+  if post_status failure "the job ended before the backtest did: its log says why"; then
+    say "set the commit status $status_context on $status_sha: failure, as the job ended before the backtest did"
+  else
+    say "the commit status $status_context on $status_sha stays pending: the job ended before the backtest did"
+  fi
 }
 
 # status_on_commit: the commit the status goes on, into status_sha:

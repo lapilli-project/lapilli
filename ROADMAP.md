@@ -187,7 +187,8 @@ before it caught by no rule (`FAIL_MISSED`, `--fail-missed`) or breaks an
 expectation, and sets a commit status on the pull request's head commit
 (`STATUS`): commit statuses on every host (Bitbucket's build statuses,
 Azure DevOps' pull request statuses), not GitHub check runs, for a branch
-rule to require. Still to do:
+rule to require, pending while the job runs, so that a job that dies
+never leaves a success. Still to do:
 
 - Through serve: Bitbucket Pipelines' ID token, and Azure Pipelines' if
   decided (step 2); Grafana-managed and Loki rules, if decided (step 3);
@@ -195,7 +196,11 @@ rule to require. Still to do:
   the rules left alone by its record.
 
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
-  DevOps accounts: how each renders the comment, and takes the status.
+  DevOps accounts: how each renders the comment, and takes the status,
+  pending then final (GitLab's `running` set again over a job left
+  running, which its reference doesn't say).
+- A test of the commits GitLab's merged results pipelines give
+  (`CI_MERGE_REQUEST_TARGET_BRANCH_SHA`), which the recipe takes untested.
   Today each is tested against its API's documented answers, with a
   server standing in; Gitea against a real one.
 

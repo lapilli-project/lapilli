@@ -120,7 +120,7 @@ inputs:
     description: true, with incidents or impact, fails the step when the change leaves an incident a rule caught before it caught by no rule after it, once the comment says which (lapilli's --fail-missed); also when a rule that differs couldn't be replayed, as what it catches can't be judged. Refused with serve-url.
     default: "false"
   status:
-    description: true also sets a commit status, lapilli/backtest (with key, lapilli/backtest/KEY), on the pull request's head commit, success or failure as the step ends, linking to the run, which a branch rule can require; the token needs statuses write (the job's permissions statuses write).
+    description: true also sets a commit status, lapilli/backtest (with key, lapilli/backtest/KEY), on the pull request's head commit, pending while the step runs and success or failure as it ends, linking to the run, which a branch rule can require; the token needs statuses write (the job's permissions statuses write).
     default: "false"
   promtool:
     description: promtool on the runner, its path or its name on PATH, outside the checkout (install it in a step before), which runs the scenarios expect names (scenarios, promtool's own test files) of the rules that differ, before and after, each against the rule's group as Lapilli writes it; with fail-on-expectations, a scenario that couldn't be run after the change fails the step too. Without it, each scenario is not known. Refused with serve-url, which runs none.

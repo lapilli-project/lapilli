@@ -110,11 +110,14 @@ edit_comment() {
   case $code in 2??) ;; *) say "Azure DevOps didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
 }
 
-# A pull request status: succeeded or failed, as lib.sh says, on the
-# latest iteration at the commit.
+# A pull request status: pending, succeeded or failed, as lib.sh says
+# pending, success or failure, on the latest iteration at the commit.
 post_status() {
-  st=succeeded
-  [ "$1" = success ] || st=failed
+  case $1 in
+    success) st=succeeded ;;
+    pending) st=pending ;;
+    *) st=failed ;;
+  esac
   code=$(host GET "$threads/$PR/iterations?api-version=7.1")
   case $code in 2??) ;; *) say "Azure DevOps didn't list the pull request's iterations ($code): $(shown "$out")"; return 1 ;; esac
   it=$(jq -r --arg c "$status_sha" '[(if type == "object" then .value else . end)[]? | objects
