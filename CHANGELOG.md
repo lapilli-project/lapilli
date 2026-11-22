@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-11-23
+
+`lapilli demo`: a first report on a sample built in, with nothing to
+connect. A pending commit status while a backtest job runs, so that a job
+that dies never leaves an earlier run's success. And nine fixes left over
+from 0.67 and 0.68, a flag that is on or off given `=false` among them.
+No schema change: the ledger stays at 029.
+
+Before upgrading:
+- **A flag that is on or off takes `=true` or `=false`, and nothing
+  else**: `=1`, `=t` or `=TRUE`, which `--check-replay`,
+  `--check-content`, `--grafana-history`, `--progress`, serve's own and
+  preflight's took, are refused. And `=false` turns one off where it
+  turned it on (below): a command line that gave `--json=false` or the
+  like now gets what it says.
+
 ### Added
 
 - **`lapilli demo`: a first report, with nothing to connect.** It runs
@@ -24,7 +40,7 @@
   sets failure ("the job ended before the backtest did"); killed
   outright, it leaves pending, which a branch rule doesn't take as
   passing. A pending status the host refuses is said in the job's log,
-  and the run goes on. Each host's status is tested against its
+  and the run goes on; a job that dies after sets failure all the same. Each host's status is tested against its
   reference's states with a server standing in, and Gitea's pending then
   failure against a real Gitea in CI (`test/e2e/backtest.sh`). No new
   setting; a job sets two statuses where it set one.
@@ -86,13 +102,6 @@
 - The weekly digest read the notifications sent, and the firings that
   paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
   the webhook is told. Once now, everyone's and each team's.
-
-### Changed
-
-- **A flag that is on or off takes `=true` or `=false`, and nothing
-  else**, in every command: `=1`, `=t` or `=TRUE`, which
-  `--check-replay`, `--check-content`, `--grafana-history`, `--progress`,
-  serve's own and preflight's took, are refused, as `=yes` was.
 
 ## [0.68.1] - 2026-11-21
 

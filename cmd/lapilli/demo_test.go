@@ -100,13 +100,21 @@ func TestDemoJSON(t *testing.T) {
 // TestDemoFlags: lapilli demo takes --json and --tz, and refuses anything
 // else before it reads anything.
 func TestDemoFlags(t *testing.T) {
-	for _, args := range [][]string{{"--rules", "x.yaml"}, {"--tz"}, {"--tz", "Nowhere/Else"}, {"--json=false"}, {"--prometheus", "http://p"}} {
+	for _, args := range [][]string{{"--rules", "x.yaml"}, {"--tz"}, {"--tz", "Nowhere/Else"}, {"--tz="}, {"--tz", ""}, {"--json=1"}, {"--prometheus", "http://p"}} {
 		if code, out, errs := demo(t, args...); code != 2 || out != "" || !strings.Contains(errs, `Run "lapilli demo -h"`) {
 			t.Errorf("%q: exit %d, %q %q", args, code, out, errs)
 		}
 	}
 	if code, out, _ := demo(t, "-h"); code != 0 || out != demoUsage {
 		t.Errorf("-h: exit %d", code)
+	}
+	// --json is on or off as any flag that is: =false the report as text,
+	// =true as JSON.
+	if code, out, _ := demo(t, "--tz", "UTC", "--json=false"); code != 0 || !strings.HasPrefix(out, "Lapilli  ") {
+		t.Errorf("--json=false: exit %d, %.40q", code, out)
+	}
+	if code, out, _ := demo(t, "--tz", "UTC", "--json=true"); code != 0 || !strings.HasPrefix(out, "{") {
+		t.Errorf("--json=true: exit %d, %.40q", code, out)
 	}
 }
 

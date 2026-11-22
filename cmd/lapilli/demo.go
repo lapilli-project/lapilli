@@ -63,8 +63,12 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 		case name == "-h" || name == "--help":
 			fmt.Fprint(stdout, demoUsage)
 			return 0
-		case name == "--json" && !hasVal:
-			asJSON = true
+		case name == "--json":
+			on, err := onOff(name, val, hasVal)
+			if err != nil {
+				return demoBad(stderr, verdict.Clean(err.Error()))
+			}
+			asJSON = on
 		case name == "--tz":
 			if !hasVal {
 				if i+1 == len(args) {
@@ -72,6 +76,11 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 				}
 				i++
 				val = args[i]
+			}
+			// None named isn't the machine's, nor UTC as verdict would read
+			// it: refused.
+			if val == "" {
+				return demoBad(stderr, "--tz needs a zone")
 			}
 			tz = val
 		default:

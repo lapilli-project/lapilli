@@ -2354,7 +2354,9 @@ status() {
 # job runs, and once it died, the status reads as no verdict: not an
 # earlier run's success on the same commit. On a commit status would
 # refuse, none (status says why, at the end). One the host refuses is
-# said, and the run goes on: the end's is set all the same. Never fails.
+# said, and the run goes on: the end's is set all the same, and so is the
+# failure of a job that dies after, which may have found an earlier run's
+# success on the commit. Never fails.
 status_start() {
   [ -n "$status_on" ] || return 0
   status_on_commit 2>/dev/null || return 0
@@ -2364,7 +2366,6 @@ status_start() {
   if post_status pending "the backtest is running"; then
     say "set the commit status $status_context on $status_sha: pending, until the backtest ends"
   else
-    status_left=
     say "the commit status $status_context couldn't be set pending on $status_sha: the job's end sets it all the same"
   fi
 }

@@ -140,6 +140,21 @@ func TestBacktestRecipeStatus(t *testing.T) {
 				st.SHA != sha || rr.host.statuses[n-2].State != pendingState[h.kind] {
 				t.Errorf("ended by a signal: %v, %+v\n%s", err, st, out)
 			}
+			// The host refuses the pending one, and the job is ended later
+			// (at its next request of the host): set failure all the same,
+			// not left as an earlier run's on the commit may read.
+			_, was := rr.host.lastStatus()
+			rr.host.set(func(h *commentHost) { h.failPending = true })
+			rr.started = func(p *os.Process) {
+				rr.host.set(func(h *commentHost) { h.later = func() { p.Signal(syscall.SIGTERM) } })
+			}
+			out, err = rr.run(settings, args...)
+			rr.started = nil
+			rr.host.set(func(h *commentHost) { h.failPending, h.refusedPending, h.later = false, false, nil })
+			if st, n := rr.host.lastStatus(); err == nil || n != was+1 || st.State != want[1] || st.SHA != sha ||
+				st.Text != "the job ended before the backtest did: its log says why" || !strings.Contains(out, "couldn't be set pending on "+sha) {
+				t.Errorf("pending refused, then ended by a signal: %v, %d statuses more, %+v\n%s", err, n-was, st, out)
+			}
 			// A commit the backtest didn't read: none set on it.
 			_, before := rr.host.lastStatus()
 			other := strings.Repeat("ab", 20)

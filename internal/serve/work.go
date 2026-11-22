@@ -115,7 +115,7 @@ func (s *Server) logLinked(ctx context.Context) {
 		s.log.Info("--linked-only isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
 			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
 	default:
-		s.log.Warn("--linked-only isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same",
+		s.log.Warn("--linked-only isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same, and start this one again once they have it, which judges every firing again if the ledger's is still the other",
 			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
 	}
 }

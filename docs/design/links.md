@@ -131,7 +131,14 @@ everything again only while the ledger's value is still the one it found
 at start (or last agreed with); one another replica wrote since is newer,
 and a replica it has passed judges what it runs with its own flag and
 nothing again. Each says in its log, at start and as it leads, when its
-flag isn't the ledger's, with both. The chart's `linkedOnly` gives it, to the CronJob and
+flag isn't the ledger's, with both. Two things follow, of replicas that
+differ. A replica that follows says "being judged again" by its own flag
+and what it found, whichever the leader runs with: true once the
+replicas have the same, not before. And a change undone by taking away
+the one replica that made it (a rollout turned back) leaves the stones
+as that replica gave them: the others had found the ledger before it,
+and take its value for a newer change. Starting them again, with the
+same flag, judges every firing again once. The chart's `linkedOnly` gives it, to the CronJob and
 to serve alike. The incident's page marks a linked catch "(linked in
 the incident tool)", and the rule's page the incidents it caught so. The
 UI's form has no alerts: an incident written in the UI and given alerts

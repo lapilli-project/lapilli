@@ -277,6 +277,10 @@ type commentHost struct {
 	// pending is called, h.mu held, as a status is taken whose state is
 	// the host's word for pending (pendingState).
 	pending func()
+	// failPending refuses a status of that state alone; later is then
+	// called once, h.mu held, at the request after one refused.
+	failPending, refusedPending bool
+	later                       func()
 }
 
 // pendingState is each host's word for a status of a job under way, as its
@@ -337,6 +341,10 @@ func (h *commentHost) mine() []hostComment {
 func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.refusedPending && h.later != nil {
+		h.refusedPending = false
+		h.later()
+	}
 	header := "Authorization"
 	if h.kind == "gitlab" {
 		header = "PRIVATE-TOKEN"
@@ -578,7 +586,8 @@ func (h *commentHost) status(w http.ResponseWriter, r *http.Request, rest string
 	if !slices.Contains(states, st.State) {
 		h.t.Errorf("%s: a status of state %q", h.kind, st.State)
 	}
-	if h.failStatus {
+	if refused := h.failPending && st.State == pendingState[h.kind]; h.failStatus || refused {
+		h.refusedPending = refused
 		http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
 		return
 	}
