@@ -14,6 +14,21 @@
   the sample's week, from Monday 9 November 2026, is laid in `--tz`'s
   zone, or the machine's. `--json` gives it as JSON. It reads no
   Prometheus and sends nothing anywhere (docs/design/demo.md).
+- **A pending commit status while a backtest job runs** (`STATUS`, the
+  action's `status`): once the recipe has found the commits, it sets the
+  status pending, in each host's words (GitHub's, Gitea's and Azure
+  DevOps' `pending`, GitLab's `running`, Bitbucket's `INPROGRESS`), then
+  success or failure as before when the job ends. A job that dies never
+  leaves a status that reads as success, an earlier run's on the same
+  commit: ended by a signal (a CI's cancel) or an error of its own, it
+  sets failure ("the job ended before the backtest did"); killed
+  outright, it leaves pending, which a branch rule doesn't take as
+  passing. A pending status the host refuses is said in the job's log,
+  and the run goes on. Each host's status is tested against its
+  reference's states with a server standing in, and Gitea's pending then
+  failure against a real Gitea in CI (`test/e2e/backtest.sh`). No new
+  setting; a job sets two statuses where it set one.
+
 ### Fixed
 
 - **A flag that is on or off was on whatever it was given** (affected:

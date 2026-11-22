@@ -205,7 +205,12 @@ the branch's rules:
 - `STATUS=true` (the action's `status`): the job also sets a commit status
   on the pull request's head commit, `lapilli/backtest`
   (`lapilli/backtest/KEY` with a `KEY` of its own), success or failure as
-  the job ends, its description saying why, linking to the job. It is a
+  the job ends, its description saying why, linking to the job; and
+  pending while it runs, from when it has found the commits, so that a
+  job that dies never leaves a success: ended by a signal, such as a
+  cancel, or by an error of its own, it sets failure, saying so, and
+  killed outright it leaves pending, which a branch rule doesn't take as
+  passing. It is a
   commit status, not a GitHub check run: one API on every host, for a
   branch rule to require by its name. The comment is posted first,
   whatever the status, and the job's exit follows the run, not the
@@ -249,11 +254,11 @@ comment does:
 
 | Host | Status | The token |
 |---|---|---|
-| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, on the event's `pull_request.head.sha` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
-| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit | the Developer role (the comment's Reporter can't), scope `api` |
-| Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, key `lapilli-backtest`, its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
-| Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
-| Azure DevOps | a pull request status, `POST .../pullRequests/{id}/statuses`, genre `lapilli` and name `backtest`, on the iteration at the head commit (`GET .../iterations`): none when there is no such iteration, as one on the pull request alone would stay after a later push | a personal access token's Code (status), `vso.code_status`, or the build service's Contribute to pull requests (not checked against an account) |
+| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
+| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit | the Developer role (the comment's Reporter can't), scope `api` |
+| Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, `INPROGRESS` then `SUCCESSFUL` or `FAILED`, key `lapilli-backtest` (a key's status written over by the next), its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
+| Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
+| Azure DevOps | a pull request status, `POST .../pullRequests/{id}/statuses`, `pending` then `succeeded` or `failed`, genre `lapilli` and name `backtest`, on the iteration at the head commit (`GET .../iterations`): none when there is no such iteration, as one on the pull request alone would stay after a later push | a personal access token's Code (status), `vso.code_status`, or the build service's Contribute to pull requests (not checked against an account) |
 
 Each is tested against its reference's documented answers, with a server
 standing in; Gitea's also in CI's run against a real Gitea

@@ -152,7 +152,14 @@ And, as wanted:
 - `STATUS=true` (or `1`): a commit status on the pull request's head
   commit too, `lapilli/backtest` (`lapilli/backtest/KEY` with a `KEY` of
   its own), success or failure as the job ends, with why, linking to the
-  job; set after the comment, whatever became of it. Each script takes
+  job; set after the comment, whatever became of it. Once the commits are
+  found it is set pending, in the host's words (GitHub's, Gitea's and
+  Azure DevOps' `pending`, GitLab's `running`, Bitbucket's `INPROGRESS`),
+  so that while the job runs, and once it died, it reads as no verdict,
+  never as an earlier run's success on the same commit: a job ended by a
+  signal (a cancel) or by an error of its own sets it failure, saying so,
+  and one killed outright leaves it pending. A pending status the host
+  refuses is said, and the run goes on. Each script takes
   the head commit from its CI (GitHub's and Gitea's event, GitLab's
   `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` or `CI_COMMIT_SHA`,
   `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,
@@ -201,7 +208,8 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    decides when a rule fires changed and there is no comment yet, it posts
    none; when there is one, it says that nothing changes now.
 6. With `STATUS`, sets the commit status on the pull request's head
-   commit, success or failure as the job is about to end, and ends it.
+   commit, success or failure as the job is about to end, and ends it;
+   pending from step 1 on, once the commits are found.
 
 ## In each CI
 

@@ -274,7 +274,15 @@ type commentHost struct {
 	statuses   []hostStatus
 	failStatus bool
 	iterations []string
+	// pending is called, h.mu held, as a status is taken whose state is
+	// the host's word for pending (pendingState).
+	pending func()
 }
+
+// pendingState is each host's word for a status of a job under way, as its
+// reference has it: GitHub's, Gitea's and Azure DevOps' pending, GitLab's
+// running, Bitbucket's INPROGRESS.
+var pendingState = map[string]string{"github": "pending", "gitea": "pending", "gitlab": "running", "bitbucket": "INPROGRESS", "azure": "pending"}
 
 // hostStatus is a commit status a stand-in host took, in each host's
 // words: State as it was sent, Context its name (Azure DevOps'
@@ -530,13 +538,13 @@ func (h *commentHost) status(w http.ResponseWriter, r *http.Request, rest string
 	str := func(k string) string { s, _ := in[k].(string); return s }
 	num := func(k string) int { n, _ := in[k].(float64); return int(n) }
 	st := hostStatus{SHA: rest, State: str("state"), Context: str("context"), Text: str("description"), URL: str("target_url")}
-	states := []string{"success", "failure"}
+	states := []string{"pending", "success", "failure"}
 	known := []string{"state", "context", "description", "target_url"}
 	code := http.StatusCreated
 	switch h.kind {
 	case "gitlab":
 		st.Context, st.Pipeline = str("name"), num("pipeline_id")
-		states, known = []string{"success", "failed"}, []string{"state", "name", "description", "target_url", "pipeline_id"}
+		states, known = []string{"running", "success", "failed"}, []string{"state", "name", "description", "target_url", "pipeline_id"}
 		if len(st.Text) > 255 || len(st.URL) > 255 {
 			http.Error(w, `{"message":"must be 255 characters or fewer"}`, http.StatusBadRequest)
 			return
@@ -544,7 +552,7 @@ func (h *commentHost) status(w http.ResponseWriter, r *http.Request, rest string
 	case "bitbucket":
 		sha, ok := strings.CutSuffix(rest, "/statuses/build")
 		st.SHA, st.Context, st.URL, st.Ref = sha, str("name"), str("url"), str("refname")
-		states, known = []string{"SUCCESSFUL", "FAILED"}, []string{"key", "state", "name", "description", "url", "refname"}
+		states, known = []string{"INPROGRESS", "SUCCESSFUL", "FAILED"}, []string{"key", "state", "name", "description", "url", "refname"}
 		if !ok || str("key") != strings.ReplaceAll(st.Context, "/", "-") {
 			h.t.Errorf("bitbucket: a build status at %s, key %q", rest, str("key"))
 		}
@@ -553,7 +561,7 @@ func (h *commentHost) status(w http.ResponseWriter, r *http.Request, rest string
 		genre, _ := c["genre"].(string)
 		name, _ := c["name"].(string)
 		st.SHA, st.Context, st.URL, st.Iteration = "", genre+"/"+name, str("targetUrl"), num("iterationId")
-		states, known = []string{"succeeded", "failed"}, []string{"state", "description", "context", "targetUrl", "iterationId"}
+		states, known = []string{"pending", "succeeded", "failed"}, []string{"state", "description", "context", "targetUrl", "iterationId"}
 		code = http.StatusOK
 		if rest != "" || r.URL.Query().Get("api-version") != "7.1" || st.Iteration < 1 || st.Iteration > len(h.iterations) {
 			h.t.Errorf("azure: a status at %s, iteration %d", r.URL, st.Iteration)
@@ -575,6 +583,9 @@ func (h *commentHost) status(w http.ResponseWriter, r *http.Request, rest string
 		return
 	}
 	h.statuses = append(h.statuses, st)
+	if h.pending != nil && st.State == pendingState[h.kind] {
+		h.pending()
+	}
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]any{"id": len(h.statuses), "state": in["state"]})
 }
@@ -628,6 +639,8 @@ type recipeRun struct {
 	env  []string
 	// cwd is where it runs, when not the repository's top.
 	cwd string
+	// started is given the recipe's process once it starts.
+	started func(*os.Process)
 }
 
 func newRecipeRun(t *testing.T, h backtestHost, repo *prRepo) *recipeRun {
@@ -676,9 +689,17 @@ func (rr *recipeRun) run(settings []string, args ...string) (string, error) {
 	// requests between them, which the race detector doesn't see: its lock,
 	// taken before and after the run, orders what each does to it.
 	rr.host.set(func(*commentHost) {})
-	out, err := cmd.CombinedOutput()
+	var out strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err = cmd.Start()
+	if err == nil {
+		if rr.started != nil {
+			rr.started(cmd.Process)
+		}
+		err = cmd.Wait()
+	}
 	rr.host.set(func(*commentHost) {})
-	return string(out), err
+	return out.String(), err
 }
 
 // A pull request that changes a rule gets one comment, the report, which a
