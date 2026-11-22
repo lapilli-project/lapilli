@@ -5,6 +5,24 @@ rules you have now and a Prometheus-compatible API that holds their
 history. `lapilli verdict` only reads the history and files, and sends the
 report nowhere but where you say.
 
+## See it first, on sample data
+
+```sh
+lapilli demo
+```
+
+replays the seven made-up alert rules of a small shop over a made-up week
+of their history, and judges them against its incidents, by `lapilli
+verdict`'s own code. The history is made up in the process: there is
+nothing to connect, and nothing is read or sent. Its report has what
+the rest of this page finds in yours: a noisy rule and the longer `for`
+that would quiet it, the rules that caught an incident, one that nothing
+caught and the rule that nearly did, the firings that came while people
+slept. `--json` gives the whole report as JSON, and `--tz` the zone the
+sample's week is laid in. With Go and nothing installed, `go run
+lapilli.dev/cmd/lapilli@latest demo` does the same
+([docs/design/demo.md](design/demo.md)).
+
 ## Install
 
 ```sh

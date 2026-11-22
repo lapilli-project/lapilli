@@ -1,0 +1,70 @@
+# lapilli demo's sample, made up: the incidents written down, and the
+# history demo/rules.yaml is replayed against. A time is a day of the
+# week and a time of day, in the zone the report is shown in; the same
+# each week, so each run's report is the same.
+#
+# The incidents of the sample's week, Monday 9 November 2026 on. Those of
+# the week before are numbered before them (INC-38 to INC-40), and keep
+# the record of this week's firings.
+incidents:
+  - {id: INC-41, title: Checkout errors, at: tue 12:01, lasted: 38m, service: checkout}
+  - {id: INC-42, title: Search timeouts, at: thu 21:15, lasted: 35m, service: search}
+  - {id: INC-43, title: Orders stuck, at: sat 03:05, lasted: 25m, service: orders}
+
+# For each expression a rule compares with a number, its series: a value
+# all week, and the spans it is another, [when, how long, value]. A rule
+# is the expression held to its number at each step; an expression not
+# here has no series.
+series:
+  # CheckoutErrors: the share of checkout's requests that failed.
+  - expr: sum by (service) (rate(http_requests_total{service="checkout",code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total{service="checkout"}[5m]))
+    labels: {service: checkout}
+    base: 0.002
+    spans:
+      - [tue 12:02, 30m, 0.09]
+  # CheckoutLatencyP99: over 0.8s for a few minutes at each deploy
+  # (13:30 on weekdays) and now and then, and through INC-41.
+  - expr: histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket{service="checkout"}[5m])))
+    labels: {service: checkout}
+    base: 0.32
+    spans:
+      - [mon 13:33, 4m, 0.95]
+      - [mon 19:42, 3m, 0.91]
+      - [tue 12:04, 32m, 1.4]
+      - [tue 13:34, 3m, 0.97]
+      - [tue 14:02, 2m, 0.88]
+      - [wed 13:32, 5m, 0.93]
+      - [thu 13:35, 3m, 0.9]
+      - [thu 20:15, 4m, 0.86]
+      - [fri 10:48, 2m, 0.84]
+      - [fri 13:33, 6m, 1.1]
+      - [fri 16:20, 3m, 0.87]
+      - [sat 11:05, 4m, 0.92]
+      - [sun 18:30, 3m, 0.85]
+      - [sun 23:10, 2m, 0.83]
+  # SearchErrors: through INC-42.
+  - expr: sum by (service) (rate(http_requests_total{service="search",code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total{service="search"}[5m]))
+    labels: {service: search}
+    base: 0.003
+    spans:
+      - [thu 21:13, 25m, 0.12]
+  # OrdersQueueBacklog: over 500 for 9 minutes in INC-43, short of its
+  # "for", and for 4 on Wednesday.
+  - expr: sum by (service) (queue_depth{service="orders"})
+    labels: {service: orders}
+    base: 120
+    spans:
+      - [wed 10:20, 4m, 560]
+      - [sat 03:07, 9m, 640]
+  # NodeCPUHigh: the nightly batch, every night.
+  - expr: avg by (instance) (rate(node_cpu_seconds_total{mode!="idle"}[5m]))
+    labels: {instance: node-3}
+    base: 0.35
+    spans:
+      - [mon 01:10, 45m, 0.97]
+      - [tue 01:10, 45m, 0.97]
+      - [wed 01:10, 45m, 0.97]
+      - [thu 01:10, 45m, 0.97]
+      - [fri 01:10, 45m, 0.97]
+      - [sat 01:10, 45m, 0.97]
+      - [sun 01:10, 45m, 0.97]

@@ -1382,6 +1382,12 @@ func (f *verdictFlags) prometheus() source.Prometheus {
 var now = time.Now
 
 func runVerdict(args []string, stdout, stderr io.Writer) int {
+	return verdictOn(args, nil, stdout, stderr)
+}
+
+// verdictOn is lapilli verdict; with sample, the history is sample, in
+// place of --prometheus's, which is never asked: lapilli demo's.
+func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			fmt.Fprint(stdout, verdictUsage)
@@ -1584,7 +1590,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var h history
 	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.anyImpact() {
 		if f.promURL != "" || f.gcpProj != "" {
-			if h, err = newHistory(ctx, f); err != nil {
+			if sample != nil {
+				h = sample
+			} else if h, err = newHistory(ctx, f); err != nil {
 				return fail(err)
 			}
 			f.askScrapes(ctx, h, stderr, versions, was, same, before, after)
