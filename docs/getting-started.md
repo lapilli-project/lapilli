@@ -23,6 +23,17 @@ sample's week is laid in. With Go and nothing installed, `go run
 lapilli.dev/cmd/lapilli@latest demo` does the same
 ([docs/design/demo.md](design/demo.md)).
 
+```sh
+lapilli demo --serve
+```
+
+shows the same week in `lapilli serve`'s pages, judged by its own hourly
+job: it says the URL to open, on this machine alone (`--listen`, a
+loopback address, a free port by default), and is read-only. Its ledger
+is kept in a temporary directory, removed when Ctrl-C ends it; its clock
+stands at the end of the sample's week, the last whole week its pages
+show.
+
 ## Install
 
 ```sh

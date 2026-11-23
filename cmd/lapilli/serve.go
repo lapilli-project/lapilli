@@ -1458,7 +1458,20 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	return serveSetup{cfg: cfg, f: f, trustFile: trustFile, trustErr: trustErr}, nil
 }
 
-func runServe(args []string, stdout, stderr io.Writer) int {
+func runServe(args []string, stdout, stderr io.Writer) int { return serveOn(args, nil, stdout, stderr) }
+
+// serveWith is what lapilli demo --serve gives lapilli serve that no flag
+// says: the sample's history, in place of --prometheus's, which is then
+// never asked; the clock serve judges by, pinned; and who is told where it
+// listens, once bound. Its log says only warnings and errors.
+type serveWith struct {
+	history   history
+	clock     func() time.Time
+	listening func(net.Addr)
+}
+
+// serveOn is lapilli serve; with demo, as lapilli demo --serve runs it.
+func serveOn(args []string, demo *serveWith, stdout, stderr io.Writer) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			fmt.Fprint(stdout, serveUsage)
@@ -1471,7 +1484,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	cfg, f := st.cfg, st.f
-	log := slog.New(slog.NewTextHandler(stderr, nil))
+	var level slog.Level
+	if demo != nil {
+		cfg.Clock, cfg.Listening, level = demo.clock, demo.listening, slog.LevelWarn
+	}
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
 	if f.checkGrafana != "" && f.grafanaTk != "" && plainHTTP(f.checkGrafana) {
 		log.Warn("--check-grafana is plain http: the token goes unencrypted")
 	}
@@ -1480,7 +1497,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	// With firings copied in alone, there may be no history to read.
 	var h history
 	if f.promURL != "" || f.gcpProj != "" {
-		if h, err = newHistory(ctx, f); err != nil {
+		if demo != nil {
+			h = demo.history
+		} else if h, err = newHistory(ctx, f); err != nil {
 			fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 			return 1
 		}

@@ -19,8 +19,9 @@ you know whether it earns its page; an incident with no stone is one your
 alerts missed.
 
 Usage:
-  lapilli demo                       see it on sample data, with nothing
-                                     to connect
+  lapilli demo [--serve]             see it on sample data, with nothing
+                                     to connect: a report, or serve's
+                                     pages on this machine
   lapilli verdict --rules FILE --prometheus URL --incidents FILE
                                      replay rules against history
   lapilli verdict --alerts --prometheus URL --incidents FILE
@@ -1314,6 +1315,7 @@ and sends nothing anywhere (docs/design/demo.md).
 
 Usage:
   lapilli demo [--json] [--tz ZONE]
+  lapilli demo --serve [--listen ADDR] [--tz ZONE]
 
   --json              the whole report, every firing included, as lapilli
                       verdict --json gives it
@@ -1322,6 +1324,16 @@ Usage:
                       sample's week, from Monday 9 November 2026, is laid
                       in this zone: the report is the same in every zone
                       but for the zone it names
+  --serve             the same sample in lapilli serve's pages and API, by
+                      its own code: its rules, history and incidents in a
+                      ledger of a temporary directory, its clock pinned to
+                      the end of the sample's week, which its pages show.
+                      Read-only, on this machine alone, it says the URL to
+                      open, and runs until Ctrl-C (or SIGTERM), which
+                      removes the ledger
+  --listen ADDR       with --serve, where to listen: a loopback address and
+                      a port, 127.0.0.1:PORT or [::1]:PORT, and no other
+                      (default 127.0.0.1:0, a free port)
 
 The same on your own rules, and incidents written down:
   lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
