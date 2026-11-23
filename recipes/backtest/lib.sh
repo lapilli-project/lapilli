@@ -100,9 +100,11 @@
 #                    judged. Refused with LAPILLI_SERVE
 #   STATUS           true (or 1): also sets a commit status on the pull
 #                    request's head commit, lapilli/backtest (with KEY,
-#                    lapilli/backtest/KEY), success or failure as the job
-#                    ends, with a short description: the host's commit
-#                    statuses (Bitbucket's build statuses, Azure DevOps'
+#                    lapilli/backtest/KEY; of a pull request into a branch
+#                    other than the default, where the CI says both,
+#                    lapilli/backtest (into BRANCH)), success or failure
+#                    as the job ends, with a short description: the host's
+#                    commit statuses (Bitbucket's build statuses, Azure DevOps'
 #                    pull request statuses, on the iteration at that
 #                    commit), which a branch rule can require. Set after
 #                    the comment, whatever became of it; and pending
@@ -427,9 +429,30 @@ full_hash() {
   case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
   [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
 }
-# The status's name: one a job, as the comment's KEY is.
+# The status's name: one a job, as the comment's KEY is. A status is a
+# commit's, of that name, not a pull request's: the same head opened again
+# as a pull request into a branch its author chose would set the status a
+# rule of the default branch requires, a success of a backtest against
+# that branch in place of the failure against the default. So, where the
+# CI says the repository's default branch (ci_default) and the branch the
+# pull request goes into (ci_into), and the two differ, the name says that
+# branch: lapilli/backtest (into BRANCH). One the name can't hold (but
+# letters, digits and . _ / -, 200 at most) leaves the status unset.
 status_context=lapilli/backtest
 [ "$KEY" = default ] || status_context=lapilli/backtest/$KEY
+status_unnamed=
+if [ -n "${ci_default:-}" ] && [ -n "${ci_into:-}" ] && [ "$ci_into" != "$ci_default" ]; then
+  case $ci_into in
+    -* | *[!A-Za-z0-9._/-]*) status_unnamed=1 ;;
+    *)
+      if [ "${#ci_into}" -le 200 ]; then
+        status_context="$status_context (into $ci_into)"
+      else
+        status_unnamed=1
+      fi
+      ;;
+  esac
+fi
 status_url=
 if [ -n "$status_on" ]; then
   if [ -n "${STATUS_SHA:-}" ] && ! full_hash "$STATUS_SHA"; then
@@ -2496,6 +2519,10 @@ status_died() {
 # would else stand for this one. Never HEAD, another event's to judge, nor
 # STATUS_SHA, which may name it.
 status_on_commit() {
+  if [ -n "$status_unnamed" ]; then
+    say "the branch the pull request goes into, as the CI says, isn't the repository's default, and a status's name can't hold it (letters, digits and . _ / -, 200 at most): no status set, as one of the default's name would stand for the default's pull requests"
+    return 1
+  fi
   if [ -n "$strayed" ]; then
     if ! full_hash "$ci_head"; then
       say "the pull request's head commit, as the CI says, isn't a full hash: no status set"

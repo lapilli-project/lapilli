@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -75,7 +77,9 @@ func TestBacktestRecipeTargetNameIsATag(t *testing.T) {
 	repo.git("tag", "origin/main", aside)
 	repo.git("tag", main[:12], aside)
 	for _, target := range []string{"origin/main", "origin/main~0", main[:12]} {
-		rr.host.set(func(h *commentHost) { h.statuses = []hostStatus{{SHA: head, State: "success", Context: "lapilli/backtest"}} })
+		rr.host.set(func(h *commentHost) {
+			h.statuses = []hostStatus{{SHA: head, State: "success", Context: "lapilli/backtest"}}
+		})
 		out, err := rr.run(append(slices.Clone(gates), "TARGET="+target), args...)
 		st, n := rr.host.lastStatus()
 		if err == nil || !strings.Contains(out, "TARGET "+target+" names a tag too") || n != 2 || st.State != "failure" || st.SHA != head ||
@@ -93,6 +97,117 @@ func TestBacktestRecipeTargetNameIsATag(t *testing.T) {
 	lost("refs/remotes/origin/main")
 	lost(main)
 	lost(strings.ToUpper(main))
+}
+
+// eventOf is a pull_request event's file, as GitHub or Gitea writes it:
+// the pull request 7, of head sha into branch into, in a repository whose
+// default branch is def ("" for an event that doesn't say).
+func eventOf(t *testing.T, sha, into, def string) string {
+	t.Helper()
+	event := filepath.Join(t.TempDir(), "event.json")
+	body := fmt.Sprintf(`{"pull_request": {"number": 7, "head": {"sha": %q}, "base": {"ref": %q}}`, sha, into)
+	if def != "" {
+		body += fmt.Sprintf(`, "repository": {"default_branch": %q}`, def)
+	}
+	os.WriteFile(event, []byte(body+"}"), 0o600)
+	return event
+}
+
+// lastOf is the status of name context set last on sha, and whether one was.
+func lastOf(h *commentHost, sha, context string) (hostStatus, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := len(h.statuses) - 1; i >= 0; i-- {
+		if st := h.statuses[i]; st.SHA == sha && st.Context == context {
+			return st, true
+		}
+	}
+	return hostStatus{}, false
+}
+
+// A status is a commit's and its name's, not a pull request's: the same
+// head opened again as a second pull request, into a branch its author
+// chose that holds the change already, was judged against that branch,
+// and its success took the place of the failure the pull request into the
+// default branch left, the status that branch's rule requires. Where the
+// CI says the default branch (GitHub's and Gitea's event, GitLab's
+// CI_DEFAULT_BRANCH), a pull request into another branch sets
+// lapilli/backtest (into BRANCH), and the default's stays as its own pull
+// request left it; one into the default, or where the CI doesn't say, is
+// named as before. A branch a status's name can't hold sets none.
+func TestBacktestRecipeSecondPullRequest(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo, bad, aside := gateRepo(t)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "FAIL_MISSED=true", "STATUS=true"}
+	main := repo.git("rev-parse", "main")
+	t.Run("github", func(t *testing.T) {
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		for _, into := range []struct{ branch, tip, context, state string }{
+			{"main", main, "lapilli/backtest", "failure"},
+			{"aside", aside, "lapilli/backtest (into aside)", "success"},
+		} {
+			merge := repo.git("commit-tree", repo.git("rev-parse", bad+"^{tree}"), "-p", into.tip, "-p", bad, "-m", "Merge")
+			repo.git("checkout", "--quiet", "--detach", merge)
+			env := []string{"GITHUB_EVENT_PATH=" + eventOf(t, bad, into.branch, "main"), "GITHUB_BASE_REF=" + into.branch, "GITHUB_SHA=" + merge, "GITHUB_REF=refs/pull/7/merge"}
+			out, err := rr.run(append(slices.Clone(gates), env...), args...)
+			if st, ok := lastOf(rr.host, bad, into.context); !ok || st.State != into.state || (err == nil) != (into.state == "success") || st.SHA != bad {
+				t.Errorf("into %s: %v, %s %+v\n%s", into.branch, err, into.context, st, lastLines(out, 3))
+			}
+		}
+		if st, ok := lastOf(rr.host, bad, "lapilli/backtest"); !ok || st.State != "failure" {
+			t.Errorf("the default branch's status after the second pull request: %+v", st)
+		}
+		// The event that doesn't say the default branch: named as before.
+		repo.git("checkout", "--quiet", "--detach", bad)
+		out, _ := rr.run(append(slices.Clone(gates), "GITHUB_EVENT_PATH="+eventOf(t, bad, "aside", ""), "GITHUB_BASE_REF=aside"), args...)
+		if st, _ := rr.host.lastStatus(); st.Context != "lapilli/backtest" || st.SHA != bad {
+			t.Errorf("no default branch said: %+v\n%s", st, lastLines(out, 3))
+		}
+		// A branch a status's name can't hold: none set.
+		before := len(rr.host.statuses)
+		out, _ = rr.run(append(slices.Clone(gates), "GITHUB_EVENT_PATH="+eventOf(t, bad, "aside(x)", "main"), "GITHUB_BASE_REF=aside(x)"), args...)
+		if _, n := rr.host.lastStatus(); n != before || !strings.Contains(out, "a status's name can't hold it") {
+			t.Errorf("a branch the name can't hold: %d set\n%s", n-before, lastLines(out, 3))
+		}
+	})
+	// Gitea's and GitLab's are compared from where the head and the branch
+	// parted, main's commit here: the name is what tells the two apart.
+	t.Run("gitea", func(t *testing.T) {
+		rr := newRecipeRun(t, backtestHosts[1], repo)
+		repo.git("checkout", "--quiet", "--detach", bad)
+		for _, into := range []struct{ branch, context, state string }{
+			{"main", "lapilli/backtest", "failure"},
+			{"aside", "lapilli/backtest (into aside)", "failure"},
+		} {
+			env := []string{"GITEA_ACTIONS=true", "GITHUB_EVENT_PATH=" + eventOf(t, bad, into.branch, "main"), "GITHUB_BASE_REF=" + into.branch}
+			out, err := rr.run(append(slices.Clone(gates), env...), args...)
+			if st, ok := lastOf(rr.host, bad, into.context); !ok || st.State != into.state || (err == nil) != (into.state == "success") || st.SHA != bad {
+				t.Errorf("into %s: %v, %s %+v\n%s", into.branch, err, into.context, st, lastLines(out, 3))
+			}
+		}
+		if st, ok := lastOf(rr.host, bad, "lapilli/backtest"); !ok || st.State != "failure" {
+			t.Errorf("the default branch's status after the second pull request: %+v", st)
+		}
+	})
+	t.Run("gitlab", func(t *testing.T) {
+		rr := newRecipeRun(t, backtestHosts[2], repo)
+		repo.git("checkout", "--quiet", "--detach", bad)
+		for _, into := range []struct{ branch, context, state string }{
+			{"main", "lapilli/backtest", "failed"},
+			{"aside", "lapilli/backtest (into aside)", "failed"},
+		} {
+			env := []string{"CI_COMMIT_SHA=" + bad, "CI_MERGE_REQUEST_IID=7", "CI_DEFAULT_BRANCH=main", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME=" + into.branch}
+			out, err := rr.run(append(slices.Clone(gates), env...), args...)
+			if st, ok := lastOf(rr.host, bad, into.context); !ok || st.State != into.state || (err == nil) != (into.state == "success") || st.SHA != bad {
+				t.Errorf("into %s: %v, %s %+v\n%s", into.branch, err, into.context, st, lastLines(out, 3))
+			}
+		}
+		if st, ok := lastOf(rr.host, bad, "lapilli/backtest"); !ok || st.State != "failed" {
+			t.Errorf("the default branch's status after the second merge request: %+v", st)
+		}
+	})
 }
 
 func lastLines(s string, n int) string {

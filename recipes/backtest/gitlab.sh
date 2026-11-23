@@ -33,6 +33,8 @@
 # request, linking to the job (CI_JOB_URL): an external job of the
 # pipeline (CI_PIPELINE_ID) when it is that pipeline's commit, or else of
 # the one GitLab finds or makes for it. The token needs the Developer role.
+# Of a merge request into a branch other than the project's default
+# (CI_DEFAULT_BRANCH), it is lapilli/backtest (into BRANCH).
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), the job names its ID
 # token for serve's audience under id_tokens:, as LAPILLI_ID_TOKEN:
@@ -73,9 +75,13 @@ fi
 case $GITLAB_PROJECT in *[!A-Za-z0-9._/-]* | /* | */) echo "gitlab.sh: GITLAB_PROJECT $GITLAB_PROJECT: want an id or a path" >&2; exit 1 ;; esac
 host_api=$api
 project=$(printf '%s' "$GITLAB_PROJECT" | jq -sRr @uri)
-# For STATUS: the merge request's source commit, and the job's page.
+# For STATUS: the merge request's source commit, and the job's page; and,
+# for the status's name, the project's default branch and the one the
+# merge request goes into (lib.sh).
 status_commit=${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-${CI_COMMIT_SHA:-}}
 status_link=${CI_JOB_URL:-}
+ci_default=${CI_DEFAULT_BRANCH:-}
+ci_into=${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}
 
 host_auth() {
   printf 'PRIVATE-TOKEN: %s\n' "$(cat "$GITLAB_TOKEN_FILE")"

@@ -226,8 +226,29 @@ comment but sets the status, so run it on every pull request, without a
 `paths:` filter, if the status is required. A fork's pull request, which
 the job skips (below), gets none.
 
+A status is a commit's and its name's, not a pull request's: the same
+head, opened again as a pull request into a branch its author chose that
+holds the change already, would be judged against that branch, and its
+success would take the place of the failure the pull request into the
+default branch left. Where the CI says the repository's default branch
+(GitHub's and Gitea's event, `repository.default_branch`; GitLab's
+`CI_DEFAULT_BRANCH`), a pull request into another branch sets
+`lapilli/backtest (into BRANCH)` instead (`lapilli/backtest/KEY (into
+BRANCH)` with a `KEY`), so a rule of a branch other than the default
+needs that branch's name: `lapilli/backtest (into release/1.x)`. One into
+the default is named `lapilli/backtest`, as before. A branch whose name
+holds more than letters, digits and `. _ / -`, or more than 200 of them,
+gets no status. Bitbucket Pipelines doesn't say the default branch, and
+its build status is a commit's, of its key: there two pull requests of
+one branch into two destinations set the same one, the last standing for
+both. Azure DevOps' status is the pull request's own. Run the job only on
+pull requests into the branches a rule protects, too (`branches:` below),
+so that no other pull request's run sets a status of their names.
+
 ```yaml
-on: pull_request
+on:
+  pull_request:
+    branches: [main] # the branches whose rules require the status
 permissions:
   contents: read
   pull-requests: write
@@ -254,10 +275,10 @@ comment does:
 
 | Host | Status | The token |
 |---|---|---|
-| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha`, when the checkout is that commit or GitHub's merge of it (`GITHUB_SHA`): of another, such as the branch checked out by name after it moved, the run is refused, the job fails, and the status is a `failure` there saying so | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
-| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit | the Developer role (the comment's Reporter can't), scope `api` |
-| Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, `INPROGRESS` then `SUCCESSFUL` or `FAILED`, key `lapilli-backtest` (a key's status written over by the next), its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
-| Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
+| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha`, when the checkout is that commit or GitHub's merge of it (`GITHUB_SHA`): of another, such as the branch checked out by name after it moved, the run is refused, the job fails, and the status is a `failure` there saying so. Into a branch other than `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
+| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit; into a branch other than `CI_DEFAULT_BRANCH`, named `lapilli/backtest (into BRANCH)` | the Developer role (the comment's Reporter can't), scope `api` |
+| Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, `INPROGRESS` then `SUCCESSFUL` or `FAILED`, key `lapilli-backtest` (a key's status written over by the next, a pull request's into another destination too, as Pipelines doesn't say the default branch), its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
+| Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`; in Actions, into a branch other than the event's `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
 | Azure DevOps | a pull request status, `POST .../pullRequests/{id}/statuses`, `pending` then `succeeded` or `failed`, genre `lapilli` and name `backtest`, on the iteration at the head commit (`GET .../iterations`): none when there is no such iteration, as one on the pull request alone would stay after a later push | a personal access token's Code (status), `vso.code_status`, or the build service's Contribute to pull requests (not checked against an account) |
 
 Each is tested against its reference's documented answers, with a server

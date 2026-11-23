@@ -21,7 +21,9 @@
 # With STATUS=true (see lib.sh), a commit status (POST
 # /repos/OWNER/REPO/statuses/SHA) on the event's head commit
 # (pull_request.head.sha), linking to the run: the token needs statuses:
-# write (a fine-grained token: commit statuses, write).
+# write (a fine-grained token: commit statuses, write). Of a pull request
+# into a branch other than the repository's default, as the event says
+# (repository.default_branch), it is lapilli/backtest (into BRANCH).
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks GitHub Actions for the job's ID token for that audience, as
@@ -71,6 +73,15 @@ ci_merge=
 case ${GITHUB_REF:-} in
   refs/pull/*/merge) ci_merge=${GITHUB_SHA:-} ;;
 esac
+# ... and, for the status's name, the repository's default branch and the
+# one the pull request goes into, as the event says: a pull request into
+# another branch sets lapilli/backtest (into BRANCH), not the default's
+# (lib.sh).
+ci_default='' ci_into=${GITHUB_BASE_REF:-}
+if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
+  ci_default=$(jq -r '.repository.default_branch // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_default=
+  [ -n "$ci_into" ] || ci_into=$(jq -r '.pull_request.base.ref // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_into=
+fi
 status_link=
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
   status_link=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID

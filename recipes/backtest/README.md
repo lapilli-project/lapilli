@@ -186,10 +186,22 @@ And, as wanted:
   into nor the one compared against; on GitHub, of a `HEAD` that is
   neither the event's head nor GitHub's merge of it (`GITHUB_SHA`), the
   refusal's failure alone, on the event's head. `STATUS_URL` links elsewhere, https,
-  or http to this machine. A status is a commit's, not a pull request's:
-  two pull requests of one branch into two bases, each with its job, set
-  the same status on the same commit, the last one's standing for both;
-  give each its own `KEY`. A status the host refuses is said in the job's
+  or http to this machine. A status is a commit's and its name's, not a
+  pull request's: the same head opened again as a pull request into a
+  branch its author chose would set the status the default branch's rule
+  requires, judged against that branch. So where the CI says the
+  repository's default branch (GitHub's and Gitea's event,
+  `repository.default_branch`; GitLab's `CI_DEFAULT_BRANCH`), a pull
+  request into another branch sets `lapilli/backtest (into BRANCH)`
+  (`lapilli/backtest/KEY (into BRANCH)`), and the default's is left as its
+  own pull request set it; a branch whose name holds more than letters,
+  digits and `. _ / -`, or 200 of them, sets none. A rule of another
+  branch requires that branch's name. Bitbucket Pipelines doesn't say the
+  default branch, and its build status of a key is a commit's: there, two
+  pull requests of one branch into two destinations set the same one, the
+  last standing for both, so run the step only for pull requests into the
+  branches a rule protects. Azure DevOps' status is the pull request's
+  own. A status the host refuses is said in the job's
   log, and fails the job only with `FAIL_ON_ERROR=true`. The token needs more for it
   ([Stopping a merge](../../docs/pr-backtests.md#stopping-a-merge) has
   each host's API and scopes).
