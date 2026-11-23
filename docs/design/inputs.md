@@ -240,6 +240,21 @@ people:
 - **A zone that isn't one**, such as Outlook's `Korea Standard Time`, or a
   `VTIMEZONE` of the feed's own: the event is passed over and said.
   Lapilli doesn't read zone rules from a feed.
+- **As built in 0.70.** Monthly and yearly repeats are read too, with
+  `BYMONTHDAY`, `BYDAY` numbered in the month or the year (`1MO`, `-1FR`),
+  `BYMONTH` and `BYSETPOS`, as RFC 5545's table of BYxxx parts has them;
+  a day a month doesn't have is skipped. Every repeat is worked out on the
+  clock it is written on, each day then made an instant in its zone. A
+  `TZID` that isn't an IANA name is read by the feed's own `VTIMEZONE`, or,
+  with none, as a Windows name by CLDR's table; an IANA name still wins,
+  and a `VTIMEZONE` wins over the table. A time the clocks skip, or show
+  twice, is read as RFC 5545 (3.3.5) reads one. `BYWEEKNO`, `BYYEARDAY`,
+  `BYHOUR` and repeats more often than daily are still passed over. The
+  bounds: a step is a period and each day it holds, 2,000,000 a feed, its
+  zones' among them; 100 `VTIMEZONE`s a feed, 64 parts and 1,000 `RDATE`s
+  each, offsets within 18 hours, 16 changes a year; a zone is worked out
+  a year at a time for the years asked, so Outlook's rules from 1601 cost
+  a few steps.
 
 ### Attacker's look
 

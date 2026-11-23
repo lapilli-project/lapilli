@@ -291,15 +291,23 @@ later, by any of these, is found in the turns kept before; a name is cut
 to the ledger's 200 bytes). Two people in the file as an event's
 attendees, or two events that start together, are said; a turn that starts
 during another holds until it ends. An event that can't be read is passed
-over and said, and the turns kept of whoever it names stay as they were. Times in UTC, with an IANA `TZID`, or
-floating (the schedule's `tz`) are read; daily and weekly repeats are
-expanded (`WKST` honoured), with `EXDATE` and occurrences replaced by
-`RECURRENCE-ID`; what
-can't be read (a Windows zone name, a monthly repeat) is passed over and
-said. A feed's URL holds its secret, so it is read from its file, never
-shown or logged, fetched over https only, with no redirect followed, 8 MB
-and 30 seconds at most. `lapilli serve` reads each feed every `every` (30
-minutes by default) and keeps the turns in its ledger past what the feed
+over and said, and the turns kept of whoever it names stay as they were.
+Times are read in UTC, floating (the schedule's `tz`), or with a `TZID`:
+an IANA name; else the feed's own `VTIMEZONE` of that name, as Outlook
+and Exchange write one for `Pacific Standard Time`; else, with none, a
+Windows name by CLDR's table. A time the clocks skip is read by the
+offset before (02:30 is 03:30), one they show twice is the first.
+Daily, weekly, monthly and yearly repeats are expanded on the clock they
+are written on, so a weekly 09:00 turn stays at 09:00 when the clocks
+change: with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (numbered for monthly
+and yearly, as `1MO` or `-1FR`), `BYMONTHDAY`, `BYMONTH`, `BYSETPOS` and
+`WKST`, a day a month doesn't have skipped, with `EXDATE` and
+occurrences replaced by `RECURRENCE-ID`. What can't be read (`BYWEEKNO`,
+`BYYEARDAY`, `BYHOUR`, a repeat more often than daily, a zone none of
+these is) is passed over and said. A feed's URL holds its secret, so it is
+read from its file, never shown or logged, fetched over https only, with
+no redirect followed, 8 MB and 30 seconds at most. `lapilli serve` reads
+each feed every `every` (30 minutes by default) and keeps the turns in its ledger past what the feed
 looks back (PagerDuty a month, Grafana OnCall 15 days), and its Run
 history page says when each was last read and whom its turns name that the
 file
