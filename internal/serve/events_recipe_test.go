@@ -607,3 +607,61 @@ func TestEventsRecipeRotatedNames(t *testing.T) {
 		}
 	})
 }
+
+// Following the file, the token is read again for each request: a Secret
+// rotated while it runs is sent from the next request on, not refused
+// until it is started again.
+func TestEventsRecipeTokenRotated(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		var mu sync.Mutex
+		want := "Bearer token-one-long-enough"
+		seen := map[string]int{}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			got := r.Header.Get("Authorization")
+			seen[got]++
+			if got != want {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.Write([]byte(`{"kept":0}`))
+		}))
+		defer srv.Close()
+		dir := t.TempDir()
+		events := filepath.Join(dir, "events.jsonl")
+		token := filepath.Join(dir, "token")
+		os.WriteFile(token, []byte("token-one-long-enough\n"), 0o600)
+		lines := recorded(t, "alertmanager-0.35.0.jsonl")
+		appendLines(t, events, lines[:5], nil)
+		cmd := exec.Command(eventsShell, eventsRecipe, "file", events)
+		cmd.Env = recipeEnv(srv.URL, token, "", "FOLLOW=true", "POLL=1")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer cmd.Process.Kill()
+		waitFor := func(what string, ok func() bool) {
+			t.Helper()
+			for range 1200 { // a minute, at most, for a loaded machine
+				mu.Lock()
+				done := ok()
+				mu.Unlock()
+				if done {
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			t.Fatalf("no %s:\n%s", what, stderr.String())
+		}
+		waitFor("request with the first token", func() bool { return seen["Bearer token-one-long-enough"] > 0 })
+		mu.Lock()
+		want = "Bearer token-two-long-enough"
+		mu.Unlock()
+		os.WriteFile(token, []byte("token-two-long-enough\n"), 0o600)
+		appendLines(t, events, lines[5:10], nil)
+		waitFor("request with the token rotated", func() bool { return seen[want] > 0 })
+	})
+}

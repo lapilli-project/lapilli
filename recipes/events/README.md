@@ -77,7 +77,8 @@ the topic.
   end); a consumer group with none begins at the end.
 - **The token** is read as the other recipes read theirs: one line, no
   control character, spaces after it dropped, sent to `curl` on stdin so
-  `ps` doesn't show it. `LAPILLI_URL` is http or https, with no user
+  `ps` doesn't show it. It is read again for each request, so a Secret
+  rotated while it follows is sent from the next one on. `LAPILLI_URL` is http or https, with no user
   before `@`, query or anchor, and `curl` speaks no other scheme. Over
   plain http the token is read by whatever is on the way: keep that to
   the cluster serve runs in, as its port is. `SKIP` names receivers to

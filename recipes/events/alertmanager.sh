@@ -135,6 +135,9 @@ secret() {
   esac
   printf '%s' "$s"
 }
+# Read once now, to refuse a file that holds none before anything is read,
+# and again for each request, so a Secret rotated while it follows is
+# picked up.
 token=$(secret LAPILLI_TOKEN_FILE "$LAPILLI_TOKEN_FILE")
 
 work=$(mktemp -d)
@@ -150,6 +153,7 @@ send() {
     printf '"over %s bytes"' "$bodymax" >"$work/answer"
     return
   fi
+  token=$(secret LAPILLI_TOKEN_FILE "$LAPILLI_TOKEN_FILE")
   code=$(printf 'Authorization: Bearer %s\n' "$token" |
     curl -q -sS --proto "$proto" --max-time 60 --max-filesize 1048576 --retry "$RETRIES" --retry-max-time 300 -X POST -H @- \
       -H 'Content-Type: application/json' --data-binary "@$1" -o "$work/answer" -w '%{http_code}' "$target") || code=failed
