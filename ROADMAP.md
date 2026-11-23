@@ -57,12 +57,14 @@ Still to do:
   database keeps no history of what a query returned (the design says why).
   Their rules, read with `--grafana`, are judged from Grafana's own alert
   state history instead, with no backtest
-  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md), 0.68);
-  still to do: a rule whose title another rule has too, which leaves each
-  day a gap while it does (0.68.1), tied by `grafana_folder`; a rule whose
-  alerts no write holds, left out alone rather than its day; a severity
-  for such a rule, which today has none; those `--check-grafana`'s Grafana
-  runs from files; and a value for it in the chart.
+  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md), 0.68),
+  each change taken for the rule the history says it is of, by its uid or
+  id, since 0.69.2; still to do: a severity for such a rule, which today
+  has none; the rules' ids read from wherever Grafana lists them once its
+  provisioning API, which its main branch marks deprecated, is gone; a day
+  past the reader's bounds, or of more firings than a write holds, a gap
+  for every rule judged so; those `--check-grafana`'s Grafana runs from
+  files; and a value for `--grafana-history=false` in the chart.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
 - A firing on when a period starts, of a group placed within its interval
