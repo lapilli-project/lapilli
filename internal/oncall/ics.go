@@ -43,7 +43,7 @@ const (
 var maxZones = 1024
 
 // maxTZID is the longest zone name read, in bytes: Outlook's longest are
-// some 70. A longer one isn't kept as a key.
+// some 70. A longer one isn't kept, as a key or a VTIMEZONE's name.
 const maxTZID = 256
 
 // The span repeats are expanded over, around now.
@@ -99,7 +99,7 @@ type Feed struct {
 	From time.Time
 	// Held are the events passed over that name someone (Hold).
 	Held []Held
-	// steps is how many steps the feed's repeats took.
+	// steps is how many steps the feed's repeats and zones took.
 	steps int
 }
 
@@ -139,14 +139,21 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			f.Notes = append(f.Notes, msg)
 		}
 	}
+	// The feed's own zones, read first: an event may name one written
+	// after it. Working them out takes steps from the feed's, as its
+	// repeats do.
 	steps := maxFeedSteps
+	own, err := readZones(ctx, data, &steps)
+	if err != nil {
+		return nil, err
+	}
 	var events []*event
 	var cur *event
 	depth := 0 // within the event: a VALARM in it is passed over
 	// The zones TZIDs name, each looked up once: time.LoadLocation reads
 	// the zone's file each time. A zone not kept once the feed has named
-	// maxZones is refused, not looked up again for each date it is named
-	// in.
+	// maxZones, its VTIMEZONEs among them, is refused, not looked up again
+	// for each date it is named in.
 	zones := map[string]cachedZone{}
 	resolve := func(tz string) (zone, error) {
 		if c, ok := zones[tz]; ok {
@@ -158,7 +165,7 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 		if len(zones) >= maxZones {
 			return nil, fmt.Errorf("the feed names more than %d time zones", maxZones)
 		}
-		z, err := lookupZone(tz)
+		z, err := lookupZone(tz, own)
 		zones[tz] = cachedZone{z, err}
 		return z, err
 	}
@@ -557,8 +564,8 @@ func unescape(s string) string {
 }
 
 // parseStamp reads a date or a time: in UTC (Z), in the zone TZID names
-// (resolve's: an IANA name), or floating, in floating; a date from its
-// midnight there.
+// (resolve's: an IANA name, or one of the feed's VTIMEZONEs), or
+// floating, in floating; a date from its midnight there.
 // resolve, when nil, reads none.
 func parseStamp(params map[string]string, v string, floating zone, resolve func(string) (zone, error)) (stamp, error) {
 	v = strings.TrimSpace(v)
@@ -590,7 +597,8 @@ func parseStamp(params map[string]string, v string, floating zone, resolve func(
 	return zoned(z, w, false)
 }
 
-// zoned is the stamp of a clock time w in z, its year looked at first.
+// zoned is the stamp of a clock time w in z. Its year is looked at first,
+// so a feed's own zone is never worked out for a year no turn is in.
 func zoned(z zone, w time.Time, date bool) (stamp, error) {
 	if err := sane(w); err != nil {
 		return stamp{}, err

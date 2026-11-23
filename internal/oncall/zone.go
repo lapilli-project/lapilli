@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// zone is the zone a time is written in: UTC or an IANA zone. offset is
-// how far east of UTC its clocks are at an instant, in seconds.
+// zone is the zone a time is written in: UTC, an IANA zone, or one of the
+// feed's own VTIMEZONEs. offset is how far east of UTC its clocks are at an
+// instant, in seconds.
 type zone interface {
 	offset(u time.Time) (int, error)
 }
@@ -104,11 +105,19 @@ type cachedZone struct {
 	err error
 }
 
-// lookupZone is the zone a TZID names: an IANA name only, a feed's own
-// VTIMEZONE isn't read.
-func lookupZone(tz string) (zone, error) {
+// lookupZone is the zone a TZID names: an IANA name, which wins over a
+// VTIMEZONE of the same name (Google writes both); else the feed's own
+// VTIMEZONE (Outlook and Exchange write "Pacific Standard Time" with
+// one).
+func lookupZone(tz string, own map[string]*vzone) (zone, error) {
 	if l, err := LoadZone(strings.TrimPrefix(tz, "/")); err == nil {
 		return ianaZone{l}, nil
 	}
-	return nil, fmt.Errorf("a zone that isn't an IANA name, %q: its own VTIMEZONE isn't read", clip(tz))
+	if v := own[tz]; v != nil {
+		if v.err != nil {
+			return nil, fmt.Errorf("the feed's VTIMEZONE %q isn't read: %v", clip(tz), v.err)
+		}
+		return v, nil
+	}
+	return nil, fmt.Errorf("a zone %q that isn't an IANA name or one of the feed's VTIMEZONEs", clip(tz))
 }
