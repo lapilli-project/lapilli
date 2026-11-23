@@ -160,7 +160,11 @@
 #                    or on STATUS_SHA. A TARGET given where the CI says
 #                    the base (Gitea's Actions, GitLab's merge requests,
 #                    Bitbucket's and Azure's pull requests) is taken as it
-#                    is
+#                    is. A branch's name is the branch in full,
+#                    refs/remotes/NAME before refs/heads/NAME, and one a
+#                    tag has too (refs/tags/NAME, which git takes first)
+#                    is refused, as is a short hash a tag is named as; a
+#                    full ref or a full hash is taken as it is
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -1085,6 +1089,39 @@ own_parent() {
   [ -n "$p" ] && [ "$(git -C "$repo" rev-parse --verify -q "$1^{commit}" 2>/dev/null)" = "$p" ]
 }
 
+# target_ref REF: REF, as the job means it, for git to resolve. HEAD,
+# FETCH_HEAD, a full ref (refs/...) and a commit's full hash, in any case,
+# are as they are; a branch's name is the branch in full, refs/remotes/NAME
+# before refs/heads/NAME, what follows it (~1, ^0) kept. Git takes a name
+# for a tag first (refs/tags/NAME, before either), and anyone who can push
+# a tag can make one named origin/main, or a short hash: a name that a tag
+# has too fails. Any other, a short hash or a remote's name, is as git
+# resolves it, no tag having it.
+target_ref() {
+  tref=${1%%[~^]*}
+  case $tref in
+    HEAD | FETCH_HEAD | refs/*) printf '%s' "$1"; return 0 ;;
+    *[!0-9A-Fa-f]*) ;;
+    *)
+      if [ "${#tref}" -eq 40 ] || [ "${#tref}" -eq 64 ]; then
+        printf '%s' "$1"
+        return 0
+      fi
+      ;;
+  esac
+  [ -n "$tref" ] || { printf '%s' "$1"; return 0; }
+  if git -C "$repo" show-ref --verify -q "refs/tags/$tref"; then
+    return 1
+  fi
+  for tref_full in "refs/remotes/$tref" "refs/heads/$tref"; do
+    if git -C "$repo" show-ref --verify -q "$tref_full"; then
+      printf '%s' "$tref_full${1#"$tref"}"
+      return 0
+    fi
+  done
+  printf '%s' "$1"
+}
+
 # ci_merged: whether HEAD is the merge the CI made of the pull request,
 # its first parent the commit the pull request goes into, where the CI
 # says its head (ci_head): the commit the CI says is that merge
@@ -1167,6 +1204,16 @@ commits() {
     trouble "the clone has no commit checked out"
     return 1
   fi
+  # A name git would read as a tag before the branch the job means: refused,
+  # a gate passed and a status set by it being whoever pushed the tag's.
+  if ! ref=$(target_ref "$TARGET"); then
+    if [ -n "$strict$held$required$missed_gate$status_on" ]; then
+      refused="TARGET names a tag too, which git would take for it"
+    fi
+    trouble "TARGET $TARGET names a tag too (refs/tags/${TARGET%%[~^]*}), which git takes before a branch of that name: give the branch in full, such as refs/remotes/origin/main, or the commit's full hash"
+    return 1
+  fi
+  TARGET=$ref
   if ! target=$(git -C "$repo" rev-parse --verify -q "$TARGET^{commit}"); then
     trouble "TARGET $TARGET isn't a commit the clone has: fetch it, or all of the history (fetch-depth: 0)"
     return 1

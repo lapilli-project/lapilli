@@ -103,7 +103,13 @@ And, as wanted:
   `TARGET` the job gives where the CI says what the pull request goes into
   (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
   Azure's pull request builds) is the job's, and taken as it is, as one
-  the script takes from the CI is.
+  the script takes from the CI is. A branch's name in `TARGET`, such as
+  `origin/main`, is that branch in full, `refs/remotes/origin/main`, or
+  else `refs/heads/origin/main`: git reads a name as a tag's first, and
+  anyone who can push a tag could name one `origin/main`, so a name a tag
+  has too, or a short hash one is named as, is refused (with a gate or
+  `STATUS`, the job fails). A full ref (`refs/remotes/origin/main`) or a
+  commit's full hash is taken as it is.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
