@@ -656,3 +656,68 @@ func TestServeGrafanaJudgedEndedInSpanLetGo(t *testing.T) {
 		t.Errorf("the span let go is covered again: %v %v", spans[0], err)
 	}
 }
+
+// An alert that began while its rule was left out (its title shared), on
+// where the rule is judged again and ended soon after: the round the rule
+// comes back in writes it from there, ended, and every round after, which
+// reads the settle again from after it began, keeps it so, as one the
+// ledger has from within the write. Whether it began before the settle the
+// first round reads or within it; and as lapilli serve runs unless told
+// otherwise, a round an hour, the hour before read again.
+func TestServeGrafanaJudgedLeftOutEndedSoon(t *testing.T) {
+	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
+	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
+	for _, began := range []time.Duration{30 * time.Minute, 100 * time.Minute} {
+		g := ordersAndStock()
+		sh := shopServer(t, g)
+		sh.round(0)
+		g.hold(two...)
+		g.fired("Orders slow", "search", began, 2*time.Hour+10*time.Minute)
+		sh.round(2 * time.Hour)
+		g.hold(one...)
+		want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 2h0m0s 2h10m0s", "Stock low/stock -3h0m0s -2h0m0s"}
+		for _, at := range []time.Duration{2*time.Hour + 30*time.Minute, 4 * time.Hour, 6 * time.Hour} {
+			sh.round(at)
+			sh.want(fmt.Sprintf("began %s: judged again, at %s", began, at), sh.copied(), want)
+		}
+		sh.want("its copies", sh.covers("Orders slow"), "→0s 2h0m0s→6h0m0s")
+	}
+
+	g := ordersAndStock()
+	sh := shopServer(t, g)
+	sh.round(0)
+	sh.round(time.Hour)
+	g.hold(two...)
+	g.fired("Orders slow", "search", 2*time.Hour+30*time.Minute, 3*time.Hour+20*time.Minute)
+	sh.round(2 * time.Hour)
+	sh.round(3 * time.Hour)
+	g.hold(one...)
+	want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 3h0m0s 3h20m0s", "Stock low/stock -3h0m0s -2h0m0s"}
+	for h := 4; h <= 6; h++ {
+		sh.round(time.Duration(h) * time.Hour)
+		sh.want(fmt.Sprintf("hourly: judged again from 3h, at %dh", h), sh.copied(), want)
+	}
+	sh.want("hourly: its copies", sh.covers("Orders slow"), "→1h0m0s 3h0m0s→6h0m0s")
+}
+
+// The same of a gap of the source's (the one judged rule's title shared):
+// an alert on at the gap's end that ended before the first round after it
+// read.
+func TestServeGrafanaJudgedGapEndedSoon(t *testing.T) {
+	g := &shopGrafana{}
+	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}}
+	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
+	g.hold(one...)
+	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
+	sh := shopServer(t, g)
+	sh.round(0)
+	g.fired("Orders slow", "search", 30*time.Minute, 2*time.Hour+10*time.Minute)
+	g.hold(two...)
+	sh.round(2 * time.Hour)
+	g.hold(one...)
+	want := []string{"Orders slow/orders -5h0m0s -4h0m0s", "Orders slow/search 2h0m0s 2h10m0s"}
+	for _, at := range []time.Duration{2*time.Hour + 30*time.Minute, 4 * time.Hour, 6 * time.Hour} {
+		sh.round(at)
+		sh.want(fmt.Sprintf("after the gap, at %s", at), sh.copied(), want)
+	}
+}

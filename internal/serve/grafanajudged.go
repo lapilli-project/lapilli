@@ -304,23 +304,26 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	if err != nil {
 		return err
 	}
-	// The alerts the ledger has on: since before the write (on), and from
-	// within it (within), where a round before wrote one on since a gap,
-	// or a period its rule was left out, from where the copies covered it
-	// again.
-	on, within := map[[32]byte]firing.Firing{}, map[[32]byte]firing.Firing{}
+	// The alerts the ledger has on since before the write (on); and its
+	// firings from within it (within), on or ended, where a round before
+	// wrote one on since a gap, or a period its rule was left out, from
+	// where the copies covered it again: one that ended before a round read
+	// past where the history has it begin is one of them too.
+	on, within := map[[32]byte]firing.Firing{}, map[[32]byte][]firing.Firing{}
 	for _, f := range open {
 		if judging[f.Rule] {
 			on[alertOf(f)] = f
 		}
 	}
 	for _, f := range had {
-		if f.End.IsZero() && judging[f.Rule] && !inHole(f.Rule, f.Start) {
-			within[alertOf(f)] = f
+		if judging[f.Rule] && !inHole(f.Rule, f.Start) {
+			k := alertOf(f)
+			within[k] = append(within[k], f)
 		}
 	}
-	// told are the alerts of within the history tells of at all: one it
-	// doesn't changed state in none of what was read, and is on as it was.
+	// told are the alerts on within the write the history tells of at all:
+	// one it doesn't changed state in none of what was read, and is on as
+	// it was.
 	told := map[[32]byte]bool{}
 	ended := map[[32]byte]time.Time{}
 	var send []firing.Firing
@@ -331,8 +334,17 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		if len(on)+len(within) > 0 {
 			k = alertOf(f)
 			was, isOn = on[k]
-			if in, isIn = within[k]; isIn {
+			if len(within[k]) > 0 {
 				told[k] = true
+			}
+		}
+		// The firing the ledger has from within the write that one on since
+		// before it is: the first it was on over the start of.
+		if f.Start.Before(p) {
+			for _, x := range within[k] {
+				if (f.End.IsZero() || x.Start.Before(f.End)) && (!isIn || x.Start.Before(in.Start)) {
+					in, isIn = x, true
+				}
 			}
 		}
 		// The firing the ledger has on: the one on over its start, which
@@ -346,13 +358,13 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			if _, done := ended[k]; !done && !f.End.IsZero() && f.End.After(was.Start) {
 				ended[k] = f.End
 			}
-		case isIn && f.Start.Before(p):
-			// On since before the write, and the ledger has it on from
-			// within it: that firing, from where the ledger has it.
-			if f.End.IsZero() || f.End.After(in.Start) {
-				f.Start = in.Start
-				send = append(send, f)
-			}
+		case isIn:
+			// On since before the write, and the ledger has it from within
+			// it, on or ended: that firing, from where the ledger has it, as
+			// the history says it is. Not taken away by a read that begins
+			// after where the history has it begin.
+			f.Start = in.Start
+			send = append(send, f)
 		case !f.Start.Before(p) || (first || back[f.Rule]) && (f.End.IsZero() || f.End.After(a)):
 			// Firing again, it had stopped: where, the history didn't say.
 			if _, done := ended[k]; isOn && !done {
