@@ -1018,6 +1018,38 @@ func TestServeGrafanaJudgedLeftOutLong(t *testing.T) {
 	sh.want("Stock low's copies", sh.covers("Stock low"), "→0s 28h0m0s→36h0m0s")
 }
 
+// The read back from where a rule was left out past the reader's bounds,
+// while the day's read isn't: the rule is left out of the day once more,
+// and the other rules' day is written, not left a gap. The round after,
+// the read back within the bounds, judges the rule again.
+func TestServeGrafanaJudgedReadBackTooMuch(t *testing.T) {
+	g := ordersAndStock()
+	for at := -18 * time.Hour; at < 12*time.Hour; at += 10 * time.Minute {
+		g.fired("Stock low", "shelf", at, at+2*time.Minute)
+	}
+	sh := shopServer(t, g)
+	sh.round(0)
+	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
+	g.hold(append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})...)
+	sh.round(2 * time.Hour)
+	g.hold(one...)
+	sh.round(4 * time.Hour)
+	sh.round(6 * time.Hour)
+	sh.want("Orders slow's copies, left out", sh.covers("Orders slow"), "→0s")
+	// A day and a half read back holds some 480 changes; the day's read from
+	// the settle before, some 60.
+	was := source.MaxChanges
+	t.Cleanup(func() { source.MaxChanges = was })
+	source.MaxChanges = 200
+	sh.round(8 * time.Hour)
+	source.MaxChanges = was
+	sh.want("Orders slow's copies, read back too much", sh.covers("Orders slow"), "→0s")
+	sh.want("Stock low's copies, read back too much", sh.covers("Stock low"), "→8h0m0s")
+	sh.round(10 * time.Hour)
+	sh.want("Orders slow's copies, judged again", sh.covers("Orders slow"), "→0s 8h0m0s→10h0m0s")
+	sh.want("Stock low's copies", sh.covers("Stock low"), "→10h0m0s")
+}
+
 // Left out for longer than a week, a rule is read back a week alone: an
 // alert of it on since before, that the read says nothing of, is ended
 // where the rule was left out, not left on.
