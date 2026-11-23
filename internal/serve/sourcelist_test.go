@@ -13,6 +13,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 )
 
 // sourceEvents are the notices of sources down or back the webhook has
@@ -735,5 +738,111 @@ func TestLeadingAgainForgetsWhatWasNotedFailing(t *testing.T) {
 	s.readFile(errors.New("incidents.yaml: mounted late"))
 	if got := s.failingNow()["incidents-file"]; !got.Equal(*clock) {
 		t.Errorf("noted again at %v, want %v", got, *clock)
+	}
+}
+
+// A replica that leads again kept what it read in a term it led earlier:
+// three days on, a source it read well then, which the leader between
+// read well all along, was quiet and down before this term read it, and
+// down at once at its first failed read. And letting go of every read on
+// each lead would have a source that never reads well never down while
+// the leader changes more often than its bound. It takes the reads of the
+// term before: the leader's, as it last said them; its own, where it led
+// that term; else none.
+func TestLeadingTakesTheReadsOfTheTermBefore(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, clock := hookServer(t, func(c *Config) {
+		c.Incidents, c.Deploys = filepath.Join(dir, "incidents.yaml"), filepath.Join(dir, "deploys.yaml")
+		c.OnCall = &oncall.Config{Schedules: []*oncall.Schedule{{Name: "primary"}}}
+	})
+	ids := []string{"incidents-file", "deploys-file", "on-call/primary"}
+	shown := func() map[string]sourceItem {
+		t.Helper()
+		items, err := s.sourceList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]sourceItem{}
+		for _, it := range items {
+			if slices.Contains(ids, it.ID) {
+				out[it.ID] = it
+			}
+		}
+		if len(out) != len(ids) {
+			t.Fatalf("sources %v, want %v", out, ids)
+		}
+		return out
+	}
+	readOnCall := func(err error) {
+		st := s.onCallRead("primary")
+		s.onCall.mu.Lock()
+		st.At = s.now()
+		if err != nil {
+			st.Err = err.Error()
+		} else {
+			st.OK, st.Err = st.At, ""
+		}
+		s.onCall.mu.Unlock()
+		s.noteFailing("on-call/primary", err)
+	}
+	read := func(err error) {
+		s.readFile(err)
+		s.noteRead("deploys-file", s.now(), -1, err)
+		readOnCall(err)
+	}
+	// Term 1, this replica's: each read well.
+	s.takeReads(1, ledger.Leader{}, false)
+	read(nil)
+	// Term 3, three days on: who led term 2 wasn't read. None of what this
+	// replica read in term 1 stands.
+	*clock = clock.Add(72 * time.Hour)
+	s.takeReads(3, ledger.Leader{ID: "b", Term: 1, Status: []byte(`{}`)}, true)
+	for id, it := range shown() {
+		if it.Down || it.State != "pending" {
+			t.Errorf("term 3, before a read: %s %s, down %v", id, it.State, it.Down)
+		}
+	}
+	read(errors.New("broke a minute ago"))
+	for id, it := range shown() {
+		if it.Down || it.State != "failing" {
+			t.Errorf("term 3, its first failed read: %s %s, down %v", id, it.State, it.Down)
+		}
+	}
+	// Term 5, after term 4 another's: what it last said is taken. The
+	// incidents file has failed since three hours less than its bound, the
+	// deploys file and the schedule read well a minute ago.
+	bound := s.sourceStale()
+	since, ok := clock.Add(-bound+3*time.Hour), clock.Add(-time.Minute)
+	said, _ := json.Marshal(sharedStatus{
+		Reads:   map[string]sourceRead{"deploys-file": {OK: ok, Rules: -1}},
+		Failing: map[string]time.Time{"incidents-file": since},
+		Sources: &sourcesSeen{FileFailed: ok, FileErr: "not mounted"},
+		OnCall:  map[string]onCallRead{"primary": {Name: "primary", At: ok, OK: ok}},
+	})
+	s.takeReads(5, ledger.Leader{ID: "b", Term: 4, Status: said}, true)
+	got := shown()
+	if it := got["incidents-file"]; it.State != "failing" || it.Down || it.LastError != "not mounted" {
+		t.Errorf("term 5, the incidents file as the leader said: %+v", it)
+	}
+	for _, id := range ids[1:] {
+		if it := got[id]; it.State != "ok" || !it.LastOK.Equal(ok) {
+			t.Errorf("term 5, %s as the leader said: %+v", id, it)
+		}
+	}
+	// Failing past its bound, counted from when the leader said: down,
+	// however often the leader changed.
+	*clock = clock.Add(4 * time.Hour)
+	if it := shown()["incidents-file"]; !it.Down {
+		t.Errorf("term 5, failing since %v, %v on: %s, not down", since, clock.Sub(since), it.State)
+	}
+	// Term 6, after term 5 its own: kept as it is, whatever was said of
+	// term 4.
+	s.takeReads(6, ledger.Leader{ID: "b", Term: 4, Status: []byte(`{}`)}, true)
+	if got := s.failingNow()["incidents-file"]; !got.Equal(since) {
+		t.Errorf("term 6, failing since %v, want %v", got, since)
+	}
+	if it := shown()["deploys-file"]; !it.LastOK.Equal(ok) {
+		t.Errorf("term 6, the deploys file: %+v", it)
 	}
 }

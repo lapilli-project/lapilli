@@ -283,8 +283,11 @@ type replicas struct {
 
 	lead   atomic.Pointer[leadership]
 	leader atomic.Pointer[Leader]
-	live   atomic.Int64
-	keys   atomic.Int64
+	// led is the last replica but this one read leading with a status,
+	// kept once it no longer leads (Led).
+	led  atomic.Pointer[Leader]
+	live atomic.Int64
+	keys atomic.Int64
 	// swept is when the leader last swept what is long gone.
 	swept time.Time
 }
@@ -771,6 +774,22 @@ func (l *Ledger) Leader() (Leader, bool) {
 	return *p, true
 }
 
+// Led is the last replica but this one that this one read leading, and
+// what it said of itself (Status) as last read, a beatEvery before it
+// stopped at most: kept once another leads, or none, so that a replica
+// that starts to lead knows what the one before said, and its term.
+// False when none was read: a SQLite ledger's process, one just started.
+func (l *Ledger) Led() (Leader, bool) {
+	if l.rep == nil {
+		return Leader{}, false
+	}
+	p := l.rep.led.Load()
+	if p == nil {
+		return Leader{}, false
+	}
+	return *p, true
+}
+
 // Replicas is how many replicas live, this one with them, as last counted
 // every beatEvery: 1 for a ledger no replicas share.
 func (l *Ledger) Replicas() int {
@@ -1083,6 +1102,9 @@ func (r *replicas) beat(ctx context.Context) {
 	case err == nil:
 		p.Status, p.Self = []byte(st), p.ID == r.id
 		r.leader.Store(&p)
+		if !p.Self && st != "" {
+			r.led.Store(&p)
+		}
 	}
 	if ld != nil && ld.valid() && time.Since(r.swept) >= sweepEvery {
 		// The leader sweeps what is over, each sweepEvery: replicas gone a

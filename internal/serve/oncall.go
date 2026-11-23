@@ -221,6 +221,23 @@ func (s *Server) onCallView() []onCallRead {
 	return out
 }
 
+// takeOnCallReads sets each schedule's last read of its feed to what by
+// says of it, none where it says nothing, as a replica starts to lead
+// (takeReads); its turns are as this replica keeps them, read from the
+// ledger.
+func (s *Server) takeOnCallReads(by map[string]onCallRead) {
+	if s.cfg.OnCall == nil {
+		return
+	}
+	for _, sc := range s.cfg.OnCall.Schedules {
+		st := s.onCallRead(sc.Name)
+		r := by[sc.Name]
+		s.onCall.mu.Lock()
+		st.At, st.OK, st.Err, st.Events, st.Notes = r.At, r.OK, r.Err, r.Events, slices.Clone(r.Notes)
+		s.onCall.mu.Unlock()
+	}
+}
+
 // onCallShown is each schedule's last read as a status says it: the
 // leader's, which reads the feeds, on a replica that follows; with its turns
 // as this replica keeps them, read from the ledger.

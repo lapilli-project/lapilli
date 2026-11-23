@@ -387,6 +387,33 @@ func TestReplicasOneLeads(t *testing.T) {
 	ls.apart(t)
 }
 
+// A replica that starts to lead knows which led before it, in which term,
+// and what that one last said of itself, though it no longer leads: so
+// that it goes on from what the one before read (serve's takeReads).
+func TestReplicasKnowWhoLedBefore(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	ls := &leads{}
+	a, b := openReplica(t, u), openReplica(t, u)
+	if _, ok := b.Led(); ok {
+		t.Fatal("a replica just opened knows of one that led")
+	}
+	stopA := elect(t, a, ls, 0)
+	within(t, 5*time.Second, "a leads", func() bool { return a.Leading() })
+	elect(t, b, ls, 1)
+	within(t, 2*time.Second, "b reads what a says", func() bool { p, ok := b.Led(); return ok && string(p.Status) == `{"who":0}` })
+	stopA()
+	within(t, 3*campaignEvery+time.Second, "b leads", func() bool { return b.Leading() })
+	p, ok := b.Led()
+	now, _ := b.Leader()
+	if !ok || p.ID != a.ReplicaID() || p.Self || p.Term != now.Term-1 || string(p.Status) != `{"who":0}` {
+		t.Errorf("b leads term %d; the one before, as it knows: %+v, %v", now.Term, p, ok)
+	}
+	if _, ok := a.Led(); ok {
+		t.Error("a knows of another that led, none did")
+	}
+}
+
 // A leader cut off from the database stops leading by its own clock,
 // before its lease lapses in the database, and another takes the lease
 // once it has: within leaseFor and a campaign of the cut. What the old

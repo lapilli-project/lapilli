@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -45,6 +46,10 @@ type readsState struct {
 	// failing is when each source whose reads aren't counted first failed
 	// to read, since it last read well, by this replica (noteFailing).
 	failing map[string]time.Time
+	// led says this replica led, and term is the term it led last
+	// (takeReads).
+	led  bool
+	term int64
 }
 
 // noteFailing keeps when the source id, one whose reads aren't counted
@@ -68,12 +73,45 @@ func (s *Server) noteFailing(id string, err error) {
 	s.reads.failing[id] = s.now()
 }
 
-// forgetFailing lets go of what this replica noted of the sources failing
-// (noteFailing), as it starts to lead (lead).
-func (s *Server) forgetFailing() {
+// takeReads sets what this replica holds of the sources' reads as it
+// starts to lead term (lead): the reads of the term before, whoever led
+// it. Where this replica led it, its own are kept. Where another did, and
+// this replica read what it said (prev, as the ledger's Led gives it), the
+// reads it said are taken, as it last said them: a source it read well
+// all along is read well as late here, and one failing is failing since
+// when it said, so that a leader that changes more often than a source's
+// bound doesn't start the source's clock again each time. Else, none: what
+// this replica read in a term it led earlier, kept while others led,
+// would have a source read well all along quiet or down at once, before
+// this term read it. Each source is then pending until it is read, and
+// one never read well failing from its first failed read in this term.
+// The incidents file, the impact signals, the on-call schedules and the
+// sources counted read by read alike.
+func (s *Server) takeReads(term int64, prev ledger.Leader, ok bool) {
 	s.reads.Lock()
-	defer s.reads.Unlock()
-	s.reads.failing = nil
+	own := s.reads.led && s.reads.term == term-1
+	s.reads.led, s.reads.term = true, term
+	s.reads.Unlock()
+	if own {
+		return
+	}
+	var said sharedStatus
+	if ok && !prev.Self && prev.Term == term-1 && json.Unmarshal(prev.Status, &said) != nil {
+		said = sharedStatus{}
+	}
+	s.reads.Lock()
+	s.reads.m, s.reads.failing = maps.Clone(said.Reads), maps.Clone(said.Failing)
+	s.reads.Unlock()
+	seen := sourcesSeen{}
+	if said.Sources != nil {
+		seen = *said.Sources
+	}
+	s.sources.Lock()
+	s.sources.impactRead, s.sources.impactKey, s.sources.impactFailed, s.sources.impactErr = seen.ImpactRead, seen.ImpactKey, seen.ImpactFailed, seen.ImpactErr
+	s.sources.fileRead, s.sources.fileFailed, s.sources.fileErr = seen.FileRead, seen.FileFailed, seen.FileErr
+	s.sources.signals = maps.Clone(seen.Signals)
+	s.sources.Unlock()
+	s.takeOnCallReads(said.OnCall)
 }
 
 // failingNow is when each source this replica reads first failed, as it

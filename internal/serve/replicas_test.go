@@ -653,6 +653,33 @@ func TestReplicasShowTheLeadersSources(t *testing.T) {
 	})
 }
 
+// A replica that takes the lead goes on from what the leader before it
+// said of the sources: an incidents file never read well is failing since
+// the leader first failed to read it, not since this replica's own first
+// failed read, an hour later by its clock.
+func TestReplicasLeaderTakesTheReadsBefore(t *testing.T) {
+	f := sharedLedger(t)
+	q := quickReplicas(t)
+	rc := newSink(t)
+	gone := func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.gone") }
+	a, b := replica(t, f, rc, gone), replica(t, f, rc, gone)
+	later := now.Add(time.Hour)
+	b.now = func() time.Time { return later }
+	stopA := running(t, a)
+	until(t, 30*time.Second, "a leads", func() bool { return a.l.Leading() })
+	running(t, b)
+	until(t, 30*time.Second, "a's first failed read noted", func() bool { return !a.failingNow()["incidents-file"].IsZero() })
+	until(t, 10*time.Second, "b reads what a says", func() bool {
+		p, ok := b.l.Led()
+		return ok && strings.Contains(string(p.Status), `"incidents-file"`)
+	})
+	stopA()
+	until(t, q.Lease+5*q.Campaign+5*time.Second, "b leads", func() bool { return b.l.Leading() })
+	until(t, 10*time.Second, "b leads, the incidents file failing since a said", func() bool {
+		return b.failingNow()["incidents-file"].Equal(now)
+	})
+}
+
 // readPage is a page as anyone reads it.
 func readPage(t *testing.T, s *Server, path string) string {
 	t.Helper()
