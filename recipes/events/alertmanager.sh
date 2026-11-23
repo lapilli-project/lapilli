@@ -210,7 +210,7 @@ batches() {
       }
       b++; f = dir "/batch." b; n = 0; size = 2; long = 0
     }
-    BEGIN { b = 0; f = dir "/batch.0"; size = 2 }
+    BEGIN { b = 0; f = dir "/batch.0"; size = 2; n = 0; off = 0; long = 0 }
     {
       len = length($0) + 1
       if (len + 1 > bytes) { off += len; long++; next }

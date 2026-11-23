@@ -89,6 +89,13 @@ func runEvents(t *testing.T, env []string, args ...string) (int, string) {
 	} else if err != nil {
 		t.Fatal(err)
 	}
+	// A test of a number that isn't one, as sh and dash say it: the
+	// script went on past what it didn't mean to.
+	for _, bad := range []string{"integer expression expected", "Illegal number", "unexpected operator", "arithmetic"} {
+		if strings.Contains(stderr.String(), bad) {
+			t.Errorf("%s said %q:\n%s", eventsShell, bad, stderr.String())
+		}
+	}
 	return code, stderr.String()
 }
 
