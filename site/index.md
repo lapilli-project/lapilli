@@ -161,9 +161,9 @@ runs will take. It reads, and writes nothing.
 </div>
 
 The ledger is one SQLite file, or a Postgres database that several
-replicas share, one of them leading. On SQLite, over two million firings,
-an hourly run takes 0.18 s and twelve weeks by rule 2 ms, and these budgets
-are part of the tests. `/metrics` gives the stones to Prometheus, and the Helm chart a Grafana
+replicas share, one of them leading. The tests hold an hourly run over
+twelve weeks of 200,000 firings to two seconds, and each page to a few
+statements a rule, never one a firing. `/metrics` gives the stones to Prometheus, and the Helm chart a Grafana
 dashboard of them. The UI runs no scripts.
 
 ## How it judges {#how-it-judges}

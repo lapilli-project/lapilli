@@ -12,7 +12,11 @@ token in `--grafana-token-file`; with `--ruler`, those a Mimir or Cortex
 ruler, Amazon Managed Service for Prometheus or Azure's Prometheus rule
 groups hold, with `--ruler-token-file` or the cloud's credentials; with
 `--alarms`, a cloud's own alarms (CloudWatch, Azure Monitor, Google Cloud
-Monitoring, OCI Monitoring), with that cloud's credentials. It sends
+Monitoring, OCI Monitoring), with that cloud's credentials. With `--loki`,
+it queries that Loki with `--loki-token-file`; with `--on-call`, it fetches
+the iCalendar feeds the file names, whose URLs hold their secret; with
+`--promtool`, it runs promtool on the test files an expectations file
+names. It sends
 its report only where it is told
 to: a Pushgateway (`--push`) and a Slack webhook (`--slack-webhook-file`). Of
 particular interest:
@@ -30,7 +34,8 @@ particular interest:
 - a rule or answer that makes it use memory or time far out of proportion.
 
 `lapilli serve` does the same every hour, and serves a web UI and API that
-read and write its ledger (one SQLite file). It listens on localhost unless
+read and write its ledger (one SQLite file, or a Postgres database that
+replicas share). It listens on localhost unless
 told otherwise, takes changes without roles only there (or with
 `--everyone-admin`), and learns who is asking one way of three: the headers
 named by `--user-header` and `--groups-header`, which it trusts; an OpenID
@@ -39,8 +44,19 @@ session in a cookie it signs, and taking the provider's ID tokens as bearer
 tokens; or the JWT a sign-in in front signs (`--proxy-jwt`), checked against
 that sign-in's keys. It gives them the role `--editors` and `--admins` do,
 refuses posts from other sites, and with `--read-only` takes no changes. It sends notices to the URLs in
-`--notify-webhook-file` and `--slack-webhook-file`, and follows no
-redirects. Whoever can write its ledger, as a Postgres user or in the
+`--notify-webhook-file`, `--slack-webhook-file`, each `--webhook-dest` and
+each `--report-dest`, and follows no redirects. With `--incidents-listen`,
+it takes incidents on a port of its own with `--incidents-token-file`, and,
+each with a token of its own, firings copied in (`--firings-token-file`)
+and a tracker's tasks (`--tasks-token-file`). With `--notify-listen`, it
+takes notifications from Alertmanager, Grafana, Amazon SNS, Azure and
+Google Cloud, each with its token or signature, and makes one request, to
+confirm an SNS subscription, at an SNS host only. `--metrics-listen` serves
+`/metrics` and the health checks alone. Whoever can write the file
+`--config` names gives roles (`grants`), teams, routes and reports: guard
+it as you guard the ledger. `lapilli preflight` reads what serve would
+meet, with serve's flags and credentials, through an allowlist, and writes
+nothing. Whoever can write its ledger, as a Postgres user or in the
 SQLite file, can make it query the history and the rule sources with its
 tokens (the impact signals set in the UI, the versions of the rules and the
 proposals are kept there), carry out with `--changes` a change the ledger
@@ -50,6 +66,13 @@ particular interest besides the above:
 
 - a way for a page to run script, or for a rule, label or incident to
   change what a page shows beyond its own text;
+- a way past a port's token or signature, or to reach on one port what
+  another serves; a body read, or memory or time used, before its token is
+  checked; the SNS confirmation sent anywhere but an SNS host; one token
+  doing what another's does;
+- a way for a test file an agent or a pull request gives to make promtool
+  read or write outside its directory, or use memory or time far out of
+  proportion; a way to make `lapilli preflight` write, or show a token;
 - a way to make it change the ledger without a request to it, through a
   page from another site, or with `--read-only` (but for who signed out,
   which signing out keeps there, for people a role lets in, as
@@ -130,7 +153,8 @@ repository credentials. Of particular interest:
 - a way for the changes token to do anything but read the changes handed
   out and say what became of them;
 - a way for an agent's words to pass as a person's, for an agent to do
-  anything but propose, or for its proposal to be kept as anyone's but the
+  more than read, backtest, propose and draft, or to approve, accept or
+  apply anything, or for its proposal to be kept as anyone's but the
   person's it acts for (whom its request to `/mcp` came from, however they
   signed in), which they could then approve, or whose limit it wouldn't
   count against; or for a proposal's refusals to read the rules from
@@ -179,7 +203,10 @@ neither is a way past what this says, which a report is welcome of.
 
 ## Versions
 
-Only the latest release gets fixes, in a patch release. Each release is
+Only the latest release gets fixes, in the next release: a patch release,
+or a minor one when one is ready. Fixed vulnerabilities are published as
+[advisories](https://github.com/lapilli-project/lapilli/security/advisories),
+each naming the versions affected and the release that fixed it. Each release is
 checked with [govulncheck](https://go.dev/doc/security/vuln/) before it is
 published, the code and each binary, and the latest release is checked again
 every day: a binary holds the Go standard library and modules it was built

@@ -10,20 +10,29 @@ person's time, or on one company's view of what an alert is.
 
 ## Why you might
 
-- **A small, readable codebase.** It is Go with no cgo; `go test ./...` runs
-  the whole of it in seconds. The design notes in `docs/design/` say why
-  things are as they are.
+- **A readable codebase, with its reasons written down.** It is Go with no
+  cgo: some 150,000 lines, and as many again of tests. Most packages' tests
+  take seconds; `go test ./...` takes ten to fifteen minutes, most of it
+  serve's. The design notes in `docs/design/` say why things are as they
+  are.
 - **Real questions that are still open.** How faithfully can a replay
   reproduce what fired? How should a thin incident log still give a fair
   verdict? See [ROADMAP.md](ROADMAP.md).
 - **Things we can show.**
-  - Every release is checked for vulnerabilities before it is published,
-    carries build provenance, and is checked again every day.
-  - Performance has budgets in the tests: an hourly run over two million
-    firings takes under a fifth of a second.
-- **Vendor neutral by rule.** Prometheus, Thanos, Mimir and VictoriaMetrics
-  work, as do the managed Prometheus of AWS, Azure and Google Cloud, Grafana
-  and plain rule files. Help with a cloud is help for everyone who uses it.
+  - Every release is checked for vulnerabilities before it is published
+    and carries build provenance, and the latest is checked again every
+    day.
+  - Performance has budgets in the tests: over twelve weeks of 200,000
+    firings, an hourly run within two seconds, and each page held to a few
+    statements a rule, never one a firing.
+- **Vendor neutral by rule.** It reads Prometheus, Thanos, Mimir, Cortex,
+  VictoriaMetrics and Loki, the managed Prometheus of AWS, Azure and Google
+  Cloud, Grafana, plain rule files and each cloud's own alarms (CloudWatch,
+  Azure Monitor, Google Cloud Monitoring, OCI Monitoring), and judges
+  Datadog's and New Relic's alerts by their history. Some are checked only
+  against what their documentation shows, AWS's and Azure's among them
+  ([ROADMAP.md](ROADMAP.md)): help with a cloud is help for everyone who
+  uses it.
 
 ## How to become one
 

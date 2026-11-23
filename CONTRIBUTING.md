@@ -20,22 +20,28 @@ note. Everyone taking part follows the
 
 ## Build and test
 
+Go 1.26.11 or later, as `go.mod` says; CI tests the latest Go too, which
+releases are built with. The recipes' tests need `sh`, `curl` and `jq`, and
+are skipped without them.
+
 ```sh
 go build ./cmd/lapilli   # the lapilli binary
-go test ./...            # everything, in seconds
-gofmt -l . && go vet ./...
+go test -timeout 20m ./...   # everything: ten minutes or more, most of it serve's; go test's own ten is too short
+test -z "$(gofmt -l .)" && go mod tidy -diff && go vet ./...   # as CI checks them
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
-test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
+test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea, Grafana and Mimir; needs Docker, git, curl, jq
 test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
 test/e2e/signin.sh       # lapilli's own sign-in against a real Dex; needs Docker, curl
-test/e2e/postgres.sh     # serve on a real Postgres: a restart, a second serve refused, a copy; needs Docker, curl, jq
+test/e2e/postgres.sh     # serve on a real Postgres: a restart, a second serve that follows, a copy in and out; needs Docker, curl, jq, python3
+test/e2e/replicas.sh     # three serves on one Postgres ledger on kind, the leader killed; needs Docker, kubectl, helm, jq
+test/e2e/backtest.sh     # pull request backtests on a real Gitea and Prometheus: the comment and the commit status; needs Docker, git, curl, jq
 test/e2e/serve-lb.sh     # the chart at a URL on kind: a LoadBalancer, Gateway API, an Ingress, Dex; Linux
 test/e2e/rendered.sh     # rules a chart renders, from a real Gitea, replayed and followed; needs Docker, jq, helm, yq
 test/e2e/dashboard.sh    # the chart's Grafana dashboard on a real Grafana and Prometheus; needs Docker, jq, python3
 test/e2e/service.sh      # the whole service on kind: Grafana's alerts, Lapilli at a LoadBalancer, Dex, a browser; Linux
 test/e2e/ratelimit.sh    # runs at once against a real Prometheus behind nginx's rate limit (429); needs Docker
 test/e2e/compat.sh       # verdict and --check-replay against a real Thanos, and VictoriaMetrics with vmalert; needs Docker, jq
-test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
+test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Go and Docker
 ```
 
 With `LAPILLI_TEST_POSTGRES` naming a Postgres server (15 or later), the
@@ -55,7 +61,8 @@ Each checks first that every test is in one shard, and one only.
 
 A statement that Postgres takes otherwise than SQLite is given for both
 (`internal/ledger/dialect.go`); `TestDialectSeam` says where one isn't. A
-migration comes in a pair: `schema/NNN.sql` and `schema/postgres/NNN.sql`.
+migration comes in a pair: `internal/ledger/schema/NNN.sql` and
+`internal/ledger/schema/postgres/NNN.sql`.
 Its changelog entry says **Ledger schema NNN**, which release can't open
 the ledger after, and to keep a copy first, pointing to the chart's
 README, "Going back after a schema upgrade"; and it gets a row in
@@ -66,10 +73,12 @@ in [docs/metrics.md](docs/metrics.md), and an option in
 `go test ./cmd/lapilli -run TestCommandsDocumented -write-docs` writes it
 again.
 
-`go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
-and the pages over a busy ledger: two million firings in the ledger, 200,000
-for the pages. `LAPILLI_SCALE=10` makes it busier. The budgets are part of the
-tests, so a change that slows a run or a page fails.
+`go test ./internal/ledger ./internal/serve -run Scale -v` measures the
+ledger and the pages over twelve weeks of a busy ledger, about 200,000
+firings; `LAPILLI_SCALE=10` makes it two million. The ledger's runs and
+reads are held to times, doubled on CI; the pages to how many statements
+and rows they cost the ledger, not to time, so a page that reads every
+firing fails on any machine.
 
 ## Pull requests
 
@@ -96,8 +105,14 @@ tests, so a change that slows a run or a page fails.
   - the whole service on kind: a scenario of user impact, a re-fire and a
     deploy, Grafana's alerts and notifications, the dashboard, a browser
   - the sign-in against a real identity provider
+  - three replicas on one Postgres ledger, on kind
   - the other end-to-end jobs, against real servers in Docker
   - CodeQL
+  - on a pull request that changes `site/`, `assets/`, `docs/` or
+    `test/a11y/`, the website built and every page checked with axe
+    (`pages.yml`)
+  - every day, govulncheck on the latest release (`latest-release.yml`);
+    weekly, OpenSSF Scorecard
 
   On a pull request, an end-to-end job runs only when the changes reach
   it: lapilli itself, which each one builds (`go.mod`, `go.sum`, `cmd/`
@@ -108,7 +123,8 @@ tests, so a change that slows a run or a page fails.
   `internal/source`), and `go.mod` and `go.sum`. A change to the
   docs alone runs none of them. A new push to a pull request cancels the
   run in progress. On each push to main every job runs, and weekly the
-  fuzzing too. All of what runs must pass.
+  fuzzing too. The four checks above must pass to merge; everything that
+  runs must pass on main before a release.
 - **Dependencies.** A new one needs a reason. Versions are at least two weeks
   old, except for security fixes.
 - **Nothing private.** Real rule names, hostnames, incident titles and
@@ -119,7 +135,9 @@ tests, so a change that slows a run or a page fails.
 
 ## Where things live
 
-- `cmd/lapilli`: the flags of `lapilli verdict` and `lapilli serve`.
+- `cmd/lapilli`: the commands and their flags: `verdict`, `serve`,
+  `preflight`, `ledger copy`, `impact suggest` and `demo`, whose made-up
+  rules and history are in `cmd/lapilli/demo/`.
 - `internal/rules` reads rule files. A Grafana rule becomes a `Graph`: its
   queries as PromQL, and its threshold, math and reduce steps.
 - `internal/sse` evaluates Grafana's math expressions and joins the way
@@ -133,11 +151,12 @@ tests, so a change that slows a run or a page fails.
 - `internal/preflight` is `lapilli preflight`: what serve will meet before
   it is deployed, read through an allowlist, the ledger through
   `ledger.Probe` (docs/design/preflight.md).
-- `internal/source` reads the history and the rules for both commands.
+- `internal/source` reads the history and the rules for every command.
 - `internal/incident` reads incidents. `recipes/incidents` copies them from
   the tools they are kept in; `internal/serve/recipes_test.go` runs each
   against a server standing in for the tool. The other recipes are tested
-  the same way: `recipes/firings` (a cloud's alarm history), `recipes/trackers`
+  the same way: `recipes/firings` (a cloud's, Datadog's or New Relic's alarm
+  history, `internal/firing/recipes_test.go`), `recipes/trackers`
   (tasks kept in step with a tracker, `trackers_recipes_test.go`) and
   `recipes/changes` (pull requests for approved changes, one script a git
   host).
@@ -189,22 +208,30 @@ Chart colours are checked for colour blindness and contrast; keep text at
 structure in every language (`TestPagesAccessible`: one h1, landmarks, a
 skip link, a name for every control, headers with scope, a text for every
 chart, which has its numbers in a table too); `test/a11y/axe.sh` runs
-axe-core over them in a browser. [ACCESSIBILITY.md](ACCESSIBILITY.md) says what
+axe-core over them in a browser. CI doesn't run it over serve's pages: a
+change to a page runs it before its pull request. [ACCESSIBILITY.md](ACCESSIBILITY.md) says what
 the pages aim for, and what a change to them should check.
 
 ## Releases
 
-A maintainer tags `vX.Y.Z` on a commit of `main` whose CI run passed in
-full: a pull request's run leaves out the end-to-end jobs its changes
-don't reach, so main's is the run that has them all.
+First, Unreleased in `CHANGELOG.md` becomes `## [X.Y.Z] - date`: the
+release fails unless that is the first version it names. A maintainer with
+the admin role, which tags `v*` need (the `release tags` ruleset), then
+tags `vX.Y.Z` on a commit of `main` whose CI run passed in full: a pull
+request's run leaves out the end-to-end jobs its changes don't reach, so
+main's is the run that has them all.
 `.github/workflows/release.yml` builds
 the binaries, the image and the chart, checks them with govulncheck,
 attests their provenance, and puts the attestations' Sigstore bundles
-beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md). The job
-that runs the repository's code (`build`) may write nothing; the one that
-publishes (`publish`) runs none of it, and checks the sha256 of each file
-`build` hands on. Before tagging, a dry run builds and checks everything and
-publishes nothing:
+beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md); the
+chart goes to `oci://ghcr.io/lapilli-project/charts/lapilli`. The job that
+runs the repository's code (`build`) may write nothing; `verify` checks
+what it handed on and can write nothing either; the one that publishes
+(`publish`) runs none of it, and checks the sha256 of each file `build`
+hands on. A published release can't be changed, and its tag can't be
+moved: a fix is the next patch. A run that failed before publishing is run
+again, with the tag left where it is. Before tagging, a dry run builds and
+checks everything and publishes nothing:
 
 ```sh
 gh workflow run release.yml --ref main -f version=vX.Y.Z
@@ -213,7 +240,10 @@ gh workflow run release.yml --ref main -f version=vX.Y.Z
 `lapilli.dev` is built from `site/` by `.github/workflows/pages.yml`. Its
 front page is in English, Spanish, Japanese and Korean (`site/index.md`,
 `site/es/`, `site/ja/`, `site/ko/`), with the header's and footer's words in
-`site/_data/i18n.yml`; the docs are in English only. A change to the English
+`site/_data/i18n.yml`; the docs are in English only. A new page in `docs/`
+gets a line in `docs/README.md`: the site's sidebar and each page's
+description come from it, and the site's build fails on a page it doesn't
+list (`site/docs.sh`). A change to the English
 front page changes the other three with it, or says in the pull request
 which it left. Their sections keep the English page's ids, which the header
 links to, and the build fails when they don't.

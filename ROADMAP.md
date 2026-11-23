@@ -11,6 +11,17 @@ Some areas need what the current maintainer doesn't have: an AWS or Azure
 account with a managed Prometheus, Loki alerts in real use, an incident
 tool. If you do, you are the person this needs.
 
+## A first look
+
+`cmd/lapilli`
+
+`lapilli demo` (0.69) runs `lapilli verdict`'s own code over a sample
+built in, a small shop's week, reading no Prometheus and sending nothing
+([docs/design/demo.md](docs/design/demo.md)). Still to do: `lapilli demo
+--serve`, `lapilli serve` on a temporary ledger of the sample, on loopback
+alone, with its own look from an attacker's point of view: a port, however
+local.
+
 ## Replay fidelity
 
 `internal/rules`, `internal/sse`, `internal/replay`
@@ -46,10 +57,12 @@ Still to do:
   database keeps no history of what a query returned (the design says why).
   Their rules, read with `--grafana`, are judged from Grafana's own alert
   state history instead, with no backtest
-  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)); still to
-  do: a rule whose title another folder has too (tie by `grafana_folder`),
-  one whose severity changed, those `--check-grafana`'s Grafana runs from
-  files, and a value for it in the chart.
+  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md), 0.68);
+  still to do: a rule whose title another rule has too, which leaves each
+  day a gap while it does (0.68.1), tied by `grafana_folder`; a rule whose
+  alerts no write holds, left out alone rather than its day; a severity
+  for such a rule, which today has none; those `--check-grafana`'s Grafana
+  runs from files; and a value for it in the chart.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
 - A firing on when a period starts, of a group placed within its interval
@@ -69,23 +82,27 @@ Still to do:
 `--check-replay` sets a replay beside what really fired, once, when asked.
 
 - The same in `lapilli serve`, kept in the ledger, so a rule starting to differ
-  shows on its page: built for v0.21
+  shows on its page: built (0.21)
   ([docs/design/fidelity.md](docs/design/fidelity.md)). Still to do: the
   threshold a rule differs at, set from what real ledgers show.
+- For Grafana's rules, what really fired is read from Grafana's own alert
+  state history (0.50), in annotations or in Loki, where `GRAFANA_ALERTS`
+  isn't written ([docs/design/grafanahistory.md](docs/design/grafanahistory.md)).
 - Notifications as they were sent are built (0.20): Alertmanager's and
   Grafana's webhooks, SNS for Amazon Managed Service for Prometheus, Azure
   Monitor's action groups and Google Cloud's webhook channels, each on a path
   of its own ([docs/design/notifications.md](docs/design/notifications.md)).
+  A cloud alarm's own notifications, every cloud alike (CloudWatch through
+  SNS, Azure Monitor's other alerts, Google Cloud's other policies, OCI
+  through Notifications), tied to the firings copied in, are taken since
+  0.21 ([notifications.md](docs/design/notifications.md#a-clouds-own-alarms-notifications-v021)).
   Alertmanager's event recorder, every delivery, PagerDuty's and Slack's
   too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md)),
   and its mutes, which say why a firing paged no one, since 0.67
   ([docs/design/mutes.md](docs/design/mutes.md)), counted in the digest
-  and the reports since; still to do:
-  checking the SNS, Azure and Google Cloud paths against real accounts; and a cloud alarm's own notifications,
-  every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
-  Google Cloud's other policies, OCI through Notifications), tied to the
-  firings copied in: accepted for v0.21 in
-  [docs/design/notifications.md](docs/design/notifications.md#a-clouds-own-alarms-notifications-v021).
+  and the reports since 0.68. Still to do: checking the SNS, Azure, Google
+  Cloud and OCI paths against real accounts; the recorder's file and Kafka
+  outputs (mutes.md).
 
 ## What to change
 
@@ -111,7 +128,7 @@ noisy: a rule that fires as often says what its firings were (0.41).
 - Near misses by value for a Grafana math expression joining comparisons
   with `&&` or `||`, and for classic conditions, are built (0.25). A
   comparison under `!`, or inside arithmetic, is still read only as a whole.
-- Shifts read from where on-call schedules are kept: built for 0.27
+- Shifts read from where on-call schedules are kept: built (0.27)
   (`--on-call`, iCalendar feeds). Still to do: monthly and yearly repeats,
   and a feed's own `VTIMEZONE`; checking each tool's feed against a real
   account.
@@ -123,13 +140,15 @@ noisy: a rule that fires as often says what its firings were (0.41).
 - Alarms kept in a cloud's own monitoring. Those written in PromQL are
   replayed (CloudWatch PromQL alarms, Google Cloud policies with a PromQL
   condition, Azure's Prometheus rule groups), and the others' history is
-  judged through [recipes/firings](recipes/firings), one script a cloud.
+  judged through [recipes/firings](recipes/firings), one script a cloud;
+  Datadog's monitors and New Relic's alert conditions the same way since
+  0.67, from their events, neither read nor replayed.
   `lapilli serve` keeps that history, copied in a source at a time, past
-  what the cloud keeps ([docs/design/recorded.md](docs/design/recorded.md)).
-  Still to do, every cloud alike (see [GOVERNANCE.md](GOVERNANCE.md)):
-  - Checking a cloud alarm's replay against its history: built for 0.27,
-    the history copied in standing in for `ALERTS`, CloudWatch's replay
-    put together as the alarm as a whole.
+  what the cloud keeps ([docs/design/recorded.md](docs/design/recorded.md)),
+  and checks a PromQL alarm's replay against it (0.27), the history copied
+  in standing in for `ALERTS`, CloudWatch's replay put together as the
+  alarm as a whole. Still to do, every cloud alike (see
+  [GOVERNANCE.md](GOVERNANCE.md)):
   - Per-series history: CloudWatch keeps a contributor's moves for an alarm
     on several series (`AlarmContributorStateUpdate`), in a form its
     documentation doesn't show; OCI keeps only the alarm's.
@@ -162,7 +181,8 @@ Service for Prometheus.
   clouds' documented answers with stand-ins for the CLIs; none of them yet
   against a real account. Two things the documentation doesn't show are
   guessed both ways: the key of the Azure CLI's skip token, and how the OCI
-  CLI pages alarm history.
+  CLI pages alarm history. Datadog's and New Relic's recipes, too, are
+  tested against their documentation's answers, not real accounts.
 
 A contributor with an account could run `lapilli verdict --check-replay`
 there, report what differs, and keep a check that does it. It also needs
@@ -180,8 +200,13 @@ action on GitHub. The Markdown is checked by its structure in the tests,
 and as Gitea renders it against a real Gitea in CI; GitHub's rendering was
 checked by hand. A job can backtest through `lapilli serve` instead, with
 no metric credential, judged by serve's record, by the ID token of GitHub
-Actions, GitLab CI or Forgejo Actions or a plain token
-([docs/design/backtests.md](docs/design/backtests.md), step 1). A job can
+Actions, GitLab CI, Forgejo Actions or Bitbucket Pipelines, or a plain
+token, which Azure Pipelines keeps; Grafana-managed and Loki rules too,
+on the data sources serve's own rules read (0.63)
+([docs/design/backtests.md](docs/design/backtests.md)). The rules changed
+can be held to what is expected of them (`--expect`, 0.47): how often each
+may fire, and the incidents it must keep catching
+([docs/design/expectations.md](docs/design/expectations.md)). A job can
 stop a merge: it fails when the change leaves an incident a rule caught
 before it caught by no rule (`FAIL_MISSED`, `--fail-missed`) or breaks an
 expectation, and sets a commit status on the pull request's head commit
@@ -190,10 +215,8 @@ Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
 never leaves a success. Still to do:
 
-- Through serve: Bitbucket Pipelines' ID token, and Azure Pipelines' if
-  decided (step 2); Grafana-managed and Loki rules, if decided (step 3);
-  `FAIL_MISSED`, which serve's report doesn't say yet: serve would judge
-  the rules left alone by its record.
+- Through serve: `FAIL_MISSED`, which serve's report doesn't say yet:
+  serve would judge the rules left alone by its record.
 
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
@@ -213,16 +236,29 @@ and through the [recipes](recipes/incidents) for PagerDuty, incident.io, Jira,
 GitHub issues, Grafana IRM, Rootly, FireHydrant and Compass's alerts. No tool
 is built in and none is favoured.
 
+- Signals of user impact, named, each with its own `for`, match and
+  record (0.53 in verdict, 0.55 in serve, on the Settings page since
+  0.58); a lead and `require:` of a signal's or a rule entry's own, and a
+  person's verdict on one firing, kept apart from Lapilli's (0.63)
+  ([docs/design/signals.md](docs/design/signals.md),
+  [docs/design/judging.md](docs/design/judging.md)). `lapilli impact
+  suggest` (0.67) says which stacks' metrics the history has, and the
+  `--impact` to give ([docs/design/suggest.md](docs/design/suggest.md)).
+  Still to do: `lapilli serve` saying a firing came after its incident
+  ended, as verdict does; a tenant flag of the history's own, for a Mimir
+  or a Cortex with no gateway.
+
 - Recipes checked against real accounts. Today each is tested against its
   API's published schema, with a server standing in.
 - Compass keeps alerts, not incidents; its recipe reads a closed alert's
   log for its close since 0.27. Compass doesn't document a close's words:
   checking them against a real account.
-- The alerts an incident's tool linked to it judge it (built,
+- The alerts an incident's tool linked to it judge it (0.67,
   [docs/design/links.md](docs/design/links.md)): the PagerDuty, incident.io
   and Rootly recipes copy them where an alert carries its `alertname` and
-  labels. Still to do: Grafana IRM's, FireHydrant's and Jira Service
-  Management's linked alerts; near misses looked for by a link.
+  labels, FireHydrant's and Jira Service Management's since 0.68, and near
+  misses are looked for by the link too (0.68). Still to do: Grafana IRM's
+  linked alerts; `--linked-only` as a setting in the UI.
 
 ## lapilli serve
 
@@ -240,27 +276,45 @@ is built in and none is favoured.
   ([docs/design/inputs.md](docs/design/inputs.md)). Still to do: edits
   followed; YouTrack, Jira Data Center; checking the recipes against real
   accounts.
-- Roles kept in the ledger, and a team's own editors (built,
+- Roles kept in the ledger, and a team's own editors (0.25,
   [docs/design/serveops.md](docs/design/serveops.md)): admins give an
   editor's role, of every team or of one; the flags stay the floor, and
-  the UI never makes an admin or an approver. Still to do: whether a team's
-  editors give their team's role, or write incidents only their rules
-  caught.
+  the UI never makes an admin or an approver. A team's editors give no
+  role and write no incident, as decided: an incident judges every team's
+  firings.
 - Quiet windows that repeat every month or by a cron expression, and a
-  team's quiet windows (built, serveops.md).
+  team's quiet windows (0.25, serveops.md).
+- Declared configuration (`--config`, 0.44): teams, windows, goals,
+  reports and roles in one file, kept to as it changes; routes of who is
+  told what, a team as the boundary of change, the Sources page and the
+  activity log (0.64).
+- Goals (0.53; over a period, 0.57) and marked windows (0.53; in the UI,
+  0.57) ([docs/design/goals.md](docs/design/goals.md),
+  [docs/design/marked.md](docs/design/marked.md)). Still to do: goals in
+  the UI; months and quarters as `each:`; weeks in a team's own zone;
+  expressions for marked windows in the UI; deploys among their kinds;
+  budgets inside a kind.
+- `lapilli preflight` (0.53; what each identity may write, 0.60; the
+  backtest lane, 0.62) says what serve will meet before it is deployed,
+  and writes nothing ([docs/design/preflight.md](docs/design/preflight.md)).
+  Still to do: each rule's expression asked once, behind `--queries`; the
+  same checks in serve, on the Settings page, once a day.
+- Agents over MCP (0.13): they read what the pages show, backtest a change
+  they propose, keep it as a proposal, and since 0.65 draft and test
+  expectations ([docs/mcp.md](docs/mcp.md)); they never approve or apply.
 - Reports people schedule themselves (0.22): daily, weekly, monthly or by a
   cron expression, for everyone or a team, to destinations named in files,
   with the sections they pick
   ([docs/design/reports.md](docs/design/reports.md)); the weekly digest set
   among them, in the UI and the API, the flags defining it until an admin
-  does (built, serveops.md).
+  does (0.25, serveops.md).
 - What an alert says is checked (0.22): summaries, descriptions, runbook
   links, templates and severities, from every source's own fields, beside
   what the ledger measured of each rule, in `serve` and
   `lapilli verdict --check-content`
   ([docs/design/content.md](docs/design/content.md)); the range check by
   each job's own scrape interval, and Grafana's notification templates
-  checked beside each rule (built, serveops.md). Still to do: the same for
+  checked beside each rule (0.25, serveops.md). Still to do: the same for
   Alertmanager's templates, which a ruler's rules are sent with, read from
   Alertmanager's or a managed service's configuration; and a range over a
   selector that names no job, by the jobs its metric comes from.
@@ -271,16 +325,17 @@ is built in and none is favoured.
   by people who use a screen reader day to day, and the heatmap's long
   rule names, cut short.
 
-- The ledger in Postgres (built, [docs/design/postgres.md](docs/design/postgres.md)):
+- The ledger in Postgres (0.34, [docs/design/postgres.md](docs/design/postgres.md)):
   `--ledger-url-file`, the same tables and statements as SQLite's, and
-  `lapilli ledger copy`; and several replicas on it (built,
+  `lapilli ledger copy`; and several replicas on it (0.36,
   [docs/design/replicas.md](docs/design/replicas.md)): a leader on a lease
   for what runs once, the caches told of other replicas' writes, each
   write's turn across them, notices claimed one at a time, the rate limits
   shared, and the chart's `serve.replicas`. Still to do: fewer round trips
   to the database where a page or a write still asks a row at a time
   (each request now asks one more, for the others' writes); the kind e2e
-  of three replicas run in CI for a while; and checking managed services
+  of three replicas (`e2e-replicas`), which runs on main, made a required
+  check; and checking managed services
   (RDS, Cloud SQL, Azure Database) for real, a failover among them.
 
 The performance budgets are part of the tests (`TestScale`,
@@ -294,7 +349,8 @@ too, in CI's job for it.
 - Provenance as a release asset is built (0.28): the attestations'
   Sigstore bundles go with each release as `lapilli-vX.Y.Z.intoto.jsonl`,
   where OpenSSF Scorecard looks, and check offline (SECURITY.md).
-- **The [OpenSSF Best Practices](https://www.bestpractices.dev) badge.**
+- The [OpenSSF Best Practices](https://www.bestpractices.dev/projects/16891)
+  badge, passing, is built (0.60); [SECURITY.md](SECURITY.md) says how.
 - **A Homebrew tap.** It needs a public repository of its own
   (`homebrew-tap`), which the maintainer decides on; it waits for that.
 
@@ -307,11 +363,11 @@ Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept nowhere else,
 through the API that holds it. Built in steps, every source alike within
 each:
 
-1. Proposals, the git path and Grafana: built for v0.22.
+1. Proposals, the git path and Grafana: built (0.22).
 2. The managed Prometheus rulers: Mimir and Cortex, Amazon Managed Service
    for Prometheus, Azure's rule groups, through their APIs; Google Cloud's
    rule resources, Kubernetes resources, by the git path
-   ([docs/design/rulers.md](docs/design/rulers.md)): built for v0.23.
+   ([docs/design/rulers.md](docs/design/rulers.md)): built (0.23).
    Mimir's runs against a real Mimir in CI; Amazon's and Azure's against
    their documented answers only. Still to do, with an account: what an
    Amazon namespace's `data` reads as after `UPDATE_FAILED`, whether IAM
@@ -323,7 +379,7 @@ each:
    threshold only where the alarm is PromQL and can be backtested; one
    that isn't retired as far as off; turning off and deleting waiting
    while a rule fires, on every path
-   ([docs/design/alarms.md](docs/design/alarms.md)): built for v0.24,
+   ([docs/design/alarms.md](docs/design/alarms.md)): built (0.24),
    against each cloud's documented answers only. Still to do, with an
    account: that CloudWatch answers `DescribeAlarms` and `PutMetricAlarm`
    in JSON 1.0 as its model says, which `PendingPeriod`s a PromQL alarm
@@ -333,6 +389,11 @@ each:
    `scopes` is the workspace `--prometheus` queries; whether a Google or
    OCI alarm off is still evaluated; that OKE's workload identity reads
    alarms.
+4. A new rule, proposed held to its expectations: built (0.65), with a
+   team as the boundary of change, its approvers, where its rules are
+   written and its freezes, in `--config` (0.64). Not offered where the
+   design says why: Azure's rule groups and alert rules, OCI's alarms, a
+   new Grafana group, a new rule file.
 
 ## Not planned
 
@@ -340,9 +401,9 @@ each:
   rules and applies one only once a person has approved it
   ([docs/design/changes.md](docs/design/changes.md)); an agent proposes,
   never applies.
-- **Silencing alerts, or writing anything but alert rules.** No silences,
-  no metrics written, nothing changed in a cluster beyond the rules it was
-  told it may change.
+- **Silencing alerts, or writing anything but alert rules and what they
+  are held to.** No silences, no metrics written, nothing changed beyond
+  the rules, and the expectations file, it was told it may change.
 - **A Kubernetes controller.** `lapilli serve` reads files and APIs; it
   doesn't watch cluster resources, and changes nothing in a cluster: a rule
   resource is changed by a pull request.
