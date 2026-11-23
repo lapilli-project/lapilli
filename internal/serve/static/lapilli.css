@@ -93,9 +93,16 @@ header.side { background: var(--card); }
    ring isn't lost. */
 .brand img { flex: none; border-radius: 50%; background: var(--mark-plate); }
 .page { min-width: 0; }
-.nav-group { margin: 1rem .7rem .2rem; font-size: .8rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+/* A group's name and its pages told apart (bundle 69): the name a small
+   dim label, a line above it but the first's; its pages in ink, a step in
+   from it, on a guide line, as a nested menu draws them. Korean, Japanese
+   and their kin have no capitals to set a label apart, so its size, colour,
+   line and the pages' step say it. */
+.nav-group { margin: .6rem .7rem .3rem; padding-top: .6rem; border-top: 1px solid var(--line); font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.nav-group:first-child { margin-top: 1rem; padding-top: 0; border-top: 0; }
 header.side ul { list-style: none; margin: 0; padding: 0; }
-.nav-side a, .nav-menu a { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem .7rem; border-radius: var(--control-r); color: var(--dim); text-decoration: none; }
+header.side .nav-side ul, header.side .nav-menu ul { margin-left: .95rem; padding-left: .35rem; border-left: 1px solid var(--line-strong); }
+.nav-side a, .nav-menu a { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem .7rem; border-radius: var(--control-r); color: var(--ink); text-decoration: none; }
 .nav-side a:hover, .nav-menu a:hover { color: var(--ink); background: var(--panel); }
 .nav-side a[aria-current], .nav-menu a[aria-current] { color: var(--ink); font-weight: 600; background: var(--accent-wash); }
 .count { font-size: .8rem; font-weight: 500; color: var(--ink); background: var(--panel); border-radius: 9999px; padding: 0 .5rem; font-variant-numeric: tabular-nums; }
@@ -140,7 +147,27 @@ nav.crumbs [aria-current] { color: var(--ink); }
 .find input[type=search] { width: min(18rem, 100%); }
 /* With no team or period to look at a page with, the search alone, at
    the right. */
-.bar:not(:has(form.ctx)) { justify-content: flex-end; }
+.bar:not(:has(.ctx)) { justify-content: flex-end; }
+/* The bar's choices are links, taken as soon as one is picked (bundle 69):
+   a select and a Show button asked for a second press, and a page's
+   script, which the pages have none of, would have taken a select's arrow
+   keys as choices (WCAG 3.2.2). The team's open under its name, over the
+   page, longest list scrolled; the period's are side by side. */
+.bar .ctx { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; min-width: 0; max-width: 100%; }
+details.picker { position: relative; min-width: 0; max-width: 100%; }
+details.picker > summary { display: inline-flex; align-items: center; gap: .45rem; max-width: 100%; min-height: var(--control-h); padding: .3rem .8rem; border: 1px solid var(--line-ui); border-radius: var(--control-r); background: var(--card); color: var(--ink); cursor: pointer; list-style: none; }
+details.picker > summary::-webkit-details-marker { display: none; }
+details.picker > summary::after { content: "▾"; content: "▾" / ""; color: var(--dim); }
+details.picker .picked { overflow-wrap: anywhere; }
+details.picker > ul { position: absolute; z-index: 20; top: calc(100% + .3rem); left: 0; width: max-content; min-width: 100%; max-width: min(26rem, calc(100vw - 2rem)); max-height: 60vh; overflow: auto; list-style: none; margin: 0; padding: .3rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 6px 20px #0000002e; }
+details.picker li a { display: block; padding: .35rem .7rem; border-radius: var(--control-r); color: var(--ink); text-decoration: none; overflow-wrap: break-word; }
+details.picker li a:hover { background: var(--panel); }
+details.picker li a[aria-current] { background: var(--accent-wash); font-weight: 600; }
+ul.seg { display: inline-flex; list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-ui); border-radius: var(--control-r); overflow: hidden; }
+ul.seg a { display: flex; align-items: center; min-height: calc(var(--control-h) - 2px); padding: 0 .8rem; color: var(--ink); text-decoration: none; white-space: nowrap; }
+ul.seg li + li a { border-left: 1px solid var(--line-ui); }
+ul.seg a:hover { background: var(--panel); }
+ul.seg a[aria-current] { background: var(--accent-wash); font-weight: 600; }
 /* A page's header, with its main action; one the reader may not use is
    shown disabled, with why. */
 .head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem 1rem; margin-bottom: .6rem; }
@@ -733,6 +760,10 @@ details.badge-legend dd { font-size: .9rem; }
 .notice { color: var(--ink); background: var(--card); border: 1px solid var(--line-strong); border-left: 4px solid var(--line-ui); border-radius: 10px; padding: .5rem .8rem; }
 .notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { color: var(--ink); background: var(--s-wash); border-left-color: var(--s-line); }
 .notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) .sign { color: var(--s); }
+/* Not known's sign leading a notice is a "?" in a ring, so that it reads as
+   a sign, as the others' do, not as a question mark left before the
+   sentence (bundle 69). */
+.notice.status-unknown .sign { display: inline-grid; place-items: center; box-sizing: border-box; width: 1.3em; height: 1.3em; margin-right: .1em; border: 1.5px solid currentColor; border-radius: 50%; font-size: .8em; font-weight: 700; line-height: 1; vertical-align: .12em; }
 div.notice p, div.notice ul { margin: .3rem 0; }
 /* A form's syntax, behind a summary under it: read once, then in the way
    (docs/design/ui.md, bundle 64). */

@@ -447,15 +447,16 @@ func TestRuleActions(t *testing.T) {
 func TestRuleBar(t *testing.T) {
 	s, _ := a11yServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules/Errors?tab=firings&zzz=1&edit=note&team=payments")
-	want := `<form method="get" action="/rules/Errors" class="ctx" aria-label="Period"><input type="hidden" name="tab" value="firings"><input type="hidden" name="team" value="payments">`
+	// Each period a link, taken at once, keeping the tab and the team.
+	want := `<div class="ctx" role="group" aria-label="Period"><span class="bar-k" id="bar-period">Period</span><ul class="seg" aria-labelledby="bar-period"><li><a href="/rules/Errors?tab=firings&amp;team=payments&amp;weeks=1">1 week</a></li>`
 	if !strings.Contains(body, want) || strings.Contains(unlinked(body), "zzz") {
 		t.Errorf("the bar: no %s, or zzz in it", want)
 	}
-	if !strings.Contains(body, `<option value="12" selected>12 weeks</option>`) {
+	if !strings.Contains(body, `<a href="/rules/Errors?tab=firings&amp;team=payments&amp;weeks=12" aria-current="true">12 weeks</a>`) {
 		t.Error("a rule's page isn't twelve weeks unless asked")
 	}
 	_, body, _ = get(t, s.Handler(), "/rules/Errors?weeks=4")
-	if !strings.Contains(body, `<option value="4" selected>4 weeks</option>`) || !strings.Contains(body, "The last 4 weeks, from 2026-10-12.") {
+	if !strings.Contains(body, `aria-current="true">4 weeks</a>`) || !strings.Contains(body, "The last 4 weeks, from 2026-10-12.") {
 		t.Error("weeks=4: not four weeks")
 	}
 	_, body, _ = get(t, s.Handler(), "/rules/Errors?weeks=1")

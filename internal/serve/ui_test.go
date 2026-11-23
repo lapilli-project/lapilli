@@ -108,6 +108,8 @@ func TestContextCarried(t *testing.T) {
 				continue
 			}
 			text := squashed(nodeText(n))
+			// The bar's team choices each carry the team they choose.
+			choice := inPicker(n)
 			if w.Code != http.StatusOK {
 				if l.Query().Has("team") || l.Query().Has("weeks") {
 					t.Errorf("%s, %d: %q (%q) carries the context", p, w.Code, href, text)
@@ -117,7 +119,7 @@ func TestContextCarried(t *testing.T) {
 			switch team, ok := l.Query()["team"]; {
 			case !ok:
 				t.Errorf("%s: %q (%q) doesn't carry the team", p, href, text)
-			case team[0] != "payments" && !(strings.HasPrefix(p, "/teams") && teams[team[0]]) && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams" ||
+			case team[0] != "payments" && !choice && !(strings.HasPrefix(p, "/teams") && teams[team[0]]) && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams" ||
 				text == "Add a task about this rule" || text == "Add a task about this incident" || text == "Add a task" && strings.HasPrefix(p, "/rules/"))):
 				t.Errorf("%s: %q (%q) carries another team", p, href, text)
 			}
@@ -362,7 +364,7 @@ func TestDefaultTeam(t *testing.T) {
 	if !strings.Contains(body, "pay&#39;s") || strings.Contains(body, "search&#39;s") || !strings.Contains(body, "payments (your team)") {
 		t.Errorf("/tasks for pat isn't payments', as pat's own team:\n%s", body)
 	}
-	if !strings.Contains(body, `<select name="team"><option value="">All teams</option>`) {
+	if !strings.Contains(body, `<li><a href="/tasks?team=">All teams</a></li>`) {
 		t.Error("/tasks for pat: the bar offers no way to every team's")
 	}
 	// The bar alone picks the team: no second picker on the page.
@@ -614,8 +616,78 @@ func TestBarNamed(t *testing.T) {
 		{s.Handler(), "/", "Team"}, {s.Handler(), "/tasks", "Team"}, {s.Handler(), "/rules", "Team and period"},
 		{s.Handler(), "/incidents", "Team and period"}, {alone.Handler(), "/rules", "Period"},
 	} {
-		if _, body, _ := get(t, c.h, c.path); !strings.Contains(body, `class="ctx" aria-label="`+c.want+`">`) {
+		if _, body, _ := get(t, c.h, c.path); !strings.Contains(body, `class="ctx" role="group" aria-label="`+c.want+`">`) {
 			t.Errorf("%s: the bar's form isn't %q", c.path, c.want)
 		}
+	}
+}
+
+// inPicker says n is in the bar's team picker, whose links each choose a
+// team (bundle 69).
+func inPicker(n *html.Node) bool {
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.DataAtom == atom.Details && strings.Contains(" "+nodeAttr(p, "class")+" ", " picker ") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBarTakesAChoiceAtOnce: the bar's team and period are links, each
+// the page for that choice with the rest the page was asked kept, so a
+// pick shows it at once: no select and no Show to press after (bundle 69).
+// A choice of one keeps the other only as the reader chose it.
+func TestBarTakesAChoiceAtOnce(t *testing.T) {
+	s := pagesServer(t)
+	h := s.Handler()
+	_, body, _ := get(t, h, "/rules?q=i&team=payments&weeks=12")
+	bar := body[strings.Index(body, `<div class="ctx"`):]
+	bar = bar[:strings.Index(bar, "</div>")]
+	for _, want := range []string{
+		`<span class="picked">payments</span>`,
+		`<li><a href="/rules?q=i&amp;team=&amp;weeks=12">All teams</a></li>`,
+		`<li><a href="/rules?q=i&amp;team=payments&amp;weeks=12" aria-current="true">payments</a></li>`,
+		`<li><a href="/rules?q=i&amp;team=payments&amp;weeks=1">1 week</a></li>`,
+		`<li><a href="/rules?q=i&amp;team=payments&amp;weeks=12" aria-current="true">12 weeks</a></li>`,
+	} {
+		if !strings.Contains(bar, want) {
+			t.Errorf("the bar lacks %s:\n%s", want, bar)
+		}
+	}
+	if strings.Contains(bar, "<select") || strings.Contains(bar, "<button") {
+		t.Errorf("the bar asks for a second press:\n%s", bar)
+	}
+	// Nothing asked: a team keeps the page's own period, a period every
+	// team's, as they were.
+	_, body, _ = get(t, h, "/rules")
+	if !strings.Contains(body, `<li><a href="/rules?team=payments">payments</a></li>`) || !strings.Contains(body, `<li><a href="/rules?weeks=12">12 weeks</a></li>`) {
+		t.Error("a choice carries the other though the reader chose none")
+	}
+}
+
+// TestBarKeepsALongQueryOnce: a query past barKeepBudget isn't carried in
+// each of the bar's choices, so a query of junk can't be written out again
+// for every team (bundle 69's review): the choices carry the team and the
+// weeks alone.
+func TestBarKeepsALongQueryOnce(t *testing.T) {
+	s := pagesServer(t)
+	junk := strings.Repeat("!", 4000)
+	_, body, _ := get(t, s.Handler(), "/rules?zz="+junk+"&team=payments&weeks=12")
+	bar := body[strings.Index(body, `<div class="ctx"`):]
+	bar = bar[:strings.Index(bar, "</div>")]
+	if strings.Contains(bar, "zz=") || !strings.Contains(bar, `<li><a href="/rules?team=payments&amp;weeks=1">1 week</a></li>`) {
+		t.Errorf("a long query in the bar's choices:\n%.600s", bar)
+	}
+	// Nor a long tab= on a page whose tab isn't its own to name.
+	_, body, _ = get(t, s.Handler(), "/tasks?tab="+junk)
+	bar = body[strings.Index(body, `<div class="ctx"`):]
+	bar = bar[:strings.Index(bar, "</div>")]
+	if strings.Contains(bar, "tab=") {
+		t.Errorf("a long tab= in the bar's choices:\n%.600s", bar)
+	}
+	// A short one is kept, as the page was asked.
+	_, body, _ = get(t, s.Handler(), "/rules?zz=1&team=payments&weeks=12")
+	if !strings.Contains(body, `<li><a href="/rules?team=payments&amp;weeks=1&amp;zz=1">1 week</a></li>`) {
+		t.Error("a short query isn't kept in the bar's choices")
 	}
 }

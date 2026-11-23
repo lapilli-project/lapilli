@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rules · Lapilli</title>
-<link rel="icon" href="/static/mark-32.png?v=8fd71d01d306" sizes="32x32" type="image/png">
-<link rel="icon" href="/static/mark-16.png?v=8fd71d01d306" sizes="16x16" type="image/png">
-<link rel="stylesheet" href="/static/lapilli.css?v=8fd71d01d306">
+<link rel="icon" href="/static/mark-32.png?v=8b0803e535ef" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=8b0803e535ef" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=8b0803e535ef">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/mark-48.png?v=8fd71d01d306" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=8b0803e535ef" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Rules</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -44,11 +44,8 @@
 <main id="main">
 <nav class="crumbs" aria-label="Breadcrumb"><ol><li>Monitoring</li><li><span aria-current="page">Rules</span></li></ol></nav>
 <div class="bar">
-<form method="get" action="/rules" class="ctx" aria-label="Period">
-  
-  <label><span class="bar-k">Period</span> <select name="weeks"><option value="1">1 week</option><option value="4" selected>4 weeks</option><option value="12">12 weeks</option></select></label>
-  <button class="quiet-button">Show</button>
-</form>
+<div class="ctx" role="group" aria-label="Period"><span class="bar-k" id="bar-period">Period</span><ul class="seg" aria-labelledby="bar-period"><li><a href="/rules?weeks=1">1 week</a></li><li><a href="/rules?weeks=4" aria-current="true">4 weeks</a></li><li><a href="/rules?weeks=12">12 weeks</a></li></ul>
+</div>
 <form method="get" action="/search" role="search" class="find" aria-label="Search"><input type="hidden" name="weeks" value="4">
   <label><span class="vh">Search</span> <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
   <button class="quiet-button">Search</button>

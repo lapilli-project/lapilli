@@ -26,11 +26,11 @@
 <main id="main">
 <nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{with .GroupHref}}<a href="{{$.Link .}}">{{t $.Crumb.Group}}</a>{{else}}{{t $.Crumb.Group}}{{end}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{or $.Short $.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
 <div class="bar">
-{{with .Bar}}{{if .Action}}<form method="get" action="{{.Action}}" class="ctx" aria-label="{{t .Label}}">{{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-  {{if .Team}}<label><span class="bar-k">{{t "Team"}}</span> <select name="team"><option value=""{{if not $.Ctx.Team}} selected{{end}}>{{t "All teams"}}</option>{{range $.Ctx.Teams}}<option value="{{.}}"{{if eq . $.Ctx.Team}} selected{{end}}>{{.}}{{if and $.Ctx.Mine (eq . $.Ctx.Team)}} ({{t "your team"}}){{end}}</option>{{end}}</select></label>{{end}}
-  {{if .Weeks}}<label><span class="bar-k">{{t "Period"}}</span> <select name="weeks">{{range $w := list "1" "4" "12"}}<option value="{{$w}}"{{if eq $w (print $.Bar.WeeksIn)}} selected{{end}}>{{if eq $w "1"}}{{t "1 week"}}{{else if eq $w "4"}}{{t "4 weeks"}}{{else}}{{t "12 weeks"}}{{end}}</option>{{end}}</select></label>{{end}}
-  <button class="quiet-button">{{t "Show"}}</button>
-</form>{{end}}
+{{with .Bar}}{{if .Action}}<div class="ctx" role="group" aria-label="{{t .Label}}">
+  {{- if .Team}}<details class="picker"><summary><span class="bar-k">{{t "Team"}}</span> <span class="picked">{{if $.Ctx.Team}}{{$.Ctx.Team}}{{if $.Ctx.Mine}} ({{t "your team"}}){{end}}{{else}}{{t "All teams"}}{{end}}</span></summary>
+  <ul>{{range .Teams}}<li><a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{if .Raw}}{{.Text}}{{if .Mine}} ({{t "your team"}}){{end}}{{else}}{{t .Text}}{{end}}</a></li>{{end}}</ul></details>{{end}}
+  {{- if .Weeks}}<span class="bar-k" id="bar-period">{{t "Period"}}</span><ul class="seg" aria-labelledby="bar-period">{{range .Periods}}<li><a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{t .Text}}</a></li>{{end}}</ul>{{end}}
+</div>{{end}}
 <form method="get" action="/search" role="search" class="find" aria-label="{{t "Search"}}">{{range .Search}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <label><span class="vh">{{t "Search"}}</span> <input type="search" name="q" value="{{.Q}}" maxlength="500" placeholder="{{t "Rules, incidents, teams"}}"></label>
   <button class="quiet-button">{{t "Search"}}</button>

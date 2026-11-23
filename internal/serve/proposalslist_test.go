@@ -197,7 +197,7 @@ func TestProposalsFacets(t *testing.T) {
 	if strings.Contains(body, `class="facets pick"`) || !strings.Contains(body, "No proposals of this team yet.") || !strings.Contains(body, `href="/proposals?team=">Every team&#39;s</a>`) {
 		t.Error("a team with no proposal is offered filters, or isn't told why there are none and where every team's are")
 	}
-	if !strings.Contains(body, `<label><span class="bar-k">Team</span> <select name="team">`) {
+	if !strings.Contains(body, `<details class="picker"><summary><span class="bar-k">Team</span>`) {
 		t.Error("no team in the bar")
 	}
 	if v := proposalsFor(t, s, "state=all&state=proposed"); v.Shown != 3 {

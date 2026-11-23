@@ -39,8 +39,8 @@ what is left.
   3:1 on every surface, in light and dark (`TestContrast` holds the
   stylesheet's tokens to it). At 320 CSS px and at 200% zoom no page scrolls
   sideways; a wide table scrolls in its own box. A field's label holds it
-  within the page's width, a select as wide as its longest option among
-  them: a team's long name doesn't push the bar past 320 px.
+  within the page's width, and the bar's team list is no wider than the
+  screen: a team's long name doesn't push the bar past 320 px.
 - **What a page says.** A line is on a page because a reader decides by
   it, or would go wrong without it: what a number is of, a limit of the
   record, a risk, a permission, why something failed. What a number means
@@ -115,6 +115,11 @@ text colour (`--ok`), a wash (`--ok-wash`) and a line (`--ok-line`).
 | `bad` | failed, missed, overdue, given up | `#a3271b`, `#fbebe8`, `#c65b4f` | `#ef8a7e`, `#3d2422`, `#ba645a` | ✕ (✗ for missed, as before) |
 | `info` | under way, or in effect now | `--on-blue`, `--tint-blue`, `#6389be` | `--on-blue`, `--tint-blue`, `#5b7ea8` | ↻ under way, ● in effect |
 | `unknown` | not known: no record, not judged | `--dim`, `--panel`, `--line-ui` | the same | ? or – |
+
+A notice's sign leads it, in its text colour. Not known's, a "?", is drawn
+in a ring there (bundle 69): bare at the start of a sentence it read as a
+question mark left there, not as a sign as ✓, ⚠︎, ✕ and ↻ do. In a cell,
+a badge or beside its word ("? not judged") it stays bare.
 
 The ok green is a cool one, a teal-green as Argo CD's, told apart from
 the olive of the accent. Each text colour is 4.5:1 or more on its wash,
@@ -304,6 +309,13 @@ or all teams': two counts the ledger gives once each time it changes
 (`Server.waiting`: the open tasks by team, the proposals waiting by
 rule, counted by the database), not once a page.
 
+A group's name and its pages are told apart (bundle 69): the name is a
+small dim label, with a line above it but the first's; its pages are in
+ink, a step in from it, on a guide line, as a nested menu draws them. The
+labels were dim and the pages dim too, a size apart, with the same step:
+in Korean and Japanese, which have no capitals to set a label apart, they
+read as one list. The menu a narrow screen opens draws them alike.
+
 On a screen 960 CSS px wide or more, the sidebar stays on the left as the
 page scrolls, with the languages at its foot, each name kept whole (한국어
 was broken between its syllables there). Narrower, or zoomed in, it is
@@ -358,23 +370,41 @@ heading (`crumbed`).
 ### The bar
 
 Under the breadcrumbs, every page has a search (below), and the pages that
-show one team's or a period, a GET form to pick them: the team (all teams,
+show one team's or a period, the choices of them as links: the team (all teams,
 or one) on the overview, the rules, the incidents, the tasks and the proposals; the period
 (1, 4 or 12 weeks) on the rules, the incidents and a rule's page. The
 overview has no period: its tiles are last week beside the week before, by
-design. The form sends the page's other parameters again, as they were, and
-is named for what it chooses: "Team", "Period", or "Team and period". A
-rule's page is twelve weeks unless asked, as it has always been, and its
-form is sent to the rule's own page with the tab it shows, and nothing
-else it was asked. On a page that shows a period of its own other than a
+design. Each choice is the page for it, with the page's other parameters
+as they were, and the group of them is named for what it chooses: "Team",
+"Period", or "Team and period". A choice of one keeps the other only as
+the reader asked for it: a team picked keeps the weeks asked for, or none,
+so that the page's own period stands; a period picked keeps the team asked
+for, or none, so that the reader's own stands. A rule's page is twelve
+weeks unless asked, as it has always been, and its periods are the rule's
+own page with the tab it shows, and nothing else it was asked. On a page that shows a period of its own other than a
 rule's page's twelve weeks (the rules, the incidents: four unless asked),
 the bar's search has its weeks, so that a rule it opens is over them.
 
 The bar is a toolbar on the page itself, not a card round controls with
-edges of their own (bundle 59): each field's name before it on its line,
-dim; the search box's name read out alone (`.vh`), as its placeholder and
-its button say what it is. The forms are GETs, so their buttons stay:
-nothing is applied as it is picked.
+edges of their own (bundle 59): each choice's name before it, dim; the
+search box's name read out alone (`.vh`), as its placeholder and its
+button say what it is.
+
+A pick is taken at once (bundle 69). The team and period were selects in
+a GET form with a Show button, a second press after the pick, which read
+as the pick not taken. The pages have no script (their
+`Content-Security-Policy` allows none), and a select that sent itself as
+it changed would take each arrow key through it as a choice (WCAG 3.2.2),
+so the choices are links: the team's in a `<details>` that opens under
+its name ("Team payments ▾"), over the page, as wide as its longest name
+and the screen allow, scrolled past 60% of its height, the one in effect
+`aria-current`; the period's side by side, 1, 4 and 12 weeks, the one in
+effect `aria-current`. A link is taken by a press, and the page it opens
+is the page for that choice. The search keeps its button: it takes typing.
+The page's other parameters are written into each choice, so past 1 KiB
+encoded (`barKeepBudget`) a choice carries the team, the weeks and, on a
+rule's page, its tab alone: a query of junk isn't written out again for
+every team (`TestBarKeepsALongQueryOnce`).
 
 ### A page's main action
 
