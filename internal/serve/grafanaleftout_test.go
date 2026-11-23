@@ -30,13 +30,19 @@ import (
 // rule has now (alertName), "" once it is deleted, as Grafana's do, and its
 // provisioning API lists each rule's id. hidden are rules in a folder the
 // token doesn't read: neither exported nor listed, their annotations are
-// read all the same.
+// read all the same. listed counts the requests for its list of rules,
+// which it refuses (403) while refuse is set; a request for its
+// annotations from oldFrom, in milliseconds, while set, it answers with
+// one of no tags, as Grafana before 12.4 wrote them.
 type shopGrafana struct {
-	mu     sync.Mutex
-	rules  []shopRule
-	hidden []shopRule
-	notes  []shopNote
-	ids    bool
+	mu      sync.Mutex
+	rules   []shopRule
+	hidden  []shopRule
+	notes   []shopNote
+	ids     bool
+	listed  int
+	refuse  bool
+	oldFrom int64
 }
 
 // shopRule is a rule of a title in a folder, paused or not.
@@ -124,6 +130,10 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"apiVersion": 1, "groups": groups})
 	case "/api/v1/provisioning/alert-rules":
+		if g.listed++; g.refuse {
+			http.Error(w, `{"message": "no"}`, http.StatusForbidden)
+			return
+		}
 		out := []map[string]any{}
 		for _, x := range g.rules {
 			out = append(out, map[string]any{"id": g.idOf(x.uid), "uid": x.uid, "title": x.title, "folderUID": x.folder, "isPaused": x.paused})
@@ -138,6 +148,10 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscan(r.URL.Query().Get("from"), &from)
 		fmt.Sscan(r.URL.Query().Get("to"), &to)
 		fmt.Sscan(r.URL.Query().Get("limit"), &limit)
+		if g.oldFrom != 0 && from == g.oldFrom {
+			json.NewEncoder(w).Encode([]map[string]any{{"id": 1 << 30, "alertId": 9, "prevState": "Normal", "newState": "Alerting", "time": from, "tags": []string{}}})
+			return
+		}
 		all := make([]map[string]any, 0, len(g.notes))
 		held := slices.Concat(g.rules, g.hidden)
 		for i, n := range g.notes {
@@ -1102,6 +1116,62 @@ func TestServeGrafanaJudgedReadBackTooMuch(t *testing.T) {
 	sh.round(10 * time.Hour)
 	sh.want("Orders slow's copies, judged again", sh.covers("Orders slow"), "→0s 8h0m0s→10h0m0s")
 	sh.want("Stock low's copies", sh.covers("Stock low"), "→10h0m0s")
+}
+
+// The read back from where a rule was left out of no use where the day's
+// read was: here Grafana's list of its rules, which the day's read, of no
+// change of a rule's title, doesn't ask for, refused. The rule is left out
+// of the day once more, and the other rules' day is written, not left a
+// gap.
+func TestServeGrafanaJudgedReadBackRefused(t *testing.T) {
+	g := &shopGrafana{ids: true}
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
+	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
+	sh := shopServer(t, g)
+	sh.round(0)
+	// Stock low's change to a state Grafana has no name for leaves it out.
+	g.note(shopNote{title: "Stock low", prev: "Normal", next: "Firing", service: "depot", at: now.Add(30 * time.Minute)})
+	sh.round(2 * time.Hour)
+	sh.want("Stock low's copies, left out", sh.covers("Stock low"), "→0s")
+	g.mu.Lock()
+	g.refuse = true
+	g.mu.Unlock()
+	sh.round(4 * time.Hour)
+	sh.want("Orders slow's copies", sh.covers("Orders slow"), "→4h0m0s")
+	sh.want("Stock low's copies, the read back refused", sh.covers("Stock low"), "→0s")
+	sh.want("copied in", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s", "Stock low/stock -3h0m0s -2h0m0s"})
+}
+
+// A rule left out for more than a day, of a change passed over within the
+// period, is judged by a read from a day before the day alone. That read
+// of no use (here, an annotation of no tags in it) leaves the rule out of
+// the day once more, not the day a gap; the round after judges it again.
+func TestServeGrafanaJudgedReadNearUnusable(t *testing.T) {
+	g := &shopGrafana{ids: true}
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
+	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
+	sh := shopServer(t, g)
+	sh.round(0)
+	// Stock low's change to a state Grafana has no name for leaves it out
+	// while a read holds it: past a day, a read from a day before judges it.
+	g.note(shopNote{title: "Stock low", prev: "Normal", next: "Firing", service: "depot", at: now.Add(30 * time.Minute)})
+	for at := 2 * time.Hour; at <= 26*time.Hour; at += 2 * time.Hour {
+		sh.round(at)
+	}
+	sh.want("Stock low's copies, left out", sh.covers("Stock low"), "→0s")
+	g.mu.Lock()
+	g.oldFrom = now.Add(2 * time.Hour).UnixMilli() // the day copied from 26h, read from a day before
+	g.mu.Unlock()
+	sh.round(28 * time.Hour)
+	sh.want("Orders slow's copies", sh.covers("Orders slow"), "→28h0m0s")
+	sh.want("Stock low's copies, its read of no use", sh.covers("Stock low"), "→0s")
+	g.mu.Lock()
+	g.oldFrom = 0
+	g.mu.Unlock()
+	sh.round(30 * time.Hour)
+	sh.want("Stock low's copies, judged again", sh.covers("Stock low"), "→0s 28h0m0s→30h0m0s")
 }
 
 // Left out for longer than a week, a rule is read back a week alone: an

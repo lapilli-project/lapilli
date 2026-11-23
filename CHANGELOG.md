@@ -108,9 +108,11 @@ Before upgrading:
   rule's. Judged again, the rule is read back from where it was left out,
   a week at most, and an alert on then is written from there; past a
   week, an alert of it on since before it was left out, that the read
-  says nothing of, is ended where it was left out. A read back past the
-  reader's bounds leaves the rules judged again out once more, not the
-  day. Past 5,000 rules, the periods of rules no longer among Grafana's
+  says nothing of, is ended where it was left out. A read back of no use
+  where the day's read was (past any of the reader's bounds, Grafana's
+  list of its rules refused or past its own, answers that can't be used)
+  leaves the rules judged again out once more, not the day. Past 5,000
+  rules, the periods of rules no longer among Grafana's
   are let go of, those that ended earliest first: the record of such a
   rule, kept under its old name once it is renamed or deleted, then reads
   as copied over them. And a change of Grafana's history is taken for a

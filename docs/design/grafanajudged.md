@@ -141,10 +141,13 @@ history (recorded.md), such a rule can get from Grafana's.
   leaves it out for a day, not a week; an alert of it on since before,
   that this read says nothing of, stays on, as one a read holds no change
   of does, and is ended where the rule was left out only past a week. A
-  read back past the reader's bounds leaves the rules judged again out of
-  the round once more, logged, and the other rules' day is written; the
-  next round reads back again, so a Grafana that busy keeps them out
-  while it is. The rules a name may be of across
+  read back of no use where the day's read was, this one or the one from
+  a day before (past any of the reader's bounds, Grafana's list of its
+  rules refused or past its own, answers that can't be used, such as
+  annotations from before Grafana 12.4), leaves the rules it judges again
+  out of the round once more, logged, and the other rules' day is
+  written; the next round reads back again, so a Grafana that busy keeps
+  them out while it is. The rules a name may be of across
   the read are those of the versions in effect across what is written,
   from the settle before it: a title shared in a version a round writes
   across leaves the rule out of that round too, where the history doesn't
@@ -270,8 +273,8 @@ its data sources answered.
   day of more changes than the reader's bounds, of changes passed over of
   more than 1,000 rules, or of more than 100,000 firings (one rule
   flapping enough is enough), and more than 5,000 rules to keep as left
-  out. A read back past the bounds, from where a rule was
-  left out, leaves out the rules judged again alone.
+  out. A read back of no use, from where a rule was left out, where the
+  day's read was of use, leaves out the rules judged again alone.
 
 ## Questions
 

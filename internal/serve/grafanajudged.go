@@ -271,9 +271,10 @@ func (s *Server) sourceTheirs(ctx context.Context) (bool, error) {
 // later. Judged again, it is read back from where it was left out, a week
 // at most (judgedBack), and written from a as on a first day; past a week,
 // one of its alerts on since before then, that the read says nothing of,
-// is ended where it was left out. A read back past the reader's bounds
-// leaves the rules judged again out once more. A day none of the rules is
-// judged for is of no use, and left a gap.
+// is ended where it was left out. A read back of no use where the day's
+// read was (past the reader's bounds, Grafana's list of its rules refused
+// or past its own) leaves the rules judged again out once more. A day none
+// of the rules is judged for is of no use, and left a gap.
 func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule, twice map[string]bool, a, b time.Time, first bool, o verdict.Options) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
@@ -354,11 +355,14 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	if far.Before(read) {
 		again, err := judge(far)
 		switch {
-		case errors.Is(err, source.ErrTooManyChanges):
-			// Read back that far, the history is more than is read at once:
-			// the rules judged again are left out of the day once more, and
-			// the others judged by the day's read, so that the day isn't a gap
-			// for every rule. The next round reads back again.
+		case errors.Is(err, source.ErrUnusable):
+			// Read back that far, the history is of no use where the day's
+			// read was: more than is read at once, past another of the
+			// reader's bounds, Grafana's list of its rules refused or past
+			// its own, or answers that can't be used. The rules judged again
+			// are left out of the day once more, and the others judged by the
+			// day's read, so that the day isn't a gap for every rule. The next
+			// round reads back again.
 			var returning []string
 			for name := range back {
 				if !left(j, name) {
@@ -367,7 +371,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			}
 			slices.Sort(returning)
 			j.Unsure = slices.Sorted(slices.Values(slices.Concat(j.Unsure, returning)))
-			s.log.Warn("Grafana's alert state history read back from where rules were left out is more than is read at once: they are left out of the day again",
+			s.log.Warn("Grafana's alert state history read back from where rules were left out is of no use: they are left out of the day again",
 				"from", far, "to", b, "rules", someNames(returning), "err", err)
 		case err != nil:
 			return err
@@ -377,10 +381,10 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			// by the first read and unsure by this one, is judged by a read
 			// from a day before a alone, as what is further back is past what
 			// is read, so that it isn't left out for as long as a read holds
-			// that change; left out, where that read is more than is read at
-			// once. An alert of it on that the read says nothing of stays on,
-			// as one a read holds no change of does; ended where the rule was
-			// left out only past a week, as any rule's.
+			// that change; left out, where that read is of no use. An alert of
+			// it on that the read says nothing of stays on, as one a read holds
+			// no change of does; ended where the rule was left out only past
+			// a week, as any rule's.
 			var lost []string
 			for _, r := range rs {
 				if !left(j, r.Name) && slices.Contains(again.Unsure, r.Name) {
@@ -394,7 +398,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			if len(lost) > 0 && near.After(far) {
 				alone, err := judge(near)
 				switch {
-				case errors.Is(err, source.ErrTooManyChanges):
+				case errors.Is(err, source.ErrUnusable):
 				case err != nil:
 					return err
 				default:
