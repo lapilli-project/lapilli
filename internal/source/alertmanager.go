@@ -102,6 +102,11 @@ func AlertmanagerFiles(path string) (config []byte, files []TemplateFile, passed
 		} else if !inDir(dir, filepath.Dir(filepath.Clean(g))) {
 			pattern = filepath.Join(dir, filepath.Base(g))
 		}
+		// A glob that leaves the directory (../*) isn't looked through.
+		if !inDir(dir, globDir(pattern)) {
+			passed = append(passed, fmt.Sprintf("templates: %q is outside the configuration's directory, and isn't read", clip(g)))
+			continue
+		}
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			passed = append(passed, fmt.Sprintf("templates: %q isn't a glob", clip(g)))
@@ -110,10 +115,15 @@ func AlertmanagerFiles(path string) (config []byte, files []TemplateFile, passed
 		if len(matches) == 0 {
 			passed = append(passed, fmt.Sprintf("templates: %q names no file beside the configuration", clip(g)))
 		}
+		if len(matches) > maxMatches {
+			passed = append(passed, fmt.Sprintf("templates: %q names more than %d files: those after aren't looked at", clip(g), maxMatches))
+			matches = matches[:maxMatches]
+		}
+		outside := 0
 		for _, m := range matches {
 			real, err := filepath.EvalSymlinks(m)
 			if err != nil || !inDir(dir, real) {
-				passed = append(passed, fmt.Sprintf("templates: %q is outside the configuration's directory, and isn't read", clip(rel(dir, m))))
+				outside++ // a link out of it: counted, not named
 				continue
 			}
 			if st, err := os.Stat(real); err != nil || !st.Mode().IsRegular() || seen[real] {
@@ -140,8 +150,25 @@ func AlertmanagerFiles(path string) (config []byte, files []TemplateFile, passed
 			}
 			files = append(files, TemplateFile{Name: rel(dir, m), Text: b})
 		}
+		if outside > 0 {
+			passed = append(passed, fmt.Sprintf("templates: %q: %d files are links out of the configuration's directory, and aren't read", clip(g), outside))
+		}
 	}
 	return config, files, passed, nil
+}
+
+// maxMatches is how many files one glob is looked at for.
+const maxMatches = 4 * MaxTemplateFiles
+
+// globDir is the directory a glob's files are in, as far as it says before
+// its first wildcard: /etc/am of /etc/am/*.tmpl, the configuration's
+// directory's parent of DIR/../*.
+func globDir(pattern string) string {
+	i := strings.IndexAny(pattern, `*?[\`)
+	if i < 0 {
+		return filepath.Dir(filepath.Clean(pattern))
+	}
+	return filepath.Dir(filepath.Clean(pattern[:i] + "x"))
 }
 
 // inDir reports whether path is dir or under it.
