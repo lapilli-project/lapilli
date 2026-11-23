@@ -585,18 +585,23 @@ func TestReplicasShareWhatPeopleDo(t *testing.T) {
 	if !a.usedOnce(ctx, "state-1", now.Add(time.Hour).Unix()) || b.usedOnce(ctx, "state-1", now.Add(time.Hour).Unix()) {
 		t.Error("a sign-in's state used twice, once on each replica")
 	}
-	// The incidents token's burst is theirs, not each one's.
+	// The incidents token's burst is theirs, not each one's: 40 of the 100
+	// asked of the two in turn, where each one's own would be 80. The
+	// bucket is the ledger's, filled by the database's clock, whatever
+	// time allow is given: at no rate it isn't filled while the test runs,
+	// so the count is the burst, however long the run takes.
+	a.tokenRate.rate, b.tokenRate.rate = 0, 0
 	n := 0
 	for i := range 100 {
 		s := a
 		if i%2 == 1 {
 			s = b
 		}
-		if s.tokenRate.allow(time.Now()) {
+		if s.tokenRate.allow(now) {
 			n++
 		}
 	}
-	if n < 40 || n > 42 {
+	if n != 40 {
 		t.Errorf("a burst of 40 shared by two replicas let %d through", n)
 	}
 }
