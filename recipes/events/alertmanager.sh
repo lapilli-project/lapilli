@@ -141,7 +141,8 @@ secret() {
 token=$(secret LAPILLI_TOKEN_FILE "$LAPILLI_TOKEN_FILE")
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+lock=
+trap 'rm -rf "$work"; [ -z "$lock" ] || rm -rf "$lock"' EXIT
 trap 'exit 1' INT TERM HUP
 
 # send BODY: BODY posted to serve; the answer's status in code, the
@@ -512,6 +513,34 @@ case $mode in
     case ${KAFKA_GROUP:-x} in *[!A-Za-z0-9._-]* | -*) say "KAFKA_GROUP is a group's name"; exit 2 ;; esac
     ;;
 esac
+
+# One run at a time for an offset file, as two would each move it as they
+# read: a directory beside it holds the process ID of the run that has it.
+# Another run's, alive, stops this one, which says so and exits 0, as a
+# run from cron while the last goes on; one left by a run that is gone (on
+# this machine) is taken.
+if [ -n "${OFFSET_FILE:-}" ]; then
+  if ! mkdir "$OFFSET_FILE.lock" 2>/dev/null; then
+    if [ ! -d "$OFFSET_FILE.lock" ]; then
+      unkept
+      exit 1
+    fi
+    held=$(cat "$OFFSET_FILE.lock/pid" 2>/dev/null || true)
+    case $held in *[!0-9]* | '') held= ;; esac
+    if [ -n "$held" ] && kill -0 "$held" 2>/dev/null; then
+      say "another run ($held) is sending from $(basename "$OFFSET_FILE"): this one stops"
+      exit 0
+    fi
+    say "a lock a run that is gone left is taken"
+    rm -rf "$OFFSET_FILE.lock"
+    mkdir "$OFFSET_FILE.lock" 2>/dev/null || {
+      say "another run took the lock: this one stops"
+      exit 0
+    }
+  fi
+  lock="$OFFSET_FILE.lock"
+  echo $$ >"$lock/pid"
+fi
 
 while :; do
   if [ "$mode" = file ]; then

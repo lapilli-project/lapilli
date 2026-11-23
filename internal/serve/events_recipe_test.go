@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -663,5 +664,42 @@ func TestEventsRecipeTokenRotated(t *testing.T) {
 		os.WriteFile(token, []byte("token-two-long-enough\n"), 0o600)
 		appendLines(t, events, lines[5:10], nil)
 		waitFor("request with the token rotated", func() bool { return seen[want] > 0 })
+	})
+}
+
+// One run at a time for an offset file: another run's lock, its process
+// alive, stops this one, saying so; one left by a run that is gone is
+// taken, and let go at the end.
+func TestEventsRecipeLock(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		var posts atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			posts.Add(1)
+			w.Write([]byte(`{"kept":0}`))
+		}))
+		defer srv.Close()
+		dir := t.TempDir()
+		events := filepath.Join(dir, "events.jsonl")
+		appendLines(t, events, recorded(t, "alertmanager-0.35.0.jsonl")[:5], nil)
+		lock := events + ".offset.lock"
+		os.MkdirAll(lock, 0o755)
+		os.WriteFile(filepath.Join(lock, "pid"), []byte(fmt.Sprint(os.Getpid())), 0o644)
+		env := recipeEnv(srv.URL, tokenFile(t, notifyToken), "")
+		if code, out := runEvents(t, env, "file", events); code != 0 || posts.Load() != 0 || !strings.Contains(out, "another run") {
+			t.Errorf("held: exit %d, %d posts: %s", code, posts.Load(), out)
+		}
+		// A process that has ended.
+		gone := exec.Command("true")
+		if err := gone.Run(); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(lock, "pid"), []byte(fmt.Sprint(gone.ProcessState.Pid())), 0o644)
+		if code, out := runEvents(t, env, "file", events); code != 0 || posts.Load() != 1 || !strings.Contains(out, "is taken") {
+			t.Errorf("left: exit %d, %d posts: %s", code, posts.Load(), out)
+		}
+		if _, err := os.Stat(lock); !os.IsNotExist(err) {
+			t.Errorf("the lock is still there: %v", err)
+		}
 	})
 }

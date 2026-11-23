@@ -90,5 +90,9 @@ beside Alertmanager's file: where it can't keep where it stopped, it says so
 and stops, exiting 1, rather than send the same again each run, as a
 delivery is kept once but a mute, which has no key of its own, isn't.
 
-Run one at a time for an offset file: two would each send what the other
-sent, which serve keeps once, but each move the offset as it read.
+One run at a time for an offset file: two would each move the offset as
+it read. A run takes `OFFSET_FILE.lock`, a directory holding its process
+ID; another run, while that process is alive, says so and exits 0, so a
+run from cron while the last goes on is passed over. A lock left by a run
+that is gone is taken. The process ID is this machine's: runs in two
+containers sharing one offset file aren't told apart, so don't.
