@@ -2,6 +2,208 @@
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-11-23
+
+`lapilli demo --serve`, the sample in serve's own pages. `FAIL_MISSED`
+through serve. A Loki ruler's rules changed through its API, as a
+Mimir's are, and Loki in the chart. Alertmanager's templates checked
+beside each rule. YouTrack and Jira Data Center among the trackers, and
+comments' edits followed both ways. Monthly and yearly repeats, and a
+feed's own `VTIMEZONE`, in on-call feeds. serve saying a firing came
+after its incident ended, as verdict does. And what made two end-to-end
+tests fail now and then, both in serve itself: a version of the rules
+added while serve read the history, and a replica that closed its ports
+the moment it was told to stop. No schema change: the ledger stays at
+031.
+
+Before upgrading:
+- **`--changes-in loki:NAMESPACE` beside `--loki-loaded-rules`** names a
+  namespace of Loki's ruler now, no longer a `--ruler` namespace of that
+  name. Without `--loki-loaded-rules` it is `--ruler`'s, as before; with
+  no `--ruler` either, it is refused. An `--alarms` source named `loki`
+  is refused beside `--loki-loaded-rules` with changes on (Changed).
+- **With `serve.replicas` above 1**, each pod answers for five seconds
+  after it is told to stop (`serve.shutdownDelaySeconds`), not ready
+  meanwhile, and its `terminationGracePeriodSeconds` is 35. A request
+  under way when serve stops now finishes, ten seconds at most, where it
+  was ended at once (Fixed).
+- **`FAIL_MISSED` with `LAPILLI_SERVE`** needs serve 0.70.0: an older one
+  refuses it, and the job says so. With replicas of both, a job asks
+  again once every one is.
+- **An on-call feed's turn at a time the clocks skip or show twice** is
+  read as RFC 5545 reads it: 02:30 in the gap is 03:30, where 0.69 made
+  it 01:30; of two, the first. A repeat is worked out on the clock it is
+  written on, so a weekly 09:00 turn stays at 09:00 when the clocks
+  change (Fixed, Changed).
+- **The range check asks Prometheus once more**: for a selector that
+  names no job, `count by (job)` of its metric, at most 200 a pass, kept
+  a day in serve (Changed).
+
+### Added
+
+- **`lapilli demo --serve`: the sample in `lapilli serve`'s pages.** It
+  runs serve's own code over the same sample as `lapilli demo`: its
+  rules and the incidents of its week in a temporary directory, its
+  history answered in the process, a ledger kept beside them. serve's
+  clock is pinned to the end of the sample's week (Monday 16 November
+  2026, 00:15), so its first run replays the week, its digest works it
+  out, and every page and `/api/v1/report` shows it as the last whole
+  week, with the numbers `lapilli demo` prints. Read-only, every write
+  refused; on a loopback address alone (`--listen`, `127.0.0.1:0`, a
+  free port, by default; a name or any other address refused); reading
+  no Prometheus and sending nothing. It says the URL to open; Ctrl-C or
+  SIGTERM ends it and removes the directory (docs/design/demo.md,
+  "`--serve`").
+- **`FAIL_MISSED` through `lapilli serve`** (`LAPILLI_SERVE`, the
+  action's `fail-missed` with `serve-url`): the job asks serve to hold
+  the change to its incidents (`fail_missed`), and fails, once the
+  comment says which, when the change leaves an incident a rule caught
+  before it caught by no rule after it, as `--fail-missed` does. The
+  rules that differ are judged by the backtest; the rules left alone by
+  serve's record of what caught each incident, not replayed: a rule the
+  pull request holds alike, or one serve runs that it doesn't hold,
+  keeps an incident caught. One that a rule left alone may have caught
+  unrecorded (serve doesn't run it, its runs don't cover the incident's
+  time, it couldn't be replayed then), or that a rule after the change
+  that couldn't be replayed may catch, is not known
+  (`missed_not_known`), and fails the job held to it. Nothing more is
+  asked of the history (docs/design/backtests.md, step 4).
+- **A Loki ruler's rules changed through its API** (`lapilli serve
+  --changes`): a rule read with `--loki-loaded-rules` is written, once
+  approved, through Loki's ruler's configuration API
+  (`/loki/api/v1/rules`), as a Mimir's is. Its group is read again just
+  before (the rule changed since is refused as stale; others changed
+  only, it is made afresh), kept for undo, sent once with
+  `--loki-tenant` as `X-Scope-OrgID`, and read back. It is done only in
+  the namespaces `--changes-in` names as `loki:NAMESPACE` (or
+  `loki:PREFIX*`), on a path of its own, `loki`, never sent to
+  `--ruler`; `--changes-loki-token-file`, a token of its own, writes.
+  `lapilli preflight` says what it may write is unknown
+  (`changes.loki`). A Loki whose ruler keeps its rules in local files
+  takes no writes. Run against a real Loki 3.7.9 in `test/e2e/loki.sh`
+  (docs/design/rulers.md, "Loki's ruler").
+- **The chart's Loki**: `loki.url`, `loki.tenant` and `loki.tokenSecret`
+  (mounted as a file); `rules.loki.loaded`, or `rules.loki.configMaps`
+  for its rule files; `serve.changes.lokiTokenSecret`. And
+  `rules.grafana.history: false` for `--grafana-history=false`.
+- **Alertmanager's notification templates checked beside each rule**
+  (`--alertmanager-config FILE|URL`, for `lapilli verdict
+  --check-content` and `lapilli serve`): the receivers a rule's alerts
+  reach, by the route tree; a template that shows an annotation the rule
+  lacks, names a label its alerts never had, or doesn't parse, which
+  Alertmanager finds only when it sends (`notify_template_error`). Read
+  from `alertmanager.yml` and its template globs, from a file in
+  Mimir's, Cortex's or Amazon's form, or from Mimir's and Cortex's
+  `/api/v1/alerts` with `--ruler-token-file` and `--ruler-tenant`. No
+  field that holds a secret is parsed (docs/design/content.md).
+- **The event recorder's file and Kafka outputs**, sent on to
+  `/v1/alertmanager/events` by `recipes/events/alertmanager.sh`: from
+  where it stopped, by an offset file or a Kafka consumer group, a file
+  rotated or truncated read as it should be, in batches of 1,000 events
+  and 1 MB at most (docs/design/inputs.md).
+- **YouTrack and Jira Data Center, among the trackers tasks are kept in
+  step with** (`recipes/trackers/youtrack.sh`, `jira-dc.sh`; the
+  chart's `serve.trackers.tracker: youtrack` or `jira-dc`). YouTrack's
+  issues in one project, by its REST API and a permanent token; Jira
+  Data Center's or Server's (8.14 and later) by REST API v2 and a
+  personal access token, its text in wiki markup, the task's names and
+  the comments posted from Lapilli in a `{noformat}` block, so that a
+  PromQL selector's braces aren't a macro and `[~name]` mentions no
+  one. Each does what the others do, comments both ways among it, tested
+  against a stand-in for its documented API, not a real account.
+- **Comments' edits followed, both ways** (`COMMENTS=true`, every
+  tracker): a comment people wrote in Lapilli and changed after it was
+  posted has the job's post changed, once; a comment from the tracker
+  changed there after it was copied is taken again, as the tracker's,
+  once. A deletion isn't followed. The tasks token may change a comment
+  copied in from the tracker, by a later edit alone (`PATCH
+  /api/v1/tasks/{id}/comments/{comment}` with `text` and `edited`), and
+  nothing more (docs/design/trackers.md, "Edits followed").
+- **Monthly and yearly repeats in on-call feeds**, with `INTERVAL`,
+  `COUNT`, `UNTIL`, `BYMONTHDAY` (`-1` the last day), `BYDAY` numbered
+  in the month, or in the year without `BYMONTH` (`1MO`, `-1FR`),
+  `BYMONTH` and `BYSETPOS`, as RFC 5545's table has them; a day a month
+  doesn't have is skipped.
+- **A feed's own `VTIMEZONE`**: a `TZID` that isn't an IANA name, such
+  as Outlook's `Pacific Standard Time`, is read by the feed's
+  `VTIMEZONE` of that name, wherever it is in the feed; with none, a
+  Windows zone name is read by CLDR's table. An IANA name still wins.
+- **`lapilli serve` says a firing came after its incident ended**, its
+  condition having held in it, as `lapilli verdict` does: `late`,
+  `fired_after`, `after` and `held_from` in `/api/v1/report`, the
+  digest, a report's missed incidents, the Incidents page and an
+  incident's own ("✗ nothing in time; after its end: RULE +1m"), a
+  rule's page, and MCP. Worked out as the pages are read, within bounds
+  a page that passes them says it has cut.
+- **With no record, how many of a rule's firings went well past its
+  bounds is said of a range, and of comparisons joined by `and`, `or`
+  and `unless`** (Grafana's `&&`, `||`, ranges and classic conditions
+  too), where the bounds decide the condition; `bounds` says how many. A
+  value beside them under `or`, or a comparison under `!` or inside
+  arithmetic, is still left unsaid (docs/design/serve.md, "With no
+  record: which conditions").
+- **A `for` one log line can't outlast**, of LogQL's `count_over_time`,
+  `rate`, `bytes_over_time` and `bytes_rate`, in a Loki rule and a
+  Grafana rule's instant Loki query, as of PromQL's counts of events
+  (docs/design/loki.md).
+- **`lapilli serve --shutdown-delay DUR`**, and the chart's
+  `serve.shutdownDelaySeconds` (5, with more than one replica): how long
+  a replica told to stop answers on, not ready, before it stops.
+- **gitlab.sh tested in a merged results pipeline** (the temporary
+  merge compared against the target branch's head, the status on the
+  source branch's head) and in a plain merge request pipeline.
+
+### Changed
+
+- **The range check of a selector that names no job** counts with the
+  longest interval of the jobs its series come from, asked once with
+  `count by (job)`, and the finding names the job, where it counted with
+  the global interval. When the query fails, as before.
+- `--ruler-token-file` and `--ruler-tenant` go with
+  `--alertmanager-config URL` too.
+- A rule from a Loki ruler's rule files says in its own words why it is
+  for a person; a Loki rule from the API whose namespace isn't named says
+  "its namespace in Loki's ruler isn't one --changes-in names, as
+  loki:NAMESPACE".
+- The chart refuses a Loki flag given in `extraArgs` beside `loki` or
+  `rules.loki`.
+- **Grafana IRM's incidents carry no linked alerts, and the docs say
+  why**: its incident API lists none, and its OnCall API's alert groups
+  name no incident (docs/design/links.md, "Grafana IRM").
+- A step of an on-call repeat is a period and each day it holds, so a
+  feed of thousands of repeats whose days make no turn can now be
+  refused at the 2,000,000 steps.
+- CI's and the release's tests are given forty minutes, where twenty
+  left the serve package unfinished on a slow macOS runner.
+
+### Fixed
+
+- **A version of the rules added while serve read the history was taken
+  for the rules changed then** (affected: 0.29.0 to 0.69.2). A look read
+  the history's directory twice, and a version added in between was
+  recorded from when it was seen; the hours since its own time were
+  never replayed with it. The rules in effect are now read no later than
+  the last version followed, and the next look follows it from its own
+  time. It made `test/e2e/rendered.sh` fail about once in 470 runs.
+- **A replica told to stop closed its ports at once and ended its
+  requests** (affected: 0.36.0 to 0.69.2; requests were ended on every
+  stop since 0.6.0). In a rolling update the Service still sent it
+  connections for a moment, and they were refused; a request under way,
+  a notification among them, was answered with nothing, a 200, as if
+  done. serve now answers for `--shutdown-delay` first, not ready
+  meanwhile, then lets the requests under way finish, ten seconds at
+  most. A request whose context ended before it was done is answered
+  503. It made `test/e2e/replicas.sh` fail about once in 60 runs.
+- **A rule judged from Grafana's own alert state history had no severity
+  in `lapilli serve`** (0.68.0 to 0.69.2): it has the one its labels
+  say, as every other rule has.
+- **An on-call feed's turn at a time the clocks skip or show twice**
+  was read an hour off: 02:30 in the gap is 03:30, as RFC 5545 (3.3.5)
+  reads it, where 0.69 made it 01:30; of two, the first, where 0.69
+  took the second east of UTC.
+- **An on-call zone's name over 256 bytes is refused**: a feed could
+  keep 1,024 names of 64 KB each.
+
 ## [0.69.2] - 2026-11-23
 
 What 0.68.1's reviews left: a rule Grafana's history can't judge is left
