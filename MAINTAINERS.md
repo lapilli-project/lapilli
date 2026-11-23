@@ -40,14 +40,17 @@ person's time, or on one company's view of what an alert is.
    really fired, a translation or a recipe all count. Reports of a replay
    that differs from reality are the most useful thing there is
    ([CONTRIBUTING.md](CONTRIBUTING.md)).
-2. **Review.** After a few merged changes in an area, a maintainer can add
-   you to [CODEOWNERS](.github/CODEOWNERS) for its paths, so you are asked
-   to review changes there.
+2. **Review.** After a few merged changes in an area, a maintainer can ask
+   you to review changes there. GitHub asks a code owner only if they have
+   write access, so you are added to [CODEOWNERS](.github/CODEOWNERS) for
+   the area's paths when you become a maintainer.
 3. **Maintain.** After about three months of steady contributions and
    reviews, a maintainer nominates you in a pull request to this file. You
    become a maintainer when the maintainers agree, as
    [GOVERNANCE.md](GOVERNANCE.md) describes. You get write access and a
-   share of releases, triage and security reports.
+   share of triage; releases, security reports and reports under the Code
+   of Conduct need the repository's admin role (the `release tags`
+   ruleset, and GitHub's own).
 
 A maintainer who steps back moves to the list below, and can come back the
 same way.

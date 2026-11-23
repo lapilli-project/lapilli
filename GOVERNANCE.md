@@ -19,7 +19,9 @@ written down in its pull request:
   - Every Prometheus-compatible API, and the managed Prometheus of each
     cloud, is supported alike. A feature isn't built for one cloud when the
     others could have it.
-  - Integrations are generic: a webhook, not a particular tracker.
+  - Integrations are generic: a webhook, a token and an API, with Slack the
+    one tool lapilli posts to by name. A particular tool's is a recipe
+    beside it (`recipes/`), tested against a server standing in for it.
 - **Measured.** Claims about speed are tests with budgets, and claims about
   faithfulness are replays checked against what really fired.
 - **Safe by default.**
@@ -29,12 +31,16 @@ written down in its pull request:
 
 ## Decisions
 
-- **Day-to-day changes** are made in pull requests. One maintainer's approval
-  merges a change; a maintainer's own change waits a working day for
-  objections, unless it fixes something broken.
-- **Larger changes go to `docs/design/` first.** These are a new command, a
-  new kind of data in the ledger, or a change to how a firing is judged. The
-  design is a pull request, open for at least a week.
+- **Day-to-day changes** are made in pull requests, and merge once the
+  required checks pass. With two maintainers or more, a change needs one
+  maintainer's approval, and a maintainer's own change waits a working day
+  for objections, unless it fixes something broken. With one, as now, the
+  maintainer merges their own.
+- **Larger changes are written down in `docs/design/` first, or in the same
+  pull request.** These are a new command, a new port or token, a new kind
+  of data in the ledger, or a change to how a firing is judged. With two
+  maintainers or more, the design is open for at least a week; with one, it
+  may be merged sooner, and its note says so.
 - **Disagreements** that discussion doesn't settle are decided by a majority
   of maintainers. With an even split, the change doesn't go in.
 
@@ -51,12 +57,16 @@ written down in its pull request:
 
 ## Releases
 
-- **Who:** any maintainer can release.
-- **How:** push a tag `vX.Y.Z` on `main` after CI passes. The release
-  workflow builds the binaries, the image and the chart. It checks them with
-  govulncheck before publishing, and attests their provenance.
+- **Who:** a maintainer with the admin role, which tags `v*` need (the
+  `release tags` ruleset).
+- **How:** after a dry run of the release workflow on `main`, push a tag
+  `vX.Y.Z` on a commit of `main` whose CI run passed in full. The workflow
+  tests and builds the binaries, the image and the chart, checks the code
+  and each binary with govulncheck before publishing, and attests their
+  provenance; the latest release is checked again every day.
 - **Numbering:** while the version is 0.x, a minor release may change flags
-  or the API, and its changelog entry says how.
+  or the API, and its changelog entry says how. A security fix may change
+  behaviour in a patch release too; its entry says how.
 
 ## Conduct
 
