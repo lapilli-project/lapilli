@@ -92,7 +92,7 @@ func runEvents(t *testing.T, env []string, args ...string) (int, string) {
 	}
 	// A test of a number that isn't one, as sh and dash say it: the
 	// script went on past what it didn't mean to.
-	for _, bad := range []string{"integer expression expected", "Illegal number", "unexpected operator", "arithmetic"} {
+	for _, bad := range []string{"integer expression expected", "Illegal number", "unexpected operator", "arithmetic", "illegal byte count", "invalid number of bytes"} {
 		if strings.Contains(stderr.String(), bad) {
 			t.Errorf("%s said %q:\n%s", eventsShell, bad, stderr.String())
 		}
@@ -566,6 +566,44 @@ func TestEventsRecipeKafkaBudget(t *testing.T) {
 		}
 		if got, want := kept2(t, s), notificationEvents(t, lines); got != want {
 			t.Errorf("%d deliveries kept, want %d", got, want)
+		}
+	})
+}
+
+// A file rotated with logrotate's dateext is read to its end too; one
+// rotated where no file beside it is the one it was, say compressed, is
+// said, not passed over in silence.
+func TestEventsRecipeRotatedNames(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		s := notifyServer(t, nil)
+		s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+		srv := httptest.NewServer(s.NotifyHandler())
+		defer srv.Close()
+		dir := t.TempDir()
+		events := filepath.Join(dir, "events.jsonl")
+		lines := recorded(t, "alertmanager-0.35.0.jsonl")
+		env := recipeEnv(srv.URL, tokenFile(t, notifyToken), "")
+		appendLines(t, events, lines[:10], nil)
+		if code, out := runEvents(t, env, "file", events); code != 0 {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		os.Rename(events, events+"-20261123")
+		appendLines(t, events+"-20261123", lines[10:30], nil)
+		appendLines(t, events, lines[30:40], nil)
+		if code, out := runEvents(t, env, "file", events); code != 0 || strings.Contains(out, "was rotated") {
+			t.Fatalf("dateext: exit %d: %s", code, out)
+		}
+		if got, want := kept2(t, s), notificationEvents(t, lines[:40]); got != want {
+			t.Errorf("%d deliveries kept, want %d", got, want)
+		}
+		// Rotated again, and the old one gone (compressed): said.
+		os.Remove(events + "-20261123")
+		os.Remove(events)
+		os.WriteFile(events+".1.gz", []byte("\x1f\x8b compressed"), 0o644)
+		appendLines(t, events, lines[40:], nil)
+		if code, out := runEvents(t, env, "file", events); code != 0 || !strings.Contains(out, "was rotated") {
+			t.Errorf("gone: exit %d: %s", code, out)
 		}
 	})
 }

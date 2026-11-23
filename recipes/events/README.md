@@ -51,8 +51,10 @@ the topic.
   at least once.
 - **Rotated or truncated.** Alertmanager doesn't rotate its file; it
   reopens it when logrotate renames it. A file renamed beside the path
-  (`PATH.1`, as logrotate's `delaycompress` leaves it) is read to its end
-  first, then the new file from its start. A file truncated in place
+  (`PATH.1`, as logrotate's `delaycompress` leaves it, or `PATH-20261123`
+  with `dateext`) is read to its end first, then the new file from its
+  start. One compressed already, or rotated twice between runs, can't be:
+  that is said, and what was written to it after the last run isn't sent. A file truncated in place
   (`copytruncate`), or written again from its start, is told by its size
   or by its first bytes, and read again from its start. A line the
   recorder is still writing waits for its end.

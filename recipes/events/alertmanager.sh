@@ -239,7 +239,11 @@ inode() { ls -di "$1" | awk '{print $1}'; }
 
 # head_sum PATH N: a sum of the file's first N bytes, which a file
 # truncated and written again doesn't keep.
-head_sum() { head -c "$2" "$1" | cksum | awk '{print $1 "-" $2}'; }
+head_sum() {
+  if [ "$2" -gt 0 ]; then
+    head -c "$2" "$1"
+  fi | cksum | awk '{print $1 "-" $2}'
+}
 
 # send_from PATH FROM [KEEP]: the complete lines of PATH from byte FROM
 # on, sent, a batch at a time; after each, with KEEP (the default, keep),
@@ -323,11 +327,17 @@ file_once() {
   if [ -n "$ino" ] && [ "$ino" != "$now" ]; then
     # Rotated: the file it was reading, renamed beside it, is read to its
     # end first; then the new one from its start.
-    for old in "$path".*; do
+    # Renamed as logrotate names it: PATH.1, or PATH-20261123 with
+    # dateext.
+    found=
+    for old in "$path".* "$path"-*; do
+      case $old in *.gz | *.bz2 | *.xz | *.zst | *.lz4) continue ;; esac
       [ -f "$old" ] && [ "$old" != "$OFFSET_FILE" ] && [ "$(inode "$old")" = "$ino" ] || continue
       send_from "$old" "$off" once || return 1
+      found=1
       break
     done
+    [ -n "$found" ] || say "$(basename "$path") was rotated, and the file it was isn't beside it, uncompressed: what was written to it after the last run isn't sent"
     off=0
     sum=
     file_kept "$path" 0 || return 1
