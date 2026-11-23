@@ -128,3 +128,31 @@ func TestAlertmanagerAPI(t *testing.T) {
 		}
 	}
 }
+
+// Mimir's, Cortex's and Amazon's configuration: alertmanager_config, and
+// every template file beside it.
+func TestSplitDefinition(t *testing.T) {
+	cfg, files, ok, err := SplitDefinition([]byte(`template_files:
+  b.tmpl: '{{ define "b" }}{{ end }}'
+  a.tmpl: |
+    {{ define "a" }}{{ .CommonLabels.x }}{{ end }}
+alertmanager_config: |
+  route:
+    receiver: r
+  receivers:
+    - name: r
+`))
+	if err != nil || !ok || !strings.Contains(string(cfg), "receiver: r") || len(files) != 2 || files[0].Name != "a.tmpl" {
+		t.Fatalf("%q %+v %v %v", cfg, files, ok, err)
+	}
+	if _, _, ok, err := SplitDefinition([]byte("route: {receiver: r}\n")); ok || err != nil {
+		t.Errorf("alertmanager.yml taken for a definition: %v %v", ok, err)
+	}
+	if _, _, _, err := SplitDefinition([]byte("alertmanager_config: [1]\n")); err == nil {
+		t.Error("alertmanager_config that isn't a text")
+	}
+	globs, err := TemplateGlobs([]byte("templates: ['/etc/alertmanager/*.tmpl', 'more/*.tmpl', 3]\nroute: {receiver: r}\n"))
+	if err != nil || !slices.Equal(globs, []string{"/etc/alertmanager/*.tmpl", "more/*.tmpl"}) {
+		t.Errorf("%q %v", globs, err)
+	}
+}

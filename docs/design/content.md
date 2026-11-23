@@ -256,3 +256,108 @@ the above, or the above left it open:
   and the details found in it, are data, never instructions. The line a
   report gets has counts and the checks' own words, nothing from the
   rules.
+
+## Alertmanager's templates
+
+Status: built, for the next release. [serveops.md](serveops.md) checks the
+notification templates a Grafana rule is sent with. The other rules,
+Prometheus's, a ruler's and Loki's, are sent by Alertmanager, whose
+receivers' fields are templates too. This checks those the same way.
+
+### What it reads
+
+`--alertmanager-config`, for `lapilli verdict --check-content` and
+`lapilli serve`:
+
+- **A file:** `alertmanager.yml`, and the template files its `templates:`
+  globs name, resolved against the file's directory, as Alertmanager
+  resolves them. An absolute glob is Alertmanager's own path, not
+  Lapilli's: `/etc/alertmanager/templates/*.tmpl` is looked for by its last
+  element, `*.tmpl`, beside the file, where a mounted Secret or ConfigMap
+  puts the templates. No file outside the file's directory, after its
+  links, is read: a glob that leaves it (`../*`), or a link out of it, is
+  passed over and said. A file in Mimir's, Cortex's or Amazon's format
+  (`alertmanager_config` and `template_files`) is read as they keep it.
+- **Mimir's or Cortex's API:** `GET /api/v1/alerts`, with the ruler's
+  token (`--ruler-token-file`) and tenant (`--ruler-tenant`, as
+  `X-Scope-OrgID`). It gives the configuration and every template file;
+  Mimir loads them all, whatever `templates:` says, so all are read. A
+  404 is a tenant with none.
+
+Only what routing and the templates need is read: the route tree, each
+receiver's name and its integrations' fields that hold `{{`, and the
+template files. No field whose name says it is a secret or a connection's
+(a password, a token, a key, a URL, a file, `http_config`, `tls_config`) is
+parsed: none is a template a person reads, and what they hold isn't
+Lapilli's to see.
+
+### Which templates
+
+The route tree is Grafana's policy tree, and is routed by the same code:
+each route's `matchers` (a line may hold several, in braces or not,
+quoted or not), `match` and `match_re`; `continue`; and the receiver a
+route inherits from its parent. A rule's alerts are known to have
+`alertname`, its labels and its group's; a label set as a template is
+filled in from the series, and isn't known. A route matching a label the
+rule doesn't set goes both ways, and a template counts only when every way
+reaches a receiver that uses it.
+
+A receiver uses each of its fields that is a template, the templates that
+field names, and those they name in turn. A field an integration doesn't
+set is sent with Alertmanager's default, `{{ template "slack.default.title"
+. }}`: a template file that defines that name in its place is used. The
+defaults themselves aren't followed, as Grafana's aren't: they show every
+label and annotation there is, and fault nothing.
+
+### What is checked
+
+As Grafana's are, with the template's name in the detail (a field's is
+`RECEIVER/slack_configs[0].title`):
+
+| Check | Kind | When |
+|---|---|---|
+| A notification template shows an annotation the rule hasn't | fact | `.Annotations.x` or `.CommonAnnotations.x`, unguarded, and the rule has no `x`: any annotation, where the rule's are all known; a rule whose runbook is in `runbook` hasn't `runbook_url` |
+| A notification template that doesn't parse | fact | a receiver's field, or a template a template file defines, that the rule is sent with |
+| A notification template names a label the alert never had | measured | as Grafana's |
+| A notification template names a label the expression can't give | heuristic | as Grafana's; not of a Loki ruler's rule |
+
+A template that doesn't parse is a fact here and not for Grafana: Grafana
+refuses one when it is saved. Alertmanager parses a receiver's field only
+when it sends with it, and then sends nothing; `amtool check-config`
+doesn't catch it. A template file that doesn't parse stops Alertmanager
+loading the configuration at all: that is said once, on stderr and in the
+log, and a rule sent with a name the file defines (as its text says) is
+told so too.
+
+### Bounds
+
+The configuration, or Mimir's answer, is 8 MB at most, parsed as rule
+files are, what its aliases make bounded. 256 template files at most, each
+256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates; a
+field 64 KB; routes as Grafana's, 2,000 and 32 levels. Past each, what is
+past is passed over, and said. Routing has its own budget of work and
+time, as Grafana's has. The request to Mimir goes to its host only,
+follows no redirect, and is a read.
+
+### When it is read
+
+`lapilli verdict` reads it once; one that can't be read is an error, as
+it is read for this alone. `serve` reads it once an hour, as Grafana's
+templates; one that can't be read leaves the check as it was, and the log
+says why, once for each why. What is passed over is said the same way.
+
+### Not done
+
+- **Grafana rules sent to an external Alertmanager.** Grafana's own
+  routing is read with `--grafana`; a Grafana that sends to an
+  Alertmanager instead isn't followed there.
+- **A name no template defines.** `{{ template "x" . }}` with no `x` fails
+  when Alertmanager sends, but Alertmanager's defaults, which differ by
+  version, define many names this doesn't know: it isn't a check.
+- **Alertmanager's API** (`/api/v2/status`) gives the configuration
+  without its template files, and with secrets hidden: a rule's templates
+  can't be followed from it.
+- **`.CommonAnnotations` of a group whose alerts differ.** A summary
+  templated by an alert's labels differs from one alert to the next, and
+  is then not common: it shows nothing. Guessing it needs the group's
+  alerts.

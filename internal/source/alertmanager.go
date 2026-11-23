@@ -6,19 +6,38 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
-	"lapilli.dev/internal/content"
+	"lapilli.dev/internal/rules"
 )
 
 // Alertmanager's configuration, for the notification templates a rule is
 // sent with (docs/design/content.md, "Alertmanager's templates"): from a
 // file, with the template files it names, or from Mimir's or Cortex's
 // configuration API. It only reads.
+
+// A TemplateFile is a file of Alertmanager's notification templates: its
+// name, as said (relative to the configuration's directory, or Mimir's
+// own), and what it holds.
+type TemplateFile struct {
+	Name string
+	Text []byte
+}
+
+// What of the template files is read: one of MaxTemplateFile bytes at
+// most, MaxTemplateFiles of them, MaxTemplateBytes in all; as
+// content.ReadAlertmanager reads them.
+const (
+	MaxTemplateFile  = 256 << 10
+	MaxTemplateFiles = 256
+	MaxTemplateBytes = 8 << 20
+)
 
 // MaxAlertmanagerConfig is the most an Alertmanager configuration may be,
 // as a file or an answer, template files and all in Mimir's.
@@ -47,23 +66,23 @@ func CheckAlertmanagerURL(raw string) error {
 // that directory, as Alertmanager's own path (/etc/alertmanager/*.tmpl),
 // is looked for by its last element beside the file, where a mounted
 // Secret or ConfigMap puts the templates. No file outside the directory,
-// after its links, is read; nor more than content.MaxTemplateFiles, each
-// content.MaxTemplateFile at most. A file in the format of Mimir's,
+// after its links, is read; nor more than MaxTemplateFiles, each
+// MaxTemplateFile at most. A file in the format of Mimir's,
 // Cortex's and Amazon's (alertmanager_config, template_files) is read as
 // they hold it, its templates beside it. What is passed over is said in
 // passed, by the names the files have relative to the directory.
-func AlertmanagerFiles(path string) (config []byte, files []content.TemplateFile, passed []string, err error) {
+func AlertmanagerFiles(path string) (config []byte, files []TemplateFile, passed []string, err error) {
 	config, err = readBounded(path, MaxAlertmanagerConfig)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("--alertmanager-config: %w", err)
 	}
-	if cfg, fs, ok, err := content.SplitDefinition(config); ok || err != nil {
+	if cfg, fs, ok, err := SplitDefinition(config); ok || err != nil {
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("--alertmanager-config: %w", err)
 		}
 		return cfg, fs, nil, nil
 	}
-	globs, err := content.TemplateGlobs(config)
+	globs, err := TemplateGlobs(config)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("--alertmanager-config: %w", err)
 	}
@@ -101,11 +120,11 @@ func AlertmanagerFiles(path string) (config []byte, files []content.TemplateFile
 				continue
 			}
 			seen[real] = true
-			if len(files) >= content.MaxTemplateFiles {
-				passed = append(passed, fmt.Sprintf("templates: more than %d files: those after aren't read", content.MaxTemplateFiles))
+			if len(files) >= MaxTemplateFiles {
+				passed = append(passed, fmt.Sprintf("templates: more than %d files: those after aren't read", MaxTemplateFiles))
 				return config, files, passed, nil
 			}
-			b, err := readBounded(real, content.MaxTemplateFile)
+			b, err := readBounded(real, MaxTemplateFile)
 			if err != nil {
 				// Said by its name beside the configuration, not where it is.
 				var pe *fs.PathError
@@ -115,11 +134,11 @@ func AlertmanagerFiles(path string) (config []byte, files []content.TemplateFile
 				passed = append(passed, fmt.Sprintf("templates: %s: %s", clip(rel(dir, m)), clipErr(err)))
 				continue
 			}
-			if total += len(b); total > content.MaxTemplateBytes {
-				passed = append(passed, fmt.Sprintf("templates: more than %d MB in all: those after aren't read", content.MaxTemplateBytes>>20))
+			if total += len(b); total > MaxTemplateBytes {
+				passed = append(passed, fmt.Sprintf("templates: more than %d MB in all: those after aren't read", MaxTemplateBytes>>20))
 				return config, files, passed, nil
 			}
-			files = append(files, content.TemplateFile{Name: rel(dir, m), Text: b})
+			files = append(files, TemplateFile{Name: rel(dir, m), Text: b})
 		}
 	}
 	return config, files, passed, nil
@@ -178,7 +197,7 @@ func readBounded(path string, limit int64) ([]byte, error) {
 // follows no redirect, and reads MaxAlertmanagerConfig at most; the tenant
 // is sent as X-Scope-OrgID, and the token, read from its file, as a
 // bearer token.
-func AlertmanagerAPI(ctx context.Context, raw, tenant string, c Creds, agent string, transport http.RoundTripper) (config []byte, files []content.TemplateFile, found bool, err error) {
+func AlertmanagerAPI(ctx context.Context, raw, tenant string, c Creds, agent string, transport http.RoundTripper) (config []byte, files []TemplateFile, found bool, err error) {
 	if err := CheckAlertmanagerURL(raw); err != nil {
 		return nil, nil, false, err
 	}
@@ -198,7 +217,7 @@ func AlertmanagerAPI(ctx context.Context, raw, tenant string, c Creds, agent str
 	case code != http.StatusOK:
 		return nil, nil, false, fmt.Errorf("the Alertmanager: HTTP %d: %s", code, answered(body, 300))
 	}
-	cfg, fs, ok, err := content.SplitDefinition(body)
+	cfg, fs, ok, err := SplitDefinition(body)
 	switch {
 	case err != nil:
 		return nil, nil, false, fmt.Errorf("the Alertmanager's configuration: %w", err)
@@ -206,4 +225,62 @@ func AlertmanagerAPI(ctx context.Context, raw, tenant string, c Creds, agent str
 		return nil, nil, false, errors.New("the Alertmanager's answer has no alertmanager_config: not Mimir's or Cortex's configuration API")
 	}
 	return cfg, fs, true, nil
+}
+
+// SplitDefinition reads a configuration as Mimir's and Cortex's
+// /api/v1/alerts give it, and Amazon's alert manager definition is written
+// (alertmanager_config, and template_files beside it): Alertmanager's
+// configuration, and every template file, by name, as Mimir loads them all.
+// ok is false for any other document, such as alertmanager.yml itself.
+func SplitDefinition(b []byte) (config []byte, files []TemplateFile, ok bool, err error) {
+	m, err := yamlMap(b)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	raw, has := m["alertmanager_config"]
+	if !has {
+		return nil, nil, false, nil
+	}
+	cfg, isText := raw.(string)
+	if !isText {
+		return nil, nil, true, errors.New("alertmanager_config isn't a text")
+	}
+	tf, _ := m["template_files"].(map[string]any)
+	for _, name := range slices.Sorted(maps.Keys(tf)) {
+		if text, ok := tf[name].(string); ok {
+			files = append(files, TemplateFile{Name: name, Text: []byte(text)})
+		}
+	}
+	return []byte(cfg), files, true, nil
+}
+
+// TemplateGlobs are what the configuration's templates: name, as written:
+// globs, relative to where it is, or not.
+func TemplateGlobs(config []byte) ([]string, error) {
+	m, err := yamlMap(config)
+	if err != nil {
+		return nil, fmt.Errorf("Alertmanager's configuration: %w", err)
+	}
+	var out []string
+	l, _ := m["templates"].([]any)
+	for _, x := range l {
+		if s, ok := x.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// yamlMap reads a YAML document that is a map, as rule files are read:
+// bounded in what its aliases and values may make.
+func yamlMap(b []byte) (map[string]any, error) {
+	v, err := rules.UnmarshalYAML(b)
+	if err != nil {
+		return nil, err
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, errors.New("not a map")
+	}
+	return m, nil
 }

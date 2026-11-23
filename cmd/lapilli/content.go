@@ -135,6 +135,13 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 			fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification templates weren't read, and aren't checked: %s\n", verdict.Clean(err.Error()))
 		}
 	}
+	// With --alertmanager-config, what the templates Alertmanager sends the
+	// other rules with show; it is for this alone, so not read is an error.
+	if f.amConfig != "" {
+		if o.Alertmanager, err = f.alertmanagerTemplates(ctx, stderr); err != nil {
+			return fail(err)
+		}
+	}
 	rep := contentReport{Rules: []contentRule{}}
 	cut := false
 	if h != nil {
@@ -211,6 +218,40 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		return 1
 	}
 	return 0
+}
+
+// alertmanagerTemplates reads --alertmanager-config: a file, and the
+// template files it names, or Mimir's or Cortex's API, with the ruler's
+// token and tenant. What is passed over is said on stderr.
+func (f *verdictFlags) alertmanagerTemplates(ctx context.Context, stderr io.Writer) (*content.Notifications, error) {
+	var cfg []byte
+	var files []source.TemplateFile
+	var passed []string
+	var err error
+	if source.AlertmanagerURL(f.amConfig) {
+		var found bool
+		cfg, files, found, err = source.AlertmanagerAPI(ctx, f.amConfig, f.rulerTenant, source.Creds{TokenFile: f.rulerTk}, "lapilli/"+buildVersion(), nil)
+		if err == nil && !found {
+			err = errors.New("the tenant has no Alertmanager configuration (HTTP 404)")
+		}
+	} else {
+		cfg, files, passed, err = source.AlertmanagerFiles(f.amConfig)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("--alertmanager-config: %w", err)
+	}
+	in := make([]content.TemplateFile, len(files))
+	for i, x := range files {
+		in[i] = content.TemplateFile(x)
+	}
+	n, skipped, err := content.ReadAlertmanager(cfg, in)
+	for _, p := range append(passed, skipped...) {
+		fmt.Fprintf(stderr, "lapilli verdict: --alertmanager-config: %s\n", verdict.Clean(p))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("--alertmanager-config: %w", err)
+	}
+	return n, nil
 }
 
 // contentText writes the report as tables: the problems, then the guesses,

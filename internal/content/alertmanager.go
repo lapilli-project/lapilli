@@ -149,50 +149,6 @@ func yamlMap(b []byte) (map[string]any, error) {
 	return m, nil
 }
 
-// SplitDefinition reads a configuration as Mimir's and Cortex's
-// /api/v1/alerts give it, and Amazon's alert manager definition is written
-// (alertmanager_config, and template_files beside it): Alertmanager's
-// configuration, and every template file, by name, as Mimir loads them all.
-// ok is false for any other document, such as alertmanager.yml itself.
-func SplitDefinition(b []byte) (config []byte, files []TemplateFile, ok bool, err error) {
-	m, err := yamlMap(b)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	raw, has := m["alertmanager_config"]
-	if !has {
-		return nil, nil, false, nil
-	}
-	cfg, isText := raw.(string)
-	if !isText {
-		return nil, nil, true, errors.New("alertmanager_config isn't a text")
-	}
-	tf, _ := m["template_files"].(map[string]any)
-	for _, name := range slices.Sorted(maps.Keys(tf)) {
-		if text, ok := tf[name].(string); ok {
-			files = append(files, TemplateFile{Name: name, Text: []byte(text)})
-		}
-	}
-	return []byte(cfg), files, true, nil
-}
-
-// TemplateGlobs are what the configuration's templates: name, as written:
-// globs, relative to where it is, or not.
-func TemplateGlobs(config []byte) ([]string, error) {
-	m, err := yamlMap(config)
-	if err != nil {
-		return nil, fmt.Errorf("Alertmanager's configuration: %w", err)
-	}
-	var out []string
-	l, _ := m["templates"].([]any)
-	for _, x := range l {
-		if s, ok := x.(string); ok && s != "" {
-			out = append(out, s)
-		}
-	}
-	return out, nil
-}
-
 // field is a receiver's field that is a template: where, and its text.
 type field struct{ path, text string }
 
