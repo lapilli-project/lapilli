@@ -42,7 +42,8 @@ func single(summary, tz, start, d string) string {
 // A weekly 09:00 turn in Pacific Standard Time is 09:00 on the clock all
 // year (17:00Z in winter, 16:00Z in summer), a monthly one in W. Europe
 // Standard Time too, and a turn at 01:30 on the night the clocks go back
-// is the first 01:30.
+// is the first 01:30. The same feed with no VTIMEZONE is read by CLDR's
+// table, alike.
 func TestOutlookVTimezone(t *testing.T) {
 	cfg := config(t, "  - {name: payments, file: x}\n")
 	s := cfg.Schedules[0]
@@ -77,9 +78,10 @@ func TestOutlookVTimezone(t *testing.T) {
 	if len(own.Turns) != 46+12+1+1 { // Ali's weekend in two
 		t.Errorf("%d turns", len(own.Turns))
 	}
-	// The same, by IANA names.
-	iana := strings.NewReplacer("TZID=Pacific Standard Time", "TZID=America/Los_Angeles", "TZID=W. Europe Standard Time", "TZID=Europe/Berlin").Replace(string(feed(t, "outlook.ics")))
-	for name, b := range map[string][]byte{"IANA names": []byte(iana)} {
+	// The same, by IANA names, and by the Windows names alone.
+	plain := feed(t, "outlook-no-vtimezone.ics")
+	iana := strings.NewReplacer("TZID=Pacific Standard Time", "TZID=America/Los_Angeles", "TZID=W. Europe Standard Time", "TZID=Europe/Berlin").Replace(string(plain))
+	for name, b := range map[string][]byte{"IANA names": []byte(iana), "no VTIMEZONE": plain} {
 		if got := read(b).Turns; !slices.EqualFunc(got, own.Turns, func(a, b verdict.RotaTurn) bool { return a.From.Equal(b.From) && a.To.Equal(b.To) && a.Who == b.Who }) {
 			t.Errorf("%s: %d turns, not the VTIMEZONEs' %d:\n%+v", name, len(got), len(own.Turns), got)
 		}
@@ -115,8 +117,9 @@ func TestVTimezoneAfterEvents(t *testing.T) {
 }
 
 // Which zone a TZID is: an IANA name, though the feed gives a VTIMEZONE
-// of its own for it (Google writes both); else the feed's VTIMEZONE. A
-// VTIMEZONE of STANDARD alone is an offset that doesn't change.
+// of its own for it (Google writes both); else the feed's VTIMEZONE,
+// though the name is a Windows one too; else the Windows name by CLDR's
+// table. A VTIMEZONE of STANDARD alone is an offset that doesn't change.
 // Outlook's older names, which hold commas, are matched as written. A zone
 // none of these is, is said.
 func TestZoneLookup(t *testing.T) {
@@ -128,7 +131,9 @@ func TestZoneLookup(t *testing.T) {
 		"BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
 	for _, c := range []struct{ name, zones, tz, want string }{
 		{"IANA over the feed's", wrongNewYork, "America/New_York", "2026-07-06T13:30:00Z"},
-		{"the feed's, as it gives it", ninePacific, "Pacific Standard Time", "2026-07-06T00:30:00Z"},
+		{"the feed's over the table", ninePacific, "Pacific Standard Time", "2026-07-06T00:30:00Z"},
+		{"the table, with no VTIMEZONE", "", "Pacific Standard Time", "2026-07-06T16:30:00Z"},
+		{"the table, a zone east", "", "Korea Standard Time", "2026-07-06T00:30:00Z"},
 		{"STANDARD alone", korea, "Korea Standard Time", "2026-07-06T00:30:00Z"},
 		{"an older name, quoted", older, `"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"`, "2026-07-06T07:30:00Z"},
 	} {

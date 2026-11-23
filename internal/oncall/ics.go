@@ -564,8 +564,8 @@ func unescape(s string) string {
 }
 
 // parseStamp reads a date or a time: in UTC (Z), in the zone TZID names
-// (resolve's: an IANA name, or one of the feed's VTIMEZONEs), or
-// floating, in floating; a date from its midnight there.
+// (resolve's: an IANA name, one of the feed's VTIMEZONEs, or a Windows
+// name), or floating, in floating; a date from its midnight there.
 // resolve, when nil, reads none.
 func parseStamp(params map[string]string, v string, floating zone, resolve func(string) (zone, error)) (stamp, error) {
 	v = strings.TrimSpace(v)

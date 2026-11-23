@@ -14,7 +14,7 @@ import (
 
 func FuzzFeed(f *testing.F) {
 	for _, name := range []string{"google.ics", "grafana-oncall.ics", "opsgenie.ics", "pagerduty.ics",
-		"google-monthly.ics", "outlook.ics", "pagerduty-monthly.ics", "opsgenie-yearly.ics"} {
+		"google-monthly.ics", "outlook.ics", "outlook-no-vtimezone.ics", "pagerduty-monthly.ics", "opsgenie-yearly.ics"} {
 		if b, err := os.ReadFile(filepath.Join("testdata", name)); err == nil {
 			f.Add(b)
 		}

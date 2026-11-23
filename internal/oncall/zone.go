@@ -108,7 +108,8 @@ type cachedZone struct {
 // lookupZone is the zone a TZID names: an IANA name, which wins over a
 // VTIMEZONE of the same name (Google writes both); else the feed's own
 // VTIMEZONE (Outlook and Exchange write "Pacific Standard Time" with
-// one).
+// one); else, without one, a Windows name by CLDR's table (windows.go).
+// A VTIMEZONE wins over the table: the feed says what it means.
 func lookupZone(tz string, own map[string]*vzone) (zone, error) {
 	if l, err := LoadZone(strings.TrimPrefix(tz, "/")); err == nil {
 		return ianaZone{l}, nil
@@ -119,5 +120,10 @@ func lookupZone(tz string, own map[string]*vzone) (zone, error) {
 		}
 		return v, nil
 	}
-	return nil, fmt.Errorf("a zone %q that isn't an IANA name or one of the feed's VTIMEZONEs", clip(tz))
+	if name, ok := windowsZones[tz]; ok {
+		if l, err := LoadZone(name); err == nil {
+			return ianaZone{l}, nil
+		}
+	}
+	return nil, fmt.Errorf("a zone %q that isn't an IANA name, a Windows one, or one of the feed's VTIMEZONEs", clip(tz))
 }
