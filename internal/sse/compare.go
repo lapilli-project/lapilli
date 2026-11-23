@@ -96,6 +96,29 @@ func Comparisons(e Expr) []Cmp {
 	return out
 }
 
+// Decided reports whether a condition holds, for each series, only where
+// its comparisons (Comparisons) let it: a comparison; of && one side so at
+// least, as the other only holds it back; of || both, as either holds it.
+// Each comparison set to hold less then makes a condition that holds
+// nowhere the condition doesn't, and where it does, holds by a comparison
+// that held so. A value that isn't a comparison, under || or alone,
+// decides it whatever the numbers, and so does any other operator, ! too.
+func Decided(e Expr) bool {
+	if _, _, _, ok := Compared(e); ok {
+		return true
+	}
+	b, ok := e.(binary)
+	switch {
+	case !ok:
+		return false
+	case b.op == "&&":
+		return Decided(b.l) || Decided(b.r)
+	case b.op == "||":
+		return Decided(b.l) && Decided(b.r)
+	}
+	return false
+}
+
 // walkCmp calls f with each comparison Comparisons finds, and the way to
 // it: false for the left of each && or || on the way, true for the right.
 func walkCmp(e Expr, f func(Cmp, []bool)) {

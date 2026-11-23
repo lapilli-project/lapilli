@@ -28,6 +28,15 @@ var eventFuncs = map[string]bool{"increase": true, "changes": true, "resets": tr
 // the alerts it is over, and the most of them.
 var eventAggs = map[string]bool{"sum": true, "max": true}
 
+// logEventFuncs are LogQL's functions of a range of log lines that count
+// what happened in it (docs/design/loki.md): each line is one event, and
+// holds what it counts for that range at most, whatever the line. Of each,
+// whether one line comes to one over the range's seconds: count_over_time
+// counts lines, rate is them a second; bytes_over_time counts a line's
+// bytes, one at least of a line that says anything, and bytes_rate is them
+// a second.
+var logEventFuncs = map[string]bool{"count_over_time": false, "rate": true, "bytes_over_time": false, "bytes_rate": true}
+
 // continuous are the ends of the names of counters of an amount, not of
 // events: an increase of them is time spent or bytes sent, not something
 // that happened.
@@ -52,8 +61,13 @@ const (
 // longest range. Of a Grafana rule, as Graph.eventWindow reads it. ok is
 // false for any other rule, and when what its condition is can't be told:
 // nothing is said then.
+//
+// Of a Loki ruler's rule, written in LogQL, the same of count_over_time,
+// rate, bytes_over_time or bytes_rate of a stream's lines over a range
+// (logEventValue), its pipeline counting lines, not a label's values
+// (unwrap): count_over_time({app="shop"} |= "error" [5m]) > 0.
 func (r Rule) EventWindow() (time.Duration, bool) {
-	if r.Logs != "" || r.Unsupported != "" {
+	if r.Unsupported != "" {
 		return 0, false
 	}
 	if r.Graph != nil {
@@ -61,6 +75,13 @@ func (r Rule) EventWindow() (time.Duration, bool) {
 	}
 	if len(r.Expr) > eventMaxExpr {
 		return 0, false
+	}
+	value := eventValue
+	if r.Logs != "" {
+		if !plainLogQL(r.Expr) {
+			return 0, false
+		}
+		value = logEventValue
 	}
 	parts, ok := andParts(r.Expr, 0)
 	if !ok {
@@ -72,7 +93,7 @@ func (r Rule) EventWindow() (time.Duration, bool) {
 		if !ok {
 			continue
 		}
-		w, one, ok := eventValue(c.value, 0)
+		w, one, ok := value(c.value, 0)
 		if !ok || passes(c.op, 0, c.n) || !passes(c.op, one, c.n) {
 			continue
 		}
@@ -86,15 +107,16 @@ func (r Rule) EventWindow() (time.Duration, bool) {
 // does: a threshold of one number (gt or gte), or a math expression that is
 // one comparison of a ref with a number, of that query's value as it is
 // (an instant query's) or through reduces that leave it so (keeps). The
-// query's PromQL is read as a Prometheus rule's value is. ok is false for
-// any other: a range query, whose points one event can hold for as long
-// again as its range (a pod's series that went on being returned after the
-// pod was gone), a classic condition, any other math, a reduce that changes
-// the value or puts a number in place of NaN, two data queries, Loki's; and
-// for a rule that fires on no data (noDataState Alerting, or KeepLast),
-// whose firings needn't be events.
+// query's PromQL is read as a Prometheus rule's value is; a Loki query's
+// LogQL as a Loki ruler's rule's (logEventValue), of an instant query
+// alike. ok is false for any other: a range query, whose points one event
+// can hold for as long again as its range (a pod's series that went on
+// being returned after the pod was gone), a classic condition, any other
+// math, a reduce that changes the value or puts a number in place of NaN,
+// two data queries; and for a rule that fires on no data (noDataState
+// Alerting, or KeepLast), whose firings needn't be events.
 func (g *Graph) eventWindow() (time.Duration, bool) {
-	if g.Logs != "" || len(g.Data) != 1 || len(g.Other) != 0 || g.NoData == StateAlerting || g.NoData == StateKeepLast {
+	if len(g.Data) != 1 || len(g.Other) != 0 || g.NoData == StateAlerting || g.NoData == StateKeepLast {
 		return 0, false
 	}
 	var in, op string
@@ -114,7 +136,14 @@ func (g *Graph) eventWindow() (time.Duration, bool) {
 	if !ok || op == "" || len(expr) > eventMaxExpr {
 		return 0, false
 	}
-	w, one, ok := eventValue(expr, 0)
+	value := eventValue
+	if g.Logs != "" {
+		if !plainLogQL(expr) {
+			return 0, false
+		}
+		value = logEventValue
+	}
+	w, one, ok := value(expr, 0)
 	if !ok || passes(op, 0, n) || !passes(op, one, n) {
 		return 0, false
 	}
@@ -256,6 +285,123 @@ func eventValue(value string, depth int) (w time.Duration, one float64, ok bool)
 		return w, 1, true
 	}
 	return 0, 0, false
+}
+
+// logEventValue is eventValue of LogQL: of the value a condition compares,
+// the range it counts a stream's lines over, and what one line comes to:
+// count_over_time({app="shop"} |= "error" [5m]) one, rate({app="shop"}
+// [5m]) one over 300, bytes_over_time(...) one byte at least, sum by (app)
+// (count_over_time(...)) one; times or over numbers, as eventValue reads
+// them.
+func logEventValue(value string, depth int) (w time.Duration, one float64, ok bool) {
+	value = unwrap(value)
+	if depth > eventMaxDepth || value == "" {
+		return 0, 0, false
+	}
+	term, k, ok := scaled(value)
+	if !ok {
+		return 0, 0, false
+	}
+	if term != value {
+		w, one, ok = logEventValue(term, depth+1)
+		return w, k * one, ok
+	}
+	name, rest := leadingWord(value)
+	perSecond, counts := logEventFuncs[name]
+	switch {
+	case eventAggs[strings.ToLower(name)]:
+		rest = skipGrouping(rest)
+		inner, after, ok := call(rest)
+		if !ok || !blank(skipGrouping(after)) {
+			return 0, 0, false
+		}
+		return logEventValue(inner, depth+1)
+	case counts:
+		arg, after, ok := call(rest)
+		if !ok || !blank(after) {
+			return 0, 0, false
+		}
+		w, ok := logRangeOf(arg)
+		if !ok {
+			return 0, 0, false
+		}
+		if perSecond {
+			return w, 1 / w.Seconds(), true
+		}
+		return w, 1, true
+	}
+	return 0, 0, false
+}
+
+// logRangeOf is the range a LogQL range function counts lines over: a
+// stream selector, its pipeline or none, then the range, with an offset
+// after it or not: {app="shop"} |= "error" | json [5m]. ok is false for
+// any other: a range before the pipeline, a pipeline that unwraps a label,
+// whose values, not lines, are then taken, or no stream selector.
+func logRangeOf(arg string) (time.Duration, bool) {
+	open, shut := -1, -1
+	ok := walk(arg, func(i, depth int) {
+		if depth != 0 {
+			return
+		}
+		switch arg[i] {
+		case '[':
+			open, shut = i, -1
+		case ']':
+			if open >= 0 && shut < 0 {
+				shut = i
+			}
+		}
+	})
+	if !ok || open <= 0 || shut < 0 || !modifiers(arg[shut+1:]) {
+		return 0, false
+	}
+	lo, hi, ok := trimmed(arg[:open])
+	if !ok || lo >= hi || arg[lo] != '{' {
+		return 0, false
+	}
+	stream := arg[lo:hi]
+	end := closing(stream, 0)
+	if end < 0 {
+		return 0, false
+	}
+	if pipe := stream[end+1:]; !blank(pipe) {
+		if at := skipSpace(pipe, 0); pipe[at] != '|' || hasLogWord(pipe, "unwrap") {
+			return 0, false
+		}
+	}
+	d, ok := readRange(strings.Join(strings.Fields(arg[open+1:shut]), ""))
+	return d, ok && d > 0
+}
+
+// hasLogWord reports whether a LogQL pipeline has word outside its strings
+// and comments: a stage's keyword, such as unwrap.
+func hasLogWord(expr, word string) bool {
+	found := false
+	walk(expr, func(i, _ int) {
+		if found || !isWordByte(expr[i]) || i > 0 && isWordByte(expr[i-1]) {
+			return
+		}
+		j := i
+		for j < len(expr) && isWordByte(expr[j]) {
+			j++
+		}
+		found = strings.EqualFold(expr[i:j], word)
+	})
+	return found
+}
+
+// plainLogQL reports whether a LogQL expression has no comment of the kinds
+// Loki reads beside PromQL's (// and /* */) outside its strings: what the
+// rest of this file reads it by, # and strings, says all there is.
+func plainLogQL(expr string) bool {
+	plain := true
+	walk(expr, func(i, _ int) {
+		if expr[i] == '/' && i+1 < len(expr) && (expr[i+1] == '/' || expr[i+1] == '*') {
+			plain = false
+		}
+	})
+	return plain
 }
 
 // scaled is a value as a term times or over numbers, and what they come to:

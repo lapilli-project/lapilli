@@ -2818,5 +2818,14 @@
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s は lapilli serve が Grafana 自身のアラート状態の履歴を取り込む取り込み元です。別の名前にしてください",
  "Loki's ruler's API": "Loki ルーラーの API",
  "it is from a Loki ruler's rule files, which Lapilli doesn't write: a person changes it where they are kept": "Loki ルーラーのルールファイルから読んだルールなので Lapilli は書き込みません。ルールファイルの置き場所で人が変更してください",
- "its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE": "Loki ルーラーのネームスペースが --changes-in に loki:NAMESPACE として指定されていません"
+ "its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE": "Loki ルーラーのネームスペースが --changes-in に loki:NAMESPACE として指定されていません",
+ "All %d went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "%d 件すべてが判定を決めた閾値（%s）を大きく超えました。閾値付近の一時的な揺れではなく、実際に起きたことです。",
+ "%d of them went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "そのうち %d 件が判定を決めた閾値（%s）を大きく超えました。閾値付近の一時的な揺れではなく、実際に起きたことです。",
+ "None stayed more than a fifth past the bounds that decide it (%s) for all of its for.": "判定を決める閾値（%s）を 20%% より大きく超えたまま for のあいだ続いた発火はありませんでした。",
+ "✗ nothing in time; after its end: %s": "✗ 間に合った発火なし。終了後: %s",
+ "Nothing in time.": "間に合った発火はありません。",
+ "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same.": "終了後に発火したルールです。インシデント中に条件は成立していましたが、\"for\" とメトリクスの到着の遅れが終了を越えました。このインシデントのアラートですが遅すぎたため、黒のままです。",
+ "%s after its end": "終了の %s 後",
+ "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "検知なしの発火のうち %d 件は、ラベルが合うインシデントの終了後に来ました。インシデント中に条件は成立していましたが、\"for\" とメトリクスの到着の遅れが終了を越えました。遅すぎたアラートで、黒のままです。",
+ "fired after its end: %s": "終了後に発火: %s"
 }

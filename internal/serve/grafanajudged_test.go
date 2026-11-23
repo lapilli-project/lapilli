@@ -207,6 +207,34 @@ func TestServeGrafanaJudged(t *testing.T) {
 	}
 }
 
+// A rule judged from Grafana's history has the severity its labels say
+// (severity: page), as a replayed rule has its own: in the report, the
+// rules list and MCP, though the recorded rule its firings are copied in
+// as keeps none.
+func TestServeGrafanaJudgedSeverity(t *testing.T) {
+	ctx := context.Background()
+	s := ordersServer(t, &ordersGrafana{})
+	s.jobs(ctx, true)
+	if s.status.errWhat != "" {
+		t.Fatalf("a round failed: %s: %s", s.status.errWhat, s.status.err)
+	}
+	o, _ := s.options(ctx)
+	rep, err := s.ledgerReport(ctx, now.Add(-7*24*time.Hour), now.Add(time.Hour), o, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rules) != 1 || rep.Rules[0].Severity != "page" || !rep.Rules[0].ByHistory() {
+		t.Errorf("report: %+v", rep.Rules)
+	}
+	_, out, err := s.toolRules(ctx, nil, rulesIn{Weeks: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Rules) != 1 || out.Rules[0].Severity != "page" {
+		t.Errorf("MCP's rules: %+v", out.Rules)
+	}
+}
+
 // An alert of a rule Lapilli can't replay flipping between Alerting and
 // NoData every 500ms for two hours, with 128 labels: thousands of firings,
 // within every bound of a read, none of which a write holds. The days

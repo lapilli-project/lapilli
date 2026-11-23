@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -103,10 +104,14 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	}
 	sc := own.schedules(o.Hours)
 	o.Hours = nil // counted below
+	if o, err = s.withHeld(ctx, o, from, to); err != nil {
+		return nil, err
+	}
 	rep, err := s.l.ReportFor(ctx, from, to, o, firings, teamKeeps(own, team))
 	if err != nil {
 		return nil, err
 	}
+	s.lateCut(rep.LateCut, from, to)
 	// What judged it, for a reader counting it again (docs/numbers.md): by
 	// the ledger's weeks.
 	rep.Settings = o.Settings()
@@ -119,6 +124,35 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	}
 	rep.Hours = sc.used(rep.Rules, nil)
 	return rep, nil
+}
+
+// withHeld is o with how long before its start each rule's condition held
+// (verdict.Options.Held), the least of the versions in effect over [from,
+// to] (verdict.HeldFor): what the ledger says a firing came after an
+// incident was over by (ledger.LateOf), as lapilli verdict says it of the
+// rules it replays. Kept when o has it already.
+func (s *Server) withHeld(ctx context.Context, o verdict.Options, from, to time.Time) (verdict.Options, error) {
+	if o.Held != nil {
+		return o, nil
+	}
+	vs, err := s.versions(ctx, from, to)
+	if err != nil {
+		return o, err
+	}
+	var rs []rules.Rule
+	for _, v := range vs {
+		rs = append(rs, v.Rules...)
+	}
+	o.Held = verdict.HeldFor(rs)
+	return o, nil
+}
+
+// lateCut logs, when cut, that more firings came near the end of incidents
+// in [from, to) than one read looks at for those that came after one.
+func (s *Server) lateCut(cut bool, from, to time.Time) {
+	if cut {
+		s.log.Warn("more firings came near the end of incidents than one read looks at: those past it aren't said to have come after one", "from", from, "to", to)
+	}
 }
 
 // asleepNote says what the tile of firings while people slept counts, for

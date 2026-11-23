@@ -198,10 +198,14 @@ longer `for`; one only some of whose are, says how many. `--json` has
 judged, and `"unjudged"` counts the rest. A rule replayed that fired as
 often as a noisy rule with no record says instead what those firings were:
 of a condition that counts events (below), each firing is an event it
-counted, a count that went up; of another with one bound that decides it,
-how many had the value its condition compares go well past its bound (by
-more than a fifth of it, for its `for`), not a flicker at its edge; and the
-alerts that fired most. Those happened; whether they mattered is for a
+counted, a count that went up; of another whose bounds decide it, how many
+had the values its condition compares go well past the bounds that decided
+them (by more than a fifth of each, for its `for`), not a flicker at an
+edge: one bound, a range (`x > 1 and x < 5`), or comparisons joined by
+`and`, `or` and `unless` (or, in Grafana, `&&` and `||`), not a value
+beside them under `or`, a bound of nothing, nor a range narrower than two
+fifths of its ends (docs/design/serve.md, "With no record: which
+conditions"); and the alerts that fired most. Those happened; whether they mattered is for a
 person to write down (`"unrecorded"` in `--json`). lapilli serve judges a
 firing by its week instead: a week whose record is kept, an incident on in
 it or in the two weeks before it, or `--impact` read over all of it, and,
@@ -225,7 +229,15 @@ query's value, as it is or through reduces that leave it so (`last`,
 `max`, `min` or `mean` of its one value), its PromQL read as above; not a
 range query, whose points one event can hold for as long again as its
 range, nor one that fires on no data (`noDataState` `Alerting` or
-`KeepLast`), and a firing on no data is no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
+`KeepLast`), and a firing on no data is no event. A rule written in LogQL
+(a Loki ruler's, or a Grafana rule's one instant Loki query, read as
+above) is one when its value is `count_over_time`, `rate`,
+`bytes_over_time` or `bytes_rate` of a stream's lines over a range, the
+range after the pipeline, summed or maxed or not, times or over numbers or
+not, compared with a number no line passes and one does: each line is an
+event, and a line of `bytes_over_time` one byte at least
+(`count_over_time({app="shop"} |= "error" [5m]) > 0`). A pipeline that
+unwraps a label counts its values, not lines: no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
 30 minutes at most: with `for: 1h`, one restart can never fire it, only
 restarts that keep coming for an hour. The report says so of a rule whose
 `for` is that long already: "Its for (1h) is as long as the 30m its
@@ -322,8 +334,13 @@ out from the rules replayed, with no step after the replays, so `--extras`
 doesn't cut it. A firing says when its condition held (`held_from`), so a
 report's firings, read back with `--firings`, say the same; firings from
 elsewhere, with no `held_from`, came after nothing, and a `held_from` after
-its firing's start is read as none. `lapilli serve` doesn't
-say it yet.
+its firing's start is read as none. `lapilli serve` says it too (0.70),
+worked out as its ledger is read, of the incidents that count, every one it
+has, as its stones are given: `/api/v1/report`, the digest and the reports
+it sends (`fired_after` of a missed incident), the Incidents page and an
+incident's own, a rule's page (how many of its firings that caught nothing
+came after one) and MCP (`fired_after`, `late`), its rules as they stood
+over what is shown.
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
 did, each rule replayed from `--rules`, as it stood then, is looked at about

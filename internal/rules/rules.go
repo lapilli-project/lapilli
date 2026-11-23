@@ -1834,9 +1834,9 @@ type Graph struct {
 	// is the condition's data source's; Grafana takes one that returns
 	// nothing as no data, which the replay can't see (UnseenOther).
 	Other map[string]string
-	// reads are, by ref of Queries, what each PromQL data query and each
-	// reduce folded into one reads, as read: what tells whether the
-	// condition counts events (EventWindow).
+	// reads are, by ref of Queries, what each data query, PromQL or
+	// LogQL, and each reduce folded into one reads, as read: what tells
+	// whether the condition counts events (EventWindow).
 	reads map[string]read
 }
 
@@ -2301,6 +2301,7 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 				g.Queries[ref] = q.expr
 				g.Shift[ref] = q.to
 				g.Data[ref] = Source{Present: ref, UID: uid}
+				g.reads[ref] = read{query: ref, window: q.window}
 			}
 			continue
 		}

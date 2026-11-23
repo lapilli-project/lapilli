@@ -63,7 +63,7 @@ func TestTooWideNotPassedOver(t *testing.T) {
 
 	bounded := []replay.Version{{Rules: []rules.Rule{labelled(rules.Rule{Name: "Errors", Expr: "errors > 5"}, 300)}}}
 	f := firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: tue.Add(10 * time.Hour), End: tue.Add(11 * time.Hour)}
-	if _, _, err := clearOf(context.Background(), wideDays{h}, bounded, "Errors", []firing.Firing{f}, o.From, o.To, time.Minute); err == nil || !strings.Contains(err.Error(), rules.TooWide) {
+	if _, _, _, err := clearOf(context.Background(), wideDays{h}, bounded, "Errors", []firing.Firing{f}, o.From, o.To, time.Minute); err == nil || !strings.Contains(err.Error(), rules.TooWide) {
 		t.Errorf("an unrecorded firing's clearance: %v", err)
 	}
 }
