@@ -394,6 +394,8 @@ func TestBoundsDecide(t *testing.T) {
 		{"up == 1 and on() up", false},
 		{"errors", false},
 		{"errors > bool 5", false},
+		{"errors > 5 or 1 < # c\n bool up", false}, // a value, its bool behind a comment
+		{"errors > 5 or 1 < # c\n up", true},
 		{"(errors > 5) * 2", false},
 		{"errors > 1e-310 and x > 1", false}, // a number a float doesn't hold to the full, not among Bounds
 		{"errors > 5 and", false},

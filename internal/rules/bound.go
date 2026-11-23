@@ -755,7 +755,8 @@ func compared(expr string) (comparison, bool) {
 		return comparison{}, false
 	}
 	left, right := expr[:o.at], expr[o.end:]
-	if w := strings.Fields(right); len(w) > 0 && strings.EqualFold(w[0], "bool") {
+	// bool, a comment before it or not, makes it a value, not a filter.
+	if w := strings.Fields(stripComments(right)); len(w) > 0 && strings.EqualFold(w[0], "bool") {
 		return comparison{}, false
 	}
 	ln, lok := number(left)
