@@ -145,6 +145,25 @@ func TestDecideAgainThroughTheAPIAndTheForm(t *testing.T) {
 	if now, err := s.l.IncidentByID(ctx, first); err != nil || now.Title != "by the form" {
 		t.Errorf("the incident's title, none given: %q (%v), want it as it was", now.Title, err)
 	}
+	// Deleted through the API and written again under its id by an
+	// editor, of another day: another incident, which the window doesn't
+	// take, confirmed again.
+	decide("", "")
+	if code, body, _ := apiAs(t, h, http.MethodDelete, "/api/v1/incidents/"+first, nil, vEditor, "", ""); code != http.StatusNoContent {
+		t.Fatalf("deleted: %d %s", code, body)
+	}
+	other := map[string]any{"title": "search down", "start": in.Start.Add(48 * time.Hour).Format(time.RFC3339), "end": in.Start.Add(49 * time.Hour).Format(time.RFC3339),
+		"labels": map[string][]string{"service": {"search"}}}
+	if code, body, _ := apiAs(t, h, http.MethodPut, "/api/v1/incidents/"+first, other, vEditor, "", ""); code >= 300 {
+		t.Fatalf("written again under %s: %d %s", first, code, body)
+	}
+	again := decide("confirmed", "")
+	if again == "" || again == first {
+		t.Errorf("confirmed again after %s was deleted and written again: %q, want an incident of its own", first, again)
+	}
+	if now, err := s.l.IncidentByID(ctx, first); err != nil || now.Title != "search down" || !now.Start.Equal(in.Start.Add(48*time.Hour)) {
+		t.Errorf("the editor's incident: %+v %v, want it as they wrote it", now, err)
+	}
 }
 
 // POST /api/v1/firings/real writes the firing a report gives down as an
