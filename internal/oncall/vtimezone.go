@@ -34,8 +34,9 @@ const (
 	// real zone's changes two to four times.
 	maxYearChanges = 16
 	// lookBack is how many periods a part's rule is looked back through for
-	// its last onset before a year: a zone's yearly rule has one each year.
-	lookBack = 8
+	// its last onset before a time: a zone's rule is yearly and holds a day
+	// every period, so the period of the time or the one before has it.
+	lookBack = 2
 	// firstYear and lastYear bound the years a zone is worked out for.
 	firstYear, lastYear = 1800, 2300
 )
@@ -47,7 +48,7 @@ const (
 type vzone struct {
 	name  string
 	obs   []*observance
-	err   error // why it can't be read; kept once found
+	err   error // why it can't be read, whatever the year: kept once found
 	steps *int
 	// rdates is how many RDATEs its parts hold.
 	rdates int
@@ -67,10 +68,12 @@ type change struct {
 }
 
 // zoneYear is a zone's offset over a year (in UTC): before, as it starts,
-// and changes, its onsets in it, in order.
+// and changes, its onsets in it, in order; or err, why the year can't be
+// worked out, kept for the year alone.
 type zoneYear struct {
 	before  int
 	changes []change
+	err     error
 }
 
 // observance is a STANDARD or DAYLIGHT part.
@@ -188,7 +191,12 @@ func (o *observance) read(z *vzone, name string, params map[string]string, value
 			err = fmt.Errorf("a part with two RRULEs")
 			break
 		}
-		o.rule, err = parseRule(value)
+		// A zone's rules are yearly, as RFC 5545's and every export's are:
+		// a rule that repeats more often would need its onsets looked for
+		// further back than a year's.
+		if o.rule, err = parseRule(value); err == nil && o.rule.freq != yearly {
+			err = fmt.Errorf("a part whose rule repeats %s, where a zone's repeats yearly", freqNames[o.rule.freq])
+		}
 	case "RDATE":
 		if strings.EqualFold(params["VALUE"], "PERIOD") {
 			err = fmt.Errorf("an RDATE of periods")
@@ -333,6 +341,22 @@ func (o *observance) untilAt() (time.Time, error) {
 	return w.Add(-secs(o.from)), nil
 }
 
+// period is the days of period p of a part's rule, the steps taken. A
+// period that holds none (29 February in a year of 365 days, or one that
+// BYSETPOS empties) is refused: an onset is then looked for only in the
+// period of a time and the one before, the same whatever was read before.
+func (z *vzone) period(o *observance, p int) ([]time.Time, error) {
+	var work int
+	z.buf, work = o.rule.days(o.start, p, z.buf)
+	if err := z.charge(work); err != nil {
+		return nil, err
+	}
+	if len(z.buf) == 0 {
+		return nil, fmt.Errorf("a rule that holds no day in %d", o.rule.begin(o.start, p).Year())
+	}
+	return z.buf, nil
+}
+
 // counted adds the onsets of a rule with COUNT: stepped through from its
 // DTSTART, as COUNT counts from there, maxCounted periods at most.
 func (z *vzone) counted(o *observance) error {
@@ -345,12 +369,11 @@ func (z *vzone) counted(o *observance) error {
 		if r.begin(o.start, p).Year() > lastYear {
 			return nil
 		}
-		var work int
-		z.buf, work = r.days(o.start, p, z.buf)
-		if err := z.charge(work); err != nil {
+		days, err := z.period(o, p)
+		if err != nil {
 			return err
 		}
-		for _, w := range z.buf {
+		for _, w := range days {
 			if w.Before(o.start) {
 				continue
 			}
@@ -398,11 +421,12 @@ func (z *vzone) offsetAt(u time.Time) (int, error) {
 }
 
 // year works out a year's offsets, once: the onsets in it, and the offset
-// as it starts, which is the last change of the year before when that is
-// known, else of the onset latest before it.
+// as it starts, that of the onset latest before it. Each year is worked
+// out alone, so what a year says, or why it can't be read, is the same
+// whichever times were read first.
 func (z *vzone) year(y int) (*zoneYear, error) {
 	if zy := z.years[y]; zy != nil {
-		return zy, nil
+		return zy, zy.err
 	}
 	if z.err != nil {
 		return nil, z.err
@@ -410,6 +434,15 @@ func (z *vzone) year(y int) (*zoneYear, error) {
 	if y < firstYear || y > lastYear {
 		return nil, fmt.Errorf("a time in %d", y)
 	}
+	zy, err := z.workOut(y)
+	if err != nil {
+		zy = &zoneYear{err: err}
+	}
+	z.years[y] = zy
+	return zy, err
+}
+
+func (z *vzone) workOut(y int) (*zoneYear, error) {
 	start := time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(y+1, 1, 1, 0, 0, 0, 0, time.UTC)
 	zy := &zoneYear{}
@@ -427,38 +460,27 @@ func (z *vzone) year(y int) (*zoneYear, error) {
 			break
 		}
 		if err := z.openIn(o, start, end, &zy.changes); err != nil {
-			z.err = err
 			return nil, err
 		}
 	}
 	if len(zy.changes) > maxYearChanges {
-		z.err = fmt.Errorf("its offset changes more than %d times in %d", maxYearChanges, y)
-		return nil, z.err
+		return nil, fmt.Errorf("its offset changes more than %d times in %d", maxYearChanges, y)
 	}
 	slices.SortStableFunc(zy.changes, func(a, b change) int { return a.at.Compare(b.at) })
-	if prev := z.years[y-1]; prev != nil {
-		zy.before = prev.before
-		if n := len(prev.changes); n > 0 {
-			zy.before = prev.changes[n-1].off
+	zy.before = z.first
+	var best time.Time
+	if i > 0 {
+		best, zy.before = z.onsets[i-1].at, z.onsets[i-1].off
+	}
+	for _, o := range z.open {
+		u, ok, err := z.lastBefore(o, start)
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		zy.before = z.first
-		var best time.Time
-		if i > 0 {
-			best, zy.before = z.onsets[i-1].at, z.onsets[i-1].off
-		}
-		for _, o := range z.open {
-			u, ok, err := z.lastBefore(o, start)
-			if err != nil {
-				z.err = err
-				return nil, err
-			}
-			if ok && (best.IsZero() || u.After(best)) {
-				best, zy.before = u, o.to
-			}
+		if ok && (best.IsZero() || u.After(best)) {
+			best, zy.before = u, o.to
 		}
 	}
-	z.years[y] = zy
 	return zy, nil
 }
 
@@ -471,12 +493,11 @@ func (z *vzone) openIn(o *observance, start, end time.Time, out *[]change) error
 		if !b.Before(end) || !o.until.IsZero() && b.After(o.until) {
 			return nil
 		}
-		var work int
-		z.buf, work = r.days(o.start, p, z.buf)
-		if err := z.charge(work); err != nil {
+		days, err := z.period(o, p)
+		if err != nil {
 			return err
 		}
-		for _, w := range z.buf {
+		for _, w := range days {
 			if w.Before(o.start) {
 				continue
 			}
@@ -495,8 +516,8 @@ func (z *vzone) openIn(o *observance, start, end time.Time, out *[]change) error
 }
 
 // lastBefore is the last onset before limit of a part's rule without
-// COUNT, looked for lookBack periods back at most: a rule that holds no
-// day so near is taken to have none, and the part's DTSTART, among the
+// COUNT: in limit's period or the one before, as each holds a day (period);
+// none there, before the part's DTSTART, and the DTSTART, among the
 // onsets, stands.
 func (z *vzone) lastBefore(o *observance, limit time.Time) (time.Time, bool, error) {
 	r, from := o.rule, secs(o.from)
@@ -505,13 +526,12 @@ func (z *vzone) lastBefore(o *observance, limit time.Time) (time.Time, bool, err
 	}
 	p := r.periodOf(o.start, limit.Add(from))
 	for k := 0; k < lookBack && p-k >= 0; k++ {
-		var work int
-		z.buf, work = r.days(o.start, p-k, z.buf)
-		if err := z.charge(work); err != nil {
+		days, err := z.period(o, p-k)
+		if err != nil {
 			return time.Time{}, false, err
 		}
-		for i := len(z.buf) - 1; i >= 0; i-- {
-			w := z.buf[i]
+		for i := len(days) - 1; i >= 0; i-- {
+			w := days[i]
 			if w.Before(o.start) {
 				break
 			}
