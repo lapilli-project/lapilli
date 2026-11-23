@@ -67,13 +67,21 @@ func (c realHistory) file(dir, name string) []byte {
 
 // recorded is a fake Grafana answering from what a real one answered:
 // its frontend settings, its alert annotations, newest first, from and to
-// within, as many as asked; its state history kept in Loki likewise, to
-// before to, in seconds.
+// within, as many as asked, one rule's alone with alertUID; its state
+// history kept in Loki likewise, to before to, in seconds.
 func (c realHistory) recorded(t *testing.T) GrafanaHistory {
 	t.Helper()
 	settings, err := os.ReadFile(filepath.Join("testdata", c.dir, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The title of each rule's uid, as GRAFANA_ALERTS labels its alerts:
+	// an annotation names its rule by its id and its title alone.
+	titleOf := map[string]string{}
+	if c.where == HistoryAnnotations {
+		for _, f := range c.alerts(t) {
+			titleOf[f.Labels["grafana_rule_uid"]] = f.Rule
+		}
 	}
 	var notes []json.RawMessage
 	var lines struct {
@@ -100,9 +108,13 @@ func (c realHistory) recorded(t *testing.T) GrafanaHistory {
 			w.Write(settings)
 		case "/api/annotations":
 			var out []json.RawMessage
+			uid := q.Get("alertUID")
 			for _, n := range notes {
 				var a annotation
 				json.Unmarshal(n, &a)
+				if uid != "" && (titleOf[uid] == "" || a.AlertName != titleOf[uid]) {
+					continue
+				}
 				if a.Time >= from && a.Time <= to {
 					out = append(out, n)
 				}

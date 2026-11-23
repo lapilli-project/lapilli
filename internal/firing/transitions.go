@@ -15,12 +15,27 @@ import (
 // Key, when set, tells its alert apart, the same for every change of it;
 // otherwise its rule and labels do. The changes of one alert may share
 // one Labels, which isn't written to.
+//
+// Of, where the history was read with its alerts told apart by the rule
+// that fired them, is what it says of that rule beside its alert name.
 type Transition struct {
 	Rule     string
 	Labels   map[string]string
 	At       time.Time
 	From, To string
 	Key      string
+	Of       RuleOf
+}
+
+// RuleOf is what Grafana's alert state history says of the rule a change
+// is of, beside the alert name its labels carry: kept in Loki, the rule's
+// uid; in annotations, the rule's id in Grafana's database (no uid), and
+// its title as it is when read, "" for a rule deleted since. Zero where
+// the history says none of them, or wasn't read for them.
+type RuleOf struct {
+	UID   string
+	ID    int64
+	Title string
 }
 
 // The label a firing in Grafana's NoData state carries, as its series of

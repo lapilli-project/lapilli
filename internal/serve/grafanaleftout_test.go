@@ -25,11 +25,15 @@ import (
 
 // shopGrafana stands in for a Grafana 12.4 holding rules whose conditions
 // read a MySQL data source, which Lapilli can't replay, and keeping its
-// state history in annotations.
+// state history in annotations. Its annotations say no rule's id unless
+// ids is set: then each carries its rule's id (alertId) and the title the
+// rule has now (alertName), "" once it is deleted, as Grafana's do, and
+// alertUID keeps one rule's.
 type shopGrafana struct {
 	mu    sync.Mutex
 	rules []shopRule
 	notes []shopNote
+	ids   bool
 }
 
 // shopRule is a rule of a title in a folder, paused or not.
@@ -39,21 +43,27 @@ type shopRule struct {
 }
 
 // shopNote is a change of state of the alert of a rule's title for a
-// service, with as many labels besides as extra.
+// service, with as many labels besides as extra; of the rule of uid, ""
+// for the first of the title the Grafana holds when it is added.
 type shopNote struct {
 	title, prev, next, service string
 	at                         time.Time
 	extra                      int
+	uid                        string
 }
 
 // fired adds a firing of title's alert for service from start to end, as
-// long past now; still on, with no end.
+// long past now; still on, with no end. It is the first rule's of the
+// title.
 func (g *shopGrafana) fired(title, service string, start, end time.Duration) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.notes = append(g.notes, shopNote{title: title, prev: "Normal", next: "Alerting", service: service, at: now.Add(start)})
+	g.firedBy("", title, service, start, end)
+}
+
+// firedBy is fired, of the rule of uid.
+func (g *shopGrafana) firedBy(uid, title, service string, start, end time.Duration) {
+	g.note(shopNote{uid: uid, title: title, prev: "Normal", next: "Alerting", service: service, at: now.Add(start)})
 	if end != 0 {
-		g.notes = append(g.notes, shopNote{title: title, prev: "Alerting", next: "Normal", service: service, at: now.Add(end)})
+		g.note(shopNote{uid: uid, title: title, prev: "Alerting", next: "Normal", service: service, at: now.Add(end)})
 	}
 }
 
@@ -61,7 +71,23 @@ func (g *shopGrafana) fired(title, service string, start, end time.Duration) {
 func (g *shopGrafana) note(n shopNote) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if i := slices.IndexFunc(g.rules, func(r shopRule) bool { return r.title == n.title }); n.uid == "" && i >= 0 {
+		n.uid = g.rules[i].uid
+	}
 	g.notes = append(g.notes, n)
+}
+
+// idOf is the id in Grafana's database of the rule of uid.
+func (g *shopGrafana) idOf(uid string) int64 {
+	ids := map[string]int64{ordersUID: 1, stockUID: 2}
+	if id, ok := ids[uid]; ok {
+		return id
+	}
+	var n int64
+	for _, c := range uid {
+		n = n*31 + int64(c)
+	}
+	return 100 + n%100000
 }
 
 // hold sets the rules it holds.
@@ -104,12 +130,23 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscan(r.URL.Query().Get("to"), &to)
 		fmt.Sscan(r.URL.Query().Get("limit"), &limit)
 		all := make([]map[string]any, 0, len(g.notes))
+		uid := r.URL.Query().Get("alertUID")
 		for i, n := range g.notes {
+			if uid != "" && n.uid != uid {
+				continue
+			}
 			tags := []string{"alertname:" + n.title, "grafana_folder:Ops", "service:" + n.service, "severity:page"}
 			for j := range n.extra {
 				tags = append(tags, fmt.Sprintf("l%02d:v", j))
 			}
-			all = append(all, map[string]any{"id": i + 1, "alertName": n.title, "prevState": n.prev, "newState": n.next, "time": n.at.UnixMilli(), "tags": tags})
+			a := map[string]any{"id": i + 1, "alertName": n.title, "prevState": n.prev, "newState": n.next, "time": n.at.UnixMilli(), "tags": tags}
+			if g.ids {
+				a["alertId"], a["alertName"] = g.idOf(n.uid), ""
+				if j := slices.IndexFunc(g.rules, func(r shopRule) bool { return r.uid == n.uid }); j >= 0 {
+					a["alertName"] = g.rules[j].title
+				}
+			}
+			all = append(all, a)
 		}
 		slices.SortStableFunc(all, func(a, b map[string]any) int { return int(b["time"].(int64) - a["time"].(int64)) }) // newest first
 		out := []map[string]any{}
@@ -244,12 +281,13 @@ func ordersAndStock() *shopGrafana {
 }
 
 // A second rule of a judged rule's title, even paused, in any folder
-// Lapilli reads: the history never says which of the two fired. The judged
-// rule is left out of each day while the title is shared, alone: nothing of
-// it is written or taken away, its alert on stays on, and the days are no
-// record of it, then and once the other rule is gone, whatever round reads
-// them again and after a restart. The other rules' days are written as
-// they are, and read as copied. Judged again, an alert of it that began
+// Lapilli reads, of a history that says no rule's uid or id: it never says
+// which of the two fired. The judged rule is left out of each day while a
+// read reaches a version of the rules that holds the other, alone: nothing
+// of it is written or taken away, its alert on stays on, and the days are
+// no record of it, then and once the other rule is gone, whatever round
+// reads them again and after a restart. The other rules' days are written
+// as they are, and read as copied. Judged again, an alert of it that began
 // meanwhile and is still on is written from there, in every round after.
 func TestServeGrafanaJudgedShared(t *testing.T) {
 	for _, paused := range []bool{false, true} {
@@ -295,41 +333,49 @@ func TestServeGrafanaJudgedShared(t *testing.T) {
 		}
 
 		// Still shared two hours on: the search and the cart fire under
-		// the title, and stay on; so does the basket, until five hours on.
+		// the title, and stay on; so does the basket, until seven hours on.
 		g.fired("Orders slow", "search", 3*time.Hour, 0)
 		g.fired("Orders slow", "cart", 3*time.Hour+45*time.Minute, 0)
-		g.fired("Orders slow", "basket", 3*time.Hour+10*time.Minute, 5*time.Hour)
+		g.fired("Orders slow", "basket", 3*time.Hour+10*time.Minute, 7*time.Hour)
 		sh.round(4 * time.Hour)
 		sh.want("still shared", sh.copied(), shared)
 		sh.want("Orders slow's copies, still shared", sh.covers("Orders slow"), "→0s")
 
-		// The other rule gone. A round shorter than --settle after: the
-		// orders' alert is ended where the history says, and those on
-		// since the title was shared are written from where it is the
-		// rule's alone again. What fired and ended meanwhile is no one's.
+		// The other rule gone by four and a half hours on. The rounds whose
+		// reads reach back to then, when the version of the rules read
+		// four hours on held it, leave the rule out still.
 		g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
-		// The round after reads from after the search and the basket
-		// began: the search, of which it reads no change, stays on as it
-		// is, and the basket is ended from where it was written.
-		after := []string{"Orders slow/basket 4h0m0s 5h0m0s", "Orders slow/cart 4h0m0s on", "Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 10m0s",
-			"Orders slow/search 4h0m0s on", "Stock low/stock -3h0m0s -2h0m0s", "Stock low/stock 1h0m0s 1h30m0s"}
-		for _, at := range []time.Duration{4*time.Hour + 30*time.Minute, 6 * time.Hour, 8 * time.Hour} {
+		for _, at := range []time.Duration{4*time.Hour + 30*time.Minute, 6 * time.Hour} {
+			sh.round(at)
+			sh.want(fmt.Sprintf("paused %v: the other rule gone, read back to when it wasn't, at %s", paused, at), sh.copied(), shared)
+			sh.want(fmt.Sprintf("paused %v: Orders slow's copies at %s", paused, at), sh.covers("Orders slow"), "→0s")
+		}
+		// A round shorter than --settle after: the orders' alert is ended
+		// where the history says, and those on since the title was shared
+		// are written from where it is the rule's alone again. What fired
+		// and ended meanwhile is no one's. The round after reads from after
+		// the search and the basket began: the search, of which it reads no
+		// change, stays on as it is, and the basket is ended from where it
+		// was written.
+		after := []string{"Orders slow/basket 6h0m0s 7h0m0s", "Orders slow/cart 6h0m0s on", "Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 10m0s",
+			"Orders slow/search 6h0m0s on", "Stock low/stock -3h0m0s -2h0m0s", "Stock low/stock 1h0m0s 1h30m0s"}
+		for _, at := range []time.Duration{6*time.Hour + 30*time.Minute, 8 * time.Hour} {
 			sh.round(at)
 			want := slices.Clone(after)
-			if at < 5*time.Hour {
-				want[0] = "Orders slow/basket 4h0m0s on"
+			if at < 7*time.Hour {
+				want[0] = "Orders slow/basket 6h0m0s on"
 			}
 			sh.want(fmt.Sprintf("paused %v: the other rule gone, at %s", paused, at), sh.copied(), want)
-			sh.want(fmt.Sprintf("paused %v: Orders slow's copies at %s", paused, at), sh.covers("Orders slow"), "→0s 4h0m0s→"+at.String())
+			sh.want(fmt.Sprintf("paused %v: Orders slow's copies at %s", paused, at), sh.covers("Orders slow"), "→0s 6h0m0s→"+at.String())
 		}
 		// And lapilli serve started again.
 		sh.restart()
 		sh.round(10 * time.Hour)
 		sh.want("after a restart", sh.copied(), after)
-		sh.want("Orders slow's copies after a restart", sh.covers("Orders slow"), "→0s 4h0m0s→10h0m0s")
+		sh.want("Orders slow's copies after a restart", sh.covers("Orders slow"), "→0s 6h0m0s→10h0m0s")
 		sh.want("Stock low's copies after a restart", sh.covers("Stock low"), "→10h0m0s")
 		ties, err = sh.s.l.Ties(ctx)
-		if o := ties["Orders slow"]; err != nil || o.Since != now.Add(4*time.Hour).Unix() || o.To != now.Add(10*time.Hour).Unix() || o.Out != 0 {
+		if o := ties["Orders slow"]; err != nil || o.Since != now.Add(6*time.Hour).Unix() || o.To != now.Add(10*time.Hour).Unix() || o.Out != 0 {
 			t.Errorf("paused %v: Orders slow's tie once judged again: %+v %v", paused, o, err)
 		}
 		// Its record is held from where it is judged again, not across
@@ -338,7 +384,7 @@ func TestServeGrafanaJudgedShared(t *testing.T) {
 			rule string
 			at   time.Duration
 			want bool
-		}{{"Orders slow", -time.Hour, false}, {"Orders slow", 2 * time.Hour, false}, {"Orders slow", 5 * time.Hour, true}, {"Stock low", -time.Hour, true}} {
+		}{{"Orders slow", -time.Hour, false}, {"Orders slow", 2 * time.Hour, false}, {"Orders slow", 5 * time.Hour, false}, {"Orders slow", 7 * time.Hour, true}, {"Stock low", -time.Hour, true}} {
 			v := ruleView{ruleLine: ruleLine{Name: c.rule}, Tie: tieViewOf(ties[c.rule])}
 			if got, err := sh.s.holds(ctx, &v, now.Add(c.at)); err != nil || got != c.want {
 				t.Errorf("paused %v: %s's record held from %s: %v %v", paused, c.rule, c.at, got, err)
@@ -351,7 +397,8 @@ func TestServeGrafanaJudgedShared(t *testing.T) {
 // is left a gap, as a day the history is of no use for is. The period is
 // kept for the rule all the same: a restart, which reads the gap's days
 // again, the other rule gone, writes nothing the history says of them
-// under the title.
+// under the title; nor does the round after, read from where the copies
+// got to, a first day.
 func TestServeGrafanaJudgedSharedAlone(t *testing.T) {
 	ctx := context.Background()
 	g := &shopGrafana{}
@@ -371,10 +418,16 @@ func TestServeGrafanaJudgedSharedAlone(t *testing.T) {
 	}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false})
 	g.fired("Orders slow", "search", 2*time.Hour+30*time.Minute, 2*time.Hour+40*time.Minute)
+	g.fired("Orders slow", "cart", 3*time.Hour+30*time.Minute, 3*time.Hour+40*time.Minute)
+	// The round after a restart writes from where the copies got to,
+	// across the version that held the other rule: a gap still.
 	sh.restart()
 	sh.round(3 * time.Hour)
-	sh.want("after a restart, the other rule gone", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s", "Orders slow/search 2h30m0s 2h40m0s"})
-	sh.want("its copies", sh.covers("Orders slow"), "→0s 2h0m0s→3h0m0s")
+	sh.want("after a restart, the other rule gone", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s"})
+	sh.want("its copies after a restart", sh.covers("Orders slow"), "→0s")
+	sh.round(5 * time.Hour)
+	sh.want("the round after", sh.copied(), []string{"Orders slow/cart 3h30m0s 3h40m0s", "Orders slow/orders -5h0m0s -4h0m0s"})
+	sh.want("its copies", sh.covers("Orders slow"), "→0s 3h0m0s→5h0m0s")
 }
 
 // A rule the history can't say all it fired of (a state Grafana has no
@@ -430,7 +483,9 @@ func TestServeGrafanaJudgedUnheldAlone(t *testing.T) {
 // written again while the rule is left out, whatever the history says
 // under its title; judged again, it is ended where the history says. One
 // the history says ended and fired again meanwhile, still on, is ended and
-// written from where the rule is judged again.
+// written from where the rule is judged again. The rule is left out as
+// long as a round writes from when a version of the rules held the other
+// rule: to six hours on.
 func TestServeGrafanaJudgedLeftOutOn(t *testing.T) {
 	g := ordersAndStock()
 	g.fired("Orders slow", "search", -4*time.Hour, 0)
@@ -446,10 +501,15 @@ func TestServeGrafanaJudgedLeftOutOn(t *testing.T) {
 	sh.want("left out", sh.copied(), []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on",
 		"Orders slow/search -4h0m0s on", "Stock low/stock -3h0m0s -2h0m0s"})
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
-	for _, at := range []time.Duration{4 * time.Hour, 4*time.Hour + 30*time.Minute, 6 * time.Hour} {
+	for _, at := range []time.Duration{4 * time.Hour, 6 * time.Hour} {
+		sh.round(at)
+		sh.want(fmt.Sprintf("left out still, at %s", at), sh.copied(), []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on",
+			"Orders slow/search -4h0m0s on", "Stock low/stock -3h0m0s -2h0m0s"})
+	}
+	for _, at := range []time.Duration{8 * time.Hour, 8*time.Hour + 30*time.Minute, 10 * time.Hour} {
 		sh.round(at)
 		sh.want(fmt.Sprintf("judged again, at %s", at), sh.copied(), []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 10m0s",
-			"Orders slow/search -4h0m0s 20m0s", "Orders slow/search 2h0m0s on", "Stock low/stock -3h0m0s -2h0m0s"})
+			"Orders slow/search -4h0m0s 20m0s", "Orders slow/search 6h0m0s on", "Stock low/stock -3h0m0s -2h0m0s"})
 	}
 }
 
@@ -464,22 +524,28 @@ func TestServeGrafanaJudgedLeftOutTwice(t *testing.T) {
 	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
 	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
 	g.note(shopNote{title: "Orders slow", prev: "Alerting", next: "Normal", service: "orders", at: now.Add(10 * time.Minute)})
-	g.fired("Orders slow", "search", time.Hour, 4*time.Hour+30*time.Minute)
+	g.fired("Orders slow", "search", time.Hour, 9*time.Hour)
+	// Left out two hours on, and the two rounds after, which write from
+	// when a version of the rules held the other rule.
 	g.hold(two...)
 	sh.round(2 * time.Hour)
 	g.hold(one...)
 	sh.round(4 * time.Hour)
-	if got := sh.copied(); !slices.Contains(got, "Orders slow/search 2h0m0s on") {
+	sh.round(6 * time.Hour)
+	sh.round(8 * time.Hour)
+	if got := sh.copied(); !slices.Contains(got, "Orders slow/search 6h0m0s on") {
 		t.Errorf("judged again: %q", got)
 	}
 	g.hold(two...)
-	sh.round(6 * time.Hour)
+	sh.round(10 * time.Hour)
 	g.hold(one...)
-	for _, at := range []time.Duration{8 * time.Hour, 10 * time.Hour} {
+	sh.round(12 * time.Hour)
+	sh.round(14 * time.Hour)
+	for _, at := range []time.Duration{16 * time.Hour, 18 * time.Hour} {
 		sh.round(at)
 		sh.want(fmt.Sprintf("judged again a second time, at %s", at), sh.copied(), []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 10m0s",
-			"Orders slow/search 2h0m0s 4h30m0s", "Stock low/stock -3h0m0s -2h0m0s"})
-		sh.want("its copies", sh.covers("Orders slow"), "→0s 2h0m0s→4h0m0s 6h0m0s→"+at.String())
+			"Orders slow/search 6h0m0s 9h0m0s", "Stock low/stock -3h0m0s -2h0m0s"})
+		sh.want("its copies", sh.covers("Orders slow"), "→0s 6h0m0s→8h0m0s 14h0m0s→"+at.String())
 	}
 }
 
@@ -501,27 +567,32 @@ func TestServeGrafanaJudgedGapAlerts(t *testing.T) {
 	g.fired("Orders slow", "orders", 50*time.Minute, 0)
 	g.fired("Orders slow", "search", time.Hour, 5*time.Hour)
 	g.fired("Orders slow", "cart", 70*time.Minute, 0)
+	// A gap two hours on, and in the round after, which writes from when a
+	// version of the rules held the other rule.
 	g.hold(two...)
 	sh.round(2 * time.Hour)
 	g.hold(one...)
-	// The first round after the gap, shorter than --settle; the next reads
-	// from after the search and the cart began.
-	on := []string{"Orders slow/cart 2h0m0s on", "Orders slow/orders -5h0m0s 20m0s", "Orders slow/orders 2h0m0s on", "Orders slow/search 2h0m0s on"}
-	for _, at := range []time.Duration{2*time.Hour + 30*time.Minute, 4 * time.Hour} {
+	sh.round(2*time.Hour + 30*time.Minute)
+	// The first round after the gap; the next reads from after the search
+	// and the cart began.
+	on := []string{"Orders slow/cart 2h30m0s on", "Orders slow/orders -5h0m0s 20m0s", "Orders slow/orders 2h30m0s on", "Orders slow/search 2h30m0s on"}
+	for _, at := range []time.Duration{3*time.Hour + 30*time.Minute, 4*time.Hour + 30*time.Minute} {
 		sh.round(at)
 		sh.want(fmt.Sprintf("after the gap, at %s", at), sh.copied(), on)
 	}
 	// A second gap, the search ending in it.
 	g.hold(two...)
-	sh.round(6 * time.Hour)
+	sh.round(6*time.Hour + 30*time.Minute)
 	g.hold(one...)
-	for _, at := range []time.Duration{8 * time.Hour, 10 * time.Hour} {
+	sh.round(7 * time.Hour)
+	for _, at := range []time.Duration{8*time.Hour + 30*time.Minute, 10 * time.Hour} {
 		sh.round(at)
-		sh.want(fmt.Sprintf("after a second gap, at %s", at), sh.copied(), []string{"Orders slow/cart 2h0m0s on", "Orders slow/orders -5h0m0s 20m0s",
-			"Orders slow/orders 2h0m0s on", "Orders slow/search 2h0m0s 5h0m0s"})
+		sh.want(fmt.Sprintf("after a second gap, at %s", at), sh.copied(), []string{"Orders slow/cart 2h30m0s on", "Orders slow/orders -5h0m0s 20m0s",
+			"Orders slow/orders 2h30m0s on", "Orders slow/search 2h30m0s 5h0m0s"})
 	}
 	spans, err := sh.s.l.Spans(context.Background(), ledger.GrafanaSource)
-	if err != nil || len(spans) != 3 || !spans[0][1].Equal(now) || !spans[1][0].Equal(now.Add(2*time.Hour)) || !spans[1][1].Equal(now.Add(4*time.Hour)) || !spans[2][0].Equal(now.Add(6*time.Hour)) {
+	if err != nil || len(spans) != 3 || !spans[0][1].Equal(now) || !spans[1][0].Equal(now.Add(2*time.Hour+30*time.Minute)) || !spans[1][1].Equal(now.Add(4*time.Hour+30*time.Minute)) ||
+		!spans[2][0].Equal(now.Add(7*time.Hour)) {
 		t.Errorf("the gaps: %v %v", spans, err)
 	}
 }
@@ -659,28 +730,32 @@ func TestServeGrafanaJudgedEndedInSpanLetGo(t *testing.T) {
 
 // An alert that began while its rule was left out (its title shared), on
 // where the rule is judged again and ended soon after: the round the rule
-// comes back in writes it from there, ended, and every round after, which
-// reads the settle again from after it began, keeps it so, as one the
-// ledger has from within the write. Whether it began before the settle the
-// first round reads or within it; and as lapilli serve runs unless told
-// otherwise, a round an hour, the hour before read again.
+// comes back in, four hours on (the rounds before write from when a
+// version of the rules held the other rule), writes it from there, ended,
+// and every round after, which reads the settle again from after it
+// began, keeps it so, as one the ledger has from within the write.
+// Whether it began before the settle the first round reads or within it;
+// and as lapilli serve runs unless told otherwise, a round an hour, the
+// hour before read again.
 func TestServeGrafanaJudgedLeftOutEndedSoon(t *testing.T) {
 	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
 	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
-	for _, began := range []time.Duration{30 * time.Minute, 100 * time.Minute} {
+	for _, began := range []time.Duration{30 * time.Minute, 3*time.Hour + 30*time.Minute} {
 		g := ordersAndStock()
 		sh := shopServer(t, g)
 		sh.round(0)
 		g.hold(two...)
-		g.fired("Orders slow", "search", began, 2*time.Hour+10*time.Minute)
+		g.fired("Orders slow", "search", began, 4*time.Hour+10*time.Minute)
 		sh.round(2 * time.Hour)
 		g.hold(one...)
-		want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 2h0m0s 2h10m0s", "Stock low/stock -3h0m0s -2h0m0s"}
-		for _, at := range []time.Duration{2*time.Hour + 30*time.Minute, 4 * time.Hour, 6 * time.Hour} {
+		sh.round(2*time.Hour + 30*time.Minute)
+		sh.round(4 * time.Hour)
+		want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 4h0m0s 4h10m0s", "Stock low/stock -3h0m0s -2h0m0s"}
+		for _, at := range []time.Duration{5 * time.Hour, 5*time.Hour + 30*time.Minute, 7 * time.Hour} {
 			sh.round(at)
 			sh.want(fmt.Sprintf("began %s: judged again, at %s", began, at), sh.copied(), want)
 		}
-		sh.want("its copies", sh.covers("Orders slow"), "→0s 2h0m0s→6h0m0s")
+		sh.want("its copies", sh.covers("Orders slow"), "→0s 4h0m0s→7h0m0s")
 	}
 
 	g := ordersAndStock()
@@ -688,16 +763,18 @@ func TestServeGrafanaJudgedLeftOutEndedSoon(t *testing.T) {
 	sh.round(0)
 	sh.round(time.Hour)
 	g.hold(two...)
-	g.fired("Orders slow", "search", 2*time.Hour+30*time.Minute, 3*time.Hour+20*time.Minute)
+	g.fired("Orders slow", "search", 2*time.Hour+30*time.Minute, 5*time.Hour+20*time.Minute)
 	sh.round(2 * time.Hour)
 	sh.round(3 * time.Hour)
 	g.hold(one...)
-	want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 3h0m0s 3h20m0s", "Stock low/stock -3h0m0s -2h0m0s"}
-	for h := 4; h <= 6; h++ {
+	sh.round(4 * time.Hour)
+	sh.round(5 * time.Hour)
+	want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 5h0m0s 5h20m0s", "Stock low/stock -3h0m0s -2h0m0s"}
+	for h := 6; h <= 8; h++ {
 		sh.round(time.Duration(h) * time.Hour)
-		sh.want(fmt.Sprintf("hourly: judged again from 3h, at %dh", h), sh.copied(), want)
+		sh.want(fmt.Sprintf("hourly: judged again from 5h, at %dh", h), sh.copied(), want)
 	}
-	sh.want("hourly: its copies", sh.covers("Orders slow"), "→1h0m0s 3h0m0s→6h0m0s")
+	sh.want("hourly: its copies", sh.covers("Orders slow"), "→1h0m0s 5h0m0s→8h0m0s")
 }
 
 // The same of a gap of the source's (the one judged rule's title shared):
@@ -711,13 +788,105 @@ func TestServeGrafanaJudgedGapEndedSoon(t *testing.T) {
 	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
 	sh := shopServer(t, g)
 	sh.round(0)
-	g.fired("Orders slow", "search", 30*time.Minute, 2*time.Hour+10*time.Minute)
+	g.fired("Orders slow", "search", 30*time.Minute, 2*time.Hour+40*time.Minute)
 	g.hold(two...)
 	sh.round(2 * time.Hour)
 	g.hold(one...)
-	want := []string{"Orders slow/orders -5h0m0s -4h0m0s", "Orders slow/search 2h0m0s 2h10m0s"}
-	for _, at := range []time.Duration{2*time.Hour + 30*time.Minute, 4 * time.Hour, 6 * time.Hour} {
+	sh.round(2*time.Hour + 30*time.Minute) // a gap still
+	want := []string{"Orders slow/orders -5h0m0s -4h0m0s", "Orders slow/search 2h30m0s 2h40m0s"}
+	for _, at := range []time.Duration{3 * time.Hour, 4 * time.Hour, 6 * time.Hour} {
 		sh.round(at)
 		sh.want(fmt.Sprintf("after the gap, at %s", at), sh.copied(), want)
 	}
+}
+
+// A rule of a judged rule's title in another folder, made between two
+// rounds, firing, and deleted before the second, of a history that says
+// each change's rule (alertId, alertName): what it fired is none of the
+// judged rule's, whether a read of the rules saw it (--watch) or not, and
+// the judged rule isn't left out. Nor does an alert of it with the labels
+// of one the judged rule has on end that one.
+func TestServeGrafanaJudgedSharedBetweenRounds(t *testing.T) {
+	for _, seen := range []bool{false, true} {
+		g := ordersAndStock()
+		g.ids = true
+		sh := shopServer(t, g)
+		sh.round(0)
+		before := sh.copied()
+		one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
+		g.hold(append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", false})...)
+		for i := range 12 {
+			at := 20*time.Minute + time.Duration(i)*5*time.Minute
+			g.firedBy("elsewhere", "Orders slow", "payments", at, at+2*time.Minute)
+		}
+		g.firedBy("elsewhere", "Orders slow", "orders", 30*time.Minute, 40*time.Minute)
+		if seen {
+			sh.s.now = func() time.Time { return now.Add(30 * time.Minute) }
+			raw := ""
+			if err := sh.s.look(context.Background(), &raw); err != nil {
+				t.Fatal(err)
+			}
+		}
+		g.hold(one...)
+		for _, at := range []time.Duration{2 * time.Hour, 4 * time.Hour} {
+			sh.round(at)
+			sh.want(fmt.Sprintf("seen %v: at %s", seen, at), sh.copied(), before)
+			sh.want(fmt.Sprintf("seen %v: its copies at %s", seen, at), sh.covers("Orders slow"), "→"+at.String())
+		}
+		if out, err := sh.s.l.LeftOut(context.Background(), ledger.GrafanaSource); err != nil || len(out) != 0 {
+			t.Errorf("seen %v: left out %v %v", seen, out, err)
+		}
+	}
+}
+
+// Two rules of one title in two folders, both judged, of a history that
+// says each change's rule: each has what it fired, and neither is left out.
+func TestServeGrafanaJudgedSharedTold(t *testing.T) {
+	ctx := context.Background()
+	g := ordersAndStock()
+	g.ids = true
+	sh := shopServer(t, g)
+	sh.round(0)
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false}, shopRule{"elsewhere", "Orders slow", "Elsewhere", false})
+	g.firedBy("elsewhere", "Orders slow", "payments", 30*time.Minute, 40*time.Minute)
+	g.fired("Orders slow", "search", time.Hour, 70*time.Minute)
+	sh.round(2 * time.Hour)
+	names, err := sh.s.l.FromHistory(ctx)
+	if err != nil || len(names) != 3 {
+		t.Fatalf("judged: %q %v", names, err)
+	}
+	other := names[slices.IndexFunc(names, func(n string) bool { return n != "Orders slow" && n != "Stock low" })]
+	want := []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s on", "Orders slow/search 1h0m0s 1h10m0s",
+		other + "/payments 30m0s 40m0s", "Stock low/stock -3h0m0s -2h0m0s"}
+	slices.Sort(want)
+	sh.want("each its own", sh.copied(), want)
+	sh.want("its copies", sh.covers("Orders slow"), "→2h0m0s")
+	if out, err := sh.s.l.LeftOut(ctx, ledger.GrafanaSource); err != nil || len(out) != 0 {
+		t.Errorf("left out %v %v", out, err)
+	}
+}
+
+// The same rule, of a history that says no rule's id: a read of the rules
+// (--watch) saw it, and the rule is left out of what is written across the
+// version that held it.
+func TestServeGrafanaJudgedSharedBetweenRoundsUntold(t *testing.T) {
+	g := ordersAndStock()
+	sh := shopServer(t, g)
+	sh.round(0)
+	before := sh.copied()
+	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
+	g.hold(append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", false})...)
+	for i := range 12 {
+		at := 20*time.Minute + time.Duration(i)*5*time.Minute
+		g.firedBy("elsewhere", "Orders slow", "payments", at, at+2*time.Minute)
+	}
+	sh.s.now = func() time.Time { return now.Add(30 * time.Minute) }
+	raw := ""
+	if err := sh.s.look(context.Background(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	g.hold(one...)
+	sh.round(2 * time.Hour)
+	sh.want("copied in", sh.copied(), before)
+	sh.want("its copies", sh.covers("Orders slow"), "→0s")
 }

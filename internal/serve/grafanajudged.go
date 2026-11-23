@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -32,15 +33,17 @@ const maxCopyDays = 7
 // fromHistory are the rules of the version in effect now that are judged
 // from Grafana's history, each under the name it is judged under, and all
 // the rules of that version's documents, --rule or not: what a name in
-// the history may be of.
-func (s *Server) fromHistory(ctx context.Context) (judged, all []rules.Rule, err error) {
+// the history may be of. twice are those of the judged rules whose name
+// the version gives two rules of different titles: which of them the
+// history's firings are of isn't known.
+func (s *Server) fromHistory(ctx context.Context) (judged, all []rules.Rule, twice map[string]bool, err error) {
 	if s.cfg.JudgedHistory == nil || s.cfg.Grafana == "" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	at := s.now()
 	vs, err := s.versions(ctx, at, at)
 	if err != nil || len(vs) == 0 {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	v := vs[len(vs)-1]
 	for _, r := range v.Rules {
@@ -49,34 +52,82 @@ func (s *Server) fromHistory(ctx context.Context) (judged, all []rules.Rule, err
 		}
 	}
 	if len(judged) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	all, names, err := s.named(ctx, v.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// The history names a rule by its title: a rule judged under a name
 	// made to tell it apart, from another of its title or from a rule read
 	// elsewhere, is read by the title it has in Grafana (rules.Rule.Alert).
 	titles := make(map[string]string, len(all))
+	twice = map[string]bool{}
 	for i, r := range all {
 		if i < len(names) && names[i] != "" {
+			if t, ok := titles[names[i]]; ok && t != r.AlertName() {
+				twice[names[i]] = true
+			}
 			titles[names[i]] = r.AlertName()
 		}
 	}
 	for i, r := range judged {
-		if title, ok := titles[r.Name]; ok && title != r.AlertName() {
+		if title, ok := titles[r.Name]; ok && title != r.AlertName() && !twice[r.Name] {
 			judged[i].Alert = title
 		}
 	}
-	return judged, all, nil
+	return judged, all, twice, nil
 }
+
+// everRules are the Grafana rules of every version in effect over [from,
+// to], before any --rule, as each version's documents read: what a name
+// the history gives across a read may have been of. Kept by version, as a
+// version doesn't change, of each rule its uid and title alone.
+func (s *Server) everRules(ctx context.Context, from, to time.Time) ([]rules.Rule, error) {
+	vs, err := s.l.Versions(ctx, from, to, false)
+	if err != nil {
+		return nil, err
+	}
+	var out []rules.Rule
+	for _, v := range vs {
+		k := fmt.Sprint(s.cfg.Ledger, "\x00", s.cfg.LedgerURLFile, "\x00", v.ID, "\x00", v.Digest)
+		everRead.Lock()
+		rs, ok := everRead.m[k]
+		everRead.Unlock()
+		if !ok {
+			all, _, err := s.named(ctx, v.ID)
+			if err != nil {
+				return nil, err
+			}
+			rs = []rules.Rule{}
+			for _, r := range all {
+				if r.UID != "" {
+					rs = append(rs, rules.Rule{Name: r.Name, Alert: r.Alert, UID: r.UID})
+				}
+			}
+			everRead.Lock()
+			if len(everRead.m) >= 128 {
+				clear(everRead.m)
+			}
+			everRead.m[k] = rs
+			everRead.Unlock()
+		}
+		out = append(out, rs...)
+	}
+	return out, nil
+}
+
+// everRead keeps what everRules read of each version.
+var everRead = struct {
+	sync.Mutex
+	m map[string][]rules.Rule
+}{m: map[string][]rules.Rule{}}
 
 // noteFromHistory keeps, before a run, the names of the rules judged from
 // Grafana's history, which the run, a new version and each copy tie to
 // the history copied in for them; none, when it isn't read.
 func (s *Server) noteFromHistory(ctx context.Context) error {
-	rs, _, err := s.fromHistory(ctx)
+	rs, _, _, err := s.fromHistory(ctx)
 	if err != nil {
 		return err
 	}
@@ -101,7 +152,7 @@ func (s *Server) noteFromHistory(ctx context.Context) error {
 // fails the round, which asks again the next. A source of its name a job
 // wrote to before isn't written over.
 func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
-	rs, all, err := s.fromHistory(ctx)
+	rs, all, twice, err := s.fromHistory(ctx)
 	if err != nil || len(rs) == 0 {
 		return err
 	}
@@ -151,7 +202,7 @@ func (s *Server) copyFromHistory(ctx context.Context, o verdict.Options) error {
 		reaches, err := s.cfg.JudgedHistory.Reaches(ctx, hw.Serves, b)
 		if err == nil && reaches {
 			s.status.set("copying in what Grafana's alert state history says its rules fired, %s", a.In(s.cfg.Loc).Format("2006-01-02 15:04"))
-			err = s.copyDay(ctx, hw.Serves, rs, all, a, b, first, o)
+			err = s.copyDay(ctx, hw.Serves, rs, all, twice, a, b, first, o)
 		}
 		var invalid ledger.ErrInvalid
 		switch {
@@ -207,14 +258,16 @@ func (s *Server) sourceTheirs(ctx context.Context) (bool, error) {
 //
 // A rule the history can't say all it fired of is left out of the day
 // alone: one whose name the history gives another of Grafana's rules too,
-// one it passed over changes of or doesn't tell the alerts of apart, one
-// with a firing a write can't hold. Nothing of it is written or taken
-// away, an alert of it on stays on, and the period is kept for it
-// (ledger.LeaveOut): no record of it there, whatever is copied in for the
-// other rules, and whatever the history says of the period later. Judged
-// again, it is read as on a first day, and written from there. A day none
-// of the rules is judged for is of no use, and left a gap.
-func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule, a, b time.Time, first bool, o verdict.Options) error {
+// where it doesn't say which fired (source.GrafanaHistory.Judge), one it
+// passed over changes of or doesn't tell the alerts of apart, one with a
+// firing a write can't hold, one whose name twice holds. Nothing of it is
+// written or taken away, an alert of it on stays on, and the period is
+// kept for it (ledger.LeaveOut): no record of it there, whatever is copied
+// in for the other rules, and whatever the history says of the period
+// later. Judged again, it is read as on a first day, and written from
+// there. A day none of the rules is judged for is of no use, and left a
+// gap.
+func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule, twice map[string]bool, a, b time.Time, first bool, o verdict.Options) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
 	// The periods each rule was left out of the copies before.
@@ -226,13 +279,10 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		return slices.ContainsFunc(out[rule], func(h [2]time.Time) bool { return !t.Before(h[0]) && t.Before(h[1]) })
 	}
 	// A rule left out up to a, and judged again from it, is read as on a
-	// first day: an alert of it on at a is written from there. One whose
-	// name is another rule's still isn't read for: the read is no longer
-	// for it.
-	shared := source.SharedNames(where, rs, all)
+	// first day: an alert of it on at a is written from there.
 	back := map[string]bool{}
 	for _, r := range rs {
-		if !shared[r.Name] && slices.ContainsFunc(out[r.Name], func(h [2]time.Time) bool { return h[0].Before(a) && !h[1].Before(a) }) {
+		if slices.ContainsFunc(out[r.Name], func(h [2]time.Time) bool { return h[0].Before(a) && !h[1].Before(a) }) {
 			back[r.Name] = true
 		}
 	}
@@ -246,12 +296,26 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	} else if lead := a.Add(-source.JudgedLead); len(back) > 0 && lead.Before(read) {
 		read = lead
 	}
-	j, err := s.cfg.JudgedHistory.Judge(ctx, where, rs, all, read, b)
+	// The rules of every version in effect across what is written, from
+	// the settle before it, for a history that doesn't say which rule each
+	// change is of: a name two of them gave is neither's. Not across the
+	// day a first day is read from besides, which would leave a rule out
+	// for a day once its title was shared.
+	ever, err := s.everRules(ctx, p, b)
+	if err != nil {
+		return err
+	}
+	j, err := s.cfg.JudgedHistory.Judge(ctx, where, rs, all, ever, read, b)
 	if err != nil {
 		return err
 	}
 	if j.Passed > 0 {
 		s.log.Warn("changes of state in Grafana's alert state history passed over, past what lapilli reads of one", "changes", j.Passed)
+	}
+	for _, r := range rs {
+		if twice[r.Name] && !slices.Contains(j.Shared, r.Name) {
+			j.Shared = append(j.Shared, r.Name)
+		}
 	}
 	// The rules left out of the day. A firing a write can't hold (more
 	// than 32 labels, labels past 4 KB, a name that doesn't show) leaves

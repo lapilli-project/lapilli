@@ -412,7 +412,9 @@ func TestServeGrafanaJudgedLeftOut(t *testing.T) {
 // A firing on across a gap, or two, that the history says ended a round
 // or more after the copies went on past them is written again from its
 // start within the spans it lies across, ended: each gap stays one, never
-// read as days with a record.
+// read as days with a record. Each gap is of a round the title is shared
+// in and of the round after, which writes from when a version of the
+// rules held the other rule.
 func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 	for name, c := range map[string]struct {
 		rounds []bool // a round each two hours, a title shared or not
@@ -421,8 +423,8 @@ func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 		// The day the firing ends follows a gap, a round on.
 		"a gap, ended a round after": {[]bool{false, true, false, false}, 5},
 		// Two gaps, the firing ending in the second.
-		"two gaps":              {[]bool{false, true, false, true, false}, 5},
-		"two gaps, ended after": {[]bool{false, true, false, true, false}, 7},
+		"two gaps":              {[]bool{false, true, false, false, true, false, false}, 7},
+		"two gaps, ended after": {[]bool{false, true, false, false, true, false, false}, 11},
 	} {
 		rounds := c.rounds
 		ctx := context.Background()
@@ -474,18 +476,20 @@ func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 // copies cover again, in every round after it: the first after the gap,
 // shorter than --settle, writes it from its start, and the next, which
 // reads it again from where it truly began, in the gap, writes it from
-// there too, rather than taking the copy away. The gap stays one.
+// there too, rather than taking the copy away. The gap stays one: of the
+// round the title is shared in, and of the round after, which writes from
+// when a version of the rules held the other rule.
 func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 	ctx := context.Background()
 	g := &dupGrafana{ordersGrafana: &ordersGrafana{more: []alertChange{
-		{"Normal", "Alerting", "search", now.Add(time.Hour + 45*time.Minute)},
+		{"Normal", "Alerting", "search", now.Add(2*time.Hour + 15*time.Minute)},
 	}}}
 	s := judgingServer(t, g)
 	raw := ""
 	for i, r := range []struct {
 		at  time.Duration
 		dup bool
-	}{{0, false}, {2 * time.Hour, true}, {2*time.Hour + 30*time.Minute, false}, {4 * time.Hour, false}, {6 * time.Hour, false}} {
+	}{{0, false}, {2 * time.Hour, true}, {2*time.Hour + 30*time.Minute, false}, {3 * time.Hour, false}, {4 * time.Hour, false}, {6 * time.Hour, false}} {
 		g.mu.Lock()
 		g.dup = r.dup
 		g.mu.Unlock()
@@ -498,7 +502,7 @@ func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 		if s.status.errWhat != "" {
 			t.Fatalf("round %d failed: %s: %s", i, s.status.errWhat, s.status.err)
 		}
-		if i < 2 {
+		if i < 3 {
 			continue
 		}
 		fs, err := s.l.RecordedFirings(ctx, ledger.GrafanaSource, now.Add(-48*time.Hour), now.Add(48*time.Hour))
@@ -509,7 +513,7 @@ func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 		for _, f := range fs {
 			if f.Labels["service"] == "search" {
 				n++
-				if !f.Start.Equal(now.Add(2*time.Hour)) || !f.End.IsZero() {
+				if !f.Start.Equal(now.Add(2*time.Hour+30*time.Minute)) || !f.End.IsZero() {
 					t.Errorf("round %d: search's firing %s to %s, not from the gap's end, on", i, f.Start, f.End)
 				}
 			}
@@ -523,8 +527,10 @@ func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, sp := range spans {
-		if in := now.Add(time.Hour); !sp[0].After(in) && sp[1].After(in) {
-			t.Errorf("the gap is covered: %v", spans)
+		for _, in := range []time.Time{now.Add(time.Hour), now.Add(2*time.Hour + 15*time.Minute)} {
+			if !sp[0].After(in) && sp[1].After(in) {
+				t.Errorf("the gap is covered at %s: %v", in, spans)
+			}
 		}
 	}
 }

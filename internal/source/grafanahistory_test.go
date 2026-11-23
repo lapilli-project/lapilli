@@ -35,7 +35,10 @@ type fakeGrafana struct {
 	lines    []fakeLine
 	asked    []string
 	auth     []string
-	// stream is a label each line's stream has, for Loki's answers.
+	// byUID is the id of each rule's uid, for alertUID; renamed, the title
+	// an answer of one rule alone gives a rule of an id.
+	byUID   map[string]int64
+	renamed map[int64]string
 }
 
 type fakeLine struct {
@@ -65,7 +68,14 @@ func (g *fakeGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			limit = 100
 		}
 		var out []annotation
+		uid := q.Get("alertUID")
 		for _, a := range g.notes {
+			if uid != "" && (g.byUID[uid] == 0 || a.AlertID != g.byUID[uid]) {
+				continue
+			}
+			if title, ok := g.renamed[a.AlertID]; ok && uid != "" {
+				a.AlertName = title
+			}
 			if a.Time >= from && a.Time <= to {
 				out = append(out, a)
 			}

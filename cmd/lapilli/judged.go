@@ -59,7 +59,7 @@ func (f *verdictFlags) judgeFromHistory(ctx context.Context, known []rules.Rule,
 	if len(all) == 0 {
 		all = known
 	}
-	j, err := gh.Judge(ctx, hw.Serves, rs, all, f.opts.From.Add(-source.JudgedLead), f.opts.To)
+	j, err := gh.Judge(ctx, hw.Serves, rs, all, nil, f.opts.From.Add(-source.JudgedLead), f.opts.To)
 	if err != nil {
 		return not(err.Error())
 	}
