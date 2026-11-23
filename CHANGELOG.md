@@ -29,7 +29,16 @@ Before upgrading:
   was ended at once (Fixed).
 - **`FAIL_MISSED` with `LAPILLI_SERVE`** needs serve 0.70.0: an older one
   refuses it, and the job says so. With replicas of both, a job asks
-  again once every one is.
+  again once every one is. A rule serve reads from an API that writes
+  its expression otherwise than the repository's file does
+  (Prometheus's rules API, `--loaded-rules`) leaves the incidents that
+  hang on it not known, failing the job: compared by text, the two
+  differ.
+- **Where `--ruler-tenant` or `--loki-tenant` is set**, a ruler proposal
+  made before 0.70.0 kept no tenant and is refused once approved:
+  propose it again. One left applying across the upgrade stays applying
+  until an admin closes it: let changes settle before upgrading (Fixed
+  (security)).
 - **An on-call feed's turn at a time the clocks skip or show twice** is
   read as RFC 5545 reads it: 02:30 in the gap is 03:30, where 0.69 made
   it 01:30; of two, the first. A repeat is worked out on the clock it is
@@ -60,14 +69,17 @@ Before upgrading:
   comment says which, when the change leaves an incident a rule caught
   before it caught by no rule after it, as `--fail-missed` does. The
   rules that differ are judged by the backtest; the rules left alone by
-  serve's record of what caught each incident, not replayed: a rule the
-  pull request holds alike, or one serve runs that it doesn't hold,
-  keeps an incident caught. One that a rule left alone may have caught
-  unrecorded (serve doesn't run it, its runs don't cover the incident's
-  time, it couldn't be replayed then), or that a rule after the change
-  that couldn't be replayed may catch, is not known
-  (`missed_not_known`), and fails the job held to it. Nothing more is
-  asked of the history (docs/design/backtests.md, step 4).
+  serve's record of what caught each incident, not replayed, a catch
+  counting only where the rule was written then as it is after the
+  change: a rule the pull request holds alike, or one serve runs now
+  that it doesn't hold, keeps an incident caught only so. One that a
+  rule left alone may have caught unrecorded (serve doesn't run it as
+  the pull request has it, its runs don't cover the incident's time, it
+  couldn't be replayed then), that a rule written otherwise then caught,
+  or that a rule after the change that couldn't be replayed may catch,
+  is not known (`missed_not_known`), and fails the job held to it.
+  Nothing more is asked of the history (docs/design/backtests.md, step
+  4).
 - **A Loki ruler's rules changed through its API** (`lapilli serve
   --changes`): a rule read with `--loki-loaded-rules` is written, once
   approved, through Loki's ruler's configuration API
@@ -115,7 +127,9 @@ Before upgrading:
   tracker): a comment people wrote in Lapilli and changed after it was
   posted has the job's post changed, once; a comment from the tracker
   changed there after it was copied is taken again, as the tracker's,
-  once. A deletion isn't followed. The tasks token may change a comment
+  once. A post is compared as the tracker gives it back, so a save that
+  changed nothing edits nothing; an edit the tracker refuses is said and
+  passed over. A deletion isn't followed. The tasks token may change a comment
   copied in from the tracker, by a later edit alone (`PATCH
   /api/v1/tasks/{id}/comments/{comment}` with `text` and `edited`), and
   nothing more (docs/design/trackers.md, "Edits followed").
@@ -127,14 +141,19 @@ Before upgrading:
 - **A feed's own `VTIMEZONE`**: a `TZID` that isn't an IANA name, such
   as Outlook's `Pacific Standard Time`, is read by the feed's
   `VTIMEZONE` of that name, wherever it is in the feed; with none, a
-  Windows zone name is read by CLDR's table. An IANA name still wins.
+  Windows zone name is read by CLDR's table. An IANA name of a place
+  (Europe/Berlin) still wins over the feed's `VTIMEZONE`; the feed's
+  wins over IANA's names for a fixed offset (`EST`, `MST`,
+  `Etc/GMT+5`). A `VTIMEZONE`'s rules are yearly, holding a day each
+  year: a monthly or daily one, or one with a year of no day (29
+  February), is refused, and the events in it are passed over and said.
 - **`lapilli serve` says a firing came after its incident ended**, its
   condition having held in it, as `lapilli verdict` does: `late`,
   `fired_after`, `after` and `held_from` in `/api/v1/report`, the
   digest, a report's missed incidents, the Incidents page and an
   incident's own ("✗ nothing in time; after its end: RULE +1m"), a
-  rule's page, and MCP. Worked out as the pages are read, within bounds
-  a page that passes them says it has cut.
+  rule's page, and MCP, and `late_cut` where one read of them was cut
+  short at its bounds.
 - **With no record, how many of a rule's firings went well past its
   bounds is said of a range, and of comparisons joined by `and`, `or`
   and `unless`** (Grafana's `&&`, `||`, ranges and classic conditions
@@ -144,7 +163,8 @@ Before upgrading:
   record: which conditions").
 - **A `for` one log line can't outlast**, of LogQL's `count_over_time`,
   `rate`, `bytes_over_time` and `bytes_rate`, in a Loki rule and a
-  Grafana rule's instant Loki query, as of PromQL's counts of events
+  Grafana rule's instant Loki query, a pipeline starting with a line
+  filter, `|=` or `!=` alike, as of PromQL's counts of events
   (docs/design/loki.md).
 - **`lapilli serve --shutdown-delay DUR`**, and the chart's
   `serve.shutdownDelaySeconds` (5, with more than one replica): how long
@@ -170,9 +190,20 @@ Before upgrading:
 - **Grafana IRM's incidents carry no linked alerts, and the docs say
   why**: its incident API lists none, and its OnCall API's alert groups
   name no incident (docs/design/links.md, "Grafana IRM").
-- A step of an on-call repeat is a period and each day it holds, so a
-  feed of thousands of repeats whose days make no turn can now be
-  refused at the 2,000,000 steps.
+- **A step of an on-call feed's repeats is a period, or a month of a
+  yearly one, and each day it makes, those `BYSETPOS` or a limiting part
+  drops among them**, where 0.69 counted a week of a weekly repeat as
+  one; the feed's 2,000,000 steps take its zones' too. A feed of many
+  repeats whose days make no turn can now pass the bound and be refused,
+  as 2,000 yearly repeats keeping one day in 366 (`BYSETPOS=-366`),
+  340 KB, are.
+- **A `TZID` that is IANA's name for a fixed offset** (`EST`, `MST`,
+  `HST`, `Etc/GMT+5`) is read by the feed's own `VTIMEZONE` of that name,
+  when it has one, where 0.69 read IANA's fixed offset: a feed's `EST`
+  that keeps summer time was an hour off all summer.
+- The chart refuses a `loki.tenant` or `rules.ruler.tenant` with `|`,
+  `/`, `\` or a line break as it renders, where the pod refused it as it
+  started.
 - CI's and the release's tests are given forty minutes, where twenty
   left the serve package unfinished on a slow macOS runner.
 
@@ -196,11 +227,24 @@ Before upgrading:
   503. It made `test/e2e/replicas.sh` fail about once in 60 runs.
 - **A rule judged from Grafana's own alert state history had no severity
   in `lapilli serve`** (0.68.0 to 0.69.2): it has the one its labels
-  say, as every other rule has.
+  say, as every other rule has. And a severity serve joined for rules
+  of one name read one extra (`critical/critical/warning`, where verdict
+  says `critical/warning`).
+- **A change approved through a Mimir's, a Cortex's or a Loki's ruler
+  is written only in the tenant it was proposed in** (affected: 0.23.0
+  to 0.69.2, Mimir's and Cortex's) (security). serve started again on
+  the same ruler with `--ruler-tenant` naming another tenant read the
+  change again there, and wrote it whenever the rule hashed alike. Such
+  a change is refused once approved now, and one sent but not yet read
+  back is read back only in its own tenant.
 - **An on-call feed's turn at a time the clocks skip or show twice**
-  was read an hour off: 02:30 in the gap is 03:30, as RFC 5545 (3.3.5)
-  reads it, where 0.69 made it 01:30; of two, the first, where 0.69
-  took the second east of UTC.
+  was read an hour off. A `DTSTART` is read as RFC 5545 (3.3.5) reads
+  one: 02:30 in the gap is 03:30, where 0.69 made it 01:30; of two, the
+  first, where 0.69 took the second east of UTC. A repeat's day the
+  clocks skip is read so too, and kept and counted by `COUNT`: there
+  Lapilli departs from RFC 5545 on purpose, whose 3.3.10 says such a day
+  is ignored and not counted, as a turn dropped would leave no one on
+  call.
 - **An on-call zone's name over 256 bytes is refused**: a feed could
   keep 1,024 names of 64 KB each.
 

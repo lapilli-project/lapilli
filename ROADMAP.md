@@ -223,7 +223,10 @@ never leaves a success. Through serve too since 0.70, which judges the
 rules left alone by its record. Still to do:
 
 - Through serve, a rule left alone that serve doesn't run: an incident
-  only it may catch is not known, where it could be replayed.
+  only it may catch is not known, where it could be replayed. And a rule
+  serve reads from an API that writes its expression otherwise
+  (Prometheus's rules API): compared by text, its catches count for
+  nothing; compared as parsed, they would.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left
