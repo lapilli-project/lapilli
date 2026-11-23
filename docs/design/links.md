@@ -158,12 +158,49 @@ that carry an `alertname` as its `alerts`:
 | FireHydrant | the alert's `labels` (`GET /v1/incidents/{incident_id}/alerts`), arbitrary pairs; its Alertmanager source names the labels a group's alerts share `alertmanager/labels-NAME`, read with the prefix taken off | one a page of an incident's alerts |
 | Jira Service Management | the alert's `extraProperties`, which keep the `details` Alertmanager's Opsgenie notifier sends: from 0.22.0, the labels its group's alerts share. The incident API that lists an incident's alerts is in beta | one a page of an incident's alert ids, and one an alert (the operations API) |
 
+Grafana IRM isn't among them: its documented APIs don't tie an incident
+to its alerts (below, "Grafana IRM").
+
 An alert with no `alertname` is left out, and how many were is said on
 stderr, as counts alone. Every label an alert carries is kept: one a
 replayed firing doesn't have is passed over in judging, above.
 `ALERT_LABELS` narrows them to those it names, and `ALERTS=no` reads
 none. They are tested against each API's documented
 answers with a server standing in, not against real accounts.
+
+### Grafana IRM
+
+Grafana IRM's incident API and its OnCall API were read for this (0.70),
+and between them they don't say which alerts an incident came from:
+
+- **The incident API** (`IncidentsService.QueryIncidents`, `GetIncident`)
+  gives an incident's `labels` (its own, `key` and `label`), and its
+  `refs`, "associated IDs in third-party systems", each a `key`, a `ref`
+  and the `url` of "the incident in the third-party system". No method of
+  its ten services (activity, fields, incidents, integrations, key
+  updates, roles, severities, status, tasks, users) lists an incident's
+  alerts or alert groups. `CreateIncidentRequest` takes an `alertGroupID`,
+  "the alert group associated with this incident", and the Incident it
+  answers doesn't give it back.
+- **The OnCall API** gives an alert group's alerts
+  (`GET /api/v1/alerts/?alert_group_id=ID`), each with the payload it came
+  with: an Alertmanager integration's is the group Alertmanager sent, its
+  `alerts` with their labels, `alertname` among them (a legacy one's, one
+  alert and its `labels`). But an alert group (`GET /api/v1/alert_groups/`:
+  its id, integration, team, route, state, times, labels, title, links and
+  last alert) names no incident. OnCall, declaring an incident from an
+  alert group, gives the incident the group's page as an attachment
+  (`attachURL`), which the incident API doesn't give back as the group's
+  id.
+
+So `grafana-irm.sh` writes no `alerts`, and doesn't guess them: an alert
+group's page, or a `ref` whose meaning the reference doesn't give, taken
+for the link, would credit an alert with an incident on a reading no one
+documented, and a wrong link makes a firing white. Its incidents are
+judged by time and labels, as before, and with `--linked-only` they list
+none, so they are judged as before too. Once the incident API gives an
+incident's alert groups (their ids), the recipe can read each group's
+alerts from the OnCall API, its labels in the payload, as the others do.
 
 ## Cost and bounds
 
@@ -222,8 +259,24 @@ Done since:
 
 Open:
 
-1. **Grafana IRM** keeps alerts beside incidents; its recipe doesn't read
-   them yet. FireHydrant's and Jira Service Management's are read (the
-   latter from an API in beta).
+1. **Grafana IRM**: its documented APIs don't tie an incident to its
+   alerts (above, "Grafana IRM"), so its recipe reads none; asked again
+   when they do.
 2. **`--linked-only` as a setting** of the UI, tried first as `--lead` is,
    rather than a flag.
+
+## Sources
+
+- Grafana IRM's incident API, its services, `Incident`, `IncidentRef` and
+  `CreateIncidentRequest`:
+  https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/incident/api/reference/
+- The OnCall API's alert groups and alerts, and how it is reached:
+  https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/oncall/oncall-api-reference/,
+  https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/oncall/oncall-api-reference/alertgroups/,
+  https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/oncall/oncall-api-reference/alerts/
+- What an Alertmanager integration's alert holds, and a legacy one's:
+  https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/integrations/alert-sources/alertmanager/
+- The fields an alert group gives, and how OnCall declares an incident from
+  one: `engine/apps/public_api/serializers/alert_groups.py` and
+  `engine/apps/alerts/tasks/declare_incident.py` in
+  https://github.com/grafana/oncall (archived; IRM continues it)

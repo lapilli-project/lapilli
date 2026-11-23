@@ -1338,6 +1338,10 @@ func TestCompassLogsBounded(t *testing.T) {
 	}
 }
 
+// Grafana IRM's incidents, as IncidentsService.QueryIncidents gives them.
+// One has a ref to OnCall, as the reference's example has: the recipe
+// writes no alerts for it, and asks nothing else, as no documented API
+// says which alerts an incident came from (docs/design/links.md).
 func TestGrafanaIRMRecipe(t *testing.T) {
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

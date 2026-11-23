@@ -45,7 +45,10 @@ judging, one the firing doesn't carry (an external label Prometheus added)
 is passed over, and one both carry must agree. A PagerDuty alert from an
 Alertmanager before 0.30.0, whose details say `alertname` beside text that
 may be anything, is its rule alone, with the labels `ALERT_LABELS` names
-from its details. `ALERTS=no` reads none,
+from its details. Grafana IRM's APIs don't say which alerts an incident
+came from (its incident API gives none, and its OnCall API's alert groups
+name no incident), so `grafana-irm.sh` writes none
+([links.md](../../docs/design/links.md#grafana-irm)). `ALERTS=no` reads none,
 `ALERT_LABELS` keeps the labels it names alone, to narrow them, and
 `MAX_ALERT_REQUESTS` (2000) is the most they ask for a run, past which they
 stop and write nothing.
