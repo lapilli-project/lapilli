@@ -362,3 +362,39 @@ func TestEventsRecipeOversize(t *testing.T) {
 		t.Errorf("%d deliveries kept, want %d", got, want)
 	}
 }
+
+// A batch whose body jq writes longer than serve takes (a DEL is six bytes
+// as \u007f) is sent one event at a time, and an event serve can't take
+// alone is passed over: the run goes on, where it stopped there for good.
+func TestEventsRecipeLongBody(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		s := notifyServer(t, nil)
+		s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+		srv := httptest.NewServer(s.NotifyHandler())
+		defer srv.Close()
+		events := filepath.Join(t.TempDir(), "events.jsonl")
+		lines := recorded(t, "alertmanager-0.35.0.jsonl")
+		var notes [][]byte
+		for _, l := range lines {
+			if bytes.Contains(l, []byte(`"notification"`)) {
+				notes = append(notes, l)
+			}
+		}
+		pad := func(l []byte, n int) []byte {
+			return append([]byte(`{"pad":"`+strings.Repeat("\x7f", n)+`",`), l[1:]...)
+		}
+		// Four of 100 KB, 2.4 MB as jq writes them; one of 300 KB, 1.8 MB
+		// alone, which serve can't take.
+		appendLines(t, events, [][]byte{pad(notes[0], 100<<10), pad(notes[1], 100<<10), pad(notes[2], 100<<10), pad(notes[3], 100<<10)}, nil)
+		appendLines(t, events, [][]byte{pad(notes[4], 300<<10)}, nil)
+		appendLines(t, events, notes[5:7], nil)
+		code, out := runEvents(t, recipeEnv(srv.URL, tokenFile(t, notifyToken), "", "BATCH=4"), "file", events)
+		if code != 0 || !strings.Contains(out, "sent one at a time") || !strings.Contains(out, "1 events serve can't take, passed over (413)") {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		if got := kept2(t, s); got != 6 {
+			t.Errorf("%d deliveries kept, want 6", got)
+		}
+	})
+}

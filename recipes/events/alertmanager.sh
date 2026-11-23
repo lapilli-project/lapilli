@@ -71,9 +71,11 @@ if [ "$BATCH" = x ] || [ "$BATCH" -gt 1000 ]; then
 fi
 case $POLL in *[!0-9]* | '' | 0) say "POLL is a number of seconds"; exit 2 ;; esac
 case $FOLLOW in true | false) ;; *) say "FOLLOW is true or false"; exit 2 ;; esac
-# A request's body is 1 MB at most: what is sent is held under it, the
-# brackets and commas of a batch counted.
+# A request's body is 1 MiB at most (bodymax): a batch is read to under
+# 1 MB of lines (maxbody), the brackets and commas counted, and checked
+# again as jq writes it.
 maxbody=1000000
+bodymax=1048576
 # How much of the file is read at a time.
 maxread=16777216
 
@@ -130,11 +132,45 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' INT TERM HUP
 
-# post FILE: the events in FILE, one a line, as one JSON array. 0 when
-# serve took them, or refused them as events it can't read (they are
-# passed over, and said: sent again, they would be refused again); 1
-# otherwise, and the offset isn't moved. A line that isn't a JSON object
-# isn't an event: it is left out, and counted.
+# send BODY: BODY posted to serve; the answer's status in code, the
+# answer in $work/answer. curl tries again on 429 and 5xx, after what
+# Retry-After says. A body over what serve takes isn't sent: 413.
+send() {
+  if [ "$(wc -c <"$1" | tr -d ' ')" -gt "$bodymax" ]; then
+    code=413
+    printf '"over %s bytes"' "$bodymax" >"$work/answer"
+    return
+  fi
+  code=$(printf 'Authorization: Bearer %s\n' "$token" |
+    curl -q -sS --proto "$proto" --max-time 60 --max-filesize 1048576 --retry "$RETRIES" --retry-max-time 300 -X POST -H @- \
+      -H 'Content-Type: application/json' --data-binary "@$1" -o "$work/answer" -w '%{http_code}' "$target") || code=failed
+}
+
+# answered N: what serve said of N events sent; 0 when it took them, or
+# refused them as events it can't read (400), or as too large alone
+# (413): they are passed over, and said, as sent again they would be
+# refused again; 1 otherwise, and the offset isn't moved.
+answered() {
+  case $code in
+    2??)
+      # Numbers alone: nothing the server says acts on a terminal.
+      say "$1 events sent, $(jq -r '(.kept // 0) | tonumber' "$work/answer" 2>/dev/null || echo 0) deliveries kept"
+      ;;
+    400 | 413)
+      say "$1 events serve can't take, passed over ($code): $(jq -Rsc '.[0:300]' "$work/answer")"
+      ;;
+    *)
+      say "the events weren't sent ($code): $(jq -Rsc '.[0:300]' "$work/answer" 2>/dev/null || echo '""')"
+      return 1
+      ;;
+  esac
+}
+
+# post FILE: the events in FILE, one a line, as one JSON array; when serve
+# takes no body so large (jq may write it longer than it was read: a
+# DEL as \u007f), or answers 413 (too large), one at a time. 0 when each
+# was taken or passed over (answered); 1 otherwise. A line that isn't a
+# JSON object isn't an event: it is left out, and counted.
 post() {
   jq -cRs '[split("\n")[] | select(length > 0) | (fromjson? // null) | select(type == "object")]' "$1" >"$work/body" 2>/dev/null || {
     say "the events couldn't be read"
@@ -144,25 +180,20 @@ post() {
   events=$(jq length "$work/body")
   [ "$events" -eq "$lines" ] || say "$((lines - events)) lines that aren't an event left out (the recorder's Kafka output writes JSON with format: json)"
   [ "$events" -gt 0 ] || return 0
-  # curl tries again on 429 and 503, after what Retry-After says.
-  code=$(printf 'Authorization: Bearer %s\n' "$token" |
-    curl -q -sS --proto "$proto" --max-time 60 --max-filesize 1048576 --retry "$RETRIES" --retry-max-time 300 -X POST -H @- \
-      -H 'Content-Type: application/json' --data-binary "@$work/body" -o "$work/answer" -w '%{http_code}' "$target") || code=failed
-  case $code in
-    2??)
-      # Numbers alone: nothing the server says acts on a terminal.
-      say "$events events sent, $(jq -r '(.kept // 0) | tonumber' "$work/answer" 2>/dev/null || echo 0) deliveries kept"
-      return 0
-      ;;
-    400)
-      say "$events events serve can't read, passed over: $(jq -Rsc '.[0:300]' "$work/answer")"
-      return 0
-      ;;
-    *)
-      say "the events weren't sent ($code): $(jq -Rsc '.[0:300]' "$work/answer" 2>/dev/null || echo '""')"
-      return 1
-      ;;
-  esac
+  send "$work/body"
+  if [ "$code" != 413 ] || [ "$events" -eq 1 ]; then
+    answered "$events"
+    return
+  fi
+  say "$events events in more than serve takes at once: sent one at a time"
+  rm -f "$work"/one.*
+  jq -c '.[]' "$work/body" | split -a 4 -l 1 - "$work/one."
+  for one in "$work"/one.*; do
+    [ -f "$one" ] || continue
+    { printf '['; cat "$one"; printf ']'; } >"$work/body"
+    send "$work/body"
+    answered 1 || return 1
+  done
 }
 
 # batches FILE: FILE's lines, BATCH at most and under maxbody bytes in all,

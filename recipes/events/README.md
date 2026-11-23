@@ -43,7 +43,9 @@ the topic.
   serve didn't take (it was down, or refused the token) stops the run,
   which exits 1, and is sent again the next time. One serve answers 400,
   events it can't read as the recorder's, is passed over and said: sent
-  again, it would be refused again. A consumer group's offsets are
+  again, it would be refused again. One answered 413, or whose body is
+  over 1 MiB as `jq` writes it, is sent an event at a time, and an event
+  serve can't take alone is passed over, and said. A consumer group's offsets are
   committed by `kcat` once it has read the messages, so a run stopped
   before it sent them doesn't read them again: keep offsets in a file for
   at least once.
