@@ -339,6 +339,16 @@ type Config struct {
 	// RLIMIT_DATA on Linux (scenario.CanCap), none elsewhere; 0 for no cap.
 	Promtool       string
 	PromtoolMemory uint64
+
+	// Clock is the time serve judges by, read as time.Now is, nil for
+	// time.Now: what its runs replay up to, the weeks its pages show, when
+	// the digest falls due. lapilli demo --serve pins it to the end of its
+	// sample's week (docs/design/demo.md). The wall clock, which proposals
+	// expire by and the outbox keeps, stays the machine's.
+	Clock func() time.Time
+	// Listening is told where the UI's listener was bound, once, before it
+	// serves; nil for no one: lapilli demo --serve says the URL to open.
+	Listening func(net.Addr)
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -675,6 +685,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l),
 		impactTries: tries{limit: impactTriesAnHour}, settingsTries: tries{limit: settingsTriesAnHour}}
+	if cfg.Clock != nil {
+		s.now = cfg.Clock
+	}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
 	s.life, s.end = context.WithCancel(context.Background())
 	s.parsing.base, s.parsing.log = s.life, log
@@ -979,6 +992,9 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("--listen: %w", err)
 	}
 	s.listening(ln.Addr())
+	if s.cfg.Listening != nil {
+		s.cfg.Listening(ln.Addr())
+	}
 	if s.in != nil && s.in.oidc != nil {
 		// Asked at once, so a setting that is wrong is in the log at start,
 		// not first found by someone signing in.

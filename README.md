@@ -81,7 +81,8 @@ lapilli demo
 
 `lapilli demo` replays seven made-up rules over a week of history made up
 in the process, and prints a report like the one above: nothing to
-connect, nothing read or sent. Then
+connect, nothing read or sent. `lapilli demo --serve` shows the same week
+in `lapilli serve`'s pages, read-only, on this machine alone. Then
 [Getting started](docs/getting-started.md) does the same on your own rules.
 
 ## Why

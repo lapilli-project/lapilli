@@ -1,10 +1,10 @@
 # `lapilli demo`: a first report, with nothing to connect
 
-Status: proposed, built in the same pull request. Under
-[GOVERNANCE.md](../../GOVERNANCE.md) a new command is designed first, as a
-pull request open for a week; this one carries the code too, so the
-design can be read beside what it does. It adds nothing to the ledger,
-and changes how no firing is judged.
+Status: proposed, built in the same pull request; `--serve` (0.70), the
+same way, in its own. Under [GOVERNANCE.md](../../GOVERNANCE.md) a new
+command is designed first, as a pull request open for a week; this one
+carries the code too, so the design can be read beside what it does. It
+adds nothing to the ledger, and changes how no firing is judged.
 
 ## Why
 
@@ -40,7 +40,8 @@ history is another: the sample's, answered in the process.
   directory of `os.MkdirTemp`'s and read from there as anyone's are, and
   the directory removed after.
 
-It takes `--json` and `--tz`, as verdict does, and nothing else. After the
+It takes `--json` and `--tz`, as verdict does, and `--serve` with
+`--listen` (below), and nothing else. After the
 report it says how to run the same on one's own rules, and `lapilli
 impact suggest` for those with no incidents written down: on stdout, or
 on stderr with `--json`, so that stdout is the JSON alone.
@@ -64,10 +65,98 @@ with it, on purpose.
 - Write anywhere but its temporary directory, which it removes.
 - Read a file of the user's: its flags name none.
 
-## Later: `--serve`
+With `--serve` it listens, on loopback alone, read-only; the rest holds
+as it does without.
 
-`lapilli demo --serve` would start `lapilli serve` on a temporary ledger
-of the sample, the weeks of the sample laid on the four weeks before now,
-on loopback alone, and remove the ledger on exit. It is a step of its own,
-with its own look from an attacker's point of view: a port, however
-local.
+## `--serve`: the same sample in serve's pages
+
+`lapilli demo --serve` is `lapilli serve`, its own code from the flags
+on, over the same sample: the rules read from a file and replayed by its
+hourly job, the firings judged and kept in a ledger, the week's digest
+worked out, the pages, the API and MCP served from the ledger. As with
+the report, only the history is another; and the clock.
+
+- **The flags** (`demoServeArgs`): the rules, and the incidents of the
+  sample's week, written to a directory of `os.MkdirTemp`'s, and the
+  ledger kept in the same directory; `--read-only`; `--check-replay=false`,
+  as the sample has no `ALERTS` to set the replay beside; `--backfill` from
+  the week's Monday to the clock, `--settle 0s` and `--digest mon@00:00`;
+  and the demo's `--tz`. No flag names anything else to read, or anywhere
+  to send to.
+- **The incidents** are the week's alone. serve judges a week's firings by
+  the incidents of that week and the two before it (`Options.RecordWeek`),
+  and the week's keep its record. The week before's, which the report
+  gives for its first days, would be shown as missed here: nothing is
+  replayed over them.
+- **The clock** (`serve.Config.Clock`) is pinned to Monday 16 November
+  2026, 00:15, in the zone shown: the end of the week, and the 15 minutes
+  (`--lead`) after it in which a firing of its last minutes could still
+  catch an incident. The first run replays the week from its Monday up to
+  it. The digest, which waits for the runs to be that far past the week,
+  falls due at its end and works it out, its suggestions and near misses
+  with it. Later runs have nothing to replay. Every page that shows weeks
+  shows the sample's as the last whole one, the overview beside the week
+  before, which is empty: the ledger began with it. `/api/v1/report`'s
+  last seven days, from 00:15 to 00:15, hold the same firings. The wall
+  clock, which proposals expire by and the outbox keeps, stays the
+  machine's: read-only, nothing is made by it.
+- **Where it listens**: `--listen`, a loopback address written as one and
+  a port, `127.0.0.1:0` by default, a free port. A name (`localhost`
+  among them, which the resolver could make another address), an address
+  left out (`:8080`, every interface), any other address, and a port that
+  isn't digits (a service's name would be looked up) are refused before
+  anything is written. `serve.Config.Listening` is told the address bound,
+  and the demo says the URL to open.
+- **The end**: serve takes SIGINT and SIGTERM as it always does, and
+  closes the ledger; the demo removes the directory after. Killed outright
+  (SIGKILL), it can't: the directory, `lapilli-demo-*` under the system's
+  temporary directory, stays, holding the sample and nothing else.
+
+The seam is `serveOn`: `lapilli serve` with a `serveWith`, which gives the
+history in place of `--prometheus`'s, the clock, and who is told where it
+listens. `newHistory` isn't called; a test fails if it is. serve's log
+says warnings and errors alone, so that the URL is what is read.
+
+`TestDemoServe` holds what it serves to what `lapilli demo --json`
+reports: the firings, stones, refires, hours and episodes of each rule,
+and what caught each incident, in `/api/v1/report` over the week and by
+default; and the overview, the incidents and a rule's page to the week,
+its suggestion and its near miss.
+
+### Reviewed as an attacker would
+
+A port, however local, is reached by every process and every user of the
+machine, and by every page a browser there opens.
+
+- **Writes.** Read-only: every request is a viewer's, and every write of
+  the UI's, the API's and MCP's is refused, 403 (`need`, `teamWrite`).
+  Without it, serve on loopback with no roles takes everyone for an admin.
+  Its writes would stay in the temporary ledger, of made-up data, removed
+  at the end; but some start work (a setting changed judges every firing
+  again, a proposal is backtested), anyone on the machine could make them,
+  and what people write is stamped by the wall clock, a week and more
+  after the week the pages show. A demo is to be looked at: read-only
+  leaves nothing to start but reading.
+- **Another site's page, by a name (DNS rebinding).** Over loopback,
+  serve answers an address, `localhost` and a name under `.localhost`
+  alone (`hostOK`): a name of the attacker's pointed at 127.0.0.1 is
+  refused, 421, before anything is read, and so is a name without dots.
+  The demo gives no `--allowed-hosts` and no `--external-url`.
+- **Another site's page, by a request.** The cross-origin check
+  (`http.CrossOriginProtection`) refuses what isn't a GET or a HEAD from
+  another origin, read-only aside, and `/mcp` an `Origin` not its own.
+  Answers carry no CORS header, so a page can't read them, and
+  `frame-ancestors 'none'` keeps them out of its frames. What such a page
+  can still make it do is answer GETs, each bounded as serve bounds any (a
+  heavy report one at a time), over a week of made-up data.
+- **Read.** The files it reads are its directory's: the rules (again
+  every minute), the incidents, the ledger; and the zone's data, as any
+  program does. No flag names another file, and no request names one.
+- **Sent.** Nothing. The history is the sample's, answered in the process;
+  no flag gives a Grafana, a ruler, alarms, Loki, an on-call feed, a
+  webhook, Slack, a sign-in's provider or another port, and
+  `TestDemoServeSendsNothing` holds serve's configuration to that, a
+  field at a time: one added with a default fails it until it is looked
+  at. `TestDemoServe` fails every request made through Go's default
+  transport, and none is.
+- **Held.** Nothing of the user's: the sample, and the ledger made of it.

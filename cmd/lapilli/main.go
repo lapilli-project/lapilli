@@ -21,8 +21,9 @@ you know whether it earns its page; an incident with no stone is one your
 alerts missed.
 
 Usage:
-  lapilli demo                       see it on sample data, with nothing
-                                     to connect
+  lapilli demo [--serve]             see it on sample data, with nothing
+                                     to connect: a report, or serve's
+                                     pages on this machine
   lapilli verdict --rules FILE --prometheus URL --incidents FILE
                                      replay rules against history
   lapilli verdict --alerts --prometheus URL --incidents FILE

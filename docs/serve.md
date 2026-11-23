@@ -17,6 +17,10 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 # then http://localhost:8080
 ```
 
+To look at the pages before connecting anything, `lapilli demo --serve`
+serves a made-up week of a small shop's alerts, read-only, on this
+machine alone ([Getting started](getting-started.md#see-it-first-on-sample-data)).
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-dashboard-dark.png">
   <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks, most beside the week before, and a link to the list that makes it; under them, what to look at: rules to quiet or look at, each with a button to make it a task" src="../assets/serve-dashboard.png" width="820">

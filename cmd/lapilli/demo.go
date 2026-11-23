@@ -27,6 +27,7 @@ and sends nothing anywhere (docs/design/demo.md).
 
 Usage:
   lapilli demo [--json] [--tz ZONE]
+  lapilli demo --serve [--listen ADDR] [--tz ZONE]
 
   --json              the whole report, every firing included, as lapilli
                       verdict --json gives it
@@ -35,6 +36,16 @@ Usage:
                       sample's week, from Monday 9 November 2026, is laid
                       in this zone: the report is the same in every zone
                       but for the zone it names
+  --serve             the same sample in lapilli serve's pages and API, by
+                      its own code: its rules, history and incidents in a
+                      ledger of a temporary directory, its clock pinned to
+                      the end of the sample's week, which its pages show.
+                      Read-only, on this machine alone, it says the URL to
+                      open, and runs until Ctrl-C (or SIGTERM), which
+                      removes the ledger
+  --listen ADDR       with --serve, where to listen: a loopback address and
+                      a port, 127.0.0.1:PORT or [::1]:PORT, and no other
+                      (default 127.0.0.1:0, a free port)
 
 The same on your own rules, and incidents written down:
   lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -55,36 +66,62 @@ func demoWeek(loc *time.Location) time.Time { return time.Date(2026, 11, 9, 0, 0
 const demoPrometheus = "lapilli-demo-sample"
 
 func runDemo(args []string, stdout, stderr io.Writer) int {
-	asJSON := false
-	var tz string
+	asJSON, serving := false, false
+	var tz, listen string
+	listenSet := false
 	for i := 0; i < len(args); i++ {
 		name, val, hasVal := strings.Cut(args[i], "=")
 		switch {
 		case name == "-h" || name == "--help":
 			fmt.Fprint(stdout, demoUsage)
 			return 0
-		case name == "--json":
+		case name == "--json" || name == "--serve":
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
 				return demoBad(stderr, verdict.Clean(err.Error()))
 			}
-			asJSON = on
-		case name == "--tz":
+			if name == "--json" {
+				asJSON = on
+			} else {
+				serving = on
+			}
+		case name == "--tz" || name == "--listen":
+			what := "a zone"
+			if name == "--listen" {
+				what = "an address"
+			}
 			if !hasVal {
 				if i+1 == len(args) {
-					return demoBad(stderr, "--tz needs a zone")
+					return demoBad(stderr, name+" needs "+what)
 				}
 				i++
 				val = args[i]
 			}
-			// None named isn't the machine's, nor UTC as verdict would read
-			// it: refused.
+			// A zone none names isn't the machine's, nor UTC as verdict would
+			// read it; an address none names isn't the default: refused.
 			if val == "" {
-				return demoBad(stderr, "--tz needs a zone")
+				return demoBad(stderr, name+" needs "+what)
 			}
-			tz = val
+			if name == "--tz" {
+				tz = val
+			} else {
+				listen, listenSet = val, true
+			}
 		default:
 			return demoBad(stderr, fmt.Sprintf("unknown flag %s", verdict.Clean(name)))
+		}
+	}
+	switch {
+	case serving && asJSON:
+		return demoBad(stderr, "--json is the report's: with --serve, /api/v1/report gives it")
+	case listenSet && !serving:
+		return demoBad(stderr, "--listen is where --serve listens: give --serve")
+	case !serving:
+	case !listenSet:
+		listen = demoListen
+	default:
+		if err := loopbackOnly(listen); err != nil {
+			return demoBad(stderr, fmt.Sprintf("--listen %s: %v", verdict.Clean(listen), err))
 		}
 	}
 	loc := time.Local
@@ -101,6 +138,9 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 	s, err := readDemoSample()
 	if err != nil {
 		return fail(err)
+	}
+	if serving {
+		return demoServe(s, loc, tz, listen, stdout, stderr)
 	}
 	// The rules and the incidents as files, for verdict to read as it reads
 	// anyone's; removed after.
