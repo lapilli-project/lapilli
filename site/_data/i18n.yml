@@ -1,0 +1,166 @@
+# The words of the site's header and footer, in each language the front
+# page is in: site/index.md, and site/LANG/index.md with lang: LANG. docs/
+# is in English only, so a page with no lang is English, and the language
+# menu on it goes to each language's front page. The languages are those of
+# lapilli serve's UI, in the order of its menu.
+order: [en, es, ja, ko]
+
+en:
+  name: English
+  code: EN
+  locale: en_US
+  home: /
+  skip: Skip to the content
+  site_nav: Site
+  docs: Docs
+  how: How it judges
+  install: Install
+  contribute: Contribute
+  roadmap: Roadmap
+  menu: Menu
+  language: Language
+  others_home: The docs are in English; the front page is in each of these.
+  star: Star
+  star_more: " Lapilli on GitHub"
+  start: Get started
+  notes: release notes
+  tagline: Which of your alerts are worth their page?
+  license: Apache-2.0, open source
+  f_project: Project
+  f_docs: Documentation
+  f_community: Community
+  getting_started: Getting started
+  releases: Releases
+  docs_home: All the docs
+  faq: FAQ
+  troubleshooting: Troubleshooting
+  issues: Issues
+  discussions: Discussions
+  first_issues: Good first issues
+  contributing: Contributing
+  security: Security
+  governance: Governance
+  maintainers: Maintainers
+  font: Heebo, under the SIL Open Font License 1.1
+  copy: Copy
+  copied: Copied
+
+es:
+  name: Español
+  code: ES
+  locale: es_ES
+  home: /es/
+  skip: Saltar al contenido
+  site_nav: Sitio
+  docs: Documentación
+  how: Cómo juzga
+  install: Instalar
+  contribute: Contribuir
+  roadmap: Hoja de ruta
+  menu: Menú
+  language: Idioma
+  others_home: ""
+  star: Star
+  star_more: " a Lapilli en GitHub"
+  start: Empezar
+  notes: notas de la versión
+  tagline: ¿Cuáles de tus alertas merecen avisar a alguien?
+  license: Código abierto, Apache-2.0
+  f_project: Proyecto
+  f_docs: Documentación (en inglés)
+  f_community: Comunidad
+  getting_started: Primeros pasos
+  releases: Versiones
+  docs_home: Toda la documentación
+  faq: Preguntas frecuentes
+  troubleshooting: Solución de problemas
+  issues: Issues
+  discussions: Discusiones
+  first_issues: Primeras issues
+  contributing: Cómo contribuir
+  security: Seguridad
+  governance: Gobernanza
+  maintainers: Mantenedores
+  font: Heebo, bajo la SIL Open Font License 1.1
+  copy: Copiar
+  copied: Copiado
+
+ja:
+  name: 日本語
+  code: JA
+  locale: ja_JP
+  home: /ja/
+  skip: 本文へスキップ
+  site_nav: サイト
+  docs: ドキュメント
+  how: 判定のしくみ
+  install: インストール
+  contribute: 貢献する
+  roadmap: ロードマップ
+  menu: メニュー
+  language: 言語
+  others_home: ""
+  star: Star
+  star_more: " (GitHub の Lapilli)"
+  start: はじめる
+  notes: リリースノート
+  tagline: そのアラート、人を呼ぶ価値はありますか？
+  license: Apache-2.0 のオープンソース
+  f_project: プロジェクト
+  f_docs: ドキュメント (英語)
+  f_community: コミュニティ
+  getting_started: はじめに
+  releases: リリース
+  docs_home: ドキュメント一覧
+  faq: よくある質問
+  troubleshooting: トラブルシューティング
+  issues: Issue
+  discussions: Discussions
+  first_issues: 初めての Issue
+  contributing: 貢献ガイド
+  security: セキュリティ
+  governance: ガバナンス
+  maintainers: メンテナー
+  font: Heebo フォント (SIL Open Font License 1.1)
+  copy: コピー
+  copied: コピーしました
+
+ko:
+  name: 한국어
+  code: KO
+  locale: ko_KR
+  home: /ko/
+  skip: 본문으로 건너뛰기
+  site_nav: 사이트
+  docs: 문서
+  how: 정탐 기준
+  install: 설치
+  contribute: 기여하기
+  roadmap: 로드맵
+  menu: 메뉴
+  language: 언어
+  others_home: ""
+  star: Star
+  star_more: " (GitHub 의 Lapilli)"
+  start: 시작하기
+  notes: 릴리스 노트
+  tagline: 그 알림, 사람을 호출할 만한가요?
+  license: Apache-2.0 오픈소스
+  f_project: 프로젝트
+  f_docs: 문서 (영어)
+  f_community: 커뮤니티
+  getting_started: 시작하기
+  releases: 릴리스
+  docs_home: 전체 문서
+  faq: 자주 묻는 질문
+  troubleshooting: 문제 해결
+  issues: 이슈
+  discussions: 토론
+  first_issues: 첫 기여 이슈
+  contributing: 기여 안내
+  security: 보안 정책
+  governance: 거버넌스
+  maintainers: 메인테이너
+  font: Heebo 글꼴, SIL Open Font License 1.1
+  copy: 복사
+  copied: 복사했어요

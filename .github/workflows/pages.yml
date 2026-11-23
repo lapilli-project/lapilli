@@ -5,7 +5,8 @@ name: pages
 # Cloudflare with the proxy off; with the proxy on, GitHub can't issue the
 # certificate. docs/ is published at /docs/ (site/docs.sh). A pull request
 # that changes any of it builds the site, checks it with axe, and deploys
-# nothing.
+# nothing. The pages name the latest release, so a release, once published,
+# builds and deploys the site again (workflow_run).
 
 on:
   push:
@@ -14,6 +15,9 @@ on:
   pull_request:
     paths: ["site/**", "assets/**", "docs/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
 
 permissions:
   contents: read
@@ -24,6 +28,9 @@ concurrency:
 
 jobs:
   build:
+    # After the release workflow: only a tag's run, not a dry run, and only
+    # once it has published.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -32,9 +39,10 @@ jobs:
       - id: pages
         if: github.event_name != 'pull_request'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
-      - name: Copy the brand images, the font and docs/ in, and set baseurl
+      - name: Copy the brand images, the font and docs/ in, and set baseurl and the version
         env:
           BASE: ${{ steps.pages.outputs.base_path }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cp assets/*.png site/
@@ -42,6 +50,23 @@ jobs:
           [ "$BASE" = "/" ] && BASE=""
           sh site/docs.sh "$BASE"
           echo "baseurl: \"$BASE\"" >> site/_config.yml
+          # The header, the front page and the footer name the latest
+          # release, and the commands to install it.
+          version=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "the latest release is \"$version\", not a version" >&2
+            exit 1
+          }
+          echo "version: \"$version\"" >> site/_config.yml
+          # The header links to the front page's sections by their ids, in
+          # every language: each translation has the English page's.
+          for f in site/*/index.md; do
+            grep -q '^lang: ' "$f" || continue
+            diff <(grep -o '{#[a-z-]*}' site/index.md) <(grep -o '{#[a-z-]*}' "$f") >/dev/null || {
+              echo "$f: its sections' ids aren't site/index.md's" >&2
+              exit 1
+            }
+          done
       - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
         with:
           source: ./site
