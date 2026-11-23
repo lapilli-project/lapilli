@@ -78,9 +78,13 @@ And, as wanted:
   (`HEAD~1`, `HEAD^`, its hash in any case or short, `HASH^0`, the
   branch's `NAME~1`, as git resolves it; a branch's name alone, such as
   `main`, is the branch the job named), is a merge's first parent, taken
-  only of the CI's merge: `HEAD^2` the pull request's head as the CI says
-  (GitHub's `pull_request.head.sha`), or, where it says none, `HEAD` a
-  merge. Of the pull request's own commit, such as GitHub Actions' checkout
+  only of the CI's merge: where the CI says the pull request's head
+  (GitHub's `pull_request.head.sha`), `HEAD` the commit it says it merged
+  it in (a `pull_request` event's `GITHUB_SHA`, of `refs/pull/N/merge`)
+  and `HEAD^2` that head, or, where it says none, `HEAD` a merge. A merge
+  with that head for its second parent isn't GitHub's by that alone: one
+  the pull request's author pushed has whatever first parent its author
+  chose. Of the pull request's own commit, such as GitHub Actions' checkout
   of `pull_request.head.sha`, a merge of its own among them (an "Update
   branch"), it is the pull request's own earlier commit, so with no
   `TARGET_BRANCH` the branch the CI says the pull request goes into is
@@ -88,6 +92,14 @@ And, as wanted:
   says none, a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
   `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS` is refused, and the job
   fails: give `TARGET` or `TARGET_BRANCH`, or check out the merge. A
+  `HEAD` that is neither the head the CI says nor its merge of it, such as
+  the pull request's branch checked out by its name (`ref:
+  github.head_ref`) after it moved, is refused with a gate or `STATUS`
+  whatever `TARGET` is, as both would say of the event's head what was
+  read of another commit: the job fails, and its status is a failure on
+  the event's head, saying so, whatever `STATUS_SHA` says, so that no
+  earlier run's success or pending there stands for this one. Check out
+  the head's commit (`ref: pull_request.head.sha`) or the merge. A
   `TARGET` the job gives where the CI says what the pull request goes into
   (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
   Azure's pull request builds) is the job's, and taken as it is, as one
@@ -165,7 +177,9 @@ And, as wanted:
   `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,
   or `HEAD` when it isn't a merge, and sets it only when that is the
   commit read or a parent of it, never the commit the pull request goes
-  into nor the one compared against. `STATUS_URL` links elsewhere, https,
+  into nor the one compared against; on GitHub, of a `HEAD` that is
+  neither the event's head nor GitHub's merge of it (`GITHUB_SHA`), the
+  refusal's failure alone, on the event's head. `STATUS_URL` links elsewhere, https,
   or http to this machine. A status is a commit's, not a pull request's:
   two pull requests of one branch into two bases, each with its job, set
   the same status on the same commit, the last one's standing for both;

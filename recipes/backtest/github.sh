@@ -63,6 +63,14 @@ ci_branch=${GITHUB_BASE_REF:-}
 # ... and its head, as the event says: HEAD^2 of the merge GitHub makes of
 # it, or HEAD itself where the job checks the head out.
 ci_head=$status_commit
+# ... and that merge, which a pull_request event's run is of: GITHUB_SHA,
+# where GITHUB_REF is refs/pull/N/merge. A merge with the head for its
+# second parent isn't GitHub's by that alone: one the pull request's
+# author pushed since has whatever first parent its author chose.
+ci_merge=
+case ${GITHUB_REF:-} in
+  refs/pull/*/merge) ci_merge=${GITHUB_SHA:-} ;;
+esac
 status_link=
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
   status_link=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID

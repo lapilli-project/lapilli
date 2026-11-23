@@ -17,9 +17,11 @@
 #
 # and may set status_commit, the pull request's head commit as its CI
 # says, and status_link, the job's page, for STATUS; and ci_branch, the
-# branch the pull request goes into as its CI says, and ci_head, the pull
-# request's head commit as it says, by which a TARGET of HEAD's first
-# parent is told the CI's merge's or the pull request's own (commits); or
+# branch the pull request goes into as its CI says, ci_head, the pull
+# request's head commit as it says, and ci_merge, the commit its CI says
+# it made merging that head into the branch, by which a TARGET of HEAD's
+# first parent is told the CI's merge's or the pull request's own, and a
+# HEAD that is neither the head nor that merge is told (commits); or
 # ci_base, that its CI says the commit or the branch the pull request goes
 # into, which the script gave as TARGET or TARGET_BRANCH, unless the job
 # gave its own TARGET: one given there is the job's, and taken as it is.
@@ -114,7 +116,11 @@
 #                    commit the backtest read, or a parent of it, a merge
 #                    the CI made of the pull request: of a merge, the
 #                    parent that is the pull request's, never TARGET nor
-#                    the commit compared against
+#                    the commit compared against. Where the CI says the
+#                    pull request's head (GitHub's event) and HEAD is
+#                    neither that head nor the CI's merge of it, the one
+#                    status set is the refusal's failure, on that head,
+#                    whatever STATUS_SHA says
 #   STATUS_URL       optional: the page the status links to, https, or
 #                    http to this machine (default the job's, as the CI
 #                    says)
@@ -134,18 +140,27 @@
 #                    last (git merge-base), as are the expectations of the
 #                    rules in place; INCIDENTS is TARGET's own. HEAD's
 #                    first parent, however written (HEAD^1, HEAD~1, HEAD^,
-#                    its hash), is taken only of the CI's merge: HEAD^2 the
-#                    pull request's head as the CI says, or, where it says
-#                    none, HEAD a merge. Of the pull request's own commit,
-#                    a merge of its own among them, with no TARGET_BRANCH,
-#                    the branch the CI says it goes into is taken (GitHub's
-#                    GITHUB_BASE_REF), or else, with a gate (FAIL_ON_ERROR,
-#                    FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED, FAIL_MISSED) or
-#                    STATUS, the run is refused and the job fails, as it
-#                    would judge the pull request against itself. A TARGET
-#                    given where the CI says the base (Gitea's Actions,
-#                    GitLab's merge requests, Bitbucket's and Azure's pull
-#                    requests) is taken as it is
+#                    its hash), is taken only of the CI's merge: where the
+#                    CI says the pull request's head, HEAD the commit it
+#                    says it merged it in (GitHub's GITHUB_SHA of
+#                    refs/pull/N/merge) and HEAD^2 that head, or, where it
+#                    says none, HEAD a merge. Of the pull request's own
+#                    commit, a merge of its own among them, with no
+#                    TARGET_BRANCH, the branch the CI says it goes into is
+#                    taken (GitHub's GITHUB_BASE_REF), or else, with a gate
+#                    (FAIL_ON_ERROR, FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED,
+#                    FAIL_MISSED) or STATUS, the run is refused and the job
+#                    fails, as it would judge the pull request against
+#                    itself. So is a HEAD that is neither the head the CI
+#                    says nor its merge of it, a branch checked out by name
+#                    and moved since: with a gate or STATUS the run is
+#                    refused and the job fails, as they would say of that
+#                    head what was read of another commit; its status is
+#                    a failure on that head, saying so, never one on HEAD
+#                    or on STATUS_SHA. A TARGET given where the CI says
+#                    the base (Gitea's Actions, GitLab's merge requests,
+#                    Bitbucket's and Azure's pull requests) is taken as it
+#                    is
 #   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
 #                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
@@ -968,9 +983,13 @@ missed_judged=
 # trouble WHAT [LOG]: the backtest can't be what the comment shows: WHAT,
 # said in the comment, with LOG's last lines.
 problem=
-# refused is why commits refused the run: a gate or a status would judge
-# the pull request against its own commit. It fails the job.
+# refused is why commits refused the run, in a few words, for the status:
+# a gate or a status would judge the pull request against its own commit,
+# or say of its head what was read of another. It fails the job. strayed:
+# HEAD is neither the pull request's head as the CI says nor the CI's merge
+# of it, so the only status set is the refusal's failure, on that head.
 refused=
+strayed=
 trouble() {
   problem=$1
   : >"$tmp/problem.log"
@@ -1066,6 +1085,17 @@ own_parent() {
   [ -n "$p" ] && [ "$(git -C "$repo" rev-parse --verify -q "$1^{commit}" 2>/dev/null)" = "$p" ]
 }
 
+# ci_merged: whether HEAD is the merge the CI made of the pull request,
+# its first parent the commit the pull request goes into, where the CI
+# says its head (ci_head): the commit the CI says is that merge
+# (ci_merge), its second parent the head, as a clone that has its parents
+# shows. The parents alone don't say: a merge the pull request's author
+# made of the head has it for a parent too, the other any commit.
+ci_merged() {
+  [ -n "${ci_merge:-}" ] && [ "$(git -C "$repo" rev-parse --verify -q "HEAD^{commit}" 2>/dev/null)" = "$ci_merge" ] &&
+    [ "$(git -C "$repo" rev-parse --verify -q "HEAD^2^{commit}" 2>/dev/null)" = "$ci_head" ]
+}
+
 # commits: the pull request's commit, $head, and the commit its rules are
 # compared against, $base: the last HEAD and TARGET share.
 commits() {
@@ -1073,23 +1103,42 @@ commits() {
     trouble "REPO isn't a git clone" "$tmp/git.log"
     return 1
   fi
+  # Where the CI says the pull request's head (ci_head), the run is that
+  # commit's: the host shows the job's end on it, and the status goes on
+  # it. HEAD is it, or the merge the CI says it made of it (ci_merge, in a
+  # clone of any depth); any other is what the job checked out since, a
+  # branch by its name after it moved, which the pull request's author
+  # can make a merge of that head with anything. A gate or a status would
+  # say of the head what was read of another commit: refused, the job
+  # fails, and the status, if one is asked for, is a failure on the head
+  # the CI says, saying why, so that no earlier run's success or pending
+  # there stands for this one.
+  if [ -n "${ci_head:-}" ] && at=$(git -C "$repo" rev-parse --verify -q "HEAD^{commit}" 2>/dev/null) && [ "$at" != "$ci_head" ] && [ "$at" != "${ci_merge:-}" ]; then
+    strayed=1
+    if [ -n "$strict$held$required$missed_gate$status_on" ]; then
+      refused="HEAD isn't the pull request's head as the CI says, nor the CI's merge of it"
+      trouble "HEAD $at is neither the pull request's head as the CI says, $ci_head, nor the CI's merge of it: the gates and the status would say of that head what was read of another commit. Check out the pull request's head commit, or the merge commit the CI made of it"
+      return 1
+    fi
+  fi
   # HEAD^1 is the first parent of a merge the CI made: of HEAD that isn't
   # one, the pull request's own commit, which it would be judged against,
   # INCIDENTS read from it, a gate passed and a status set by it; and so is
   # it of a pull request's head that is a merge of its own (an "Update
   # branch", a merge --no-ff), checked out as it is. A TARGET of HEAD's
   # first parent, however written (HEAD^1, HEAD~1, HEAD^, its hash), is
-  # taken for the CI's merge's only when it is one: HEAD^2 the pull
-  # request's head as the CI says (ci_head), or, where the CI says none,
-  # HEAD a merge. A TARGET the job gave where the CI says the base itself
-  # (ci_base) is the job's, as one the script took from the CI is. Otherwise the branch the CI says it goes into is taken
-  # instead; or, with none, a gate or a status is refused: the job fails,
-  # its status a failure saying why. A HEAD whose parent the clone hasn't (a depth of 1)
-  # has no HEAD^1: said below.
+  # taken for the CI's merge's only when it is one: where the CI says the
+  # pull request's head (ci_head), HEAD the commit it says it merged it in
+  # (ci_merged), or, where the CI says none, HEAD a merge. A TARGET the job
+  # gave where the CI says the base itself (ci_base) is the job's, as one
+  # the script took from the CI is. Otherwise the branch the CI says it
+  # goes into is taken instead; or, with none, a gate or a status is
+  # refused: the job fails, its status a failure saying why. A HEAD whose
+  # parent the clone hasn't (a depth of 1) has no HEAD^1: said below.
   if [ -z "${TARGET_BRANCH:-}" ] && { [ -z "$target_given" ] || [ -z "${ci_base:-}" ]; } && own_parent "$TARGET"; then
     merged=
     if [ -n "${ci_head:-}" ]; then
-      [ "$(git -C "$repo" rev-parse --verify -q "HEAD^2^{commit}" 2>/dev/null)" != "$ci_head" ] || merged=1
+      ! ci_merged || merged=1
     elif [ "$(git -C "$repo" rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)" -ne 2 ]; then
       merged=1 # a merge, or a commit whose parents the clone hasn't
     fi
@@ -1097,8 +1146,8 @@ commits() {
       TARGET_BRANCH=$ci_branch
       say "HEAD isn't the CI's merge of the pull request: compared with the branch it goes into, $TARGET_BRANCH"
     elif [ -z "$merged" ] && [ -n "$strict$held$required$missed_gate$status_on" ]; then
-      refused="TARGET $TARGET is HEAD's first parent, but HEAD isn't the CI's merge of the pull request: that parent is the pull request's own commit, which the gates and the status would judge it against. Give TARGET or TARGET_BRANCH, the branch it goes into, or check out the merge commit"
-      trouble "$refused"
+      refused="TARGET is the pull request's own commit, not the branch it goes into"
+      trouble "TARGET $TARGET is HEAD's first parent, but HEAD isn't the CI's merge of the pull request: that parent is the pull request's own commit, which the gates and the status would judge it against. Give TARGET or TARGET_BRANCH, the branch it goes into, or check out the merge commit"
       return 1
     fi
   fi
@@ -2286,7 +2335,7 @@ main() {
   # A run refused (commits) fails the job whatever else is on, and its
   # status, if one is asked for, says why: STATUS alone is a gate too.
   if [ -n "$refused" ]; then
-    rc=1 why="refused: TARGET is the pull request's own commit, not the branch it goes into"
+    rc=1 why="refused: $refused"
   fi
   if ! post; then
     say "the comment couldn't be posted"
@@ -2338,8 +2387,11 @@ status() {
     say "the commit status $status_context wasn't set"
     return 1
   fi
+  # A run refused is a failure, whatever RC says.
   state=success
-  [ "$1" = 0 ] || state=failure
+  if [ "$1" != 0 ] || [ -n "$refused$strayed" ]; then
+    state=failure
+  fi
   desc=$(printf '%s' "$2" | cut -c 1-140)
   if ! post_status "$state" "$desc"; then
     say "the commit status $status_context couldn't be set on $status_sha"
@@ -2359,6 +2411,8 @@ status() {
 # success on the commit. Never fails.
 status_start() {
   [ -n "$status_on" ] || return 0
+  # A run refused has no backtest under way.
+  [ -z "$refused$strayed" ] || return 0
   status_on_commit 2>/dev/null || return 0
   # Left before it is asked: a signal while it is set ends the job with a
   # failure, not with a status that may be pending.
@@ -2388,8 +2442,21 @@ status_died() {
 # the commits, it must be the commit read, or a parent of it, which a
 # merge the CI made of the pull request is, but the one it goes into,
 # TARGET, or the one compared against: no other commit is said to be what
-# it judged.
+# it judged. Where HEAD is neither the head the CI says nor the CI's merge
+# of it (strayed), the run was refused (commits), and the commit is that
+# head, for the refusal's failure alone (status): the commit the host
+# shows this job's end on, where an earlier run's success or pending
+# would else stand for this one. Never HEAD, another event's to judge, nor
+# STATUS_SHA, which may name it.
 status_on_commit() {
+  if [ -n "$strayed" ]; then
+    if ! full_hash "$ci_head"; then
+      say "the pull request's head commit, as the CI says, isn't a full hash: no status set"
+      return 1
+    fi
+    status_sha=$ci_head
+    return 0
+  fi
   status_sha=${STATUS_SHA:-${status_commit:-}}
   if [ -z "$status_sha" ] && [ -n "${head:-}" ]; then
     if [ "$(git -C "$repo" rev-list --parents -n 1 "$head" | wc -w)" -gt 2 ]; then

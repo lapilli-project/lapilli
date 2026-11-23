@@ -254,7 +254,7 @@ comment does:
 
 | Host | Status | The token |
 |---|---|---|
-| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
+| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha`, when the checkout is that commit or GitHub's merge of it (`GITHUB_SHA`): of another, such as the branch checked out by name after it moved, the run is refused, the job fails, and the status is a `failure` there saying so | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
 | GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit | the Developer role (the comment's Reporter can't), scope `api` |
 | Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, `INPROGRESS` then `SUCCESSFUL` or `FAILED`, key `lapilli-backtest` (a key's status written over by the next), its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
 | Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
