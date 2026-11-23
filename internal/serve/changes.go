@@ -942,8 +942,11 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		ev.Cloud, ev.NoPath = r.Cloud, noPathAlarmFile
 	case s.lokiKept(f):
 		// A Loki ruler's rule, from its API: written there as a Mimir's is,
-		// on a path of its own, never taken for --ruler's.
-		if err := s.apiPropose(ctx, rulerTarget{s: s, loki: true}, &p, &ev, f, want, e, b, q.Value); err != nil {
+		// on a path of its own, never taken for --ruler's, in the tenant it
+		// was read in.
+		tg := rulerTarget{s: s, loki: true}
+		e = tg.tenanted(e)
+		if err := s.apiPropose(ctx, tg, &p, &ev, f, want, e, b, q.Value); err != nil {
 			return 0, err
 		}
 	case f.doc.Logs != "":
@@ -957,7 +960,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			p.AfterHash = "" // Grafana says, once it is applied
 		}
 	case s.rulerKept(f):
-		if err := s.apiPropose(ctx, rulerTarget{s: s}, &p, &ev, f, want, e, b, q.Value); err != nil {
+		tg := rulerTarget{s: s}
+		e = tg.tenanted(e)
+		if err := s.apiPropose(ctx, tg, &p, &ev, f, want, e, b, q.Value); err != nil {
 			return 0, err
 		}
 	case !f.doc.API && len(f.doc.Data) > 0:

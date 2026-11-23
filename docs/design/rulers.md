@@ -253,7 +253,9 @@ them is now written there as a Mimir's is. Before, it was for a person.
   `--changes-ruler-token-file`'s; without it, writes carry no token, for a
   Loki reached only in the cluster. Loki has no authorization of its own:
   a gateway in front of it checks a token. `--loki-tenant` is sent as
-  `X-Scope-OrgID` on reads and writes alike.
+  `X-Scope-OrgID` on reads and writes alike, and a change is written only
+  in the tenant it was proposed in, as a Mimir's is (Security, "A proposal
+  is written where it was read").
 - **Only where it was told.** As `--ruler`'s: every request to `--loki`'s
   host, no redirect followed, 30 seconds, 4 MB a group and 64 MB the list.
   A namespace or group whose name isn't written to (`NameOK`) is for a
@@ -643,7 +645,21 @@ in the namespaces or rule groups of one ruler. It is held so:
 - **A proposal is written where it was read.** The place is worked out
   again from `--ruler` and the proposal's namespace and group, and must be
   the proposal's source: one made against another ruler, before a restart
-  changed the flag, is refused.
+  changed the flag, is refused. From v0.70.0 the tenant is part of the
+  place too. A Mimir's, a Cortex's or a Loki's proposal keeps the tenant
+  its rule was read in (`--ruler-tenant`, `--loki-tenant`; none when
+  none is set). One made in another tenant than serve sends now, on the
+  same ruler, is refused once approved ("the rule was read in another
+  tenant"), and nothing is sent; one sent and not yet read back is read
+  back only in its own tenant, and stays applying, saying why, while serve
+  names another. Before, a restart naming another tenant on the same ruler
+  had an approved change read again and written there whenever the rule
+  hashed alike. A proposal made before v0.70.0 kept no tenant, and is
+  taken as made with none: it is written, and read back, only while no
+  tenant is set. Where one is set, such a proposal is refused once
+  approved, to be proposed again; one left applying across the upgrade
+  stays applying until an admin closes it, so let changes settle before
+  upgrading a ruler with tenants.
 - **Never from outside.** Nothing the notifications or incidents ports
   take becomes a write; the changes token can't see ruler proposals, which
   are no recipe's.

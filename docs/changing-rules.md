@@ -130,7 +130,10 @@ would now be missed), and the rule as it was is kept for undo. Then:
   `--changes-aws-role`, `--changes-azure-client-id`), and read back: an
   Amazon namespace stays applying while it is `UPDATING`. A group goes
   with its last rule; an Amazon namespace's or an Azure rule group's last
-  rule is for a person.
+  rule is for a person. A Mimir's or a Cortex's change is written only in
+  the tenant it was proposed in (`--ruler-tenant`): after a restart naming
+  another, it is refused once approved. One proposed before 0.70.0, which
+  kept no tenant, is written only while none is set.
 - **A rule kept in Loki's ruler**, read with `--loki-loaded-rules`, is
   changed through Loki's ruler's API (`/loki/api/v1/rules`) as a Mimir's
   is, and only in the namespaces `--changes-in` names as `loki:NAMESPACE`
@@ -138,7 +141,8 @@ would now be missed), and the rule as it was is kept for undo. Then:
   `shop`, never Loki's. It takes a way of its own, Loki's ruler's API, so
   that it is written only to `--loki`. Writes carry
   `--changes-loki-token-file`'s token, a token of their own, and
-  `--loki-tenant` as `X-Scope-OrgID`. Loki takes writes only when its ruler
+  `--loki-tenant` as `X-Scope-OrgID`, in the tenant the change was
+  proposed in alone. Loki takes writes only when its ruler
   keeps its rules in an object store (or on the filesystem through its
   object store client, `use_thanos_objstore`), not in local files
   (`ruler.storage.type: local`). A rule read from a Loki's rule files

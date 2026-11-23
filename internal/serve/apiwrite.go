@@ -132,6 +132,9 @@ const (
 	notThereRuler = "--ruler no longer names the ruler the change was sent to: it is read back there once it does again, and never sent again"
 	notThereLoki  = "--loki no longer names the Loki the change was sent to, or --loki-loaded-rules is left out: it is read back there once they do again, and never sent again"
 	notThereAlarm = "--alarms no longer names where the change was sent: it is read back there once it does again, and never sent again"
+	// otherTenant is why a change sent is still applying when serve sends
+	// another tenant to its ruler than it was sent in.
+	otherTenant = "--ruler-tenant or --loki-tenant no longer names the tenant the change was sent in: it is read back in that tenant once it does again, and never sent again"
 )
 
 // targetOf is where a proposal's rule is changed, nil for none.
@@ -487,11 +490,13 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 	ev := proposalEvidence(p)
 	var u apiUnit
 	err := errors.New("the proposal names no rule read through an API")
-	elsewhere := false
+	elsewhere, tenant := false, false
 	if tg != nil && ev.Edit != nil && ev.Edit.Namespace != "" {
 		// Read back where it was sent, and nowhere else: a restart that
-		// points the flag elsewhere leaves it applying.
-		if elsewhere = tg.owns(p.Source, *ev.Edit) != nil; !elsewhere {
+		// points the flag elsewhere, or names another tenant, leaves it
+		// applying.
+		owned := tg.owns(p.Source, *ev.Edit)
+		if elsewhere, tenant = owned != nil, errors.Is(owned, source.ErrOtherTenant); !elsewhere {
 			u, err = tg.readBack(ctx, p, *ev.Edit)
 		}
 	}
@@ -517,6 +522,9 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 			return nil
 		}
 		return err
+	}
+	if tenant {
+		return still(otherTenant)
 	}
 	if elsewhere {
 		return still(tg.notThere())
@@ -847,8 +855,26 @@ func (t rulerTarget) allowed(_ string, e rules.Edit) string {
 	return ""
 }
 
+// owns: the source is the ruler's for the namespace, and the change was
+// proposed in the tenant the ruler is asked in now (Edit.Tenant, set by
+// tenanted): a restart that names another tenant on the same ruler refuses
+// it. A proposal that recorded none, as before 0.70.0, is written only
+// while no tenant is set.
 func (t rulerTarget) owns(src string, e rules.Edit) error {
-	return t.r().Owns(src, e.Namespace, e.Group)
+	if err := t.r().Owns(src, e.Namespace, e.Group); err != nil {
+		return err
+	}
+	if e.Tenant != t.r().Tenant {
+		return source.ErrOtherTenant
+	}
+	return nil
+}
+
+// tenanted is a change as it is proposed through the ruler: with the
+// tenant it was read in, which owns asks again.
+func (t rulerTarget) tenanted(e rules.Edit) rules.Edit {
+	e.Tenant = t.r().Tenant
+	return e
 }
 
 func (t rulerTarget) unit(ctx context.Context, _ string, e rules.Edit) (apiUnit, error) {

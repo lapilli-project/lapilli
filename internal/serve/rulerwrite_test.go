@@ -1268,3 +1268,60 @@ func TestRulerAzureIDCase(t *testing.T) {
 		t.Errorf("after the id's case changed: %+v", p)
 	}
 }
+
+// A change is written in the tenant it was proposed in (--ruler-tenant),
+// and nowhere else: serve restarted on the same Mimir naming another
+// tenant refuses an approved change, nothing sent; one proposed with no
+// tenant, as before the tenant was recorded, is refused once a tenant is
+// set; and one left applying is read back only in the tenant it was sent
+// in, saying so meanwhile.
+func TestRulerTenantKept(t *testing.T) {
+	ctx := context.Background()
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	s := mimirServer(t, m, func(c *Config) { c.RulerTenant = "staging" })
+	h := s.Handler()
+	id := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+	if ev := proposalEvidence(state(t, s, id)); ev.Edit == nil || ev.Edit.Tenant != "staging" {
+		t.Fatalf("the tenant it was read in isn't kept: %+v", ev.Edit)
+	}
+	approve(t, h, id, ana)
+	s.ruler.Tenant = "prod" // a restart naming another tenant
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "another tenant") || len(m.written()) != 0 {
+		t.Fatalf("another tenant: %s %q, written %v", p.State, p.Reason, m.written())
+	}
+	// Proposed with no tenant, as before 0.70.0: refused once one is set.
+	s.ruler.Tenant = ""
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	none := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"20m"}})
+	approve(t, h, none, ana)
+	s.ruler.Tenant = "staging"
+	s.jobs(ctx, false)
+	if p := state(t, s, none); p.State != ledger.StateRefused || len(m.written()) != 0 {
+		t.Fatalf("no tenant recorded, one set now: %s %q, written %v", p.State, p.Reason, m.written())
+	}
+	// Sent in staging and not read back yet; serve then names prod: it
+	// stays applying, saying why, until it names staging again.
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	sent := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"25m"}})
+	approve(t, h, sent, ana)
+	tr := s.ruler.Transport.(*toStandIn)
+	s.ruler.Transport = &failAfterWrite{next: tr, m: m}
+	s.jobs(ctx, false)
+	m.failGets.Store(false)
+	s.ruler.Transport = tr
+	s.ruler.Tenant = "prod"
+	s.jobs(ctx, false)
+	if p := state(t, s, sent); p.State != ledger.StateApplying || p.Reason != otherTenant {
+		t.Fatalf("read back in another tenant: %s %q", p.State, p.Reason)
+	}
+	s.ruler.Tenant = "staging"
+	s.jobs(ctx, false)
+	if p := state(t, s, sent); p.State != ledger.StateApplied {
+		t.Errorf("its tenant again: %s %q", p.State, p.Reason)
+	}
+}
