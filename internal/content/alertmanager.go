@@ -320,16 +320,25 @@ func amRoute(m map[string]any, count *int, depth int) *route {
 		}
 		r.matchers = append(r.matchers, x)
 	}
+	// A value YAML reads as a number or true is the text written, as
+	// Alertmanager reads it into a string.
+	text := func(v any) string {
+		switch v := v.(type) {
+		case string:
+			return v
+		case int, int64, uint64, float64, bool:
+			return fmt.Sprint(v)
+		}
+		return ""
+	}
 	if mm, ok := m["match"].(map[string]any); ok {
 		for _, k := range slices.Sorted(maps.Keys(mm)) {
-			v, _ := mm[k].(string)
-			add(k, "=", v)
+			add(k, "=", text(mm[k]))
 		}
 	}
 	if mm, ok := m["match_re"].(map[string]any); ok {
 		for _, k := range slices.Sorted(maps.Keys(mm)) {
-			v, _ := mm[k].(string)
-			add(k, "=~", v)
+			add(k, "=~", text(mm[k]))
 		}
 	}
 	if l, ok := m["matchers"].([]any); ok {
