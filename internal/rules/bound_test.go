@@ -463,3 +463,19 @@ func TestBoundsDecide(t *testing.T) {
 		t.Error("classic conditions")
 	}
 }
+
+// What a bound compares is one value however it is bracketed, spaced or
+// commented around: as Grafana's are written out afresh.
+func TestCompares(t *testing.T) {
+	r := Rule{Name: "R", Expr: "(x) > 1 and ( x  # the same\n) < 5 or rate(y[5m]) > 2"}
+	bs := r.Bounds()
+	if len(bs) != 3 {
+		t.Fatalf("%+v", bs)
+	}
+	if a, b, c := r.Compares(bs[0]), r.Compares(bs[1]), r.Compares(bs[2]); a != "x" || b != "x" || c != "rate(y[5m])" {
+		t.Errorf("%q %q %q", a, b, c)
+	}
+	if got := r.Compares(Bound{At: 9}); got != "" {
+		t.Errorf("not the rule's: %q", got)
+	}
+}

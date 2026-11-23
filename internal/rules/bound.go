@@ -192,6 +192,22 @@ func (r Rule) BoundsDecide() bool {
 	return false
 }
 
+// Compares is what a bound of the rule's compares, as one value is told
+// from another: of PromQL, the expression without brackets around the
+// whole of it, comments and spaces around it, its spaces one, uncut, so
+// that (x) > 1 and x < 5 compare one value; of a Grafana rule, Of, which
+// is written out afresh. "" for a bound not of the rule's.
+func (r Rule) Compares(b Bound) string {
+	if r.Graph != nil {
+		return b.Of
+	}
+	cs := comparisons(r.Expr)
+	if b.At < 0 || b.At >= len(cs) {
+		return ""
+	}
+	return strings.Join(strings.Fields(unwrap(cs[b.At].value)), " ")
+}
+
 // decides is BoundsDecide of a PromQL expression, as operands reads it.
 func decides(expr string, depth int) bool {
 	lo, hi, ok := trimmed(expr)

@@ -217,9 +217,10 @@ func deciding(r rules.Rule) ([]rules.Bound, bool) {
 	}
 	// Of a range on one value, its ends set past each other hold nowhere:
 	// none could go well past both, which says nothing of a narrow one.
+	// One value however it is written: (x) is x (rules.Rule.Compares).
 	for _, lo := range bs {
 		for _, hi := range bs {
-			if lo.Of == hi.Of && lo.Unless == hi.Unless && lo.Above() && !hi.Above() && lo.Value < hi.Value && past(lo) >= past(hi) {
+			if lo.Unless == hi.Unless && lo.Above() && !hi.Above() && lo.Value < hi.Value && past(lo) >= past(hi) && r.Compares(lo) == r.Compares(hi) {
 				return nil, false
 			}
 		}
