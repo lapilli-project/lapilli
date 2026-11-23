@@ -478,6 +478,7 @@ func TestUnpagedSpanBounded(t *testing.T) {
 		return u, unpagedSpanRead.Load() - rows, unpagedSpanPages.Load() - pages
 	}
 	whole := Unpaged{Silence: 1, Nothing: 151}
+	wholeMuted := Unpaged{Silence: 2, Nothing: 150}
 	if u, rows, pages := count(); u != whole || rows != 450 || pages != 1 {
 		t.Errorf("in one statement: %+v, %d rows in %d statements", u, rows, pages)
 	}
@@ -494,9 +495,17 @@ func TestUnpagedSpanBounded(t *testing.T) {
 	if u, rows, pages := count(); u != (Unpaged{Silence: 1, Nothing: 79, Partial: true}) || rows != 200 || pages != 4 {
 		t.Errorf("200 at most: %+v, %d rows in %d statements", u, rows, pages)
 	}
+	// So it is of a rule with mutes: those of the second it is cut in read
+	// before the cut are counted alike, db-0's muted.
+	if _, _, err := l.KeepMutes(ctx, []Mute{{At: t0.Add(2*time.Hour + 30*time.Second), Rule: "Burst", Labels: map[string]string{"alertname": "Burst", "instance": "db-0"}, Kind: MutedSilence, Ref: "s-2"}}); err != nil {
+		t.Fatal(err)
+	}
+	if u, rows, _ := count(); u != (Unpaged{Silence: 2, Nothing: 78, Partial: true}) || rows != 200 {
+		t.Errorf("200 at most, the rule cut in with mutes: %+v, %d rows", u, rows)
+	}
 	// As many as there are: all read, and not said cut.
 	UnpagedFirings = 450
-	if u, rows, _ := count(); u != whole || rows != 450 {
+	if u, rows, _ := count(); u != wholeMuted || rows != 450 {
 		t.Errorf("as many as there are: %+v, %d rows", u, rows)
 	}
 	if p := plan(t, l, qUnpagedSpan, t0.Unix(), -1, t0.Add(24*time.Hour).Unix(), 10); scansAll(l, p, "firings") || !strings.Contains(p, "firings_start") {

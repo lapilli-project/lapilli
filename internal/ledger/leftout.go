@@ -48,8 +48,11 @@ func RuleName(name string) bool {
 // left out of what was copied in for source over [from, to): a period that
 // meets or overlaps one kept of the rule is run together with it. Kept
 // already, nothing is written. A rule past as many as have periods kept
+// lets go of the periods of the rules no longer among now, the source's
+// rules, those whose last period ended earliest first, as many as make
+// room; with none to let go of (now nil, the source's rules not known), it
 // fails the write, as ErrLeftOutFull.
-func (l *Ledger) LeaveOut(ctx context.Context, source string, rules []string, from, to time.Time) error {
+func (l *Ledger) LeaveOut(ctx context.Context, source string, rules, now []string, from, to time.Time) error {
 	switch {
 	case !ValidSource(source):
 		return fmt.Errorf("%w: not a source's name", ErrLeftOut)
@@ -67,11 +70,11 @@ func (l *Ledger) LeaveOut(ctx context.Context, source string, rules []string, fr
 	}
 	// Looked at first apart from a write: a round that leaves the same
 	// rules out of the same day again writes nothing.
-	if del, add, err := l.leavingOut(ctx, l.r, source, rules, from.Unix(), to.Unix()); err != nil || len(del)+len(add) == 0 {
+	if del, add, err := l.leavingOut(ctx, l.r, source, rules, now, from.Unix(), to.Unix()); err != nil || len(del)+len(add) == 0 {
 		return err
 	}
 	return l.write(ctx, func(t *txn) error {
-		del, add, err := l.leavingOut(t.ctx, t, source, rules, from.Unix(), to.Unix())
+		del, add, err := l.leavingOut(t.ctx, t, source, rules, now, from.Unix(), to.Unix())
 		if err != nil {
 			return err
 		}
@@ -97,10 +100,11 @@ type leftOutRow struct {
 
 // leavingOut is what keeping [from, to) of rules, sorted, changes in what
 // is kept of source: the rows that go, and those that come.
-func (l *Ledger) leavingOut(ctx context.Context, q reader, source string, rules []string, from, to int64) (del []int64, add []leftOutRow, err error) {
+func (l *Ledger) leavingOut(ctx context.Context, q reader, source string, rules, now []string, from, to int64) (del []int64, add []leftOutRow, err error) {
 	// How many rules of the source have a period kept, counted when a new
-	// one is to be.
+	// one is to be; past as many as are kept, those let go of.
 	known := -1
+	var gone []string
 	for _, rule := range rules {
 		rows, err := q.QueryContext(ctx, "SELECT id, from_at, to_at FROM left_out WHERE source = ? AND rule = ? ORDER BY from_at", source, rule)
 		if err != nil {
@@ -130,7 +134,22 @@ func (l *Ledger) leavingOut(ctx context.Context, q reader, source string, rules 
 				}
 			}
 			if known >= maxLeftOutRules {
-				return nil, nil, fmt.Errorf("%w: %d", ErrLeftOutFull, maxLeftOutRules)
+				if gone == nil {
+					gone = []string{}
+					if now != nil {
+						if gone, err = l.leftOutGone(ctx, q, source, slices.Concat(rules, now)); err != nil {
+							return nil, nil, err
+						}
+					}
+				}
+				if len(gone) == 0 {
+					return nil, nil, fmt.Errorf("%w: %d", ErrLeftOutFull, maxLeftOutRules)
+				}
+				ids, err := l.leftOutIDs(ctx, q, source, gone[0])
+				if err != nil {
+					return nil, nil, err
+				}
+				del, gone, known = append(del, ids...), gone[1:], known-1
 			}
 			known++
 		}
@@ -157,6 +176,46 @@ func (l *Ledger) leavingOut(ctx context.Context, q reader, source string, rules 
 		}
 	}
 	return del, add, nil
+}
+
+// leftOutGone are the rules of source with periods kept that aren't among
+// keep, those whose last period ended earliest first.
+func (l *Ledger) leftOutGone(ctx context.Context, q reader, source string, keep []string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT rule, max(to_at) AS last FROM left_out WHERE source = ? GROUP BY rule ORDER BY last, rule", source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	gone := []string{}
+	for rows.Next() {
+		var rule string
+		var last int64
+		if err := rows.Scan(&rule, &last); err != nil {
+			return nil, err
+		}
+		if !slices.Contains(keep, rule) {
+			gone = append(gone, rule)
+		}
+	}
+	return gone, rows.Err()
+}
+
+// leftOutIDs are the rows kept of a rule of source.
+func (l *Ledger) leftOutIDs(ctx context.Context, q reader, source, rule string) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id FROM left_out WHERE source = ? AND rule = ?", source, rule)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // runTogether are spans in time, those that meet or overlap as one.
@@ -204,6 +263,26 @@ func (l *Ledger) leftOut(ctx context.Context, q reader, source string) (map[stri
 			return nil, err
 		}
 		out[rule] = append(out[rule], p)
+	}
+	return out, rows.Err()
+}
+
+// leftOutOf are the periods one rule of source, by the name the source
+// sends it by, was left out of its copies, the earliest first: its rows
+// alone read.
+func (l *Ledger) leftOutOf(ctx context.Context, q reader, source, rule string) ([][2]int64, error) {
+	rows, err := q.QueryContext(ctx, "SELECT from_at, to_at FROM left_out WHERE source = ? AND rule = ? ORDER BY from_at", source, rule)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]int64
+	for rows.Next() {
+		var p [2]int64
+		if err := rows.Scan(&p[0], &p[1]); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }
@@ -269,11 +348,15 @@ func (l *Ledger) SpansOf(ctx context.Context, source, name string) ([][2]time.Ti
 	if err := l.r.QueryRowContext(ctx, "SELECT sent FROM rules WHERE name = ? AND source = ?", name, source).Scan(&sent); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	out, err := l.LeftOut(ctx, source)
+	ps, err := l.leftOutOf(ctx, l.r, source, sent)
 	if err != nil {
 		return nil, err
 	}
-	return Without(spans, out[sent]), nil
+	out := make([][2]time.Time, len(ps))
+	for i, p := range ps {
+		out[i] = [2]time.Time{unix(p[0]), unix(p[1])}
+	}
+	return Without(spans, out), nil
 }
 
 // CoverageOf is Coverage of one of a source's rules: what its copies

@@ -1254,11 +1254,11 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		}
 	}
 	if len(s.alarms) > 0 || s.cfg.JudgedHistory != nil {
-		ties, err := s.l.Ties(ctx)
+		x, ok, err := s.l.TieOf(ctx, name)
 		if err != nil {
 			return ruleView{}, err
 		}
-		if x, ok := ties[name]; ok {
+		if ok {
 			v.Tie = tieViewOf(x)
 		}
 	}

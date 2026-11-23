@@ -453,10 +453,31 @@ type TieState struct {
 // Ties are, by the name each alarm read through --alarms and not replayed
 // is judged under, its history tied to it, or why none is.
 func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
+	return l.tiesOf(ctx, nil)
+}
+
+// TieOf is Ties of one rule, by its name, alone: what is read of the
+// periods rules were left out of their source's copies is that rule's.
+func (l *Ledger) TieOf(ctx context.Context, name string) (TieState, bool, error) {
+	ties, err := l.tiesOf(ctx, &name)
+	st, ok := ties[name]
+	return st, ok, err
+}
+
+// tiesOf are Ties, of the rule of name alone when it isn't nil.
+func (l *Ledger) tiesOf(ctx context.Context, name *string) (map[string]TieState, error) {
 	out := map[string]TieState{}
 	list, untied, err := l.latestTies(ctx, l.r)
 	if err != nil || (len(list) == 0 && len(untied) == 0) {
 		return out, err
+	}
+	if name != nil {
+		list = slices.DeleteFunc(list, func(x Tie) bool { return x.Rule != *name })
+		if w, ok := untied[*name]; ok {
+			untied = Untied{*name: w}
+		} else {
+			untied = nil
+		}
 	}
 	found, why, err := l.tied(ctx, l.r, list)
 	if err != nil {
@@ -487,7 +508,16 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 			if c.spans, err = l.spans(ctx, l.r, src); err != nil {
 				return nil, err
 			}
-			if c.out, err = l.leftOut(ctx, l.r, src); err != nil {
+			if name != nil {
+				// One rule's periods alone.
+				var ps [][2]int64
+				if ps, err = l.leftOutOf(ctx, l.r, src, h.sent); err == nil && len(ps) > 0 {
+					c.out = map[string][][2]int64{h.sent: ps}
+				}
+			} else {
+				c.out, err = l.leftOut(ctx, l.r, src)
+			}
+			if err != nil {
 				return nil, err
 			}
 			covers[src] = c

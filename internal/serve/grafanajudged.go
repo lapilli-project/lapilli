@@ -421,7 +421,19 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		// A name the ledger keeps no rule copied in by has no record to
 		// be left out of: no firing of it was ever written.
 		names := slices.DeleteFunc(slices.Sorted(maps.Keys(leave)), func(n string) bool { return !ledger.RuleName(n) })
-		if err := s.l.LeaveOut(context.WithoutCancel(ctx), ledger.GrafanaSource, names, a, b); err != nil {
+		// The rules of the source now, whose periods are kept however many
+		// rules have some: those judged, and every Grafana rule, paused
+		// ones among them, by its title.
+		now := make([]string, 0, len(rs)+len(all))
+		for _, r := range rs {
+			now = append(now, r.Name)
+		}
+		for _, r := range all {
+			if r.UID != "" {
+				now = append(now, r.Name, r.AlertName())
+			}
+		}
+		if err := s.l.LeaveOut(context.WithoutCancel(ctx), ledger.GrafanaSource, names, now, a, b); err != nil {
 			return err
 		}
 		why := leftOutWhy(j.Unsure, j.Shared, unheld)

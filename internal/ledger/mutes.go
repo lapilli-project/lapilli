@@ -469,8 +469,9 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 	}
 	byName := map[string]*ofRule{}
 	// The span as far as it is read: to, or where the first firing past
-	// UnpagedFirings started.
-	upTo := to.Unix()
+	// UnpagedFirings started, and its id (cut): those of its second read
+	// before it are counted, whether their rule has mutes or not.
+	upTo, cut := to.Unix(), int64(-1)
 	lastStart, lastID := from.Unix(), int64(-1)
 	for read, more := 0, true; more; {
 		// One more than are read still, to say there were more.
@@ -484,7 +485,9 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 				return err
 			}
 			if n++; read >= UnpagedFirings {
-				out.Partial, upTo = true, start
+				if !out.Partial {
+					out.Partial, upTo, cut = true, start, id
+				}
 				return nil
 			}
 			read++
@@ -562,8 +565,8 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 			fs = append(fs, f)
 			return nil
 		}, `SELECT f.id, s.id, s.labels, f.start_at, f.end_at FROM firings f JOIN series s ON s.id = f.series_id
-			WHERE f.rule_id IN (`+l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at < ? ORDER BY f.start_at, f.id LIMIT ?`,
-			string(ids), from.Unix(), upTo, left+1); err != nil {
+			WHERE f.rule_id IN (`+l.d.ints("?")+`) AND f.start_at >= ? AND (f.start_at < ? OR f.start_at = ? AND f.id < ?) ORDER BY f.start_at, f.id LIMIT ?`,
+			string(ids), from.Unix(), upTo, upTo, cut, left+1); err != nil {
 			return out, err
 		}
 		if left -= min(n, left); more || left <= 0 && len(fs) > 0 {

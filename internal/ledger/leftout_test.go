@@ -35,7 +35,7 @@ func TestLeftOut(t *testing.T) {
 	putFirings(t, l, GrafanaSource, h(0), h(24), []firing.Firing{{Rule: "Orders slow", Start: h(1), End: h(2)}})
 	leave := func(from, to int, rules ...string) {
 		t.Helper()
-		if err := l.LeaveOut(ctx, GrafanaSource, rules, h(from), h(to)); err != nil {
+		if err := l.LeaveOut(ctx, GrafanaSource, rules, nil, h(from), h(to)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -87,12 +87,12 @@ func TestLeftOut(t *testing.T) {
 	}
 	// What isn't kept.
 	for what, err := range map[string]error{
-		"a name that doesn't show": l.LeaveOut(ctx, GrafanaSource, []string{"Orders​slow"}, h(0), h(1)),
-		"no name":                  l.LeaveOut(ctx, GrafanaSource, []string{""}, h(0), h(1)),
-		"a long name":              l.LeaveOut(ctx, GrafanaSource, []string{strings.Repeat("x", 513)}, h(0), h(1)),
-		"no source":                l.LeaveOut(ctx, "Not A Source", []string{"A"}, h(0), h(1)),
-		"a period backwards":       l.LeaveOut(ctx, GrafanaSource, []string{"A"}, h(1), h(1)),
-		"a part of a second":       l.LeaveOut(ctx, GrafanaSource, []string{"A"}, h(0), h(1).Add(time.Millisecond)),
+		"a name that doesn't show": l.LeaveOut(ctx, GrafanaSource, []string{"Orders​slow"}, nil, h(0), h(1)),
+		"no name":                  l.LeaveOut(ctx, GrafanaSource, []string{""}, nil, h(0), h(1)),
+		"a long name":              l.LeaveOut(ctx, GrafanaSource, []string{strings.Repeat("x", 513)}, nil, h(0), h(1)),
+		"no source":                l.LeaveOut(ctx, "Not A Source", []string{"A"}, nil, h(0), h(1)),
+		"a period backwards":       l.LeaveOut(ctx, GrafanaSource, []string{"A"}, nil, h(1), h(1)),
+		"a part of a second":       l.LeaveOut(ctx, GrafanaSource, []string{"A"}, nil, h(0), h(1).Add(time.Millisecond)),
 	} {
 		if !errors.Is(err, ErrLeftOut) {
 			t.Errorf("%s: %v", what, err)
@@ -120,7 +120,7 @@ func TestLeftOutBounds(t *testing.T) {
 	l := open(t, time.UTC)
 	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
 	for i := range maxLeftOut + 2 {
-		if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, h(2*i), h(2*i+1)); err != nil {
+		if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, nil, h(2*i), h(2*i+1)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,21 +131,37 @@ func TestLeftOutBounds(t *testing.T) {
 	}
 	defer func(n int) { maxLeftOutRules = n }(maxLeftOutRules)
 	maxLeftOutRules = 3
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "C"}, h(0), h(1)); err != nil {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "C"}, nil, h(0), h(1)); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "D"}, h(1), h(2)); !errors.Is(err, ErrLeftOutFull) {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "D"}, nil, h(1), h(2)); !errors.Is(err, ErrLeftOutFull) {
 		t.Errorf("a fourth rule: %v", err)
 	}
 	// Nothing of a write refused is kept, and those kept go on.
 	if out, _ := l.LeftOut(ctx, GrafanaSource); len(out) != 3 || !reflect.DeepEqual(hours(out["B"]), [][2]int{{0, 1}}) {
 		t.Errorf("after a write refused: %v", out)
 	}
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "C"}, h(1), h(2)); err != nil {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "C"}, nil, h(1), h(2)); err != nil {
 		t.Errorf("rules kept already: %v", err)
 	}
+	// The rules no longer the source's let go of, those whose last period
+	// ended earliest first, as many as make room: B's, which ended before
+	// C's.
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"C"}, nil, h(2), h(3)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"D"}, []string{"Orders slow"}, h(3), h(4)); err != nil {
+		t.Errorf("a fourth rule, the source's rules known: %v", err)
+	}
+	if out, _ := l.LeftOut(ctx, GrafanaSource); len(out) != 3 || out["B"] != nil || out["C"] == nil || out["D"] == nil {
+		t.Errorf("after letting go of one: %v", out)
+	}
+	// None to let go of: refused.
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"E"}, []string{"Orders slow", "C", "D"}, h(3), h(4)); !errors.Is(err, ErrLeftOutFull) {
+		t.Errorf("a fourth rule, the others the source's: %v", err)
+	}
 	// Another source's are counted apart.
-	if err := l.LeaveOut(ctx, "cw", []string{"D"}, h(1), h(2)); err != nil {
+	if err := l.LeaveOut(ctx, "cw", []string{"D"}, nil, h(1), h(2)); err != nil {
 		t.Errorf("another source's rule: %v", err)
 	}
 }
@@ -168,26 +184,31 @@ func TestTiedGrafanaHistoryLeftOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	putFirings(t, l, GrafanaSource, h(0), h(9), []firing.Firing{{Rule: "Orders slow", Start: h(1), End: h(2)}, {Rule: "Stock low", Start: h(1), End: h(2)}})
+	// Each rule's tie, of every rule's and of its own alone (TieOf), which
+	// reads its periods alone.
 	ties := func(rule string, since, to int) {
 		t.Helper()
 		ts, err := l.Ties(ctx)
 		if x := ts[rule]; err != nil || x.Source != GrafanaSource || x.Since != h(since).Unix() || x.To != h(to).Unix() {
 			t.Errorf("%s: since %s to %s, not %d to %d: %v", rule, unix(x.Since).Sub(t0), unix(x.To).Sub(t0), since, to, err)
 		}
+		if x, ok, err := l.TieOf(ctx, rule); err != nil || !ok || x != ts[rule] {
+			t.Errorf("%s alone: %+v %v %v, of all %+v", rule, x, ok, err, ts[rule])
+		}
 	}
 	ties("Orders slow", 0, 9)
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, h(3), h(6)); err != nil {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, nil, h(3), h(6)); err != nil {
 		t.Fatal(err)
 	}
 	ties("Orders slow", 6, 9)
 	ties("Stock low", 0, 9)
 	// Left out up to where the copies reach.
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, h(6), h(9)); err != nil {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, nil, h(6), h(9)); err != nil {
 		t.Fatal(err)
 	}
 	ties("Orders slow", 0, 3)
 	// Left out of all of them: tied, with no record.
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, h(0), h(3)); err != nil {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, nil, h(0), h(3)); err != nil {
 		t.Fatal(err)
 	}
 	if ts, err := l.Ties(ctx); err != nil || ts["Orders slow"].Source != GrafanaSource || ts["Orders slow"].Since != 0 || ts["Orders slow"].To != 0 {
@@ -299,7 +320,7 @@ func TestMigrate030(t *testing.T) {
 	if out, err := l2.LeftOut(ctx, GrafanaSource); err != nil || len(out) != 0 {
 		t.Errorf("left out after migrating: %v %v", out, err)
 	}
-	if err := l2.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, h(8), h(12)); err != nil {
+	if err := l2.LeaveOut(ctx, GrafanaSource, []string{"Orders slow"}, nil, h(8), h(12)); err != nil {
 		t.Fatalf("a period after migrating: %v", err)
 	}
 	if spans, err := l2.SpansOf(ctx, GrafanaSource, "Orders slow"); err != nil || !reflect.DeepEqual(hours(spans), [][2]int{{0, 8}, {12, 24}}) {
