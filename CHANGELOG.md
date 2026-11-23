@@ -18,9 +18,12 @@ Before upgrading:
   A lapilli before this one doesn't open the upgraded ledger.
 - **A backtest job on GitHub that checks the pull request's branch out by
   its name** (`ref: github.head_ref`), or any commit but the event's head
-  or GitHub's merge of it, with a gate or `STATUS`, fails where the
-  checkout isn't the event's head: check out the default, or `ref:
-  github.event.pull_request.head.sha` (Changed).
+  or the commit GitHub's event names (`GITHUB_SHA`), GitHub's merge of
+  it, with a gate or `STATUS`, fails where the checkout isn't the event's
+  head: check out the default, or `ref:
+  github.event.pull_request.head.sha`. `refs/pull/N/merge` checked out by
+  its name in a run again after the base moved is GitHub's merge made
+  again, not `GITHUB_SHA`, and is refused too (Changed).
 - **The firing recipes take https alone**, or http to this machine, and a
   token file of one line; `put.sh` takes http or https (Fixed (security)).
 - **The tracker recipes take their tracker's API over https alone**
@@ -31,6 +34,31 @@ Before upgrading:
   (Fixed (security)).
 - **A route whose `teams:` names a team in another letter case than
   either of two teams alike** takes neither's events (Changed).
+- **A rule of a branch other than the default that requires
+  `lapilli/backtest`** needs `lapilli/backtest (into BRANCH)` now
+  (`lapilli/backtest/KEY (into BRANCH)` with a `KEY`), on GitHub, Gitea
+  and Forgejo Actions, and GitLab, where the CI says the default branch;
+  the default branch's is named as before (Changed).
+- **A backtest job whose `TARGET` is a short name a tag has too**
+  (`origin/main` beside a tag `origin/main`, or a short hash a tag is
+  named as), with a gate or `STATUS`, fails: give the branch in full
+  (`refs/remotes/origin/main`) or the commit's full hash (Changed).
+- **A backtest job in GitHub Actions on an event of no pull request**
+  (`push`, `workflow_run`) that gives `PR`, with a gate or `STATUS`, fails
+  where `TARGET` is left at `HEAD^1`: give `TARGET` or `TARGET_BRANCH`,
+  the branch the pull request goes into (Changed).
+- **The incidents' `put.sh` takes `http://` or `https://` alone**, an
+  address with no scheme (`lapilli:8082`) or another refused, and a token
+  file of one line, with no tab or other control character (Fixed
+  (security)).
+- **An address with `@` anywhere, in its query too**
+  (`?owner=ana@example.com`), is refused by the firing, incident and
+  tracker recipes, and by both `put.sh`s (Fixed (security)).
+- **An incident tool or a tracker reached over plain http inside a
+  cluster** needs `PLAIN_HTTP=true` now (in the chart,
+  `serve.trackers.env`): without it, an `http://` address to a host but
+  this machine is refused, and the job stops, saying which setting
+  (Changed).
 
 ### Fixed (security)
 
@@ -129,9 +157,10 @@ Before upgrading:
   own.
 - **A firing recipe read an answer of any size** (affected: 0.19.0 to
   0.69.0; Datadog's and New Relic's from 0.67.0). Each answer is 16 MiB
-  at most now (`--max-filesize`, with curl 8.4 or later for an answer
-  that doesn't give its length), serve's to `put.sh` too; past it, the
-  script stops, writing nothing.
+  at most now, whatever curl's version: `--max-filesize`, which before
+  curl 8.4.0 holds only an answer that says its length first, and what
+  curl writes cut there too; past it, the script stops, writing nothing.
+  Serve's answer to `put.sh`, its own, is held by `--max-filesize` alone.
 - **The incidents' `put.sh` and the tracker recipes read their token
   files whole, and gave curl no scheme** (affected: `put.sh` 0.15.0 to
   0.69.0; `github.sh`, `gitlab.sh`, `jira.sh` and `linear.sh` from
@@ -153,10 +182,14 @@ Before upgrading:
   Lapilli's, Jira's, Azure DevOps' and Linear's. Neither a token nor an
   address is said.
 - **A tracker recipe read an answer of any size** (affected: 0.22.0 to
-  0.69.0). Each answer, Lapilli's or the tracker's, is 16 MiB at most now
-  (`--max-filesize`, with curl 8.4 or later for one that doesn't give
-  its length); past it the task is skipped, or the run stops, as with
-  any answer that fails. So is serve's to the incidents' `put.sh`.
+  0.69.0). Each answer, Lapilli's or the tracker's, is 16 MiB at most now,
+  whatever curl's version: `--max-filesize`, and what curl writes cut
+  there too; past it the task is skipped, or the run stops, as with any
+  answer that fails. A tracker's request that times out, or is answered
+  408, 429, 500, 502, 503 or 504, is asked again three times at most, as
+  `curl --retry 3` did, by the recipe: curl's own writes each try's answer
+  after the one before when the answer goes through a pipe. Serve's
+  answer to the incidents' `put.sh` isn't kept.
 - **A task made of a proposal mentioned an issue of its tracker's**
   (affected: 0.22.0 to 0.69.0). Its title was `Proposal #12: ...`, which
   a tracker recipe makes its issue's title, where `#12` is the host's own
@@ -186,7 +219,81 @@ Before upgrading:
   failed read is noted where the source is read now, and judging a source
   reads it and writes nothing; the leader says it with its status, so a
   replica that follows judges by the leader's reads, not by when its own
-  page was first looked at.
+  page was first looked at. A replica that starts to lead lets go of what
+  it noted before, in a term it led earlier: kept while another led,
+  which may have read the source well all along, the note had the source
+  down at once.
+- **The backtest gate read a `TARGET` of a branch's name as a tag of
+  that name** (affected: 0.32.0 to 0.69.0; the gates that stop a merge,
+  and the status, from 0.67.0). A `TARGET` given by a short name, such as
+  `origin/main`, was whatever git resolves the name to, and git takes
+  `refs/tags/NAME` before `refs/remotes/NAME`: whoever could push a tag
+  named `origin/main`, at a commit of theirs holding the change already,
+  fetched with the history, had the gate compare the pull request against
+  that commit, pass `FAIL_MISSED`, and set a success on the event's head.
+  A branch's name is that branch in full now, `refs/remotes/NAME` before
+  `refs/heads/NAME`; a name a tag has too, a short hash among them, is
+  refused, failing the job with a gate or `STATUS`, its status the one
+  failure, or said in the comment without; a full ref or a full hash is
+  taken as it is (Changed). `TARGET_BRANCH`, and what each host's script
+  gives from its CI, are full refs or full hashes already.
+- **The same head, opened as a second pull request into a branch its
+  author chose, replaced the failure with a success** (affected: 0.67.0
+  to 0.69.0). A status is a commit's and its name's, not a pull
+  request's: the pull request's author could open the same head again
+  into a branch of theirs holding the change already, whose backtest
+  against that branch passed, and its success took the place of the
+  failure the pull request into the default branch left, the status that
+  branch's rule requires. Where the CI says the repository's default
+  branch, GitHub's and Gitea's event (`repository.default_branch`) and
+  GitLab's `CI_DEFAULT_BRANCH`, a pull request into another branch sets
+  `lapilli/backtest (into BRANCH)` now, and the default's stays as its own
+  pull request left it; a branch whose name holds more than letters,
+  digits and `. _ / -`, or more than 200, sets none (Changed). Bitbucket
+  Pipelines doesn't say the default branch, and its build status is still
+  one of a commit and a key, the last pull request's standing for both;
+  Azure DevOps' status is the pull request's own. The docs' workflow runs
+  on pull requests into the protected branches alone (`branches:`).
+- **The backtest gate took a merge for GitHub's in an event of no pull
+  request, and one of another head for the event's** (affected: 0.67.0
+  to 0.69.0). In GitHub Actions, a `push` or `workflow_run` job that gives
+  `PR` had `HEAD` a merge taken for the CI's, as outside a CI, and its
+  first parent for the base: a merge of the change into a commit its
+  author chose passed `FAIL_MISSED` and got a success, where the same
+  change as a plain commit was refused. GitHub says the merge it makes,
+  so one it doesn't say isn't taken: `TARGET` `HEAD^1` is refused there
+  with a gate or `STATUS`, unless `TARGET` or `TARGET_BRANCH` says the
+  base; so in Gitea's and Forgejo's Actions, which make none. And a
+  `GITHUB_SHA` whose second parent isn't the event's head, a merge of an
+  earlier push beside the later head, was read, compared with
+  `GITHUB_BASE_REF`, and passed with no status: it is refused, its
+  failure on the event's head. A merge queue's run (`merge_group`) is
+  said plainly not to be taken yet, and fails, as it did.
+- **An earlier run's success or pending stood where a backtest with
+  `STATUS` stopped before it set the status** (affected: 0.67.0 to
+  0.69.0). A run refused where the CI says no head and `STATUS_SHA`
+  isn't given, a path of `PATHS` in neither commit, a setting found wrong,
+  and GitHub's merge in a clone of depth 1, whose parents the clone
+  hasn't, each failed the job and set nothing. Each sets the one failure
+  now, on the head the CI says, or `STATUS_SHA`, or else `HEAD` where it
+  is a commit of one parent; a setting read before the status's own (`PR`,
+  the host's API, `KEY`, `STATUS`, `STATUS_SHA`, `STATUS_URL`) can't set
+  one.
+- **An incident recipe read a redirect as a page of no incidents, and
+  `google-cloud.sh` as one of no alerts** (affected: `google-cloud.sh`
+  0.19.0 to 0.69.0; `pagerduty.sh`, `incident-io.sh`, `grafana-irm.sh`
+  and `compass.sh` to 0.69.0). They asked with `curl -f`, which fails an
+  answer of 400 or more alone, and doesn't follow a redirect with the
+  token: a 307 was read as an empty page, and the script exited 0,
+  writing that nothing fired, or no incidents, which `put.sh` copies to
+  serve as the tool's. An answer that isn't a 2xx stops each now,
+  writing nothing.
+- **An incident recipe read an answer of any size, with a curl before
+  8.4** (affected: 0.15.0 to 0.69.0). 0.68.1 held an answer to 16 MiB by
+  `--max-filesize`, which before curl 8.4.0 (Ubuntu 22.04 has 7.81) holds
+  only one that says its length first: a chunked one was read whole. What
+  curl writes is cut at 16 MiB too now, whatever its version; past it the
+  script stops, writing nothing.
 
 ### Fixed
 
@@ -236,12 +343,20 @@ Before upgrading:
   incident each time** (affected: 0.6.0 to 0.69.0; `POST
   /api/v1/incidents/{id}/decide` from 0.64.0). Each was of the same
   hours, and each counted. A window confirmed again is the incident it
-  wrote before now, the latest the ledger still keeps, as the changes
-  note it (`impact window KEY confirmed as ID`), as it is: no second is
-  written, and the title given isn't applied (Changed). One deleted
-  since, or confirmed longer ago than `--keep` keeps the changes, is
-  written down anew. A verdict naming both the window and that incident
-  names the incident once after it.
+  wrote before now, the latest the ledger keeps, as the changes note it
+  (`impact window KEY confirmed as ID`), while that incident stands for
+  it: kept as a person's, no note since saying it was deleted, and its
+  hours meeting the window's. It is given the hours and labels the window
+  has grown to since, earlier or later, never fewer, and what they touch
+  is judged again: a window confirmed while the impact went on had its
+  firings after the hours first written black. A title given is its
+  title; none, or the window's own as its form sends it back, leaves the
+  incident's. One deleted since and written again under its id, by
+  anyone, of other hours or the same, or moved by a person to hours the
+  window hasn't, is another's, and the window is written down anew; so
+  is one confirmed longer ago than `--keep` keeps the changes. A verdict
+  naming both the window and that incident names the incident once after
+  it.
 
 ### Changed
 
@@ -270,21 +385,27 @@ Before upgrading:
 - **A backtest refused sets one status, a failure, and no pending.**
   0.69.0 sets the status pending once the commits are found; a run the
   gate refuses finds none, and ends with the failure alone: of a
-  `TARGET` that is the pull request's own commit, on the head the CI
-  says or `STATUS_SHA`, as in 0.68.1; of a checkout that isn't the
-  event's, on the event's head, whatever `STATUS_SHA` says, never on the
-  commit checked out, which another event's run judges.
+  `TARGET` that is the pull request's own commit, or a tag's name, on the
+  head the CI says, `STATUS_SHA`, or `HEAD` where the CI says none, as in
+  0.68.1; of a checkout that isn't the event's, on the event's head,
+  whatever `STATUS_SHA` says, never on the commit checked out, which
+  another event's run judges. A run that stops otherwise before the
+  status is set (`PATHS` in neither commit, a setting wrong, a clone
+  without the merge's parents) sets the failure too; a failure whose
+  commit the backtest couldn't be shown to have read goes on the head the
+  CI says, or `STATUS_SHA`, never on the commit the pull request goes
+  into.
 - **The tracker recipes take a tracker's API over https alone**, or this
-  machine over http: a self-managed GitLab, Jira or Azure DevOps Server
-  reached over plain http is refused, as the incident recipes refuse
-  one since 0.68.1. Their token files, and the incidents' `put.sh`'s,
-  may end in a carriage return or spaces.
+  machine over http, or, with `PLAIN_HTTP=true`, http to any host: a
+  self-managed GitLab, Jira or Azure DevOps Server reached over plain http
+  is refused without it, as an incident tool is. Their token files, and
+  the incidents' `put.sh`'s, may end in a carriage return or spaces.
 - **The firing recipes take an address's scheme in capitals**
   (`HTTPS://`), `http://[::1]`, and this machine with no port, any other
-  host over http still refused, and a key or token file ending in a
-  carriage return or spaces, which `datadog.sh` and `newrelic.sh`
-  refused. Their README says to use curl 8.4 or later, as the incident
-  recipes' does.
+  host over http still refused unless `PLAIN_HTTP=true`, and a key or
+  token file ending in a carriage return or spaces, which `datadog.sh`
+  and `newrelic.sh` refused. An answer is held to 16 MiB whatever curl's
+  version, as the incident recipes' and the trackers' are.
 - **`put.sh` of the firing recipes takes `http://` or `https://`
   alone**, and a token file of one line: a token with a space in it is
   sent as before, one with a tab or another control character refused.
@@ -292,15 +413,23 @@ Before upgrading:
   neither's events.** With `Payments` and `payments` both kept, `teams:
   [PAYMENTS]` took both; it takes none now, and they go to `default`:
   name the team as it is written, or rename one, as the Teams page says.
-- **A window confirmed again keeps the incident's title.** `title` in
-  `POST /api/v1/incidents/{id}/decide`, and the form's, names the
-  incident a window is first written down as; of one written down
-  before, change the title on the incident's own page.
+- **A window confirmed again gives its incident the window's hours and
+  labels as they are now**, and `title` in `POST
+  /api/v1/incidents/{id}/decide`, or the form's, when one is given that
+  isn't the window's own: an incident a person changed since keeps what
+  they changed, and gains what the window has more.
 - **A source never read well is down by its first failed read**, not by
   when a replica first looked at it: sooner by as long as no one looked,
   and no job judged it. A replica that follows a leader of an earlier
   release, which doesn't say it, shows such a source failing, and not
   down, until the leader is upgraded.
+- **`PLAIN_HTTP=true` takes an API's address over plain http, to any
+  host**, in the firing, incident and tracker recipes alike (default
+  `false`; another value refused): for a self-managed tool or tracker
+  reached inside a cluster, where https isn't served. Its token is read
+  by whatever is on the way. curl is given http alone, an address with
+  `@` is refused still, and the token checks stand. A refusal of plain
+  http says so.
 
 ## [0.69.1] - 2026-11-23
 
