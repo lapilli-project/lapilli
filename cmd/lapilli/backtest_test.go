@@ -1518,6 +1518,112 @@ func TestBacktestRecipeGitLabTarget(t *testing.T) {
 	}
 }
 
+// gitlab.sh as GitLab runs a merge request's pipeline, as its predefined
+// variables' reference and its merged results pipelines' say. With merged
+// results, the job checks out a temporary merge commit (CI_COMMIT_SHA),
+// the source branch's head (CI_MERGE_REQUEST_SOURCE_BRANCH_SHA) merged
+// into the target branch's (CI_MERGE_REQUEST_TARGET_BRANCH_SHA): the
+// change is that merge, compared against the target's head, its first
+// parent, so that what the target changed since the branch parted isn't
+// the merge request's; INCIDENTS is the target's; and the commit status
+// goes on the source branch's head, as the commits API says to for a
+// commit of a merge request, never on the merge, which is in no branch
+// (with no pipeline_id: the pipeline's is the merge's). In a plain merge
+// request pipeline those two variables are empty: the job checks out the
+// source branch's head (CI_COMMIT_SHA), compared from where it parted
+// from the target branch, fetched by its name, INCIDENTS the branch's as
+// it is, and the status on that head, in the job's pipeline.
+func TestBacktestRecipeGitLabMergedResults(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
+	old := repo.git("rev-parse", "HEAD")
+	// The target branch moves on: a rule file and an incident of its own.
+	repo.write(map[string]string{"alerts/api.yaml": "# the target's own\ngroups: []\n",
+		"incidents.yaml": "incidents:\n  - {id: INC-9, start: 2026-11-10T00:00:00Z, end: 2026-11-10T01:00:00Z}\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "the target moves on")
+	tip := repo.git("rev-parse", "HEAD")
+	repo.git("checkout", "--quiet", "-b", "pr", old)
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("commit", "--quiet", "-am", "slower")
+	source := repo.git("rev-parse", "HEAD")
+	repo.git("checkout", "--quiet", "--detach", tip)
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", "pr")
+	merge := repo.git("rev-parse", "HEAD")
+	if parents := repo.git("rev-list", "--parents", "-n", "1", merge); parents != merge+" "+tip+" "+source {
+		t.Fatalf("the merge's parents: %s", parents)
+	}
+	repo.git("remote", "add", "origin", repo.dir)
+
+	// A lapilli that keeps the rules it was given, of both sides, and the
+	// incidents.
+	kept := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(fake, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in\n"+
+		"    --rules) rm -rf '"+kept+"/rules'; cp -R \"$2\" '"+kept+"/rules' ;;\n"+
+		"    --compare) rm -rf '"+kept+"/compare'; cp -R \"$2\" '"+kept+"/compare' ;;\n"+
+		"    --incidents) cp \"$2\" '"+kept+"/incidents' ;;\n  esac\n  shift\ndone\n"+
+		"echo '[//]: # (lapilli-compare {\"nothing_changed\":false,\"changed\":1,\"unreplayed\":0})'\n"), 0o755)
+	given := func(p ...string) string {
+		b, _ := os.ReadFile(filepath.Join(append([]string{kept}, p...)...))
+		return string(b)
+	}
+	job := []string{"CI_MERGE_REQUEST_IID=7", "CI_PIPELINE_SOURCE=merge_request_event", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main",
+		"CI_MERGE_REQUEST_DIFF_BASE_SHA=" + old, "CI_DEFAULT_BRANCH=main", "CI_PIPELINE_ID=314", "CI_JOB_URL=https://gitlab.example.com/o/r/-/jobs/27"}
+	for _, c := range []struct {
+		name        string
+		checkout    string
+		ci          []string
+		head, base  string
+		targetRules bool // the rules of both sides hold the target's api.yaml
+		statusOn    string
+		pipeline    int
+	}{
+		{"merged results", merge, []string{"CI_MERGE_REQUEST_EVENT_TYPE=merged_result", "CI_COMMIT_SHA=" + merge,
+			"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA=" + source, "CI_MERGE_REQUEST_TARGET_BRANCH_SHA=" + tip}, merge, tip, true, source, 0},
+		{"a merge request pipeline", source, []string{"CI_MERGE_REQUEST_EVENT_TYPE=detached", "CI_COMMIT_SHA=" + source,
+			"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA=", "CI_MERGE_REQUEST_TARGET_BRANCH_SHA="}, source, old, false, source, 314},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			repo.git("checkout", "--quiet", "--detach", c.checkout)
+			os.RemoveAll(filepath.Join(kept, "rules"))
+			os.RemoveAll(filepath.Join(kept, "compare"))
+			os.Remove(filepath.Join(kept, "incidents"))
+			rr := newRecipeRun(t, backtestHosts[2], repo)
+			out, err := rr.run(append(append([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_ON_ERROR=true", "LAPILLI=" + fake}, job...), c.ci...),
+				"--prometheus", "http://127.0.0.1:9")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if !strings.Contains(out, "the rules of "+c.head+", beside those of "+c.base) {
+				t.Errorf("not %s beside %s:\n%s", c.head, c.base, out)
+			}
+			if given("rules", "shop.yaml") != shopRules("2h") || given("compare", "shop.yaml") != shopRules("5m") {
+				t.Errorf("shop.yaml: %q beside %q", given("rules", "shop.yaml"), given("compare", "shop.yaml"))
+			}
+			// What the target changed since the branch parted is on both
+			// sides, or on neither: never the merge request's.
+			if a, b := given("rules", "api.yaml"), given("compare", "api.yaml"); (a != "") != c.targetRules || a != b {
+				t.Errorf("api.yaml: %q beside %q", a, b)
+			}
+			if !strings.Contains(given("incidents"), "INC-9") {
+				t.Errorf("the incidents aren't the target's: %q", given("incidents"))
+			}
+			if n := len(rr.host.statuses); n != 2 {
+				t.Fatalf("%d statuses: %+v", n, rr.host.statuses)
+			}
+			for _, st := range rr.host.statuses {
+				if st.SHA != c.statusOn || st.Pipeline != c.pipeline || st.URL != "https://gitlab.example.com/o/r/-/jobs/27" || st.Context != "lapilli/backtest" {
+					t.Errorf("a status %+v, want on %s in pipeline %d", st, c.statusOn, c.pipeline)
+				}
+			}
+			if st, _ := rr.host.lastStatus(); st.State != "success" {
+				t.Errorf("the status: %+v", st)
+			}
+		})
+	}
+}
+
 // Two paths under PATHS that differ only in case, two files or a file and
 // a directory, are one on a file system that folds case (a macOS or
 // Windows runner's): one's rules would never be backtested, and the gates
