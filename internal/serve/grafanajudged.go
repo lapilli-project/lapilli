@@ -401,22 +401,28 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	}
 	// The rules left out of the day. A firing a write can't hold (more
 	// than 32 labels, labels past 4 KB, a name that doesn't show) leaves
-	// its rule out, as it would refuse the write; looked at before
-	// anything is made of its labels.
+	// its rule out where it would be written, starting in the write or on
+	// at a, as it would refuse the write; looked at before anything is
+	// made of its labels. One over before the write is of nothing the
+	// ledger has, and nothing writes it: it is dropped alone, so that a read
+	// back from where its rule was left out, which holds it, doesn't leave
+	// the rule out again.
 	leave := map[string]bool{}
 	for _, n := range slices.Concat(j.Unsure, j.Shared) {
 		leave[n] = true
 	}
 	var unheld []string
-	for _, x := range j.Firings {
-		if leave[x.Rule] {
-			continue
+	j.Firings = slices.DeleteFunc(j.Firings, func(x firing.Firing) bool {
+		switch {
+		case leave[x.Rule] || recordable(x) == nil:
+			return false
+		case x.Start.Before(p) && !x.End.IsZero() && !x.End.After(a):
+			return true
 		}
-		if err := recordable(x); err != nil {
-			leave[x.Rule] = true
-			unheld = append(unheld, x.Rule)
-		}
-	}
+		leave[x.Rule] = true
+		unheld = append(unheld, x.Rule)
+		return false
+	})
 	if len(leave) > 0 {
 		// A name the ledger keeps no rule copied in by has no record to
 		// be left out of: no firing of it was ever written.

@@ -501,6 +501,28 @@ func TestServeGrafanaJudgedUnheldAlone(t *testing.T) {
 	}
 }
 
+// A firing no write holds leaves its rule out of the rounds that would
+// write it alone: the round after, which reads the history back from
+// where the rule was left out, holds it ended before what it writes, and
+// judges the rule again.
+func TestServeGrafanaJudgedUnheldOnce(t *testing.T) {
+	g := ordersAndStock()
+	sh := shopServer(t, g)
+	sh.round(0)
+	g.note(shopNote{title: "Stock low", prev: "Normal", next: "Alerting", service: "depot", at: now.Add(30 * time.Minute), extra: 40})
+	g.note(shopNote{title: "Stock low", prev: "Alerting", next: "Normal", service: "depot", at: now.Add(40 * time.Minute), extra: 40})
+	g.fired("Stock low", "stock", 3*time.Hour, 3*time.Hour+10*time.Minute)
+	sh.round(2 * time.Hour)
+	sh.want("Stock low's copies, left out", sh.covers("Stock low"), "→0s")
+	for _, at := range []time.Duration{4 * time.Hour, 6 * time.Hour} {
+		sh.round(at)
+		sh.want(fmt.Sprintf("Stock low's copies at %s", at), sh.covers("Stock low"), "→0s 2h0m0s→"+at.String())
+	}
+	if got := sh.copied(); !slices.Contains(got, "Stock low/stock 3h0m0s 3h10m0s") {
+		t.Errorf("Stock low judged again: %q", got)
+	}
+}
+
 // An alert of a rule left out, on since before, is neither ended nor
 // written again while the rule is left out, whatever the history says
 // under its title; judged again, it is ended where the history says. One
