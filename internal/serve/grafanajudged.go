@@ -360,6 +360,9 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		// the first read and unsure by this one, is judged by a read from a
 		// day before a alone, as what is further back is past what is read,
 		// so that it isn't left out for as long as a read holds that change.
+		// An alert of it on that the read says nothing of stays on, as one a
+		// read holds no change of does; ended where the rule was left out
+		// only past a week, as any rule's.
 		var lost []string
 		for _, r := range rs {
 			if !left(j, r.Name) && slices.Contains(again.Unsure, r.Name) {
@@ -378,9 +381,6 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			again = mergeJudged(again, alone, lost)
 			for _, name := range lost {
 				readOf[name] = near
-				if h0, ok := back[name]; ok && h0.Add(-time.Millisecond).Before(near) {
-					past[name] = h0
-				}
 			}
 		}
 		j, read = again, far

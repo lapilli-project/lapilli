@@ -477,6 +477,26 @@ func TestServeGrafanaJudgedUnsureAlone(t *testing.T) {
 	}
 }
 
+// A rule left out for more than a day by a change passed over, judged again
+// by a read from a day before the day copied (the read back from where it
+// was left out holds the change): an alert of it on since before, on still
+// in Grafana and changing state in none of that day, stays on, as it is
+// within a week of where the rule was left out.
+func TestServeGrafanaJudgedUnsureKeepsOn(t *testing.T) {
+	g := ordersAndStock()
+	g.fired("Stock low", "shelf", -4*time.Hour, 0)
+	sh := shopServer(t, g)
+	sh.round(0)
+	g.note(shopNote{title: "Stock low", prev: "Normal", next: "Firing", service: "depot", at: now.Add(30 * time.Minute)})
+	g.fired("Stock low", "stock", 28*time.Hour, 28*time.Hour+10*time.Minute)
+	for _, at := range []time.Duration{2 * time.Hour, 27 * time.Hour, 30 * time.Hour} {
+		sh.round(at)
+	}
+	sh.want("Stock low's copies", sh.covers("Stock low"), "→0s 26h0m0s→30h0m0s")
+	got := slices.DeleteFunc(sh.copied(), func(s string) bool { return !strings.HasPrefix(s, "Stock low/") })
+	sh.want("Stock low's firings", got, []string{"Stock low/shelf -4h0m0s on", "Stock low/stock -3h0m0s -2h0m0s", "Stock low/stock 28h0m0s 28h10m0s"})
+}
+
 // A rule with a firing no write holds (40 labels) is left out alone, and
 // so is one whose name the ledger keeps no rule by, a zero-width space in
 // it: that one with no period kept, as it never has a record.
