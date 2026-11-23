@@ -99,7 +99,18 @@ And, as wanted:
   read of another commit: the job fails, and its status is a failure on
   the event's head, saying so, whatever `STATUS_SHA` says, so that no
   earlier run's success or pending there stands for this one. Check out
-  the head's commit (`ref: pull_request.head.sha`) or the merge. A
+  the head's commit (`ref: pull_request.head.sha`) or the merge, the
+  commit GitHub's event names (`GITHUB_SHA`): `refs/pull/N/merge` checked
+  out by its name in a run again after the base moved is GitHub's merge
+  made again, not that commit, and is refused too, as is a `GITHUB_SHA`
+  whose second parent isn't the event's head. In GitHub Actions, an event
+  of no pull request (`push`, `workflow_run`) has no merge GitHub made:
+  the job giving `PR`, `HEAD` a merge is its author's, and `TARGET`
+  `HEAD^1` is refused with a gate or `STATUS`; give `TARGET` or
+  `TARGET_BRANCH`. A merge queue's run (`merge_group`) isn't taken yet:
+  its commit is the queue's, and the script says so and fails, setting no
+  status, so a branch whose rules require the job or `lapilli/backtest`
+  can't merge through a queue yet. A
   `TARGET` the job gives where the CI says what the pull request goes into
   (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
   Azure's pull request builds) is the job's, and taken as it is, as one
@@ -177,7 +188,12 @@ And, as wanted:
   never as an earlier run's success on the same commit: a job ended by a
   signal (a cancel) or by an error of its own sets it failure, saying so,
   and one killed outright leaves it pending. A pending status the host
-  refuses is said, and the run goes on. Each script takes
+  refuses is said, and the run goes on. A job that ends otherwise than
+  passing, before or after, sets the one failure where the head is known:
+  a run refused, a path of `PATHS` in neither commit, a setting found
+  wrong once `STATUS`'s own are read, a clone that hasn't the merge's
+  parents; on the head the CI says, or `STATUS_SHA`, or else `HEAD` where
+  it is a commit of one parent. Each script takes
   the head commit from its CI (GitHub's and Gitea's event, GitLab's
   `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` or `CI_COMMIT_SHA`,
   `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,

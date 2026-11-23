@@ -270,6 +270,13 @@ jobs:
           status: true
 ```
 
+A merge queue's run (GitHub's `merge_group`) isn't taken yet: its commit
+is the queue's, neither a pull request's head nor GitHub's merge of one,
+and the event names no pull request. `github.sh` says so and fails,
+setting no status, so a branch whose rules require the job or
+`lapilli/backtest` can't merge through a queue yet: leave `merge_group`
+out of the workflow's `on:`, and the queue off for that branch.
+
 Each host sets it through its own API, and the token needs more than the
 comment does:
 

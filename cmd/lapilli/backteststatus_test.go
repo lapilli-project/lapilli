@@ -396,15 +396,22 @@ func TestBacktestRecipeOwnParent(t *testing.T) {
 	}
 
 	// GitHub's merge of it into main, the status asked for on main's commit:
-	// not the pull request's, none set.
+	// not the pull request's, none set there; the job's failure goes on the
+	// event's head all the same, where an earlier run's success would else
+	// stand.
 	repo.git("checkout", "--quiet", "--detach", "main")
 	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
 	rr.env = append(rr.env, githubMerge(repo.git("rev-parse", "HEAD"))...)
 	main := repo.git("rev-parse", "main")
 	before := len(rr.host.statuses)
 	out, err = rr.run(append(slices.Clone(settings), "STATUS_SHA="+main), args...)
-	if _, n := rr.host.lastStatus(); n != before || !strings.Contains(out, "is the commit the pull request goes into") {
-		t.Errorf("a status on the commit it goes into: %v, %d statuses\n%s", err, n-before, out)
+	if st, n := rr.host.lastStatus(); n != before+1 || st.SHA != sha || st.State != "failure" || !strings.Contains(out, "is the commit the pull request goes into") {
+		t.Errorf("a status on the commit it goes into: %v, %d statuses, the last %+v\n%s", err, n-before, st, out)
+	}
+	for _, st := range rr.host.statuses[before:] {
+		if st.SHA == main {
+			t.Errorf("a status on the commit it goes into: %+v", st)
+		}
 	}
 	// Its parent that is the pull request's, linking to a page on this
 	// machine, which STATUS_URL takes over http as it says.

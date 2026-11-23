@@ -49,6 +49,12 @@ api=${GITHUB_API:-${GITHUB_API_URL:-https://api.github.com}}
 case $GITHUB_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 case $GITHUB_REPO in */*) ;; *) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 host_api=$api
+# A merge queue's run is of a commit the queue made, no pull request's head
+# nor GitHub's merge of one, and its event says no pull request.
+if [ "${GITHUB_EVENT_NAME:-}" = merge_group ]; then
+  echo "github.sh: a merge queue's run (merge_group) isn't taken yet: its commit is the queue's, neither a pull request's head nor GitHub's merge of one, and no status is set. Run the backtest on pull_request alone, and leave merge_group out of the workflow's on:" >&2
+  exit 1
+fi
 if [ -z "${PR:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
   PR=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
 fi
@@ -73,6 +79,13 @@ ci_merge=
 case ${GITHUB_REF:-} in
   refs/pull/*/merge) ci_merge=${GITHUB_SHA:-} ;;
 esac
+# In GitHub Actions, that is the one merge GitHub makes: in an event of no
+# pull request (push, workflow_run), HEAD a merge is one its author made,
+# and its first parent isn't taken for the base (lib.sh's ci_merges).
+ci_merges=
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${GITHUB_EVENT_NAME:-}" ]; then
+  ci_merges=1
+fi
 # ... and, for the status's name, the repository's default branch and the
 # one the pull request goes into, as the event says: a pull request into
 # another branch sets lapilli/backtest (into BRANCH), not the default's

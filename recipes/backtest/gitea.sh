@@ -62,6 +62,12 @@ if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   if [ -z "${TARGET:-}" ]; then
     TARGET_BRANCH=${TARGET_BRANCH:-${GITHUB_BASE_REF:-}}
   fi
+  # ... and makes no merge: in an event of no pull request (push), HEAD a
+  # merge is one its author made, and its first parent isn't taken for the
+  # base (lib.sh's ci_merges).
+  if [ -n "${GITHUB_EVENT_NAME:-}" ] && [ -z "${status_commit:-}" ]; then
+    ci_merges=1
+  fi
 fi
 : "${GITEA_API:?such as https://git.example.com/api/v1}"
 : "${GITEA_REPO:?such as example/monitoring}"

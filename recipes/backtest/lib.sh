@@ -25,6 +25,11 @@
 # ci_base, that its CI says the commit or the branch the pull request goes
 # into, which the script gave as TARGET or TARGET_BRANCH, unless the job
 # gave its own TARGET: one given there is the job's, and taken as it is.
+# And ci_merges, that its CI says the merge it made where it made one, so
+# that HEAD a merge in an event of no pull request is its author's, not
+# the CI's; and ci_default and ci_into, the repository's default branch and
+# the one the pull request goes into, as its CI says them, for the
+# status's name.
 #
 # In a clone of the repository with the pull request checked out, it
 # installs a pinned Lapilli release, checked against the release's
@@ -382,6 +387,38 @@ id_token_audience() {
       end' 2>/dev/null || echo unknown
 }
 
+# capped MOST FILE: stdin into FILE, MOST bytes of it at most; it fails
+# when there was more. Before curl 8.4.0 (Ubuntu 22.04 has 7.81),
+# --max-filesize caps only an answer that says its length first: what curl
+# writes is capped so, whatever its version. A command whose stdin it is
+# writes $tmp/failed when it fails: { CMD || : >"$tmp/failed"; } | capped.
+capped() { head -c "$(($1 + 1))" >"$2" && [ "$(wc -c <"$2")" -le "$1" ]; }
+
+# host METHOD URL [FILE]: asks the host's API, the answer in $out, 16 MiB
+# at most; writes the HTTP status, or "failed". curl reads no .curlrc (-q),
+# follows no redirect, and speaks only HTTP and HTTPS.
+host() {
+  rm -f "$tmp/failed"
+  if { ask_host "$@" || : >"$tmp/failed"; } | capped 16777216 "$out" && [ ! -e "$tmp/failed" ]; then
+    code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp/headers" | tail -n 1)
+    echo "${code:-failed}"
+  else
+    echo failed
+  fi
+}
+
+# ask_host METHOD URL [FILE]: the answer on stdout, its headers in
+# $tmp/headers.
+ask_host() {
+  : >"$tmp/headers"
+  if [ $# -ge 3 ]; then
+    host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
+      --data-binary "@$3" -D "$tmp/headers" -o - "$2"
+  else
+    host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -D "$tmp/headers" -o - "$2"
+  fi
+}
+
 # The settings, checked before anything runs.
 case ${PR:-} in
   '' | *[!0-9]* | 0*) say "PR ${PR:-}: want the pull request's number"; exit 1 ;;
@@ -398,26 +435,6 @@ esac
 # The comment's first line: a link reference definition, which every
 # host's Markdown shows nothing of.
 marker="[//]: # (lapilli-backtest $KEY)"
-case ${FAIL_ON_ERROR:-false} in
-  true) strict=1 ;;
-  false | '') strict= ;;
-  *) say "FAIL_ON_ERROR $FAIL_ON_ERROR: want true or false"; exit 1 ;;
-esac
-case ${FAIL_ON_EXPECTATIONS:-false} in
-  true) held=1 ;;
-  false | '') held= ;;
-  *) say "FAIL_ON_EXPECTATIONS $FAIL_ON_EXPECTATIONS: want true or false"; exit 1 ;;
-esac
-case ${EXPECT_REQUIRED:-false} in
-  true) required=1 ;;
-  false | '') required= ;;
-  *) say "EXPECT_REQUIRED $EXPECT_REQUIRED: want true or false"; exit 1 ;;
-esac
-case ${FAIL_MISSED:-false} in
-  true | 1) missed_gate=1 ;;
-  false | 0 | '') missed_gate= ;;
-  *) say "FAIL_MISSED $FAIL_MISSED: want true or false"; exit 1 ;;
-esac
 case ${STATUS:-false} in
   true | 1) status_on=1 ;;
   false | 0 | '') status_on= ;;
@@ -482,6 +499,56 @@ else
     fi
   done
 fi
+# settings_failed: with STATUS, the job ending on a setting found wrong
+# from here on, before the commits are found: its status a failure saying
+# so, on the pull request's head as the CI says, or STATUS_SHA, or else HEAD
+# where it is a commit of one parent, so that an earlier run's success or
+# pending there doesn't stand for this run. The settings read before these
+# (PR, the host's API, KEY, STATUS and its own) can't set one.
+settings_failed() {
+  [ -n "$status_on" ] && [ -z "$status_unnamed" ] || return 0
+  status_sha=
+  for c in "${ci_head:-}" "${STATUS_SHA:-}" "${status_commit:-}"; do
+    if full_hash "$c"; then
+      status_sha=$c
+      break
+    fi
+  done
+  if [ -z "$status_sha" ]; then
+    c=$(git -C "${REPO:-.}" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null) || return 0
+    [ "$(git -C "${REPO:-.}" rev-list --parents -n 1 "$c" 2>/dev/null | wc -w)" -eq 2 ] || return 0
+    status_sha=$c
+  fi
+  tmp=$(mktemp -d) || return 0
+  out=$tmp/out
+  if post_status failure "a setting is wrong: the job's log says which"; then
+    say "set the commit status $status_context on $status_sha: failure, as a setting is wrong"
+  else
+    say "the commit status $status_context couldn't be set on $status_sha"
+  fi
+  rm -rf "$tmp"
+}
+trap 'rc=$?; [ "$rc" = 0 ] || settings_failed || :; exit "$rc"' EXIT
+case ${FAIL_ON_ERROR:-false} in
+  true) strict=1 ;;
+  false | '') strict= ;;
+  *) say "FAIL_ON_ERROR $FAIL_ON_ERROR: want true or false"; exit 1 ;;
+esac
+case ${FAIL_ON_EXPECTATIONS:-false} in
+  true) held=1 ;;
+  false | '') held= ;;
+  *) say "FAIL_ON_EXPECTATIONS $FAIL_ON_EXPECTATIONS: want true or false"; exit 1 ;;
+esac
+case ${EXPECT_REQUIRED:-false} in
+  true) required=1 ;;
+  false | '') required= ;;
+  *) say "EXPECT_REQUIRED $EXPECT_REQUIRED: want true or false"; exit 1 ;;
+esac
+case ${FAIL_MISSED:-false} in
+  true | 1) missed_gate=1 ;;
+  false | 0 | '') missed_gate= ;;
+  *) say "FAIL_MISSED $FAIL_MISSED: want true or false"; exit 1 ;;
+esac
 repo=${REPO:-.}
 # HEAD^1, given or not, takes HEAD for a merge the CI made (commits).
 # Given otherwise, where the CI says what the pull request goes into
@@ -967,38 +1034,6 @@ out=$tmp/out
 mkdir "$tmp/empty"
 : >"$tmp/problem.log"
 
-# capped MOST FILE: stdin into FILE, MOST bytes of it at most; it fails
-# when there was more. Before curl 8.4.0 (Ubuntu 22.04 has 7.81),
-# --max-filesize caps only an answer that says its length first: what curl
-# writes is capped so, whatever its version. A command whose stdin it is
-# writes $tmp/failed when it fails: { CMD || : >"$tmp/failed"; } | capped.
-capped() { head -c "$(($1 + 1))" >"$2" && [ "$(wc -c <"$2")" -le "$1" ]; }
-
-# host METHOD URL [FILE]: asks the host's API, the answer in $out, 16 MiB
-# at most; writes the HTTP status, or "failed". curl reads no .curlrc (-q),
-# follows no redirect, and speaks only HTTP and HTTPS.
-host() {
-  rm -f "$tmp/failed"
-  if { ask_host "$@" || : >"$tmp/failed"; } | capped 16777216 "$out" && [ ! -e "$tmp/failed" ]; then
-    code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp/headers" | tail -n 1)
-    echo "${code:-failed}"
-  else
-    echo failed
-  fi
-}
-
-# ask_host METHOD URL [FILE]: the answer on stdout, its headers in
-# $tmp/headers.
-ask_host() {
-  : >"$tmp/headers"
-  if [ $# -ge 3 ]; then
-    host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
-      --data-binary "@$3" -D "$tmp/headers" -o - "$2"
-  else
-    host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -D "$tmp/headers" -o - "$2"
-  fi
-}
-
 # unmet: what the change does to the expectations that fails the job
 # (FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED), said once the comment is posted;
 # lost, what it does to the incidents (FAIL_MISSED). judged and
@@ -1024,6 +1059,15 @@ trouble() {
     cp "$2" "$tmp/problem.log"
   fi
   say "$1"
+}
+
+# stop WHY: a setting found wrong once the commits are: the job fails at
+# once, WHY in its log and no comment posted, and with STATUS its status is
+# a failure saying so, never what an earlier run left.
+stop() {
+  say "$1"
+  status 1 "a setting is wrong: the job's log says which" || :
+  exit 1
 }
 
 # sha256 FILE: its sha256, with whichever tool the machine has.
@@ -1163,6 +1207,12 @@ commits() {
     trouble "REPO isn't a git clone" "$tmp/git.log"
     return 1
   fi
+  # The commit checked out, known from here on: a run refused below has
+  # its status on it where the CI says no head and it isn't a merge.
+  if ! head=$(git -C "$repo" rev-parse --verify -q "HEAD^{commit}"); then
+    trouble "the clone has no commit checked out"
+    return 1
+  fi
   # Where the CI says the pull request's head (ci_head), the run is that
   # commit's: the host shows the job's end on it, and the status goes on
   # it. HEAD is it, or the merge the CI says it made of it (ci_merge, in a
@@ -1172,12 +1222,21 @@ commits() {
   # say of the head what was read of another commit: refused, the job
   # fails, and the status, if one is asked for, is a failure on the head
   # the CI says, saying why, so that no earlier run's success or pending
-  # there stands for this one.
-  if [ -n "${ci_head:-}" ] && at=$(git -C "$repo" rev-parse --verify -q "HEAD^{commit}" 2>/dev/null) && [ "$at" != "$ci_head" ] && [ "$at" != "${ci_merge:-}" ]; then
+  # there stands for this one. So is the CI's merge whose second parent,
+  # where the clone has it, isn't that head: a merge of an earlier head,
+  # made before the event that says the later one.
+  if [ -n "${ci_head:-}" ] && [ "$head" != "$ci_head" ] && [ "$head" != "${ci_merge:-}" ]; then
     strayed=1
     if [ -n "$strict$held$required$missed_gate$status_on" ]; then
       refused="HEAD isn't the pull request's head as the CI says, nor the CI's merge of it"
-      trouble "HEAD $at is neither the pull request's head as the CI says, $ci_head, nor the CI's merge of it: the gates and the status would say of that head what was read of another commit. Check out the pull request's head commit, or the merge commit the CI made of it"
+      trouble "HEAD $head is neither the pull request's head as the CI says, $ci_head, nor the CI's merge of it: the gates and the status would say of that head what was read of another commit. Check out the pull request's head commit, or the merge commit the CI made of it"
+      return 1
+    fi
+  elif [ -n "${ci_head:-}" ] && [ "$head" = "${ci_merge:-}" ] && of=$(git -C "$repo" rev-parse --verify -q "HEAD^2^{commit}" 2>/dev/null) && [ "$of" != "$ci_head" ]; then
+    strayed=1
+    if [ -n "$strict$held$required$missed_gate$status_on" ]; then
+      refused="HEAD is the CI's merge of another head than the pull request's as the CI says"
+      trouble "HEAD $head is the CI's merge of $of, not of the pull request's head as the CI says, $ci_head: the gates and the status would say of that head what was read of another commit. Run the job again, once the CI has merged the head, or check out the pull request's head commit"
       return 1
     fi
   fi
@@ -1199,6 +1258,16 @@ commits() {
     merged=
     if [ -n "${ci_head:-}" ]; then
       ! ci_merged || merged=1
+    elif [ -n "${ci_merges:-}" ]; then
+      # A CI that says its merge (ci_merges: GitHub's and Gitea's Actions),
+      # in an event of no pull request (push, workflow_run), made none: HEAD
+      # a merge is one its author made, its first parent any commit they
+      # chose.
+      if [ "$(git -C "$repo" rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)" -gt 2 ] && [ -n "$strict$held$required$missed_gate$status_on" ] && [ -z "${ci_branch:-}" ]; then
+        refused="TARGET is HEAD's first parent, and the CI made no merge of a pull request"
+        trouble "TARGET $TARGET is HEAD's first parent, and HEAD a merge, but the CI's event says no pull request, so it made no merge of one: that parent is whatever commit the merge's author chose, which the gates and the status would judge the pull request against. Give TARGET or TARGET_BRANCH, the branch it goes into"
+        return 1
+      fi
     elif [ "$(git -C "$repo" rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)" -ne 2 ]; then
       merged=1 # a merge, or a commit whose parents the clone hasn't
     fi
@@ -1222,10 +1291,6 @@ commits() {
       trouble "the branch $TARGET_BRANCH isn't in the clone, and couldn't be fetched from origin: check out every branch, or let the job fetch (the recipes' README says how, CI by CI)" "$tmp/git.log"
       return 1
     fi
-  fi
-  if ! head=$(git -C "$repo" rev-parse --verify -q "HEAD^{commit}"); then
-    trouble "the clone has no commit checked out"
-    return 1
   fi
   # A name git would read as a tag before the branch the job means: refused,
   # a gate passed and a status set by it being whoever pushed the tag's.
@@ -1260,8 +1325,7 @@ commits() {
         fi
       done
       if [ -n "$missing" ]; then
-        say "${list%% *}:$missing: in neither commit: say where the rules are"
-        exit 1
+        stop "${list%% *}:$missing: in neither commit: say where the rules are"
       fi
     done
     set +f
@@ -2453,14 +2517,14 @@ status() {
   [ -n "$status_on" ] || return 0
   # Ended, as the job does: the trap leaves the status to this.
   status_left=
-  if ! status_on_commit; then
-    say "the commit status $status_context wasn't set"
-    return 1
-  fi
   # A run refused is a failure, whatever RC says.
   state=success
   if [ "$1" != 0 ] || [ -n "$refused$strayed" ]; then
     state=failure
+  fi
+  if ! status_on_commit && ! { [ "$state" = failure ] && failure_commit; }; then
+    say "the commit status $status_context wasn't set"
+    return 1
   fi
   desc=$(printf '%s' "$2" | cut -c 1-140)
   if ! post_status "$state" "$desc"; then
@@ -2468,6 +2532,28 @@ status() {
     return 1
   fi
   say "set the commit status $status_context on $status_sha: $state, $desc"
+}
+
+# failure_commit: where status_on_commit finds no commit the backtest read
+# to set the status on (a clone of depth 1, whose merge's parents it
+# hasn't), the commit a failure goes on all the same, into status_sha: the
+# pull request's head as the CI says (ci_head), or STATUS_SHA, or the head
+# as the CI says otherwise (status_commit), a full hash, but the commit it
+# goes into and the one compared against. A failure says nothing was
+# judged well of it, which needs no proof the commit was read; it keeps an
+# earlier run's success or pending there from standing for this one.
+failure_commit() {
+  [ -z "$status_unnamed" ] || return 1
+  for c in "${ci_head:-}" "${STATUS_SHA:-}" "${status_commit:-}"; do
+    full_hash "$c" || continue
+    if [ "$c" != "${head:-}" ] && { [ "$c" = "${target:-}" ] || [ "$c" = "${base:-}" ]; }; then
+      continue
+    fi
+    status_sha=$c
+    say "the failure goes on $c, the pull request's head as the CI says, or STATUS_SHA, all the same"
+    return 0
+  done
+  return 1
 }
 
 # status_start: with STATUS, the commit status pending (in the host's
