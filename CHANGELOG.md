@@ -131,10 +131,10 @@ Before upgrading:
   Grafana's provisioning API lists the rule's uid with
   (`/api/v1/provisioning/alert-rules`, which a token that exports the
   rules reads too), read once a day copied, within the reader's bounds. A
-  rule it lists no more, or under
-  another title, renamed since the rules were read, is left out. A title
-  shared across folders leaves neither rule out, however many rules share
-  titles; a rule of a judged rule's title in a folder Lapilli's token
+  rule it lists no more, with an id it lists another rule with too, or
+  under another title, renamed since the rules were read, is left out. A
+  title shared across folders leaves neither rule out, however many rules
+  share titles; a rule of a judged rule's title in a folder Lapilli's token
   doesn't read takes nothing, its changes read or passed over (a change
   the read passes over leaves out the rule it says it is of alone); and a
   rule of a judged rule's title made, firing and deleted between two

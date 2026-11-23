@@ -236,8 +236,9 @@ type RuleIDs struct {
 // (/api/v1/provisioning/alert-rules): what an annotation names its rule
 // by (alertId). Grafana asks of a token the same to list them as to
 // export them, which Lapilli reads its rules from, and the export holds no
-// id. A rule it doesn't list, lists twice, or lists under another title
-// than rs has (renamed since they were read) has none. A list past
+// id. A rule it doesn't list, lists twice, lists with an id it lists
+// another rule with too, or lists under another title than rs has
+// (renamed since they were read) has none. A list past
 // ListLimit or MaxRules can't be used. It is asked within what the read of
 // the history, read, leaves of the reader's bounds of requests and bytes,
 // and past them fails as ErrTooManyChanges; with g.IDs, once.
@@ -271,6 +272,7 @@ func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule, read Histo
 		n     int
 	}
 	got := map[string]*listed{}
+	listedIDs := map[int64]int{} // how many rules each id is listed with
 	d := json.NewDecoder(bytes.NewReader(body))
 	if t, err := d.Token(); err != nil || t != json.Delim('[') {
 		return nil, fmt.Errorf("%w: reading %s: not a list of rules", ErrUnusable, what)
@@ -287,6 +289,7 @@ func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule, read Histo
 		if err := d.Decode(&x); err != nil {
 			return nil, fmt.Errorf("%w: reading %s: %v", ErrUnusable, what, err)
 		}
+		listedIDs[x.ID]++
 		if _, ok := title[x.UID]; !ok {
 			continue
 		}
@@ -299,7 +302,7 @@ func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule, read Histo
 	}
 	ids := make(map[string]int64, len(got))
 	for uid, l := range got {
-		if l.n == 1 && l.id > 0 && l.title == title[uid] {
+		if l.n == 1 && l.id > 0 && listedIDs[l.id] == 1 && l.title == title[uid] {
 			ids[uid] = l.id
 		}
 	}

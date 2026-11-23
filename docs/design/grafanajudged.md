@@ -44,8 +44,9 @@ history (recorded.md), such a rule can get from Grafana's.
   rule needs its own, within what the day's read of the history leaves of
   the reader's bounds, and 64 MB and 50,000 rules at most. Grafana asks of a token the same to list the rules as to
   export them, which Lapilli reads its rules from; the export holds no
-  id. A rule it lists no more, lists twice, or lists under another title
-  than the rules read (renamed since) is unsure. A change of another rule
+  id. A rule it lists no more, lists twice, lists with an id it lists
+  another rule with too, or lists under another title than the rules read
+  (renamed since) is unsure. A change of another rule
   of the title is passed over and its alerts told apart from the judged
   rule's, so one title in two folders judges both, however many such
   rules there are, and a rule of the title in a folder the token doesn't

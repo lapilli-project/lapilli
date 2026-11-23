@@ -202,7 +202,8 @@ func TestGrafanaJudgedByUID(t *testing.T) {
 // read with it or in a folder the token doesn't read, is none of the
 // judged rule's, whether the judged rule changes state in the read or not.
 // A rule Grafana lists no more, lists under another title (renamed since
-// the rules were read), or lists twice, is unsure.
+// the rules were read), lists twice, or lists with an id it lists another
+// rule with too, is unsure.
 func TestGrafanaJudgedByID(t *testing.T) {
 	note := func(id int64, m int, alertID int64, title, from, to string) annotation {
 		return annotation{ID: id, AlertID: alertID, AlertName: title, PrevState: from, NewState: to, Time: min_(m).UnixMilli(),
@@ -232,6 +233,8 @@ func TestGrafanaJudgedByID(t *testing.T) {
 		{what: "the judged rule renamed since the rules were read", all: []rules.Rule{mine}, listed: []listedRule{{7, "orders", "Orders slower"}}, unsure: true},
 		{what: "the judged rule listed no more", all: []rules.Rule{mine}, listed: listed[1:], unsure: true},
 		{what: "the judged rule listed twice", all: []rules.Rule{mine}, listed: []listedRule{listed[0], {8, "orders", "Orders slow"}}, unsure: true},
+		{what: "the judged rule's id listed with another rule too", all: []rules.Rule{mine}, listed: []listedRule{listed[0], {7, "elsewhere", "Orders slower"}}, unsure: true},
+		{what: "the judged rule's id listed with another rule too, before it", all: []rules.Rule{mine}, listed: []listedRule{{7, "elsewhere", "Stock low"}, listed[0]}, unsure: true},
 	} {
 		g := &fakeGrafana{settings: `{"buildInfo": {"version": "12.4.14"}, "unifiedAlerting": {"alertStateHistoryBackend": "annotations"}}`, listed: c.listed}
 		if !c.quiet {
