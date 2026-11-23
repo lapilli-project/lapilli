@@ -10,6 +10,8 @@ import (
 	"strings"
 	"text/template"
 
+	"go.yaml.in/yaml/v3"
+
 	"lapilli.dev/internal/rules"
 )
 
@@ -54,10 +56,18 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 	if err != nil {
 		return nil, nil, fmt.Errorf("Alertmanager's configuration: %w", err)
 	}
-	root, ok := m["route"].(map[string]any)
-	if !ok {
+	if _, ok := m["route"].(map[string]any); !ok {
 		return nil, nil, errors.New("Alertmanager's configuration has no route")
 	}
+	// The route tree again, as written: Alertmanager reads it with
+	// yaml.v2, a value as the text it is written in (1.10, 0x1F), continue
+	// as YAML 1.1 reads a boolean (yes, on). It parsed above, within the
+	// bounds of a rule file.
+	var doc yaml.Node
+	if err := yaml.Unmarshal(config, &doc); err != nil || len(doc.Content) != 1 {
+		return nil, nil, fmt.Errorf("Alertmanager's configuration: %v", err)
+	}
+	root := yamlField(doc.Content[0], "route", 0)
 	n = &Notifications{alertmanager: true, defs: map[string]*shown{}, receivers: map[string][]string{}}
 	total := 0
 	for i, f := range files {
@@ -86,6 +96,9 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 	}
 	recvs, _ := m["receivers"].([]any)
 	fields := 0
+	// The defaults the files define in Alertmanager's place, by kind,
+	// worked out once; a receiver's templates, each once.
+	defaults := map[string][]string{}
 	for i, x := range recvs {
 		if i >= maxReceivers {
 			skipped = append(skipped, fmt.Sprintf("more than %d receivers: those after aren't read", maxReceivers))
@@ -95,6 +108,18 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 		name, _ := rm["name"].(string)
 		if name == "" || len(name) > 1024 {
 			continue
+		}
+		uses := map[string]bool{}
+		use := func(def string) bool {
+			if uses[def] {
+				return true
+			}
+			if fields++; fields > maxFields {
+				return false
+			}
+			uses[def] = true
+			n.receivers[name] = append(n.receivers[name], def)
+			return true
 		}
 		for _, k := range slices.Sorted(maps.Keys(rm)) {
 			kind, ok := strings.CutSuffix(k, "_configs")
@@ -108,7 +133,8 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 					continue
 				}
 				for _, f := range amFields(im, fmt.Sprintf("%s[%d]", k, j), 0) {
-					if fields++; fields > maxFields {
+					if fields >= maxFields {
+						fields++
 						break
 					}
 					def := name + "/" + f.path
@@ -120,9 +146,23 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 						continue
 					}
 					n.defs[def] = s
-					n.receivers[name] = append(n.receivers[name], def)
+					use(def)
 				}
-				n.receivers[name] = append(n.receivers[name], n.overrides(kind, im)...)
+				ds, ok := defaults[kind]
+				if !ok {
+					ds = n.defaults(kind)
+					defaults[kind] = ds
+					if len(ds) > maxDefaults {
+						ds = ds[:maxDefaults]
+						defaults[kind] = ds
+						skipped = append(skipped, bound(fmt.Sprintf("templates define more than %d of %s's defaults: those after aren't followed", maxDefaults, kind)))
+					}
+				}
+				for _, d := range overrides(ds, kind, im) {
+					if !use(d) {
+						break
+					}
+				}
 			}
 		}
 	}
@@ -130,7 +170,8 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 		skipped = append(skipped, fmt.Sprintf("receivers' fields of more than %d templates: those after aren't read", maxFields))
 	}
 	count := 0
-	n.route = amRoute(root, &count, 0)
+	matchers := 0
+	n.route = amRoute(root, &count, &matchers, 0)
 	n.number()
 	return n, skipped, nil
 }
@@ -269,13 +310,33 @@ func defined(text []byte) []string {
 	return out
 }
 
-// overrides are the templates a file defines in place of Alertmanager's
-// own default for a field an integration doesn't set: slack.default.title
-// for a Slack integration with no title, email.default.subject for an
-// email with no Subject header. Alertmanager's defaults themselves aren't
-// followed: they show every label and annotation there is, and fault
-// nothing.
-func (n *Notifications) overrides(kind string, set map[string]any) []string {
+// maxDefaults is how many of a kind's defaults the files may define in
+// Alertmanager's place, and are followed.
+const maxDefaults = 200
+
+// defaults are the names the files define in place of Alertmanager's own
+// defaults for an integration of a kind (slack.default.title), sorted.
+func (n *Notifications) defaults(kind string) []string {
+	prefix := kind + ".default."
+	var out []string
+	for name := range n.defs {
+		if f, ok := strings.CutPrefix(name, prefix); ok && f != "" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// overrides are the defaults (n.defaults) an integration is sent with:
+// those for a field it doesn't set, slack.default.title for a Slack
+// integration with no title, email.default.subject for an email with no
+// Subject header. Alertmanager's defaults themselves aren't followed: they
+// show every label and annotation there is, and fault nothing.
+func overrides(defaults []string, kind string, set map[string]any) []string {
+	if len(defaults) == 0 {
+		return nil
+	}
 	has := map[string]bool{}
 	for k := range set {
 		has[squash(k)] = true
@@ -288,9 +349,8 @@ func (n *Notifications) overrides(kind string, set map[string]any) []string {
 		}
 	}
 	var out []string
-	prefix := kind + ".default."
-	for _, name := range slices.Sorted(maps.Keys(n.defs)) {
-		if f, ok := strings.CutPrefix(name, prefix); ok && f != "" && !has[squash(f)] {
+	for _, name := range defaults {
+		if !has[squash(strings.TrimPrefix(name, kind+".default."))] {
 			out = append(out, name)
 		}
 	}
@@ -301,15 +361,80 @@ func (n *Notifications) overrides(kind string, set map[string]any) []string {
 // and titlelink, client_url and clientURL alike.
 func squash(s string) string { return strings.ToLower(strings.ReplaceAll(s, "_", "")) }
 
+// maxMatchers is how many matchers the route tree's routes may have, in
+// all: past them, a route matches maybe.
+const maxMatchers = 20000
+
+// yamlNode is what n stands for: an alias's anchor, followed a few times.
+func yamlNode(n *yaml.Node) *yaml.Node {
+	for i := 0; n != nil && n.Kind == yaml.AliasNode && i < 8; i++ {
+		n = n.Alias
+	}
+	return n
+}
+
+// yamlField is a mapping's value for a key: its own, or one its merge
+// (<<) brings in, as yaml.v2 reads it; nil for none.
+func yamlField(m *yaml.Node, key string, depth int) *yaml.Node {
+	m = yamlNode(m)
+	if m == nil || m.Kind != yaml.MappingNode || depth > 8 {
+		return nil
+	}
+	var merge *yaml.Node
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		switch m.Content[i].Value {
+		case key:
+			return yamlNode(m.Content[i+1])
+		case "<<":
+			merge = yamlNode(m.Content[i+1])
+		}
+	}
+	switch {
+	case merge == nil:
+	case merge.Kind == yaml.MappingNode:
+		return yamlField(merge, key, depth+1)
+	case merge.Kind == yaml.SequenceNode:
+		for _, x := range merge.Content {
+			if v := yamlField(x, key, depth+1); v != nil {
+				return v
+			}
+		}
+	}
+	return nil
+}
+
+// yamlText is a scalar as it is written, as yaml.v2 reads one into a
+// string; "" for anything else.
+func yamlText(n *yaml.Node) string {
+	if n = yamlNode(n); n != nil && n.Kind == yaml.ScalarNode {
+		return n.Value
+	}
+	return ""
+}
+
+// yamlTrue is a boolean as YAML 1.1, and so yaml.v2, reads one: yes and on
+// are true.
+func yamlTrue(n *yaml.Node) bool {
+	switch yamlText(n) {
+	case "true", "True", "TRUE", "yes", "Yes", "YES", "y", "Y", "on", "On", "ON":
+		return true
+	}
+	return false
+}
+
 // amRoute reads a route of Alertmanager's tree: its receiver, its
 // matchers (matchers, and the older match and match_re), continue, and the
 // routes under it, as many as are read.
-func amRoute(m map[string]any, count *int, depth int) *route {
+func amRoute(m *yaml.Node, count, matchers *int, depth int) *route {
 	*count++
 	r := &route{}
-	r.receiver, _ = m["receiver"].(string)
-	r.cont, _ = m["continue"].(bool)
+	r.receiver = yamlText(yamlField(m, "receiver", 0))
+	r.cont = yamlTrue(yamlField(m, "continue", 0))
 	add := func(name, op, value string) {
+		if *matchers++; *matchers > maxMatchers {
+			r.matchers = append(r.matchers, routeMatcher{op: "?"})
+			return
+		}
 		x := routeMatcher{name: name, op: op, value: value}
 		if op == "=~" || op == "!~" {
 			re, err := regexp.Compile("^(?:" + value + ")$")
@@ -320,31 +445,20 @@ func amRoute(m map[string]any, count *int, depth int) *route {
 		}
 		r.matchers = append(r.matchers, x)
 	}
-	// A value YAML reads as a number or true is the text written, as
-	// Alertmanager reads it into a string.
-	text := func(v any) string {
-		switch v := v.(type) {
-		case string:
-			return v
-		case int, int64, uint64, float64, bool:
-			return fmt.Sprint(v)
+	pairs := func(key, op string) {
+		mm := yamlField(m, key, 0)
+		if mm == nil || mm.Kind != yaml.MappingNode {
+			return
 		}
-		return ""
-	}
-	if mm, ok := m["match"].(map[string]any); ok {
-		for _, k := range slices.Sorted(maps.Keys(mm)) {
-			add(k, "=", text(mm[k]))
+		for i := 0; i+1 < len(mm.Content); i += 2 {
+			add(yamlText(mm.Content[i]), op, yamlText(mm.Content[i+1]))
 		}
 	}
-	if mm, ok := m["match_re"].(map[string]any); ok {
-		for _, k := range slices.Sorted(maps.Keys(mm)) {
-			add(k, "=~", text(mm[k]))
-		}
-	}
-	if l, ok := m["matchers"].([]any); ok {
-		for _, x := range l {
-			line, _ := x.(string)
-			ms, ok := amMatchers(line)
+	pairs("match", "=")
+	pairs("match_re", "=~")
+	if l := yamlField(m, "matchers", 0); l != nil && l.Kind == yaml.SequenceNode {
+		for _, x := range l.Content {
+			ms, ok := amMatchers(yamlText(x))
 			if !ok {
 				r.matchers = append(r.matchers, routeMatcher{op: "?"})
 				continue
@@ -354,17 +468,17 @@ func amRoute(m map[string]any, count *int, depth int) *route {
 			}
 		}
 	}
-	routes, _ := m["routes"].([]any)
-	for _, c := range routes {
-		cm, ok := c.(map[string]any)
-		if !ok {
-			continue
+	if routes := yamlField(m, "routes", 0); routes != nil && routes.Kind == yaml.SequenceNode {
+		for _, c := range routes.Content {
+			if c = yamlNode(c); c == nil || c.Kind != yaml.MappingNode {
+				continue
+			}
+			if *count >= maxRoutes || depth >= maxDepth {
+				r.routes = append(r.routes, &route{matchers: []routeMatcher{{op: "?"}}, cut: true})
+				break
+			}
+			r.routes = append(r.routes, amRoute(c, count, matchers, depth+1))
 		}
-		if *count >= maxRoutes || depth >= maxDepth {
-			r.routes = append(r.routes, &route{matchers: []routeMatcher{{op: "?"}}, cut: true})
-			break
-		}
-		r.routes = append(r.routes, amRoute(cm, count, depth+1))
 	}
 	return r
 }
@@ -392,21 +506,56 @@ func amMatchers(line string) (out [][3]string, ok bool) {
 		}
 		name, value := g[1], g[3]
 		if strings.HasPrefix(name, `"`) {
-			var err error
-			if name, err = strconv.Unquote(name); err != nil {
-				return nil, false
-			}
+			name = amUnquote(name)
 		}
 		if strings.HasPrefix(value, `"`) {
-			v, err := strconv.Unquote(value)
-			if err != nil {
+			if !quoted(value) {
 				return nil, false
 			}
-			value = v
+			value = amUnquote(value)
 		}
 		out = append(out, [3]string{name, g[2], value})
 	}
 	return out, len(out) > 0
+}
+
+// quoted reports whether s is one quoted text: its first quote closed by
+// its last byte, and none between but those escaped.
+func quoted(s string) bool {
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '"':
+			return i == len(s)-1
+		}
+	}
+	return false
+}
+
+// amUnquote is a matcher's quoted name or value as Alertmanager reads it:
+// \", \\ and \n are what they stand for; any other backslash is kept as
+// written, as in a regular expression's \. or \d.
+func amUnquote(q string) string {
+	in := q[1 : len(q)-1]
+	var b strings.Builder
+	for i := 0; i < len(in); i++ {
+		if in[i] != '\\' || i+1 == len(in) {
+			b.WriteByte(in[i])
+			continue
+		}
+		i++
+		switch in[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case '"', '\\':
+			b.WriteByte(in[i])
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(in[i])
+		}
+	}
+	return b.String()
 }
 
 // splitMatchers splits matchers at the commas outside a quoted text.

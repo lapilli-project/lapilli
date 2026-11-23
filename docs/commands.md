@@ -229,7 +229,8 @@ What the rules say:
                       none outside its directory), or a file of Mimir's,
                       Cortex's or Amazon's format (alertmanager_config and
                       template_files); or Mimir's or Cortex's API, read
-                      with --ruler-token-file and --ruler-tenant:
+                      with --ruler-token-file and --ruler-tenant, on
+                      --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
                       Only read: no field that holds a secret is parsed

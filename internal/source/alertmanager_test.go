@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,13 +56,23 @@ receivers: [{name: r}]
 		t.Errorf("read %q", names)
 	}
 	joined := strings.Join(passed, "\n")
-	for _, want := range []string{`"templates/link.tmpl" is outside`, `"../secret.tmpl" is outside`, `"[bad" isn't a glob`} {
+	for _, want := range []string{`"templates/*.tmpl": 1 files are links out`, `"../*.tmpl" is outside`, `"[bad" isn't a glob`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("passed over: %q, want %s", passed, want)
 		}
 	}
 	if strings.Contains(joined, root) {
 		t.Errorf("a path on the disk said: %q", passed)
+	}
+	// A glob that leaves the directory isn't looked through, and nothing
+	// it would name is said.
+	for i := range 30 {
+		writeFile(t, filepath.Join(root, fmt.Sprintf("other%d", i), "x.tmpl"), "x")
+	}
+	writeFile(t, filepath.Join(dir, "far.yml"), "templates: ['../../*/*', '../*/*.tmpl']\nroute: {receiver: r}\n")
+	_, files, passed, err = AlertmanagerFiles(filepath.Join(dir, "far.yml"))
+	if err != nil || len(files) != 0 || len(passed) != 2 || strings.Contains(strings.Join(passed, " "), "other") {
+		t.Errorf("globs out of the directory: %d files, %q %v", len(files), passed, err)
 	}
 	// Mimir's format, in a file, as Amazon's definition is written.
 	writeFile(t, filepath.Join(dir, "definition.yml"), "template_files:\n  x.tmpl: '{{ define \"x\" }}{{ end }}'\nalertmanager_config: |\n  route: {receiver: r}\n")

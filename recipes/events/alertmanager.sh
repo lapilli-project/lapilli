@@ -32,6 +32,9 @@
 #   POLL                seconds between reads when following (default 5)
 #   RETRIES             how often a request serve answers 429 or 5xx is
 #                       tried again, as Retry-After says (default 8)
+#   MAX_READ            bytes read at a time: of the file, and of what kcat
+#                       gives of a partition (default 16777216, 16 MiB); a
+#                       line longer is passed over, and said
 #   KAFKA_START         where a partition with no offset kept begins:
 #                       beginning, end, or the default, an hour ago, which is
 #                       as far back as serve takes an event's own time
@@ -64,6 +67,12 @@ FOLLOW=${FOLLOW:-false}
 POLL=${POLL:-5}
 RETRIES=${RETRIES:-8}
 case $RETRIES in *[!0-9]* | '') say "RETRIES is a number"; exit 2 ;; esac
+MAX_READ=${MAX_READ:-16777216}
+case $MAX_READ in *[!0-9]* | '' | 0*) MAX_READ=x ;; esac
+if [ "$MAX_READ" = x ] || [ "$MAX_READ" -lt 1024 ]; then
+  say "MAX_READ is a number of bytes, 1024 or more"
+  exit 2
+fi
 case $BATCH in *[!0-9]* | '' | 0*) BATCH=x ;; esac
 if [ "$BATCH" = x ] || [ "$BATCH" -gt 1000 ]; then
   say "BATCH is a number of events, 1 to 1000"
@@ -71,11 +80,13 @@ if [ "$BATCH" = x ] || [ "$BATCH" -gt 1000 ]; then
 fi
 case $POLL in *[!0-9]* | '' | 0) say "POLL is a number of seconds"; exit 2 ;; esac
 case $FOLLOW in true | false) ;; *) say "FOLLOW is true or false"; exit 2 ;; esac
-# A request's body is 1 MB at most: what is sent is held under it, the
-# brackets and commas of a batch counted.
+# A request's body is 1 MiB at most (bodymax): a batch is read to under
+# 1 MB of lines (maxbody), the brackets and commas counted, and checked
+# again as jq writes it.
 maxbody=1000000
-# How much of the file is read at a time.
-maxread=16777216
+bodymax=1048576
+# How much of the file, or of a partition, is read at a time.
+maxread=$MAX_READ
 
 # The token goes where the URL points, serve's port: https, or http as a
 # Service in the cluster is reached, and curl speaks no other scheme
@@ -124,17 +135,56 @@ secret() {
   esac
   printf '%s' "$s"
 }
+# Read once now, to refuse a file that holds none before anything is read,
+# and again for each request, so a Secret rotated while it follows is
+# picked up.
 token=$(secret LAPILLI_TOKEN_FILE "$LAPILLI_TOKEN_FILE")
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+lock=
+trap 'rm -rf "$work"; [ -z "$lock" ] || rm -rf "$lock"' EXIT
 trap 'exit 1' INT TERM HUP
 
-# post FILE: the events in FILE, one a line, as one JSON array. 0 when
-# serve took them, or refused them as events it can't read (they are
-# passed over, and said: sent again, they would be refused again); 1
-# otherwise, and the offset isn't moved. A line that isn't a JSON object
-# isn't an event: it is left out, and counted.
+# send BODY: BODY posted to serve; the answer's status in code, the
+# answer in $work/answer. curl tries again on 429 and 5xx, after what
+# Retry-After says. A body over what serve takes isn't sent: 413.
+send() {
+  if [ "$(wc -c <"$1" | tr -d ' ')" -gt "$bodymax" ]; then
+    code=413
+    printf '"over %s bytes"' "$bodymax" >"$work/answer"
+    return
+  fi
+  token=$(secret LAPILLI_TOKEN_FILE "$LAPILLI_TOKEN_FILE")
+  code=$(printf 'Authorization: Bearer %s\n' "$token" |
+    curl -q -sS --proto "$proto" --max-time 60 --max-filesize 1048576 --retry "$RETRIES" --retry-max-time 300 -X POST -H @- \
+      -H 'Content-Type: application/json' --data-binary "@$1" -o "$work/answer" -w '%{http_code}' "$target") || code=failed
+}
+
+# answered N: what serve said of N events sent; 0 when it took them, or
+# refused them as events it can't read (400), or as too large alone
+# (413): they are passed over, and said, as sent again they would be
+# refused again; 1 otherwise, and the offset isn't moved.
+answered() {
+  case $code in
+    2??)
+      # Numbers alone: nothing the server says acts on a terminal.
+      say "$1 events sent, $(jq -r '(.kept // 0) | tonumber' "$work/answer" 2>/dev/null || echo 0) deliveries kept"
+      ;;
+    400 | 413)
+      say "$1 events serve can't take, passed over ($code): $(jq -Rsc '.[0:300]' "$work/answer")"
+      ;;
+    *)
+      say "the events weren't sent ($code): $(jq -Rsc '.[0:300]' "$work/answer" 2>/dev/null || echo '""')"
+      return 1
+      ;;
+  esac
+}
+
+# post FILE: the events in FILE, one a line, as one JSON array; when serve
+# takes no body so large (jq may write it longer than it was read: a
+# DEL as \u007f), or answers 413 (too large), one at a time. 0 when each
+# was taken or passed over (answered); 1 otherwise. A line that isn't a
+# JSON object isn't an event: it is left out, and counted.
 post() {
   jq -cRs '[split("\n")[] | select(length > 0) | (fromjson? // null) | select(type == "object")]' "$1" >"$work/body" 2>/dev/null || {
     say "the events couldn't be read"
@@ -144,25 +194,20 @@ post() {
   events=$(jq length "$work/body")
   [ "$events" -eq "$lines" ] || say "$((lines - events)) lines that aren't an event left out (the recorder's Kafka output writes JSON with format: json)"
   [ "$events" -gt 0 ] || return 0
-  # curl tries again on 429 and 503, after what Retry-After says.
-  code=$(printf 'Authorization: Bearer %s\n' "$token" |
-    curl -q -sS --proto "$proto" --max-time 60 --max-filesize 1048576 --retry "$RETRIES" --retry-max-time 300 -X POST -H @- \
-      -H 'Content-Type: application/json' --data-binary "@$work/body" -o "$work/answer" -w '%{http_code}' "$target") || code=failed
-  case $code in
-    2??)
-      # Numbers alone: nothing the server says acts on a terminal.
-      say "$events events sent, $(jq -r '(.kept // 0) | tonumber' "$work/answer" 2>/dev/null || echo 0) deliveries kept"
-      return 0
-      ;;
-    400)
-      say "$events events serve can't read, passed over: $(jq -Rsc '.[0:300]' "$work/answer")"
-      return 0
-      ;;
-    *)
-      say "the events weren't sent ($code): $(jq -Rsc '.[0:300]' "$work/answer" 2>/dev/null || echo '""')"
-      return 1
-      ;;
-  esac
+  send "$work/body"
+  if [ "$code" != 413 ] || [ "$events" -eq 1 ]; then
+    answered "$events"
+    return
+  fi
+  say "$events events in more than serve takes at once: sent one at a time"
+  rm -f "$work"/one.*
+  jq -c '.[]' "$work/body" | split -a 4 -l 1 - "$work/one."
+  for one in "$work"/one.*; do
+    [ -f "$one" ] || continue
+    { printf '['; cat "$one"; printf ']'; } >"$work/body"
+    send "$work/body"
+    answered 1 || return 1
+  done
 }
 
 # batches FILE: FILE's lines, BATCH at most and under maxbody bytes in all,
@@ -179,7 +224,7 @@ batches() {
       }
       b++; f = dir "/batch." b; n = 0; size = 2; long = 0
     }
-    BEGIN { b = 0; f = dir "/batch.0"; size = 2 }
+    BEGIN { b = 0; f = dir "/batch.0"; size = 2; n = 0; off = 0; long = 0 }
     {
       len = length($0) + 1
       if (len + 1 > bytes) { off += len; long++; next }
@@ -199,7 +244,11 @@ inode() { ls -di "$1" | awk '{print $1}'; }
 
 # head_sum PATH N: a sum of the file's first N bytes, which a file
 # truncated and written again doesn't keep.
-head_sum() { head -c "$2" "$1" | cksum | awk '{print $1 "-" $2}'; }
+head_sum() {
+  if [ "$2" -gt 0 ]; then
+    head -c "$2" "$1"
+  fi | cksum | awk '{print $1 "-" $2}'
+}
 
 # send_from PATH FROM [KEEP]: the complete lines of PATH from byte FROM
 # on, sent, a batch at a time; after each, with KEEP (the default, keep),
@@ -211,7 +260,15 @@ send_from() {
     tail -c +"$((from + 1))" "$1" | head -c "$maxread" >"$work/chunk"
     # Only whole lines: one the recorder is still writing waits.
     nl=$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')
-    [ "$nl" -gt 0 ] || return 0
+    if [ "$nl" -eq 0 ]; then
+      # A line longer than is read at a time, written to its end, is passed
+      # over to its end, and said; one not yet ended waits.
+      [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 0
+      skip_long "$1" "$from" || return 0
+      say "a line over $maxread bytes passed over"
+      [ "${3:-keep}" != keep ] || file_kept "$1" "$from" || return 1
+      continue
+    fi
     head -n "$nl" "$work/chunk" >"$work/lines"
     batches "$work/lines"
     while read -r b end long; do
@@ -219,11 +276,26 @@ send_from() {
       if [ "$b" != - ] && ! post "$b"; then
         return 1
       fi
-      [ "${3:-keep}" != keep ] || file_kept "$1" "$((from + end))"
+      [ "${3:-keep}" != keep ] || file_kept "$1" "$((from + end))" || return 1
     done <"$work/ends"
     # A read that held as much as is read at a time: read on.
     [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 0
     from=$((from + $(wc -c <"$work/lines" | tr -d ' ')))
+  done
+}
+
+# skip_long PATH FROM: from, past the end of the line at FROM in PATH,
+# read maxread bytes at a time; 1 when the line hasn't ended yet.
+skip_long() {
+  pos=$(($2 + maxread))
+  while :; do
+    tail -c +"$((pos + 1))" "$1" | head -c "$maxread" >"$work/chunk"
+    if [ "$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')" -gt 0 ]; then
+      from=$((pos + $(head -n 1 "$work/chunk" | wc -c | tr -d ' ')))
+      return 0
+    fi
+    [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 1
+    pos=$((pos + maxread))
   done
 }
 
@@ -233,9 +305,15 @@ send_from() {
 file_kept() {
   n=$2
   [ "$n" -le 64 ] || n=64
-  printf '%s %s %s\n' "$(inode "$1")" "$2" "$(head_sum "$1" "$n")" >"$OFFSET_FILE.tmp"
-  mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"
+  if ! printf '%s %s %s\n' "$(inode "$1")" "$2" "$(head_sum "$1" "$n")" >"$OFFSET_FILE.tmp" || ! mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"; then
+    unkept
+    return 1
+  fi
 }
+
+# unkept says where it stopped can't be kept, and so the run stops: each
+# run would send the same again.
+unkept() { say "$(basename "$OFFSET_FILE") can't be written: where it stopped isn't kept, so it stops (keep OFFSET_FILE where it can write)"; }
 
 # file_once: what was written since the last time, sent.
 file_once() {
@@ -254,14 +332,20 @@ file_once() {
   if [ -n "$ino" ] && [ "$ino" != "$now" ]; then
     # Rotated: the file it was reading, renamed beside it, is read to its
     # end first; then the new one from its start.
-    for old in "$path".*; do
+    # Renamed as logrotate names it: PATH.1, or PATH-20261123 with
+    # dateext.
+    found=
+    for old in "$path".* "$path"-*; do
+      case $old in *.gz | *.bz2 | *.xz | *.zst | *.lz4) continue ;; esac
       [ -f "$old" ] && [ "$old" != "$OFFSET_FILE" ] && [ "$(inode "$old")" = "$ino" ] || continue
       send_from "$old" "$off" once || return 1
+      found=1
       break
     done
+    [ -n "$found" ] || say "$(basename "$path") was rotated, and the file it was isn't beside it, uncompressed: what was written to it after the last run isn't sent"
     off=0
     sum=
-    file_kept "$path" 0
+    file_kept "$path" 0 || return 1
   fi
   size=$(wc -c <"$path" | tr -d ' ')
   n=$off
@@ -301,11 +385,12 @@ kafka_once() {
     # end, or where KAFKA_START says.
     reset=latest
     [ "${KAFKA_START:-}" != beginning ] || reset=earliest
-    run_kcat -C -G "$KAFKA_GROUP" -X auto.offset.reset="$reset" -e -q -c 10000 -f '%s\n' "$KAFKA_TOPIC" >"$work/kafka" </dev/null || {
+    read_kcat -C -G "$KAFKA_GROUP" -X auto.offset.reset="$reset" -e -q -c 10000 -J "$KAFKA_TOPIC" || {
       say "kcat failed to read $KAFKA_TOPIC"
       return 1
     }
-    batches "$work/kafka"
+    messages "$work/kafka" || return 1
+    batches "$work/lines"
     while read -r b _ long; do
       [ "$long" -eq 0 ] || say "$long events over a request's 1 MB, passed over"
       if [ "$b" != - ] && ! post "$b"; then
@@ -315,7 +400,10 @@ kafka_once() {
     return 0
   fi
   # Offsets kept here, a line a partition: PARTITION NEXT.
-  touch "$OFFSET_FILE"
+  touch "$OFFSET_FILE" || {
+    unkept
+    return 1
+  }
   run_kcat -L -t "$KAFKA_TOPIC" -J >"$work/meta" </dev/null || {
     say "kcat failed to list $KAFKA_TOPIC's partitions"
     return 1
@@ -328,13 +416,15 @@ kafka_once() {
   while read -r p; do
     next=$(awk -v p="$p" '$1 == p && $2 ~ /^[0-9]+$/ {n = $2} END {print n}' "$OFFSET_FILE")
     from=${next:-$start}
-    run_kcat -C -t "$KAFKA_TOPIC" -p "$p" -o "$from" -e -q -c 10000 -f '%o %s\n' >"$work/kafka" </dev/null || {
+    read_kcat -C -t "$KAFKA_TOPIC" -p "$p" -o "$from" -e -q -c 10000 -J || {
       say "kcat failed to read $KAFKA_TOPIC's partition $p"
       return 1
     }
-    # Each line an offset and its message: the messages, and where each
-    # line ends, for the offset to keep after each batch.
-    LC_ALL=C awk -v offsets="$work/offsets" '$1 ~ /^[0-9]+$/ { o = $1; sub(/^[0-9]+ /, ""); print; print o > offsets }' "$work/kafka" >"$work/lines"
+    if [ -s "$work/skip" ]; then
+      kafka_kept "$p" "$(($(cat "$work/skip") + 1))" || return 1
+      continue
+    fi
+    messages "$work/kafka" || return 1
     [ -s "$work/lines" ] || continue
     batches "$work/lines"
     while read -r b end long; do
@@ -349,17 +439,59 @@ kafka_once() {
       case $last in
         '' | *[!0-9]*) say "where partition $p stopped can't be told: it is read again from where it was"; return 1 ;;
       esac
-      kafka_kept "$p" "$((last + 1))"
+      kafka_kept "$p" "$((last + 1))" || return 1
     done <"$work/ends"
   done <"$work/partitions"
+}
+
+# read_kcat ARGS: what kcat gives, maxread bytes at most, into
+# $work/kafka, whole lines only: the messages past are read the next time,
+# from the offset kept (in a group, kcat has read them: they aren't). 1
+# when kcat failed before it gave as much.
+read_kcat() {
+  rm -f "$work/skip"
+  { run_kcat "$@" </dev/null; echo $? >"$work/kcat.status"; } | head -c "$maxread" >"$work/kafka.read"
+  if [ "$(wc -c <"$work/kafka.read" | tr -d ' ')" -ge "$maxread" ]; then
+    # Cut: its last line may be part of a message.
+    nl=$(tr -dc '\n' <"$work/kafka.read" | wc -c | tr -d ' ')
+    if [ "$nl" -eq 0 ]; then
+      # One message longer than is read at a time: passed over, by the
+      # offset its envelope gives before its payload.
+      head -c 512 "$work/kafka.read" | sed -n 's/^{.*"offset":\([0-9][0-9]*\)[,}].*/\1/p' | head -n 1 >"$work/skip"
+      say "a message over $maxread bytes passed over"
+      : >"$work/kafka"
+      return 0
+    fi
+    head -n "$nl" "$work/kafka.read" >"$work/kafka"
+    say "more than $maxread bytes of messages: the rest the next time"
+    return 0
+  fi
+  mv "$work/kafka.read" "$work/kafka"
+  [ "$(cat "$work/kcat.status")" = 0 ]
+}
+
+# messages FILE: the messages kcat -J wrote to FILE, each in its JSON
+# envelope: their payloads, one a line, in $work/lines, and their offsets,
+# a line each, in $work/offsets. The offset is Kafka's, from the envelope,
+# never from what a message says; a payload's line ends (whitespace in
+# JSON) are spaces, so one message is one line.
+messages() {
+  sel='select(type == "object" and (.offset | type) == "number")'
+  if ! jq -r "$sel | .offset | floor | tostring" "$1" >"$work/offsets" 2>/dev/null ||
+    ! jq -r "$sel"' | (.payload // "") | if type == "string" then gsub("[\r\n]"; " ") else tojson end' "$1" >"$work/lines" 2>/dev/null; then
+    say "what kcat read isn't its JSON envelopes"
+    return 1
+  fi
 }
 
 # kafka_kept PARTITION NEXT: the offset to read the partition from next,
 # kept beside the others, written aside and moved.
 kafka_kept() {
-  awk -v p="$1" '$1 != p' "$OFFSET_FILE" >"$OFFSET_FILE.tmp"
-  printf '%s %s\n' "$1" "$2" >>"$OFFSET_FILE.tmp"
-  mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"
+  if ! awk -v p="$1" '$1 != p' "$OFFSET_FILE" >"$OFFSET_FILE.tmp" || ! printf '%s %s\n' "$1" "$2" >>"$OFFSET_FILE.tmp" ||
+    ! mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"; then
+    unkept
+    return 1
+  fi
 }
 
 case $mode in
@@ -381,6 +513,34 @@ case $mode in
     case ${KAFKA_GROUP:-x} in *[!A-Za-z0-9._-]* | -*) say "KAFKA_GROUP is a group's name"; exit 2 ;; esac
     ;;
 esac
+
+# One run at a time for an offset file, as two would each move it as they
+# read: a directory beside it holds the process ID of the run that has it.
+# Another run's, alive, stops this one, which says so and exits 0, as a
+# run from cron while the last goes on; one left by a run that is gone (on
+# this machine) is taken.
+if [ -n "${OFFSET_FILE:-}" ]; then
+  if ! mkdir "$OFFSET_FILE.lock" 2>/dev/null; then
+    if [ ! -d "$OFFSET_FILE.lock" ]; then
+      unkept
+      exit 1
+    fi
+    held=$(cat "$OFFSET_FILE.lock/pid" 2>/dev/null || true)
+    case $held in *[!0-9]* | '') held= ;; esac
+    if [ -n "$held" ] && kill -0 "$held" 2>/dev/null; then
+      say "another run ($held) is sending from $(basename "$OFFSET_FILE"): this one stops"
+      exit 0
+    fi
+    say "a lock a run that is gone left is taken"
+    rm -rf "$OFFSET_FILE.lock"
+    mkdir "$OFFSET_FILE.lock" 2>/dev/null || {
+      say "another run took the lock: this one stops"
+      exit 0
+    }
+  fi
+  lock="$OFFSET_FILE.lock"
+  echo $$ >"$lock/pid"
+fi
 
 while :; do
   if [ "$mode" = file ]; then

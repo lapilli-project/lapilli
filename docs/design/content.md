@@ -282,7 +282,10 @@ receivers' fields are templates too. This checks those the same way.
   token (`--ruler-token-file`) and tenant (`--ruler-tenant`, as
   `X-Scope-OrgID`). It gives the configuration and every template file;
   Mimir loads them all, whatever `templates:` says, so all are read. A
-  404 is a tenant with none.
+  404 is a tenant with none. With `--ruler` and its token, the URL must be
+  on `--ruler`'s scheme and host, or the flags are refused: the token is
+  the ruler's, and a typo, or a plain Alertmanager's URL, mustn't be sent
+  it. Without `--ruler`, the token is given for this alone.
 
 Only what routing and the templates need is read: the route tree, each
 receiver's name and its integrations' fields that hold `{{`, and the
@@ -333,8 +336,16 @@ told so too.
 
 The configuration, or Mimir's answer, is 8 MB at most, parsed as rule
 files are, what its aliases make bounded. 256 template files at most, each
-256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates; a
-field over 64 KB isn't read; routes as Grafana's, 2,000 and 32 levels. Past each, what is
+256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates,
+the defaults a file defines in Alertmanager's place counted with them, 200
+of a kind, each followed once a receiver; a field over 64 KB isn't read;
+routes as Grafana's, 2,000 and 32 levels, 20,000 matchers in all. A glob
+that leaves the configuration's directory isn't looked through, a glob's
+first 1,024 files at most are, and the links out of it are counted, not
+named. The route tree is read as Alertmanager reads it, with yaml.v2: a
+value as the text it is written in (`1.10`, not 1.1), `continue: yes` true;
+a matcher's `\.` kept, as Alertmanager keeps a backslash before anything
+but `"`, `\\` and `n`. Past each, what is
 past is passed over, and said. Routing has its own budget of work and
 time, as Grafana's has. The request to Mimir goes to its host only,
 follows no redirect, and is a read.

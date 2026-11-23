@@ -251,6 +251,10 @@ func TestAlertmanagerMatchers(t *testing.T) {
 		`x="open`:                               `[]`,
 		`{severity="critical",}`:                `[[severity = critical]]`,
 		`alertname=~"Disk.*",instance!~"db-.*"`: `[[alertname =~ Disk.*] [instance !~ db-.*]]`,
+		// Escapes as Alertmanager reads them: a regular expression's \. kept.
+		`service=~"api\.shop.*"`: `[[service =~ api\.shop.*]]`,
+		`x="a\nb\\c"`:            "[[x = a\nb\\c]]",
+		`x="ends\"`:              `[]`,
 	} {
 		ms, _ := amMatchers(line)
 		var got []string
@@ -268,5 +272,83 @@ func TestAlertmanagerMatchers(t *testing.T) {
 		if g != want {
 			t.Errorf("%s: %s, want %s", line, g, want)
 		}
+	}
+}
+
+// A receiver of many integrations, beside templates that define many of
+// their defaults, follows each default once, and so many at most: not a
+// receiver's every default once for each of its integrations.
+func TestAlertmanagerDefaultsBounded(t *testing.T) {
+	const n = 2500
+	var cfg, tmpl strings.Builder
+	cfg.WriteString("route: {receiver: r}\nreceivers:\n  - name: r\n    slack_configs:\n")
+	for i := range n {
+		cfg.WriteString("      - {}\n")
+		fmt.Fprintf(&tmpl, `{{ define "slack.default.f%d" }}{{ .CommonLabels.x }}{{ end }}`, i)
+	}
+	got, skipped, err := ReadAlertmanager([]byte(cfg.String()), []TemplateFile{{Name: "d.tmpl", Text: []byte(tmpl.String())}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := got.receivers["r"]
+	seen := map[string]bool{}
+	for _, d := range used {
+		if seen[d] {
+			t.Fatalf("%s followed twice", d)
+		}
+		seen[d] = true
+	}
+	if len(used) != maxDefaults || len(skipped) != 1 || !strings.Contains(skipped[0], "slack's defaults") {
+		t.Errorf("%d templates followed, %q", len(used), skipped)
+	}
+}
+
+// A route's values as Alertmanager reads them, with yaml.v2: the text as
+// written, not a number YAML makes of it; continue as YAML 1.1 reads a
+// boolean; a merge's keys too.
+func TestAlertmanagerRouteText(t *testing.T) {
+	cfg := []byte(`x: &shop {receiver: shop, continue: yes}
+route:
+  receiver: r
+  routes:
+    - match: {v: 1.10, w: 1e3, h: 0x1F, y: True, z: 1_000, o: 010}
+      receiver: odd
+    - <<: *shop
+      matchers: ['service=~"api\\.shop.*"']
+    - receiver: r2
+receivers:
+  - name: r
+  - name: odd
+    slack_configs: [{text: '{{ .CommonLabels.odd }}'}]
+  - name: shop
+    slack_configs: [{text: '{{ .CommonLabels.shop }}'}]
+  - name: r2
+    slack_configs: [{text: '{{ .CommonLabels.r2 }}'}]
+`)
+	n, _, err := ReadAlertmanager(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := n.route.routes[0].matchers
+	var got []string
+	for _, x := range m {
+		got = append(got, x.name+"="+x.value)
+	}
+	if want := []string{"v=1.10", "w=1e3", "h=0x1F", "y=True", "z=1_000", "o=010"}; !slices.Equal(got, want) {
+		t.Errorf("match read as %q, want %q", got, want)
+	}
+	odd := promRule("Odd", map[string]string{"v": "1.10", "w": "1e3", "h": "0x1F", "y": "True", "z": "1_000", "o": "010"}, nil)
+	if u := n.For(odd); len(u) != 1 || u[0].Template != "odd/slack_configs[0].text" {
+		t.Errorf("labels as written: %+v", u)
+	}
+	// v=2 rules the first route out; service=api.shop.checkout is shop's,
+	// and on, continue: yes, to r2's.
+	shop := promRule("Shop", map[string]string{"service": "api.shop.checkout", "v": "2"}, nil)
+	var names []string
+	for _, u := range n.For(shop) {
+		names = append(names, u.Template)
+	}
+	if want := []string{"r2/slack_configs[0].text", "shop/slack_configs[0].text"}; !slices.Equal(names, want) {
+		t.Errorf("shop: %q, want %q", names, want)
 	}
 }
