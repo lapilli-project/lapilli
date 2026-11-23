@@ -259,6 +259,13 @@ type proof struct {
 	events func(r *http.Request, body []byte, now time.Time) ([]ledger.Notification, []ledger.Mute, error)
 }
 
+// notKept answers a notification whose request ended before it was kept,
+// as serve stops: the sender is to send it again, not told it was kept
+// (an answer of nothing is a 200).
+func notKept(w http.ResponseWriter) {
+	http.Error(w, "stopped before the notification was kept: send it again", http.StatusServiceUnavailable)
+}
+
 // NotifyHandler is the notifications port.
 func (s *Server) NotifyHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -459,11 +466,14 @@ func (s *Server) takeNotifications(source string, p proof,
 			http.Error(w, "busy keeping other notifications: try again in a second", busy)
 			return
 		case <-r.Context().Done():
+			notKept(w)
 			return
 		}
 		if len(fresh) > 0 {
 			if err := s.keepMutes(r.Context(), fresh); err != nil {
-				if !errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) {
+					notKept(w)
+				} else {
 					s.log.Error("keeping mutes", "source", source, "err", err)
 					http.Error(w, "the mutes couldn't be kept: try again", http.StatusInternalServerError)
 				}
@@ -479,7 +489,10 @@ func (s *Server) takeNotifications(source string, p proof,
 		for _, n := range ns {
 			alerts += len(n.Alerts)
 		}
-		if ok, err := s.dayRoom(r.Context(), source, alerts); err != nil {
+		if ok, err := s.dayRoom(r.Context(), source, alerts); errors.Is(err, context.Canceled) {
+			notKept(w)
+			return
+		} else if err != nil {
 			s.log.Error("counting the alerts kept today", "err", err)
 			http.Error(w, "the notification couldn't be kept: try again", http.StatusInternalServerError)
 			return
@@ -501,6 +514,7 @@ func (s *Server) takeNotifications(source string, p proof,
 		oks, errs, err = s.l.NotifyAll(r.Context(), ns)
 		switch {
 		case errors.Is(err, context.Canceled):
+			notKept(w)
 			return
 		case err != nil:
 			s.log.Error("keeping notifications", "source", source, "err", err)

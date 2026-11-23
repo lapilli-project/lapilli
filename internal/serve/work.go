@@ -1227,7 +1227,7 @@ func (s *Server) history(ctx context.Context) error {
 			"dir", s.cfg.RulesHistory)
 		return nil
 	}
-	hs, err := rules.History(s.cfg.RulesHistory)
+	hs, err := historyVersions(s.cfg.RulesHistory)
 	if errors.Is(err, rules.ErrNoVersions) {
 		s.log.Warn("--rules-history: the directory holds no versions, as when they couldn't be fetched: the backfill replays today's rules",
 			"dir", s.cfg.RulesHistory)
@@ -1420,7 +1420,7 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	case s.ruler != nil:
 		rs, docs, err = s.ruler.Read(ctx)
 	case s.following():
-		rs, docs, err = s.newest()
+		rs, docs, err = s.newest(ctx)
 	case s.cfg.RulesPath != "":
 		var picked rules.Picked
 		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})

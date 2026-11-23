@@ -38,6 +38,13 @@ spec:
       # Mounted in lapilli's container alone, when a cloud's identity may
       # need it (lapilli.saToken), not in the rules history's.
       automountServiceAccountToken: false
+      {{- $drain := 0 }}
+      {{- if gt $n 1 }}{{ $drain = int $s.shutdownDelaySeconds }}{{ end }}
+      {{- if gt $drain 0 }}
+      # Told to stop, a replica answers for serve.shutdownDelaySeconds
+      # first; then the 30 s Kubernetes gives, for the rest of its stop.
+      terminationGracePeriodSeconds: {{ add $drain 30 }}
+      {{- end }}
       securityContext:
         {{- include "lapilli.podSecurity" . | nindent 8 }}
       {{- $promtool := $s.promtool | default dict }}
@@ -79,6 +86,9 @@ spec:
             {{- end }}
             - --listen=:8080
             - {{ printf "--metrics-listen=:%d" (int .Values.serve.metricsPort) | quote }}
+            {{- if gt $drain 0 }}
+            - {{ printf "--shutdown-delay=%ds" $drain | quote }}
+            {{- end }}
             - {{ printf "--every=%s" $s.every | quote }}
             {{- with .Values.rules.alarmsEvery }}
             - {{ printf "--alarms-every=%s" . | quote }}

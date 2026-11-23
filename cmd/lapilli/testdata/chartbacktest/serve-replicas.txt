@@ -101,6 +101,9 @@ spec:
       # Mounted in lapilli's container alone, when a cloud's identity may
       # need it (lapilli.saToken), not in the rules history's.
       automountServiceAccountToken: false
+      # Told to stop, a replica answers for serve.shutdownDelaySeconds
+      # first; then the 30 s Kubernetes gives, for the rest of its stop.
+      terminationGracePeriodSeconds: 35
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -117,6 +120,7 @@ spec:
             - "--ledger-url-file=/var/run/lapilli/ledger/url"
             - --listen=:8080
             - "--metrics-listen=:9091"
+            - "--shutdown-delay=5s"
             - "--every=1h"
             - "--settle=1h"
             - "--backfill=28d"

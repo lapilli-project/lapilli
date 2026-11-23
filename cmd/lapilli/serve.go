@@ -251,6 +251,14 @@ The web UI and API:
   --metrics-listen ADDR
                       also serve /metrics, /healthz and /readyz here, alone,
                       so a NetworkPolicy can let Prometheus reach only them
+  --shutdown-delay DUR
+                      told to stop (SIGTERM, Ctrl-C), go on answering on
+                      every port for this long before they close, /readyz
+                      answering 503, so that a Service's endpoints or a load
+                      balancer send requests elsewhere first; then the
+                      requests under way finish, 10s at most (default 0, at
+                      most 10m; the chart gives 5s to more than one
+                      replica). The leader's work stops at once either way
   --incidents-listen ADDR
                       also take incidents here, and nothing else, from a job
                       that holds the token in --incidents-token-file: PUT or
@@ -800,6 +808,11 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			cfg.AllowedHosts = list(val)
 		case "--metrics-listen":
 			cfg.MetricsListen = val
+		case "--shutdown-delay":
+			cfg.ShutdownDelay, err = dur(0)
+			if err == nil && cfg.ShutdownDelay > 10*time.Minute {
+				err = fmt.Errorf("--shutdown-delay %s: at most 10m", val)
+			}
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
 		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file",

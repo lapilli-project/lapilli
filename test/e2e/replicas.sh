@@ -189,15 +189,33 @@ for i in 1 2 3 4 5 6; do task "after $i"; done
 wait_sent
 
 # A rolling restart: the API answers throughout, to a client that tries a
-# request a second time (one may reach a pod as it stops), and one leads
-# after.
-runs() { incluster wget -qO- -T 5 "$ui/api/v1/runs" >/dev/null 2>&1; }
+# request a second time, and one leads after. A pod told to stop answers
+# on, not ready, for the chart's serve.shutdownDelaySeconds, while the
+# Service's endpoints drop it (docs/design/replicas.md, "Stopping").
+why=
+runs() { why=$(incluster wget -qO- -T 5 "$ui/api/v1/runs" 2>&1 >/dev/null); }
+# stopping: the address of a serve pod told to stop, if one is.
+stopping() {
+  kubectl -n "$ns" get pods -l app.kubernetes.io/instance=lapilli,app.kubernetes.io/component=serve -o json |
+    jq -r '[.items[] | select(.metadata.deletionTimestamp and .status.podIP) | .status.podIP][0] // empty'
+}
 kubectl -n "$ns" rollout restart deploy/lapilli
 refused=0
+drained=
 while ! kubectl -n "$ns" rollout status deploy/lapilli --timeout=2s >/dev/null 2>&1; do
-  runs || runs || refused=$((refused + 1))
+  if ! runs && ! runs; then
+    refused=$((refused + 1))
+    # What the client was told, and the pods then.
+    echo "refused twice at $(date -u +%H:%M:%S): $why"
+    kubectl -n "$ns" get pods -l app.kubernetes.io/component=serve -o wide || true
+  fi
+  if [ -z "$drained" ] && ip=$(stopping) && [ -n "$ip" ]; then
+    said=$(incluster wget -qO- -T 3 "http://$ip:$metrics/readyz" 2>&1 || true)
+    if grep -q 503 <<<"$said"; then drained=$said; fi
+  fi
 done
 check "the API answered through a rolling restart" "$refused" '^0$'
+check "a pod told to stop answered on, not ready" "$drained" '503'
 for _ in $(seq 30); do
   [ "$(leaders | wc -l | tr -d ' ')" = 1 ] && break
   sleep 2

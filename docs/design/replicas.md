@@ -492,7 +492,8 @@ replica's.**
   commits others' numbers took, are taken for everything changed.
 - **A rolling update**: each new pod follows; each old pod gives the lease
   up as it stops; a follower takes it within a campaign. The UI and the
-  ports keep answering, from the pods still up.
+  ports keep answering, from the pods still up, and from the one stopping
+  (below).
 - **A new release that migrates the ledger**, rolled onto older replicas:
   the new pod migrates as it starts, under the writers' turn; each older
   replica finds the newer schema at its next read (a second) and stops,
@@ -511,6 +512,39 @@ replica's.**
   **Builder's decision: in the ledger's schema, not one of their own**: a
   schema of their own would need the role to create schemas, and the
   search path pinned to two.
+
+## Stopping
+
+A pod is told to stop with `SIGTERM`, and the Service's endpoints drop it
+at the same moment; kube-proxy, and a load balancer, learn of it a moment
+later, and send it connections meanwhile. So serve, told to stop:
+
+- **Gives the lease up at once**, as before: the leader's work stops, and
+  a follower leads within a campaign.
+- **Answers on for `--shutdown-delay`**, the chart's
+  `serve.shutdownDelaySeconds` (5 s) with more than one replica, on every
+  port: `/readyz` answers 503 "stopping", and each answer closes its
+  connection, so a client that keeps one open makes a new one, to another
+  pod. The pod's `terminationGracePeriodSeconds` is the delay and the 30
+  s Kubernetes gives.
+- **Then closes its ports and lets the requests under way finish**, 10 s
+  at most, every port's together. A request's context ends after that, not
+  when serve is told to stop; at once for a server that failed or a ledger
+  lost.
+- **Answers a request its context ended before it was done with 503**, to
+  be asked again, and a notification so too, to be sent again.
+
+Not a `preStop` sleep: the image has no shell or `sleep`, and the chart's
+Kubernetes (1.27 and later) has no sleep action before 1.30. One replica
+stops at once: with `Recreate`, no other pod takes its requests.
+
+**Builder's note, 0.70.0.** Until then serve closed its ports the moment
+it was told, while kube-proxy still sent it connections, and ended its
+requests' context at the same moment: a request sent to a pod a rolling
+update was replacing now and then found its port closed
+(`test/e2e/replicas.sh`: one refused twice in a row, in 7 of 439 CI runs
+from 0.36.0 to 0.69.2), and one under way was answered with nothing, a
+200, as if done, a notification as kept.
 
 ## Not in this
 

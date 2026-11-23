@@ -254,6 +254,12 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   each new pod a follower until the leader it replaces gives the lease up;
   a PodDisruptionBudget lets `serve.podDisruptionBudget.maxUnavailable` (1)
   go at once. One replica stays `Recreate`.
+- **A pod told to stop answers on for `serve.shutdownDelaySeconds` (5)**
+  (`--shutdown-delay`): its lease is given up at once, `/readyz` answers
+  503, and its ports go on answering while the Service's endpoints learn
+  it is going, then let the requests under way finish. Its
+  `terminationGracePeriodSeconds` is the delay and 30. Behind a load
+  balancer that takes longer to drop a pod, raise it.
 - **From 0.35 or before, upgrade with `serve.replicas: 1` first**:
   its pod holds the ledger alone, and refuses new pods until it stops,
   which `Recreate` waits for. Then raise it.
