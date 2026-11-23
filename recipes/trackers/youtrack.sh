@@ -164,10 +164,10 @@ t_close() {
 t_comments() {
   skip=0
   while [ "$skip" -lt 1000 ]; do
-    out=$(yt again GET "/issues/$1/comments?fields=id,text,created,deleted,author(id,login,fullName),visibility(\$type)&\$top=100&\$skip=$skip") || return 1
+    out=$(yt again GET "/issues/$1/comments?fields=id,text,created,updated,deleted,author(id,login,fullName),visibility(\$type)&\$top=100&\$skip=$skip") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.[] | select((.deleted // false | not) and ((.visibility // {})["$type"] // "") != "LimitedVisibility")
       | {id: (.id | tostring), author: (.author.fullName // .author.login // "someone"), mine: ((.author.id // "") == $me),
-         at: (.created / 1000 | floor | todate), body: (.text // "")}' || return 1
+         at: (.created / 1000 | floor | todate), edited: (.updated // .created | . / 1000 | floor | todate), body: (.text // "")}' || return 1
     [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
     skip=$((skip + 100))
   done
@@ -177,6 +177,12 @@ t_comments() {
 t_comment() {
   out=$(yt once POST "/issues/$1/comments?fields=id" "$(jq -Rsc '{text: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
+}
+
+# t_edit: a comment is changed by a POST to it.
+t_edit() {
+  printf '%s' "$2" | grep -Eq '^[0-9]{1,10}-[0-9]{1,10}$' || return 1
+  yt again POST "/issues/$1/comments/$2?fields=id" "$(jq -Rsc '{text: .}' "$3")" >/dev/null
 }
 
 sync_tasks

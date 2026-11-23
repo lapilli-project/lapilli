@@ -207,9 +207,20 @@ repository, to everyone. Turn it on only where that is meant.
   keeps 1,000 comments from its issue; once it does, the job sends no
   more for it.
 
-A comment edited or deleted after it was copied isn't followed, either
-way. `MAX_COMMENTS` bounds how many go each way for a task in a run; the
-rest go the next. A comment changes when an issue last changed, not when
+A comment edited after it was carried is carried again, either way, by
+when each was last changed. A comment people wrote here, changed after the
+tracker last changed the job's post of it, has the post changed to what
+would be posted now (unless the post holds that already); a comment from
+the tracker changed there after Lapilli copied it is taken again, as the
+tracker's, with the tracker's time for the change, and Lapilli keeps only
+an edit later than the one it has, so each is taken once. The times are
+the tracker's and Lapilli's, two clocks, as with `CLOSE_ISSUES`: an edit
+here within their difference after the post may be missed. Only the job's
+own post is changed; one someone changed in the tracker since isn't
+changed back until the comment is edited again here. A comment deleted
+isn't followed, either way ([trackers.md](../../docs/design/trackers.md),
+"Edits followed"). `MAX_COMMENTS` bounds how many go each way for a task
+in a run, posts, copies and edits each; the rest go the next. A comment changes when an issue last changed, not when
 its state did: a task follows its issue's state by the time the tracker
 says the state changed (GitHub's and GitLab's `closed_at`, Jira's
 `statuscategorychangedate`, Linear's `completedAt` and `canceledAt`, Azure
@@ -236,7 +247,10 @@ comments (`GET /api/v1/tasks/{id}/comments`) and adds one from the tracker
 tracker's id for it, kept once a task, and `at`; 1,000 a task at most; the
 answer says whether it was `kept`, and `as_sent`), notes that one people
 wrote was posted (`PATCH /api/v1/tasks/{id}/comments/{comment}` with
-`posted`, a ref no other comment on the task has), and
+`posted`, a ref no other comment on the task has), takes the edit of one
+copied in from the tracker (the same, with `text` and `edited`, when the
+tracker says it changed: kept only when later than the one kept, and the
+answer says whether it `changed`), and
 nothing else: it can't make, delete or retitle a task, read anything but
 tasks, or reach the UI. A link is an `https` URL of 2,048 characters at most
 with no user name in it, set once: a job doesn't move a task from one issue
@@ -326,6 +340,8 @@ alone, without `tracker`, opens the port for a job of your own, named in
 ## Another tracker
 
 Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` (and
-`t_comments` and `t_comment`, for comments) as `lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
+`t_comments` and `t_comment`, for comments; a comment's `edited` time and
+`t_edit`, for its edits, each followed only where the recipe has it) as
+`lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
 requests, `gone` for an answer that says an issue isn't there, and the jq
 `kept` for the marker line. Please send it here.

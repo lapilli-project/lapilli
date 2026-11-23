@@ -98,7 +98,7 @@ t_comments() {
     out=$(gl again GET "/projects/$enc/issues/$1/notes?sort=asc&order_by=created_at&per_page=100&page=$page") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.[] | select((.system | not) and (.internal // false | not) and (.confidential // false | not))
       | {id: (.id | tostring), author: (.author.username // "someone"),
-      mine: ((.author.id // "" | tostring) == $me), at: .created_at, body: (.body // "")}'
+      mine: ((.author.id // "" | tostring) == $me), at: .created_at, edited: (.updated_at // .created_at), body: (.body // "")}'
     [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
     page=$((page + 1))
   done
@@ -109,8 +109,19 @@ t_comments() {
 # issue's text is: GitLab carries out quick actions in a note the API is
 # given, as the job's account.
 t_comment() {
-  out=$(gl once POST "/projects/$enc/issues/$1/notes" "$(jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$2")") || return 1
+  out=$(gl once POST "/projects/$enc/issues/$1/notes" "$(note "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
+}
+
+# note FILE: FILE's text as a note's body, each line starting with /
+# escaped, as t_comment says.
+note() {
+  jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$1"
+}
+
+t_edit() {
+  case $2 in '' | *[!0-9]*) return 1 ;; esac
+  gl again PUT "/projects/$enc/issues/$1/notes/$2" "$(note "$3")" >/dev/null
 }
 
 sync_tasks

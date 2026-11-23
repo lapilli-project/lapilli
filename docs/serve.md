@@ -1161,7 +1161,8 @@ GitHub App's or Actions' token can't say who it is: set `GITHUB_LOGIN`
 ways, each once: people's comments on a task are posted to its issue,
 quoted, and the issue's comments copied to the task, shown as the
 tracker's, with the token's `GET` and `POST /api/v1/tasks/{id}/comments`;
-an edit after that isn't followed.
+an edit after that is followed, either way, by when each was last changed,
+and a deletion isn't.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \

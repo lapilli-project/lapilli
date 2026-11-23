@@ -85,6 +85,22 @@ func adoServe(f *fakeTracker) http.HandlerFunc {
 					"System.ChangedDate":                    i.updated.UTC().Format("2006-01-02T15:04:05.00Z"),
 					"Microsoft.VSTS.Common.StateChangeDate": i.stateAt().UTC().Format("2006-01-02T15:04:05.00Z")}}
 		}
+		if m := regexp.MustCompile(`^/example/alerts/_apis/wit/workItems/([0-9]+)/comments/([0-9]+)$`).FindStringSubmatch(path); m != nil && r.Method == "PATCH" {
+			in, _ := strconv.Atoi(m[1])
+			cn, _ := strconv.Atoi(m[2])
+			var body struct{ Text string }
+			readBody(r, &body)
+			if q.Get("api-version") != "7.1-preview.4" || body.Text == "" {
+				http.Error(w, `{"message":"bad comment"}`, http.StatusBadRequest)
+				return
+			}
+			if f.issue(in) == nil || !f.editComment(f.issue(in), cn, body.Text) {
+				http.Error(w, `{"message":"TF401232: comment not found"}`, http.StatusNotFound)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"workItemId": in, "commentId": cn, "version": 2, "text": body.Text})
+			return
+		}
 		if cn := commentPath(`^/example/alerts/_apis/wit/workItems/([0-9]+)/comments$`, path); cn > 0 && f.issue(cn) != nil {
 			i := f.issue(cn)
 			if q.Get("api-version") != "7.1-preview.4" {
@@ -109,7 +125,8 @@ func adoServe(f *fakeTracker) http.HandlerFunc {
 					text = "<div>" + strings.ReplaceAll(html.EscapeString(c.body), "\n", "<br>") + "</div>"
 				}
 				return map[string]any{"workItemId": i.n, "commentId": c.id, "version": 1, "text": text, "isDeleted": c.system,
-					"createdBy": map[string]any{"id": adoUser(c.author), "displayName": c.author}, "createdDate": c.at.UTC().Format(time.RFC3339)}
+					"createdBy": map[string]any{"id": adoUser(c.author), "displayName": c.author}, "createdDate": c.at.UTC().Format(time.RFC3339),
+					"modifiedDate": c.editedAt().UTC().Format(time.RFC3339)}
 			}, true)
 			json.NewEncoder(w).Encode(map[string]any{"totalCount": len(cs), "count": len(cs), "comments": cs})
 			return
@@ -235,7 +252,7 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 			}
 			cs := trComments(i, func(c *fakeComment) map[string]any {
 				return map[string]any{"id": c.id, "text": c.body, "author_id": scMember(c.author), "created_at": c.at.UTC().Format(time.RFC3339),
-					"deleted": c.system}
+					"updated_at": c.editedAt().UTC().Format(time.RFC3339), "deleted": c.system}
 			}, true)
 			out := map[string]any{"id": i.n, "app_url": fmt.Sprintf("https://app.example.com/example/story/%d/an-issue", i.n),
 				"name": i.title, "description": i.body, "labels": labels, "requested_by_id": scMember(i.author),
@@ -248,6 +265,18 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 		}
 		n := commentPath(`^/stories/([0-9]+)$`, path)
 		hn := commentPath(`^/stories/([0-9]+)/history$`, path)
+		if m := regexp.MustCompile(`^/stories/([0-9]+)/comments/([0-9]+)$`).FindStringSubmatch(path); m != nil && r.Method == "PUT" {
+			in, _ := strconv.Atoi(m[1])
+			cn, _ := strconv.Atoi(m[2])
+			var body struct{ Text string }
+			readBody(r, &body)
+			if f.issue(in) == nil || body.Text == "" || !f.editComment(f.issue(in), cn, body.Text) {
+				http.Error(w, `{"message":"Resource does not exist"}`, http.StatusNotFound)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": cn, "text": body.Text})
+			return
+		}
 		switch cn := commentPath(`^/stories/([0-9]+)/comments$`, path); {
 		case hn > 0 && r.Method == "GET" && f.issue(hn) != nil:
 			// A story's changes, as History gives them: an archive, and

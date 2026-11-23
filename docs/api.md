@@ -411,7 +411,10 @@ the one request at a time stays each replica's
   `ref`, the tracker's id for it, and `at`) and gives `kept` and
   `as_sent`, with 201 when it was kept;
   `PATCH /api/v1/tasks/{id}/comments/{comment}` takes `{"posted": REF}`,
-  the tracker's id for a comment of people's the job posted, set once
+  the tracker's id for a comment of people's the job posted, set once, or,
+  for a comment copied in from the issue, `{"text": TEXT, "edited": TIME}`,
+  its edit there, kept when later than the one kept, and gives `changed`
+  and `as_sent`
   ([Tasks kept in step with a tracker](serve.md#tasks-kept-in-step-with-a-tracker),
   [docs/design/trackers.md](design/trackers.md)).
 - **Changes.** `GET /api/v1/changes` gives `changes`, 50 at most, of rules

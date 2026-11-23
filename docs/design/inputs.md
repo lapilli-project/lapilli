@@ -481,7 +481,9 @@ the thing to avoid, and a copy one way leaves half of it out of each.
   does, under that id, so it isn't sent again (as built, after the
   verification).
 - **Once.** A comment edited or deleted after it was copied isn't followed
-  either way: what was said, was said. (A question for review.)
+  either way: what was said, was said. (A question for review.) Since
+  0.70 an edit is followed, both ways, and a deletion still isn't
+  ([trackers.md](trackers.md), "Edits followed").
 - **Bounded.** 200 comments a task a run, each 10,000 characters at most,
   as a comment written in Lapilli is.
 

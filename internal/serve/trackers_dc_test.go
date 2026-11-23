@@ -137,6 +137,21 @@ func ytServe(f *fakeTracker) http.HandlerFunc {
 			return out
 		}
 		n := commentPath(`^/api/issues/OPS-([0-9]+)$`, r.URL.Path)
+		if m := regexp.MustCompile(`^/api/issues/OPS-([0-9]+)/comments/4-([0-9]+)$`).FindStringSubmatch(r.URL.Path); m != nil && r.Method == "POST" {
+			in, _ := strconv.Atoi(m[1])
+			cn, _ := strconv.Atoi(m[2])
+			var body struct{ Text string }
+			if err := readBody(r, &body); err != nil || body.Text == "" {
+				fail(http.StatusBadRequest, "bad_request", "text is required")
+				return
+			}
+			if f.issue(in) == nil || !f.editComment(f.issue(in), cn, body.Text) {
+				fail(http.StatusNotFound, "Not Found", "Entity not found")
+				return
+			}
+			answer(http.StatusOK, ytFields(map[string]any{"$type": "IssueComment", "id": fmt.Sprintf("4-%d", cn)}, fields))
+			return
+		}
 		if cn := commentPath(`^/api/issues/OPS-([0-9]+)/comments$`, r.URL.Path); cn > 0 && f.issue(cn) != nil {
 			i := f.issue(cn)
 			if r.Method == "POST" {
@@ -160,8 +175,12 @@ func ytServe(f *fakeTracker) http.HandlerFunc {
 				if c.restricted {
 					vis = map[string]any{"$type": "LimitedVisibility", "permittedGroups": []map[string]any{{"id": "3-2", "name": "Admins"}}, "permittedUsers": []any{}}
 				}
+				updated := any(nil)
+				if !c.edited.IsZero() {
+					updated = c.edited.UnixMilli()
+				}
 				return ytFields(map[string]any{"$type": "IssueComment", "id": fmt.Sprintf("4-%d", c.id), "text": c.body, "created": c.at.UnixMilli(),
-					"updated": nil, "deleted": c.system, "visibility": vis,
+					"updated": updated, "deleted": c.system, "visibility": vis,
 					"author": map[string]any{"$type": "User", "id": ytUser(c.author), "login": strings.ToLower(c.author), "fullName": c.author}}, fields)
 			}, true)
 			top, _ := strconv.Atoi(q.Get("$top"))
@@ -294,6 +313,23 @@ func jdcServe(f *fakeTracker) http.HandlerFunc {
 		fields := func(i *fakeIssue) map[string]any {
 			return map[string]any{"creator": user(i.author), "labels": i.labels}
 		}
+		if m := regexp.MustCompile(`^/rest/api/2/issue/OPS-([0-9]+)/comment/([0-9]+)$`).FindStringSubmatch(r.URL.Path); m != nil && r.Method == "PUT" {
+			in, _ := strconv.Atoi(m[1])
+			cn, _ := strconv.Atoi(m[2])
+			var body struct{ Body any }
+			readBody(r, &body)
+			text, ok := body.Body.(string)
+			if !ok || text == "" {
+				http.Error(w, `{"errorMessages":[],"errors":{"comment":"Comment body can not be empty!"}}`, http.StatusBadRequest)
+				return
+			}
+			if f.issue(in) == nil || !f.editComment(f.issue(in), cn, text) {
+				http.Error(w, `{"errorMessages":["Can not find a comment for the id."]}`, http.StatusNotFound)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": strconv.Itoa(cn), "body": text})
+			return
+		}
 		if cn := commentPath(`^/rest/api/2/issue/OPS-([0-9]+)/comment$`, r.URL.Path); cn > 0 && f.issue(cn) != nil {
 			i := f.issue(cn)
 			if r.Method == "POST" {
@@ -314,7 +350,7 @@ func jdcServe(f *fakeTracker) http.HandlerFunc {
 			cs := trComments(i, func(c *fakeComment) map[string]any {
 				out := map[string]any{"self": fmt.Sprintf("https://jira.example.com/rest/api/2/issue/%d/comment/%d", 10000+i.n, c.id),
 					"id": strconv.Itoa(c.id), "author": user(c.author), "updateAuthor": user(c.author), "body": c.body,
-					"created": stamp(c.at), "updated": stamp(c.at)}
+					"created": stamp(c.at), "updated": stamp(c.editedAt())}
 				if c.restricted {
 					out["visibility"] = map[string]any{"type": "role", "value": "Administrators"}
 				}

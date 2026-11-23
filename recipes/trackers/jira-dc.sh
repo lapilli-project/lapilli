@@ -80,7 +80,7 @@ t_find() {
 # mentions no one, !URL! shows no image. Only {noformat} ends the block, so
 # one in the text is broken by a zero-width space.
 # shellcheck disable=SC2016 # jq's
-block='def block: "{noformat}\n" + gsub("(?<b>\\{)(?<n>[Nn][Oo][Ff][Oo][Rr][Mm][Aa][Tt])"; "\(.b)​\(.n)") + "\n{noformat}";'
+block='def block: "{noformat}\n" + gsub("(?<b>\\{)(?<n>[Nn][Oo][Ff][Oo][Rr][Mm][Aa][Tt])"; "\(.b)\u200b\(.n)") + "\n{noformat}";'
 
 # wiki_text: the task on stdin as the issue's text, in wiki markup: what
 # issue_text writes, the task's text and its names in a block, then the
@@ -140,7 +140,8 @@ t_comments() {
   while [ "$start" -lt 1000 ]; do
     out=$(jira again GET "/issue/$1/comment?startAt=$start&maxResults=100&orderBy=created") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.comments[] | select(.visibility == null) | {id: (.id | tostring), author: (.author.displayName // "someone"),
-      mine: ((.author.key // "") == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body // "")}' || return 1
+      mine: ((.author.key // "") == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")),
+      edited: (.updated // .created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body // "")}' || return 1
     n=$(printf '%s' "$out" | jq '.comments | length')
     total=$(printf '%s' "$out" | jq '.total // 0')
     number "Jira's total of comments" "$total"
@@ -162,6 +163,11 @@ wiki_comment() {
 t_comment() {
   out=$(jira once POST "/issue/$1/comment" "$(wiki_comment "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
+}
+
+t_edit() {
+  case $2 in '' | *[!0-9]*) return 1 ;; esac
+  jira again PUT "/issue/$1/comment/$2" "$(wiki_comment "$3")" >/dev/null
 }
 
 sync_tasks

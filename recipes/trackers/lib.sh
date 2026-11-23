@@ -28,13 +28,19 @@
 #
 #   t_comments REF      the issue's comments, the earliest first, a JSON
 #                       object a line: {"id", "author", "mine", "at",
-#                       "body"}: id the tracker's (letters, digits and
-#                       ._:-), mine whether $me wrote it, at an RFC 3339
-#                       time; people's only, not the tracker's own notes,
-#                       nor those only some may read; it touches
-#                       $work/capped when it stopped before the last
+#                       "edited", "body"}: id the tracker's (letters,
+#                       digits and ._:-), mine whether $me wrote it, at an
+#                       RFC 3339 time, edited when its text last changed
+#                       (at, where it never did; none, and edits there
+#                       aren't followed); people's only, not the
+#                       tracker's own notes, nor those only some may read;
+#                       it touches $work/capped when it stopped before the
+#                       last
 #   t_comment REF FILE  post FILE's text as a comment on the issue; print
 #                       the tracker's id for it
+#   t_edit REF ID FILE  change the job's own comment ID on the issue to
+#                       FILE's text (edits followed, where the recipe
+#                       has it)
 #
 # Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
 # may link a task to any issue: an issue someone else wrote is never taken
@@ -73,8 +79,9 @@
 #                       Lapilli is posted to its issue once, quoted, with
 #                       who wrote it and the line it is found again by;
 #                       each comment on the issue that isn't this job's is
-#                       copied to the task once. An edit or a deletion
-#                       after that isn't followed, either way
+#                       copied to the task once. An edit after that is
+#                       followed, either way (sync_comments); a deletion
+#                       isn't
 #   MAX_COMMENTS        comments sent each way for a task in a run, at
 #                       most (default 200)
 #   COMMENT_NAMES       true to say who wrote a comment posted from Lapilli,
@@ -473,6 +480,28 @@ lapilli_copy() {
   printf '%s' "${l_code:-000}"
 }
 
+# lapilli_retake ID COMMENT JSON: the edit of a comment copied in from the
+# issue ({text, edited}), sent to Lapilli. It prints Lapilli's HTTP status,
+# as lapilli_copy does; what Lapilli said is in $work/retaken: whether it
+# changed the comment.
+lapilli_retake() {
+  : >"$work/retaken"
+  if lapilli_curl "$work/retaken" again -fsS -X PATCH -H 'Content-Type: application/json' \
+    --data-binary "$3" "$lapilli/api/v1/tasks/$1/comments/$2" 2>"$work/lretake.log"; then
+    l_code=$(status_of "$work/lheads")
+  else
+    l_code=$(status_of "$work/lheads")
+    case $l_code in
+      4??) ;;
+      *)
+        cat "$work/lretake.log" >&2
+        l_code=000
+        ;;
+    esac
+  fi
+  printf '%s' "${l_code:-000}"
+}
+
 # lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
 # the task's issue as REF, so it is never posted again.
 lapilli_mark() {
@@ -514,7 +543,7 @@ sync_comments() {
   # What the tracker said is checked before any of it goes on.
   if ! jq -e -s 'all(.[]; (.id | type == "string" and test("\\A[A-Za-z0-9._:-]{1,100}\\z"))
       and (.mine | type == "boolean") and (.at | type == "string") and (.body | type == "string")
-      and (.author | type == "string"))' "$work/tc" >/dev/null; then
+      and (.author | type == "string") and (.edited == null or (.edited | type == "string")))' "$work/tc" >/dev/null; then
     say "the tracker's comments on task $1's issue aren't as they should be; stopping"
     exit 1
   fi
@@ -589,6 +618,74 @@ sync_comments() {
         ;;
     esac
   done <"$work/in"
+  sync_edits "$1" "$2"
+}
+
+# sync_edits ID REF: edits followed, each way, each by when the comment
+# last changed, MAX_COMMENTS each way (docs/design/trackers.md, "Edits
+# followed"). Lapilli to the tracker: a comment people wrote here, changed
+# after the tracker last changed the job's post of it, has the post
+# changed to what would be posted now, unless the post holds that already;
+# only the job's own post, found by the tracker's id Lapilli keeps for it.
+# The times are two clocks', as CLOSE_ISSUES compares a task's status with
+# its issue's last change: an edit within their difference of the post may
+# be missed. The tracker to Lapilli: a comment copied in, changed in the
+# tracker after the time Lapilli keeps for it (the tracker's own), is sent
+# again with that time, made to fit as when it was copied; Lapilli keeps
+# it only when it is later than the one kept, so it is taken once. A
+# deletion isn't followed either way.
+sync_edits() {
+  # Lapilli to the tracker, where the recipe can change a comment (t_edit).
+  : >"$work/edits"
+  if command -v t_edit >/dev/null 2>&1; then
+    # shellcheck disable=SC2016 # $epoch and $tc are jq's
+    jq -c --slurpfile tc "$work/tc" "$epoch"'[$tc[] | select(.mine)] as $ours
+      | .comments[] | select((.origin // "") == "" and (.ref // "") != "")
+      | .ref as $r | ([$ours[] | select(.id == $r)][0]) as $post
+      | select($post != null and $post.edited != null) | select((.updated | epoch) > ($post.edited | epoch))
+      | . + {post: $post.body}' "$work/lc" | head -n "$max_comments" >"$work/edits"
+  fi
+  while IFS= read -r c; do
+    printf '%s' "$c" | comment_text >"$work/ctext"
+    # What the post holds already: as the tracker gives it back, line ends
+    # and the space at its end aside.
+    if printf '%s' "$c" | jq -e --rawfile t "$work/ctext" 'def plain: gsub("\r"; "") | sub("\\s+\\z"; "");
+        (.post | plain) == ($t | plain)' >/dev/null; then
+      continue
+    fi
+    cref=$(printf '%s' "$c" | jq -r '.ref')
+    if ! (t_edit "$2" "$cref" "$work/ctext"); then
+      fail "the tracker didn't take the edit of a comment on task $1's issue; skipped"
+      return 0
+    fi
+    carried=$((carried + 1))
+  done <"$work/edits"
+  # The tracker to Lapilli, where the recipe says when comments changed.
+  # shellcheck disable=SC2016 # $epoch, $copy_text and $lc are jq's
+  jq -c --slurpfile lc "$work/lc" "$epoch$copy_text"'[$lc[0].comments[] | select(.origin == "tracker")] as $copies
+    | select(.mine | not) | .id as $i | ([$copies[] | select(.ref == $i)][0]) as $copy
+    | select($copy != null and .edited != null) | select((.edited | epoch) > ($copy.updated | epoch))
+    | {id: $copy.id, edit: {text: (.body | copy_text), edited: .edited}}' "$work/tc" | head -n "$max_comments" >"$work/edited"
+  while IFS= read -r c; do
+    cid=$(printf '%s' "$c" | jq -r '.id')
+    number "a comment's id" "$cid"
+    code=$(lapilli_retake "$1" "$cid" "$(printf '%s' "$c" | jq -c '.edit')")
+    case $code in
+      2??)
+        if jq -e '.changed == true' "$work/retaken" >/dev/null 2>&1; then
+          retaken=$((retaken + 1))
+        fi
+        ;;
+      4??)
+        say "Lapilli refused the edit of comment $cid on task $1 ($code); passed over"
+        refused=$((refused + 1))
+        ;;
+      *)
+        fail "the edit of a comment on task $1's issue couldn't be sent ($code); skipped"
+        return 0
+        ;;
+    esac
+  done <"$work/edited"
 }
 
 # fail WHAT: say what failed for one task, and count it.
@@ -641,6 +738,8 @@ sync_tasks() {
   copied=0
   altered=0
   refused=0
+  carried=0
+  retaken=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
@@ -756,7 +855,7 @@ sync_tasks() {
     esac
   done <"$work/linked"
   if [ "$comments" = true ]; then
-    say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused"
+    say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused; carried $carried edits to issues, took $retaken edits from them"
   fi
   say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
   if [ "$failed" -gt 0 ]; then

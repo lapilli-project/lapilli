@@ -118,7 +118,7 @@ t_comments() {
   while [ "$page" -le 10 ]; do
     out=$(gh again GET "/repos/$repo/issues/$1/comments?per_page=100&page=$page") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.[] | {id: (.id | tostring), author: (.user.login // "someone"),
-      mine: ((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)), at: .created_at, body: (.body // "")}'
+      mine: ((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)), at: .created_at, edited: (.updated_at // .created_at), body: (.body // "")}'
     [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
     page=$((page + 1))
   done
@@ -128,6 +128,12 @@ t_comments() {
 t_comment() {
   out=$(gh once POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
+}
+
+# t_edit: a comment is changed by its own id, in the repository.
+t_edit() {
+  case $2 in '' | *[!0-9]*) return 1 ;; esac
+  gh again PATCH "/repos/$repo/issues/comments/$2" "$(jq -Rsc '{body: .}' "$3")" >/dev/null
 }
 
 sync_tasks
