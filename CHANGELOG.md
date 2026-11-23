@@ -106,13 +106,20 @@ Before upgrading:
   Alertmanager finds only when it sends (`notify_template_error`). Read
   from `alertmanager.yml` and its template globs, from a file in
   Mimir's, Cortex's or Amazon's form, or from Mimir's and Cortex's
-  `/api/v1/alerts` with `--ruler-token-file` and `--ruler-tenant`. No
-  field that holds a secret is parsed (docs/design/content.md).
+  `/api/v1/alerts` with `--ruler-token-file` and `--ruler-tenant`: with
+  `--ruler` and its token, on `--ruler`'s host alone. No field that holds
+  a secret is parsed, and a templates glob that leaves the
+  configuration's directory isn't looked through
+  (docs/design/content.md).
 - **The event recorder's file and Kafka outputs**, sent on to
   `/v1/alertmanager/events` by `recipes/events/alertmanager.sh`: from
-  where it stopped, by an offset file or a Kafka consumer group, a file
-  rotated or truncated read as it should be, in batches of 1,000 events
-  and 1 MB at most (docs/design/inputs.md).
+  where it stopped, by an offset file or a Kafka consumer group (Kafka
+  read with `kcat -J`), a file rotated (`dateext` too) or truncated read
+  as it should be, in batches of 1,000 events and 1 MB at most, a batch
+  answered 413 sent an event at a time. `MAX_READ` (16 MiB) bounds what a
+  run reads, a line or a message longer passed over and said; one run at
+  a time, by a lock beside the offset file; an offset that can't be
+  written stops the run, exit 1 (docs/design/inputs.md).
 - **YouTrack and Jira Data Center, among the trackers tasks are kept in
   step with** (`recipes/trackers/youtrack.sh`, `jira-dc.sh`; the
   chart's `serve.trackers.tracker: youtrack` or `jira-dc`). YouTrack's
@@ -181,6 +188,10 @@ Before upgrading:
   the global interval. When the query fails, as before.
 - `--ruler-token-file` and `--ruler-tenant` go with
   `--alertmanager-config URL` too.
+- **`/v1/alertmanager/events`: an event of more than 1,000 alerts is
+  refused as 400**, as any event the path can't read, not 413, which a
+  sender takes for a body too large and sends again. The webhook path,
+  `/v1/alertmanager`, answers 413 as before.
 - A rule from a Loki ruler's rule files says in its own words why it is
   for a person; a Loki rule from the API whose namespace isn't named says
   "its namespace in Loki's ruler isn't one --changes-in names, as
