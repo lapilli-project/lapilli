@@ -1,7 +1,8 @@
 package oncall
 
 // A feed, whatever it holds, is read without a panic, its turns not
-// overlapping, in five seconds at most.
+// overlapping, in five seconds at most, and in no more steps than a feed
+// may take.
 
 import (
 	"context"
@@ -12,12 +13,15 @@ import (
 )
 
 func FuzzFeed(f *testing.F) {
-	for _, name := range []string{"google.ics", "grafana-oncall.ics", "opsgenie.ics", "pagerduty.ics"} {
+	for _, name := range []string{"google.ics", "grafana-oncall.ics", "opsgenie.ics", "pagerduty.ics",
+		"google-monthly.ics", "pagerduty-monthly.ics", "opsgenie-yearly.ics"} {
 		if b, err := os.ReadFile(filepath.Join("testdata", name)); err == nil {
 			f.Add(b)
 		}
 	}
 	f.Add([]byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Seoul:20261101T090000\r\nDURATION:P1W\r\nRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH;WKST=SU;UNTIL=20270101\r\nEXDATE;VALUE=DATE:20261110\r\nATTENDEE;CN=\"Sam; Lee\":mailto:sam@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"))
+	// A yearly repeat by numbered day and BYSETPOS.
+	f.Add([]byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Europe/Berlin:20260105T090000\r\nDURATION:PT8H\r\nRRULE:FREQ=YEARLY;INTERVAL=2;BYMONTH=1,7;BYDAY=1MO,-1FR;BYSETPOS=1,-1;COUNT=6\r\nEXDATE;TZID=Europe/Berlin:20260105T090000\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"))
 	dir := f.TempDir()
 	p := filepath.Join(dir, "on-call.yaml")
 	if err := os.WriteFile(p, []byte("schedules:\n  - {name: s, file: x, who: '^(.*) on call$'}\n"+people), 0o600); err != nil {
@@ -34,6 +38,9 @@ func FuzzFeed(f *testing.F) {
 		fd, err := Parse(ctx, data, s, cfg, now)
 		if err != nil {
 			return
+		}
+		if fd.steps > maxFeedSteps {
+			t.Fatalf("%d steps", fd.steps)
 		}
 		for i := 1; i < len(fd.Turns); i++ {
 			if fd.Turns[i].From.Before(fd.Turns[i-1].To) {

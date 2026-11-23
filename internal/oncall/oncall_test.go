@@ -106,11 +106,14 @@ func TestFeeds(t *testing.T) {
 			"2026-10-19T12:00:00Z": "", // Jane's turn, replaced by Sam's a day later
 			"2026-10-20T12:00:00Z": "Sam Lee",
 			"2026-10-26T12:00:00Z": "Sam Lee", // a day's event over Ali's turn
-			"2026-10-28T00:00:00Z": "Ali Kaya", "2026-11-03T00:00:00Z": "Jane Doe",
+			"2026-10-28T02:00:00Z": "Ali Kaya", "2026-11-03T00:00:00Z": "Jane Doe",
 			"2026-11-10T00:00:00Z": "Ali Kaya", "2026-11-17T00:00:00Z": "", "2026-11-24T00:00:00Z": "Ali Kaya", // 16 November left out
 			"2026-12-01T00:00:00Z": "Jane Doe", // UNTIL 1 December takes the 30 November turn
 			"2026-12-08T00:00:00Z": "",         // and no more: COUNT=4 stopped Ali's too
-		}, 9, []string{"Korea Standard Time", "FREQ=MONTHLY"}},
+			// The first Thursday, 09:00 in Seoul, over whoever's turn it is.
+			"2026-10-01T00:30:00Z": "Monthly review", "2026-11-05T00:30:00Z": "Monthly review", "2026-11-05T01:30:00Z": "Jane Doe",
+			"2026-12-03T00:30:00Z": "Monthly review",
+		}, 14, []string{"Korea Standard Time", "start at the same time"}},
 	} {
 		t.Run(c.file, func(t *testing.T) {
 			cfg := config(t, c.schedule)
