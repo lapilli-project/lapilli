@@ -398,19 +398,20 @@ data:
     # status (000 for none), curl's exit status, and how the request is asked,
     # as its caller says, not as its method does: Linear's reads are POSTs, as
     # is Azure Boards' search. Every request is asked again on a connection
-    # refused (curl's 7), which sent nothing, and a 408, 429 or 503, which the
+    # refused (curl's 7), which sent nothing, and a 408 or 429, which the
     # server says it didn't take. One asked again (HOW again), a read, or a
     # write a second try leaves as the first did (a state, a link), is also
-    # asked again on a time out (curl's 28), or a 500, 502 or 504, as curl's
-    # --retry does. One asked once, a write that makes something, an issue, a
-    # comment, a transition, which a second try would make again, isn't: it
-    # may have been taken, and it fails, for the next run, which finds what
-    # was made by its marker.
+    # asked again on a time out (curl's 28), or a 500, 502, 503 or 504, as
+    # curl's --retry does. One asked once, a write that makes something, an
+    # issue, a comment, a transition, which a second try would make again,
+    # isn't: it may have been taken, a 503 too, which a proxy (Envoy) answers
+    # after the tracker has the request, and it fails, for the next run, which
+    # finds what was made by its marker.
     ask_again() {
       [ "$2" != 7 ] || return 0
-      case $1 in 408 | 429 | 503) return 0 ;; esac
+      case $1 in 408 | 429) return 0 ;; esac
       [ "$3" = again ] || return 1
-      case $1 in 500 | 502 | 504) return 0 ;; esac
+      case $1 in 500 | 502 | 503 | 504) return 0 ;; esac
       [ "$2" = 28 ]
     }
     

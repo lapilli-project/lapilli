@@ -83,17 +83,18 @@ exec '` + real + `' "$@"
 
 // A tracker's request answered 502 was asked again whatever its method:
 // an issue the tracker made, behind a proxy that answered 502, was made
-// a second time, and the task linked to the second. A POST is asked again
-// now only where it can't have been taken, a 408, 429 or 503, or a
-// connection refused; otherwise it fails, and the next run finds the
-// issue made by its marker.
+// a second time, and the task linked to the second. So was one answered
+// 503, which a proxy (Envoy) answers after the tracker has the request. A
+// write that makes something is asked again now only where it can't have
+// been taken, a 408 or 429, or a connection refused; otherwise it fails,
+// and the next run finds the issue made by its marker.
 func TestTrackerRecipePostAnsweredBadly(t *testing.T) {
 	needTools(t)
 	ctx := context.Background()
 	for _, c := range []struct {
 		code  int
 		taken bool
-	}{{http.StatusBadGateway, true}, {http.StatusGatewayTimeout, true}, {http.StatusServiceUnavailable, false}} {
+	}{{http.StatusBadGateway, true}, {http.StatusGatewayTimeout, true}, {http.StatusServiceUnavailable, true}, {http.StatusTooManyRequests, false}} {
 		var mu sync.Mutex
 		posts, first := 0, true
 		g := retryRig(t, "github", func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
