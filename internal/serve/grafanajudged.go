@@ -474,7 +474,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		if err := s.l.LeaveOut(context.WithoutCancel(ctx), ledger.GrafanaSource, names, now, a, b); err != nil {
 			return err
 		}
-		why := leftOutWhy(j.Unsure, j.Shared, unheld)
+		why := leftOutWhy(j.Unsure, j.Unlisted, j.Shared, unheld)
 		if len(leave) >= len(rs) {
 			return fmt.Errorf("%w: %s", source.ErrUnusable, why)
 		}
@@ -739,6 +739,11 @@ func mergeJudged(j, alone source.FromHistory, names []string) source.FromHistory
 				out.Unsure = append(out.Unsure, n)
 			}
 		}
+		for _, n := range x.h.Unlisted {
+			if of(n) == x.mine {
+				out.Unlisted = append(out.Unlisted, n)
+			}
+		}
 		for _, n := range x.h.Shared {
 			if of(n) == x.mine {
 				out.Shared = append(out.Shared, n)
@@ -747,18 +752,28 @@ func mergeJudged(j, alone source.FromHistory, names []string) source.FromHistory
 	}
 	firing.Sort(out.Firings)
 	slices.Sort(out.Unsure)
+	slices.Sort(out.Unlisted)
 	slices.Sort(out.Shared)
 	return out
 }
 
 // leftOutWhy says why rules are left out of a day copied in, for a log:
-// those the history can't say all of (unsure), those whose name another
-// of Grafana's rules has too (shared), and those with a firing a write
-// can't hold (unheld).
-func leftOutWhy(unsure, shared, unheld []string) string {
+// those the history can't say all of (unsure), those of them Grafana's
+// list of its rules gives no id (unlisted), those whose name another of
+// Grafana's rules has too (shared), and those with a firing a write can't
+// hold (unheld).
+func leftOutWhy(unsure, unlisted, shared, unheld []string) string {
 	var why []string
-	if len(unsure) > 0 {
-		why = append(why, fmt.Sprintf("it passed over changes of %d of the rules, or doesn't tell their alerts apart: %s", len(unsure), someNames(unsure)))
+	no := make(map[string]bool, len(unlisted))
+	for _, n := range unlisted {
+		no[n] = true
+	}
+	if rest := slices.DeleteFunc(slices.Clone(unsure), func(n string) bool { return no[n] }); len(rest) > 0 {
+		why = append(why, fmt.Sprintf("it passed over changes of %d of the rules, or doesn't tell their alerts apart: %s", len(rest), someNames(rest)))
+	}
+	if len(unlisted) > 0 {
+		why = append(why, fmt.Sprintf("Grafana's list of its rules gives %d of the rules no id the history names them by: it lists them no more, under another title (renamed since they were read), twice, or with an id another rule has too: %s",
+			len(unlisted), someNames(unlisted)))
 	}
 	if len(shared) > 0 {
 		why = append(why, fmt.Sprintf("it gives the name of %d of the rules to another of Grafana's rules too, and doesn't say which fired: %s", len(shared), someNames(shared)))

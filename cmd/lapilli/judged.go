@@ -66,10 +66,18 @@ func (f *verdictFlags) judgeFromHistory(ctx context.Context, known []rules.Rule,
 	if j.Passed > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d changes of state in Grafana's history passed over, past what lapilli reads of one (docs/design/grafanahistory.md).\n", j.Passed)
 	}
+	// Those Grafana's list gives no id said apart from those whose changes
+	// were passed over.
+	unlisted := make(map[string]bool, len(j.Unlisted))
+	for _, n := range j.Unlisted {
+		unlisted[n] = true
+	}
+	passed := slices.DeleteFunc(slices.Clone(j.Unsure), func(n string) bool { return unlisted[n] })
 	for _, c := range []struct {
 		names []string
 		why   string
-	}{{j.Unsure, "which passed over changes of them, or doesn't tell their alerts apart"},
+	}{{passed, "which passed over changes of them, or doesn't tell their alerts apart"},
+		{j.Unlisted, "as Grafana's list of its rules gives them no id it names them by: it lists them no more, under another title (renamed since they were read), twice, or with an id another rule has too"},
 		{j.Shared, "which gives their name to another of Grafana's rules too, and doesn't say which fired"}} {
 		if len(c.names) == 0 {
 			continue

@@ -248,8 +248,8 @@ func TestGrafanaJudgedByID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.what, err)
 		}
-		if got := firingsOf(j.Firings); got != c.want || (len(j.Unsure) == 1) != c.unsure || len(j.Shared) != 0 {
-			t.Errorf("%s: firings %q, unsure %v, shared %v", c.what, got, j.Unsure, j.Shared)
+		if got := firingsOf(j.Firings); got != c.want || (len(j.Unsure) == 1) != c.unsure || !slices.Equal(j.Unlisted, j.Unsure) || len(j.Shared) != 0 {
+			t.Errorf("%s: firings %q, unsure %v, unlisted %v, shared %v", c.what, got, j.Unsure, j.Unlisted, j.Shared)
 		}
 		if n := countAsked(g, "/api/v1/provisioning/alert-rules"); n != 1 {
 			t.Errorf("%s: its rules listed %d times", c.what, n)
@@ -300,8 +300,8 @@ func TestGrafanaJudgedPassedOverByRule(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := firingsOf(j.Firings); got != c.want || (len(j.Unsure) == 1) != c.unsure || j.Passed != 2 {
-				t.Errorf("firings %q, unsure %v, passed %d", got, j.Unsure, j.Passed)
+			if got := firingsOf(j.Firings); got != c.want || (len(j.Unsure) == 1) != c.unsure || len(j.Unlisted) != 0 || j.Passed != 2 {
+				t.Errorf("firings %q, unsure %v, unlisted %v, passed %d", got, j.Unsure, j.Unlisted, j.Passed)
 			}
 		})
 		t.Run("loki, "+c.what, func(t *testing.T) {

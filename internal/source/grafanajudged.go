@@ -36,10 +36,10 @@ type FromHistory struct {
 	// Unsure are the rules, by name, the history judges none of over
 	// what was read: it passed over changes of them, or doesn't tell their
 	// alerts apart, or Grafana lists them no more as they were read
-	// (ruleIDs). Shared are those whose alert name, as the history
-	// names it, another of Grafana's rules has too, where it doesn't say
-	// which of them fired.
-	Unsure, Shared []string
+	// (ruleIDs), which are Unlisted too. Shared are those whose alert name,
+	// as the history names it, another of Grafana's rules has too, where it
+	// doesn't say which of them fired.
+	Unsure, Unlisted, Shared []string
 	// Passed is how many changes the read passed over, past what is read
 	// of one (HistoryRead.Passed).
 	Passed int
@@ -114,7 +114,7 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 	}
 	j := FromHistory{Passed: read.Passed}
 	byName := map[string][]rules.Rule{}
-	unsure := map[string]bool{}
+	unsure, unlisted := map[string]bool{}, map[string]bool{}
 	for _, r := range rs {
 		if read.UnsureMore {
 			unsure[r.Name] = true
@@ -174,7 +174,7 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 				}
 				id := ids[r.UID]
 				if id == 0 {
-					unsure[r.Name] = true
+					unsure[r.Name], unlisted[r.Name] = true, true
 					continue
 				}
 				its = firing.RuleOf{ID: id}
@@ -220,7 +220,7 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 			j.Firings = append(j.Firings, f)
 		}
 	}
-	j.Unsure, j.Shared = slices.Sorted(maps.Keys(unsure)), slices.Sorted(maps.Keys(shared))
+	j.Unsure, j.Unlisted, j.Shared = slices.Sorted(maps.Keys(unsure)), slices.Sorted(maps.Keys(unlisted)), slices.Sorted(maps.Keys(shared))
 	return j, nil
 }
 

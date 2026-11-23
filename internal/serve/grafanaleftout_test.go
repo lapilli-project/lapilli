@@ -33,18 +33,20 @@ import (
 // provisioning API lists each rule's id. hidden are rules in a folder the
 // token doesn't read: neither exported nor listed, their annotations are
 // read all the same. listed counts the requests for its list of rules,
-// which it refuses (403) while refuse is set; a request for its
+// which it refuses (403) while refuse is set, and which leaves out the
+// rule of uid unlisted, exported all the same; a request for its
 // annotations from oldFrom, in milliseconds, while set, it answers with
 // one of no tags, as Grafana before 12.4 wrote them.
 type shopGrafana struct {
-	mu      sync.Mutex
-	rules   []shopRule
-	hidden  []shopRule
-	notes   []shopNote
-	ids     bool
-	listed  int
-	refuse  bool
-	oldFrom int64
+	mu       sync.Mutex
+	rules    []shopRule
+	hidden   []shopRule
+	notes    []shopNote
+	ids      bool
+	listed   int
+	refuse   bool
+	unlisted string
+	oldFrom  int64
 }
 
 // shopRule is a rule of a title in a folder, paused or not.
@@ -138,7 +140,9 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		out := []map[string]any{}
 		for _, x := range g.rules {
-			out = append(out, map[string]any{"id": g.idOf(x.uid), "uid": x.uid, "title": x.title, "folderUID": x.folder, "isPaused": x.paused})
+			if x.uid != g.unlisted {
+				out = append(out, map[string]any{"id": g.idOf(x.uid), "uid": x.uid, "title": x.title, "folderUID": x.folder, "isPaused": x.paused})
+			}
 		}
 		json.NewEncoder(w).Encode(out)
 	case "/api/datasources/uid/orders":
@@ -1143,6 +1147,31 @@ func TestServeGrafanaJudgedReadBackRefused(t *testing.T) {
 	sh.want("Orders slow's copies", sh.covers("Orders slow"), "→4h0m0s")
 	sh.want("Stock low's copies, the read back refused", sh.covers("Stock low"), "→0s")
 	sh.want("copied in", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s", "Stock low/stock -3h0m0s -2h0m0s"})
+}
+
+// A judged rule Grafana's list of its rules leaves out, exported all the
+// same, is left out of the day, and the log says so, not that the history
+// passed over its changes.
+func TestServeGrafanaJudgedUnlistedWhy(t *testing.T) {
+	g := &shopGrafana{ids: true}
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
+	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
+	sh := shopServer(t, g)
+	sh.round(0)
+	g.mu.Lock()
+	g.unlisted = stockUID
+	g.mu.Unlock()
+	g.fired("Stock low", "stock", time.Hour, 90*time.Minute)
+	var logged bytes.Buffer
+	sh.s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	sh.round(2 * time.Hour)
+	sh.want("Stock low's copies", sh.covers("Stock low"), "→0s")
+	sh.want("Orders slow's copies", sh.covers("Orders slow"), "→2h0m0s")
+	l := logged.String()
+	if !strings.Contains(l, "Grafana's list of its rules gives 1 of the rules no id the history names them by") || strings.Contains(l, "passed over changes of") {
+		t.Errorf("why:\n%s", l)
+	}
 }
 
 // A day copied lists Grafana's rules once, though its read and the read

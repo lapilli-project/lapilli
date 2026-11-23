@@ -47,11 +47,13 @@ groups:
 // state history in annotations: Orders slow fired six times, ten minutes
 // each, an hour apart up to an hour before t0; and a change long before,
 // so the history reaches back past the period. With refuse, the settings
-// answer 403.
+// answer 403. With unlisted, its annotations carry their rule's id
+// (alertId), and its list of rules leaves Orders slow out.
 type judgedGrafana struct {
-	mu     sync.Mutex
-	refuse bool
-	asked  []string
+	mu       sync.Mutex
+	refuse   bool
+	unlisted bool
+	asked    []string
 	// rules, when set, are its rules, and tag the name its history gives
 	// Orders slow.
 	rules, tag string
@@ -68,6 +70,8 @@ func (g *judgedGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, judgedRules)
+	case "/api/v1/provisioning/alert-rules":
+		io.WriteString(w, `[{"id": 1, "uid": "gerrors", "title": "GErrors"}]`)
 	case "/api/datasources/uid/prom":
 		io.WriteString(w, `{"uid": "prom", "type": "prometheus", "jsonData": {"prometheusType": "Prometheus"}}`)
 	case "/api/datasources/uid/orders":
@@ -88,8 +92,12 @@ func (g *judgedGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if g.tag != "" && rule == "Orders slow" {
 				tag = g.tag
 			}
-			return map[string]any{"id": id, "alertName": rule, "prevState": prev, "newState": next, "time": at.UnixMilli(),
+			n := map[string]any{"id": id, "alertName": rule, "prevState": prev, "newState": next, "time": at.UnixMilli(),
 				"tags": []string{"alertname:" + tag, "grafana_folder:Ops", "service:orders"}}
+			if g.unlisted {
+				n["alertId"] = 2
+			}
+			return n
 		}
 		var all []map[string]any
 		for k := 1; k <= 6; k++ { // newest first
@@ -228,6 +236,26 @@ func TestVerdictGrafanaJudged(t *testing.T) {
 	if code := run([]string{"verdict", "--rules", write(t, "r.yaml", judgedRules), "--prometheus", "http://p", "--incidents", incidents, "--grafana-history=false"}, io.Discard, &errs); code != 2 ||
 		!strings.Contains(errs.String(), "--grafana-history judges the rules --grafana reads") {
 		t.Errorf("exit %d: %s", code, errs.String())
+	}
+}
+
+// A rule Grafana's list of its rules leaves out, of a history that says
+// each change's rule by its id, isn't judged from the history: it is listed
+// as before, and stderr says why, not that its changes were passed over.
+func TestVerdictGrafanaJudgedUnlisted(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
+	now = func() time.Time { return t0 }
+	srv := httptest.NewServer(&judgedGrafana{unlisted: true})
+	defer srv.Close()
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-9, title: Orders slow, start: 2026-11-01T19:00:00Z, end: 2026-11-01T19:30:00Z, labels: {service: orders}}\n")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--grafana", srv.URL, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Could not replay 1 rules:\n  Orders slow: its condition reads a mysql data source") ||
+		!strings.Contains(stderr.String(), "1 Grafana rules aren't judged from its alert state history, as Grafana's list of its rules gives them no id") ||
+		strings.Contains(stderr.String(), "passed over changes") {
+		t.Errorf("not said apart:\n%s\n%s", stdout.String(), stderr.String())
 	}
 }
 
