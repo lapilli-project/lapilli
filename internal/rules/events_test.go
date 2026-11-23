@@ -286,6 +286,11 @@ func TestLogEventWindow(t *testing.T) {
 		{`bytes_over_time({app="shop"} |= "panic" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
 		{`bytes_rate({app="shop"} |= "panic" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
 		{`0 < count_over_time({app="shop"} |= "error" [20m])`, 20 * time.Minute, 20 * time.Minute, true},
+		// A pipeline that starts by keeping the lines without something.
+		{`count_over_time({app="shop"} != "debug" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} !~ "debug|trace" |= "error" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} !> "<_> debug <_>" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} ! "debug" [5m]) > 0`, time.Hour, 0, false},
 		// A bracket or a word in a string is the string's.
 		{`count_over_time({app="shop"} |~ "code=[45][0-9]{2}" |= "unwrap" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
 		{`count_over_time({app="shop"} |= "error" [5m]) > 0 and count_over_time({app="cart"} |= "error" [1h]) > 0`, 30 * time.Minute, time.Hour, false},

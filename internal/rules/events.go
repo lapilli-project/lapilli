@@ -335,7 +335,8 @@ func logEventValue(value string, depth int) (w time.Duration, one float64, ok bo
 
 // logRangeOf is the range a LogQL range function counts lines over: a
 // stream selector, its pipeline or none, then the range, with an offset
-// after it or not: {app="shop"} |= "error" | json [5m]. ok is false for
+// after it or not: {app="shop"} |= "error" | json [5m], {app="shop"} !=
+// "debug" [5m]. ok is false for
 // any other: a range before the pipeline, a pipeline that unwraps a label,
 // whose values, not lines, are then taken, or no stream selector.
 func logRangeOf(arg string) (time.Duration, bool) {
@@ -366,12 +367,19 @@ func logRangeOf(arg string) (time.Duration, bool) {
 		return 0, false
 	}
 	if pipe := stream[end+1:]; !blank(pipe) {
-		if at := skipSpace(pipe, 0); pipe[at] != '|' || hasLogWord(pipe, "unwrap") {
+		if at := skipSpace(pipe, 0); !pipeStart(pipe[at:]) || hasLogWord(pipe, "unwrap") {
 			return 0, false
 		}
 	}
 	d, ok := readRange(strings.Join(strings.Fields(arg[open+1:shut]), ""))
 	return d, ok && d > 0
+}
+
+// pipeStart reports whether a LogQL pipeline starts as one does: a stage
+// (|), or a line filter that keeps the lines without what it names (!=,
+// !~, !>).
+func pipeStart(pipe string) bool {
+	return strings.HasPrefix(pipe, "|") || strings.HasPrefix(pipe, "!=") || strings.HasPrefix(pipe, "!~") || strings.HasPrefix(pipe, "!>")
 }
 
 // hasLogWord reports whether a LogQL pipeline has word outside its strings
