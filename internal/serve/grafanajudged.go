@@ -129,17 +129,26 @@ var everRead = struct {
 
 // noteFromHistory keeps, before a run, the names of the rules judged from
 // Grafana's history, which the run, a new version and each copy tie to
-// the history copied in for them; none, when it isn't read.
+// the history copied in for them; none, when it isn't read. And the
+// severity of each, by its labels, as a run reads every other rule's
+// (work.go): the recorded rule it is copied in as keeps none of its own.
 func (s *Server) noteFromHistory(ctx context.Context) error {
 	rs, _, _, err := s.fromHistory(ctx)
 	if err != nil {
 		return err
 	}
 	names := make([]string, 0, len(rs))
+	sev := map[string]string{}
 	for _, r := range rs {
 		names = append(names, r.Name)
+		if v := ledger.Severities([]string{sev[r.Name], r.Labels["severity"]}); v != "" {
+			sev[r.Name] = v
+		}
 	}
-	return s.l.SetFromHistory(ctx, names)
+	if err := s.l.SetFromHistory(ctx, names); err != nil {
+		return err
+	}
+	return s.l.SetJudgedSeverity(ctx, sev)
 }
 
 // copyFromHistory copies in what Grafana's alert state history says the

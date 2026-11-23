@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/verdict"
@@ -63,6 +64,62 @@ func (l *Ledger) fromHistory(ctx context.Context, q querier) ([]string, error) {
 	}
 	var names []string
 	return names, json.Unmarshal([]byte(v), &names)
+}
+
+// severityKey is the meta key the severities of the rules judged from
+// Grafana's history are kept under, as JSON, by the name each is judged
+// under.
+const severityKey = "grafana.severity"
+
+// MaxSeverityLen is the most bytes of a severity kept of a rule judged
+// from Grafana's history: a label's value, as an alert's are kept
+// (verdict.KeptLabels).
+const MaxSeverityLen = 256
+
+// SetJudgedSeverity keeps, by the name each is judged under, the severity
+// of the rules judged from Grafana's own alert state history, as its
+// labels say it: as a run reads every other rule's (Severities). The
+// recorded rule each is copied in as keeps none in rules.severity, which
+// is how a source tells its rules apart, and Grafana's history is of a
+// rule whatever severities its alerts carry (PutFirings); RuleTable gives
+// it from here. A severity past MaxSeverityLen is cut. Kept as they were,
+// nothing is written.
+func (l *Ledger) SetJudgedSeverity(ctx context.Context, sev map[string]string) error {
+	keep := map[string]string{}
+	for name, s := range sev {
+		if s = cutText(s, MaxSeverityLen); s != "" {
+			keep[name] = s
+		}
+	}
+	b, err := json.Marshal(keep)
+	if err != nil {
+		return err
+	}
+	if was, err := l.meta(ctx, l.r, severityKey); err != nil || was == string(b) || was == "" && len(keep) == 0 {
+		return err
+	}
+	return l.write(ctx, func(t *txn) error { return setMeta(t.ctx, t, severityKey, string(b)) })
+}
+
+// judgedSeverity are the severities SetJudgedSeverity kept, by name.
+func (l *Ledger) judgedSeverity(ctx context.Context, q querier) (map[string]string, error) {
+	v, err := l.meta(ctx, q, severityKey)
+	if err != nil || v == "" {
+		return nil, err
+	}
+	var out map[string]string
+	return out, json.Unmarshal([]byte(v), &out)
+}
+
+// cutText is s cut to at most n bytes, at the start of a character.
+func cutText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // grafanaTies are the ties of those of names judged from Grafana's

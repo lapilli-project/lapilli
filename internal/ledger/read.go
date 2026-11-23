@@ -32,14 +32,34 @@ func (l *Ledger) RuleTable(ctx context.Context) (map[int64]RuleRow, error) {
 	}
 	defer rows.Close()
 	out := map[int64]RuleRow{}
+	judged := false
 	for rows.Next() {
 		var r RuleRow
 		if err := rows.Scan(&r.ID, &r.Name, &r.Group, &r.Severity, &r.Unsupported, &r.Source, &r.Sent); err != nil {
 			return nil, err
 		}
 		out[r.ID] = r
+		judged = judged || r.Source == GrafanaSource && r.Severity == ""
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil || !judged {
+		return out, err
+	}
+	rows.Close()
+	// A rule judged from Grafana's history is the recorded rule its
+	// firings are copied in as, which keeps no severity of its own: its
+	// labels', as the runs read them (SetJudgedSeverity), so that it shows
+	// and sorts as every other rule does.
+	sev, err := l.judgedSeverity(ctx, l.r)
+	if err != nil {
+		return nil, err
+	}
+	for id, r := range out {
+		if r.Source == GrafanaSource && r.Severity == "" && sev[r.Name] != "" {
+			r.Severity = sev[r.Name]
+			out[id] = r
+		}
+	}
+	return out, nil
 }
 
 // Tally is a rule's stones over a day or a week.
