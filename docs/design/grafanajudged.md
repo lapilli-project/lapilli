@@ -5,7 +5,7 @@ rule that can't be replayed has, not how a firing is judged, and kept
 nothing new in the ledger (no schema), so it is written down beside the
 build, as one pull request. It reads with the reader of
 [grafanahistory.md](grafanahistory.md), and keeps what it reads as
-[recorded.md](recorded.md) keeps firings copied in. 0.68.2 gave it the one
+[recorded.md](recorded.md) keeps firings copied in. 0.69.1 gave it the one
 table it keeps, `left_out` (schema 030): a rule the history can't judge is
 left out alone, remembered.
 
@@ -82,7 +82,7 @@ history (recorded.md), such a rule can get from Grafana's.
   so, and its record is what the copies cover. A source `grafana` a job
   wrote to before 0.68 isn't written over: serve says so once, and copies
   nothing (docs/upgrading.md).
-- **A rule left out alone** (0.68.2, schema 030). A rule the history
+- **A rule left out alone** (0.69.1, schema 030). A rule the history
   can't say all it fired of in a day's read is left out of that day alone,
   and the other rules' day is written: one whose name another of Grafana's
   rules has too (both, when both are judged), one a change of which the
