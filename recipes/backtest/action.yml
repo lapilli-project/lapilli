@@ -117,7 +117,7 @@ inputs:
     description: true fails the step when the change adds a rule no expectation holds.
     default: "false"
   fail-missed:
-    description: true, with incidents or impact, fails the step when the change leaves an incident a rule caught before it caught by no rule after it, once the comment says which (lapilli's --fail-missed); also when a rule that differs couldn't be replayed, as what it catches can't be judged. Refused with serve-url.
+    description: true, with incidents or impact, fails the step when the change leaves an incident a rule caught before it caught by no rule after it, once the comment says which (lapilli's --fail-missed); also when a rule that differs couldn't be replayed, as what it catches can't be judged. With serve-url, serve's incidents judge, the rules left alone by serve's record of them.
     default: "false"
   status:
     description: true also sets a commit status, lapilli/backtest (with key, lapilli/backtest/KEY), on the pull request's head commit, pending while the step runs and success or failure as it ends, linking to the run, which a branch rule can require; the token needs statuses write (the job's permissions statuses write).

@@ -130,7 +130,7 @@ func (s *serveStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.t.Errorf("a body that isn't JSON: %v\n%s", err, b)
 		}
 		for k := range body {
-			if !slices.Contains([]string{"before", "after", "expect", "expect_before", "rules_select", "days", "tz", "pull_request", "commit"}, k) {
+			if !slices.Contains([]string{"before", "after", "expect", "expect_before", "rules_select", "days", "tz", "pull_request", "commit", "fail_missed"}, k) {
 				s.t.Errorf("a field serve doesn't take: %s", k)
 			}
 		}
@@ -803,6 +803,104 @@ func TestBacktestServeRecipeExpectations(t *testing.T) {
 	}
 }
 
+// missedReport is serve's report of a change that holds CheckoutErrors 2h,
+// which catches INC-1 no more, held to the incidents (fail_missed), as
+// CompareMarkdown writes it: with what serve's record says of the rules
+// the change leaves alone, that one of them catches INC-1 (caught), and
+// whether it knows (known).
+func missedReport(t *testing.T, caught, known bool) string {
+	t.Helper()
+	t0 := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	opts := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, SomeRules: true}
+	page := map[string]string{"severity": "page"}
+	incs := []incident.Incident{{ID: "INC-1", Title: "Checkout errors", Start: m(100), End: m(140)}}
+	before := verdict.Judge([]rules.Rule{{Name: "CheckoutErrors", Expr: "x", For: 5 * time.Minute, Labels: page}},
+		[]firing.Firing{{Rule: "CheckoutErrors", Labels: page, Start: m(102), End: m(130)}}, incs, opts)
+	after := verdict.Judge([]rules.Rule{{Name: "CheckoutErrors", Expr: "x", For: 2 * time.Hour, Labels: page}}, nil, incs, opts)
+	c := verdict.Compare(before, after, []string{"CheckoutErrors"}, 1)
+	c.JudgedBy, c.ChangedOnly = verdict.JudgedByServe, true
+	c.Summarize(true)
+	c.HoldMissedBy(func(incident.Incident) (bool, bool) { return caught, known })
+	c.Incidents[0].Title = ""
+	for i := range c.Missed {
+		c.Missed[i].Title = ""
+	}
+	var b bytes.Buffer
+	if err := verdict.CompareMarkdown(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// FAIL_MISSED through serve: the request asks serve to hold the change to
+// the incidents (fail_missed), and the job fails from the summary line
+// serve's report has, as from lapilli's: a change that leaves an incident
+// caught by no rule, once the comment says which, and the commit status
+// says so; one whose incidents can't be told caught or missed; a serve
+// that doesn't hold a change to them. A rule left alone that serve's
+// record says still catches INC-1 keeps it caught, and the job passes.
+func TestBacktestServeRecipeFailMissed(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	sha := repo.git("rev-parse", "pr")
+	srv := newServeStandIn(t)
+	rr := serveRun(t, backtestHosts[0], repo, srv)
+	ci, link := headOf(t, "github", sha)
+	rr.env = append(append(rr.env, ci...), githubMerge(repo.git("rev-parse", "HEAD"))...)
+	lost := "the change leaves 1 incidents a rule caught before it caught by no rule (FAIL_MISSED=true)"
+	unknown := "1 incidents a rule caught before the change can't be told caught or missed by lapilli serve (FAIL_MISSED=true)"
+	for _, c := range []struct {
+		name     string
+		post     []serveAnswer
+		get      serveAnswer
+		settings []string
+		state    string
+		says     string // in the job's log, and the status
+		trouble  string // the comment's failure block, if any
+	}{
+		{"missed", nil, serveDone(missedReport(t, false, true)), []string{"FAIL_MISSED=true"}, "failure", lost, ""},
+		{"kept caught", nil, serveDone(missedReport(t, true, true)), []string{"FAIL_MISSED=1"}, "success", "", ""},
+		{"not known", nil, serveDone(missedReport(t, false, false)), []string{"FAIL_MISSED=true"}, "failure", unknown, ""},
+		{"not held", nil, serveDone(serveMarkdown(changedSummary)), nil, "success", "", ""},
+		{"serve says nothing of it", nil, serveDone(serveMarkdown(changedSummary)), []string{"FAIL_MISSED=true"}, "failure", "",
+			"lapilli serve's report doesn't say which incidents the change leaves caught by no rule: it needs lapilli 0.70.0 or later"},
+		{"serve takes no fail_missed", []serveAnswer{serveState(400, map[string]any{"error": `the body isn't a backtest's request: json: unknown field "fail_missed"`})},
+			serveDone(serveMarkdown(changedSummary)), []string{"FAIL_MISSED=true"}, "failure", "",
+			"lapilli serve doesn't hold a change to the incidents (FAIL_MISSED): it needs lapilli 0.70.0 or later"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			post := c.post
+			if post == nil {
+				post = []serveAnswer{{202, nil, `{"id":"` + serveID + `","key":"` + serveKey + `","position":0,"requests":80}`}}
+			}
+			srv.answers(post, []serveAnswer{c.get})
+			rr.host.set(func(h *commentHost) { h.comments, h.statuses = nil, nil })
+			out, err := rr.run(append([]string{"PATHS=alerts", "STATUS=true"}, c.settings...))
+			if (err != nil) != (c.state == "failure") || c.says != "" && !strings.Contains(out, c.says) || len(rr.host.mine()) != 1 {
+				t.Fatalf("%v, want it to end %s saying %q\n%s", err, c.state, c.says, out)
+			}
+			if held := srv.sent()["fail_missed"]; (held == true) != (len(c.settings) > 0) || held != nil && held != true {
+				t.Errorf("fail_missed sent: %v", held)
+			}
+			body := rr.body()
+			switch {
+			case c.trouble != "":
+				failure(t, body, c.trouble)
+			case strings.Contains(body, "### Lapilli backtest failed"):
+				t.Errorf("a report held to the incidents is no failure of the backtest:\n%s", body)
+			case c.says == lost && (!strings.Contains(body, "**This run fails** (`--fail-missed`): 1 incidents") || !strings.Contains(body, "| `INC-1` |")):
+				t.Errorf("the comment doesn't say which:\n%s", body)
+			}
+			st, _ := rr.host.lastStatus()
+			if st.SHA != sha || st.State != c.state || st.URL != link || c.says != "" && st.Text != c.says {
+				t.Errorf("the status: %+v, want %s on %s", st, c.state, sha)
+			}
+		})
+	}
+}
+
 // What can't be sent is said before anything is: a rule file that isn't
 // UTF-8 text, a request past 4 MiB, two files of one name from two of
 // PATHS.
@@ -1251,6 +1349,15 @@ func realReports(t *testing.T) map[string]string {
 		t.Fatal(err)
 	}
 	out["expectations"] = write(c, true, time.UTC)
+
+	// Held to the incidents (fail_missed): one caught by no rule after the
+	// change, one a rule left alone keeps caught, one that can't be told.
+	out["missed"] = missedReport(t, false, true)
+	out["missed, kept caught"] = missedReport(t, true, true)
+	out["missed, not known"] = missedReport(t, false, false)
+	if !strings.Contains(out["missed"], "**This run fails**") || !strings.Contains(out["missed, not known"], "whether they are missed isn't known") {
+		t.Fatalf("the reports held to the incidents:\n%s\n%s", out["missed"], out["missed, not known"])
+	}
 
 	// What comes from the rules, anything at all, as code spans.
 	hostile := []string{"@octocat please look", "@example-org/oncall", "#123", "example/repo#5", "GH-7", "!12", "~3", "$4", "&5", "%v1",

@@ -308,7 +308,10 @@ func TestBacktestRecipeFailMissed(t *testing.T) {
 		{[]string{"PATHS=alerts", "FAIL_MISSED=true"}, nil, "FAIL_MISSED fails the job when the change leaves an incident caught by no rule: give the incidents, INCIDENTS or IMPACT"},
 		{[]string{"PATHS=alerts", "FAIL_MISSED=yes", "INCIDENTS=incidents.yaml"}, nil, "FAIL_MISSED yes: want true or false"},
 		{[]string{"PATHS=alerts", "INCIDENTS=incidents.yaml"}, []string{"--fail-missed"}, "--fail-missed: the recipe gives lapilli --fail-missed itself"},
-		{[]string{"PATHS=alerts", "FAIL_MISSED=true", "LAPILLI_SERVE=https://lapilli-ci.example.com"}, nil, "FAIL_MISSED: lapilli serve's report doesn't say yet"},
+		// Through lapilli serve, serve's incidents judge, and a file of the
+		// job's is refused.
+		{[]string{"PATHS=alerts", "FAIL_MISSED=true", "INCIDENTS=incidents.yaml", "LAPILLI_SERVE=https://lapilli-ci.example.com"}, nil,
+			"INCIDENTS: lapilli serve judges the firings by the incidents and impact windows it keeps"},
 		{[]string{"PATHS=alerts", "STATUS=yes"}, nil, "STATUS yes: want true or false"},
 		{[]string{"PATHS=alerts", "STATUS=true", "STATUS_SHA=abc123"}, nil, "STATUS_SHA abc123: want the commit's full hash"},
 		{[]string{"PATHS=alerts", "STATUS=true", "STATUS_URL=http://ci.example.com/job/1"}, nil, "STATUS_URL http://ci.example.com/job/1: want an https URL, or http to this machine, of 255 characters at most"},

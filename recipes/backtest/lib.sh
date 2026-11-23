@@ -104,7 +104,9 @@
 #                    Also when a rule that differs couldn't be replayed,
 #                    or an incident can't be told caught or missed (the
 #                    summary's missed_not_known), as neither can be
-#                    judged. Refused with LAPILLI_SERVE
+#                    judged. With LAPILLI_SERVE, serve's incidents judge,
+#                    and the rules left alone are judged by serve's record
+#                    of them (fail_missed)
 #   STATUS           true (or 1): also sets a commit status on the pull
 #                    request's head commit, lapilli/backtest (with KEY,
 #                    lapilli/backtest/KEY; of a pull request into a branch
@@ -647,10 +649,6 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     say "PROMTOOL: lapilli serve runs no scenario a pull request sends, each said as not run, and nothing is run here: run promtool test rules in a step of its own, or the recipe without LAPILLI_SERVE"
     exit 1
   fi
-  if [ -n "$missed_gate" ]; then
-    say "FAIL_MISSED: lapilli serve's report doesn't say yet which incidents a change leaves caught by no rule: run the recipe without LAPILLI_SERVE to fail the job on it"
-    exit 1
-  fi
 else
   for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "SERVE_RETRY_MIN ${SERVE_RETRY_MIN:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
     "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY:-}" "LOKI_PATHS $(printf '%s' "${LOKI_PATHS:-}" | tr -d ' ')" \
@@ -1035,7 +1033,9 @@ if [ -n "$match" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
   say "MATCH is what a firing and an incident must agree on: give IMPACT or INCIDENTS too"
   exit 1
 fi
-if [ -n "$missed_gate" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
+# Through lapilli serve, serve's incidents and impact windows are the
+# incidents.
+if [ -n "$missed_gate" ] && [ -z "$serve" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
   say "FAIL_MISSED fails the job when the change leaves an incident caught by no rule: give the incidents, INCIDENTS or IMPACT"
   exit 1
 fi
@@ -1814,12 +1814,18 @@ judge() {
         case $n$unreplayed$unknown in *[!0-9]*) ;; *) missed_judged=1 ;; esac
         ;;
     esac
-    if [ -z "$missed_judged" ]; then
+    if [ -z "$missed_judged" ] && [ -n "$serve" ]; then
+      trouble "lapilli serve's report doesn't say which incidents the change leaves caught by no rule: it needs lapilli 0.70.0 or later"
+    elif [ -z "$missed_judged" ]; then
       trouble "the report doesn't say which incidents the change leaves caught by no rule: give LAPILLI_VERSION a release with --fail-missed" "$tmp/lapilli.said"
     elif [ "$n" -gt 0 ]; then
       lost="the change leaves $n incidents a rule caught before it caught by no rule (FAIL_MISSED=true)"
     elif [ "$unreplayed" -gt 0 ]; then
       lost="$unreplayed of the rules that differ couldn't be replayed, so what they catch can't be judged (FAIL_MISSED=true)"
+    elif [ "$unknown" -gt 0 ] && [ -n "$serve" ]; then
+      # Through serve, a rule left alone whose record doesn't hold an
+      # incident's time may catch it too: the comment says which.
+      lost="$unknown incidents a rule caught before the change can't be told caught or missed by lapilli serve (FAIL_MISSED=true)"
     elif [ "$unknown" -gt 0 ]; then
       lost="$unknown incidents a rule caught before the change can't be told caught or missed, as a rule after it couldn't be replayed (FAIL_MISSED=true)"
     fi
@@ -1923,7 +1929,8 @@ side() {
 
 # request: the body of POST /v1/backtests, in $tmp/serve.json, built by jq
 # alone: both sides' files, the expectations as expectations() wrote them,
-# --rules-select, the period's days, the zone, the pull request's number
+# --rules-select, the period's days, the zone, whether the change is held
+# to the incidents (FAIL_MISSED: fail_missed), the pull request's number
 # and its commit. 4 MiB at most, as serve takes it: past it, said before
 # anything is sent.
 request() {
@@ -1942,13 +1949,14 @@ request() {
   if ! jq -n --slurpfile before "$tmp/base.jsonl" --slurpfile after "$tmp/head.jsonl" \
     --rawfile expect "$expect_head" --rawfile expect_before "$expect_base" \
     --arg expect_given "${expect_head#/dev/null}" --arg before_given "${expect_base#/dev/null}" --arg select "$serve_select" \
-    --arg tz "$serve_tz" --arg days "$serve_days" --argjson pr "$PR" --arg commit "$head" '
+    --arg tz "$serve_tz" --arg days "$serve_days" --argjson pr "$PR" --arg commit "$head" --arg missed "$missed_gate" '
       {before: $before, after: $after}
       + (if $expect_given != "" then {expect: $expect} else {} end)
       + (if $before_given != "" then {expect_before: $expect_before} else {} end)
       + (if $select != "" then {rules_select: $select} else {} end)
       + (if $days != "" then {days: ($days | tonumber)} else {} end)
       + (if $tz != "" then {tz: $tz} else {} end)
+      + (if $missed != "" then {fail_missed: true} else {} end)
       + {pull_request: $pr, commit: $commit}' >"$tmp/serve.json" 2>"$tmp/jq.log"; then
     trouble "the request to lapilli serve couldn't be written" "$tmp/jq.log"
     return 1
@@ -2100,6 +2108,12 @@ through_serve() {
         ;;
       400)
         serve_said
+        # A serve before 0.70.0 reads the request strictly, and has no
+        # fail_missed.
+        if [ -n "$missed_gate" ] && grep -q 'unknown field "fail_missed"' "$tmp/serve.said"; then
+          trouble "lapilli serve doesn't hold a change to the incidents (FAIL_MISSED): it needs lapilli 0.70.0 or later" "$tmp/serve.said"
+          return 1
+        fi
         trouble "lapilli serve refused the backtest" "$tmp/serve.said"
         return 1
         ;;
