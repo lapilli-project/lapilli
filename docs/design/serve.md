@@ -351,7 +351,9 @@ Left unsaid, as it can't be said soundly: a value beside them under `or`,
 or alone (`errors > 5 or up == 0`: a firing of `up == 0` went past no
 bound); a comparison under `!` or inside arithmetic, which decides it the
 other way round or not alone; `unless` with nothing compared on its left; a
-bound of nothing, which no share of is past; a range on one value narrower
+bound of nothing, which no share of is past, or one a fifth past which is no
+number a float holds (`1.7e308`), which set past would be no bound and the
+rule another; a range on one value narrower
 than two fifths of its ends, which set further holds nowhere (none could go
 well past both, which says nothing of it); classic conditions with one that
 compares no number (`eq`, `ne`, `no_value`); a rule whose bounds changed

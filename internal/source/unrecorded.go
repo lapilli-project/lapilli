@@ -209,7 +209,9 @@ func deciding(r rules.Rule) ([]rules.Bound, bool) {
 	}
 	bs := r.Bounds()
 	for _, b := range bs {
-		if b.Value == 0 || b.Rest != nil && b.Rest.Value == 0 {
+		// A bound past which no number is a float, as 1.7e308 a fifth
+		// further: set past, it would be no bound, and the rule another.
+		if p := past(b); b.Value == 0 || b.Rest != nil && b.Rest.Value == 0 || math.IsInf(p, 0) || math.IsNaN(p) {
 			return nil, false
 		}
 	}
