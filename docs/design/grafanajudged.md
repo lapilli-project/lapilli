@@ -5,7 +5,7 @@ rule that can't be replayed has, not how a firing is judged, and kept
 nothing new in the ledger (no schema), so it is written down beside the
 build, as one pull request. It reads with the reader of
 [grafanahistory.md](grafanahistory.md), and keeps what it reads as
-[recorded.md](recorded.md) keeps firings copied in. 0.69.1 gave it the one
+[recorded.md](recorded.md) keeps firings copied in. 0.69.2 gave it the one
 table it keeps, `left_out` (schema 030): a rule the history can't judge is
 left out alone, remembered.
 
@@ -37,7 +37,7 @@ history (recorded.md), such a rule can get from Grafana's.
   annotation's tags name a rule by its title as `AnnotationName` writes
   it; the firings are given the name the rule is judged under. A change
   is taken for a judged rule only where the history says it is that
-  rule's (0.69.1): kept in Loki, by the rule's uid each line carries; in
+  rule's (0.69.2): kept in Loki, by the rule's uid each line carries; in
   annotations, by the rule's id in Grafana's database (`alertId`), the
   rule's where every change of its name is of one id and of its title now
   (`alertName`, joined from its rules, empty for one deleted) and no other
@@ -86,7 +86,7 @@ history (recorded.md), such a rule can get from Grafana's.
   covered again. One the history has begin before a write, which the
   ledger has from within it, on or ended (written from where the copies
   covered it again), is written from where the ledger has it, as the
-  history has it: before 0.69.1, one ended before the next round read was
+  history has it: before 0.69.2, one ended before the next round read was
   taken away by that round, which reads the settle again from after it
   began, and the period read as quiet, with `--every 1h` and `--settle
   1h`. The firings are kept as copied-in
@@ -99,7 +99,7 @@ history (recorded.md), such a rule can get from Grafana's.
   so, and its record is what the copies cover. A source `grafana` a job
   wrote to before 0.68 isn't written over: serve says so once, and copies
   nothing (docs/upgrading.md).
-- **A rule left out alone** (0.69.1, schema 030). A rule the history
+- **A rule left out alone** (0.69.2, schema 030). A rule the history
   can't say all it fired of in a day's read is left out of that day alone,
   and the other rules' day is written: one whose name another of Grafana's
   rules has too (both, when both are judged), one a change of which the
@@ -119,7 +119,7 @@ history (recorded.md), such a rule can get from Grafana's.
   (each alert on then written from there), in a round shorter than
   `--settle` after it, which reads the period again, or after a restart.
   Judged again, the rule is read back from where it was left out, a day
-  before the day copied at least and a week at most (0.69.1; a day alone
+  before the day copied at least and a week at most (0.69.2; a day alone
   before, so an alert of it that ended early in a longer period stayed
   on, and one that began then and was still on was never written): past
   a week, its alerts on since before it was left out, that the read says
@@ -133,7 +133,7 @@ history (recorded.md), such a rule can get from Grafana's.
   from the settle before it: a title shared in a version a round writes
   across leaves the rule out of that round too, where the history doesn't
   say each change's rule. A name the read holds no change of is its
-  rule's, judged with no firing, whoever else has it. Before 0.69.1, such
+  rule's, judged with no firing, whoever else has it. Before 0.69.2, such
   a rule made the day a gap for every rule judged so: the record was the
   source's, not each rule's. A rule whose name can't be kept (one that
   doesn't show) has no period kept: no firing of it is ever written, so
@@ -211,7 +211,7 @@ its data sources answered.
   nothing into that rule's record, ends none of its alerts, and takes
   nothing away, whether the rule is there at a round or made, firing and
   deleted between two (`TestServeGrafanaJudgedSharedBetweenRounds`,
-  `TestGrafanaJudgedByUID`, `TestGrafanaJudgedByID`). Before 0.69.1 a
+  `TestGrafanaJudgedByUID`, `TestGrafanaJudgedByID`). Before 0.69.2 a
   rule there between two rounds wrote its firings into the judged rule's
   record, and its alert could end the judged rule's, as a title was
   counted at the round alone; and a title shared at a round left the
@@ -244,7 +244,7 @@ its data sources answered.
 
 - One recorded rule a name keeps no severity: the report gives such a rule
   none, where a replayed rule has its labels'.
-- One title in two folders is tied by the rule's uid or id (0.69.1),
+- One title in two folders is tied by the rule's uid or id (0.69.2),
   not by `grafana_folder`, which two folders of one title share. The
   export Lapilli reads its rules from holds no rule's id: read it from
   `/api/v1/provisioning/alert-rules`, which does, rather than ask the

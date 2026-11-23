@@ -183,7 +183,7 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
   statement and 2,000,000 at most, and those a notification told of
   passed over; firings past the 2,000,000 aren't read, are in none of the
   numbers, and the line says some weren't counted (`partial`), as below
-  (`TestUnpagedSpanBounded`). Before 0.69.1 one statement read them all,
+  (`TestUnpagedSpanBounded`). Before 0.69.2 one statement read them all,
   however many the span held. For each rule left, one row of `mutes_rule`
   says whether a mute of it was told of about them. Only a rule with one
   has its firings read with their labels, one rule at a time, and its

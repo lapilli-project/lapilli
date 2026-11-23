@@ -63,7 +63,7 @@ Before upgrading:
 ### Fixed (security)
 
 - **One Grafana rule of a judged rule's title stopped the record of every
-  rule judged from Grafana's history** (affected: 0.68.1 and 0.69.0;
+  rule judged from Grafana's history** (affected: 0.68.1 to 0.69.1;
   0.68.0 took the one rule's firings away instead, which 0.68.1 fixed by
   this). The history names a rule by its title alone, and 0.68.1 left each
   day a gap for every rule judged from it while any of them shared its
@@ -94,7 +94,7 @@ Before upgrading:
   title now (`alertName`), or the id the newest annotation of its uid
   has (`alertUID`). A title shared across folders leaves neither rule
   out, and a rule of a judged rule's title made, firing and deleted
-  between two rounds, which 0.68.0 to 0.69.0 took for the judged rule,
+  between two rounds, which 0.68.0 to 0.69.1 took for the judged rule,
   its firings written into the judged rule's record and its alert ending
   the judged rule's, writes nothing. Where the history says no rule's uid
   or id, a rule of a judged rule's title in any version of the rules in
@@ -109,7 +109,7 @@ Before upgrading:
   rules to keep as left out, none of them gone from Grafana, or none of
   the rules judged ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
 - **The backtest gate could pass a pull request read from a branch its
-  author moved** (affected: 0.32.0 to 0.69.0; the gates that stop a
+  author moved** (affected: 0.32.0 to 0.69.1; the gates that stop a
   merge, and the status, from 0.67.0). 0.68.1 took `HEAD`'s first parent
   for the base only of GitHub's merge, told by `HEAD^2` the event's head.
   A merge the pull request's author pushes has that head for a parent
@@ -135,7 +135,7 @@ Before upgrading:
   checkout, GitHub's merge, and a checkout of `pull_request.head.sha` are
   judged as in 0.69.0.
 - **A firing recipe read its token file whole, and gave curl no scheme**
-  (affected: 0.19.0 to 0.69.0). `google-cloud.sh` from 0.19.0 and `put.sh`
+  (affected: 0.19.0 to 0.69.1). `google-cloud.sh` from 0.19.0 and `put.sh`
   from 0.20.0 sent what `GOOGLE_TOKEN_FILE` and `LAPILLI_TOKEN_FILE` hold
   as it was: a second line, or a carriage return, went into curl's
   headers as a header of its own. `put.sh` sent serve's token to an
@@ -156,14 +156,14 @@ Before upgrading:
   through their cloud's CLI, and hold no token and no address of their
   own.
 - **A firing recipe read an answer of any size** (affected: 0.19.0 to
-  0.69.0; Datadog's and New Relic's from 0.67.0). Each answer is 16 MiB
+  0.69.1; Datadog's and New Relic's from 0.67.0). Each answer is 16 MiB
   at most now, whatever curl's version: `--max-filesize`, which before
   curl 8.4.0 holds only an answer that says its length first, and what
   curl writes cut there too; past it, the script stops, writing nothing.
   Serve's answer to `put.sh`, its own, is held by `--max-filesize` alone.
 - **The incidents' `put.sh` and the tracker recipes read their token
   files whole, and gave curl no scheme** (affected: `put.sh` 0.15.0 to
-  0.69.0; `github.sh`, `gitlab.sh`, `jira.sh` and `linear.sh` from
+  0.69.1; `github.sh`, `gitlab.sh`, `jira.sh` and `linear.sh` from
   0.22.0, `azure-boards.sh` and `shortcut.sh` from 0.27.0, and the
   chart's copies of them). Each sent what its token file holds as it
   was, Lapilli's and the tracker's: a second line, or a carriage return,
@@ -182,7 +182,7 @@ Before upgrading:
   Lapilli's, Jira's, Azure DevOps' and Linear's. Neither a token nor an
   address is said.
 - **A tracker recipe read an answer of any size** (affected: 0.22.0 to
-  0.69.0). Each answer, Lapilli's or the tracker's, is 16 MiB at most now,
+  0.69.1). Each answer, Lapilli's or the tracker's, is 16 MiB at most now,
   whatever curl's version: `--max-filesize`, and what curl writes cut
   there too; past it the task is skipped, or the run stops, as with any
   answer that fails. A tracker's request that times out, or is answered
@@ -191,7 +191,7 @@ Before upgrading:
   after the one before when the answer goes through a pipe. Serve's
   answer to the incidents' `put.sh` isn't kept.
 - **A task made of a proposal mentioned an issue of its tracker's**
-  (affected: 0.22.0 to 0.69.0). Its title was `Proposal #12: ...`, which
+  (affected: 0.22.0 to 0.69.1). Its title was `Proposal #12: ...`, which
   a tracker recipe makes its issue's title, where `#12` is the host's own
   issue or pull request 12, mentioned by it. It is `Proposal 12: ...`
   now, as a change's pull request says Lapilli's own numbers since
@@ -199,7 +199,7 @@ Before upgrading:
   proposal's task id, and its issue is found by the marker in the
   issue's text, neither by the title.
 - **A route's `teams:` took another team's events, where two teams'
-  names differ only in letter case** (affected: 0.64.0 to 0.69.0). A
+  names differ only in letter case** (affected: 0.64.0 to 0.69.1). A
   route matched a team's name in any letter case. A ledger from before
   0.44.0 may hold two such teams (`Payments`, `payments`), which the
   Teams page lists apart, to be renamed: a route naming one sent the
@@ -210,7 +210,7 @@ Before upgrading:
   takes neither's, which go to `default` (Changed). `teams: [Payments]`
   still takes the one team `payments`.
 - **Looking at the Sources page started a source's clock** (affected:
-  0.64.0 to 0.69.0). A source whose reads aren't counted (the incidents
+  0.64.0 to 0.69.1). A source whose reads aren't counted (the incidents
   file, an impact signal, an on-call schedule), never read well, is down
   once it has failed past its bound, counted from when the replica first
   saw it failing: noted as the page, or `GET /api/v1/sources?all=true`,
@@ -224,7 +224,7 @@ Before upgrading:
   which may have read the source well all along, the note had the source
   down at once.
 - **The backtest gate read a `TARGET` of a branch's name as a tag of
-  that name** (affected: 0.32.0 to 0.69.0; the gates that stop a merge,
+  that name** (affected: 0.32.0 to 0.69.1; the gates that stop a merge,
   and the status, from 0.67.0). A `TARGET` given by a short name, such as
   `origin/main`, was whatever git resolves the name to, and git takes
   `refs/tags/NAME` before `refs/remotes/NAME`: whoever could push a tag
@@ -239,7 +239,7 @@ Before upgrading:
   gives from its CI, are full refs or full hashes already.
 - **The same head, opened as a second pull request into a branch its
   author chose, replaced the failure with a success** (affected: 0.67.0
-  to 0.69.0). A status is a commit's and its name's, not a pull
+  to 0.69.1). A status is a commit's and its name's, not a pull
   request's: the pull request's author could open the same head again
   into a branch of theirs holding the change already, whose backtest
   against that branch passed, and its success took the place of the
@@ -256,7 +256,7 @@ Before upgrading:
   on pull requests into the protected branches alone (`branches:`).
 - **The backtest gate took a merge for GitHub's in an event of no pull
   request, and one of another head for the event's** (affected: 0.67.0
-  to 0.69.0). In GitHub Actions, a `push` or `workflow_run` job that gives
+  to 0.69.1). In GitHub Actions, a `push` or `workflow_run` job that gives
   `PR` had `HEAD` a merge taken for the CI's, as outside a CI, and its
   first parent for the base: a merge of the change into a commit its
   author chose passed `FAIL_MISSED` and got a success, where the same
@@ -271,7 +271,7 @@ Before upgrading:
   said plainly not to be taken yet, and fails, as it did.
 - **An earlier run's success or pending stood where a backtest with
   `STATUS` stopped before it set the status** (affected: 0.67.0 to
-  0.69.0). A run refused where the CI says no head and `STATUS_SHA`
+  0.69.1). A run refused where the CI says no head and `STATUS_SHA`
   isn't given, a path of `PATHS` in neither commit, a setting found wrong,
   and GitHub's merge in a clone of depth 1, whose parents the clone
   hasn't, each failed the job and set nothing. Each sets the one failure
@@ -281,15 +281,15 @@ Before upgrading:
   one.
 - **An incident recipe read a redirect as a page of no incidents, and
   `google-cloud.sh` as one of no alerts** (affected: `google-cloud.sh`
-  0.19.0 to 0.69.0; `pagerduty.sh`, `incident-io.sh`, `grafana-irm.sh`
-  and `compass.sh` to 0.69.0). They asked with `curl -f`, which fails an
+  0.19.0 to 0.69.1; `pagerduty.sh`, `incident-io.sh`, `grafana-irm.sh`
+  and `compass.sh` to 0.69.1). They asked with `curl -f`, which fails an
   answer of 400 or more alone, and doesn't follow a redirect with the
   token: a 307 was read as an empty page, and the script exited 0,
   writing that nothing fired, or no incidents, which `put.sh` copies to
   serve as the tool's. An answer that isn't a 2xx stops each now,
   writing nothing.
 - **An incident recipe read an answer of any size, with a curl before
-  8.4** (affected: 0.15.0 to 0.69.0). 0.68.1 held an answer to 16 MiB by
+  8.4** (affected: 0.15.0 to 0.69.1). 0.68.1 held an answer to 16 MiB by
   `--max-filesize`, which before curl 8.4.0 (Ubuntu 22.04 has 7.81) holds
   only one that says its length first: a chunked one was read whole. What
   curl writes is cut at 16 MiB too now, whatever its version; past it the
@@ -298,14 +298,14 @@ Before upgrading:
 ### Fixed
 
 - **A Grafana rule named apart from another rule of its name was judged
-  as one that never fired** (affected: 0.68.0 to 0.69.0). The history
+  as one that never fired** (affected: 0.68.0 to 0.69.1). The history
   names a rule by its title, and serve read it by the name the rule is
   judged under: for a rule told apart from a Loki ruler's or a cloud's
   alarm of its name, `Orders slow [Ops/shop]`, a name the history never
   has, so its days read as ones with a record and nothing fired. It is
   read by its title now, and written under the name it is judged by.
 - **A firing of Grafana's history on in a span the ledger let go stayed
-  on** (affected: 0.68.0 to 0.69.0). The ledger keeps 64 spans of what a
+  on** (affected: 0.68.0 to 0.69.1). The ledger keeps 64 spans of what a
   source's copies cover, the earliest let go past them. A firing that
   started in one let go, which the history then said ended, was written
   again only within the spans kept: it stayed on, and was written a
@@ -313,7 +313,7 @@ Before upgrading:
   is, in a write of the second it started in that isn't taken as covered
   again; the span stays let go.
 - **An alert on since a gap in Grafana's history could be taken away, or
-  left on, by a later round** (affected: 0.68.0 to 0.69.0). One written
+  left on, by a later round** (affected: 0.68.0 to 0.69.1). One written
   from where the copies covered again was taken away by a round that
   began within `--settle` of there and read from after the alert began;
   one that ended and fired again in the gap, still on, wasn't written;
@@ -327,7 +327,7 @@ Before upgrading:
   has it, and one on at the first day after a gap is written from there
   whatever the ledger had on.
 - **A pull request's backtest takes the place of the one waiting by its
-  repository's id** (affected: 0.61.0 to 0.69.0; **ledger schema 031**,
+  repository's id** (affected: 0.61.0 to 0.69.1; **ledger schema 031**,
   `backtests.repository_id`). The one waiting was matched by the entry,
   the repository's name and the pull request's number: a repository
   renamed while one waited didn't take its own one's place, another
@@ -340,7 +340,7 @@ Before upgrading:
   token's, whose pull request is the job's word, takes none's, as
   before.
 - **An impact window confirmed, reopened and confirmed again wrote a new
-  incident each time** (affected: 0.6.0 to 0.69.0; `POST
+  incident each time** (affected: 0.6.0 to 0.69.1; `POST
   /api/v1/incidents/{id}/decide` from 0.64.0). Each was of the same
   hours, and each counted. A window confirmed again is the incident it
   wrote before now, the latest the ledger keeps, as the changes note it
@@ -361,7 +361,7 @@ Before upgrading:
 ### Changed
 
 - **The count of firings that paged no one reads 2,000,000 of a span's
-  firings at most** (affected: 0.68.0 to 0.69.0, which read them all),
+  firings at most** (affected: 0.68.0 to 0.69.1, which read them all),
   in the digest, a team's, and a report. It read every firing of the span
   without its labels in one statement, however many the span held. They
   are read in the order they started, 20,000 a statement; past
