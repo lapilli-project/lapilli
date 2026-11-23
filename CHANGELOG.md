@@ -37,8 +37,17 @@ Before upgrading:
 - **A rule of a branch other than the default that requires
   `lapilli/backtest`** needs `lapilli/backtest (into BRANCH)` now
   (`lapilli/backtest/KEY (into BRANCH)` with a `KEY`), on GitHub, Gitea
-  and Forgejo Actions, and GitLab, where the CI says the default branch;
-  the default branch's is named as before (Changed).
+  and Forgejo Actions, and GitLab, where the CI says the default branch,
+  in place of `lapilli/backtest`: a rule that keeps it, beside the new
+  name or alone, is met by the same head's pull request into the default
+  branch, judged against the default. A rule of a pattern (`release/*`)
+  asks one name of every branch it matches, none of them each branch's
+  own: give each such branch a rule of its own, naming its status in
+  full, and one to each branch made later. Require each status by its name
+  in full, never by a pattern of names (Gitea's and Forgejo's
+  `lapilli/backtest*`), which takes the names a pull request's author
+  makes by the branch they open it into. The default branch's is named as
+  before (Changed).
 - **A backtest job whose `TARGET` is a short name a tag has too**
   (`origin/main` beside a tag `origin/main`, or a short hash a tag is
   named as), with a gate or `STATUS`, fails: give the branch in full
@@ -46,7 +55,12 @@ Before upgrading:
 - **A backtest job in GitHub Actions on an event of no pull request**
   (`push`, `workflow_run`) that gives `PR`, with a gate or `STATUS`, fails
   where `TARGET` is left at `HEAD^1`: give `TARGET` or `TARGET_BRANCH`,
-  the branch the pull request goes into (Changed).
+  the branch the pull request goes into. With `STATUS`, where the event
+  says the repository's default branch, as GitHub's do, and in Gitea's
+  `push` and GitLab's branch pipelines likewise, give `TARGET_BRANCH`: the
+  status's name says that branch (`lapilli/backtest (into BRANCH)` of one
+  but the default), and a job that gives `TARGET` instead, or neither,
+  sets no status, the log saying why (Changed).
 - **The incidents' `put.sh` takes `http://` or `https://` alone**, an
   address with no scheme (`lapilli:8082`) or another refused, and a token
   file of one line, with no tab or other control character (Fixed
@@ -59,6 +73,14 @@ Before upgrading:
   `serve.trackers.env`): without it, an `http://` address to a host but
   this machine is refused, and the job stops, saying which setting
   (Changed).
+- **A backtest job that writes `TARGET=HEAD^1`**, the default, on Gitea's
+  or Forgejo's Actions, GitLab, Bitbucket Pipelines or Azure Pipelines, is
+  compared with the branch the pull request goes into, as one that leaves
+  `TARGET` out is, not with `HEAD`'s first parent: that branch is the
+  clone's, or fetched from `origin`, which needs the checkout's
+  credentials kept. On Gitea's and Forgejo's Actions, `HEAD` a merge where
+  the CI says no branch it goes into (`GITHUB_BASE_REF`), with a gate or
+  `STATUS`, fails: give `TARGET` or `TARGET_BRANCH` (Changed).
 
 ### Fixed (security)
 
@@ -194,11 +216,13 @@ Before upgrading:
   0.69.1). Each answer, Lapilli's or the tracker's, is 16 MiB at most now,
   whatever curl's version: `--max-filesize`, and what curl writes cut
   there too; past it the task is skipped, or the run stops, as with any
-  answer that fails. A tracker's request that times out, or is answered
-  408, 429, 500, 502, 503 or 504, is asked again three times at most, as
-  `curl --retry 3` did, by the recipe: curl's own writes each try's answer
-  after the one before when the answer goes through a pipe. Serve's
-  answer to the incidents' `put.sh` isn't kept.
+  answer that fails. A request is asked again by the recipe, not by
+  `curl --retry`, which writes each try's answer after the one before
+  when the answer goes through a pipe, a read that timed out midway
+  followed by the next try's whole: the tracker's and Lapilli's alike,
+  three times at most, each try's answer the last alone, a POST only
+  where it can't have been taken (above). Serve's answer to the
+  incidents' `put.sh` isn't kept.
 - **A task made of a proposal mentioned an issue of its tracker's**
   (affected: 0.22.0 to 0.69.1). Its title was `Proposal #12: ...`, which
   a tracker recipe makes its issue's title, where `#12` is the host's own
@@ -228,10 +252,17 @@ Before upgrading:
   failed read is noted where the source is read now, and judging a source
   reads it and writes nothing; the leader says it with its status, so a
   replica that follows judges by the leader's reads, not by when its own
-  page was first looked at. A replica that starts to lead lets go of what
-  it noted before, in a term it led earlier: kept while another led,
-  which may have read the source well all along, the note had the source
-  down at once.
+  page was first looked at. And a replica that led again judged by what
+  it read in a term it led earlier, kept while another led, which may
+  have read the sources well all along: days on, a source read well then
+  was quiet and down before this term read it, and down at once at its
+  first failed read, which a notice could tell (`source.down`). A replica
+  that starts to lead takes the sources' reads of the term before now:
+  the leader's, as it last said them, which a follower keeps from the
+  leader's heartbeats; its own, where it led that term; or else none,
+  each source waiting until it is read. So a source failing is failing
+  since when the leader before said, and one that never reads well is
+  down past its bound however often the leader changes.
 - **The backtest gate read a `TARGET` of a branch's name as a tag of
   that name** (affected: 0.32.0 to 0.69.1; the gates that stop a merge,
   and the status, from 0.67.0). A `TARGET` given by a short name, such as
@@ -258,11 +289,23 @@ Before upgrading:
   GitLab's `CI_DEFAULT_BRANCH`, a pull request into another branch sets
   `lapilli/backtest (into BRANCH)` now, and the default's stays as its own
   pull request left it; a branch whose name holds more than letters,
-  digits and `. _ / -`, or more than 200, sets none (Changed). Bitbucket
-  Pipelines doesn't say the default branch, and its build status is still
-  one of a commit and a key, the last pull request's standing for both;
-  Azure DevOps' status is the pull request's own. The docs' workflow runs
-  on pull requests into the protected branches alone (`branches:`).
+  digits and `. _ / -`, or more than 200, sets none (Changed). In an event
+  of no pull request (GitHub's `push` or `workflow_run`, Gitea's `push`,
+  GitLab's branch pipeline), the CI says the default branch but not the
+  one the pull request goes into, and the status kept the default's name
+  whatever `TARGET_BRANCH` said: a job that judged the same head against
+  the branch of a second pull request, `TARGET_BRANCH` taken from it, set
+  `lapilli/backtest` success over the failure the job into the default
+  branch left. `TARGET_BRANCH` is the branch there, named as the CI's
+  would be; a `TARGET`, or none, names no branch, and no status is set,
+  the log saying why (Changed). Bitbucket Pipelines doesn't say the
+  default branch, and its build status is still one of a commit and a
+  key, the last pull request's standing for both; Azure DevOps' status is
+  the pull request's own. The docs' workflow runs on pull requests into
+  the protected branches alone (`branches:`), and say to require a
+  branch's own status by its name in full: not `lapilli/backtest` beside
+  it, nor one rule of a pattern (`release/*`) for several branches, nor a
+  pattern of names (`lapilli/backtest*`).
 - **The backtest gate took a merge for GitHub's in an event of no pull
   request, and one of another head for the event's** (affected: 0.67.0
   to 0.69.1). In GitHub Actions, a `push` or `workflow_run` job that gives
@@ -303,6 +346,22 @@ Before upgrading:
   only one that says its length first: a chunked one was read whole. What
   curl writes is cut at 16 MiB too now, whatever its version; past it the
   script stops, writing nothing.
+- **The backtest gate took the first parent of the author's own merge for
+  the base where a job wrote `TARGET=HEAD^1`** (affected: 0.32.0 to
+  0.69.1; the gates that stop a merge, and the status, from 0.67.0). The
+  scripts of the CIs that say the base, Gitea's and Forgejo's Actions,
+  GitLab's merge requests, Bitbucket's and Azure's pull requests, set
+  their default, the branch the pull request goes into, only where
+  `TARGET` wasn't given, while lib.sh takes `HEAD^1`, its own default,
+  written out as none given. A job that wrote it, of a head that is a
+  merge its author pushed, its first parent a commit of theirs holding
+  the change already, compared the pull request against that commit,
+  passed `FAIL_MISSED`, and set a success on the head. `HEAD^1` written
+  out is the default now, in each script. And Gitea's and Forgejo's
+  Actions, which make no merge in any event, said so only of an event of
+  no pull request: `HEAD` a merge is the author's in every event now, and
+  the branch the pull request goes into (`GITHUB_BASE_REF`) is taken, or
+  else, with a gate or `STATUS`, the run is refused (Changed).
 
 ### Fixed
 
@@ -358,14 +417,29 @@ Before upgrading:
   hours meeting the window's. It is given the hours and labels the window
   has grown to since, earlier or later, never fewer, and what they touch
   is judged again: a window confirmed while the impact went on had its
-  firings after the hours first written black. A title given is its
-  title; none, or the window's own as its form sends it back, leaves the
-  incident's. One deleted since and written again under its id, by
-  anyone, of other hours or the same, or moved by a person to hours the
-  window hasn't, is another's, and the window is written down anew; so
-  is one confirmed longer ago than `--keep` keeps the changes. A verdict
-  naming both the window and that incident names the incident once after
-  it.
+  firings after the hours first written black. Grown past what a
+  person's change of it is held to, hours past 31 days or labels past
+  4 KB, the confirmation is refused, saying why, and the incident and the
+  window are left as they were. A title given is its title; none, or the
+  window's own as its form sends it back, leaves the incident's. One
+  deleted since and written again under its id, by anyone, of other hours
+  or the same, or moved by a person to hours the window hasn't, is
+  another's, and the window is written down anew; so is one confirmed
+  longer ago than `--keep` keeps the changes. A verdict naming both the
+  window and that incident names the incident once after it.
+- **A tracker recipe made an issue or a comment twice where the tracker
+  took the request and answered it with an error, or not in time**
+  (affected: 0.22.0 to 0.69.1; comments from 0.27.0). A request answered
+  500, 502 or 504, or not answered within 30 seconds, was asked again
+  three times at most whatever its method, as `curl --retry 3` does: an
+  issue the tracker made, behind a proxy that answered 502, was made a
+  second time, and the task linked to the second; so was a comment posted
+  to an issue, and a comment copied to a task was sent to Lapilli again,
+  which keeps it once. A POST is asked again now only where it can't have
+  been taken: a connection refused, a 408, 429 or 503. Otherwise the task
+  is skipped for the run, saying so, and the next run finds the issue or
+  the comment made by its marker. A request of another method is asked
+  again as before, and on a connection refused too.
 
 ### Changed
 
@@ -426,7 +500,9 @@ Before upgrading:
   labels as they are now**, and `title` in `POST
   /api/v1/incidents/{id}/decide`, or the form's, when one is given that
   isn't the window's own: an incident a person changed since keeps what
-  they changed, and gains what the window has more.
+  they changed, and gains what the window has more, within what a
+  person's change is held to; past it, the confirmation is refused, for
+  the incident to be changed first.
 - **A source never read well is down by its first failed read**, not by
   when a replica first looked at it: sooner by as long as no one looked,
   and no job judged it. A replica that follows a leader of an earlier
