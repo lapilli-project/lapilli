@@ -17,7 +17,10 @@
       "title": "Checkout errors",
       "overviewURL": "/a/grafana-irm-app/incidents/41",
       "incidentStart": "2026-10-28T03:01:00Z",
-      "incidentEnd": "2026-10-28T03:40:00Z"
+      "incidentEnd": "2026-10-28T03:40:00Z",
+      "refs": [
+        {"key": "com.grafana.oncall", "ref": "I68T24C13IFW1", "url": "https://example.grafana.net/a/grafana-irm-app/alert-groups/I68T24C13IFW1"}
+      ]
     },
     {
       "incidentID": "42",

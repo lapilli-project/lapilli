@@ -331,7 +331,7 @@ func (s *Server) settleApplying(ctx context.Context) error {
 // settleOne reads back one change sent to Grafana or a ruler and not yet
 // read back.
 func (s *Server) settleOne(ctx context.Context, p ledger.Proposal) error {
-	if p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
+	if p.Path == ledger.PathRuler || p.Path == ledger.PathLoki || p.Path == ledger.PathAlarm {
 		return s.apiSettle(ctx, s.targetOf(p.Path), p, nil)
 	}
 	ev := proposalEvidence(p)

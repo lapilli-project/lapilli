@@ -87,13 +87,17 @@ increase(x[30m]) # in half an hour
 // doesn't panic; what it says is a range one event holds for.
 func FuzzEventWindow(f *testing.F) {
 	for _, seed := range []string{`increase(x{a="]"}[30m]) > 0.5`, `sum by (ns) (increase(x[10m])) >= 1`, `changes(up[1h:1m] @ start()) > 0`,
-		`(((increase(x[5m]))))>0`, `max(changes(x[1d] offset -5m)) by (a) > 0 and y`, `increase(x[30m] > 0.5`, `sum(sum(sum(increase(x[1m]))))>0`} {
+		`(((increase(x[5m]))))>0`, `max(changes(x[1d] offset -5m)) by (a) > 0 and y`, `increase(x[30m] > 0.5`, `sum(sum(sum(increase(x[1m]))))>0`,
+		`count_over_time({app="]"} |= "[" [5m]) > 0`, `sum by (a) (bytes_rate({a=~".+"} | json | unwrap [1m])) > 0`, `rate({a="b"}[5m] offset 1m) * 60 >= 1`} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, expr string) {
-		r := Rule{Expr: expr, For: time.Hour}
-		if w, ok := r.EventWindow(); ok && w <= 0 {
-			t.Errorf("%q: window %s", expr, w)
+		// Read as PromQL, and as a Loki ruler's LogQL.
+		for _, logs := range []string{"", LokiRuler} {
+			r := Rule{Expr: expr, For: time.Hour, Logs: logs}
+			if w, ok := r.EventWindow(); ok && w <= 0 {
+				t.Errorf("%q (%q): window %s", expr, logs, w)
+			}
 		}
 	})
 }
@@ -253,5 +257,143 @@ groups:
 	}
 	if _, ok := rule("1h", deep(eventMaxDepth+3)).EventWindow(); ok {
 		t.Errorf("%d reduces: read", eventMaxDepth+3)
+	}
+}
+
+// A Loki ruler's rule counts events when its value is how many lines a
+// stream's pipeline let through over a range (count_over_time), them a
+// second (rate), their bytes (bytes_over_time) or those a second
+// (bytes_rate), summed or maxed or not, and one line passes its bound: a
+// line holds what it counts for that range at most, as an increase's event
+// does. Nothing is said of a pipeline that unwraps a label, whose values
+// are then taken, of a range before the pipeline, of a comment Loki reads
+// that PromQL doesn't, or of a bound one line doesn't pass.
+func TestLogEventWindow(t *testing.T) {
+	errors := `count_over_time({app="shop"} |= "error" [5m]) > 0`
+	for _, c := range []struct {
+		expr     string
+		for_     time.Duration
+		window   time.Duration // 0: not one that counts events
+		outlasts bool
+	}{
+		{errors, time.Minute, 5 * time.Minute, false},
+		{errors, 5 * time.Minute, 5 * time.Minute, true},
+		{`sum by (app) (count_over_time({app="shop"} |= "error" | json | level="error" [10m])) >= 1`, 10 * time.Minute, 10 * time.Minute, true},
+		{`sum(count_over_time({app="shop"} |~ "panic|fatal" [10m])) by (app) > 0.5`, 15 * time.Minute, 10 * time.Minute, true},
+		{`max without (pod) (count_over_time({app="shop"} [1h] offset 5m)) > 0`, 2 * time.Hour, time.Hour, true},
+		{`rate({app="shop"} |= "panic" [5m]) > 0`, 10 * time.Minute, 5 * time.Minute, true},
+		{`rate({app="shop"} |= "panic" [5m]) * 300 >= 1`, 10 * time.Minute, 5 * time.Minute, true},
+		{`bytes_over_time({app="shop"} |= "panic" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`bytes_rate({app="shop"} |= "panic" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`0 < count_over_time({app="shop"} |= "error" [20m])`, 20 * time.Minute, 20 * time.Minute, true},
+		// A pipeline that starts by keeping the lines without something.
+		{`count_over_time({app="shop"} != "debug" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} !~ "debug|trace" |= "error" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} !> "<_> debug <_>" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} ! "debug" [5m]) > 0`, time.Hour, 0, false},
+		// A bracket or a word in a string is the string's.
+		{`count_over_time({app="shop"} |~ "code=[45][0-9]{2}" |= "unwrap" [5m]) > 0`, 5 * time.Minute, 5 * time.Minute, true},
+		{`count_over_time({app="shop"} |= "error" [5m]) > 0 and count_over_time({app="cart"} |= "error" [1h]) > 0`, 30 * time.Minute, time.Hour, false},
+		{`# errors
+count_over_time({app="shop"} |= "error" [5m]) # in five minutes
+  > 0`, 5 * time.Minute, 5 * time.Minute, true},
+
+		// Not sure, so nothing said.
+		{`count_over_time({app="shop"}[5m]) > 5`, time.Hour, 0, false},
+		{`bytes_over_time({app="shop"}[5m]) > 100`, time.Hour, 0, false},
+		{`rate({app="shop"}[5m]) > 1`, time.Hour, 0, false},
+		{`count_over_time({app="shop"}[5m]) >= 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"}[5m]) < 1`, time.Hour, 0, false},
+		{`rate({app="shop"} | logfmt | unwrap latency [5m]) > 0`, time.Hour, 0, false},
+		{`sum_over_time({app="shop"} | logfmt | unwrap bytes [5m]) > 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"}[5m] |= "error") > 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"} |= "error" [5m]) > 0 // errors`, time.Hour, 0, false},
+		{`count_over_time({app="shop"} |= "error" /* errors */ [5m]) > 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"} |= "error" [5m]) > 0 or vector(0)`, time.Hour, 0, false},
+		{`count_over_time({app="shop"} |= "error" [5m]) > 0 unless count_over_time({app="shop"} |= "ok" [5m]) > 0`, time.Hour, 0, false},
+		{`absent_over_time({app="shop"}[5m]) > 0`, time.Hour, 0, false},
+		{`avg(count_over_time({app="shop"}[5m])) > 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"}[5m]) + count_over_time({app="cart"}[5m]) > 0`, time.Hour, 0, false},
+		{`count_over_time(app[5m]) > 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"}[5m]) > bool 0`, time.Hour, 0, false},
+		{`count_over_time({app="shop"}[5m]`, time.Hour, 0, false},
+		// PromQL's counts, read as LogQL: none of LogQL's.
+		{`increase(x[30m]) > 0.5`, time.Hour, 0, false},
+	} {
+		r := Rule{Name: "R", Expr: c.expr, For: c.for_, Logs: LokiRuler}
+		w, ok := r.EventWindow()
+		if ok != (c.window > 0) || w != c.window {
+			t.Errorf("%s: window %s %v, want %s", c.expr, w, ok, c.window)
+		}
+		if _, out := r.ForOutlasts(); out != c.outlasts {
+			t.Errorf("%s for %s: outlasts %v, want %v", c.expr, c.for_, out, c.outlasts)
+		}
+	}
+	// LogQL's counts in a Prometheus rule are no PromQL: nothing said.
+	if _, ok := (Rule{Expr: errors, For: time.Hour}).EventWindow(); ok {
+		t.Error("count_over_time read as PromQL")
+	}
+}
+
+// A Grafana rule on Loki counts events as a Loki ruler's rule does, of its
+// one instant query, as it is or through a reduce that leaves its value so,
+// compared with a number one line passes. A range query, as of PromQL, says
+// nothing.
+func TestGrafanaLogEventWindow(t *testing.T) {
+	rule := func(for_, queryType, expr, cond string) Rule {
+		t.Helper()
+		rs, err := Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: logs
+    folder: Logs
+    interval: 1m
+    rules:
+      - uid: errors
+        title: Shop errors
+        condition: C
+        for: ` + for_ + `
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: lk
+            model: {datasource: {type: loki, uid: lk}, expr: '` + expr + `', intervalMs: 1000, queryType: ` + queryType + `}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model: ` + cond + "\n"))
+		if err != nil || len(rs) != 1 || rs[0].Graph == nil || rs[0].Unsupported != "" || rs[0].Logs == "" {
+			t.Fatalf("%v %+v", err, rs)
+		}
+		return rs[0]
+	}
+	const errors = `sum by (app) (count_over_time({app="shop"} |= "error" [5m]))`
+	gt := func(n, in string) string {
+		return `{type: threshold, expression: ` + in + `, conditions: [{evaluator: {type: gt, params: [` + n + `]}}]}`
+	}
+	for _, c := range []struct {
+		name               string
+		for_, qt, expr, cd string
+		window             time.Duration
+		outlasts           bool
+	}{
+		{"instant, last, > 0, for 5m", "5m", "instant", errors, gt("0", "B"), 5 * time.Minute, true},
+		{"for 1m", "1m", "instant", errors, gt("0", "B"), 5 * time.Minute, false},
+		{"on the query itself", "10m", "instant", errors, gt("0", "A"), 5 * time.Minute, true},
+		{"math", "10m", "instant", `rate({app="shop"} |= "panic" [5m])`, `{type: math, expression: "$B > 0"}`, 5 * time.Minute, true},
+		{"a range query", "1h", "range", errors, gt("0", "B"), 0, false},
+		{"a bound one line doesn't pass", "1h", "instant", errors, gt("10", "B"), 0, false},
+		{"unwrap", "1h", "instant", `sum(rate({app="shop"} | logfmt | unwrap latency [5m]))`, gt("0", "B"), 0, false},
+	} {
+		r := rule(c.for_, c.qt, c.expr, c.cd)
+		w, ok := r.EventWindow()
+		if ok != (c.window > 0) || w != c.window {
+			t.Errorf("%s: window %s %v, want %s", c.name, w, ok, c.window)
+		}
+		if _, out := r.ForOutlasts(); out != c.outlasts {
+			t.Errorf("%s: outlasts %v, want %v", c.name, out, c.outlasts)
+		}
 	}
 }

@@ -338,6 +338,13 @@ type ruleLine struct {
 	PrecisionByLapilli                   string
 	NotJudged                            bool
 	NotJudgedEntry                       int
+	// Late are, of its firings that caught nothing over the weeks shown,
+	// those that came after an incident they agree with was over, its
+	// condition having held in it: its alert, too late (ledger.LateOf).
+	// LateCut says more firings came near the ends of incidents than one
+	// read looks at: Late may be fewer than they are.
+	Late    int
+	LateCut bool
 }
 
 // NoisyApart reports whether it is noisy by its firings and not by its
@@ -649,6 +656,13 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	if err != nil {
 		return nil, nil, err
 	}
+	// Those of its black firings that came after an incident was over,
+	// over the weeks shown: to the end of the last, which holds nothing
+	// past now.
+	late, err := s.lateOf(ctx, s.l.Midnight(recent[0]), s.l.Midnight(recent[len(recent)-1]+7), t.o)
+	if err != nil {
+		return nil, nil, err
+	}
 	hours, err := s.byHours(ctx, t)
 	if err != nil {
 		return nil, nil, err
@@ -666,6 +680,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	for id, l := range sum {
 		c := credit[l.Name]
 		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
+		l.Late, l.LateCut = late.Rules[l.Name], late.Cut
 		l.Black = l.Firings - l.White
 		judged := l.Firings - l.Unjudged
 		l.Noisy = verdict.IsNoisy(judged, l.White, at)
@@ -1470,6 +1485,24 @@ type incidentLine struct {
 	// at some time in it, withMost at most; WithMore how many more.
 	With     []withWindow
 	WithMore int
+	// FiredAfter are the rules that didn't catch it but fired once it was
+	// over, their condition having held in it, each by its first such
+	// firing (ledger.Late.Fired); After, of one nothing caught, as its line
+	// says them, and Afters, as its page lists them: each by how long after
+	// its end.
+	FiredAfter []verdict.Catch
+	After      string
+	Afters     []afterLine
+	// LateCut says more firings came near the ends of incidents than one
+	// read looks at: one nothing caught may have had an alert after its
+	// end not named.
+	LateCut bool
+}
+
+// afterLine is a rule that fired once an incident was over, by how long
+// after its end.
+type afterLine struct {
+	Rule, After string
 }
 
 // impactTitle is the title an impact window is found with.
@@ -1712,6 +1745,23 @@ func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incid
 	return l
 }
 
+// firedAfter gives an incident's line the rules that fired once it was
+// over, from late, and, when nothing caught it, says them.
+func (s *Server) firedAfter(l string, line *incidentLine, late ledger.Late, o verdict.Options) {
+	if !line.Counts {
+		return
+	}
+	line.FiredAfter, line.LateCut = late.Fired[line.ID], late.Cut
+	if line.Status != "missed" {
+		return
+	}
+	line.After = afterText(l, line.Incident, line.FiredAfter, o.UnknownLen)
+	end := line.EndOr(o.UnknownLen).Sub(line.Start)
+	for _, c := range line.FiredAfter {
+		line.Afters = append(line.Afters, afterLine{Rule: c.Rule, After: verdict.Delay(c.Delay - end)})
+	}
+}
+
 type incidentsView struct {
 	Weeks int
 	Lines []incidentLine
@@ -1735,6 +1785,9 @@ type incidentsView struct {
 	// from: those in effect, then those the windows shown have.
 	Signal  string
 	Signals []string
+	// LateCut says more firings came near the ends of the incidents than
+	// one read looks at (ledger.Late.Cut).
+	LateCut bool
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -1781,7 +1834,13 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now()}
+	// The rules that fired after each was over, from the start of its first
+	// week to the end of its last, which holds nothing past now.
+	late, err := s.lateOf(ctx, from, s.l.Midnight(ledger.Week(s.l.Day(to.Add(-time.Second)))+7), t.o)
+	if err != nil {
+		return nil, err
+	}
+	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now(), LateCut: late.Cut}
 	if week != 0 {
 		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
 	}
@@ -1823,6 +1882,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 			continue
 		}
 		line := s.incidentLine(l, in, t)
+		s.firedAfter(l, &line, late, t.o)
 		if in.Counts {
 			v.Judged.Total++
 			switch line.Status {
@@ -1953,6 +2013,15 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := incidentView{incidentLine: s.incidentLine(lang(r), in, t), Labels: labelText(in.Labels), Match: strings.Join(t.o.Match, ", ")}
+	if in.Counts {
+		// Over the incident, so that the rules as they stood then and up to
+		// the firings after its end judge them (withHeld).
+		late, err := s.lateOf(ctx, in.Start, later(in.EndOr(t.o.UnknownLen), in.Start.Add(time.Second)), t.o)
+		if err != nil {
+			return nil, err
+		}
+		s.firedAfter(lang(r), &v.incidentLine, late, t.o)
+	}
 	o, err := s.owners(ctx)
 	if err != nil {
 		return nil, err

@@ -8,6 +8,10 @@
 #   SINCE                   only incidents created on or after this: a date
 #                           such as 2026-10-01, or an RFC 3339 time
 #   MAX_PAGES               of 100 incidents, at most (default 1000)
+#
+# It writes no incident's alerts: Grafana IRM's incident API lists none,
+# and its OnCall API's alert groups name no incident
+# (docs/design/links.md, "Grafana IRM").
 set -eu
 here=$(dirname "$0")
 : "${GRAFANA_URL:?your Grafana stack, such as https://example.grafana.net}"

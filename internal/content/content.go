@@ -49,9 +49,10 @@ const (
 	ShortRange      = "short_range"      // heuristic: a range shorter than two scrapes
 	AbsentNoFor     = "absent_no_for"    // heuristic: absent() with no for
 
-	// What a Grafana rule's notification templates show
-	// (docs/design/serveops.md).
+	// What a rule's notification templates show: Grafana's
+	// (docs/design/serveops.md) and Alertmanager's (docs/design/content.md).
 	NotifyNoText         = "notify_no_text"          // fact: an annotation a template shows the rule hasn't
+	NotifyTemplateError  = "notify_template_error"   // fact: an Alertmanager template that doesn't parse
 	NotifyLabelNeverSeen = "notify_label_never_seen" // measured: a label a template names no firing had
 	NotifyLabelNotGiven  = "notify_label_not_given"  // heuristic: a label a template names the expression can't give
 )
@@ -59,7 +60,7 @@ const (
 // Checks are every check, in the order they are shown: facts, then what is
 // measured, then heuristics.
 var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate, ForOutlasts, NotifyNoText,
-	LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
+	NotifyTemplateError, LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
 
 // Class is the kind of check a check is.
 func Class(check string) string {
@@ -124,6 +125,11 @@ type Options struct {
 	// (docs/design/serveops.md).
 	Scrape time.Duration
 	Jobs   map[string]time.Duration
+	// JobsOf, when known, are the jobs each selector's series come from
+	// (ToAsk), by the selector as RangeUse.Selector writes it: a range
+	// over a selector that names no job is counted with the longest of
+	// their intervals. One not in it is counted as before.
+	JobsOf map[string][]string
 	// Seen, when firings were judged, gives the label names a rule's
 	// firings had and whether it fired at all; nil when nothing is known.
 	Seen func(rule string) (names map[string]bool, fired bool)
@@ -142,6 +148,12 @@ type Options struct {
 	NotifyBy  time.Time
 	Unchecked func(rule, why string)
 	notify    *notifyRun
+	// Alertmanager, when not nil, is what Alertmanager's notification
+	// templates show (ReadAlertmanager), and which a rule written in
+	// Prometheus's templates is sent with: routed as Notify is, with a
+	// budget of its own.
+	Alertmanager *Notifications
+	am           *notifyRun
 	// scrapes are Scrape and Jobs, read once for every rule.
 	scrapes Scrapes
 }
@@ -173,6 +185,9 @@ func Check(rs []rules.Rule, o Options) [][]Finding {
 	o.scrapes = Scrapes{Global: o.Scrape, Jobs: o.Jobs}
 	if o.Notify != nil {
 		o.notify = o.Notify.run(o.NotifyBy)
+	}
+	if o.Alertmanager != nil {
+		o.am = o.Alertmanager.run(o.NotifyBy)
 	}
 	o.scrapes.names = o.scrapes.sorted()
 	sevs := severityCounts(rs)
@@ -291,6 +306,11 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	if o.Scrape > 0 && !logs {
 		for _, u := range Ranges(r.Expr) {
 			d, job := o.scrapes.For(u.Jobs)
+			if jobs, asked := o.JobsOf[u.Selector]; asked && u.Selector != "" {
+				if x, j, ok := o.scrapes.ForJobs(jobs); ok {
+					d, job = x, j
+				}
+			}
 			if u.Range >= 2*d {
 				continue
 			}

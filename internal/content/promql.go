@@ -267,6 +267,11 @@ type RangeUse struct {
 	Range time.Duration
 	// Jobs are the selector's matchers on its job label.
 	Jobs []Matcher
+	// Selector, of a selector that names no job, is it as one plain
+	// selector, its name and matchers written again from its tokens
+	// (http_requests_total{code=~"5.."}): what the jobs it comes from are
+	// asked by (JobsOf). "" for one that names its job, or isn't plain.
+	Selector string
 }
 
 var rateLike = map[string]bool{"rate": true, "increase": true, "irate": true, "delta": true}
@@ -289,7 +294,11 @@ func Ranges(expr string) []RangeUse {
 		}
 		text := strings.Join(strings.Fields(t.text), "")
 		if d, ok := ParseDuration(text); ok {
-			out = append(out, RangeUse{Func: f.text, Text: text, Range: d, Jobs: jobMatchers(ts, j)})
+			u := RangeUse{Func: f.text, Text: text, Range: d, Jobs: jobMatchers(ts, j)}
+			if len(u.Jobs) == 0 {
+				u.Selector = selectorAt(ts, j)
+			}
+			out = append(out, u)
 		}
 	}
 	return out
@@ -328,6 +337,83 @@ func jobMatchers(ts []token, j int) []Matcher {
 		}
 	}
 	return out
+}
+
+// maxSelector is the longest selector the jobs it comes from are asked of.
+const maxSelector = 1024
+
+// selectorAt is the selector a range at ts[j] is taken of, written again
+// as one plain selector of one metric: its name, its matchers, or both
+// (errors_total, {__name__="x", code="500"}). "" when it isn't one: only a
+// name, and matchers each a name, an operator and a string, are written,
+// so what is asked can be nothing but the selector; and only of a metric
+// named, by its name or __name__=, so it is asked of one metric's series.
+func selectorAt(ts []token, j int) string {
+	if j < 1 {
+		return ""
+	}
+	var b strings.Builder
+	name := func(k int) bool {
+		if k >= 0 && ts[k].kind == 'i' && !notSelector[ts[k].text] && !rateLike[ts[k].text] {
+			b.WriteString(ts[k].text)
+			return true
+		}
+		return false
+	}
+	if ts[j-1].text != "}" {
+		if !name(j-1) || j < 2 || ts[j-2].text != "(" {
+			return ""
+		}
+		return b.String()
+	}
+	named := false
+	open := -1
+	for k := j - 2; k >= 0; k-- {
+		if ts[k].text == "{" {
+			open = k
+			break
+		}
+	}
+	if open < 0 {
+		return ""
+	}
+	if named = name(open - 1); !named && (open < 1 || ts[open-1].text != "(") {
+		return ""
+	}
+	b.WriteString("{")
+	in := ts[open+1 : j-1]
+	for k := 0; k < len(in); {
+		if k > 0 {
+			b.WriteString(",")
+		}
+		if k+2 >= len(in) || in[k].kind != 'i' || in[k+2].kind != 's' {
+			return ""
+		}
+		switch in[k+1].text {
+		case "=", "!=", "=~", "!~":
+		default:
+			return ""
+		}
+		v, ok := unquote(in[k+2].text)
+		if !ok {
+			return ""
+		}
+		b.WriteString(in[k].text + in[k+1].text + strconv.Quote(v))
+		k += 3
+		if k < len(in) {
+			if in[k].text != "," {
+				return ""
+			}
+			k++
+		}
+	}
+	b.WriteString("}")
+	// Of one metric, by its name: no selector of every series a regular
+	// expression on __name__ matches is asked of.
+	if b.Len() > maxSelector || !named && !strings.Contains(b.String(), `{__name__="`) && !strings.Contains(b.String(), `,__name__="`) {
+		return ""
+	}
+	return b.String()
 }
 
 // Absent is whether an expression is absent(...), and only that.

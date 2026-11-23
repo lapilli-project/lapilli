@@ -19,8 +19,9 @@ you know whether it earns its page; an incident with no stone is one your
 alerts missed.
 
 Usage:
-  lapilli demo                       see it on sample data, with nothing
-                                     to connect
+  lapilli demo [--serve]             see it on sample data, with nothing
+                                     to connect: a report, or serve's
+                                     pages on this machine
   lapilli verdict --rules FILE --prometheus URL --incidents FILE
                                      replay rules against history
   lapilli verdict --alerts --prometheus URL --incidents FILE
@@ -106,10 +107,12 @@ Where the firings come from (pick one):
                       Rules of one name in two namespaces are told apart by
                       both: "ScrapeSlow [payments/shop]"
   --ruler-token-file FILE
-                      a token that may read a Mimir's or a Cortex's rules
+                      a token that may read a Mimir's or a Cortex's rules,
+                      and its Alertmanager's configuration with
+                      --alertmanager-config URL
   --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
-                      gateway to set it, sent as X-Scope-OrgID to --ruler
-                      and --prometheus alike
+                      gateway to set it, sent as X-Scope-OrgID to --ruler,
+                      --alertmanager-config and --prometheus alike
   --alarms SOURCE=URL also read a cloud's own alarms through its API, beside
                       any of the above or alone (repeatable): PromQL alarms
                       are replayed, the others listed. SOURCE names them, as
@@ -212,9 +215,25 @@ What the rules say:
                       needed for --rules alone. With --grafana, also the
                       notification templates each Grafana rule's contact
                       point is written with: an annotation shown the rule
-                      hasn't, a label named its alerts never had. A
-                      template is parsed, never run; a link is checked,
-                      never visited
+                      hasn't, a label named its alerts never had. With
+                      --alertmanager-config, the same of the templates
+                      Alertmanager sends the other rules with, and a
+                      template there that doesn't parse. A template is
+                      parsed, never run; a link is checked, never visited
+  --alertmanager-config FILE|URL
+                      Alertmanager's configuration, whose route tree and
+                      receivers say which templates each rule written in
+                      Prometheus's templates is sent with: alertmanager.yml,
+                      its templates: globs read beside it (an absolute one
+                      by its last element, as a mounted Secret has them;
+                      none outside its directory), or a file of Mimir's,
+                      Cortex's or Amazon's format (alertmanager_config and
+                      template_files); or Mimir's or Cortex's API, read
+                      with --ruler-token-file and --ruler-tenant, on
+                      --ruler's host when --ruler is given with its token:
+                        Mimir   http://mimir:8080/api/v1/alerts
+                        Cortex  http://cortex:9009/api/v1/alerts
+                      Only read: no field that holds a secret is parsed
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -230,7 +249,9 @@ What the rules say:
                       without it, those Prometheus's /api/v1/status/config
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
-                      label, as /api/v1/targets says; any other, the global
+                      label, as /api/v1/targets says; one naming none, with
+                      the longest of the jobs its series come from, asked
+                      once (count by (job)); any other, the global
                       interval. A replay asks the server for Grafana's
                       reduces that don't count points at this resolution;
                       without it, at the shortest interval the series they
@@ -693,15 +714,23 @@ each history API (lapilli_serve_history_*). Off by default:
                       Grafana's notification templates, contact points and
                       policies are read once an hour too, with the same
                       token, and checked beside each rule
+  --alertmanager-config FILE|URL
+                      as for lapilli verdict --check-content: Alertmanager's
+                      configuration, read once an hour, and its templates
+                      checked beside each rule it is sent; a file that
+                      can't be read, or an API that refuses, leaves the
+                      check as it was, and the log says why once
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
                       and /api/v1/targets are asked once a day, for the
-                      global interval and each job's: the range check
-                      counts with them, and a replay asks Grafana's reduces
-                      that don't count points at the shortest interval the
-                      series they read are scraped at, or, where they
-                      aren't served, at Grafana's own resolution (1s)
+                      global interval and each job's, and the jobs the
+                      series of a selector that names none come from: the
+                      range check counts with them, and a replay asks
+                      Grafana's reduces that don't count points at the
+                      shortest interval the series they read are scraped
+                      at, or, where they aren't served, at Grafana's own
+                      resolution (1s)
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). Without a
@@ -712,6 +741,14 @@ The web UI and API:
   --metrics-listen ADDR
                       also serve /metrics, /healthz and /readyz here, alone,
                       so a NetworkPolicy can let Prometheus reach only them
+  --shutdown-delay DUR
+                      told to stop (SIGTERM, Ctrl-C), go on answering on
+                      every port for this long before they close, /readyz
+                      answering 503, so that a Service's endpoints or a load
+                      balancer send requests elsewhere first; then the
+                      requests under way finish, 10s at most (default 0, at
+                      most 10m; the chart gives 5s to more than one
+                      replica). The leader's work stops at once either way
   --incidents-listen ADDR
                       also take incidents here, and nothing else, from a job
                       that holds the token in --incidents-token-file: PUT or
@@ -1028,7 +1065,9 @@ and proposes; docs/design/changes.md):
                       comma-separated, each a name or a prefix ending in *
                       (team-*); on Azure, rule groups, RG/NAME, or NAME when
                       --ruler names one resource group, in any letter case.
-                      And a cloud's alarms, SOURCE:NAME, an --alarms source
+                      Loki's, with --loki-loaded-rules, as loki:NAMESPACE
+                      (loki:shop, loki:team-*). And a cloud's alarms,
+                      SOURCE:NAME, an --alarms source
                       and an alarm in it: CloudWatch's alarm name, Azure's
                       RG/NAME (in any letter case), Google Cloud's policy's
                       display name, OCI's display name (cloudwatch-prod:
@@ -1052,6 +1091,13 @@ and proposes; docs/design/changes.md):
                       a token that may write a Mimir's or a Cortex's rules
                       (rules:write), for --ruler; without it, writes are sent
                       with no token, for a ruler reached only in the cluster
+  --changes-loki-token-file FILE
+                      a token that may write the rules of --loki's ruler,
+                      read with --loki-loaded-rules, sent with --loki-tenant
+                      as its reads are; without it, writes are sent with no
+                      token, for a Loki reached only in the cluster. A
+                      Loki whose ruler reads its rules from local files
+                      (ruler.storage.type: local) takes no writes
   --changes-aws-role ARN
                       a role the pod's identity assumes to write Amazon's
                       rule groups namespaces, allowed
@@ -1314,6 +1360,7 @@ and sends nothing anywhere (docs/design/demo.md).
 
 Usage:
   lapilli demo [--json] [--tz ZONE]
+  lapilli demo --serve [--listen ADDR] [--tz ZONE]
 
   --json              the whole report, every firing included, as lapilli
                       verdict --json gives it
@@ -1322,6 +1369,16 @@ Usage:
                       sample's week, from Monday 9 November 2026, is laid
                       in this zone: the report is the same in every zone
                       but for the zone it names
+  --serve             the same sample in lapilli serve's pages and API, by
+                      its own code: its rules, history and incidents in a
+                      ledger of a temporary directory, its clock pinned to
+                      the end of the sample's week, which its pages show.
+                      Read-only, on this machine alone, it says the URL to
+                      open, and runs until Ctrl-C (or SIGTERM), which
+                      removes the ledger
+  --listen ADDR       with --serve, where to listen: a loopback address and
+                      a port, 127.0.0.1:PORT or [::1]:PORT, and no other
+                      (default 127.0.0.1:0, a free port)
 
 The same on your own rules, and incidents written down:
   lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \

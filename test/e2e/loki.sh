@@ -11,7 +11,17 @@
 # every firing must be alike. A classic condition over Loki and a
 # condition reading a MySQL data source are listed, not replayed.
 #
-# Needs Docker, Go, curl and jq. Takes 15 to 21 minutes (MINUTES=6 for
+# Then Loki's ruler is changed through its configuration API, as
+# test/e2e/changes.sh changes Mimir's (docs/design/rulers.md, "Loki's
+# ruler"): a second Loki, with tenants and its rules on the filesystem
+# through its object store client, which takes writes as its local store
+# doesn't; lapilli serve reading it with --loki-loaded-rules and its
+# tenant, --changes-in loki:shop. A longer for is applied (Loki's ruler
+# loads it) and undone byte for byte; a rule changed in Loki since it was
+# proposed is refused as stale; a namespace --changes-in doesn't name is
+# left for a person.
+#
+# Needs Docker, Go, curl and jq. Takes 17 to 24 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
 # shellcheck disable=SC2016,SC2329 # LogQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
@@ -22,16 +32,19 @@ grafana=grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb
 loki=grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
 p=lapilli-e2e-loki
 minutes=${MINUTES:-10}
+port=${PORT:-28190} # serve takes port
 
 work=$(mktemp -d)
 pusher=
+served=
 cleanup() {
   [ -n "$pusher" ] && kill "$pusher" 2>/dev/null || true
+  [ -n "$served" ] && kill "$served" 2>/dev/null || true
   if [ -n "${KEEP:-}" ]; then
     echo "kept: $work, containers $p-*"
     return
   fi
-  docker rm -fv "$p-loki" "$p-prom" "$p-grafana" >/dev/null 2>&1 || true
+  docker rm -fv "$p-loki" "$p-lokiw" "$p-prom" "$p-grafana" >/dev/null 2>&1 || true
   docker network rm "$p" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -210,4 +223,132 @@ listed=$("$work/lapilli" verdict --check-replay --grafana "$gf" --grafana-token-
 for want in "LkClassic: classic conditions over a Loki query" "LkSQL: its condition reads a mysql data source"; do
   if grep -qF "$want" <<<"$listed"; then echo "ok: listed: $want"; else echo "FAILED: not listed: $want"; fail=1; fi
 done
+
+# Loki's ruler, changed through its configuration API. Its local store,
+# above, is read-only to the API; this Loki keeps its rules on the
+# filesystem through its object store client, which takes writes, and has
+# tenants: every request names acme, or Loki refuses it.
+cat >"$work/lokiw.yaml" <<'YAML'
+auth_enabled: true
+server: {http_listen_port: 3100, log_level: warn}
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring: {kvstore: {store: inmemory}}
+storage_config:
+  use_thanos_objstore: true
+  object_store: {filesystem: {dir: /loki/objects}}
+schema_config:
+  configs:
+    - {from: 2020-10-24, store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
+ruler_storage: {backend: filesystem, filesystem: {dir: /loki/rules}}
+ruler:
+  rule_path: /loki/rules-tmp
+  enable_api: true
+  poll_interval: 10s
+  wal: {dir: /loki/ruler-wal}
+limits_config: {reject_old_samples: false}
+analytics: {reporting_enabled: false}
+YAML
+docker run -d --name "$p-lokiw" --network "$p" -p 127.0.0.1::3100 -v "$work/lokiw.yaml:/etc/loki/loki.yaml:ro" \
+  "$loki" -config.file=/etc/loki/loki.yaml >/dev/null
+lw=http://$(docker port "$p-lokiw" 3100/tcp | head -1)
+until_true 180 sh -c "curl -sf '$lw/ready' | grep -q ready"
+lrules=$lw/loki/api/v1/rules
+tenant=(-H 'X-Scope-OrgID: acme')
+lpost() { curl -sf "${tenant[@]}" -X POST -H 'Content-Type: application/yaml' --data-binary @- "$lrules/$1" >/dev/null; }
+lput() { printf '%s' "$2" | lpost "$1"; } # namespace, group: retried as one
+lns() { curl -s "${tenant[@]}" "$lrules/$1"; }
+lloaded() { # namespace, alert: the rule as Loki's ruler has loaded it
+  curl -s "${tenant[@]}" "$lw/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.name == $n)'
+}
+shop_api='name: api
+interval: 1m
+rules:
+  - alert: LogErrors
+    expr: sum(count_over_time({app="shop", level="error"}[1m])) > 20
+    for: 1m
+    labels:
+      severity: page
+  - alert: LogSlow
+    expr: max(max_over_time({app="shop"} | logfmt | unwrap latency_ms [1m])) > 500
+    for: 2m
+'
+# The ruler takes writes once it is running.
+until_true 120 lput shop "$shop_api"
+lpost other <<'YAML'
+name: other
+rules:
+  - alert: OtherErrors
+    expr: sum(count_over_time({app="other", level="error"}[1m])) > 5
+YAML
+check_line() { # what, got, want (an extended regexp)
+  if grep -qE -- "$3" <<<"$2"; then echo "ok: $1"; else echo "FAILED: $1: got $2, want $3"; fail=1; fi
+}
+check_line "Loki refuses a request without its tenant" "$(curl -s -o /dev/null -w '%{http_code}' "$lrules")" '^401$'
+
+head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/loki-write-token"
+"$work/lapilli" serve --user-header X-Forwarded-Email --editors '*' --admins ana@example.com --approvers 'ana@example.com,cy@example.com' \
+  --backfill 2h --settle 1m --watch 10s --prometheus "$pu" --loki "$lw" --loki-tenant acme --loki-loaded-rules \
+  --ledger "$work/ledger" --listen "127.0.0.1:$port" \
+  --changes --changes-in loki:shop --changes-loki-token-file "$work/loki-write-token" >"$work/serve.log" 2>&1 &
+served=$!
+sl=http://127.0.0.1:$port
+until_true 60 curl -sf -H 'X-Forwarded-Email: bo@example.com' "$sl/api/v1/proposals"
+until_true 60 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sl/api/v1/rules' | grep -q '\"LogErrors\"'"
+
+# A person's browser, behind a proxy that names them, as in changes.sh.
+propose() { # who, form fields...
+  local who=$1 args=()
+  shift
+  for f in "$@"; do args+=(--data-urlencode "$f"); done
+  curl -s -o /dev/null -w '%{redirect_url}' -H "X-Forwarded-Email: $who" -H 'Sec-Fetch-Site: same-origin' "${args[@]}" "$sl/proposals" |
+    sed -nE 's|.*/proposals/([0-9]+)$|\1|p'
+}
+act() { # who, id, approve or undo: the form on the proposal's page
+  local key
+  key=$(curl -s -H "X-Forwarded-Email: $1" "$sl/proposals/$2" |
+    sed -nE "s|.*action=\"/proposals/$2/$3\"><input type=\"hidden\" name=\"key\" value=\"([0-9a-f]+)\".*|\1|p" | head -1)
+  [ -n "$key" ] || return 1
+  curl -s -o /dev/null -H "X-Forwarded-Email: $1" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "key=$key" --data-urlencode "read=1" "$sl/proposals/$2/$3"
+}
+proposal() { curl -s -H 'X-Forwarded-Email: ana@example.com' "$sl/api/v1/proposals/$1"; }
+state() { proposal "$1" | jq -r '(.proposal // .) | .state'; }
+reason() { proposal "$1" | jq -r '(.proposal // .) | .reason // ""'; }
+is() { [ "$(state "$1")" = "$2" ]; }
+newest() { curl -s -H 'X-Forwarded-Email: ana@example.com' "$sl/api/v1/proposals" | jq '[.proposals[].id] | max'; }
+
+shop_before=$(lns shop)
+id=$(propose bo@example.com rule=LogErrors kind=for for=5m)
+check_line "a Loki ruler's proposal, on its own path" "$(proposal "$id" | jq -r '.path')" '^loki$'
+act ana@example.com "$id" approve
+until_true 90 is "$id" applied || true
+check_line "a longer for, applied in Loki" "$(state "$id")" '^applied$'
+check_line "the namespace differs by that one line" "$(diff <(echo "$shop_before") <(lns shop) | grep -E '^[<>]' | tr '\n' ' ')" '^< +for: 1m > +for: 5m $'
+until_true 60 sh -c "curl -s -H 'X-Scope-OrgID: acme' '$lw/prometheus/api/v1/rules' | jq -e '.data.groups[] | select(.file == \"shop\") | .rules[] | select(.name == \"LogErrors\" and .duration == 300)'" || true
+check_line "Loki's ruler loaded it" "$(lloaded shop LogErrors | jq .duration)" '^300$'
+act ana@example.com "$id" undo
+undo=$(newest)
+until_true 90 is "$undo" applied || true
+check_line "undone in Loki" "$(state "$id")" '^undone$'
+check_line "the namespace as it was, byte for byte" "$(diff <(echo "$shop_before") <(lns shop) | wc -l | tr -d ' ')" '^0$'
+
+# The rule itself changed in Loki between proposing and approving: refused
+# as stale, nothing written.
+until_true 30 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sl/api/v1/proposals?state=applying,approved' | jq -e '.proposals | length == 0'" || true
+id=$(propose bo@example.com rule=LogErrors kind=for for=7m)
+lns shop/api | sed 's/> 20/> 30/' | lpost shop
+act ana@example.com "$id" approve
+until_true 90 is "$id" refused || true
+check_line "LogErrors changed since: refused as stale" "$(state "$id"): $(reason "$id")" "^refused: the rule changed in Loki's ruler since it was proposed"
+check_line "LogErrors's for as Loki has it" "$(lns shop/api | grep -cE '^ +for: 7m')" '^0$'
+
+id=$(propose bo@example.com rule=OtherErrors kind=for for=5m)
+check_line "a namespace --changes-in doesn't name is for a person, with why" \
+  "$(proposal "$id" | jq -r '.path + ": " + (.evidence.no_path // "")')" \
+  "^none: its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE$"
+
+if [ "$fail" != 0 ]; then
+  echo "--- serve (Loki's ruler)"; tail -30 "$work/serve.log"
+fi
 exit $fail

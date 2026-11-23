@@ -135,7 +135,8 @@ t_comments() {
   while [ "$start" -lt 1000 ]; do
     out=$(jira again GET "/issue/$1/comment?startAt=$start&maxResults=100&orderBy=created") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" "$adf"'.comments[] | select(.visibility == null) | {id: (.id | tostring), author: (.author.displayName // "someone"),
-      mine: (.author.accountId == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body | adf)}'
+      mine: (.author.accountId == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")),
+      edited: (.updated // .created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body | adf)}'
     n=$(printf '%s' "$out" | jq '.comments | length')
     total=$(printf '%s' "$out" | jq '.total // 0')
     number "Jira's total of comments" "$total"
@@ -148,9 +149,25 @@ t_comments() {
 # t_comment: the text as Atlassian Document Format, a paragraph a line, as
 # text nodes only: nothing in it becomes a link, a mention or a macro.
 t_comment() {
-  out=$(jira once POST "/issue/$1/comment" "$(jq -Rsc '{body: {type: "doc", version: 1, content: [split("\n")[] |
-    if . == "" then {type: "paragraph", content: []} else {type: "paragraph", content: [{type: "text", text: .}]} end]}}' "$2")") || return 1
+  out=$(jira once POST "/issue/$1/comment" "$(doc "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
+}
+
+# doc FILE: FILE's text as a comment's body, as t_comment says.
+doc() {
+  jq -Rsc '{body: {type: "doc", version: 1, content: [split("\n")[] |
+    if . == "" then {type: "paragraph", content: []} else {type: "paragraph", content: [{type: "text", text: .}]} end]}}' "$1"
+}
+
+t_edit() {
+  case $2 in '' | *[!0-9]*) return 1 ;; esac
+  jira again PUT "/issue/$1/comment/$2" "$(doc "$3")" >/dev/null
+}
+
+# t_shown: a comment as t_comments reads it back, from the document it
+# was sent as.
+t_shown() {
+  doc "$1" | jq -r "$adf"'.body | adf'
 }
 
 sync_tasks

@@ -129,7 +129,9 @@ var everRead = struct {
 
 // noteFromHistory keeps, before a run, the names of the rules judged from
 // Grafana's history, which the run, a new version and each copy tie to
-// the history copied in for them; none, when it isn't read.
+// the history copied in for them; none, when it isn't read. And the
+// severity of each, by its labels, as a run reads every other rule's
+// (work.go): the recorded rule it is copied in as keeps none of its own.
 func (s *Server) noteFromHistory(ctx context.Context) error {
 	rs, _, _, err := s.fromHistory(ctx)
 	if err != nil {
@@ -139,7 +141,37 @@ func (s *Server) noteFromHistory(ctx context.Context) error {
 	for _, r := range rs {
 		names = append(names, r.Name)
 	}
-	return s.l.SetFromHistory(ctx, names)
+	if err := s.l.SetFromHistory(ctx, names); err != nil {
+		return err
+	}
+	return s.l.SetJudgedSeverity(ctx, judgedSeverities(rs))
+}
+
+// judgedSeverities are, by name, the severities of rules as their labels
+// say them, those of one name joined once (severitiesBy); none for a name
+// whose rules say none.
+func judgedSeverities(rs []rules.Rule) map[string]string {
+	by := severitiesBy{}
+	out := map[string]string{}
+	for _, r := range rs {
+		if v := by.add(r.Name, r.Labels["severity"]); v != "" {
+			out[r.Name] = v
+		}
+	}
+	return out
+}
+
+// severitiesBy are, by a rule's name, the severities its rules have, as
+// they are read: what a name's severity is, each once (ledger.Severities),
+// however many rules of it say which. Joined anew from the list each time,
+// not from what was joined before, which would read "critical/warning" as
+// one severity more.
+type severitiesBy map[string][]string
+
+// add adds a rule's severity to its name's, and gives the name's.
+func (by severitiesBy) add(name, sev string) string {
+	by[name] = append(by[name], sev)
+	return ledger.Severities(by[name])
 }
 
 // copyFromHistory copies in what Grafana's alert state history says the

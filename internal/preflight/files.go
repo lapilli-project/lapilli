@@ -118,7 +118,7 @@ func (p *run) secrets() {
 		{"--tasks-token-file", s.TasksToken}, {"--changes-token-file", s.ChangesToken}, {"--notify-token-file", s.NotifyToken},
 		{"--notify-grafana-secret-file", s.NotifyGrafanaSecret}, {"--grafana-token-file", s.GrafanaToken}, {"--loki-token-file", s.LokiToken},
 		{"--ruler-token-file", s.RulerToken}, {"--changes-grafana-token-file", s.ChangesGrafanaToken}, {"--changes-ruler-token-file", s.ChangesRulerToken},
-		{"--bearer-token-file", p.c.History.TokenFile}} {
+		{"--changes-loki-token-file", s.ChangesLokiToken}, {"--bearer-token-file", p.c.History.TokenFile}} {
 		least := 16
 		if x.flag == "--grafana-token-file" || x.flag == "--loki-token-file" || x.flag == "--ruler-token-file" || x.flag == "--bearer-token-file" {
 			least = 1 // tokens others make, of whatever length

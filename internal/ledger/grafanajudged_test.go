@@ -3,8 +3,10 @@ package ledger
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/rules"
@@ -121,5 +123,74 @@ func TestTiedGrafanaHistorySeverities(t *testing.T) {
 	}
 	if i := slices.IndexFunc(rep.Rules, func(r verdict.RuleResult) bool { return r.Rule == "Orders slow" }); i < 0 || rep.Rules[i].Firings != 2 || !rep.Rules[i].ByHistory() {
 		t.Errorf("report: %+v", rep.Rules)
+	}
+}
+
+// A rule judged from Grafana's history has the severity its labels say, as
+// every other rule has its own: kept by SetJudgedSeverity, given by
+// RuleTable and the report, though the recorded rule it is copied in as
+// keeps none. One no longer judged so has none of it; a severity too long
+// is cut.
+func TestJudgedSeverity(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if err := l.SetFromHistory(ctx, []string{"Orders slow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetJudgedSeverity(ctx, map[string]string{"Orders slow": "page", "Gone": ""}); err != nil {
+		t.Fatal(err)
+	}
+	grafanaVersion(t, l, t0, "Orders slow")
+	f := Found{From: t0, To: t0.Add(3 * time.Hour), Rules: []Rule{{Name: "Orders slow", Severity: "page", Unsupported: "its condition reads a mysql data source: only PromQL and LogQL are replayed"},
+		{Name: "Replayed", Severity: "ticket"}}, Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(3 * time.Hour)}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	putFirings(t, l, GrafanaSource, t0, t0.Add(3*time.Hour), []firing.Firing{
+		{Rule: "Orders slow", Labels: map[string]string{"service": "orders"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}})
+	severities := func() map[string]string {
+		t.Helper()
+		table, err := l.RuleTable(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, r := range table {
+			out[r.Name+" <"+r.Source+">"] = r.Severity
+		}
+		return out
+	}
+	if got := severities(); got["Orders slow <grafana>"] != "page" || got["Replayed <>"] != "ticket" {
+		t.Errorf("severities: %v", got)
+	}
+	rep, err := l.Report(ctx, t0, t0.Add(3*time.Hour), opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(rep.Rules, func(r verdict.RuleResult) bool { return r.Rule == "Orders slow" }); i < 0 || rep.Rules[i].Severity != "page" {
+		t.Errorf("report: %+v", rep.Rules)
+	}
+	// Cut to MaxSeverityLen, at a character.
+	long := strings.Repeat("é", MaxSeverityLen)
+	if err := l.SetJudgedSeverity(ctx, map[string]string{"Orders slow": long}); err != nil {
+		t.Fatal(err)
+	}
+	if got := severities()["Orders slow <grafana>"]; len(got) > MaxSeverityLen || !utf8.ValidString(got) || !strings.HasPrefix(long, got) || got == "" {
+		t.Errorf("cut to %d bytes: %q", len(got), got)
+	}
+	// No longer judged so: named apart, with none.
+	if err := l.SetFromHistory(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetJudgedSeverity(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.From, f.To = t0.Add(3*time.Hour), t0.Add(6*time.Hour)
+	f.Run.From, f.Run.To, f.Run.Started, f.Run.Finished = f.From, f.To, f.To, f.To
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	if got := severities(); got["Orders slow [grafana] <grafana>"] != "" {
+		t.Errorf("no longer judged: %v", got)
 	}
 }

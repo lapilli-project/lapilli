@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 )
 
@@ -204,6 +206,34 @@ func TestServeGrafanaJudged(t *testing.T) {
 	s.IncidentsHandler().ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "copies Grafana's own alert state history in under") {
 		t.Errorf("a job wrote to grafana: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A rule judged from Grafana's history has the severity its labels say
+// (severity: page), as a replayed rule has its own: in the report, the
+// rules list and MCP, though the recorded rule its firings are copied in
+// as keeps none.
+func TestServeGrafanaJudgedSeverity(t *testing.T) {
+	ctx := context.Background()
+	s := ordersServer(t, &ordersGrafana{})
+	s.jobs(ctx, true)
+	if s.status.errWhat != "" {
+		t.Fatalf("a round failed: %s: %s", s.status.errWhat, s.status.err)
+	}
+	o, _ := s.options(ctx)
+	rep, err := s.ledgerReport(ctx, now.Add(-7*24*time.Hour), now.Add(time.Hour), o, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rules) != 1 || rep.Rules[0].Severity != "page" || !rep.Rules[0].ByHistory() {
+		t.Errorf("report: %+v", rep.Rules)
+	}
+	_, out, err := s.toolRules(ctx, nil, rulesIn{Weeks: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Rules) != 1 || out.Rules[0].Severity != "page" {
+		t.Errorf("MCP's rules: %+v", out.Rules)
 	}
 }
 
@@ -543,5 +573,26 @@ func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 				t.Errorf("the gap is covered at %s: %v", in, spans)
 			}
 		}
+	}
+}
+
+// The severities of rules of one name are joined once each, however many
+// rules say which, and in whatever order: critical, warning, critical is
+// critical/warning, as verdict says it, not critical/critical/warning.
+func TestJudgedSeveritiesJoinedOnce(t *testing.T) {
+	sev := func(s string) map[string]string { return map[string]string{"severity": s} }
+	rs := []rules.Rule{{Name: "Orders slow", Labels: sev("critical")}, {Name: "Orders slow", Labels: sev("warning")}, {Name: "Orders slow", Labels: sev("critical")},
+		{Name: "Stock low"}, {Name: "Cart", Labels: sev("page")}}
+	if got := judgedSeverities(rs); !maps.Equal(got, map[string]string{"Orders slow": "critical/warning", "Cart": "page"}) {
+		t.Errorf("judged: %v", got)
+	}
+	// A run's, rule after rule.
+	by := severitiesBy{}
+	var got string
+	for _, s := range []string{"critical", "warning", "critical", ""} {
+		got = by.add("Errors", s)
+	}
+	if got != "critical/warning" {
+		t.Errorf("a run's: %q", got)
 	}
 }

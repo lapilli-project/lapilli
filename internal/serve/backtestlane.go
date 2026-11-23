@@ -184,8 +184,11 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 			}
 		}
 	}
-	result, why := s.backtestResult(cmp, pr, o, t.IncidentTitles)
-	if why != "" {
+	result, why := s.backtestResult(ctx, cmp, pr, from, to, o, t.IncidentTitles)
+	switch {
+	case why != "" && ctx.Err() != nil:
+		return // no longer leading: the next leader runs it again
+	case why != "":
 		fail(why)
 		return
 	}
@@ -245,8 +248,10 @@ func scrubFor(own map[string]bool) func(string) string {
 // incidents' ids and titles, and Lapilli's words: no label of a series a
 // rule read (an alert's labels), which a rule could make of whatever
 // serve's access reads; no reason of the history's; nothing of serve's
-// settings.
-func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict.Options, titles bool) ([]byte, string) {
+// settings. Held to the incidents (fail_missed), it says which incidents
+// the change leaves caught by no rule, as lapilli verdict --fail-missed
+// does, the rules left alone judged by serve's record (holdMissed).
+func (s *Server) backtestResult(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options, titles bool) ([]byte, string) {
 	cmp.Recording, cmp.JudgedBy, cmp.ChangedOnly = pr.recording, verdict.JudgedByServe, true
 	if len(pr.passedOver) > 0 {
 		cmp.PassedOver = pr.passedOver
@@ -258,7 +263,7 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 		// While people slept by the hours of the rule's team, where it has
 		// its own, as serve's checks count it (docs/design/expectations.md).
 		hours := func(string) *verdict.Hours { return o.Hours }
-		if own, err := s.owners(context.Background()); err == nil {
+		if own, err := s.owners(ctx); err == nil {
 			hours = own.schedules(o.Hours).of
 		}
 		// The scenarios a request names are the pull request's files,
@@ -268,6 +273,14 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 		cmp.Scenarios = verdict.NotThroughServe
 		if err := cmp.ExpectBy(pr.expect, pr.before, hours); err != nil {
 			return nil, "expect: " + clip(verdict.Clean(err.Error()), 600)
+		}
+	}
+	if pr.failMissed {
+		if err := s.holdMissed(ctx, cmp, pr, from, to, o); err != nil {
+			if ctx.Err() == nil {
+				s.log.Error("backtest lane: reading the record of the rules left alone", "err", err)
+			}
+			return nil, "lapilli serve couldn't read its record: try again"
 		}
 	}
 	verdict.ForComment(cmp, unreadByServe, scrubFor(pr.reasons), nil)
@@ -290,13 +303,16 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 			}
 		}
 	}
-	// Of the incidents, those caught differently, by their ids: a title
-	// written in a tracker is said only where the entry says so.
-	for i := range cmp.Incidents {
-		if !titles {
-			cmp.Incidents[i].Title = ""
+	// Of the incidents, those caught differently, and those caught by no
+	// rule after the change, by their ids: a title written in a tracker is
+	// said only where the entry says so.
+	for _, list := range [][]verdict.IncidentChange{cmp.Incidents, cmp.Missed} {
+		for i := range list {
+			if !titles {
+				list[i].Title = ""
+			}
+			list[i].Signal = ""
 		}
-		cmp.Incidents[i].Signal = ""
 	}
 	var md bytes.Buffer
 	if err := verdict.CompareMarkdown(&md, cmp, pr.loc); err != nil {
@@ -320,9 +336,10 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 // reportForPullRequest is a comparison's JSON as verdict.JSON writes it,
 // less what a job has no use for and serve's record or settings would say:
 // each side's firings (the counts stay) and incidents (the comparison's
-// own, caught differently, stay, each its id, start and catches, and its
-// title where CompareMarkdown said it), the thresholds and hours it was
-// judged by, the impact signals, and what only lapilli verdict works out.
+// own, caught differently, and those caught by no rule after the change,
+// stay, each its id, start and catches, and its title where
+// CompareMarkdown said it), the thresholds and hours it was judged by, the
+// impact signals, and what only lapilli verdict works out.
 func reportForPullRequest(c *verdict.Comparison) ([]byte, error) {
 	var b bytes.Buffer
 	if err := verdict.JSON(&b, c); err != nil {
@@ -340,7 +357,8 @@ func reportForPullRequest(c *verdict.Comparison) ([]byte, error) {
 			}
 		}
 	}
-	if incs, ok := m["incidents"].([]any); ok {
+	for _, list := range []string{"incidents", "missed"} {
+		incs, _ := m[list].([]any)
 		for _, x := range incs {
 			if in, ok := x.(map[string]any); ok {
 				for k := range in {

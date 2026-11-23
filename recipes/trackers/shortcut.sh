@@ -166,12 +166,17 @@ t_comments() {
   fi
   printf '%s' "$out" | jq -c --arg me "$me" --slurpfile who "$work/members" '.comments[]? | select(.deleted | not)
     | {id: (.id | tostring), author: ($who[0][.author_id // ""] // "someone"), mine: (.author_id == $me),
-       at: .created_at, body: (.text // "")}'
+       at: .created_at, edited: (.updated_at // .created_at), body: (.text // "")}'
 }
 
 t_comment() {
   out=$(sc once POST "/stories/$1/comments" "$(jq -Rsc '{text: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
+}
+
+t_edit() {
+  case $2 in '' | *[!0-9]*) return 1 ;; esac
+  sc again PUT "/stories/$1/comments/$2" "$(jq -Rsc '{text: .}' "$3")" >/dev/null
 }
 
 sync_tasks

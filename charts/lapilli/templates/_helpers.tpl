@@ -21,6 +21,17 @@ values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
 {{- $s := .Values.serve -}}
 {{- include "lapilli.bool" (dict "in" .Values "key" "linkedOnly" "name" "linkedOnly") -}}
+{{- /* A Loki's, its ruler's rules, and Grafana's history: 0.70.0's. */ -}}
+{{- include "lapilli.fill" (dict "in" .Values "key" "loki" "with" (dict "url" "" "tenant" "")) -}}
+{{- include "lapilli.fill" (dict "in" .Values.loki "key" "tokenSecret" "with" (dict "name" "" "key" "token")) -}}
+{{- include "lapilli.fill" (dict "in" .Values "key" "rules" "with" (dict)) -}}
+{{- include "lapilli.fill" (dict "in" .Values.rules "key" "loki" "with" (dict "loaded" false "configMaps" (list))) -}}
+{{- include "lapilli.bool" (dict "in" .Values.rules.loki "key" "loaded" "name" "rules.loki.loaded") -}}
+{{- include "lapilli.fill" (dict "in" .Values.rules "key" "grafana" "with" (dict "url" "")) -}}
+{{- if not (hasKey .Values.rules.grafana "history") }}{{ $_ := set .Values.rules.grafana "history" true }}{{ end -}}
+{{- include "lapilli.bool" (dict "in" .Values.rules.grafana "key" "history" "name" "rules.grafana.history") -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "changes" "with" (dict)) -}}
+{{- include "lapilli.fill" (dict "in" $s.changes "key" "lokiTokenSecret" "with" (dict "name" "" "key" "token")) -}}
 {{- include "lapilli.bool" (dict "in" $s "key" "everyoneAdmin" "name" "serve.everyoneAdmin") -}}
 {{- include "lapilli.bool" (dict "in" $s "key" "exposeWithoutSignIn" "name" "serve.exposeWithoutSignIn") -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "service" "with" (dict "type" "ClusterIP" "port" 80 "annotations" (dict) "loadBalancerClass" "" "loadBalancerSourceRanges" (list) "externalTrafficPolicy" "" "nodePort" nil "sourceRangesAreTheProxy" false)) -}}
@@ -40,6 +51,7 @@ values, not the new chart's): every template reads them through this. */}}
 {{- end }}
 {{- if not (hasKey $s "exposeWithoutSignIn") }}{{ $_ := set $s "exposeWithoutSignIn" false }}{{ end -}}
 {{- if not (hasKey $s "replicas") }}{{ $_ := set $s "replicas" 1 }}{{ end -}}
+{{- if not (hasKey $s "shutdownDelaySeconds") }}{{ $_ := set $s "shutdownDelaySeconds" 5 }}{{ end -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "podDisruptionBudget" "with" (dict "maxUnavailable" 1)) -}}
 {{- if not (hasKey $s "readinessPath") }}{{ $_ := set $s "readinessPath" "/readyz" }}{{ end -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "backtest" "with" (dict "enabled" false "port" 8084 "tokens" (list) "share" "" "queue" "" "timeout" "" "from" (list))) -}}
@@ -114,11 +126,42 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.ruler.url }}{{ $from = add1 $from }}{{ end }}
 {{- /* Followed, the rules history is the rules. */}}
 {{- if include "lapilli.historyFollows" . }}{{ $from = add1 $from }}{{ end }}
-{{- /* A Loki ruler's rules, given through extraArgs (--loki URL
-     --loki-loaded-rules), go beside the rest, or alone, as rules.alarms do. */}}
-{{- $loki := false }}
+{{- /* A Loki ruler's rules (rules.loki, or, before 0.70.0, given through
+     extraArgs: --loki URL --loki-loaded-rules) go beside the rest, or
+     alone, as rules.alarms do. */}}
+{{- $lk := .Values.loki }}
+{{- $loki := or $r.loki.loaded $r.loki.configMaps }}
+{{- $lokiSet := or $lk.url $lk.tenant $lk.tokenSecret.name $loki }}
 {{- range .Values.extraArgs }}
 {{- if or (hasPrefix "--loki-loaded-rules" (toString .)) (hasPrefix "--loki-rules" (toString .)) }}{{ $loki = true }}{{ end }}
+{{- if and $lokiSet (hasPrefix "--loki" (toString .)) }}
+{{- fail (printf "extraArgs: %s: give a Loki's flags as loki and rules.loki, not through extraArgs as well" (toString .)) }}
+{{- end }}
+{{- end }}
+{{- if and $r.loki.loaded $r.loki.configMaps }}
+{{- fail "rules.loki.loaded and rules.loki.configMaps are two ways to the same rules: give one" }}
+{{- end }}
+{{- if and (or $r.loki.loaded $r.loki.configMaps) (not $lk.url) }}
+{{- fail "rules.loki is replayed against a Loki: give loki.url" }}
+{{- end }}
+{{- if and (or $lk.tenant $lk.tokenSecret.name) (not $lk.url) }}
+{{- fail "loki.tenant and loki.tokenSecret go with loki.url" }}
+{{- end }}
+{{- /* A tenant's ID as lapilli takes one (--loki-tenant, --ruler-tenant):
+     150 bytes at most, no |, /, \, line break, nor . or .. alone. The
+     pattern is a raw string: in a quoted one, \ before the line break
+     escapes it, and \ isn't matched. */}}
+{{- $tenantBad := `[|/\\\r\n]` }}
+{{- if and $lk.tenant (or (gt (len (toString $lk.tenant)) 150) (regexMatch $tenantBad (toString $lk.tenant)) (has (toString $lk.tenant) (list "." ".."))) }}
+{{- fail (printf "loki.tenant %q: want a tenant's ID, as Loki takes one" (toString $lk.tenant)) }}
+{{- end }}
+{{- with $r.ruler.tenant }}
+{{- if or (gt (len (toString .)) 150) (regexMatch $tenantBad (toString .)) (has (toString .) (list "." "..")) }}
+{{- fail (printf "rules.ruler.tenant %q: want a tenant's ID, as Mimir and Cortex take one" (toString .)) }}
+{{- end }}
+{{- end }}
+{{- if and (not $r.grafana.history) (not $r.grafana.url) }}
+{{- fail "rules.grafana.history judges the rules rules.grafana.url reads that can't be replayed: it goes with rules.grafana.url" }}
 {{- end }}
 {{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied) (not $r.alarms) (not $loki)) }}
 {{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url, rules.ruler.url and serve.rulesHistory (with no rules.configMaps, the rules are the repository's, followed), or rules.alarms, or a Loki's rules through extraArgs" }}
@@ -199,6 +242,10 @@ must stay. */}}
 {{- else }}{{ $ok = and (ge (int $u) 1) (lt (int $u) $n) }}{{ end }}
 {{- if and (gt $n 1) (not $ok) }}
 {{- fail (printf "serve.podDisruptionBudget.maxUnavailable: a number of pods, 1 to %d, or a percentage below 100%%, so that one replica at least stays" (sub $n 1)) }}
+{{- end }}
+{{- $d := toString $s.shutdownDelaySeconds }}
+{{- if or (not (regexMatch "^[0-9]{1,3}$" $d)) (gt (int $d) 600) }}
+{{- fail "serve.shutdownDelaySeconds: seconds, 0 to 600" }}
 {{- end }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $in.proxyJWT.kind (not (has $in.proxyJWT.kind (list "google-iap" "aws-alb" "jwks"))) }}
@@ -302,19 +349,40 @@ your own needs from. */ -}}
 {{- if and (eq .Values.mode "serve") $c.enabled $c.grafanaTokenSecret.name (not .Values.rules.grafana.url) }}
 {{- fail "serve.changes.grafanaTokenSecret is for the rules read from Grafana (rules.grafana)" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (or $c.in $c.managed $c.rulerTokenSecret.name $c.awsRole $c.azureClientId $c.googleServiceAccount ($c.ociConfigSecret).name) (not $c.enabled) }}
-{{- fail "serve.changes.in, managed, rulerTokenSecret, awsRole, azureClientId, googleServiceAccount and ociConfigSecret go with serve.changes.enabled" }}
+{{- if and (eq .Values.mode "serve") (or $c.in $c.managed $c.rulerTokenSecret.name $c.lokiTokenSecret.name $c.awsRole $c.azureClientId $c.googleServiceAccount ($c.ociConfigSecret).name) (not $c.enabled) }}
+{{- fail "serve.changes.in, managed, rulerTokenSecret, lokiTokenSecret, awsRole, azureClientId, googleServiceAccount and ociConfigSecret go with serve.changes.enabled" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (or $c.in $c.managed) (not $r.ruler.url) (not $r.alarms) }}
+{{- range $c.in }}
+{{- /* An alarms source named loki takes its own entries, as before 0.70.0. */}}
+{{- if and (eq $.Values.mode "serve") (hasPrefix "loki:" (toString .)) (not $r.loki.loaded) (not $r.ruler.url) (not (hasKey $sources "loki")) }}
+{{- fail (printf "serve.changes.in: %s names a namespace of Loki's ruler: set rules.loki.loaded, which reads it" (toString .)) }}
+{{- end }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.in (not $r.ruler.url) (not $r.alarms) (not $r.loki.loaded) }}
+{{- fail "serve.changes.in is for the rules read from a ruler (rules.ruler.url) or Loki's ruler (rules.loki.loaded), and the alarms in rules.alarms" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.managed (not $r.ruler.url) (not $r.alarms) }}
 {{- fail "serve.changes.in and serve.changes.managed are for the rules read from a ruler (rules.ruler.url), and the alarms in rules.alarms" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $r.loki.loaded (hasKey $sources "loki") }}
+{{- fail "rules.alarms: the source loki: with rules.loki.loaded, loki: in serve.changes.in names Loki's ruler's namespaces: name the alarms' source another" }}
 {{- end }}
 {{- if eq .Values.mode "serve" }}
 {{- range $c.in }}
 {{- $src := index (splitList ":" (toString .)) 0 }}
-{{- if and (contains ":" (toString .)) (regexMatch "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" $src) (not (hasKey $sources $src)) (not $r.ruler.url) }}
+{{- if and (contains ":" (toString .)) (regexMatch "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" $src) (not (hasKey $sources $src)) (not $r.ruler.url) (not (and (eq $src "loki") $r.loki.loaded)) }}
 {{- fail (printf "serve.changes.in: %s names the source %s, which rules.alarms doesn't" (toString .) $src) }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.lokiTokenSecret.name (not $r.loki.loaded) }}
+{{- fail "serve.changes.lokiTokenSecret is for the rules of Loki's ruler (rules.loki.loaded)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.lokiTokenSecret.name (eq $c.lokiTokenSecret.name $lk.tokenSecret.name) (eq $c.lokiTokenSecret.key $lk.tokenSecret.key) }}
+{{- fail "serve.changes.lokiTokenSecret is loki.tokenSecret: give the writes a token of their own" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.lokiTokenSecret.name (eq $c.lokiTokenSecret.name $c.rulerTokenSecret.name) (eq $c.lokiTokenSecret.key $c.rulerTokenSecret.key) }}
+{{- fail "serve.changes.lokiTokenSecret is serve.changes.rulerTokenSecret: give each ruler's writes a token of their own" }}
 {{- end }}
 {{- $clouds := values $sources }}
 {{- if and (eq .Values.mode "serve") $c.googleServiceAccount (not (has "google" $clouds)) }}
@@ -566,6 +634,31 @@ the rules and the incidents are, and how to judge. */}}
 {{- range $r.alarms }}
 - {{ printf "--alarms=%s=%s" .source .url | quote }}
 {{- end }}
+{{- if and $r.grafana.url (not $r.grafana.history) }}
+- --grafana-history=false
+{{- end }}
+{{- with .Values.loki }}
+{{- if .url }}
+- {{ printf "--loki=%s" .url | quote }}
+{{- with .tenant }}
+- {{ printf "--loki-tenant=%s" . | quote }}
+{{- end }}
+{{- if .tokenSecret.name }}
+- {{ printf "--loki-token-file=/var/run/lapilli/loki/%s" (.tokenSecret.key | default "token") | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $r.loki.loaded }}
+- --loki-loaded-rules
+{{- end }}
+{{- if and (eq .Values.mode "serve") $r.loki.configMaps }}
+{{- /* serve reads one directory: every ConfigMap's keys in it, as one projected volume */}}
+- "--loki-rules=/etc/lapilli/loki-rules/0"
+{{- else }}
+{{- range $i, $_ := $r.loki.configMaps }}
+- {{ printf "--loki-rules=/etc/lapilli/loki-rules/%d" $i | quote }}
+{{- end }}
+{{- end }}
 {{- if .Values.incidents }}
 - --incidents=/etc/lapilli/incidents/incidents.yaml
 {{- end }}
@@ -636,6 +729,22 @@ the rules and the incidents are, and how to judge. */}}
   mountPath: /var/run/lapilli/ruler
   readOnly: true
 {{- end }}
+{{- if and .Values.loki.url .Values.loki.tokenSecret.name }}
+- name: loki-token
+  mountPath: /var/run/lapilli/loki
+  readOnly: true
+{{- end }}
+{{- if and (eq .Values.mode "serve") $r.loki.configMaps }}
+- name: loki-rules-0
+  mountPath: /etc/lapilli/loki-rules/0
+  readOnly: true
+{{- else }}
+{{- range $i, $_ := $r.loki.configMaps }}
+- name: loki-rules-{{ $i }}
+  mountPath: /etc/lapilli/loki-rules/{{ $i }}
+  readOnly: true
+{{- end }}
+{{- end }}
 {{- if include "lapilli.saToken" . }}
 - name: service-account-token
   mountPath: /var/run/secrets/kubernetes.io/serviceaccount
@@ -692,6 +801,27 @@ which must not share a name, side by side. */}}
 - name: ruler-token
   secret:
     secretName: {{ $r.ruler.tokenSecret.name }}
+{{- end }}
+{{- if and .Values.loki.url .Values.loki.tokenSecret.name }}
+- name: loki-token
+  secret:
+    secretName: {{ .Values.loki.tokenSecret.name }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $r.loki.configMaps }}
+{{- /* One directory for serve, as for rules.configMaps. */}}
+- name: loki-rules-0
+  projected:
+    sources:
+      {{- range $r.loki.configMaps }}
+      - configMap:
+          name: {{ . }}
+      {{- end }}
+{{- else }}
+{{- range $i, $name := $r.loki.configMaps }}
+- name: loki-rules-{{ $i }}
+  configMap:
+    name: {{ $name }}
+{{- end }}
 {{- end }}
 {{- if .Values.report.slackWebhookSecret.name }}
 - name: slack

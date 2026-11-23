@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"lapilli.dev/internal/rules"
 )
 
 // defaultScrape is the scrape interval Prometheus uses when its
@@ -184,6 +186,63 @@ func (s Scrapes) For(jobs []Matcher) (time.Duration, string) {
 		return d, ""
 	}
 	return s.Global, ""
+}
+
+// ForJobs is the interval a range over series of these jobs is counted
+// with, and the job it is that job's: the longest of theirs, since the
+// range must hold two points of each, a job not known taken to have the
+// global interval. ok is false when none of them is known, and a job's own
+// can't be told.
+func (s Scrapes) ForJobs(jobs []string) (d time.Duration, job string, ok bool) {
+	for _, j := range slices.Sorted(slices.Values(jobs)) {
+		x, known := s.Jobs[j]
+		if !known {
+			x = s.Global
+		}
+		ok = ok || known
+		if x > d {
+			d, job = x, j
+		}
+	}
+	return d, job, ok
+}
+
+// longest is the longest interval known, of any job or the global one.
+func (s Scrapes) longest() time.Duration {
+	d := s.Global
+	for _, x := range s.Jobs {
+		d = max(d, x)
+	}
+	return d
+}
+
+// ToAsk are the selectors whose jobs the range check would count with,
+// were they known (docs/design/content.md, "A range over a selector that
+// names no job"): of a range over a selector that names no job, plain,
+// that could be shorter than two scrapes of one of the jobs, in a rule
+// that is checked; each once, in the order the rules have them. None when
+// every job has one interval, or no job's is known: the answer would
+// change nothing.
+func ToAsk(rs []rules.Rule, s Scrapes) []string {
+	if _, one := s.uniform(); one || len(s.Jobs) == 0 || s.Global <= 0 {
+		return nil
+	}
+	longest := s.longest()
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rs {
+		if off(r) || r.Logs != "" {
+			continue
+		}
+		for _, u := range Ranges(r.Expr) {
+			if u.Selector == "" || u.Range >= 2*longest || seen[u.Selector] {
+				continue
+			}
+			seen[u.Selector] = true
+			out = append(out, u.Selector)
+		}
+	}
+	return out
 }
 
 // A Matcher is a selector's matcher on the job label, = or =~; those that

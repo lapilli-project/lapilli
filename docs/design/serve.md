@@ -39,7 +39,9 @@ happen, and judged for any period when someone looks.
   ruler it reads (`--ruler`), in the namespaces `--changes-in` names
   ([rulers.md](rulers.md)), or, since v0.24.0, to a cloud's own alarms it
   reads (`--alarms`), those `--changes-in` names ([alarms.md](alarms.md)),
-  and nowhere else.
+  or, since v0.70.0, to the Loki ruler it reads (`--loki-loaded-rules`), in
+  the namespaces `--changes-in` names as `loki:NAMESPACE`, and nowhere
+  else.
 - **Not a controller.** It reads mounted ConfigMaps and HTTP APIs. It doesn't
   watch the Kubernetes API and needs no RBAC: a rule resource in a cluster
   is changed by a pull request.
@@ -285,18 +287,88 @@ team's): of a condition that counts events (`rules.Rule.EventWindow`, a
 Grafana rule's too), each is one, a count that went up, unless one fired on
 no data (a Grafana rule's, labeled `grafana_alertstate="nodata"`), which is
 none, or more than 5,000 are to be read to tell (said: "Too many firings
-to tell how many happened"); of another, how many had the value its
-condition compares go well past its bound, from the rule replayed over the
-week with its one bound a fifth further (a firing of that one overlapping
-it, alike in its labels, went well past it; a condition with no one bound
-that decides it, a range, `and`, `or`, `unless`, says nothing, nor does a
-rule with more than 5,000 such firings); and the alerts that fired most, of
+to tell how many happened"); of another whose bounds decide it, how many
+went well past them, from the rule replayed over the week with each bound a
+fifth further (a firing of that one overlapping it, alike in its labels,
+went well past them; which conditions, and which are left unsaid, below,
+"With no record: which conditions"; nor does a rule with more than 5,000
+such firings say it); and the alerts that fired most, of
 the 1,000 counted most in one grouped read (`RuleAlerts`), by the labels
 that tell them apart, each with the team whose labels it has, and those
 during deploys. Its reads and replays share the digest's `--timeout`. A
 week whose record is kept since, by an incident written down later, no
 longer shows it; a result kept that doesn't decode is logged and taken as
 none.
+
+**An alert after the incident** (0.70). A black firing that came once an
+incident was over, its condition having held in it and its labels
+agreeing, is that incident's alert, too late (docs/how-it-judges.md):
+`lapilli verdict` has said so since 0.54; serve says it the same way,
+`verdict.AfterEnd` deciding for both. Nothing is kept for it, and no stone
+changes: it is worked out as the ledger is read (`ledger.LateOf`), from the
+firings, the incidents that count and the catches it keeps, and how long
+before its start each rule's condition held, its `for` and lag, the least
+of the versions in effect from the span's start to its end and as long
+after it as a rule's held at most (`verdict.HeldFor`,
+`verdict.Options.Held`): a firing after an incident of the span comes that
+long after its end at most, and every version it could be of must have
+held, as verdict asks every version of its period. An incident's page reads
+the span of the incident itself. A rule copied in, whose condition serve doesn't
+have, held from its start, and so came after nothing. As a firing's
+stones are given against every incident the ledger has, so is this: a
+firing in the span after an incident before it counts for its rule, and an
+incident in the span is named with the firings after it past the span's
+end; verdict, given a period, looks at those of the period alone. What
+reads it: the report (`late` of a rule, `fired_after` of an incident,
+`after` and `held_from` of a firing), so `/api/v1/report`, the digest's
+text and the reports' `missed` (each missed incident's `fired_after`); the
+Incidents page ("✗ nothing in time; after its end: Errors +1m") and an
+incident's own; a rule's page and the rules list, over the weeks shown
+(`ruleLine.Late`); and MCP (`fired_after` of an incident, `late` of a
+rule). The spans read are the incidents' that count ending from as long
+before the span as a rule's condition held at most, each read once where
+they meet, firings neither white nor excused; a read looks at 4,000,000
+firings against an incident each at most, 1,000,000 firings read and
+10,000 reads, past which the rest aren't said to have come after one, and
+serve says so where it shows them: `late_cut` in the report, the digest's
+text and MCP, a line on the Incidents page, an incident's own and a rule's,
+and `late_cut` in a report's missed incidents; and logs it. The pages keep what they read
+by the ledger's generation and their span, as the credit is kept.
+
+**With no record: which conditions** (0.70). How many of a rule's firings
+went well past its bounds is said where it can be said soundly: where its
+condition holds only where its comparisons with numbers let it
+(`rules.Rule.BoundsDecide`), so that the rule with every bound a fifth
+further the way the condition holds less fires for no alert the rule
+doesn't, and fires only where each comparison that decided it held that much
+further. A firing it overlaps happened, not a flicker at an edge. Said of:
+
+- one bound alone, as since 0.41;
+- a range, on one value (`x > 1 and x < 5`) or a Grafana threshold's
+  (`within_range`, `outside_range`): both ends set further, inside for
+  one, outside for the other;
+- comparisons joined by `and`, where either side decides it (the other
+  only holds it back: `up == 1 and errors > 5` too); by `or`, where both
+  sides do, as either fires it alone; by `unless`, where its left does,
+  and a comparison on its right is set the other way, to hold more, so it
+  keeps the rule quiet more; in brackets as without; a Grafana math
+  expression of comparisons joined by `&&` (either side) and `||` (both);
+  classic conditions every one of which compares above or below a number,
+  or within or outside a range.
+
+Left unsaid, as it can't be said soundly: a value beside them under `or`,
+or alone (`errors > 5 or up == 0`: a firing of `up == 0` went past no
+bound); a comparison under `!` or inside arithmetic, which decides it the
+other way round or not alone; `unless` with nothing compared on its left; a
+bound of nothing, which no share of is past, or one a fifth past which is no
+number a float holds (`1.7e308`), which set past would be no bound and the
+rule another; a range on one value narrower
+than two fifths of its ends, which set further holds nowhere (none could go
+well past both, which says nothing of it); classic conditions with one that
+compares no number (`eq`, `ne`, `no_value`); a rule whose bounds changed
+over the week. Of one bound the line says "its bound (> 0.5)"; of several,
+"the bounds that decided them (errors > 5, unless requests < 10)", each
+with what it compares, `bounds` in the JSON saying how many.
 
 **Firings on what a team owns.** The digest also counts each rule's
 firings in the week by the team whose labels they have (the teams'

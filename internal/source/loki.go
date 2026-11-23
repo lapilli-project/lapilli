@@ -191,11 +191,21 @@ func LokiLoaded(ctx context.Context, l Loki, agent string, warn func(string)) ([
 	return rs, docs, places, nil
 }
 
+// Ruler is the Loki's ruler's configuration API, /loki/api/v1/rules, which
+// is Cortex's: what its rules are read from, a document a namespace, and
+// what a change approved to one is written through (docs/design/
+// rulers.md), with the Loki's tenant and its token to read. Each document
+// read is sourced at its namespace's URL under it, which a change must be
+// of (Ruler.Owns).
+func (l Loki) Ruler(agent string, warn func(string)) *Ruler {
+	return &Ruler{URL: strings.TrimRight(l.URL, "/") + "/loki/api/v1/rules", Kind: RulerConfig, Tenant: l.Tenant, Agent: agent,
+		Reads: Creds{TokenFile: l.TokenFile}, Warn: warn, Flag: "--loki-loaded-rules"}
+}
+
 // LokiRules reads the rules a Loki's ruler holds, as LokiLoaded does, but
 // not where it runs each group.
 func LokiRules(ctx context.Context, l Loki, agent string, warn func(string)) ([]rules.Rule, []rules.Doc, error) {
-	r := &Ruler{URL: strings.TrimRight(l.URL, "/") + "/loki/api/v1/rules", Kind: RulerConfig, Tenant: l.Tenant, Agent: agent,
-		Reads: Creds{TokenFile: l.TokenFile}, Warn: warn, Flag: "--loki-loaded-rules"}
+	r := l.Ruler(agent, warn)
 	rs, docs, err := r.Read(ctx)
 	if err != nil {
 		return nil, nil, err

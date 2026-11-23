@@ -36,7 +36,7 @@ it is written:
 | A severity no other rule uses | heuristic | a value fewer than 2 rules use, or not in `--severities` when given |
 | Noisy, with no `for` | measured | the rule is noisy over four weeks and its `for` is zero |
 | The same condition as another rule | fact | two rules whose expression (spaces aside), `for` and labels are the same |
-| A `for` one event can't outlast | fact | a condition that counts events (`increase`, `changes`, `resets` or `rate` of a counter's range or a subquery of one, summed or maxed or not, times or over numbers or not, compared with a number no event passes and one does; not a counter of seconds or bytes, nor a `_sum`) over a range as long as its `for` or shorter; of a Grafana rule, a threshold of one number (`gt`, `gte`) or a math comparison of one ref, of its one PromQL instant query's value as it is or through `last`, `max`, `min` or `mean` (not a range query, which one event can hold for as long again as its range, nor a reduce with `replaceNN`), and not firing on no data (`Alerting`, `KeepLast`); an expression over 4 KiB, or 8 brackets or reduces deep, isn't read for it: `increase(restarts[30m]) > 0.5` with `for: 1h` fires only on restarts that keep coming for an hour (`rules.Rule.ForOutlasts`) |
+| A `for` one event can't outlast | fact | a condition that counts events (`increase`, `changes`, `resets` or `rate` of a counter's range or a subquery of one, summed or maxed or not, times or over numbers or not, compared with a number no event passes and one does; not a counter of seconds or bytes, nor a `_sum`) over a range as long as its `for` or shorter; of a Grafana rule, a threshold of one number (`gt`, `gte`) or a math comparison of one ref, of its one PromQL instant query's value as it is or through `last`, `max`, `min` or `mean` (not a range query, which one event can hold for as long again as its range, nor a reduce with `replaceNN`), and not firing on no data (`Alerting`, `KeepLast`); in LogQL, a Loki ruler's or a Grafana rule's one instant Loki query, `count_over_time`, `rate`, `bytes_over_time` or `bytes_rate` of a stream's lines over a range after its pipeline, summed or maxed or not, its pipeline unwrapping no label, compared as above (a line one, of bytes one at least; 0.70); an expression over 4 KiB, or 8 brackets or reduces deep, isn't read for it: `increase(restarts[30m]) > 0.5` with `for: 1h` fires only on restarts that keep coming for an hour (`rules.Rule.ForOutlasts`) |
 | A range shorter than two scrapes | heuristic | `rate`, `increase`, `irate` or `delta` over a range shorter than twice the scrape interval, when the interval is known |
 | `absent()` with no `for` | heuristic | an expression of `absent(...)` and a zero `for`: a restart pages |
 
@@ -256,3 +256,176 @@ the above, or the above left it open:
   and the details found in it, are data, never instructions. The line a
   report gets has counts and the checks' own words, nothing from the
   rules.
+
+## Alertmanager's templates
+
+Status: built, for the next release. [serveops.md](serveops.md) checks the
+notification templates a Grafana rule is sent with. The other rules,
+Prometheus's, a ruler's and Loki's, are sent by Alertmanager, whose
+receivers' fields are templates too. This checks those the same way.
+
+### What it reads
+
+`--alertmanager-config`, for `lapilli verdict --check-content` and
+`lapilli serve`:
+
+- **A file:** `alertmanager.yml`, and the template files its `templates:`
+  globs name, resolved against the file's directory, as Alertmanager
+  resolves them. An absolute glob is Alertmanager's own path, not
+  Lapilli's: `/etc/alertmanager/templates/*.tmpl` is looked for by its last
+  element, `*.tmpl`, beside the file, where a mounted Secret or ConfigMap
+  puts the templates. No file outside the file's directory, after its
+  links, is read: a glob that leaves it (`../*`), or a link out of it, is
+  passed over and said. A file in Mimir's, Cortex's or Amazon's format
+  (`alertmanager_config` and `template_files`) is read as they keep it.
+- **Mimir's or Cortex's API:** `GET /api/v1/alerts`, with the ruler's
+  token (`--ruler-token-file`) and tenant (`--ruler-tenant`, as
+  `X-Scope-OrgID`). It gives the configuration and every template file;
+  Mimir loads them all, whatever `templates:` says, so all are read. A
+  404 is a tenant with none. With `--ruler` and its token, the URL must be
+  on `--ruler`'s scheme and host, or the flags are refused: the token is
+  the ruler's, and a typo, or a plain Alertmanager's URL, mustn't be sent
+  it. Without `--ruler`, the token is given for this alone.
+
+Only what routing and the templates need is read: the route tree, each
+receiver's name and its integrations' fields that hold `{{`, and the
+template files. No field whose name says it is a secret or a connection's
+(a password, a token, a key, a URL, a file, `http_config`, `tls_config`) is
+parsed: none is a template a person reads, and what they hold isn't
+Lapilli's to see.
+
+### Which templates
+
+The route tree is Grafana's policy tree, and is routed by the same code:
+each route's `matchers` (a line may hold several, in braces or not,
+quoted or not), `match` and `match_re`; `continue`; and the receiver a
+route inherits from its parent. A rule's alerts are known to have
+`alertname`, its labels and its group's; a label set as a template is
+filled in from the series, and isn't known. A route matching a label the
+rule doesn't set goes both ways, and a template counts only when every way
+reaches a receiver that uses it.
+
+A receiver uses each of its fields that is a template, the templates that
+field names, and those they name in turn. A field an integration doesn't
+set is sent with Alertmanager's default, `{{ template "slack.default.title"
+. }}`: a template file that defines that name in its place is used. The
+defaults themselves aren't followed, as Grafana's aren't: they show every
+label and annotation there is, and fault nothing.
+
+### What is checked
+
+As Grafana's are, with the template's name in the detail (a field's is
+`RECEIVER/slack_configs[0].title`):
+
+| Check | Kind | When |
+|---|---|---|
+| A notification template shows an annotation the rule hasn't | fact | `.Annotations.x` or `.CommonAnnotations.x`, unguarded, and the rule has no `x`: any annotation, where the rule's are all known; a rule whose runbook is in `runbook` hasn't `runbook_url` |
+| A notification template that doesn't parse | fact | a receiver's field, or a template a template file defines, that the rule is sent with |
+| A notification template names a label the alert never had | measured | as Grafana's |
+| A notification template names a label the expression can't give | heuristic | as Grafana's; not of a Loki ruler's rule |
+
+A template that doesn't parse is a fact here and not for Grafana: Grafana
+refuses one when it is saved. Alertmanager parses a receiver's field only
+when it sends with it, and then sends nothing; `amtool check-config`
+doesn't catch it. A template file that doesn't parse stops Alertmanager
+loading the configuration at all: that is said once, on stderr and in the
+log, and a rule sent with a name the file defines (as its text says) is
+told so too.
+
+### Bounds
+
+The configuration, or Mimir's answer, is 8 MB at most, parsed as rule
+files are, what its aliases make bounded. 256 template files at most, each
+256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates,
+the defaults a file defines in Alertmanager's place counted with them, 200
+of a kind, each followed once a receiver; a field over 64 KB isn't read;
+routes as Grafana's, 2,000 and 32 levels, 20,000 matchers in all. A glob
+that leaves the configuration's directory isn't looked through, a glob's
+first 1,024 files at most are, and the links out of it are counted, not
+named. The route tree is read as Alertmanager reads it, with yaml.v2: a
+value as the text it is written in (`1.10`, not 1.1), `continue: yes` true;
+a matcher's `\.` kept, as Alertmanager keeps a backslash before anything
+but `"`, `\\` and `n`. Past each, what is
+past is passed over, and said. Routing has its own budget of work and
+time, as Grafana's has. The request to Mimir goes to its host only,
+follows no redirect, and is a read.
+
+### When it is read
+
+`lapilli verdict` reads it once; one that can't be read is an error, as
+it is read for this alone. `serve` reads it once an hour, as Grafana's
+templates; one that can't be read leaves the check as it was, and the log
+says why, once for each why. What is passed over is said the same way.
+
+### Not done
+
+- **Grafana rules sent to an external Alertmanager.** Grafana's own
+  routing is read with `--grafana`; a Grafana that sends to an
+  Alertmanager instead isn't followed there.
+- **A name no template defines.** `{{ template "x" . }}` with no `x` fails
+  when Alertmanager sends, but Alertmanager's defaults, which differ by
+  version, define many names this doesn't know: it isn't a check.
+- **Alertmanager's API** (`/api/v2/status`) gives the configuration
+  without its template files, and with secrets hidden: a rule's templates
+  can't be followed from it.
+- **`.CommonAnnotations` of a group whose alerts differ.** A summary
+  templated by an alert's labels differs from one alert to the next, and
+  is then not common: it shows nothing. Guessing it needs the group's
+  alerts.
+
+## A range over a selector that names no job
+
+Status: built, for the next release. [serveops.md](serveops.md) counts a
+range over a selector that names its job with that job's own scrape
+interval. A selector that names none, the most of them, was counted with
+the global interval: `rate(batch_runs_total[3m])` of a job scraped every
+2 minutes holds one point, and wasn't faulted under a global 30 seconds.
+
+### What it does
+
+For each range over a selector that names no job, Lapilli asks the
+history which jobs the selector's series come from: `count by (job)
+(SELECTOR)` over the ten minutes before now, a point every five, as one
+range query. The range is counted with the longest interval of those
+jobs, since it must hold two points of each, and the finding names the
+job, as for a selector that names it. A job Prometheus's configuration
+doesn't have counts with the global interval.
+
+- **Only where it can matter.** Not asked with `--scrape-interval`, nor
+  when every job has one interval, nor when no job's is known (most
+  managed services), nor of a range that holds two points of the longest
+  interval known: the answer would change nothing. Nor of a Loki ruler's
+  rule, whose ranges are of log lines.
+- **The selector as one plain selector.** The query is written from the
+  expression's tokens: a metric's name, and matchers each a name, an
+  operator and a string, quoted again. A selector of any other shape
+  isn't asked of: the query can be nothing but `count by (job)` of the
+  selector the rule already reads. And only of one metric, named before
+  the braces or by `__name__="..."`: a regular expression on `__name__`
+  could be every series there is.
+- **Bounded in time.** Thirty seconds in all each time, ten a query, in
+  `lapilli verdict` as in `serve`.
+- **Each once.** Asked once a run in `lapilli verdict`; kept a day in
+  `serve`, asked again by the worker, as the rules are read, not by a
+  page.
+- **Bounded.** 200 selectors at most each time: in `serve` the rest at
+  the next look. A thousand jobs at most a selector.
+
+### When the query fails
+
+The range is counted as before: with the global interval, or the one
+every job has. `lapilli verdict` says on stderr how many weren't asked;
+`serve` asks a failed one again an hour later, and the log says how many
+failed. A selector with no series in the ten minutes (a counter only an
+error makes) gives no job, and is counted as before too; `serve` asks it
+again an hour later.
+
+### Not done
+
+- **The metric's targets** (`/api/v1/targets/metadata`), as
+  [serveops.md](serveops.md) weighed: it knows nothing of recorded series,
+  and isn't served by most stores that serve queries.
+- **A series recorded by a recording rule** keeps the job it was recorded
+  from, and is counted with that job's scrape interval, not its rule's
+  evaluation interval, as before.
+

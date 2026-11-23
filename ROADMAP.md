@@ -17,10 +17,10 @@ tool. If you do, you are the person this needs.
 
 `lapilli demo` (0.69) runs `lapilli verdict`'s own code over a sample
 built in, a small shop's week, reading no Prometheus and sending nothing
-([docs/design/demo.md](docs/design/demo.md)). Still to do: `lapilli demo
---serve`, `lapilli serve` on a temporary ledger of the sample, on loopback
-alone, with its own look from an attacker's point of view: a port, however
-local.
+([docs/design/demo.md](docs/design/demo.md)). `lapilli demo --serve`
+(0.70) shows the same week in `lapilli serve`'s pages, by its own code,
+read-only, on loopback alone, its clock pinned to the end of the sample's
+week.
 
 ## Replay fidelity
 
@@ -49,22 +49,22 @@ Still to do:
   replayed in part (the Loki query could be asked); classic conditions over
   Loki; a Loki group's fraction of a second, and instant queries an
   evaluation for a short `--check-replay`, which would see exactly what the
-  ruler saw; Loki's values in the chart (today `--loki`, `--loki-tenant`
-  and `--loki-loaded-rules` through `extraArgs`, with no token file or rule
-  files to mount); and
-  changing a Loki ruler's rules through its API, as Mimir's are (today a
-  proposal for one is for a person). SQL and the other data sources stay out: a
+  ruler saw; and a Loki ruler's rule files changed by a pull request, and
+  a rule added to Loki's ruler (today both for a person). A Loki ruler's
+  rules read from its API are changed through it, as Mimir's are, and the
+  chart takes Loki's values, since 0.70
+  ([docs/design/rulers.md](docs/design/rulers.md)). SQL and the other data sources stay out: a
   database keeps no history of what a query returned (the design says why).
   Their rules, read with `--grafana`, are judged from Grafana's own alert
   state history instead, with no backtest
   ([docs/design/grafanajudged.md](docs/design/grafanajudged.md), 0.68),
   each change taken for the rule the history says it is of, by its uid or
-  id, since 0.69.2; still to do: a severity for such a rule, which today
-  has none; the rules' ids read from wherever Grafana lists them once its
+  id, since 0.69.2, with the severity its labels say since 0.70; still to
+  do: the rules' ids read from wherever Grafana lists them once its
   provisioning API, which its main branch marks deprecated, is gone; a day
   past the reader's bounds, or of more firings than a write holds, a gap
-  for every rule judged so; those `--check-grafana`'s Grafana runs from
-  files; and a value for `--grafana-history=false` in the chart.
+  for every rule judged so; and those `--check-grafana`'s Grafana runs from
+  files.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
 - A firing on when a period starts, of a group placed within its interval
@@ -102,9 +102,9 @@ Still to do:
   too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md)),
   and its mutes, which say why a firing paged no one, since 0.67
   ([docs/design/mutes.md](docs/design/mutes.md)), counted in the digest
-  and the reports since 0.68. Still to do: checking the SNS, Azure, Google
-  Cloud and OCI paths against real accounts; the recorder's file and Kafka
-  outputs (mutes.md).
+  and the reports since 0.68; its file and Kafka outputs, sent on by
+  [recipes/events](recipes/events), since 0.70. Still to do: checking the
+  SNS, Azure, Google Cloud and OCI paths against real accounts.
 
 ## What to change
 
@@ -115,14 +115,17 @@ an incident nothing caught gets the shorter `for`, or the number short of its
 threshold, that would have. With no incident written down, nothing is
 noisy: a rule that fires as often says what its firings were (0.41).
 
-- What a rule's firings were with no record is said only of a condition
-  with one bound that decides it. A range, or `and`, `or` and `unless`
-  joining comparisons, is still left unsaid.
+- What a rule's firings were with no record is said of one bound, a
+  range, and comparisons joined by `and`, `or` and `unless` where they
+  decide the condition (0.70); a value beside them under `or`, or a
+  comparison under `!` or inside arithmetic, is still left unsaid.
 - A `for` one event can't outlast is known of PromQL's counts of events
   (`increase`, `changes`, `resets`, `rate` of a counter), in a Prometheus
   rule or a Grafana rule's one instant query, compared as it is or reduced
-  by `last`, `max`, `min` or `mean`. LogQL's `count_over_time`, Grafana's classic conditions, and a
-  Grafana rule's range queries are still left unsaid.
+  by `last`, `max`, `min` or `mean`, and of LogQL's `count_over_time`,
+  `rate`, `bytes_over_time` and `bytes_rate` (0.70). Grafana's classic
+  conditions, a Grafana rule's range queries, and LogQL's `unwrap` are
+  still left unsaid.
 - lapilli serve judges a firing by its week's record; lapilli verdict by the
   record at the firing's own time. Judging serve's by the day, from its
   daily tallies, would bring the two closer.
@@ -131,9 +134,10 @@ noisy: a rule that fires as often says what its firings were (0.41).
   with `&&` or `||`, and for classic conditions, are built (0.25). A
   comparison under `!`, or inside arithmetic, is still read only as a whole.
 - Shifts read from where on-call schedules are kept: built (0.27)
-  (`--on-call`, iCalendar feeds). Still to do: monthly and yearly repeats,
-  and a feed's own `VTIMEZONE`; checking each tool's feed against a real
-  account.
+  (`--on-call`, iCalendar feeds); monthly and yearly repeats, a feed's own
+  `VTIMEZONE` and Windows zone names (0.70). Still to do: checking each
+  tool's feed against a real account; `RDATE` in events, which is read as
+  nothing.
 
 ## Where rules and alarms come from
 
@@ -215,19 +219,23 @@ expectation, and sets a commit status on the pull request's head commit
 (`STATUS`): commit statuses on every host (Bitbucket's build statuses,
 Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
-never leaves a success. Still to do:
+never leaves a success. Through serve too since 0.70, which judges the
+rules left alone by its record. Still to do:
 
-- Through serve: `FAIL_MISSED`, which serve's report doesn't say yet:
-  serve would judge the rules left alone by its record.
-
+- Through serve, a rule left alone that serve doesn't run: an incident
+  only it may catch is not known, where it could be replayed. And a rule
+  serve reads from an API that writes its expression otherwise
+  (Prometheus's rules API): compared by text, its catches count for
+  nothing; compared as parsed, they would.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left
-  running, which its reference doesn't say).
-- A test of the commits GitLab's merged results pipelines give
-  (`CI_MERGE_REQUEST_TARGET_BRANCH_SHA`), which the recipe takes untested.
-  Today each is tested against its API's documented answers, with a
-  server standing in; Gitea against a real one.
+  running, which its reference doesn't say). Today each is tested against
+  its API's documented answers, with a server standing in; Gitea against
+  a real one. GitLab's merged results pipelines are tested (0.70); its
+  merge train pipelines (`CI_MERGE_REQUEST_EVENT_TYPE=merge_train`), whose
+  commits its reference doesn't describe, are taken the same way,
+  untested.
 
 ## Incidents in
 
@@ -246,9 +254,9 @@ is built in and none is favoured.
   [docs/design/judging.md](docs/design/judging.md)). `lapilli impact
   suggest` (0.67) says which stacks' metrics the history has, and the
   `--impact` to give ([docs/design/suggest.md](docs/design/suggest.md)).
-  Still to do: `lapilli serve` saying a firing came after its incident
-  ended, as verdict does; a tenant flag of the history's own, for a Mimir
-  or a Cortex with no gateway.
+  `lapilli serve` says a firing came after its incident ended, as verdict
+  does, since 0.70. Still to do: a tenant flag of the history's own, for a
+  Mimir or a Cortex with no gateway.
 
 - Recipes checked against real accounts. Today each is tested against its
   API's published schema, with a server standing in.
@@ -259,8 +267,11 @@ is built in and none is favoured.
   [docs/design/links.md](docs/design/links.md)): the PagerDuty, incident.io
   and Rootly recipes copy them where an alert carries its `alertname` and
   labels, FireHydrant's and Jira Service Management's since 0.68, and near
-  misses are looked for by the link too (0.68). Still to do: Grafana IRM's
-  linked alerts; `--linked-only` as a setting in the UI.
+  misses are looked for by the link too (0.68). Grafana IRM's APIs don't
+  say which alerts an incident came from (links.md, "Grafana IRM"): its
+  linked alerts are read once they do. Still to do: `--linked-only` as a
+  setting in the UI; Grafana IRM's `QueryIncidents`, which its reference
+  marks deprecated, read by what takes its place.
 
 ## lapilli serve
 
@@ -275,9 +286,9 @@ is built in and none is favoured.
   port, and `recipes/trackers` for GitHub, GitLab, Jira and Linear
   ([docs/design/trackers.md](docs/design/trackers.md)); Azure Boards and
   Shortcut, and comments kept in step both ways, since 0.27
-  ([docs/design/inputs.md](docs/design/inputs.md)). Still to do: edits
-  followed; YouTrack, Jira Data Center; checking the recipes against real
-  accounts.
+  ([docs/design/inputs.md](docs/design/inputs.md)); YouTrack and Jira Data
+  Center, and comments' edits followed both ways, since 0.70. Still to do:
+  deletions followed; checking the recipes against real accounts.
 - Roles kept in the ledger, and a team's own editors (0.25,
   [docs/design/serveops.md](docs/design/serveops.md)): admins give an
   editor's role, of every team or of one; the flags stay the floor, and
@@ -316,10 +327,12 @@ is built in and none is favoured.
   `lapilli verdict --check-content`
   ([docs/design/content.md](docs/design/content.md)); the range check by
   each job's own scrape interval, and Grafana's notification templates
-  checked beside each rule (0.25, serveops.md). Still to do: the same for
-  Alertmanager's templates, which a ruler's rules are sent with, read from
-  Alertmanager's or a managed service's configuration; and a range over a
-  selector that names no job, by the jobs its metric comes from.
+  checked beside each rule (0.25, serveops.md); Alertmanager's templates,
+  which a ruler's rules are sent with, from its configuration or Mimir's
+  and Cortex's, and a range over a selector that names no job by the jobs
+  its metric comes from (0.70). Still to do: Grafana's rules sent to an
+  outside Alertmanager; `--alertmanager-config` in the chart and in
+  `lapilli preflight`.
 - An accessibility review of the UI and its charts, to WCAG 2.2 AA, is
   built (0.28): axe-core over every page in a browser, and tests that hold
   each page's structure, its contrast and its charts' numbers in tables
@@ -337,7 +350,9 @@ is built in and none is favoured.
   to the database where a page or a write still asks a row at a time
   (each request now asks one more, for the others' writes); the kind e2e
   of three replicas (`e2e-replicas`), which runs on main, made a required
-  check; and checking managed services
+  check once its rolling restart has passed on main since 0.70, which
+  fixed what failed it, and its setup's downloads are retried or cached;
+  and checking managed services
   (RDS, Cloud SQL, Azure Database) for real, a failover among them.
 
 The performance budgets are part of the tests (`TestScale`,

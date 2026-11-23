@@ -133,6 +133,134 @@ func (r Rule) Bounds() []Bound {
 	return slices.DeleteFunc(out, func(b Bound) bool { return !fine(b.Value) })
 }
 
+// BoundsDecide reports whether a rule's condition holds only where its
+// Bounds let it, every one of them read: each set further the way the
+// condition holds less (on the right of unless, the way its own comparison
+// holds more) makes a condition that holds for no alert the rule's doesn't,
+// and holds by comparisons that held that much further. So:
+//
+//   - in PromQL, a comparison with a number; of and, one side so at least,
+//     as the other only holds it back; of unless, its left; of or, both, as
+//     either fires it alone; in brackets, as without. Another value under
+//     or, or alone, decides it whatever the numbers;
+//   - in Grafana, a threshold, of one number or a range; a math expression
+//     as sse.Decided reads it; classic conditions of which every one
+//     compares above or below a number or within or outside a range.
+//
+// ok is false for any other, and for one with a comparison whose number
+// isn't among Bounds (one a float doesn't hold to the full).
+func (r Rule) BoundsDecide() bool {
+	if r.Unsupported != "" {
+		return false
+	}
+	bs := r.Bounds()
+	if len(bs) == 0 {
+		return false
+	}
+	if r.Graph == nil {
+		// Of LogQL, a comment Loki reads that PromQL doesn't (// and /* */)
+		// can hide what reads as a bound here: nothing is said of it.
+		if r.Logs != "" && !plainLogQL(r.Expr) {
+			return false
+		}
+		return len(r.Expr) <= maxExpr && len(comparisons(r.Expr)) == len(bs) && decides(r.Expr, 0)
+	}
+	st, ok := r.Graph.Steps[r.Graph.Cond]
+	switch {
+	case !ok:
+		return false
+	case st.Threshold != nil:
+		return true // one number, or a range's two (Bounds)
+	case st.Math != nil:
+		return len(sse.Comparisons(st.Math)) == len(bs) && sse.Decided(st.Math)
+	case st.Classic != nil:
+		n := 0
+		for _, cd := range st.Classic.Conds {
+			_, one := thresholdOps[cd.Type]
+			_, rg := rangeOps[cd.Type]
+			switch {
+			case one && len(cd.Params) > 0:
+				n++ // its first number, as bounds reads it
+			case rg && len(cd.Params) == 2:
+				n += 2
+			default:
+				return false
+			}
+		}
+		return n == len(bs)
+	}
+	return false
+}
+
+// Compares is what a bound of the rule's compares, as one value is told
+// from another: of PromQL, the expression without brackets around the
+// whole of it, comments and spaces around it, its spaces one, uncut, so
+// that (x) > 1 and x < 5 compare one value; of a Grafana rule, Of, which
+// is written out afresh. "" for a bound not of the rule's.
+func (r Rule) Compares(b Bound) string {
+	if r.Graph != nil {
+		return b.Of
+	}
+	cs := comparisons(r.Expr)
+	if b.At < 0 || b.At >= len(cs) {
+		return ""
+	}
+	return strings.Join(strings.Fields(unwrap(cs[b.At].value)), " ")
+}
+
+// decides is BoundsDecide of a PromQL expression, as operands reads it.
+func decides(expr string, depth int) bool {
+	lo, hi, ok := trimmed(expr)
+	if !ok || lo >= hi || depth > maxDepth {
+		return false
+	}
+	expr = expr[lo:hi]
+	if expr[0] == '(' && closing(expr, 0) == len(expr)-1 {
+		return decides(expr[1:len(expr)-1], depth+1)
+	}
+	ops, ok := setOps(expr)
+	if !ok {
+		return false
+	}
+	if len(ops) == 0 {
+		_, ok := compared(expr)
+		return ok
+	}
+	// or binds least: each of its operands decides it.
+	if slices.ContainsFunc(ops, func(o setOp) bool { return o.word == "or" }) {
+		start := 0
+		for _, o := range ops {
+			if o.word == "or" {
+				if !decides(expr[start:o.at], depth+1) {
+					return false
+				}
+				start = o.end
+			}
+		}
+		return decides(expr[start:], depth+1)
+	}
+	// and and unless, from the left: and decides it by either side, unless
+	// by its left alone. An operand with nothing in it isn't PromQL.
+	if lo, hi, _ := trimmed(expr[:ops[0].at]); lo >= hi {
+		return false
+	}
+	d := decides(expr[:ops[0].at], depth+1)
+	for i, o := range ops {
+		end := len(expr)
+		if i+1 < len(ops) {
+			end = ops[i+1].at
+		}
+		operand := expr[o.end:end]
+		if lo, hi, _ := trimmed(operand); lo >= hi {
+			return false
+		}
+		if o.word == "and" {
+			d = d || decides(operand, depth+1)
+		}
+	}
+	return d
+}
+
 // bounds are the numbers of classic conditions that compare above or below
 // one, by their place among all the conditions' numbers: each named by its
 // reducer and query, as avg(A); a range's two ends, its lower first,
@@ -643,7 +771,8 @@ func compared(expr string) (comparison, bool) {
 		return comparison{}, false
 	}
 	left, right := expr[:o.at], expr[o.end:]
-	if w := strings.Fields(right); len(w) > 0 && strings.EqualFold(w[0], "bool") {
+	// bool, a comment before it or not, makes it a value, not a filter.
+	if w := strings.Fields(stripComments(right)); len(w) > 0 && strings.EqualFold(w[0], "bool") {
 		return comparison{}, false
 	}
 	ln, lok := number(left)

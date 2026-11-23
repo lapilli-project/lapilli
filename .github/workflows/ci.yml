@@ -40,9 +40,10 @@ jobs:
       - name: go.mod is tidy
         run: go mod tidy -diff
       - run: go vet ./...
-      # The serve tests take five to seven minutes, more on macOS: past
-      # go test's own ten, the package fails unrun. Twenty, as on Postgres.
-      - run: go test -timeout 20m ./...
+      # The serve tests take ten minutes on Linux and eighteen on macOS,
+      # where twenty left a slow runner's package unfinished (11-23):
+      # forty, so that a slow runner fails a test, not the clock.
+      - run: go test -timeout 40m ./...
 
   latest-go:
     name: test on the latest Go
@@ -55,9 +56,10 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      # The serve tests take five to seven minutes, more on macOS: past
-      # go test's own ten, the package fails unrun. Twenty, as on Postgres.
-      - run: go test -timeout 20m ./...
+      # The serve tests take ten minutes on Linux and eighteen on macOS,
+      # where twenty left a slow runner's package unfinished (11-23):
+      # forty, so that a slow runner fails a test, not the clock.
+      - run: go test -timeout 40m ./...
 
   postgres:
     # The ledger's, serve's and the command's tests with the ledger in
@@ -310,13 +312,14 @@ jobs:
 
   e2e-loki:
     # Rules written in LogQL replayed against a real Loki and Grafana in
-    # Docker, and set beside what they fired. Not a required check: it
-    # pulls images, and logs must run for some minutes first.
+    # Docker, and set beside what they fired; then a change applied and
+    # undone through a second Loki's ruler. Not a required check: it pulls
+    # images, and logs must run for some minutes first.
     name: Loki on real servers
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-loki == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

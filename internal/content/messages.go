@@ -19,6 +19,7 @@ var messages = map[string]string{
 	AbsentNoFor:     "absent() with no for: a restart pages",
 
 	NotifyNoText:         "a notification template shows an annotation the rule hasn't",
+	NotifyTemplateError:  "a notification template that doesn't parse",
 	NotifyLabelNeverSeen: "a notification template names a label no firing had",
 	NotifyLabelNotGiven:  "a notification template names a label its expression may not give",
 }
@@ -27,7 +28,7 @@ var messages = map[string]string{
 var whys = map[string]string{
 	LabelNotGiven: "read from its aggregation; it hasn't fired to tell",
 	RareSeverity:  "it may be a typo, or a severity only it needs",
-	ShortRange:    "the interval is its job's where the selector names one, and Prometheus's global one otherwise",
+	ShortRange:    "the interval is its job's where the selector names one or its series say which, and Prometheus's global one otherwise",
 	AbsentNoFor:   "a series gone for a moment may be what it is there for",
 
 	NotifyLabelNotGiven: "read from its aggregation; it hasn't fired to tell",

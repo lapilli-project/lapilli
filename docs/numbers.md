@@ -843,7 +843,7 @@ minor release, said in the changelog. A patch release changes none of
 them. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
 `unreplayed`, `hours`, `impact_short`, a rule's `unseen`, `for_outlasts`
 and `late`, an incident's `fired_after`, a firing's `after` and
-`held_from`, and the
+`held_from`, the report's `late_cut`, and the
 metrics of `lapilli serve` about itself that aren't below) may change in a
 minor release, said in the changelog.
 
@@ -989,7 +989,7 @@ The ids: `rules.read`, `rules.replayable`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
 `history.intervals`, `grafana.notifications`, `grafana.write`,
 `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
-`changes.oci`, `changes.ruler`, `inputs.files`, `secrets.files`,
+`changes.oci`, `changes.ruler`, `changes.loki`, `inputs.files`, `secrets.files`,
 `ledger.sqlite`, `ledger.postgres`, `signin`, `backtest.trust`,
 `backtest.issuers`, `access`, `estimate.hourly`, `estimate.backfill`,
 `estimate.nights`, `estimate.beside`, `estimate.backtests`,

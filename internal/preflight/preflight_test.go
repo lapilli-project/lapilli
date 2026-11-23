@@ -589,7 +589,7 @@ func TestOffline(t *testing.T) {
 // IDs are every item's id a preflight gives.
 var IDs = []string{"rules.read", "rules.replayable", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
 	"history.alerts", "history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
-	"changes.google", "changes.oci", "changes.ruler", "inputs.files",
+	"changes.google", "changes.oci", "changes.ruler", "changes.loki", "inputs.files",
 	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "backtest.trust", "backtest.issuers", "access", "estimate.hourly",
 	"estimate.backfill", "estimate.nights", "estimate.beside", "estimate.backtests", "estimate.memory"}
 
@@ -832,6 +832,33 @@ func TestChangesIdentity(t *testing.T) {
 	}
 	if a := p.al.asked(); a.Requests+a.Refused != 0 {
 		t.Errorf("%+v", a)
+	}
+}
+
+// What a ruler may write can't be asked without writing: a Mimir's, and
+// Loki's ruler's once --changes-in names a namespace of it (loki:NAMESPACE),
+// are unknown, and nothing is asked.
+func TestChangesRulers(t *testing.T) {
+	c := config()
+	c.Serve.Changes = true
+	c.Serve.Loki, c.Serve.LokiLoaded, c.Serve.ChangesIn = "http://loki:3100", true, []string{"loki:shop"}
+	p := newRun(c)
+	p.changes(context.Background())
+	if it := itemOf(p, "changes.loki"); it == nil || it.State != Unknown || !strings.Contains(it.Why, "local") {
+		t.Fatalf("%+v", it)
+	}
+	if itemOf(p, "changes.ruler") != nil {
+		t.Error("a Mimir's item without --ruler")
+	}
+	if a := p.al.asked(); a.Requests+a.Refused != 0 {
+		t.Errorf("%+v", a)
+	}
+	c.Serve.ChangesIn = []string{"shop"}
+	c.Serve.Ruler = "http://mimir:8080/prometheus/config/v1/rules"
+	p = newRun(c)
+	p.changes(context.Background())
+	if itemOf(p, "changes.loki") != nil || itemOf(p, "changes.ruler") == nil {
+		t.Errorf("--changes-in shop: %+v", p.r.Items)
 	}
 }
 

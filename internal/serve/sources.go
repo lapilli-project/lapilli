@@ -171,7 +171,8 @@ func (s *Server) filePaths() []filePath {
 		{c.IncidentsToken, "--incidents-token-file"}, {c.FiringsToken, "--firings-token-file"}, {c.TasksToken, "--tasks-token-file"},
 		{c.NotifyToken, "--notify-token-file"}, {c.NotifyGrafanaSecret, "--notify-grafana-secret-file"},
 		{c.ChangesToken, "--changes-token-file"}, {c.ChangesGrafanaToken, "--changes-grafana-token-file"},
-		{c.ChangesRulerToken, "--changes-ruler-token-file"}, {c.ChangesPaused, "--changes-paused"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
+		{c.ChangesRulerToken, "--changes-ruler-token-file"}, {c.ChangesLokiToken, "--changes-loki-token-file"},
+		{c.ChangesPaused, "--changes-paused"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
 	for _, f := range c.TeamDigests {
 		given = append(given, filePath{f, "--team-digest"})
 	}

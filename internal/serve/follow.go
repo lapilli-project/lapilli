@@ -28,6 +28,10 @@ func (s *Server) following() bool {
 	return s.cfg.RulesHistory != "" && s.cfg.RulesPath == ""
 }
 
+// historyVersions lists the versions in a history: a variable, so that a
+// test can add one between the reads of a look.
+var historyVersions = rules.History
+
 // pickHistory is how a version in the history is read: its rules alone,
 // those --rules-select keeps.
 func (s *Server) pickHistory() rules.Picking {
@@ -83,16 +87,39 @@ func (s *Server) extrasNow(ctx context.Context) ([]rules.Rule, []rules.Doc) {
 	return rs, docs
 }
 
-// newest reads the history's newest version from before now that reads:
-// the rules in effect, when following.
-func (s *Server) newest() ([]rules.Rule, []rules.Doc, error) {
-	hs, err := rules.History(s.cfg.RulesHistory)
+// followedTo is the time of the last version the ledger followed, read or
+// not (follow, history); ok is false before any.
+func (s *Server) followedTo(ctx context.Context) (time.Time, bool, error) {
+	v, err := s.l.Meta(ctx, "followed")
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(n, 0), true, nil
+}
+
+// newest reads the history's newest version that reads, from before now
+// and no later than the last followed: the rules in effect, when
+// following. A version added since the last look waits for the next,
+// which records it from its own time: read here first, it would be taken
+// for the rules changed now, and the hours since its time never replayed
+// with it.
+func (s *Server) newest(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
+	hs, err := historyVersions(s.cfg.RulesHistory)
 	if err != nil {
 		return nil, nil, fmt.Errorf("--rules-history: %w", err)
 	}
-	now := s.now()
+	to := s.now()
+	if at, ok, err := s.followedTo(ctx); err != nil {
+		return nil, nil, err
+	} else if ok && at.Before(to) {
+		to = at
+	}
 	for i := len(hs) - 1; i >= 0; i-- {
-		if hs[i].At.After(now) {
+		if hs[i].At.After(to) {
 			continue
 		}
 		var picked rules.Picked
@@ -116,7 +143,7 @@ func (s *Server) follow(ctx context.Context) error {
 	if !ok {
 		return s.history(ctx)
 	}
-	hs, err := rules.History(s.cfg.RulesHistory)
+	hs, err := historyVersions(s.cfg.RulesHistory)
 	if errors.Is(err, rules.ErrNoVersions) {
 		return nil
 	}
@@ -128,14 +155,15 @@ func (s *Server) follow(ctx context.Context) error {
 	// began. Not after the latest when there is a last followed: a version
 	// recorded since for the extras beside it (alarms, Loki) is no later a
 	// commit of the history.
-	var after time.Time
-	if v, err := s.l.Meta(ctx, "followed"); err != nil {
+	after, marked, err := s.followedTo(ctx)
+	if err != nil {
 		return err
-	} else if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-		after = time.Unix(n, 0)
-	} else if after = latest.Since; after.IsZero() {
-		if after, err = s.l.RunsFrom(ctx); err != nil {
-			return err
+	}
+	if !marked {
+		if after = latest.Since; after.IsZero() {
+			if after, err = s.l.RunsFrom(ctx); err != nil {
+				return err
+			}
 		}
 	}
 	now := s.now()
@@ -159,6 +187,12 @@ func (s *Server) follow(ctx context.Context) error {
 		if err := s.l.SetMeta(ctx, "followed", strconv.FormatInt(h.At.Unix(), 10)); err != nil {
 			return err
 		}
+		marked = true
+	}
+	// Followed from where it looked, when no version was: newest reads
+	// none after it, so one added meanwhile waits for the next look here.
+	if !marked && !after.IsZero() {
+		return s.l.SetMeta(ctx, "followed", strconv.FormatInt(after.Unix(), 10))
 	}
 	return nil
 }

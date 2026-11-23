@@ -231,3 +231,155 @@ As above, with these settled in the building:
   written. A task's title and text reach the tracker as written in
   Lapilli, mentions included: the tracker renders them as it renders its
   own, and nothing in them is taken for a marker.
+
+## YouTrack and Jira Data Center (0.70)
+
+Two more recipes, alike with the others, each tested against a stand-in
+for the API its documentation gives (recipes/trackers/README.md names the
+pages); neither is checked against a real account yet.
+
+- **`youtrack.sh`**: issues in one project (`YOUTRACK_PROJECT`, the ID its
+  issues' IDs start with), REST `/api`, a permanent token as a Bearer
+  token. YouTrack answers only the attributes `fields=` names, so every
+  request names them. The project's database id, which an issue is made
+  in, is looked up among the projects the token reads, a thousand at most.
+  An issue's text ends with the marker line, as GitHub's does, since
+  YouTrack's tags are made and shared beforehand and given by id; it is
+  found again by search (`project: {OPS} reporter: me "lapilli-task-ID"`)
+  and taken for the job's by its reporter, which YouTrack doesn't let be
+  changed, its project and its last line. An issue resolved closes its
+  task, by when it was (`resolved`): `dropped` when its state is
+  `YOUTRACK_DROPPED` or reads as not to be done, `done` otherwise.
+  `CLOSE_ISSUES` sets the state field as a custom field is set
+  (`StateIssueCustomField`), not by a command: a command is a language of
+  its own, and the field's value goes in it as text. A field a
+  state-machine workflow keeps is moved by its transitions alone, which
+  the recipe doesn't name: YouTrack refuses the update, the run says so,
+  and the issue stays open. Comments
+  limited to some groups or users aren't copied.
+- **`jira-dc.sh`**: Jira Data Center and Server, as `jira.sh` is Jira
+  Cloud: REST API v2, a personal access token as a Bearer token (8.14 and
+  later), the same labels and JQL, `/rest/api/2/search`, transitions into
+  the done category. Users are by `key`, which a rename doesn't change.
+  Text is wiki markup, not Atlassian Document Format, and wiki markup has
+  no escape that holds everywhere: the task's text and its names go in a
+  `{noformat}` block, and a posted comment is quoted in one, with who
+  wrote it where `COMMENT_NAMES` says (a name is the sign-in proxy's, and
+  may be anything), so a PromQL selector's braces aren't a macro,
+  `[~name]` mentions no one and `!URL!` shows no image. Only `{noformat}` ends the block, and one in the text is
+  broken by a zero-width space. The link back and the marker line are
+  told from the end of what `issue_text` writes, so no line of a task's
+  text is taken for them and moved out of the block. A Jira that doesn't
+  give `statuscategorychangedate` is read by `resolutiondate`, as Cloud's.
+
+Both wait out a 429, and a 503 on a read, as long as `Retry-After` says, as
+every recipe does (`fetch` in `lib.sh`). The chart's `serve.trackers.tracker`
+takes `youtrack` and `jira-dc`; Jira Data Center's settings are named
+`JIRA_*`, as Cloud's are, without `JIRA_EMAIL`.
+
+What an attacker could newly reach: nothing past what the other recipes
+reach. Each token goes to the configured address alone; an issue's
+reference is taken out of a link only when it starts with the configured
+address and is `PROJECT-N`; a project's id, a comment's id and every time
+are checked before they are used or sent on; the project lookup and the
+comments are paged within bounds. The names a rule's source chooses can't
+mention, link or show an image in either tracker.
+
+## Edits followed (0.70)
+
+ROADMAP said, of trackers, "Still to do: edits followed". What it meant is
+in [inputs.md](inputs.md), section 6: comments are kept in step both ways
+since 0.27, "once", and "a comment edited or deleted after it was copied
+isn't followed either way", left as a question and settled for that
+release. Nothing in the designs asked for a task's title or text to be
+carried after its issue was made. So this is about comments, and it
+needed deciding: which edits, which way, by what, and what is left.
+
+**Decided here:**
+
+- **Edits, both ways; not deletions.** A comment changed after it was
+  carried is carried again. A comment deleted isn't followed, either way:
+  in Lapilli a deleted comment leaves no row to say which post was its
+  (following it would take a new column, a schema change), and in a
+  tracker a comment no longer read can be one deleted, one made
+  restricted, or one past what a run reads. Taking it away from Lapilli on
+  that guess could take a person's words from where the team reads them.
+- **Not a task's title or text.** An issue is the tracker's once it is
+  made: people there retitle it and write under it, and the marker line
+  must stay last. Carrying a task's edits would overwrite theirs; carrying
+  theirs back would let anyone who can edit the issue rewrite the task.
+  Neither is built, and neither is asked for.
+- **By time, not by text.** Each tracker gives a comment's last change
+  (GitHub's and GitLab's `updated_at`, Jira's `updated`, Linear's
+  `editedAt`, Azure Boards' `modifiedDate`, Shortcut's `updated_at`,
+  YouTrack's `updated`), and Lapilli keeps its own. Text alone can't
+  decide: trackers give a comment back otherwise than it was sent (Jira
+  as Atlassian Document Format, Azure Boards as HTML, Jira Data Center's
+  posts in a block), and a difference that never goes away would edit the
+  post every run.
+
+**How.**
+
+- **Lapilli to the tracker.** A comment people wrote here, posted to its
+  issue, and changed here after the tracker last changed the job's post
+  of it, has the post changed to what would be posted now (the comment
+  quoted, its marker last), unless the post holds that already: what it
+  would hold, as the tracker gives back what it was sent (`t_shown`:
+  Jira's from Atlassian Document Format, Jira Data Center's in its block,
+  GitLab's lines starting with `/` escaped, Azure Boards' read as HTML), so
+  a save here that changed nothing, which moves the comment's time, edits
+  nothing in the tracker and tells its watchers nothing. Only the
+  job's own post, found by the tracker's id Lapilli keeps for it; the
+  tracker changes it (`PATCH`, `PUT` or `POST` to the comment, as each
+  takes an edit). Once it has, the post is later than the comment, so it
+  is changed once. The comment's time is Lapilli's and the post's the
+  tracker's, two clocks, as `CLOSE_ISSUES` compares a task's status with
+  its issue's last change: an edit made here within their difference after
+  the post may be missed, and a post someone changed in the tracker after
+  the last edit here isn't changed back until the comment is edited again.
+  An edit the tracker refuses (a 4xx, or a comment's id not of its shape)
+  is said and passed over, each run, and holds up nothing else: the
+  task's other edits go on, and so do the tracker's, below.
+- **The tracker to Lapilli.** A comment copied in, changed in the tracker
+  after the time Lapilli keeps for it, is sent again with the tracker's
+  time for the change, its text made to fit as when it was copied. Lapilli
+  keeps a copy's times as the tracker gives them (`created` when it was
+  written, and now `updated` when it last changed there), so this compares
+  one clock with itself. It keeps the edit only when it is later than the
+  one kept, text and time, though the text shows as the one kept does: an
+  edit is taken once, the same sent again or an older one after a newer
+  changes nothing. Only a comment copied in from the tracker is changed
+  so; a person's is theirs.
+- **Bounded.** `MAX_COMMENTS` (200) each way a task a run, as comments
+  are; a post isn't edited where the issue has more comments than a run
+  reads and the post isn't among those read.
+- **A recipe of one's own** that gives no comment's time of change
+  (`edited`, beside `at`) follows no edit, and one with no `t_edit` sends
+  none to the tracker; each keeps comments in step as before.
+
+**What the tasks token may now also do:** `PATCH
+/api/v1/tasks/{id}/comments/{comment}` with `text` and `edited` (an RFC 3339
+time), for a comment copied in from the task's issue, and nothing more: it
+answers whether it `changed`, and whether the text was kept `as_sent`. It
+is noted as `tasks-token`, and isn't told to the notice webhook or Slack:
+the tracker told people. With `posted` it is as before, and the two can't
+be sent together.
+
+**No schema change.** A copy's `updated`, kept since 015 and set to when
+it was written, now holds when it was last changed in the tracker.
+
+**Attacker's look.** Someone with the tasks token can now also rewrite
+the text of a comment copied in from a tracker, to what a copy may hold,
+at most 10,000 characters, with what doesn't show kept as what does; not
+a person's comment, not its author, not its time past now. That is no
+more than copying a comment in already let them write. Someone who can
+edit a comment in the tracker can change what its copy says in Lapilli:
+that is what kept in step means, and it shows as the tracker's. The
+recipes send an edit only to the job's own comment, by an id checked to
+be the tracker's shape (digits; YouTrack's `N-N`; Linear's as a GraphQL
+variable), on an issue whose reference they checked; what they send is
+what they would post.
+
+**Left to do:** deletions, either way; an edit in the tracker of a
+comment no longer read (restricted since, or past the bound); checking
+the edit endpoints against real accounts.

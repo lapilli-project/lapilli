@@ -662,8 +662,9 @@ incident to its end, and agrees with it on each `--match` label both carry
 - **Too soon, or too late.** A firing that started more than `--lead`
   before the incident caught nothing: it was on anyway. One whose condition
   held in the incident but fired after it ended, its `for` run out, is
-  named on the incident's row (`✗ nothing in time; after its end: RULE
-  +3m`), and stays black.
+  named on the incident's row, in the report and on `lapilli serve`'s
+  Incidents page alike (`✗ nothing in time; after its end: RULE +3m`), and
+  stays black.
 
 ### The replay differs from what really fired
 

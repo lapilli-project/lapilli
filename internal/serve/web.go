@@ -415,6 +415,12 @@ func (s *Server) checks(mux *http.ServeMux, detail bool) {
 	// turn is: the turn is every replica's, and reads are answered. Which
 	// replica leads is said after, and whether writes wait.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		// Told to stop, it answers on for --shutdown-delay, ready no
+		// longer: what sends it requests is to send them elsewhere.
+		if s.stopping.Load() {
+			http.Error(w, "stopping", http.StatusServiceUnavailable)
+			return
+		}
 		if !s.ready.Load() {
 			if c, err := s.l.Cursor(r.Context()); err == nil && !c.IsZero() {
 				s.ready.Store(true)
@@ -1197,6 +1203,11 @@ const (
 // said to anyone but an admin.
 const unreachedText = "can't reach the ledger's database; an admin sees why"
 
+// stoppedText is what a request is answered when its context ended before
+// it was done: serve stopping, or a ledger lost. One whose client went
+// away is answered so too, read by no one.
+const stoppedText = "stopped before it was done: try again"
+
 // unreached reports whether a status error is that the ledger's database
 // couldn't be reached (ledger.ErrConnect): told by its text, as the leader
 // shares its status with the other replicas.
@@ -1222,7 +1233,9 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken), errors.Is(err, ledger.ErrTooMany), errors.Is(err, ledger.ErrSignalsChanged):
 		code = http.StatusConflict
 	case errors.Is(err, context.Canceled):
-		return
+		// Not done: whoever still waits is to ask again, not told it was
+		// (an answer of nothing is a 200).
+		code = http.StatusServiceUnavailable
 	}
 	if code == http.StatusInternalServerError {
 		s.log.Error("serving", "path", r.URL.Path, "err", err)
@@ -1235,6 +1248,9 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 		// Where the ledger's database is, and as whom serve connects, are
 		// an admin's to read, as in the status banner.
 		text = func(lang string) string { return tr(lang, unreachedText) }
+	}
+	if errors.Is(err, context.Canceled) {
+		text = func(lang string) string { return tr(lang, stoppedText) }
 	}
 	if errors.Is(err, errPagesBusy) {
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(renderWait/time.Second))))

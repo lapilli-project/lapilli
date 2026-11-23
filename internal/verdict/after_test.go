@@ -175,6 +175,21 @@ func TestFiredAfterText(t *testing.T) {
 	if out := b.String(); strings.Contains(out, "after its end") || strings.Contains(out, "came after an incident") {
 		t.Errorf("no rules known, nothing said of after:\n%s", out)
 	}
+	// Cut short, as lapilli serve's ledger may say (Report.LateCut): said,
+	// and in --json.
+	rep := Judge(known, slices.Clone(fs[:4]), incs, opts())
+	rep.LateCut = true
+	b.Reset()
+	if err := Text(&b, rep, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if out := b.String(); !strings.Contains(out, "! More firings came near the ends of incidents than one read looks at") {
+		t.Errorf("cut, not said:\n%s", out)
+	}
+	b.Reset()
+	if err := JSON(&b, rep); err != nil || !strings.Contains(b.String(), `"late_cut": true`) {
+		t.Errorf("cut, not in the JSON: %v", err)
+	}
 }
 
 // TestImpactShortLateText: when rules need longer for their late metrics,

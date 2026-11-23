@@ -11,11 +11,13 @@ import (
 // called noisy: its firings caught nothing written down, which isn't
 // nothing. What can be said without a record is what they were. Of a rule
 // whose condition counts events (rules.Rule.EventWindow), each firing is an
-// event it counted, a count that went up: they happened. Of another with one
-// bound that decides it, those whose value went well past the bound
-// happened, and those that stayed within a fifth of it may have flickered at
-// its edge. And which alerts fired most. Whether they mattered is for a
-// person to write down. A longer "for" would only hide them.
+// event it counted, a count that went up: they happened. Of another whose
+// bounds decide it (rules.Rule.BoundsDecide: one bound, a range, or
+// comparisons joined by and, or and unless), those whose values went well
+// past the bounds that decided them happened, and those that stayed within
+// a fifth of them may have flickered at an edge. And which alerts fired
+// most. Whether they mattered is for a person to write down. A longer
+// "for" would only hide them.
 
 // Unrecorded is such a rule, as lapilli verdict, replaying it, and lapilli
 // serve's weekly digest work it out.
@@ -28,14 +30,17 @@ type Unrecorded struct {
 	// data among them, which is none.
 	Events bool `json:"events,omitempty"`
 	// Clear is how many of its firings happened: of a condition that counts
-	// events, all; of another, those whose value went past its bound by
-	// more than rules.NearBy of it, for all of its "for". Nil when that
-	// can't be told: its condition has no one bound that decides it (a
-	// range, and, or, unless), its bound is nothing, it couldn't be
-	// replayed with the bound further, or it fired more than is read. Bound
-	// is the bound, as compared: "> 0.5".
-	Clear *int   `json:"clear,omitempty"`
-	Bound string `json:"bound,omitempty"`
+	// events, all; of another, those whose values went past the bounds that
+	// decided them by more than rules.NearBy of each, for all of its "for":
+	// held with every bound that far further. Nil when that can't be told:
+	// its bounds don't decide its condition (a value that isn't compared,
+	// under or or alone), one is nothing, a range is narrower than two
+	// fifths of its ends, it couldn't be replayed with them further, or it
+	// fired more than is read. Bound is the bounds, as compared: "> 0.5";
+	// of several, "errors > 5, unless requests < 10", and Bounds how many.
+	Clear  *int   `json:"clear,omitempty"`
+	Bound  string `json:"bound,omitempty"`
+	Bounds int    `json:"bounds,omitempty"`
 	// TooMany says Clear is nil for there were more firings than are read
 	// to tell.
 	TooMany bool `json:"too_many,omitempty"`
@@ -171,6 +176,12 @@ func (u Unrecorded) text(labels bool) string {
 	case u.Clear == nil && u.TooMany:
 		b.WriteString(" Too many firings to tell how many happened.")
 	case u.Clear == nil:
+	case u.Bounds > 1 && *u.Clear == u.Firings:
+		fmt.Fprintf(&b, " All %d went well past the bounds that decided them (%s), not a flicker at an edge: these happened.", *u.Clear, Clean(u.Bound))
+	case u.Bounds > 1 && *u.Clear > 0:
+		fmt.Fprintf(&b, " %d of them went well past the bounds that decided them (%s), not a flicker at an edge: these happened.", *u.Clear, Clean(u.Bound))
+	case u.Bounds > 1:
+		fmt.Fprintf(&b, " None stayed more than a fifth past the bounds that decide it (%s) for all of its for.", Clean(u.Bound))
 	case *u.Clear == u.Firings:
 		fmt.Fprintf(&b, " All %d went well past its bound (%s), not a flicker at its edge: these happened.", *u.Clear, Clean(u.Bound))
 	case *u.Clear > 0:

@@ -361,3 +361,121 @@ func TestBoundBesideOther(t *testing.T) {
 		t.Errorf("value of $A: %v", ok)
 	}
 }
+
+// A condition's bounds decide it when it holds only where they let it, so
+// that each set further the way it holds less makes a condition that holds
+// for no alert the rule's doesn't: one comparison, a range, comparisons
+// joined by and (either side), or (both), unless (its left); in Grafana, a
+// threshold, math of comparisons joined by && and ||, classic conditions
+// every one of which compares. What beside them decides it whatever the
+// numbers doesn't.
+func TestBoundsDecide(t *testing.T) {
+	for _, c := range []struct {
+		expr string
+		ok   bool
+	}{
+		{"errors > 5", true},
+		{"x > 1 and x < 5", true},
+		{"(x > 1) and (x < 5)", true},
+		{"errors > 5 and latency > 0.5", true},
+		{"up == 1 and errors > 5", true},
+		{"errors > 5 and on(job) up == 1", true},
+		{"errors > 5 or latency > 0.5", true},
+		{"x < 1 or x > 5", true},
+		{"(errors > 5 and up == 1) or latency > 0.5", true},
+		{"errors > 5 unless requests < 10", true},
+		{"errors > 5 unless on(job) maintenance == 1", true},
+		{"errors > 5 and latency > 0.5 unless requests < 10", true},
+		{"sum(errors > 1) > 5", true}, // a comparison inside is part of its value
+		// What decides it whatever the numbers.
+		{"errors > 5 or up == 0", false},
+		{"up == 0 or errors > 5", false},
+		{"up == 1 unless errors > 5", false},
+		{"up == 1 and on() up", false},
+		{"errors", false},
+		{"errors > bool 5", false},
+		{"errors > 5 or 1 < # c\n bool up", false}, // a value, its bool behind a comment
+		{"errors > 5 or 1 < # c\n up", true},
+		{"(errors > 5) * 2", false},
+		{"errors > 1e-310 and x > 1", false}, // a number a float doesn't hold to the full, not among Bounds
+		{"errors > 5 and", false},
+		{"and errors > 5", false},
+	} {
+		r := Rule{Name: "R", Expr: c.expr}
+		if got := r.BoundsDecide(); got != c.ok {
+			t.Errorf("%s: %v, want %v", c.expr, got, c.ok)
+		}
+	}
+	if (Rule{Expr: "errors > 5", Unsupported: Paused}).BoundsDecide() {
+		t.Error("a rule not replayed")
+	}
+	// A Loki rule's bound behind a comment Loki reads and PromQL doesn't is
+	// Loki's comment, not a bound; one PromQL reads too, a bound.
+	for _, c := range []struct {
+		expr string
+		ok   bool
+	}{
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m]))\n// > 10", false},
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m])) /* > 10 */ > 20", false},
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m])) # x\n > 10", true},
+		{"sum(count_over_time({app=\"x\"} |= \"a//b\" [5m])) > 10", true},
+	} {
+		if got := (Rule{Name: "R", Expr: c.expr, Logs: LokiRuler}).BoundsDecide(); got != c.ok {
+			t.Errorf("Loki %q: %v, want %v", c.expr, got, c.ok)
+		}
+	}
+
+	graph := func(st Step) Rule {
+		return Rule{Name: "R", Graph: &Graph{Queries: map[string]string{"A": "a", "B": "b"}, Cond: "C", Steps: map[string]Step{"C": st}}}
+	}
+	for _, typ := range []string{"gt", "within_range", "outside_range_included"} {
+		if !graph(Step{Threshold: &Threshold{Input: "A", Type: typ, A: 1, B: 5}}).BoundsDecide() {
+			t.Errorf("a threshold %s", typ)
+		}
+	}
+	for _, c := range []struct {
+		math string
+		ok   bool
+	}{
+		{"$A > 5", true},
+		{"$A > 5 && $B < 3", true},
+		{"$A > 5 || $B < 3", true},
+		{"$A > 5 && $B", true},
+		{"$A > 5 || $B", false},
+		{"!($A > 5)", false},
+		{"($A > 5) * 2 > 1", true},
+		{"$A", false},
+	} {
+		m, err := sse.ParseMath(c.math)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := graph(Step{Math: m}).BoundsDecide(); got != c.ok {
+			t.Errorf("math %s: %v, want %v", c.math, got, c.ok)
+		}
+	}
+	classic := func(conds ...ClassicCond) Rule { return graph(Step{Classic: &Classic{Conds: conds}}) }
+	gt := ClassicCond{Query: "A", Reducer: "avg", Type: "gt", Params: []float64{5}}
+	within := ClassicCond{Query: "B", Reducer: "max", Type: "within_range", Params: []float64{1, 10}, Op: "or"}
+	eq := ClassicCond{Query: "A", Reducer: "last", Type: "eq", Params: []float64{3}, Op: "and"}
+	none := ClassicCond{Query: "A", Reducer: "diff", Type: "no_value", Op: "or"}
+	if !classic(gt, within).BoundsDecide() || classic(gt, eq).BoundsDecide() || classic(gt, none).BoundsDecide() {
+		t.Error("classic conditions")
+	}
+}
+
+// What a bound compares is one value however it is bracketed, spaced or
+// commented around: as Grafana's are written out afresh.
+func TestCompares(t *testing.T) {
+	r := Rule{Name: "R", Expr: "(x) > 1 and ( x  # the same\n) < 5 or rate(y[5m]) > 2"}
+	bs := r.Bounds()
+	if len(bs) != 3 {
+		t.Fatalf("%+v", bs)
+	}
+	if a, b, c := r.Compares(bs[0]), r.Compares(bs[1]), r.Compares(bs[2]); a != "x" || b != "x" || c != "rate(y[5m])" {
+		t.Errorf("%q %q %q", a, b, c)
+	}
+	if got := r.Compares(Bound{At: 9}); got != "" {
+		t.Errorf("not the rule's: %q", got)
+	}
+}

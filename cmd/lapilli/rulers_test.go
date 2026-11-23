@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +110,52 @@ func TestServeRulerFlags(t *testing.T) {
 		var out, errs strings.Builder
 		if code := run(append([]string{"serve"}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
 			t.Errorf("%s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
+		}
+	}
+}
+
+// lapilli serve's changes through Loki's ruler, read with
+// --loki-loaded-rules: its namespaces named loki:NAMESPACE in --changes-in,
+// a token of their own to write with, and no Loki namespace named without
+// Loki's ruler read.
+func TestServeLokiChangesFlags(t *testing.T) {
+	tok := write(t, "tok", "loki-writes-0123456789\n")
+	same := write(t, "same", "loki-writes-0123456789\n")
+	signed := []string{"--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com"}
+	loki := []string{"--loki", "http://loki:3100", "--loki-loaded-rules", "--prometheus", "http://p"}
+	dir := t.TempDir()
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"a token, files alone":    {append([]string{"--changes-loki-token-file", tok, "--loki", "http://loki:3100", "--loki-rules", dir, "--prometheus", "http://p"}, signed...), "--changes-loki-token-file is for"},
+		"a token, short":          {append(append([]string{"--changes-loki-token-file", write(t, "short", "x")}, loki...), signed...), "16 characters"},
+		"the read token to write": {append(append([]string{"--changes-loki-token-file", tok, "--loki-token-file", same}, loki...), signed...), "same token as --loki-token-file"},
+		"a token, no changes":     {append([]string{"--changes-loki-token-file", tok}, loki...), "go with --changes"},
+		"loki:, files alone":      {append([]string{"--changes-in", "loki:shop", "--loki", "http://loki:3100", "--loki-rules", dir, "--prometheus", "http://p", "--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com"}, signed...), "names a namespace of Loki's ruler"},
+		"alarms named loki":       {append(append([]string{"--changes-in", "loki:shop", "--alarms", "loki=https://monitoring.eu-west-1.amazonaws.com"}, loki...), signed...), "--alarms loki="},
+	} {
+		var out, errs strings.Builder
+		if code := run(append([]string{"serve"}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
+			t.Errorf("%s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
+		}
+	}
+	// Taken: Loki's namespaces alone, with a token to write; and beside a
+	// Mimir's, loki:shop is Loki's, shop the Mimir's.
+	for _, args := range [][]string{
+		append(append([]string{"--changes-in", "loki:shop,loki:team-*", "--changes-loki-token-file", tok}, loki...), signed...),
+		append(append([]string{"--changes-in", "shop,loki:shop", "--ruler", "http://mimir:8080/prometheus/config/v1/rules"}, loki...), signed...),
+	} {
+		got, err := readServe(args, false)
+		if err != nil {
+			t.Errorf("%v: %v", args, err)
+			continue
+		}
+		if !got.cfg.LokiLoaded || !slices.Contains(got.cfg.ChangesIn, "loki:shop") {
+			t.Errorf("%v: %+v", args, got.cfg.ChangesIn)
+		}
+		if slices.Contains(args, "--changes-loki-token-file") && got.cfg.ChangesLokiToken != tok {
+			t.Errorf("the write token: %q", got.cfg.ChangesLokiToken)
 		}
 	}
 }

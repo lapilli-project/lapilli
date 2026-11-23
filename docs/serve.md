@@ -17,6 +17,10 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 # then http://localhost:8080
 ```
 
+To look at the pages before connecting anything, `lapilli demo --serve`
+serves a made-up week of a small shop's alerts, read-only, on this
+machine alone ([Getting started](getting-started.md#see-it-first-on-sample-data)).
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-dashboard-dark.png">
   <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks, most beside the week before, and a link to the list that makes it; under them, what to look at: rules to quiet or look at, each with a button to make it a task" src="../assets/serve-dashboard.png" width="820">
@@ -532,7 +536,8 @@ with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
 `--notify-webhook-secret-file`, each post to it is signed, so the receiver
 can tell it came from this Lapilli
 ([Signed posts to the webhook](#signed-posts-to-the-webhook)). To keep
-tasks in step with issues in GitHub, GitLab, Jira or Linear, run the
+tasks in step with issues in GitHub, GitLab, Jira (Cloud or Data Center),
+Linear, Azure Boards, Shortcut or YouTrack, run the
 tracker's script in [recipes/trackers](../recipes/trackers) every few minutes
 with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
@@ -810,6 +815,13 @@ and a sign-in of lapilli's own needs the session key from a Secret of your
 own, which every pod mounts. From 0.35 or before, upgrade with one
 replica first: its pod holds the ledger alone, and refuses new ones until
 it stops.
+
+A pod told to stop gives the lease up at once, and with `--shutdown-delay`
+(the chart's `serve.shutdownDelaySeconds`, 5 s with more than one replica)
+answers on every port for that long, `/readyz` answering 503, while the
+Service's endpoints and a load balancer learn it is going; then it lets
+the requests under way finish, 10 s at most. A request whose time runs
+out, or that a ledger lost ends, is answered 503, to be asked again.
 
 ## Pull request backtests
 
@@ -1142,7 +1154,7 @@ A task says who does what by when; the work is tracked where the team tracks
 the rest. With `--tasks-token-file FILE`, the port `--incidents-listen` opens
 lets a job holding that token, its own, read tasks and set their link and
 status, and nothing else. [recipes/trackers](../recipes/trackers) has a script
-for each of GitHub, GitLab, Jira, Linear, Azure Boards and Shortcut, alike: each run makes an issue
+for each of GitHub, GitLab, Jira Cloud, Jira Data Center, Linear, Azure Boards, Shortcut and YouTrack, alike: each run makes an issue
 for each open task without one, with a link back to the task's page, and
 puts the issue's URL on the task; then a task whose issue was closed is
 closed, `done` or `dropped` as the issue was, and one closed that way is
@@ -1160,7 +1172,8 @@ GitHub App's or Actions' token can't say who it is: set `GITHUB_LOGIN`
 ways, each once: people's comments on a task are posted to its issue,
 quoted, and the issue's comments copied to the task, shown as the
 tracker's, with the token's `GET` and `POST /api/v1/tasks/{id}/comments`;
-an edit after that isn't followed.
+an edit after that is followed, either way, by when each was last changed,
+and a deletion isn't.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \

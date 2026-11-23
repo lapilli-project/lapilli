@@ -6,7 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +61,11 @@ type saidRules struct {
 	// job's, asked once a day; a zero global when it gave none.
 	scrape   content.Scrapes
 	scrapeAt time.Time
+	// jobsOf are the jobs each selector that names none comes from, as
+	// asked (askJobs), and jobsAt when each was asked: kept a day, or an
+	// hour when its query failed.
+	jobsOf map[string][]string
+	jobsAt map[string]time.Time
 	// notify is what Grafana's notification templates show, read once an
 	// hour with --grafana; notifyAt when, notifySum what it was read from.
 	notify    *content.Notifications
@@ -65,6 +73,13 @@ type saidRules struct {
 	notifySum string
 	// notifyWarned is set once Grafana refused them, which is logged once.
 	notifyWarned bool
+	// am is what Alertmanager's notification templates show, read once
+	// an hour with --alertmanager-config; amAt when, amSum what it was
+	// read from, amWarned what was logged of it last, so each is once.
+	am       *content.Notifications
+	amAt     time.Time
+	amSum    string
+	amWarned string
 	// What was found, and what it was found from.
 	at    contentKey
 	found *contentState
@@ -86,6 +101,7 @@ type contentKey struct {
 	said, version, firings int64
 	scrape                 string // content.Scrapes, as a line
 	notify                 string // what Grafana's notifications were read from
+	am                     string // what Alertmanager's configuration was read from
 	noisyN                 int
 	noisyP                 float64
 	hour                   int64
@@ -172,6 +188,87 @@ func (s *Server) askScrape(ctx context.Context) {
 	s.saidRules.Unlock()
 }
 
+// How long what askJobs asked is kept: a day, or an hour when its query
+// failed.
+const (
+	jobsEvery = 24 * time.Hour
+	jobsRetry = time.Hour
+)
+
+// askJobs asks the history which jobs the series of each selector that
+// names no job come from (docs/design/content.md, "A range over a
+// selector that names no job"), for the range check, of the rules as read:
+// those not asked within a day, source.MaxAsk at most a look, one bounded
+// query each, for source.JobsBudget in all: the rest at the next look. One whose
+// query fails, or gives no job, is asked again an hour later; its range is
+// counted as before meanwhile, and the log says how many failed.
+func (s *Server) askJobs(ctx context.Context, rs []rules.Rule) {
+	if !s.cfg.CheckContent || s.cfg.ScrapeInterval > 0 {
+		return
+	}
+	scrape := s.scrapes()
+	now := s.now()
+	var ask []string
+	s.saidRules.Lock()
+	for _, sel := range content.ToAsk(rs, scrape) {
+		at, ok := s.saidRules.jobsAt[sel]
+		keep := jobsEvery
+		if _, had := s.saidRules.jobsOf[sel]; ok && !had {
+			keep = jobsRetry
+		}
+		if !ok || now.Sub(at) >= keep {
+			ask = append(ask, sel)
+		}
+	}
+	s.saidRules.Unlock()
+	if len(ask) == 0 {
+		return
+	}
+	jobs, failed, notAsked := source.JobsOf(ctx, replay.Base(s.h), ask, now)
+	asked := ask[:len(ask)-notAsked]
+	s.saidRules.Lock()
+	if s.saidRules.jobsOf == nil {
+		s.saidRules.jobsOf, s.saidRules.jobsAt = map[string][]string{}, map[string]time.Time{}
+	}
+	for _, sel := range asked {
+		if js, ok := jobs[sel]; ok {
+			if !slices.Equal(js, s.saidRules.jobsOf[sel]) {
+				s.saidRules.gen++ // what the pages show changes
+			}
+			s.saidRules.jobsOf[sel] = js
+		} else if _, had := s.saidRules.jobsOf[sel]; had {
+			delete(s.saidRules.jobsOf, sel)
+			s.saidRules.gen++
+		}
+		s.saidRules.jobsAt[sel] = now
+	}
+	// What the rules no longer read is let go.
+	if len(s.saidRules.jobsAt) > 4*source.MaxAsk {
+		for sel, at := range s.saidRules.jobsAt {
+			if now.Sub(at) >= jobsEvery {
+				delete(s.saidRules.jobsAt, sel)
+				delete(s.saidRules.jobsOf, sel)
+			}
+		}
+	}
+	s.saidRules.Unlock()
+	// Those not asked for the time are asked at the next look.
+	if failed > 0 {
+		s.log.Warn("the jobs some selectors' series come from couldn't be asked: their ranges are counted as before until they are, in an hour",
+			"failed", failed)
+	}
+	if notAsked > 0 {
+		s.log.Debug("the jobs some selectors' series come from are asked at the next look", "not_asked", notAsked)
+	}
+}
+
+// jobsOf are the jobs each selector that names none comes from, as asked.
+func (s *Server) jobsOf() map[string][]string {
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	return maps.Clone(s.saidRules.jobsOf)
+}
+
 // notifyEvery is how often Grafana's notification templates are read;
 // notifyTime, how long the content check may route rules to them.
 const (
@@ -220,6 +317,94 @@ func (s *Server) askNotify(ctx context.Context) {
 	for _, x := range skipped {
 		s.log.Debug("a notification template doesn't parse; passed over", "template", x)
 	}
+}
+
+// askAlertmanager reads, with --alertmanager-config, once an hour,
+// Alertmanager's configuration and the template files it names, or Mimir's
+// or Cortex's (docs/design/content.md), which say what a rule's
+// notifications show. Not read, the check goes on without them, and the
+// log says why, once for each why; what is passed over in them, likewise.
+func (s *Server) askAlertmanager(ctx context.Context) {
+	if !s.cfg.CheckContent || s.cfg.AlertmanagerConfig == "" {
+		return
+	}
+	s.saidRules.Lock()
+	fresh := !s.saidRules.amAt.IsZero() && s.now().Sub(s.saidRules.amAt) < notifyEvery
+	s.saidRules.Unlock()
+	if fresh {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var cfg []byte
+	var files []source.TemplateFile
+	var passed []string
+	var err error
+	if source.AlertmanagerURL(s.cfg.AlertmanagerConfig) {
+		var found bool
+		cfg, files, found, err = source.AlertmanagerAPI(ctx, s.cfg.AlertmanagerConfig, s.cfg.RulerTenant, source.Creds{TokenFile: s.cfg.RulerToken},
+			"lapilli/"+s.cfg.Version, s.cfg.RulerTransport)
+		if err == nil && !found {
+			err = errors.New("the tenant has no Alertmanager configuration (HTTP 404)")
+		}
+	} else {
+		cfg, files, passed, err = source.AlertmanagerFiles(s.cfg.AlertmanagerConfig)
+	}
+	var n *content.Notifications
+	var skipped []string
+	if err == nil {
+		n, skipped, err = content.ReadAlertmanager(cfg, templateFiles(files))
+	}
+	sum := ""
+	if err == nil {
+		h := sha256.New()
+		h.Write(cfg)
+		for _, f := range files {
+			fmt.Fprintf(h, "\x00%d:%s\x00", len(f.Name), f.Name)
+			h.Write(f.Text)
+		}
+		sum = hex.EncodeToString(h.Sum(nil))
+	}
+	told := ""
+	if err != nil {
+		told = err.Error()
+	}
+	told += strings.Join(append(passed, skipped...), "\n")
+	s.saidRules.Lock()
+	warn := told != s.saidRules.amWarned
+	s.saidRules.amWarned = told
+	if sum != s.saidRules.amSum {
+		s.saidRules.gen++ // what the pages show changes
+	}
+	s.saidRules.am, s.saidRules.amAt, s.saidRules.amSum = n, s.now(), sum
+	s.saidRules.Unlock()
+	if !warn {
+		return
+	}
+	if err != nil {
+		s.log.Warn("Alertmanager's notification templates can't be read: the content check goes on without them", "err", err)
+	}
+	for _, x := range append(passed, skipped...) {
+		s.log.Warn("Alertmanager's configuration: passed over", "what", x)
+	}
+}
+
+// templateFiles are template files as source reads them, as the content
+// check takes them.
+func templateFiles(fs []source.TemplateFile) []content.TemplateFile {
+	out := make([]content.TemplateFile, len(fs))
+	for i, f := range fs {
+		out[i] = content.TemplateFile(f)
+	}
+	return out
+}
+
+// alertmanager is what Alertmanager's notification templates show, as
+// read last, and what they were read from; nil when not read.
+func (s *Server) alertmanager() (*content.Notifications, string) {
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	return s.saidRules.am, s.saidRules.amSum
 }
 
 // grafanaNotifications reads Grafana's notifications; tests replace it.
@@ -298,7 +483,8 @@ func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *
 		return contentKey{}, nil, nil, err
 	}
 	_, notified := s.notifications()
-	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
+	_, am := s.alertmanager()
+	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, am: am, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
 		hour: s.now().Unix() / 3600}
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
@@ -344,8 +530,10 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 		}
 	}
 	notify, _ := s.notifications()
+	am, _ := s.alertmanager()
 	unchecked := map[string]string{}
 	fs := content.Check(named, content.Options{Runbooks: s.cfg.RunbookAnnotations, Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
+		Alertmanager: am, JobsOf: s.jobsOf(),
 		// Routing the rules to Grafana's contact points has a budget of its
 		// own, and a time: the check holds what pages and /metrics wait on.
 		NotifyBy:  time.Now().Add(notifyTime),
@@ -361,7 +549,7 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 		for _, why := range unchecked {
 			whys[why]++
 		}
-		s.log.Warn("some Grafana rules' notification templates weren't checked", "rules", len(unchecked), "why", whys)
+		s.log.Warn("some rules' notification templates weren't checked", "rules", len(unchecked), "why", whys)
 	}
 	st := &contentState{findings: map[string][]contentFinding{}, says: map[string]rules.Says{}, unchecked: unchecked}
 	for i, r := range named {

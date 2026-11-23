@@ -369,6 +369,12 @@ check "follow: said why" "$(docker logs "$p-follow" 2>&1)" 'before the branch he
 until_true 120 grep -q 'rules changed: a new version, from the history' "$work/serve.log" || {
   # What serve and the follow said, before stopping: the wait says nothing.
   echo "FAILED: serve didn't say the history's new version within 120 s"
+  # A version taken as the rules changed when seen is said without "from
+  # the history".
+  echo "--- serve's changes of the rules"
+  grep 'rules changed' "$work/serve.log" || echo "none"
+  echo "--- the history"
+  ls -la "$work/history/versions" || true
   echo "--- serve"
   tail -60 "$work/serve.log"
   echo "--- follow"

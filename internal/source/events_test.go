@@ -154,15 +154,16 @@ func TestUnrecorded(t *testing.T) {
 		t.Errorf("a level: %q", us[0].Text())
 	}
 
-	// No one bound that decides it: how many went past isn't known, and
-	// isn't guessed.
-	versions[0].Rules[0].Expr = "up == 1 and level > 0.5"
+	// Bounds that don't decide it, a value beside them under or: how many
+	// went past isn't known, and isn't guessed (TestUnrecordedBounds says
+	// which do).
+	versions[0].Rules[0].Expr = "up == 1 or level > 0.5"
 	us, err = Unrecorded(context.Background(), restarts{}, versions, rep, Judged(rep.Firings), time.Minute)
 	if err != nil || len(us) != 1 || us[0].Clear != nil || us[0].Bound != "" || us[0].Alerts != 3 {
-		t.Errorf("and: %+v %v", us, err)
+		t.Errorf("or: %+v %v", us, err)
 	}
 	if strings.Contains(us[0].Text(), "well past") || strings.Contains(us[0].Text(), "would hide") {
-		t.Errorf("and: %q", us[0].Text())
+		t.Errorf("or: %q", us[0].Text())
 	}
 }
 

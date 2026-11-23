@@ -157,9 +157,10 @@ firing fails on any machine.
   against a server standing in for the tool. The other recipes are tested
   the same way: `recipes/firings` (a cloud's, Datadog's or New Relic's alarm
   history, `internal/firing/recipes_test.go`), `recipes/trackers`
-  (tasks kept in step with a tracker, `trackers_recipes_test.go`) and
+  (tasks kept in step with a tracker, `trackers_recipes_test.go`),
   `recipes/changes` (pull requests for approved changes, one script a git
-  host).
+  host) and `recipes/events` (Alertmanager's event recorder's file and
+  Kafka outputs, `events_recipe_test.go`, Kafka by a `kcat` standing in).
 - `internal/content` checks what a rule says when it fires
   (docs/design/content.md). `internal/schedule` reads the presets and cron
   expressions reports are scheduled by.

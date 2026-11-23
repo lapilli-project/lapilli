@@ -106,8 +106,8 @@ type Creds struct {
 type Ruler struct {
 	URL  string
 	Kind string
-	// Tenant, when set, is sent as X-Scope-OrgID: Mimir's or Cortex's
-	// tenant, for one with tenants and no gateway to set it.
+	// Tenant, when set, is sent as X-Scope-OrgID: Mimir's, Cortex's or
+	// Loki's tenant, for one with tenants and no gateway to set it.
 	Tenant string
 	Agent  string
 	// Reads are the credentials the rules are read with.
@@ -1186,6 +1186,11 @@ func (r *Ruler) Owns(source, ns, group string) error {
 // ErrUnreadable is a group a ruler gives in a form that can't be read back
 // as it was written: it is for a person to change.
 var ErrUnreadable = errors.New("the ruler gives the group in a form that can't be read back as written")
+
+// ErrOtherTenant is a proposal made in another tenant than the one its
+// ruler is asked in now: --ruler-tenant or --loki-tenant changed since,
+// or was set since a proposal that recorded none.
+var ErrOtherTenant = errors.New("the rule was read in another tenant (X-Scope-OrgID) than the one serve sends now: propose it again")
 
 // ErrElsewhere is a unit, or a proposal's source, that isn't --ruler's for
 // its namespace and group.

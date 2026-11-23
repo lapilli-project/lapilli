@@ -218,7 +218,11 @@ func parseEvents(r *http.Request, body []byte, now time.Time) ([]ledger.Notifica
 			mutes = append(mutes, muted...)
 			continue
 		case err != nil:
-			refuse(fmt.Errorf("event %d: %w", i+1, err))
+			// %v: an event of too many alerts is one event that can't be
+			// read, not a request too large; a batch of them alone is
+			// answered 400, as the rest are, and passed over by whoever
+			// sent it.
+			refuse(fmt.Errorf("event %d: %v", i+1, err))
 			continue
 		}
 		out = append(out, n)

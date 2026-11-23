@@ -55,8 +55,11 @@ it is served: a range over a selector that names its job
 (`rate(x{job="batch"}[3m])`, or `job=~` the longest of the jobs it can be)
 with that job's own interval, by the job label `/api/v1/targets` says its
 targets end up with (under the Prometheus Operator, a ServiceMonitor's job
-is its service's name); any other with the global one. The finding says
-whose: `rate[3m] < 2 × 2m (job "batch")`. With `--grafana`, the
+is its service's name); a range over a selector that names none
+(`rate(batch_runs_total[3m])`) with the longest interval of the jobs its
+series come from, asked once, `count by (job) (batch_runs_total)` over the
+last ten minutes; any other, and one whose query fails, with the global
+one. The finding says whose: `rate[3m] < 2 × 2m (job "batch")`. With `--grafana`, the
 notification templates each Grafana rule is sent with are checked too
 (below). `--json` writes it all, what each rule says included.
 
@@ -77,6 +80,47 @@ measured, or that the expression can't give, as a guess. Under an `if` or a
 more than its share of the check's work or time isn't checked against
 templates, and its page says why. Nothing is written to Grafana.
 
+The other rules, written in Prometheus's templates, are sent by
+Alertmanager, whose receivers' fields are templates too. With
+`--alertmanager-config`, Lapilli reads Alertmanager's configuration and
+works out, by the route tree (each route's `matchers`, `match` and
+`match_re`, `continue`, the receiver a route inherits), which receivers a
+rule's alerts reach, by the labels it and its group set and its
+`alertname`; as with Grafana, both ways are followed where a route matches a
+label the rule doesn't set. Each field of those receivers that is a
+template, and the templates it uses (`{{ template "slack.text" . }}`, and a
+file's own `slack.default.title` for a Slack integration with no title of
+its own), is checked as Grafana's are, and more: an annotation it shows that
+the rule hasn't, by its own name (`.CommonAnnotations.dashboard` too, and
+`runbook_url` for a rule whose runbook is in `runbook`); and a template
+that doesn't parse, as a fact. Alertmanager parses a receiver's field only
+when it sends with it, so `amtool check-config` doesn't catch that one: the
+page goes out with nothing. It reads:
+
+- `--alertmanager-config alertmanager.yml`: the file, and the template
+  files its `templates:` globs name, beside it as Alertmanager resolves
+  them. An absolute glob, which is Alertmanager's own path
+  (`/etc/alertmanager/templates/*.tmpl`), is looked for by its last element
+  beside the file, where a mounted Secret or ConfigMap puts them; no file
+  outside the file's directory is read. A file in Mimir's, Cortex's or
+  Amazon's format (`alertmanager_config` and `template_files`, as `aws amp
+  describe-alert-manager-definition` gives it, decoded) is read as they
+  hold it.
+- `--alertmanager-config http://mimir:8080/api/v1/alerts`: a Mimir's or a
+  Cortex's configuration for its tenant, with `--ruler-tenant` and
+  `--ruler-token-file`, every template file in it, as Mimir loads them all.
+  Given with `--ruler` and its token, it must be on `--ruler`'s host and
+  scheme: the ruler's token goes nowhere else.
+
+Alertmanager's own defaults aren't followed: they show every label and
+annotation there is, and fault nothing. No field whose name says it holds a
+secret, or where a request goes (`api_url`, `routing_key`, `http_config`,
+anything `_file`), is read. A template file that doesn't parse is said on
+stderr, and in `serve`'s log: Alertmanager won't load the configuration. In
+`lapilli verdict` a configuration that can't be read is an error; in
+`serve` it is read once an hour, and one that can't be read leaves the check
+as it was, the log saying why once. Nothing is written to Alertmanager.
+
 `lapilli serve` checks the rules as it read them last, each `--watch`, so a
 new summary shows at once without making a new version. Each rule's page has
 "What it says" (its summary, description and runbook, escaped, the runbook a
@@ -89,7 +133,7 @@ with no runbook; and MCP's `rule` carries what a rule says and its problems,
 `rules` how many each has. What is measured comes from the ledger: the
 labels a rule's alerts had over twelve weeks, and whether it was noisy over
 four. Prometheus is asked for its scrape intervals once a day, and Grafana
-for its notification templates once an hour.
+and `--alertmanager-config` for their notification templates once an hour.
 `--check-content=false` turns it off, and so does the chart's
 `serve.checkContent.enabled`; `serve.checkContent.severities` and
 `scrapeInterval` give the rest.

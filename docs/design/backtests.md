@@ -1,6 +1,6 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted; steps 1, 2 and 3 built.
+Status: accepted; steps 1, 2, 3 and 4 built.
 Merged on 2026-11-18, before its week was out, by the maintainer's
 decision, with open questions 1, 5 and 6 decided, and 2, 3 and 4 on
 2026-11-19 ("Open questions" below).
@@ -19,9 +19,11 @@ Step 1 is built: in serve, the port, the trust file, the lane and schema
 `serve-wait`). Step 2 is built: Bitbucket Pipelines' ID token; Azure
 Pipelines stays on the plain token. Step 3 is built: Grafana-managed rules
 and a Loki ruler's, on the data sources the rules in effect read
-already. Where the code had to do otherwise than this note says,
-"As built (step 1)", "As built (step 2)" and "As built (step 3)" below
-say so.
+already. Step 4 is built: a change held to the incidents (`FAIL_MISSED`),
+the rules left alone judged by serve's record of them ("Held to the
+incidents (step 4)"). Where the code had to do otherwise than this note
+says, "As built (step 1)", "As built (step 2)" and "As built (step 3)"
+below say so.
 
 ## Why
 
@@ -490,9 +492,13 @@ at most, read strictly:
   "days": 7,
   "tz": "Asia/Seoul",
   "pull_request": 123,
-  "commit": "0123abcd..."
+  "commit": "0123abcd...",
+  "fail_missed": true
 }
 ```
+
+`fail_missed`, since step 4, holds the change to the incidents ("Held to
+the incidents (step 4)"); left out, it is false.
 
 Answers: 202 `{"id", "key", "position", "requests"}` (the key shown once);
 200 with the same id when the same token sends the same body again, a job
@@ -543,11 +549,12 @@ status. This design moves where that comparison runs, and nothing else:
   be judged", closed, as #86's second review made it.
 - `--fail-expectations` and `--expect-required` aren't sent: the recipe
   decides, as it does today.
-- `FAIL_MISSED` (`--fail-missed`) is refused with `LAPILLI_SERVE`: serve's
-  lane replays the rules that differ alone, and its summary's
-  `missed_checked` is false. Holding a change to the incidents there needs
-  the rules left alone judged too, by serve's record of them, which isn't
-  built.
+- `FAIL_MISSED` (`--fail-missed`) is sent as `fail_missed: true`, and
+  serve holds the change to its incidents, the rules left alone judged by
+  its record of them, not replayed (step 4, "Held to the incidents"). Its
+  summary's `missed_checked`, `incidents_missed` and `missed_not_known`
+  come back as Lapilli writes them, and the recipe's gate reads them as it
+  reads Lapilli's. Until step 4, it was refused with `LAPILLI_SERVE`.
 
 **What reads differently through serve**, and is said so in the comment's
 heading ("judged by lapilli serve's record"):
@@ -592,6 +599,99 @@ period's end; `compare` still calls `replayChange`, as it holds nothing.
 **Order.** It is built once step 1 is merged, and needs nothing from steps
 2 and 3; its schema is the next free one when its pull request opens.
 
+## Held to the incidents (step 4)
+
+`lapilli verdict --compare --changed-only --fail-missed` replays the rules
+left alone too, once, when the rules that differ lose an incident, to see
+whether one of them still catches it. Serve doesn't replay them: it has
+judged them already, every hour, and the ledger keeps which rules caught
+each incident (its catches). A request with `fail_missed: true` is held so:
+
+- **The rules that differ** are judged by the backtest, as before: an
+  incident one of them caught before the change and none catches after it
+  is lost to them.
+- **The rules left alone** are judged by serve's record: such an incident
+  is still caught when the ledger says a rule the change doesn't name
+  caught it, and only from the same text. A catch in the record was made
+  by the rule as it was written then; `lapilli verdict` replays a rule
+  left alone as it is now. So a catch counts only when the rule's text
+  (`rules.Rule.Whole`: what decides when it fires), in every version of
+  serve's rules over the incident's catch window and its condition's
+  reach before it (its `for` and its group's interval), is the text it has
+  after the change:
+  - of a rule the pull request holds alike on both sides, the pull
+    request's, read as serve reads its own (`replayedAs`);
+  - of a rule serve runs now (in its latest version of the rules) that
+    the pull request doesn't hold at all (another repository's, a
+    Grafana's), serve's latest: the change doesn't touch it, and after the
+    merge it runs as it does now.
+
+  Where the text then was another, or a version over that time isn't in
+  the ledger, or a version holds two rules of the name written otherwise,
+  the incident is not known, never caught. A rule serve runs no longer,
+  and the pull request doesn't hold, catches nothing after the change;
+  one whose firings serve copies in and no version of its rules holds now
+  (a cloud's alarm copied in, a Grafana rule judged from Grafana's history
+  and since deleted) has no text to hold, and its catch leaves the
+  incident not known. A rule's name is the ledger's, as every page has
+  it; a rule of the pull request's is the ledger's rule of the same name.
+  A rule serve reads from an API that writes its expression otherwise
+  than the pull request's file (Prometheus's rules API prints PromQL
+  again) has another text: its catch is not known.
+- **Not known, not missed**, as in `lapilli verdict`: an incident is not
+  known (`missed_not_known`) when a rule after the change couldn't be
+  replayed; or when a rule the pull request leaves alone may have caught it
+  with no record of it: serve's runs didn't cover the incident's time (its
+  lead before its start, to its end), a version of serve's rules over it
+  and its reach before doesn't hold the rule as the pull request has it,
+  serve couldn't replay it the last time it ran, or a run meeting that
+  time couldn't. And when a rule that caught it has a name told apart
+  from one the pull request holds (`Errors [shop]` beside `Errors`, as
+  `source.TellApart` names rules that share one), which may be the rule
+  the change changes; or the name of a rule it changes and of one it
+  leaves alone, alike in group and labels, which the ledger counts as
+  one. Serve's own rules beside the pull request's can only keep an
+  incident caught: `lapilli verdict` wouldn't know them, so a gap in their
+  record leaves nothing not known.
+- **What it reads.** The ledger, once a backtest: the incidents of the
+  period and their catches, the rules and the latest version of them, where
+  the runs began and have got to, the versions of the rules over the
+  period and its reach before (14 days at most, each version read as the
+  runs read it, of the texts of the rules left alone and of those that
+  caught an incident kept by their hash; past 200 versions none, and every
+  incident that hangs on them is not known), and the runs that couldn't
+  replay a rule. Nothing more is asked of the history, and the planner's
+  count, the queue and the hour are as they are.
+- **What it says.** The report, as `--fail-missed` writes it: the summary's
+  three fields; `"missed"`, each incident by its id, start and the rules
+  that differ that caught it before, its title only where the entry asks
+  for titles (`incident_titles`), as `"incidents"` is; and the comment's
+  "Caught before, by no rule after", which says it is by serve's record of
+  the rules left alone. Serve fails nothing: the job's gate does.
+
+What it doesn't do:
+
+- **Judge a rule of the pull request's that serve runs otherwise** (the
+  commit the pull request goes into ahead of what is deployed): its record
+  is of another text, and an incident that hangs on it is not known. Send
+  the rules serve runs, as serve reads them, or backtest without
+  `LAPILLI_SERVE`.
+- **Replay a rule left alone that serve has no record of.** That is a
+  backtest of every rule, with its requests and its share of the rate; the
+  incident is not known instead, and the job held to it fails, as a gate
+  that can't judge doesn't pass.
+
+Why the record, not a replay: the rules left alone are most of a pull
+request's, and replaying them would ask the history for each, at the
+lane's share of the rate, for a question the ledger answers already, by
+the same judging and the same incidents.
+
+A serve before 0.70.0 reads a request strictly, and refuses
+`fail_missed` (400, "unknown field"): the recipe says it needs 0.70.0.
+Replicas of both, one before 0.70.0 leading, fail a request with it that
+another queued, as the leader can't read it back: ask again once every
+replica is 0.70.0. A request without it is as it was.
+
 ## Security: as an attacker reviews it
 
 What can someone send before they prove who they are?
@@ -625,6 +725,17 @@ How much can a holder make Lapilli read, fetch, keep or judge?
   hour old, and only with the body it first came with; it can't read any
   backtest but its own (each has its key). A plain token stolen works until
   it is rotated.
+- **Held to the incidents** (step 4), the answer tells, of each incident a
+  rule that differs caught before the change and none catches after it,
+  whether a rule of serve's caught it, and whether its record holds each
+  rule the pull request leaves alone over that time (not known): never
+  which rule, nor anything of its firings. A pull request can ask so, a
+  name at a time, whether serve runs a rule of that name, as a refusal
+  tells a uid at a time whether one is in effect: each a backtest of the
+  entry's hour; and whether a rule's text over that time is the one the
+  pull request leaves alone, a rule at a time. What it reads is the
+  ledger's, once a backtest, whatever the request (an incident's catches
+  are a lookup; the versions, 200 at most, and the failed runs read once).
 
 Where do the names they choose end up? A rule's name, group, labels and
 expression, an expectation's `rule:` and `group:`, a catch's incident id,
@@ -1295,3 +1406,5 @@ step 3 does otherwise than the sections above say, or says more:
    (open question 3).
 3. Grafana and Loki rules: built, on the data sources the rules in effect
    read (open question 2).
+4. A change held to the incidents (`FAIL_MISSED`, `fail_missed`), the
+   rules left alone judged by serve's record: built.

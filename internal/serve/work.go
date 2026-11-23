@@ -757,6 +757,7 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 		groups[since][name] = true
 	}
 	meta := map[string]*ledger.Rule{}
+	sevs := severitiesBy{}
 	var order []string
 	// The latest first: the rules the run is for, then those catching up,
 	// so one rule far behind doesn't keep the rest from their turn; with
@@ -803,7 +804,7 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 				meta[r.Name] = x
 				order = append(order, r.Name)
 			}
-			x.Severity = ledger.Severities([]string{x.Severity, r.Labels["severity"]})
+			x.Severity = sevs.add(r.Name, r.Labels["severity"])
 			if r.Unsupported != "" && x.Unsupported == "" {
 				// Kept without how often a request was asked, which
 				// differs from run to run; the run's record says it.
@@ -1109,6 +1110,8 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	}
 	s.askScrape(ctx)
 	s.askNotify(ctx)
+	s.askAlertmanager(ctx)
+	s.askJobs(ctx, s.matching(rs))
 	sum := docsSum(docs)
 	if sum == *raw {
 		return nil
@@ -1225,7 +1228,7 @@ func (s *Server) history(ctx context.Context) error {
 			"dir", s.cfg.RulesHistory)
 		return nil
 	}
-	hs, err := rules.History(s.cfg.RulesHistory)
+	hs, err := historyVersions(s.cfg.RulesHistory)
 	if errors.Is(err, rules.ErrNoVersions) {
 		s.log.Warn("--rules-history: the directory holds no versions, as when they couldn't be fetched: the backfill replays today's rules",
 			"dir", s.cfg.RulesHistory)
@@ -1418,7 +1421,7 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	case s.ruler != nil:
 		rs, docs, err = s.ruler.Read(ctx)
 	case s.following():
-		rs, docs, err = s.newest()
+		rs, docs, err = s.newest(ctx)
 	case s.cfg.RulesPath != "":
 		var picked rules.Picked
 		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})

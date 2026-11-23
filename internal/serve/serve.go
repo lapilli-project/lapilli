@@ -160,6 +160,11 @@ type Config struct {
 	// MetricsListen, when set, is where the health checks and the metrics
 	// are served too, alone.
 	MetricsListen string
+	// ShutdownDelay is how long serve, told to stop, goes on answering on
+	// its ports before it stops taking requests (--shutdown-delay), not
+	// ready meanwhile, so that whatever sends it requests learns it is
+	// going first; 0 stops at once.
+	ShutdownDelay time.Duration
 	// IncidentsListen, when set, is where incidents can be written with the
 	// token in IncidentsToken, and firings recorded elsewhere with the one
 	// in FiringsToken, and nothing else can be done.
@@ -255,6 +260,11 @@ type Config struct {
 	CheckContent   bool
 	Severities     []string
 	ScrapeInterval time.Duration
+	// AlertmanagerConfig is Alertmanager's configuration, whose templates
+	// the rules written in Prometheus's templates are sent with, checked
+	// beside them: a file, or Mimir's or Cortex's API, read with
+	// RulerToken and RulerTenant (docs/design/content.md).
+	AlertmanagerConfig string
 
 	// MCPPropose is who an agent must be acting for to propose a change to
 	// a rule over MCP: "editors", "admins", or "" for no one. An agent
@@ -291,6 +301,11 @@ type Config struct {
 	// cloud's with the pod's own identity.
 	ChangesRulerToken, ChangesAWSRole, ChangesAzureClientID string
 	ChangesGoogleServiceAccount, ChangesOCIConfig           string
+	// ChangesLokiToken is the file holding a token that may write the
+	// rules of --loki's ruler, read with --loki-loaded-rules: without it,
+	// its writes are sent with no token, as a Mimir's are. A Loki's
+	// namespaces are named in ChangesIn as loki:NAMESPACE.
+	ChangesLokiToken string
 	// RulerTransport carries the ruler's and the alarms' requests: nil but
 	// in tests.
 	RulerTransport http.RoundTripper
@@ -339,6 +354,16 @@ type Config struct {
 	// RLIMIT_DATA on Linux (scenario.CanCap), none elsewhere; 0 for no cap.
 	Promtool       string
 	PromtoolMemory uint64
+
+	// Clock is the time serve judges by, read as time.Now is, nil for
+	// time.Now: what its runs replay up to, the weeks its pages show, when
+	// the digest falls due. lapilli demo --serve pins it to the end of its
+	// sample's week (docs/design/demo.md). The wall clock, which proposals
+	// expire by and the outbox keeps, stays the machine's.
+	Clock func() time.Time
+	// Listening is told where the UI's listener was bound, once, before it
+	// serves; nil for no one: lapilli demo --serve says the URL to open.
+	Listening func(net.Addr)
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -529,6 +554,7 @@ type Server struct {
 	sigs       signalsCache
 	grantsC    grantsCache
 	creds      creditCache
+	lates      lateCache
 	hours      hoursCache
 	// goalsC are the goals the ledger holds, goalRows the goals' weeks the
 	// pages read, and goalsK what the leader worked out of them last.
@@ -542,12 +568,20 @@ type Server struct {
 	// saidRules are the rules as last read, for what they say.
 	saidRules saidRules
 	ready     atomic.Bool
+	// stopping is set as serve, told to stop, waits out --shutdown-delay:
+	// it is no longer ready.
+	stopping atomic.Bool
 	// changes is what changes to the rules keep while serve runs.
 	changes *changesState
 	// ruler reads --ruler, with the credentials that read it, and
 	// rulerWrites are those that write to it.
 	ruler       *source.Ruler
 	rulerWrites source.Creds
+	// loki is --loki's ruler, its configuration API, read with
+	// --loki-loaded-rules, and lokiWrites the credentials that write to it:
+	// nil without --loki-loaded-rules. It is never --ruler's.
+	loki       *source.Ruler
+	lokiWrites source.Creds
 	// alarms read each --alarms, with the credentials that read it, and
 	// alarmWrites are those that write to it, by source.
 	alarms      []*source.Alarms
@@ -675,6 +709,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l),
 		impactTries: tries{limit: impactTriesAnHour}, settingsTries: tries{limit: settingsTriesAnHour}}
+	if cfg.Clock != nil {
+		s.now = cfg.Clock
+	}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
 	s.life, s.end = context.WithCancel(context.Background())
 	s.parsing.base, s.parsing.log = s.life, log
@@ -708,6 +745,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 			l.Close()
 			return nil, err
 		}
+	}
+	if err := s.newLoki(); err != nil {
+		l.Close()
+		return nil, err
 	}
 	if err := s.newAlarms(ctx); err != nil {
 		l.Close()
@@ -858,6 +899,29 @@ func (s *Server) newRuler(ctx context.Context) error {
 	return nil
 }
 
+// newLoki readies --loki's ruler, read with --loki-loaded-rules, as a
+// ruler a change approved is written through, with the token that reads
+// it, its tenant, and, with --changes, the token that writes to it, which
+// isn't read otherwise.
+func (s *Server) newLoki() error {
+	if s.cfg.Loki == "" || !s.cfg.LokiLoaded {
+		return nil
+	}
+	// loki: in --changes-in names Loki's namespaces: an --alarms source of
+	// that name would have its alarms named by them too.
+	for _, a := range s.cfg.Alarms {
+		if s.cfg.Changes && a.Source == strings.TrimSuffix(lokiIn, ":") {
+			return errors.New("--alarms loki=: with --loki-loaded-rules, loki: in --changes-in names Loki's ruler's namespaces: name the alarms' source another")
+		}
+	}
+	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant}
+	s.loki = l.Ruler("lapilli/"+s.cfg.Version, func(what string) { s.log.Warn(what) })
+	if s.cfg.Changes {
+		s.lokiWrites.TokenFile = s.cfg.ChangesLokiToken
+	}
+	return nil
+}
+
 // alarmsCloud is the cloud whose credentials read and write alarms of a
 // kind.
 var alarmsCloud = map[string]string{source.AlarmsAWS: "aws", source.AlarmsAzure: "azure", source.AlarmsGoogle: "google", source.AlarmsOCI: "oci"}
@@ -956,6 +1020,12 @@ func (s *Server) Run(ctx context.Context) error {
 	// the workers stop with it.
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	// The requests' context outlasts a stop: told to stop, serve answers
+	// for --shutdown-delay, then lets the requests under way finish, and
+	// ends their context once its servers are shut down. A server that
+	// failed, or a ledger lost, ends it at once.
+	reqs, endReqs := context.WithCancel(context.WithoutCancel(ctx))
+	defer endReqs()
 	// --config's notify:, as read now, before anything is told, and the
 	// owners its routes read.
 	s.startRoutes(ctx)
@@ -979,6 +1049,9 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("--listen: %w", err)
 	}
 	s.listening(ln.Addr())
+	if s.cfg.Listening != nil {
+		s.cfg.Listening(ln.Addr())
+	}
 	if s.in != nil && s.in.oidc != nil {
 		// Asked at once, so a setting that is wrong is in the log at start,
 		// not first found by someone signing in.
@@ -991,8 +1064,10 @@ func (s *Server) Run(ctx context.Context) error {
 		WriteTimeout:      2 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    64 << 10,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
+		BaseContext:       func(net.Listener) context.Context { return reqs },
 	}
+	// Every server, shut down together as serve stops.
+	servers := []*http.Server{srv}
 	where := s.cfg.Ledger
 	if s.l.Postgres() {
 		where = "postgres"
@@ -1015,6 +1090,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Info("serving the metrics", "listen", mln.Addr().String())
 		go func() { served <- msrv.Serve(mln) }()
 		defer msrv.Close()
+		servers = append(servers, msrv)
 	}
 	if s.cfg.IncidentsListen != "" {
 		iln, err := net.Listen("tcp", s.cfg.IncidentsListen)
@@ -1024,10 +1100,11 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		isrv := &http.Server{Handler: s.IncidentsHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
-			BaseContext: func(net.Listener) context.Context { return ctx }}
+			BaseContext: func(net.Listener) context.Context { return reqs }}
 		s.log.Info("taking incidents and firings", "listen", iln.Addr().String())
 		go func() { served <- isrv.Serve(iln) }()
 		defer isrv.Close()
+		servers = append(servers, isrv)
 	}
 	if s.cfg.NotifyListen != "" {
 		nln, err := net.Listen("tcp", s.cfg.NotifyListen)
@@ -1037,10 +1114,11 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		nsrv := &http.Server{Handler: s.NotifyHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
-			BaseContext: func(net.Listener) context.Context { return ctx }}
+			BaseContext: func(net.Listener) context.Context { return reqs }}
 		s.log.Info("taking notifications", "listen", nln.Addr().String())
 		go func() { served <- nsrv.Serve(nln) }()
 		defer nsrv.Close()
+		servers = append(servers, nsrv)
 	}
 	if s.btPort != nil {
 		bln, err := net.Listen("tcp", s.cfg.BacktestListen)
@@ -1048,10 +1126,11 @@ func (s *Server) Run(ctx context.Context) error {
 			srv.Close()
 			return fmt.Errorf("--backtest-listen: %w", err)
 		}
-		bsrv := s.backtestServer(ctx)
+		bsrv := s.backtestServer(reqs)
 		s.log.Info("taking pull request backtests", "listen", bln.Addr().String(), "trust", len(s.btPort.trust))
 		go func() { served <- bsrv.Serve(bln) }()
 		defer bsrv.Close()
+		servers = append(servers, bsrv)
 		go s.discoverIssuers(ctx)
 	}
 	if s.cfg.Config != "" {
@@ -1078,8 +1157,10 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 	var serr error
+	told := false
 	select {
 	case <-ctx.Done():
+		told = true
 	case serr = <-served:
 	case serr = <-failed:
 	case <-s.l.Lost():
@@ -1088,19 +1169,61 @@ func (s *Server) Run(ctx context.Context) error {
 		// than send a notice twice.
 		serr = s.l.LostWhy()
 	}
+	// The leader's work stops at once, its lease given up, so another
+	// replica leads within a campaign while this one answers on.
 	stop()
+	if !told {
+		endReqs()
+	} else if s.cfg.ShutdownDelay > 0 {
+		serr = s.drain(servers, served)
+		if serr != nil {
+			endReqs()
+		}
+	}
 	// What runs apart from the requests ends with them, so that none of
 	// them waits on it to finish.
 	s.end()
 	shut, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(shut)
+	var down sync.WaitGroup
+	for _, x := range servers {
+		down.Go(func() { x.Shutdown(shut) })
+	}
+	down.Wait()
+	endReqs()
 	wg.Wait()
 	if errors.Is(serr, http.ErrServerClosed) {
 		serr = nil
 	}
 	return serr
 }
+
+// drain is serve told to stop, for --shutdown-delay: no longer ready
+// (/readyz answers 503), and answering on every port meanwhile, each
+// response closing its connection, so that a Service's endpoints, or a
+// load balancer, that still send requests here have them answered while
+// they learn this one is going, and a client that keeps its connection
+// open makes a new one, to another replica. A server that fails, or the
+// ledger lost, ends it at once.
+func (s *Server) drain(servers []*http.Server, served <-chan error) error {
+	s.stopping.Store(true)
+	for _, x := range servers {
+		x.SetKeepAlivesEnabled(false)
+	}
+	s.log.Info("stopping: not ready, and answering for --shutdown-delay before the ports close", "delay", s.cfg.ShutdownDelay)
+	select {
+	case <-waitDrain(s.cfg.ShutdownDelay):
+		return nil
+	case err := <-served:
+		return err
+	case <-s.l.Lost():
+		return s.l.LostWhy()
+	}
+}
+
+// waitDrain is how drain waits out --shutdown-delay: a variable, so that a
+// test can end it.
+var waitDrain = time.After
 
 // Settings the UI can change, by name, with the flag each stands for.
 var settable = []struct{ key, flag string }{

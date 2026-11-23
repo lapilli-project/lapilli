@@ -118,8 +118,9 @@ event_recorder:
   a notification's `mutedAlerts`). That answers "firings that paged no one:
   why". It wasn't kept here: it is a new kind of data, with a design of its
   own, [mutes.md](mutes.md), built since (schema 029).
-- **The file and Kafka outputs.** A recipe could send a JSONL file's
-  notifications on later; not built.
+- **The file and Kafka outputs** weren't read here. Since built as a
+  recipe, [recipes/events](../../recipes/events) (below, "The file and
+  Kafka outputs").
 
 ### Attacker's look
 
@@ -139,6 +140,54 @@ event_recorder:
   bounds, as on `/v1/alertmanager` today; and mutes that never were, which
   claim only that a firing was muted ([mutes.md](mutes.md), "Attacker's
   look").
+
+### The file and Kafka outputs
+
+Status: built, for the next release, as a recipe: nothing changes in
+serve. `recipes/events/alertmanager.sh` reads what the recorder wrote to a
+file (`file_outputs`) or to Kafka (`kafka_outputs`), and POSTs it to
+`/v1/alertmanager/events` as the webhook output would, in batches.
+
+- **The formats.** Read from Alertmanager 0.35.0's source
+  (`eventrecorder/file.go`, `kafka.go`): the file output appends each event
+  as the webhook output writes it, one a line, and never rotates or
+  truncates the file, reopening it when it is renamed or removed (for
+  logrotate); the Kafka output writes each event as a message, its value
+  that JSON with `format: json`, the default, its key the instance. Both
+  are what this path already reads, a line or a message an event, and the
+  recorder's own test data (`internal/serve/testdata/events/`, a request a
+  line) is the file output's format too.
+- **Where it stopped.** A file's byte offset, kept with the file's inode
+  and a sum of its first 64 bytes: a new inode is a file rotated, whose old
+  one, renamed beside it, is read to its end first; a smaller size, or
+  other first bytes, is a file truncated, read again from its start. Of
+  Kafka, the offsets kept in a file, a partition a line, read with `kcat
+  -J` partition by partition from there, each message's offset from its
+  envelope, never from its text; or a consumer group's, which Kafka keeps
+  and `kcat` commits. An offset that can't be written stops the run: each
+  run would send the same again, and a mute has no key to be kept once by.
+  One run at a time holds a lock beside the offset file.
+- **At least once.** The offset moves after each batch serve takes; a
+  batch it doesn't take stops the run. serve keeps a delivery sent twice
+  once, by the instance, the group, the flush and the receiver, as it does
+  the webhook output's tries again.
+- **Bounded.** A batch is 1,000 events and 1 MB at most, as serve takes
+  them, 100 by default, and 1 MiB as `jq` writes it; one serve answers
+  413 is sent an event at a time, and an event over that alone is passed
+  over. `MAX_READ` bytes (16 MiB) are read at a time, of the file or of a
+  partition; a line or a message longer is passed over to its end. The
+  token is read and sent as the other recipes send theirs, again for
+  each request.
+- **An event of too many alerts** is answered 400 by serve, as any event
+  it can't read, not 413: a batch of them alone would otherwise be taken
+  for a body too large and sent again for ever.
+
+What it doesn't do: an event older than an hour when it arrives is kept as
+of when it arrives, as serve takes any event's time. The recipe is meant
+to run every minute, or beside Alertmanager, following the file; a backlog
+of days sent at once is counted on the day it is sent. Changing that would
+be a change to what serve trusts of an event's time, which a token's
+holder could then set to any hour.
 
 ## 2. Shifts read from on-call schedules
 
@@ -240,6 +289,28 @@ people:
 - **A zone that isn't one**, such as Outlook's `Korea Standard Time`, or a
   `VTIMEZONE` of the feed's own: the event is passed over and said.
   Lapilli doesn't read zone rules from a feed.
+- **As built in 0.70.** Monthly and yearly repeats are read too, with
+  `BYMONTHDAY`, `BYDAY` numbered in the month or the year (`1MO`, `-1FR`),
+  `BYMONTH` and `BYSETPOS`, as RFC 5545's table of BYxxx parts has them;
+  a day a month doesn't have is skipped. Every repeat is worked out on the
+  clock it is written on, each day then made an instant in its zone. A
+  `TZID` is read by the feed's own `VTIMEZONE` of its name, or, with none,
+  as IANA's name or a Windows one by CLDR's table; an IANA name of a
+  place (`Europe/Berlin`) still wins over a `VTIMEZONE`, IANA's names for
+  a fixed offset (`EST`, `Etc/GMT+5`) don't. A `VTIMEZONE`'s rules are
+  yearly and hold a day each year, so each year is worked out alone,
+  whatever was read before. A `DTSTART` the clocks skip, or show twice, is
+  read as RFC 5545 (3.3.5) reads one. A repeat's day the clocks skip is
+  read so too, kept and counted: RFC 5545 (3.3.10) says such a day "MUST
+  be ignored", and, further on, that it is read as 3.3.5 says; Lapilli
+  departs from the first on purpose, as a turn dropped would leave the
+  pager with no one. `BYWEEKNO`, `BYYEARDAY`, `BYHOUR` and repeats more
+  often than daily are still passed over. The bounds: a step is a period
+  and each day it makes, BYSETPOS's dropped among them, 2,000,000 a feed,
+  its zones' among them; 100 `VTIMEZONE`s a feed, 64 parts and 1,000
+  `RDATE`s each, offsets within 18 hours, 16 changes a year; a zone is
+  worked out a year at a time for the years asked, so Outlook's rules
+  from 1601 cost a few steps.
 
 ### Attacker's look
 
@@ -466,7 +537,9 @@ the thing to avoid, and a copy one way leaves half of it out of each.
   does, under that id, so it isn't sent again (as built, after the
   verification).
 - **Once.** A comment edited or deleted after it was copied isn't followed
-  either way: what was said, was said. (A question for review.)
+  either way: what was said, was said. (A question for review.) Since
+  0.70 an edit is followed, both ways, and a deletion still isn't
+  ([trackers.md](trackers.md), "Edits followed").
 - **Bounded.** 200 comments a task a run, each 10,000 characters at most,
   as a comment written in Lapilli is.
 

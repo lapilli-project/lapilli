@@ -330,6 +330,58 @@ func shownText(s string) string {
 	}, strings.ToValidUTF8(s, "\uFFFD"))
 }
 
+// EditCopied takes the edit of a comment copied in from a task's issue, as
+// the tasks token sends it: its text as the tracker has it now, and when
+// the tracker says it was last changed (docs/design/trackers.md, "Edits
+// followed"). An edit no later than the one kept changes nothing, so the
+// same edit sent again, or an older one sent after a newer, is passed over;
+// a later one is kept, text and time. One whose text shows as the one kept
+// does keeps its time alone, so it isn't sent again, and isn't noted as a
+// change: a tracker may move a comment's time for a reaction. Its text is
+// kept as CopyComment keeps a
+// comment's, and its time as the tracker's, now when after now. Only a
+// comment copied in is changed so: a person's is theirs. It is noted as the
+// tracker job's, and isn't told: the tracker told people.
+func (l *Ledger) EditCopied(ctx context.Context, task, comment int64, body string, at time.Time) (bool, error) {
+	body = strings.TrimSpace(shownText(body))
+	switch {
+	case body == "":
+		return false, invalid("a comment says something")
+	case utf8.RuneCountInString(body) > 10000:
+		return false, invalid("a comment is %d characters at most", 10000)
+	case !sane(at):
+		return false, invalid("a comment's edit is when it was made")
+	}
+	if now := time.Now(); at.After(now) {
+		at = now
+	}
+	changed := false
+	err := l.write(ctx, func(t *txn) error {
+		var origin, was string
+		var updated int64
+		err := t.QueryRowContext(t.ctx, "SELECT origin, updated, body FROM comments WHERE id = ? AND on_kind = 'task' AND on_key = ?", comment, fmt.Sprint(task)).Scan(&origin, &updated, &was)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrNotFound
+		case err != nil:
+			return err
+		case origin != OriginTracker:
+			return invalid("only a comment copied in from the tracker takes its edits there")
+		case at.Unix() <= updated:
+			return nil
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET body = ?, updated = ? WHERE id = ?", body, at.Unix(), comment); err != nil {
+			return err
+		}
+		if body == was {
+			return nil
+		}
+		changed = true
+		return change(t, TaskTracker, fmt.Sprintf("comment %d on task %d edited in its issue", comment, task), nil, nil)
+	})
+	return changed, err
+}
+
 // MarkPosted notes that a comment people wrote on a task was posted to the
 // task's issue, as the tracker's comment ref: the job reads it back, and
 // doesn't post it again, however many comments the issue has since. Set

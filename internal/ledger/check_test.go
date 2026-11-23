@@ -72,6 +72,34 @@ func TestFailedRules(t *testing.T) {
 	if err != nil || fmt.Sprint(got) != "map[A:true]" {
 		t.Errorf("failed: %v %v", got, err)
 	}
+	// A run at a time, of the rules asked of alone, each its period.
+	span := func(a, b time.Duration) [2]time.Time { return [2]time.Time{t0.Add(a), t0.Add(b)} }
+	for _, c := range []struct {
+		from, to time.Duration
+		names    map[string]bool
+		want     [][2]time.Time
+	}{
+		{12 * time.Hour, 60 * time.Hour, map[string]bool{"A": true, "B": true}, [][2]time.Time{span(0, 24*time.Hour), span(48*time.Hour, 72*time.Hour)}},
+		{12 * time.Hour, 60 * time.Hour, map[string]bool{"B": true}, [][2]time.Time{span(48*time.Hour, 72*time.Hour)}},
+		{12 * time.Hour, 60 * time.Hour, map[string]bool{"C": true}, nil},
+		{12 * time.Hour, 60 * time.Hour, nil, nil},
+		{24 * time.Hour, 48 * time.Hour, map[string]bool{"A": true, "B": true}, nil},
+	} {
+		got, err := l.RunsFailing(ctx, t0.Add(c.from), t0.Add(c.to), c.names)
+		if err != nil || !slices.EqualFunc(got, c.want, func(a, b [2]time.Time) bool { return a[0].Equal(b[0]) && a[1].Equal(b[1]) }) {
+			t.Errorf("%v of %v: %v %v, want %v", c.names, c.from, got, err, c.want)
+		}
+	}
+	// A key, not its value, names a rule.
+	if hit, err := failedAny(`{"x": "A", "B": {"nested": ["A"]}, "A": "boom"}`, map[string]bool{"A": true}); err != nil || !hit {
+		t.Errorf("A failed: %t %v", hit, err)
+	}
+	if hit, err := failedAny(`{"x": "A", "B": {"nested": ["A"]}}`, map[string]bool{"A": true}); err != nil || hit {
+		t.Errorf("A named only as a value: %t %v", hit, err)
+	}
+	if _, err := failedAny(`["A"]`, map[string]bool{"A": true}); err == nil {
+		t.Error("a list taken")
+	}
 }
 
 // Where the clocks skip midnight, a day still starts on itself: the check

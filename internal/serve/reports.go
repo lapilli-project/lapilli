@@ -521,6 +521,9 @@ type missedIncident struct {
 	Start time.Time `json:"start"`
 	// Nearly are the rules that nearly caught it, as last looked for.
 	Nearly []string `json:"nearly"`
+	// FiredAfter are the rules that fired once it was over, their condition
+	// having held in it: its alert, too late (ledger.LateOf).
+	FiredAfter []string `json:"fired_after,omitempty"`
 }
 
 // missedSection: the incidents that started in the span with no alert, and
@@ -550,9 +553,17 @@ func (s *Server) missedSection(ctx context.Context, rep *verdict.Report, from, t
 				m.Nearly = append(m.Nearly, nm.Rule)
 			}
 		}
+		for _, c := range in.FiredAfter {
+			m.FiredAfter = append(m.FiredAfter, c.Rule)
+		}
 		missed = append(missed, m)
 	}
 	nums := map[string]any{"incidents": n, "missed": orNoneOf(missed), "only_noisy": onlyNoisy}
+	if rep.LateCut {
+		// Past what one read looks at, a missed incident's fired_after
+		// may be none.
+		nums["late_cut"] = true
+	}
 	switch {
 	case n == 0:
 		return tr(l, "No incidents."), nums, nil
@@ -562,6 +573,13 @@ func (s *Server) missedSection(ctx context.Context, rep *verdict.Report, from, t
 	items := make([]string, 0, 10)
 	for _, m := range missed[:min(len(missed), 10)] {
 		item := verdict.Clean(cmp.Or(m.Title, m.ID)) + " (" + m.Start.In(loc).Format("2006-01-02 15:04") + ")"
+		if len(m.FiredAfter) > 0 {
+			names := make([]string, 0, len(m.FiredAfter))
+			for _, r := range m.FiredAfter[:min(len(m.FiredAfter), 3)] {
+				names = append(names, verdict.Clean(r))
+			}
+			item += " " + tr(l, "fired after its end: %s", strings.Join(names, ", "))
+		}
 		if len(m.Nearly) > 0 {
 			names := make([]string, 0, len(m.Nearly))
 			for _, r := range m.Nearly[:min(len(m.Nearly), 3)] {
@@ -820,6 +838,9 @@ func (s *Server) firingsSection(ctx context.Context, rep *verdict.Report, from, 
 	team *ledger.Team) (string, any, error) {
 	own, err := s.owners(ctx)
 	if err != nil {
+		return "", nil, err
+	}
+	if o, err = s.withHeld(ctx, o, from, to); err != nil {
 		return "", nil, err
 	}
 	fs, total, err := s.l.ReportFirings(ctx, from, to, o, teamKeeps(own, team), in, reportFiringsMost)

@@ -240,8 +240,12 @@ func TestEventRecorderRefuses(t *testing.T) {
 		}
 		notif(e)["alerts"] = all
 	})
-	if code, _, _ := send(t, h, path, tooMany, bearer(notifyToken)); code != http.StatusRequestEntityTooLarge {
-		t.Errorf("%d alerts: %d", ledger.MaxAlerts+1, code)
+	// An event of too many alerts is an event that can't be read: 400, as
+	// the rest are, not 413, which a sender would take for a body too
+	// large and try again.
+	if code, body, _ := send(t, h, path, append(append([]byte("["), tooMany...), ']'), bearer(notifyToken)); code != http.StatusBadRequest ||
+		!strings.Contains(body, "at most") {
+		t.Errorf("%d alerts: %d %s", ledger.MaxAlerts+1, code, body)
 	}
 	if n := kept2(t, s); n != 0 {
 		t.Fatalf("%d kept from what was refused", n)

@@ -171,6 +171,18 @@ history (recorded.md), such a rule can get from Grafana's.
   under, which the history never has: it read as a rule that never fired.
 - **One flag.** `--grafana-history=false`, for both commands, lists them as
   before.
+- **Its severity** (0.70). A rule judged so has the severity its labels
+  say, as a replayed rule has its own: its `severity` label, the rules of
+  its name joined by `/`. The recorded rule it is copied in as keeps none
+  in `rules.severity`, which is how a source tells its rules apart (one
+  recorded rule a name, whatever severities its alerts carry), so serve
+  keeps it in the ledger's meta (`grafana.severity`, 256 bytes a rule at
+  most), written with the names before each run, and the rules table
+  gives it from there: the report, the rules list and its sorting, a
+  rule's page, MCP, `--metrics` and the summary by severity have it, and
+  so does what decides a spare rule (at the same severity or above). Before
+  0.70 serve gave such a rule none; `lapilli verdict` gave it its labels'.
+  No schema.
 
 A tie made by a copy now carries the reason the run gave the rule, and its
 group, from the empty row the run made for it: before, a cloud's alarm read
@@ -283,8 +295,6 @@ its data sources answered.
 
 ## Questions
 
-- One recorded rule a name keeps no severity: the report gives such a rule
-  none, where a replayed rule has its labels'.
 - In annotations, a rule is tied to its changes by its id as
   `/api/v1/provisioning/alert-rules` lists it (0.69.2), which Grafana's
   main branch marks deprecated, beside the rules API of its app platform:

@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -150,6 +153,65 @@ func (l *Ledger) FailedRules(ctx context.Context, from, to time.Time) (map[strin
 		}
 	}
 	return out, rows.Err()
+}
+
+// RunsFailing are the spans of the runs meeting [from, to) that couldn't
+// replay one of the rules named, the earliest first: what FailedRules
+// says of a span, a run at a time, of those rules alone. Each run's
+// rules are read as a stream, none kept; with none named, nothing is read.
+func (l *Ledger) RunsFailing(ctx context.Context, from, to time.Time, names map[string]bool) ([][2]time.Time, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := l.r.QueryContext(ctx, "SELECT period_from, period_to, failed FROM runs WHERE period_from < ? AND period_to > ? AND failed != '{}' ORDER BY period_from, id",
+		to.Unix(), from.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]time.Time
+	for rows.Next() {
+		var a, b int64
+		var raw string
+		if err := rows.Scan(&a, &b, &raw); err != nil {
+			return nil, err
+		}
+		hit, err := failedAny(raw, names)
+		if err != nil {
+			return nil, err
+		}
+		if hit {
+			out = append(out, [2]time.Time{unix(a), unix(b)})
+		}
+	}
+	return out, rows.Err()
+}
+
+// failedAny reports whether a run's failed rules, a JSON object of a
+// rule's name to why, name one of names: read a key at a time.
+func failedAny(raw string, names map[string]bool) (bool, error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return false, fmt.Errorf("a run's failed rules aren't an object: %v", err)
+	}
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return false, err
+		}
+		name, ok := k.(string)
+		if !ok {
+			return false, errors.New("a run's failed rules have a key that isn't a name")
+		}
+		if names[name] {
+			return true, nil
+		}
+		var why json.RawMessage
+		if err := dec.Decode(&why); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // CheckedTo is how far the check has got; zero before it began.

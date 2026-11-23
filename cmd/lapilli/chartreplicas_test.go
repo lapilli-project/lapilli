@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -109,5 +110,55 @@ func TestChartReplicas(t *testing.T) {
 	// with the key every pod mounts.
 	if strings.Contains(out, "sessionAffinity: ClientIP") {
 		t.Error("the Service sticks people to a pod")
+	}
+}
+
+// Replicas drain as they stop: each answers for serve.shutdownDelaySeconds
+// (5) before its ports close, while the Service's endpoints learn it is
+// going, and its pod's grace is that and Kubernetes's 30 s. One replica, or
+// a delay of 0, stops at once, with Kubernetes's own grace; a delay that
+// isn't seconds, or over ten minutes, is refused.
+func TestChartReplicasDrain(t *testing.T) {
+	pg := append(serveValues, "--set", "serve.ledger.postgres.secret.name=ledger-db")
+	pod := func(values ...string) (args []any, grace any) {
+		t.Helper()
+		out, err := helmTemplate(t, values...)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		spec := chartDocs(t, out)["Deployment"][0]["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+		for _, c := range spec["containers"].([]any) {
+			if c := c.(map[string]any); c["name"] == "lapilli" {
+				args = c["args"].([]any)
+			}
+		}
+		return args, spec["terminationGracePeriodSeconds"]
+	}
+	has := func(args []any, flag string) bool {
+		for _, a := range args {
+			if s, _ := a.(string); strings.HasPrefix(s, flag) {
+				return true
+			}
+		}
+		return false
+	}
+	args, grace := pod(append(pg, "--set", "serve.replicas=3")...)
+	if !slices.Contains(args, any("--shutdown-delay=5s")) || grace != 35 {
+		t.Errorf("three replicas: %v, grace %v", args, grace)
+	}
+	args, grace = pod(append(pg, "--set", "serve.replicas=2", "--set", "serve.shutdownDelaySeconds=20")...)
+	if !slices.Contains(args, any("--shutdown-delay=20s")) || grace != 50 {
+		t.Errorf("a delay of 20: %v, grace %v", args, grace)
+	}
+	for _, at := range [][]string{pg, serveValues, append(pg, "--set", "serve.replicas=3", "--set", "serve.shutdownDelaySeconds=0")} {
+		if args, grace := pod(at...); has(args, "--shutdown-delay") || grace != nil {
+			t.Errorf("%v: %v, grace %v", at[len(serveValues):], args, grace)
+		}
+	}
+	for _, bad := range []string{"5s", "601", "-1"} {
+		out, err := helmTemplate(t, append(pg, "--set", "serve.replicas=3", "--set", "serve.shutdownDelaySeconds="+bad)...)
+		if err == nil || !strings.Contains(out, "serve.shutdownDelaySeconds: seconds, 0 to 600") {
+			t.Errorf("%s: %v, want refused\n%s", bad, err, out)
+		}
 	}
 }
