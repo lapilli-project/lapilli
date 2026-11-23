@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 )
 
@@ -571,5 +573,26 @@ func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 				t.Errorf("the gap is covered at %s: %v", in, spans)
 			}
 		}
+	}
+}
+
+// The severities of rules of one name are joined once each, however many
+// rules say which, and in whatever order: critical, warning, critical is
+// critical/warning, as verdict says it, not critical/critical/warning.
+func TestJudgedSeveritiesJoinedOnce(t *testing.T) {
+	sev := func(s string) map[string]string { return map[string]string{"severity": s} }
+	rs := []rules.Rule{{Name: "Orders slow", Labels: sev("critical")}, {Name: "Orders slow", Labels: sev("warning")}, {Name: "Orders slow", Labels: sev("critical")},
+		{Name: "Stock low"}, {Name: "Cart", Labels: sev("page")}}
+	if got := judgedSeverities(rs); !maps.Equal(got, map[string]string{"Orders slow": "critical/warning", "Cart": "page"}) {
+		t.Errorf("judged: %v", got)
+	}
+	// A run's, rule after rule.
+	by := severitiesBy{}
+	var got string
+	for _, s := range []string{"critical", "warning", "critical", ""} {
+		got = by.add("Errors", s)
+	}
+	if got != "critical/warning" {
+		t.Errorf("a run's: %q", got)
 	}
 }
