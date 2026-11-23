@@ -75,6 +75,11 @@ type Options struct {
 	// "for" and lag of its rule among known and these, so it is said to
 	// have held in an incident only when every version would have.
 	Versions []rules.Rule `json:"-"`
+	// Held is, in lapilli serve, by rule, how long before a firing its
+	// condition held, of the versions in effect over the period (HeldFor):
+	// what the ledger says a firing came after an incident by, as Judge
+	// says it from known and Versions. Nil says nothing came after any.
+	Held map[string]time.Duration `json:"-"`
 	// Signals, when named, are the impact signals and the rule entries
 	// firings are judged by (docs/design/signals.md): each window matched
 	// on its signal's labels, each firing judged by the signals that could
@@ -450,6 +455,10 @@ type Report struct {
 	// are kept (docs/design/judging.md, item 3): its metrics give each
 	// rule's answers to "needed action".
 	People bool `json:"-"`
+	// LateCut says, in lapilli serve, that more firings came near the end
+	// of incidents than its ledger looks at in one read for those that came
+	// after one (ledger.LateOf): the rest aren't said to have.
+	LateCut bool `json:"-"`
 }
 
 // Settings are what a report's firings were judged by, as Options has
@@ -559,12 +568,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	// How long before a firing its rule's condition held, by the time of
 	// the history it read: its "for" and how late its metrics arrive, of
 	// a rule as it was at several times the least (Options.Versions).
-	held := map[string]time.Duration{}
-	for _, k := range slices.Concat(known, o.Versions) {
-		if d, ok := held[k.Name]; !ok || max(k.For, 0)+k.Lag() < d {
-			held[k.Name] = max(k.For, 0) + k.Lag()
-		}
-	}
+	held := HeldFor(slices.Concat(known, o.Versions))
 	for _, k := range known {
 		// A name can stand for several rules, or a rule as it was at
 		// several times; if any of them couldn't be replayed, say so.
@@ -656,9 +660,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 				catches[i][f.Rule] = d
 			}
 		}
-		if j.Held.IsZero() && held[f.Rule] > 0 {
-			j.Held = f.Start.Add(-held[f.Rule])
-		}
+		j.Held = HeldFrom(f, held)
 		if !j.White && !nj {
 			j.After = cameAfter(f, j.Held, inPeriod, catches, after, o)
 		}
@@ -757,21 +759,52 @@ func sortCatches(cs []Catch) {
 	})
 }
 
-// cameAfter is, of a black firing whose condition held from held (zero
-// for its start), the incidents it came after the end of while its
-// condition had held in them, its labels agreeing, of those its rule
-// hasn't caught (catches): their alert, too late. Each is noted in after,
-// by the delay from its start of the rule's first such firing. A firing
-// from elsewhere, with no rule or Held to say when its condition held,
-// held from its start, and so came after none.
-func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches, after []map[string]time.Duration, o Options) []string {
+// HeldFor is, by rule, how long before a firing its condition held, by
+// the time of the history it read: its "for" and how late its metrics
+// arrive, the least of the rules of its name (a rule as it stood at
+// several times). A rule with neither held only once it fired.
+func HeldFor(rs []rules.Rule) map[string]time.Duration {
+	held := map[string]time.Duration{}
+	for _, k := range rs {
+		if d, ok := held[k.Name]; !ok || max(k.For, 0)+k.Lag() < d {
+			held[k.Name] = max(k.For, 0) + k.Lag()
+		}
+	}
+	return held
+}
+
+// HeldFrom is from when a firing's condition held: its own Held, or else
+// its start less how long its rule's held (HeldFor); zero for its start.
+func HeldFrom(f firing.Firing, held map[string]time.Duration) time.Time {
+	if f.Held.IsZero() && held[f.Rule] > 0 {
+		return f.Start.Add(-held[f.Rule])
+	}
+	return f.Held
+}
+
+// AfterEnd reports whether a firing whose condition held from held (zero
+// for its start) came after an incident was over while its condition had
+// held in it, its labels agreeing (About): its alert, too late. Whether
+// its rule caught the incident otherwise isn't asked. A firing from
+// elsewhere, with no rule or Held to say when its condition held, held
+// from its start, and so came after none.
+func AfterEnd(f firing.Firing, held time.Time, in incident.Incident, o Options) bool {
 	if held.IsZero() {
 		held = f.Start
 	}
+	end := in.EndOr(o.UnknownLen)
+	return f.Start.After(end) && !held.After(end) && o.About(f.Rule, f.Labels, in)
+}
+
+// cameAfter is, of a black firing whose condition held from held (zero
+// for its start), the incidents it came after the end of while its
+// condition had held in them (AfterEnd), of those its rule hasn't caught
+// (catches): their alert, too late. Each is noted in after, by the delay
+// from its start of the rule's first such firing.
+func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches, after []map[string]time.Duration, o Options) []string {
 	var ids []string
 	for i, in := range ins {
-		end := in.EndOr(o.UnknownLen)
-		if _, caught := catches[i][f.Rule]; caught || !f.Start.After(end) || held.After(end) || !o.About(f.Rule, f.Labels, in) {
+		if _, caught := catches[i][f.Rule]; caught || !AfterEnd(f, held, in, o) {
 			continue
 		}
 		ids = append(ids, in.ID)

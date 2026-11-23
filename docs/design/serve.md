@@ -298,6 +298,34 @@ week whose record is kept since, by an incident written down later, no
 longer shows it; a result kept that doesn't decode is logged and taken as
 none.
 
+**An alert after the incident** (0.70). A black firing that came once an
+incident was over, its condition having held in it and its labels
+agreeing, is that incident's alert, too late (docs/how-it-judges.md):
+`lapilli verdict` has said so since 0.54; serve says it the same way,
+`verdict.AfterEnd` deciding for both. Nothing is kept for it, and no stone
+changes: it is worked out as the ledger is read (`ledger.LateOf`), from the
+firings, the incidents that count and the catches it keeps, and how long
+before its start each rule's condition held, its `for` and lag, the least
+of the versions in effect over the span read (`verdict.HeldFor`,
+`verdict.Options.Held`). A rule copied in, whose condition serve doesn't
+have, held from its start, and so came after nothing. As a firing's
+stones are given against every incident the ledger has, so is this: a
+firing in the span after an incident before it counts for its rule, and an
+incident in the span is named with the firings after it past the span's
+end; verdict, given a period, looks at those of the period alone. What
+reads it: the report (`late` of a rule, `fired_after` of an incident,
+`after` and `held_from` of a firing), so `/api/v1/report`, the digest's
+text and the reports' `missed` (each missed incident's `fired_after`); the
+Incidents page ("✗ nothing in time; after its end: Errors +1m") and an
+incident's own; a rule's page and the rules list, over the weeks shown
+(`ruleLine.Late`); and MCP (`fired_after` of an incident, `late` of a
+rule). The spans read are the incidents' that count ending from as long
+before the span as a rule's condition held at most, each read once where
+they meet, firings neither white nor excused; a read looks at 4,000,000
+firings against an incident each at most, past which the rest aren't said
+to have come after one, and serve logs it. The pages keep what they read
+by the ledger's generation and their span, as the credit is kept.
+
 **With no record: which conditions** (0.70). How many of a rule's firings
 went well past its bounds is said where it can be said soundly: where its
 condition holds only where its comparisons with numbers let it

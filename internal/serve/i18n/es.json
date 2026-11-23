@@ -2816,5 +2816,11 @@
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s es la fuente bajo la que lapilli serve copia el historial de estados de alerta del propio Grafana: usa otro nombre",
  "All %d went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "Los %d pasaron con creces los umbrales que los decidieron (%s), no un parpadeo en un borde: ocurrieron.",
  "%d of them went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "%d de ellos pasaron con creces los umbrales que los decidieron (%s), no un parpadeo en un borde: ocurrieron.",
- "None stayed more than a fifth past the bounds that decide it (%s) for all of its for.": "Ninguno se mantuvo más de un 20 %% más allá de los umbrales que la deciden (%s) durante todo su for."
+ "None stayed more than a fifth past the bounds that decide it (%s) for all of its for.": "Ninguno se mantuvo más de un 20 %% más allá de los umbrales que la deciden (%s) durante todo su for.",
+ "✗ nothing in time; after its end: %s": "✗ nada a tiempo; después de su fin: %s",
+ "Nothing in time.": "Nada a tiempo.",
+ "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same.": "Después de su fin, reglas cuya condición se cumplió en él, pero cuyo \"for\" y el retraso con que llegan sus métricas pasaron de su fin: su alerta, demasiado tarde, negra de todos modos.",
+ "%s after its end": "%s después de su fin",
+ "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "%d de los disparos que no detectaron nada llegaron después de que terminara un incidente con el que coinciden: su condición se cumplió en él, pero su \"for\" y el retraso con que llegan sus métricas pasaron de su fin. Una alerta demasiado tarde, negra de todos modos.",
+ "fired after its end: %s": "se disparó después de su fin: %s"
 }

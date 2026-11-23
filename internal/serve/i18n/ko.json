@@ -2816,5 +2816,11 @@
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s 는 lapilli serve 가 Grafana 의 알림 상태 이력을 복사해 오는 출처예요. 다른 이름을 써 주세요",
  "All %d went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "%d건 모두 판정을 가른 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
  "%d of them went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "그중 %d건은 판정을 가른 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
- "None stayed more than a fifth past the bounds that decide it (%s) for all of its for.": "판정을 가르는 임계값(%s)을 20%% 넘게 넘은 채로 for 내내 이어진 알림은 없었어요."
+ "None stayed more than a fifth past the bounds that decide it (%s) for all of its for.": "판정을 가르는 임계값(%s)을 20%% 넘게 넘은 채로 for 내내 이어진 알림은 없었어요.",
+ "✗ nothing in time; after its end: %s": "✗ 제때 울린 알림 없음. 끝난 뒤: %s",
+ "Nothing in time.": "제때 울린 알림이 없어요.",
+ "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same.": "인시던트 동안 조건이 참이었지만 \"for\"와 메트릭이 늦게 들어오는 시간 때문에 인시던트가 끝난 뒤에 울린 규칙이에요. 이 인시던트의 알림이지만 너무 늦어서 오탐으로 쳐요.",
+ "%s after its end": "끝나고 %s 뒤",
+ "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "오탐 중 %d건은 라벨이 맞는 인시던트가 끝난 뒤에 울렸어요. 인시던트 동안 조건이 참이었지만 \"for\"와 메트릭이 늦게 들어오는 시간 때문에 끝난 뒤에 울린 거예요. 너무 늦은 알림이라 오탐으로 쳐요.",
+ "fired after its end: %s": "끝난 뒤 울림: %s"
 }

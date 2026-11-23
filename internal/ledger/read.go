@@ -655,8 +655,16 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return nil, err
 	}
 	rep.EpisodesNotCounted = !counted
+	// The firings that came after an incident was over, their condition
+	// having held in it, as lapilli verdict says it (LateOf): with o.Held.
+	late, err := l.LateOf(ctx, from, to, o, firings)
+	if err != nil {
+		return nil, err
+	}
+	rep.LateCut = late.Cut
 	total := 0
 	for _, rr := range byName {
+		rr.Late = late.Rules[rr.Rule]
 		rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
 		rr.Noisy = verdict.IsNoisy(rr.Judged(), rr.White, at)
 		rr.ImpactRule = o.Signals.EntryNumber(rr.Rule)
@@ -686,10 +694,15 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return nil, err
 	}
 	for _, in := range incs {
-		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy}
+		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID]}
 		for i, c := range ir.CaughtBy {
 			if rr, ok := byName[c.Rule]; ok {
 				ir.CaughtBy[i].Noisy = rr.Noisy
+			}
+		}
+		for i, c := range ir.FiredAfter {
+			if rr, ok := byName[c.Rule]; ok {
+				ir.FiredAfter[i].Noisy = rr.Noisy
 			}
 		}
 		rep.Incidents = append(rep.Incidents, ir)
@@ -724,6 +737,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return fs[a].Rule < fs[b].Rule
 	})
 	jd.numbering(counted)
+	jd.after = late.After
 	for _, f := range fs {
 		if f.Excused {
 			continue // counted in the rule's Excused, not judged
@@ -746,6 +760,9 @@ type judger struct {
 	// firing as the firings are judged, by the id of their first firing;
 	// nil when they aren't counted (numbering).
 	episodes map[int64]int
+	// after are, by firing id, the incidents each came after the end of
+	// (Late.After).
+	after map[int64][]string
 }
 
 // numbering has the episodes of the firings judged numbered, when they are
@@ -795,6 +812,10 @@ func (jd *judger) judge(f Firing) verdict.Judged {
 		Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds, Signals: signals,
 		Day: f.Start.In(jd.l.loc).Format(time.DateOnly), Action: f.Action(), NotJudged: jd.o.NotJudged(f.Rule)}
 	j.Episode = jd.number(f.Episode)
+	// From when its condition held, and the incidents it came after, as
+	// lapilli verdict says them.
+	j.Held = verdict.HeldFrom(f.Firing, jd.o.Held)
+	j.After = jd.after[f.ID]
 	for _, in := range jd.near {
 		if verdict.Catches(f.Firing, in, jd.o) {
 			// Said by a person to be unrelated to it: not caught.
@@ -844,7 +865,13 @@ func (l *Ledger) ReportFirings(ctx context.Context, from, to time.Time, o verdic
 		return nil, 0, err
 	}
 	jd.numbering(counted)
-	rows, err := l.r.QueryContext(ctx, `SELECT f.rule_id, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.deploy, f.marked, s.signals, f.episode, f.person, f.unrelated
+	// The incidents each came after the end of, as ReportFor says them.
+	late, err := l.LateOf(ctx, from, to, o, true)
+	if err != nil {
+		return nil, 0, err
+	}
+	jd.after = late.After
+	rows, err := l.r.QueryContext(ctx, `SELECT f.id, f.rule_id, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.deploy, f.marked, s.signals, f.episode, f.person, f.unrelated
 		FROM firings f JOIN series s ON s.id = f.series_id WHERE f.start_at >= ? AND f.start_at < ? AND f.excused = 0
 		ORDER BY f.start_at, f.id`, from.Unix(), to.Unix())
 	if err != nil {
@@ -888,7 +915,7 @@ func (l *Ledger) ReportFirings(ctx context.Context, from, to time.Time, o verdic
 		var r row
 		var rule int64
 		var unrelated string
-		if err := rows.Scan(&rule, &r.sid, &r.labels, &r.start, &r.end, &r.f.White, &r.f.Refired, &r.f.Deploy, &r.bits, &r.f.Signals, &r.f.Episode,
+		if err := rows.Scan(&r.f.ID, &rule, &r.sid, &r.labels, &r.start, &r.end, &r.f.White, &r.f.Refired, &r.f.Deploy, &r.bits, &r.f.Signals, &r.f.Episode,
 			&r.f.Person, &unrelated); err != nil {
 			return nil, 0, err
 		}

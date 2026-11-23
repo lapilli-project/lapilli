@@ -40,7 +40,8 @@
 <dd class="big">{{.Backtest}}{{template "delta" .BacktestBy}}</dd>
 <dd>{{if .Either}}{{t "alike with what really fired, of %d" .Either}}{{else}}{{t "not set beside what really fired"}}{{end}}</dd></div>
 </dl>{{end}}
-{{if .Firings}}<p class="episodes">{{if .EpisodesCounted}}{{t "Episodes: %d, each one problem, its alerts of the same labels overlapping or re-firing within a day; %d of them caught something, precision by episodes %s." .Episodes .EpisodesWhite .EpisodesPrecision}}{{if .NoisyApart}} {{if .Noisy}}{{t "Noisy by firings, not by episodes: %d firings in %d episodes." .Firings .Episodes}}{{else}}{{t "Noisy by episodes, not by firings: %d firings in %d episodes." .Firings .Episodes}}{{end}}{{end}}{{else}}{{t "Its episodes aren't counted yet: the ledger counts them a week at a time, the newest first."}}{{end}}</p>{{end}}
+{{if .Firings}}<p class="episodes">{{if .EpisodesCounted}}{{t "Episodes: %d, each one problem, its alerts of the same labels overlapping or re-firing within a day; %d of them caught something, precision by episodes %s." .Episodes .EpisodesWhite .EpisodesPrecision}}{{if .NoisyApart}} {{if .Noisy}}{{t "Noisy by firings, not by episodes: %d firings in %d episodes." .Firings .Episodes}}{{else}}{{t "Noisy by episodes, not by firings: %d firings in %d episodes." .Firings .Episodes}}{{end}}{{end}}{{else}}{{t "Its episodes aren't counted yet: the ledger counts them a week at a time, the newest first."}}{{end}}</p>{{end}}{{with .Late}}
+<p class="late">{{t "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same." .}}</p>{{end}}
 
 {{with .Strip}}<figure class="strip">
 <figcaption>{{t "The last 84 days"}}</figcaption>

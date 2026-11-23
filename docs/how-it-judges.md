@@ -334,8 +334,13 @@ out from the rules replayed, with no step after the replays, so `--extras`
 doesn't cut it. A firing says when its condition held (`held_from`), so a
 report's firings, read back with `--firings`, say the same; firings from
 elsewhere, with no `held_from`, came after nothing, and a `held_from` after
-its firing's start is read as none. `lapilli serve` doesn't
-say it yet.
+its firing's start is read as none. `lapilli serve` says it too (0.70),
+worked out as its ledger is read, of the incidents that count, every one it
+has, as its stones are given: `/api/v1/report`, the digest and the reports
+it sends (`fired_after` of a missed incident), the Incidents page and an
+incident's own, a rule's page (how many of its firings that caught nothing
+came after one) and MCP (`fired_after`, `late`), its rules as they stood
+over what is shown.
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
 did, each rule replayed from `--rules`, as it stood then, is looked at about

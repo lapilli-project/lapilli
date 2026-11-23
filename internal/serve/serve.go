@@ -529,6 +529,7 @@ type Server struct {
 	sigs       signalsCache
 	grantsC    grantsCache
 	creds      creditCache
+	lates      lateCache
 	hours      hoursCache
 	// goalsC are the goals the ledger holds, goalRows the goals' weeks the
 	// pages read, and goalsK what the leader worked out of them last.
