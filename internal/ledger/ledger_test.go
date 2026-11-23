@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -672,6 +673,72 @@ func TestDecideAgainOfAWindowThatGrew(t *testing.T) {
 	}
 	if now, _ := l.Changes(ctx, 100); len(now) != len(cs)+2 {
 		t.Errorf("confirmed once more, unchanged: %d changes noted, want the two of the window", len(now)-len(cs))
+	}
+}
+
+// A window confirmed again gave its incident the hours and labels it had
+// grown to, through no check of Put's: a person's incident, within Put's
+// bounds, grew past them, labels past 4 KB, hours past 31 days. Grown past
+// them, the confirmation is refused, saying why, and the incident and the
+// window are left as they were.
+func TestDecideAgainGrownPastPutsBounds(t *testing.T) {
+	ctx := context.Background()
+	vals := func(p string) []string {
+		var vs []string
+		for i := range 30 {
+			vs = append(vs, p+strings.Repeat("x", 100)+string(rune('a'+i%26)))
+		}
+		return vs
+	}
+	key := "impact-20261102T0100Z"
+	for _, c := range []struct {
+		name   string
+		person incident.Incident
+		says   string
+	}{
+		{"labels", incident.Incident{Title: "x", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), Labels: incident.Labels{"team": vals("t")}},
+			"an incident's labels are 4 KB at most in all, as JSON"},
+		{"hours", incident.Incident{Title: "x", Start: t0.Add(2*time.Hour - maxIncident - time.Minute), End: t0.Add(time.Hour)},
+			"an incident lasts 31 days at most"},
+	} {
+		l := open(t, time.UTC)
+		w := incident.Incident{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour),
+			Labels: incident.Labels{"service": vals("s")}, Candidate: true}
+		if c.name == "hours" {
+			w.Labels = incident.Labels{"service": {"checkout"}}
+		}
+		f := Found{From: t0, To: t0.Add(2 * time.Hour), ImpactOn: true, ImpactSince: t0, ImpactCriterion: "a", Impact: []incident.Incident{w},
+			Run: Run{Kind: "test", Started: t0.Add(2 * time.Hour), Finished: t0.Add(2 * time.Hour), From: t0, To: t0.Add(2 * time.Hour)}}
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatal(err)
+		}
+		first, err := l.Decide(ctx, key, "confirmed", "", "ana", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A person changes it, within Put's bounds, and the window is
+		// taken back.
+		c.person.ID = first
+		if _, err := l.Put(ctx, c.person, "eve", opts); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if _, err := l.Decide(ctx, key, "", "", "ana", opts); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := l.IncidentByID(ctx, first)
+		_, err = l.Decide(ctx, key, "confirmed", "", "ana", opts)
+		var bad ErrInvalid
+		if !errors.As(err, &bad) || err.Error() != c.says {
+			t.Errorf("%s: confirmed again: %v, want %q", c.name, err, c.says)
+		}
+		after, _ := l.IncidentByID(ctx, first)
+		b, _ := json.Marshal(after.Labels)
+		if len(b) > maxLabelBytes || after.End.Sub(after.Start) > maxIncident || !same(l.d, before.Incident, after.Incident) {
+			t.Errorf("%s: the incident is %d bytes of labels, %v long, changed %v", c.name, len(b), after.End.Sub(after.Start), !same(l.d, before.Incident, after.Incident))
+		}
+		if win, _ := l.IncidentByID(ctx, key); win.State != "" {
+			t.Errorf("%s: the window is %q", c.name, win.State)
+		}
 	}
 }
 

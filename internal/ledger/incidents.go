@@ -476,7 +476,8 @@ func (l *Ledger) Delete(ctx context.Context, key, by string, o verdict.Options) 
 // stands for it still (confirmedAs): no second is written, of the same
 // hours, which would count them twice. That incident is given what the
 // window has grown to since, its hours and labels, and the title, if one
-// is given; and what its hours and labels touch is judged again, as when a
+// is given, within what Put takes, or else the confirmation is refused;
+// and what its hours and labels touch is judged again, as when a
 // person changes them (Put).
 func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o verdict.Options) (string, error) {
 	if state != "" && state != "confirmed" && state != "dismissed" {
@@ -515,6 +516,13 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 				made = was.ID
 				now := grown(was.Incident, old.Incident, title)
 				if !same(l.d, was.Incident, now) {
+					// Held to what Put holds a person's change to: grown past
+					// it (hours past 31 days, labels past 4 KB), refused, the
+					// window left as it was, for the person to change the
+					// incident first.
+					if err := checkIncident(now); err != nil {
+						return err
+					}
 					if err := put(t, now, "ui", by, time.Now().Unix()); err != nil {
 						return err
 					}
