@@ -2809,6 +2809,7 @@
  "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "ここではなく lapilli serve の起動時に指定します。付けたり外したりして起動すると、すべての発火を一度だけ再判定します。",
  "Every firing is being judged again with it: until that is done, the pages show what was judged before.": "この値ですべての発火を再判定中です。終わるまでは、以前の判定結果が表示されます。",
  "A Grafana rule Lapilli can't replay: what Grafana's own alert state history says it fired, copied in from %s on, is its record, so Lapilli can't say what a change to it would do.": "Lapilli がバックテストできない Grafana のルールです。Grafana 自身のアラート状態の履歴が示す発火を %s 以降取り込み、このルールの記録としているため、ルールを変えたらどうなるかは分かりません。",
+ "A Grafana rule Lapilli can't replay, left out of what is copied in of Grafana's own alert state history since %s: the history can't say what it fired (another rule has its title, changes of it were passed over, or a firing of it can't be kept), so it has no record from then.": "Lapilli がバックテストできない Grafana のルールです。%s 以降は、Grafana 自身のアラート状態の履歴の取り込みから外しています。履歴だけでは何が発火したか分からないためです (同じタイトルのルールがほかにある、状態の変化の一部を読めなかった、または保存できない発火がある)。それ以降の記録はありません。",
  "copying in what Grafana's alert state history says its rules fired, %s": "Grafana のアラート状態の履歴が示す発火を取り込み中: %s",
  "copying in Grafana's alert state history": "Grafana のアラート状態の履歴の取り込み",
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s は lapilli serve が Grafana 自身のアラート状態の履歴を取り込む取り込み元です。別の名前にしてください"

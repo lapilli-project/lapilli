@@ -440,6 +440,9 @@ type TieState struct {
 	// while (LeaveOut), what they cover of it: from the end of the latest
 	// such period, or, while it is left out, up to its start.
 	Since, To int64
+	// Out is, while the rule is left out of the source's copies
+	// (LeaveOut), as of the latest of them, when that began: 0 otherwise.
+	Out int64
 	// Apart is when the latest firing of the alarm's history held apart
 	// at another severity began: its severity changed. 0 for none.
 	Apart int64
@@ -492,8 +495,12 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 		st := TieState{Source: src, Apart: h.apart}
 		// A period the rule was left out of the copies is none of its
 		// record: no gap, and none of those, since Since.
-		if own := without(c.spans, c.out[h.sent]); len(own) > 0 {
+		left := c.out[h.sent]
+		if own := without(c.spans, left); len(own) > 0 {
 			st.Since, st.To = own[len(own)-1][0], own[len(own)-1][1]
+		}
+		if n, m := len(c.spans), len(left); n > 0 && m > 0 && left[m-1][1] >= c.spans[n-1][1] {
+			st.Out = left[m-1][0]
 		}
 		out[rule] = st
 	}

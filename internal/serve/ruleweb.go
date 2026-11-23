@@ -553,7 +553,9 @@ func besides(l ruleLine, was ledger.Span) (precision, firings, incidents moved) 
 // span from at on, to now: for one it replays, the replay's runs; for one
 // copied in, its source's copies without a gap from at, and still coming,
 // not quiet past --source-quiet (a cloud's alarm's history from when its
-// tie says too). A copy that stopped would read as a rule grown quieter.
+// tie says too). A copy that stopped would read as a rule grown quieter;
+// so would a period the rule alone was left out of the copies
+// (ledger.LeaveOut), which is none of what they cover of it.
 func (s *Server) holds(ctx context.Context, v *ruleView, at time.Time) (bool, error) {
 	src := v.Source
 	if v.Tie != nil {
@@ -563,7 +565,7 @@ func (s *Server) holds(ctx context.Context, v *ruleView, at time.Time) (bool, er
 		src = v.Tie.Source
 	}
 	if src != "" {
-		from, to, err := s.l.Coverage(ctx, src)
+		from, to, err := s.l.CoverageOf(ctx, src, v.Name)
 		if err != nil || from.IsZero() {
 			return false, err
 		}

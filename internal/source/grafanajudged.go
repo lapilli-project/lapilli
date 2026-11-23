@@ -39,6 +39,40 @@ type FromHistory struct {
 	Passed int
 }
 
+// historyName is the name the history kept where gives a rule's alerts:
+// an annotation's tags as AnnotationName writes its alert name, Loki's as
+// it is.
+func historyName(where string, r rules.Rule) string {
+	if where == HistoryAnnotations {
+		return AnnotationName(r.AlertName())
+	}
+	return r.AlertName()
+}
+
+// SharedNames are those of rs, each by the name it is judged under, whose
+// alert name, as the history kept where names it, another of Grafana's
+// rules among all has too (rs alone, when all is nil): known before the
+// history is read, as Judge gives them in Shared.
+func SharedNames(where string, rs, all []rules.Rule) map[string]bool {
+	of := all
+	if len(of) == 0 {
+		of = rs
+	}
+	n := map[string]int{}
+	for _, r := range of {
+		if r.UID != "" {
+			n[historyName(where, r)]++
+		}
+	}
+	twice := map[string]bool{}
+	for _, r := range rs {
+		if n[historyName(where, r)] > 1 {
+			twice[r.Name] = true
+		}
+	}
+	return twice
+}
+
 // Judge reads the history kept where over [from, to] and gives the firings
 // of rs, the rules to judge by it, each under its Name. An annotation's
 // tags name a rule as AnnotationName writes its alert name, Loki's as it
@@ -53,32 +87,16 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all []rules
 		return FromHistory{}, err
 	}
 	j := FromHistory{Passed: read.Passed}
-	key := func(r rules.Rule) string {
-		if where == HistoryAnnotations {
-			return AnnotationName(r.AlertName())
-		}
-		return r.AlertName()
-	}
-	of := all
-	if len(of) == 0 {
-		of = rs
-	}
-	shared := map[string]int{}
-	for _, r := range of {
-		if r.UID != "" {
-			shared[key(r)]++
-		}
-	}
+	twice := SharedNames(where, rs, all)
 	byKey := map[string]string{}
-	unsure, twice := map[string]bool{}, map[string]bool{}
+	unsure := map[string]bool{}
 	for _, r := range rs {
-		switch k := key(r); {
-		case shared[k] > 1:
-			twice[r.Name] = true
+		switch {
+		case twice[r.Name]:
 		case read.UnsureMore:
 			unsure[r.Name] = true
 		default:
-			byKey[k] = r.Name
+			byKey[historyName(where, r)] = r.Name
 		}
 	}
 	fs, odd := firing.FromTransitions(ts, from)

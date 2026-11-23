@@ -1086,7 +1086,10 @@ type refireWeek struct {
 type tieView struct {
 	Source string
 	Since  time.Time
-	Why    string
+	// Out is, for a rule left out of its source's copies as of the latest
+	// (ledger.LeaveOut), since when: it has no record from then.
+	Out time.Time
+	Why string
 }
 
 // tieViewOf is what a rule's page says of a cloud's alarm's tie.
@@ -1094,6 +1097,9 @@ func tieViewOf(x ledger.TieState) *tieView {
 	v := &tieView{Source: x.Source, Why: x.Why}
 	if x.Since > 0 {
 		v.Since = time.Unix(x.Since, 0)
+	}
+	if x.Out > 0 {
+		v.Out = time.Unix(x.Out, 0)
 	}
 	return v
 }

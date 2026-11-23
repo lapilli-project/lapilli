@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -28,6 +29,14 @@ const maxLeftOut = 64
 // variable, so tests can make it small.
 var maxLeftOutRules = 5000
 
+// ErrLeftOut is a period, a source or a rule LeaveOut doesn't keep.
+var ErrLeftOut = errors.New("not a period a rule was left out the ledger keeps")
+
+// ErrLeftOutFull is a rule to leave out of a source whose rules with
+// periods kept are as many as are kept (maxLeftOutRules): none of the
+// write is kept.
+var ErrLeftOutFull = errors.New("as many rules of the source with periods left out as the ledger keeps")
+
 // RuleName reports whether name can name a rule copied in, as PutFirings
 // takes one: 1 to 512 characters, all of which show. A rule of another
 // name has no firing copied in, so no record to leave it out of.
@@ -38,20 +47,19 @@ func RuleName(name string) bool {
 // LeaveOut keeps that rules, by the names their source sends them by, were
 // left out of what was copied in for source over [from, to): a period that
 // meets or overlaps one kept of the rule is run together with it. Kept
-// already, nothing is written.
+// already, nothing is written. A rule past as many as have periods kept
+// fails the write, as ErrLeftOutFull.
 func (l *Ledger) LeaveOut(ctx context.Context, source string, rules []string, from, to time.Time) error {
 	switch {
 	case !ValidSource(source):
-		return invalid("a source is lowercase letters, digits and dashes, 40 at most, such as cloudwatch-prod")
-	case !from.Equal(from.Truncate(time.Second)) || !to.Equal(to.Truncate(time.Second)):
-		return invalid("from and to are whole seconds, such as 2026-11-02T00:00:00Z")
-	case !to.After(from) || !sane(from) || !sane(to):
-		return invalid("a period is from 1970 to 9999, and to after from")
+		return fmt.Errorf("%w: not a source's name", ErrLeftOut)
+	case !from.Equal(from.Truncate(time.Second)) || !to.Equal(to.Truncate(time.Second)) || !to.After(from) || !sane(from) || !sane(to):
+		return fmt.Errorf("%w: a period is of whole seconds, from 1970 to 9999, its end after its start", ErrLeftOut)
 	}
 	rules = slices.Compact(slices.Sorted(slices.Values(rules)))
 	for _, r := range rules {
 		if !RuleName(r) {
-			return invalid("a rule's name is 1 to 512 characters, all of which show")
+			return fmt.Errorf("%w: a rule's name is 1 to 512 characters, all of which show", ErrLeftOut)
 		}
 	}
 	if len(rules) == 0 {
@@ -122,7 +130,7 @@ func (l *Ledger) leavingOut(ctx context.Context, q reader, source string, rules 
 				}
 			}
 			if known >= maxLeftOutRules {
-				return nil, nil, invalid("the ledger keeps the periods %d rules of a source were left out of its copies at most", maxLeftOutRules)
+				return nil, nil, fmt.Errorf("%w: %d", ErrLeftOutFull, maxLeftOutRules)
 			}
 			known++
 		}

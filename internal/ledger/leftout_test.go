@@ -86,7 +86,6 @@ func TestLeftOut(t *testing.T) {
 		t.Errorf("another source's rule: %v %v", hours(spans), err)
 	}
 	// What isn't kept.
-	var inv ErrInvalid
 	for what, err := range map[string]error{
 		"a name that doesn't show": l.LeaveOut(ctx, GrafanaSource, []string{"Orders​slow"}, h(0), h(1)),
 		"no name":                  l.LeaveOut(ctx, GrafanaSource, []string{""}, h(0), h(1)),
@@ -95,7 +94,7 @@ func TestLeftOut(t *testing.T) {
 		"a period backwards":       l.LeaveOut(ctx, GrafanaSource, []string{"A"}, h(1), h(1)),
 		"a part of a second":       l.LeaveOut(ctx, GrafanaSource, []string{"A"}, h(0), h(1).Add(time.Millisecond)),
 	} {
-		if !errors.As(err, &inv) {
+		if !errors.Is(err, ErrLeftOut) {
 			t.Errorf("%s: %v", what, err)
 		}
 	}
@@ -135,8 +134,7 @@ func TestLeftOutBounds(t *testing.T) {
 	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "C"}, h(0), h(1)); err != nil {
 		t.Fatal(err)
 	}
-	var inv ErrInvalid
-	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "D"}, h(1), h(2)); !errors.As(err, &inv) {
+	if err := l.LeaveOut(ctx, GrafanaSource, []string{"B", "D"}, h(1), h(2)); !errors.Is(err, ErrLeftOutFull) {
 		t.Errorf("a fourth rule: %v", err)
 	}
 	// Nothing of a write refused is kept, and those kept go on.

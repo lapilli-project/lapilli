@@ -2809,6 +2809,7 @@
  "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once.": "여기서가 아니라 lapilli serve 를 시작할 때 정해요. 이 플래그를 더하거나 빼고 시작하면 모든 발화를 한 번 다시 판정해요.",
  "Every firing is being judged again with it: until that is done, the pages show what was judged before.": "이 값으로 모든 발화를 다시 판정하는 중이에요. 끝날 때까지는 전에 판정한 결과가 보여요.",
  "A Grafana rule Lapilli can't replay: what Grafana's own alert state history says it fired, copied in from %s on, is its record, so Lapilli can't say what a change to it would do.": "Lapilli 가 백테스트할 수 없는 Grafana 규칙이에요. Grafana 의 알림 상태 이력에 남은 %s 이후의 알림을 복사해 와서 이 규칙의 기록으로 삼기 때문에, 규칙을 바꾸면 어떻게 될지는 말할 수 없어요.",
+ "A Grafana rule Lapilli can't replay, left out of what is copied in of Grafana's own alert state history since %s: the history can't say what it fired (another rule has its title, changes of it were passed over, or a firing of it can't be kept), so it has no record from then.": "Lapilli 가 백테스트할 수 없는 Grafana 규칙이에요. %s 부터는 Grafana 의 알림 상태 이력을 복사해 올 때 이 규칙을 빼고 있어요. 이력만으로는 이 규칙이 무엇을 울렸는지 알 수 없어서예요 (제목이 같은 규칙이 또 있거나, 상태 변경 일부를 읽지 못했거나, 저장할 수 없는 알림이 있어요). 그때부터는 기록이 없어요.",
  "copying in what Grafana's alert state history says its rules fired, %s": "Grafana 알림 상태 이력의 알림을 복사해 오는 중: %s",
  "copying in Grafana's alert state history": "Grafana 알림 상태 이력 복사해 오기",
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s 는 lapilli serve 가 Grafana 의 알림 상태 이력을 복사해 오는 출처예요. 다른 이름을 써 주세요"

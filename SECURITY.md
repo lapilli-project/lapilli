@@ -171,11 +171,14 @@ history says the rules it can't replay fired, and judges them by it
 (docs/design/grafanajudged.md), unless `--grafana-history=false`. That
 history is taken as Grafana wrote it. Where Grafana keeps it in Loki,
 whoever can push to that Loki tenant writes these rules' record: their
-firings, and, with changes to a state Grafana has no name for, or of more
-than 1,000 rules' names, every day a gap. Whoever may make a rule in a
-folder Lapilli reads can make every day a gap too, with a rule of a judged
-rule's title, paused or not. Guard the tenant as you guard the Grafana;
-neither is a way past what this says, which a report is welcome of.
+firings; with a change to a state Grafana has no name for, no record for
+the rule it names; and, with changes of more than 1,000 rules' names,
+every day a gap. Whoever may make a rule in a folder Lapilli reads can
+take one judged rule's record away, with a rule of its title, paused or
+not, for as long as that rule is there: the judged rule alone is left out,
+shown as having no record for the period, and the other rules' history is
+copied in as before. Guard the tenant as you guard the Grafana; neither is
+a way past what this says, which a report is welcome of.
 
 ## Versions
 
