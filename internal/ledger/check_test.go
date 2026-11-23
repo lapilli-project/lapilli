@@ -72,6 +72,15 @@ func TestFailedRules(t *testing.T) {
 	if err != nil || fmt.Sprint(got) != "map[A:true]" {
 		t.Errorf("failed: %v %v", got, err)
 	}
+	// A run at a time, each with its period.
+	runs, err := l.RunsFailing(ctx, t0.Add(12*time.Hour), t0.Add(60*time.Hour))
+	if err != nil || len(runs) != 2 || !runs[0].From.Equal(t0) || !runs[0].To.Equal(t0.Add(24*time.Hour)) || fmt.Sprint(runs[0].Rules) != "map[A:true]" ||
+		!runs[1].From.Equal(t0.Add(48*time.Hour)) || fmt.Sprint(runs[1].Rules) != "map[B:true]" {
+		t.Errorf("failed runs: %+v %v", runs, err)
+	}
+	if runs, err := l.RunsFailing(ctx, t0.Add(24*time.Hour), t0.Add(48*time.Hour)); err != nil || len(runs) != 0 {
+		t.Errorf("between the runs: %+v %v", runs, err)
+	}
 }
 
 // Where the clocks skip midnight, a day still starts on itself: the check

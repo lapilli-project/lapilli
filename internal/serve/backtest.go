@@ -628,6 +628,11 @@ type backtestRequest struct {
 	TZ           string         `json:"tz"`
 	PullRequest  int64          `json:"pull_request"`
 	Commit       string         `json:"commit"`
+	// FailMissed holds the change to the incidents, as --fail-missed does:
+	// the report says which incidents a rule caught before the change no
+	// rule catches after it, the rules left alone judged by serve's record
+	// of them (holdMissed). The job fails on it; serve fails nothing.
+	FailMissed bool `json:"fail_missed,omitempty"`
 }
 
 type backtestFile struct {
@@ -677,6 +682,8 @@ type prepared struct {
 	// reasons are why rules the request holds can't be replayed, as read
 	// from it: its own words, said in the comment as they are.
 	reasons map[string]bool
+	// failMissed is the request's fail_missed.
+	failMissed bool
 }
 
 // prepare reads and checks a backtest's request, as the port does before
@@ -684,7 +691,7 @@ type prepared struct {
 // Loki rules held to what the rules in effect read (eff): 400's reason
 // when it can't be, in Lapilli's words and the request's own.
 func (s *Server) prepare(req backtestRequest, t Trust, eff inEffectReads) (*prepared, string) {
-	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}}
+	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}, failMissed: req.FailMissed}
 	if p.days == 0 {
 		p.days = backtestDefaultDays
 	}
