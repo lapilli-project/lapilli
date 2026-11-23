@@ -258,17 +258,8 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 		}
 	}
 	if len(a.same) > 0 && !a.cursor.IsZero() {
-		runs, err := s.l.RunsFailing(ctx, from.Add(-o.MaxLead()), a.cursor.Add(time.Second))
-		if err != nil {
+		if a.failed, err = s.l.RunsFailing(ctx, from.Add(-o.MaxLead()), a.cursor.Add(time.Second), a.same); err != nil {
 			return nil, err
-		}
-		for _, r := range runs {
-			for n := range r.Rules {
-				if a.same[n] {
-					a.failed = append(a.failed, [2]time.Time{r.From, r.To})
-					break
-				}
-			}
 		}
 	}
 	return a, nil
