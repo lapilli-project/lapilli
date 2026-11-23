@@ -225,7 +225,15 @@ query's value, as it is or through reduces that leave it so (`last`,
 `max`, `min` or `mean` of its one value), its PromQL read as above; not a
 range query, whose points one event can hold for as long again as its
 range, nor one that fires on no data (`noDataState` `Alerting` or
-`KeepLast`), and a firing on no data is no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
+`KeepLast`), and a firing on no data is no event. A rule written in LogQL
+(a Loki ruler's, or a Grafana rule's one instant Loki query, read as
+above) is one when its value is `count_over_time`, `rate`,
+`bytes_over_time` or `bytes_rate` of a stream's lines over a range, the
+range after the pipeline, summed or maxed or not, times or over numbers or
+not, compared with a number no line passes and one does: each line is an
+event, and a line of `bytes_over_time` one byte at least
+(`count_over_time({app="shop"} |= "error" [5m]) > 0`). A pipeline that
+unwraps a label counts its values, not lines: no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
 30 minutes at most: with `for: 1h`, one restart can never fire it, only
 restarts that keep coming for an hour. The report says so of a rule whose
 `for` is that long already: "Its for (1h) is as long as the 30m its

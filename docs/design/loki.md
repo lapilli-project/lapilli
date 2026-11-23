@@ -433,6 +433,44 @@ couldn't be read never had its data sources' types asked (fixed: it is read
 again once they are), and the firing on at a period's start (its check now
 starts on a minute no firing ends near).
 
+## A `for` one line can't outlast (0.70)
+
+A rule that counts events can be given a `for` one event can't wait out
+(content.md, `rules.Rule.ForOutlasts`): `increase(restarts[30m]) > 0.5`
+holds for 30 minutes after one restart, so `for: 1h` fires only on
+restarts that keep coming for an hour. Until 0.70 that was said of PromQL
+alone. A log line is an event the same way, so it is said of LogQL too:
+
+- **Which values.** `count_over_time`, `rate`, `bytes_over_time` and
+  `bytes_rate` of a stream's lines over a range: the stream selector, its
+  pipeline, then the range, with an `offset` after it or not. Summed or
+  maxed by some labels or not, times or over numbers or not, as of PromQL.
+  Of a condition of comparisons joined by `and`, each that counts lines,
+  the longest range.
+- **What one line comes to.** `count_over_time` one; `rate` one over the
+  range's seconds; `bytes_over_time` its bytes, taken as one at least, so
+  only a bound one byte passes says it (`> 0`, `>= 1`); `bytes_rate` that
+  over the range's seconds. The bound must be one no line doesn't pass and
+  one line does, as of PromQL: `count_over_time(...) > 5` counts bursts,
+  not an event, and says nothing.
+- **Where.** A Loki ruler's rule, and a Grafana rule on Loki whose
+  condition compares its one instant query's value, as it is or through
+  `last`, `max`, `min` or `mean`, with a threshold of one number or one
+  math comparison: what the PromQL path already takes of a Grafana rule.
+- **What isn't.** A pipeline that unwraps a label (`| unwrap latency`):
+  its values are taken, not its lines, so `rate` of it is no count. A
+  range before the pipeline, which LogQL reads too, isn't read. A comment
+  Loki reads that PromQL doesn't (`//`, `/* */`) outside a string leaves
+  the whole condition unread, as what is read of it is by PromQL's rules.
+  A Grafana range query, as for PromQL: its points one line can hold for as
+  long again as its range. `absent_over_time`, `*_over_time` of an
+  `unwrap`, `or`, `unless`, a value added to another: nothing said.
+
+What is said is what PromQL's rules get: the report's line under the rule,
+`for_outlasts` in `--json` and on a proposal, the content check's fact, a
+longer `for` never suggested as long as the range, and, with no record,
+every firing an event that happened (`verdict.Unrecorded.Events`).
+
 ## What the reviews found
 
 Two reviews before release, one as an attacker and one for correctness,
