@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,27 @@ func TestCheckContentAlertmanager(t *testing.T) {
 		stderr.Reset()
 		if code := run(args, &stdout, &stderr); code != 2 && code != 1 || !strings.Contains(stderr.String(), "--alertmanager-config") {
 			t.Errorf("%q: exit %d: %s", args, code, stderr.String())
+		}
+	}
+}
+
+// The ruler's token goes to the ruler's host alone: --alertmanager-config
+// on another, with --ruler and its token, is refused; on the same, or
+// without --ruler, taken.
+func TestAlertmanagerConfigRulerHost(t *testing.T) {
+	tok := write(t, "token", "tok\n")
+	base := []string{"verdict", "--check-content", "--ruler", "http://mimir:8080/prometheus/config/v1/rules", "--ruler-token-file", tok}
+	if _, err := parseVerdictFlags(append(slices.Clone(base[1:]), "--alertmanager-config", "http://alertmanager:9093/api/v1/alerts")); err == nil ||
+		!strings.Contains(err.Error(), "isn't on --ruler's host") {
+		t.Errorf("another host: %v", err)
+	}
+	for _, ok := range [][]string{
+		append(slices.Clone(base[1:]), "--alertmanager-config", "http://MIMIR:8080/api/v1/alerts"),
+		{"--check-content", "--rules", write(t, "r.yaml", amRules), "--ruler-token-file", tok, "--alertmanager-config", "http://alertmanager:9093/api/v1/alerts"},
+		{"--check-content", "--ruler", "http://mimir:8080/prometheus/config/v1/rules", "--alertmanager-config", "http://alertmanager:9093/api/v1/alerts"},
+	} {
+		if _, err := parseVerdictFlags(ok); err != nil && strings.Contains(err.Error(), "--ruler's host") {
+			t.Errorf("%q: %v", ok, err)
 		}
 	}
 }

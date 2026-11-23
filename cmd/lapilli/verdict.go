@@ -217,7 +217,8 @@ What the rules say:
                       none outside its directory), or a file of Mimir's,
                       Cortex's or Amazon's format (alertmanager_config and
                       template_files); or Mimir's or Cortex's API, read
-                      with --ruler-token-file and --ruler-tenant:
+                      with --ruler-token-file and --ruler-tenant, on
+                      --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
                       Only read: no field that holds a secret is parsed
@@ -1312,6 +1313,14 @@ func validContent(f *verdictFlags, sources int) error {
 	return validHistory(f)
 }
 
+// sameHost reports whether two URLs are of one scheme and host, in any
+// letter case, as the ruler's requests are held to its host.
+func sameHost(a, b string) bool {
+	x, err1 := url.Parse(a)
+	y, err2 := url.Parse(b)
+	return err1 == nil && err2 == nil && strings.EqualFold(x.Scheme, y.Scheme) && strings.EqualFold(x.Host, y.Host)
+}
+
 // validRuler checks the flags that read a ruler: its token for Mimir and
 // Cortex, a cloud's credentials for Amazon and Azure.
 func validRuler(f *verdictFlags) error {
@@ -1329,6 +1338,10 @@ func validRuler(f *verdictFlags) error {
 		return errors.New("--ruler-token-file is a Mimir's or a Cortex's token: Amazon and Azure are read with --auth")
 	case f.rulerTenant != "" && f.ruler != "" && kind != source.RulerConfig:
 		return errors.New("--ruler-tenant is a Mimir's or a Cortex's tenant")
+	case amAPI && f.rulerTk != "" && f.ruler != "" && !sameHost(f.ruler, f.amConfig):
+		// The ruler's token goes to the ruler's host alone: a typo, or a
+		// plain Alertmanager's URL, isn't sent it.
+		return fmt.Errorf("--alertmanager-config %s isn't on --ruler's host, and --ruler-token-file is the ruler's: give Mimir's or Cortex's /api/v1/alerts on the same host and scheme", verdict.Clean(f.amConfig))
 	case kind == source.RulerAmazon && f.auth != "aws":
 		return errors.New("--ruler on Amazon is read with the pod's identity: add --auth aws")
 	case kind == source.RulerAzure && f.auth != "azure":

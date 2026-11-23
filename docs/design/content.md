@@ -282,7 +282,10 @@ receivers' fields are templates too. This checks those the same way.
   token (`--ruler-token-file`) and tenant (`--ruler-tenant`, as
   `X-Scope-OrgID`). It gives the configuration and every template file;
   Mimir loads them all, whatever `templates:` says, so all are read. A
-  404 is a tenant with none.
+  404 is a tenant with none. With `--ruler` and its token, the URL must be
+  on `--ruler`'s scheme and host, or the flags are refused: the token is
+  the ruler's, and a typo, or a plain Alertmanager's URL, mustn't be sent
+  it. Without `--ruler`, the token is given for this alone.
 
 Only what routing and the templates need is read: the route tree, each
 receiver's name and its integrations' fields that hold `{{`, and the

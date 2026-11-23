@@ -109,6 +109,8 @@ page goes out with nothing. It reads:
 - `--alertmanager-config http://mimir:8080/api/v1/alerts`: a Mimir's or a
   Cortex's configuration for its tenant, with `--ruler-tenant` and
   `--ruler-token-file`, every template file in it, as Mimir loads them all.
+  Given with `--ruler` and its token, it must be on `--ruler`'s host and
+  scheme: the ruler's token goes nowhere else.
 
 Alertmanager's own defaults aren't followed: they show every label and
 annotation there is, and fault nothing. No field whose name says it holds a
