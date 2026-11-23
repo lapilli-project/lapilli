@@ -416,15 +416,12 @@ data:
     }
     
     # pause_for HEADS PAUSE: how long to wait before a try is asked again: as
-    # long as the Retry-After of the headers curl wrote to HEADS says, a minute
-    # at most, or else PAUSE seconds.
+    # long as the Retry-After of the headers curl wrote to HEADS says, of any
+    # number of seconds, a minute at most; or else (none, or a date) PAUSE
+    # seconds. Counted by awk, so that no number is too long for the shell.
     pause_for() {
-      p_wait=$(tr -d '\r' <"$1" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
-      case $p_wait in
-        '' | *[!0-9]* | ???*) p_wait=$2 ;;
-        *) [ "$p_wait" -le 60 ] || p_wait=60 ;;
-      esac
-      printf '%s' "$p_wait"
+      tr -d '\r' <"$1" | awk -v pause="$2" 'tolower($1) == "retry-after:" { v = $2 }
+        END { if (v !~ /^[0-9]+$/) { print pause; exit } n = v + 0; if (n > 60) n = 60; print n }'
     }
     
     # fetch HOW CURL-ARGUMENTS: the tracker's answer, taken whole before it is

@@ -309,3 +309,26 @@ func TestTrackerRecipePostsThatRead(t *testing.T) {
 		})
 	}
 }
+
+// A Retry-After of three digits or more waited the first pause, a second,
+// not the minute it is held to. Any number of seconds waits as long, a
+// minute at most; a date, or none, the pause given.
+func TestTrackerRecipeRetryAfter(t *testing.T) {
+	needTools(t)
+	for _, c := range []struct{ header, want string }{
+		{"Retry-After: 45", "45"}, {"Retry-After: 60", "60"}, {"Retry-After: 61", "60"}, {"Retry-After: 120", "60"},
+		{"retry-after: 3600", "60"}, {"Retry-After: 99999999999999999999999", "60"}, {"Retry-After: 007", "7"},
+		{"Retry-After: 0", "0"}, {"Retry-After: Wed, 21 Oct 2026 07:28:00 GMT", "1"}, {"Retry-After: -5", "1"}, {"", "1"},
+	} {
+		heads := filepath.Join(t.TempDir(), "heads")
+		if err := os.WriteFile(heads, []byte("HTTP/1.1 429 Too Many Requests\r\n"+c.header+"\r\n\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(recipeShell(), "-c", `set -eu; name=test.sh; . "$0"; pause_for "$HEADS" 1`, trackerRecipes+"lib.sh")
+		cmd.Env = append(trackerEnv(), "LAPILLI_URL=http://127.0.0.1:1", "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok), "HEADS="+heads)
+		out, err := cmd.CombinedOutput()
+		if got := strings.TrimSpace(string(out)); err != nil || got != c.want {
+			t.Errorf("%q: waits %q, %v, want %s", c.header, got, err, c.want)
+		}
+	}
+}
