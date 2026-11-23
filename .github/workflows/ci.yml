@@ -40,9 +40,10 @@ jobs:
       - name: go.mod is tidy
         run: go mod tidy -diff
       - run: go vet ./...
-      # The serve tests take five to seven minutes, more on macOS: past
-      # go test's own ten, the package fails unrun. Twenty, as on Postgres.
-      - run: go test -timeout 20m ./...
+      # The serve tests take ten minutes on Linux and eighteen on macOS,
+      # where twenty left a slow runner's package unfinished (11-23):
+      # forty, so that a slow runner fails a test, not the clock.
+      - run: go test -timeout 40m ./...
 
   latest-go:
     name: test on the latest Go
@@ -55,9 +56,10 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      # The serve tests take five to seven minutes, more on macOS: past
-      # go test's own ten, the package fails unrun. Twenty, as on Postgres.
-      - run: go test -timeout 20m ./...
+      # The serve tests take ten minutes on Linux and eighteen on macOS,
+      # where twenty left a slow runner's package unfinished (11-23):
+      # forty, so that a slow runner fails a test, not the clock.
+      - run: go test -timeout 40m ./...
 
   postgres:
     # The ledger's, serve's and the command's tests with the ledger in

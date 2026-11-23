@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           go mod download
           go mod verify
-      - run: go vet ./... && go test -timeout 20m ./...
+      - run: go vet ./... && go test -timeout 40m ./...
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
