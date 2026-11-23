@@ -237,9 +237,10 @@ Before upgrading:
   `curl --retry`, which writes each try's answer after the one before
   when the answer goes through a pipe, a read that timed out midway
   followed by the next try's whole: the tracker's and Lapilli's alike,
-  three times at most, each try's answer the last alone, a POST only
-  where it can't have been taken (above). Serve's answer to the
-  incidents' `put.sh` isn't kept.
+  three times at most, each try's answer the last alone, after a second,
+  then twice as long, or as long as `Retry-After` says, a minute at most;
+  a write that makes something only where it can't have been taken
+  (below). Serve's answer to the incidents' `put.sh` isn't kept.
 - **A task made of a proposal mentioned an issue of its tracker's**
   (affected: 0.22.0 to 0.69.1). Its title was `Proposal #12: ...`, which
   a tracker recipe makes its issue's title, where `#12` is the host's own
@@ -274,12 +275,15 @@ Before upgrading:
   have read the sources well all along: days on, a source read well then
   was quiet and down before this term read it, and down at once at its
   first failed read, which a notice could tell (`source.down`). A replica
-  that starts to lead takes the sources' reads of the term before now:
-  the leader's, as it last said them, which a follower keeps from the
-  leader's heartbeats; its own, where it led that term; or else none,
-  each source waiting until it is read. So a source failing is failing
-  since when the leader before said, and one that never reads well is
-  down past its bound however often the leader changes.
+  that starts to lead takes the sources' reads of the term before now,
+  before its heartbeat says anything of the term: the leader's, as it
+  last said them, which a follower keeps from the leader's heartbeats,
+  where it said them within a lease, a campaign and three beats of the
+  handover (a leader whose heartbeat stopped writing while its lease was
+  still renewed passes none on); its own, where it led that term; or
+  else none, each source waiting until it is read. So a source failing
+  is failing since when the leader before said, and one that never reads
+  well is down past its bound however often the leader changes.
 - **The backtest gate read a `TARGET` of a branch's name as a tag of
   that name** (affected: 0.32.0 to 0.69.1; the gates that stop a merge,
   and the status, from 0.67.0). A `TARGET` given by a short name, such as
@@ -436,27 +440,34 @@ Before upgrading:
   is judged again: a window confirmed while the impact went on had its
   firings after the hours first written black. Grown past what a
   person's change of it is held to, hours past 31 days or labels past
-  4 KB, the confirmation is refused, saying why, and the incident and the
-  window are left as they were. A title given is its title; none, or the
-  window's own as its form sends it back, leaves the incident's. One
-  deleted since and written again under its id, by anyone, of other hours
-  or the same, or moved by a person to hours the window hasn't, is
-  another's, and the window is written down anew; so is one confirmed
-  longer ago than `--keep` keeps the changes. A verdict naming both the
-  window and that incident names the incident once after it.
+  4 KB, the confirmation is refused, naming the incident and saying why
+  (`incident L-3 would grow past its bounds: an incident lasts 31 days at
+  most`), and the incident and the window are left as they were. A title
+  given is its title; none, or the window's own as its form sends it
+  back, leaves the incident's. One deleted since and written again under
+  its id, by anyone, of other hours or the same, or moved by a person to
+  hours the window hasn't, is another's, and the window is written down
+  anew; so is one confirmed longer ago than `--keep` keeps the changes. A
+  verdict naming both the window and that incident names the incident
+  once after it.
 - **A tracker recipe made an issue or a comment twice where the tracker
   took the request and answered it with an error, or not in time**
   (affected: 0.22.0 to 0.69.1; comments from 0.27.0). A request answered
-  500, 502 or 504, or not answered within 30 seconds, was asked again
-  three times at most whatever its method, as `curl --retry 3` does: an
-  issue the tracker made, behind a proxy that answered 502, was made a
-  second time, and the task linked to the second; so was a comment posted
-  to an issue, and a comment copied to a task was sent to Lapilli again,
-  which keeps it once. A POST is asked again now only where it can't have
-  been taken: a connection refused, a 408, 429 or 503. Otherwise the task
-  is skipped for the run, saying so, and the next run finds the issue or
-  the comment made by its marker. A request of another method is asked
-  again as before, and on a connection refused too.
+  500, 502, 503 or 504, or not answered within 30 seconds, was asked
+  again three times at most whatever its method, as `curl --retry 3`
+  does: an issue the tracker made, behind a proxy that answered 502, was
+  made a second time, and the task linked to the second; so was a comment
+  posted to an issue, and a comment copied to a task was sent to Lapilli
+  again, which keeps it once. A write that makes something (an issue, a
+  comment, a transition) is asked again now only where it can't have
+  been taken: a connection refused, a 408 or a 429. A 503 isn't among
+  them, as a proxy (Envoy) answers it after the tracker has the request.
+  Otherwise the task is skipped for the run, saying so, and the next run
+  finds the issue or the comment made by its marker. Each request is
+  marked a read or a write where the recipe asks it, not by its method:
+  a read, Linear's queries and Azure Boards' search among them, which go
+  as POSTs, and a write a second try leaves as the first did (a state, a
+  link), are asked again as before, and on a connection refused too.
 
 ### Changed
 
