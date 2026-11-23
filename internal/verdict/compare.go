@@ -217,37 +217,72 @@ func (c *Comparison) Lost() bool {
 // a query refused, out of time), whether it would catch one isn't known:
 // such an incident is counted as not known (MissedNotKnown), not missed.
 func (c *Comparison) HoldMissed(alike *Report) {
-	c.Missed = []IncidentChange{}
-	notKnown := 0
-	unreplayed := func(r *Report) bool {
-		return r != nil && slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" })
-	}
-	// After the change: the rules replayed after it, and the rules left
-	// alone, replayed with them or apart.
-	unsure := unreplayed(c.After) || unreplayed(alike)
-	stillCaught := func(i int, in incident.Incident) bool {
+	broken := anyUnreplayed(alike)
+	c.holdMissed(func(i int, in incident.Incident) (bool, bool) {
 		if alike == nil {
-			return false
+			return false, true
 		}
 		same := func(x IncidentResult) bool { return x.ID == in.ID && x.Start.Equal(in.Start) }
 		if i < len(alike.Incidents) && same(alike.Incidents[i]) {
-			return len(alike.Incidents[i].CaughtBy) > 0
+			return len(alike.Incidents[i].CaughtBy) > 0, !broken
 		}
 		for _, x := range alike.Incidents {
 			if same(x) && len(x.CaughtBy) > 0 {
-				return true
+				return true, true
 			}
 		}
-		return false
-	}
+		return false, !broken
+	})
+}
+
+// LeftAlone says of an incident whether a rule the change leaves alone
+// catches it (caught), and whether that is known at all (known): a rule
+// left alone that couldn't be replayed, or whose record doesn't hold the
+// incident's time, may catch it.
+type LeftAlone func(in incident.Incident) (caught, known bool)
+
+// HoldMissedBy is HoldMissed, with what the rules left alone catch said
+// by leftAlone, asked only of an incident a rule that differs caught
+// before the change and none catches after it: lapilli serve's backtests
+// say it by serve's record of those rules, not by replaying them. An
+// incident leftAlone doesn't know is counted as not known, as one a rule
+// after the change that couldn't be replayed may catch. nil is no rule
+// left alone.
+func (c *Comparison) HoldMissedBy(leftAlone LeftAlone) {
+	c.holdMissed(func(_ int, in incident.Incident) (bool, bool) {
+		if leftAlone == nil {
+			return false, true
+		}
+		return leftAlone(in)
+	})
+}
+
+// anyUnreplayed reports whether a rule r judged couldn't be replayed.
+func anyUnreplayed(r *Report) bool {
+	return r != nil && slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" })
+}
+
+// holdMissed sets Missed and the summary's counts, leftAlone saying of the
+// i-th incident whether a rule left alone catches it, and whether that is
+// known.
+func (c *Comparison) holdMissed(leftAlone func(i int, in incident.Incident) (caught, known bool)) {
+	c.Missed = []IncidentChange{}
+	notKnown := 0
+	// After the change: the rules replayed after it, and the rules left
+	// alone, as leftAlone says them.
+	unsure := anyUnreplayed(c.After)
 	// Both sides were judged against the same incidents, which come in the
 	// same order.
 	if c.Before != nil && c.After != nil && len(c.Before.Incidents) == len(c.After.Incidents) {
 		for i, b := range c.Before.Incidents {
-			if len(b.CaughtBy) == 0 || len(c.After.Incidents[i].CaughtBy) > 0 || stillCaught(i, b.Incident) {
+			if len(b.CaughtBy) == 0 || len(c.After.Incidents[i].CaughtBy) > 0 {
 				continue
 			}
-			if unsure {
+			caught, known := leftAlone(i, b.Incident)
+			if caught {
+				continue
+			}
+			if unsure || !known {
 				notKnown++
 				continue
 			}
@@ -260,10 +295,16 @@ func (c *Comparison) HoldMissed(alike *Report) {
 }
 
 // MissedNotKnownText says how many incidents HoldMissed couldn't tell
-// caught or missed, and why, or nothing.
+// caught or missed, and why, or nothing. Of a backtest lapilli serve ran,
+// a rule left alone may be why too: its record doesn't hold one of them
+// over an incident's time.
 func (c *Comparison) MissedNotKnownText() string {
 	if c.Summary == nil || c.Summary.MissedNotKnown == 0 {
 		return ""
+	}
+	if c.JudgedBy == JudgedByServe {
+		return fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule after it that lapilli serve can tell, but a rule after it couldn't be replayed, "+
+			"or serve's record doesn't hold a rule left alone over them: whether they are missed isn't known.", c.Summary.MissedNotKnown)
 	}
 	return fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule replayed after it, but a rule after it couldn't be replayed: "+
 		"whether they are missed isn't known, and they fail nothing (--fail-unreplayed fails a run whose history couldn't be read).", c.Summary.MissedNotKnown)
@@ -295,8 +336,13 @@ func MissedText(w io.Writer, c *Comparison, loc *time.Location) error {
 
 // leftAloneToo says, of the incidents Missed holds, that no rule left
 // alone catches them either, when those weren't replayed with the others
-// (ChangedOnly) but were for them (HoldMissed).
+// (ChangedOnly) but were for them (HoldMissed), or, of a backtest lapilli
+// serve ran, by serve's record of them, its own rules beside the pull
+// request's (HoldMissedBy).
 func (c *Comparison) leftAloneToo() string {
+	if c.JudgedBy == JudgedByServe {
+		return ", the rules left alone among them, as lapilli serve's record has them"
+	}
 	if c.ChangedOnly && c.Same > 0 {
 		return ", the rules left alone among them"
 	}

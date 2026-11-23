@@ -181,8 +181,9 @@ And, as wanted:
   replayed, an incident lapilli can't tell caught or missed as a rule
   after the change couldn't be replayed (`missed_not_known`), no report, a
   lapilli without `--fail-missed`. Either gate
-  failing fails the job. Refused with `LAPILLI_SERVE`, whose report
-  doesn't say yet.
+  failing fails the job. With `LAPILLI_SERVE`, serve's incidents judge,
+  and the rules left alone are judged by serve's record of them
+  ([below](#through-lapilli-serve)).
 - `STATUS=true` (or `1`): a commit status on the pull request's head
   commit too, `lapilli/backtest` (`lapilli/backtest/KEY` with a `KEY` of
   its own), success or failure as the job ends, with why, linking to the
@@ -558,8 +559,15 @@ same summary line. Serve replays the rules that differ with its own access
 to the history, at its share of the rate, and judges them by its record:
 the job needs no credential for the metrics, and no cloud sign-in. The
 comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`, `EXPECT_REQUIRED` and
-`STATUS` are as they are without it; `FAIL_MISSED` is refused, as serve's
-report doesn't say yet which incidents a change leaves caught by no rule. Serve runs no scenario `EXPECT` names: each is
+`STATUS` are as they are without it. `FAIL_MISSED` holds the change to
+serve's incidents and impact windows, with no `INCIDENTS` or `IMPACT`: the
+rules that differ are judged by the backtest, and the rules left alone by
+serve's record, which rules caught each incident, not replayed. A rule
+left alone that serve doesn't run, or whose record doesn't hold an
+incident's time (serve's runs began after it, or couldn't replay the
+rule), may have caught it unrecorded: that incident is not known, and the
+job fails, as with lapilli when a rule couldn't be replayed. Send the rules
+serve runs. It needs lapilli serve 0.70.0 or later. Serve runs no scenario `EXPECT` names: each is
 said as not run through lapilli serve, and `PROMTOOL` is refused; run
 `promtool test rules` in a step of its own to gate on them. The design is
 [docs/design/backtests.md](../../docs/design/backtests.md).

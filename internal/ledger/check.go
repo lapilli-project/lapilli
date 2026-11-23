@@ -152,6 +152,43 @@ func (l *Ledger) FailedRules(ctx context.Context, from, to time.Time) (map[strin
 	return out, rows.Err()
 }
 
+// FailedRun is a run that couldn't replay some rules: its period, and
+// those rules by name.
+type FailedRun struct {
+	From, To time.Time
+	Rules    map[string]bool
+}
+
+// RunsFailing are the runs meeting [from, to) that couldn't replay a rule,
+// the earliest first: FailedRules a run at a time, so that a span within
+// it is told by one read.
+func (l *Ledger) RunsFailing(ctx context.Context, from, to time.Time) ([]FailedRun, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT period_from, period_to, failed FROM runs WHERE period_from < ? AND period_to > ? AND failed != '{}' ORDER BY period_from, id",
+		to.Unix(), from.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FailedRun
+	for rows.Next() {
+		var a, b int64
+		var raw string
+		if err := rows.Scan(&a, &b, &raw); err != nil {
+			return nil, err
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			return nil, err
+		}
+		r := FailedRun{From: unix(a), To: unix(b), Rules: make(map[string]bool, len(m))}
+		for k := range m {
+			r.Rules[k] = true
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // CheckedTo is how far the check has got; zero before it began.
 func (l *Ledger) CheckedTo(ctx context.Context) (time.Time, error) {
 	v, err := l.meta(ctx, l.r, "checked_to")

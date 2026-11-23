@@ -151,9 +151,9 @@ What a tool reads is stable:
   | `expectations_already_broken` | expectations broken on both sides, which aren't the change's |
   | `unexpected` | rules the change adds that no expectation holds |
   | `scenarios_unrun` | scenarios of the rules that differ that couldn't be run after the change, `--promtool` given and the rule one promtool runs: the test file unreadable, a time out, a crash. They can't be judged, as a rule that couldn't be replayed can't; through lapilli serve, which runs none, always 0 |
-  | `missed_checked` | the run looked for incidents a rule caught before the change that no rule catches after it, `--fail-missed`; through lapilli serve, which doesn't yet, always false |
+  | `missed_checked` | the run looked for incidents a rule caught before the change that no rule catches after it, `--fail-missed`; through lapilli serve, when the job asked (`FAIL_MISSED`, `fail_missed`) |
   | `incidents_missed` | those it found, listed as `"missed"`; 0 when `missed_checked` is false |
-  | `missed_not_known` | of the incidents a rule caught before the change, those no rule replayed catches after it while a rule after it couldn't be replayed: not known to be missed, failing nothing; 0 when `missed_checked` is false |
+  | `missed_not_known` | of the incidents a rule caught before the change, those no rule replayed catches after it while a rule after it couldn't be replayed (through lapilli serve, or a rule left alone may have caught it unrecorded): not known to be missed, failing nothing; 0 when `missed_checked` is false |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -193,7 +193,7 @@ the job fail on it, and require the job, or the commit status it sets, in
 the branch's rules:
 
 - `FAIL_MISSED=true` (the action's `fail-missed`), with `INCIDENTS` or
-  `IMPACT`: the job fails when the change leaves an incident a rule
+  `IMPACT`, or through lapilli serve, by its incidents: the job fails when the change leaves an incident a rule
   caught before it caught by no rule after it (`--fail-missed`,
   [compare.md](compare.md#an-incident-no-rule-catches-after-the-change)),
   and when a rule that differs couldn't be replayed, or an incident can't
@@ -352,8 +352,13 @@ don't: a fork's run in the repository carries the repository's own
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate
 (`fail-on-expectations`, `expect-required`) reads the summary line as it
-reads Lapilli's. `fail-missed` is refused with `serve-url`: serve's
-report doesn't say yet which incidents a change leaves caught by no rule.
+reads Lapilli's. `fail-missed` holds the change to serve's incidents: the
+rules that differ are judged by the backtest, the rules left alone by
+serve's record of them, which rules caught each incident, not replayed; an
+incident a rule left alone may have caught with no record of it (serve
+doesn't run the rule, or its runs don't cover the incident's time) is not
+known, which fails the step as a gate that can't judge
+([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through
 lapilli serve, and `promtool` is refused with `serve-url`; run `promtool
