@@ -117,9 +117,10 @@ func TestVTimezoneAfterEvents(t *testing.T) {
 	}
 }
 
-// Which zone a TZID is: an IANA name, though the feed gives a VTIMEZONE
-// of its own for it (Google writes both); else the feed's VTIMEZONE,
-// though the name is a Windows one too; else the Windows name by CLDR's
+// Which zone a TZID is: an IANA name of a place, though the feed gives a
+// VTIMEZONE of its own for it (Google writes both); else the feed's
+// VTIMEZONE, though the name is IANA's for a fixed offset (EST) or a
+// Windows one too; else IANA's name, or the Windows name by CLDR's
 // table. A VTIMEZONE of STANDARD alone is an offset that doesn't change.
 // Outlook's older names, which hold commas, are matched as written. A zone
 // none of these is, is said.
@@ -130,8 +131,15 @@ func TestZoneLookup(t *testing.T) {
 	older := "BEGIN:VTIMEZONE\r\nTZID:(UTC+01:00) Amsterdam\\, Berlin\\, Bern\\, Rome\\, Stockholm\\, Vienna\r\n" +
 		"BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n" +
 		"BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+	est := "BEGIN:VTIMEZONE\r\nTZID:EST\r\n" +
+		"BEGIN:STANDARD\r\nDTSTART:19701101T020000\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\nRRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU\r\nEND:STANDARD\r\n" +
+		"BEGIN:DAYLIGHT\r\nDTSTART:19700308T020000\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
 	for _, c := range []struct{ name, zones, tz, want string }{
 		{"IANA over the feed's", wrongNewYork, "America/New_York", "2026-07-06T13:30:00Z"},
+		// EST is IANA's fixed -0500; the feed's EST keeps summer time (L19).
+		{"the feed's EST over IANA's", est, "EST", "2026-07-06T13:30:00Z"},
+		{"IANA's EST, with none", "", "EST", "2026-07-06T14:30:00Z"},
+		{"the feed's Etc/GMT+5 over IANA's", strings.ReplaceAll(est, "TZID:EST", "TZID:Etc/GMT+5"), "Etc/GMT+5", "2026-07-06T13:30:00Z"},
 		{"the feed's over the table", ninePacific, "Pacific Standard Time", "2026-07-06T00:30:00Z"},
 		{"the table, with no VTIMEZONE", "", "Pacific Standard Time", "2026-07-06T16:30:00Z"},
 		{"the table, a zone east", "", "Korea Standard Time", "2026-07-06T00:30:00Z"},
