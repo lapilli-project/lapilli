@@ -232,8 +232,8 @@ var proposalFacets = []pickFacet{
 		none: true},
 	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindAdd, ledger.KindUndo},
 		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "a new rule", "undoing a change"}},
-	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathAlarm, ledger.PathNone},
-		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "the cloud's API", "for a person to make"}},
+	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathLoki, ledger.PathAlarm, ledger.PathNone},
+		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "Loki's ruler's API", "the cloud's API", "for a person to make"}},
 	{param: "by", name: "Made by", values: []string{ledger.MakerPerson, ledger.MakerAgent, ledger.MakerLapilli}, labels: []string{"a person", "an agent", "Lapilli itself"}},
 	// The proposals made together, as a bulk proposal's result links to
 	// them: these alone, maxValues of them.
@@ -1136,7 +1136,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.PostFormValue("unwritten") != "1" {
 			switch p.Path {
-			case ledger.PathRuler:
+			case ledger.PathRuler, ledger.PathLoki:
 				s.oops(w, r, bad("the ruler can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach the ruler, and say so"))
 			case ledger.PathAlarm:
 				s.oops(w, r, bad("the cloud can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach the cloud, and say so"))
@@ -1147,7 +1147,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		}
 		to, step.Reason = ledger.StateFailed, "closed by an admin, who says the change didn't reach Grafana: "+why
 		switch p.Path {
-		case ledger.PathRuler:
+		case ledger.PathRuler, ledger.PathLoki:
 			step.Reason = "closed by an admin, who says the change didn't reach the ruler: " + why
 		case ledger.PathAlarm:
 			step.Reason = "closed by an admin, who says the change didn't reach the cloud: " + why

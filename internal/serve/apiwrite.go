@@ -130,6 +130,7 @@ const (
 	asWasYet      = "sent to the ruler, which took it, but still gives it as it was: it is read again each round for two minutes from when it was sent, as a ruler caching its storage may lag, before the change is called failed"
 	readBehind    = "sent to the cloud, which took it, but still reads as it was: it is read again each round for two minutes from when it was sent, as a cloud may be read a moment behind a write, before the change is called failed; it is never sent again"
 	notThereRuler = "--ruler no longer names the ruler the change was sent to: it is read back there once it does again, and never sent again"
+	notThereLoki  = "--loki no longer names the Loki the change was sent to, or --loki-loaded-rules is left out: it is read back there once they do again, and never sent again"
 	notThereAlarm = "--alarms no longer names where the change was sent: it is read back there once it does again, and never sent again"
 )
 
@@ -137,7 +138,9 @@ const (
 func (s *Server) targetOf(path string) target {
 	switch {
 	case path == ledger.PathRuler && s.ruler != nil:
-		return rulerTarget{s}
+		return rulerTarget{s: s}
+	case path == ledger.PathLoki && s.loki != nil:
+		return rulerTarget{s: s, loki: true}
 	case path == ledger.PathAlarm && len(s.alarms) > 0:
 		return alarmTarget{s}
 	}
@@ -424,7 +427,7 @@ func (s *Server) apiUndoAdd(ctx context.Context, tg target, p ledger.Proposal, s
 	}
 	i := slices.IndexFunc(rs, func(x rules.Rule) bool { return x.Name == e.Name && hashOf(p, x) == p.BeforeHash })
 	changed := refusal{fmt.Sprintf("the rule changed in %s since it was added: undo it in %s", tg.where(), tg.where())}
-	if i < 0 || (tg.path() == ledger.PathRuler && !tg.leftAsChanged(orig, u, p, e)) {
+	if i < 0 || ((tg.path() == ledger.PathRuler || tg.path() == ledger.PathLoki) && !tg.leftAsChanged(orig, u, p, e)) {
 		return changed
 	}
 	if why := tg.managed(u); why != "" {
@@ -648,19 +651,54 @@ const (
 	noPathLastGroup = "it is its rule group's last rule: a person deletes the rule group"
 	noPathEdit      = "the change can't be written into the ruler's group as it reads"
 	noPathUnread    = "the ruler gives its group in a form that can't be read back as written: change it in the ruler"
-	noPathLoki      = "it is a Loki ruler's rule, which Lapilli doesn't write: a person changes it, in Loki or where its rule files are kept"
+	noPathLoki      = "it is from a Loki ruler's rule files, which Lapilli doesn't write: a person changes it where they are kept"
+	noPathLokiIn    = "its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE"
 )
 
 // noPaths are every reason a rule read from a ruler, or a cloud's alarm,
 // is for a person.
-var noPaths = append([]string{noPathIn, noPathInAzure, noPathName, noPathCFN, noPathManaged, noPathLastNS, noPathLastGroup, noPathEdit, noPathUnread, noPathLoki},
+var noPaths = append([]string{noPathIn, noPathInAzure, noPathName, noPathCFN, noPathManaged, noPathLastNS, noPathLastGroup, noPathEdit, noPathUnread, noPathLoki, noPathLokiIn},
 	alarmNoPaths...)
 
-// rulerTarget is --ruler's.
-type rulerTarget struct{ s *Server }
+// rulerTarget is --ruler's; with loki, --loki's ruler's, read with
+// --loki-loaded-rules: Cortex's configuration API under Loki's path,
+// written as a Mimir's is, but on a path of its own (ledger.PathLoki), its
+// namespaces named in --changes-in as loki:NAMESPACE, and with its own
+// token to write.
+type rulerTarget struct {
+	s    *Server
+	loki bool
+}
 
-func (t rulerTarget) path() string     { return ledger.PathRuler }
-func (t rulerTarget) where() string    { return "the ruler" }
+// r is the ruler a change is read and written through.
+func (t rulerTarget) r() *source.Ruler {
+	if t.loki {
+		return t.s.loki
+	}
+	return t.s.ruler
+}
+
+// writes are the credentials that write to it.
+func (t rulerTarget) writes() source.Creds {
+	if t.loki {
+		return t.s.lokiWrites
+	}
+	return t.s.rulerWrites
+}
+
+func (t rulerTarget) path() string {
+	if t.loki {
+		return ledger.PathLoki
+	}
+	return ledger.PathRuler
+}
+
+func (t rulerTarget) where() string {
+	if t.loki {
+		return "Loki's ruler"
+	}
+	return "the ruler"
+}
 func (t rulerTarget) gone() string     { return "the rule's group is gone from the ruler" }
 func (t rulerTarget) cantEdit() string { return noPathEdit }
 func (t rulerTarget) goneUndo() string {
@@ -670,7 +708,12 @@ func (t rulerTarget) again() string {
 	return "a rule of its name is in its group again: undo it in the ruler"
 }
 func (t rulerTarget) backup(u apiUnit) []byte { return u.Raw }
-func (t rulerTarget) notThere() string        { return notThereRuler }
+func (t rulerTarget) notThere() string {
+	if t.loki {
+		return notThereLoki
+	}
+	return notThereRuler
+}
 
 // goneAllowed: a Mimir's or a Cortex's group is asked of by its namespace,
 // as apiApply asked already.
@@ -679,7 +722,7 @@ func (t rulerTarget) goneAllowed(ledger.Proposal, rules.Edit) string { return ""
 // lag: a Mimir or a Cortex caching its rule storage may give a group as it
 // was for a while after it took a change.
 func (t rulerTarget) lag() (time.Duration, string) {
-	if t.s.ruler.Kind == source.RulerConfig {
+	if t.r().Kind == source.RulerConfig {
 		return readBackWithin, asWasYet
 	}
 	return 0, ""
@@ -688,7 +731,7 @@ func (t rulerTarget) lag() (time.Duration, string) {
 // oneUnit: the same group (Mimir, Cortex), namespace (Amazon), rule group
 // (Azure).
 func (t rulerTarget) oneUnit(q ledger.Proposal, qe rules.Edit, p ledger.Proposal, e rules.Edit) bool {
-	return strings.EqualFold(q.Source, p.Source) && (t.s.ruler.Kind == source.RulerAmazon || qe.Group == e.Group)
+	return strings.EqualFold(q.Source, p.Source) && (t.r().Kind == source.RulerAmazon || qe.Group == e.Group)
 }
 
 func (t rulerTarget) leftAsChanged(orig ledger.Proposal, u apiUnit, _ ledger.Proposal, e rules.Edit) bool {
@@ -704,7 +747,7 @@ func (t rulerTarget) onlyRule(u apiUnit, out []byte, _ ledger.Proposal, e rules.
 // unitName is a unit's name in a diff: the namespace and group, an Amazon
 // namespace, the resource group and rule group.
 func (t rulerTarget) unitName(_ string, e rules.Edit) string {
-	if t.s.ruler.Kind == source.RulerAmazon {
+	if t.r().Kind == source.RulerAmazon {
 		return e.Namespace
 	}
 	return e.Namespace + "/" + e.Group
@@ -717,7 +760,7 @@ func (t rulerTarget) unitName(_ string, e rules.Edit) string {
 // source's.
 func (s *Server) changesIn(ns, group string) bool {
 	for _, pat := range s.cfg.ChangesIn {
-		if s.alarmsEntry(pat) {
+		if s.alarmsEntry(pat) || s.lokiEntry(pat) {
 			continue
 		}
 		if s.ruler.Kind != source.RulerAzure {
@@ -740,6 +783,39 @@ func (s *Server) changesIn(ns, group string) bool {
 	return false
 }
 
+// lokiEntry reports whether an entry of --changes-in names namespaces of
+// --loki's ruler, read with --loki-loaded-rules: loki:NAMESPACE, or
+// loki:PREFIX*. Without --loki-loaded-rules, such an entry is --ruler's, as
+// before.
+func (s *Server) lokiEntry(pat string) bool {
+	return s.loki != nil && strings.HasPrefix(pat, lokiIn)
+}
+
+// lokiIn is what an entry of --changes-in naming Loki's namespaces starts
+// with.
+const lokiIn = "loki:"
+
+// changesInLoki reports whether --changes-in names a namespace of Loki's
+// ruler: loki:NAMESPACE, or loki:PREFIX*, as Loki compares names, in their
+// letter case.
+func (s *Server) changesInLoki(ns string) bool {
+	return lokiInOf(s.cfg.ChangesIn, s.loki != nil, ns)
+}
+
+// lokiInOf reports whether a list of --changes-in entries, or a team's
+// changes_in, names a namespace of Loki's ruler.
+func lokiInOf(pats []string, loki bool, ns string) bool {
+	if !loki {
+		return false
+	}
+	for _, pat := range pats {
+		if p, ok := strings.CutPrefix(pat, lokiIn); ok && namedBy(p, ns, false) {
+			return true
+		}
+	}
+	return false
+}
+
 // namedBy reports whether a pattern of --changes-in names a name: the name,
 // or a prefix ending in *; fold compares in any letter case.
 func namedBy(pat, name string, fold bool) bool {
@@ -755,11 +831,15 @@ func namedBy(pat, name string, fold bool) bool {
 // allowed is why Lapilli may not change a rule in a namespace and a group,
 // "" when it may: --changes-in names it, and its names can be written to.
 func (t rulerTarget) allowed(_ string, e rules.Edit) string {
-	s := t.s
+	s, r := t.s, t.r()
 	switch {
-	case s.ruler.NameOK(e.Namespace, true) != nil || s.ruler.NameOK(e.Group, false) != nil:
+	case r.NameOK(e.Namespace, true) != nil || r.NameOK(e.Group, false) != nil:
 		return noPathName
-	case !s.changesIn(e.Namespace, e.Group) && s.ruler.Kind == source.RulerAzure:
+	case t.loki && !s.changesInLoki(e.Namespace):
+		return noPathLokiIn
+	case t.loki:
+		return ""
+	case !s.changesIn(e.Namespace, e.Group) && r.Kind == source.RulerAzure:
 		return noPathInAzure
 	case !s.changesIn(e.Namespace, e.Group):
 		return noPathIn
@@ -768,11 +848,11 @@ func (t rulerTarget) allowed(_ string, e rules.Edit) string {
 }
 
 func (t rulerTarget) owns(src string, e rules.Edit) error {
-	return t.s.ruler.Owns(src, e.Namespace, e.Group)
+	return t.r().Owns(src, e.Namespace, e.Group)
 }
 
 func (t rulerTarget) unit(ctx context.Context, _ string, e rules.Edit) (apiUnit, error) {
-	u, err := t.s.ruler.Unit(ctx, e.Namespace, e.Group)
+	u, err := t.r().Unit(ctx, e.Namespace, e.Group)
 	return apiUnit{Raw: u.Raw, Hash: u.Hash, Gone: u.Gone, ruler: u, ns: e.Namespace}, err
 }
 
@@ -781,7 +861,7 @@ func (t rulerTarget) unit(ctx context.Context, _ string, e rules.Edit) (apiUnit,
 // those --changes-managed names. A Mimir's or a Cortex's group carries
 // nothing that could say: --changes-in alone decides.
 func (t rulerTarget) managed(u apiUnit) string {
-	if t.s.ruler.Kind == source.RulerAmazon {
+	if t.r().Kind == source.RulerAmazon {
 		for k := range u.ruler.Tags {
 			if strings.EqualFold(k, "aws:cloudformation:stack-id") {
 				return noPathCFN
@@ -811,7 +891,7 @@ func managedBy(managed []string, tags map[string]string) bool {
 // being made, updated or deleted waits (errWaits); one that failed is
 // refused, with Amazon's reason.
 func (t rulerTarget) ready(_ context.Context, u apiUnit, _ ledger.Proposal) error {
-	if t.s.ruler.Kind != source.RulerAmazon || u.Gone {
+	if t.r().Kind != source.RulerAmazon || u.Gone {
 		return nil
 	}
 	switch u.ruler.Status {
@@ -835,7 +915,11 @@ func (t rulerTarget) rules(u apiUnit) ([]rules.Rule, error) {
 	if len(u.Raw) == 0 {
 		return nil, nil
 	}
-	return rules.FromDocs([]rules.Doc{{Source: u.ruler.Source, Namespace: u.ruler.Namespace, Data: u.Raw}})
+	d := rules.Doc{Source: u.ruler.Source, Namespace: u.ruler.Namespace, Data: u.Raw}
+	if t.loki {
+		d.Logs = rules.LokiRuler // read as --loki-loaded-rules reads it
+	}
+	return rules.FromDocs([]rules.Doc{d})
 }
 
 // unitSize is how many rules a unit's group holds, of any kind, and how
@@ -866,14 +950,13 @@ func unitSize(raw []byte, group string) (int, int) {
 // namespace or an Azure rule group never does. why says why it can't be
 // made, when it can't.
 func (t rulerTarget) edit(u apiUnit, r rules.Rule, e rules.Edit, kind string, b rules.Bound, v float64) (out []byte, why string) {
-	s := t.s
-	azure := s.ruler.Kind == source.RulerAzure
+	azure := t.r().Kind == source.RulerAzure
 	if e.Delete {
 		n, groups := unitSize(u.Raw, e.Group)
 		switch {
 		case n == 1 && azure:
 			return nil, noPathLastGroup
-		case n == 1 && s.ruler.Kind == source.RulerConfig:
+		case n == 1 && t.r().Kind == source.RulerConfig:
 			return []byte("groups: []\n"), "" // the group goes: DELETE
 		case n == 1 && groups == 1:
 			return nil, noPathLastNS
@@ -902,12 +985,17 @@ func (t rulerTarget) edit(u apiUnit, r rules.Rule, e rules.Edit, kind string, b 
 func (t rulerTarget) reads(before, after []byte, r, want rules.Rule, kind string) (*rules.Rule, bool) {
 	rr, ww := r, want
 	rr.Namespace, ww.Namespace = "", ""
+	// A Loki ruler's group is read as its rules are, LogQL.
+	parse := parserOf("")
+	if t.loki {
+		parse = parserOf(rules.LokiRuler)
+	}
 	var got *rules.Rule
 	var ok bool
 	if kind == ledger.KindSays {
-		got, ok = readsSaying(before, after, rr, ww)
+		got, ok = readsSayingBy(parse, before, after, rr, ww)
 	} else {
-		got, ok = readsAs(before, after, rr, ww, kind == ledger.KindDelete)
+		got, ok = readsAsBy(parse, before, after, rr, ww, kind == ledger.KindDelete)
 	}
 	if got != nil {
 		g := *got
@@ -925,15 +1013,15 @@ func (t rulerTarget) putBack(u apiUnit, p ledger.Proposal, e rules.Edit) ([]byte
 // is put back into; an Amazon namespace or an Azure rule group gone is for
 // a person.
 func (t rulerTarget) undoGone(apiUnit, ledger.Proposal) bool {
-	return t.s.ruler.Kind == source.RulerConfig
+	return t.r().Kind == source.RulerConfig
 }
 
 func (t rulerTarget) request(_ context.Context, p ledger.Proposal, u apiUnit, doc []byte) (func(context.Context, ledger.Proposal) error, error) {
-	s := t.s
+	ruler, writes := t.r(), t.writes()
 	method, at, ctype := http.MethodPut, u.ruler.At, "application/json"
 	var body []byte
 	var err error
-	switch s.ruler.Kind {
+	switch ruler.Kind {
 	case source.RulerConfig:
 		var ok bool
 		body, ok, err = source.GroupOf(doc)
@@ -941,7 +1029,7 @@ func (t rulerTarget) request(_ context.Context, p ledger.Proposal, u apiUnit, do
 			return nil, refusal{"the group can't be written out as it reads: " + err.Error()}
 		}
 		if ok {
-			method, at, ctype = http.MethodPost, s.ruler.WriteAt(u.ruler), "application/yaml"
+			method, at, ctype = http.MethodPost, ruler.WriteAt(u.ruler), "application/yaml"
 		} else {
 			method, body = http.MethodDelete, nil // the group went with its last rule
 		}
@@ -951,13 +1039,13 @@ func (t rulerTarget) request(_ context.Context, p ledger.Proposal, u apiUnit, do
 		}
 	}
 	return func(ctx context.Context, p ledger.Proposal) error {
-		if s.ruler.Kind == source.RulerAmazon {
+		if ruler.Kind == source.RulerAmazon {
 			// The SDK's way: a request repeated after a timeout isn't
 			// taken twice. Lapilli never sends a change again.
 			body, _ = json.Marshal(map[string]string{"data": base64.StdEncoding.EncodeToString(doc),
 				"clientToken": fmt.Sprintf("lapilli-%d-%d", p.ID, p.Applied.Unix())})
 		}
-		code, out, err := s.ruler.Call(ctx, method, at, body, ctype, s.rulerWrites, source.UnitLimit)
+		code, out, err := ruler.Call(ctx, method, at, body, ctype, writes, source.UnitLimit)
 		switch {
 		case err != nil:
 			return err
@@ -975,7 +1063,7 @@ func (t rulerTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Ed
 // settling says an Amazon namespace being updated is still being written,
 // and one that failed, failed.
 func (t rulerTarget) settling(u apiUnit) (string, string) {
-	if t.s.ruler.Kind != source.RulerAmazon || u.Gone {
+	if t.r().Kind != source.RulerAmazon || u.Gone {
 		return "", ""
 	}
 	switch u.ruler.Status {
@@ -995,7 +1083,7 @@ func (t rulerTarget) same(u apiUnit, raw []byte) bool {
 	if len(raw) == 0 {
 		return false
 	}
-	if u.Gone && t.s.ruler.Kind != source.RulerConfig {
+	if u.Gone && t.r().Kind != source.RulerConfig {
 		return false
 	}
 	a, err1 := rules.Shape(u.Raw, source.AzureSets)
