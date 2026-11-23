@@ -1,10 +1,12 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1146,7 +1148,8 @@ func TestServeGrafanaJudgedReadBackRefused(t *testing.T) {
 // A rule left out for more than a day, of a change passed over within the
 // period, is judged by a read from a day before the day alone. That read
 // of no use (here, an annotation of no tags in it) leaves the rule out of
-// the day once more, not the day a gap; the round after judges it again.
+// the day once more, not the day a gap, and the log names it; the round
+// after judges it again.
 func TestServeGrafanaJudgedReadNearUnusable(t *testing.T) {
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
@@ -1164,9 +1167,15 @@ func TestServeGrafanaJudgedReadNearUnusable(t *testing.T) {
 	g.mu.Lock()
 	g.oldFrom = now.Add(2 * time.Hour).UnixMilli() // the day copied from 26h, read from a day before
 	g.mu.Unlock()
+	var logged bytes.Buffer
+	sh.s.log = slog.New(slog.NewTextHandler(&logged, nil))
 	sh.round(28 * time.Hour)
 	sh.want("Orders slow's copies", sh.covers("Orders slow"), "→28h0m0s")
 	sh.want("Stock low's copies, its read of no use", sh.covers("Stock low"), "→0s")
+	if l := logged.String(); !strings.Contains(l, "read from a day before, for rules the read back from where they were left out can't judge, is of no use") ||
+		!strings.Contains(l, `rules="Stock low"`) {
+		t.Errorf("not logged:\n%s", l)
+	}
 	g.mu.Lock()
 	g.oldFrom = 0
 	g.mu.Unlock()

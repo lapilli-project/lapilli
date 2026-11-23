@@ -399,6 +399,8 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 				alone, err := judge(near)
 				switch {
 				case errors.Is(err, source.ErrUnusable):
+					s.log.Warn("Grafana's alert state history read from a day before, for rules the read back from where they were left out can't judge, is of no use: they are left out of the day again",
+						"from", near, "to", b, "rules", someNames(lost), "err", err)
 				case err != nil:
 					return err
 				default:
