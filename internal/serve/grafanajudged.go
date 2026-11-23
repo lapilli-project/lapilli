@@ -387,8 +387,8 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		}
 	}
 	var before []firing.Firing
-	// now are the starts, to the second, of those of before ended now.
-	now := map[int64]bool{}
+	// closed are the starts, to the second, of those of before ended now.
+	closed := map[int64]bool{}
 	if from.Before(p) {
 		if before, err = s.l.RecordedFirings(ctx, ledger.GrafanaSource, from, p); err != nil {
 			return err
@@ -400,7 +400,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			k := alertOf(x)
 			if end, ok := ended[k]; ok && x.Start.Equal(on[k].Start) {
 				before[i].End = end
-				now[x.Start.Unix()] = true
+				closed[x.Start.Unix()] = true
 			}
 		}
 	}
@@ -441,7 +441,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	// as covered again (ledger.AmendFirings).
 	amend := map[int64][]firing.Firing{}
 	for _, x := range before {
-		if !place(x) && now[x.Start.Unix()] {
+		if !place(x) && closed[x.Start.Unix()] {
 			amend[x.Start.Unix()] = append(amend[x.Start.Unix()], x)
 		}
 	}
