@@ -794,7 +794,9 @@ func TestServeGrafanaJudgedGapEndedSoon(t *testing.T) {
 	g.hold(one...)
 	sh.round(2*time.Hour + 30*time.Minute) // a gap still
 	want := []string{"Orders slow/orders -5h0m0s -4h0m0s", "Orders slow/search 2h30m0s 2h40m0s"}
-	for _, at := range []time.Duration{3 * time.Hour, 4 * time.Hour, 6 * time.Hour} {
+	// The first round after the gap, and the next, which writes from where
+	// it has the alert begin, and reads from after it began.
+	for _, at := range []time.Duration{3*time.Hour + 30*time.Minute, 4*time.Hour + 30*time.Minute, 6 * time.Hour} {
 		sh.round(at)
 		sh.want(fmt.Sprintf("after the gap, at %s", at), sh.copied(), want)
 	}
@@ -889,4 +891,62 @@ func TestServeGrafanaJudgedSharedBetweenRoundsUntold(t *testing.T) {
 	sh.round(2 * time.Hour)
 	sh.want("copied in", sh.copied(), before)
 	sh.want("its copies", sh.covers("Orders slow"), "→0s")
+}
+
+// A rule left out for longer than a day (its title shared for 28 hours) is
+// read back from where it was left out once it is judged again: an alert
+// of it on since before, which ended in the first hours it was left out,
+// is ended there; one that began then and is still on is written from
+// where the rule is judged again.
+func TestServeGrafanaJudgedLeftOutLong(t *testing.T) {
+	g := ordersAndStock()
+	sh := shopServer(t, g)
+	sh.round(0)
+	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
+	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
+	g.hold(two...)
+	g.note(shopNote{title: "Orders slow", prev: "Alerting", next: "Normal", service: "orders", at: now.Add(10 * time.Minute)})
+	g.fired("Orders slow", "search", time.Hour, 0)
+	// Stock low keeps the history reaching each day.
+	for h := 2; h <= 40; h += 4 {
+		g.fired("Stock low", "stock", time.Duration(h)*time.Hour+5*time.Minute, time.Duration(h)*time.Hour+15*time.Minute)
+	}
+	for _, at := range []time.Duration{2 * time.Hour, 10 * time.Hour, 20 * time.Hour, 28 * time.Hour} {
+		sh.round(at)
+	}
+	g.hold(one...)
+	// The two rounds after write from when a version of the rules held the
+	// other rule; the one after those judges it again, from 32 hours on.
+	for _, at := range []time.Duration{30 * time.Hour, 32 * time.Hour, 36 * time.Hour} {
+		sh.round(at)
+	}
+	got := slices.DeleteFunc(sh.copied(), func(s string) bool { return !strings.HasPrefix(s, "Orders slow/") })
+	sh.want("judged again after 32 hours", got, []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 10m0s", "Orders slow/search 32h0m0s on"})
+	sh.want("its copies", sh.covers("Orders slow"), "→0s 32h0m0s→36h0m0s")
+}
+
+// Left out for longer than a week, a rule is read back a week alone: an
+// alert of it on since before, that the read says nothing of, is ended
+// where the rule was left out, not left on.
+func TestServeGrafanaJudgedLeftOutPastAWeek(t *testing.T) {
+	g := ordersAndStock()
+	sh := shopServer(t, g)
+	sh.round(0)
+	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
+	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
+	g.hold(two...)
+	g.note(shopNote{title: "Orders slow", prev: "Alerting", next: "Normal", service: "orders", at: now.Add(10 * time.Minute)})
+	for h := 2; h <= 200; h += 4 {
+		g.fired("Stock low", "stock", time.Duration(h)*time.Hour+5*time.Minute, time.Duration(h)*time.Hour+15*time.Minute)
+	}
+	for h := 2; h <= 194; h += 24 {
+		sh.round(time.Duration(h) * time.Hour)
+	}
+	g.hold(one...)
+	for _, at := range []time.Duration{196 * time.Hour, 198 * time.Hour, 200 * time.Hour} {
+		sh.round(at)
+	}
+	got := slices.DeleteFunc(sh.copied(), func(s string) bool { return !strings.HasPrefix(s, "Orders slow/") })
+	sh.want("judged again after eight days", got, []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 0s"})
+	sh.want("its copies", sh.covers("Orders slow"), "→0s 198h0m0s→200h0m0s")
 }

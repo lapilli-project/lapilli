@@ -30,6 +30,10 @@ import (
 // first start's backfill is copied over a few rounds.
 const maxCopyDays = 7
 
+// judgedBack is how far before a day copied in the history is read back
+// from at most, for a rule judged again from it: to where it was left out.
+const judgedBack = 7 * 24 * time.Hour
+
 // fromHistory are the rules of the version in effect now that are judged
 // from Grafana's history, each under the name it is judged under, and all
 // the rules of that version's documents, --rule or not: what a name in
@@ -264,9 +268,11 @@ func (s *Server) sourceTheirs(ctx context.Context) (bool, error) {
 // written or taken away, an alert of it on stays on, and the period is
 // kept for it (ledger.LeaveOut): no record of it there, whatever is copied
 // in for the other rules, and whatever the history says of the period
-// later. Judged again, it is read as on a first day, and written from
-// there. A day none of the rules is judged for is of no use, and left a
-// gap.
+// later. Judged again, it is read back from where it was left out, a week
+// at most (judgedBack), and written from a as on a first day; one of its
+// alerts on since before then, that the read says nothing of, is ended
+// where it was left out. A day none of the rules is judged for is of no
+// use, and left a gap.
 func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule, twice map[string]bool, a, b time.Time, first bool, o verdict.Options) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
@@ -278,12 +284,14 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	inHole := func(rule string, t time.Time) bool {
 		return slices.ContainsFunc(out[rule], func(h [2]time.Time) bool { return !t.Before(h[0]) && t.Before(h[1]) })
 	}
-	// A rule left out up to a, and judged again from it, is read as on a
-	// first day: an alert of it on at a is written from there.
-	back := map[string]bool{}
+	// The rules left out up to a, from when: judged again from a, each is
+	// read as on a first day, an alert of it on at a written from there.
+	back := map[string]time.Time{}
 	for _, r := range rs {
-		if slices.ContainsFunc(out[r.Name], func(h [2]time.Time) bool { return h[0].Before(a) && !h[1].Before(a) }) {
-			back[r.Name] = true
+		for _, h := range out[r.Name] {
+			if h[0].Before(a) && !h[1].Before(a) {
+				back[r.Name] = h[0]
+			}
 		}
 	}
 	// Read from just before the write, so an alert on since before it,
@@ -293,8 +301,6 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	read := p.Add(-time.Millisecond)
 	if first {
 		p, read = a, a.Add(-source.JudgedLead)
-	} else if lead := a.Add(-source.JudgedLead); len(back) > 0 && lead.Before(read) {
-		read = lead
 	}
 	// The rules of every version in effect across what is written, from
 	// the settle before it, for a history that doesn't say which rule each
@@ -305,9 +311,67 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	if err != nil {
 		return err
 	}
-	j, err := s.cfg.JudgedHistory.Judge(ctx, where, rs, all, ever, read, b)
+	judge := func(read time.Time) (source.FromHistory, error) {
+		return s.cfg.JudgedHistory.Judge(ctx, where, rs, all, ever, read, b)
+	}
+	j, err := judge(read)
 	if err != nil {
 		return err
+	}
+	// A rule judged again is read again from where it was left out, a day
+	// before a at least, a week at most: what began while it was left out
+	// and is on still is seen with its start, and what was on then and
+	// ended meanwhile, with its end. Past a week, its alerts on since
+	// before it was left out are ended there, as what the read says
+	// nothing of (past). The rules a name may be of are those of the read
+	// first made: what the read again adds is of the period the rule was
+	// left out, no record of it.
+	left := func(j source.FromHistory, name string) bool {
+		return slices.Contains(j.Unsure, name) || slices.Contains(j.Shared, name) || twice[name]
+	}
+	lead := a.Add(-source.JudgedLead)
+	past := map[string]time.Time{}
+	far := read
+	for name, h0 := range back {
+		if left(j, name) {
+			continue
+		}
+		from := lead
+		if t := h0.Add(-time.Millisecond); t.Before(from) {
+			from = t
+		}
+		if limit := a.Add(-judgedBack); from.Before(limit) {
+			from, past[name] = limit, h0
+		}
+		if from.Before(far) {
+			far = from
+		}
+	}
+	if far.Before(read) {
+		again, err := judge(far)
+		if err != nil {
+			return err
+		}
+		// What the read again holds of the period a rule was left out may
+		// be what left it out (a change passed over): read from a day
+		// before a alone then, as what is further back is past what is
+		// read, so that the rule isn't left out for as long as a read
+		// holds that change.
+		if slices.ContainsFunc(rs, func(r rules.Rule) bool { return !left(j, r.Name) && left(again, r.Name) }) && lead.After(far) {
+			far = lead
+			if read.Before(far) {
+				far = read
+			}
+			if again, err = judge(far); err != nil {
+				return err
+			}
+			for name, h0 := range back {
+				if h0.Add(-time.Millisecond).Before(far) {
+					past[name] = h0
+				}
+			}
+		}
+		j, read = again, far
 	}
 	if j.Passed > 0 {
 		s.log.Warn("changes of state in Grafana's alert state history passed over, past what lapilli reads of one", "changes", j.Passed)
@@ -419,6 +483,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		switch {
 		case !f.Start.Before(b):
 		case same:
+			told[k] = true
 			if _, done := ended[k]; !done && !f.End.IsZero() && f.End.After(was.Start) {
 				ended[k] = f.End
 			}
@@ -429,7 +494,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			// after where the history has it begin.
 			f.Start = in.Start
 			send = append(send, f)
-		case !f.Start.Before(p) || (first || back[f.Rule]) && (f.End.IsZero() || f.End.After(a)):
+		case !f.Start.Before(p) || (first || !back[f.Rule].IsZero()) && (f.End.IsZero() || f.End.After(a)):
 			// Firing again, it had stopped: where, the history didn't say.
 			if _, done := ended[k]; isOn && !done {
 				ended[k] = f.Start.Truncate(time.Second)
@@ -440,6 +505,16 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 				f.Start = a
 			}
 			send = append(send, f)
+		}
+	}
+	// An alert of a rule judged again, read back a week alone, on since
+	// before it was left out, that the read says nothing of: ended where it
+	// was left out, as whether it was on after isn't known.
+	for k, f := range on {
+		if h0, ok := past[f.Rule]; ok && judging[f.Rule] && f.Start.Before(h0) && !told[k] {
+			if _, done := ended[k]; !done {
+				ended[k] = h0
+			}
 		}
 	}
 	// A firing ended is written again from its start, with all the ledger
