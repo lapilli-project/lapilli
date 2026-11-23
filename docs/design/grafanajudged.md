@@ -48,11 +48,15 @@ history (recorded.md), such a rule can get from Grafana's.
   of the title is passed over and its alerts told apart from the judged
   rule's, so one title in two folders judges both, however many such
   rules there are, and a rule of the title in a folder the token doesn't
-  read takes nothing. Where the history says no rule's uid or id (a Loki
-  line without `ruleUID`; Grafana's annotations of alerts always carry
-  `alertId`), a rule is judged by its name, and a name two of Grafana's
-  rules share is neither's; a rule some change of which the history
-  passed over, or whose alerts it doesn't tell apart, isn't judged by it.
+  read takes nothing. A rule some change of which the history passed
+  over, or whose alerts it doesn't tell apart, isn't judged by it: a
+  change passed over leaves out the rule it says it is of alone, not
+  every rule of its title. Where the history says no rule's uid or id (a
+  Loki line without `ruleUID`, or with one past 256 bytes; Grafana's
+  annotations of alerts always carry `alertId`), a rule is judged by its
+  name, and a name two of Grafana's rules share is neither's; such a
+  change passed over, or any change of a name judged so, leaves out every
+  rule of the name.
 - **`lapilli verdict`.** After the replay, the history is read from a day
   before the period, once it is known to hold a change from before its
   start, and the rules' firings are judged with the replayed ones. Each
@@ -213,11 +217,12 @@ its data sources answered.
   they write these rules' record, their firings within the bounds above,
   under a rule's uid; with a line of a rule's name that has no uid, they
   have that rule judged by its name, as above; with a change to a state
-  Grafana has no name for, under a rule's name, they leave that rule with
-  no record while a read holds the change (a read back from where it was
-  left out holds it a day at most); and with changes of more than 1,000
-  rules' names, which a read can't say all of, they make every day a gap.
-  SECURITY.md says so: guard the tenant as the Grafana.
+  Grafana has no name for, under a rule's uid, or its name with no uid,
+  they leave that rule with no record while a read holds the change (a
+  read back from where it was left out holds it a day at most); and with
+  changes passed over of more than 1,000 rules, which a read can't say
+  all of, they make every day a gap. SECURITY.md says so: guard the
+  tenant as the Grafana.
 - **Names.** The history names a rule only by the title of one of the
   rules read from that Grafana; any other name's changes are passed over,
   never kept, so the history can't add a rule. A change of a judged rule's
@@ -227,9 +232,16 @@ its data sources answered.
   Lapilli reads or one its token doesn't, paused or not, writes nothing
   into that rule's record, ends none of its alerts, and takes nothing
   away, whether the rule is there at a round or made, firing and deleted
-  between two (`TestServeGrafanaJudgedSharedBetweenRounds`,
-  `TestServeGrafanaJudgedHiddenFolder`, `TestGrafanaJudgedByUID`,
-  `TestGrafanaJudgedByID`). Before 0.69.2 a rule there between two rounds
+  between two, and whether its changes are read or passed over (two
+  labels Grafana's tags keep under one name, `team:a` and `team_a`)
+  (`TestServeGrafanaJudgedSharedBetweenRounds`,
+  `TestServeGrafanaJudgedHiddenFolder`,
+  `TestServeGrafanaJudgedHiddenFolderPassedOver`,
+  `TestGrafanaJudgedByUID`, `TestGrafanaJudgedByID`,
+  `TestGrafanaJudgedPassedOverByRule`). Past 1,000 rules, though, a read
+  can't say which rules it passed over changes of, and judges none: a day
+  holding changes passed over of more than 1,000 rules, firing in any
+  folder, is a gap for every rule. Before 0.69.2 a rule there between two rounds
   wrote its firings into the judged rule's record, and its alert could end
   the judged rule's, as a title was counted at the round alone; and a
   title shared at a round left the judged rule out. Where the history
@@ -241,8 +253,10 @@ its data sources answered.
   leaves the rule out while a round writes across such a version, the
   period kept (`TestServeGrafanaJudgedShared`); a rule no read of the
   rules saw, in a folder the token doesn't read or there between two
-  rounds, is taken for the judged rule then. That is the one way left
-  for another rule's changes to be taken for a judged rule's.
+  rounds, is taken for the judged rule then, and such a line passed over
+  leaves every rule of its name out. That is the one way left for
+  another rule's changes to be taken for a judged rule's, or to take its
+  record away, but for changes passed over of more than 1,000 rules.
   What fired under the title while it was left out is no one's; an alert
   the history has on under the title where the rule is judged again is
   written from there, the other rule's among them, until the history
@@ -253,9 +267,10 @@ its data sources answered.
   still makes a day a gap for every rule judged so is of the whole read:
   the history refused or of no use, Grafana's list of its rules refused
   or past its bounds (64 MB, 50,000 rules) where a rule needs its id, a
-  day of more changes than the reader's bounds or of more than 100,000
-  firings (one rule flapping enough is enough), and more than 5,000 rules
-  to keep as left out. A read back past the bounds, from where a rule was
+  day of more changes than the reader's bounds, of changes passed over of
+  more than 1,000 rules, or of more than 100,000 firings (one rule
+  flapping enough is enough), and more than 5,000 rules to keep as left
+  out. A read back past the bounds, from where a rule was
   left out, leaves out the rules judged again alone.
 
 ## Questions

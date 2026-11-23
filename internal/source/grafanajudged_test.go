@@ -253,6 +253,80 @@ func TestGrafanaJudgedByID(t *testing.T) {
 	}
 }
 
+// A change the read passes over leaves unsure the rule it says it is of,
+// not its name: one of another rule of the judged rule's title, in a
+// folder the token doesn't read, takes nothing from the judged rule,
+// whether the judged rule changes state in the read or not. One of the
+// judged rule's own, or one that says no rule, leaves it unsure. Here a
+// change is passed over for two labels Grafana's tags keep under one name
+// (team:a and team_a), or, in Loki, a state Grafana has no name for.
+func TestGrafanaJudgedPassedOverByRule(t *testing.T) {
+	const unsupported = "its condition reads a mysql data source: only PromQL and LogQL are replayed"
+	mine := rules.Rule{Name: "Orders slow", UID: "orders", Unsupported: unsupported}
+	const judged = "Orders slow map[service:orders] 07:01-07:09"
+	for _, c := range []struct {
+		what   string
+		of     int64 // the rule the change passed over says, by id; in Loki, its uid
+		quiet  bool  // the judged rule changes state in none of the read
+		want   string
+		unsure bool
+	}{
+		{what: "another rule's", of: 9, want: judged},
+		{what: "another rule's, the judged rule quiet", of: 9, quiet: true},
+		{what: "the judged rule's own", of: 7, unsure: true},
+		{what: "the judged rule's own, the judged rule quiet", of: 7, quiet: true, unsure: true},
+		{what: "of no rule", of: 0, unsure: true},
+	} {
+		t.Run("annotations, "+c.what, func(t *testing.T) {
+			g := &fakeGrafana{settings: `{"buildInfo": {"version": "12.4.14"}, "unifiedAlerting": {"alertStateHistoryBackend": "annotations"}}`,
+				listed: []listedRule{{7, "orders", "Orders slow"}}} // the other rule, id 9, isn't listed
+			if !c.quiet {
+				a, b := note(1, min_(1), "Orders slow", "Normal", "Alerting", "service", "orders"), note(2, min_(9), "Orders slow", "Alerting", "Normal", "service", "orders")
+				a.AlertID, b.AlertID = 7, 7
+				g.notes = []annotation{a, b}
+			}
+			x, y := note(3, min_(3), "Orders slow", "Normal", "Alerting", "team:a", "1", "team_a", "2"), note(4, min_(4), "Orders slow", "Alerting", "Normal", "team:a", "1", "team_a", "2")
+			if !slices.Equal(x.Tags, []string{"alertname:Orders slow", "team_a:1", "team_a:2"}) {
+				t.Fatalf("tags %q", x.Tags)
+			}
+			x.AlertID, y.AlertID = c.of, c.of
+			g.notes = append(g.notes, x, y)
+			h, _ := g.start(t)
+			j, err := h.Judge(context.Background(), HistoryAnnotations, []rules.Rule{mine}, []rules.Rule{mine}, nil, min_(0), min_(10))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := firingsOf(j.Firings); got != c.want || (len(j.Unsure) == 1) != c.unsure || j.Passed != 2 {
+				t.Errorf("firings %q, unsure %v, passed %d", got, j.Unsure, j.Passed)
+			}
+		})
+		t.Run("loki, "+c.what, func(t *testing.T) {
+			line := func(m int, uid, from, to, service string) fakeLine {
+				l := map[string]any{"schemaVersion": 1, "previous": from, "current": to, "ruleTitle": "Orders slow", "fingerprint": uid + "-" + service,
+					"labels": map[string]any{"alertname": "Orders slow", "service": service}}
+				if uid != "" {
+					l["ruleUID"] = uid
+				}
+				return fakeLine{min_(m).UnixMilli(), uid, l}
+			}
+			uid := map[int64]string{9: "elsewhere", 7: "orders"}[c.of]
+			g := &fakeGrafana{settings: `{"unifiedAlerting": {"alertStateHistoryBackend": "loki"}}`}
+			if !c.quiet {
+				g.lines = []fakeLine{line(1, "orders", "Normal", "Alerting", "orders"), line(9, "orders", "Alerting", "Normal", "orders")}
+			}
+			g.lines = append(g.lines, line(3, uid, "Normal", "Exploding", "payments"))
+			h, _ := g.start(t)
+			j, err := h.Judge(context.Background(), HistoryLoki, []rules.Rule{mine}, []rules.Rule{mine}, nil, min_(0), min_(10))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := firingsOf(j.Firings); got != c.want || (len(j.Unsure) == 1) != c.unsure || j.Passed != 1 {
+				t.Errorf("firings %q, unsure %v, passed %d", got, j.Unsure, j.Passed)
+			}
+		})
+	}
+}
+
 // countAsked is how many requests g was asked of path.
 func countAsked(g *fakeGrafana, path string) int {
 	g.mu.Lock()

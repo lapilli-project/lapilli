@@ -89,15 +89,20 @@ func sharedNames(where string, rs, all []rules.Rule) map[string]bool {
 // the rule of its uid now (ruleIDs). A change of another rule of the name
 // is passed over: its rule isn't the one judged, and the name isn't
 // shared. A rule Grafana lists no more, or under another title, is unsure:
-// what it fired under its title now isn't read.
+// what it fired under its title now isn't read. So is a rule a change of
+// which the read passed over, by the rule the change says (HistoryRead),
+// and each rule of the name where it says none: one of another rule of
+// the name, passed over, leaves it be.
 //
 // Where the history doesn't say which rule a change of a rule's name is of
 // (with no uid or id), the rule is judged by its name, as the history
 // names it; and one whose name another rule has, among all, every rule
 // read from the Grafana now, before any --rule (rs alone, when all is
 // nil), and ever, every rule of a version in effect across the read, is
-// neither's. A name the read holds no change of is its rule's, which fired
-// nothing of it, whoever else has it. A read past its bounds fails, as
+// neither's; and a change of the name passed over, whichever rule it says,
+// leaves each rule of the name unsure. A name the read holds no change of
+// is its rule's, which fired nothing of it, whoever else has it. A read
+// past its bounds fails, as
 // ErrTooManyChanges, and one whose answers can't be used, as ErrUnusable:
 // none of rs is judged then.
 func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever []rules.Rule, from, to time.Time) (FromHistory, error) {
@@ -129,26 +134,36 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 		}
 		return t.Of.ID != 0
 	}
+	// The rules the changes passed over that say theirs are of, by the name
+	// the changes give them.
+	passed := map[string][]firing.RuleOf{}
+	for _, x := range read.unsureOf {
+		passed[x.name] = append(passed[x.name], x.of)
+	}
 	everShared := sharedNames(where, rs, slices.Concat(all, ever))
 	shared := map[string]bool{}
 	whose := make([]string, len(ts)) // the name of the rule judged each change is of
 	// The ids of the rules judged, read once, when a rule needs its own.
 	var ids map[string]int64
 	for _, n := range slices.Sorted(maps.Keys(byName)) {
-		if len(of[n]) == 0 {
+		if len(of[n]) == 0 && len(passed[n]) == 0 {
 			continue // no change of it: nothing to say whose
 		}
 		told := !slices.ContainsFunc(of[n], func(i int) bool { return !says(ts[i]) })
 		for _, r := range byName[n] {
-			var mine func(firing.RuleOf) bool
+			var its firing.RuleOf // the rule as the changes say it
 			switch {
 			case !told && everShared[r.Name]:
 				shared[r.Name] = true
 				continue
 			case !told:
-				mine = func(firing.RuleOf) bool { return true }
+				// Every change of the name is taken for it: one passed over,
+				// whatever rule it says, leaves it unsure.
+				if len(passed[n]) > 0 {
+					unsure[r.Name] = true
+				}
 			case where == HistoryLoki:
-				mine = func(o firing.RuleOf) bool { return o.UID == r.UID }
+				its = firing.RuleOf{UID: r.UID}
 			default:
 				if ids == nil {
 					if ids, err = g.ruleIDs(ctx, rs); err != nil {
@@ -160,7 +175,16 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 					unsure[r.Name] = true
 					continue
 				}
-				mine = func(o firing.RuleOf) bool { return o.ID == id }
+				its = firing.RuleOf{ID: id}
+			}
+			mine := func(firing.RuleOf) bool { return true }
+			if told {
+				// Its own changes alone, and those passed over of it alone
+				// leave it unsure.
+				if slices.Contains(passed[n], its) {
+					unsure[r.Name] = true
+				}
+				mine = func(o firing.RuleOf) bool { return o == its }
 			}
 			for _, i := range of[n] {
 				if whose[i] == "" && mine(ts[i].Of) {
@@ -176,7 +200,8 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 			keep = append(keep, t)
 		}
 	}
-	// A name passed over changes of: each rule of it is unsure.
+	// A name passed over changes of that say no rule: each rule of it is
+	// unsure, as any may be the one they are of.
 	for _, n := range read.Unsure {
 		for _, r := range byName[n] {
 			if !shared[r.Name] {

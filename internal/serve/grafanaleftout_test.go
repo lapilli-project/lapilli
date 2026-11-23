@@ -956,6 +956,60 @@ func TestServeGrafanaJudgedHiddenFolder(t *testing.T) {
 	sh.want("its copies", sh.covers("Orders slow"), "→2h0m0s")
 }
 
+// oneTagName is a shopGrafana whose annotations of the rule of uid carry
+// two labels Grafana's tags keep under one name (team:a and team_a are
+// both team_a there), as whoever makes a rule may label it.
+type oneTagName struct {
+	g   *shopGrafana
+	uid string
+}
+
+func (d oneTagName) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/annotations" {
+		d.g.ServeHTTP(w, r)
+		return
+	}
+	rec := httptest.NewRecorder()
+	d.g.ServeHTTP(rec, r)
+	var out []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id := float64(d.g.idOf(d.uid))
+	for _, a := range out {
+		if a["alertId"] == id {
+			a["tags"] = append(a["tags"].([]any), "team_a:1", "team_a:2")
+		}
+	}
+	json.NewEncoder(w).Encode(out)
+}
+
+// A rule of a judged rule's title in a folder the token doesn't read,
+// whose changes the read passes over (two labels Grafana's tags keep under
+// one name), leaves the judged rule be: what it fired is written, and its
+// copies cover the round, as each change says its rule.
+func TestServeGrafanaJudgedHiddenFolderPassedOver(t *testing.T) {
+	g := &shopGrafana{ids: true}
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.hidden = []shopRule{{"teamb", "Orders slow", "Team B", false}}
+	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
+	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
+	ts := httptest.NewServer(oneTagName{g, "teamb"})
+	t.Cleanup(ts.Close)
+	sh := &shop{t: t, g: g, url: ts.URL, tok: tokenFile(t, "glsa_viewer")}
+	sh.s, _ = server(t, sh.config(nil))
+	sh.round(0)
+	sh.want("copied in", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s", "Stock low/stock -3h0m0s -2h0m0s"})
+	g.fired("Orders slow", "orders", 30*time.Minute, 40*time.Minute)
+	g.firedBy("teamb", "Orders slow", "payments", 50*time.Minute, 60*time.Minute)
+	g.fired("Stock low", "stock", time.Hour, 90*time.Minute)
+	sh.round(2 * time.Hour)
+	sh.want("beside a hidden rule of its title, passed over", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s",
+		"Orders slow/orders 30m0s 40m0s", "Stock low/stock -3h0m0s -2h0m0s", "Stock low/stock 1h0m0s 1h30m0s"})
+	sh.want("its copies", sh.covers("Orders slow"), "→2h0m0s")
+}
+
 // The same rule, of a history that says no rule's id: a read of the rules
 // (--watch) saw it, and the rule is left out of what is written across the
 // version that held it.

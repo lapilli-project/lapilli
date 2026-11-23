@@ -122,22 +122,26 @@ Before upgrading:
   another title, renamed since the rules were read, is left out. A title
   shared across folders leaves neither rule out, however many rules share
   titles; a rule of a judged rule's title in a folder Lapilli's token
-  doesn't read takes nothing; and a rule of a judged rule's title made,
-  firing and deleted between two rounds, which 0.68.0 to 0.69.1 took for
-  the judged rule, its firings written into the judged rule's record and
-  its alert ending the judged rule's, writes nothing. Where the history
-  says no rule's uid or id (a Loki line without one, as whoever can push
-  to the tenant may write; Grafana's annotations of alerts always carry
-  one), a rule of a judged rule's title in any version of the rules in
-  effect across what a round writes leaves the judged rule out alone, and
-  shows as no record; one no read of the rules saw, in a folder the token
-  doesn't read or there between two rounds, is still taken for it. A name
-  the read holds no change of is judged, with no firing, whoever else has
-  it. What still makes a day a gap for every rule judged so is of the
-  whole read: the history refused or past the reader's bounds, Grafana's
-  list of its rules refused or past its own (64 MB, 50,000 rules), more
-  than 100,000 firings in a day, more than 5,000 rules to keep as left
-  out, none of them gone from Grafana, or none of the rules judged
+  doesn't read takes nothing, its changes read or passed over (a change
+  the read passes over leaves out the rule it says it is of alone); and a
+  rule of a judged rule's title made, firing and deleted between two
+  rounds, which 0.68.0 to 0.69.1 took for the judged rule, its firings
+  written into the judged rule's record and its alert ending the judged
+  rule's, writes nothing. Where the history says no rule's uid or id (a
+  Loki line without one, as whoever can push to the tenant may write;
+  Grafana's annotations of alerts always carry one), a rule of a judged
+  rule's title in any version of the rules in effect across what a round
+  writes leaves the judged rule out alone, and shows as no record; one no
+  read of the rules saw, in a folder the token doesn't read or there
+  between two rounds, is still taken for it; and such a line passed over
+  leaves out every rule of its title. A name the read holds no change of
+  is judged, with no firing, whoever else has it. What still makes a day
+  a gap for every rule judged so is of the whole read: the history
+  refused or past the reader's bounds, changes passed over of more than
+  1,000 rules, in any folder, Grafana's list of its rules refused or past
+  its own (64 MB, 50,000 rules), more than 100,000 firings in a day, more
+  than 5,000 rules to keep as left out, none of them gone from Grafana,
+  or none of the rules judged
   ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
 - **The backtest gate could pass a pull request read from a branch its
   author moved** (affected: 0.32.0 to 0.69.1; the gates that stop a
