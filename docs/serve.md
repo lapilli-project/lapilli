@@ -536,7 +536,8 @@ with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
 `--notify-webhook-secret-file`, each post to it is signed, so the receiver
 can tell it came from this Lapilli
 ([Signed posts to the webhook](#signed-posts-to-the-webhook)). To keep
-tasks in step with issues in GitHub, GitLab, Jira or Linear, run the
+tasks in step with issues in GitHub, GitLab, Jira (Cloud or Data Center),
+Linear, Azure Boards, Shortcut or YouTrack, run the
 tracker's script in [recipes/trackers](../recipes/trackers) every few minutes
 with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
@@ -1153,7 +1154,7 @@ A task says who does what by when; the work is tracked where the team tracks
 the rest. With `--tasks-token-file FILE`, the port `--incidents-listen` opens
 lets a job holding that token, its own, read tasks and set their link and
 status, and nothing else. [recipes/trackers](../recipes/trackers) has a script
-for each of GitHub, GitLab, Jira, Linear, Azure Boards and Shortcut, alike: each run makes an issue
+for each of GitHub, GitLab, Jira Cloud, Jira Data Center, Linear, Azure Boards, Shortcut and YouTrack, alike: each run makes an issue
 for each open task without one, with a link back to the task's page, and
 puts the issue's URL on the task; then a task whose issue was closed is
 closed, `done` or `dropped` as the issue was, and one closed that way is
@@ -1171,7 +1172,8 @@ GitHub App's or Actions' token can't say who it is: set `GITHUB_LOGIN`
 ways, each once: people's comments on a task are posted to its issue,
 quoted, and the issue's comments copied to the task, shown as the
 tracker's, with the token's `GET` and `POST /api/v1/tasks/{id}/comments`;
-an edit after that isn't followed.
+an edit after that is followed, either way, by when each was last changed,
+and a deletion isn't.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \

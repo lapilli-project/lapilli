@@ -42,6 +42,10 @@ const (
 // more than IANA has. Replaced in tests.
 var maxZones = 1024
 
+// maxTZID is the longest zone name read, in bytes: Outlook's longest are
+// some 70. A longer one isn't kept, as a key or a VTIMEZONE's name.
+const maxTZID = 256
+
 // The span repeats are expanded over, around now.
 const (
 	Back  = 400 * 24 * time.Hour
@@ -54,7 +58,7 @@ type event struct {
 	start, end           stamp
 	duration             string
 	rrule                string
-	exdates              []stamp
+	exdates              []exdate
 	recurrence           *stamp
 	attendees            []string
 	// names are the attendees' common names (CN).
@@ -63,12 +67,23 @@ type event struct {
 	err error
 }
 
-// stamp is a DTSTART, DTEND, EXDATE or RECURRENCE-ID: its value and the
-// zone it was written in.
+// stamp is a DTSTART, DTEND, EXDATE or RECURRENCE-ID: the instant, the
+// clock time it was written as, and the zone it was written in.
 type stamp struct {
-	t    time.Time
+	t time.Time
+	// wall is the clock as written, held in UTC: what a repeat steps
+	// through, in z.
+	wall time.Time
+	z    zone
 	date bool // VALUE=DATE: a day, not a time
 	set  bool
+}
+
+// exdate is a date left out of a repeat: an instant, or a day (date) as
+// written.
+type exdate struct {
+	t    time.Time
+	date bool
 }
 
 // Feed is what a feed said: its turns, flattened, the earliest first, and
@@ -84,6 +99,8 @@ type Feed struct {
 	From time.Time
 	// Held are the events passed over that name someone (Hold).
 	Held []Held
+	// steps is how many steps the feed's repeats and zones took.
+	steps int
 }
 
 // Held is an event passed over: what it would make isn't known, so the
@@ -122,13 +139,43 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			f.Notes = append(f.Notes, msg)
 		}
 	}
+	// The feed's own zones, read first: an event may name one written
+	// after it. Working them out takes steps from the feed's, as its
+	// repeats do.
+	steps := maxFeedSteps
+	own, err := readZones(ctx, data, &steps)
+	if err != nil {
+		return nil, err
+	}
 	var events []*event
 	var cur *event
 	depth := 0 // within the event: a VALARM in it is passed over
-	// The zones TZIDs name, each loaded once: time.LoadLocation reads the
-	// zone's file each time.
-	zones := map[string]*time.Location{}
-	readStamp := func(params map[string]string, v string) (stamp, error) { return parseStamp(params, v, s.Loc, zones) }
+	// The zones TZIDs name, each looked up once: time.LoadLocation reads
+	// the zone's file each time. A zone not kept once the feed has named
+	// maxZones, its VTIMEZONEs among them, is refused, not looked up again
+	// for each date it is named in.
+	zones := map[string]cachedZone{}
+	resolve := func(tz string) (zone, error) {
+		if c, ok := zones[tz]; ok {
+			return c.z, c.err
+		}
+		if len(tz) > maxTZID {
+			return nil, fmt.Errorf("a zone's name over %d bytes", maxTZID)
+		}
+		if len(zones) >= maxZones {
+			return nil, fmt.Errorf("the feed names more than %d time zones", maxZones)
+		}
+		z, err := lookupZone(tz, own)
+		zones[tz] = cachedZone{z, err}
+		return z, err
+	}
+	floating := zone(ianaZone{time.UTC})
+	if s.Loc != nil {
+		floating = ianaZone{s.Loc}
+	}
+	readStamp := func(params map[string]string, v string) (stamp, error) {
+		return parseStamp(params, v, floating, resolve)
+	}
 	lines := 0
 	for line := range bytes.SplitSeq(data, []byte("\n")) {
 		if lines++; lines%1024 == 0 && ctx.Err() != nil {
@@ -194,7 +241,11 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 					err = e
 					break
 				}
-				cur.exdates = append(cur.exdates, x)
+				ex := exdate{t: x.t}
+				if x.date {
+					ex = exdate{t: x.wall, date: true}
+				}
+				cur.exdates = append(cur.exdates, ex)
 			}
 		case "RECURRENCE-ID":
 			var x stamp
@@ -209,6 +260,9 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			if cn := params["CN"]; cn != "" {
 				cur.names = append(cur.names, cn)
 			}
+		}
+		if errors.Is(err, errTooManySteps) {
+			return nil, err
 		}
 		if err != nil && cur.err == nil {
 			cur.err = err
@@ -229,7 +283,6 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 	}
 	from, to := now.Add(-Back), now.Add(Ahead)
 	var turns []verdict.RotaTurn
-	steps := maxFeedSteps
 	for k, e := range events {
 		if k%256 == 0 && ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -268,7 +321,7 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			passOver(e.err, onceEnd(once, e.start.t, nil))
 			continue
 		}
-		length, err := e.length(s.Loc)
+		length, err := e.length()
 		if err != nil {
 			passOver(err, onceEnd(once, e.start.t, nil))
 			continue
@@ -291,7 +344,10 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 				continue
 			}
 		}
-		speaks()
+		// The event's turns, kept only once all are known: one whose end
+		// can't be worked out passes the event over.
+		var mine []verdict.RotaTurn
+		var lengthErr error
 		for i, st := range starts {
 			if i%4096 == 4095 && ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -299,18 +355,32 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			if replaced[e.uid][st.UnixNano()] && e.recurrence == nil {
 				continue
 			}
-			end := length(st)
+			end, err := length(st)
+			if err != nil {
+				lengthErr = err
+				break
+			}
 			// Within the span read: an event from long ago, or far ahead,
 			// is no turn of it, and can't push kept turns out.
 			if !end.After(st) || !end.After(from) || !st.Before(to) {
 				continue
 			}
-			if len(turns) >= maxTurns {
+			if len(turns)+len(mine) >= maxTurns {
 				return nil, errTooManyTurns
 			}
-			turns = append(turns, verdict.RotaTurn{From: st, To: end, Who: who})
+			mine = append(mine, verdict.RotaTurn{From: st, To: end, Who: who})
 		}
+		switch {
+		case errors.Is(lengthErr, errTooManySteps):
+			return nil, lengthErr
+		case lengthErr != nil:
+			passOver(lengthErr, onceEnd(once, e.start.t, nil))
+			continue
+		}
+		speaks()
+		turns = append(turns, mine...)
 	}
+	f.steps = maxFeedSteps - steps
 	// Two turns that start together: the one later in the feed holds
 	// (Flatten), said once for each two people.
 	slices.SortStableFunc(turns, func(a, b verdict.RotaTurn) int { return a.From.Compare(b.From) })
@@ -379,39 +449,46 @@ func (c *Config) who(s *Schedule, e *event) (string, string) {
 // onceEnd is the end of an event's one turn, when it holds one and its
 // length is known: a turn that starts at its start and no other is held
 // otherwise. A repeat's is zero: held on.
-func onceEnd(once bool, start time.Time, length func(time.Time) time.Time) time.Time {
-	switch {
-	case !once:
+func onceEnd(once bool, start time.Time, length func(time.Time) (time.Time, error)) time.Time {
+	if !once {
 		return time.Time{}
-	case length != nil && length(start).After(start):
-		return length(start)
+	}
+	if length != nil {
+		if end, err := length(start); err == nil && end.After(start) {
+			return end
+		}
 	}
 	return start.Add(time.Nanosecond)
 }
 
-// length gives an occurrence's end from its start: DTEND less DTSTART, or
-// DURATION; a day for a day with neither.
-func (e *event) length(loc *time.Location) (func(time.Time) time.Time, error) {
+// length gives an occurrence's end from its start: DTEND less DTSTART, an
+// exact span; or DURATION, its days on the clock of the zone the start is
+// written in, then the rest; a day on that clock for a day with neither.
+func (e *event) length() (func(time.Time) (time.Time, error), error) {
+	z := e.start.z
+	if z == nil {
+		z = utcZone{}
+	}
 	switch {
 	case e.end.set && e.duration != "":
 		return nil, errors.New("both DTEND and DURATION")
 	case e.end.set:
 		if e.start.date && e.end.date {
-			days := int(e.end.t.Sub(e.start.t).Hours()/24 + 0.5)
-			return func(t time.Time) time.Time { return t.AddDate(0, 0, days) }, nil
+			days := int(e.end.wall.Sub(e.start.wall).Hours()/24 + 0.5)
+			return func(t time.Time) (time.Time, error) { return later(z, t, days, 0) }, nil
 		}
 		d := e.end.t.Sub(e.start.t)
-		return func(t time.Time) time.Time { return t.Add(d) }, nil
+		return func(t time.Time) (time.Time, error) { return t.Add(d), nil }, nil
 	case e.duration != "":
 		days, d, err := parseDuration(e.duration)
 		if err != nil {
 			return nil, err
 		}
-		return func(t time.Time) time.Time { return t.AddDate(0, 0, days).Add(d) }, nil
+		return func(t time.Time) (time.Time, error) { return later(z, t, days, d) }, nil
 	case e.start.date:
-		return func(t time.Time) time.Time { return t.AddDate(0, 0, 1) }, nil
+		return func(t time.Time) (time.Time, error) { return later(z, t, 1, 0) }, nil
 	}
-	return func(t time.Time) time.Time { return t }, nil // no length: passed over
+	return func(t time.Time) (time.Time, error) { return t, nil }, nil // no length: passed over
 }
 
 // contentLine splits a content line into its name, its parameters and its
@@ -487,51 +564,50 @@ func unescape(s string) string {
 }
 
 // parseStamp reads a date or a time: in UTC (Z), in the zone TZID names
-// (an IANA name only: a feed's own VTIMEZONE isn't read), or floating, in
-// loc. zones, when not nil, keeps the zones loaded, nil for one that
-// isn't one.
-func parseStamp(params map[string]string, v string, loc *time.Location, zones map[string]*time.Location) (stamp, error) {
+// (resolve's: an IANA name, one of the feed's VTIMEZONEs, or a Windows
+// name), or floating, in floating; a date from its midnight there.
+// resolve, when nil, reads none.
+func parseStamp(params map[string]string, v string, floating zone, resolve func(string) (zone, error)) (stamp, error) {
 	v = strings.TrimSpace(v)
 	if params["VALUE"] == "DATE" || len(v) == 8 {
-		t, err := time.ParseInLocation("20060102", v, loc)
+		w, err := time.Parse("20060102", v)
 		if err != nil {
 			return stamp{}, fmt.Errorf("%q isn't a date", clip(v))
 		}
-		return stamp{t: t, date: true, set: true}, sane(t)
+		return zoned(floating, w, true)
 	}
 	if strings.HasSuffix(v, "Z") {
 		t, err := time.Parse("20060102T150405Z", v)
 		if err != nil {
 			return stamp{}, fmt.Errorf("%q isn't a time", clip(v))
 		}
-		return stamp{t: t, set: true}, sane(t)
+		return stamp{t: t, wall: t, z: utcZone{}, set: true}, sane(t)
 	}
-	if tz := params["TZID"]; tz != "" {
-		l, seen := zones[tz]
-		if !seen {
-			// A zone not kept once the feed has named maxZones is
-			// refused, not loaded again for each date it is named in.
-			if zones != nil && len(zones) >= maxZones {
-				return stamp{}, fmt.Errorf("the feed names more than %d time zones", maxZones)
-			}
-			var err error
-			if l, err = LoadZone(strings.TrimPrefix(tz, "/")); err != nil {
-				l = nil
-			}
-			if zones != nil {
-				zones[tz] = l
-			}
+	z := floating
+	if tz := params["TZID"]; tz != "" && resolve != nil {
+		var err error
+		if z, err = resolve(tz); err != nil {
+			return stamp{}, err
 		}
-		if l == nil {
-			return stamp{}, fmt.Errorf("a zone that isn't an IANA name, %q: its own VTIMEZONE isn't read", clip(tz))
-		}
-		loc = l
 	}
-	t, err := time.ParseInLocation("20060102T150405", v, loc)
+	w, err := time.Parse("20060102T150405", v)
 	if err != nil {
 		return stamp{}, fmt.Errorf("%q isn't a time", clip(v))
 	}
-	return stamp{t: t, set: true}, sane(t)
+	return zoned(z, w, false)
+}
+
+// zoned is the stamp of a clock time w in z. Its year is looked at first,
+// so a feed's own zone is never worked out for a year no turn is in.
+func zoned(z zone, w time.Time, date bool) (stamp, error) {
+	if err := sane(w); err != nil {
+		return stamp{}, err
+	}
+	t, err := instant(z, w)
+	if err != nil {
+		return stamp{}, err
+	}
+	return stamp{t: t, wall: w, z: z, date: date, set: true}, nil
 }
 
 func sane(t time.Time) error {
@@ -594,68 +670,31 @@ func parseDuration(s string) (int, time.Duration, error) {
 }
 
 // expand gives the starts of a repeating event's occurrences that may meet
-// [from, to], at most most of them: FREQ=DAILY or WEEKLY, with INTERVAL,
-// COUNT or UNTIL, and BYDAY for weekly; EXDATE taken out. Other repeats
-// are refused.
+// [from, to], at most most of them, as parseRule reads its RRULE; EXDATE
+// taken out. Each period's days are worked out on the clock the start is
+// written on, then each made an instant in its zone. A step is a period
+// (a month, of a yearly one), and each day it holds.
 func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *int) ([]time.Time, error) {
-	freq, interval, count := "", 1, -1
-	wkst := time.Monday
-	for part := range strings.SplitSeq(e.rrule, ";") {
-		if k, v, _ := strings.Cut(part, "="); strings.EqualFold(k, "FREQ") {
-			freq = strings.ToUpper(v)
-		}
+	r, err := parseRule(e.rrule)
+	if err != nil {
+		return nil, err
 	}
-	if freq != "DAILY" && freq != "WEEKLY" {
-		return nil, fmt.Errorf("a repeat FREQ=%s, which this doesn't expand: only DAILY and WEEKLY", clip(freq))
+	z, start := e.start.z, e.start.wall
+	if z == nil {
+		z = utcZone{}
 	}
 	var until time.Time
-	var byday [7]bool // the days a weekly repeat is on: looked up each step
-	bydays := false
-	for part := range strings.SplitSeq(e.rrule, ";") {
-		k, v, _ := strings.Cut(part, "=")
-		switch strings.ToUpper(k) {
-		case "FREQ":
-		case "INTERVAL":
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 1 || n > 1000 {
-				return nil, fmt.Errorf("a repeat's INTERVAL %q", clip(v))
-			}
-			interval = n
-		case "COUNT":
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 1 || n > maxSteps {
-				return nil, fmt.Errorf("a repeat's COUNT %q", clip(v))
-			}
-			count = n
-		case "UNTIL":
-			st, err := parseStamp(nil, v, e.start.t.Location(), nil)
-			if err != nil {
+	if r.until != "" {
+		st, err := parseStamp(nil, r.until, z, nil)
+		if err != nil {
+			return nil, err
+		}
+		until = st.t
+		if st.date {
+			if until, err = later(z, st.t, 1, -time.Second); err != nil {
 				return nil, err
 			}
-			until = st.t
-			if st.date {
-				until = until.AddDate(0, 0, 1).Add(-time.Second)
-			}
-		case "BYDAY":
-			for d := range strings.SplitSeq(v, ",") {
-				i := slices.Index([]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}, strings.ToUpper(d))
-				if i < 0 {
-					return nil, fmt.Errorf("a repeat by day %q, which this doesn't expand", clip(d))
-				}
-				byday[i], bydays = true, true
-			}
-		case "WKST":
-			i := slices.Index([]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}, strings.ToUpper(v))
-			if i < 0 {
-				return nil, fmt.Errorf("a repeat's week starting %q", clip(v))
-			}
-			wkst = time.Weekday(i)
-		default:
-			return nil, fmt.Errorf("a repeat by %s, which this doesn't expand", clip(k))
 		}
-	}
-	if freq == "DAILY" && bydays {
-		return nil, errors.New("a daily repeat by day, which this doesn't expand")
 	}
 	// Dates left out, looked up rather than searched each step.
 	exTimes, exDates := map[int64]bool{}, map[[3]int]bool{}
@@ -667,23 +706,19 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 			exTimes[x.t.Unix()] = true
 		}
 	}
-	excluded := func(t time.Time) bool {
-		y, m, d := t.Date()
-		return exTimes[t.Unix()] || exDates[[3]int{y, int(m), d}]
-	}
-	start := e.start.t
 	var out []time.Time
 	n := 0 // occurrences so far, for COUNT
 	full := false
-	take := func(t time.Time) bool {
+	take := func(w, t time.Time) bool {
 		if !until.IsZero() && t.After(until) || t.After(to) {
 			return false
 		}
 		n++
-		if count >= 0 && n > count {
+		if r.count >= 0 && n > r.count {
 			return false
 		}
-		if !t.Before(from.Add(-Ahead)) && !excluded(t) {
+		y, m, d := w.Date()
+		if !t.Before(from.Add(-Ahead)) && !exTimes[t.Unix()] && !exDates[[3]int{y, int(m), d}] {
 			if len(out) >= most {
 				full = true
 				return false
@@ -692,57 +727,56 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 		}
 		return true
 	}
-	// Without COUNT, the steps before the span read are skipped, not taken:
-	// a repeat from 1970 starts near now. With COUNT they are counted, and
-	// COUNT bounds them.
+	// Without COUNT, the periods before the span read are skipped, not
+	// taken: a repeat from 1970 starts near now. With COUNT they are
+	// counted, and COUNT bounds them.
 	first := 0
-	if count < 0 {
-		days := 7 * interval
-		if freq == "DAILY" {
-			days = interval
-		}
-		if gap := int(from.Add(-Ahead).Sub(start).Hours() / 24 / float64(days)); gap > 1 {
-			first = gap - 1
-		}
+	if r.count < 0 {
+		first = max(r.periodOf(start, from.Add(-Ahead))-1, 0)
 	}
-	for step := first; step < first+maxSteps; step++ {
-		*steps--
-		if *steps < 0 {
-			return nil, errTooManySteps
-		}
-		if step%4096 == 0 && ctx.Err() != nil {
+	// A period that begins past the span read, or past UNTIL, ends the
+	// repeat, whether or not it held a day: one that never does (30
+	// February) stops there. A clock time is within 18 hours of its
+	// instant.
+	end := to
+	if !until.IsZero() && until.Before(end) {
+		end = until
+	}
+	end = end.Add(48 * time.Hour)
+	buf := make([]time.Time, 0, 32)
+	taken := 0
+	for p := first; ; p++ {
+		if (p-first)%256 == 0 && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		more := true
-		switch {
-		case freq == "DAILY":
-			more = take(start.AddDate(0, 0, step*interval))
-		case !bydays:
-			more = take(start.AddDate(0, 0, 7*step*interval))
-		default:
-			// WEEKLY by day: the week of the start, as WKST begins weeks,
-			// then every interval weeks, each day it names at the start's
-			// time of day.
-			week := start.AddDate(0, 0, 7*step*interval)
-			begin := week.AddDate(0, 0, -((int(week.Weekday()) - int(wkst) + 7) % 7))
-			for i := range 7 {
-				d := begin.AddDate(0, 0, i)
-				if !byday[d.Weekday()] || d.Before(start) {
-					continue
-				}
-				if more = take(d); !more {
-					break
-				}
-			}
-		}
-		if full {
-			return nil, errTooManyTurns
-		}
-		if !more {
+		if r.begin(start, p).After(end) {
 			return out, nil
 		}
+		var work int
+		buf, work = r.days(start, p, buf)
+		cost := work + len(buf)
+		if *steps -= cost; *steps < 0 {
+			return nil, errTooManySteps
+		}
+		if taken += cost; taken > maxSteps {
+			return nil, errors.New("a repeat that takes too many steps to reach now")
+		}
+		for _, w := range buf {
+			if w.Before(start) {
+				continue
+			}
+			t, err := instant(z, w)
+			if err != nil {
+				return nil, err
+			}
+			if !take(w, t) {
+				if full {
+					return nil, errTooManyTurns
+				}
+				return out, nil
+			}
+		}
 	}
-	return nil, errors.New("a repeat that takes too many steps to reach now")
 }
 
 func sameDate(a, b time.Time) bool {

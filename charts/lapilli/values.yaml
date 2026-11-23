@@ -622,7 +622,7 @@ serve:
     tokenSecret:
       name: ""
       key: token
-    tracker: ""   # github, gitlab, jira, linear, azure-boards or shortcut; no CronJob when empty
+    tracker: ""   # github, gitlab, jira, linear, azure-boards, shortcut, youtrack or jira-dc; no CronJob when empty
     schedule: "*/5 * * * *"
     # The recipe's settings, as recipes/trackers says, such as
     #   GITHUB_REPO: example/alerts
@@ -633,7 +633,8 @@ serve:
     # by the chart.
     env: {}
     # A Secret holding the tracker's own token: GitHub's, GitLab's, Jira's
-    # API token or Linear's API key.
+    # API token, Linear's API key, YouTrack's permanent token or Jira Data
+    # Center's personal access token.
     trackerTokenSecret:
       name: ""
       key: token

@@ -78,6 +78,11 @@ stderr how many they left out:
   by `alertname`. `jira.sh` reads them with `JSM_CLOUD_ID`, the site's
   cloud id, from the incident API Atlassian has in beta
   ([recipes/incidents](../recipes/incidents/README.md#jira-service-managements-linked-alerts)).
+- **Grafana IRM** keeps an alert group's alerts, with their labels, in its
+  OnCall API, but neither that API nor the incident API says which alert
+  groups an incident came from, so `grafana-irm.sh` writes no alerts: its
+  incidents are judged by time and labels, `--linked-only` or not
+  ([links.md](design/links.md#grafana-irm)).
 
 An alert's labels hold a firing to them only where it carries them too, as
 `--match` does: a label Prometheus adds as it sends an alert (an external

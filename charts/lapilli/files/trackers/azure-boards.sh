@@ -148,6 +148,7 @@ t_comments() {
     printf '%s' "$out" | jq -c --arg me "$me" '.comments[]? | select(.isDeleted | not)
       | {id: ((.id // .commentId) | tostring), author: (.createdBy.displayName // "someone"),
          mine: ((.createdBy.id // "" | ascii_downcase) == ($me | ascii_downcase)), at: .createdDate,
+         edited: (.modifiedDate // .createdDate),
          body: (.text // "" | gsub("<br */?>|</p>|</div>"; "\n") | gsub("<[^>]*>"; "")
            | gsub("&lt;"; "<") | gsub("&gt;"; ">") | gsub("&quot;"; "\"") | gsub("&#39;"; ([39] | implode)) | gsub("&nbsp;"; " ") | gsub("&amp;"; "&")
            | rtrimstr("\n"))}'
@@ -163,6 +164,13 @@ t_comments() {
 t_comment() {
   out=$(az once POST "/$penc/_apis/wit/workItems/$1/comments?format=markdown&api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '(.id // .commentId) // empty | tostring'
+}
+
+# t_edit: Update Comment takes text alone; the comment keeps the format it
+# was made in (markdown).
+t_edit() {
+  case $2 in '' | *[!0-9]*) return 1 ;; esac
+  az again PATCH "/$penc/_apis/wit/workItems/$1/comments/$2?api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$3")" >/dev/null
 }
 
 sync_tasks

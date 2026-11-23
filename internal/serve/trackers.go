@@ -45,17 +45,26 @@ func (s *Server) trackerPaths(mux *http.ServeMux) {
 }
 
 // trackerPosted answers PATCH /api/v1/tasks/{id}/comments/{comment} for a
-// tracker job: {"posted": REF}, the tracker's id for the comment it posted
-// for one people wrote here, set once, so it isn't posted again
-// (docs/design/inputs.md). Nothing else is taken.
+// tracker job, one of two: {"posted": REF}, the tracker's id for the
+// comment it posted for one people wrote here, set once, so it isn't posted
+// again (docs/design/inputs.md); or {"text": TEXT, "edited": TIME}, the
+// edit of a comment copied in from the issue, as the tracker has it and
+// when it was made, kept when later than the one kept (docs/design/
+// trackers.md, "Edits followed"). Nothing else is taken.
 func (s *Server) trackerPosted(w http.ResponseWriter, r *http.Request) {
 	var c struct {
-		Posted string `json:"posted"`
+		Posted *string    `json:"posted"`
+		Text   *string    `json:"text"`
+		Edited *time.Time `json:"edited"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
-		s.oops(w, r, bad("want JSON with posted, the tracker's id for the comment: %v", err))
+		if mb := (*http.MaxBytesError)(nil); errors.As(err, &mb) {
+			http.Error(w, fmt.Sprintf("a tracker job sends %d KB at most", trackerBody>>10), http.StatusRequestEntityTooLarge)
+			return
+		}
+		s.oops(w, r, bad("want JSON with posted, the tracker's id for the comment, or text and edited, its edit there: %v", err))
 		return
 	}
 	cid, err := strconv.ParseInt(r.PathValue("comment"), 10, 64)
@@ -63,11 +72,23 @@ func (s *Server) trackerPosted(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("a comment is named by its id"))
 		return
 	}
-	if err := s.l.MarkPosted(r.Context(), pathID(r), cid, c.Posted); err != nil {
-		s.oops(w, r, err)
-		return
+	switch {
+	case c.Posted != nil && c.Text == nil && c.Edited == nil:
+		if err := s.l.MarkPosted(r.Context(), pathID(r), cid, *c.Posted); err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"posted": true})
+	case c.Posted == nil && c.Text != nil && c.Edited != nil:
+		changed, err := s.l.EditCopied(r.Context(), pathID(r), cid, *c.Text, *c.Edited)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"changed": changed, "as_sent": ledger.AsSent(*c.Text, "someone")})
+	default:
+		s.oops(w, r, bad("want posted alone, or text and edited"))
 	}
-	writeJSON(w, map[string]bool{"posted": true})
 }
 
 // trackerComments answers GET /api/v1/tasks/{id}/comments for a tracker

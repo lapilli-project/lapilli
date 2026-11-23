@@ -67,15 +67,62 @@ type fakeComment struct {
 	// adf, for Jira, is its body as Atlassian Document Format, when it is
 	// more than paragraphs of text.
 	adf map[string]any
+	// edited is when its text last changed, zero for never.
+	edited time.Time
 }
 
-// comment says something on an issue, as someone.
+// editedAt is when a comment's text last changed: when it was written,
+// where it never did.
+func (c *fakeComment) editedAt() time.Time {
+	if c.edited.IsZero() {
+		return c.at
+	}
+	return c.edited
+}
+
+// comment says something on an issue, as someone: a minute ago, or now,
+// as the job's own comment is written when the job asks.
 func (f *fakeTracker) comment(i *fakeIssue, author, body string) *fakeComment {
 	f.lastComment++
-	c := &fakeComment{id: 1000 + f.lastComment, author: author, body: body, at: time.Now().Add(-time.Minute).Truncate(time.Second)}
+	at := time.Now().Add(-time.Minute).Truncate(time.Second)
+	if author == trBot {
+		at = time.Now()
+	}
+	c := &fakeComment{id: 1000 + f.lastComment, author: author, body: body, at: at}
 	i.comments = append(i.comments, c)
 	i.updated = time.Now() // as every tracker's issue changes with a comment
 	return c
+}
+
+// reword changes a comment's text, as its writer edits it in the tracker.
+func (f *fakeTracker) reword(i *fakeIssue, c *fakeComment, body string) {
+	c.body, c.adf, c.edited = body, nil, time.Now()
+	i.updated = time.Now()
+}
+
+// editComment is the job editing comment id on issue i: its own alone, as
+// a tracker lets a token change its own comments; false for any other.
+func (f *fakeTracker) editComment(i *fakeIssue, id int, body string) bool {
+	for _, c := range i.comments {
+		if c.id == id && c.author == trBot {
+			f.edits++
+			f.reword(i, c, body)
+			return true
+		}
+	}
+	return false
+}
+
+// commentOf is the issue a comment is on, and the comment, by its id.
+func (f *fakeTracker) commentOf(id int) (*fakeIssue, *fakeComment) {
+	for _, i := range f.issues {
+		for _, c := range i.comments {
+			if c.id == id {
+				return i, c
+			}
+		}
+	}
+	return nil, nil
 }
 
 // trBot is who the stand-in trackers say the recipes' token is; trTeam is
@@ -135,8 +182,9 @@ type fakeTracker struct {
 	// noStatusDate: Jira doesn't give statuscategorychangedate, only
 	// resolutiondate, as a Jira without the field.
 	noStatusDate bool
-	// lastComment numbers comments; posted counts those the recipe posts.
-	lastComment, posted int
+	// lastComment numbers comments; posted counts those the recipe posts,
+	// and edits those it edits.
+	lastComment, posted, edits int
 }
 
 // made tells onMade of an issue made.
@@ -214,6 +262,13 @@ func (f *fakeTracker) created() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.creates
+}
+
+// edited is how many comments the recipe has edited.
+func (f *fakeTracker) edited() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.edits
 }
 
 // posts is how many comments the recipe has posted.
@@ -395,8 +450,19 @@ var trackerAPIs = map[string]trackerAPI{
 						if login == trBot {
 							login = "Lapilli-Bot"
 						}
-						return map[string]any{"id": c.id, "user": map[string]any{"login": login}, "body": c.body, "created_at": c.at.UTC().Format(time.RFC3339)}
+						return map[string]any{"id": c.id, "user": map[string]any{"login": login}, "body": c.body, "created_at": c.at.UTC().Format(time.RFC3339),
+							"updated_at": c.editedAt().UTC().Format(time.RFC3339)}
 					}, false), page, 100))
+					return
+				}
+				if cn := commentPath(`^/repos/example/alerts/issues/comments/([0-9]+)$`, r.URL.Path); cn > 0 && r.Method == "PATCH" {
+					var in struct{ Body string }
+					readBody(r, &in)
+					if i, _ := f.commentOf(cn); i == nil || in.Body == "" || !f.editComment(i, cn, in.Body) {
+						http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+						return
+					}
+					json.NewEncoder(w).Encode(map[string]any{"id": cn, "body": in.Body})
 					return
 				}
 				switch {
@@ -519,6 +585,18 @@ var trackerAPIs = map[string]trackerAPI{
 						"updated_at": i.updated.UTC().Format("2006-01-02T15:04:05.000Z")}
 				}
 				n, _ := strconv.Atoi(strings.TrimPrefix(path, base+"/"))
+				if m := regexp.MustCompile(`^/api/v4/projects/example%2Falerts/issues/([0-9]+)/notes/([0-9]+)$`).FindStringSubmatch(path); m != nil && r.Method == "PUT" {
+					in, _ := strconv.Atoi(m[1])
+					cn, _ := strconv.Atoi(m[2])
+					var body struct{ Body string }
+					readBody(r, &body)
+					if f.issue(in) == nil || body.Body == "" || !f.editComment(f.issue(in), cn, body.Body) {
+						http.Error(w, `{"message":"404 Not found"}`, http.StatusNotFound)
+						return
+					}
+					json.NewEncoder(w).Encode(map[string]any{"id": cn, "body": body.Body})
+					return
+				}
 				if cn := commentPath(`^/api/v4/projects/example%2Falerts/issues/([0-9]+)/notes$`, path); cn > 0 && f.issue(cn) != nil {
 					i := f.issue(cn)
 					if r.Method == "POST" {
@@ -533,7 +611,8 @@ var trackerAPIs = map[string]trackerAPI{
 					page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 					json.NewEncoder(w).Encode(pageOf(trComments(i, func(c *fakeComment) map[string]any {
 						return map[string]any{"id": c.id, "body": c.body, "system": c.system, "created_at": c.at.UTC().Format("2006-01-02T15:04:05.000Z"),
-							"author": map[string]any{"id": trUserID("gitlab", c.author), "username": c.author}, "internal": c.restricted, "confidential": c.restricted}
+							"updated_at": c.editedAt().UTC().Format("2006-01-02T15:04:05.000Z"),
+							"author":     map[string]any{"id": trUserID("gitlab", c.author), "username": c.author}, "internal": c.restricted, "confidential": c.restricted}
 					}, true), page, 100))
 					return
 				}
@@ -623,6 +702,23 @@ var trackerAPIs = map[string]trackerAPI{
 				fields := func(i *fakeIssue) map[string]any {
 					return map[string]any{"creator": map[string]any{"accountId": trUserID("jira", i.author)}, "labels": i.labels}
 				}
+				if m := regexp.MustCompile(`^/rest/api/3/issue/OPS-([0-9]+)/comment/([0-9]+)$`).FindStringSubmatch(r.URL.Path); m != nil && r.Method == "PUT" {
+					in, _ := strconv.Atoi(m[1])
+					cn, _ := strconv.Atoi(m[2])
+					var body struct{ Body map[string]any }
+					readBody(r, &body)
+					text, ok := adfText(body.Body)
+					if !ok {
+						http.Error(w, `{"errorMessages":["Comment body is not valid!"]}`, http.StatusBadRequest)
+						return
+					}
+					if f.issue(in) == nil || !f.editComment(f.issue(in), cn, text) {
+						http.Error(w, `{"errorMessages":["Can not find a comment for the id."]}`, http.StatusNotFound)
+						return
+					}
+					json.NewEncoder(w).Encode(map[string]any{"id": strconv.Itoa(cn)})
+					return
+				}
 				if cn := commentPath(`^/rest/api/3/issue/OPS-([0-9]+)/comment$`, r.URL.Path); cn > 0 && f.issue(cn) != nil {
 					i := f.issue(cn)
 					if r.Method == "POST" {
@@ -649,7 +745,7 @@ var trackerAPIs = map[string]trackerAPI{
 							body = c.adf
 						}
 						out := map[string]any{"id": strconv.Itoa(c.id), "author": map[string]any{"accountId": trUserID("jira", c.author), "displayName": c.author},
-							"body": body, "created": c.at.In(seoul).Format("2006-01-02T15:04:05.000-0700")}
+							"body": body, "created": c.at.In(seoul).Format("2006-01-02T15:04:05.000-0700"), "updated": c.editedAt().In(seoul).Format("2006-01-02T15:04:05.000-0700")}
 						if c.restricted {
 							out["visibility"] = map[string]any{"type": "role", "value": "Administrators"}
 						}
@@ -818,10 +914,23 @@ var trackerAPIs = map[string]trackerAPI{
 				case strings.Contains(q, "comments(first: 50") && f.issue(n) != nil:
 					data(map[string]any{"issue": map[string]any{"comments": map[string]any{
 						"nodes": trComments(f.issue(n), func(c *fakeComment) map[string]any {
+							edited := any(nil)
+							if !c.edited.IsZero() {
+								edited = c.edited.UTC().Format("2006-01-02T15:04:05.000Z")
+							}
 							return map[string]any{"id": fmt.Sprintf("c0ffee00-0000-4000-8000-%012d", c.id), "body": c.body, "createdAt": c.at.UTC().Format("2006-01-02T15:04:05.000Z"),
-								"user": map[string]any{"id": trUserID("linear", c.author), "name": c.author}, "botActor": nil}
+								"editedAt": edited, "user": map[string]any{"id": trUserID("linear", c.author), "name": c.author}, "botActor": nil}
 						}, false),
 						"pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}}})
+				case strings.Contains(q, "commentUpdate"):
+					id, _ := in.Variables["id"].(string)
+					body, _ := in.Variables["body"].(string)
+					cn, _ := strconv.Atoi(strings.TrimPrefix(id, "c0ffee00-0000-4000-8000-"))
+					if i, _ := f.commentOf(cn); i == nil || body == "" || !f.editComment(i, cn, body) {
+						json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Comment"}}})
+						return
+					}
+					data(map[string]any{"commentUpdate": map[string]any{"success": true}})
 				case strings.Contains(q, "commentCreate"):
 					v, _ := in.Variables["in"].(map[string]any)
 					id, _ := v["issueId"].(string)
@@ -921,7 +1030,7 @@ func trackerEnv() []string {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(name, "LAPILLI_") || strings.HasPrefix(name, "GITHUB_") || strings.HasPrefix(name, "GITLAB_") ||
-			strings.HasPrefix(name, "JIRA_") || strings.HasPrefix(name, "LINEAR_") || strings.HasPrefix(name, "AZURE_") || strings.HasPrefix(name, "SHORTCUT_") ||
+			strings.HasPrefix(name, "JIRA_") || strings.HasPrefix(name, "LINEAR_") || strings.HasPrefix(name, "AZURE_") || strings.HasPrefix(name, "SHORTCUT_") || strings.HasPrefix(name, "YOUTRACK_") ||
 			slices.Contains([]string{"CLOSE_ISSUES", "MAX_ISSUES", "MAX_PAGES", "SYNC_DAYS", "COMMENTS", "MAX_COMMENTS"}, name) {
 			continue
 		}
@@ -1487,6 +1596,9 @@ func TestTrackerRecipeSettings(t *testing.T) {
 		{"gitlab.sh", []string{"GITLAB_PROJECT=example/a b", "GITLAB_TOKEN_FILE=" + secret}, "GITLAB_PROJECT is a project path"},
 		{"jira.sh", []string{"JIRA_URL=http://127.0.0.1:1", "JIRA_EMAIL=a@example.com", "JIRA_TOKEN_FILE=" + secret, "JIRA_PROJECT=ops\" OR 1=1"}, "JIRA_PROJECT is a project key"},
 		{"linear.sh", []string{"LINEAR_TEAM=ENG", "LINEAR_TOKEN_FILE=" + secret}, "LINEAR_TEAM is a team id"},
+		{"youtrack.sh", []string{"YOUTRACK_URL=http://127.0.0.1:1", "YOUTRACK_TOKEN_FILE=" + secret, "YOUTRACK_PROJECT=OPS} or {x"}, "YOUTRACK_PROJECT is a project's ID"},
+		{"youtrack.sh", []string{"YOUTRACK_URL=http://127.0.0.1:1", "YOUTRACK_TOKEN_FILE=" + secret, "YOUTRACK_PROJECT=OPS", "YOUTRACK_DONE=Fixed} tag {x"}, "a state field or state is a name"},
+		{"jira-dc.sh", []string{"JIRA_URL=http://127.0.0.1:1", "JIRA_TOKEN_FILE=" + secret, "JIRA_PROJECT=ops\" OR 1=1"}, "JIRA_PROJECT is a project key"},
 	} {
 		cmd := exec.Command("sh", trackerRecipes+c.script)
 		cmd.Env = append(append(trackerEnv(), lapilli...), c.env...)
@@ -1540,7 +1652,7 @@ func TestTrackerRecipeDistrustsLapilli(t *testing.T) {
 // The chart runs the recipes from its own copies: they must be the same.
 func TestTrackerRecipesInChart(t *testing.T) {
 	for _, name := range []string{"lib.sh", "github.sh", "github.jq", "gitlab.sh", "gitlab.jq", "jira.sh", "jira.jq", "linear.sh", "linear.jq",
-		"azure-boards.sh", "azure-boards.jq", "shortcut.sh", "shortcut.jq"} {
+		"azure-boards.sh", "azure-boards.jq", "shortcut.sh", "shortcut.jq", "youtrack.sh", "youtrack.jq", "jira-dc.sh", "jira-dc.jq"} {
 		a, err := os.ReadFile(trackerRecipes + name)
 		if err != nil {
 			t.Fatal(err)

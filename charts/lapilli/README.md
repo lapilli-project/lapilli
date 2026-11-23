@@ -97,7 +97,7 @@ recorded elsewhere, such as a cloud's own alarm history, with a token of its
 own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
 `serve.trackers.tokenSecret` lets it read tasks and set their link and status,
 with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
-`jira` or `linear`), `image` (one with `sh`, `curl` and `jq`, by its digest,
+`jira`, `linear`, `azure-boards`, `shortcut`, `youtrack` or `jira-dc`), `image` (one with `sh`, `curl` and `jq`, by its digest,
 `NAME@sha256:...`: a tag is refused) and `trackerTokenSecret`, a CronJob keeps
 tasks in step with that tracker's issues every five minutes; see
 `recipes/trackers`. The tracker's API is asked over https; `PLAIN_HTTP:
