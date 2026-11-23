@@ -78,5 +78,10 @@ the topic.
   pass over, as serve's `?skip=`: Lapilli's own webhook receiver, while
   it is kept beside the recorder.
 
+Keep `OFFSET_FILE` where the script can write, not on a read-only mount
+beside Alertmanager's file: where it can't keep where it stopped, it says so
+and stops, exiting 1, rather than send the same again each run, as a
+delivery is kept once but a mute, which has no key of its own, isn't.
+
 Run one at a time for an offset file: two would each send what the other
 sent, which serve keeps once, but each move the offset as it read.

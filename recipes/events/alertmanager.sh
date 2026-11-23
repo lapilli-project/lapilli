@@ -250,7 +250,7 @@ send_from() {
       if [ "$b" != - ] && ! post "$b"; then
         return 1
       fi
-      [ "${3:-keep}" != keep ] || file_kept "$1" "$((from + end))"
+      [ "${3:-keep}" != keep ] || file_kept "$1" "$((from + end))" || return 1
     done <"$work/ends"
     # A read that held as much as is read at a time: read on.
     [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 0
@@ -264,9 +264,15 @@ send_from() {
 file_kept() {
   n=$2
   [ "$n" -le 64 ] || n=64
-  printf '%s %s %s\n' "$(inode "$1")" "$2" "$(head_sum "$1" "$n")" >"$OFFSET_FILE.tmp"
-  mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"
+  if ! printf '%s %s %s\n' "$(inode "$1")" "$2" "$(head_sum "$1" "$n")" >"$OFFSET_FILE.tmp" || ! mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"; then
+    unkept
+    return 1
+  fi
 }
+
+# unkept says where it stopped can't be kept, and so the run stops: each
+# run would send the same again.
+unkept() { say "$(basename "$OFFSET_FILE") can't be written: where it stopped isn't kept, so it stops (keep OFFSET_FILE where it can write)"; }
 
 # file_once: what was written since the last time, sent.
 file_once() {
@@ -292,7 +298,7 @@ file_once() {
     done
     off=0
     sum=
-    file_kept "$path" 0
+    file_kept "$path" 0 || return 1
   fi
   size=$(wc -c <"$path" | tr -d ' ')
   n=$off
@@ -346,7 +352,10 @@ kafka_once() {
     return 0
   fi
   # Offsets kept here, a line a partition: PARTITION NEXT.
-  touch "$OFFSET_FILE"
+  touch "$OFFSET_FILE" || {
+    unkept
+    return 1
+  }
   run_kcat -L -t "$KAFKA_TOPIC" -J >"$work/meta" </dev/null || {
     say "kcat failed to list $KAFKA_TOPIC's partitions"
     return 1
@@ -380,7 +389,7 @@ kafka_once() {
       case $last in
         '' | *[!0-9]*) say "where partition $p stopped can't be told: it is read again from where it was"; return 1 ;;
       esac
-      kafka_kept "$p" "$((last + 1))"
+      kafka_kept "$p" "$((last + 1))" || return 1
     done <"$work/ends"
   done <"$work/partitions"
 }
@@ -388,9 +397,11 @@ kafka_once() {
 # kafka_kept PARTITION NEXT: the offset to read the partition from next,
 # kept beside the others, written aside and moved.
 kafka_kept() {
-  awk -v p="$1" '$1 != p' "$OFFSET_FILE" >"$OFFSET_FILE.tmp"
-  printf '%s %s\n' "$1" "$2" >>"$OFFSET_FILE.tmp"
-  mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"
+  if ! awk -v p="$1" '$1 != p' "$OFFSET_FILE" >"$OFFSET_FILE.tmp" || ! printf '%s %s\n' "$1" "$2" >>"$OFFSET_FILE.tmp" ||
+    ! mv "$OFFSET_FILE.tmp" "$OFFSET_FILE"; then
+    unkept
+    return 1
+  fi
 }
 
 case $mode in

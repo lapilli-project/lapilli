@@ -405,3 +405,42 @@ func TestEventsRecipeLongBody(t *testing.T) {
 		}
 	})
 }
+
+// Where the offset can't be written, the run says so and stops, exit 1,
+// for a file and for Kafka: it would send the same again each run.
+func TestEventsRecipeOffsetUnwritable(t *testing.T) {
+	needEventTools(t)
+	if os.Getuid() == 0 {
+		t.Skip("root writes into a read-only directory")
+	}
+	eachShell(t, func(t *testing.T) {
+		s := notifyServer(t, nil)
+		s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+		srv := httptest.NewServer(s.NotifyHandler())
+		defer srv.Close()
+		dir := t.TempDir()
+		events := filepath.Join(dir, "events.jsonl")
+		appendLines(t, events, recorded(t, "alertmanager-0.35.0.jsonl")[:10], nil)
+		ro := filepath.Join(dir, "ro")
+		os.MkdirAll(ro, 0o755)
+		os.Chmod(ro, 0o555)
+		t.Cleanup(func() { os.Chmod(ro, 0o755) })
+		env := recipeEnv(srv.URL, tokenFile(t, notifyToken), "", "OFFSET_FILE="+filepath.Join(ro, "offset"))
+		code, out := runEvents(t, env, "file", events)
+		if code != 1 || !strings.Contains(out, "can't be written") {
+			t.Errorf("a file: exit %d: %s", code, out)
+		}
+		bin := filepath.Join(dir, "bin")
+		kafka := filepath.Join(dir, "kafka")
+		os.MkdirAll(bin, 0o755)
+		os.MkdirAll(kafka, 0o755)
+		os.WriteFile(filepath.Join(bin, "kcat"), []byte(fakeKcat), 0o755)
+		appendLines(t, filepath.Join(kafka, "0"), recorded(t, "alertmanager-0.35.0.jsonl")[:5], nil)
+		appendLines(t, filepath.Join(kafka, "1"), nil, nil)
+		env = recipeEnv(srv.URL, tokenFile(t, notifyToken), bin, "FAKE_KAFKA="+kafka, "KAFKA_BROKERS=k:9092", "KAFKA_TOPIC=am-events",
+			"OFFSET_FILE="+filepath.Join(ro, "kafka.offsets"))
+		if code, out := runEvents(t, env, "kafka"); code != 1 || !strings.Contains(out, "can't be written") {
+			t.Errorf("Kafka: exit %d: %s", code, out)
+		}
+	})
+}
