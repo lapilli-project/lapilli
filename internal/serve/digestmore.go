@@ -202,7 +202,7 @@ func (x *sentLine) text(l string) string {
 				u.Silence, u.Inhibition, u.Either, u.Nothing)
 		}
 		if u.Partial {
-			line += " " + tr(l, "Mutes were too many to look through for every firing: those of some rules weren't counted.")
+			line += " " + tr(l, "The firings or their mutes were too many to look through: some firings weren't counted.")
 		}
 		parts = append(parts, line)
 	}

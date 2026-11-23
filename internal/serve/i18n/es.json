@@ -1276,7 +1276,7 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "Notificaciones enviadas, tal como las enviaron los alert managers: %d, de %d reglas; %d repeticiones, %d mientras la gente dormía, %d por disparos que no detectaron nada.",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "Disparos que no avisaron a nadie: %d acallados por un silencio, %d inhibidos por otra alerta, %d sin ningún silencio ni inhibición recibidos.",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "Disparos que no avisaron a nadie: %d acallados por un silencio, %d inhibidos por otra alerta, %d acallados por un silencio o una inhibición, %d sin ningún silencio ni inhibición recibidos.",
- "Mutes were too many to look through for every firing: those of some rules weren't counted.": "Había demasiados silencios e inhibiciones para revisarlos con cada disparo: los de algunas reglas no se contaron.",
+ "The firings or their mutes were too many to look through: some firings weren't counted.": "Había demasiados disparos, o demasiados silencios e inhibiciones, para revisarlos todos: algunos disparos no se contaron.",
  "Counted from %s on: notifications are read for the last twelve weeks.": "Contado desde %s: las notificaciones se leen de las últimas doce semanas.",
  "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.": "Las notificaciones se leen de las últimas doce semanas, desde %s: no se contó ninguna del periodo.",
  "The most for nothing: %s.": "Las que más avisaron en vano: %s.",

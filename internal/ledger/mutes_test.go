@@ -433,3 +433,73 @@ func TestUnpagedBounded(t *testing.T) {
 		t.Errorf("past the most: %+v, %d rows of firings read, %d of mutes", u, firings, mutes)
 	}
 }
+
+// The span's firings are read without their labels a page a statement,
+// each once, those that started in one second among them, and
+// UnpagedFirings at most, in the order they started: past it the rest
+// aren't read, are in none of the counts, and the count says so.
+func TestUnpagedSpanBounded(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	wasPage, wasMost := unpagedPage, UnpagedFirings
+	t.Cleanup(func() { unpagedPage, UnpagedFirings = wasPage, wasMost })
+	var many []firing.Firing
+	for i := range 300 {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		many = append(many, firing.Firing{Rule: "Flapping", Labels: map[string]string{"instance": "web-" + strconv.Itoa(i)}, Start: at, End: at.Add(30 * time.Second)})
+	}
+	// And 150 of another rule's that started in one second.
+	for i := range 150 {
+		many = append(many, firing.Firing{Rule: "Burst", Labels: map[string]string{"instance": "db-" + strconv.Itoa(i)}, Start: t0.Add(2*time.Hour + 30*time.Second), End: t0.Add(3 * time.Hour)})
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), many)
+	if _, _, err := l.KeepMutes(ctx, []Mute{{At: t0.Add(time.Minute), Rule: "Flapping", Labels: map[string]string{"alertname": "Flapping", "instance": "web-0"}, Kind: MutedSilence, Ref: "s-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(24 * time.Hour), Limit: 1000})
+	if err != nil || len(fs) != 450 {
+		t.Fatalf("%d firings: %v", len(fs), err)
+	}
+	// No notification told of web-0, muted, of web-200, nor of Burst's.
+	untold := map[int64]bool{}
+	for _, f := range fs {
+		if f.Rule == "Burst" || f.Labels["instance"] == "web-0" || f.Labels["instance"] == "web-200" {
+			untold[f.ID] = true
+		}
+	}
+	count := func() (Unpaged, int64, int64) {
+		t.Helper()
+		rows, pages := unpagedSpanRead.Load(), unpagedSpanPages.Load()
+		u, err := l.Unpaged(ctx, t0, t0.Add(24*time.Hour), func(string) bool { return true }, func(id int64) bool { return !untold[id] },
+			func(string, time.Time) bool { return true }, mutedWithin, t0.Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u, unpagedSpanRead.Load() - rows, unpagedSpanPages.Load() - pages
+	}
+	whole := Unpaged{Silence: 1, Nothing: 151}
+	if u, rows, pages := count(); u != whole || rows != 450 || pages != 1 {
+		t.Errorf("in one statement: %+v, %d rows in %d statements", u, rows, pages)
+	}
+	// A page of 64: eight statements, the second in which Burst's began
+	// across three of them, and each firing read once.
+	unpagedPage = 64
+	if u, rows, pages := count(); u != whole || rows != 450 || pages != 8 {
+		t.Errorf("a page of 64: %+v, %d rows in %d statements", u, rows, pages)
+	}
+	// 200 at most: Flapping's first 121 and 79 of Burst's, which started
+	// two hours in. web-200 and the rest of Burst's aren't read, nor
+	// counted.
+	UnpagedFirings = 200
+	if u, rows, pages := count(); u != (Unpaged{Silence: 1, Nothing: 79, Partial: true}) || rows != 200 || pages != 4 {
+		t.Errorf("200 at most: %+v, %d rows in %d statements", u, rows, pages)
+	}
+	// As many as there are: all read, and not said cut.
+	UnpagedFirings = 450
+	if u, rows, _ := count(); u != whole || rows != 450 {
+		t.Errorf("as many as there are: %+v, %d rows", u, rows)
+	}
+	if p := plan(t, l, qUnpagedSpan, t0.Unix(), -1, t0.Add(24*time.Hour).Unix(), 10); scansAll(l, p, "firings") || !strings.Contains(p, "firings_start") {
+		t.Errorf("the span's firings are read through: %s", p)
+	}
+}

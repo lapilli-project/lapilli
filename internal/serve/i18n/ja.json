@@ -1276,7 +1276,7 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "アラートマネージャーが実際に送った通知: ルール %[2]d 件で %[1]d 件。繰り返し %[3]d 件、睡眠時間中 %[4]d 件、何も検知しなかった発火への通知 %[5]d 件。",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "誰も呼び出さなかった発火: サイレンスで %d 件、別のアラートの抑制で %d 件、届いたサイレンス・抑制の記録なしで %d 件。",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "誰も呼び出さなかった発火: サイレンスで %d 件、別のアラートの抑制で %d 件、サイレンスか抑制で %d 件、届いたサイレンス・抑制の記録なしで %d 件。",
- "Mutes were too many to look through for every firing: those of some rules weren't counted.": "サイレンス・抑制の記録が多すぎて、すべての発火を調べられませんでした。一部のルールの発火は数えていません。",
+ "The firings or their mutes were too many to look through: some firings weren't counted.": "発火またはサイレンス・抑制の記録が多すぎて、すべてを調べられませんでした。一部の発火は数えていません。",
  "Counted from %s on: notifications are read for the last twelve weeks.": "%s 以降の件数です。通知は直近 12 週間分だけを読みます。",
  "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.": "通知は直近 12 週間、%s 以降の分だけを読みます。この期間の通知は数えていません。",
  "The most for nothing: %s.": "無駄な通知が最も多いルール: %s。",

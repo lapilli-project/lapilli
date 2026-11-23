@@ -408,9 +408,10 @@ type Unpaged struct {
 	Inhibition int `json:"inhibition"`
 	Either     int `json:"either"`
 	Nothing    int `json:"nothing"`
-	// Partial says the mutes looked at came to their most (UnpagedMost)
-	// before every firing of a rule with mutes was looked at: those not
-	// looked at are in none of the counts.
+	// Partial says not every firing was looked at: the span's firings
+	// came to more than are read (UnpagedFirings), or the mutes looked at
+	// to their most (UnpagedMost) before every firing of a rule with mutes
+	// was. Those not looked at are in none of the counts.
 	Partial bool `json:"partial,omitempty"`
 }
 
@@ -427,20 +428,35 @@ const qMutedAny = `SELECT 1 FROM mutes WHERE rule = ? AND hour >= ? AND hour <= 
 // port's most), what a day's firings page can read.
 var UnpagedMost = 200_000
 
+// UnpagedFirings is how many of a span's firings Unpaged reads without
+// their labels, at most, in the order they started; unpagedPage, how many
+// a statement reads of them. Variables, so tests can make them small.
+var (
+	UnpagedFirings = 2_000_000
+	unpagedPage    = 20_000
+)
+
+// qUnpagedSpan reads a page of a span's firings without their labels,
+// from after the last one read (its start and id), through firings_start.
+const qUnpagedSpan = `SELECT f.id, f.rule_id, r.name, f.start_at, f.end_at FROM firings f JOIN rules r ON r.id = f.rule_id
+	WHERE f.start_at >= ?1 AND (f.start_at > ?1 OR f.id > ?2) AND f.start_at < ?3 ORDER BY f.start_at, f.id LIMIT ?4`
+
 // unpagedFiringsRead counts the rows of firings Unpaged reads with their
-// labels: for tests of what a digest reads.
-var unpagedFiringsRead atomic.Int64
+// labels, unpagedSpanRead those it reads without, and unpagedSpanPages
+// the statements it reads those with: for tests of what a digest reads.
+var unpagedFiringsRead, unpagedSpanRead, unpagedSpanPages atomic.Int64
 
 // Unpaged counts the firings that started in [from, to) of the rules in
 // says, that told doesn't say a notification told of: muted, by kind, or
 // not, those of them counted says notifications were counted for by
-// then. The firings are read without their labels; a rule's with them,
-// only when a mute of it was told of about them (one row of mutes_rule
-// looked up), one rule at a time. Its mutes are read as MutedOf reads a
-// firing's, the hours about each firing's start and its end, each of a
-// rule once. UnpagedMost rows in all, of firings read with their labels
-// and of mutes looked at: past it, the rest aren't read, and Partial
-// says so.
+// then. The firings are read without their labels, in the order they
+// started, a page a statement and UnpagedFirings at most: those past it
+// aren't read. A rule's are read with them only when a mute of it was
+// told of about them (one row of mutes_rule looked up), one rule at a
+// time. Its mutes are read as MutedOf reads a firing's, the hours about
+// each firing's start and its end, each of a rule once. UnpagedMost rows
+// in all, of firings read with their labels and of mutes looked at: past
+// it, the rest aren't read. Partial says whichever was cut.
 func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule string) bool, told func(firing int64) bool,
 	counted func(rule string, start time.Time) bool, within Within, now time.Time) (Unpaged, error) {
 	var out Unpaged
@@ -452,38 +468,54 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 		counted int
 	}
 	byName := map[string]*ofRule{}
-	err := l.eachRow(ctx, func(r scanner) error {
-		var id, rid, start int64
-		var end sql.NullInt64
-		var name string
-		if err := r.Scan(&id, &rid, &name, &start, &end); err != nil {
-			return err
-		}
-		if !in(name) || told(id) {
+	// The span as far as it is read: to, or where the first firing past
+	// UnpagedFirings started.
+	upTo := to.Unix()
+	lastStart, lastID := from.Unix(), int64(-1)
+	for read, more := 0, true; more; {
+		// One more than are read still, to say there were more.
+		limit, n := min(unpagedPage, UnpagedFirings-read+1), 0
+		unpagedSpanPages.Add(1)
+		err := l.eachRow(ctx, func(r scanner) error {
+			var id, rid, start int64
+			var end sql.NullInt64
+			var name string
+			if err := r.Scan(&id, &rid, &name, &start, &end); err != nil {
+				return err
+			}
+			if n++; read >= UnpagedFirings {
+				out.Partial, upTo = true, start
+				return nil
+			}
+			read++
+			unpagedSpanRead.Add(1)
+			lastStart, lastID = start, id
+			if !in(name) || told(id) {
+				return nil
+			}
+			w := int64(within(name) / time.Second)
+			hi := now.Unix()
+			if end.Valid {
+				hi = end.Int64
+			}
+			x := byName[name]
+			if x == nil {
+				x = &ofRule{lo: start - w, hi: hi + w}
+				byName[name] = x
+			}
+			if !slices.Contains(x.ids, rid) {
+				x.ids = append(x.ids, rid)
+			}
+			x.lo, x.hi = min(x.lo, start-w), max(x.hi, hi+w)
+			if counted(name, unix(start)) {
+				x.counted++
+			}
 			return nil
+		}, qUnpagedSpan, lastStart, lastID, to.Unix(), limit)
+		if err != nil {
+			return out, err
 		}
-		w := int64(within(name) / time.Second)
-		hi := now.Unix()
-		if end.Valid {
-			hi = end.Int64
-		}
-		x := byName[name]
-		if x == nil {
-			x = &ofRule{lo: start - w, hi: hi + w}
-			byName[name] = x
-		}
-		if !slices.Contains(x.ids, rid) {
-			x.ids = append(x.ids, rid)
-		}
-		x.lo, x.hi = min(x.lo, start-w), max(x.hi, hi+w)
-		if counted(name, unix(start)) {
-			x.counted++
-		}
-		return nil
-	}, `SELECT f.id, f.rule_id, r.name, f.start_at, f.end_at FROM firings f JOIN rules r ON r.id = f.rule_id
-		WHERE f.start_at >= ? AND f.start_at < ?`, from.Unix(), to.Unix())
-	if err != nil {
-		return out, err
+		more = n == limit && !out.Partial
 	}
 	left := UnpagedMost
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
@@ -531,7 +563,7 @@ func (l *Ledger) Unpaged(ctx context.Context, from, to time.Time, in func(rule s
 			return nil
 		}, `SELECT f.id, s.id, s.labels, f.start_at, f.end_at FROM firings f JOIN series s ON s.id = f.series_id
 			WHERE f.rule_id IN (`+l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at < ? ORDER BY f.start_at, f.id LIMIT ?`,
-			string(ids), from.Unix(), to.Unix(), left+1); err != nil {
+			string(ids), from.Unix(), upTo, left+1); err != nil {
 			return out, err
 		}
 		if left -= min(n, left); more || left <= 0 && len(fs) > 0 {

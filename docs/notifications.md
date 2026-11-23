@@ -184,11 +184,12 @@ no one: muted by a silence, inhibited by another alert, muted by one or
 the other, or with no mute told of, as their pages say it.
 `digest.ready` and `report.ready` carry it as
 `notifications.paged_no_one`: `silence`, `inhibition`, `either`,
-`nothing`, and `partial` when there were too many mutes to look through
-for every firing. It reads 200,000 rows of firings and mutes at most
-([design/mutes.md](design/mutes.md#bounds)). Notifications are read for
-the last twelve weeks: a report whose span starts earlier says from when
-its notifications and those firings are counted, and carries it as
+`nothing`, and `partial` when the firings or their mutes were too many to
+look through. It reads the span's firings without their labels, 2,000,000
+at most, and 200,000 rows of firings with their labels and of mutes at
+most ([design/mutes.md](design/mutes.md#bounds)). Notifications are read
+for the last twelve weeks: a report whose span starts earlier says from
+when its notifications and those firings are counted, and carries it as
 `notifications.counted_from`.
 
 Mutes come at the events' rate (200 a second, bursts of 1,000), not the

@@ -1276,7 +1276,7 @@
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "알림 매니저가 실제로 보낸 알림: 규칙 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못한 발화에 대한 알림 %[5]d건.",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.": "아무도 안 부른 발화: 침묵으로 %d건, 다른 알림의 억제로 %d건, 받은 침묵·억제 기록 없이 %d건.",
  "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d muted by a silence or an inhibition, %d with no mute told of.": "아무도 안 부른 발화: 침묵으로 %d건, 다른 알림의 억제로 %d건, 침묵이나 억제로 %d건, 받은 침묵·억제 기록 없이 %d건.",
- "Mutes were too many to look through for every firing: those of some rules weren't counted.": "침묵·억제 기록이 너무 많아 모든 발화를 살펴보지 못했어요. 일부 규칙의 발화는 세지 않았어요.",
+ "The firings or their mutes were too many to look through: some firings weren't counted.": "발화나 침묵·억제 기록이 너무 많아 모두 살펴보지 못했어요. 일부 발화는 세지 않았어요.",
  "Counted from %s on: notifications are read for the last twelve weeks.": "%s 부터 센 숫자예요. 알림은 최근 12주만 읽어요.",
  "Notifications are read for the last twelve weeks, from %s on: none of the span's are counted.": "알림은 최근 12주, %s 부터만 읽어요. 이 기간의 알림은 세지 않았어요.",
  "The most for nothing: %s.": "오탐 알림이 가장 많은 규칙: %s.",
