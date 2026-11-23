@@ -235,8 +235,17 @@ default branch left. Where the CI says the repository's default branch
 `CI_DEFAULT_BRANCH`), a pull request into another branch sets
 `lapilli/backtest (into BRANCH)` instead (`lapilli/backtest/KEY (into
 BRANCH)` with a `KEY`), so a rule of a branch other than the default
-needs that branch's name: `lapilli/backtest (into release/1.x)`. One into
-the default is named `lapilli/backtest`, as before. A branch whose name
+needs that branch's name: `lapilli/backtest (into release/1.x)`, in place
+of `lapilli/backtest`, which the same head's pull request into the
+default branch sets, judged against the default, and which would meet the
+rule still. One into the default is named `lapilli/backtest`, as before.
+A rule of a pattern (`release/*`) asks one name of every branch it
+matches, and none is each branch's own: give each such branch a rule of
+its own, naming its status in full, and one to each branch made later.
+And require each status by its name in full, never by a pattern of names
+(Gitea's and Forgejo's `lapilli/backtest*`): a pull request's author
+makes a name of `lapilli/backtest (into BRANCH)` by the branch they open
+it into, which such a pattern would take. A branch whose name
 holds more than letters, digits and `. _ / -`, or more than 200 of them,
 gets no status. In an event of no pull request (GitHub's `push` or
 `workflow_run`, Gitea's `push`, GitLab's branch pipeline), the CI says

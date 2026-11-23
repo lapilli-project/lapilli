@@ -222,8 +222,15 @@ And, as wanted:
   `TARGET_BRANCH`, named as the CI's would be, and a job that gives
   `TARGET` instead, or neither, sets no status, as one of the default's
   name, judged against whatever `TARGET` is, would stand for the
-  default's pull requests. A rule of another
-  branch requires that branch's name. Bitbucket Pipelines doesn't say the
+  default's pull requests. A rule of another branch requires that
+  branch's name, in place of `lapilli/backtest`, which the same head's
+  pull request into the default branch sets and would meet the rule
+  still; a rule of a pattern (`release/*`) asks one name of every branch
+  it matches, none of them each branch's own, so give each such branch a
+  rule of its own; and require each status by its name in full, never a
+  pattern of names (Gitea's and Forgejo's `lapilli/backtest*`), which
+  would take the names a pull request's author makes by the branch they
+  open it into. Bitbucket Pipelines doesn't say the
   default branch, and its build status of a key is a commit's: there, two
   pull requests of one branch into two destinations set the same one, the
   last standing for both, so run the step only for pull requests into the
