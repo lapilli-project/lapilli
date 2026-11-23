@@ -238,8 +238,14 @@ BRANCH)` with a `KEY`), so a rule of a branch other than the default
 needs that branch's name: `lapilli/backtest (into release/1.x)`. One into
 the default is named `lapilli/backtest`, as before. A branch whose name
 holds more than letters, digits and `. _ / -`, or more than 200 of them,
-gets no status. Bitbucket Pipelines doesn't say the default branch, and
-its build status is a commit's, of its key: there two pull requests of
+gets no status. In an event of no pull request (GitHub's `push` or
+`workflow_run`, Gitea's `push`, GitLab's branch pipeline), the CI says
+the default branch alone: the branch is the job's `TARGET_BRANCH`, named
+as the CI's would be, and a job that gives `TARGET` instead, or neither,
+sets no status, as one of the default's name, judged against whatever
+`TARGET` is, would stand for the default's pull requests. Bitbucket
+Pipelines doesn't say the default branch, and its build status is a
+commit's, of its key: there two pull requests of
 one branch into two destinations set the same one, the last standing for
 both. Azure DevOps' status is the pull request's own. Run the job only on
 pull requests into the branches a rule protects, too (`branches:` below),

@@ -107,7 +107,8 @@ And, as wanted:
   of no pull request (`push`, `workflow_run`) has no merge GitHub made:
   the job giving `PR`, `HEAD` a merge is its author's, and `TARGET`
   `HEAD^1` is refused with a gate or `STATUS`; give `TARGET` or
-  `TARGET_BRANCH`. A merge queue's run (`merge_group`) isn't taken yet:
+  `TARGET_BRANCH`, and with `STATUS`, `TARGET_BRANCH`, as the status's
+  name says the branch. A merge queue's run (`merge_group`) isn't taken yet:
   its commit is the queue's, and the script says so and fails, setting no
   status, so a branch whose rules require the job or `lapilli/backtest`
   can't merge through a queue yet. A
@@ -211,7 +212,13 @@ And, as wanted:
   request into another branch sets `lapilli/backtest (into BRANCH)`
   (`lapilli/backtest/KEY (into BRANCH)`), and the default's is left as its
   own pull request set it; a branch whose name holds more than letters,
-  digits and `. _ / -`, or 200 of them, sets none. A rule of another
+  digits and `. _ / -`, or 200 of them, sets none. In an event of no pull
+  request (GitHub's `push` or `workflow_run`, Gitea's `push`, GitLab's
+  branch pipeline), the CI says the default branch alone: the branch is
+  `TARGET_BRANCH`, named as the CI's would be, and a job that gives
+  `TARGET` instead, or neither, sets no status, as one of the default's
+  name, judged against whatever `TARGET` is, would stand for the
+  default's pull requests. A rule of another
   branch requires that branch's name. Bitbucket Pipelines doesn't say the
   default branch, and its build status of a key is a commit's: there, two
   pull requests of one branch into two destinations set the same one, the

@@ -107,7 +107,10 @@
 #                    request's head commit, lapilli/backtest (with KEY,
 #                    lapilli/backtest/KEY; of a pull request into a branch
 #                    other than the default, where the CI says both,
-#                    lapilli/backtest (into BRANCH)), success or failure
+#                    lapilli/backtest (into BRANCH); where the CI says the
+#                    default alone, as in an event of no pull request,
+#                    the branch is TARGET_BRANCH, and with none no status
+#                    is set), success or failure
 #                    as the job ends, with a short description: the host's
 #                    commit statuses (Bitbucket's build statuses, Azure DevOps'
 #                    pull request statuses, on the iteration at that
@@ -454,18 +457,32 @@ full_hash() {
 # CI says the repository's default branch (ci_default) and the branch the
 # pull request goes into (ci_into), and the two differ, the name says that
 # branch: lapilli/backtest (into BRANCH). One the name can't hold (but
-# letters, digits and . _ / -, 200 at most) leaves the status unset.
+# letters, digits and . _ / -, 200 at most) leaves the status unset. In
+# an event of no pull request (push, workflow_run, a branch's pipeline),
+# the CI says the default branch but not the one the pull request goes
+# into: the job's TARGET_BRANCH is that branch, named as the CI's would
+# be. A TARGET, or none, names no branch, and leaves the status unset: one
+# of the default's name, of a backtest against whatever TARGET is, would
+# stand for the default's pull requests. status_unnamed says why.
 status_context=lapilli/backtest
 [ "$KEY" = default ] || status_context=lapilli/backtest/$KEY
 status_unnamed=
+if [ -n "${ci_default:-}" ] && [ -z "${ci_into:-}" ]; then
+  if [ -n "${TARGET_BRANCH:-}" ]; then
+    ci_into=$TARGET_BRANCH
+  else
+    status_unnamed="the CI says no branch the pull request goes into, and TARGET_BRANCH names none: no status set, as one of the default's name, of a backtest against whatever TARGET is, would stand for the default's pull requests. Give TARGET_BRANCH, the branch it goes into"
+  fi
+fi
 if [ -n "${ci_default:-}" ] && [ -n "${ci_into:-}" ] && [ "$ci_into" != "$ci_default" ]; then
+  unnamed="the branch the pull request goes into isn't the repository's default, and a status's name can't hold it (letters, digits and . _ / -, 200 at most): no status set, as one of the default's name would stand for the default's pull requests"
   case $ci_into in
-    -* | *[!A-Za-z0-9._/-]*) status_unnamed=1 ;;
+    -* | *[!A-Za-z0-9._/-]*) status_unnamed=$unnamed ;;
     *)
       if [ "${#ci_into}" -le 200 ]; then
         status_context="$status_context (into $ci_into)"
       else
-        status_unnamed=1
+        status_unnamed=$unnamed
       fi
       ;;
   esac
@@ -2606,7 +2623,7 @@ status_died() {
 # STATUS_SHA, which may name it.
 status_on_commit() {
   if [ -n "$status_unnamed" ]; then
-    say "the branch the pull request goes into, as the CI says, isn't the repository's default, and a status's name can't hold it (letters, digits and . _ / -, 200 at most): no status set, as one of the default's name would stand for the default's pull requests"
+    say "$status_unnamed"
     return 1
   fi
   if [ -n "$strayed" ]; then

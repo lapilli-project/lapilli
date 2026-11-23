@@ -34,7 +34,9 @@
 # pipeline (CI_PIPELINE_ID) when it is that pipeline's commit, or else of
 # the one GitLab finds or makes for it. The token needs the Developer role.
 # Of a merge request into a branch other than the project's default
-# (CI_DEFAULT_BRANCH), it is lapilli/backtest (into BRANCH).
+# (CI_DEFAULT_BRANCH), it is lapilli/backtest (into BRANCH). In a pipeline
+# of no merge request (a branch's), the branch is TARGET_BRANCH, and with
+# none, no status is set.
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), the job names its ID
 # token for serve's audience under id_tokens:, as LAPILLI_ID_TOKEN:

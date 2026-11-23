@@ -210,6 +210,63 @@ func TestBacktestRecipeSecondPullRequest(t *testing.T) {
 	})
 }
 
+// In an event of no pull request (push, workflow_run, a branch's
+// pipeline), the CI says the default branch but not the one the pull
+// request goes into: the status kept the default's name whatever
+// TARGET_BRANCH, so a job judging the same head into a branch its author
+// chose, holding the change already, set lapilli/backtest success over the
+// failure the job into main left. TARGET_BRANCH is the branch now, named
+// as the CI's would be; a TARGET, or none, names no branch, and no status
+// is set.
+func TestBacktestRecipeNoPullRequestStatusName(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo, _, aside := gateRepo(t)
+	// The head: a child of the author's commit that holds the change, so
+	// it parts from main at main, and from aside at aside.
+	repo.git("checkout", "--quiet", "-B", "pr2", aside)
+	repo.write(map[string]string{"NOTES.md": "y\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "more")
+	head := repo.git("rev-parse", "HEAD")
+	repo.git("fetch", "--quiet", "origin")
+	repo.git("checkout", "--quiet", "--detach", head)
+	event := filepath.Join(t.TempDir(), "event.json")
+	os.WriteFile(event, []byte(`{"workflow_run": {"head_sha": "`+head+`"}, "repository": {"default_branch": "main"}}`), 0o600)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "FAIL_MISSED=true", "STATUS=true", "STATUS_SHA=" + head}
+	for _, c := range []struct {
+		host int
+		ci   []string
+		fail string
+	}{
+		{0, []string{"GITHUB_ACTIONS=true", "GITHUB_EVENT_NAME=workflow_run", "GITHUB_EVENT_PATH=" + event}, "failure"},
+		{1, []string{"GITEA_ACTIONS=true", "GITHUB_EVENT_NAME=push", "GITHUB_EVENT_PATH=" + event}, "failure"},
+		{2, []string{"CI_COMMIT_SHA=" + head, "CI_DEFAULT_BRANCH=main"}, "failed"},
+	} {
+		rr := newRecipeRun(t, backtestHosts[c.host], repo)
+		rr.env = append(rr.env, c.ci...)
+		for _, into := range []struct{ branch, context, state string }{
+			{"main", "lapilli/backtest", c.fail},
+			{"aside", "lapilli/backtest (into aside)", "success"},
+		} {
+			out, err := rr.run(append(slices.Clone(gates), "TARGET_BRANCH="+into.branch), args...)
+			if st, ok := lastOf(rr.host, head, into.context); !ok || st.State != into.state || (err == nil) != (into.state == "success") {
+				t.Errorf("%s, TARGET_BRANCH=%s: %v, %s %+v\n%s", rr.h.kind, into.branch, err, into.context, st, lastLines(out, 3))
+			}
+		}
+		if st, ok := lastOf(rr.host, head, "lapilli/backtest"); !ok || st.State != c.fail {
+			t.Errorf("%s: the default branch's status after the job into aside: %+v", rr.h.kind, st)
+		}
+		// A TARGET, a branch's in full or not, names no branch: none set.
+		before := len(rr.host.statuses)
+		out, _ := rr.run(append(slices.Clone(gates), "TARGET=refs/remotes/origin/aside"), args...)
+		if _, n := rr.host.lastStatus(); n != before || !strings.Contains(out, "TARGET_BRANCH names none: no status set") {
+			t.Errorf("%s, TARGET alone: %d set\n%s", rr.h.kind, n-before, lastLines(out, 3))
+		}
+	}
+}
+
 // An event of no pull request (push, workflow_run), the job giving PR: in
 // GitHub Actions, HEAD a merge was still taken for the CI's, and its first
 // parent for the base, though GitHub made no merge: a merge of the change

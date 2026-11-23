@@ -23,7 +23,10 @@
 # (pull_request.head.sha), linking to the run: the token needs statuses:
 # write (a fine-grained token: commit statuses, write). Of a pull request
 # into a branch other than the repository's default, as the event says
-# (repository.default_branch), it is lapilli/backtest (into BRANCH).
+# (repository.default_branch), it is lapilli/backtest (into BRANCH). In an
+# event of no pull request (push, workflow_run), the event says no branch
+# it goes into: the branch is TARGET_BRANCH, and with none, no status is
+# set.
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks GitHub Actions for the job's ID token for that audience, as
@@ -88,8 +91,9 @@ if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${GITHUB_EVENT_NAME:-}" ]; then
 fi
 # ... and, for the status's name, the repository's default branch and the
 # one the pull request goes into, as the event says: a pull request into
-# another branch sets lapilli/backtest (into BRANCH), not the default's
-# (lib.sh).
+# another branch sets lapilli/backtest (into BRANCH), not the default's;
+# in an event that says no pull request, TARGET_BRANCH is the branch, or
+# no status is set (lib.sh).
 ci_default='' ci_into=${GITHUB_BASE_REF:-}
 if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
   ci_default=$(jq -r '.repository.default_branch // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_default=

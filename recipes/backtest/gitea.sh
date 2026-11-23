@@ -24,7 +24,8 @@
 # write:repository, its account write access to the repository. In
 # Actions, of a pull request into a branch other than the repository's
 # default (the event's repository.default_branch), it is lapilli/backtest
-# (into BRANCH).
+# (into BRANCH); in an event of no pull request (push), the branch is
+# TARGET_BRANCH, and with none, no status is set.
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks Forgejo Actions for the job's ID token for that audience, which the
