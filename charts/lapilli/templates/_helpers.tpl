@@ -348,7 +348,8 @@ your own needs from. */ -}}
 {{- fail "serve.changes.in, managed, rulerTokenSecret, lokiTokenSecret, awsRole, azureClientId, googleServiceAccount and ociConfigSecret go with serve.changes.enabled" }}
 {{- end }}
 {{- range $c.in }}
-{{- if and (eq $.Values.mode "serve") (hasPrefix "loki:" (toString .)) (not $r.loki.loaded) (not $r.ruler.url) }}
+{{- /* An alarms source named loki takes its own entries, as before 0.70.0. */}}
+{{- if and (eq $.Values.mode "serve") (hasPrefix "loki:" (toString .)) (not $r.loki.loaded) (not $r.ruler.url) (not (hasKey $sources "loki")) }}
 {{- fail (printf "serve.changes.in: %s names a namespace of Loki's ruler: set rules.loki.loaded, which reads it" (toString .)) }}
 {{- end }}
 {{- end }}

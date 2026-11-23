@@ -75,6 +75,14 @@ func TestChartLoki(t *testing.T) {
 		t.Errorf("the cronjob's Loki rule files: %v\n%s", err, out)
 	}
 
+	// An --alarms source named loki, with no Loki ruler read: loki:NAME in
+	// serve.changes.in is its alarms', as 0.69 took it.
+	if m, _ := render(t, append([]string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090",
+		"--set", "rules.alarms[0].source=loki", "--set", "rules.alarms[0].url=https://monitoring.eu-west-1.amazonaws.com",
+		"--set", "serve.changes.enabled=true", "--set", "serve.changes.in={loki:checkout-*}"}, signed...)...); !slices.Contains(m.args(t), "--changes-in=loki:checkout-*") {
+		t.Errorf("an alarms source named loki: %v", m.args(t))
+	}
+
 	// Through extraArgs, as before 0.70.0: still taken, alone.
 	if m, _ := render(t, "--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090",
 		"--set", "extraArgs={--loki,http://loki:3100,--loki-loaded-rules}"); !slices.Contains(m.args(t), "--loki-loaded-rules") {
