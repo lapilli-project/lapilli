@@ -326,8 +326,11 @@ incident's own; a rule's page and the rules list, over the weeks shown
 rule). The spans read are the incidents' that count ending from as long
 before the span as a rule's condition held at most, each read once where
 they meet, firings neither white nor excused; a read looks at 4,000,000
-firings against an incident each at most, past which the rest aren't said
-to have come after one, and serve logs it. The pages keep what they read
+firings against an incident each at most, 1,000,000 firings read and
+10,000 reads, past which the rest aren't said to have come after one, and
+serve says so where it shows them: `late_cut` in the report, the digest's
+text and MCP, a line on the Incidents page, an incident's own and a rule's,
+and `late_cut` in a report's missed incidents; and logs it. The pages keep what they read
 by the ledger's generation and their span, as the credit is kept.
 
 **With no record: which conditions** (0.70). How many of a rule's firings

@@ -341,7 +341,10 @@ type ruleLine struct {
 	// Late are, of its firings that caught nothing over the weeks shown,
 	// those that came after an incident they agree with was over, its
 	// condition having held in it: its alert, too late (ledger.LateOf).
-	Late int
+	// LateCut says more firings came near the ends of incidents than one
+	// read looks at: Late may be fewer than they are.
+	Late    int
+	LateCut bool
 }
 
 // NoisyApart reports whether it is noisy by its firings and not by its
@@ -677,7 +680,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	for id, l := range sum {
 		c := credit[l.Name]
 		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
-		l.Late = late.Rules[l.Name]
+		l.Late, l.LateCut = late.Rules[l.Name], late.Cut
 		l.Black = l.Firings - l.White
 		judged := l.Firings - l.Unjudged
 		l.Noisy = verdict.IsNoisy(judged, l.White, at)
@@ -1490,6 +1493,10 @@ type incidentLine struct {
 	FiredAfter []verdict.Catch
 	After      string
 	Afters     []afterLine
+	// LateCut says more firings came near the ends of incidents than one
+	// read looks at: one nothing caught may have had an alert after its
+	// end not named.
+	LateCut bool
 }
 
 // afterLine is a rule that fired once an incident was over, by how long
@@ -1744,7 +1751,7 @@ func (s *Server) firedAfter(l string, line *incidentLine, late ledger.Late, o ve
 	if !line.Counts {
 		return
 	}
-	line.FiredAfter = late.Fired[line.ID]
+	line.FiredAfter, line.LateCut = late.Fired[line.ID], late.Cut
 	if line.Status != "missed" {
 		return
 	}
@@ -1778,6 +1785,9 @@ type incidentsView struct {
 	// from: those in effect, then those the windows shown have.
 	Signal  string
 	Signals []string
+	// LateCut says more firings came near the ends of the incidents than
+	// one read looks at (ledger.Late.Cut).
+	LateCut bool
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -1830,7 +1840,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now()}
+	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now(), LateCut: late.Cut}
 	if week != 0 {
 		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
 	}

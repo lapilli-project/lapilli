@@ -96,6 +96,10 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 		late(w, r.Rules)
+		if r.LateCut {
+			fmt.Fprintln(w, "! More firings came near the ends of incidents than one read looks at: past them, a firing that came after\n"+
+				"  an incident isn't named, so an incident may read as nothing fired.")
+		}
 	}
 	if len(r.Unrecorded) > 0 {
 		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")

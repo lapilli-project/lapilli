@@ -2822,5 +2822,6 @@
  "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same.": "Después de su fin, reglas cuya condición se cumplió en él, pero cuyo \"for\" y el retraso con que llegan sus métricas pasaron de su fin: su alerta, demasiado tarde, negra de todos modos.",
  "%s after its end": "%s después de su fin",
  "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "%d de los disparos que no detectaron nada llegaron después de que terminara un incidente con el que coinciden: su condición se cumplió en él, pero su \"for\" y el retraso con que llegan sus métricas pasaron de su fin. Una alerta demasiado tarde, negra de todos modos.",
- "fired after its end: %s": "se disparó después de su fin: %s"
+ "fired after its end: %s": "se disparó después de su fin: %s",
+ "More firings came near the ends of incidents than one read looks at: past them, a firing that came after an incident isn't named, so an incident may read as nothing fired.": "Se dispararon más alertas cerca del fin de los incidentes de las que se miran de una vez: pasadas esas, un disparo que llegó después de un incidente no se nombra, así que un incidente puede leerse como que no se disparó nada."
 }

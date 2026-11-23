@@ -457,8 +457,9 @@ type Report struct {
 	People bool `json:"-"`
 	// LateCut says, in lapilli serve, that more firings came near the end
 	// of incidents than its ledger looks at in one read for those that came
-	// after one (ledger.LateOf): the rest aren't said to have.
-	LateCut bool `json:"-"`
+	// after one (ledger.LateOf): the rest aren't said to have, so a rule's
+	// Late may be fewer, and an incident's FiredAfter none, than they are.
+	LateCut bool `json:"late_cut,omitempty"`
 }
 
 // Settings are what a report's firings were judged by, as Options has

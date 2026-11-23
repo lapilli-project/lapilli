@@ -35,20 +35,21 @@ type Late struct {
 	// order of their start (verdict.Judged.After); only when asked for.
 	After map[int64][]string
 	// Cut says there was more to look at than one read looks at
-	// (lateChecks, lateRows, lateSpans): what was found by then is given,
-	// the rest isn't, and the caller logs it.
+	// (LateChecks, LateRows, LateSpans): what was found by then is given,
+	// the rest isn't, and the caller says so where it shows them.
 	Cut bool
 }
 
 // How much one read of Late looks at, at most: an incident written down
 // can end anywhere, and a span read is a page's or a report's, a year's
-// with no firings in it. lateChecks are firings, each against an incident
-// it may have come after; lateRows, the firings read near the incidents'
-// ends; lateSpans, the reads of them, one where the incidents meet.
+// with no firings in it. LateChecks are firings, each against an incident
+// it may have come after; LateRows, the firings read near the incidents'
+// ends; LateSpans, the reads of them, one where the incidents meet.
+// Replaced in tests.
 var (
-	lateChecks = 4_000_000
-	lateRows   = 1_000_000
-	lateSpans  = 10_000
+	LateChecks = 4_000_000
+	LateRows   = 1_000_000
+	LateSpans  = 10_000
 )
 
 // LateOf are the firings of [from, to) that came after an incident was
@@ -107,7 +108,7 @@ func (l *Ledger) LateOf(ctx context.Context, from, to time.Time, o verdict.Optio
 	// The spans the firings are read in, those of the incidents that meet
 	// as one, so that each firing is read once.
 	for i := 0; i < len(ins) && !out.Cut; {
-		if spans++; spans > lateSpans {
+		if spans++; spans > LateSpans {
 			out.Cut = true
 			break
 		}
@@ -132,7 +133,7 @@ func (l *Ledger) LateOf(ctx context.Context, from, to time.Time, o verdict.Optio
 				rows.Close()
 				return out, err
 			}
-			if read++; read > lateRows {
+			if read++; read > LateRows {
 				out.Cut = true
 				break
 			}
@@ -151,7 +152,7 @@ func (l *Ledger) LateOf(ctx context.Context, from, to time.Time, o verdict.Optio
 				if caught[n.row][name] {
 					continue
 				}
-				if checks++; checks > lateChecks {
+				if checks++; checks > LateChecks {
 					out.Cut = true
 					break
 				}

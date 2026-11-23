@@ -2822,5 +2822,6 @@
  "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same.": "인시던트 동안 조건이 참이었지만 \"for\"와 메트릭이 늦게 들어오는 시간 때문에 인시던트가 끝난 뒤에 울린 규칙이에요. 이 인시던트의 알림이지만 너무 늦어서 오탐으로 쳐요.",
  "%s after its end": "끝나고 %s 뒤",
  "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "오탐 중 %d건은 라벨이 맞는 인시던트가 끝난 뒤에 울렸어요. 인시던트 동안 조건이 참이었지만 \"for\"와 메트릭이 늦게 들어오는 시간 때문에 끝난 뒤에 울린 거예요. 너무 늦은 알림이라 오탐으로 쳐요.",
- "fired after its end: %s": "끝난 뒤 울림: %s"
+ "fired after its end: %s": "끝난 뒤 울림: %s",
+ "More firings came near the ends of incidents than one read looks at: past them, a firing that came after an incident isn't named, so an incident may read as nothing fired.": "인시던트가 끝날 무렵 울린 알림이 한 번에 읽는 양보다 많았어요. 그 뒤로는 인시던트가 끝난 뒤에 울린 알림을 이름으로 밝히지 않아서, 그런 인시던트가 울린 알림 없음으로 보일 수 있어요."
 }
