@@ -15,7 +15,8 @@
 #   PR                 the merge request's iid (default: GitLab CI's
 #                      CI_MERGE_REQUEST_IID)
 #   TARGET             default, in a merged results pipeline, the target
-#                      branch's commit (CI_MERGE_REQUEST_TARGET_BRANCH_SHA)
+#                      branch's commit (CI_MERGE_REQUEST_TARGET_BRANCH_SHA);
+#                      HEAD^1, lib.sh's default, written out is none given
 #   TARGET_BRANCH      default, in another merge request pipeline, the
 #                      target branch (CI_MERGE_REQUEST_TARGET_BRANCH_NAME),
 #                      fetched from origin with the job's own credentials
@@ -55,6 +56,10 @@ PR=${PR:-${CI_MERGE_REQUEST_IID:-}}
 # A merge request's pipeline says what it goes into: TARGET, the script's
 # or the job's, is taken as it is (lib.sh's ci_base).
 [ -z "${CI_MERGE_REQUEST_IID:-}" ] || ci_base=1
+# HEAD^1, lib.sh's default, written out is none given, as lib.sh takes it:
+# of a merge request's own commit, a merge its author made, it is
+# whatever first parent they chose.
+[ "${TARGET:-}" != HEAD^1 ] || TARGET=
 if [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ]; then
   if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-}" ]; then
     TARGET=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA

@@ -12,7 +12,8 @@
 #                     read:repository and read:user)
 #   PR                the pull request's number (default, in Actions: the
 #                     event's)
-#   TARGET_BRANCH     default, in Actions without TARGET, the branch the
+#   TARGET_BRANCH     default, in Actions without TARGET, or with lib.sh's
+#                     default HEAD^1 written out, the branch the
 #                     pull request goes into (GITHUB_BASE_REF), as
 #                     fetch-depth: 0 fetched it: Actions checks out the
 #                     pull request's own commit. Fetched only when the
@@ -58,17 +59,19 @@ if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   fi
   # Actions checks out the pull request's own commit, not a merge: the
   # branch it goes into is fetched, and compared from where they parted.
-  # A TARGET the job gives is its own, as the CI says the base (lib.sh).
+  # A TARGET the job gives is its own, as the CI says the base (lib.sh);
+  # HEAD^1, lib.sh's default, written out is none given, as lib.sh takes
+  # it: of the pull request's own commit, a merge its author made, it is
+  # whatever first parent they chose.
   ci_base=1
-  if [ -z "${TARGET:-}" ]; then
-    TARGET_BRANCH=${TARGET_BRANCH:-${GITHUB_BASE_REF:-}}
-  fi
-  # ... and makes no merge: in an event of no pull request (push), HEAD a
-  # merge is one its author made, and its first parent isn't taken for the
-  # base (lib.sh's ci_merges).
-  if [ -n "${GITHUB_EVENT_NAME:-}" ] && [ -z "${status_commit:-}" ]; then
-    ci_merges=1
-  fi
+  case ${TARGET:-HEAD^1} in
+    HEAD^1) TARGET_BRANCH=${TARGET_BRANCH:-${GITHUB_BASE_REF:-}} ;;
+  esac
+  # ... and makes no merge, in any event: HEAD a merge is one its author
+  # made, and its first parent isn't taken for the base, but the branch
+  # the pull request goes into (lib.sh's ci_merges and ci_branch).
+  ci_merges=1
+  ci_branch=${GITHUB_BASE_REF:-}
 fi
 : "${GITEA_API:?such as https://git.example.com/api/v1}"
 : "${GITEA_REPO:?such as example/monitoring}"

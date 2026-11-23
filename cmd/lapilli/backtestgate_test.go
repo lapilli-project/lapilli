@@ -267,6 +267,54 @@ func TestBacktestRecipeNoPullRequestStatusName(t *testing.T) {
 	}
 }
 
+// TARGET=HEAD^1, lib.sh's default, written out: the scripts of the CIs
+// that say the base set their TARGET_BRANCH default only without TARGET,
+// while lib.sh takes a literal HEAD^1 as none given. A head that is the
+// author's own merge, its first parent a commit of theirs holding the
+// change, had that parent for the base: FAIL_MISSED passed, and the status
+// was a success on it. HEAD^1 written out is none given now, in each
+// script; and Gitea's Actions, which makes no merge in any event, never
+// takes HEAD a merge for one.
+func TestBacktestRecipeHeadParentWrittenOut(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo, bad, aside := gateRepo(t)
+	// The author's merge: first parent their own commit, second the change.
+	merge := repo.git("commit-tree", repo.git("rev-parse", bad+"^{tree}"), "-p", aside, "-p", bad, "-m", "Merge")
+	repo.git("checkout", "--quiet", "--detach", merge)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "FAIL_MISSED=true", "STATUS=true"}
+	for _, c := range []struct {
+		host int
+		ci   []string
+	}{
+		{1, []string{"GITEA_ACTIONS=true", "GITHUB_EVENT_NAME=pull_request", "GITHUB_BASE_REF=main", "GITHUB_EVENT_PATH=" + eventOf(t, merge, "main", "main")}},
+		{2, []string{"CI_COMMIT_SHA=" + merge, "CI_MERGE_REQUEST_IID=7", "CI_DEFAULT_BRANCH=main", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main"}},
+		{3, []string{"BITBUCKET_COMMIT=" + merge, "BITBUCKET_PR_DESTINATION_BRANCH=main"}},
+		{4, []string{"SYSTEM_PULLREQUEST_SOURCECOMMITID=" + merge, "SYSTEM_PULLREQUEST_TARGETBRANCH=refs/heads/main"}},
+	} {
+		rr := newRecipeRun(t, backtestHosts[c.host], repo)
+		rr.env = append(rr.env, c.ci...)
+		rr.host.set(func(h *commentHost) { h.iterations = []string{merge} })
+		for _, target := range []string{"TARGET=", "TARGET=HEAD^1"} {
+			out, err := rr.run(append(slices.Clone(gates), target), args...)
+			st, _ := rr.host.lastStatus()
+			if err == nil || !strings.Contains(out, "caught by no rule") || !slices.Contains([]string{"failure", "failed", "FAILED"}, st.State) {
+				t.Errorf("%s, %q: %v, the last status %+v\n%s", rr.h.kind, target, err, st, lastLines(out, 3))
+			}
+		}
+	}
+	// Gitea's Actions with the TARGET_BRANCH default left out (an event of
+	// no base, the job giving TARGET=HEAD^1): HEAD a merge is its author's,
+	// refused with a gate.
+	rr := newRecipeRun(t, backtestHosts[1], repo)
+	rr.env = append(rr.env, "GITEA_ACTIONS=true", "GITHUB_EVENT_NAME=pull_request", "GITHUB_EVENT_PATH="+eventOf(t, merge, "main", "main"))
+	out, err := rr.run(append(slices.Clone(gates), "TARGET=HEAD^1"), args...)
+	if st, _ := rr.host.lastStatus(); err == nil || !strings.Contains(out, "Gitea's and Forgejo's in none") || st.State != "failure" {
+		t.Errorf("gitea, no base: %v, the last status %+v\n%s", err, st, lastLines(out, 3))
+	}
+}
+
 // An event of no pull request (push, workflow_run), the job giving PR: in
 // GitHub Actions, HEAD a merge was still taken for the CI's, and its first
 // parent for the base, though GitHub made no merge: a merge of the change
@@ -299,7 +347,7 @@ func TestBacktestRecipeNoEventHead(t *testing.T) {
 			})
 			out, err := rr.run(slices.Clone(settings), args...)
 			st, n := rr.host.lastStatus()
-			if err == nil || !strings.Contains(out, "the CI's event says no pull request, so it made no merge of one") || n != 2 || st.State != "failure" ||
+			if err == nil || !strings.Contains(out, "but the CI made no merge of a pull request (GitHub's Actions makes one in a pull request's event alone") || n != 2 || st.State != "failure" ||
 				st.Text != "refused: TARGET is HEAD's first parent, and the CI made no merge of a pull request" {
 				t.Errorf("%s, %v: %v, %d set, the last %+v\n%s", ev[1], settings, err, n-1, st, lastLines(out, 3))
 			}

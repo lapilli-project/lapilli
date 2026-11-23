@@ -70,8 +70,15 @@ func TestBacktestRecipeStatus(t *testing.T) {
 				link = rr.host.url + link
 			}
 			rr.env = append(rr.env, ci...)
-			if h.kind == "github" {
+			switch h.kind {
+			case "github":
 				rr.env = append(rr.env, githubMerge(repo.git("rev-parse", "HEAD"))...)
+			case "gitea":
+				// Gitea's Actions makes no merge: HEAD one is judged against
+				// the branch the event says, as fetched.
+				repo.git("remote", "add", "origin", repo.dir)
+				repo.git("fetch", "--quiet", "origin")
+				rr.env = append(rr.env, "GITHUB_BASE_REF=main")
 			}
 			settings := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true"}
 			args := []string{"--prometheus", prom.URL, "--tz", "UTC"}

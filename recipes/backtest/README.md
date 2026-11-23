@@ -115,8 +115,12 @@ And, as wanted:
   `TARGET` the job gives where the CI says what the pull request goes into
   (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
   Azure's pull request builds) is the job's, and taken as it is, as one
-  the script takes from the CI is. A branch's name in `TARGET`, such as
-  `origin/main`, is that branch in full, `refs/remotes/origin/main`, or
+  the script takes from the CI is; `HEAD^1` written out is the default,
+  none given, so the script's own is taken. Gitea's and Forgejo's Actions
+  make no merge, in any event: `HEAD` a merge is its author's, and the
+  branch the pull request goes into is taken. A branch's name in
+  `TARGET`, such as `origin/main`, is that branch in full,
+  `refs/remotes/origin/main`, or
   else `refs/heads/origin/main`: git reads a name as a tag's first, and
   anyone who can push a tag could name one `origin/main`, so a name a tag
   has too, or a short hash one is named as, is refused (with a gate or

@@ -16,9 +16,10 @@
 #                            BUILD_REPOSITORY_NAME)
 #   PR                       the pull request's id (default:
 #                            SYSTEM_PULLREQUEST_PULLREQUESTID)
-#   TARGET_BRANCH            default, without TARGET, the branch it goes
-#                            into (SYSTEM_PULLREQUEST_TARGETBRANCH), as the
-#                            checkout fetched it: the order of a merge
+#   TARGET_BRANCH            default, without TARGET (or with HEAD^1,
+#                            lib.sh's default, written out), the branch it
+#                            goes into (SYSTEM_PULLREQUEST_TARGETBRANCH), as
+#                            the checkout fetched it: the order of a merge
 #                            commit's parents isn't documented. Fetched only
 #                            when the checkout didn't, which needs
 #                            persistCredentials: true
@@ -49,9 +50,14 @@ AZURE_DEVOPS_ORG_URL=${AZURE_DEVOPS_ORG_URL:-${SYSTEM_COLLECTIONURI:-}}
 AZURE_DEVOPS_PROJECT=${AZURE_DEVOPS_PROJECT:-${SYSTEM_TEAMPROJECT:-}}
 AZURE_DEVOPS_REPO=${AZURE_DEVOPS_REPO:-${BUILD_REPOSITORY_NAME:-}}
 PR=${PR:-${SYSTEM_PULLREQUEST_PULLREQUESTID:-}}
-if [ -z "${TARGET:-}" ] && [ -n "${SYSTEM_PULLREQUEST_TARGETBRANCH:-}" ]; then
-  TARGET_BRANCH=${TARGET_BRANCH:-${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}}
-fi
+# HEAD^1, lib.sh's default, written out is none given, as lib.sh takes it.
+case ${TARGET:-HEAD^1} in
+  HEAD^1)
+    if [ -n "${SYSTEM_PULLREQUEST_TARGETBRANCH:-}" ]; then
+      TARGET_BRANCH=${TARGET_BRANCH:-${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}}
+    fi
+    ;;
+esac
 # A pull request's build says what it goes into: a TARGET the job gives is
 # its own (lib.sh's ci_base).
 [ -z "${SYSTEM_PULLREQUEST_TARGETBRANCH:-}" ] || ci_base=1

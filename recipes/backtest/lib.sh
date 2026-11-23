@@ -24,10 +24,12 @@
 # HEAD that is neither the head nor that merge is told (commits); or
 # ci_base, that its CI says the commit or the branch the pull request goes
 # into, which the script gave as TARGET or TARGET_BRANCH, unless the job
-# gave its own TARGET: one given there is the job's, and taken as it is.
+# gave its own TARGET: one given there is the job's, and taken as it is,
+# but HEAD^1, the default, written out, which is none given.
 # And ci_merges, that its CI says the merge it made where it made one, so
-# that HEAD a merge in an event of no pull request is its author's, not
-# the CI's; and ci_default and ci_into, the repository's default branch and
+# that HEAD a merge in an event of no pull request, or in any event of a
+# CI that makes none, is its author's, not the CI's; and ci_default and
+# ci_into, the repository's default branch and
 # the one the pull request goes into, as its CI says them, for the
 # status's name.
 #
@@ -1276,13 +1278,13 @@ commits() {
     if [ -n "${ci_head:-}" ]; then
       ! ci_merged || merged=1
     elif [ -n "${ci_merges:-}" ]; then
-      # A CI that says its merge (ci_merges: GitHub's and Gitea's Actions),
-      # in an event of no pull request (push, workflow_run), made none: HEAD
-      # a merge is one its author made, its first parent any commit they
-      # chose.
+      # A CI that says its merge (ci_merges: GitHub's Actions, in an event
+      # of no pull request, push or workflow_run; Gitea's and Forgejo's
+      # Actions, in any event) made none: HEAD a merge is one its author
+      # made, its first parent any commit they chose.
       if [ "$(git -C "$repo" rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)" -gt 2 ] && [ -n "$strict$held$required$missed_gate$status_on" ] && [ -z "${ci_branch:-}" ]; then
         refused="TARGET is HEAD's first parent, and the CI made no merge of a pull request"
-        trouble "TARGET $TARGET is HEAD's first parent, and HEAD a merge, but the CI's event says no pull request, so it made no merge of one: that parent is whatever commit the merge's author chose, which the gates and the status would judge the pull request against. Give TARGET or TARGET_BRANCH, the branch it goes into"
+        trouble "TARGET $TARGET is HEAD's first parent, and HEAD a merge, but the CI made no merge of a pull request (GitHub's Actions makes one in a pull request's event alone, Gitea's and Forgejo's in none): that parent is whatever commit the merge's author chose, which the gates and the status would judge the pull request against. Give TARGET or TARGET_BRANCH, the branch it goes into"
         return 1
       fi
     elif [ "$(git -C "$repo" rev-list --parents -n 1 HEAD 2>/dev/null | wc -w)" -ne 2 ]; then
