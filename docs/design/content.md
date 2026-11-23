@@ -336,8 +336,16 @@ told so too.
 
 The configuration, or Mimir's answer, is 8 MB at most, parsed as rule
 files are, what its aliases make bounded. 256 template files at most, each
-256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates; a
-field over 64 KB isn't read; routes as Grafana's, 2,000 and 32 levels. Past each, what is
+256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates,
+the defaults a file defines in Alertmanager's place counted with them, 200
+of a kind, each followed once a receiver; a field over 64 KB isn't read;
+routes as Grafana's, 2,000 and 32 levels, 20,000 matchers in all. A glob
+that leaves the configuration's directory isn't looked through, a glob's
+first 1,024 files at most are, and the links out of it are counted, not
+named. The route tree is read as Alertmanager reads it, with yaml.v2: a
+value as the text it is written in (`1.10`, not 1.1), `continue: yes` true;
+a matcher's `\.` kept, as Alertmanager keeps a backslash before anything
+but `"`, `\\` and `n`. Past each, what is
 past is passed over, and said. Routing has its own budget of work and
 time, as Grafana's has. The request to Mimir goes to its host only,
 follows no redirect, and is a read.

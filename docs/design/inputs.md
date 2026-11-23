@@ -161,16 +161,26 @@ file (`file_outputs`) or to Kafka (`kafka_outputs`), and POSTs it to
   and a sum of its first 64 bytes: a new inode is a file rotated, whose old
   one, renamed beside it, is read to its end first; a smaller size, or
   other first bytes, is a file truncated, read again from its start. Of
-  Kafka, the offsets kept in a file, a partition a line, read with `kcat`
-  partition by partition from there; or a consumer group's, which Kafka
-  keeps and `kcat` commits.
+  Kafka, the offsets kept in a file, a partition a line, read with `kcat
+  -J` partition by partition from there, each message's offset from its
+  envelope, never from its text; or a consumer group's, which Kafka keeps
+  and `kcat` commits. An offset that can't be written stops the run: each
+  run would send the same again, and a mute has no key to be kept once by.
+  One run at a time holds a lock beside the offset file.
 - **At least once.** The offset moves after each batch serve takes; a
   batch it doesn't take stops the run. serve keeps a delivery sent twice
   once, by the instance, the group, the flush and the receiver, as it does
   the webhook output's tries again.
 - **Bounded.** A batch is 1,000 events and 1 MB at most, as serve takes
-  them, 100 by default; an event over that alone is passed over. The
-  token is read and sent as the other recipes send theirs.
+  them, 100 by default, and 1 MiB as `jq` writes it; one serve answers
+  413 is sent an event at a time, and an event over that alone is passed
+  over. `MAX_READ` bytes (16 MiB) are read at a time, of the file or of a
+  partition; a line or a message longer is passed over to its end. The
+  token is read and sent as the other recipes send theirs, again for
+  each request.
+- **An event of too many alerts** is answered 400 by serve, as any event
+  it can't read, not 413: a batch of them alone would otherwise be taken
+  for a body too large and sent again for ever.
 
 What it doesn't do: an event older than an hour when it arrives is kept as
 of when it arrives, as serve takes any event's time. The recipe is meant
