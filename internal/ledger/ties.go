@@ -436,7 +436,9 @@ type TieState struct {
 	Source string
 	// Since and To are what the source's copies cover without a gap, up to
 	// the end of the latest period copied in (Coverage): an alarm's record
-	// covers the weeks between.
+	// covers the weeks between. Of a rule left out of the copies for a
+	// while (LeaveOut), what they cover of it: from the end of the latest
+	// such period, or, while it is left out, up to its start.
 	Since, To int64
 	// Apart is when the latest firing of the alarm's history held apart
 	// at another severity began: its severity changed. 0 for none.
@@ -457,7 +459,12 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 	if err != nil {
 		return nil, err
 	}
-	type cover struct{ since, to int64 }
+	type cover struct {
+		spans [][2]int64
+		// out are the periods its rules were left out of them, by the name
+		// the source sends each by.
+		out map[string][][2]int64
+	}
 	covers := map[string]cover{}
 	for rule, h := range found {
 		src := ""
@@ -474,16 +481,21 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 		}
 		c, ok := covers[src]
 		if !ok {
-			spans, err := l.spans(ctx, l.r, src)
-			if err != nil {
+			if c.spans, err = l.spans(ctx, l.r, src); err != nil {
 				return nil, err
 			}
-			if len(spans) > 0 {
-				c = cover{spans[len(spans)-1][0], spans[len(spans)-1][1]}
+			if c.out, err = l.leftOut(ctx, l.r, src); err != nil {
+				return nil, err
 			}
 			covers[src] = c
 		}
-		out[rule] = TieState{Source: src, Since: c.since, To: c.to, Apart: h.apart}
+		st := TieState{Source: src, Apart: h.apart}
+		// A period the rule was left out of the copies is none of its
+		// record: no gap, and none of those, since Since.
+		if own := without(c.spans, c.out[h.sent]); len(own) > 0 {
+			st.Since, st.To = own[len(own)-1][0], own[len(own)-1][1]
+		}
+		out[rule] = st
 	}
 	for rule, w := range untied {
 		out[rule] = TieState{Why: w}

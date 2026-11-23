@@ -116,6 +116,21 @@ type recordedKey struct{ sent, severity string }
 // again as they are, nothing changes and nothing is judged again; only the
 // source's last write is noted. It all happens, or none of it does.
 func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Time, fs []firing.Firing, by string, o verdict.Options) (Recorded, error) {
+	return l.putFirings(ctx, source, from, to, fs, by, o, true)
+}
+
+// AmendFirings is PutFirings of a period the source's copies covered
+// once, noting nothing of the source: neither what its copies cover
+// (Coverage, Spans), should the ledger have let the span go since, nor its
+// last write. For a firing still on in such a span, which its source then
+// says ended: ended where it is.
+func (l *Ledger) AmendFirings(ctx context.Context, source string, from, to time.Time, fs []firing.Firing, by string, o verdict.Options) (Recorded, error) {
+	return l.putFirings(ctx, source, from, to, fs, by, o, false)
+}
+
+// putFirings is PutFirings, the period taken as one the source's copies
+// cover from now (covers), or not (AmendFirings).
+func (l *Ledger) putFirings(ctx context.Context, source string, from, to time.Time, fs []firing.Firing, by string, o verdict.Options, covers bool) (Recorded, error) {
 	out := Recorded{Firings: len(fs)}
 	// The ledger keeps times to the second: a period is of whole seconds,
 	// so two that meet share none, and each firing starts and ends at the
@@ -384,6 +399,9 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			if _, err := l.tie(t, list); err != nil {
 				return err
 			}
+		}
+		if !covers {
+			return nil
 		}
 		// A period may run on past now, a job sending today's; the source
 		// has written up to now, not to its end.
