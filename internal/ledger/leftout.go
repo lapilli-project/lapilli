@@ -186,6 +186,10 @@ func (l *Ledger) leftOutGone(ctx context.Context, q reader, source string, keep 
 		return nil, err
 	}
 	defer rows.Close()
+	kept := make(map[string]bool, len(keep))
+	for _, r := range keep {
+		kept[r] = true
+	}
 	gone := []string{}
 	for rows.Next() {
 		var rule string
@@ -193,7 +197,7 @@ func (l *Ledger) leftOutGone(ctx context.Context, q reader, source string, keep 
 		if err := rows.Scan(&rule, &last); err != nil {
 			return nil, err
 		}
-		if !slices.Contains(keep, rule) {
+		if !kept[rule] {
 			gone = append(gone, rule)
 		}
 	}
