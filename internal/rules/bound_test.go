@@ -407,6 +407,21 @@ func TestBoundsDecide(t *testing.T) {
 	if (Rule{Expr: "errors > 5", Unsupported: Paused}).BoundsDecide() {
 		t.Error("a rule not replayed")
 	}
+	// A Loki rule's bound behind a comment Loki reads and PromQL doesn't is
+	// Loki's comment, not a bound; one PromQL reads too, a bound.
+	for _, c := range []struct {
+		expr string
+		ok   bool
+	}{
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m]))\n// > 10", false},
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m])) /* > 10 */ > 20", false},
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m])) # x\n > 10", true},
+		{"sum(count_over_time({app=\"x\"} |= \"a//b\" [5m])) > 10", true},
+	} {
+		if got := (Rule{Name: "R", Expr: c.expr, Logs: LokiRuler}).BoundsDecide(); got != c.ok {
+			t.Errorf("Loki %q: %v, want %v", c.expr, got, c.ok)
+		}
+	}
 
 	graph := func(st Step) Rule {
 		return Rule{Name: "R", Graph: &Graph{Queries: map[string]string{"A": "a", "B": "b"}, Cond: "C", Steps: map[string]Step{"C": st}}}

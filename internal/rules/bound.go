@@ -158,6 +158,11 @@ func (r Rule) BoundsDecide() bool {
 		return false
 	}
 	if r.Graph == nil {
+		// Of LogQL, a comment Loki reads that PromQL doesn't (// and /* */)
+		// can hide what reads as a bound here: nothing is said of it.
+		if r.Logs != "" && !plainLogQL(r.Expr) {
+			return false
+		}
 		return len(r.Expr) <= maxExpr && len(comparisons(r.Expr)) == len(bs) && decides(r.Expr, 0)
 	}
 	st, ok := r.Graph.Steps[r.Graph.Cond]
