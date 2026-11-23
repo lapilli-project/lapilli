@@ -612,32 +612,55 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   is lost to them.
 - **The rules left alone** are judged by serve's record: such an incident
   is still caught when the ledger says a rule the change doesn't name
-  caught it. That is a rule the pull request holds alike on both sides, or
-  one serve runs now (in its latest version of the rules, or whose firings
-  it copies in) that the pull request doesn't hold at all (another
-  repository's, a Grafana's): the change doesn't touch it, and after the
-  merge it still runs. A rule serve runs no longer, and the pull request
-  doesn't hold, catches nothing after the change. A rule's name is the ledger's, as every page has it; a rule of the
-  pull request's is the ledger's rule of the same name.
+  caught it, and only from the same text. A catch in the record was made
+  by the rule as it was written then; `lapilli verdict` replays a rule
+  left alone as it is now. So a catch counts only when the rule's text
+  (`rules.Rule.Whole`: what decides when it fires), in every version of
+  serve's rules over the incident's catch window and its condition's
+  reach before it (its `for` and its group's interval), is the text it has
+  after the change:
+  - of a rule the pull request holds alike on both sides, the pull
+    request's, read as serve reads its own (`replayedAs`);
+  - of a rule serve runs now (in its latest version of the rules) that
+    the pull request doesn't hold at all (another repository's, a
+    Grafana's), serve's latest: the change doesn't touch it, and after the
+    merge it runs as it does now.
+
+  Where the text then was another, or a version over that time isn't in
+  the ledger, or a version holds two rules of the name written otherwise,
+  the incident is not known, never caught. A rule serve runs no longer,
+  and the pull request doesn't hold, catches nothing after the change;
+  one whose firings serve copies in and no version of its rules holds now
+  (a cloud's alarm copied in, a Grafana rule judged from Grafana's history
+  and since deleted) has no text to hold, and its catch leaves the
+  incident not known. A rule's name is the ledger's, as every page has
+  it; a rule of the pull request's is the ledger's rule of the same name.
+  A rule serve reads from an API that writes its expression otherwise
+  than the pull request's file (Prometheus's rules API prints PromQL
+  again) has another text: its catch is not known.
 - **Not known, not missed**, as in `lapilli verdict`: an incident is not
   known (`missed_not_known`) when a rule after the change couldn't be
   replayed; or when a rule the pull request leaves alone may have caught it
   with no record of it: serve's runs didn't cover the incident's time (its
-  lead before its start, to its end), the rule wasn't in effect in serve
-  over all of it (a version of the rules then lacks it), serve couldn't
-  replay it the last time it ran, or a run meeting that time couldn't. And when a rule
-  that caught it has a name told apart from one the pull request holds
-  (`Errors [shop]` beside `Errors`, as `source.TellApart` names rules that
-  share one), which may be the rule the change changes; or the name of a
-  rule it changes and of one it leaves alone, alike in group and labels,
-  which the ledger counts as one. Serve's own rules
-  beside the pull request's can only keep an incident caught: `lapilli
-  verdict` wouldn't know them, so a gap in their record leaves nothing not
-  known.
+  lead before its start, to its end), a version of serve's rules over it
+  and its reach before doesn't hold the rule as the pull request has it,
+  serve couldn't replay it the last time it ran, or a run meeting that
+  time couldn't. And when a rule that caught it has a name told apart
+  from one the pull request holds (`Errors [shop]` beside `Errors`, as
+  `source.TellApart` names rules that share one), which may be the rule
+  the change changes; or the name of a rule it changes and of one it
+  leaves alone, alike in group and labels, which the ledger counts as
+  one. Serve's own rules beside the pull request's can only keep an
+  incident caught: `lapilli verdict` wouldn't know them, so a gap in their
+  record leaves nothing not known.
 - **What it reads.** The ledger, once a backtest: the incidents of the
   period and their catches, the rules and the latest version of them, where
   the runs began and have got to, the versions of the rules over the
-  period and the runs that couldn't replay a rule. Nothing more is asked of the history, and the planner's
+  period and its reach before (14 days at most, each version read as the
+  runs read it, of the texts of the rules left alone and of those that
+  caught an incident kept by their hash; past 200 versions none, and every
+  incident that hangs on them is not known), and the runs that couldn't
+  replay a rule. Nothing more is asked of the history, and the planner's
   count, the queue and the hour are as they are.
 - **What it says.** The report, as `--fail-missed` writes it: the summary's
   three fields; `"missed"`, each incident by its id, start and the rules
@@ -650,8 +673,9 @@ What it doesn't do:
 
 - **Judge a rule of the pull request's that serve runs otherwise** (the
   commit the pull request goes into ahead of what is deployed): its record
-  is of the rule as serve runs it, by name. Send the rules serve runs, or
-  backtest without `LAPILLI_SERVE`.
+  is of another text, and an incident that hangs on it is not known. Send
+  the rules serve runs, as serve reads them, or backtest without
+  `LAPILLI_SERVE`.
 - **Replay a rule left alone that serve has no record of.** That is a
   backtest of every rule, with its requests and its share of the rate; the
   incident is not known instead, and the job held to it fails, as a gate
@@ -708,9 +732,10 @@ How much can a holder make Lapilli read, fetch, keep or judge?
   which rule, nor anything of its firings. A pull request can ask so, a
   name at a time, whether serve runs a rule of that name, as a refusal
   tells a uid at a time whether one is in effect: each a backtest of the
-  entry's hour. What it reads is the ledger's, once a backtest, whatever
-  the request (an incident's catches are a lookup, a rule's versions and
-  failed runs read once).
+  entry's hour; and whether a rule's text over that time is the one the
+  pull request leaves alone, a rule at a time. What it reads is the
+  ledger's, once a backtest, whatever the request (an incident's catches
+  are a lookup; the versions, 200 at most, and the failed runs read once).
 
 Where do the names they choose end up? A rule's name, group, labels and
 expression, an expectation's `rule:` and `group:`, a catch's incident id,

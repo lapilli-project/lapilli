@@ -354,10 +354,12 @@ The rules are read from git, and `render` run, in the job as before;
 (`fail-on-expectations`, `expect-required`) reads the summary line as it
 reads Lapilli's. `fail-missed` holds the change to serve's incidents: the
 rules that differ are judged by the backtest, the rules left alone by
-serve's record of them, which rules caught each incident, not replayed; an
-incident a rule left alone may have caught with no record of it (serve
-doesn't run the rule, or its runs don't cover the incident's time) is not
-known, which fails the step as a gate that can't judge
+serve's record of them, which rules caught each incident, not replayed: a
+catch counts only where the rule was written then as it is after the
+change. An incident a rule left alone may have caught with no record of
+it (serve doesn't run the rule as the pull request has it, or its runs
+don't cover the incident's time), or that a rule written otherwise then
+caught, is not known, which fails the step as a gate that can't judge
 ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through
