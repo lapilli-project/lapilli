@@ -202,10 +202,11 @@ func secretish(k string) bool {
 
 // parseField parses a receiver's field as Alertmanager does when it sends:
 // as a template of its own, which may use those the files define. nil when
-// it can't be told, as with too many functions not known.
+// it can't be told, as with too many functions not known, or a field over
+// maxTemplate, which isn't read: Alertmanager would send it.
 func parseField(text string) (s *shown, err error) {
 	if len(text) > maxTemplate {
-		return nil, fmt.Errorf("longer than %d KB", maxTemplate>>10)
+		return nil, nil
 	}
 	defer func() {
 		if recover() != nil {

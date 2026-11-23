@@ -201,27 +201,30 @@ inode() { ls -di "$1" | awk '{print $1}'; }
 # truncated and written again doesn't keep.
 head_sum() { head -c "$2" "$1" | cksum | awk '{print $1 "-" $2}'; }
 
-# send_from PATH FROM: the complete lines of PATH from byte FROM on, sent,
-# a batch at a time; after each, kept (file_kept) as the offset. 0 when
-# all were sent; 1 when a batch wasn't.
+# send_from PATH FROM [KEEP]: the complete lines of PATH from byte FROM
+# on, sent, a batch at a time; after each, with KEEP (the default, keep),
+# kept as the offset (file_kept). A rotated file is read so with none: it
+# is read to its end once. 0 when all were sent; 1 when a batch wasn't.
 send_from() {
-  tail -c +"$(($2 + 1))" "$1" | head -c "$maxread" >"$work/chunk"
-  # Only whole lines: one the recorder is still writing waits.
-  nl=$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')
-  [ "$nl" -gt 0 ] || return 0
-  head -n "$nl" "$work/chunk" >"$work/lines"
-  batches "$work/lines"
-  while read -r b end long; do
-    [ "$long" -eq 0 ] || say "$long events over a request's 1 MB, passed over"
-    if [ "$b" != - ] && ! post "$b"; then
-      return 1
-    fi
-    file_kept "$1" "$(($2 + end))"
-  done <"$work/ends"
-  # More than one read holds: read on.
-  if [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ]; then
-    send_from "$1" "$(($2 + $(wc -c <"$work/lines" | tr -d ' ')))"
-  fi
+  from=$2
+  while :; do
+    tail -c +"$((from + 1))" "$1" | head -c "$maxread" >"$work/chunk"
+    # Only whole lines: one the recorder is still writing waits.
+    nl=$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')
+    [ "$nl" -gt 0 ] || return 0
+    head -n "$nl" "$work/chunk" >"$work/lines"
+    batches "$work/lines"
+    while read -r b end long; do
+      [ "$long" -eq 0 ] || say "$long events over a request's 1 MB, passed over"
+      if [ "$b" != - ] && ! post "$b"; then
+        return 1
+      fi
+      [ "${3:-keep}" != keep ] || file_kept "$1" "$((from + end))"
+    done <"$work/ends"
+    # A read that held as much as is read at a time: read on.
+    [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 0
+    from=$((from + $(wc -c <"$work/lines" | tr -d ' ')))
+  done
 }
 
 # file_kept PATH OFFSET: where it stopped, kept: the file's inode, the
@@ -253,7 +256,7 @@ file_once() {
     # end first; then the new one from its start.
     for old in "$path".*; do
       [ -f "$old" ] && [ "$old" != "$OFFSET_FILE" ] && [ "$(inode "$old")" = "$ino" ] || continue
-      send_old "$old" "$off" || return 1
+      send_from "$old" "$off" once || return 1
       break
     done
     off=0
@@ -269,22 +272,6 @@ file_once() {
     off=0
   fi
   send_from "$path" "$off"
-}
-
-# send_old PATH FROM: a rotated file's last lines, sent; where it stopped
-# isn't kept, as the file is read to its end once.
-send_old() {
-  tail -c +"$(($2 + 1))" "$1" | head -c "$maxread" >"$work/chunk"
-  nl=$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')
-  [ "$nl" -gt 0 ] || return 0
-  head -n "$nl" "$work/chunk" >"$work/lines"
-  batches "$work/lines"
-  while read -r b _ long; do
-    [ "$long" -eq 0 ] || say "$long events over a request's 1 MB, passed over"
-    if [ "$b" != - ] && ! post "$b"; then
-      return 1
-    fi
-  done <"$work/ends"
 }
 
 # run_kcat MODE ARGS: kcat in MODE (-C, -L), with the brokers and the
@@ -357,7 +344,11 @@ kafka_once() {
       fi
       # The message the batch ends at: the line whose end it is.
       upto=$(LC_ALL=C awk -v end="$end" '{ off += length($0) + 1; if (off == end) { print NR; exit } }' "$work/lines")
-      last=$(sed -n "${upto}p" "$work/offsets")
+      last=
+      [ -z "$upto" ] || last=$(sed -n "${upto}p" "$work/offsets")
+      case $last in
+        '' | *[!0-9]*) say "where partition $p stopped can't be told: it is read again from where it was"; return 1 ;;
+      esac
       kafka_kept "$p" "$((last + 1))"
     done <"$work/ends"
   done <"$work/partitions"

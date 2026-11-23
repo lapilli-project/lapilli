@@ -13,12 +13,14 @@ import (
 // asked of the history, count by (job) of the selector over the ten
 // minutes before at, a point every five, as one bounded query each.
 
-// How the jobs are asked: MaxAsk selectors at most each time; maxJobsOf
-// jobs kept of a selector; jobsWait, how long one query may take.
+// How the jobs are asked: MaxAsk selectors at most each time, for
+// JobsBudget in all; maxJobsOf jobs kept of a selector; jobsWait, how long
+// one query may take.
 const (
-	MaxAsk    = 200
-	maxJobsOf = 1000
-	jobsWait  = 10 * time.Second
+	MaxAsk     = 200
+	JobsBudget = 30 * time.Second
+	maxJobsOf  = 1000
+	jobsWait   = 10 * time.Second
 )
 
 // JobsQuery is what the jobs a selector's series come from are asked by:
@@ -27,11 +29,14 @@ const (
 func JobsQuery(selector string) string { return "count by (job) (" + selector + ")" }
 
 // JobsOf asks the history which jobs each selector's series come from, at
-// most MaxAsk of them, one query each, in turn, until ctx ends.
+// most MaxAsk of them, one query each, in turn, for JobsBudget at most or
+// until ctx ends.
 // A selector whose query fails, or gives no job, isn't in what it gives:
 // its range is counted as before. failed is how many failed, and not
 // asked those ctx ended before.
 func JobsOf(ctx context.Context, h replay.History, sels []string, at time.Time) (jobs map[string][]string, failed, notAsked int) {
+	ctx, cancel := context.WithTimeout(ctx, JobsBudget)
+	defer cancel()
 	jobs = map[string][]string{}
 	for i, sel := range sels {
 		if i >= MaxAsk || ctx.Err() != nil {

@@ -189,18 +189,17 @@ func (s *Server) askScrape(ctx context.Context) {
 }
 
 // How long what askJobs asked is kept: a day, or an hour when its query
-// failed; and how long one look may ask for.
+// failed.
 const (
-	jobsEvery  = 24 * time.Hour
-	jobsRetry  = time.Hour
-	jobsBudget = 30 * time.Second
+	jobsEvery = 24 * time.Hour
+	jobsRetry = time.Hour
 )
 
 // askJobs asks the history which jobs the series of each selector that
 // names no job come from (docs/design/content.md, "A range over a
 // selector that names no job"), for the range check, of the rules as read:
 // those not asked within a day, source.MaxAsk at most a look, one bounded
-// query each, for jobsBudget in all: the rest at the next look. One whose
+// query each, for source.JobsBudget in all: the rest at the next look. One whose
 // query fails, or gives no job, is asked again an hour later; its range is
 // counted as before meanwhile, and the log says how many failed.
 func (s *Server) askJobs(ctx context.Context, rs []rules.Rule) {
@@ -225,8 +224,6 @@ func (s *Server) askJobs(ctx context.Context, rs []rules.Rule) {
 	if len(ask) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, jobsBudget)
-	defer cancel()
 	jobs, failed, notAsked := source.JobsOf(ctx, replay.Base(s.h), ask, now)
 	asked := ask[:len(ask)-notAsked]
 	s.saidRules.Lock()

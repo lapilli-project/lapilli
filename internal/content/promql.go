@@ -343,10 +343,11 @@ func jobMatchers(ts []token, j int) []Matcher {
 const maxSelector = 1024
 
 // selectorAt is the selector a range at ts[j] is taken of, written again
-// as one plain selector: a metric's name, its matchers, or both
+// as one plain selector of one metric: its name, its matchers, or both
 // (errors_total, {__name__="x", code="500"}). "" when it isn't one: only a
 // name, and matchers each a name, an operator and a string, are written,
-// so what is asked can be nothing but the selector.
+// so what is asked can be nothing but the selector; and only of a metric
+// named, by its name or __name__=, so it is asked of one metric's series.
 func selectorAt(ts []token, j int) string {
 	if j < 1 {
 		return ""
@@ -365,6 +366,7 @@ func selectorAt(ts []token, j int) string {
 		}
 		return b.String()
 	}
+	named := false
 	open := -1
 	for k := j - 2; k >= 0; k-- {
 		if ts[k].text == "{" {
@@ -372,7 +374,10 @@ func selectorAt(ts []token, j int) string {
 			break
 		}
 	}
-	if open < 0 || (!name(open-1) && (open < 1 || ts[open-1].text != "(")) {
+	if open < 0 {
+		return ""
+	}
+	if named = name(open - 1); !named && (open < 1 || ts[open-1].text != "(") {
 		return ""
 	}
 	b.WriteString("{")
@@ -403,7 +408,9 @@ func selectorAt(ts []token, j int) string {
 		}
 	}
 	b.WriteString("}")
-	if b.Len() > maxSelector || b.String() == "{}" {
+	// Of one metric, by its name: no selector of every series a regular
+	// expression on __name__ matches is asked of.
+	if b.Len() > maxSelector || !named && !strings.Contains(b.String(), `{__name__="`) && !strings.Contains(b.String(), `,__name__="`) {
 		return ""
 	}
 	return b.String()

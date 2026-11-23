@@ -22,6 +22,8 @@ func TestRangeSelector(t *testing.T) {
 		`rate(x{a="\") or vector(1) or (\""}[1m])`:          `x{a="\") or vector(1) or (\""}`,
 		`rate(x{a="1"} offset 5m [1m])`:                     ``,
 		`delta(ns:cpu:sum{ns="shop"}[2m]) and rate(y[30s])`: `ns:cpu:sum{ns="shop"}`,
+		`rate({__name__=~"http_.+"}[1m])`:                   ``, // every metric a regular expression matches
+		`rate({code="500"}[1m])`:                            ``,
 	} {
 		us := Ranges(expr)
 		got := ""

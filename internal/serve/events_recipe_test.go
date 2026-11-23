@@ -340,3 +340,25 @@ func TestEventsRecipeKafka(t *testing.T) {
 		}
 	})
 }
+
+// An event alone over a request's 1 MB, and a line that isn't an event,
+// are passed over, and said; those around them are sent.
+func TestEventsRecipeOversize(t *testing.T) {
+	needEventTools(t)
+	s := notifyServer(t, nil)
+	s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+	srv := httptest.NewServer(s.NotifyHandler())
+	defer srv.Close()
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	lines := recorded(t, "alertmanager-0.35.0.jsonl")
+	huge := []byte(`{"@timestamp":"2026-11-11T15:56:00Z","instance":"x","data":{"pad":"` + strings.Repeat("x", 1<<20) + `"}}`)
+	appendLines(t, events, [][]byte{lines[0], huge, []byte("not an event"), lines[1]}, nil)
+	appendLines(t, events, lines[2:], nil)
+	code, out := runEvents(t, recipeEnv(srv.URL, tokenFile(t, notifyToken), ""), "file", events)
+	if code != 0 || !strings.Contains(out, "1 events over a request's 1 MB, passed over") || !strings.Contains(out, "1 lines that aren't an event left out") {
+		t.Errorf("exit %d: %s", code, out)
+	}
+	if got, want := kept2(t, s), notificationEvents(t, lines); got != want {
+		t.Errorf("%d deliveries kept, want %d", got, want)
+	}
+}

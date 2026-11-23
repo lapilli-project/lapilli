@@ -334,7 +334,7 @@ told so too.
 The configuration, or Mimir's answer, is 8 MB at most, parsed as rule
 files are, what its aliases make bounded. 256 template files at most, each
 256 KB, 8 MB in all; 5,000 receivers; 20,000 fields that are templates; a
-field 64 KB; routes as Grafana's, 2,000 and 32 levels. Past each, what is
+field over 64 KB isn't read; routes as Grafana's, 2,000 and 32 levels. Past each, what is
 past is passed over, and said. Routing has its own budget of work and
 time, as Grafana's has. The request to Mimir goes to its host only,
 follows no redirect, and is a read.
@@ -389,13 +389,16 @@ doesn't have counts with the global interval.
   expression's tokens: a metric's name, and matchers each a name, an
   operator and a string, quoted again. A selector of any other shape
   isn't asked of: the query can be nothing but `count by (job)` of the
-  selector the rule already reads.
+  selector the rule already reads. And only of one metric, named before
+  the braces or by `__name__="..."`: a regular expression on `__name__`
+  could be every series there is.
+- **Bounded in time.** Thirty seconds in all each time, ten a query, in
+  `lapilli verdict` as in `serve`.
 - **Each once.** Asked once a run in `lapilli verdict`; kept a day in
   `serve`, asked again by the worker, as the rules are read, not by a
   page.
-- **Bounded.** 200 selectors at most each time, ten seconds a query, and
-  in `serve` thirty seconds a look: the rest at the next look. A thousand
-  jobs at most a selector.
+- **Bounded.** 200 selectors at most each time: in `serve` the rest at
+  the next look. A thousand jobs at most a selector.
 
 ### When the query fails
 
