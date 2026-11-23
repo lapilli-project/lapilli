@@ -216,7 +216,8 @@ func (sh *shop) round(at time.Duration) {
 }
 
 // copied are the firings copied in from the history, as "rule/service
-// start end" in time past now, in order; "on" for one with no end.
+// start end" in time past now, in order; "on" for one with no end. Those
+// of the beat, which keeps a rule's changes in every read, are left out.
 func (sh *shop) copied() []string {
 	sh.t.Helper()
 	fs, err := sh.s.l.RecordedFirings(context.Background(), ledger.GrafanaSource, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour))
@@ -226,6 +227,9 @@ func (sh *shop) copied() []string {
 	firing.Sort(fs)
 	var out []string
 	for _, f := range fs {
+		if f.Labels["service"] == "beat" {
+			continue
+		}
 		end := "on"
 		if !f.End.IsZero() {
 			end = f.End.Sub(now).String()
@@ -234,6 +238,16 @@ func (sh *shop) copied() []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// beat adds a firing of title's alert for the beat, two minutes every half
+// hour from from to to: every read of the history holds a change of the
+// title, so that a title shared is one whose changes the history doesn't
+// say the rule of.
+func (g *shopGrafana) beat(title string, from, to time.Duration) {
+	for at := from; at < to; at += 30 * time.Minute {
+		g.fired(title, "beat", at+time.Minute, at+3*time.Minute)
+	}
 }
 
 // covers are what the copies cover of a rule, as hours past now, from the
@@ -269,11 +283,13 @@ const (
 
 // ordersAndStock is a Grafana holding Orders slow and Stock low: Orders
 // slow fired for the checkout from 06:00 to 06:30 the day before now, and
-// has been on for the orders since 07:00; Stock low fired for the stock
-// from 09:00 to 10:00.
+// has been on for the orders since 07:00, its beat on and off every half
+// hour from 10:00 on, for two days; Stock low fired for the stock from
+// 09:00 to 10:00.
 func ordersAndStock() *shopGrafana {
 	g := &shopGrafana{}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.beat("Orders slow", -2*time.Hour, 48*time.Hour)
 	g.fired("Orders slow", "checkout", -30*time.Hour, -30*time.Hour+30*time.Minute)
 	g.fired("Orders slow", "orders", -5*time.Hour, 0)
 	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
@@ -611,7 +627,7 @@ func TestServeGrafanaJudgedLeftOutExpect(t *testing.T) {
 	// in for the old ones kept, as a source's rules, named apart.
 	g.hold(shopRule{ordersUID, "Orders slower", "Ops", false}, shopRule{stockUID, "Stock lower", "Ops", false})
 	file := filepath.Join(t.TempDir(), "expect.yaml")
-	os.WriteFile(file, []byte("expectations:\n  - rule: \"Orders slow [grafana]\"\n    budget: {week: 5}\n  - rule: \"Stock low [grafana]\"\n    budget: {week: 5}\n"), 0o600)
+	os.WriteFile(file, []byte("expectations:\n  - rule: \"Orders slow [grafana]\"\n    budget: {week: 500}\n  - rule: \"Stock low [grafana]\"\n    budget: {week: 500}\n"), 0o600)
 	sh.s.cfg.Expect = file
 	sh.round(4 * time.Hour)
 	expectReadTwice(t, sh.s)
@@ -897,7 +913,9 @@ func TestServeGrafanaJudgedSharedBetweenRoundsUntold(t *testing.T) {
 // read back from where it was left out once it is judged again: an alert
 // of it on since before, which ended in the first hours it was left out,
 // is ended there; one that began then and is still on is written from
-// where the rule is judged again.
+// where the rule is judged again. So it is beside another rule that read
+// leaves out, of a change passed over then (Stock low's, a state Grafana
+// has no name for), which a read from a day before judges.
 func TestServeGrafanaJudgedLeftOutLong(t *testing.T) {
 	g := ordersAndStock()
 	sh := shopServer(t, g)
@@ -907,6 +925,7 @@ func TestServeGrafanaJudgedLeftOutLong(t *testing.T) {
 	g.hold(two...)
 	g.note(shopNote{title: "Orders slow", prev: "Alerting", next: "Normal", service: "orders", at: now.Add(10 * time.Minute)})
 	g.fired("Orders slow", "search", time.Hour, 0)
+	g.note(shopNote{title: "Stock low", prev: "Normal", next: "Firing", service: "depot", at: now.Add(30 * time.Minute)})
 	// Stock low keeps the history reaching each day.
 	for h := 2; h <= 40; h += 4 {
 		g.fired("Stock low", "stock", time.Duration(h)*time.Hour+5*time.Minute, time.Duration(h)*time.Hour+15*time.Minute)
@@ -923,6 +942,8 @@ func TestServeGrafanaJudgedLeftOutLong(t *testing.T) {
 	got := slices.DeleteFunc(sh.copied(), func(s string) bool { return !strings.HasPrefix(s, "Orders slow/") })
 	sh.want("judged again after 32 hours", got, []string{"Orders slow/checkout -30h0m0s -29h30m0s", "Orders slow/orders -5h0m0s 10m0s", "Orders slow/search 32h0m0s on"})
 	sh.want("its copies", sh.covers("Orders slow"), "→0s 32h0m0s→36h0m0s")
+	// Stock low itself, left out while a read a day back holds the change.
+	sh.want("Stock low's copies", sh.covers("Stock low"), "→0s 28h0m0s→36h0m0s")
 }
 
 // Left out for longer than a week, a rule is read back a week alone: an
@@ -936,6 +957,7 @@ func TestServeGrafanaJudgedLeftOutPastAWeek(t *testing.T) {
 	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
 	g.hold(two...)
 	g.note(shopNote{title: "Orders slow", prev: "Alerting", next: "Normal", service: "orders", at: now.Add(10 * time.Minute)})
+	g.beat("Orders slow", 48*time.Hour, 200*time.Hour)
 	for h := 2; h <= 200; h += 4 {
 		g.fired("Stock low", "stock", time.Duration(h)*time.Hour+5*time.Minute, time.Duration(h)*time.Hour+15*time.Minute)
 	}

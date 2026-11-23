@@ -331,6 +331,9 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	}
 	lead := a.Add(-source.JudgedLead)
 	past := map[string]time.Time{}
+	// readOf is where the read a rule was judged by began, read but for
+	// those of the read from a day before a.
+	readOf := map[string]time.Time{}
 	far := read
 	for name, h0 := range back {
 		if left(j, name) {
@@ -353,25 +356,40 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 			return err
 		}
 		// What the read again holds of the period a rule was left out may
-		// be what left it out (a change passed over): read from a day
-		// before a alone then, as what is further back is past what is
-		// read, so that the rule isn't left out for as long as a read
-		// holds that change.
-		if slices.ContainsFunc(rs, func(r rules.Rule) bool { return !left(j, r.Name) && left(again, r.Name) }) && lead.After(far) {
-			far = lead
-			if read.Before(far) {
-				far = read
+		// be what left it out (a change passed over): such a rule, judged by
+		// the first read and unsure by this one, is judged by a read from a
+		// day before a alone, as what is further back is past what is read,
+		// so that it isn't left out for as long as a read holds that change.
+		var lost []string
+		for _, r := range rs {
+			if !left(j, r.Name) && slices.Contains(again.Unsure, r.Name) {
+				lost = append(lost, r.Name)
 			}
-			if again, err = judge(far); err != nil {
+		}
+		near := lead
+		if read.Before(near) {
+			near = read
+		}
+		if len(lost) > 0 && near.After(far) {
+			alone, err := judge(near)
+			if err != nil {
 				return err
 			}
-			for name, h0 := range back {
-				if h0.Add(-time.Millisecond).Before(far) {
+			again = mergeJudged(again, alone, lost)
+			for _, name := range lost {
+				readOf[name] = near
+				if h0, ok := back[name]; ok && h0.Add(-time.Millisecond).Before(near) {
 					past[name] = h0
 				}
 			}
 		}
 		j, read = again, far
+	}
+	readFrom := func(rule string) time.Time {
+		if t, ok := readOf[rule]; ok {
+			return t
+		}
+		return read
 	}
 	if j.Passed > 0 {
 		s.log.Warn("changes of state in Grafana's alert state history passed over, past what lapilli reads of one", "changes", j.Passed)
@@ -479,7 +497,7 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		// the ledger may have from where the copies covered it again; or,
 		// on since before what was read, on at its start.
 		same := isOn && (!f.Start.Truncate(time.Second).After(was.Start) && (f.End.IsZero() || f.End.After(was.Start)) ||
-			f.Start.Equal(read) && was.Start.Before(read))
+			f.Start.Equal(readFrom(f.Rule)) && was.Start.Before(readFrom(f.Rule)))
 		switch {
 		case !f.Start.Before(b):
 		case same:
@@ -650,6 +668,37 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 		}
 	}
 	return nil
+}
+
+// mergeJudged is what j says, but for the rules of names, which alone
+// says of.
+func mergeJudged(j, alone source.FromHistory, names []string) source.FromHistory {
+	of := func(n string) bool { return slices.Contains(names, n) }
+	out := source.FromHistory{Passed: max(j.Passed, alone.Passed)}
+	for _, x := range [2]struct {
+		h    source.FromHistory
+		mine bool
+	}{{j, false}, {alone, true}} {
+		for _, f := range x.h.Firings {
+			if of(f.Rule) == x.mine {
+				out.Firings = append(out.Firings, f)
+			}
+		}
+		for _, n := range x.h.Unsure {
+			if of(n) == x.mine {
+				out.Unsure = append(out.Unsure, n)
+			}
+		}
+		for _, n := range x.h.Shared {
+			if of(n) == x.mine {
+				out.Shared = append(out.Shared, n)
+			}
+		}
+	}
+	firing.Sort(out.Firings)
+	slices.Sort(out.Unsure)
+	slices.Sort(out.Shared)
+	return out
 }
 
 // leftOutWhy says why rules are left out of a day copied in, for a log:

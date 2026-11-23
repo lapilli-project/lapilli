@@ -97,13 +97,14 @@ const maxLookups = 100
 // (ruleID). A change of another rule of the name is passed over: its rule
 // isn't the one judged, and the name isn't shared.
 //
-// Where the history doesn't say which rule a change is of (a change of
-// the name, or with none, one of the read, with no uid or id), a rule is
-// judged by its name, as the history names it; and one whose name another
-// rule has, among all and ever, every rule of a version in effect across
-// the read, is neither's. A read past its bounds fails, as
-// ErrTooManyChanges, and one whose answers can't be used, as ErrUnusable:
-// none of rs is judged then.
+// Where the history doesn't say which rule a change of a rule's name is of
+// (with no uid or id), the rule is judged by its name, as the history
+// names it; and one whose name another rule has, among all and ever, every
+// rule of a version in effect across the read, is neither's. A name the
+// read holds no change of is its rule's, which fired nothing of it,
+// whoever else has it. A read past its bounds fails, as ErrTooManyChanges,
+// and one whose answers can't be used, as ErrUnusable: none of rs is
+// judged then.
 func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever []rules.Rule, from, to time.Time) (FromHistory, error) {
 	ts, read, err := g.read(ctx, where, from, to, true)
 	if err != nil {
@@ -133,17 +134,16 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 		}
 		return t.Of.ID != 0
 	}
-	saysAll := len(ts) > 0 && !slices.ContainsFunc(ts, func(t firing.Transition) bool { return !says(t) })
 	nowShared := sharedNames(where, rs, all)
 	everShared := sharedNames(where, rs, slices.Concat(all, ever))
 	shared := map[string]bool{}
 	whose := make([]string, len(ts)) // the name of the rule judged each change is of
 	lookups := 0
 	for n, named := range byName {
-		told := saysAll
-		if len(of[n]) > 0 {
-			told = !slices.ContainsFunc(of[n], func(i int) bool { return !says(ts[i]) })
+		if len(of[n]) == 0 {
+			continue // no change of it: nothing to say whose
 		}
+		told := !slices.ContainsFunc(of[n], func(i int) bool { return !says(ts[i]) })
 		for _, r := range named {
 			var mine func(firing.RuleOf) bool
 			switch {

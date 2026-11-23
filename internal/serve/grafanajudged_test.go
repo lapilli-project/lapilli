@@ -44,6 +44,18 @@ type alertChange struct {
 	at                  time.Time
 }
 
+// beat are changes of Orders slow's alert for the beat, on for two minutes
+// every half hour from from to to: every read of the history holds a change
+// of it, so that its title shared is one whose changes the history doesn't
+// say the rule of.
+func beat(from, to time.Duration) []alertChange {
+	var out []alertChange
+	for at := from; at < to; at += 30 * time.Minute {
+		out = append(out, alertChange{"Normal", "Alerting", "beat", now.Add(at + time.Minute)}, alertChange{"Alerting", "Normal", "beat", now.Add(at + 3*time.Minute)})
+	}
+	return out
+}
+
 func (g *ordersGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -428,7 +440,7 @@ func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 	} {
 		rounds := c.rounds
 		ctx := context.Background()
-		g := &dupGrafana{ordersGrafana: &ordersGrafana{}}
+		g := &dupGrafana{ordersGrafana: &ordersGrafana{more: beat(-2*time.Hour, 16*time.Hour)}}
 		s := judgingServer(t, g)
 		raw := ""
 		for i, dup := range rounds {
@@ -481,9 +493,8 @@ func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 // when a version of the rules held the other rule.
 func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 	ctx := context.Background()
-	g := &dupGrafana{ordersGrafana: &ordersGrafana{more: []alertChange{
-		{"Normal", "Alerting", "search", now.Add(2*time.Hour + 15*time.Minute)},
-	}}}
+	g := &dupGrafana{ordersGrafana: &ordersGrafana{more: append(beat(-2*time.Hour, 8*time.Hour),
+		alertChange{"Normal", "Alerting", "search", now.Add(2*time.Hour + 15*time.Minute)})}}
 	s := judgingServer(t, g)
 	raw := ""
 	for i, r := range []struct {

@@ -133,7 +133,8 @@ func TestGrafanaJudgedBounds(t *testing.T) {
 // has the labels of its own. Where the changes carry no uid, as the
 // history then says nothing of which rule fired, a title two rules of
 // every version given (ever) have is neither's; one only the judged rule
-// has is judged by its name.
+// has is judged by its name; and one the read holds no change of is the
+// judged rule's, which fired nothing.
 func TestGrafanaJudgedByUID(t *testing.T) {
 	line := func(m int, uid, from, to string) fakeLine {
 		l := map[string]any{"schemaVersion": 1, "previous": from, "current": to, "ruleTitle": "Orders slow", "fingerprint": uid + "-orders",
@@ -152,11 +153,13 @@ func TestGrafanaJudgedByUID(t *testing.T) {
 		all, ever []rules.Rule
 		want      string
 		shared    bool
+		quiet     bool // the read holds no change of the title, but another's
 	}{
 		{what: "told, the other rule read", uid: "elsewhere", all: []rules.Rule{mine, theirs}, want: "Orders slow map[service:orders] 07:01-07:09"},
 		{what: "told, the other rule never read", uid: "elsewhere", all: []rules.Rule{mine}, want: "Orders slow map[service:orders] 07:01-07:09"},
 		{what: "untold, the other rule of a version across the read", all: []rules.Rule{mine}, ever: []rules.Rule{theirs}, shared: true},
 		{what: "untold, no other rule", all: []rules.Rule{mine}, want: "Orders slow map[service:orders] 07:01-07:09"},
+		{what: "untold, no change of it", all: []rules.Rule{mine}, ever: []rules.Rule{theirs}, quiet: true},
 	} {
 		g := &fakeGrafana{settings: `{"unifiedAlerting": {"alertStateHistoryBackend": "loki"}}`}
 		mineUID := ""
@@ -171,6 +174,12 @@ func TestGrafanaJudgedByUID(t *testing.T) {
 			// The other rule's alert, of the same labels, on and off while
 			// the judged rule's is on.
 			g.lines = append(g.lines, line(3, c.uid, "Normal", "Alerting"), line(4, c.uid, "Alerting", "Normal"))
+		}
+		if c.quiet {
+			for i := range g.lines {
+				g.lines[i].line["labels"] = map[string]any{"alertname": "Stock low", "service": "orders"}
+				g.lines[i].line["ruleTitle"] = "Stock low"
+			}
 		}
 		h, _ := g.start(t)
 		j, err := h.Judge(context.Background(), HistoryLoki, []rules.Rule{mine}, c.all, c.ever, min_(0), min_(10))
