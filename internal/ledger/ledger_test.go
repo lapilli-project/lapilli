@@ -679,8 +679,8 @@ func TestDecideAgainOfAWindowThatGrew(t *testing.T) {
 // A window confirmed again gave its incident the hours and labels it had
 // grown to, through no check of Put's: a person's incident, within Put's
 // bounds, grew past them, labels past 4 KB, hours past 31 days. Grown past
-// them, the confirmation is refused, saying why, and the incident and the
-// window are left as they were.
+// them, the confirmation is refused, saying why and which incident would
+// grow, and the incident and the window are left as they were.
 func TestDecideAgainGrownPastPutsBounds(t *testing.T) {
 	ctx := context.Background()
 	vals := func(p string) []string {
@@ -728,8 +728,11 @@ func TestDecideAgainGrownPastPutsBounds(t *testing.T) {
 		before, _ := l.IncidentByID(ctx, first)
 		_, err = l.Decide(ctx, key, "confirmed", "", "ana", opts)
 		var bad ErrInvalid
-		if !errors.As(err, &bad) || err.Error() != c.says {
-			t.Errorf("%s: confirmed again: %v, want %q", c.name, err, c.says)
+		if says := "incident " + first + " would grow past its bounds: " + c.says; !errors.As(err, &bad) || err.Error() != says {
+			t.Errorf("%s: confirmed again: %v, want %q", c.name, err, says)
+		} else if _, ok := bad.Args[len(bad.Args)-1].(ErrInvalid); !ok {
+			// For serve to say in the reader's language (message).
+			t.Errorf("%s: why, %T, isn't a refusal of its own", c.name, bad.Args[len(bad.Args)-1])
 		}
 		after, _ := l.IncidentByID(ctx, first)
 		b, _ := json.Marshal(after.Labels)

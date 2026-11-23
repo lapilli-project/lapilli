@@ -519,9 +519,9 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 					// Held to what Put holds a person's change to: grown past
 					// it (hours past 31 days, labels past 4 KB), refused, the
 					// window left as it was, for the person to change the
-					// incident first.
+					// incident first, which the refusal names.
 					if err := checkIncident(now); err != nil {
-						return err
+						return invalid("incident %s would grow past its bounds: %s", made, err)
 					}
 					if err := put(t, now, "ui", by, time.Now().Unix()); err != nil {
 						return err

@@ -620,6 +620,7 @@
  "an incident has 32 labels at most": "un incidente tiene 32 etiquetas como máximo",
  "an incident lasts 31 days at most": "un incidente dura 31 días como máximo",
  "an incident's labels are 4 KB at most in all, as JSON": "las etiquetas de un incidente son 4 KB como máximo en total, como JSON",
+ "incident %s would grow past its bounds: %s": "el incidente %s crecería más allá de sus límites: %s",
  "an incident's times are from 1970 to 9999": "las horas de un incidente van de 1970 a 9999",
  "an incident's label is a name of up to 128 bytes, with up to 64 values of up to 256": "una etiqueta de un incidente es un nombre de hasta 128 bytes, con hasta 64 valores de hasta 256",
  "an incident needs a start": "un incidente necesita un inicio",

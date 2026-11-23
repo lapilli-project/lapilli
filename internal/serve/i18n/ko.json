@@ -620,6 +620,7 @@
  "an incident has 32 labels at most": "인시던트 라벨은 최대 32개예요",
  "an incident lasts 31 days at most": "인시던트는 최대 31일까지예요",
  "an incident's labels are 4 KB at most in all, as JSON": "인시던트 라벨은 JSON으로 모두 합쳐 4 KB까지예요",
+ "incident %s would grow past its bounds: %s": "%s 인시던트가 한도를 넘어 커지게 돼요: %s",
  "an incident's times are from 1970 to 9999": "인시던트 시각은 1970년부터 9999년까지예요",
  "an incident's label is a name of up to 128 bytes, with up to 64 values of up to 256": "인시던트 라벨은 128바이트까지의 이름에, 256바이트까지의 값 64개까지예요",
  "an incident needs a start": "인시던트에는 시작 시각이 필요해요",
