@@ -35,9 +35,20 @@ history (recorded.md), such a rule can get from Grafana's.
   (`source.GrafanaHistory.Judge`), where Grafana serves one (annotations,
   its default from 12.4 on, or Loki), with Lapilli's own token. An
   annotation's tags name a rule by its title as `AnnotationName` writes
-  it; the firings are given the name the rule is judged under. A name two
-  of Grafana's rules share (one title in two folders) is neither's; a rule
-  some change of which the history passed over, or whose alerts it doesn't
+  it; the firings are given the name the rule is judged under. A change
+  is taken for a judged rule only where the history says it is that
+  rule's (0.69.1): kept in Loki, by the rule's uid each line carries; in
+  annotations, by the rule's id in Grafana's database (`alertId`), the
+  rule's where every change of its name is of one id and of its title now
+  (`alertName`, joined from its rules, empty for one deleted) and no other
+  rule read has the title now, else as the newest annotation of its uid
+  says (`alertUID`, 100 rules a read at most, past which a rule is left
+  out as shared). The rules read hold no id (the export has none). A
+  change of another rule of the title is passed over and its alerts told
+  apart from the judged rule's, so one title in two folders judges both.
+  Where the history says no rule's uid or id, a rule is judged by its
+  name, and a name two of Grafana's rules share is neither's; a rule some
+  change of which the history passed over, or whose alerts it doesn't
   tell apart, isn't judged by it.
 - **`lapilli verdict`.** After the replay, the history is read from a day
   before the period, once it is known to hold a change from before its
@@ -72,7 +83,13 @@ history (recorded.md), such a rule can get from Grafana's.
   what the ledger has from there, within 31 days and 100,000 firings; one
   that started in a span the ledger let go, of the 64 it keeps, is ended
   where it is, in a write of the second it started in that isn't taken as
-  covered again. The firings are kept as copied-in
+  covered again. One the history has begin before a write, which the
+  ledger has from within it, on or ended (written from where the copies
+  covered it again), is written from where the ledger has it, as the
+  history has it: before 0.69.1, one ended before the next round read was
+  taken away by that round, which reads the settle again from after it
+  began, and the period read as quiet, with `--every 1h` and `--settle
+  1h`. The firings are kept as copied-in
   ones are: rows of `firings` under a recorded rule of the source, one a
   rule by its name, whatever severities its alerts carry, written as
   `grafana-history`. The rule and its history are one rule, tied by name, as a
@@ -99,12 +116,30 @@ history (recorded.md), such a rule can get from Grafana's.
   for a rule only copied in, what it is held to. A period stays no record
   whatever the history says of it later: nothing that began in it is
   written, in the round the rule is judged again, read as on a first day
-  (from a day before, each alert on then written from there), in a round
-  shorter than `--settle` after it, which reads the period again, or
-  after a restart. Before, such a rule made the day a gap for every rule
-  judged so: the record was the source's, not each rule's. A rule whose
-  name can't be kept (one that doesn't show) has no period kept: no
-  firing of it is ever written, so it has no record at all.
+  (each alert on then written from there), in a round shorter than
+  `--settle` after it, which reads the period again, or after a restart.
+  Judged again, the rule is read back from where it was left out, a day
+  before the day copied at least and a week at most (0.69.1; a day alone
+  before, so an alert of it that ended early in a longer period stayed
+  on, and one that began then and was still on was never written): past
+  a week, its alerts on since before it was left out, that the read says
+  nothing of, are ended where it was left out, and one that began more
+  than a week before and is on still, changing state in none of the
+  week, isn't seen. Where reading back that far finds a rule unsure that
+  the shorter read judged (a change passed over within the period), that
+  rule alone is judged by a read from a day before, so one such change
+  leaves it out for a day, not a week. The rules a name may be of across
+  the read are those of the versions in effect across what is written,
+  from the settle before it: a title shared in a version a round writes
+  across leaves the rule out of that round too, where the history doesn't
+  say each change's rule. A name the read holds no change of is its
+  rule's, judged with no firing, whoever else has it. Before 0.69.1, such
+  a rule made the day a gap for every rule judged so: the record was the
+  source's, not each rule's. A rule whose name can't be kept (one that
+  doesn't show) has no period kept: no firing of it is ever written, so
+  it has no record at all. Past the 5,000 rules, the periods of rules no
+  longer among Grafana's are let go of, those that ended earliest first,
+  before a day is refused.
 - **By its title.** A rule judged under a name made to tell it apart,
   from another of its title or from a rule read elsewhere (a Loki ruler's,
   a cloud's alarm), is read from the history by the title it has in
@@ -159,28 +194,42 @@ its data sources answered.
   make a recorded rule that ties itself to a Grafana rule.
 - **Who writes the history.** It is taken as Grafana wrote it. Kept in
   Loki, it is written by whoever can push to that tenant, Grafana or not:
-  they write these rules' record, their firings within the bounds above;
-  with a change to a state Grafana has no name for, under a rule's name,
-  they leave that rule with no record while a read holds the change; and
-  with changes of more than 1,000 rules' names, which a read can't say
-  all of, they make every day a gap. SECURITY.md says so: guard the
-  tenant as the Grafana.
+  they write these rules' record, their firings within the bounds above,
+  under a rule's uid; with a line of a rule's name that has no uid, they
+  have that rule judged by its name, as above; with a change to a state
+  Grafana has no name for, under a rule's name, they leave that rule with
+  no record while a read holds the change (a read back from where it was
+  left out holds it a day at most); and with changes of more than 1,000
+  rules' names, which a read can't say all of, they make every day a gap.
+  SECURITY.md says so: guard the tenant as the Grafana.
 - **Names.** The history names a rule only by the title of one of the
   rules read from that Grafana; any other name's changes are passed over,
-  never kept, so the history can't add a rule. A name it gives two of
-  them, counted over every rule read before `--rule` picks, paused ones
-  among them, is neither's: `lapilli verdict` lists such a rule as before,
-  and serve leaves the rule out of each day while the title is shared,
-  the period kept (`TestServeGrafanaJudgedShared`). So whoever can make a
-  rule in a folder Lapilli reads, one of a judged rule's title, paused or
-  not, takes that rule's record for as long as the rule is there, and no
-  other rule's: it shows as no record, then and after, and the log names
-  the rule. Before 0.68.1 serve wrote the day without the rule's firings,
-  those copied in within the `--settle` taken away too, and its days read
-  as quiet ones; in 0.68.1 the day was a gap for every rule judged so,
-  which one such rule made of every team's. What fired under the title
-  meanwhile is no rule's, whichever of the two fired it; an alert the
-  history has on under the title where the rule is judged again is
+  never kept, so the history can't add a rule. A change of a judged rule's
+  title is that rule's only where the history says so, by the rule's uid
+  (Loki) or its id (annotations), as above: so whoever can make a rule in
+  a folder Lapilli reads, of a judged rule's title, paused or not, writes
+  nothing into that rule's record, ends none of its alerts, and takes
+  nothing away, whether the rule is there at a round or made, firing and
+  deleted between two (`TestServeGrafanaJudgedSharedBetweenRounds`,
+  `TestGrafanaJudgedByUID`, `TestGrafanaJudgedByID`). Before 0.69.1 a
+  rule there between two rounds wrote its firings into the judged rule's
+  record, and its alert could end the judged rule's, as a title was
+  counted at the round alone; and a title shared at a round left the
+  judged rule out. In annotations, a rule given a judged rule's title in
+  the seconds between a round's read of the rules and of the history,
+  firing there while the judged rule changes state in none of the read,
+  is taken for it: its id is the one changes of the title have, and the
+  rules read have no other of the title. Where the history says no rule's
+  uid or id (a Loki line without `ruleUID`, an annotation without
+  `alertId`, as a writer to the tenant may push), a name two rules give,
+  counted over every rule read before `--rule` picks, paused ones among
+  them, and over every version in effect across what a round writes, is
+  neither's: `lapilli verdict` lists such a rule as before, and serve
+  leaves the rule out while a round writes across such a version, the
+  period kept (`TestServeGrafanaJudgedShared`); a rule there between two
+  rounds that no read of the rules saw is taken for the judged rule then.
+  What fired under the title while it was left out is no one's; an alert
+  the history has on under the title where the rule is judged again is
   written from there, the other rule's among them, until the history
   says it ended.
 - **What it can make serve miss.** One rule whose changes the history
@@ -195,9 +244,11 @@ its data sources answered.
 
 - One recorded rule a name keeps no severity: the report gives such a rule
   none, where a replayed rule has its labels'.
-- One title in two folders: the tags hold `grafana_folder`; tie by it too?
-  It would judge such a rule, rather than leave it out while the title is
-  shared.
+- One title in two folders is tied by the rule's uid or id (0.69.1),
+  not by `grafana_folder`, which two folders of one title share. The
+  export Lapilli reads its rules from holds no rule's id: read it from
+  `/api/v1/provisioning/alert-rules`, which does, rather than ask the
+  annotations by uid, and close the seconds between a round's two reads?
 - A day past the reader's bounds, or of more firings than a write holds,
   is a gap for every rule judged so: leave out the rule with the most?
 - The rules list gives a rule that fired before the weeks shown, and has

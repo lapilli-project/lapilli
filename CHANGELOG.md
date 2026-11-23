@@ -55,14 +55,31 @@ Before upgrading:
   only copied in is held to. The period stays so once the rule is judged
   again, in a round that reads it again within `--settle`, and after a
   restart: what the history says fired under the title meanwhile is no
-  rule's. Judged again, the rule is read as on a first day, and an alert
-  on then is written from there. Whoever can make a rule of a judged
-  rule's title now takes that one rule's record, for as long as their rule
-  is there, and it shows as no record. What still makes a day a gap for
+  rule's. Judged again, the rule is read back from where it was left out,
+  a week at most, and an alert on then is written from there; past a
+  week, an alert of it on since before it was left out, that the read
+  says nothing of, is ended where it was left out. Past 5,000 rules, the
+  periods of rules no longer among Grafana's are let go of, those that
+  ended earliest first. And a change of Grafana's history is taken for a
+  judged rule only where the history says it is that rule's: kept in
+  Loki, by the rule's uid; in annotations, by its id (`alertId`) and its
+  title now (`alertName`), or the id the newest annotation of its uid
+  has (`alertUID`). A title shared across folders leaves neither rule
+  out, and a rule of a judged rule's title made, firing and deleted
+  between two rounds, which 0.68.0 to 0.69.0 took for the judged rule,
+  its firings written into the judged rule's record and its alert ending
+  the judged rule's, writes nothing. Where the history says no rule's uid
+  or id, a rule of a judged rule's title in any version of the rules in
+  effect across what a round writes leaves the judged rule out alone, and
+  shows as no record; one there between two rounds that no read of the
+  rules saw is still taken for it; so, in annotations, is one given the
+  title in the seconds between a round's two reads, firing while the
+  judged rule is quiet. A name the read holds no change of is judged,
+  with no firing, whoever else has it. What still makes a day a gap for
   every rule judged so is of the whole read: the history refused or past
   the reader's bounds, more than 100,000 firings in a day, more than 5,000
-  rules to keep as left out, or none of the rules judged
-  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
+  rules to keep as left out, none of them gone from Grafana, or none of
+  the rules judged ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
 - **The backtest gate could pass a pull request read from a branch its
   author moved** (affected: 0.32.0 to 0.69.0; the gates that stop a
   merge, and the status, from 0.67.0). 0.68.1 took `HEAD`'s first parent
@@ -193,10 +210,15 @@ Before upgrading:
   from where the copies covered again was taken away by a round that
   began within `--settle` of there and read from after the alert began;
   one that ended and fired again in the gap, still on, wasn't written;
-  and one written from a gap's end, which ended in a later gap, stayed
-  on. An alert a read holds no change of stays as it is, one it says
-  ended is ended from where it was written, and one on at the first day
-  after a gap is written from there whatever the ledger had on.
+  one written from where the copies covered again that ended before the
+  round after read was taken away by that round, which read from after
+  it began, and the period read as quiet, with `--every 1h` and
+  `--settle 1h`; and one written from a gap's end, which ended in a later
+  gap, stayed on. An alert a read holds no change of stays as it is, one
+  it says ended is ended from where it was written, one the ledger has
+  from within the write, on or ended, is written from where the ledger
+  has it, and one on at the first day after a gap is written from there
+  whatever the ledger had on.
 - **A pull request's backtest takes the place of the one waiting by its
   repository's id** (affected: 0.61.0 to 0.69.0; **ledger schema 031**,
   `backtests.repository_id`). The one waiting was matched by the entry,
@@ -230,8 +252,10 @@ Before upgrading:
   are read in the order they started, 20,000 a statement; past
   2,000,000 the rest aren't read, are in none of the numbers, and
   `paged_no_one.partial` says so, as it does past 200,000 rows of mutes.
-  The line then reads "The firings or their mutes were too many to look
-  through: some firings weren't counted."
+  Those of the second it is cut in, read before the cut, are counted
+  whether their rule has mutes or not. The line then reads "The firings
+  or their mutes were too many to look through: some firings weren't
+  counted."
 - **A backtest job on GitHub whose checkout is neither the event's head
   nor GitHub's merge of it fails with a gate or `STATUS`.** The branch
   checked out by its name, where it moved since the event; a merge ref

@@ -171,14 +171,22 @@ history says the rules it can't replay fired, and judges them by it
 (docs/design/grafanajudged.md), unless `--grafana-history=false`. That
 history is taken as Grafana wrote it. Where Grafana keeps it in Loki,
 whoever can push to that Loki tenant writes these rules' record: their
-firings; with a change to a state Grafana has no name for, no record for
-the rule it names; and, with changes of more than 1,000 rules' names,
-every day a gap. Whoever may make a rule in a folder Lapilli reads can
-take one judged rule's record away, with a rule of its title, paused or
-not, for as long as that rule is there: the judged rule alone is left out,
-shown as having no record for the period, and the other rules' history is
-copied in as before. Guard the tenant as you guard the Grafana; neither is
-a way past what this says, which a report is welcome of.
+firings, under a rule's uid, or, with no uid, under its name alone; with
+a change to a state Grafana has no name for, no record for the rule it
+names; and, with changes of more than 1,000 rules' names, every day a
+gap. A change is taken for a judged rule only where the history says it
+is that rule's, by its uid (Loki) or its id (annotations): whoever may
+make a rule in a folder Lapilli reads, of a judged rule's title, paused
+or not, at a round or between two, writes nothing into that rule's
+record and takes nothing away. In annotations, a rule given a judged
+rule's title in the seconds between a round's read of the rules and of
+the history, firing there while the judged rule is quiet, is taken for
+it. Where the history says no rule's uid or id, a title two rules have
+in any version of the rules in effect across what a round writes leaves
+the judged rule out alone, shown as having no record for the period; a
+rule there between two rounds that no read of the rules saw is taken for
+it. Guard the tenant as you guard the Grafana; neither is a way past what
+this says, which a report is welcome of.
 
 ## Versions
 
