@@ -266,32 +266,34 @@ capped() { head -c 16777217 >"$1" && [ "$(wc -c <"$1")" -le 16777216 ]; }
 # wrote to FILE (-D), or nothing.
 status_of() { sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$1" | tail -n 1; }
 
-# posts CURL-ARGUMENTS: whether the request is a POST (-X POST): one a
-# try may have made already, though it was answered with an error, or not
-# in time (ask_again).
-posts() {
-  p_prev=
-  for p_arg in "$@"; do
-    if [ "$p_prev" = -X ] && [ "$p_arg" = POST ]; then
-      return 0
-    fi
-    p_prev=$p_arg
-  done
-  return 1
+# again_or_once WORD: refuse a WORD that isn't again or once, which each
+# request is given where it is asked (ask_again).
+again_or_once() {
+  case $1 in
+    again | once) ;;
+    *)
+      say "a request is asked again or once, not $(printf '%s' "$1" | jq -Rc .)"
+      exit 1
+      ;;
+  esac
 }
 
-# ask_again CODE CURL-EXIT POST: whether a try is asked again, of its HTTP
-# status (000 for none) and curl's exit status: a connection refused
-# (curl's 7), which sent nothing, and a 408, 429 or 503, which the server
-# says it didn't take; and, but of a POST (POST not empty), a time out
-# (curl's 28), or a 500, 502 or 504, as curl's --retry does. A POST
-# answered so may have made what it asks for, an issue, a comment, which a
-# second would make again: it fails, for the next run, which finds what
+# ask_again CODE CURL-EXIT HOW: whether a try is asked again, of its HTTP
+# status (000 for none), curl's exit status, and how the request is asked,
+# as its caller says, not as its method does: Linear's reads are POSTs, as
+# is Azure Boards' search. Every request is asked again on a connection
+# refused (curl's 7), which sent nothing, and a 408, 429 or 503, which the
+# server says it didn't take. One asked again (HOW again), a read, or a
+# write a second try leaves as the first did (a state, a link), is also
+# asked again on a time out (curl's 28), or a 500, 502 or 504, as curl's
+# --retry does. One asked once, a write that makes something, an issue, a
+# comment, a transition, which a second try would make again, isn't: it
+# may have been taken, and it fails, for the next run, which finds what
 # was made by its marker.
 ask_again() {
   [ "$2" != 7 ] || return 0
   case $1 in 408 | 429 | 503) return 0 ;; esac
-  [ -z "$3" ] || return 1
+  [ "$3" = again ] || return 1
   case $1 in 500 | 502 | 504) return 0 ;; esac
   [ "$2" = 28 ]
 }
@@ -308,21 +310,23 @@ pause_for() {
   printf '%s' "$p_wait"
 }
 
-# fetch CURL-ARGUMENTS: the tracker's answer, taken whole before it is
+# fetch HOW CURL-ARGUMENTS: the tracker's answer, taken whole before it is
 # read, for a 2xx; anything else is said and fails, its HTTP status kept
-# for gone. The headers curl is to send come on stdin (-H @-), read once
-# and sent again with each try. An answer is 16 MiB at most (capped): past
-# it, the request fails. A try is asked again as ask_again says, three
-# times at most, a second after the first, twice as long each time after,
-# or as long as Retry-After says, a minute at most: asked by the recipe,
-# as curl's own --retry writes each try's answer after the one before when
-# the answer goes through a pipe.
+# for gone. HOW is again or once, as ask_again says. The headers curl is
+# to send come on stdin (-H @-), read once and sent again with each try.
+# An answer is 16 MiB at most (capped): past it, the request fails. A try
+# is asked again as ask_again says, three times at most, a second after
+# the first, twice as long each time after, or as long as Retry-After
+# says, a minute at most: asked by the recipe, as curl's own --retry
+# writes each try's answer after the one before when the answer goes
+# through a pipe.
 fetch() {
+  f_how=$1
+  shift
+  again_or_once "$f_how"
   f_sent=$(cat)
   f_tries=0
   f_pause=1
-  f_post=
-  ! posts "$@" || f_post=1
   while :; do
     : >"$work/heads"
     rm -f "$work/failed"
@@ -338,7 +342,7 @@ fetch() {
       say "the tracker's answer is more than 16 MiB: not read"
       return 1
     fi
-    if [ "$f_tries" -lt 3 ] && ask_again "$code" "$(cat "$work/failed" 2>/dev/null)" "$f_post"; then
+    if [ "$f_tries" -lt 3 ] && ask_again "$code" "$(cat "$work/failed" 2>/dev/null)" "$f_how"; then
       f_tries=$((f_tries + 1))
       sleep "$(pause_for "$work/heads" "$f_pause")"
       f_pause=$((f_pause * 2))
@@ -365,22 +369,23 @@ gone() {
   return 1
 }
 
-# lapilli_curl OUT CURL-ARGUMENTS: curl to Lapilli, its answer into OUT
-# (/dev/null for none), and the headers of its answer into $work/lheads:
-# its token on stdin, not the command line, where ps would show it;
-# LAPILLI_URL's scheme alone; and an answer of 16 MiB at most (capped),
-# past which it fails. Each asks with -f, which fails an HTTP error. A try
-# is asked again as fetch asks the tracker, three times at most, OUT
-# holding the last try's answer alone: curl's own --retry writes each
-# try's answer after the one before, as -o - goes through a pipe, so that
-# a read that timed out midway was followed by the next try's whole.
+# lapilli_curl OUT HOW CURL-ARGUMENTS: curl to Lapilli, its answer into
+# OUT (/dev/null for none), and the headers of its answer into
+# $work/lheads: its token on stdin, not the command line, where ps would
+# show it; LAPILLI_URL's scheme alone; and an answer of 16 MiB at most
+# (capped), past which it fails. Each asks with -f, which fails an HTTP
+# error. HOW is again or once, as ask_again says. A try is asked again as
+# fetch asks the tracker, three times at most, OUT holding the last try's
+# answer alone: curl's own --retry writes each try's answer after the one
+# before, as -o - goes through a pipe, so that a read that timed out
+# midway was followed by the next try's whole.
 lapilli_curl() {
   l_out=$1
-  shift
+  l_how=$2
+  shift 2
+  again_or_once "$l_how"
   l_tries=0
   l_pause=1
-  l_post=
-  ! posts "$@" || l_post=1
   while :; do
     : >"$work/lheads"
     rm -f "$work/lfailed"
@@ -391,7 +396,7 @@ lapilli_curl() {
     fi
     [ -e "$work/lfailed" ] || return 0
     l_code=$(status_of "$work/lheads")
-    if [ "$l_tries" -lt 3 ] && ask_again "${l_code:-000}" "$(cat "$work/lfailed")" "$l_post"; then
+    if [ "$l_tries" -lt 3 ] && ask_again "${l_code:-000}" "$(cat "$work/lfailed")" "$l_how"; then
       l_tries=$((l_tries + 1))
       sleep "$(pause_for "$work/lheads" "$l_pause")"
       l_pause=$((l_pause * 2))
@@ -412,7 +417,7 @@ lapilli_tasks() {
       say "more than $max_pages pages of tasks; stopping (raise MAX_PAGES)"
       exit 1
     fi
-    if ! lapilli_curl "$work/page" -fsS "$lapilli/api/v1/tasks?$1&after=$after"; then
+    if ! lapilli_curl "$work/page" again -fsS "$lapilli/api/v1/tasks?$1&after=$after"; then
       say "Lapilli didn't give the tasks"
       exit 1
     fi
@@ -434,13 +439,13 @@ lapilli_tasks() {
 
 # lapilli_patch ID JSON: set a task's link or status.
 lapilli_patch() {
-  lapilli_curl /dev/null -fsS -X PATCH -H 'Content-Type: application/json' \
+  lapilli_curl /dev/null again -fsS -X PATCH -H 'Content-Type: application/json' \
     --data-binary "$2" "$lapilli/api/v1/tasks/$1"
 }
 
 # lapilli_comments ID FILE: a task's comments, as Lapilli has them.
 lapilli_comments() {
-  if ! lapilli_curl "$2" -fsS "$lapilli/api/v1/tasks/$1/comments"; then
+  if ! lapilli_curl "$2" again -fsS "$lapilli/api/v1/tasks/$1/comments"; then
     return 1
   fi
   jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
@@ -454,7 +459,7 @@ lapilli_copy() {
   : >"$work/copied"
   # A refusal (4xx) fails curl (-f), and is told by its status, of the
   # headers lapilli_curl keeps.
-  if lapilli_curl "$work/copied" -fsS -X POST -H 'Content-Type: application/json' \
+  if lapilli_curl "$work/copied" once -fsS -X POST -H 'Content-Type: application/json' \
     --data-binary "$2" "$lapilli/api/v1/tasks/$1/comments" 2>"$work/lcopy.log"; then
     l_code=$(status_of "$work/lheads")
   else
@@ -473,7 +478,7 @@ lapilli_copy() {
 # lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
 # the task's issue as REF, so it is never posted again.
 lapilli_mark() {
-  lapilli_curl /dev/null -fsS -X PATCH -H 'Content-Type: application/json' \
+  lapilli_curl /dev/null again -fsS -X PATCH -H 'Content-Type: application/json' \
     --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" "$lapilli/api/v1/tasks/$1/comments/$2"
 }
 

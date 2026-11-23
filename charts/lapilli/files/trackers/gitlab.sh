@@ -30,14 +30,15 @@ fi
 enc=$(printf '%s' "$project" | jq -sRr @uri)
 gl_token=$(secret GITLAB_TOKEN_FILE "$GITLAB_TOKEN_FILE")
 
-# gl METHOD PATH [BODY]: GitLab's answer, or a failure for anything but a
-# 2xx. Taken whole before it is read, so a failure isn't read as nothing.
+# gl HOW METHOD PATH [BODY]: GitLab's answer, or a failure for anything
+# but a 2xx, the request asked again or once (HOW, as lib.sh's ask_again
+# says). Taken whole before it is read, so a failure isn't read as nothing.
 gl() {
-  if [ $# -gt 2 ]; then
-    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | fetch -X "$1" -H @- \
-      -H 'Content-Type: application/json' --data-binary "$3" "$base/api/v4$2"
+  if [ $# -gt 3 ]; then
+    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | fetch "$1" -X "$2" -H @- \
+      -H 'Content-Type: application/json' --data-binary "$4" "$base/api/v4$3"
   else
-    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | fetch -X "$1" -H @- "$base/api/v4$2"
+    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | fetch "$1" -X "$2" -H @- "$base/api/v4$3"
   fi
 }
 
@@ -48,19 +49,19 @@ ours=$kept'def ours: (.author.id // "" | tostring) == $me
   and (.description | kept($m));'
 
 t_me() {
-  out=$(gl GET /user) || return 1
+  out=$(gl again GET /user) || return 1
   printf '%s' "$out" | jq -r '.id | numbers'
 }
 
 t_find() {
-  out=$(gl GET "/projects/$enc/issues?search=$1&in=description&author_id=$me&labels=lapilli&scope=all&per_page=20") || return 1
+  out=$(gl again GET "/projects/$enc/issues?search=$1&in=description&author_id=$me&labels=lapilli&scope=all&per_page=20") || return 1
   printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'[.[] | select(ours and ([.labels[]? | .name? // .] | index("lapilli")))][0].web_url // empty'
 }
 
 t_create() {
   text=$(issue_text <"$1")
   body=$(jq -c --arg text "$text" -f "$here/gitlab.jq" "$1")
-  out=$(gl POST "/projects/$enc/issues" "$body") || return 1
+  out=$(gl once POST "/projects/$enc/issues" "$body") || return 1
   printf '%s' "$out" | jq -r '.web_url // empty'
 }
 
@@ -72,10 +73,10 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(gl GET "/projects/$enc/issues/$1"); then
+  if ! out=$(gl again GET "/projects/$enc/issues/$1"); then
     # Not there (deleted), in a project the token still reads.
     gone || return 1
-    gl GET "/projects/$enc" >/dev/null || return 1
+    gl again GET "/projects/$enc" >/dev/null || return 1
     echo gone
     return 0
   fi
@@ -85,7 +86,7 @@ t_state() {
 }
 
 t_close() {
-  gl PUT "/projects/$enc/issues/$1" '{"state_event":"close"}' >/dev/null
+  gl again PUT "/projects/$enc/issues/$1" '{"state_event":"close"}' >/dev/null
 }
 
 # t_comments: the issue's notes, ten pages of 100 at most, people's: not
@@ -94,7 +95,7 @@ t_close() {
 t_comments() {
   page=1
   while [ "$page" -le 10 ]; do
-    out=$(gl GET "/projects/$enc/issues/$1/notes?sort=asc&order_by=created_at&per_page=100&page=$page") || return 1
+    out=$(gl again GET "/projects/$enc/issues/$1/notes?sort=asc&order_by=created_at&per_page=100&page=$page") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.[] | select((.system | not) and (.internal // false | not) and (.confidential // false | not))
       | {id: (.id | tostring), author: (.author.username // "someone"),
       mine: ((.author.id // "" | tostring) == $me), at: .created_at, body: (.body // "")}'
@@ -108,7 +109,7 @@ t_comments() {
 # issue's text is: GitLab carries out quick actions in a note the API is
 # given, as the job's account.
 t_comment() {
-  out=$(gl POST "/projects/$enc/issues/$1/notes" "$(jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$2")") || return 1
+  out=$(gl once POST "/projects/$enc/issues/$1/notes" "$(jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 

@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,18 +12,19 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/ledger"
 )
 
-// retryRig is the GitHub tracker recipe against its stand-in, and
+// retryRig is a tracker's recipe (name) against its stand-in, and
 // Lapilli's incidents port, each behind tracker and lapilli: given the
 // request, and the handler it goes to, either answers it.
-func retryRig(t *testing.T, tracker, lapilli func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc)) *trackerRig {
+func retryRig(t *testing.T, name string, tracker, lapilli func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc)) *trackerRig {
 	t.Helper()
-	api := trackerAPIs["github"]
+	api := trackerAPIs[name]
 	s := trackerServer(t, nil)
 	in := s.IncidentsHandler()
 	lap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { lapilli(w, r, in.ServeHTTP) }))
@@ -30,7 +33,7 @@ func retryRig(t *testing.T, tracker, lapilli func(w http.ResponseWriter, r *http
 	inner := api.serve(f)
 	trk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { tracker(w, r, inner) }))
 	t.Cleanup(trk.Close)
-	env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, "gh-secret"))...)
+	env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, trackerSecrets[name]))...)
 	env = append(env, "LAPILLI_URL="+lap.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok))
 	return &trackerRig{s: s, f: f, api: api, env: env}
 }
@@ -93,7 +96,7 @@ func TestTrackerRecipePostAnsweredBadly(t *testing.T) {
 	}{{http.StatusBadGateway, true}, {http.StatusGatewayTimeout, true}, {http.StatusServiceUnavailable, false}} {
 		var mu sync.Mutex
 		posts, first := 0, true
-		g := retryRig(t, func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		g := retryRig(t, "github", func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues") {
 				mu.Lock()
 				posts++
@@ -172,7 +175,7 @@ func TestTrackerRecipeLapilliAskedAgain(t *testing.T) {
 	t.Run("a comment copied, answered 502", func(t *testing.T) {
 		var mu sync.Mutex
 		copies := 0
-		g := retryRig(t, passed, func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		g := retryRig(t, "github", passed, func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
 				mu.Lock()
 				copies++
@@ -210,7 +213,7 @@ func TestTrackerRecipeLapilliAskedAgain(t *testing.T) {
 		t.Setenv("PATH", quickCurl(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 		var mu sync.Mutex
 		first := true
-		g := retryRig(t, passed, func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		g := retryRig(t, "github", passed, func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 			mu.Lock()
 			was := first && r.Method == http.MethodGet && r.URL.Path == "/api/v1/tasks"
 			if was {
@@ -233,4 +236,75 @@ func TestTrackerRecipeLapilliAskedAgain(t *testing.T) {
 			t.Errorf("%v\n%s", err, out)
 		}
 	})
+}
+
+// badFirst answers 502 to the first POST that is takes for one, and
+// passes the rest on, that first one taken where taken says; asked counts
+// the POSTs is takes.
+func badFirst(is func(r *http.Request, body string) bool, taken bool, asked *atomic.Int64) func(http.ResponseWriter, *http.Request, http.HandlerFunc) {
+	return func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		b, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(b))
+		if r.Method == http.MethodPost && is(r, string(b)) && asked.Add(1) == 1 {
+			if taken {
+				next(httptest.NewRecorder(), r)
+			}
+			http.Error(w, "upstream", http.StatusBadGateway)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// Linear asks each request as a POST, its reads among them, and Azure
+// Boards its search: a read answered 502 was taken, by its method, for a
+// write that may have been made, and not asked again, and the run stopped
+// at the search that failed. A request is asked again or once as its
+// caller says: a read answered 502 is asked again, and the run goes on;
+// an issue made and answered 502 isn't made again, and the next run finds
+// it.
+func TestTrackerRecipePostsThatRead(t *testing.T) {
+	needTools(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name         string
+		read, create func(r *http.Request, body string) bool
+	}{
+		{"linear",
+			func(r *http.Request, body string) bool { return strings.Contains(body, "issues(first: 20") },
+			func(r *http.Request, body string) bool { return strings.Contains(body, "issueCreate") }},
+		{"azure-boards",
+			func(r *http.Request, body string) bool {
+				return strings.HasSuffix(r.URL.EscapedPath(), "/_apis/wit/wiql")
+			},
+			func(r *http.Request, body string) bool {
+				return strings.HasSuffix(r.URL.EscapedPath(), "/_apis/wit/workitems/%24Task")
+			}},
+	} {
+		t.Run(c.name+", a read answered 502", func(t *testing.T) {
+			var asked atomic.Int64
+			g := retryRig(t, c.name, badFirst(c.read, false, &asked), passed)
+			// A search for each of the two tasks, the first asked again.
+			if out, err := runTracker(g); err != nil || !strings.Contains(out, "made 2 issues") || asked.Load() != 3 {
+				t.Errorf("%v, searched %d times, want 3\n%s", err, asked.Load(), out)
+			}
+		})
+		t.Run(c.name+", an issue made, answered 502", func(t *testing.T) {
+			var asked atomic.Int64
+			g := retryRig(t, c.name, badFirst(c.create, true, &asked), passed)
+			runTracker(g)
+			out, err := runTracker(g)
+			for _, n := range []int64{1, 2} {
+				if task, terr := g.s.l.TaskByID(ctx, n); terr != nil || task.Link == "" {
+					t.Errorf("the next run: task %d linked to %q, %v", n, task.Link, terr)
+				}
+			}
+			g.f.mu.Lock()
+			made := g.f.creates
+			g.f.mu.Unlock()
+			if err != nil || made != 2 || asked.Load() != 2 {
+				t.Errorf("the next run: %v; %d issues made, asked %d times, want 2 and 2\n%s", err, made, asked.Load(), out)
+			}
+		})
+	}
 }

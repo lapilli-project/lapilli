@@ -948,12 +948,14 @@ func newTrackerRig(t *testing.T, name string) *trackerRig {
 	f := &fakeTracker{t: t}
 	trk := httptest.NewServer(api.serve(f))
 	t.Cleanup(trk.Close)
-	secrets := map[string]string{"github": "gh-secret", "gitlab": "gl-secret", "jira": "jira-secret", "linear": "lin-secret",
-		"azure-boards": "ado-secret", "shortcut": "sc-secret"}
-	env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, secrets[name]))...)
+	env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, trackerSecrets[name]))...)
 	env = append(env, "LAPILLI_URL="+lap.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok))
 	return &trackerRig{s: s, f: f, api: api, env: env}
 }
+
+// trackerSecrets are the tokens each tracker's stand-in takes.
+var trackerSecrets = map[string]string{"github": "gh-secret", "gitlab": "gl-secret", "jira": "jira-secret", "linear": "lin-secret",
+	"azure-boards": "ado-secret", "shortcut": "sc-secret"}
 
 // run runs the recipe once, with more settings.
 func (g *trackerRig) run(more ...string) (string, error) {

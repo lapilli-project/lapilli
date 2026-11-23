@@ -37,16 +37,17 @@ if ! printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
 fi
 gh_token=$(secret GITHUB_TOKEN_FILE "$GITHUB_TOKEN_FILE")
 
-# gh METHOD PATH [BODY]: GitHub's answer, or a failure for anything but a
-# 2xx. Taken whole before it is read, so a failure isn't read as nothing.
+# gh HOW METHOD PATH [BODY]: GitHub's answer, or a failure for anything
+# but a 2xx, the request asked again or once (HOW, as lib.sh's ask_again
+# says). Taken whole before it is read, so a failure isn't read as nothing.
 gh() {
-  if [ $# -gt 2 ]; then
-    printf 'Authorization: Bearer %s\n' "$gh_token" | fetch -X "$1" -H @- \
+  if [ $# -gt 3 ]; then
+    printf 'Authorization: Bearer %s\n' "$gh_token" | fetch "$1" -X "$2" -H @- \
       -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
-      -H 'Content-Type: application/json' --data-binary "$3" "$api$2"
+      -H 'Content-Type: application/json' --data-binary "$4" "$api$3"
   else
-    printf 'Authorization: Bearer %s\n' "$gh_token" | fetch -X "$1" -H @- \
-      -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$api$2"
+    printf 'Authorization: Bearer %s\n' "$gh_token" | fetch "$1" -X "$2" -H @- \
+      -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$api$3"
   fi
 }
 
@@ -61,7 +62,7 @@ t_me() {
     printf '%s' "$GITHUB_LOGIN"
     return 0
   fi
-  if ! out=$(gh GET /user); then
+  if ! out=$(gh again GET /user); then
     say "GET /user didn't say who the token is (a GitHub App's or Actions' token can't): set GITHUB_LOGIN, such as NAME[bot]"
     return 1
   fi
@@ -73,7 +74,7 @@ t_find() {
   author=$me
   case $me in *\[bot\]) author=app/${me%\[bot\]} ;; esac
   q=$(printf 'repo:%s is:issue in:body "%s" author:%s label:lapilli' "$repo" "$1" "$author" | jq -sRr @uri)
-  out=$(gh GET "/search/issues?q=$q&per_page=20") || return 1
+  out=$(gh again GET "/search/issues?q=$q&per_page=20") || return 1
   printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'
     [.items[] | select(ours and ([.labels[]? | .name? // .] | index("lapilli")))][0].html_url // empty'
 }
@@ -81,7 +82,7 @@ t_find() {
 t_create() {
   text=$(issue_text <"$1")
   body=$(jq -c --arg text "$text" -f "$here/github.jq" "$1")
-  out=$(gh POST "/repos/$repo/issues" "$body") || return 1
+  out=$(gh once POST "/repos/$repo/issues" "$body") || return 1
   printf '%s' "$out" | jq -r '.html_url // empty'
 }
 
@@ -92,10 +93,10 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(gh GET "/repos/$repo/issues/$1"); then
+  if ! out=$(gh again GET "/repos/$repo/issues/$1"); then
     # Not there (deleted: 410), in a repository the token still reads.
     gone || return 1
-    gh GET "/repos/$repo" >/dev/null || return 1
+    gh again GET "/repos/$repo" >/dev/null || return 1
     echo gone
     return 0
   fi
@@ -107,7 +108,7 @@ t_state() {
 t_close() {
   reason=completed
   [ "$2" != dropped ] || reason=not_planned
-  gh PATCH "/repos/$repo/issues/$1" "$(jq -cn --arg r "$reason" '{state: "closed", state_reason: $r}')" >/dev/null
+  gh again PATCH "/repos/$repo/issues/$1" "$(jq -cn --arg r "$reason" '{state: "closed", state_reason: $r}')" >/dev/null
 }
 
 # t_comments: the issue's comments, ten pages of 100 at most, people's;
@@ -115,7 +116,7 @@ t_close() {
 t_comments() {
   page=1
   while [ "$page" -le 10 ]; do
-    out=$(gh GET "/repos/$repo/issues/$1/comments?per_page=100&page=$page") || return 1
+    out=$(gh again GET "/repos/$repo/issues/$1/comments?per_page=100&page=$page") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.[] | {id: (.id | tostring), author: (.user.login // "someone"),
       mine: ((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)), at: .created_at, body: (.body // "")}'
     [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
@@ -125,7 +126,7 @@ t_comments() {
 }
 
 t_comment() {
-  out=$(gh POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")") || return 1
+  out=$(gh once POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 
