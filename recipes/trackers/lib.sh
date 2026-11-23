@@ -45,7 +45,9 @@
 #
 # Each token goes where its address points, and curl speaks that
 # address's scheme alone (--proto). A recipe says where its tracker's API
-# is (tracker_api): https, or this machine over http, for tests. Lapilli's
+# is (tracker_api): https, or this machine over http, for tests; or, with
+# PLAIN_HTTP=true, http to any host, for a tracker reached inside a
+# cluster, its token read by whatever is on the way. Lapilli's
 # is http too, as a Service in the cluster is reached: over plain http its
 # token is read by whatever is on the way, so keep that to the cluster
 # serve runs in. An address with a user or token before @ is refused, and
@@ -135,6 +137,16 @@ secret_line() {
   printf '%s' "$s"
 }
 
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    say "PLAIN_HTTP is true or false"
+    exit 1
+    ;;
+esac
 # tracker_api NAME URL: the tracker's API is at URL, which the variable
 # NAME gave: https, or this machine over http, for tests (127.0.0.1, [::1]
 # or localhost, with a port or not, and no name that only starts with
@@ -154,10 +166,11 @@ tracker_api() {
         127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) tracker_proto='=http' ;;
         127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) tracker_proto='=http' ;;
       esac
+      [ "${PLAIN_HTTP:-false}" = false ] || tracker_proto='=http'
       ;;
   esac
   if [ -z "$tracker_proto" ]; then
-    say "$1 is not https"
+    say "$1 is not https (PLAIN_HTTP=true takes plain http, to any host)"
     exit 1
   fi
 }

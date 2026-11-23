@@ -35,7 +35,10 @@ goes to, where `DATADOG_API`, `NEW_RELIC_API` or `GOOGLE_MONITORING_API`
 changes it, is `https://`, on whatever port and path, or this machine's
 over `http://` for tests (`127.0.0.1`, `[::1]` or `localhost`, with a port
 or not), and `curl` speaks no other scheme; the scheme may be in capitals.
-One with a user or token before `@` is refused. Neither the token nor the
+With `PLAIN_HTTP=true` (default `false`) it may be `http://` to any host, for
+a tool reached over plain http inside a cluster, its token read by whatever
+is on the way; `curl` speaks http alone then. One with a user or token
+before `@` is refused, `@` in its query too. Neither the token nor the
 address is said. An answer is 16 MiB at most, whatever `curl`'s version
 (before 8.4, `--max-filesize` holds to that bound only an answer that says
 its length; the scripts cut what `curl` writes too): past it a script

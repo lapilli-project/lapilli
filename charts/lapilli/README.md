@@ -86,7 +86,10 @@ with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
 `jira` or `linear`), `image` (one with `sh`, `curl` and `jq`, by its digest,
 `NAME@sha256:...`: a tag is refused) and `trackerTokenSecret`, a CronJob keeps
 tasks in step with that tracker's issues every five minutes; see
-`recipes/trackers`.
+`recipes/trackers`. The tracker's API is asked over https; `PLAIN_HTTP:
+"true"` in `serve.trackers.env` takes `http://` to any host, for a
+self-managed tracker reached inside the cluster, its token read by whatever
+is on the way.
 `serve.notificationsAPI` opens a port that takes notifications as the alert
 manager sent them, and does nothing else:
 Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service

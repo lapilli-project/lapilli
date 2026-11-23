@@ -27,8 +27,12 @@ as is a second line. The address a token goes to (`JIRA_URL`, `JSM_API`,
 `GRAFANA_URL`, or the API a script asks, which `PAGERDUTY_API` and the like
 change) is `https://`, or this machine's over `http://` for tests
 (`127.0.0.1`, `[::1]` or `localhost`, with a port or not), and `curl` speaks
-no other scheme; the scheme may be in capitals. One with a user or token
-before `@` is refused. Neither the token nor the address is said.
+no other scheme; the scheme may be in capitals. With `PLAIN_HTTP=true`
+(default `false`) it may be `http://` to any host, for a self-managed tool,
+such as Grafana or Jira Data Center, reached over plain http inside a
+cluster, its token read by whatever is on the way; `curl` speaks http alone
+then. One with a user or token before `@` is refused, `@` in its query too.
+Neither the token nor the address is said.
 
 `pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, for
 Jira Service Management's incidents given `JSM_CLOUD_ID`, `jira.sh` also

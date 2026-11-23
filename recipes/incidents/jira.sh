@@ -44,6 +44,16 @@ here=$(dirname "$0")
 : "${JIRA_EMAIL:?the email of the account}"
 : "${JIRA_TOKEN_FILE:?a file holding its API token}"
 : "${JIRA_JQL:?the search that finds your incidents}"
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "jira.sh" >&2
+    exit 1
+    ;;
+esac
 # https NAME URL: the scheme curl speaks to URL, in proto. The token goes
 # where URL points: over https, or to this machine, for tests. Neither is
 # said: a user and password before @ would be in the log.
@@ -63,10 +73,11 @@ https() {
         127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
         127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
       esac
+      [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
       ;;
   esac
   if [ -z "$proto" ]; then
-    printf 'jira.sh: %s is not https\n' "$1" >&2
+    printf 'jira.sh: %s is not https (PLAIN_HTTP=true takes plain http, to any host)\n' "$1" >&2
     exit 1
   fi
 }

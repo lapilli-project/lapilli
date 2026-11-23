@@ -594,7 +594,10 @@ serve:
     # The recipe's settings, as recipes/trackers says, such as
     #   GITHUB_REPO: example/alerts
     #   JIRA_URL: https://example.atlassian.net, JIRA_EMAIL: ..., JIRA_PROJECT: OPS
-    # The tokens' files and LAPILLI_URL are set by the chart.
+    # The tracker's API is https; PLAIN_HTTP: "true" takes http to any host,
+    # for a self-managed tracker reached inside the cluster, its token read
+    # by whatever is on the way. The tokens' files and LAPILLI_URL are set
+    # by the chart.
     env: {}
     # A Secret holding the tracker's own token: GitHub's, GitLab's, Jira's
     # API token or Linear's API key.

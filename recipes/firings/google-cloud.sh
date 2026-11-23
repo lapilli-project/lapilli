@@ -20,6 +20,16 @@ api=${GOOGLE_MONITORING_API:-https://monitoring.googleapis.com}
 # The scheme may be in capitals, as curl takes it. This machine is
 # 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
 # starts with one, such as localhost.example.com.
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "google-cloud.sh" >&2
+    exit 1
+    ;;
+esac
 proto=
 case $api in
   *@*)
@@ -32,10 +42,11 @@ case $api in
       127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
       127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
     esac
+    [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
     ;;
 esac
 if [ -z "$proto" ]; then
-  printf 'google-cloud.sh: GOOGLE_MONITORING_API is not https\n' >&2
+  printf 'google-cloud.sh: GOOGLE_MONITORING_API is not https (PLAIN_HTTP=true takes plain http, to any host)\n' >&2
   exit 1
 fi
 : "${GOOGLE_CLOUD_PROJECT:?the project}"

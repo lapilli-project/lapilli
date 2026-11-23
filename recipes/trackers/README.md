@@ -87,7 +87,10 @@ Each token goes where its address points, and `curl` is given that
 address's scheme alone. The tracker's API (`GITHUB_API`, `GITLAB_URL`,
 `JIRA_URL`, `LINEAR_API`, `AZURE_DEVOPS_URL`, `SHORTCUT_API`, where given)
 is `https://`, on whatever port and path, or this machine's over `http://`
-for tests (`127.0.0.1`, `[::1]` or `localhost`); `LAPILLI_URL` is `http://`
+for tests (`127.0.0.1`, `[::1]` or `localhost`); or, with `PLAIN_HTTP=true`
+(default `false`), `http://` to any host, for a self-managed GitLab, Jira or
+Azure DevOps Server reached over plain http inside a cluster, its token read
+by whatever is on the way; `LAPILLI_URL` is `http://`
 or `https://`, as serve's port is reached inside its cluster, where plain
 http should stay. One with a user or token before `@` is refused, and
 neither an address nor a token is said. A token file holds the token
