@@ -219,7 +219,9 @@ an edit later than the one it has, so each is taken once. The times are
 the tracker's and Lapilli's, two clocks, as with `CLOSE_ISSUES`: an edit
 here within their difference after the post may be missed. Only the job's
 own post is changed; one someone changed in the tracker since isn't
-changed back until the comment is edited again here. A comment deleted
+changed back until the comment is edited again here. An edit the tracker
+refuses (a 4xx) is said and passed over, as it is each run, and holds up
+neither the task's other edits nor the tracker's. A comment deleted
 isn't followed, either way ([trackers.md](../../docs/design/trackers.md),
 "Edits followed"). `MAX_COMMENTS` bounds how many go each way for a task
 in a run, posts, copies and edits each; the rest go the next. A comment changes when an issue last changed, not when

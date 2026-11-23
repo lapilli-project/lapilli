@@ -654,9 +654,21 @@ sync_edits() {
       continue
     fi
     cref=$(printf '%s' "$c" | jq -r '.ref')
+    rm -f "$work/status"
     if ! (t_edit "$2" "$cref" "$work/ctext"); then
+      # One the tracker refuses (4xx), or one it was never asked as its id
+      # isn't the tracker's shape, is said and passed over, as it would be
+      # each run; anything else ends this way for the task. Either way the
+      # tracker's edits are still taken, below.
+      case $(cat "$work/status" 2>/dev/null) in
+        4?? | '')
+          say "the tracker refused the edit of comment $(printf '%s' "$c" | jq -r '.id') on task $1's issue; passed over"
+          unedited=$((unedited + 1))
+          continue
+          ;;
+      esac
       fail "the tracker didn't take the edit of a comment on task $1's issue; skipped"
-      return 0
+      break
     fi
     carried=$((carried + 1))
   done <"$work/edits"
@@ -740,6 +752,7 @@ sync_tasks() {
   refused=0
   carried=0
   retaken=0
+  unedited=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
@@ -855,7 +868,7 @@ sync_tasks() {
     esac
   done <"$work/linked"
   if [ "$comments" = true ]; then
-    say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused; carried $carried edits to issues, took $retaken edits from them"
+    say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused; carried $carried edits to issues, took $retaken edits from them, passed over $unedited the tracker refused"
   fi
   say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
   if [ "$failed" -gt 0 ]; then

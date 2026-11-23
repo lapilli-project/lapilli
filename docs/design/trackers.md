@@ -332,6 +332,9 @@ needed deciding: which edits, which way, by what, and what is left.
   its issue's last change: an edit made here within their difference after
   the post may be missed, and a post someone changed in the tracker after
   the last edit here isn't changed back until the comment is edited again.
+  An edit the tracker refuses (a 4xx, or a comment's id not of its shape)
+  is said and passed over, each run, and holds up nothing else: the
+  task's other edits go on, and so do the tracker's, below.
 - **The tracker to Lapilli.** A comment copied in, changed in the tracker
   after the time Lapilli keeps for it, is sent again with the tracker's
   time for the change, its text made to fit as when it was copied. Lapilli

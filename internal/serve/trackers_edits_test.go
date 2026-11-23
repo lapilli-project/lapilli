@@ -294,6 +294,35 @@ func TestTrackerRecipeOwnWithoutEdits(t *testing.T) {
 	}
 }
 
+// A tracker that refuses to change a comment holds up nothing else: the
+// refusal is said, and passed over, and the tracker's own edit is still
+// taken, run after run.
+func TestTrackerRecipesCommentEditRefused(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	ctx := context.Background()
+	g.mustRun(t)
+	mine, _ := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Raised it."}, "ana@example.com")
+	g.f.mu.Lock()
+	theirs := g.f.comment(g.f.issue(1), "someone", "Fine.")
+	g.f.mu.Unlock()
+	g.mustRun(t, "COMMENTS=true")
+	time.Sleep(1100 * time.Millisecond)
+	g.s.l.PutComment(ctx, ledger.Comment{ID: mine, Body: "Raised it more."}, "ana@example.com")
+	g.f.with(func() {
+		g.f.noEdit = true
+		g.f.reword(g.f.issue(1), theirs, "Fine, but watch Fridays.")
+	})
+	out, err := g.run("COMMENTS=true")
+	if err != nil || !strings.Contains(out, "refused the edit of comment") || !strings.Contains(out, "took 1 edits from them, passed over 1 the tracker refused") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	cs, _ := g.s.l.Comments(ctx, "task", "1")
+	if !slices.ContainsFunc(cs, func(c ledger.Comment) bool { return c.Body == "Fine, but watch Fridays." }) {
+		t.Errorf("the tracker's edit wasn't taken: %+v", cs)
+	}
+}
+
 // Jira Data Center: with COMMENT_NAMES, who wrote a comment, as the
 // sign-in proxy names them, is in the block with the comment, so a name
 // holding wiki markup mentions no one and shows no image.
