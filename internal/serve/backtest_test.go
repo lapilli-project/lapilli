@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1637,20 +1638,72 @@ func TestPerKeyFullFailsClosed(t *testing.T) {
 	}
 }
 
-// A token whose repository's name isn't kept (past 200 bytes, or with
-// what doesn't show) supersedes nothing: two repositories one entry pins,
-// each named so, are both kept as "", and one's pull request 42 would
-// take the place of the other's.
+// A newer commit's backtest takes the place of the one waiting for its
+// repository by the repository's id, which its token says and the entry
+// pins. A repository whose name isn't kept (past 200 bytes, or with what
+// doesn't show) takes its own one's place, and two repositories one entry
+// pins, each named so and both kept as "", never each other's: one's pull
+// request 42 isn't the other's.
 func TestBacktestSupersedeUnnamed(t *testing.T) {
 	b := btServer(t, nil, "", nil)
 	long := "example/" + strings.Repeat("a", 210)
-	for i, c := range []struct{ id, name string }{{"111", long}, {"123456789", "example/" + "alerts​"}, {"123456789", long}} {
+	for i, c := range []struct {
+		id, name string
+		position float64
+	}{{"111", long, 0}, {"123456789", "example/" + "alerts​", 1}, {"123456789", long, 1}} {
 		tok := b.github(map[string]any{"jti": fmt.Sprint("u", i), "repository_id": c.id, "repository": c.name})
-		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 || m["position"] != float64(i) {
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 || m["position"] != c.position {
 			t.Fatalf("repository %s's pull request 42: %d %v", c.id, code, m)
 		}
 	}
-	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}]; n != 0 {
-		t.Errorf("%d superseded, by a repository whose name isn't kept", n)
+	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}]; n != 1 {
+		t.Errorf("%d superseded: the second repository's own, and not the first's", n)
+	}
+	bs, err := b.s.l.Backtests(context.Background(), 10)
+	if err != nil || len(bs) != 3 {
+		t.Fatalf("%d backtests: %v", len(bs), err)
+	}
+	for _, x := range bs {
+		if want := map[string]string{"111": ledger.BacktestWaiting}[x.RepositoryID]; x.Repository != "" || want != "" && x.State != want {
+			t.Errorf("kept: %+v", x)
+		}
+	}
+}
+
+// A repository renamed while a backtest of its pull request waits is
+// still itself: its newer commit takes that one's place. A repository of
+// the entry's that has its old name since doesn't: before ids were kept,
+// the name alone said which repository a backtest was of.
+func TestBacktestSupersedeRenamed(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	ask := func(jti, id, name string) (int, map[string]any) {
+		t.Helper()
+		tok := b.github(map[string]any{"jti": jti, "repository_id": id, "repository": name})
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil))
+		return code, m
+	}
+	superseded := func() int { return b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] }
+	if code, m := ask("r0", "123456789", "example/alerts"); code != 202 || m["position"] != float64(0) {
+		t.Fatalf("pull request 42: %d %v", code, m)
+	}
+	// Another repository the entry pins, under the name the first had.
+	if code, m := ask("r1", "111", "example/alerts"); code != 202 || m["position"] != float64(1) || superseded() != 0 {
+		t.Errorf("another repository of the first's name: %d %v, %d superseded", code, m, superseded())
+	}
+	// The first, renamed.
+	if code, m := ask("r2", "123456789", "example/monitoring"); code != 202 || m["position"] != float64(1) || superseded() != 1 {
+		t.Errorf("the first repository, renamed: %d %v, %d superseded", code, m, superseded())
+	}
+	bs, err := b.s.l.Backtests(context.Background(), 10)
+	if err != nil || len(bs) != 3 {
+		t.Fatalf("%d backtests: %v", len(bs), err)
+	}
+	got := map[string]string{}
+	for _, x := range bs {
+		got[x.RepositoryID+" "+x.Repository] = x.State
+	}
+	want := map[string]string{"123456789 example/alerts": ledger.BacktestSuperseded, "111 example/alerts": ledger.BacktestWaiting, "123456789 example/monitoring": ledger.BacktestWaiting}
+	if !maps.Equal(got, want) {
+		t.Errorf("kept %v, want %v", got, want)
 	}
 }

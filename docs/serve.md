@@ -957,9 +957,9 @@ request refused keeps its hour: what it cost to read and check is what
 `hourly` bounds. An entry has one body read at a time, two of all
 entries at once, each within 5 seconds of its headers. 20 wait at most
 (`--backtest-queue`), 3 of an entry, one of a pull request the token's
-`ref` names (a newer commit's takes the place of the one waiting, of a
-repository the token names by a name kept: one past 200 bytes, or with
-what doesn't show, takes none's, since 0.63.2; a number the job said takes
+`ref` names (a newer commit's takes the place of the one waiting for the
+same repository, by the repository's id as the token says it, since
+0.68.2: renamed meanwhile, it is still itself; a number the job said takes
 none's: GitLab's ID token names a merge request's
 source branch, not its number, and Bitbucket's no pull request, so their
 backtests don't take each other's place); past them, 429 with

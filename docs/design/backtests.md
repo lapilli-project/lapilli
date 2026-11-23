@@ -397,8 +397,9 @@ they need:
   its own when the API pushes back (HTTP 429), as each Limiter does.
 - **A queue.** 20 waiting at most (`--backtest-queue`), 3 of one entry, and
   one of a pull request: a newer commit's takes the place of the one
-  waiting, which is answered as superseded. Past them, 429 with
-  `Retry-After`.
+  waiting, which is answered as superseded (as built, the one of the same
+  entry, repository id and pull request: "As built (step 1)"). Past them,
+  429 with `Retry-After`.
 - **An hour.** An entry's `hourly`, 30 unless given, from a bucket every
   replica shares (`ledger.Take`, as the token ports' rates are shared,
   `shareLimits`).
@@ -440,7 +441,8 @@ credential in CI, and the job's log says where it is in the queue.
   merged; whichever pull request merges first takes a number). A row is
   a backtest asked: its id (random, so that ids don't count backtests), the
   trust entry, the repository as the token's claim names it (the entry's
-  name for a plain token), the pull request's number from GitHub's `ref`
+  name for a plain token) and, since 0.68.2, by its id as the token says
+  it (`repository_id`, schema 031), the pull request's number from GitHub's `ref`
   claim or as the job sent it, the commit sent, its state, when it was
   asked, started and ended, the requests it made, a hash of its key, the
   files and expectations sent (gzipped, 4 MiB at most) until it ends, and
@@ -905,12 +907,17 @@ Where step 1 does otherwise than the sections above say, or says more:
 - **A pull request superseded by its token's word alone.** Only a number
   the token names (GitHub's and Forgejo's `ref`) supersedes the backtest
   waiting for it; one the job said (GitLab, a plain token, a `push`)
-  supersedes none. Nor, since 0.63.2, does a token whose repository's name
-  isn't kept (past 200 bytes, or with what doesn't show: ""), as the
-  backtest waiting is matched by that name: two repositories an entry pins,
-  each named so, would be one. The repository's id would tell them apart,
-  but isn't kept (a column of its own is a schema change). The leader takes the oldest of the entry that started
-  one least lately. One started twice whose leader stopped each time
+  supersedes none. The backtest waiting is matched by the entry, the pull
+  request and the repository's id, which the token says and the entry
+  pins, kept on its row since 0.68.2 (`repository_id`, schema 031): a
+  repository renamed while one waits is still itself, and two an entry
+  pins never take each other's place, one under the other's old name or
+  both with no name kept. Before, it was matched by the repository's name,
+  and from 0.63.2 a name not kept (past 200 bytes, or with what doesn't
+  show: "") superseded none, as two repositories named so would be one. A
+  row with no id, asked before 0.68.2, is still matched by its name. The
+  leader takes the oldest of the entry that started one least lately. One
+  started twice whose leader stopped each time
   (`attempts`, in 023) fails, saying so; one that panics fails. What ended
   a day ago goes at each of the leader's rounds, the port on or not.
 - **Reads by the key.** Each process keeps the backtests' key hashes by

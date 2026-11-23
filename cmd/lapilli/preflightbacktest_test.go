@@ -128,7 +128,7 @@ func TestPreflightBacktests(t *testing.T) {
 	if iss := items["backtest.issuers"]["what"].(string); !strings.Contains(iss, "(alerts, alerts-push), 1 key for RS256") || !strings.Contains(iss, "(monitoring), 1 key for RS256") {
 		t.Errorf("backtest.issuers: %s", iss)
 	}
-	if !strings.Contains(items["ledger.sqlite"]["what"].(string), "schema 030, this release's") {
+	if !strings.Contains(items["ledger.sqlite"]["what"].(string), "schema 031, this release's") {
 		t.Errorf("%v", items["ledger.sqlite"])
 	}
 	if !strings.Contains(items["access"]["what"].(string), "--backtest-listen") || items["estimate.backtests"] == nil {

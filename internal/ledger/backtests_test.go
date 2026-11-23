@@ -157,7 +157,7 @@ func TestBacktestRoom(t *testing.T) {
 	defer l.Close()
 	room := func(trust, token string, pr int64, queue int, at time.Time) (bool, bool) {
 		t.Helper()
-		used, full, err := l.BacktestRoom(ctx, trust, token, "example/alerts", pr, queue, 3, at)
+		used, full, err := l.BacktestRoom(ctx, trust, token, "", "example/alerts", pr, queue, 3, at)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -390,7 +390,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
+		for _, q := range append(slices.Concat(undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -401,7 +401,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
+		for _, q := range append(slices.Concat(undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -506,5 +506,147 @@ func TestPruneBacktests(t *testing.T) {
 	}
 	if _, ok, _ := l.Backtest(ctx, "old"); ok {
 		t.Error("a backtest ended a day ago is kept")
+	}
+}
+
+// askOf is ask, of a repository by its id and its name.
+func askOf(id, repoID, repo string, pr int64) BacktestAsk {
+	a := ask(id, "alerts", pr, "t-"+id)
+	a.RepositoryID, a.Repository = repoID, repo
+	return a
+}
+
+// A newer commit's backtest takes the place of the one waiting for its
+// repository by the repository's id: one renamed since is still itself,
+// and two repositories an entry pins never take each other's place,
+// whatever they are named, one name after the other or none kept. A
+// backtest kept with no id, asked before ids were kept, is matched by its
+// repository's name, as it was.
+func TestBacktestSupersedeByID(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	asked := func(a BacktestAsk, want int, what string) {
+		t.Helper()
+		a.Queue, a.PerTrust = 50, 50
+		if _, _, sup, err := l.AskBacktest(ctx, a, t0); err != nil || sup != want {
+			t.Errorf("%s: %d superseded, want %d: %v", what, sup, want, err)
+		}
+	}
+	room := func(repoID, repo string, pr int64, perTrust int) bool {
+		t.Helper()
+		_, full, err := l.BacktestRoom(ctx, "alerts", "t-room", repoID, repo, pr, 50, perTrust, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+	waiting := func() int {
+		t.Helper()
+		by, err := l.BacktestsWaiting(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return by["alerts"]
+	}
+	// Two repositories of one entry, pull request 5 of each, the second
+	// under the first's name: renamed, and its name taken.
+	asked(askOf("a1", "111", "example/alerts", 5), 0, "the first")
+	asked(askOf("b1", "222", "example/alerts", 5), 0, "another repository of its name and pull request")
+	if room("222", "example/alerts", 5, 2) || !room("333", "example/alerts", 5, 2) {
+		t.Errorf("the room for a newer commit: its own one waiting would go, and no other's")
+	}
+	// The first, renamed, takes its own one's place, and not the other's.
+	asked(askOf("a2", "111", "example/monitoring", 5), 1, "the first repository, renamed")
+	if b, _, _ := l.Backtest(ctx, "a1"); b.State != BacktestSuperseded || b.RepositoryID != "111" {
+		t.Errorf("the renamed repository's older commit: %+v", b)
+	}
+	if b, _, _ := l.Backtest(ctx, "b1"); b.State != BacktestWaiting {
+		t.Errorf("the other repository's: %+v", b)
+	}
+	// Neither name kept: by their ids all the same.
+	asked(askOf("c1", "111", "", 6), 0, "a name not kept")
+	asked(askOf("d1", "222", "", 6), 0, "another repository's, its name not kept either")
+	asked(askOf("c2", "111", "", 6), 1, "the first's newer commit, its name not kept")
+	// One kept with no id, as before 031: by its name; not by a name of "".
+	asked(askOf("o1", "", "example/alerts", 7), 0, "one kept with no id")
+	asked(askOf("o2", "", "", 8), 0, "one kept with no id and no name")
+	asked(askOf("n2", "111", "", 8), 0, "a newer commit with no name, of one with no id")
+	asked(askOf("n3", "333", "example/other", 7), 0, "a newer commit of another name, of one with no id")
+	if !room("999", "example/other", 7, waiting()) || room("999", "example/alerts", 7, waiting()) {
+		t.Errorf("the room for a newer commit of one kept with no id: by its name")
+	}
+	asked(askOf("n1", "111", "example/alerts", 7), 1, "a newer commit, of one with no id, by its name")
+	// And one with an id isn't matched by its name alone.
+	asked(askOf("p1", "", "example/monitoring", 5), 0, "a token with no id, of the name of one kept with an id")
+}
+
+// A ledger at 030 with a backtest waiting, in SQLite or, with
+// LAPILLI_TEST_POSTGRES, in Postgres, migrates to 031 with it as it was,
+// its repository's id none: a newer commit takes its place by its
+// repository's name, and is kept with its id.
+func TestMigrate031(t *testing.T) {
+	ctx := context.Background()
+	where := place(t)
+	l, err := openAt(ctx, where, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := l.AskBacktest(ctx, askOf("old", "", "example/alerts", 7), t0); err != nil {
+		t.Fatal(err)
+	}
+	was, _, err := l.Backtest(ctx, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+
+	// Back to 030.
+	if strings.HasPrefix(where, "postgres") {
+		c, err := pgx.Connect(ctx, where)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range append(slices.Clone(undo031), "UPDATE schema_version SET version = 30") {
+			if _, err := c.Exec(ctx, q); err != nil {
+				t.Fatal(q, err)
+			}
+		}
+		c.Close(ctx)
+	} else {
+		l, err := Open(ctx, where, time.UTC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range append(slices.Clone(undo031), "PRAGMA user_version = 30") {
+			if _, err := l.w.ExecContext(ctx, q); err != nil {
+				t.Fatal(q, err)
+			}
+		}
+		l.Close()
+	}
+
+	l2, err := openAt(ctx, where, time.UTC)
+	if err != nil {
+		t.Fatalf("migrating to 031: %v", err)
+	}
+	defer l2.Close()
+	if b, _, err := l2.Backtest(ctx, "old"); err != nil || b != was || b.RepositoryID != "" || b.State != BacktestWaiting {
+		t.Errorf("after migrating: %+v, not %+v: %v", b, was, err)
+	}
+	// Another repository of the entry's doesn't take its place; its own
+	// newer commit does, by its name.
+	if _, _, sup, err := l2.AskBacktest(ctx, askOf("other", "222", "example/elsewhere", 7), t0); err != nil || sup != 0 {
+		t.Errorf("another repository's pull request 7: %d %v", sup, err)
+	}
+	b, _, sup, err := l2.AskBacktest(ctx, askOf("new", "111", "example/alerts", 7), t0)
+	if err != nil || sup != 1 || b.RepositoryID != "111" {
+		t.Errorf("its newer commit after migrating: %+v %d %v", b, sup, err)
+	}
+	if old, _, _ := l2.Backtest(ctx, "old"); old.State != BacktestSuperseded {
+		t.Errorf("the older commit: %+v", old)
 	}
 }

@@ -350,7 +350,7 @@ func TestEpisodesUpgradedOnce(t *testing.T) {
 	}
 	daysBefore, _ := l.DaysBy(ctx, 0, 1<<30)
 	// Taken back to 024, as the release before left it.
-	undo, version := slices.Concat(ledgertest.Undo030, ledgertest.Undo029, ledgertest.Undo028, ledgertest.Undo027, ledgertest.Undo026, ledgertest.Undo025), "PRAGMA user_version = 24"
+	undo, version := slices.Concat(ledgertest.Undo031, ledgertest.Undo030, ledgertest.Undo029, ledgertest.Undo028, ledgertest.Undo027, ledgertest.Undo026, ledgertest.Undo025), "PRAGMA user_version = 24"
 	if l.d == postgres {
 		version = "UPDATE schema_version SET version = 24"
 	}
