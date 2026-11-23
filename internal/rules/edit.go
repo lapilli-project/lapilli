@@ -29,6 +29,10 @@ type Edit struct {
 	// Namespace is a ruler's namespace, or an Azure rule group's resource
 	// group, for a rule read with --ruler.
 	Namespace string `json:",omitempty"`
+	// Tenant is the tenant a Mimir's, a Cortex's or a Loki's ruler was
+	// read in when the change was proposed (--ruler-tenant,
+	// --loki-tenant), "" for none: it is written in that tenant alone.
+	Tenant string `json:",omitempty"`
 	// For, when set, is the rule's new "for".
 	For *time.Duration
 	// From and To, when set, replace the one place From is written in the

@@ -134,7 +134,8 @@ repository credentials. Of particular interest:
   anything but alert rules, or write to anywhere but the Grafana or the
   ruler it reads from; to write in a ruler's namespace or rule group
   `--changes-in` doesn't name, or one tagged as another tool's; to write a
-  Loki rule's change to `--ruler`, or a Mimir rule's to Loki; to change,
+  Loki rule's change to `--ruler`, or a Mimir rule's to Loki, or either in
+  another tenant than it was proposed in; to change,
   in a unit it writes whole (a group, an Amazon namespace, an Azure rule
   group), any other rule than as the ruler held it just before; or to make
   a recipe push, or write a file, other than the one the proposal was made

@@ -738,6 +738,7 @@ func (s *Server) buildRuler(ctx context.Context, b *addBuilt) error {
 		return errNoPlace
 	}
 	b.edit.Namespace = b.place.Namespace
+	b.edit = tg.tenanted(b.edit) // written in the tenant it was read in
 	if why := tg.allowed("", b.edit); why != "" {
 		return errNoPlace
 	}

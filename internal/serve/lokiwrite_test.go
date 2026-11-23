@@ -263,3 +263,21 @@ func TestLokiTeamChangesIn(t *testing.T) {
 		t.Error("loki:shop within --changes-in shop,solo")
 	}
 }
+
+// As a Mimir's: a Loki rule's change is written in the tenant it was read
+// in (--loki-tenant) alone; serve restarted naming another refuses it.
+func TestLokiRulerTenantKept(t *testing.T) {
+	ctx := context.Background()
+	s, _, lk := lokiServer(t, []string{"loki:shop"}, nil)
+	h := s.Handler()
+	id := proposeRule(t, h, "LogErrors", "for", url.Values{"for": {"15m"}})
+	if ev := proposalEvidence(state(t, s, id)); ev.Edit == nil || ev.Edit.Tenant != lk.tenant {
+		t.Fatalf("the tenant it was read in isn't kept: %+v", ev.Edit)
+	}
+	approve(t, h, id, ana)
+	s.loki.Tenant = "other"
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "another tenant") || len(lk.written()) != 0 {
+		t.Fatalf("another tenant: %s %q, written %v", p.State, p.Reason, lk.written())
+	}
+}

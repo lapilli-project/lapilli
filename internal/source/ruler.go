@@ -1187,6 +1187,11 @@ func (r *Ruler) Owns(source, ns, group string) error {
 // as it was written: it is for a person to change.
 var ErrUnreadable = errors.New("the ruler gives the group in a form that can't be read back as written")
 
+// ErrOtherTenant is a proposal made in another tenant than the one its
+// ruler is asked in now: --ruler-tenant or --loki-tenant changed since,
+// or was set since a proposal that recorded none.
+var ErrOtherTenant = errors.New("the rule was read in another tenant (X-Scope-OrgID) than the one serve sends now: propose it again")
+
 // ErrElsewhere is a unit, or a proposal's source, that isn't --ruler's for
 // its namespace and group.
 var ErrElsewhere = errors.New("the rules were read from another ruler, or another namespace or group, than --ruler's: propose it again")
