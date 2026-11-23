@@ -1017,8 +1017,14 @@ func TestReplicasStuckLeaderGivesUp(t *testing.T) {
 			stuck := false
 			ls := &leads{}
 			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			go a.Elect(ctx, Elected{Version: "test", Stuck: func() bool { mu.Lock(); defer mu.Unlock(); return stuck }}, ls.lead(0, a))
+			// Elect is waited for, before fastLease puts back the timings
+			// it reads.
+			done := make(chan struct{})
+			defer func() { cancel(); <-done }()
+			go func() {
+				defer close(done)
+				a.Elect(ctx, Elected{Version: "test", Stuck: func() bool { mu.Lock(); defer mu.Unlock(); return stuck }}, ls.lead(0, a))
+			}()
 			within(t, 5*time.Second, "a leads", func() bool { return ls.current() == 0 })
 			elect(t, b, ls, 1)
 			switch how {

@@ -110,8 +110,11 @@ func TestReplicasSessionKeysRotate(t *testing.T) {
 		t.Skip("the ledgers are SQLite's")
 	}
 	ectx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go s.l.Elect(ectx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
+	// Each Elect is waited for, before the servers close and quickReplicas
+	// puts back the timings it reads.
+	var elected sync.WaitGroup
+	defer func() { cancel(); elected.Wait() }()
+	elected.Go(func() { s.l.Elect(ectx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() }) })
 	until(t, 5*time.Second, "the first lives", func() bool { return s.l.Replicas() == 1 })
 	newKey := filepath.Join(t.TempDir(), "key2")
 	os.WriteFile(newKey, []byte(strings.Repeat("z", 40)), 0o600)
@@ -121,8 +124,8 @@ func TestReplicasSessionKeysRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a replica with a newer key: %v", err)
 	}
-	defer b.Close()
-	go b.l.Elect(ectx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
+	t.Cleanup(func() { b.Close() })
+	elected.Go(func() { b.l.Elect(ectx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() }) })
 	until(t, 5*time.Second, "the replicas count two keys", func() bool { return s.l.SessionKeys() == 2 })
 	if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); !strings.Contains(body, "lapilli_serve_session_keys 2") {
 		t.Error("the metrics don't say two keys sign sessions")
