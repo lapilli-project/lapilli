@@ -52,6 +52,10 @@ func (p *run) changes(ctx context.Context) {
 				Why: "a Mimir's or a Cortex's can't say without writing"})
 		}
 	}
+	if s.Loki != "" && s.LokiLoaded && slices.ContainsFunc(s.ChangesIn, func(x string) bool { return strings.HasPrefix(x, "loki:") }) {
+		p.add(Item{ID: "changes.loki", State: Unknown, What: "whether Loki's ruler takes writes isn't known",
+			Why: "Loki's ruler can't say without writing, and one whose rules are local files (ruler.storage.type: local) takes none"})
+	}
 	endpoint := func(kind string) string {
 		if k, _ := source.RulerKind(s.Ruler); s.Ruler != "" && (kind == "aws" && k == source.RulerAmazon || kind == "azure" && k == source.RulerAzure) {
 			return s.Ruler
