@@ -231,3 +231,55 @@ As above, with these settled in the building:
   written. A task's title and text reach the tracker as written in
   Lapilli, mentions included: the tracker renders them as it renders its
   own, and nothing in them is taken for a marker.
+
+## YouTrack and Jira Data Center (0.70)
+
+Two more recipes, alike with the others, each tested against a stand-in
+for the API its documentation gives (recipes/trackers/README.md names the
+pages); neither is checked against a real account yet.
+
+- **`youtrack.sh`**: issues in one project (`YOUTRACK_PROJECT`, the ID its
+  issues' IDs start with), REST `/api`, a permanent token as a Bearer
+  token. YouTrack answers only the attributes `fields=` names, so every
+  request names them. The project's database id, which an issue is made
+  in, is looked up among the projects the token reads, a thousand at most.
+  An issue's text ends with the marker line, as GitHub's does, since
+  YouTrack's tags are made and shared beforehand and given by id; it is
+  found again by search (`project: {OPS} reporter: me "lapilli-task-ID"`)
+  and taken for the job's by its reporter, which YouTrack doesn't let be
+  changed, its project and its last line. An issue resolved closes its
+  task, by when it was (`resolved`): `dropped` when its state is
+  `YOUTRACK_DROPPED` or reads as not to be done, `done` otherwise.
+  `CLOSE_ISSUES` sets the state field as a custom field is set
+  (`StateIssueCustomField`), not by a command: a command is a language of
+  its own, and the field's value goes in it as text. A field a
+  state-machine workflow keeps is moved by its transitions alone, which
+  the recipe doesn't name: YouTrack refuses the update, the run says so,
+  and the issue stays open. Comments
+  limited to some groups or users aren't copied.
+- **`jira-dc.sh`**: Jira Data Center and Server, as `jira.sh` is Jira
+  Cloud: REST API v2, a personal access token as a Bearer token (8.14 and
+  later), the same labels and JQL, `/rest/api/2/search`, transitions into
+  the done category. Users are by `key`, which a rename doesn't change.
+  Text is wiki markup, not Atlassian Document Format, and wiki markup has
+  no escape that holds everywhere: the task's text and its names go in a
+  `{noformat}` block, and a posted comment is quoted in one, so a PromQL
+  selector's braces aren't a macro, `[~name]` mentions no one and `!URL!`
+  shows no image. Only `{noformat}` ends the block, and one in the text is
+  broken by a zero-width space. The link back and the marker line are
+  told from the end of what `issue_text` writes, so no line of a task's
+  text is taken for them and moved out of the block. A Jira that doesn't
+  give `statuscategorychangedate` is read by `resolutiondate`, as Cloud's.
+
+Both wait out a 429, and a 503 on a read, as long as `Retry-After` says, as
+every recipe does (`fetch` in `lib.sh`). The chart's `serve.trackers.tracker`
+takes `youtrack` and `jira-dc`; Jira Data Center's settings are named
+`JIRA_*`, as Cloud's are, without `JIRA_EMAIL`.
+
+What an attacker could newly reach: nothing past what the other recipes
+reach. Each token goes to the configured address alone; an issue's
+reference is taken out of a link only when it starts with the configured
+address and is `PROJECT-N`; a project's id, a comment's id and every time
+are checked before they are used or sent on; the project lookup and the
+comments are paged within bounds. The names a rule's source chooses can't
+mention, link or show an image in either tracker.

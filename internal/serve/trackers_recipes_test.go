@@ -921,7 +921,7 @@ func trackerEnv() []string {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(name, "LAPILLI_") || strings.HasPrefix(name, "GITHUB_") || strings.HasPrefix(name, "GITLAB_") ||
-			strings.HasPrefix(name, "JIRA_") || strings.HasPrefix(name, "LINEAR_") || strings.HasPrefix(name, "AZURE_") || strings.HasPrefix(name, "SHORTCUT_") ||
+			strings.HasPrefix(name, "JIRA_") || strings.HasPrefix(name, "LINEAR_") || strings.HasPrefix(name, "AZURE_") || strings.HasPrefix(name, "SHORTCUT_") || strings.HasPrefix(name, "YOUTRACK_") ||
 			slices.Contains([]string{"CLOSE_ISSUES", "MAX_ISSUES", "MAX_PAGES", "SYNC_DAYS", "COMMENTS", "MAX_COMMENTS"}, name) {
 			continue
 		}
@@ -1487,6 +1487,9 @@ func TestTrackerRecipeSettings(t *testing.T) {
 		{"gitlab.sh", []string{"GITLAB_PROJECT=example/a b", "GITLAB_TOKEN_FILE=" + secret}, "GITLAB_PROJECT is a project path"},
 		{"jira.sh", []string{"JIRA_URL=http://127.0.0.1:1", "JIRA_EMAIL=a@example.com", "JIRA_TOKEN_FILE=" + secret, "JIRA_PROJECT=ops\" OR 1=1"}, "JIRA_PROJECT is a project key"},
 		{"linear.sh", []string{"LINEAR_TEAM=ENG", "LINEAR_TOKEN_FILE=" + secret}, "LINEAR_TEAM is a team id"},
+		{"youtrack.sh", []string{"YOUTRACK_URL=http://127.0.0.1:1", "YOUTRACK_TOKEN_FILE=" + secret, "YOUTRACK_PROJECT=OPS} or {x"}, "YOUTRACK_PROJECT is a project's ID"},
+		{"youtrack.sh", []string{"YOUTRACK_URL=http://127.0.0.1:1", "YOUTRACK_TOKEN_FILE=" + secret, "YOUTRACK_PROJECT=OPS", "YOUTRACK_DONE=Fixed} tag {x"}, "a state field or state is a name"},
+		{"jira-dc.sh", []string{"JIRA_URL=http://127.0.0.1:1", "JIRA_TOKEN_FILE=" + secret, "JIRA_PROJECT=ops\" OR 1=1"}, "JIRA_PROJECT is a project key"},
 	} {
 		cmd := exec.Command("sh", trackerRecipes+c.script)
 		cmd.Env = append(append(trackerEnv(), lapilli...), c.env...)
@@ -1540,7 +1543,7 @@ func TestTrackerRecipeDistrustsLapilli(t *testing.T) {
 // The chart runs the recipes from its own copies: they must be the same.
 func TestTrackerRecipesInChart(t *testing.T) {
 	for _, name := range []string{"lib.sh", "github.sh", "github.jq", "gitlab.sh", "gitlab.jq", "jira.sh", "jira.jq", "linear.sh", "linear.jq",
-		"azure-boards.sh", "azure-boards.jq", "shortcut.sh", "shortcut.jq"} {
+		"azure-boards.sh", "azure-boards.jq", "shortcut.sh", "shortcut.jq", "youtrack.sh", "youtrack.jq", "jira-dc.sh", "jira-dc.jq"} {
 		a, err := os.ReadFile(trackerRecipes + name)
 		if err != nil {
 			t.Fatal(err)

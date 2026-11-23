@@ -4,9 +4,9 @@ minutes, with the tasks token on the incidents port. */ -}}
 {{- $s := .Values.serve }}
 {{- $t := $s.trackers }}
 {{- if and (eq .Values.mode "serve") $t.tokenSecret.name $t.tracker }}
-{{- $names := dict "github" "GITHUB" "gitlab" "GITLAB" "jira" "JIRA" "linear" "LINEAR" "azure-boards" "AZURE_DEVOPS" "shortcut" "SHORTCUT" }}
+{{- $names := dict "github" "GITHUB" "gitlab" "GITLAB" "jira" "JIRA" "linear" "LINEAR" "azure-boards" "AZURE_DEVOPS" "shortcut" "SHORTCUT" "youtrack" "YOUTRACK" "jira-dc" "JIRA" }}
 {{- if not (hasKey $names $t.tracker) }}
-{{- fail "serve.trackers.tracker: github, gitlab, jira, linear, azure-boards or shortcut" }}
+{{- fail "serve.trackers.tracker: github, gitlab, jira, linear, azure-boards, shortcut, youtrack or jira-dc" }}
 {{- end }}
 {{- $prefix := get $names $t.tracker }}
 {{- if not $t.trackerTokenSecret.name }}

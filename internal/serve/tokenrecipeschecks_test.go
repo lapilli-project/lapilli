@@ -181,6 +181,10 @@ func trackerTokenRecipes() []trackerRecipe {
 			"Authorization", basic(""), true, "Ab12Cd34Ef56Gh78Ij90"},
 		{"shortcut.sh", "SHORTCUT_API", "SHORTCUT_TOKEN_FILE", "", []string{"SHORTCUT_STATE=500000001"}, "Shortcut-Token", plain, false,
 			"0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9"},
+		{"youtrack.sh", "YOUTRACK_URL", "YOUTRACK_TOKEN_FILE", "", []string{"YOUTRACK_PROJECT=OPS"}, "Authorization",
+			func(t string) string { return "Bearer " + t }, true, "perm:YW5h.NDMtMQ==.Ab12Cd34Ef56"},
+		{"jira-dc.sh", "JIRA_URL", "JIRA_TOKEN_FILE", "", []string{"JIRA_PROJECT=OPS"}, "Authorization",
+			func(t string) string { return "Bearer " + t }, false, "MDk4NzY1NDMyMTpBYjEy+Q/z"},
 	}
 }
 

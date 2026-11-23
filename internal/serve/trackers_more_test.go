@@ -743,7 +743,7 @@ func TestTrackerRecipesCommentsPosted(t *testing.T) {
 				t.Errorf("posted again though Lapilli knows it was")
 			}
 			// More comments than are read: nothing is posted.
-			if name == "github" || name == "gitlab" || name == "jira" {
+			if name == "github" || name == "gitlab" || name == "jira" || name == "jira-dc" || name == "youtrack" {
 				if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Another."}, "ana@example.com"); err != nil {
 					t.Fatal(err)
 				}
@@ -767,7 +767,7 @@ func TestTrackerRecipesCommentsPosted(t *testing.T) {
 // reads the task would read them.
 func TestTrackerRecipesCommentsRestricted(t *testing.T) {
 	needTools(t)
-	for _, name := range []string{"jira", "gitlab"} {
+	for _, name := range []string{"jira", "gitlab", "jira-dc", "youtrack"} {
 		t.Run(name, func(t *testing.T) {
 			g := newTrackerRig(t, name)
 			g.mustRun(t)

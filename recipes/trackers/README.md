@@ -3,8 +3,8 @@
 A task in Lapilli (tune a rule, write one, retire one, decide about an
 incident) says who does what by when; the work itself is tracked where the
 team tracks the rest. These scripts keep the two in step, one for each of
-GitHub, GitLab, Jira, Linear, Azure Boards and Shortcut, alike. Run one
-every few minutes. Each run:
+GitHub, GitLab, Jira (Cloud, and Data Center or Server), Linear, Azure
+Boards, Shortcut and YouTrack, alike. Run one every few minutes. Each run:
 
 1. makes an issue for each open task without one (`open` or `doing`), with
    the task's title, text, rule or incident, team, assignee, due date and a
@@ -15,7 +15,8 @@ every few minutes. Each run:
    - an issue closed since the task's status was set closes the task:
      `done`, or `dropped` when the issue was closed as not to be done
      (GitHub's "not planned", Jira's "Won't Do" and the like, Linear's
-     canceled; GitLab closes one way, so `done`);
+     canceled, YouTrack's "Won't fix", "Duplicate" or "Obsolete"; GitLab
+     closes one way, so `done`);
    - a task the job closed because its issue was is opened again when the
      issue is;
    - with `CLOSE_ISSUES=true`, an issue whose task someone closed in
@@ -54,6 +55,8 @@ GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
 | `linear.sh` | `LINEAR_TEAM` (its id), `LINEAR_TOKEN_FILE`                                        | read and write the team's issues |
 | `azure-boards.sh` | `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TOKEN_FILE`; `AZURE_DEVOPS_URL` for Azure DevOps Server; `AZURE_BOARDS_TYPE` (Task), `AZURE_BOARDS_DONE` (Done), `AZURE_BOARDS_REMOVED` (Removed) | a personal access token with Work Items (read and write) |
 | `shortcut.sh` | `SHORTCUT_TOKEN_FILE`, `SHORTCUT_STATE` (the workflow state stories are made in, by id); `SHORTCUT_DONE_STATE` | an API token: read and write the workspace's stories |
+| `youtrack.sh` | `YOUTRACK_URL`, `YOUTRACK_TOKEN_FILE`, `YOUTRACK_PROJECT` (its ID, as `OPS-12` starts); `YOUTRACK_STATE_FIELD` (State), `YOUTRACK_DONE` (Fixed), `YOUTRACK_DROPPED` (Won't fix) | a permanent token of a user who may read the project, and create, update and comment on its issues |
+| `jira-dc.sh` | `JIRA_URL`, `JIRA_TOKEN_FILE`, `JIRA_PROJECT`; `JIRA_ISSUE_TYPE` (Task) | a personal access token (Jira 8.14 or later): browse, create, transition |
 
 A GitHub App's installation token, and Actions' `GITHUB_TOKEN`, can't ask
 `GET /user` who they are: set `GITHUB_LOGIN` to the account the token
@@ -61,7 +64,7 @@ writes issues as, `NAME[bot]` (Actions: `github-actions[bot]`); its issues
 are then searched for as `author:app/NAME`. A personal access token,
 classic or fine-grained, needs none. GitLab's, Jira's and Linear's tokens
 say who they are (GitLab's project and group access tokens as their bot
-users), so need nothing more.
+users), so need nothing more; so do YouTrack's and Jira Data Center's.
 
 Azure Boards keeps a work item's description as HTML, so its marker is the
 tag `lapilli-task-ID`, as Jira's is a label, and a team's tag is
@@ -75,6 +78,35 @@ is archived. A story is taken for the job's by the member who asked for it
 workspace can change who asked for a story, so in Shortcut, unlike the
 others, someone who can edit a story can make it look like the job's.
 
+A YouTrack issue ends with the marker line, as GitHub's does, and is taken
+for the job's by its reporter (the token's user, which YouTrack doesn't let
+be changed) and its project; it is found again by search (`project: {OPS}
+reporter: me "lapilli-task-ID"`). One resolved (YouTrack's `resolved`, the
+time it was) closes its task: `dropped` when its state is
+`YOUTRACK_DROPPED` or says so (Won't fix, Duplicate, Obsolete, Incomplete,
+Can't reproduce), `done` otherwise. `CLOSE_ISSUES` sets the state field
+(`YOUTRACK_STATE_FIELD`) to `YOUTRACK_DONE` or `YOUTRACK_DROPPED`, as an
+issue's custom field is set (`POST /api/issues/ID`); a field a
+state-machine workflow keeps moves by its transitions alone and refuses
+that, so close those issues in YouTrack. The project's database id, which
+an issue is made in, is looked up among the projects the token reads
+(`GET /api/admin/projects`, a thousand at most). A comment whose visibility
+is limited to some groups or users isn't copied.
+
+Jira Data Center (and Server) is as Jira Cloud, by REST API v2, with a
+personal access token as a Bearer token (Jira 8.14 and later), users by
+their key, and text in wiki markup rather than Atlassian Document Format:
+the task's text and its names go in a `{noformat}` block, so a PromQL
+selector's braces aren't taken for a macro and `[~name]` mentions no one,
+and a comment posted from Lapilli is quoted in one, between who wrote it
+and its marker; a `{noformat}` in either is broken by a zero-width space,
+so it can't end the block. A project whose fields use the plain text
+renderer shows the `{noformat}` lines as they are. A Jira Data Center that
+doesn't give `statuscategorychangedate` is read by `resolutiondate`, as
+Cloud's can be (below). Its account's key is `JIRAUSER` and a number for
+an account made since Jira 8.4, or its user name before; one with a
+character other than letters, digits and `. _ : -` isn't taken.
+
 And for each: `LAPILLI_URL` (or the first argument), `LAPILLI_TOKEN_FILE`,
 `CLOSE_ISSUES` (`false`), `COMMENTS` (`false`, below), `MAX_COMMENTS` (200), `MAX_ISSUES` made in a run (50; the rest wait for
 the next), `MAX_PAGES` of 200 tasks (20) and `SYNC_DAYS`, how long after
@@ -85,20 +117,21 @@ through; `MAX_PAGES` bounds the open tasks and those closed lately, each.
 
 Each token goes where its address points, and `curl` is given that
 address's scheme alone. The tracker's API (`GITHUB_API`, `GITLAB_URL`,
-`JIRA_URL`, `LINEAR_API`, `AZURE_DEVOPS_URL`, `SHORTCUT_API`, where given)
+`JIRA_URL`, `LINEAR_API`, `AZURE_DEVOPS_URL`, `SHORTCUT_API`, `YOUTRACK_URL`, where given)
 is `https://`, on whatever port and path, or this machine's over `http://`
 for tests (`127.0.0.1`, `[::1]` or `localhost`); or, with `PLAIN_HTTP=true`
-(default `false`), `http://` to any host, for a self-managed GitLab, Jira or
-Azure DevOps Server reached over plain http inside a cluster, its token read
+(default `false`), `http://` to any host, for a self-managed GitLab, Jira,
+YouTrack or Azure DevOps Server reached over plain http inside a cluster, its token read
 by whatever is on the way; `LAPILLI_URL` is `http://`
 or `https://`, as serve's port is reached inside its cluster, where plain
 http should stay. One with a user or token before `@` is refused, and
 neither an address nor a token is said. A token file holds the token
 alone, on one line, with what an editor leaves after it (spaces, a
-carriage return) dropped: GitHub's, GitLab's and Shortcut's of the
-characters a Bearer token is written in (letters, digits and `- . _ ~ + /
-=`); Lapilli's, Jira's, Azure DevOps' and Linear's of any but a tab or
-another control character. An answer, Lapilli's or the tracker's, is 16 MiB
+carriage return) dropped: GitHub's, GitLab's, Shortcut's and Jira Data
+Center's of the characters a Bearer token is written in (letters, digits and
+`- . _ ~ + / =`); Lapilli's, Jira Cloud's, Azure DevOps', Linear's and
+YouTrack's (`perm:` and what follows) of any but a tab or another control
+character. An answer, Lapilli's or the tracker's, is 16 MiB
 at most, whatever `curl`'s version: the scripts cut what `curl` writes, as
 before 8.4 `--max-filesize` holds to that bound only an answer that says its
 length. Past it, the task is skipped, or the run stops, as with any answer
@@ -120,7 +153,8 @@ issue or the comment by its marker rather than making it twice.
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
 name, Jira's as `lapilli-team-NAME`; Linear takes them by id, so add
-`labelIds` there), the issue type. They are made to fit: a Jira summary is
+`labelIds` there, and YouTrack's tags are made and shared beforehand and
+given by id, so add `tags` there), the issue type. They are made to fit: a Jira summary is
 one line, a GitHub label 50 characters at most.
 Change it there. The text ends with `Kept in step with Lapilli:
 lapilli-task-ID` (Jira: the label `lapilli-task-ID`): that is how an issue
@@ -159,7 +193,8 @@ repository, to everyone. Turn it on only where that is meant.
 - a comment on the issue that the token's account didn't write, that
   isn't the tracker's own (GitLab's system notes, Azure Boards' deleted
   comments, Shortcut's), and that everyone who reads the issue may read
-  (not Jira's restricted to a role or group, nor GitLab's internal notes),
+  (not Jira's restricted to a role or group, nor GitLab's internal notes,
+  nor YouTrack's limited to some groups or users),
   is copied to the task once, as the tracker's: who wrote it as the
   tracker names them, when, and its text. It shows on the task's page as
   written "in the tracker", and no one can change it there. One with no
@@ -178,7 +213,8 @@ rest go the next. A comment changes when an issue last changed, not when
 its state did: a task follows its issue's state by the time the tracker
 says the state changed (GitHub's and GitLab's `closed_at`, Jira's
 `statuscategorychangedate`, Linear's `completedAt` and `canceledAt`, Azure
-Boards' `StateChangeDate`, Shortcut's `completed_at`, and for a story
+Boards' `StateChangeDate`, Shortcut's `completed_at`, YouTrack's
+`resolved`, and for a story
 archived, when its history says it was), so a comment on a closed issue,
 the job's own among them, doesn't close a task reopened in Lapilli. A Jira
 that doesn't give `statuscategorychangedate` is read by `resolutiondate`;
@@ -225,7 +261,8 @@ rate (5 a second, bursts of 100) and its own turn.
   one someone else wrote, one whose text merely names the marker, or one
   linked by hand, is neither taken, followed nor closed. The account is
   asked of the tracker once a run (GitHub's and GitLab's `/user`, Jira's
-  `/myself`, Linear's `viewer`), or given (`GITHUB_LOGIN`).
+  `/myself`, Linear's `viewer`, YouTrack's `/users/me`), or given
+  (`GITHUB_LOGIN`).
 - A URL from the tracker is followed only as the issue's own: the
   reference (a number, a key) is taken out of a link that starts with the
   tracker's own address and checked, and the request is built from the
@@ -245,6 +282,29 @@ rate (5 a second, bursts of 100) and its own turn.
 
 Each is tested against a stand-in for the tracker's documented API and
 Lapilli's own port: `go test ./internal/serve -run TestTrackerRecipe`.
+None is yet checked against a real account. YouTrack's and Jira Data
+Center's follow:
+
+- YouTrack's REST API: issues, an issue, its comments, `users/me`, the
+  projects, and the search's attributes:
+  https://www.jetbrains.com/help/youtrack/devportal/resource-api-issues.html,
+  https://www.jetbrains.com/help/youtrack/devportal/operations-api-issues.html,
+  https://www.jetbrains.com/help/youtrack/devportal/resource-api-issues-issueID-comments.html,
+  https://www.jetbrains.com/help/youtrack/devportal/operations-api-issues-issueID-comments.html,
+  https://www.jetbrains.com/help/youtrack/devportal/resource-api-users-me.html,
+  https://www.jetbrains.com/help/youtrack/devportal/resource-api-admin-projects.html,
+  https://www.jetbrains.com/help/youtrack/devportal/api-howto-create-issue-with-fields.html,
+  https://www.jetbrains.com/help/youtrack/devportal/api-entity-StateMachineIssueCustomField.html,
+  https://www.jetbrains.com/help/youtrack/cloud/search-and-command-attributes.html;
+  its permanent token, as a Bearer token:
+  https://www.jetbrains.com/help/youtrack/devportal/authentication-with-permanent-token.html
+- Jira Data Center's REST API v2 (9.12): `myself`, `search`, `issue`, its
+  comments and transitions, `project`:
+  https://docs.atlassian.com/software/jira/docs/api/REST/9.12.0/; its
+  personal access tokens:
+  https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html;
+  its rate limits, which answer 429 with `Retry-After`:
+  https://confluence.atlassian.com/adminjiraserver/improving-instance-stability-with-rate-limiting-983794911.html
 
 ## In the chart
 
