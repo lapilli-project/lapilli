@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.69.1] - 2026-11-23
+
+The bar's team and period taken as they are picked, the sidebar's groups
+told apart from their pages, and not known's sign in a ring. No schema
+change: the ledger stays at 029.
+
 ### Changed
 
 - **A team or a period picked in the bar is shown at once**: each is a
