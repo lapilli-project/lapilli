@@ -11,8 +11,9 @@ way.
 The pages of `lapilli serve`: the overview, the rules, incidents,
 proposals, settings and the rest. `lapilli verdict` prints text, or
 `--json`, `--csv` and `--metrics` for other tools, and with `--compare`,
-`--markdown` for a pull request. And [lapilli.dev](https://lapilli.dev), its
-front page and the docs, checked as below.
+`--markdown` for a pull request; `lapilli demo` prints text or `--json`.
+And [lapilli.dev](https://lapilli.dev), its front page, in English,
+Spanish, Japanese and Korean, and the docs, in English, checked as below.
 
 ## What the pages aim for
 
@@ -20,8 +21,10 @@ front page and the docs, checked as below.
 pages are built and checked against, not a claim that they conform: no one
 who uses a screen reader day to day has reviewed them yet.
 
-- No script and no animation: every page is HTML and CSS, and works
-  without JavaScript.
+- No animation, and no script in serve's pages: every one is HTML and CSS.
+  lapilli.dev has one small script, a Copy button on each shell command and
+  its menus closed on Escape or a click outside; every page works without
+  it.
 - A skip link to the main content, landmarks, one h1, headings in order,
   and a name for every control.
 - Every chart's numbers are in text too: in a table below it, or for a
@@ -52,7 +55,8 @@ who uses a screen reader day to day has reviewed them yet.
   every page its sitemap lists, with the same rules, light and dark, and
   checks for sideways scrolling at 320px. Its first run, on 2026-11-19,
   found code blocks and tables that scroll sideways and couldn't be reached
-  by the keyboard; each now takes the focus.
+  by the keyboard; each now takes the focus. On `main` the site is deployed
+  without waiting for it.
 
 [docs/design/access.md](docs/design/access.md) says what the first review
 found, and what it fixed.

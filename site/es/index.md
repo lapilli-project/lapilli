@@ -165,9 +165,9 @@ lee; no escribe nada.
 </div>
 
 El registro es un solo archivo SQLite, o una base de datos Postgres que comparten
-varias réplicas, una de ellas como líder. En SQLite, con más de dos millones de
-disparos, una ejecución horaria tarda 0,18 s y doce semanas por regla, 2 ms, y estos
-presupuestos forman parte de los tests. `/metrics` entrega las piedras a Prometheus,
+varias réplicas, una de ellas como líder. Los tests limitan una ejecución horaria
+sobre doce semanas de 200.000 disparos a dos segundos, y cada página a unas pocas
+consultas por regla, nunca una por disparo. `/metrics` entrega las piedras a Prometheus,
 y el chart de Helm, un dashboard de Grafana con ellas. La UI no ejecuta scripts.
 
 ## Cómo juzga {#how-it-judges}

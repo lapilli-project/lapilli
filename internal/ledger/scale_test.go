@@ -38,7 +38,7 @@ func init() {
 // backfill and hourly runs would, and holds what a person waits on to a
 // budget: an hourly run, writing an incident, reading twelve weeks, a
 // week's report. LAPILLI_SCALE multiplies the firings (default 1: about
-// 100,000); budgets are generous, for a slow CI runner.
+// 200,000); budgets are generous, for a slow CI runner.
 func TestScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")

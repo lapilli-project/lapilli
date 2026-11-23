@@ -419,10 +419,11 @@ The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
 (`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what
 reading one does, and a change gives stones again only to the firings near
-it. Measured with two million firings (a thousand an hour for twelve
-weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
-rule 2 ms, judging everything again after a change to the settings 15 s;
-the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
+it. The tests hold it to budgets over twelve weeks of 200,000 firings: an
+hourly run within two seconds, and each page to a few statements a rule,
+never one a firing.
+`LAPILLI_SCALE=10 go test ./internal/ledger ./internal/serve -run Scale -v`
+measures it with two million, on your own machine.
 
 It isn't only to look at. Teams own rules (by a note, a name pattern, or
 labels, in that order: a team that owns by labels can't take a rule another

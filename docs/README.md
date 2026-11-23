@@ -9,8 +9,9 @@ Lapilli is, and how to install it.
 
 ## Start here
 
-- [Getting started](getting-started.md): install it, write down an incident
-  or two, and read a first report on your own alerts; then keep judging with
+- [Getting started](getting-started.md): a first report on sample data
+  with `lapilli demo`; then install it, write down an incident or two, and
+  read a first report on your own alerts; then keep judging with
   `lapilli serve`
 - [Words](glossary.md): stones, firings, incidents, the ledger, and the
   rest of the words these pages use
@@ -40,14 +41,16 @@ Lapilli is, and how to install it.
 - [Before a change is merged](compare.md): `--compare`, the rules proposed
   beside the rules in place, and what a rule is expected to do (`--expect`)
 - [Pull request backtests in CI](pr-backtests.md): the backtest as a comment
-  on each pull request that changes alert rules
+  on each pull request that changes alert rules, and a commit status that
+  can stop the merge
 
 ## Incidents
 
 - [Incidents kept elsewhere](incidents.md): the incident log copied from
-  where it is kept
+  where it is kept, and the alerts its tool linked to each
 - [Incidents nobody wrote down](impact.md): `--impact`, incidents found in a
-  signal of user impact
+  signal of user impact, and `lapilli impact suggest`, which says which
+  signal your history has
 
 ## Reports
 
@@ -62,7 +65,7 @@ Lapilli is, and how to install it.
   goals; checking it before it is deployed, the ledger in Postgres, several
   replicas, firings recorded elsewhere, tasks kept in step with a tracker
 - [Notifications as they were sent](notifications.md): the notifications
-  kept beside the firings
+  kept beside the firings, and why a firing paged no one
 - [Changing rules](changing-rules.md): proposals, approval, and the change
   made where the rule is kept
 - [Ask it from an agent](mcp.md): MCP at `/mcp`
@@ -70,7 +73,7 @@ Lapilli is, and how to install it.
 ## Reference
 
 - [Commands](commands.md): every option of `lapilli verdict`, `serve`,
-  `preflight`, `ledger` and `impact`, as `-h` prints it
+  `preflight`, `ledger`, `impact` and `demo`, as `-h` prints it
 - [The HTTP API](api.md): every endpoint `lapilli serve` answers on, and the
   role each needs
 - [Metrics](metrics.md): every metric `lapilli serve` exposes at `/metrics`

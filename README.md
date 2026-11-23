@@ -12,8 +12,9 @@ week and you know whether it earns its place; an incident with no stone is one
 your alerts missed. `lapilli serve` keeps judging, every hour, in a ledger with
 a dashboard, where teams follow the noisy rules and missed incidents up
 ([Keep judging](docs/serve.md)). It reads by default; turned on, it also makes the
-changes it proposes, each once a person has approved it, as a pull request
-to where the rule is kept ([Changing rules](docs/changing-rules.md)).
+changes it proposes, each once a person has approved it: as a pull request
+to where the rule is kept, or, for a rule kept nowhere else, through the API
+that holds it ([Changing rules](docs/changing-rules.md)).
 
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -137,14 +138,16 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
   [Metrics](docs/metrics.md), [Upgrading](docs/upgrading.md)
 - [When something goes wrong](docs/troubleshooting.md),
   [What it doesn't do yet](docs/limits.md)
+- The Helm chart: [charts/lapilli](charts/lapilli/README.md); scripts for
+  incidents, firings, tasks and CI: [recipes](recipes)
 
 ## Help build it
 
 Lapilli has one maintainer and is looking for more, from more than one
 organisation. [ROADMAP.md](ROADMAP.md) lists what it doesn't do yet, area by
 area, with where each lives in the code. Several areas need what the current
-maintainer doesn't have: an AWS or Azure workspace, Loki alerts, an incident
-tool. To start small, an issue labelled
+maintainer doesn't have: an AWS or Azure account with a managed Prometheus,
+Loki alerts in real use, an incident tool. To start small, an issue labelled
 [good first issue](https://github.com/lapilli-project/lapilli/labels/good%20first%20issue) says where its change goes
 and when it's done; one labelled
 [help wanted](https://github.com/lapilli-project/lapilli/labels/help%20wanted) needs an account or a language
@@ -158,23 +161,31 @@ Questions, ideas and what Lapilli found in your alerts go to
 [Discussions](https://github.com/lapilli-project/lapilli/discussions): Q&A
 for how to point it at your rules or read a verdict, Ideas for what it
 should judge or read next, Show and tell for a report, which `--redact`
-makes safe to show. A replay that differs, or anything else wrong, is an
+makes safe to show. A replay that differs, a barrier to access, or anything
+else wrong, is an
 [issue](https://github.com/lapilli-project/lapilli/issues/new/choose), with
-a form for each; a vulnerability is reported privately (SECURITY.md).
+a form for each; a vulnerability is reported privately
+([SECURITY.md](SECURITY.md)).
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Install
 
 ```sh
 go install lapilli.dev/cmd/lapilli@latest
+lapilli demo    # a first report on sample data, with nothing to connect
 ```
 
-or take a binary from the [releases](https://github.com/lapilli-project/lapilli/releases),
-or the image `ghcr.io/lapilli-project/lapilli`. Each release's provenance is
+with Go 1.26.11 or later, as `go.mod` says; or take a binary (Linux and
+macOS, amd64 and arm64) from the
+[releases](https://github.com/lapilli-project/lapilli/releases), the image
+`ghcr.io/lapilli-project/lapilli`, or the Helm chart
+`oci://ghcr.io/lapilli-project/charts/lapilli`
+([charts/lapilli](charts/lapilli/README.md)). Each release's provenance is
 attested, and, from v0.28.0 on, kept beside it as
 `lapilli-vX.Y.Z.intoto.jsonl`, the seventh of its assets beside the four
-archives, the chart and `SHA256SUMS`; SECURITY.md says how to check it,
-offline too.
+archives, the chart and `SHA256SUMS`;
+[SECURITY.md](SECURITY.md#checking-a-release) says how to check it, offline
+too.
 
 ## License
 
