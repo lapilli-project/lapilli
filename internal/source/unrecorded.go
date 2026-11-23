@@ -45,9 +45,9 @@ type UnrecordedFrom interface {
 // (rules.Rule.EventWindow), each firing is an event the condition counted:
 // all happened. A Grafana rule's firing on no data (noData) is none: with
 // one among them, or more than are read to tell, that isn't said. Of
-// another with one bound that decides it (deciding), it is replayed with
-// the bound rules.NearBy further, and each of its firings one of those
-// overlaps, alike in its labels, went well past it; one on no data didn't.
+// another whose bounds decide it (deciding), it is replayed with each bound
+// rules.NearBy further, and each of its firings one of those overlaps,
+// alike in its labels, went well past them; one on no data didn't.
 // A replay that fails, or runs out of time, leaves that unknown, and err
 // says why; the rest is kept.
 func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report, from UnrecordedFrom,
@@ -101,11 +101,14 @@ func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version
 				u.TooMany = true
 				break // more than is read: how many went past isn't told
 			}
-			n, bound, err := clearOf(ctx, h, versions, rr.Rule, fs, rep.From, rep.To, step)
+			n, bound, several, err := clearOf(ctx, h, versions, rr.Rule, fs, rep.From, rep.To, step)
 			if err != nil {
 				failed = err
 			} else if bound != "" {
 				u.Clear, u.Bound = &n, bound
+				if several > 1 {
+					u.Bounds = several
+				}
 			}
 		}
 		out = append(out, u)
@@ -188,38 +191,76 @@ func (js Judged) Alerts(_ context.Context, rule string, most int) ([]verdict.Ale
 	return all[:min(len(all), most)], len(by), nil
 }
 
-// deciding is the one bound that decides a rule's condition: its only
-// one, not nothing, not a range's end, not on the right of unless, and the
-// whole condition, not an operand of and, or or unless (a Grafana classic
-// condition names its one by its reducer and query). ok is false for any
-// other.
-func deciding(r rules.Rule) (rules.Bound, bool) {
+// deciding are the bounds that decide a rule's condition, each set past
+// itself (past) to tell which of its firings went well past them: every
+// number its condition compares a value with, where the condition holds
+// only where they let it (rules.Rule.BoundsDecide): one bound alone, a
+// range (x > 1 and x < 5, a Grafana range), comparisons joined by and, or
+// and unless, a Grafana math expression of them joined by && and ||, or
+// classic conditions. None of them nothing, which no share of is past; a
+// range on one value, set past at both ends, holding somewhere still. ok
+// is false for any other: a comparison under or beside a value that isn't
+// one, a set operation's operand that is no comparison alone, a range
+// narrower than two fifths of its ends. What its firings were is then left
+// unsaid.
+func deciding(r rules.Rule) ([]rules.Bound, bool) {
+	if !r.BoundsDecide() {
+		return nil, false
+	}
 	bs := r.Bounds()
-	if len(bs) != 1 {
-		return rules.Bound{}, false
+	for _, b := range bs {
+		if b.Value == 0 || b.Rest != nil && b.Rest.Value == 0 {
+			return nil, false
+		}
 	}
-	b := bs[0]
-	if b.Value == 0 || b.Rest != nil || b.Unless || (b.Of != "" && r.Graph == nil) {
-		return rules.Bound{}, false
+	// Of a range on one value, its ends set past each other hold nowhere:
+	// none could go well past both, which says nothing of a narrow one.
+	for _, lo := range bs {
+		for _, hi := range bs {
+			if lo.Of == hi.Of && lo.Unless == hi.Unless && lo.Above() && !hi.Above() && lo.Value < hi.Value && past(lo) >= past(hi) {
+				return nil, false
+			}
+		}
 	}
-	return b, true
+	return bs, true
 }
 
-// past is the number rules.NearBy past a bound, the way it holds more.
+// past is the number rules.NearBy past a bound, the way the condition holds
+// less: above it, higher; on the right of unless, the way its own
+// comparison holds more (rules.Bound.Lowers).
 func past(b rules.Bound) float64 {
-	if b.Above() {
+	if b.Lowers() {
 		return b.Value + rules.NearBy*math.Abs(b.Value)
 	}
 	return b.Value - rules.NearBy*math.Abs(b.Value)
 }
 
-// clearOf is how many of a rule's firings fs went well past its bound over
-// [from, to]: those a replay of it with the bound rules.NearBy further
-// fires within, alike in their labels, as the ledger keeps them. bound is
-// the bound as compared, "" when the rule has no one bound that decides it
-// in every version it is in, and then n is nothing.
+// boundsText are bounds as compared: "> 0.5" of one; of several, each with
+// what it compares when it is part of the condition, and on the right of
+// unless so: "errors > 5, unless requests < 10".
+func boundsText(bs []rules.Bound) string {
+	parts := make([]string, len(bs))
+	for i, b := range bs {
+		at := b.Op + " " + verdict.Number(b.Value)
+		if len(bs) > 1 && b.Of != "" {
+			at = b.Of + " " + at
+		}
+		if b.Unless {
+			at = "unless " + at
+		}
+		parts[i] = at
+	}
+	return strings.Join(parts, ", ")
+}
+
+// clearOf is how many of a rule's firings fs went well past the bounds
+// that decide it over [from, to]: those a replay of it with each bound
+// rules.NearBy further (past) fires within, alike in their labels, as the
+// ledger keeps them. bound is the bounds as compared, and several how many
+// they are; bound is "" when the rule has none that decide it in every
+// version it is in, the same in each, and then n is nothing.
 func clearOf(ctx context.Context, h replay.History, versions []replay.Version, rule string, fs []firing.Firing, from, to time.Time,
-	step time.Duration) (n int, bound string, err error) {
+	step time.Duration) (n int, bound string, several int, err error) {
 	vs := make([]replay.Version, len(versions))
 	for i, ver := range versions {
 		vs[i].From = ver.From
@@ -233,28 +274,32 @@ func clearOf(ctx context.Context, h replay.History, versions []replay.Version, r
 			continue
 		}
 		if len(rs) > 1 {
-			return 0, "", nil
+			return 0, "", 0, nil
 		}
-		b, ok := deciding(rs[0])
+		bs, ok := deciding(rs[0])
 		if !ok {
-			return 0, "", nil
+			return 0, "", 0, nil
 		}
-		at := b.Op + " " + verdict.Number(b.Value)
+		at := boundsText(bs)
 		if bound != "" && bound != at {
-			return 0, "", nil // its bound changed: well past which?
+			return 0, "", 0, nil // its bounds changed: well past which?
 		}
-		bound = at
-		vs[i].Rules = []rules.Rule{rs[0].WithBound(b, past(b))}
+		bound, several = at, len(bs)
+		further := rs[0]
+		for _, b := range bs {
+			further = further.WithBound(b, past(b))
+		}
+		vs[i].Rules = []rules.Rule{further}
 	}
 	if bound == "" {
-		return 0, "", nil
+		return 0, "", 0, nil
 	}
 	ran, clear := replay.Run(ctx, h, vs, from, to, step, 1)
 	if i := slices.IndexFunc(ran, func(r rules.Rule) bool { return r.Unsupported != "" }); i >= 0 {
 		if u := ran[i].Unsupported; rules.Unanswered(u) {
-			return 0, "", errors.New(u)
+			return 0, "", 0, errors.New(u)
 		}
-		return 0, "", nil
+		return 0, "", 0, nil
 	}
 	byKey := map[string][]firing.Firing{}
 	for _, c := range clear {
@@ -269,7 +314,7 @@ func clearOf(ctx context.Context, h replay.History, versions []replay.Version, r
 			n++
 		}
 	}
-	return n, bound, nil
+	return n, bound, several, nil
 }
 
 // overlap reports whether two firings were on at once, one still on at to

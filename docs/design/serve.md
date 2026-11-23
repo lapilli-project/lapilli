@@ -285,18 +285,51 @@ team's): of a condition that counts events (`rules.Rule.EventWindow`, a
 Grafana rule's too), each is one, a count that went up, unless one fired on
 no data (a Grafana rule's, labeled `grafana_alertstate="nodata"`), which is
 none, or more than 5,000 are to be read to tell (said: "Too many firings
-to tell how many happened"); of another, how many had the value its
-condition compares go well past its bound, from the rule replayed over the
-week with its one bound a fifth further (a firing of that one overlapping
-it, alike in its labels, went well past it; a condition with no one bound
-that decides it, a range, `and`, `or`, `unless`, says nothing, nor does a
-rule with more than 5,000 such firings); and the alerts that fired most, of
+to tell how many happened"); of another whose bounds decide it, how many
+went well past them, from the rule replayed over the week with each bound a
+fifth further (a firing of that one overlapping it, alike in its labels,
+went well past them; which conditions, and which are left unsaid, below,
+"With no record: which conditions"; nor does a rule with more than 5,000
+such firings say it); and the alerts that fired most, of
 the 1,000 counted most in one grouped read (`RuleAlerts`), by the labels
 that tell them apart, each with the team whose labels it has, and those
 during deploys. Its reads and replays share the digest's `--timeout`. A
 week whose record is kept since, by an incident written down later, no
 longer shows it; a result kept that doesn't decode is logged and taken as
 none.
+
+**With no record: which conditions** (0.70). How many of a rule's firings
+went well past its bounds is said where it can be said soundly: where its
+condition holds only where its comparisons with numbers let it
+(`rules.Rule.BoundsDecide`), so that the rule with every bound a fifth
+further the way the condition holds less fires for no alert the rule
+doesn't, and fires only where each comparison that decided it held that much
+further. A firing it overlaps happened, not a flicker at an edge. Said of:
+
+- one bound alone, as since 0.41;
+- a range, on one value (`x > 1 and x < 5`) or a Grafana threshold's
+  (`within_range`, `outside_range`): both ends set further, inside for
+  one, outside for the other;
+- comparisons joined by `and`, where either side decides it (the other
+  only holds it back: `up == 1 and errors > 5` too); by `or`, where both
+  sides do, as either fires it alone; by `unless`, where its left does,
+  and a comparison on its right is set the other way, to hold more, so it
+  keeps the rule quiet more; in brackets as without; a Grafana math
+  expression of comparisons joined by `&&` (either side) and `||` (both);
+  classic conditions every one of which compares above or below a number,
+  or within or outside a range.
+
+Left unsaid, as it can't be said soundly: a value beside them under `or`,
+or alone (`errors > 5 or up == 0`: a firing of `up == 0` went past no
+bound); a comparison under `!` or inside arithmetic, which decides it the
+other way round or not alone; `unless` with nothing compared on its left; a
+bound of nothing, which no share of is past; a range on one value narrower
+than two fifths of its ends, which set further holds nowhere (none could go
+well past both, which says nothing of it); classic conditions with one that
+compares no number (`eq`, `ne`, `no_value`); a rule whose bounds changed
+over the week. Of one bound the line says "its bound (> 0.5)"; of several,
+"the bounds that decided them (errors > 5, unless requests < 10)", each
+with what it compares, `bounds` in the JSON saying how many.
 
 **Firings on what a team owns.** The digest also counts each rule's
 firings in the week by the team whose labels they have (the teams'

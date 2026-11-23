@@ -198,10 +198,14 @@ longer `for`; one only some of whose are, says how many. `--json` has
 judged, and `"unjudged"` counts the rest. A rule replayed that fired as
 often as a noisy rule with no record says instead what those firings were:
 of a condition that counts events (below), each firing is an event it
-counted, a count that went up; of another with one bound that decides it,
-how many had the value its condition compares go well past its bound (by
-more than a fifth of it, for its `for`), not a flicker at its edge; and the
-alerts that fired most. Those happened; whether they mattered is for a
+counted, a count that went up; of another whose bounds decide it, how many
+had the values its condition compares go well past the bounds that decided
+them (by more than a fifth of each, for its `for`), not a flicker at an
+edge: one bound, a range (`x > 1 and x < 5`), or comparisons joined by
+`and`, `or` and `unless` (or, in Grafana, `&&` and `||`), not a value
+beside them under `or`, a bound of nothing, nor a range narrower than two
+fifths of its ends (docs/design/serve.md, "With no record: which
+conditions"); and the alerts that fired most. Those happened; whether they mattered is for a
 person to write down (`"unrecorded"` in `--json`). lapilli serve judges a
 firing by its week instead: a week whose record is kept, an incident on in
 it or in the two weeks before it, or `--impact` read over all of it, and,
