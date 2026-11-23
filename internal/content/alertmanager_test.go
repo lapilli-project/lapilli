@@ -270,3 +270,31 @@ func TestAlertmanagerMatchers(t *testing.T) {
 		}
 	}
 }
+
+// A receiver of many integrations, beside templates that define many of
+// their defaults, follows each default once, and so many at most: not a
+// receiver's every default once for each of its integrations.
+func TestAlertmanagerDefaultsBounded(t *testing.T) {
+	const n = 2500
+	var cfg, tmpl strings.Builder
+	cfg.WriteString("route: {receiver: r}\nreceivers:\n  - name: r\n    slack_configs:\n")
+	for i := range n {
+		cfg.WriteString("      - {}\n")
+		fmt.Fprintf(&tmpl, `{{ define "slack.default.f%d" }}{{ .CommonLabels.x }}{{ end }}`, i)
+	}
+	got, skipped, err := ReadAlertmanager([]byte(cfg.String()), []TemplateFile{{Name: "d.tmpl", Text: []byte(tmpl.String())}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := got.receivers["r"]
+	seen := map[string]bool{}
+	for _, d := range used {
+		if seen[d] {
+			t.Fatalf("%s followed twice", d)
+		}
+		seen[d] = true
+	}
+	if len(used) != maxDefaults || len(skipped) != 1 || !strings.Contains(skipped[0], "slack's defaults") {
+		t.Errorf("%d templates followed, %q", len(used), skipped)
+	}
+}

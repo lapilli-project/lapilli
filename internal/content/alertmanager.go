@@ -86,6 +86,9 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 	}
 	recvs, _ := m["receivers"].([]any)
 	fields := 0
+	// The defaults the files define in Alertmanager's place, by kind,
+	// worked out once; a receiver's templates, each once.
+	defaults := map[string][]string{}
 	for i, x := range recvs {
 		if i >= maxReceivers {
 			skipped = append(skipped, fmt.Sprintf("more than %d receivers: those after aren't read", maxReceivers))
@@ -95,6 +98,18 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 		name, _ := rm["name"].(string)
 		if name == "" || len(name) > 1024 {
 			continue
+		}
+		uses := map[string]bool{}
+		use := func(def string) bool {
+			if uses[def] {
+				return true
+			}
+			if fields++; fields > maxFields {
+				return false
+			}
+			uses[def] = true
+			n.receivers[name] = append(n.receivers[name], def)
+			return true
 		}
 		for _, k := range slices.Sorted(maps.Keys(rm)) {
 			kind, ok := strings.CutSuffix(k, "_configs")
@@ -108,7 +123,8 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 					continue
 				}
 				for _, f := range amFields(im, fmt.Sprintf("%s[%d]", k, j), 0) {
-					if fields++; fields > maxFields {
+					if fields >= maxFields {
+						fields++
 						break
 					}
 					def := name + "/" + f.path
@@ -120,9 +136,23 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 						continue
 					}
 					n.defs[def] = s
-					n.receivers[name] = append(n.receivers[name], def)
+					use(def)
 				}
-				n.receivers[name] = append(n.receivers[name], n.overrides(kind, im)...)
+				ds, ok := defaults[kind]
+				if !ok {
+					ds = n.defaults(kind)
+					defaults[kind] = ds
+					if len(ds) > maxDefaults {
+						ds = ds[:maxDefaults]
+						defaults[kind] = ds
+						skipped = append(skipped, bound(fmt.Sprintf("templates define more than %d of %s's defaults: those after aren't followed", maxDefaults, kind)))
+					}
+				}
+				for _, d := range overrides(ds, kind, im) {
+					if !use(d) {
+						break
+					}
+				}
 			}
 		}
 	}
@@ -269,13 +299,33 @@ func defined(text []byte) []string {
 	return out
 }
 
-// overrides are the templates a file defines in place of Alertmanager's
-// own default for a field an integration doesn't set: slack.default.title
-// for a Slack integration with no title, email.default.subject for an
-// email with no Subject header. Alertmanager's defaults themselves aren't
-// followed: they show every label and annotation there is, and fault
-// nothing.
-func (n *Notifications) overrides(kind string, set map[string]any) []string {
+// maxDefaults is how many of a kind's defaults the files may define in
+// Alertmanager's place, and are followed.
+const maxDefaults = 200
+
+// defaults are the names the files define in place of Alertmanager's own
+// defaults for an integration of a kind (slack.default.title), sorted.
+func (n *Notifications) defaults(kind string) []string {
+	prefix := kind + ".default."
+	var out []string
+	for name := range n.defs {
+		if f, ok := strings.CutPrefix(name, prefix); ok && f != "" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// overrides are the defaults (n.defaults) an integration is sent with:
+// those for a field it doesn't set, slack.default.title for a Slack
+// integration with no title, email.default.subject for an email with no
+// Subject header. Alertmanager's defaults themselves aren't followed: they
+// show every label and annotation there is, and fault nothing.
+func overrides(defaults []string, kind string, set map[string]any) []string {
+	if len(defaults) == 0 {
+		return nil
+	}
 	has := map[string]bool{}
 	for k := range set {
 		has[squash(k)] = true
@@ -288,9 +338,8 @@ func (n *Notifications) overrides(kind string, set map[string]any) []string {
 		}
 	}
 	var out []string
-	prefix := kind + ".default."
-	for _, name := range slices.Sorted(maps.Keys(n.defs)) {
-		if f, ok := strings.CutPrefix(name, prefix); ok && f != "" && !has[squash(f)] {
+	for _, name := range defaults {
+		if !has[squash(strings.TrimPrefix(name, kind+".default."))] {
 			out = append(out, name)
 		}
 	}
