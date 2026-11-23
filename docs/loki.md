@@ -28,8 +28,12 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   replay, and says which rules had them. `--check-replay` reads the `ALERTS`
   Loki's ruler writes where its `remote_write` sends them, the Prometheus at
   `--prometheus`. A rule sharing a name with another is told apart as
-  `Name [loki:namespace/group]`. A change proposed for one, with its
-  backtest, is for a person: Lapilli doesn't write to Loki.
+  `Name [loki:namespace/group]`. A change proposed for one read with
+  `--loki-loaded-rules`, with its backtest, is written through Loki's
+  ruler once approved, where `lapilli serve --changes-in` names its
+  namespace as `loki:NAMESPACE`, with `--changes-loki-token-file`
+  ([changing rules](changing-rules.md)); otherwise, and for one read from
+  its files, it is for a person.
 - **Grafana's rules.** With `--grafana`, the type of each data source a
   rule reads is asked of Grafana; a Loki one's queries are asked through
   Grafana's data source proxy (`/api/datasources/proxy/uid/UID`, a Viewer's

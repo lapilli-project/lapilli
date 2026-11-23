@@ -39,7 +39,9 @@ happen, and judged for any period when someone looks.
   ruler it reads (`--ruler`), in the namespaces `--changes-in` names
   ([rulers.md](rulers.md)), or, since v0.24.0, to a cloud's own alarms it
   reads (`--alarms`), those `--changes-in` names ([alarms.md](alarms.md)),
-  and nowhere else.
+  or, since v0.70.0, to the Loki ruler it reads (`--loki-loaded-rules`), in
+  the namespaces `--changes-in` names as `loki:NAMESPACE`, and nowhere
+  else.
 - **Not a controller.** It reads mounted ConfigMaps and HTTP APIs. It doesn't
   watch the Kubernetes API and needs no RBAC: a rule resource in a cluster
   is changed by a pull request.
