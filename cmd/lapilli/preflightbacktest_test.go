@@ -37,7 +37,13 @@ import (
 // token's length.
 func TestPreflightBacktests(t *testing.T) {
 	was := now
-	now = time.Now
+	// The last noon UTC, not now: the estimates below count a backtest's
+	// requests as serve's port would at that moment, and from 01:00 to
+	// 01:05 UTC each day the count for the ten rules over seven days is
+	// 180 where it is 160 at every other time tried: the test failed
+	// there, five minutes a day.
+	noon := time.Now().UTC().Add(-12 * time.Hour).Truncate(24 * time.Hour).Add(12 * time.Hour)
+	now = func() time.Time { return noon }
 	t.Cleanup(func() { now = was })
 	prometheus := newFake(t, "Prometheus", func(w http.ResponseWriter, r *http.Request, f url.Values) bool {
 		switch {
