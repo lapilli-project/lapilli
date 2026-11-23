@@ -27,13 +27,16 @@ import (
 // read a MySQL data source, which Lapilli can't replay, and keeping its
 // state history in annotations. Its annotations say no rule's id unless
 // ids is set: then each carries its rule's id (alertId) and the title the
-// rule has now (alertName), "" once it is deleted, as Grafana's do, and
-// alertUID keeps one rule's.
+// rule has now (alertName), "" once it is deleted, as Grafana's do, and its
+// provisioning API lists each rule's id. hidden are rules in a folder the
+// token doesn't read: neither exported nor listed, their annotations are
+// read all the same.
 type shopGrafana struct {
-	mu    sync.Mutex
-	rules []shopRule
-	notes []shopNote
-	ids   bool
+	mu     sync.Mutex
+	rules  []shopRule
+	hidden []shopRule
+	notes  []shopNote
+	ids    bool
 }
 
 // shopRule is a rule of a title in a folder, paused or not.
@@ -120,6 +123,12 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			groups = append(groups, map[string]any{"orgId": 1, "name": "shop", "folder": f, "interval": "1m", "rules": folders[f]})
 		}
 		json.NewEncoder(w).Encode(map[string]any{"apiVersion": 1, "groups": groups})
+	case "/api/v1/provisioning/alert-rules":
+		out := []map[string]any{}
+		for _, x := range g.rules {
+			out = append(out, map[string]any{"id": g.idOf(x.uid), "uid": x.uid, "title": x.title, "folderUID": x.folder, "isPaused": x.paused})
+		}
+		json.NewEncoder(w).Encode(out)
 	case "/api/datasources/uid/orders":
 		io.WriteString(w, `{"uid": "orders", "type": "mysql", "jsonData": {}}`)
 	case "/api/frontend/settings":
@@ -130,11 +139,8 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscan(r.URL.Query().Get("to"), &to)
 		fmt.Sscan(r.URL.Query().Get("limit"), &limit)
 		all := make([]map[string]any, 0, len(g.notes))
-		uid := r.URL.Query().Get("alertUID")
+		held := slices.Concat(g.rules, g.hidden)
 		for i, n := range g.notes {
-			if uid != "" && n.uid != uid {
-				continue
-			}
 			tags := []string{"alertname:" + n.title, "grafana_folder:Ops", "service:" + n.service, "severity:page"}
 			for j := range n.extra {
 				tags = append(tags, fmt.Sprintf("l%02d:v", j))
@@ -142,8 +148,8 @@ func (g *shopGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			a := map[string]any{"id": i + 1, "alertName": n.title, "prevState": n.prev, "newState": n.next, "time": n.at.UnixMilli(), "tags": tags}
 			if g.ids {
 				a["alertId"], a["alertName"] = g.idOf(n.uid), ""
-				if j := slices.IndexFunc(g.rules, func(r shopRule) bool { return r.uid == n.uid }); j >= 0 {
-					a["alertName"] = g.rules[j].title
+				if j := slices.IndexFunc(held, func(r shopRule) bool { return r.uid == n.uid }); j >= 0 {
+					a["alertName"] = held[j].title
 				}
 			}
 			all = append(all, a)
@@ -882,6 +888,30 @@ func TestServeGrafanaJudgedSharedTold(t *testing.T) {
 	if out, err := sh.s.l.LeftOut(ctx, ledger.GrafanaSource); err != nil || len(out) != 0 {
 		t.Errorf("left out %v %v", out, err)
 	}
+}
+
+// A rule of a judged rule's title in a folder the token doesn't read, of a
+// history that says each change's rule: what it fires, while the judged
+// rule changes state in none of the read, is none of the judged rule's,
+// nor does an alert of it with the labels of one the judged rule has on
+// end that one. The judged rule's id is the one Grafana lists its uid
+// with, not one the read alone holds of its title.
+func TestServeGrafanaJudgedHiddenFolder(t *testing.T) {
+	g := &shopGrafana{ids: true}
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.hidden = []shopRule{{"teamb", "Orders slow", "Team B", false}}
+	g.fired("Orders slow", "orders", -5*time.Hour, 0)
+	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
+	sh := shopServer(t, g)
+	sh.round(0)
+	sh.want("copied in", sh.copied(), []string{"Orders slow/orders -5h0m0s on", "Stock low/stock -3h0m0s -2h0m0s"})
+	g.firedBy("teamb", "Orders slow", "payments", 30*time.Minute, 40*time.Minute)
+	g.firedBy("teamb", "Orders slow", "orders", 50*time.Minute, 70*time.Minute)
+	g.fired("Stock low", "stock", time.Hour, 90*time.Minute)
+	sh.round(2 * time.Hour)
+	sh.want("beside a rule of its title the token doesn't read", sh.copied(), []string{"Orders slow/orders -5h0m0s on",
+		"Stock low/stock -3h0m0s -2h0m0s", "Stock low/stock 1h0m0s 1h30m0s"})
+	sh.want("its copies", sh.covers("Orders slow"), "→2h0m0s")
 }
 
 // The same rule, of a history that says no rule's id: a read of the rules

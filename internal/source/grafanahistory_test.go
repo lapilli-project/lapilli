@@ -26,8 +26,10 @@ import (
 // fakeGrafana answers as Grafana 12.4 and 13.3 were measured to
 // (docs/design/grafanahistory.md): its frontend settings; its alert
 // annotations, newest first, from and to in milliseconds and both within,
-// limit 100 unless asked; and its state history kept in Loki, newest
-// first across streams, each stream's together, from and to in seconds.
+// limit 100 unless asked; its state history kept in Loki, newest first
+// across streams, each stream's together, from and to in seconds; and its
+// rules as its provisioning API lists them, each with its id, uid and
+// title now (listed).
 type fakeGrafana struct {
 	mu       sync.Mutex
 	settings string
@@ -35,10 +37,14 @@ type fakeGrafana struct {
 	lines    []fakeLine
 	asked    []string
 	auth     []string
-	// byUID is the id of each rule's uid, for alertUID; renamed, the title
-	// an answer of one rule alone gives a rule of an id.
-	byUID   map[string]int64
-	renamed map[int64]string
+	listed   []listedRule
+}
+
+// listedRule is a rule as Grafana's provisioning API lists it.
+type listedRule struct {
+	ID    int64  `json:"id"`
+	UID   string `json:"uid"`
+	Title string `json:"title"`
 }
 
 type fakeLine struct {
@@ -68,14 +74,7 @@ func (g *fakeGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			limit = 100
 		}
 		var out []annotation
-		uid := q.Get("alertUID")
 		for _, a := range g.notes {
-			if uid != "" && (g.byUID[uid] == 0 || a.AlertID != g.byUID[uid]) {
-				continue
-			}
-			if title, ok := g.renamed[a.AlertID]; ok && uid != "" {
-				a.AlertName = title
-			}
 			if a.Time >= from && a.Time <= to {
 				out = append(out, a)
 			}
@@ -87,6 +86,8 @@ func (g *fakeGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return int(b.ID - a.ID)
 		})
 		json.NewEncoder(w).Encode(out[:min(len(out), int(limit))])
+	case "/api/v1/provisioning/alert-rules":
+		json.NewEncoder(w).Encode(append([]listedRule{}, g.listed...))
 	case "/api/v1/rules/history":
 		from, to, limit := num("from", 0)*1000, num("to", 1<<40)*1000, num("limit", 0)
 		var in []fakeLine

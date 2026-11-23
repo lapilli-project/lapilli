@@ -67,9 +67,10 @@ func (c realHistory) file(dir, name string) []byte {
 
 // recorded is a fake Grafana answering from what a real one answered:
 // its frontend settings, its alert annotations, newest first, from and to
-// within, as many as asked, one rule's alone with alertUID; its state
-// history kept in Loki likewise, to before to, in seconds.
-func (c realHistory) recorded(t *testing.T) GrafanaHistory {
+// within, as many as asked; its state history kept in Loki likewise, to
+// before to, in seconds; and its rules as its provisioning API lists them,
+// each rule's id the one its annotations have, and those of more besides.
+func (c realHistory) recorded(t *testing.T, more ...listedRule) GrafanaHistory {
 	t.Helper()
 	settings, err := os.ReadFile(filepath.Join("testdata", c.dir, "settings.json"))
 	if err != nil {
@@ -97,6 +98,16 @@ func (c realHistory) recorded(t *testing.T) GrafanaHistory {
 	} else if err := json.Unmarshal(c.file(c.dir, "history.json.gz"), &lines); err != nil {
 		t.Fatal(err)
 	}
+	idOf := map[string]int64{}
+	for _, n := range notes {
+		var a annotation
+		json.Unmarshal(n, &a)
+		idOf[a.AlertName] = a.AlertID
+	}
+	listed := slices.Clone(more)
+	for uid, title := range titleOf {
+		listed = append(listed, listedRule{ID: idOf[title], UID: uid, Title: title})
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		var from, to, limit int64
@@ -108,19 +119,17 @@ func (c realHistory) recorded(t *testing.T) GrafanaHistory {
 			w.Write(settings)
 		case "/api/annotations":
 			var out []json.RawMessage
-			uid := q.Get("alertUID")
 			for _, n := range notes {
 				var a annotation
 				json.Unmarshal(n, &a)
-				if uid != "" && (titleOf[uid] == "" || a.AlertName != titleOf[uid]) {
-					continue
-				}
 				if a.Time >= from && a.Time <= to {
 					out = append(out, n)
 				}
 			}
 			out = out[:min(len(out), int(limit))] // as recorded, newest first
 			json.NewEncoder(w).Encode(out)
+		case "/api/v1/provisioning/alert-rules":
+			json.NewEncoder(w).Encode(listed)
 		case "/api/v1/rules/history":
 			v := lines.Data.Values
 			var keep []int

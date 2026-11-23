@@ -1,13 +1,12 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net/url"
 	"slices"
-	"strconv"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -81,30 +80,25 @@ func sharedNames(where string, rs, all []rules.Rule) map[string]bool {
 	return twice
 }
 
-// maxLookups is how many rules a read of the annotations asks the id of
-// (ruleID), at most: one past it is judged as shared.
-const maxLookups = 100
-
 // Judge reads the history kept where over [from, to] and gives the firings
 // of rs, the rules to judge by it, each under its Name. A change is taken
 // for a rule of rs only where the history says it is that rule's: kept in
 // Loki, by the rule's uid each change carries; in annotations, by the
-// rule's id in Grafana's database each carries (alertId): the rule's
-// where every change of its name is of one id, its title as each carries
-// it now (alertName) the rule's, and no other rule among all, every rule
-// read from the Grafana now, before any --rule, has its title (rs alone,
-// when all is nil); else as the newest annotation of its uid says
-// (ruleID). A change of another rule of the name is passed over: its rule
-// isn't the one judged, and the name isn't shared.
+// rule's id in Grafana's database each carries (alertId), as Grafana lists
+// the rule of its uid now (ruleIDs). A change of another rule of the name
+// is passed over: its rule isn't the one judged, and the name isn't
+// shared. A rule Grafana lists no more, or under another title, is unsure:
+// what it fired under its title now isn't read.
 //
 // Where the history doesn't say which rule a change of a rule's name is of
 // (with no uid or id), the rule is judged by its name, as the history
-// names it; and one whose name another rule has, among all and ever, every
-// rule of a version in effect across the read, is neither's. A name the
-// read holds no change of is its rule's, which fired nothing of it,
-// whoever else has it. A read past its bounds fails, as ErrTooManyChanges,
-// and one whose answers can't be used, as ErrUnusable: none of rs is
-// judged then.
+// names it; and one whose name another rule has, among all, every rule
+// read from the Grafana now, before any --rule (rs alone, when all is
+// nil), and ever, every rule of a version in effect across the read, is
+// neither's. A name the read holds no change of is its rule's, which fired
+// nothing of it, whoever else has it. A read past its bounds fails, as
+// ErrTooManyChanges, and one whose answers can't be used, as ErrUnusable:
+// none of rs is judged then.
 func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever []rules.Rule, from, to time.Time) (FromHistory, error) {
 	ts, read, err := g.read(ctx, where, from, to, true)
 	if err != nil {
@@ -134,17 +128,17 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 		}
 		return t.Of.ID != 0
 	}
-	nowShared := sharedNames(where, rs, all)
 	everShared := sharedNames(where, rs, slices.Concat(all, ever))
 	shared := map[string]bool{}
 	whose := make([]string, len(ts)) // the name of the rule judged each change is of
-	lookups := 0
-	for n, named := range byName {
+	// The ids of the rules judged, read once, when a rule needs its own.
+	var ids map[string]int64
+	for _, n := range slices.Sorted(maps.Keys(byName)) {
 		if len(of[n]) == 0 {
 			continue // no change of it: nothing to say whose
 		}
 		told := !slices.ContainsFunc(of[n], func(i int) bool { return !says(ts[i]) })
-		for _, r := range named {
+		for _, r := range byName[n] {
 			var mine func(firing.RuleOf) bool
 			switch {
 			case !told && everShared[r.Name]:
@@ -155,17 +149,14 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 			case where == HistoryLoki:
 				mine = func(o firing.RuleOf) bool { return o.UID == r.UID }
 			default:
-				id, got, err := g.idOf(ctx, r, of[n], ts, nowShared[r.Name], &lookups, to)
-				switch {
-				case err != nil:
-					return FromHistory{}, err
-				case got == idPast:
-					shared[r.Name] = true
-					continue
-				case got == idOther:
+				if ids == nil {
+					if ids, err = g.ruleIDs(ctx, rs); err != nil {
+						return FromHistory{}, err
+					}
+				}
+				id := ids[r.UID]
+				if id == 0 {
 					unsure[r.Name] = true
-					continue
-				case got == idNone:
 					continue
 				}
 				mine = func(o firing.RuleOf) bool { return o.ID == id }
@@ -205,70 +196,63 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 	return j, nil
 }
 
-// What idOf found of a rule's id.
-const (
-	idFound = iota
-	// idNone: none of its changes is of it.
-	idNone
-	// idPast: past maxLookups, it wasn't asked.
-	idPast
-	// idOther: asked, the answer is of a rule of another title now, and
-	// what it says can't be taken.
-	idOther
-)
-
-// idOf is the id in Grafana's database of r, judged from annotations,
-// its changes of its name those of at (in ts): where every one of them is
-// of one id, and of r's title now, and no other rule has that title
-// (shared is false), that id; else as the newest annotation of r's uid
-// says (ruleID), lookups counting the rules asked of, maxLookups at most.
-func (g GrafanaHistory) idOf(ctx context.Context, r rules.Rule, at []int, ts []firing.Transition, shared bool, lookups *int, to time.Time) (int64, int, error) {
-	if len(at) == 0 {
-		return 0, idNone, nil
+// ruleIDs are the ids in Grafana's database of the rules of rs, by uid, as
+// Grafana's provisioning API lists its rules now
+// (/api/v1/provisioning/alert-rules): what an annotation names its rule
+// by (alertId). Grafana asks of a token the same to list them as to
+// export them, which Lapilli reads its rules from, and the export holds no
+// id. A rule it doesn't list, lists twice, or lists under another title
+// than rs has (renamed since they were read) has none. A list past
+// ListLimit or MaxRules can't be used.
+func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule) (map[string]int64, error) {
+	const what = "Grafana's alert rules"
+	body, err := g.client().Get(ctx, "/api/v1/provisioning/alert-rules", ListLimit)
+	if err != nil {
+		return nil, unusable(what, err)
 	}
-	ids := map[int64]bool{}
-	titled := true
-	for _, i := range at {
-		ids[ts[i].Of.ID] = true
-		titled = titled && ts[i].Of.Title == r.AlertName()
-	}
-	if titled && len(ids) == 1 && !shared {
-		for id := range ids {
-			return id, idFound, nil
+	title := make(map[string]string, len(rs))
+	for _, r := range rs {
+		if r.UID != "" {
+			title[r.UID] = r.AlertName()
 		}
 	}
-	if *lookups >= maxLookups {
-		return 0, idPast, nil
+	type listed struct {
+		id    int64
+		title string
+		n     int
 	}
-	*lookups++
-	id, title, ok, err := g.ruleID(ctx, r.UID, to)
-	switch {
-	case err != nil:
-		return 0, idNone, err
-	case !ok:
-		return 0, idNone, nil
-	case title != r.AlertName():
-		return 0, idOther, nil
+	got := map[string]*listed{}
+	d := json.NewDecoder(bytes.NewReader(body))
+	if t, err := d.Token(); err != nil || t != json.Delim('[') {
+		return nil, fmt.Errorf("%w: reading %s: not a list of rules", ErrUnusable, what)
 	}
-	return id, idFound, nil
-}
-
-// ruleID is the id in Grafana's database of the rule of uid, and its
-// title now, as its newest alert annotation up to to says: alertUID keeps
-// one rule's. ok is false for a rule with none.
-func (g GrafanaHistory) ruleID(ctx context.Context, uid string, to time.Time) (id int64, title string, ok bool, err error) {
-	const what = "Grafana's alert annotations"
-	q := url.Values{"type": {"alert"}, "alertUID": {uid}, "from": {"1"}, "to": {strconv.FormatInt(to.UnixMilli(), 10)}, "limit": {"1"}}
-	body, err := g.client().Get(ctx, "/api/annotations?"+q.Encode(), historyBody)
-	if err != nil {
-		return 0, "", false, unusable(what, err)
+	for n := 0; d.More(); n++ {
+		if n >= MaxRules {
+			return nil, fmt.Errorf("%w: reading %s: more than %d rules", ErrUnusable, what, MaxRules)
+		}
+		var x struct {
+			ID    int64  `json:"id"`
+			UID   string `json:"uid"`
+			Title string `json:"title"`
+		}
+		if err := d.Decode(&x); err != nil {
+			return nil, fmt.Errorf("%w: reading %s: %v", ErrUnusable, what, err)
+		}
+		if _, ok := title[x.UID]; !ok {
+			continue
+		}
+		l := got[x.UID]
+		if l == nil {
+			l = &listed{}
+			got[x.UID] = l
+		}
+		l.id, l.title, l.n = x.ID, x.Title, l.n+1
 	}
-	var items []annotation
-	if err := json.Unmarshal(body, &items); err != nil {
-		return 0, "", false, fmt.Errorf("%w: reading %s: %v", ErrUnusable, what, err)
+	ids := make(map[string]int64, len(got))
+	for uid, l := range got {
+		if l.n == 1 && l.id > 0 && l.title == title[uid] {
+			ids[uid] = l.id
+		}
 	}
-	if len(items) == 0 {
-		return 0, "", false, nil
-	}
-	return items[0].AlertID, items[0].AlertName, true, nil
+	return ids, nil
 }
