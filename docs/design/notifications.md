@@ -580,6 +580,14 @@ default so that nothing goes nowhere. This is that, small.
 
   The first route that takes an event sends it, and each after it too while
   the one before says `continue: true`; what none takes goes to `default`.
+  A route's `teams:` names each team as it is, or in another letter case
+  where one team alone has the name, as `--config`'s own teams are matched
+  (`ledger.Reconcile`): of two teams whose names differ only in letter
+  case, which a ledger from before schema 019 may hold and the Teams page
+  lists apart, a route naming one takes that one's events and never the
+  other's, and one naming neither as written takes neither's. Before the
+  owners are first worked out, as serve starts, a name is taken in any
+  letter case.
   Routes without a default are refused, as the file is, so nothing is
   dropped. A `default` alone sends every event there. Without routes and a
   default, what happens is told as before: to `--notify-webhook-file` and,

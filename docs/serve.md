@@ -1203,7 +1203,10 @@ notify:
 
 The first route that takes an event decides, unless it says
 `continue: true`; what none takes goes to `default`, which routes need, so
-nothing is dropped. A template is text and fields (`{{.Event}}`,
+nothing is dropped. A route names a team as it is written, or in another
+letter case where one team alone has the name; of two teams a ledger kept
+from before whose names differ only in letter case, it takes the one it
+names, never the other. A template is text and fields (`{{.Event}}`,
 `{{.Line}}`, `{{.Link}}`, `{{.Rule}}`, `{{.Team}}`, `{{.Title}}`,
 `{{.ID}}`, `{{.By}}`, `{{.Labels}}`, `{{.At}}`), each value escaped for
 where it goes. The Settings page shows the routes in force and how each
