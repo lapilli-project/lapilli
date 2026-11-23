@@ -104,9 +104,8 @@ func sharedNames(where string, rs, all []rules.Rule) map[string]bool {
 // neither's; and a change of the name passed over, whichever rule it says,
 // leaves each rule of the name unsure. A name the read holds no change of
 // is its rule's, which fired nothing of it, whoever else has it. A read
-// past its bounds fails, as
-// ErrTooManyChanges, and one whose answers can't be used, as ErrUnusable:
-// none of rs is judged then.
+// past its bounds fails, as ErrTooManyChanges, and one whose answers can't
+// be used, as ErrUnusable: none of rs is judged then.
 func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever []rules.Rule, from, to time.Time) (FromHistory, error) {
 	ts, read, err := g.read(ctx, where, from, to, true)
 	if err != nil {
@@ -181,8 +180,8 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 			}
 			mine := func(firing.RuleOf) bool { return true }
 			if told {
-				// Its own changes alone, and those passed over of it alone
-				// leave it unsure.
+				// It is judged by its own changes alone, and left unsure by
+				// those of them passed over alone.
 				if slices.Contains(passed[n], its) {
 					unsure[r.Name] = true
 				}
@@ -238,10 +237,10 @@ type RuleIDs struct {
 // export them, which Lapilli reads its rules from, and the export holds no
 // id. A rule it doesn't list, lists twice, lists with an id it lists
 // another rule with too, or lists under another title than rs has
-// (renamed since they were read) has none. A list past
-// ListLimit or MaxRules can't be used. It is asked within what the read of
-// the history, read, leaves of the reader's bounds of requests and bytes,
-// and past them fails as ErrTooManyChanges; with g.IDs, once.
+// (renamed since they were read) has none. A list past ListLimit or
+// MaxRules can't be used. It is asked within what the read of the
+// history, read, leaves of the reader's bounds of requests and bytes, and
+// past them fails as ErrTooManyChanges; with g.IDs, once.
 func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule, read HistoryRead) (map[string]int64, error) {
 	if g.IDs != nil && g.IDs.ids != nil {
 		return g.IDs.ids, nil

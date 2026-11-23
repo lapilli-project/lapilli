@@ -273,8 +273,9 @@ func (s *Server) sourceTheirs(ctx context.Context) (bool, error) {
 // one of its alerts on since before then, that the read says nothing of,
 // is ended where it was left out. A read back of no use where the day's
 // read was (past the reader's bounds, Grafana's list of its rules refused
-// or past its own) leaves the rules judged again out once more. A day none
-// of the rules is judged for is of no use, and left a gap.
+// or past its own, answers that can't be used) leaves the rules judged
+// again out once more. A day none of the rules is judged for is of no
+// use, and left a gap.
 func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule, twice map[string]bool, a, b time.Time, first bool, o verdict.Options) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
