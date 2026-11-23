@@ -811,6 +811,13 @@ own, which every pod mounts. From 0.35 or before, upgrade with one
 replica first: its pod holds the ledger alone, and refuses new ones until
 it stops.
 
+A pod told to stop gives the lease up at once, and with `--shutdown-delay`
+(the chart's `serve.shutdownDelaySeconds`, 5 s with more than one replica)
+answers on every port for that long, `/readyz` answering 503, while the
+Service's endpoints and a load balancer learn it is going; then it lets
+the requests under way finish, 10 s at most. A request whose time runs
+out, or that a ledger lost ends, is answered 503, to be asked again.
+
 ## Pull request backtests
 
 A CI job can backtest a pull request's rules through serve, with serve's

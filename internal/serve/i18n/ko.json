@@ -2195,6 +2195,7 @@
  "the config file": "config 파일",
  "the path given to %s": "%s 에 준 경로",
  "can't reach the ledger's database; an admin sees why": "기록 데이터베이스에 연결할 수 없어요. 이유는 관리자가 볼 수 있어요",
+ "stopped before it was done: try again": "끝나기 전에 멈췄어요. 다시 시도하세요",
  "%s can't be read as an expectations file; an admin sees why": "기대치 파일(%s)을 읽을 수 없어요. 이유는 관리자가 볼 수 있어요",
  "the expectations of --expect and --config can't be held together; an admin sees why": "--expect 와 --config 의 기대치를 함께 적용할 수 없어요. 이유는 관리자가 볼 수 있어요",
  "the ledger keeps a signal named %s, or the windows of one since taken away: give it another name": "%s 라는 지표, 또는 이미 뺀 지표의 구간이 기록에 남아 있어요: 다른 이름을 쓰세요",

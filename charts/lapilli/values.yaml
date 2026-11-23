@@ -167,6 +167,15 @@ serve:
   replicas: 1
   podDisruptionBudget:
     maxUnavailable: 1
+  # With more than one replica, how long a pod told to stop goes on
+  # answering on its ports before they close (--shutdown-delay), not ready
+  # meanwhile, while the Service's endpoints, and a load balancer, learn it
+  # is going: a rolling update's requests that still reach it are answered.
+  # Its lease is given up at once all the same. The pod's
+  # terminationGracePeriodSeconds is this and the 30 Kubernetes gives. 0
+  # stops at once, as one replica does: with Recreate there is no other pod
+  # to send requests to.
+  shutdownDelaySeconds: 5
   every: 1h      # run this often
   settle: 1h     # and replay this much before the last run's end again
   backfill: 28d  # on first start, replay this far back

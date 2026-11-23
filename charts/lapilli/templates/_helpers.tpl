@@ -40,6 +40,7 @@ values, not the new chart's): every template reads them through this. */}}
 {{- end }}
 {{- if not (hasKey $s "exposeWithoutSignIn") }}{{ $_ := set $s "exposeWithoutSignIn" false }}{{ end -}}
 {{- if not (hasKey $s "replicas") }}{{ $_ := set $s "replicas" 1 }}{{ end -}}
+{{- if not (hasKey $s "shutdownDelaySeconds") }}{{ $_ := set $s "shutdownDelaySeconds" 5 }}{{ end -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "podDisruptionBudget" "with" (dict "maxUnavailable" 1)) -}}
 {{- if not (hasKey $s "readinessPath") }}{{ $_ := set $s "readinessPath" "/readyz" }}{{ end -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "backtest" "with" (dict "enabled" false "port" 8084 "tokens" (list) "share" "" "queue" "" "timeout" "" "from" (list))) -}}
@@ -199,6 +200,10 @@ must stay. */}}
 {{- else }}{{ $ok = and (ge (int $u) 1) (lt (int $u) $n) }}{{ end }}
 {{- if and (gt $n 1) (not $ok) }}
 {{- fail (printf "serve.podDisruptionBudget.maxUnavailable: a number of pods, 1 to %d, or a percentage below 100%%, so that one replica at least stays" (sub $n 1)) }}
+{{- end }}
+{{- $d := toString $s.shutdownDelaySeconds }}
+{{- if or (not (regexMatch "^[0-9]{1,3}$" $d)) (gt (int $d) 600) }}
+{{- fail "serve.shutdownDelaySeconds: seconds, 0 to 600" }}
 {{- end }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $in.proxyJWT.kind (not (has $in.proxyJWT.kind (list "google-iap" "aws-alb" "jwks"))) }}
