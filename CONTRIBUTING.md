@@ -210,4 +210,10 @@ publishes nothing:
 gh workflow run release.yml --ref main -f version=vX.Y.Z
 ```
 
-`lapilli.dev` is built from `site/` by `.github/workflows/pages.yml`.
+`lapilli.dev` is built from `site/` by `.github/workflows/pages.yml`. Its
+front page is in English, Spanish, Japanese and Korean (`site/index.md`,
+`site/es/`, `site/ja/`, `site/ko/`), with the header's and footer's words in
+`site/_data/i18n.yml`; the docs are in English only. A change to the English
+front page changes the other three with it, or says in the pull request
+which it left. Their sections keep the English page's ids, which the header
+links to, and the build fails when they don't.

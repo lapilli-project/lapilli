@@ -1,8 +1,12 @@
 ---
 layout: default
+home: true
 title: Which of your alerts are worth their page?
 description: "Lapilli judges every firing against what actually went wrong: a white stone when it caught an incident, a black one when nothing was wrong. Once with lapilli verdict, or every hour with lapilli serve."
 ---
+
+<p class="tags"><span class="tag">Apache-2.0 · open source</span>{% if site.version %}
+<a href="{{ site.repo }}/releases/tag/{{ site.version }}">Lapilli {{ site.version }} is out: what's new</a>{% endif %}</p>
 
 # Which of your alerts are worth their page?
 
@@ -12,11 +16,19 @@ wrong. Count a rule's stones and you know whether it earns its place; an
 incident with no stone is one your alerts missed.</p>
 
 <div class="cta">
-  <a class="primary" href="{{ '/docs/getting-started/' | relative_url }}">Get started</a>
-  <a href="#install">Install</a>
+  <a class="primary" href="{{ '/docs/getting-started/' | relative_url }}">Get started <span aria-hidden="true">→</span></a>
   <a href="{{ '/docs/' | relative_url }}">Read the docs</a>
   <a href="#help-build-it">Help build it</a>
 </div>
+
+```sh
+go install lapilli.dev/cmd/lapilli@latest
+lapilli demo
+```
+
+<p class="hint"><code>lapilli demo</code> judges a made-up week of a small
+shop's alerts, with nothing to connect. Or <a href="#install">a binary, the
+image or the Helm chart</a>.</p>
 
 <div class="shot">
 <picture>
@@ -24,6 +36,13 @@ incident with no stone is one your alerts missed.</p>
   <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks and most beside the week before; under them, what to look at: rules to quiet or look at, each with a button to make it a task" src="{{ '/serve-dashboard.png' | relative_url }}" width="1240" height="980">
 </picture>
 </div>
+
+<ul class="facts">
+  <li><b>Reads</b> Prometheus and what speaks its API, Grafana, Loki, a cloud's own alarms</li>
+  <li><b>Runs</b> once with <code>lapilli verdict</code>, every hour with <code>lapilli serve</code></li>
+  <li><b>Keeps</b> one SQLite file, or a Postgres database several replicas share</li>
+  <li><b>Changes</b> only what a person approves, and reads by default</li>
+</ul>
 
 It works from what you already have: the rules, the history in Prometheus,
 and whatever record of incidents you keep, even a thin one. It reads by
@@ -34,7 +53,7 @@ production Grafana: all 71 of its alert rules replay, and a four-week
 replay of the rules as they stood then found 177 firings of the noisiest
 rule, the number of notifications its team had counted by hand.
 
-## Once: `lapilli verdict`
+## Once: `lapilli verdict` {#once-lapilli-verdict}
 
 Replay a week, a month, or a change you are about to merge, and get the
 stones, the firings that woke people for nothing, the noisy rules with a longer
@@ -111,7 +130,7 @@ so you can check the replay on your own rules before you believe a verdict.
 `--check-content` checks what each alert says when it fires, and `--redact`
 gives every name an alias, for a report shown outside.
 
-## Every hour: `lapilli serve`
+## Every hour: `lapilli serve` {#every-hour-lapilli-serve}
 
 `lapilli serve` keeps a ledger: every firing, incident and version of the
 rules, replayed hourly with the rules as they stood. It shows the stones in
@@ -147,7 +166,7 @@ an hourly run takes 0.18 s and twelve weeks by rule 2 ms, and these budgets
 are part of the tests. `/metrics` gives the stones to Prometheus, and the Helm chart a Grafana
 dashboard of them. The UI runs no scripts.
 
-## How it judges
+## How it judges {#how-it-judges}
 
 - **Firings** come from replaying your alert rules against history. The
   rules can be Prometheus rule files, `PrometheusRule`, Grafana alerting
@@ -173,7 +192,7 @@ dashboard of them. The UI runs no scripts.
 The rest, the noisy rules, what to change and the near misses, is in
 [How it judges]({{ '/docs/how-it-judges/' | relative_url }}).
 
-## Works where your alerts are
+## Works where your alerts are {#works-where-your-alerts-are}
 
 Any Prometheus-compatible API works: Prometheus, Thanos, Mimir,
 VictoriaMetrics, the managed Prometheus of AWS, Azure or Google Cloud, or
@@ -186,7 +205,7 @@ OCI Monitoring) are judged from their history, with a small script for each
 cloud, and `lapilli serve` keeps that history past what the cloud keeps.
 Integrations are generic: a webhook, not a particular tracker.
 
-## Built to be trusted
+## Built to be trusted {#built-to-be-trusted}
 
 - **It changes only what a person approves.** Out of the box it reads.
   Turned on, it makes the changes to rules it proposes, each once a person
@@ -211,7 +230,7 @@ Integrations are generic: a webhook, not a particular tracker.
   claim they conform
   ([Accessibility](https://github.com/lapilli-project/lapilli/blob/main/ACCESSIBILITY.md)).
 
-## Help build it
+## Help build it {#help-build-it}
 
 Lapilli has one maintainer and is looking for more, from more than one
 organisation. The open questions are good ones. How faithfully can a replay
@@ -238,21 +257,56 @@ incident tool.
 The most useful report there is: a rule that replays differently from how it
 really fired.
 
-## Install
+## Install {#install}
+
+<div class="ways">
+<div markdown="1">
+### Go
 
 ```sh
 go install lapilli.dev/cmd/lapilli@latest
+lapilli demo
 ```
+</div>
+<div markdown="1">
+### A binary
 
-or a binary from the
-[releases](https://github.com/lapilli-project/lapilli/releases), the image
-`ghcr.io/lapilli-project/lapilli`, or the Helm chart
-`oci://ghcr.io/lapilli-project/charts/lapilli`. The chart runs it once a
-week as a CronJob, or with `mode: serve` every hour.
+For Linux and macOS, on amd64 or arm64, from the
+[releases]({{ site.repo }}/releases{% if site.version %}/tag/{{ site.version }}{% endif %}):
+
+```sh
+os=$(uname -s | tr '[:upper:]' '[:lower:]'); arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+{% if site.version %}curl -fsSL {{ site.repo }}/releases/download/{{ site.version }}/lapilli-{{ site.version }}-$os-$arch.tar.gz | tar -xz
+./lapilli-{{ site.version }}-$os-$arch/lapilli demo{% else %}gh release download -R lapilli-project/lapilli -p "lapilli-*-$os-$arch.tar.gz"{% endif %}
+```
+</div>
+<div markdown="1">
+### The image
+
+```sh
+docker run --rm ghcr.io/lapilli-project/lapilli{% if site.version %}:{{ site.version }}{% endif %} demo
+```
+</div>
+<div markdown="1">
+### The Helm chart
+
+Once a week as a CronJob, or with `mode=serve` every hour:
+
+```sh
+helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring \
+  --set mode=serve --set prometheus.url=http://prometheus:9090 \
+  --set 'rules.configMaps={alert-rules}' --set 'match={service}'
+```
+</div>
+</div>
+
+Each release is checked before it is published and can't be changed after;
+[Checking a release]({{ site.repo }}/blob/main/SECURITY.md#checking-a-release)
+verifies what you downloaded.
 [Getting started]({{ '/docs/getting-started/' | relative_url }}) goes from
 here to a first report on your own alerts.
 
-## The name
+## The name {#the-name}
 
 > *mos erat antiquus niveis atrisque lapillis,*<br>
 > *his damnare reos, illis absolvere culpa*

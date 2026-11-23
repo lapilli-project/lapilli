@@ -5,6 +5,9 @@
 title: Lapilli
 description: Which of your alerts are worth their page? Lapilli judges alert rules against what actually went wrong, once with lapilli verdict or every hour with lapilli serve.
 url: https://lapilli.dev
+repo: https://github.com/lapilli-project/lapilli
+# version, the latest release's tag, is added by pages.yml at build time, as
+# baseurl is; without it (a build by hand) the pages leave the version out.
 theme: null
 # jekyll-sitemap writes /sitemap.xml of every page, and /robots.txt naming it.
 plugins: [jekyll-sitemap]

@@ -1,5 +1,8 @@
+{%- assign lang = page.lang | default: "en" -%}
+{%- assign t = site.data.i18n[lang] -%}
+{%- assign home = t.home | relative_url -%}
 <!doctype html>
-<html lang="en">
+<html lang="{{ lang }}" data-copy="{{ t.copy }}" data-copied="{{ t.copied }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,7 +16,14 @@
 <meta property="og:description" content="{{ page.description | default: site.description | escape }}">
 <meta property="og:image" content="{{ '/og.png' | absolute_url }}">
 <meta property="og:url" content="{{ page.url | absolute_url }}">
+<meta property="og:locale" content="{{ t.locale }}">
 <meta name="twitter:card" content="summary_large_image">
+{%- if page.home %}
+{%- for l in site.data.i18n.order %}
+<link rel="alternate" hreflang="{{ l }}" href="{{ site.data.i18n[l].home | absolute_url }}">
+{%- endfor %}
+<link rel="alternate" hreflang="x-default" href="{{ '/' | absolute_url }}">
+{%- endif %}
 <meta name="go-import" content="lapilli.dev git https://github.com/lapilli-project/lapilli">
 <meta name="go-source" content="lapilli.dev https://github.com/lapilli-project/lapilli https://github.com/lapilli-project/lapilli/tree/main{/dir} https://github.com/lapilli-project/lapilli/blob/main{/dir}/{file}#L{line}">
 <style>
@@ -44,12 +54,19 @@
     }
   }
   * { box-sizing: border-box; }
+  html { scroll-padding-top: 5rem; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 17px/1.65 "Heebo", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", Helvetica, Arial, sans-serif;
     -webkit-text-size-adjust: 100%;
   }
-  .wrap { max-width: 50rem; margin: 0 auto; padding: 1.2rem 1rem 5rem; }
+  /* Heebo has Latin only: Japanese in Japan's fonts, not Korean's; Korean
+     broken between words, not inside them. */
+  html:lang(ja) body { font-family: "Heebo", -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; }
+  html:lang(ko) body { word-break: keep-all; overflow-wrap: break-word; }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: .4rem 1rem 3rem; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   a { color: var(--accent); text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
   a:hover { text-decoration-color: currentColor; }
   h1, h2, h3, h4 { line-height: 1.22; text-wrap: balance; margin: 2.4rem 0 .7rem; font-weight: 500; }
@@ -71,17 +88,54 @@
   th, td { border-bottom: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
   th { color: var(--dim); font-weight: 500; border-bottom-color: var(--line-strong); }
   img { max-width: 100%; height: auto; }
-  nav.top {
-    position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: .2rem;
-    background: var(--card); border: 1px solid var(--line); border-radius: 9999px; box-shadow: var(--shadow);
-    padding: .4rem .6rem; font-size: .95rem;
-  }
-  nav.top a { color: var(--dim); text-decoration: none; padding: .2rem .75rem; border-radius: 9999px; }
-  nav.top a:hover { color: var(--ink); background: var(--panel); }
-  nav.top a.brand { color: var(--ink); font-weight: 600; display: flex; align-items: center; gap: .45rem; margin-right: auto; }
-  nav.top a.brand img { width: 22px; height: 22px; border-radius: 50%; }
+  .skip { position: absolute; left: .8rem; top: -5rem; z-index: 20; padding: .5rem 1rem; border-radius: 9999px; background: var(--accent); color: var(--on-accent); text-decoration: none; }
+  .skip:focus { top: .6rem; }
+  /* The header: the mark and the version, the site's pages, the language,
+     a star on GitHub and the way in. Under 1040px (where Japanese and
+     Spanish no longer fit on one row) the pages, the star and the way in
+     fold into a menu. Both menus are <details>, so they work
+     with no script; the script at the end closes them on Escape or a click
+     elsewhere. */
+  header.site { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 74rem; margin: 0 auto; padding: .55rem 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; font-size: .95rem; }
+  .brand { display: inline-flex; align-items: center; gap: .45rem; min-height: 24px; color: var(--ink); font-weight: 600; font-size: 1.05rem; text-decoration: none; }
+  .brand img { width: 24px; height: 24px; border-radius: 50%; }
   /* The mark's ring is navy: on a dark page, a light round plate under it, as lapilli serve has it. */
-  @media (prefers-color-scheme: dark) { nav.top a.brand img { background: #efeee9; } }
+  @media (prefers-color-scheme: dark) { .brand img { background: #efeee9; } }
+  .ver { display: inline-flex; align-items: center; min-height: 24px; padding: 0 .55rem; border: 1px solid var(--line-strong); border-radius: 9999px; color: var(--dim); font: .78rem/1 ui-monospace, Menlo, Monaco, Consolas, monospace; text-decoration: none; }
+  .ver:hover { color: var(--ink); background: var(--panel); }
+  .links { display: flex; flex-wrap: wrap; gap: .1rem; margin: 0 auto; }
+  .links a, .pop a { padding: .3rem .7rem; border-radius: 9999px; color: var(--dim); text-decoration: none; }
+  .links a:hover, .pop a:hover { color: var(--ink); background: var(--panel); }
+  .acts { display: flex; align-items: center; gap: .45rem; margin-left: auto; }
+  .btn { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.25rem; padding: 0 .85rem; border: 1px solid var(--line-strong); border-radius: 9999px; background: var(--card); color: var(--ink); font: inherit; font-size: .92rem; text-decoration: none; cursor: pointer; }
+  .btn:hover { background: var(--panel); }
+  .btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+  .btn.primary:hover { background: var(--accent); filter: brightness(1.1); }
+  .btn svg { flex: none; }
+  details.pick { position: relative; }
+  details.pick > summary { list-style: none; }
+  details.pick > summary::-webkit-details-marker { display: none; }
+  details.pick[open] > summary { background: var(--panel); }
+  .pop { position: absolute; right: 0; top: calc(100% + .4rem); z-index: 11; min-width: 12rem; padding: .35rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: 0 8px 28px #2929292e; }
+  .pop ul { list-style: none; margin: 0; padding: 0; }
+  .pop li { margin: 0; }
+  .pop a { display: flex; justify-content: space-between; gap: 1.2rem; border-radius: 9px; color: var(--ink); }
+  .pop a[aria-current] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .pop .code { align-self: center; color: var(--dim); font: .75rem ui-monospace, Menlo, Monaco, Consolas, monospace; }
+  .pop .note { max-width: 15rem; margin: .3rem .7rem .45rem; color: var(--dim); font-size: .8rem; line-height: 1.4; }
+  .pop .btn { justify-content: center; margin: .35rem .3rem .15rem; }
+  .menu { display: none; }
+  @media (max-width: 1040px) {
+    .links, .acts > .star, .acts > .start { display: none; }
+    .menu { display: block; }
+  }
+  /* On a phone, the menu's button is its icon, its name kept for a
+     screen reader. */
+  @media (max-width: 520px) {
+    .menu > summary { padding: 0 .65rem; }
+    .menu > summary .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
   .lede { font-size: 1.12rem; color: var(--dim); }
   .shot { margin: 1.6rem 0; }
   .shot img { display: block; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow); }
@@ -92,7 +146,45 @@
   .grid > div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .9rem 1rem; box-shadow: var(--shadow); }
   .grid h3 { margin: 0 0 .3rem; font-size: 1.02rem; }
   .grid p { margin: 0; color: var(--dim); font-size: .95rem; }
-  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--dim); }
+  /* The front page: what's new, the way in and the commands to start
+     with, the facts at a glance, and the ways to install. */
+  .tags { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin: 2.6rem 0 0; font-size: .88rem; }
+  .tags + h1 { margin-top: 1rem; }
+  .tag { display: inline-block; padding: .2rem .7rem; border-radius: 9999px; background: var(--accent-wash); color: var(--ink); font-size: .74rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .tags a { color: var(--dim); }
+  .hint { margin-top: -.3rem; color: var(--dim); font-size: .9rem; }
+  .facts { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 1px; margin: 1.6rem 0; padding: 0; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .facts li { margin: 0; padding: .8rem 1rem; background: var(--card); color: var(--dim); font-size: .9rem; line-height: 1.45; }
+  .facts b { display: block; margin-bottom: .2rem; color: var(--accent); font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+  .ways { display: grid; gap: .8rem; margin: 1rem 0 1.4rem; }
+  .ways > div { min-width: 0; padding: .1rem 1rem .3rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+  .ways h3 { margin: .8rem 0 .4rem; }
+  .ways p { color: var(--dim); font-size: .92rem; }
+  .ways pre { background: var(--bg); box-shadow: none; }
+  /* A command's Copy button, put there by the script at the end: beside
+     the command, in the block's frame, never over it. */
+  .has-copy { display: flex; align-items: flex-start; gap: .4rem; margin: 1rem 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+  .has-copy > .highlight { flex: 1; min-width: 0; }
+  .has-copy pre { margin: 0; padding-right: .3rem; background: none; border: 0; box-shadow: none; }
+  .copy { flex: none; min-height: 1.9rem; margin: .55rem .55rem .55rem 0; padding: 0 .75rem; border: 1px solid var(--line-strong); border-radius: 9999px; background: var(--card); color: var(--ink); font: inherit; font-size: .8rem; cursor: pointer; }
+  .copy:hover { background: var(--panel); }
+  .ways .has-copy { background: var(--bg); box-shadow: none; }
+  footer.site { margin-top: 1rem; border-top: 1px solid var(--line); color: var(--dim); font-size: .9rem; }
+  .cols { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 2rem; max-width: 74rem; margin: 0 auto; padding: 2.4rem 1rem 1.4rem; }
+  .cols h2 { margin: 0 0 .6rem; padding: 0; border: 0; color: var(--dim); font-size: .75rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+  .cols ul { list-style: none; margin: 0; padding: 0; }
+  .cols li { margin: 0; }
+  .cols li a { display: inline-block; padding: .2rem 0; color: var(--ink); text-decoration: none; }
+  .cols li a:hover { color: var(--accent); text-decoration: underline; }
+  .about p { max-width: 20rem; margin: .6rem 0 0; }
+  .base { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .6rem 1.5rem; max-width: 74rem; margin: 0 auto; padding: 1rem 1rem 2rem; border-top: 1px solid var(--line); font-size: .82rem; }
+  .base p { margin: 0; }
+  .base ul { list-style: none; display: flex; flex-wrap: wrap; gap: .2rem; margin: 0; padding: 0; }
+  .base li { margin: 0; }
+  .base ul a { display: inline-block; padding: .15rem .45rem; border-radius: 9999px; color: var(--dim); text-decoration: none; }
+  .base ul a:hover { color: var(--ink); background: var(--panel); }
+  .base ul a[aria-current] { color: var(--ink); font-weight: 600; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr 1fr; } .about { grid-column: 1 / -1; } }
   /* docs/ pages (site/_layouts/docs.html): the page, and the pages beside
      it on the right, as a wiki's; under the page on a narrow screen. */
   body.docs-page .wrap { max-width: 74rem; }
@@ -113,28 +205,171 @@
     .side { position: static; max-height: none; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
   }
   @media (max-width: 640px) {
-    nav.top { position: static; border-radius: 18px; }
     h1 { font-size: 1.9rem; }
   }
 </style>
 </head>
 <body{% if page.layout == "docs" %} class="docs-page"{% endif %}>
-<div class="wrap">
-<nav class="top">
-  <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/favicon-32.png' | relative_url }}" alt="">Lapilli</a>
-  <a href="{{ '/docs/' | relative_url }}">Docs</a>
-  <a href="https://github.com/lapilli-project/lapilli/blob/main/ROADMAP.md">Roadmap</a>
-  <a href="https://github.com/lapilli-project/lapilli/blob/main/MAINTAINERS.md">Maintain</a>
-  <a href="https://github.com/lapilli-project/lapilli/discussions">Discuss</a>
-  <a href="https://github.com/lapilli-project/lapilli/releases/latest">Releases</a>
-  <a href="https://github.com/lapilli-project/lapilli">GitHub</a>
-</nav>
+<a class="skip" href="#main">{{ t.skip }}</a>
+{%- capture links %}
+  <a href="{{ '/docs/' | relative_url }}">{{ t.docs }}</a>
+  <a href="{{ home }}#how-it-judges">{{ t.how }}</a>
+  <a href="{{ home }}#install">{{ t.install }}</a>
+  <a href="{{ home }}#help-build-it">{{ t.contribute }}</a>
+  <a href="{{ site.repo }}/blob/main/ROADMAP.md">{{ t.roadmap }}</a>
+{%- endcapture %}
+{%- capture star -%}
+<a class="btn star" href="{{ site.repo }}"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>{{ t.star }}<span class="vh">{{ t.star_more }}</span></a>
+{%- endcapture %}
+{%- capture start -%}
+<a class="btn primary start" href="{{ '/docs/getting-started/' | relative_url }}">{{ t.start }}</a>
+{%- endcapture %}
+<header class="site">
+<div class="bar">
+  <a class="brand" href="{{ home }}"><img src="{{ '/favicon-32.png' | relative_url }}" alt="" width="24" height="24">Lapilli</a>
+  {%- if site.version %}
+  <a class="ver" href="{{ site.repo }}/releases/tag/{{ site.version }}">{{ site.version }}<span class="vh">, {{ t.notes }}</span></a>
+  {%- endif %}
+  <nav class="links" aria-label="{{ t.site_nav }}">{{ links }}
+  </nav>
+  <div class="acts">
+    <details class="pick lang">
+      <summary class="btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span class="vh">{{ t.language }}: </span>{{ t.code }}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="pop">
+        {%- if t.others_home != "" and page.home != true %}
+        <p class="note">{{ t.others_home }}</p>
+        {%- endif %}
+        <ul>
+        {%- for l in site.data.i18n.order %}
+        {%- assign o = site.data.i18n[l] %}
+          <li><a href="{{ o.home | relative_url }}" lang="{{ l }}" hreflang="{{ l }}"{% if l == lang %} aria-current="true"{% endif %}>{{ o.name }}<span class="code" aria-hidden="true">{{ o.code }}</span></a></li>
+        {%- endfor %}
+        </ul>
+      </div>
+    </details>
+    {{ star }}
+    {{ start }}
+    <details class="pick menu">
+      <summary class="btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="label">{{ t.menu }}</span></summary>
+      <nav class="pop" aria-label="{{ t.menu }}">{{ links }}
+        {{ star }}
+        {{ start }}
+      </nav>
+    </details>
+  </div>
+</div>
+</header>
+<main id="main" class="wrap" tabindex="-1">
 {%- comment -%} Each code block and table can take the focus, to be scrolled with the keyboard (WCAG 2.1.1). {%- endcomment -%}
 {{ content | replace: '<pre', '<pre tabindex="0"' | replace: '<table', '<table tabindex="0"' }}
-<footer>
-  Apache-2.0 · Heebo is under the <a href="{{ '/OFL-Heebo.txt' | relative_url }}">SIL Open Font License 1.1</a> ·
-  <a href="https://github.com/lapilli-project/lapilli">github.com/lapilli-project/lapilli</a>
-</footer>
+</main>
+<footer class="site">
+<div class="cols">
+  <div class="about">
+    <a class="brand" href="{{ home }}"><img src="{{ '/favicon-32.png' | relative_url }}" alt="" width="24" height="24">Lapilli</a>
+    <p>{{ t.tagline }}</p>
+    <p>{{ t.license }}{% if site.version %} · <a href="{{ site.repo }}/releases/tag/{{ site.version }}">{{ site.version }}<span class="vh">, {{ t.notes }}</span></a>{% endif %}</p>
+  </div>
+  <nav aria-labelledby="f-project">
+    <h2 id="f-project">{{ t.f_project }}</h2>
+    <ul>
+      <li><a href="{{ '/docs/getting-started/' | relative_url }}">{{ t.getting_started }}</a></li>
+      <li><a href="{{ '/docs/how-it-judges/' | relative_url }}">{{ t.how }}</a></li>
+      <li><a href="{{ home }}#install">{{ t.install }}</a></li>
+      <li><a href="{{ site.repo }}/releases">{{ t.releases }}</a></li>
+      <li><a href="{{ site.repo }}/blob/main/ROADMAP.md">{{ t.roadmap }}</a></li>
+    </ul>
+  </nav>
+  <nav aria-labelledby="f-docs">
+    <h2 id="f-docs">{{ t.f_docs }}</h2>
+    <ul>
+      <li><a href="{{ '/docs/' | relative_url }}">{{ t.docs_home }}</a></li>
+      <li><a href="{{ '/docs/verdict/' | relative_url }}">lapilli verdict</a></li>
+      <li><a href="{{ '/docs/serve/' | relative_url }}">lapilli serve</a></li>
+      <li><a href="{{ '/docs/faq/' | relative_url }}">{{ t.faq }}</a></li>
+      <li><a href="{{ '/docs/troubleshooting/' | relative_url }}">{{ t.troubleshooting }}</a></li>
+    </ul>
+  </nav>
+  <nav aria-labelledby="f-community">
+    <h2 id="f-community">{{ t.f_community }}</h2>
+    <ul>
+      <li><a href="{{ site.repo }}">GitHub</a></li>
+      <li><a href="{{ site.repo }}/issues">{{ t.issues }}</a></li>
+      <li><a href="{{ site.repo }}/discussions">{{ t.discussions }}</a></li>
+      <li><a href="{{ site.repo }}/labels/good%20first%20issue">{{ t.first_issues }}</a></li>
+      <li><a href="{{ site.repo }}/blob/main/CONTRIBUTING.md">{{ t.contributing }}</a></li>
+      <li><a href="{{ site.repo }}/blob/main/SECURITY.md">{{ t.security }}</a></li>
+      <li><a href="{{ site.repo }}/blob/main/GOVERNANCE.md">{{ t.governance }}</a></li>
+      <li><a href="{{ site.repo }}/blob/main/MAINTAINERS.md">{{ t.maintainers }}</a></li>
+    </ul>
+  </nav>
 </div>
+<div class="base">
+  <p>Apache-2.0 · <a href="{{ '/OFL-Heebo.txt' | relative_url }}">{{ t.font }}</a></p>
+  <nav aria-label="{{ t.language }}">
+    <ul>
+    {%- for l in site.data.i18n.order %}
+    {%- assign o = site.data.i18n[l] %}
+      <li><a href="{{ o.home | relative_url }}" lang="{{ l }}" hreflang="{{ l }}"{% if l == lang %} aria-current="true"{% endif %}>{{ o.name }}</a></li>
+    {%- endfor %}
+    </ul>
+  </nav>
+</div>
+</footer>
+{%- comment -%}
+The one script: a Copy button on each shell command, and the menus closed
+on Escape or a click outside them. The page works without it.
+{%- endcomment %}
+<script>
+(function () {
+  var words = document.documentElement.dataset;
+  if (navigator.clipboard && window.isSecureContext) {
+    var said = document.createElement('p');
+    said.className = 'vh';
+    said.setAttribute('role', 'status');
+    document.body.appendChild(said);
+    document.querySelectorAll('div.language-sh').forEach(function (block) {
+      var pre = block.querySelector('pre');
+      if (!pre) return;
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'copy';
+      button.textContent = words.copy;
+      button.addEventListener('click', function () {
+        navigator.clipboard.writeText(pre.innerText.replace(/\n+$/, '')).then(function () {
+          button.textContent = words.copied;
+          said.textContent = words.copied;
+          setTimeout(function () { button.textContent = words.copy; said.textContent = ''; }, 1800);
+        }, function () {});
+      });
+      block.classList.add('has-copy');
+      block.appendChild(button);
+    });
+  }
+  // A menu closes on a click outside it or on one of its links (a link to
+  // a section of the same page loads nothing), on Escape, and when the
+  // focus leaves it.
+  var menus = document.querySelectorAll('details.pick');
+  document.addEventListener('click', function (e) {
+    menus.forEach(function (d) {
+      if (d.open && (!d.contains(e.target) || e.target.closest('.pop a'))) d.open = false;
+    });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    menus.forEach(function (d) {
+      if (!d.open) return;
+      var inside = d.contains(document.activeElement);
+      d.open = false;
+      if (inside) d.querySelector('summary').focus();
+    });
+  });
+  menus.forEach(function (d) {
+    d.addEventListener('focusout', function (e) {
+      if (e.relatedTarget && !d.contains(e.relatedTarget)) d.open = false;
+    });
+  });
+})();
+</script>
 </body>
 </html>
