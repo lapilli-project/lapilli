@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -60,6 +61,11 @@ type saidRules struct {
 	// job's, asked once a day; a zero global when it gave none.
 	scrape   content.Scrapes
 	scrapeAt time.Time
+	// jobsOf are the jobs each selector that names none comes from, as
+	// asked (askJobs), and jobsAt when each was asked: kept a day, or an
+	// hour when its query failed.
+	jobsOf map[string][]string
+	jobsAt map[string]time.Time
 	// notify is what Grafana's notification templates show, read once an
 	// hour with --grafana; notifyAt when, notifySum what it was read from.
 	notify    *content.Notifications
@@ -180,6 +186,90 @@ func (s *Server) askScrape(ctx context.Context) {
 	}
 	s.saidRules.scrape, s.saidRules.scrapeAt = got, s.now()
 	s.saidRules.Unlock()
+}
+
+// How long what askJobs asked is kept: a day, or an hour when its query
+// failed; and how long one look may ask for.
+const (
+	jobsEvery  = 24 * time.Hour
+	jobsRetry  = time.Hour
+	jobsBudget = 30 * time.Second
+)
+
+// askJobs asks the history which jobs the series of each selector that
+// names no job come from (docs/design/content.md, "A range over a
+// selector that names no job"), for the range check, of the rules as read:
+// those not asked within a day, source.MaxAsk at most a look, one bounded
+// query each, for jobsBudget in all: the rest at the next look. One whose
+// query fails, or gives no job, is asked again an hour later; its range is
+// counted as before meanwhile, and the log says how many failed.
+func (s *Server) askJobs(ctx context.Context, rs []rules.Rule) {
+	if !s.cfg.CheckContent || s.cfg.ScrapeInterval > 0 {
+		return
+	}
+	scrape := s.scrapes()
+	now := s.now()
+	var ask []string
+	s.saidRules.Lock()
+	for _, sel := range content.ToAsk(rs, scrape) {
+		at, ok := s.saidRules.jobsAt[sel]
+		keep := jobsEvery
+		if _, had := s.saidRules.jobsOf[sel]; ok && !had {
+			keep = jobsRetry
+		}
+		if !ok || now.Sub(at) >= keep {
+			ask = append(ask, sel)
+		}
+	}
+	s.saidRules.Unlock()
+	if len(ask) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, jobsBudget)
+	defer cancel()
+	jobs, failed, notAsked := source.JobsOf(ctx, replay.Base(s.h), ask, now)
+	asked := ask[:len(ask)-notAsked]
+	s.saidRules.Lock()
+	if s.saidRules.jobsOf == nil {
+		s.saidRules.jobsOf, s.saidRules.jobsAt = map[string][]string{}, map[string]time.Time{}
+	}
+	for _, sel := range asked {
+		if js, ok := jobs[sel]; ok {
+			if !slices.Equal(js, s.saidRules.jobsOf[sel]) {
+				s.saidRules.gen++ // what the pages show changes
+			}
+			s.saidRules.jobsOf[sel] = js
+		} else if _, had := s.saidRules.jobsOf[sel]; had {
+			delete(s.saidRules.jobsOf, sel)
+			s.saidRules.gen++
+		}
+		s.saidRules.jobsAt[sel] = now
+	}
+	// What the rules no longer read is let go.
+	if len(s.saidRules.jobsAt) > 4*source.MaxAsk {
+		for sel, at := range s.saidRules.jobsAt {
+			if now.Sub(at) >= jobsEvery {
+				delete(s.saidRules.jobsAt, sel)
+				delete(s.saidRules.jobsOf, sel)
+			}
+		}
+	}
+	s.saidRules.Unlock()
+	// Those not asked for the time are asked at the next look.
+	if failed > 0 {
+		s.log.Warn("the jobs some selectors' series come from couldn't be asked: their ranges are counted as before until they are, in an hour",
+			"failed", failed)
+	}
+	if notAsked > 0 {
+		s.log.Debug("the jobs some selectors' series come from are asked at the next look", "not_asked", notAsked)
+	}
+}
+
+// jobsOf are the jobs each selector that names none comes from, as asked.
+func (s *Server) jobsOf() map[string][]string {
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	return maps.Clone(s.saidRules.jobsOf)
 }
 
 // notifyEvery is how often Grafana's notification templates are read;
@@ -446,7 +536,7 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 	am, _ := s.alertmanager()
 	unchecked := map[string]string{}
 	fs := content.Check(named, content.Options{Runbooks: s.cfg.RunbookAnnotations, Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
-		Alertmanager: am,
+		Alertmanager: am, JobsOf: s.jobsOf(),
 		// Routing the rules to Grafana's contact points has a budget of its
 		// own, and a time: the check holds what pages and /metrics wait on.
 		NotifyBy:  time.Now().Add(notifyTime),

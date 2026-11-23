@@ -231,6 +231,7 @@ func (s *Server) peek(ctx context.Context, raw *string) error {
 	s.askScrape(ctx)
 	s.askNotify(ctx)
 	s.askAlertmanager(ctx)
+	s.askJobs(ctx, s.matching(rs))
 	if sum := docsSum(docs); sum != *raw {
 		s.said(s.matching(rs))
 		*raw = sum

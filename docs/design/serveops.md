@@ -310,7 +310,8 @@ No schema change.
 - **Per-job intervals by the metric's targets** (`/api/v1/targets/metadata`)
   for selectors that name no job: a request for each metric a day, and
   nothing on Prometheus's own recorded series. The job matcher and the
-  global fallback answer most rules.
+  global fallback answer most rules. Since built another way, by the jobs
+  a selector's series come from: [content.md](content.md#a-range-over-a-selector-that-names-no-job).
 
 ## Questions for review
 

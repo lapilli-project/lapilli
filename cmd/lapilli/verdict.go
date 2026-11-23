@@ -236,7 +236,9 @@ What the rules say:
                       without it, those Prometheus's /api/v1/status/config
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
-                      label, as /api/v1/targets says; any other, the global
+                      label, as /api/v1/targets says; one naming none, with
+                      the longest of the jobs its series come from, asked
+                      once (count by (job)); any other, the global
                       interval. A replay asks the server for Grafana's
                       reduces that don't count points at this resolution;
                       without it, at the shortest interval the series they

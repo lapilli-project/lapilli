@@ -125,6 +125,11 @@ type Options struct {
 	// (docs/design/serveops.md).
 	Scrape time.Duration
 	Jobs   map[string]time.Duration
+	// JobsOf, when known, are the jobs each selector's series come from
+	// (ToAsk), by the selector as RangeUse.Selector writes it: a range
+	// over a selector that names no job is counted with the longest of
+	// their intervals. One not in it is counted as before.
+	JobsOf map[string][]string
 	// Seen, when firings were judged, gives the label names a rule's
 	// firings had and whether it fired at all; nil when nothing is known.
 	Seen func(rule string) (names map[string]bool, fired bool)
@@ -301,6 +306,11 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	if o.Scrape > 0 && !logs {
 		for _, u := range Ranges(r.Expr) {
 			d, job := o.scrapes.For(u.Jobs)
+			if jobs, asked := o.JobsOf[u.Selector]; asked && u.Selector != "" {
+				if x, j, ok := o.scrapes.ForJobs(jobs); ok {
+					d, job = x, j
+				}
+			}
 			if u.Range >= 2*d {
 				continue
 			}

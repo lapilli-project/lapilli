@@ -55,8 +55,11 @@ it is served: a range over a selector that names its job
 (`rate(x{job="batch"}[3m])`, or `job=~` the longest of the jobs it can be)
 with that job's own interval, by the job label `/api/v1/targets` says its
 targets end up with (under the Prometheus Operator, a ServiceMonitor's job
-is its service's name); any other with the global one. The finding says
-whose: `rate[3m] < 2 × 2m (job "batch")`. With `--grafana`, the
+is its service's name); a range over a selector that names none
+(`rate(batch_runs_total[3m])`) with the longest interval of the jobs its
+series come from, asked once, `count by (job) (batch_runs_total)` over the
+last ten minutes; any other, and one whose query fails, with the global
+one. The finding says whose: `rate[3m] < 2 × 2m (job "batch")`. With `--grafana`, the
 notification templates each Grafana rule is sent with are checked too
 (below). `--json` writes it all, what each rule says included.
 

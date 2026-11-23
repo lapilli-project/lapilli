@@ -361,3 +361,57 @@ says why, once for each why. What is passed over is said the same way.
   templated by an alert's labels differs from one alert to the next, and
   is then not common: it shows nothing. Guessing it needs the group's
   alerts.
+
+## A range over a selector that names no job
+
+Status: built, for the next release. [serveops.md](serveops.md) counts a
+range over a selector that names its job with that job's own scrape
+interval. A selector that names none, the most of them, was counted with
+the global interval: `rate(batch_runs_total[3m])` of a job scraped every
+2 minutes holds one point, and wasn't faulted under a global 30 seconds.
+
+### What it does
+
+For each range over a selector that names no job, Lapilli asks the
+history which jobs the selector's series come from: `count by (job)
+(SELECTOR)` over the ten minutes before now, a point every five, as one
+range query. The range is counted with the longest interval of those
+jobs, since it must hold two points of each, and the finding names the
+job, as for a selector that names it. A job Prometheus's configuration
+doesn't have counts with the global interval.
+
+- **Only where it can matter.** Not asked with `--scrape-interval`, nor
+  when every job has one interval, nor when no job's is known (most
+  managed services), nor of a range that holds two points of the longest
+  interval known: the answer would change nothing. Nor of a Loki ruler's
+  rule, whose ranges are of log lines.
+- **The selector as one plain selector.** The query is written from the
+  expression's tokens: a metric's name, and matchers each a name, an
+  operator and a string, quoted again. A selector of any other shape
+  isn't asked of: the query can be nothing but `count by (job)` of the
+  selector the rule already reads.
+- **Each once.** Asked once a run in `lapilli verdict`; kept a day in
+  `serve`, asked again by the worker, as the rules are read, not by a
+  page.
+- **Bounded.** 200 selectors at most each time, ten seconds a query, and
+  in `serve` thirty seconds a look: the rest at the next look. A thousand
+  jobs at most a selector.
+
+### When the query fails
+
+The range is counted as before: with the global interval, or the one
+every job has. `lapilli verdict` says on stderr how many weren't asked;
+`serve` asks a failed one again an hour later, and the log says how many
+failed. A selector with no series in the ten minutes (a counter only an
+error makes) gives no job, and is counted as before too; `serve` asks it
+again an hour later.
+
+### Not done
+
+- **The metric's targets** (`/api/v1/targets/metadata`), as
+  [serveops.md](serveops.md) weighed: it knows nothing of recorded series,
+  and isn't served by most stores that serve queries.
+- **A series recorded by a recording rule** keeps the job it was recorded
+  from, and is counted with that job's scrape interval, not its rule's
+  evaluation interval, as before.
+

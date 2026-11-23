@@ -247,7 +247,9 @@ What the rules say:
                       without it, those Prometheus's /api/v1/status/config
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
-                      label, as /api/v1/targets says; any other, the global
+                      label, as /api/v1/targets says; one naming none, with
+                      the longest of the jobs its series come from, asked
+                      once (count by (job)); any other, the global
                       interval. A replay asks the server for Grafana's
                       reduces that don't count points at this resolution;
                       without it, at the shortest interval the series they
@@ -720,11 +722,13 @@ each history API (lapilli_serve_history_*). Off by default:
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
                       and /api/v1/targets are asked once a day, for the
-                      global interval and each job's: the range check
-                      counts with them, and a replay asks Grafana's reduces
-                      that don't count points at the shortest interval the
-                      series they read are scraped at, or, where they
-                      aren't served, at Grafana's own resolution (1s)
+                      global interval and each job's, and the jobs the
+                      series of a selector that names none come from: the
+                      range check counts with them, and a replay asks
+                      Grafana's reduces that don't count points at the
+                      shortest interval the series they read are scraped
+                      at, or, where they aren't served, at Grafana's own
+                      resolution (1s)
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). Without a

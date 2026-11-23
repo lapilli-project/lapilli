@@ -147,6 +147,16 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 	if h != nil {
 		if o.Scrape == 0 && f.scrapes != nil {
 			o.Scrape, o.Jobs = f.scrapes.Global, f.scrapes.Jobs
+			// A range over a selector that names no job: the jobs its
+			// series come from, asked, one query each.
+			if sels := content.ToAsk(rs, *f.scrapes); len(sels) > 0 {
+				var failed, notAsked int
+				o.JobsOf, failed, notAsked = source.JobsOf(ctx, h, sels, now())
+				if failed+notAsked > 0 {
+					fmt.Fprintf(stderr, "lapilli verdict: the jobs the series of %d selectors that name none come from weren't asked (%d failed, %d past the %d asked or the time): their ranges count as before\n",
+						failed+notAsked, failed, notAsked, source.MaxAsk)
+				}
+			}
 		}
 		known, fs := replay.Run(ctx, h, []replay.Version{{Rules: rs}}, f.opts.From, f.opts.To, f.step, f.parallel)
 		cut = ctx.Err() != nil

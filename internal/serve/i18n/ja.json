@@ -1257,7 +1257,7 @@
  "absent() with no for: a restart pages": "for なしの absent(): 再起動だけで呼び出されます",
  "read from its aggregation; it hasn't fired to tell": "集計式から推定しました。まだ発火していないので確認できません",
  "it may be a typo, or a severity only it needs": "タイプミスか、このルールだけに必要な重大度かもしれません",
- "the interval is its job's where the selector names one, and Prometheus's global one otherwise": "間隔は、セレクターが job を指定していればその job のもの、なければ Prometheus のグローバル設定のものです",
+ "the interval is its job's where the selector names one or its series say which, and Prometheus's global one otherwise": "間隔は、セレクターが job を指定しているか、その系列がどの job かを示していればその job のもの、なければ Prometheus のグローバル設定のものです",
  "a series gone for a moment may be what it is there for": "一時的に消えた系列を検知するためのルールかもしれません",
  "What the rules say: %d problems in %d rules (%s)": "アラート内容: ルール %[2]d 件に問題 %[1]d 件（%[3]s）",
  "What the rules say: no problems": "アラート内容: 問題なし",

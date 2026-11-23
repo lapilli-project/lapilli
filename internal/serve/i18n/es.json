@@ -1257,7 +1257,7 @@
  "absent() with no for: a restart pages": "absent() sin for: un reinicio avisa a la guardia",
  "read from its aggregation; it hasn't fired to tell": "deducido de su agregación; no se ha disparado para confirmarlo",
  "it may be a typo, or a severity only it needs": "puede ser una errata, o una severidad que solo ella necesita",
- "the interval is its job's where the selector names one, and Prometheus's global one otherwise": "el intervalo es el de su job cuando el selector nombra uno, y el global de Prometheus en otro caso",
+ "the interval is its job's where the selector names one or its series say which, and Prometheus's global one otherwise": "el intervalo es el de su job cuando el selector nombra uno o sus series dicen cuál, y el global de Prometheus en otro caso",
  "a series gone for a moment may be what it is there for": "una serie que desaparece un momento puede ser justo lo que vigila",
  "What the rules say: %d problems in %d rules (%s)": "Lo que dicen las reglas: %d problemas en %d reglas (%s)",
  "What the rules say: no problems": "Lo que dicen las reglas: sin problemas",
