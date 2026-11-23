@@ -36,9 +36,11 @@ changes it, is `https://`, on whatever port and path, or this machine's
 over `http://` for tests (`127.0.0.1`, `[::1]` or `localhost`, with a port
 or not), and `curl` speaks no other scheme; the scheme may be in capitals.
 One with a user or token before `@` is refused. Neither the token nor the
-address is said. An answer is 16 MiB at most: past it a script stops,
-writing nothing. `curl` before 8.4 holds to that bound only an answer that
-says its length (`Content-Length`); use `curl` 8.4 or later.
+address is said. An answer is 16 MiB at most, whatever `curl`'s version
+(before 8.4, `--max-filesize` holds to that bound only an answer that says
+its length; the scripts cut what `curl` writes too): past it a script
+stops, writing nothing. So does an answer that isn't a 2xx, a redirect
+among them, which `curl` doesn't follow with the token.
 `cloudwatch.sh`, `azure-monitor.sh` and `oci.sh` ask through their cloud's
 CLI, signed in however it is: they hold no token and name no address, so
 there is nothing of theirs to check or to pin.
@@ -265,7 +267,8 @@ http the token is read by whatever is on the way, so keep that to the
 cluster serve runs in, as its port is. Its token file holds the token on
 one line, of any characters but a tab or another control character (serve
 takes a token of any), with what an editor leaves after it dropped; and
-serve's answer is 16 MiB at most.
+serve's answer is 16 MiB at most, held to it by `curl` alone (8.4 or later
+for an answer that doesn't say its length: serve's own).
 
 Sent again as they are, they change nothing. Every hour over the last day
 keeps the ledger close behind; every week over what the cloud keeps ends

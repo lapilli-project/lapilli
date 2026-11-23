@@ -286,10 +286,11 @@ exits non-zero.
 The port takes one write at a time, 20 a second, with bursts of 40; past that it
 answers 429, and `put.sh` waits and tries again. The ledger keeps 20,000 copied
 incidents at most. A script stops after `MAX_PAGES` pages
-(1000), when the tool gives the same page again, or at an answer over 16 MiB,
-and then writes nothing. `curl` before 8.4 holds to that bound only an answer
-that says its length (`Content-Length`); a chunked one it reads whole. Use
-`curl` 8.4 or later.
+(1000), when the tool gives the same page again, at an answer over 16 MiB,
+whatever `curl`'s version (the scripts cut what `curl` writes, as before 8.4
+`--max-filesize` holds to that bound only an answer that says its length), or
+at one that isn't a 2xx, a redirect among them, which `curl` doesn't follow
+with the token; and then writes nothing.
 
 In the chart:
 

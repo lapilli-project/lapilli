@@ -29,8 +29,9 @@ var refusedTokens = []string{"first-line\nsecond-line", "first-line\r\nsecond-li
 
 // recordingCurl puts a curl first on PATH that writes each call's
 // arguments, a line each, to the file it gives, answers Lapilli's first
-// page of tasks with one open task and its others with none, and fails
-// any other request: PATH for a recipe's environment, and that file.
+// page of tasks with one open task and its others with none, to -o's file
+// or stdout, and fails any other request: PATH for a recipe's
+// environment, and that file.
 func recordingCurl(t *testing.T) (path, args string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -45,6 +46,7 @@ while [ $# -gt 0 ]; do
   last=$1
   shift
 done
+[ "$out" != - ] || out=/dev/stdout
 case $last in
   */api/v1/tasks\?linked=false*) printf '{"tasks": [{"id": 1, "title": "t", "kind": "tune", "status": "open"}]}' >"$out" ;;
   */api/v1/tasks\?*) printf '{"tasks": []}' >"$out" ;;

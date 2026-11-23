@@ -90,8 +90,34 @@ filter="open_time>=\"$SINCE\""
 [ -z "${UNTIL:-}" ] || filter="$filter AND open_time<\"$UNTIL\""
 filter=$(printf '%s' "$filter" | jq -sRr @uri)
 all=$(mktemp)
-trap 'rm -f "$all"' EXIT
+got=$(mktemp)
+heads=$(mktemp)
+failed=$(mktemp)
+trap 'rm -f "$all" "$got" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# held CURL-ARGUMENTS: curl's answer on stdout, of a 2xx alone, and 16
+# MiB of it at most whatever curl's version (before 8.4.0, --max-filesize
+# caps only an answer that says its length first). Past it, with curl
+# failing, or of any other answer, a redirect among them, which curl
+# doesn't follow, it fails, saying so. curl's stdin is its own, and it
+# reads no .curlrc (-q).
+held() {
+  : >"$failed"
+  { curl -q "$@" -D "$heads" -o - || echo x >"$failed"; } | head -c 16777217 >"$got"
+  if [ "$(wc -c <"$got")" -gt 16777216 ]; then
+    printf 'google-cloud.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  h_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  case $h_code in
+    2??) cat "$got" ;;
+    *)
+      printf 'google-cloud.sh: the API answered %s; writing nothing\n' "${h_code:-nothing}" >&2
+      return 1
+      ;;
+  esac
+}
 next=
 pages=0
 while :; do
@@ -103,9 +129,9 @@ while :; do
   url="$api/v3/projects/$GOOGLE_CLOUD_PROJECT/alerts?pageSize=1000&filter=$filter"
   [ -z "$next" ] || url="$url&pageToken=$(printf '%s' "$next" | jq -sRr @uri)"
   # The token goes on stdin, not the command line, where ps would show it.
-  # An answer is 16 MiB at most (max-filesize): past it, curl fails, and
-  # nothing is written.
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$url")
+  # An answer is 16 MiB at most, and a 2xx (held): past it, or of
+  # another, the script stops, and nothing is written.
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$url")
   printf '%s' "$page" | jq -c '.alerts // [] | .[]' >>"$all"
   last=$next
   next=$(printf '%s' "$page" | jq -r '.nextPageToken // empty')

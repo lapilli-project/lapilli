@@ -144,8 +144,27 @@ alertIDs=$(mktemp)
 linked=$(mktemp)
 got=$(mktemp)
 heads=$(mktemp)
-trap 'rm -f "$all" "$out" "$ids" "$alertIDs" "$linked" "$got" "$heads"' EXIT
+failed=$(mktemp)
+trap 'rm -f "$all" "$out" "$ids" "$alertIDs" "$linked" "$got" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# into FILE CURL-ARGUMENTS: curl's answer into FILE, 16 MiB of it at most
+# whatever curl's version (before 8.4.0, --max-filesize caps only an
+# answer that says its length first), and its HTTP status, as the headers
+# curl wrote to $heads (-D) say, on stdout. It fails when curl does, or
+# past 16 MiB. curl's stdin is its own, and it reads no .curlrc (-q).
+into() {
+  i_file=$1
+  shift
+  : >"$failed"
+  { curl -q "$@" -o - || echo x >"$failed"; } | head -c 16777217 >"$i_file"
+  if [ "$(wc -c <"$i_file")" -gt 16777216 ]; then
+    printf 'jira.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  i_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  printf '%s' "${i_code:-000}"
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -167,7 +186,7 @@ get() {
   backoff=5
   while :; do
     code=$(printf 'Authorization: Basic %s\n' "$auth" |
-      curl -q -sS --proto "$1" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$2") || exit 1
+      into "$got" -sS --proto "$1" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" "$2") || exit 1
     [ "$code" = 429 ] || return 0
     waits=$((waits + 1))
     wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')

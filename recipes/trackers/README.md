@@ -96,8 +96,11 @@ carriage return) dropped: GitHub's, GitLab's and Shortcut's of the
 characters a Bearer token is written in (letters, digits and `- . _ ~ + /
 =`); Lapilli's, Jira's, Azure DevOps' and Linear's of any but a tab or
 another control character. An answer, Lapilli's or the tracker's, is 16 MiB
-at most; `curl` before 8.4 holds to that only an answer that says its
-length, so use 8.4 or later.
+at most, whatever `curl`'s version: the scripts cut what `curl` writes, as
+before 8.4 `--max-filesize` holds to that bound only an answer that says its
+length. Past it, the task is skipped, or the run stops, as with any answer
+that fails. A tracker's answer that timed out, or said 408, 429, 500, 502,
+503 or 504, is asked again three times at most, as `curl --retry 3` did.
 
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by

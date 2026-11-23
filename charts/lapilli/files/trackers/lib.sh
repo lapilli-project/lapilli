@@ -243,23 +243,68 @@ issue_text() {
 kept='def kept($m): [. // "" | split("\n")[] | rtrimstr("\r") | select(startswith("Kept in step with Lapilli:"))]
   | last == "Kept in step with Lapilli: " + $m;'
 
+# capped FILE: stdin into FILE, 16 MiB of it at most; it fails when there
+# was more. Before curl 8.4.0 (Ubuntu 22.04 has 7.81), --max-filesize caps
+# only an answer that says its length first: what curl writes is capped
+# so, whatever its version.
+capped() { head -c 16777217 >"$1" && [ "$(wc -c <"$1")" -le 16777216 ]; }
+
+# status_of FILE: the HTTP status of the last answer whose headers curl
+# wrote to FILE (-D), or nothing.
+status_of() { sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$1" | tail -n 1; }
+
 # fetch CURL-ARGUMENTS: the tracker's answer, taken whole before it is
 # read, for a 2xx; anything else is said and fails, its HTTP status kept
-# for gone.
+# for gone. The headers curl is to send come on stdin (-H @-), read once
+# and sent again with each try. An answer is 16 MiB at most (capped): past
+# it, the request fails. A time out, or a 408, 429, 500, 502, 503 or 504,
+# is asked again three times at most, a second after the first, twice as
+# long each time after, or as long as Retry-After says, a minute at most:
+# what curl's --retry did, which writes each try's answer after the one
+# before when the answer goes through a pipe.
 fetch() {
-  : >"$work/answer"
-  if ! code=$(curl -q -sS --proto "${tracker_proto:?tracker_api says where the tracker is}" --max-time 30 --max-filesize 16777216 --retry 3 \
-    -o "$work/answer" -w '%{http_code}' "$@"); then
-    code=000
-  fi
-  printf '%s\n' "$code" >"$work/status"
-  case $code in
-    2??) cat "$work/answer" ;;
-    *)
-      say "the tracker answered $code: $(head -c 300 "$work/answer" | jq -Rsc .)"
+  f_sent=$(cat)
+  f_tries=0
+  f_pause=1
+  while :; do
+    : >"$work/heads"
+    rm -f "$work/failed"
+    f_over=
+    if ! { printf '%s\n' "$f_sent" | curl -q -sS --proto "${tracker_proto:?tracker_api says where the tracker is}" --max-time 30 --max-filesize 16777216 \
+      -D "$work/heads" -o - "$@" || printf '%s' "$?" >"$work/failed"; } | capped "$work/answer"; then
+      f_over=1
+    fi
+    code=$(status_of "$work/heads")
+    [ -n "$code" ] && [ ! -e "$work/failed" ] || code=000
+    if [ -n "$f_over" ]; then
+      printf '000\n' >"$work/status"
+      say "the tracker's answer is more than 16 MiB: not read"
       return 1
-      ;;
-  esac
+    fi
+    again=
+    case $code in 408 | 429 | 500 | 502 | 503 | 504) again=1 ;; esac
+    [ "$(cat "$work/failed" 2>/dev/null)" != 28 ] || again=1
+    if [ -n "$again" ] && [ "$f_tries" -lt 3 ]; then
+      f_tries=$((f_tries + 1))
+      f_wait=$(tr -d '\r' <"$work/heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
+      case $f_wait in
+        '' | *[!0-9]* | ???*) f_wait=$f_pause ;;
+        *) [ "$f_wait" -le 60 ] || f_wait=60 ;;
+      esac
+      sleep "$f_wait"
+      f_pause=$((f_pause * 2))
+      continue
+    fi
+    printf '%s\n' "$code" >"$work/status"
+    case $code in
+      2??) cat "$work/answer" ;;
+      *)
+        say "the tracker answered $code: $(head -c 300 "$work/answer" | jq -Rsc .)"
+        return 1
+        ;;
+    esac
+    return 0
+  done
 }
 
 # gone: whether the tracker's last answer said what was asked for isn't
@@ -271,12 +316,19 @@ gone() {
   return 1
 }
 
-# lapilli_curl CURL-ARGUMENTS: curl to Lapilli: its token on stdin, not the
-# command line, where ps would show it; LAPILLI_URL's scheme alone; and an
-# answer of 16 MiB at most.
+# lapilli_curl OUT CURL-ARGUMENTS: curl to Lapilli, its answer into OUT
+# (/dev/null for none): its token on stdin, not the command line, where ps
+# would show it; LAPILLI_URL's scheme alone; and an answer of 16 MiB at
+# most (capped), past which it fails. Each asks with -f, which writes no
+# answer of an HTTP error, so a try curl's --retry makes again writes
+# nothing before the next's.
 lapilli_curl() {
-  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -q --proto "$lapilli_proto" --max-time 30 --max-filesize 16777216 --retry 3 -H @- "$@"
+  l_out=$1
+  shift
+  rm -f "$work/lfailed"
+  { printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+    curl -q --proto "$lapilli_proto" --max-time 30 --max-filesize 16777216 --retry 3 -H @- -o - "$@" || : >"$work/lfailed"; } |
+    capped "$l_out" && [ ! -e "$work/lfailed" ]
 }
 
 # lapilli_tasks QUERY FILE: every task the query finds, a JSON object a line.
@@ -290,7 +342,7 @@ lapilli_tasks() {
       say "more than $max_pages pages of tasks; stopping (raise MAX_PAGES)"
       exit 1
     fi
-    if ! lapilli_curl -fsS -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
+    if ! lapilli_curl "$work/page" -fsS "$lapilli/api/v1/tasks?$1&after=$after"; then
       say "Lapilli didn't give the tasks"
       exit 1
     fi
@@ -312,13 +364,13 @@ lapilli_tasks() {
 
 # lapilli_patch ID JSON: set a task's link or status.
 lapilli_patch() {
-  lapilli_curl -fsS -X PATCH -H 'Content-Type: application/json' \
-    --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
+  lapilli_curl /dev/null -fsS -X PATCH -H 'Content-Type: application/json' \
+    --data-binary "$2" "$lapilli/api/v1/tasks/$1"
 }
 
 # lapilli_comments ID FILE: a task's comments, as Lapilli has them.
 lapilli_comments() {
-  if ! lapilli_curl -fsS -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+  if ! lapilli_curl "$2" -fsS "$lapilli/api/v1/tasks/$1/comments"; then
     return 1
   fi
   jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
@@ -330,15 +382,29 @@ lapilli_comments() {
 # when the task keeps as many as it does), and as sent.
 lapilli_copy() {
   : >"$work/copied"
-  lapilli_curl -sS -X POST -H 'Content-Type: application/json' \
-    --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
+  : >"$work/lheads"
+  # A refusal (4xx) fails curl (-f), and is told by its status.
+  if lapilli_curl "$work/copied" -fsS -X POST -H 'Content-Type: application/json' -D "$work/lheads" \
+    --data-binary "$2" "$lapilli/api/v1/tasks/$1/comments" 2>"$work/lcopy.log"; then
+    l_code=$(status_of "$work/lheads")
+  else
+    l_code=$(status_of "$work/lheads")
+    case $l_code in
+      4??) ;;
+      *)
+        cat "$work/lcopy.log" >&2
+        l_code=000
+        ;;
+    esac
+  fi
+  printf '%s' "${l_code:-000}"
 }
 
 # lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
 # the task's issue as REF, so it is never posted again.
 lapilli_mark() {
-  lapilli_curl -fsS -X PATCH -H 'Content-Type: application/json' \
-    --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" -o /dev/null "$lapilli/api/v1/tasks/$1/comments/$2"
+  lapilli_curl /dev/null -fsS -X PATCH -H 'Content-Type: application/json' \
+    --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" "$lapilli/api/v1/tasks/$1/comments/$2"
 }
 
 # comment_text: a comment people wrote in Lapilli, on stdin, as the issue's

@@ -119,8 +119,27 @@ from=$((since - 86400000))
 all=$(mktemp)
 page=$(mktemp)
 heads=$(mktemp)
-trap 'rm -f "$all" "$page" "$heads"' EXIT
+failed=$(mktemp)
+trap 'rm -f "$all" "$page" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# into FILE CURL-ARGUMENTS: curl's answer into FILE, 16 MiB of it at most
+# whatever curl's version (before 8.4.0, --max-filesize caps only an
+# answer that says its length first), and its HTTP status, as the headers
+# curl wrote to $heads (-D) say, on stdout. It fails when curl does, or
+# past 16 MiB. curl's stdin is its own, and it reads no .curlrc (-q).
+into() {
+  i_file=$1
+  shift
+  : >"$failed"
+  { curl -q "$@" -o - || echo x >"$failed"; } | head -c 16777217 >"$i_file"
+  if [ "$(wc -c <"$i_file")" -gt 16777216 ]; then
+    printf 'datadog.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  i_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  printf '%s' "${i_code:-000}"
+}
 # header NAME: the whole seconds the last header NAME (lowercase) of the
 # answer says, or nothing; its leading zeros off, as $((...)) would read
 # 08 as octal, and fail.
@@ -149,10 +168,10 @@ fetch() {
   backoff=5
   while :; do
     # The keys go on stdin, not the command line, where ps would show them.
-    # An answer is 16 MiB at most (max-filesize): past it, curl fails, and
+    # An answer is 16 MiB at most (into): past it, the script stops, and
     # nothing is written.
     code=$(printf '%s\n' "$headers" |
-      curl -q -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$page" -w '%{http_code}' "$1") || exit 1
+      into "$page" -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" "$1") || exit 1
     case $code in
       2??) return 0 ;;
       429) ;;
