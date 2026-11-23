@@ -338,11 +338,12 @@ kafka_once() {
     # end, or where KAFKA_START says.
     reset=latest
     [ "${KAFKA_START:-}" != beginning ] || reset=earliest
-    run_kcat -C -G "$KAFKA_GROUP" -X auto.offset.reset="$reset" -e -q -c 10000 -f '%s\n' "$KAFKA_TOPIC" >"$work/kafka" </dev/null || {
+    run_kcat -C -G "$KAFKA_GROUP" -X auto.offset.reset="$reset" -e -q -c 10000 -J "$KAFKA_TOPIC" >"$work/kafka" </dev/null || {
       say "kcat failed to read $KAFKA_TOPIC"
       return 1
     }
-    batches "$work/kafka"
+    messages "$work/kafka" || return 1
+    batches "$work/lines"
     while read -r b _ long; do
       [ "$long" -eq 0 ] || say "$long events over a request's 1 MB, passed over"
       if [ "$b" != - ] && ! post "$b"; then
@@ -368,13 +369,11 @@ kafka_once() {
   while read -r p; do
     next=$(awk -v p="$p" '$1 == p && $2 ~ /^[0-9]+$/ {n = $2} END {print n}' "$OFFSET_FILE")
     from=${next:-$start}
-    run_kcat -C -t "$KAFKA_TOPIC" -p "$p" -o "$from" -e -q -c 10000 -f '%o %s\n' >"$work/kafka" </dev/null || {
+    run_kcat -C -t "$KAFKA_TOPIC" -p "$p" -o "$from" -e -q -c 10000 -J >"$work/kafka" </dev/null || {
       say "kcat failed to read $KAFKA_TOPIC's partition $p"
       return 1
     }
-    # Each line an offset and its message: the messages, and where each
-    # line ends, for the offset to keep after each batch.
-    LC_ALL=C awk -v offsets="$work/offsets" '$1 ~ /^[0-9]+$/ { o = $1; sub(/^[0-9]+ /, ""); print; print o > offsets }' "$work/kafka" >"$work/lines"
+    messages "$work/kafka" || return 1
     [ -s "$work/lines" ] || continue
     batches "$work/lines"
     while read -r b end long; do
@@ -392,6 +391,20 @@ kafka_once() {
       kafka_kept "$p" "$((last + 1))" || return 1
     done <"$work/ends"
   done <"$work/partitions"
+}
+
+# messages FILE: the messages kcat -J wrote to FILE, each in its JSON
+# envelope: their payloads, one a line, in $work/lines, and their offsets,
+# a line each, in $work/offsets. The offset is Kafka's, from the envelope,
+# never from what a message says; a payload's line ends (whitespace in
+# JSON) are spaces, so one message is one line.
+messages() {
+  sel='select(type == "object" and (.offset | type) == "number")'
+  if ! jq -r "$sel | .offset | floor | tostring" "$1" >"$work/offsets" 2>/dev/null ||
+    ! jq -r "$sel"' | (.payload // "") | if type == "string" then gsub("[\r\n]"; " ") else tojson end' "$1" >"$work/lines" 2>/dev/null; then
+    say "what kcat read isn't its JSON envelopes"
+    return 1
+  fi
 }
 
 # kafka_kept PARTITION NEXT: the offset to read the partition from next,

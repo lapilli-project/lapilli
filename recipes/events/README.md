@@ -23,7 +23,7 @@ event_recorder:
 | Run | Reads | Resumes from |
 |---|---|---|
 | `alertmanager.sh file PATH` | the file, from where it stopped | `OFFSET_FILE` (default `PATH.offset`): the file's inode, a byte offset into it, and a sum of its first bytes |
-| `alertmanager.sh kafka` | the topic, a partition at a time, with `kcat` | `OFFSET_FILE`: a line a partition, its next offset |
+| `alertmanager.sh kafka` | the topic, a partition at a time, with `kcat -J`, each message's offset from its envelope | `OFFSET_FILE`: a line a partition, its next offset |
 | `KAFKA_GROUP=NAME alertmanager.sh kafka` | the topic, as a member of the consumer group | the offsets Kafka keeps for the group, which `kcat` commits once it has read the messages |
 
 ```sh

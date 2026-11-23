@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -253,19 +254,22 @@ func TestEventsRecipeRefuses(t *testing.T) {
 	})
 }
 
-// fakeKcat stands in for kcat: it lists the topic's two partitions, gives
-// a partition's messages from an offset as '%o %s', or, in a group, every
-// message; and notes how it was run.
+// fakeKcat stands in for kcat: it lists the topic's two partitions, and
+// gives a partition's messages from an offset, or, in a group, every
+// message of both, each in its JSON envelope with -J, or as -f '%o %s\n'
+// writes them without; and notes how it was run. A partition's file holds
+// its messages, a JSON string a line.
 const fakeKcat = `#!/bin/sh
 echo "$*" >>"$FAKE_KAFKA/args"
 mode=$1
 shift
-p= o= g=
+p= o= g= j=
 while [ $# -gt 0 ]; do
   case $1 in
     -p) p=$2; shift ;;
     -o) o=$2; shift ;;
     -G) g=$2; shift ;;
+    -J) j=1 ;;
     -b | -t | -F | -X | -c | -f) shift ;;
   esac
   shift
@@ -273,15 +277,32 @@ done
 case $mode in
   -L) printf '{"topics":[{"topic":"am-events","partitions":[{"partition":0},{"partition":1}]}]}\n' ;;
   -C)
-    if [ -n "$g" ]; then
-      cat "$FAKE_KAFKA/0" "$FAKE_KAFKA/1"
-      exit 0
-    fi
     case $o in '' | *[!0-9]*) o=0 ;; esac
-    awk -v o="$o" 'NR - 1 >= o { print NR - 1 " " $0 }' "$FAKE_KAFKA/$p"
+    parts=$p
+    if [ -n "$g" ]; then parts="0 1" o=0; fi
+    for q in $parts; do
+      if [ -n "$j" ]; then
+        jq -c -n --argjson p "$q" --argjson o "$o" '[inputs] | to_entries[] | select(.key >= $o) | {topic: "am-events", partition: $p, offset: .key, key: "am-0", payload: .value}' "$FAKE_KAFKA/$q"
+      else
+        jq -r -n --argjson o "$o" '[inputs] | to_entries[] | select(.key >= $o) | "\(.key) \(.value)"' "$FAKE_KAFKA/$q"
+      fi
+    done
     ;;
 esac
 `
+
+// kafkaFile writes a stand-in partition's messages, a JSON string each.
+func kafkaFile(t *testing.T, path string, msgs [][]byte) {
+	t.Helper()
+	var b bytes.Buffer
+	for _, m := range msgs {
+		q, _ := json.Marshal(string(m))
+		b.Write(append(q, '\n'))
+	}
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // The recipe consumes the recorder's Kafka output with kcat: from the
 // offsets it keeps, a partition at a time, or as a consumer group's member,
@@ -308,7 +329,7 @@ func TestEventsRecipeKafka(t *testing.T) {
 			parts[i%2] = append(parts[i%2], l)
 		}
 		for p := range parts {
-			appendLines(t, filepath.Join(kafka, fmt.Sprint(p)), parts[p], nil)
+			kafkaFile(t, filepath.Join(kafka, fmt.Sprint(p)), parts[p])
 		}
 		token := tokenFile(t, notifyToken)
 		offsets := filepath.Join(dir, "offsets")
@@ -435,12 +456,40 @@ func TestEventsRecipeOffsetUnwritable(t *testing.T) {
 		os.MkdirAll(bin, 0o755)
 		os.MkdirAll(kafka, 0o755)
 		os.WriteFile(filepath.Join(bin, "kcat"), []byte(fakeKcat), 0o755)
-		appendLines(t, filepath.Join(kafka, "0"), recorded(t, "alertmanager-0.35.0.jsonl")[:5], nil)
-		appendLines(t, filepath.Join(kafka, "1"), nil, nil)
+		kafkaFile(t, filepath.Join(kafka, "0"), recorded(t, "alertmanager-0.35.0.jsonl")[:5])
+		kafkaFile(t, filepath.Join(kafka, "1"), nil)
 		env = recipeEnv(srv.URL, tokenFile(t, notifyToken), bin, "FAKE_KAFKA="+kafka, "KAFKA_BROKERS=k:9092", "KAFKA_TOPIC=am-events",
 			"OFFSET_FILE="+filepath.Join(ro, "kafka.offsets"))
 		if code, out := runEvents(t, env, "kafka"); code != 1 || !strings.Contains(out, "can't be written") {
 			t.Errorf("Kafka: exit %d: %s", code, out)
+		}
+	})
+}
+
+// A partition's offset is Kafka's, from kcat's envelope, never what a
+// message says: one holding a line end and a number moves it nowhere.
+func TestEventsRecipeKafkaOffsets(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		s := notifyServer(t, nil)
+		s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+		srv := httptest.NewServer(s.NotifyHandler())
+		defer srv.Close()
+		dir := t.TempDir()
+		bin, kafka := filepath.Join(dir, "bin"), filepath.Join(dir, "kafka")
+		os.MkdirAll(bin, 0o755)
+		os.MkdirAll(kafka, 0o755)
+		os.WriteFile(filepath.Join(bin, "kcat"), []byte(fakeKcat), 0o755)
+		lines := recorded(t, "alertmanager-0.35.0.jsonl")
+		kafkaFile(t, filepath.Join(kafka, "0"), [][]byte{lines[0], []byte("not an event\n99999999 x"), lines[1]})
+		kafkaFile(t, filepath.Join(kafka, "1"), nil)
+		offsets := filepath.Join(dir, "offsets")
+		env := recipeEnv(srv.URL, tokenFile(t, notifyToken), bin, "FAKE_KAFKA="+kafka, "KAFKA_BROKERS=k:9092", "KAFKA_TOPIC=am-events", "OFFSET_FILE="+offsets)
+		if code, out := runEvents(t, env, "kafka"); code != 0 || !strings.Contains(out, "1 lines that aren't an event left out") {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		if kept, _ := os.ReadFile(offsets); string(kept) != "0 3\n" {
+			t.Errorf("offsets kept %q, want partition 0 from 3", kept)
 		}
 	})
 }
