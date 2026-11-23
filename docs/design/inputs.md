@@ -118,8 +118,9 @@ event_recorder:
   a notification's `mutedAlerts`). That answers "firings that paged no one:
   why". It wasn't kept here: it is a new kind of data, with a design of its
   own, [mutes.md](mutes.md), built since (schema 029).
-- **The file and Kafka outputs.** A recipe could send a JSONL file's
-  notifications on later; not built.
+- **The file and Kafka outputs** weren't read here. Since built as a
+  recipe, [recipes/events](../../recipes/events) (below, "The file and
+  Kafka outputs").
 
 ### Attacker's look
 
@@ -139,6 +140,44 @@ event_recorder:
   bounds, as on `/v1/alertmanager` today; and mutes that never were, which
   claim only that a firing was muted ([mutes.md](mutes.md), "Attacker's
   look").
+
+### The file and Kafka outputs
+
+Status: built, for the next release, as a recipe: nothing changes in
+serve. `recipes/events/alertmanager.sh` reads what the recorder wrote to a
+file (`file_outputs`) or to Kafka (`kafka_outputs`), and POSTs it to
+`/v1/alertmanager/events` as the webhook output would, in batches.
+
+- **The formats.** Read from Alertmanager 0.35.0's source
+  (`eventrecorder/file.go`, `kafka.go`): the file output appends each event
+  as the webhook output writes it, one a line, and never rotates or
+  truncates the file, reopening it when it is renamed or removed (for
+  logrotate); the Kafka output writes each event as a message, its value
+  that JSON with `format: json`, the default, its key the instance. Both
+  are what this path already reads, a line or a message an event, and the
+  recorder's own test data (`internal/serve/testdata/events/`, a request a
+  line) is the file output's format too.
+- **Where it stopped.** A file's byte offset, kept with the file's inode
+  and a sum of its first 64 bytes: a new inode is a file rotated, whose old
+  one, renamed beside it, is read to its end first; a smaller size, or
+  other first bytes, is a file truncated, read again from its start. Of
+  Kafka, the offsets kept in a file, a partition a line, read with `kcat`
+  partition by partition from there; or a consumer group's, which Kafka
+  keeps and `kcat` commits.
+- **At least once.** The offset moves after each batch serve takes; a
+  batch it doesn't take stops the run. serve keeps a delivery sent twice
+  once, by the instance, the group, the flush and the receiver, as it does
+  the webhook output's tries again.
+- **Bounded.** A batch is 1,000 events and 1 MB at most, as serve takes
+  them, 100 by default; an event over that alone is passed over. The
+  token is read and sent as the other recipes send theirs.
+
+What it doesn't do: an event older than an hour when it arrives is kept as
+of when it arrives, as serve takes any event's time. The recipe is meant
+to run every minute, or beside Alertmanager, following the file; a backlog
+of days sent at once is counted on the day it is sent. Changing that would
+be a change to what serve trusts of an event's time, which a token's
+holder could then set to any hour.
 
 ## 2. Shifts read from on-call schedules
 
