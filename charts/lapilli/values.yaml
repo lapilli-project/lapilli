@@ -41,6 +41,18 @@ prometheus:
 # in this project, with auth google.
 gcpProject: ""
 
+# A Loki, which rules written in LogQL are replayed against
+# (docs/loki.md): a Loki ruler's rules (rules.loki), and Grafana's rules on
+# Loki when they are read from files. tenant is sent as X-Scope-OrgID, for a
+# Loki with tenants and no gateway to set it; tokenSecret a Secret holding a
+# bearer token, mounted as a file and read again for each request.
+loki:
+  url: ""
+  tenant: ""
+  tokenSecret:
+    name: ""
+    key: token
+
 # The alert rules to replay, from one of four places.
 rules:
   # ConfigMaps in this namespace holding alert rules: Prometheus rule files,
@@ -60,6 +72,11 @@ rules:
     tokenSecret:
       name: ""
       key: token
+    # Judge the rules it holds that can't be replayed (a condition on SQL,
+    # Elasticsearch, TestData and the like) by what its own alert state
+    # history says they fired (docs/design/grafanajudged.md); false
+    # (--grafana-history=false) lists them, with why.
+    history: true
   # Or the alert rules a managed Prometheus ruler holds, as written, read
   # through the API that writes them (docs/design/rulers.md):
   #   Mimir     http://mimir:8080/prometheus/config/v1/rules
@@ -97,6 +114,16 @@ rules:
   # How often serve reads them, so the clouds' request quotas hold: 10m
   # when empty.
   alarmsEvery: ""
+  # A Loki ruler's rules, replayed against loki.url beside any of the above
+  # or alone, one of two ways: loaded reads those its ruler holds, as
+  # written, from its API (--loki-loaded-rules), which serve.changes can
+  # change where serve.changes.in names a namespace as loki:NAMESPACE; or
+  # configMaps, ConfigMaps in this namespace holding its rule files, each
+  # mounted as rules.configMaps are (--loki-rules; serve reads one
+  # directory, so their keys must not share a name).
+  loki:
+    loaded: false
+    configMaps: []
 
 # What went wrong. Incidents written down, as in an incidents file:
 #   - {id: INC-41, title: Checkout errors, start: "2026-10-28T12:01:00+09:00", labels: {service: checkout}}
@@ -145,10 +172,7 @@ report:
     key: url
   timeZone: ""   # times in the report; the schedule's time zone when empty
 
-# More flags, such as [--lead, 10m]. A Loki ruler's rules go here too,
-# beside the rules above or alone: [--loki, http://loki:3100,
-# --loki-loaded-rules], with --loki-tenant for a Loki with tenants. A token
-# file or rule files to mount need values of their own, still to do.
+# More flags, such as [--lead, 10m]. Loki's go in loki and rules.loki.
 extraArgs: []
 
 # lapilli serve, with mode: serve. In serve mode incidents and impact may
@@ -864,7 +888,9 @@ serve:
       key: token
     # For rules read from a ruler (rules.ruler): the namespaces, or Azure
     # rule groups as RG/NAME (NAME when rules.ruler.url names one resource
-    # group), Lapilli may change rules in; NAME* for a prefix. For a cloud's
+    # group), Lapilli may change rules in; NAME* for a prefix. For a Loki
+    # ruler's (rules.loki.loaded), loki:NAMESPACE, such as loki:shop or
+    # loki:team-*: shop names the ruler's namespace alone. For a cloud's
     # alarms (rules.alarms), SOURCE:NAME: CloudWatch's alarm name, Azure's
     # RG/NAME, Google's policy's display name, OCI's display name, such as
     # cloudwatch-prod:checkout-*. Nothing in a ruler or a cloud is changed
@@ -890,6 +916,13 @@ serve:
     # a cloud's with the pod's identity. The README has each cloud's least
     # privilege.
     rulerTokenSecret:
+      name: ""
+      key: token
+    # A token that may write the rules of Loki's ruler (rules.loki.loaded),
+    # sent with loki.tenant; a token of its own, not loki.tokenSecret.
+    # Without it, Loki's writes are sent with no token. A Loki whose ruler
+    # keeps its rules in local files (ruler.storage.type: local) takes none.
+    lokiTokenSecret:
       name: ""
       key: token
     awsRole: ""         # rulers' and alarms'

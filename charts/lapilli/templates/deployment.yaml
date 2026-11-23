@@ -347,6 +347,9 @@ spec:
             {{- if .rulerTokenSecret.name }}
             - {{ printf "--changes-ruler-token-file=/var/run/lapilli/changes-ruler/%s" .rulerTokenSecret.key | quote }}
             {{- end }}
+            {{- if .lokiTokenSecret.name }}
+            - {{ printf "--changes-loki-token-file=/var/run/lapilli/changes-loki/%s" .lokiTokenSecret.key | quote }}
+            {{- end }}
             {{- with .awsRole }}
             - {{ printf "--changes-aws-role=%s" . | quote }}
             {{- end }}
@@ -535,6 +538,11 @@ spec:
               mountPath: /var/run/lapilli/changes-ruler
               readOnly: true
             {{- end }}
+            {{- if $s.changes.lokiTokenSecret.name }}
+            - name: changes-loki
+              mountPath: /var/run/lapilli/changes-loki
+              readOnly: true
+            {{- end }}
             {{- if ($s.changes.ociConfigSecret).name }}
             - name: changes-oci
               mountPath: /etc/lapilli/oci
@@ -704,6 +712,11 @@ spec:
         - name: changes-ruler
           secret:
             secretName: {{ $s.changes.rulerTokenSecret.name }}
+        {{- end }}
+        {{- if $s.changes.lokiTokenSecret.name }}
+        - name: changes-loki
+          secret:
+            secretName: {{ $s.changes.lokiTokenSecret.name }}
         {{- end }}
         {{- with $s.changes.ociConfigSecret }}
         {{- if .name }}

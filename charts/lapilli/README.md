@@ -33,8 +33,22 @@ It needs:
   for Prometheus or Azure's Prometheus rule groups hold, as written); and,
   beside any of them or alone, a cloud's own alarms in `rules.alarms`
   (CloudWatch's, Azure Monitor's, Google Cloud Monitoring's, OCI
-  Monitoring's, each named by the source its history is copied in under);
+  Monitoring's, each named by the source its history is copied in under)
+  and a Loki ruler's rules in `rules.loki` (below);
 - what went wrong: `incidents`, `impact`, or both.
+
+Rules written in LogQL are replayed against `loki.url` (`--loki`), with
+`loki.tenant` sent as `X-Scope-OrgID` and `loki.tokenSecret`, a Secret
+holding a bearer token, mounted as a file. A Loki ruler's rules go beside
+the others, or alone: `rules.loki.loaded: true` reads those its ruler
+holds, from its API (`--loki-loaded-rules`); `rules.loki.configMaps` reads
+its rule files from ConfigMaps (`--loki-rules`), mounted as
+`rules.configMaps` are, in one directory in serve mode. Give one of the
+two. Before 0.70.0 these went in `extraArgs`; a Loki flag given there as
+well as in `loki` or `rules.loki` is refused. `rules.grafana.history:
+false` (`--grafana-history=false`) lists the Grafana rules Lapilli can't
+replay, with why, rather than judging them by Grafana's own alert state
+history.
 
 An incident may list the alerts its tool linked to it (`alerts:`, which the
 PagerDuty, incident.io, Rootly, FireHydrant and Jira Service Management
@@ -1011,9 +1025,19 @@ which take `Microsoft.Authorization/permissions/read`,
 unknown), and its read of what each rule group names (the workspace, an
 action group).
 
-Without one, a Mimir's or a Cortex's writes are sent with no token, for a
-ruler reached only inside the cluster, and Amazon's and Azure's with the
-pod's own identity. The Amazon and Azure paths were tested against
+A Loki ruler's rules (`rules.loki.loaded`) are changed through its API
+too, as a Mimir's are, in the namespaces `serve.changes.in` names as
+`loki:NAMESPACE` (`loki:shop`, `loki:team-*`); `shop` alone names the
+ruler's namespace, never Loki's. `serve.changes.lokiTokenSecret` is the
+token Loki's writes carry, a token of their own, not `loki.tokenSecret`'s;
+`loki.tenant` goes with them. Loki takes writes only when its ruler keeps
+its rules in an object store, or on the filesystem through its object
+store client (`storage_config.use_thanos_objstore`), not in local files
+(`ruler.storage.type: local`), which are read-only to its API.
+
+Without one, a Mimir's, a Cortex's or a Loki's writes are sent with no
+token, for a ruler reached only inside the cluster, and Amazon's and
+Azure's with the pod's own identity. The Amazon and Azure paths were tested against
 stand-ins answering as their API documents show, not against an account.
 
 A cloud's own alarms (`rules.alarms`) are read with the pod's own

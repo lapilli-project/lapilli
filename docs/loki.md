@@ -55,8 +55,11 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   each line arrived that late. A range Loki refuses for its series
   (`max_query_series`) is asked again in shorter ranges, down to one
   evaluation; an evaluation over the limit fails, as it does in Loki's
-  ruler. The chart takes `--loki URL --loki-loaded-rules` (and
-  `--loki-tenant`) through `extraArgs`, beside its rules or alone.
+  ruler. The chart takes them as `loki.url`, `loki.tenant` and
+  `loki.tokenSecret` (a Secret, mounted as a file), and `rules.loki.loaded`
+  or `rules.loki.configMaps` (rule files from ConfigMaps), beside its rules
+  or alone; `serve.changes.lokiTokenSecret` is the token Loki's ruler is
+  written with.
 
 Measured against Loki 3.7.9 and Grafana 13.3.1: see the design for the
 recordings kept as test data. `test/e2e/loki.sh` runs the same against
