@@ -2,6 +2,102 @@
 
 ## [Unreleased]
 
+## [0.69.2] - 2026-11-23
+
+What 0.68.1's reviews left for a change of the ledger's schema: a rule
+Grafana's history can't judge is left out alone, remembered, where its
+day was a gap for every rule; a pull request's backtest takes the place of
+the one waiting by its repository's id; and the count of firings that
+paged no one reads no more of a span than it says.
+
+Before upgrading:
+- **Ledger schemas 030 and 031**, after 029, in one start: keep a copy of
+  the ledger's disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger.
+
+### Fixed (security)
+
+- **One Grafana rule of a judged rule's title stopped the record of every
+  rule judged from Grafana's history** (affected: 0.68.1 and 0.69.0;
+  0.68.0 took the one rule's firings away instead, which 0.68.1 fixed by
+  this). The history names a rule by its title alone, and 0.68.1 left each
+  day a gap for every rule judged from it while any of them shared its
+  title, as the record was kept for the source and not for each rule:
+  anyone who could make a rule in a folder Lapilli reads, of one judged
+  rule's title, paused or not, or two teams by chance, stopped every
+  team's. So did one rule the history passed over changes of, or one with
+  a firing a write can't hold. Such a rule is left out of the day alone
+  now, and the other rules' day is written: nothing of it is written or
+  taken away, an alert of it on stays on, the log names it, and the period
+  is kept for it (**ledger schema 030**, `left_out`: by source and rule,
+  64 periods a rule and 5,000 rules at most, dropped with `--keep`). Over
+  a period it was left out a rule has no record, not a quiet one, wherever
+  what the copies cover of it is read: its page, which says since when it
+  is left out while it is; whether its numbers are set beside the span
+  before; whether it has twelve weeks to be retired by; and what a rule
+  only copied in is held to. The period stays so once the rule is judged
+  again, in a round that reads it again within `--settle`, and after a
+  restart: what the history says fired under the title meanwhile is no
+  rule's. Judged again, the rule is read as on a first day, and an alert
+  on then is written from there. Whoever can make a rule of a judged
+  rule's title now takes that one rule's record, for as long as their rule
+  is there, and it shows as no record. What still makes a day a gap for
+  every rule judged so is of the whole read: the history refused or past
+  the reader's bounds, more than 100,000 firings in a day, more than 5,000
+  rules to keep as left out, or none of the rules judged
+  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)). ###
+  Fixed
+- **A Grafana rule named apart from another rule of its name was judged
+  as one that never fired** (affected: 0.68.0 to 0.69.0). The history
+  names a rule by its title, and serve read it by the name the rule is
+  judged under: for a rule told apart from a Loki ruler's or a cloud's
+  alarm of its name, `Orders slow [Ops/shop]`, a name the history never
+  has, so its days read as ones with a record and nothing fired. It is
+  read by its title now, and written under the name it is judged by.
+- **A firing of Grafana's history on in a span the ledger let go stayed
+  on** (affected: 0.68.0 to 0.69.0). The ledger keeps 64 spans of what a
+  source's copies cover, the earliest let go past them. A firing that
+  started in one let go, which the history then said ended, was written
+  again only within the spans kept: it stayed on, and was written a
+  second time from where the copies covered again. It is ended where it
+  is, in a write of the second it started in that isn't taken as covered
+  again; the span stays let go.
+- **An alert on since a gap in Grafana's history could be taken away, or
+  left on, by a later round** (affected: 0.68.0 to 0.69.0). One written
+  from where the copies covered again was taken away by a round that
+  began within `--settle` of there and read from after the alert began;
+  one that ended and fired again in the gap, still on, wasn't written;
+  and one written from a gap's end, which ended in a later gap, stayed
+  on. An alert a read holds no change of stays as it is, one it says
+  ended is ended from where it was written, and one on at the first day
+  after a gap is written from there whatever the ledger had on.
+- **A pull request's backtest takes the place of the one waiting by its
+  repository's id** (affected: 0.61.0 to 0.69.0; **ledger schema 031**,
+  `backtests.repository_id`). The one waiting was matched by the entry,
+  the repository's name and the pull request's number: a repository
+  renamed while one waited didn't take its own one's place, another
+  repository the entry pins, made under the old name, did, and from
+  0.63.2 a repository whose name isn't kept (past 200 bytes, or with what
+  doesn't show) took none's. It is matched by the repository's id now,
+  which the ID token says and the entry pins: two repositories of one
+  entry never take each other's place. A backtest asked before the
+  upgrade, kept with no id, is matched by its name as before; a plain
+  token's, whose pull request is the job's word, takes none's, as
+  before.
+
+### Changed
+
+- **The count of firings that paged no one reads 2,000,000 of a span's
+  firings at most** (affected: 0.68.0 to 0.69.0, which read them all),
+  in the digest, a team's, and a report. It read every firing of the span
+  without its labels in one statement, however many the span held. They
+  are read in the order they started, 20,000 a statement; past
+  2,000,000 the rest aren't read, are in none of the numbers, and
+  `paged_no_one.partial` says so, as it does past 200,000 rows of mutes.
+  The line then reads "The firings or their mutes were too many to look
+  through: some firings weren't counted."
+
 ## [0.69.1] - 2026-11-23
 
 The bar's team and period taken as they are picked, the sidebar's groups
