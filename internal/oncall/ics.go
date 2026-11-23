@@ -672,8 +672,10 @@ func parseDuration(s string) (int, time.Duration, error) {
 // expand gives the starts of a repeating event's occurrences that may meet
 // [from, to], at most most of them, as parseRule reads its RRULE; EXDATE
 // taken out. Each period's days are worked out on the clock the start is
-// written on, then each made an instant in its zone. A step is a period
-// (a month, of a yearly one), and each day it makes, kept or not.
+// written on, then each made an instant in its zone (instant: a day at a
+// time the clocks skip is kept, moved past the gap, and counted, where RFC
+// 5545 3.3.10 says it is ignored). A step is a period (a month, of a
+// yearly one), and each day it makes, kept or not.
 func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *int) ([]time.Time, error) {
 	r, err := parseRule(e.rrule)
 	if err != nil {

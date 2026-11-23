@@ -89,10 +89,10 @@ func TestOutlookVTimezone(t *testing.T) {
 	}
 }
 
-// A time the clocks skip, or show twice, in a feed's own zone is read as
-// RFC 5545 (3.3.5) reads one, and as the IANA zone is: 02:30 on the night
-// the clocks go forward by the offset before (03:30 after); 02:30 or 01:30
-// on the night they go back, the first.
+// A DTSTART at a time the clocks skip, or show twice, in a feed's own zone
+// is read as RFC 5545 (3.3.5) reads one, and as the IANA zone is: 02:30 on
+// the night the clocks go forward by the offset before (03:30 after);
+// 02:30 or 01:30 on the night they go back, the first.
 func TestVTimezoneGapAndOverlap(t *testing.T) {
 	for _, c := range []struct{ tz, iana, at, want string }{
 		{"Pacific Standard Time", "America/Los_Angeles", "20260308T023000", "2026-03-08T10:35:00Z"},

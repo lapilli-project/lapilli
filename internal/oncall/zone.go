@@ -31,10 +31,18 @@ const maxOffset = 18 * 3600
 func secs(n int) time.Duration { return time.Duration(n) * time.Second }
 
 // instant is the instant a wall clock time w (held in UTC) is in z, as RFC
-// 5545 (3.3.5) reads one: a time the clocks skip when they go forward is
-// read by the offset before the gap (02:30 is 03:30 after it); one they
-// show twice when they go back is the first. Go's time.Date would take
-// the offset after a gap, and east of UTC the second of two.
+// 5545 (3.3.5) reads a DTSTART: a time the clocks skip when they go
+// forward is read by the offset before the gap (02:30 is 03:30 after it);
+// one they show twice when they go back is the first. Go's time.Date would
+// take the offset after a gap, and east of UTC the second of two.
+//
+// A repeat's day at a skipped time is read so too, and kept and counted.
+// RFC 5545 is of two minds there: 3.3.10 says such an occurrence "MUST be
+// ignored and MUST NOT be counted", and, further on, that its time "is
+// interpreted in the same manner as an explicit DATE-TIME value", as
+// 3.3.5 says. Lapilli departs from the first on purpose: a turn dropped
+// on the night the clocks go forward would leave a hole in the rota, the
+// pager with no one.
 func instant(z zone, w time.Time) (time.Time, error) {
 	if _, ok := z.(utcZone); ok {
 		return w, nil
