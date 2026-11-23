@@ -1,0 +1,44 @@
+# An Alertmanager configuration for the content check's tests: made up,
+# every address and key an example.
+global:
+  resolve_timeout: 5m
+  slack_api_url: https://hooks.example.com/services/T000/B000/XXXX
+templates:
+  - templates/*.tmpl
+route:
+  receiver: everyone
+  group_by: [alertname, cluster]
+  routes:
+    # The shop's pages, by team or by service.
+    - matchers: ['team="shop"']
+      receiver: shop-pager
+      continue: true
+    - matchers: ['{service=~"pay.*", env!="dev"}']
+      receiver: shop-pager
+    - match:
+        severity: info
+      receiver: quiet
+    - match_re:
+        team: "web|edge"
+      receiver: web
+receivers:
+  - name: everyone
+    slack_configs:
+      - channel: '#alerts'
+        text: '{{ template "shop.text" . }}'
+  - name: shop-pager
+    pagerduty_configs:
+      - routing_key: example-routing-key-0000
+        description: '{{ .CommonAnnotations.summary }} in {{ .CommonLabels.cluster }}'
+        details:
+          dashboard: '{{ if .CommonAnnotations.dashboard }}{{ .CommonAnnotations.dashboard }}{{ end }}'
+  - name: quiet
+    email_configs:
+      - to: team@example.com
+        auth_password: '{{ not a template'
+  - name: web
+    webhook_configs:
+      - url: http://hooks.example.com/{{ .GroupLabels.team }}
+    slack_configs:
+      - channel: '#web'
+        title: '{{ .CommonLabels.alertname | toUpper }'

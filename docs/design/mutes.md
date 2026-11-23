@@ -231,7 +231,9 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
 
 ## Later
 
-- **The file and Kafka outputs**, as for notifications.
+- **The file and Kafka outputs**, as for notifications: since sent on by
+  [recipes/events](../../recipes/events), every event, mutes among them
+  ([inputs.md](inputs.md#the-file-and-kafka-outputs)).
 - **0.33's and 0.34's `mutedAlerts`**: by hash alone, they can't be tied
   to labels without the recorder's `alertGrouped` events, which aren't
   kept; their own mute events say the same, by what.

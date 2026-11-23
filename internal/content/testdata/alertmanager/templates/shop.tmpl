@@ -1,0 +1,5 @@
+{{ define "shop.text" }}{{ range .Alerts }}{{ .Annotations.summary }} ({{ .Labels.instance }})
+{{ if .Annotations.runbook_url }}Runbook: {{ .Annotations.runbook_url }}{{ end }}
+{{ end }}{{ template "shop.footer" . }}{{ end }}
+
+{{ define "shop.footer" }}Cluster {{ .CommonLabels.cluster }}{{ end }}

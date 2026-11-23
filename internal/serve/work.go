@@ -1109,6 +1109,8 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	}
 	s.askScrape(ctx)
 	s.askNotify(ctx)
+	s.askAlertmanager(ctx)
+	s.askJobs(ctx, s.matching(rs))
 	sum := docsSum(docs)
 	if sum == *raw {
 		return nil

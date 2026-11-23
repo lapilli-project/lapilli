@@ -95,10 +95,12 @@ Where the firings come from (pick one):
                       Rules of one name in two namespaces are told apart by
                       both: "ScrapeSlow [payments/shop]"
   --ruler-token-file FILE
-                      a token that may read a Mimir's or a Cortex's rules
+                      a token that may read a Mimir's or a Cortex's rules,
+                      and its Alertmanager's configuration with
+                      --alertmanager-config URL
   --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
-                      gateway to set it, sent as X-Scope-OrgID to --ruler
-                      and --prometheus alike
+                      gateway to set it, sent as X-Scope-OrgID to --ruler,
+                      --alertmanager-config and --prometheus alike
   --alarms SOURCE=URL also read a cloud's own alarms through its API, beside
                       any of the above or alone (repeatable): PromQL alarms
                       are replayed, the others listed. SOURCE names them, as
@@ -201,9 +203,24 @@ What the rules say:
                       needed for --rules alone. With --grafana, also the
                       notification templates each Grafana rule's contact
                       point is written with: an annotation shown the rule
-                      hasn't, a label named its alerts never had. A
-                      template is parsed, never run; a link is checked,
-                      never visited
+                      hasn't, a label named its alerts never had. With
+                      --alertmanager-config, the same of the templates
+                      Alertmanager sends the other rules with, and a
+                      template there that doesn't parse. A template is
+                      parsed, never run; a link is checked, never visited
+  --alertmanager-config FILE|URL
+                      Alertmanager's configuration, whose route tree and
+                      receivers say which templates each rule written in
+                      Prometheus's templates is sent with: alertmanager.yml,
+                      its templates: globs read beside it (an absolute one
+                      by its last element, as a mounted Secret has them;
+                      none outside its directory), or a file of Mimir's,
+                      Cortex's or Amazon's format (alertmanager_config and
+                      template_files); or Mimir's or Cortex's API, read
+                      with --ruler-token-file and --ruler-tenant:
+                        Mimir   http://mimir:8080/api/v1/alerts
+                        Cortex  http://cortex:9009/api/v1/alerts
+                      Only read: no field that holds a secret is parsed
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -219,7 +236,9 @@ What the rules say:
                       without it, those Prometheus's /api/v1/status/config
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
-                      label, as /api/v1/targets says; any other, the global
+                      label, as /api/v1/targets says; one naming none, with
+                      the longest of the jobs its series come from, asked
+                      once (count by (job)); any other, the global
                       interval. A replay asks the server for Grafana's
                       reduces that don't count points at this resolution;
                       without it, at the shortest interval the series they
@@ -529,9 +548,13 @@ type verdictFlags struct {
 	// checkGrafana is --check-grafana: the Grafana that runs the Grafana
 	// rules --rules gives, whose alert state history says what they
 	// really fired.
-	checkGrafana       string
-	checkContent       bool
-	checkContentSet    bool // --check-content given, true or false
+	checkGrafana    string
+	checkContent    bool
+	checkContentSet bool // --check-content given, true or false
+	// amConfig is --alertmanager-config: Alertmanager's configuration, a
+	// file or Mimir's or Cortex's API, whose templates the rules are sent
+	// with.
+	amConfig           string
 	severities         []string
 	runbooks           []string
 	scrapeInterval     time.Duration
@@ -806,6 +829,15 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.grafana = val
 		case "--grafana-token-file":
 			f.grafanaTk = val
+		case "--alertmanager-config":
+			if source.AlertmanagerURL(val) {
+				if err := source.CheckAlertmanagerURL(val); err != nil {
+					return nil, err
+				}
+			} else if val == "" {
+				return nil, errors.New("--alertmanager-config: want Alertmanager's configuration file, or Mimir's or Cortex's configuration API")
+			}
+			f.amConfig = val
 		case "--loki":
 			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 				return nil, fmt.Errorf("--loki %s: want Loki's URL, like http://loki:3100", val)
@@ -1110,6 +1142,8 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case len(f.severities) > 0 && f.checkContentSet && !f.checkContent:
 			return nil, errors.New("--severities goes with the content check, which --check-content=false turns off")
+		case f.amConfig != "" && f.checkContentSet && !f.checkContent:
+			return nil, errors.New("--alertmanager-config goes with the content check, which --check-content=false turns off")
 		case f.grafanaTk != "" && f.grafana == "" && f.checkGrafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana or --check-grafana")
 		case validRuler(f) != nil:
@@ -1127,6 +1161,8 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	switch {
 	case len(f.severities) > 0:
 		return nil, errors.New("--severities goes with --check-content")
+	case f.amConfig != "":
+		return nil, errors.New("--alertmanager-config goes with --check-content")
 	case sources > 1 || sources == 0 && len(f.alarms) == 0 && !lokiToo:
 		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules")
 	case lokiToo && (f.alerts || f.firings != ""):
@@ -1283,12 +1319,15 @@ func validRuler(f *verdictFlags) error {
 	if f.ruler != "" {
 		kind, _ = source.RulerKind(f.ruler)
 	}
+	// Mimir's or Cortex's Alertmanager is read with the ruler's token and
+	// tenant, as the ruler beside it is.
+	amAPI := source.AlertmanagerURL(f.amConfig)
 	switch {
-	case f.ruler == "" && (f.rulerTk != "" || f.rulerTenant != ""):
-		return errors.New("--ruler-token-file and --ruler-tenant go with --ruler")
-	case f.rulerTk != "" && kind != source.RulerConfig:
+	case f.ruler == "" && !amAPI && (f.rulerTk != "" || f.rulerTenant != ""):
+		return errors.New("--ruler-token-file and --ruler-tenant go with --ruler, or with --alertmanager-config URL")
+	case f.rulerTk != "" && f.ruler != "" && kind != source.RulerConfig:
 		return errors.New("--ruler-token-file is a Mimir's or a Cortex's token: Amazon and Azure are read with --auth")
-	case f.rulerTenant != "" && kind != source.RulerConfig:
+	case f.rulerTenant != "" && f.ruler != "" && kind != source.RulerConfig:
 		return errors.New("--ruler-tenant is a Mimir's or a Cortex's tenant")
 	case kind == source.RulerAmazon && f.auth != "aws":
 		return errors.New("--ruler on Amazon is read with the pod's identity: add --auth aws")

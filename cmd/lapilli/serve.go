@@ -224,15 +224,23 @@ each history API (lapilli_serve_history_*). Off by default:
                       Grafana's notification templates, contact points and
                       policies are read once an hour too, with the same
                       token, and checked beside each rule
+  --alertmanager-config FILE|URL
+                      as for lapilli verdict --check-content: Alertmanager's
+                      configuration, read once an hour, and its templates
+                      checked beside each rule it is sent; a file that
+                      can't be read, or an API that refuses, leaves the
+                      check as it was, and the log says why once
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
                       and /api/v1/targets are asked once a day, for the
-                      global interval and each job's: the range check
-                      counts with them, and a replay asks Grafana's reduces
-                      that don't count points at the shortest interval the
-                      series they read are scraped at, or, where they
-                      aren't served, at Grafana's own resolution (1s)
+                      global interval and each job's, and the jobs the
+                      series of a selector that names none come from: the
+                      range check counts with them, and a replay asks
+                      Grafana's reduces that don't count points at the
+                      shortest interval the series they read are scraped
+                      at, or, where they aren't served, at Grafana's own
+                      resolution (1s)
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). Without a
@@ -1466,6 +1474,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		cfg.JudgedHistory = &h
 	}
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval
+	cfg.AlertmanagerConfig = f.amConfig
 	if ocSet {
 		if !oidcScopesGiven {
 			oc.Scopes = []string{"email", "profile"}

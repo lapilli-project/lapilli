@@ -107,10 +107,12 @@ Where the firings come from (pick one):
                       Rules of one name in two namespaces are told apart by
                       both: "ScrapeSlow [payments/shop]"
   --ruler-token-file FILE
-                      a token that may read a Mimir's or a Cortex's rules
+                      a token that may read a Mimir's or a Cortex's rules,
+                      and its Alertmanager's configuration with
+                      --alertmanager-config URL
   --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
-                      gateway to set it, sent as X-Scope-OrgID to --ruler
-                      and --prometheus alike
+                      gateway to set it, sent as X-Scope-OrgID to --ruler,
+                      --alertmanager-config and --prometheus alike
   --alarms SOURCE=URL also read a cloud's own alarms through its API, beside
                       any of the above or alone (repeatable): PromQL alarms
                       are replayed, the others listed. SOURCE names them, as
@@ -213,9 +215,24 @@ What the rules say:
                       needed for --rules alone. With --grafana, also the
                       notification templates each Grafana rule's contact
                       point is written with: an annotation shown the rule
-                      hasn't, a label named its alerts never had. A
-                      template is parsed, never run; a link is checked,
-                      never visited
+                      hasn't, a label named its alerts never had. With
+                      --alertmanager-config, the same of the templates
+                      Alertmanager sends the other rules with, and a
+                      template there that doesn't parse. A template is
+                      parsed, never run; a link is checked, never visited
+  --alertmanager-config FILE|URL
+                      Alertmanager's configuration, whose route tree and
+                      receivers say which templates each rule written in
+                      Prometheus's templates is sent with: alertmanager.yml,
+                      its templates: globs read beside it (an absolute one
+                      by its last element, as a mounted Secret has them;
+                      none outside its directory), or a file of Mimir's,
+                      Cortex's or Amazon's format (alertmanager_config and
+                      template_files); or Mimir's or Cortex's API, read
+                      with --ruler-token-file and --ruler-tenant:
+                        Mimir   http://mimir:8080/api/v1/alerts
+                        Cortex  http://cortex:9009/api/v1/alerts
+                      Only read: no field that holds a secret is parsed
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -231,7 +248,9 @@ What the rules say:
                       without it, those Prometheus's /api/v1/status/config
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
-                      label, as /api/v1/targets says; any other, the global
+                      label, as /api/v1/targets says; one naming none, with
+                      the longest of the jobs its series come from, asked
+                      once (count by (job)); any other, the global
                       interval. A replay asks the server for Grafana's
                       reduces that don't count points at this resolution;
                       without it, at the shortest interval the series they
@@ -694,15 +713,23 @@ each history API (lapilli_serve_history_*). Off by default:
                       Grafana's notification templates, contact points and
                       policies are read once an hour too, with the same
                       token, and checked beside each rule
+  --alertmanager-config FILE|URL
+                      as for lapilli verdict --check-content: Alertmanager's
+                      configuration, read once an hour, and its templates
+                      checked beside each rule it is sent; a file that
+                      can't be read, or an API that refuses, leaves the
+                      check as it was, and the log says why once
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
                       and /api/v1/targets are asked once a day, for the
-                      global interval and each job's: the range check
-                      counts with them, and a replay asks Grafana's reduces
-                      that don't count points at the shortest interval the
-                      series they read are scraped at, or, where they
-                      aren't served, at Grafana's own resolution (1s)
+                      global interval and each job's, and the jobs the
+                      series of a selector that names none come from: the
+                      range check counts with them, and a replay asks
+                      Grafana's reduces that don't count points at the
+                      shortest interval the series they read are scraped
+                      at, or, where they aren't served, at Grafana's own
+                      resolution (1s)
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). Without a

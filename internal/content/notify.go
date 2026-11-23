@@ -38,6 +38,9 @@ type Notifications struct {
 	// labels are the labels the policies match on: two rules alike in
 	// these are routed alike.
 	labels map[string]bool
+	// alertmanager says they are Alertmanager's (ReadAlertmanager): the
+	// rules sent with them are Prometheus's, routed by their labels alone.
+	alertmanager bool
 }
 
 // shown is what a template shows: the labels and annotations it names,
@@ -46,6 +49,9 @@ type Notifications struct {
 type shown struct {
 	labels, annotations []label
 	includes            []string
+	// err is why it doesn't parse, and where: a template Alertmanager
+	// fails on, when it loads it or when it sends with it.
+	err string
 }
 
 // route is a notification policy: its contact point (its parent's when
@@ -140,6 +146,13 @@ func ReadNotifications(templates, contactPoints, policies []byte) (n *Notificati
 	}
 	count := 0
 	n.route = tree.read(&count, 0)
+	n.number()
+	return n, skipped, nil
+}
+
+// number gives each contact point the policies name an id, and notes the
+// labels they match on.
+func (n *Notifications) number() {
 	n.names, n.labels = []string{""}, map[string]bool{}
 	ids := map[string]int{"": 0}
 	var number func(r *route)
@@ -157,7 +170,6 @@ func ReadNotifications(templates, contactPoints, policies []byte) (n *Notificati
 		}
 	}
 	number(n.route)
-	return n, skipped, nil
 }
 
 // strings_ are the texts in a contact point's settings, every one, in a
@@ -421,6 +433,8 @@ type NotifyUse struct {
 	Template    string
 	labels      []label
 	annotations []label
+	// err is why it doesn't parse, "" when it does.
+	err string
 }
 
 // For are the templates a Grafana rule's notifications are written with,
@@ -456,23 +470,24 @@ func (n *Notifications) run(by time.Time) *notifyRun {
 // rule's routing wasn't told, "" when it was.
 func (x *notifyRun) For(r rules.Rule) ([]NotifyUse, string) {
 	n := x.n
-	if n == nil || r.Says.Template != rules.TemplateGrafana {
+	if n == nil || !n.takes(r) {
 		return nil, ""
 	}
 	var ways [][]string
-	if r.Receiver != "" {
+	if r.Receiver != "" && !n.alertmanager {
 		ways = [][]string{{r.Receiver}}
 	} else {
 		if n.route == nil {
 			return nil, ""
 		}
 		known := map[string]string{"alertname": r.AlertName()}
-		if r.Folder != "" {
+		if r.Folder != "" && !n.alertmanager {
 			known["grafana_folder"] = r.Folder
 		}
-		for k, v := range r.Labels {
-			// Grafana fills a label's template in from the series: what
-			// it comes to isn't known, so policies on it go either way.
+		for k, v := range r.AlertLabels() {
+			// Grafana and Prometheus fill a label's template in from the
+			// series: what it comes to isn't known, so policies on it go
+			// either way.
 			if !strings.Contains(v, "{{") {
 				known[k] = v
 			}
@@ -514,6 +529,17 @@ func (x *notifyRun) For(r rules.Rule) ([]NotifyUse, string) {
 	return n.uses(ways), ""
 }
 
+// takes reports whether a rule's notifications are written with these
+// templates: Grafana's are of Grafana's rules; Alertmanager's of those
+// written in Prometheus's templates, not a cloud's alarms, which a cloud
+// sends.
+func (n *Notifications) takes(r rules.Rule) bool {
+	if n.alertmanager {
+		return r.Says.Template == rules.TemplatePrometheus && r.Cloud == ""
+	}
+	return r.Says.Template == rules.TemplateGrafana
+}
+
 // uses are the templates every way reaches a contact point that uses.
 func (n *Notifications) uses(ways [][]string) []NotifyUse {
 	var common map[string]bool
@@ -532,8 +558,8 @@ func (n *Notifications) uses(ways [][]string) []NotifyUse {
 	}
 	var out []NotifyUse
 	for _, t := range slices.Sorted(maps.Keys(common)) {
-		if d := n.defs[t]; d != nil && (len(d.labels) > 0 || len(d.annotations) > 0) {
-			out = append(out, NotifyUse{Template: t, labels: d.labels, annotations: d.annotations})
+		if d := n.defs[t]; d != nil && (len(d.labels) > 0 || len(d.annotations) > 0 || d.err != "") {
+			out = append(out, NotifyUse{Template: t, labels: d.labels, annotations: d.annotations, err: d.err})
 		}
 	}
 	return out
@@ -557,8 +583,13 @@ func (n *Notifications) include(t string, used map[string]bool, depth int) {
 // notifyTemplates parses a group of notification templates, never
 // running them, and gives what each it defines shows.
 func notifyTemplates(text string) (defs map[string]*shown, err error) {
-	if len(text) > maxTemplate {
-		return nil, fmt.Errorf("longer than %d KB", maxTemplate>>10)
+	return parseNotify(text, maxTemplate)
+}
+
+// parseNotify is notifyTemplates, for a text of limit bytes at most.
+func parseNotify(text string, limit int) (defs map[string]*shown, err error) {
+	if len(text) > limit {
+		return nil, fmt.Errorf("longer than %d KB", limit>>10)
 	}
 	defer func() {
 		if recover() != nil {
@@ -799,29 +830,43 @@ var annotated = map[string]func(rules.Says) string{
 	"runbook_url": func(s rules.Says) string { return s.Runbook },
 }
 
-// notifyChecks checks what the templates a Grafana rule's notifications
-// are written with show: an annotation the rule hasn't, a label its alerts
-// never had or its expression can't give. A label the rule sets, and those
-// Grafana gives every alert, are never faulted.
+// notifyChecks checks what the templates a rule's notifications are written
+// with show: Grafana's, of a Grafana rule; Alertmanager's, of a rule
+// written in Prometheus's templates. An annotation the rule hasn't, a label
+// its alerts never had or its expression can't give, a template that
+// doesn't parse. A label the rule sets, and those Grafana gives every
+// alert, are never faulted.
 func notifyChecks(r rules.Rule, o Options, seen map[string]bool, fired bool, add func(check, detail string)) {
-	if o.notify == nil {
+	run := o.notify
+	if r.Says.Template != rules.TemplateGrafana {
+		run = o.am
+	}
+	if run == nil {
 		return
 	}
-	uses, why := o.notify.For(r)
+	uses, why := run.For(r)
 	if why != "" && o.Unchecked != nil {
 		o.Unchecked(r.Name, why)
 	}
 	if len(uses) == 0 {
 		return
 	}
+	am := run.n.alertmanager
 	gives, givesOK := map[string]bool(nil), false
-	if !fired {
+	// LogQL's parsers add labels its aggregation doesn't say: no guess is
+	// made of a Loki ruler's rule, as of its own templates.
+	if !fired && !(am && r.Logs != "") {
 		gives, givesOK = Gives(promQL(r))
 	}
+	own := r.AlertLabels()
 	for _, u := range uses {
+		if u.err != "" {
+			add(NotifyTemplateError, fmt.Sprintf("%q: %s", u.Template, u.err))
+			continue
+		}
 		said := map[string]bool{}
 		for _, a := range u.annotations {
-			if get, ok := annotated[a.label]; ok && !a.guarded && !said[a.label] && strings.TrimSpace(get(r.Says)) == "" {
+			if !a.guarded && !said[a.label] && lacks(r.Says, a.label, am) {
 				said[a.label] = true
 				add(NotifyNoText, fmt.Sprintf("%q: %s", u.Template, a.label))
 			}
@@ -829,7 +874,7 @@ func notifyChecks(r rules.Rule, o Options, seen map[string]bool, fired bool, add
 		named := map[string]bool{}
 		for _, l := range u.labels {
 			x := l.label
-			if l.guarded || named[x] || always[x] || x == "grafana_folder" || strings.HasPrefix(x, "__") || r.Labels[x] != "" {
+			if l.guarded || named[x] || always[x] || x == "grafana_folder" || strings.HasPrefix(x, "__") || own[x] != "" {
 				continue
 			}
 			named[x] = true
@@ -841,4 +886,22 @@ func notifyChecks(r rules.Rule, o Options, seen map[string]bool, fired bool, add
 			}
 		}
 	}
+}
+
+// lacks reports whether a rule hasn't the annotation a notification
+// template shows: its summary, description or runbook, as the checks know
+// them; with exact, of Alertmanager's templates, the annotation by its own
+// name, any of them, where the rule's are known, all of them kept
+// (rules.Says.Annotations): .CommonAnnotations.runbook_url shows nothing of
+// a rule whose runbook is in runbook.
+func lacks(s rules.Says, name string, exact bool) bool {
+	get, known := annotated[name]
+	switch {
+	case exact && (name == "summary" || name == "description"):
+	case exact && s.Annotations != nil && !s.AnnotationsCut:
+		return strings.TrimSpace(s.Annotations[name]) == ""
+	case !known:
+		return false // not known of any other
+	}
+	return strings.TrimSpace(get(s)) == ""
 }

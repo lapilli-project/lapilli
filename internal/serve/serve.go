@@ -255,6 +255,11 @@ type Config struct {
 	CheckContent   bool
 	Severities     []string
 	ScrapeInterval time.Duration
+	// AlertmanagerConfig is Alertmanager's configuration, whose templates
+	// the rules written in Prometheus's templates are sent with, checked
+	// beside them: a file, or Mimir's or Cortex's API, read with
+	// RulerToken and RulerTenant (docs/design/content.md).
+	AlertmanagerConfig string
 
 	// MCPPropose is who an agent must be acting for to propose a change to
 	// a rule over MCP: "editors", "admins", or "" for no one. An agent
