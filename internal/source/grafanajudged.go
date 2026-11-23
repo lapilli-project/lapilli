@@ -33,7 +33,8 @@ type FromHistory struct {
 	Firings []firing.Firing
 	// Unsure are the rules, by name, the history judges none of over
 	// what was read: it passed over changes of them, or doesn't tell their
-	// alerts apart. Shared are those whose alert name, as the history
+	// alerts apart, or Grafana lists them no more as they were read
+	// (ruleIDs). Shared are those whose alert name, as the history
 	// names it, another of Grafana's rules has too, where it doesn't say
 	// which of them fired.
 	Unsure, Shared []string
