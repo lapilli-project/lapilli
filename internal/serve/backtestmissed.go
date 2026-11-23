@@ -2,11 +2,13 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
 	"slices"
 	"strings"
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -15,25 +17,35 @@ import (
 // incidents"): the incidents a rule that differs caught before the change
 // that no rule catches after it. The rules that differ are judged by the
 // backtest; the rules the change leaves alone by serve's record of them,
-// the catches the ledger keeps of each incident, never replayed. An
-// incident is still caught when the ledger says a rule the change doesn't
-// name caught it: one the pull request leaves alone, or one serve runs now
-// that the pull request doesn't hold, which the change doesn't touch. It
-// is not known, not missed, when:
+// the catches the ledger keeps of each incident, never replayed. A catch
+// in the record was made by the rule as it was written then, and lapilli
+// verdict replays a rule left alone as it is now: so an incident is still
+// caught only when the ledger says it was caught by a rule the change
+// doesn't name whose text, in every version of serve's rules over the
+// incident's time, is the text it has after the change: the pull
+// request's own, of a rule it holds alike on both sides; serve's latest,
+// of one serve runs now that the pull request doesn't hold. It is not
+// known, not missed, when:
 //
-//   - a rule that caught it in the record has a name told apart from one
-//     the pull request holds ("Errors [shop]" beside "Errors"), which may
-//     be the rule the change changes, or the name of one it changes and
-//     one it leaves alone, alike in group and labels, which the ledger
-//     counts as one;
+//   - such a rule's text over the incident's time was another, or isn't
+//     in the record (a version before the ledger's first, one of two
+//     rules of a name);
+//   - a rule that caught it has a name told apart from one the pull
+//     request holds ("Errors [shop]" beside "Errors"), which may be the
+//     rule the change changes, or the name of one it changes and one it
+//     leaves alone, alike in group and labels, which the ledger counts as
+//     one; or it is a rule whose firings serve copies in, whose text no
+//     version holds;
 //   - a rule the pull request leaves alone may have caught it unrecorded:
 //     serve's runs didn't cover its time (before the first, past the
-//     cursor), the rule wasn't in effect in serve over it, or serve
-//     couldn't replay it, the last time or in a run meeting its time;
+//     cursor), a version of serve's rules over it doesn't hold the rule as
+//     the pull request has it, or serve couldn't replay it, the last time
+//     or in a run meeting its time;
 //   - a rule after the change couldn't be replayed, as in lapilli verdict.
 //
-// Every read is of the ledger, once a backtest: nothing is asked of the
-// history.
+// A rule that caught it which serve runs no longer, and the pull request
+// doesn't hold, catches nothing after the change. Every read is of the
+// ledger, once a backtest: nothing is asked of the history.
 func (s *Server) holdMissed(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options) error {
 	if cmp.Before == nil || cmp.After == nil {
 		// Nothing replayed: no incident caught before is missed after.
@@ -48,6 +60,16 @@ func (s *Server) holdMissed(ctx context.Context, cmp *verdict.Comparison, pr *pr
 	return nil
 }
 
+// leftAloneVersions is the most versions of the rules a backtest held to
+// the incidents reads over its period: past it, the record of the rules
+// left alone isn't read, and every incident that hangs on it is not known.
+const leftAloneVersions = 200
+
+// leftAloneReach is the furthest back, before the period's first catch
+// window, a rule's text is looked at: a rule whose for reaches further is
+// not known.
+const leftAloneReach = 14 * 24 * time.Hour
+
 // leftAlone is what serve's record holds of the rules a backtest's change
 // leaves alone, over its period.
 type leftAlone struct {
@@ -57,21 +79,31 @@ type leftAlone struct {
 	by map[caughtAt][]verdict.Catch
 	// changed, same: the names of the rules the change takes away or
 	// brings, and those it leaves alike; bases, the names of all of them
-	// before what told them apart; running, those of the rules serve runs
-	// now, of its latest version, and those whose firings it copies in.
-	changed, same, bases, running map[string]bool
+	// before what told them apart; copied, those of the rules whose
+	// firings serve copies in, which no version of its rules holds now.
+	changed, same, bases, copied map[string]bool
+	// want is the text each rule a catch may be counted by has after the
+	// change: the pull request's, of one it leaves alike; serve's latest,
+	// of one serve runs now that the pull request doesn't hold.
+	want map[string]aloneText
+	// versions are the versions of serve's rules over the period, the
+	// earliest first, each with the texts of the rules a catch may be
+	// counted by, and whether it holds every rule the pull request leaves
+	// alike as the pull request has it (sameAll); sameReach is the longest
+	// of those rules' reach. read says they were read, fewer than
+	// leftAloneVersions.
+	versions  []aloneVersion
+	sameReach time.Duration
+	read      bool
 	// unreplayable says a rule the pull request leaves alone is one serve
 	// couldn't replay the last time it did: its record holds nothing of it
 	// from then.
 	unreplayable bool
-	// runsFrom and cursor are where serve's runs began and have got to.
+	// runsFrom and cursor are where serve's runs began and have got to;
+	// failed, the spans of the runs that couldn't replay a rule the pull
+	// request leaves alone.
 	runsFrom, cursor time.Time
-	// lacking are the spans of the versions of the rules in effect over the
-	// period that lack a rule the pull request leaves alone, and failed
-	// those of the runs that couldn't replay one; versions says the ledger
-	// has a version in effect over the period at all.
-	lacking, failed [][2]time.Time
-	versions        bool
+	failed           [][2]time.Time
 }
 
 type caughtAt struct {
@@ -79,47 +111,106 @@ type caughtAt struct {
 	start int64
 }
 
-// leftAloneRecord reads what leftAlone holds: the incidents of [from, to)
-// and the rules, runs and versions of the ledger, each once.
+// aloneText is a rule's text as it decides when it fires (rules.Rule.Whole),
+// by its hash, and how long before a firing's start its condition is read
+// (its for and its group's interval); ambiguous, of two rules of a name
+// that differ.
+type aloneText struct {
+	sum       [sha256.Size]byte
+	reach     time.Duration
+	ambiguous bool
+}
+
+func aloneTextOf(r rules.Rule) aloneText {
+	return aloneText{sum: sha256.Sum256([]byte(r.Whole())), reach: r.For + max(r.Interval, time.Minute)}
+}
+
+// addAloneText keeps r's text under its name in m: a second rule of the name,
+// written otherwise, makes it ambiguous.
+func addAloneText(m map[string]aloneText, r rules.Rule) {
+	t := aloneTextOf(r)
+	if was, ok := m[r.Name]; ok && (was.sum != t.sum || was.ambiguous) {
+		t.ambiguous = true
+		t.reach = max(t.reach, was.reach)
+	}
+	m[r.Name] = t
+}
+
+type aloneVersion struct {
+	since, until time.Time
+	texts        map[string]aloneText
+	sameAll      bool
+}
+
+// leftAloneRecord reads what leftAlone holds: the incidents of [from, to),
+// the rules, the versions of them over the period and the runs, each once.
 func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to time.Time, o verdict.Options) (*leftAlone, error) {
 	a := &leftAlone{o: o, by: map[caughtAt][]verdict.Catch{}, changed: map[string]bool{}, same: map[string]bool{}, bases: map[string]bool{},
-		running: map[string]bool{}}
+		copied: map[string]bool{}, want: map[string]aloneText{}}
 	for _, r := range slices.Concat(pr.gone, pr.came) {
 		a.changed[r.Name], a.bases[nameBase(r.Name)] = true, true
 	}
-	for _, r := range pr.same {
+	// The pull request's rules left alike, as serve replays its own: so
+	// that a text read from a file and serve's of the same file are one.
+	same := slices.Clone(pr.same)
+	s.replayedAs().Apply(same)
+	prText := map[string]aloneText{}
+	for _, r := range same {
 		a.same[r.Name], a.bases[nameBase(r.Name)] = true, true
+		addAloneText(prText, r)
+		a.sameReach = max(a.sameReach, aloneTextOf(r).reach)
 	}
 	incs, err := s.l.Incidents(ctx, from, to, false)
 	if err != nil {
 		return nil, err
 	}
+	caughtBy := map[string]bool{}
 	for _, in := range incs {
 		a.by[caughtAt{in.ID, in.Start.Unix()}] = in.CaughtBy
+		for _, k := range in.CaughtBy {
+			caughtBy[k.Rule] = true
+		}
 	}
+	// The latest version: the rules serve runs now.
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil {
 		return nil, err
 	}
+	var now []rules.Rule
 	if ok {
-		for _, n := range latest.Names {
-			a.running[n] = true
+		if now, err = s.parse(ctx, latest); err != nil {
+			return nil, err
 		}
+	}
+	running := map[string]aloneText{}
+	for _, r := range now {
+		if caughtBy[r.Name] && !a.same[r.Name] && !a.changed[r.Name] {
+			addAloneText(running, r)
+		}
+	}
+	reach := a.sameReach
+	for name, t := range running {
+		a.want[name] = t
+		reach = max(reach, t.reach)
+	}
+	for name := range a.same {
+		a.want[name] = prText[name]
 	}
 	table, err := s.l.RuleTable(ctx)
 	if err != nil {
 		return nil, err
 	}
+	inNow := make(map[string]bool, len(now))
+	for _, r := range now {
+		inNow[r.Name] = true
+	}
 	for _, r := range table {
-		if r.Source != "" {
-			a.running[r.Name] = true
+		if r.Source != "" && !inNow[r.Name] {
+			a.copied[r.Name] = true
 		}
 		if a.same[r.Name] && r.Unsupported != "" {
 			a.unreplayable = true
 		}
-	}
-	if len(a.same) == 0 {
-		return a, nil // nothing of the rest is asked
 	}
 	if a.runsFrom, err = s.l.RunsFrom(ctx); err != nil {
 		return nil, err
@@ -127,43 +218,48 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 	if a.cursor, err = s.l.Cursor(ctx); err != nil {
 		return nil, err
 	}
-	if a.cursor.IsZero() {
-		return a, nil // no run: nothing is covered
-	}
-	// From the longest lead before the period to the cursor: every catch
-	// window the record covers of an incident in it.
-	first := from.Add(-o.MaxLead())
-	vs, err := s.l.Versions(ctx, first, a.cursor, false)
+	// Every version over the period's catch windows, each rule's reach
+	// before them, to now.
+	first := from.Add(-o.MaxLead() - min(reach, leftAloneReach))
+	vs, err := s.l.Versions(ctx, first, s.now(), false)
 	if err != nil {
 		return nil, err
 	}
-	a.versions = len(vs) > 0
-	for i, v := range vs {
-		names := make(map[string]bool, len(v.Names))
-		for _, n := range v.Names {
-			names[n] = true
-		}
-		for n := range a.same {
-			if !names[n] {
-				end := a.cursor.Add(time.Second)
-				if i+1 < len(vs) {
-					end = vs[i+1].Since
+	if len(vs) > 0 && len(vs) <= leftAloneVersions {
+		a.read = true
+		for i, v := range vs {
+			rs, err := s.parse(ctx, v)
+			if err != nil {
+				return nil, err
+			}
+			vt := aloneVersion{since: v.Since, until: time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), texts: map[string]aloneText{}}
+			if i+1 < len(vs) {
+				vt.until = vs[i+1].Since
+			}
+			all := map[string]aloneText{}
+			for _, r := range rs {
+				if a.want[r.Name] != (aloneText{}) || a.same[r.Name] {
+					addAloneText(all, r)
 				}
-				a.lacking = append(a.lacking, [2]time.Time{v.Since, end})
-				break
 			}
+			vt.sameAll = true
+			for name := range a.same {
+				if t, ok := all[name]; !ok || t.ambiguous || t.sum != prText[name].sum || prText[name].ambiguous {
+					vt.sameAll = false
+					break
+				}
+			}
+			for name := range a.want {
+				if t, ok := all[name]; ok {
+					vt.texts[name] = t
+				}
+			}
+			a.versions = append(a.versions, vt)
 		}
 	}
-	runs, err := s.l.RunsFailing(ctx, first, a.cursor.Add(time.Second))
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range runs {
-		for n := range r.Rules {
-			if a.same[n] {
-				a.failed = append(a.failed, [2]time.Time{r.From, r.To})
-				break
-			}
+	if len(a.same) > 0 && !a.cursor.IsZero() {
+		if a.failed, err = s.l.RunsFailing(ctx, from.Add(-o.MaxLead()), a.cursor.Add(time.Second), a.same); err != nil {
+			return nil, err
 		}
 	}
 	return a, nil
@@ -182,13 +278,25 @@ func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
 		case a.changed[k.Rule]:
 			// The rule as it was, which the backtest judged.
 		case a.same[k.Rule]:
-			return true, true
+			// Caught by the text the pull request has, or not known.
+			if a.held(k.Rule, in) {
+				return true, true
+			}
+			known = false
 		case a.bases[nameBase(k.Rule)]:
 			// Told apart from a rule the pull request holds, or one it is
 			// told apart from: maybe the rule the change changes.
 			known = false
-		case a.running[k.Rule]:
-			return true, true
+		case a.want[k.Rule] != (aloneText{}):
+			// Serve runs it now: caught by the text it has now, or not
+			// known.
+			if a.held(k.Rule, in) {
+				return true, true
+			}
+			known = false
+		case a.copied[k.Rule]:
+			// Its firings copied in: no version says what it was.
+			known = false
 		default:
 			// A rule serve runs no longer, which the pull request doesn't
 			// hold: it catches nothing after the change.
@@ -207,14 +315,49 @@ func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
 	// longest lead before the start to the end, or the start and
 	// --unknown-length.
 	from, to := in.Start.Add(-a.o.MaxLead()), in.EndOr(a.o.UnknownLen)
-	if a.unreplayable || !a.versions || a.runsFrom.IsZero() || a.runsFrom.After(from) || a.cursor.Before(to) {
+	if a.unreplayable || a.runsFrom.IsZero() || a.runsFrom.After(from) || a.cursor.Before(to) {
+		return false, false
+	}
+	if !a.over(from.Add(-a.sameReach), to, func(v aloneVersion) bool { return v.sameAll }) {
 		return false, false
 	}
 	meets := func(span [2]time.Time) bool { return !span[0].After(to) && span[1].After(from) }
-	if slices.ContainsFunc(a.lacking, meets) || slices.ContainsFunc(a.failed, meets) {
+	if slices.ContainsFunc(a.failed, meets) {
 		return false, false
 	}
 	return false, true
+}
+
+// held reports whether the rule of that name had the text it has after the
+// change (want) in every version of serve's rules over in's catch window,
+// back as far as its condition is read before a firing's start.
+func (a *leftAlone) held(name string, in incident.Incident) bool {
+	w := a.want[name]
+	if w.ambiguous {
+		return false
+	}
+	return a.over(in.Start.Add(-a.o.MaxLead()-w.reach), in.EndOr(a.o.UnknownLen), func(v aloneVersion) bool {
+		t, ok := v.texts[name]
+		return ok && !t.ambiguous && t.sum == w.sum
+	})
+}
+
+// over reports whether every version of serve's rules in effect at some
+// time in [from, to] is as ok says, the versions read reaching back to
+// from: never when they weren't read, or begin after it.
+func (a *leftAlone) over(from, to time.Time, ok func(aloneVersion) bool) bool {
+	if !a.read || len(a.versions) == 0 || a.versions[0].since.After(from) {
+		return false
+	}
+	for _, v := range a.versions {
+		if v.since.After(to) || !v.until.After(from) {
+			continue // not in effect over it
+		}
+		if !ok(v) {
+			return false
+		}
+	}
+	return true
 }
 
 // nameBase is a rule's name before what told it apart from another of the

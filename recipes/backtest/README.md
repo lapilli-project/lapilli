@@ -562,12 +562,14 @@ comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`, `EXPECT_REQUIRED` and
 `STATUS` are as they are without it. `FAIL_MISSED` holds the change to
 serve's incidents and impact windows, with no `INCIDENTS` or `IMPACT`: the
 rules that differ are judged by the backtest, and the rules left alone by
-serve's record, which rules caught each incident, not replayed. A rule
-left alone that serve doesn't run, or whose record doesn't hold an
-incident's time (serve's runs began after it, or couldn't replay the
-rule), may have caught it unrecorded: that incident is not known, and the
-job fails, as with lapilli when a rule couldn't be replayed. Send the rules
-serve runs. It needs lapilli serve 0.70.0 or later. Serve runs no scenario `EXPECT` names: each is
+serve's record, which rules caught each incident, not replayed: a catch
+counts only where the rule was written then as it is after the change. A
+rule left alone that serve doesn't run as the pull request has it, or
+whose record doesn't hold an incident's time (serve's runs began after
+it, or couldn't replay the rule), may have caught it unrecorded: that
+incident is not known, and the job fails, as with lapilli when a rule
+couldn't be replayed. So is one a rule caught that was written otherwise
+then. Send the rules serve runs, as serve reads them. It needs lapilli serve 0.70.0 or later. Serve runs no scenario `EXPECT` names: each is
 said as not run through lapilli serve, and `PROMTOOL` is refused; run
 `promtool test rules` in a step of its own to gate on them. The design is
 [docs/design/backtests.md](../../docs/design/backtests.md).
