@@ -32,6 +32,9 @@
 #   POLL                seconds between reads when following (default 5)
 #   RETRIES             how often a request serve answers 429 or 5xx is
 #                       tried again, as Retry-After says (default 8)
+#   MAX_READ            bytes read at a time: of the file, and of what kcat
+#                       gives of a partition (default 16777216, 16 MiB); a
+#                       line longer is passed over, and said
 #   KAFKA_START         where a partition with no offset kept begins:
 #                       beginning, end, or the default, an hour ago, which is
 #                       as far back as serve takes an event's own time
@@ -64,6 +67,12 @@ FOLLOW=${FOLLOW:-false}
 POLL=${POLL:-5}
 RETRIES=${RETRIES:-8}
 case $RETRIES in *[!0-9]* | '') say "RETRIES is a number"; exit 2 ;; esac
+MAX_READ=${MAX_READ:-16777216}
+case $MAX_READ in *[!0-9]* | '' | 0*) MAX_READ=x ;; esac
+if [ "$MAX_READ" = x ] || [ "$MAX_READ" -lt 1024 ]; then
+  say "MAX_READ is a number of bytes, 1024 or more"
+  exit 2
+fi
 case $BATCH in *[!0-9]* | '' | 0*) BATCH=x ;; esac
 if [ "$BATCH" = x ] || [ "$BATCH" -gt 1000 ]; then
   say "BATCH is a number of events, 1 to 1000"
@@ -76,8 +85,8 @@ case $FOLLOW in true | false) ;; *) say "FOLLOW is true or false"; exit 2 ;; esa
 # again as jq writes it.
 maxbody=1000000
 bodymax=1048576
-# How much of the file is read at a time.
-maxread=16777216
+# How much of the file, or of a partition, is read at a time.
+maxread=$MAX_READ
 
 # The token goes where the URL points, serve's port: https, or http as a
 # Service in the cluster is reached, and curl speaks no other scheme
@@ -242,7 +251,15 @@ send_from() {
     tail -c +"$((from + 1))" "$1" | head -c "$maxread" >"$work/chunk"
     # Only whole lines: one the recorder is still writing waits.
     nl=$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')
-    [ "$nl" -gt 0 ] || return 0
+    if [ "$nl" -eq 0 ]; then
+      # A line longer than is read at a time, written to its end, is passed
+      # over to its end, and said; one not yet ended waits.
+      [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 0
+      skip_long "$1" "$from" || return 0
+      say "a line over $maxread bytes passed over"
+      [ "${3:-keep}" != keep ] || file_kept "$1" "$from" || return 1
+      continue
+    fi
     head -n "$nl" "$work/chunk" >"$work/lines"
     batches "$work/lines"
     while read -r b end long; do
@@ -255,6 +272,21 @@ send_from() {
     # A read that held as much as is read at a time: read on.
     [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 0
     from=$((from + $(wc -c <"$work/lines" | tr -d ' ')))
+  done
+}
+
+# skip_long PATH FROM: from, past the end of the line at FROM in PATH,
+# read maxread bytes at a time; 1 when the line hasn't ended yet.
+skip_long() {
+  pos=$(($2 + maxread))
+  while :; do
+    tail -c +"$((pos + 1))" "$1" | head -c "$maxread" >"$work/chunk"
+    if [ "$(tr -dc '\n' <"$work/chunk" | wc -c | tr -d ' ')" -gt 0 ]; then
+      from=$((pos + $(head -n 1 "$work/chunk" | wc -c | tr -d ' ')))
+      return 0
+    fi
+    [ "$(wc -c <"$work/chunk" | tr -d ' ')" -ge "$maxread" ] || return 1
+    pos=$((pos + maxread))
   done
 }
 
@@ -338,7 +370,7 @@ kafka_once() {
     # end, or where KAFKA_START says.
     reset=latest
     [ "${KAFKA_START:-}" != beginning ] || reset=earliest
-    run_kcat -C -G "$KAFKA_GROUP" -X auto.offset.reset="$reset" -e -q -c 10000 -J "$KAFKA_TOPIC" >"$work/kafka" </dev/null || {
+    read_kcat -C -G "$KAFKA_GROUP" -X auto.offset.reset="$reset" -e -q -c 10000 -J "$KAFKA_TOPIC" || {
       say "kcat failed to read $KAFKA_TOPIC"
       return 1
     }
@@ -369,10 +401,14 @@ kafka_once() {
   while read -r p; do
     next=$(awk -v p="$p" '$1 == p && $2 ~ /^[0-9]+$/ {n = $2} END {print n}' "$OFFSET_FILE")
     from=${next:-$start}
-    run_kcat -C -t "$KAFKA_TOPIC" -p "$p" -o "$from" -e -q -c 10000 -J >"$work/kafka" </dev/null || {
+    read_kcat -C -t "$KAFKA_TOPIC" -p "$p" -o "$from" -e -q -c 10000 -J || {
       say "kcat failed to read $KAFKA_TOPIC's partition $p"
       return 1
     }
+    if [ -s "$work/skip" ]; then
+      kafka_kept "$p" "$(($(cat "$work/skip") + 1))" || return 1
+      continue
+    fi
     messages "$work/kafka" || return 1
     [ -s "$work/lines" ] || continue
     batches "$work/lines"
@@ -391,6 +427,32 @@ kafka_once() {
       kafka_kept "$p" "$((last + 1))" || return 1
     done <"$work/ends"
   done <"$work/partitions"
+}
+
+# read_kcat ARGS: what kcat gives, maxread bytes at most, into
+# $work/kafka, whole lines only: the messages past are read the next time,
+# from the offset kept (in a group, kcat has read them: they aren't). 1
+# when kcat failed before it gave as much.
+read_kcat() {
+  rm -f "$work/skip"
+  { run_kcat "$@" </dev/null; echo $? >"$work/kcat.status"; } | head -c "$maxread" >"$work/kafka.read"
+  if [ "$(wc -c <"$work/kafka.read" | tr -d ' ')" -ge "$maxread" ]; then
+    # Cut: its last line may be part of a message.
+    nl=$(tr -dc '\n' <"$work/kafka.read" | wc -c | tr -d ' ')
+    if [ "$nl" -eq 0 ]; then
+      # One message longer than is read at a time: passed over, by the
+      # offset its envelope gives before its payload.
+      head -c 512 "$work/kafka.read" | sed -n 's/^{.*"offset":\([0-9][0-9]*\)[,}].*/\1/p' | head -n 1 >"$work/skip"
+      say "a message over $maxread bytes passed over"
+      : >"$work/kafka"
+      return 0
+    fi
+    head -n "$nl" "$work/kafka.read" >"$work/kafka"
+    say "more than $maxread bytes of messages: the rest the next time"
+    return 0
+  fi
+  mv "$work/kafka.read" "$work/kafka"
+  [ "$(cat "$work/kcat.status")" = 0 ]
 }
 
 # messages FILE: the messages kcat -J wrote to FILE, each in its JSON

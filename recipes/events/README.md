@@ -58,8 +58,12 @@ the topic.
   recorder is still writing waits for its end.
 - **Bounded.** `BATCH` events a request (default 100, 1,000 at most), and
   under 1 MB, as serve takes them; an event alone over that is passed
-  over, and said. 16 MiB of the file are read at a time; 10,000 messages
-  of a partition each run. `curl` tries again on 429 and 5xx, as
+  over, and said. `MAX_READ` bytes (default 16 MiB) of the file are read
+  at a time, and of what `kcat` gives of a partition, 10,000 messages at
+  most, each run: the rest the next run, from the offset kept. A line, or
+  a message, longer than `MAX_READ` is passed over to its end, and said;
+  in a consumer group, the messages past what is read are lost, as `kcat`
+  has read them. `curl` tries again on 429 and 5xx, as
   `Retry-After` says, `RETRIES` times (default 8). A line that isn't a
   JSON object, such as the Kafka output's `format: protobuf`, isn't sent,
   and is counted.

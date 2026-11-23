@@ -493,3 +493,79 @@ func TestEventsRecipeKafkaOffsets(t *testing.T) {
 		}
 	})
 }
+
+// A line longer than is read at a time is passed over to its end, and
+// said, once it has ended; one not yet ended waits. The lines around it
+// are sent.
+func TestEventsRecipeLongLine(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		s := notifyServer(t, nil)
+		s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+		srv := httptest.NewServer(s.NotifyHandler())
+		defer srv.Close()
+		events := filepath.Join(t.TempDir(), "events.jsonl")
+		lines := recorded(t, "alertmanager-0.35.0.jsonl")
+		env := recipeEnv(srv.URL, tokenFile(t, notifyToken), "", "MAX_READ=4096")
+		long := bytes.Repeat([]byte("x"), 10000)
+		appendLines(t, events, lines[:3], long)
+		// Not ended yet: waits, the three before it sent.
+		if code, out := runEvents(t, env, "file", events); code != 0 || strings.Contains(out, "passed over") {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		appendLines(t, events, nil, []byte("\n"))
+		appendLines(t, events, lines[3:], nil)
+		code, out := runEvents(t, env, "file", events)
+		if code != 0 || strings.Count(out, "a line over 4096 bytes passed over") != 1 {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		if got, want := kept2(t, s), notificationEvents(t, lines); got != want {
+			t.Errorf("%d deliveries kept, want %d", got, want)
+		}
+	})
+}
+
+// What kcat gives of a partition is read MAX_READ bytes at a time: the
+// rest the next time, from the offset kept; a message longer alone is
+// passed over.
+func TestEventsRecipeKafkaBudget(t *testing.T) {
+	needEventTools(t)
+	eachShell(t, func(t *testing.T) {
+		s := notifyServer(t, nil)
+		s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }
+		srv := httptest.NewServer(s.NotifyHandler())
+		defer srv.Close()
+		dir := t.TempDir()
+		bin, kafka := filepath.Join(dir, "bin"), filepath.Join(dir, "kafka")
+		os.MkdirAll(bin, 0o755)
+		os.MkdirAll(kafka, 0o755)
+		os.WriteFile(filepath.Join(bin, "kcat"), []byte(fakeKcat), 0o755)
+		lines := recorded(t, "alertmanager-0.35.0.jsonl")
+		msgs := append([][]byte{bytes.Repeat([]byte("y"), 20000)}, lines...)
+		kafkaFile(t, filepath.Join(kafka, "0"), msgs)
+		kafkaFile(t, filepath.Join(kafka, "1"), nil)
+		offsets := filepath.Join(dir, "offsets")
+		env := recipeEnv(srv.URL, tokenFile(t, notifyToken), bin, "FAKE_KAFKA="+kafka, "KAFKA_BROKERS=k:9092", "KAFKA_TOPIC=am-events",
+			"OFFSET_FILE="+offsets, "MAX_READ=16384")
+		code, out := runEvents(t, env, "kafka")
+		if kept, _ := os.ReadFile(offsets); code != 0 || string(kept) != "0 1\n" || !strings.Contains(out, "a message over 16384 bytes passed over") {
+			t.Fatalf("exit %d, kept %q: %s", code, kept, out)
+		}
+		runs := 0
+		for ; runs < 100; runs++ {
+			kept, _ := os.ReadFile(offsets)
+			if string(kept) == fmt.Sprintf("0 %d\n", len(msgs)) {
+				break
+			}
+			if code, out := runEvents(t, env, "kafka"); code != 0 {
+				t.Fatalf("exit %d: %s", code, out)
+			}
+		}
+		if runs < 2 || runs == 100 {
+			t.Errorf("%d runs to read the partition", runs)
+		}
+		if got, want := kept2(t, s), notificationEvents(t, lines); got != want {
+			t.Errorf("%d deliveries kept, want %d", got, want)
+		}
+	})
+}
