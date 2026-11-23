@@ -14,17 +14,30 @@
 set -eu
 here=$(dirname "$0")
 api=${GOOGLE_MONITORING_API:-https://monitoring.googleapis.com}
-# The token goes where api points: over https, or to this machine, for tests.
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+proto=
 case $api in
-  *@*) api=x ;;
-esac
-case $api in
-  https://* | http://127.0.0.1:* | http://localhost:*) ;;
-  *)
-    printf 'google-cloud.sh: GOOGLE_MONITORING_API %s is not https\n' "$GOOGLE_MONITORING_API" >&2
+  *@*)
+    printf 'google-cloud.sh: GOOGLE_MONITORING_API holds a user or token before @, refused\n' >&2
     exit 1
     ;;
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
+    ;;
 esac
+if [ -z "$proto" ]; then
+  printf 'google-cloud.sh: GOOGLE_MONITORING_API is not https\n' >&2
+  exit 1
+fi
 : "${GOOGLE_CLOUD_PROJECT:?the project}"
 : "${SINCE:?the start of the period, such as 2026-11-01T00:00:00Z}"
 case $GOOGLE_CLOUD_PROJECT in
@@ -42,11 +55,30 @@ for t in "$SINCE" "${UNTIL:-$SINCE}"; do
     exit 1
   fi
 done
+# The token, from its file or as gcloud writes it: one line of the
+# characters a token is written in (a Bearer token's, RFC 6750), as it
+# goes in a header, where a second line would be a header of its own.
+# Spaces, tabs and a carriage return after it, as an editor may leave
+# them, are dropped. Neither the token nor what else came with it is said.
 if [ -n "${GOOGLE_TOKEN_FILE:-}" ]; then
   token=$(cat "$GOOGLE_TOKEN_FILE")
+  held="GOOGLE_TOKEN_FILE doesn't hold"
 else
   token=$(gcloud auth print-access-token)
+  held="gcloud auth print-access-token didn't write"
 fi
+while :; do
+  case $token in
+    *[[:space:]]) token=${token%?} ;;
+    *) break ;;
+  esac
+done
+case $token in
+  '' | *[!A-Za-z0-9._~+/=-]*)
+    printf '%s\n' "google-cloud.sh: $held a token: one line of letters, digits and - . _ ~ + / =" >&2
+    exit 1
+    ;;
+esac
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -71,7 +103,9 @@ while :; do
   url="$api/v3/projects/$GOOGLE_CLOUD_PROJECT/alerts?pageSize=1000&filter=$filter"
   [ -z "$next" ] || url="$url&pageToken=$(printf '%s' "$next" | jq -sRr @uri)"
   # The token goes on stdin, not the command line, where ps would show it.
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- "$url")
+  # An answer is 16 MiB at most (max-filesize): past it, curl fails, and
+  # nothing is written.
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$url")
   printf '%s' "$page" | jq -c '.alerts // [] | .[]' >>"$all"
   last=$next
   next=$(printf '%s' "$page" | jq -r '.nextPageToken // empty')

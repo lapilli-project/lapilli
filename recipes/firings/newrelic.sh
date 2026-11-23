@@ -25,19 +25,30 @@ case ${NEW_RELIC_REGION:-us} in
     ;;
 esac
 api=${NEW_RELIC_API:-$api}
-# The key goes where api points: over https, or to this machine, for tests.
-# Neither is said: a user and key before @ would be in the log.
+# The key goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and key before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+proto=
 case $api in
   *@*)
     say "NEW_RELIC_API holds a user or key before @, refused"
     exit 1
     ;;
-  https://* | http://127.0.0.1:* | http://localhost:*) ;;
-  *)
-    say "NEW_RELIC_API is not https"
-    exit 1
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
     ;;
 esac
+if [ -z "$proto" ]; then
+  say "NEW_RELIC_API is not https"
+  exit 1
+fi
 : "${NEW_RELIC_ACCOUNT_ID:?the account}"
 : "${NEW_RELIC_API_KEY_FILE:?a file holding a user key}"
 : "${SINCE:?the start of the period, such as 2026-11-01T00:00:00Z}"
@@ -64,9 +75,17 @@ case $max in
     exit 1
     ;;
 esac
-# One line of the characters a key is written in; neither the key nor what
-# else the file holds is said.
+# One line of the characters a key is written in, as it goes in a header:
+# a second line would be a header of its own. Neither the key nor what
+# else the file holds is said. Spaces, tabs and a carriage return after
+# it, as an editor may leave them, are dropped.
 key=$(cat "$NEW_RELIC_API_KEY_FILE")
+while :; do
+  case $key in
+    *[[:space:]]) key=${key%?} ;;
+    *) break ;;
+  esac
+done
 case $key in
   '' | *[!A-Za-z0-9._~+/=-]*)
     say "NEW_RELIC_API_KEY_FILE doesn't hold a key: one line of letters, digits and - . _ ~ + / ="
@@ -109,8 +128,10 @@ fetch() {
   backoff=5
   while :; do
     # The key goes on stdin, not the command line, where ps would show it.
+    # An answer is 16 MiB at most (max-filesize): past it, curl fails, and
+    # nothing is written.
     code=$(printf 'API-Key: %s\n' "$key" |
-      curl -q -sS --max-time 60 -H @- -H 'Content-Type: application/json' --data-binary "@$body" \
+      curl -q -sS --proto "$proto" --max-time 60 --max-filesize 16777216 -H @- -H 'Content-Type: application/json' --data-binary "@$body" \
         -D "$heads" -o "$page" -w '%{http_code}' "$api") || exit 1
     case $code in
       2??) return 0 ;;

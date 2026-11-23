@@ -27,19 +27,30 @@ if ! printf '%s' "$c" | grep -Eq '^[a-z0-9-]+(\.[a-z0-9-]+)+$'; then
   exit 1
 fi
 api=${DATADOG_API:-https://api.$site}
-# The keys go where api points: over https, or to this machine, for tests.
-# Neither is said: a user and key before @ would be in the log.
+# The keys go where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and key before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+proto=
 case $api in
   *@*)
     say "DATADOG_API holds a user or key before @, refused"
     exit 1
     ;;
-  https://* | http://127.0.0.1:* | http://localhost:*) ;;
-  *)
-    say "DATADOG_API is not https"
-    exit 1
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
     ;;
 esac
+if [ -z "$proto" ]; then
+  say "DATADOG_API is not https"
+  exit 1
+fi
 : "${SINCE:?the start of the period, such as 2026-11-01T00:00:00Z}"
 for t in "$SINCE" "${UNTIL:-$SINCE}"; do
   # grep reads lines: a second line could carry anything past it.
@@ -58,9 +69,18 @@ case $max in
     ;;
 esac
 # key NAME FILE: what FILE holds, one line of the characters a key is
-# written in. Neither the key nor what else the file holds is said.
+# written in, as it goes in a header: a second line would be a header of
+# its own. Neither the key nor what else the file holds is said.
 key() {
   k=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $k in
+      *[[:space:]]) k=${k%?} ;;
+      *) break ;;
+    esac
+  done
   case $k in
     '' | *[!A-Za-z0-9._~+/=-]*)
       say "$1 doesn't hold a key: one line of letters, digits and - . _ ~ + / ="
@@ -129,8 +149,10 @@ fetch() {
   backoff=5
   while :; do
     # The keys go on stdin, not the command line, where ps would show them.
+    # An answer is 16 MiB at most (max-filesize): past it, curl fails, and
+    # nothing is written.
     code=$(printf '%s\n' "$headers" |
-      curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$page" -w '%{http_code}' "$1") || exit 1
+      curl -q -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$page" -w '%{http_code}' "$1") || exit 1
     case $code in
       2??) return 0 ;;
       429) ;;
