@@ -102,8 +102,20 @@ another control character. An answer, Lapilli's or the tracker's, is 16 MiB
 at most, whatever `curl`'s version: the scripts cut what `curl` writes, as
 before 8.4 `--max-filesize` holds to that bound only an answer that says its
 length. Past it, the task is skipped, or the run stops, as with any answer
-that fails. A tracker's answer that timed out, or said 408, 429, 500, 502,
-503 or 504, is asked again three times at most, as `curl --retry 3` did.
+that fails.
+
+A request, Lapilli's or the tracker's, is asked again three times at most,
+by the script, not by `curl --retry`: after a second, then twice as long
+each time, or as long as the answer's `Retry-After` says, a minute at most.
+A read (Linear's queries and Azure Boards' search among them, which go as
+POSTs), or a write a second try leaves as the first did (a state, a link),
+is asked again where the connection was refused, the answer didn't come
+within 30 seconds, or it said 408, 429, 500, 502, 503 or 504. A write that
+makes something (an issue, a comment, a transition) is asked again only
+where it can't have been taken: the connection refused, or a 408 or 429.
+Any other answer may come after the tracker took it (a proxy says 502 or
+503 then), so the task is skipped for the run, and the next run finds the
+issue or the comment by its marker rather than making it twice.
 
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
