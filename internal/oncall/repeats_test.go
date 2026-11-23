@@ -315,3 +315,32 @@ func TestRepeatsOnTheClock(t *testing.T) {
 		}
 	}
 }
+
+// Every day a period makes is a step, those BYSETPOS drops too (L17): a
+// yearly repeat of every day that keeps the 366th from the end, none in a
+// year of 365, pays for each year's days, and 2,000 of them (340 KB)
+// pass the steps a feed may take, where each paid for its months alone,
+// 98,000 steps in all, and held a CPU for seconds.
+func TestRepeatsSetPosSteps(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	const rule = "FREQ=YEARLY;BYDAY=SU,MO,TU,WE,TH,FR,SA;BYSETPOS=-366"
+	event := func(uid int) string {
+		return fmt.Sprintf("BEGIN:VEVENT\r\nUID:p%d\r\nDTSTART:20200101T000000Z\r\nDURATION:PT1H\r\nRRULE:%s\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", uid, rule)
+	}
+	parse := func(body string) (*Feed, error) {
+		return Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\n"+body+"END:VCALENDAR\r\n"), cfg.Schedules[0], cfg, now)
+	}
+	// From 2024, as the span read is skipped to, to 2027: four years, each
+	// its 12 months and its 365 or 366 days.
+	f, err := parse(event(0))
+	if err != nil || f.steps < 4*(12+365) || len(f.Turns) != 0 {
+		t.Errorf("one repeat: %v, %d steps, want %d at least, %d turns", err, f.steps, 4*(12+365), len(f.Turns))
+	}
+	var many strings.Builder
+	for i := range 2000 {
+		many.WriteString(event(i))
+	}
+	if _, err := parse(many.String()); err == nil || !strings.Contains(err.Error(), "steps") {
+		t.Errorf("2,000 repeats keeping a day in 366: %v, want the feed's steps passed", err)
+	}
+}

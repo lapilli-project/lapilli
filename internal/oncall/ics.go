@@ -673,7 +673,7 @@ func parseDuration(s string) (int, time.Duration, error) {
 // [from, to], at most most of them, as parseRule reads its RRULE; EXDATE
 // taken out. Each period's days are worked out on the clock the start is
 // written on, then each made an instant in its zone. A step is a period
-// (a month, of a yearly one), and each day it holds.
+// (a month, of a yearly one), and each day it makes, kept or not.
 func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *int) ([]time.Time, error) {
 	r, err := parseRule(e.rrule)
 	if err != nil {
@@ -754,11 +754,10 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 		}
 		var work int
 		buf, work = r.days(start, p, buf)
-		cost := work + len(buf)
-		if *steps -= cost; *steps < 0 {
+		if *steps -= work; *steps < 0 {
 			return nil, errTooManySteps
 		}
-		if taken += cost; taken > maxSteps {
+		if taken += work; taken > maxSteps {
 			return nil, errors.New("a repeat that takes too many steps to reach now")
 		}
 		for _, w := range buf {

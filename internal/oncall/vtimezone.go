@@ -347,7 +347,7 @@ func (z *vzone) counted(o *observance) error {
 		}
 		var work int
 		z.buf, work = r.days(o.start, p, z.buf)
-		if err := z.charge(work + len(z.buf)); err != nil {
+		if err := z.charge(work); err != nil {
 			return err
 		}
 		for _, w := range z.buf {
@@ -473,7 +473,7 @@ func (z *vzone) openIn(o *observance, start, end time.Time, out *[]change) error
 		}
 		var work int
 		z.buf, work = r.days(o.start, p, z.buf)
-		if err := z.charge(work + len(z.buf)); err != nil {
+		if err := z.charge(work); err != nil {
 			return err
 		}
 		for _, w := range z.buf {
@@ -507,7 +507,7 @@ func (z *vzone) lastBefore(o *observance, limit time.Time) (time.Time, bool, err
 	for k := 0; k < lookBack && p-k >= 0; k++ {
 		var work int
 		z.buf, work = r.days(o.start, p-k, z.buf)
-		if err := z.charge(work + len(z.buf)); err != nil {
+		if err := z.charge(work); err != nil {
 			return time.Time{}, false, err
 		}
 		for i := len(z.buf) - 1; i >= 0; i-- {
