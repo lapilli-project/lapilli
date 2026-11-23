@@ -291,6 +291,11 @@ type Config struct {
 	// cloud's with the pod's own identity.
 	ChangesRulerToken, ChangesAWSRole, ChangesAzureClientID string
 	ChangesGoogleServiceAccount, ChangesOCIConfig           string
+	// ChangesLokiToken is the file holding a token that may write the
+	// rules of --loki's ruler, read with --loki-loaded-rules: without it,
+	// its writes are sent with no token, as a Mimir's are. A Loki's
+	// namespaces are named in ChangesIn as loki:NAMESPACE.
+	ChangesLokiToken string
 	// RulerTransport carries the ruler's and the alarms' requests: nil but
 	// in tests.
 	RulerTransport http.RoundTripper
@@ -558,6 +563,11 @@ type Server struct {
 	// rulerWrites are those that write to it.
 	ruler       *source.Ruler
 	rulerWrites source.Creds
+	// loki is --loki's ruler, its configuration API, read with
+	// --loki-loaded-rules, and lokiWrites the credentials that write to it:
+	// nil without --loki-loaded-rules. It is never --ruler's.
+	loki       *source.Ruler
+	lokiWrites source.Creds
 	// alarms read each --alarms, with the credentials that read it, and
 	// alarmWrites are those that write to it, by source.
 	alarms      []*source.Alarms
@@ -722,6 +732,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 			return nil, err
 		}
 	}
+	if err := s.newLoki(); err != nil {
+		l.Close()
+		return nil, err
+	}
 	if err := s.newAlarms(ctx); err != nil {
 		l.Close()
 		return nil, err
@@ -868,6 +882,29 @@ func (s *Server) newRuler(ctx context.Context) error {
 		}
 	}
 	s.ruler = r
+	return nil
+}
+
+// newLoki readies --loki's ruler, read with --loki-loaded-rules, as a
+// ruler a change approved is written through, with the token that reads
+// it, its tenant, and, with --changes, the token that writes to it, which
+// isn't read otherwise.
+func (s *Server) newLoki() error {
+	if s.cfg.Loki == "" || !s.cfg.LokiLoaded {
+		return nil
+	}
+	// loki: in --changes-in names Loki's namespaces: an --alarms source of
+	// that name would have its alarms named by them too.
+	for _, a := range s.cfg.Alarms {
+		if s.cfg.Changes && a.Source == strings.TrimSuffix(lokiIn, ":") {
+			return errors.New("--alarms loki=: with --loki-loaded-rules, loki: in --changes-in names Loki's ruler's namespaces: name the alarms' source another")
+		}
+	}
+	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant}
+	s.loki = l.Ruler("lapilli/"+s.cfg.Version, func(what string) { s.log.Warn(what) })
+	if s.cfg.Changes {
+		s.lokiWrites.TokenFile = s.cfg.ChangesLokiToken
+	}
 	return nil
 }
 

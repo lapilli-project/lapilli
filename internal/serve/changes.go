@@ -726,6 +726,21 @@ func (s *Server) rulerKept(f found) bool {
 	return s.ruler != nil && f.rule.Cloud == "" && f.doc.Logs == "" && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
 }
 
+// lokiKept reports whether a rule was read from --loki's ruler, with
+// --loki-loaded-rules: changed through its configuration API, where
+// --changes-in lets it be (loki:NAMESPACE). A rule read from a Loki's rule
+// files (--loki-rules) isn't.
+func (s *Server) lokiKept(f found) bool {
+	return s.loki != nil && f.rule.Cloud == "" && f.doc.Logs == rules.LokiRuler && f.rule.Logs == rules.LokiRuler &&
+		f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
+}
+
+// apiPath reports whether a proposal's path is applied through an API, and
+// read back from it: Grafana's, a ruler's, Loki's ruler's, a cloud's.
+func apiPath(path string) bool {
+	return path == ledger.PathGrafana || path == ledger.PathRuler || path == ledger.PathLoki || path == ledger.PathAlarm
+}
+
 // offable reports whether where a rule is kept can turn it off: Grafana,
 // Azure's rule groups, and every cloud's own alarms. A rule file, and so a
 // Mimir's, a Cortex's or an Amazon ruler's, has no off: retiring it is
@@ -925,10 +940,16 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		}
 	case r.Cloud != "":
 		ev.Cloud, ev.NoPath = r.Cloud, noPathAlarmFile
+	case s.lokiKept(f):
+		// A Loki ruler's rule, from its API: written there as a Mimir's is,
+		// on a path of its own, never taken for --ruler's.
+		if err := s.apiPropose(ctx, rulerTarget{s: s, loki: true}, &p, &ev, f, want, e, b, q.Value); err != nil {
+			return 0, err
+		}
 	case f.doc.Logs != "":
-		// A Loki ruler's rule, from its files or its API: Lapilli writes
-		// neither to Loki nor to a Loki's rule files, so the change, with
-		// its backtest, is for a person (docs/design/loki.md).
+		// A Loki ruler's rule from its files: Lapilli doesn't write a
+		// Loki's rule files, so the change, with its backtest, is for a
+		// person (docs/design/loki.md).
 		ev.NoPath = noPathLoki
 	case s.grafanaKept(f):
 		if q.Kind != ledger.KindThreshold {
@@ -936,7 +957,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			p.AfterHash = "" // Grafana says, once it is applied
 		}
 	case s.rulerKept(f):
-		if err := s.apiPropose(ctx, rulerTarget{s}, &p, &ev, f, want, e, b, q.Value); err != nil {
+		if err := s.apiPropose(ctx, rulerTarget{s: s}, &p, &ev, f, want, e, b, q.Value); err != nil {
 			return 0, err
 		}
 	case !f.doc.API && len(f.doc.Data) > 0:
@@ -1070,11 +1091,25 @@ func (s *Server) docName(source string) string {
 // with want in place of r (none, for a deletion), and gives the rule as
 // read.
 func readsAs(before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, bool) {
-	a, err := rules.Parse(before)
+	return readsAsBy(rules.Parse, before, after, r, want, gone)
+}
+
+// parserOf reads a document as a rule file: Prometheus's, or, with logs, a
+// Loki ruler's, whose queries are LogQL, as the rules read from it are.
+func parserOf(logs string) func([]byte) ([]rules.Rule, error) {
+	if logs == "" {
+		return rules.Parse
+	}
+	return func(b []byte) ([]rules.Rule, error) { return rules.FromDocs([]rules.Doc{{Data: b, Logs: logs}}) }
+}
+
+// readsAsBy is readsAs, the documents read by parse.
+func readsAsBy(parse func([]byte) ([]rules.Rule, error), before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, bool) {
+	a, err := parse(before)
 	if err != nil {
 		return nil, false
 	}
-	b, err := rules.Parse(after)
+	b, err := parse(after)
 	if err != nil {
 		return nil, false
 	}
@@ -1112,11 +1147,16 @@ func readsAs(before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, 
 // rules.Check has compared the rest of its tree whole. What it says now is
 // read back as a template, as saidOK reads it.
 func readsSaying(before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
-	a, err := rules.Parse(before)
+	return readsSayingBy(rules.Parse, before, after, r, want)
+}
+
+// readsSayingBy is readsSaying, the documents read by parse.
+func readsSayingBy(parse func([]byte) ([]rules.Rule, error), before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
+	a, err := parse(before)
 	if err != nil {
 		return nil, false
 	}
-	b, err := rules.Parse(after)
+	b, err := parse(after)
 	if err != nil || len(a) != len(b) {
 		return nil, false
 	}
@@ -1554,6 +1594,12 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 			} else {
 				err = refusal{"the proposal names no rule in a ruler, or lapilli serve no longer reads one (--ruler)"}
 			}
+		case ledger.PathLoki:
+			if tg := s.targetOf(p.Path); tg != nil {
+				err = s.apiApply(ctx, tg, p, step)
+			} else {
+				err = refusal{"the proposal names a rule in Loki's ruler, and lapilli serve no longer reads it (--loki with --loki-loaded-rules)"}
+			}
 		case ledger.PathAlarm:
 			if s.targetOf(p.Path) != nil {
 				err = s.alarmApply(ctx, p, step)
@@ -1567,7 +1613,7 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: no.why})
 		return err
 	}
-	if err != nil || p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
+	if err != nil || apiPath(p.Path) {
 		return err
 	}
 	if s.changesPaused() {
@@ -1592,7 +1638,7 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 	if p.Kind == ledger.KindAdd {
 		return s.checkAddAgain(ctx, p, ev)
 	}
-	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
+	if apiPath(p.Path) {
 		// Grafana's own copy, the ruler's or the cloud's, is read again
 		// where it is applied.
 		return step, ledger.StateApplying, s.checkEvidence(ctx, p, ev, nil)
@@ -1846,7 +1892,7 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		has[ruleHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm || saysChange(p) {
+		if apiPath(p.Path) || saysChange(p) {
 			continue // applied when Grafana, the ruler or the cloud takes it; what a rule says, by seenSays
 		}
 		if err := s.amendedInReview(ctx, p, all); err != nil {
@@ -1934,7 +1980,7 @@ func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
 		has[saysHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm || !saysChange(p) {
+		if apiPath(p.Path) || !saysChange(p) {
 			continue
 		}
 		if err := s.amendedInReview(ctx, p, rs); err != nil {

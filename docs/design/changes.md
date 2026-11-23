@@ -160,6 +160,7 @@ target's own (below).
 |---|---|---|
 | Grafana alerting | the provisioning API: `PUT`/`DELETE /api/v1/provisioning/alert-rules/{uid}`, with `X-Disable-Provenance` so the rule stays editable in Grafana's UI | its provenance is `file` (provisioned from files: the git path) or `api` set by another tool |
 | Mimir or Cortex ruler ([rulers.md](rulers.md)) | `POST /prometheus/config/v1/rules/{namespace}` with the group, `DELETE` for a group | its namespace isn't one `--changes-in` names: nothing on a group says which tool keeps it |
+| Loki's ruler, read with `--loki-loaded-rules` ([rulers.md](rulers.md#lokis-ruler), v0.70.0) | `POST /loki/api/v1/rules/{namespace}` with the group, `DELETE` for a group, on a path of its own, `loki` | its namespace isn't one `--changes-in` names as `loki:NAMESPACE` |
 | Amazon Managed Service for Prometheus ([rulers.md](rulers.md)) | `PutRuleGroupsNamespace` (the whole namespace, as it was read, with the change) | its namespace isn't named, as above, or is tagged as managed (CloudFormation's own tags, or one the operator names) |
 | Azure Monitor managed service for Prometheus ([rulers.md](rulers.md)) | `PUT` on the `prometheusRuleGroups` resource | not named, or tagged as managed, as above |
 | Google Cloud Managed Service for Prometheus | not through an API: `Rules`, `ClusterRules` and `GlobalRules` are Kubernetes resources, changed by the git path ([rulers.md](rulers.md#google-cloud-managed-service-for-prometheus-the-git-path)) | always |

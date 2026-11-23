@@ -28,8 +28,12 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   replay, and says which rules had them. `--check-replay` reads the `ALERTS`
   Loki's ruler writes where its `remote_write` sends them, the Prometheus at
   `--prometheus`. A rule sharing a name with another is told apart as
-  `Name [loki:namespace/group]`. A change proposed for one, with its
-  backtest, is for a person: Lapilli doesn't write to Loki.
+  `Name [loki:namespace/group]`. A change proposed for one read with
+  `--loki-loaded-rules`, with its backtest, is written through Loki's
+  ruler once approved, where `lapilli serve --changes-in` names its
+  namespace as `loki:NAMESPACE`, with `--changes-loki-token-file`
+  ([changing rules](changing-rules.md)); otherwise, and for one read from
+  its files, it is for a person.
 - **Grafana's rules.** With `--grafana`, the type of each data source a
   rule reads is asked of Grafana; a Loki one's queries are asked through
   Grafana's data source proxy (`/api/datasources/proxy/uid/UID`, a Viewer's
@@ -51,8 +55,11 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   each line arrived that late. A range Loki refuses for its series
   (`max_query_series`) is asked again in shorter ranges, down to one
   evaluation; an evaluation over the limit fails, as it does in Loki's
-  ruler. The chart takes `--loki URL --loki-loaded-rules` (and
-  `--loki-tenant`) through `extraArgs`, beside its rules or alone.
+  ruler. The chart takes them as `loki.url`, `loki.tenant` and
+  `loki.tokenSecret` (a Secret, mounted as a file), and `rules.loki.loaded`
+  or `rules.loki.configMaps` (rule files from ConfigMaps), beside its rules
+  or alone; `serve.changes.lokiTokenSecret` is the token Loki's ruler is
+  written with.
 
 Measured against Loki 3.7.9 and Grafana 13.3.1: see the design for the
 recordings kept as test data. `test/e2e/loki.sh` runs the same against

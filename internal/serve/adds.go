@@ -327,7 +327,7 @@ func (s *Server) rulerPlace(r rules.Rule, d rules.Doc) bool {
 	if s.ruler == nil || s.ruler.Kind == source.RulerAzure || r.Cloud != "" || d.Logs != "" || d.Namespace == "" || r.Namespace != d.Namespace {
 		return false
 	}
-	return rulerTarget{s}.allowed("", rules.Edit{Namespace: r.Namespace, Group: r.Group}) == ""
+	return rulerTarget{s: s}.allowed("", rules.Edit{Namespace: r.Namespace, Group: r.Group}) == ""
 }
 
 // alarmTells are whom a cloud's alarm tells, as a rule added may: of
@@ -733,7 +733,7 @@ func scenarioGroupOf(rs []rules.Rule, r rules.Rule) ([]byte, error) {
 }
 
 func (s *Server) buildRuler(ctx context.Context, b *addBuilt) error {
-	tg := rulerTarget{s}
+	tg := rulerTarget{s: s}
 	if s.ruler == nil || s.ruler.Kind == source.RulerAzure {
 		return errNoPlace
 	}

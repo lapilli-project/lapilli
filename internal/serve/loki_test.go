@@ -143,8 +143,9 @@ func TestLokiIdentity(t *testing.T) {
 // changes in its namespace shop allowed, and a Loki's with
 // --loki-loaded-rules, one of them in a namespace also called shop. A
 // longer for proposed for the Loki rule is backtested against Loki, and is
-// for a person: nothing is written to the Mimir, whose namespace has the
-// same name, nor to Loki.
+// for a person, as --changes-in names no Loki namespace (loki:shop):
+// nothing is written to the Mimir, whose namespace has the same name, nor
+// to Loki.
 func TestLokiProposalForAPerson(t *testing.T) {
 	ctx := context.Background()
 	lokiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +172,7 @@ func TestLokiProposalForAPerson(t *testing.T) {
 	id := proposeRule(t, h, "CheckoutLogErrors", "for", url.Values{"for": {"15m"}})
 	p := state(t, s, id)
 	ev := proposalEvidence(p)
-	if p.Path != ledger.PathNone || ev.NoPath != noPathLoki || ev.Backtest == nil {
+	if p.Path != ledger.PathNone || ev.NoPath != noPathLokiIn || ev.Backtest == nil {
 		t.Errorf("path %s, why %q, backtest %v", p.Path, ev.NoPath, ev.Backtest != nil)
 	}
 	if len(m.written()) != before {
@@ -248,8 +249,8 @@ func TestCompareKeepsLoki(t *testing.T) {
 // Mimir's group of that namespace and name and is refused, "the rule
 // changed since it was read: try again in a minute", for ever. Without
 // --ruler, it falls through to the rule-file path: a git change to a
-// "file" that is Loki's API. docs/design/loki.md says a proposal for a
-// Loki rule is for a person.
+// "file" that is Loki's API. Without loki:NAMESPACE in --changes-in, a
+// proposal for a Loki rule is for a person (docs/design/rulers.md).
 func TestLokiLoadedProposal(t *testing.T) {
 	loki := http.NewServeMux()
 	loki.HandleFunc("/loki/api/v1/rules", func(w http.ResponseWriter, r *http.Request) {

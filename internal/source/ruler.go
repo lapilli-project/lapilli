@@ -106,8 +106,8 @@ type Creds struct {
 type Ruler struct {
 	URL  string
 	Kind string
-	// Tenant, when set, is sent as X-Scope-OrgID: Mimir's or Cortex's
-	// tenant, for one with tenants and no gateway to set it.
+	// Tenant, when set, is sent as X-Scope-OrgID: Mimir's, Cortex's or
+	// Loki's tenant, for one with tenants and no gateway to set it.
 	Tenant string
 	Agent  string
 	// Reads are the credentials the rules are read with.

@@ -7,7 +7,9 @@ hold are changed through their own APIs, once a person approves. It adds a
 way of reading rules and three places Lapilli writes to, so under
 [GOVERNANCE.md](../../GOVERNANCE.md) it is designed first, as a pull
 request. It keeps everything changes.md settles and says only what is new.
-Google Cloud's rule resources stay on the git path; why is below.
+Google Cloud's rule resources stay on the git path; why is below. A Loki
+ruler's rules, read with `--loki-loaded-rules`, are changed the same way
+for v0.70.0 ("Loki's ruler", below).
 
 It is in a document of its own because it is mostly about four APIs, how
 each is read and written, and their tests; changes.md stays about
@@ -208,6 +210,66 @@ The document is JSON, which the text edit doesn't take (it edits block
 YAML), so the change is made in the decoded tree, as `rules.Check` already
 makes it to compare: the same `for`, number, annotation or `enabled`, in
 Azure's names (`expression`, an ISO 8601 `for`).
+
+### Loki's ruler
+
+Added for v0.70.0. Loki's ruler is Cortex's, under Loki's path:
+`/loki/api/v1/rules` lists every namespace, `GET .../NS/GROUP` reads a
+group, `POST .../NS` sets one (`Content-Type: application/yaml`, `202`),
+and `DELETE .../NS/GROUP` deletes one (`202`), as Loki's HTTP API reference
+gives them. `--loki-loaded-rules` already reads the rules through it, a
+document a namespace ([loki.md](loki.md)); a change approved to one of
+them is now written there as a Mimir's is. Before, it was for a person.
+
+- **Where it may.** Only where `--changes-in` names the namespace as
+  `loki:NAMESPACE`, or `loki:PREFIX*`, in its letter case. A Loki and a
+  Mimir may both have a namespace `shop`: `--changes-in shop` names the
+  Mimir's alone, and `loki:shop` the Loki's alone. Without
+  `--loki-loaded-rules`, `loki:shop` is `--ruler`'s namespace of that name,
+  as it was; given with no `--ruler` either, it is refused. An `--alarms`
+  source named `loki` is refused beside `--loki-loaded-rules`. A team's
+  `changes_in` names Loki's namespaces the same way, within those
+  `--changes-in` names.
+- **A path of its own.** A Loki rule's proposal takes the path `loki`, not
+  `ruler`. A path is fixed when the proposal is made, so a change made for
+  a Loki rule is read again and written only through `--loki`'s ruler,
+  never through `--ruler`, whatever a restart does to the flags. One whose
+  Loki serve no longer reads is refused once approved; one sent, and
+  applying, stays applying until it is read back there.
+- **As a Mimir's.** One group is what a write replaces. It is read again
+  just before: the rule changed since is refused as stale; only other
+  rules of the group changed, the change is made afresh, theirs as Loki
+  holds them. The group is kept for undo, counted against the limits, sent
+  once, and read back, a group still as it was read again for two minutes.
+  One change to a group at a time. A group goes with its last rule (its
+  `DELETE`). Undo puts back the rule alone. The pause and a team's
+  boundaries are asked again just before the write.
+- **Read as LogQL.** A group read again is read as `--loki-loaded-rules`
+  reads it, its queries LogQL, so the rule hashes as it did when it was
+  proposed. Read as Prometheus's, a LogQL rule hashed otherwise, and every
+  proposal was refused as changed since.
+- **Credentials.** Reads use `--loki-token-file`'s token. Writes use
+  `--changes-loki-token-file`'s, which must not be that token, nor
+  `--changes-ruler-token-file`'s; without it, writes carry no token, for a
+  Loki reached only in the cluster. Loki has no authorization of its own:
+  a gateway in front of it checks a token. `--loki-tenant` is sent as
+  `X-Scope-OrgID` on reads and writes alike.
+- **Only where it was told.** As `--ruler`'s: every request to `--loki`'s
+  host, no redirect followed, 30 seconds, 4 MB a group and 64 MB the list.
+  A namespace or group whose name isn't written to (`NameOK`) is for a
+  person.
+- **What Loki needs.** Its ruler's API on (`enable_api`, on by default) and
+  a rule store that takes writes. Loki's docs say its `local` store is "a
+  read-only backend that does not support the creation and deletion of
+  rules through the Ruler API". An object store does (S3, GCS, Azure,
+  Swift), and so does `ruler_storage` with `backend: filesystem` once
+  `storage_config.use_thanos_objstore` is true (Loki 3.7.9's
+  `initRulerStorage`). `lapilli preflight` says it can't know whether
+  writes are taken (`changes.loki`), as for a Mimir.
+
+Left out: a Loki ruler's rule files (`--loki-rules`) stay for a person, as
+the git path writes only the files `--rules` reads; and a rule added
+(`add`) isn't offered a place in Loki's ruler. Both are for after this.
 
 ## Google Cloud Managed Service for Prometheus: the git path
 
@@ -678,6 +740,12 @@ README gives the IAM policy and the Azure role as JSON.
 
 - **Cortex** is the same API under another base. It is tested against a
   stand-in answering as Mimir did, at Cortex's paths.
+- **Loki** is the same API under `/loki/api/v1/rules`. It is tested
+  against that stand-in at Loki's path, which takes nothing without the
+  tenant (`internal/serve/lokiwrite_test.go`), and in CI against a real
+  Loki 3.7.9 by `test/e2e/loki.sh`: a second Loki with its rules on the
+  filesystem through the object store client, a change applied, read back
+  and undone.
 - **Amazon and Azure** are tested against stand-ins answering as their
   documents show: Amazon's from botocore's `amp` model (paths, `202`s,
   `statusCode` values, base64 `data`, `nextToken`), Azure's from the REST

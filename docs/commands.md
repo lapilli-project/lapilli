@@ -1029,7 +1029,9 @@ and proposes; docs/design/changes.md):
                       comma-separated, each a name or a prefix ending in *
                       (team-*); on Azure, rule groups, RG/NAME, or NAME when
                       --ruler names one resource group, in any letter case.
-                      And a cloud's alarms, SOURCE:NAME, an --alarms source
+                      Loki's, with --loki-loaded-rules, as loki:NAMESPACE
+                      (loki:shop, loki:team-*). And a cloud's alarms,
+                      SOURCE:NAME, an --alarms source
                       and an alarm in it: CloudWatch's alarm name, Azure's
                       RG/NAME (in any letter case), Google Cloud's policy's
                       display name, OCI's display name (cloudwatch-prod:
@@ -1053,6 +1055,13 @@ and proposes; docs/design/changes.md):
                       a token that may write a Mimir's or a Cortex's rules
                       (rules:write), for --ruler; without it, writes are sent
                       with no token, for a ruler reached only in the cluster
+  --changes-loki-token-file FILE
+                      a token that may write the rules of --loki's ruler,
+                      read with --loki-loaded-rules, sent with --loki-tenant
+                      as its reads are; without it, writes are sent with no
+                      token, for a Loki reached only in the cluster. A
+                      Loki whose ruler reads its rules from local files
+                      (ruler.storage.type: local) takes no writes
   --changes-aws-role ARN
                       a role the pod's identity assumes to write Amazon's
                       rule groups namespaces, allowed

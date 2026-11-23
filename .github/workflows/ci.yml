@@ -310,13 +310,14 @@ jobs:
 
   e2e-loki:
     # Rules written in LogQL replayed against a real Loki and Grafana in
-    # Docker, and set beside what they fired. Not a required check: it
-    # pulls images, and logs must run for some minutes first.
+    # Docker, and set beside what they fired; then a change applied and
+    # undone through a second Loki's ruler. Not a required check: it pulls
+    # images, and logs must run for some minutes first.
     name: Loki on real servers
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-loki == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

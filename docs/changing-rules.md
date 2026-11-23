@@ -131,6 +131,18 @@ would now be missed), and the rule as it was is kept for undo. Then:
   Amazon namespace stays applying while it is `UPDATING`. A group goes
   with its last rule; an Amazon namespace's or an Azure rule group's last
   rule is for a person.
+- **A rule kept in Loki's ruler**, read with `--loki-loaded-rules`, is
+  changed through Loki's ruler's API (`/loki/api/v1/rules`) as a Mimir's
+  is, and only in the namespaces `--changes-in` names as `loki:NAMESPACE`
+  (or `loki:PREFIX*`): `--changes-in shop` names `--ruler`'s namespace
+  `shop`, never Loki's. It takes a way of its own, Loki's ruler's API, so
+  that it is written only to `--loki`. Writes carry
+  `--changes-loki-token-file`'s token, a token of their own, and
+  `--loki-tenant` as `X-Scope-OrgID`. Loki takes writes only when its ruler
+  keeps its rules in an object store (or on the filesystem through its
+  object store client, `use_thanos_objstore`), not in local files
+  (`ruler.storage.type: local`). A rule read from a Loki's rule files
+  (`--loki-rules`) is for a person.
 - **A cloud's own alarm**, read with `--alarms`, is changed through its
   cloud's API, and only where `--changes-in` names it as `SOURCE:NAME`:
   CloudWatch's alarm name, Azure's `RG/NAME` (in any letter case), Google
@@ -198,7 +210,8 @@ Every step is kept in the ledger's changes, and told as `proposal.made`,
 
 The git path, Grafana's and Mimir's run against real servers in
 `test/e2e/changes.sh` (Gitea 28.3, Prometheus 3.5, Grafana 13.3, Mimir
-3.2.4), and against stand-ins in the unit tests; Cortex's against a
+3.2.4), Loki's ruler's in `test/e2e/loki.sh` (Loki 3.7.9), and against
+stand-ins in the unit tests; Cortex's against a
 stand-in at its paths, Amazon's and Azure's rulers, and the four clouds'
 alarms, against stand-ins answering as their API documents show. None yet
 against an account of any cloud.

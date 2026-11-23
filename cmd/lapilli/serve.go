@@ -559,7 +559,9 @@ and proposes; docs/design/changes.md):
                       comma-separated, each a name or a prefix ending in *
                       (team-*); on Azure, rule groups, RG/NAME, or NAME when
                       --ruler names one resource group, in any letter case.
-                      And a cloud's alarms, SOURCE:NAME, an --alarms source
+                      Loki's, with --loki-loaded-rules, as loki:NAMESPACE
+                      (loki:shop, loki:team-*). And a cloud's alarms,
+                      SOURCE:NAME, an --alarms source
                       and an alarm in it: CloudWatch's alarm name, Azure's
                       RG/NAME (in any letter case), Google Cloud's policy's
                       display name, OCI's display name (cloudwatch-prod:
@@ -583,6 +585,13 @@ and proposes; docs/design/changes.md):
                       a token that may write a Mimir's or a Cortex's rules
                       (rules:write), for --ruler; without it, writes are sent
                       with no token, for a ruler reached only in the cluster
+  --changes-loki-token-file FILE
+                      a token that may write the rules of --loki's ruler,
+                      read with --loki-loaded-rules, sent with --loki-tenant
+                      as its reads are; without it, writes are sent with no
+                      token, for a Loki reached only in the cluster. A
+                      Loki whose ruler reads its rules from local files
+                      (ruler.storage.type: local) takes no writes
   --changes-aws-role ARN
                       a role the pod's identity assumes to write Amazon's
                       rule groups namespaces, allowed
@@ -786,7 +795,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
 		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file",
-			"--changes-ruler-token-file":
+			"--changes-ruler-token-file", "--changes-loki-token-file":
 			b, err := secret(val, 16)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
@@ -805,6 +814,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				cfg.ChangesGrafanaToken = val
 			case "--changes-ruler-token-file":
 				cfg.ChangesRulerToken = val
+			case "--changes-loki-token-file":
+				cfg.ChangesLokiToken = val
 			default:
 				cfg.IncidentsToken = val
 			}
@@ -1312,13 +1323,19 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--changes writes a change to where the rules are kept: followed alone, --rules-history is versions a recipe wrote, often rendered from a chart, with no file to write to. Give --rules, or leave --changes out")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
 		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{}) || len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0 ||
-		cfg.ChangesRulerToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != "" ||
+		cfg.ChangesRulerToken != "" || cfg.ChangesLokiToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != "" ||
 		cfg.ChangesGoogleServiceAccount != "" || cfg.ChangesOCIConfig != ""):
 		err = fmt.Errorf("--approvers, --approvals and the other --changes-* options go with --changes")
 	case cfg.ChangesGrafanaToken != "" && f.grafana == "":
 		err = fmt.Errorf("--changes-grafana-token-file is for the rules --grafana reads")
-	case (len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0) && f.ruler == "" && len(f.alarms) == 0:
+	case len(cfg.ChangesIn) > 0 && f.ruler == "" && len(f.alarms) == 0 && !f.lokiLoaded:
+		err = fmt.Errorf("--changes-in is for the rules --ruler reads, those of Loki's ruler --loki-loaded-rules reads, and the alarms --alarms reads")
+	case len(cfg.ChangesManaged) > 0 && f.ruler == "" && len(f.alarms) == 0:
 		err = fmt.Errorf("--changes-in and --changes-managed are for the rules --ruler reads, and the alarms --alarms reads")
+	case f.lokiLoaded && slices.ContainsFunc(f.alarms, func(a alarmsFlag) bool { return a.source == "loki" }):
+		err = fmt.Errorf("--alarms loki=: with --loki-loaded-rules, loki: in --changes-in names Loki's ruler's namespaces: name the alarms' source another")
+	case lokiChangesIn(cfg.ChangesIn, f) != "":
+		err = fmt.Errorf("--changes-in %s names a namespace of Loki's ruler: give --loki URL and --loki-loaded-rules, which read it", lokiChangesIn(cfg.ChangesIn, f))
 	case badChangesIn(cfg.ChangesIn, f) != "":
 		err = fmt.Errorf("--changes-in %s: no --alarms names the source %s", badChangesIn(cfg.ChangesIn, f), strings.SplitN(badChangesIn(cfg.ChangesIn, f), ":", 2)[0])
 	case cfg.ChangesRulerToken != "" && rulerKind(f) != source.RulerConfig:
@@ -1335,6 +1352,12 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--changes-managed names tags, which a Mimir's or a Cortex's groups don't have: --changes-in alone says what Lapilli may change there")
 	case cfg.ChangesRulerToken != "" && f.rulerTk != "" && sameFile(cfg.ChangesRulerToken, f.rulerTk):
 		err = fmt.Errorf("--changes-ruler-token-file holds the same token as --ruler-token-file: give the writes a token of their own")
+	case cfg.ChangesLokiToken != "" && !f.lokiLoaded:
+		err = fmt.Errorf("--changes-loki-token-file is for the rules of --loki's ruler, read with --loki-loaded-rules")
+	case cfg.ChangesLokiToken != "" && f.lokiTk != "" && sameFile(cfg.ChangesLokiToken, f.lokiTk):
+		err = fmt.Errorf("--changes-loki-token-file holds the same token as --loki-token-file: give the writes a token of their own")
+	case cfg.ChangesLokiToken != "" && cfg.ChangesRulerToken != "" && sameFile(cfg.ChangesLokiToken, cfg.ChangesRulerToken):
+		err = fmt.Errorf("--changes-loki-token-file holds the same token as --changes-ruler-token-file: give each ruler's writes a token of their own")
 	case cfg.MCPPropose != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-propose needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could propose as anyone")
 	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
@@ -1392,7 +1415,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		// Every token and secret serve takes or sends: none may be a plain
 		// entry's too.
 		cfg.Trust, trustErr = serve.ReadTrust(trustFile, []string{cfg.IncidentsToken, cfg.FiringsToken, cfg.NotifyToken, cfg.TasksToken, cfg.ChangesToken,
-			cfg.ChangesGrafanaToken, cfg.ChangesRulerToken, cfg.NotifyGrafanaSecret, f.grafanaTk, f.rulerTk, f.lokiTk, f.tokenFile}, secretsLater)
+			cfg.ChangesGrafanaToken, cfg.ChangesRulerToken, cfg.ChangesLokiToken, cfg.NotifyGrafanaSecret, f.grafanaTk, f.rulerTk, f.lokiTk, f.tokenFile}, secretsLater)
 		if !trustSaid {
 			err = trustErr
 		}
@@ -1511,8 +1534,11 @@ func serveOn(args []string, demo *serveWith, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer s.Close()
-	if cfg.Changes && cfg.Ruler != "" && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return !alarmsEntry(x, f) }) {
+	if cfg.Changes && cfg.Ruler != "" && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return !alarmsEntry(x, f) && !lokiEntry(x, f) }) {
 		log.Warn("--changes with --ruler and no --changes-in: nothing in the ruler will be changed; its proposals are for a person")
+	}
+	if cfg.Changes && f.lokiLoaded && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return lokiEntry(x, f) }) {
+		log.Warn("--changes with --loki-loaded-rules and no --changes-in loki:NAMESPACE: nothing in Loki's ruler will be changed; its proposals are for a person")
 	}
 	for _, a := range f.alarms {
 		if cfg.Changes && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return strings.HasPrefix(x, a.source+":") }) {
@@ -1580,12 +1606,31 @@ func alarmsEntry(x string, f *verdictFlags) bool {
 	return ok && slices.ContainsFunc(f.alarms, func(a alarmsFlag) bool { return a.source == src })
 }
 
+// lokiEntry reports whether a --changes-in entry names namespaces of
+// --loki's ruler: loki:NAMESPACE, with --loki-loaded-rules. Without it,
+// such an entry is --ruler's, as before.
+func lokiEntry(x string, f *verdictFlags) bool {
+	return f.lokiLoaded && strings.HasPrefix(x, "loki:")
+}
+
+// lokiChangesIn is a --changes-in entry, loki:NAMESPACE, given with Loki's
+// rules from files alone or without --ruler, so that it can be no one's
+// but a Loki ruler's that isn't read; "" for none.
+func lokiChangesIn(in []string, f *verdictFlags) string {
+	for _, x := range in {
+		if strings.HasPrefix(x, "loki:") && !f.lokiLoaded && f.ruler == "" && !alarmsEntry(x, f) {
+			return x
+		}
+	}
+	return ""
+}
+
 // badChangesIn is a --changes-in entry that names a source no --alarms
 // names, without a --ruler to be one of; "" for none.
 func badChangesIn(in []string, f *verdictFlags) string {
 	for _, x := range in {
 		src, _, ok := strings.Cut(x, ":")
-		if ok && ledger.ValidSource(src) && !alarmsEntry(x, f) && f.ruler == "" {
+		if ok && ledger.ValidSource(src) && !alarmsEntry(x, f) && !lokiEntry(x, f) && f.ruler == "" {
 			return x
 		}
 	}

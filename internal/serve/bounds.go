@@ -327,8 +327,9 @@ func sortedKeys[V any](m map[string]V) []string {
 // withinChangesIn reports whether an entry a team's changes_in gives is
 // within what --changes-in names: an entry of it, or a name or a narrower
 // prefix within one of its prefixes, as written. An alarm's entry
-// (SOURCE:NAME) is within one of the same source alone, a ruler's within
-// one of the ruler's; each in any letter case where its source compares
+// (SOURCE:NAME) is within one of the same source alone, a Loki ruler's
+// (loki:NAMESPACE) within one of Loki's, a ruler's within one of the
+// ruler's; each in any letter case where its source compares
 // names so (foldsIn): Azure's rule groups and Azure's alarms.
 func (s *Server) withinChangesIn(x string) bool {
 	src, alarm := s.alarmsSource(x)
@@ -356,6 +357,11 @@ func (s *Server) withinChangesIn(x string) bool {
 // alarmsSource is the source of --alarms an entry of --changes-in names an
 // alarm of (SOURCE:NAME, alarmsEntry), ok false for a ruler's entry.
 func (s *Server) alarmsSource(x string) (src string, ok bool) {
+	if s.lokiEntry(x) {
+		// Loki's ruler's namespaces (loki:NAMESPACE): within one of its own
+		// alone, as an alarm's within its source's.
+		return lokiIn, true
+	}
 	if !s.alarmsEntry(x) {
 		return "", false
 	}
@@ -367,6 +373,9 @@ func (s *Server) alarmsSource(x string) (src string, ok bool) {
 // any letter case, as its own source compares names: an alarm's, by its
 // source's kind (changesInAlarm), a ruler's by the ruler's (changesIn).
 func (s *Server) foldsIn(x string) bool {
+	if s.lokiEntry(x) {
+		return false // Loki compares namespaces as written
+	}
 	if src, ok := s.alarmsSource(x); ok {
 		return s.alarmsOf(src).Kind == source.AlarmsAzure
 	}
@@ -971,8 +980,14 @@ func (s *Server) outsideTeamIn(b *bounds, tg target, teams []string, src string,
 		if !tb.Narrowed {
 			continue
 		}
-		switch tg.(type) {
+		switch t := tg.(type) {
 		case rulerTarget:
+			if t.loki {
+				if !lokiInOf(tb.In, s.loki != nil, e.Namespace) {
+					return noPathTeamIn, false
+				}
+				continue
+			}
 			if !s.inOf(tb.In, e.Namespace, e.Group) {
 				return noPathTeamIn, false
 			}
@@ -1022,7 +1037,7 @@ func (s *Server) inOf(pats []string, ns, group string) bool {
 		return false
 	}
 	for _, pat := range pats {
-		if s.alarmsEntry(pat) {
+		if s.alarmsEntry(pat) || s.lokiEntry(pat) {
 			continue
 		}
 		if s.ruler.Kind != source.RulerAzure {
