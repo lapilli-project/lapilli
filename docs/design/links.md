@@ -82,7 +82,8 @@ lists that came after its end, its condition having held in it, is its
 alert too late, labels or not; with `--linked-only`, no other firing is.
 
 Near misses are looked for by the link too. A rule the incident lists,
-its own labels not ruling out the alert's, is looked at whatever `--match`
+the labels its alerts carry (its own over its group's) not ruling out the
+alert's, is looked at whatever `--match`
 says, and a stretch of it whose labels agree with the alert's nearly
 caught it, by a shorter `for` or a nearer number, as a firing of it would
 catch it; with `--linked-only`, an incident that lists alerts has only the
@@ -121,7 +122,23 @@ page says whether it is in effect, beside the settings that are, and
 `GET /api/v1/settings` as `linked_only`. The ledger keeps
 what its stones were last all given by (`x.linked-only` in `meta`); a
 start with it given or taken away judges every firing again, once, as a
-changed lead does. The chart's `linkedOnly` gives it, to the CronJob and
+changed lead does. Until that is done, the Settings page says so beside
+it, and `GET /api/v1/settings` as `linked_only_judging`: the pages show
+what was judged before. Replicas started with different values, as in a
+rolling update that changes it, judge every firing again once for each
+change of value, not at each change of leader: a replica leading judges
+everything again only while the ledger's value is still the one it found
+at start (or last agreed with); one another replica wrote since is newer,
+and a replica it has passed judges what it runs with its own flag and
+nothing again. Each says in its log, at start and as it leads, when its
+flag isn't the ledger's, with both. Two things follow, of replicas that
+differ. A replica that follows says "being judged again" by its own flag
+and what it found, whichever the leader runs with: true once the
+replicas have the same, not before. And a change undone by taking away
+the one replica that made it (a rollout turned back) leaves the stones
+as that replica gave them: the others had found the ledger before it,
+and take its value for a newer change. Starting them again, with the
+same flag, judges every firing again once. The chart's `linkedOnly` gives it, to the CronJob and
 to serve alike. The incident's page marks a linked catch "(linked in
 the incident tool)", and the rule's page the incidents it caught so. The
 UI's form has no alerts: an incident written in the UI and given alerts

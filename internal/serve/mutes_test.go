@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -440,7 +442,7 @@ func TestMutesCounted(t *testing.T) {
 	}
 	// As the webhook and a report's numbers have it.
 	about := map[string]any{}
-	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+	if err := s.aboutMore(ctx, about, rep, from, to, nil, x); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = json.Marshal(about["notifications"])
@@ -479,6 +481,126 @@ func TestMutesCounted(t *testing.T) {
 		x.PagedNoOne.Either = 0
 		x.text(lang)
 		x.PagedNoOne.Either = 1
+	}
+	missing.Lock()
+	for k := range missing.m {
+		t.Errorf("no translation: %q", k)
+	}
+	missing.Unlock()
+}
+
+// A digest reads what the notifications came to, and the firings that
+// paged no one, once: for its text and what the webhook is told alike,
+// everyone's and each team's.
+func TestDigestReadsSentOnce(t *testing.T) {
+	ctx := context.Background()
+	s, silenced, _, _ := mutedServer(t)
+	hook := filepath.Join(t.TempDir(), "hook")
+	if err := os.WriteFile(hook, []byte("http://127.0.0.1:1/x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.NotifyWebhook = hook
+	s.l.TellTo(s.dests())
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "search", Rules: "^Errors$"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	o, err := s.options(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := s.l.Midnight(ledger.Week(s.l.Day(silenced.Start)))
+	to := from.AddDate(0, 0, 7)
+	was := sentRead.Load()
+	if err := s.tellDigest(ctx, digestIn{On: true, Dests: []string{"webhook"}}, "w", true, from, to, o); err != nil {
+		t.Fatal(err)
+	}
+	if n := sentRead.Load() - was; n != 2 {
+		t.Errorf("worked out what the notifications came to %d times for two digests, everyone's and search's", n)
+	}
+	due, err := s.l.Due(ctx, "webhook", time.Now(), 10)
+	if err != nil || len(due) != 2 {
+		t.Fatalf("%d told: %v", len(due), err)
+	}
+	for _, d := range due {
+		if !strings.Contains(string(d.Body), `"paged_no_one":{"silence":1,`) || !strings.Contains(string(d.Body), "Firings that paged no one: 1 muted by a silence") {
+			t.Errorf("told without what paged no one: %s", d.Body)
+		}
+	}
+}
+
+// A report whose span starts before the twelve weeks the notifications are
+// read for says from when its notifications, and the firings that paged
+// no one, are counted, in its zone, and its numbers as counted_from; one
+// that ends before them says none of its are counted; one within them
+// says nothing of it. In each language.
+func TestNotificationsCountedFrom(t *testing.T) {
+	ctx := context.Background()
+	s, silenced, _, _ := mutedServer(t)
+	o, err := s.options(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := s.shownFrom()
+	weekly := ledger.Scheduled{Name: "weekly", Schedule: "weekly mon@09:00", Sections: []string{"notifications"}}
+	sch, err := weekly.When()
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := func(from, to time.Time, loc *time.Location) *built {
+		t.Helper()
+		b, err := s.buildReport(ctx, weekly, nil, sch, loc, to, from, to, o, to, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	end := s.l.Midnight(ledger.Week(s.l.Day(silenced.Start))).AddDate(0, 0, 7)
+	if !read.Before(silenced.Start) {
+		t.Fatalf("read from %s, after the firings", read)
+	}
+	seoul, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := report(read.AddDate(0, 0, -28), end, seoul)
+	since := "Counted from " + read.In(seoul).Format("2006-01-02 15:04") + " on: notifications are read for the last twelve weeks."
+	if !strings.Contains(long.Text, "Firings that paged no one: 1 muted by a silence") || !strings.Contains(long.Text, since) {
+		t.Errorf("a span from before the twelve weeks: %s", long.Text)
+	}
+	b, _ := json.Marshal(long.Numbers["notifications"])
+	if !strings.Contains(string(b), `"counted_from":"`+read.Format(time.RFC3339)+`"`) {
+		t.Errorf("its numbers: %s", b)
+	}
+	within := report(read, end, time.UTC)
+	b, _ = json.Marshal(within.Numbers["notifications"])
+	if strings.Contains(within.Text, "Counted from") || strings.Contains(string(b), "counted_from") || !strings.Contains(within.Text, "Firings that paged no one") {
+		t.Errorf("a span within the twelve weeks: %s %s", within.Text, b)
+	}
+
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	x, err := s.sent(ctx, &verdict.Report{}, read.AddDate(0, 0, -28), end)
+	if err != nil || x == nil || x.CountedFrom.IsZero() {
+		t.Fatalf("%+v %v", x, err)
+	}
+	// Twenty weeks on, the twelve weeks read start after every notification
+	// kept: a span that ends as they start has none counted, though some
+	// were taken before it ended.
+	s.now = func() time.Time { return now.AddDate(0, 0, 140) }
+	later := s.shownFrom()
+	before := report(later.AddDate(0, 0, -28), later, time.UTC)
+	if want := "Notifications are read for the last twelve weeks, from " + later.UTC().Format("2006-01-02 15:04") + " on: none of the span's are counted."; !strings.Contains(before.Text, want) ||
+		strings.Contains(before.Text, "No notifications were taken") {
+		t.Errorf("a span before the twelve weeks: %s", before.Text)
+	}
+	y, err := s.sent(ctx, &verdict.Report{}, later.AddDate(0, 0, -28), later)
+	if err != nil || y == nil || !y.before {
+		t.Fatalf("%+v %v", y, err)
+	}
+	for _, lang := range []string{"ko", "ja", "es"} {
+		x.text(lang)
+		y.text(lang)
 	}
 	missing.Lock()
 	for k := range missing.m {

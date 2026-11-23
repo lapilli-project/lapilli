@@ -74,6 +74,52 @@ func linkedText(on bool) string {
 	return ""
 }
 
+// linkedSaid is linkedText's as the log says it.
+func linkedSaid(v string) string {
+	if v == "1" {
+		return "on"
+	}
+	return "off"
+}
+
+// linkedAgain reads what the ledger's stones were last all given by
+// (linkedMeta), and says whether this replica, leading, judges every
+// firing again with its own --linked-only: when the ledger's is the other
+// value and still the one this replica knew, as it found it at start or
+// as it last agreed with its flag. One another replica wrote since is a
+// change newer than this replica's flag, as in a rolling update: leading,
+// this replica judges what it runs with its own, and leaves the rest as
+// judged, so that replicas that differ judge everything again once for
+// each change of value, not at each change of leader.
+func (s *Server) linkedAgain(ctx context.Context, own string) (was string, again bool, err error) {
+	if was, err = s.l.Meta(ctx, linkedMeta); err != nil {
+		return "", false, err
+	}
+	s.linkedKnown.Lock()
+	defer s.linkedKnown.Unlock()
+	if !s.linkedKnown.read || was == own {
+		s.linkedKnown.read, s.linkedKnown.v = true, was
+	}
+	return was, was != own && was == s.linkedKnown.v, nil
+}
+
+// logLinked says in the log, at start and on becoming the leader, when
+// this replica's --linked-only isn't what the ledger was last judged by:
+// both values, and whether it judges every firing again (linkedAgain).
+func (s *Server) logLinked(ctx context.Context) {
+	own := linkedText(s.cfg.Options.LinkedOnly)
+	was, again, err := s.linkedAgain(ctx, own)
+	switch {
+	case err != nil || was == own:
+	case again:
+		s.log.Info("--linked-only isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
+	default:
+		s.log.Warn("--linked-only isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same, and start this one again once they have it, which judges every firing again if the ledger's is still the other",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
+	}
+}
+
 // jobs does each job in turn, each only while this replica still leads
 // (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
@@ -105,12 +151,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// --linked-only other than the ledger was last judged with, as after
 	// a start with it given or taken away: every firing judged again
 	// with it, and the ledger told so once that is done
-	// (docs/design/links.md).
+	// (docs/design/links.md); not to undo another replica's newer change
+	// (linkedAgain).
 	linked := linkedText(o.LinkedOnly)
 	relinked := false
-	if was, err := s.l.Meta(ctx, linkedMeta); err != nil {
+	if _, again, err := s.linkedAgain(ctx, linked); err != nil {
 		s.fail("settings", err)
-	} else if was != linked {
+	} else if again {
 		rejudge, relinked = true, true
 	}
 	judged := func() {
@@ -119,7 +166,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		}
 		if err := s.l.SetMeta(ctx, linkedMeta, linked); err != nil {
 			s.fail("judging again", err)
+			return
 		}
+		s.linkedKnown.Lock()
+		s.linkedKnown.read, s.linkedKnown.v = true, linked
+		s.linkedKnown.Unlock()
 	}
 	// Once, on the upgrade to this release: the windows of signals not in
 	// effect kept from before, which rules with an entry may have caught,
@@ -2234,6 +2285,16 @@ const digestMax = 256 << 10
 // digestText is the week's report, and how things stand: for everyone, or
 // for one team.
 func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []string, from, to time.Time, team *ledger.Team) (string, error) {
+	sent, err := s.sent(ctx, rep, from, to)
+	if err != nil {
+		return "", err
+	}
+	return s.digestTextSent(ctx, rep, spare, from, to, team, sent)
+}
+
+// digestTextSent is digestText, with what the notifications came to as
+// sent worked it out: a digest's text and what is told of it read it once.
+func (s *Server) digestTextSent(ctx context.Context, rep *verdict.Report, spare []string, from, to time.Time, team *ledger.Team, sent *sentLine) (string, error) {
 	shown := *rep
 	shown.Rules = slices.Clone(rep.Rules)
 	for i := range shown.Rules {
@@ -2278,10 +2339,6 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 				}
 			}
 		}
-	}
-	sent, err := s.sent(ctx, rep, from, to)
-	if err != nil {
-		return "", err
 	}
 	// Re-fires and firings during deploys (docs/design/noc.md).
 	rf, err := s.refiresOf(ctx, rep, from, to)
@@ -2561,13 +2618,19 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 	}
 	var told []ledger.Told
 	if webhook || len(named) > 0 {
-		text, err := s.digestText(ctx, rep, spare, from, to, nil)
+		// What the notifications came to, and the firings that paged no
+		// one: read once, for the text and what is told of it.
+		sent, err := s.sent(ctx, rep, from, to)
+		if err != nil {
+			return err
+		}
+		text, err := s.digestTextSent(ctx, rep, spare, from, to, nil, sent)
 		if err != nil {
 			return err
 		}
 		if webhook {
 			about := digestAbout(rep, text, "", spare)
-			if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+			if err := s.aboutMore(ctx, about, rep, from, to, nil, sent); err != nil {
 				return err
 			}
 			if err := s.aboutGoals(ctx, about, from, nil); err != nil {
@@ -2598,12 +2661,16 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 			continue // nothing happened to it, nor fired on what it owns
 		}
 		mine := slices.DeleteFunc(slices.Clone(spare), func(name string) bool { return own.rule[name] != t.ID })
-		text, err := s.digestText(ctx, part, mine, from, to, &t)
+		sent, err := s.sent(ctx, part, from, to)
+		if err != nil {
+			return err
+		}
+		text, err := s.digestTextSent(ctx, part, mine, from, to, &t, sent)
 		if err != nil {
 			return err
 		}
 		about := digestAbout(part, text, t.Name, mine)
-		if err := s.aboutMore(ctx, about, part, from, to, &t); err != nil {
+		if err := s.aboutMore(ctx, about, part, from, to, &t, sent); err != nil {
 			return err
 		}
 		if err := s.aboutGoals(ctx, about, from, &t); err != nil {

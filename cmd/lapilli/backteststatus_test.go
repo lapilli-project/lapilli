@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -39,9 +40,11 @@ func headOf(t *testing.T, kind, sha string) (env []string, link string) {
 
 // STATUS sets a commit status on the pull request's head commit, as each
 // host's API takes one, after the comment: failure when FAIL_MISSED fails
-// the job, success when it passes, the description saying why. The
-// commit is the one the CI says, the backtest's or a parent of it; with
-// none, or another, no status is set, and the job goes on as it would.
+// the job, success when it passes, the description saying why; and before
+// the backtest, pending in the host's words, so that a job that dies never
+// leaves a success. The commit is the one the CI says, the backtest's or a
+// parent of it; with none, or another, no status is set, and the job goes
+// on as it would.
 func TestBacktestRecipeStatus(t *testing.T) {
 	needRecipeTools(t)
 	prom := promStandIn(t)
@@ -76,9 +79,14 @@ func TestBacktestRecipeStatus(t *testing.T) {
 			want := map[string][2]string{"github": {"success", "failure"}, "gitea": {"success", "failure"}, "gitlab": {"success", "failed"},
 				"bitbucket": {"SUCCESSFUL", "FAILED"}, "azure": {"succeeded", "failed"}}[h.kind]
 			st, n := rr.host.lastStatus()
-			if n != 1 || st.SHA != sha || st.State != want[1] || st.Context != "lapilli/backtest" || st.URL != link ||
+			if n != 2 || st.SHA != sha || st.State != want[1] || st.Context != "lapilli/backtest" || st.URL != link ||
 				st.Text != "the change leaves 1 incidents a rule caught before it caught by no rule (FAIL_MISSED=true)" {
 				t.Errorf("the status: %d, %+v, want on %s, linking to %s", n, st, sha, link)
+			}
+			// Pending first, while it ran: the same commit, name and link.
+			if p := rr.host.statuses[0]; p.State != pendingState[h.kind] || p.SHA != sha || p.Context != "lapilli/backtest" || p.URL != link ||
+				p.Text != "the backtest is running" {
+				t.Errorf("the status while it ran: %+v", p)
 			}
 			switch h.kind {
 			case "bitbucket":
@@ -99,7 +107,8 @@ func TestBacktestRecipeStatus(t *testing.T) {
 			if out, err := rr.run(settings, args...); err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if st, n := rr.host.lastStatus(); n != 2 || st.State != want[0] || st.Text != "backtested: 1 changed, 0 added, 0 taken away" {
+			if st, n := rr.host.lastStatus(); n != 4 || st.State != want[0] || st.Text != "backtested: 1 changed, 0 added, 0 taken away" ||
+				rr.host.statuses[2].State != pendingState[h.kind] {
 				t.Errorf("passed: %d, %+v", n, st)
 			}
 			// Another job's (KEY), a status of its own.
@@ -119,6 +128,33 @@ func TestBacktestRecipeStatus(t *testing.T) {
 				t.Errorf("refused, FAIL_ON_ERROR=true: passed\n%s", out)
 			}
 			rr.host.set(func(h *commentHost) { h.failStatus = false })
+			// A job ended by a signal while it runs (a CI's cancel): the
+			// status set pending is set failure, saying so, and the job fails.
+			rr.started = func(p *os.Process) {
+				rr.host.set(func(h *commentHost) { h.pending = func() { p.Signal(syscall.SIGTERM) } })
+			}
+			out, err = rr.run(settings, args...)
+			rr.started = nil
+			rr.host.set(func(h *commentHost) { h.pending = nil })
+			if st, n := rr.host.lastStatus(); err == nil || st.State != want[1] || st.Text != "the job ended before the backtest did: its log says why" ||
+				st.SHA != sha || rr.host.statuses[n-2].State != pendingState[h.kind] {
+				t.Errorf("ended by a signal: %v, %+v\n%s", err, st, out)
+			}
+			// The host refuses the pending one, and the job is ended later
+			// (at its next request of the host): set failure all the same,
+			// not left as an earlier run's on the commit may read.
+			_, was := rr.host.lastStatus()
+			rr.host.set(func(h *commentHost) { h.failPending = true })
+			rr.started = func(p *os.Process) {
+				rr.host.set(func(h *commentHost) { h.later = func() { p.Signal(syscall.SIGTERM) } })
+			}
+			out, err = rr.run(settings, args...)
+			rr.started = nil
+			rr.host.set(func(h *commentHost) { h.failPending, h.refusedPending, h.later = false, false, nil })
+			if st, n := rr.host.lastStatus(); err == nil || n != was+1 || st.State != want[1] || st.SHA != sha ||
+				st.Text != "the job ended before the backtest did: its log says why" || !strings.Contains(out, "couldn't be set pending on "+sha) {
+				t.Errorf("pending refused, then ended by a signal: %v, %d statuses more, %+v\n%s", err, n-was, st, out)
+			}
 			// A commit the backtest didn't read: none set on it.
 			_, before := rr.host.lastStatus()
 			other := strings.Repeat("ab", 20)
@@ -156,7 +192,7 @@ func TestBacktestRecipeStatusCommit(t *testing.T) {
 	if out, err := rr.run(append(settings, "TARGET=main"), "--prometheus", prom.URL); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if st, n := rr.host.lastStatus(); n != 1 || st.SHA != sha || st.State != "success" {
+	if st, n := rr.host.lastStatus(); n != 2 || st.SHA != sha || st.State != "success" {
 		t.Errorf("HEAD: %d, %+v", n, st)
 	}
 	// Nothing changed: no comment, and the status says why.
@@ -167,7 +203,7 @@ func TestBacktestRecipeStatusCommit(t *testing.T) {
 		len(rr.host.comments) != 0 {
 		t.Errorf("nothing changed: %v, %d comments\n%s", err, len(rr.host.comments), out)
 	}
-	if st, n := rr.host.lastStatus(); n != 2 || st.Text != "nothing that decides when a rule fires changed" || st.State != "success" {
+	if st, n := rr.host.lastStatus(); n != 4 || st.Text != "nothing that decides when a rule fires changed" || st.State != "success" {
 		t.Errorf("nothing changed: %d, %+v", n, st)
 	}
 
@@ -283,7 +319,7 @@ func TestBacktestActionStatus(t *testing.T) {
 	ci, _ := headOf(t, "github", sha)
 	out, err := runAction(t, rr, map[string]string{"version": "v0.32.0", "paths": "alerts", "incidents": "incidents.yaml", "prometheus-url": prom.URL,
 		"fail-missed": "true", "status": "true"}, ci...)
-	if st, n := rr.host.lastStatus(); err == nil || n != 1 || st.SHA != sha || st.State != "failure" || !strings.Contains(st.Text, "FAIL_MISSED=true") {
+	if st, n := rr.host.lastStatus(); err == nil || n != 2 || st.SHA != sha || st.State != "failure" || !strings.Contains(st.Text, "FAIL_MISSED=true") {
 		t.Errorf("%v: %d, %+v\n%s", err, n, st, out)
 	}
 }

@@ -2,6 +2,107 @@
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-11-23
+
+`lapilli demo`: a first report on a sample built in, with nothing to
+connect. A pending commit status while a backtest job runs, so that a job
+that dies never leaves an earlier run's success. And nine fixes left over
+from 0.67 and 0.68, a flag that is on or off given `=false` among them.
+No schema change: the ledger stays at 029.
+
+Before upgrading:
+- **A flag that is on or off takes `=true` or `=false`, and nothing
+  else**: `=1`, `=t` or `=TRUE`, which `--check-replay`,
+  `--check-content`, `--grafana-history`, `--progress`, serve's own and
+  preflight's took, are refused. And `=false` turns one off where it
+  turned it on (below): a command line that gave `--json=false` or the
+  like now gets what it says.
+
+### Added
+
+- **`lapilli demo`: a first report, with nothing to connect.** It runs
+  `lapilli verdict`'s own code over a sample built in: seven made-up
+  rules of a small shop, a week of their history made up in the process,
+  and three incidents. Its report shows a noisy rule and the longer `for`
+  that would quiet it, the rules that caught an incident, one nothing
+  caught and the rule that nearly did, and the firings that woke people;
+  then how to run the same on your own rules. The same report every run:
+  the sample's week, from Monday 9 November 2026, is laid in `--tz`'s
+  zone, or the machine's. `--json` gives it as JSON. It reads no
+  Prometheus and sends nothing anywhere (docs/design/demo.md).
+- **A pending commit status while a backtest job runs** (`STATUS`, the
+  action's `status`): once the recipe has found the commits, it sets the
+  status pending, in each host's words (GitHub's, Gitea's and Azure
+  DevOps' `pending`, GitLab's `running`, Bitbucket's `INPROGRESS`), then
+  success or failure as before when the job ends. A job that dies never
+  leaves a status that reads as success, an earlier run's on the same
+  commit: ended by a signal (a CI's cancel) or an error of its own, it
+  sets failure ("the job ended before the backtest did"); killed
+  outright, it leaves pending, which a branch rule doesn't take as
+  passing. A pending status the host refuses is said in the job's log,
+  and the run goes on; a job that dies after sets failure all the same. Each host's status is tested against its
+  reference's states with a server standing in, and Gitea's pending then
+  failure against a real Gitea in CI (`test/e2e/backtest.sh`). No new
+  setting; a job sets two statuses where it set one.
+
+### Fixed
+
+- **A flag that is on or off was on whatever it was given** (affected:
+  0.1.0 to 0.68.1). `--json=false` was `--json`, in `lapilli verdict` and
+  `lapilli impact suggest`, and so were `--linked-only=false`,
+  `--redact=false`, `--alerts=false`, `--csv=false`, `--markdown=false`,
+  `--metrics=false`, `--changed-only=false`, `--loaded-rules=false`,
+  `--loki-loaded-rules=false`, `--fail-unreplayed=false`,
+  `--fail-expectations=false`, `--expect-required=false` and
+  `--fail-missed=false`, in serve too where it takes them. Each is off as
+  `=false` says now, and `--redact-key` with `--redact=false` is refused.
+- **Near misses were looked for by a rule's own labels, not its group's**
+  (affected: 0.32.0 to 0.68.1). A rule whose group gave another service's
+  label was asked about an incident it could never be about, and one whose
+  group gave a label a signal's entry requires (`require:`) was passed
+  over. A rule is looked at by the labels its firings carry now, its own
+  over its group's, in `lapilli verdict` and `lapilli serve` alike.
+- **vmalert's groups were replayed when vmalert started them, not when it
+  asks their rules** (affected: 0.26.0 to 0.68.1). `--loaded-rules` placed
+  a group in its interval by its `lastEvaluation`, as Prometheus's; vmalert
+  starts a group at a random moment, but asks its rules, and stamps what
+  fires, at a multiple of the interval, or `eval_offset` past one: a
+  condition that held for less than an interval could fire in the replay
+  where it didn't in vmalert, or the other way round. A rules API answer
+  whose groups say their `concurrency`, as vmalert's alone do, through
+  VictoriaMetrics' proxy too, is placed so now.
+- **The Settings page said a new `--linked-only` before every firing was
+  judged with it** (0.68.0 to 0.68.1). Started with it given or taken
+  away, serve judges every firing again, once; until that is done, the
+  pages show what was judged before, and the page now says so beside it,
+  in every language, as `GET /api/v1/settings` does
+  (`linked_only_judging`).
+- **Replicas with different `--linked-only` judged every firing again at
+  each change of leader** (0.68.0 to 0.68.1), each undoing the other, as
+  in a rolling update that changes it. A leader judges everything again
+  now only while the ledger's value is still the one it found at start:
+  once for each change of value. A replica a newer change has passed
+  judges what it runs with its own flag, as before, and nothing again;
+  each says in its log, at start and as it leads, when its flag isn't
+  what the ledger was last judged by, with both values.
+- **A report from before the twelve weeks notifications are read for
+  didn't say its notifications were counted from then** (affected: 0.22.0
+  to 0.68.1; the firings that paged no one from 0.68.0). Its
+  `notifications` section counted the notifications sent, and the firings
+  that paged no one, from the twelve weeks' first Monday alone, and said
+  them as the span's, or, of a span that ended before them, that none were
+  taken. It says from when they count now, in the report's zone, and its
+  numbers carry it as `counted_from`.
+- **`jira.sh`'s issue search stopped at a 429** (affected: 0.15.0 to
+  0.68.1), where its requests for Jira Service Management's alerts wait
+  one out. It waits as they do now: as its `Retry-After` says, or else 5
+  seconds and twice as long each time, five waits a request and ten
+  minutes in all a run, theirs and its together. Any other answer that
+  isn't a 2xx stops it, as before, now saying its status.
+- The weekly digest read the notifications sent, and the firings that
+  paged no one, twice (0.68.0 to 0.68.1): for its text and again for what
+  the webhook is told. Once now, everyone's and each team's.
+
 ## [0.68.1] - 2026-11-21
 
 A security release, after a review of 0.67.0 from an attacker's point of

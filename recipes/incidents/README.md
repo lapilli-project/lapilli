@@ -166,8 +166,8 @@ and has no alerts read; an alert the operations API no longer has (404)
 is left out. Each is counted on stderr. Anything else it answers, and a
 page of alerts it gave before, stops the script with nothing written; a
 429 is waited out as its `Retry-After`
-says, two minutes at most, five times a request and ten minutes a run.
-`ALERTS=no` reads none.
+says, two minutes at most, five times a request and ten minutes a run,
+Jira's search's as these APIs'. `ALERTS=no` reads none.
 
 ### Compass, and Opsgenie's users
 

@@ -179,7 +179,11 @@ VictoriaMetrics 1.156.0, with vmalert 1.156.0 evaluating the same rules
 there: the same firings as against the Prometheus beside them, and every
 firing alike with `ALERTS`. For `--loaded-rules` on vmalert, give
 `--prometheus` the VictoriaMetrics that answers `/api/v1/rules` from it
-(`-vmalert.proxyURL`). `--bearer-token-file` adds a token. For a cloud's,
+(`-vmalert.proxyURL`). Its groups are replayed at the times vmalert asks
+their rules at, a multiple of their interval or `eval_offset` past one,
+not when it last started them; a group whose file sets `eval_alignment:
+false`, which its API doesn't say, is replayed as if aligned.
+`--bearer-token-file` adds a token. For a cloud's,
 `--auth` sends the credentials it wants, taken from those the machine or
 pod already has (environment, workload identity, instance or managed
 identity, the cloud's CLI):

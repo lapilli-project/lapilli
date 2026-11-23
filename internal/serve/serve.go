@@ -389,6 +389,15 @@ type Server struct {
 	log *slog.Logger
 	now func() time.Time
 
+	// linkedKnown is what this replica knew the ledger was last judged by,
+	// by --linked-only: as found at start, or as it last agreed with its
+	// flag (linkedAgain).
+	linkedKnown struct {
+		sync.Mutex
+		read bool
+		v    string
+	}
+
 	// open says that, with no roles, everyone is an admin: it listens on
 	// loopback alone, or EveryoneAdmin says so. Run says where it is bound.
 	open atomic.Bool
@@ -959,6 +968,8 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 	s.logDigest(ctx)
+	// What the ledger was last judged by, by --linked-only, as found now.
+	s.logLinked(ctx)
 	// The on-call turns kept, before anything is counted by them.
 	if err := s.onCallKept(ctx); err != nil {
 		return err

@@ -139,12 +139,16 @@ edit_comment() {
   case $code in 2??) ;; *) say "Bitbucket didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
 }
 
-# A build status: SUCCESSFUL or FAILED, as lib.sh says, keyed by the
-# status's name (lapilli-backtest, lapilli-backtest-KEY), on the pull
-# request's source branch.
+# A build status: INPROGRESS, SUCCESSFUL or FAILED, as lib.sh says pending,
+# success or failure, keyed by the status's name (lapilli-backtest,
+# lapilli-backtest-KEY), on the pull request's source branch: a key's
+# status is written over by the next, as Bitbucket's reference says.
 post_status() {
-  st=SUCCESSFUL
-  [ "$1" = success ] || st=FAILED
+  case $1 in
+    success) st=SUCCESSFUL ;;
+    pending) st=INPROGRESS ;;
+    *) st=FAILED ;;
+  esac
   code=$(host GET "$api/repositories/$BITBUCKET_REPO/pullrequests/$PR")
   case $code in 2??) ;; *) say "Bitbucket didn't give the pull request ($code): $(shown "$out")"; return 1 ;; esac
   ref=$(jq -r '.source.branch.name // empty | strings' "$out" 2>/dev/null) || ref=

@@ -21,6 +21,8 @@ you know whether it earns its page; an incident with no stone is one your
 alerts missed.
 
 Usage:
+  lapilli demo                       see it on sample data, with nothing
+                                     to connect
   lapilli verdict --rules FILE --prometheus URL --incidents FILE
                                      replay rules against history
   lapilli verdict --alerts --prometheus URL --incidents FILE
@@ -39,7 +41,8 @@ Usage:
   lapilli version
 
 Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h",
-"lapilli ledger -h" or "lapilli impact -h" for the options.
+"lapilli ledger -h", "lapilli impact -h" or "lapilli demo -h" for the
+options.
 `
 
 func main() {
@@ -62,6 +65,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLedger(rest, stdout, stderr)
 	case "impact":
 		return runImpact(rest, stdout, stderr)
+	case "demo":
+		return runDemo(rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "lapilli", buildVersion())
 		return 0
@@ -77,6 +82,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stdout, ledgerUsage)
 		case len(rest) > 0 && rest[0] == "impact":
 			fmt.Fprint(stdout, impactUsage)
+		case len(rest) > 0 && rest[0] == "demo":
+			fmt.Fprint(stdout, demoUsage)
 		default:
 			fmt.Fprint(stdout, usage)
 		}

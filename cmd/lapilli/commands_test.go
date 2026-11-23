@@ -40,6 +40,9 @@ Each command's options, as ` + "`lapilli COMMAND -h`" + ` prints them. The pages
 under each say what the options are for; this page is all of them in one
 place, to look one up. These pages follow the main branch: ` + "`lapilli version`" + `
 says which version you have, and its own ` + "`-h`" + ` is the one to go by.
+
+A flag that is on or off, such as ` + "`--json`" + `, is on by itself, and takes
+` + "`=true`" + ` or ` + "`=false`" + ` too; any other value is refused.
 `)
 	for _, c := range []struct{ name, about, help string }{
 		{"lapilli", "", usage},
@@ -48,6 +51,7 @@ says which version you have, and its own ` + "`-h`" + ` is the one to go by.
 		{"lapilli preflight", "[Before it is deployed](serve.md#before-it-is-deployed)", preflightUsage},
 		{"lapilli ledger", "[The ledger in Postgres](serve.md#the-ledger-in-postgres)", ledgerUsage},
 		{"lapilli impact", "[Incidents nobody wrote down](impact.md#which-of-them-your-history-has)", impactUsage},
+		{"lapilli demo", "[Getting started](getting-started.md#see-it-first-on-sample-data)", demoUsage},
 	} {
 		b.WriteString("\n## `" + c.name + "`\n\n")
 		if c.about != "" {

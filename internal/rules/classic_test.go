@@ -353,3 +353,54 @@ func TestPhaseFarAhead(t *testing.T) {
 		}
 	}
 }
+
+// vmalert, told apart by the concurrency only its groups say
+// (app/vmalert/rule/web.go, v1.156.0), starts a group a while into its
+// interval but asks each rule, and stamps its alerts, at its own time:
+// eval_offset past the interval, or else its time less eval_delay,
+// truncated to the interval (eval_alignment, its default), which Go's
+// Truncate counts from the zero time, year 1. Its lastEvaluation is when
+// it started, which doesn't say where. An answer as vmalert gives one,
+// through VictoriaMetrics' proxy too.
+func TestPhaseOfVmalert(t *testing.T) {
+	answer := `{"status":"success","data":{"groups":[
+	  {"name":"shop","rules":[{"state":"inactive","name":"ErrorsHigh","query":"e2e_errors > 3","duration":0,"keep_firing_for":0,
+	    "labels":{"severity":"page"},"lastError":"","evaluationTime":0.001,"lastEvaluation":"2026-11-20T10:04:23.417Z","health":"ok",
+	    "type":"alerting","datasourceType":"prometheus","lastSamples":0,"id":"1","group_id":"2","group_name":"shop","file":"/etc/vmalert/alerts.yaml","debug":false,"max_updates_entries":0}],
+	   "interval":60,"lastEvaluation":"2026-11-20T10:04:23.417Z","type":"prometheus","id":"2","file":"/etc/vmalert/alerts.yaml","concurrency":1,"states":{"ok":1}},
+	  {"name":"offset","rules":[{"name":"Late","query":"up == 0","duration":60,"type":"alerting"}],
+	   "interval":60,"lastEvaluation":"2026-11-20T10:04:30.002Z","type":"prometheus","id":"3","file":"a.yaml","concurrency":1,"eval_offset":30,"states":{}},
+	  {"name":"before","rules":[{"name":"Before","query":"up == 0","type":"alerting"}],
+	   "interval":60,"lastEvaluation":"2026-11-20T10:04:40.002Z","type":"prometheus","id":"4","file":"a.yaml","concurrency":1,"eval_offset":-20,"states":{}},
+	  {"name":"seven","rules":[{"name":"Seven","query":"up == 0","type":"alerting"}],
+	   "interval":420,"lastEvaluation":"2026-11-20T10:04:23.417Z","type":"prometheus","id":"5","file":"a.yaml","concurrency":2,"eval_delay":60,"states":{}},
+	  {"name":"new","rules":[{"name":"New","query":"up == 0","type":"alerting"}],
+	   "interval":60,"lastEvaluation":"0001-01-01T00:00:00Z","type":"prometheus","id":"6","file":"a.yaml","concurrency":1,"states":{}}]}}`
+	rs, err := FromAPI([]byte(answer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seven minutes don't divide the days since the year 1: Truncate's
+	// multiples of them fall 6m past the Unix epoch's.
+	want := map[string]time.Duration{"ErrorsHigh": 0, "Late": 30 * time.Second, "Before": 40 * time.Second, "Seven": 6 * time.Minute, "New": 0}
+	if len(rs) != len(want) {
+		t.Fatalf("%d rules: %+v", len(rs), rs)
+	}
+	for _, r := range rs {
+		if r.Phase != want[r.Name] {
+			t.Errorf("%s: phase %v, want %v", r.Name, r.Phase, want[r.Name])
+		}
+	}
+	// As vmalert's Truncate has it.
+	at := time.Date(2026, 11, 20, 10, 4, 23, 0, time.UTC)
+	if got := at.Truncate(7 * time.Minute); got.Unix()%420 != 360 {
+		t.Errorf("Truncate(7m) of %s is %s, %ds past the epoch's multiples", at, got, got.Unix()%420)
+	}
+	// A Prometheus answer, without concurrency, is placed by its last
+	// evaluation, as before.
+	rs, err = FromAPI([]byte(`{"status":"success","data":{"groups":[{"name":"g","file":"a.yaml","interval":60,"limit":0,"evaluationTime":0.001,
+	  "lastEvaluation":"2026-11-20T10:04:23.417Z","rules":[{"type":"alerting","name":"A","query":"up == 0"}]}]}}`))
+	if err != nil || len(rs) != 1 || rs[0].Phase != 23*time.Second {
+		t.Errorf("Prometheus's: %+v %v", rs, err)
+	}
+}

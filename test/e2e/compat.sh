@@ -280,6 +280,17 @@ for u in "$au" "$vu"; do
   got=$(rulesOf "$u" || true)
   if [ "$got" = "$want_rules" ]; then ok "$u/api/v1/rules: $got"; else failed "$u/api/v1/rules: $got, want $want_rules"; fi
 done
+# lapilli tells vmalert's answer by the concurrency only its groups say,
+# and places its groups on their interval's grid, not at lastEvaluation
+# (rules.FromAPI): each of vmalert's groups says it, through the proxy
+# too, and none of Prometheus's does.
+concurrency() { curl -sf "$1/api/v1/rules" | jq -c '[.data.groups[] | has("concurrency")] | unique'; }
+for u in "$au" "$vu"; do
+  got=$(concurrency "$u" || true)
+  if [ "$got" = '[true]' ]; then ok "$u/api/v1/rules: each group says its concurrency"; else failed "$u/api/v1/rules: concurrency $got, want each group's"; fi
+done
+got=$(concurrency "$pu" || true)
+if [ "$got" = '[false]' ]; then ok "$pu/api/v1/rules: no group says a concurrency"; else failed "$pu/api/v1/rules: concurrency $got, want none"; fi
 
 if [ "$fail" != 0 ]; then
   echo "--- what each holds over the period: samples of e2e_errors, and of ALERTS firing"

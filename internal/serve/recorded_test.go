@@ -431,7 +431,11 @@ func TestDigestTellsCopiedAndSent(t *testing.T) {
 		}
 	}
 	about := digestAbout(rep, text, "", nil)
-	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+	sent, err := s.sent(ctx, rep, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.aboutMore(ctx, about, rep, from, to, nil, sent); err != nil {
 		t.Fatal(err)
 	}
 	if cs, ok := about["sources"].([]copiedIn); !ok || len(cs) != 1 || cs[0].Firings != 2 {
@@ -568,9 +572,14 @@ func TestDigestWaitsForSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	s.now = time.Now
+	// Half an hour past when the digest last fell due, not now: in the ten
+	// minutes after it falls due (Monday 00:05 to 00:15 UTC) the week's end
+	// and --lead past it are still to come, and the last digest below
+	// isn't due yet. Never later than now.
+	now := cfg.Digest.Last(time.Now().Add(-30*time.Minute), time.UTC).Add(30 * time.Minute)
+	s.now = func() time.Time { return now }
 	ctx := context.Background()
-	due := cfg.Digest.Last(time.Now(), time.UTC)
+	due := cfg.Digest.Last(now, time.UTC)
 	week := s.l.Midnight(ledger.Week(s.l.Day(due)) - 7)
 	put := func(to time.Time) {
 		t.Helper()

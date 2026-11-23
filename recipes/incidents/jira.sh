@@ -153,6 +153,43 @@ case $max in
     exit 1
     ;;
 esac
+# get PROTO URL WHO: the answer in $got, its status in $code, curl
+# speaking PROTO alone; one over 16 MiB stops the script. A 429 is waited
+# out as its Retry-After says, two minutes at most, five times a request
+# and ten minutes in all a run, Jira's search and Jira Service
+# Management's alike; without one, 5 seconds, then twice as long each
+# time. WHO is who is said to be asking too often. Called in this shell,
+# not in $(...), which would forget the code.
+naps=0
+waited=0
+get() {
+  waits=0
+  backoff=5
+  while :; do
+    code=$(printf 'Authorization: Basic %s\n' "$auth" |
+      curl -q -sS --proto "$1" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$2") || exit 1
+    [ "$code" = 429 ] || return 0
+    waits=$((waits + 1))
+    wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
+    case $wait in
+      '' | *[!0-9]*)
+        wait=$backoff
+        backoff=$((backoff * 2))
+        ;;
+    esac
+    # Leading zeros off: $((...)) would read 08 as octal, and fail.
+    wait=${wait#"${wait%%[!0]*}"}
+    wait=${wait:-0}
+    [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
+    if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
+      printf 'jira.sh: %s still says too many requests after %s waits, %s seconds in all; stopping, writing nothing\n' "$3" "$naps" "$waited" >&2
+      exit 1
+    fi
+    sleep "$wait"
+    naps=$((naps + 1))
+    waited=$((waited + wait))
+  done
+}
 next=
 pages=0
 while :; do
@@ -163,10 +200,17 @@ while :; do
   fi
   url="$JIRA_URL/rest/api/3/search/jql?jql=$jql&maxResults=100&fields=$fields"
   [ -z "$next" ] || url="$url&nextPageToken=$(printf '%s' "$next" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$site" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
-  printf '%s' "$page" | jq -c '.issues[]' >>"$all"
+  get "$site" "$url" Jira
+  case $code in
+    2??) ;;
+    *)
+      printf 'jira.sh: Jira'"'"'s search answered %s; writing nothing\n' "$code" >&2
+      exit 1
+      ;;
+  esac
+  jq -c '.issues[]' "$got" >>"$all"
   was=$next
-  next=$(printf '%s' "$page" | jq -r 'if .isLast then empty else .nextPageToken // empty end')
+  next=$(jq -r 'if .isLast then empty else .nextPageToken // empty end' "$got")
   [ -n "$next" ] || break
   if [ "$next" = "$was" ]; then
     printf 'jira.sh: the API gave the same page again; stopping, writing nothing\n' >&2
@@ -175,8 +219,6 @@ while :; do
 done
 if [ "$alerts" = yes ]; then
   requests=0
-  naps=0
-  waited=0
   notincident=0
   gone=0
   # count: one request more for alerts, past MAX_ALERT_REQUESTS a stop.
@@ -186,39 +228,6 @@ if [ "$alerts" = yes ]; then
       printf 'jira.sh: more than %s requests for alerts; stopping, writing nothing (raise MAX_ALERT_REQUESTS, narrow JIRA_JQL, or set ALERTS=no)\n' "$maxreq" >&2
       exit 1
     fi
-  }
-  # get URL: JSM's answer in $got, its status in $code; one over 16 MiB
-  # stops the script. A 429 is waited out as its Retry-After says, two
-  # minutes at most, five times a request and ten minutes in all a run;
-  # without one, 5 seconds, then twice as long each time. Called in this
-  # shell, not in $(...), which would forget the code.
-  get() {
-    waits=0
-    backoff=5
-    while :; do
-      code=$(printf 'Authorization: Basic %s\n' "$auth" |
-        curl -q -sS --proto "$jsmproto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || exit 1
-      [ "$code" = 429 ] || return 0
-      waits=$((waits + 1))
-      wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
-      case $wait in
-        '' | *[!0-9]*)
-          wait=$backoff
-          backoff=$((backoff * 2))
-          ;;
-      esac
-      # Leading zeros off: $((...)) would read 08 as octal, and fail.
-      wait=${wait#"${wait%%[!0]*}"}
-      wait=${wait:-0}
-      [ "${#wait}" -le 3 ] && [ "$wait" -le 120 ] || wait=120
-      if [ "$waits" -gt 5 ] || [ $((waited + wait)) -gt 600 ]; then
-        printf 'jira.sh: Jira Service Management still says too many requests after %s waits, %s seconds in all; stopping, writing nothing\n' "$naps" "$waited" >&2
-        exit 1
-      fi
-      sleep "$wait"
-      naps=$((naps + 1))
-      waited=$((waited + wait))
-    done
   }
   jq -r -s -L "$here" --arg start "$start" --arg end "$end" --arg labels "$labels" --argjson ids true -f "$here/jira.jq" "$all" >"$ids"
   while IFS= read -r issue; do
@@ -239,7 +248,7 @@ if [ "$alerts" = yes ]; then
       url="$jsm/jsm/incidents/cloudId/$cloud/v1/incident/$issue/alert"
       [ -z "$key" ] || url="$url?startKey=$key"
       count
-      get "$url"
+      get "$jsmproto" "$url" "Jira Service Management"
       case $code in
         2??) ;;
         400)
@@ -281,7 +290,7 @@ if [ "$alerts" = yes ]; then
           ;;
       esac
       count
-      get "$jsm/jsm/ops/api/$cloud/v1/alerts/$alert"
+      get "$jsmproto" "$jsm/jsm/ops/api/$cloud/v1/alerts/$alert" "Jira Service Management"
       case $code in
         2??) ;;
         404)

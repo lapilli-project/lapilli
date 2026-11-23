@@ -448,7 +448,7 @@ func TestNOCDigest(t *testing.T) {
 		}
 	}
 	about := digestAbout(rep, text, "", nil)
-	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
+	if err := s.aboutMore(ctx, about, rep, from, to, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if rf, ok := about["refired"].(*refires); !ok || rf.Refired != 7 || rf.Deploys != 1 || rf.Worst == nil {

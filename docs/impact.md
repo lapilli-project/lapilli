@@ -31,7 +31,7 @@ lapilli impact suggest --prometheus http://prometheus:9090
 ```
 
 ```
-Lapilli impact suggest  2026-11-14 00:00 → 2026-11-21 00:00 UTC
+Lapilli impact suggest  2026-10-26 00:00 → 2026-11-02 00:00 UTC
 2 of the 6 stacks have their metrics in the history: SERIES, the most at once, and WINDOWS,
 those its --impact finds, 5m or longer, each an incident nobody wrote down.
 
@@ -46,6 +46,9 @@ Istio:
 
 ingress-nginx:
   --impact 'sum by (ingress) (rate(nginx_ingress_controller_requests{status=~"5.."}[5m])) / sum by (ingress) (rate(nginx_ingress_controller_requests[5m])) > 0.01'
+
+Label names depend on how each is scraped, and the threshold on what your users notice:
+check both before giving one to lapilli verdict (lapilli.dev/docs/impact).
 ```
 
 - **SERIES** counts the series of the metric each query reads every

@@ -122,7 +122,8 @@ edit_comment() {
   case $code in 2??) ;; *) say "GitHub didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
 }
 
-# A commit status: success or failure, as lib.sh says.
+# A commit status: pending, success or failure, as lib.sh says, GitHub's
+# words for them too.
 post_status() {
   jq -n --arg state "$1" --arg text "$2" --arg context "$status_context" --arg url "$status_url" \
     '{state: $state, description: $text, context: $context} + (if $url != "" then {target_url: $url} else {} end)' >"$tmp/body"

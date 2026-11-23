@@ -278,6 +278,10 @@ What was built differs from the above, or settles it, here:
 - **`notifications`** also counts, once mutes are kept, the span's
   firings that paged no one: muted by a silence, an inhibition or either,
   or with no mute told of ([mutes.md](mutes.md)), as `paged_no_one`.
+  Notifications are read for the last twelve weeks, from a Monday: of a
+  span that starts earlier, both count from then, and the section says
+  so, in the report's zone, with `counted_from` in its numbers; of one
+  that ends by then, it says none of the span's are counted.
 - **`firings`,** a section added later, last in order: the firings that
   started in the span, one by one, for a receiver that makes something of
   its own of each. Its numbers are `items`, each as `/api/v1/report`'s

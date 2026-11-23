@@ -152,6 +152,50 @@ func TestNearMissesSignals(t *testing.T) {
 	}
 }
 
+// A rule is looked at by the labels its firings carry, its group's with its
+// own: one whose group is another service's is asked nothing, as one
+// labelled so itself; and one whose group gives a label a signal's entry
+// requires is looked at, not passed over for lacking it.
+func TestNearMissesGroupLabels(t *testing.T) {
+	tue := t0.Add(24 * time.Hour)
+	asked := func(o verdict.Options, rs []rules.Rule, incs []incident.Incident) ([]verdict.NearMiss, int64) {
+		t.Helper()
+		h := &held{}
+		versions := []replay.Version{{Rules: rs}}
+		_, fs := replay.Run(context.Background(), h, versions, o.From, o.To, time.Minute, 4)
+		rep := verdict.Judge(rs, fs, incs, o)
+		h.asked.Store(0)
+		nms, done, err := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
+		if !done || err != nil {
+			t.Fatalf("not done: %v", err)
+		}
+		return nms, h.asked.Load()
+	}
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	written := []incident.Incident{{ID: "INC-1", Start: tue.Add(10 * time.Hour), End: tue.Add(10*time.Hour + 30*time.Minute),
+		Labels: incident.Labels{"service": {"checkout"}}}}
+	errs := rules.Rule{Name: "Errors", Expr: "errors", For: 5 * time.Minute}
+	search := rules.Rule{Name: "Search", Group: "search", Expr: "errors", For: 5 * time.Minute, GroupLabels: map[string]string{"service": "search"}}
+	nms, with := asked(o, []rules.Rule{errs, search}, written)
+	if len(nms) != 1 || nms[0].Rule != "Errors" {
+		t.Fatalf("near misses %+v, want Errors alone", nms)
+	}
+	if _, without := asked(o, []rules.Rule{errs}, written); with != without {
+		t.Errorf("asked %d questions, %d without Search: Search, another service's by its group, was looked at", with, without)
+	}
+
+	o.Signals = verdict.NewSignals([]verdict.Signal{{Name: "errors", Record: true}},
+		[]verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"errors"}, Require: []string{"service"}}})
+	errs.Group, errs.GroupLabels = "checkout", map[string]string{"service": "checkout"}
+	o.Signals = o.Signals.Index(map[string]map[string]string{"Errors": errs.AlertLabels()})
+	window := []incident.Incident{{ID: "impact-errors-1", Signal: "errors", Candidate: true, Start: tue.Add(10 * time.Hour),
+		End: tue.Add(10*time.Hour + 30*time.Minute), Labels: incident.Labels{"service": {"checkout"}}}}
+	if nms, _ := asked(o, []rules.Rule{errs}, window); len(nms) != 1 || nms[0].Rule != "Errors" || nms[0].NewFor != 2*time.Minute {
+		t.Errorf("near misses %+v, want Errors with a for of 2m: its group gives the service its entry requires", nms)
+	}
+}
+
 // A rule an incident lists among the alerts its tool linked to it is looked
 // at for a near miss of it whatever --match says, and what a shorter "for"
 // would cost counts its catch by the link; one the alert's labels rule out

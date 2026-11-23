@@ -32,6 +32,8 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 		p, _ := s.l.Leader()
 		s.log.Info("leading: this replica runs what is run once", "replica", s.l.ReplicaID(), "term", p.Term)
 		defer s.log.Info("no longer leading", "replica", s.l.ReplicaID())
+		// Another replica may have judged by another --linked-only since.
+		s.logLinked(ctx)
 		// The rules' history and the on-call turns, as a process does at
 		// start, by the one that leads.
 		if err := s.history(ctx); err != nil {

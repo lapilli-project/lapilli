@@ -366,7 +366,15 @@ named=$(date -u -d "$(sed -E 's/^(....)(..)(..)T(..)(..)(..)Z$/\1-\2-\3T\4:\5:\6
   date -u -j -f %Y%m%dT%H%M%SZ "$named" +%s)
 check "follow: named when it was fetched, not by its date" "$(( named >= pushed - 120 && named <= $(date -u +%s) ))" '^1$'
 check "follow: said why" "$(docker logs "$p-follow" 2>&1)" 'before the branch held it .*: it is named when it was fetched'
-until_true 120 grep -q 'rules changed: a new version, from the history' "$work/serve.log"
+until_true 120 grep -q 'rules changed: a new version, from the history' "$work/serve.log" || {
+  # What serve and the follow said, before stopping: the wait says nothing.
+  echo "FAILED: serve didn't say the history's new version within 120 s"
+  echo "--- serve"
+  tail -60 "$work/serve.log"
+  echo "--- follow"
+  docker logs "$p-follow" 2>&1 | tail -20
+  exit 1
+}
 # The next run, a minute on, replays from it if it had got past it.
 sleep 70
 check "serve: the firing 12 hours ago stands, two firings" "$(report | firings)" '^2$'

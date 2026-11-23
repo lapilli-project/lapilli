@@ -5,6 +5,9 @@ under each say what the options are for; this page is all of them in one
 place, to look one up. These pages follow the main branch: `lapilli version`
 says which version you have, and its own `-h` is the one to go by.
 
+A flag that is on or off, such as `--json`, is on by itself, and takes
+`=true` or `=false` too; any other value is refused.
+
 ## `lapilli`
 
 ```text
@@ -16,6 +19,8 @@ you know whether it earns its page; an incident with no stone is one your
 alerts missed.
 
 Usage:
+  lapilli demo                       see it on sample data, with nothing
+                                     to connect
   lapilli verdict --rules FILE --prometheus URL --incidents FILE
                                      replay rules against history
   lapilli verdict --alerts --prometheus URL --incidents FILE
@@ -34,7 +39,8 @@ Usage:
   lapilli version
 
 Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h",
-"lapilli ledger -h" or "lapilli impact -h" for the options.
+"lapilli ledger -h", "lapilli impact -h" or "lapilli demo -h" for the
+options.
 ```
 
 ## `lapilli verdict`
@@ -1293,4 +1299,31 @@ why: a query the history refused as written, that stack alone; a history
 not reached, not let in or turned away, or the timeout, every stack from
 it on, unasked. It exits 0 when every stack was asked, 1 when one wasn't,
 and 2 when the flags are wrong.
+```
+
+## `lapilli demo`
+
+What it's for: [Getting started](getting-started.md#see-it-first-on-sample-data).
+
+```text
+lapilli demo shows lapilli on sample data, with nothing to connect: the
+seven made-up alert rules of a small shop replayed over a made-up week of
+their history, and judged against its incidents, by lapilli verdict's own
+code. The history is made up in this process: it reads no Prometheus,
+and sends nothing anywhere (docs/design/demo.md).
+
+Usage:
+  lapilli demo [--json] [--tz ZONE]
+
+  --json              the whole report, every firing included, as lapilli
+                      verdict --json gives it
+  --tz ZONE           show times in this zone, an IANA name such as
+                      Asia/Seoul or UTC (default: the machine's own). The
+                      sample's week, from Monday 9 November 2026, is laid
+                      in this zone: the report is the same in every zone
+                      but for the zone it names
+
+The same on your own rules, and incidents written down:
+  lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
+    --incidents incidents.yaml --match service
 ```
