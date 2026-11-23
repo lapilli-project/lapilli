@@ -194,6 +194,14 @@ deployed ConfigMaps changed, if lapilli could mount them at all.
   given `--rules-history` without `--rules` follows the directory: its
   newest version from before now is the rules in effect, read every
   `--watch`, and each version added later is recorded from its own time.
+  The rules in effect are read no later than the last version followed: a
+  version added while a look reads the directory, after it looked for
+  versions to follow, waits for the next look. Until 0.70.0 the look took
+  it as the rules in effect at once, recorded it as changed then, and the
+  hours since its time were never replayed with it; the follow's look and
+  serve's fall on the same second when they start together, as in the
+  chart, so it happened now and then. A ledger that followed none yet is
+  marked followed from where its first look looked from.
   The hours since then were replayed with the version before: the ledger
   notes where to replay from again (no further back than `--backfill`),
   the next run replays from there, recording firings over those hours as

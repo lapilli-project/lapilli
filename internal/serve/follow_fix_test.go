@@ -112,6 +112,86 @@ func TestFollowGoodThenBad(t *testing.T) {
 	}
 }
 
+// A version added while a look reads the directory, after it looked for
+// versions to follow and before it read the rules in effect, waits for the
+// next look, which records it from its own time and has the hours since
+// replayed again. Taken as the rules in effect at once, it was recorded as
+// changed now, and the next look found nothing to follow: the hours since
+// its time were never replayed with it (test/e2e/rendered.sh, where the
+// follow's look and serve's fall on the same second).
+func TestFollowAddedDuringALook(t *testing.T) {
+	ctx := context.Background()
+	hist := t.TempDir()
+	addVersion(t, hist, now.Add(-90*time.Hour), "15m")
+	sel, _ := rules.ParseSelector("grafana_alert=1")
+	var logged bytes.Buffer
+	s, _ := server(t, func(c *Config) { c.RulesPath, c.RulesHistory, c.RulesSelect = "", hist, sel })
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	if err := s.start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	added := now.Add(-2 * time.Minute)
+	defer func(was func(string) ([]rules.Then, error)) { historyVersions = was }(historyVersions)
+	lists := 0
+	historyVersions = func(dir string) ([]rules.Then, error) {
+		hs, err := rules.History(dir)
+		// The first look's first read, for what to follow; then the
+		// version is added, before it reads the rules in effect.
+		if lists++; lists == 1 {
+			addVersion(t, hist, added, "2m")
+		}
+		return hs, err
+	}
+	raw := ""
+	for i := range 2 {
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatalf("look %d: %v", i, err)
+		}
+	}
+	if lists < 3 {
+		t.Fatalf("the directory read %d times", lists)
+	}
+	if latest, _, err := s.l.Latest(ctx); err != nil || !latest.Since.Equal(added) {
+		t.Errorf("the rules in effect from %v %v, want the version's time, %v", latest.Since, err, added)
+	}
+	if again, _, err := s.l.AgainFrom(ctx); err != nil || !again.Equal(added) {
+		t.Errorf("replayed again from %v %v, want %v", again, err, added)
+	}
+	if !strings.Contains(logged.String(), "rules changed: a new version, from the history") {
+		t.Errorf("not said as a version from the history:\n%s", logged.String())
+	}
+}
+
+// A ledger that read --rules, then follows a history with nothing after
+// where it looks from, is marked followed from there: a version added
+// between a look's reads waits for the next look there too.
+func TestFollowMarksWhereItLooked(t *testing.T) {
+	ctx := context.Background()
+	hist := t.TempDir()
+	addVersion(t, hist, now.Add(-100*time.Hour), "15m")
+	sel, _ := rules.ParseSelector("grafana_alert=1")
+	s, _ := server(t, func(c *Config) { c.RulesSelect = sel })
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	s.cfg.RulesPath, s.cfg.RulesHistory = "", hist
+	if err := s.follow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	at, ok, err := s.followedTo(ctx)
+	from, _ := s.l.RunsFrom(ctx)
+	if err != nil || !ok || !at.Equal(from) {
+		t.Fatalf("followed to %v %v %v, want from when the runs began, %v", at, ok, err, from)
+	}
+	addVersion(t, hist, now.Add(-time.Minute), "2m")
+	rs, _, err := s.readRules(ctx)
+	if err != nil || len(rs) != 1 || rs[0].For != 15*time.Minute {
+		t.Errorf("the rules in effect before the next look: %+v %v, want the version followed", rs, err)
+	}
+}
+
 // gated holds the first replay of "errors > 5" until released: a run
 // under way.
 type gated struct {
