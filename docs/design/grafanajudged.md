@@ -42,13 +42,14 @@ history (recorded.md), such a rule can get from Grafana's.
   one Grafana's provisioning API lists the rule's uid with
   (`/api/v1/provisioning/alert-rules`), read once a day copied when a
   rule needs its own, within what the day's read of the history leaves of
-  the reader's bounds, and 64 MB and 50,000 rules at most. Grafana asks of a token the same to list the rules as to
-  export them, which Lapilli reads its rules from; the export holds no
-  id. A rule it lists no more, lists twice, lists with an id it lists
-  another rule with too, or lists under another title than the rules read
-  (renamed since) is unsure. A change of another rule
-  of the title is passed over and its alerts told apart from the judged
-  rule's, so one title in two folders judges both, however many such
+  the reader's bounds, and 64 MB and 50,000 rules at most. Grafana asks
+  of a token the same to list the rules as to export them, which Lapilli
+  reads its rules from; the export holds no id. A rule it lists no more,
+  lists twice, lists with an id it lists another rule with too, or lists
+  under another title than the rules read (renamed since) is unsure. A
+  change of another rule of the title is passed over and its alerts told
+  apart from the judged rule's, so one title in two folders judges both,
+  however many such
   rules there are, and a rule of the title in a folder the token doesn't
   read takes nothing. A rule some change of which the history passed
   over, or whose alerts it doesn't tell apart, isn't judged by it: a
@@ -201,9 +202,10 @@ its data sources answered.
 
 - **How much.** The reader's bounds, unchanged: 16 MiB an answer, 5,000
   requests, 256 MiB of answers, Grafana's list of its rules among them,
-  200,000 changes of 50,000 alerts, their labels 64 MiB. A day past any is passed over, logged, and the copy goes
-  on from the day after; so is a day of more than 100,000 firings, which
-  no write holds. Only a failure worth asking again fails the round.
+  200,000 changes of 50,000 alerts, their labels 64 MiB. A day past any
+  is passed over, logged, and the copy goes on from the day after; so is
+  a day of more than 100,000 firings, which no write holds. Only a
+  failure worth asking again fails the round.
 - **What is kept.** A firing a write can't hold (more than 32 labels,
   labels past 4 KB, a name that doesn't show) leaves its rule out of the
   day before anything is made of its labels: the flipping alert of
@@ -222,12 +224,12 @@ its data sources answered.
   they write these rules' record, their firings within the bounds above,
   under a rule's uid; with a line of a rule's name that has no uid, they
   have that rule judged by its name, as above; with a change to a state
-  Grafana has no name for, under a rule's uid, or its name with no uid,
-  they leave that rule with no record while a read holds the change (a
-  read back from where it was left out holds it a day at most); and with
-  changes passed over of more than 1,000 rules, which a read can't say
-  all of, they make every day a gap. SECURITY.md says so: guard the
-  tenant as the Grafana.
+  Grafana has no name for, under a rule's uid, they leave that rule with
+  no record while a read holds the change, and with no uid every rule of
+  its name (a read back from where it was left out holds it a day at
+  most); and with changes passed over of more than 1,000 rules, which a
+  read can't say all of, they make every day a gap. SECURITY.md says so:
+  guard the tenant as the Grafana.
 - **Names.** The history names a rule only by the title of one of the
   rules read from that Grafana; any other name's changes are passed over,
   never kept, so the history can't add a rule. A change of a judged rule's
@@ -246,10 +248,10 @@ its data sources answered.
   `TestGrafanaJudgedPassedOverByRule`). Past 1,000 rules, though, a read
   can't say which rules it passed over changes of, and judges none: a day
   holding changes passed over of more than 1,000 rules, firing in any
-  folder, is a gap for every rule. Before 0.69.2 a rule there between two rounds
-  wrote its firings into the judged rule's record, and its alert could end
-  the judged rule's, as a title was counted at the round alone; and a
-  title shared at a round left the judged rule out. Where the history
+  folder, is a gap for every rule. Before 0.69.2 a rule there between two
+  rounds wrote its firings into the judged rule's record, and its alert
+  could end the judged rule's, as a title was counted at the round alone;
+  and a title shared at a round left the judged rule out. Where the history
   says no rule's uid or id (a Loki line without `ruleUID`, as a writer to
   the tenant may push), a name two rules give,
   counted over every rule read before `--rule` picks, paused ones among
@@ -272,12 +274,12 @@ its data sources answered.
   still makes a day a gap for every rule judged so is of the whole read:
   the history refused or of no use, Grafana's list of its rules refused
   or past its bounds (64 MB, 50,000 rules, or what the day's read leaves
-  of the reader's) where the day's read needs a rule's id, a
-  day of more changes than the reader's bounds, of changes passed over of
-  more than 1,000 rules, or of more than 100,000 firings (one rule
-  flapping enough is enough), and more than 5,000 rules to keep as left
-  out. A read back of no use, from where a rule was left out, where the
-  day's read was of use, leaves out the rules judged again alone.
+  of the reader's) where the day's read needs a rule's id, a day of more
+  changes than the reader's bounds, of changes passed over of more than
+  1,000 rules, or of more than 100,000 firings (one rule flapping enough
+  is enough), and more than 5,000 rules to keep as left out. A read back
+  of no use, from where a rule was left out, where the day's read was of
+  use, leaves out the rules judged again alone.
 
 ## Questions
 

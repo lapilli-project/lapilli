@@ -95,67 +95,66 @@ Before upgrading:
 ### Fixed (security)
 
 - **One Grafana rule of a judged rule's title stopped the record of every
-  rule judged from Grafana's history** (affected: 0.68.1 to 0.69.1;
-  0.68.0 took the one rule's firings away instead, which 0.68.1 fixed by
-  this). The history names a rule by its title alone, and 0.68.1 left each
-  day a gap for every rule judged from it while any of them shared its
-  title, as the record was kept for the source and not for each rule:
-  anyone who could make a rule in a folder Lapilli reads, of one judged
-  rule's title, paused or not, or two teams by chance, stopped every
-  team's. So did one rule the history passed over changes of, or one with
-  a firing a write can't hold. Such a rule is left out of the day alone
-  now, and the other rules' day is written: nothing of it is written or
-  taken away, an alert of it on stays on, the log names it, and the period
-  is kept for it (**ledger schema 030**, `left_out`: by source and rule,
-  64 periods a rule and 5,000 rules at most, dropped with `--keep`). Over
-  a period it was left out a rule has no record, not a quiet one, wherever
-  what the copies cover of it is read: its page, which says since when it
-  is left out while it is; whether its numbers are set beside the span
-  before; whether it has twelve weeks to be retired by; and what a rule
-  only copied in is held to. The period stays so once the rule is judged
-  again, in a round that reads it again within `--settle`, and after a
-  restart: what the history says fired under the title meanwhile is no
-  rule's. Judged again, the rule is read back from where it was left out,
-  a week at most, and an alert on then is written from there; past a
-  week, an alert of it on since before it was left out, that the read
-  says nothing of, is ended where it was left out. A read back of no use
-  where the day's read was (past any of the reader's bounds, Grafana's
-  list of its rules refused or past its own, answers that can't be used)
-  leaves the rules judged again out once more, not the day. Past 5,000
-  rules, the periods of rules no longer among Grafana's
-  are let go of, those that ended earliest first: the record of such a
-  rule, kept under its old name once it is renamed or deleted, then reads
-  as copied over them. And a change of Grafana's history is taken for a
-  judged rule only where the history says it is that rule's: kept in
-  Loki, by the rule's uid; in annotations, by its id (`alertId`), the one
-  Grafana's provisioning API lists the rule's uid with
-  (`/api/v1/provisioning/alert-rules`, which a token that exports the
-  rules reads too), read once a day copied, within the reader's bounds. A
-  rule it lists no more, with an id it lists another rule with too, or
-  under another title, renamed since the rules were read, is left out. A
-  title shared across folders leaves neither rule out, however many rules
-  share titles; a rule of a judged rule's title in a folder Lapilli's token
-  doesn't read takes nothing, its changes read or passed over (a change
-  the read passes over leaves out the rule it says it is of alone); and a
-  rule of a judged rule's title made, firing and deleted between two
-  rounds, which 0.68.0 to 0.69.1 took for the judged rule, its firings
-  written into the judged rule's record and its alert ending the judged
-  rule's, writes nothing. Where the history says no rule's uid or id (a
-  Loki line without one, as whoever can push to the tenant may write;
-  Grafana's annotations of alerts always carry one), a rule of a judged
-  rule's title in any version of the rules in effect across what a round
-  writes leaves the judged rule out alone, and shows as no record; one no
-  read of the rules saw, in a folder the token doesn't read or there
-  between two rounds, is still taken for it; and such a line passed over
-  leaves out every rule of its title. A name the read holds no change of
-  is judged, with no firing, whoever else has it. What still makes a day
-  a gap for every rule judged so is of the whole read: the history
-  refused or past the reader's bounds, changes passed over of more than
-  1,000 rules, in any folder, Grafana's list of its rules refused or past
-  its own (64 MB, 50,000 rules) or what the day's read leaves of the
-  reader's, more than 100,000 firings in a day, more
-  than 5,000 rules to keep as left out, none of them gone from Grafana,
-  or none of the rules judged
+  rule judged from Grafana's history** (affected: 0.68.1 to 0.69.1; 0.68.0
+  took the one rule's firings away instead, which 0.68.1 fixed by this).
+  The history names a rule by its title alone, and 0.68.1 left each day a
+  gap for every rule judged from it while any of them shared its title, as
+  the record was kept for the source and not for each rule: anyone who
+  could make a rule in a folder Lapilli reads, of one judged rule's title,
+  paused or not, or two teams by chance, stopped every team's. So did one
+  rule the history passed over changes of, or one with a firing a write
+  can't hold. Such a rule is left out of the day alone now, and the other
+  rules' day is written: nothing of it is written or taken away, an alert
+  of it on stays on, the log names it, and the period is kept for it
+  (**ledger schema 030**, `left_out`: by source and rule, 64 periods a
+  rule and 5,000 rules at most, dropped with `--keep`). Over a period it
+  was left out a rule has no record, not a quiet one, wherever what the
+  copies cover of it is read: its page, which says since when it is left
+  out while it is; whether its numbers are set beside the span before;
+  whether it has twelve weeks to be retired by; and what a rule only
+  copied in is held to. The period stays so once the rule is judged again,
+  in a round that reads it again within `--settle`, and after a restart:
+  what the history says fired under the title meanwhile is no rule's.
+  Judged again, the rule is read back from where it was left out, a week
+  at most, and an alert on then is written from there; past a week, an
+  alert of it on since before it was left out, that the read says nothing
+  of, is ended where it was left out. A read back of no use where the
+  day's read was (past any of the reader's bounds, Grafana's list of its
+  rules refused or past its own, answers that can't be used) leaves the
+  rules judged again out once more, not the day. Past 5,000 rules, the
+  periods of rules no longer among Grafana's are let go of, those that
+  ended earliest first: the record of such a rule, kept under its old name
+  once it is renamed or deleted, then reads as copied over them. And a
+  change of Grafana's history is taken for a judged rule only where the
+  history says it is that rule's: kept in Loki, by the rule's uid; in
+  annotations, by its id (`alertId`), the one Grafana's provisioning API
+  lists the rule's uid with (`/api/v1/provisioning/alert-rules`, which a
+  token that exports the rules reads too), read once a day copied, within
+  the reader's bounds. A rule it lists no more, with an id it lists
+  another rule with too, or under another title, renamed since the rules
+  were read, is left out. A title shared across folders leaves neither
+  rule out, however many rules share titles; a rule of a judged rule's
+  title in a folder Lapilli's token doesn't read takes nothing, its
+  changes read or passed over (a change the read passes over leaves out
+  the rule it says it is of alone); and a rule of a judged rule's title
+  made, firing and deleted between two rounds, which 0.68.0 to 0.69.1 took
+  for the judged rule, its firings written into the judged rule's record
+  and its alert ending the judged rule's, writes nothing. Where the
+  history says no rule's uid or id (a Loki line without one, as whoever
+  can push to the tenant may write; Grafana's annotations of alerts always
+  carry one), a rule of a judged rule's title in any version of the rules
+  in effect across what a round writes leaves the judged rule out alone,
+  and shows as no record; one no read of the rules saw, in a folder the
+  token doesn't read or there between two rounds, is still taken for it;
+  and such a line passed over leaves out every rule of its title. A name
+  the read holds no change of is judged, with no firing, whoever else has
+  it. What still makes a day a gap for every rule judged so is of the
+  whole read: the history refused or past the reader's bounds, changes
+  passed over of more than 1,000 rules, in any folder, Grafana's list of
+  its rules refused or past its own (64 MB, 50,000 rules) or what the
+  day's read leaves of the reader's, more than 100,000 firings in a day,
+  more than 5,000 rules to keep as left out, none of them gone from
+  Grafana, or none of the rules judged
   ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
 - **The backtest gate could pass a pull request read from a branch its
   author moved** (affected: 0.32.0 to 0.69.1; the gates that stop a
