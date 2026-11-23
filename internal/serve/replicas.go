@@ -28,6 +28,12 @@ import (
 // a single replica, leads from its start. failed is told of what makes
 // serve stop: the rules' history that can't be added.
 func (s *Server) lead(ctx context.Context, failed chan<- error) {
+	// What this replica noted of the sources failing is of a term it led
+	// before, kept while another replica led, which may have read them
+	// well all along: let go, as a note days old would say a source down
+	// before this term read it at all. Noted again at its first failed
+	// read in this term; the leader's own notes are only ever its loops'.
+	s.forgetFailing()
 	if s.l.Shared() {
 		p, _ := s.l.Leader()
 		s.log.Info("leading: this replica runs what is run once", "replica", s.l.ReplicaID(), "term", p.Term)

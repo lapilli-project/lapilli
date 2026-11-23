@@ -694,3 +694,46 @@ func TestSourceIntakeForgotten(t *testing.T) {
 		t.Errorf("told %q", got)
 	}
 }
+
+// A replica that led, failed to read a source it never read well, and
+// followed since kept its note: leading again days later, the source was
+// down at once by that old note, before this replica read it at all,
+// though the leader between may have read it well all along. Leading
+// lets go of what the replica noted before; its first failed read in the
+// new term is noted from then.
+func TestLeadingAgainForgetsWhatWasNotedFailing(t *testing.T) {
+	ctx := context.Background()
+	s, clock := hookServer(t, func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.yaml") })
+	s.readFile(errors.New("incidents.yaml: mounted late"))
+	if len(s.failingNow()) != 1 {
+		t.Fatalf("noted: %v", s.failingNow())
+	}
+	file := func() sourceItem {
+		t.Helper()
+		items, err := s.sourceList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(items, func(it sourceItem) bool { return it.ID == "incidents-file" })
+		if i < 0 {
+			t.Fatalf("no incidents file among %+v", items)
+		}
+		return items[i]
+	}
+	// Three days on, it leads again: this term's loops stopped at once.
+	*clock = clock.Add(72 * time.Hour)
+	term, cancel := context.WithCancel(ctx)
+	cancel()
+	s.lead(term, make(chan error, 1))
+	if got := s.failingNow(); len(got) != 0 {
+		t.Errorf("leading again, what was noted before: %v", got)
+	}
+	if it := file(); it.Down {
+		t.Errorf("leading again, before any read: %s, down", it.State)
+	}
+	// Its first failed read in this term is noted from then.
+	s.readFile(errors.New("incidents.yaml: mounted late"))
+	if got := s.failingNow()["incidents-file"]; !got.Equal(*clock) {
+		t.Errorf("noted again at %v, want %v", got, *clock)
+	}
+}

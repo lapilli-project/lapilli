@@ -68,6 +68,14 @@ func (s *Server) noteFailing(id string, err error) {
 	s.reads.failing[id] = s.now()
 }
 
+// forgetFailing lets go of what this replica noted of the sources failing
+// (noteFailing), as it starts to lead (lead).
+func (s *Server) forgetFailing() {
+	s.reads.Lock()
+	defer s.reads.Unlock()
+	s.reads.failing = nil
+}
+
 // failingNow is when each source this replica reads first failed, as it
 // noted (noteFailing).
 func (s *Server) failingNow() map[string]time.Time {
