@@ -29,13 +29,11 @@ type Transition struct {
 
 // RuleOf is what Grafana's alert state history says of the rule a change
 // is of, beside the alert name its labels carry: kept in Loki, the rule's
-// uid; in annotations, the rule's id in Grafana's database (no uid), and
-// its title as it is when read, "" for a rule deleted since. Zero where
-// the history says none of them, or wasn't read for them.
+// uid; in annotations, the rule's id in Grafana's database (no uid). Zero
+// where the history says neither, or wasn't read for them.
 type RuleOf struct {
-	UID   string
-	ID    int64
-	Title string
+	UID string
+	ID  int64
 }
 
 // The label a firing in Grafana's NoData state carries, as its series of

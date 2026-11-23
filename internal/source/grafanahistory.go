@@ -360,12 +360,7 @@ func (p *historyPages) markUnsure(rule string) {
 func (p *historyPages) take(at time.Time, rule string, labels map[string]string, from, to string, of firing.RuleOf) error {
 	sum, ok := historyAlert(rule, labels)
 	if ok && p.apart {
-		// The rule's uid or id with its alert. A title now past the bounds
-		// is kept as none a rule has: its rule is another, not one whose
-		// changes can't be read.
-		if len(of.Title) > maxHistoryRule {
-			of.Title = "\x00"
-		}
+		// The rule's uid or id with its alert.
 		if len(of.UID) > maxHistoryName {
 			ok = false
 		} else {
@@ -393,7 +388,7 @@ func (p *historyPages) take(at time.Time, rule string, labels map[string]string,
 			cost += int64(len(k)+len(v)) + 64
 		}
 		if p.apart {
-			cost += int64(len(of.UID) + len(of.Title))
+			cost += int64(len(of.UID))
 		}
 		if len(p.alerts) >= historyAlerts || p.labels+cost > historyLabels {
 			return p.tooMuch(fmt.Sprintf("more than %d alerts, or %d MiB of their labels", historyAlerts, historyLabels>>20))
@@ -588,7 +583,7 @@ func readAnnotations(ctx context.Context, c *prom.Client, from, to time.Time, p 
 				p.markUnsure(AnnotationName(a.AlertName))
 				continue
 			}
-			if err := p.take(time.UnixMilli(a.Time), rule, labels, a.PrevState, a.NewState, firing.RuleOf{ID: a.AlertID, Title: a.AlertName}); err != nil {
+			if err := p.take(time.UnixMilli(a.Time), rule, labels, a.PrevState, a.NewState, firing.RuleOf{ID: a.AlertID}); err != nil {
 				return nil, err
 			}
 		}
