@@ -3,6 +3,8 @@ package serve
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strconv"
 	"sync"
 )
 
@@ -201,6 +203,43 @@ type barView struct {
 	// searched for, on the search page.
 	Search []field
 	Q      string
+	// Teams and Periods are the bar's choices, each a link: picked, the page
+	// is shown for it at once, with no script and no button to press after
+	// (bundle 69).
+	Teams, Periods []barLink
+}
+
+// barKeepBudget is the most of a page's other parameters, encoded, that
+// each of the bar's choices carries: past it, a choice carries the team,
+// the weeks and, on a rule's page, its tab alone, so that a query of junk isn't written
+// out again for every team (bundle 69's review).
+const barKeepBudget = 1 << 10
+
+// barLink is one of the bar's choices: Text a message to translate, or,
+// Raw, a team's name; Mine marks the reader's own team.
+type barLink struct {
+	Href, Text         string
+	Raw, Mine, Current bool
+}
+
+// barHref is the page the bar chooses for, with what it carries and the
+// team and weeks given: set says team= is sent, empty for all teams;
+// weeks 0 sends none.
+func (b barView) barHref(team string, set bool, weeks int) string {
+	q := url.Values{}
+	for _, f := range b.Keep {
+		q.Add(f.Name, f.Value)
+	}
+	if set {
+		q.Set("team", team)
+	}
+	if weeks != 0 {
+		q.Set("weeks", strconv.Itoa(weeks))
+	}
+	if len(q) == 0 {
+		return b.Action
+	}
+	return b.Action + "?" + q.Encode()
 }
 
 // barOf is a page's bar.
@@ -243,6 +282,46 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 		for _, f := range c.hidden() {
 			if f.Name == "team" && !b.Team || f.Name == "weeks" && !b.Weeks {
 				b.Keep = append(b.Keep, f)
+			}
+		}
+		keep := url.Values{}
+		for _, f := range b.Keep {
+			keep.Add(f.Name, f.Value)
+		}
+		if len(keep.Encode()) > barKeepBudget {
+			var small []field
+			for _, f := range b.Keep {
+				// The team and weeks carried are known values; a rule's tab
+				// is the one its page names (ruleTabOf), not the reader's.
+				if f.Name == "team" || f.Name == "weeks" || f.Name == "tab" && name == "rule" {
+					small = append(small, f)
+				}
+			}
+			b.Keep = small
+		}
+		// A choice of one keeps the other as the reader chose it: the weeks
+		// asked for, or none, so the page's own period stands; the team
+		// asked for, or none, so the reader's own stands.
+		keepWeeks, keepTeam, teamSet := 0, "", false
+		if b.Weeks {
+			keepWeeks = c.Weeks
+		}
+		if b.Team && c.TeamSet {
+			keepTeam, teamSet = c.Team, true
+		}
+		if b.Team {
+			b.Teams = append(b.Teams, barLink{Href: b.barHref("", true, keepWeeks), Text: "All teams", Current: c.Team == ""})
+			for _, name := range c.Teams {
+				b.Teams = append(b.Teams, barLink{Href: b.barHref(name, true, keepWeeks), Text: name, Raw: true,
+					Mine: c.Mine && name == c.Team, Current: name == c.Team})
+			}
+		}
+		if b.Weeks {
+			for _, w := range []struct {
+				n    int
+				text string
+			}{{1, "1 week"}, {4, "4 weeks"}, {12, "12 weeks"}} {
+				b.Periods = append(b.Periods, barLink{Href: b.barHref(keepTeam, teamSet, w.n), Text: w.text, Current: w.n == b.WeeksIn})
 			}
 		}
 	}

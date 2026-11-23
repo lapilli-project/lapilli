@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **A team or a period picked in the bar is shown at once**: each is a
+  link, the team's in a list that opens under its name, the period's (1,
+  4 or 12 weeks) side by side, the one in effect marked. They were selects
+  with a Show button to press after. The pages stay without a script; a
+  pick keeps the page's other filters, up to 1 KiB of them, and the other
+  choice as it was asked.
+- **The sidebar's groups and their pages are told apart**: a group's name
+  (Monitoring, Improve, Reporting, Administration) is a small dim label
+  with a line above it, and its pages are in ink, a step in from it, on a
+  guide line. They were dim alike, a size apart, and in Korean and
+  Japanese, with no capitals, read as one list. The narrow screen's menu
+  is drawn alike.
+- Not known's sign leading a notice, a "?", is in a ring, so that it reads
+  as a sign, as ✓, ⚠︎, ✕ and ↻ do, not as a question mark before the
+  sentence.
+
 ## [0.69.0] - 2026-11-23
 
 `lapilli demo`: a first report on a sample built in, with nothing to
