@@ -164,6 +164,11 @@ wiki_comment() {
         + (.[$from:-1] | join("\n") | ltrimstr("\n") | rtrimstr("\n") | block) + "\n\n" + .[-1])}' "$1"
 }
 
+# t_shown: a comment as t_comments reads it back, its wiki markup as sent.
+t_shown() {
+  wiki_comment "$1" | jq -r '.body'
+}
+
 t_comment() {
   out=$(jira once POST "/issue/$1/comment" "$(wiki_comment "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'

@@ -134,6 +134,13 @@ t_close() {
     "$(jq -cn --arg s "$to" '[{op: "add", path: "/fields/System.State", value: $s}]')" application/json-patch+json >/dev/null
 }
 
+# jq's html_text: a comment's text, which Azure Boards keeps as HTML, read
+# as text.
+# shellcheck disable=SC2016 # jq's
+html_text='def html_text: gsub("<br */?>|</p>|</div>"; "\n") | gsub("<[^>]*>"; "")
+  | gsub("&lt;"; "<") | gsub("&gt;"; ">") | gsub("&quot;"; "\"") | gsub("&#39;"; ([39] | implode)) | gsub("&nbsp;"; " ") | gsub("&amp;"; "&")
+  | rtrimstr("\n");'
+
 # t_comments: the work item's comments, ten pages at most, by a
 # continuation token checked before it is sent back; its text is HTML,
 # read as text.
@@ -145,13 +152,11 @@ t_comments() {
     url="/$penc/_apis/wit/workItems/$1/comments?api-version=7.1-preview.4&order=asc&%24top=200"
     [ -z "$token" ] || url="$url&continuationToken=$token"
     out=$(az again GET "$url") || return 1
-    printf '%s' "$out" | jq -c --arg me "$me" '.comments[]? | select(.isDeleted | not)
+    printf '%s' "$out" | jq -c --arg me "$me" "$html_text"'.comments[]? | select(.isDeleted | not)
       | {id: ((.id // .commentId) | tostring), author: (.createdBy.displayName // "someone"),
          mine: ((.createdBy.id // "" | ascii_downcase) == ($me | ascii_downcase)), at: .createdDate,
          edited: (.modifiedDate // .createdDate),
-         body: (.text // "" | gsub("<br */?>|</p>|</div>"; "\n") | gsub("<[^>]*>"; "")
-           | gsub("&lt;"; "<") | gsub("&gt;"; ">") | gsub("&quot;"; "\"") | gsub("&#39;"; ([39] | implode)) | gsub("&nbsp;"; " ") | gsub("&amp;"; "&")
-           | rtrimstr("\n"))}'
+         body: (.text // "" | html_text)}'
     token=$(printf '%s' "$out" | jq -r '.continuationToken // empty')
     [ -n "$token" ] || return 0
     printf '%s' "$token" | grep -Eq '^[A-Za-z0-9+/=_-]{1,500}$' || return 1
@@ -164,6 +169,11 @@ t_comments() {
 t_comment() {
   out=$(az once POST "/$penc/_apis/wit/workItems/$1/comments?format=markdown&api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '(.id // .commentId) // empty | tostring'
+}
+
+# t_shown: a comment as t_comments reads it back: its text, read as HTML.
+t_shown() {
+  jq -Rsr "$html_text"'html_text' "$1"
 }
 
 # t_edit: Update Comment takes text alone; the comment keeps the format it

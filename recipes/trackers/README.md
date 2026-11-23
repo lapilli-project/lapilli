@@ -212,7 +212,10 @@ repository, to everyone. Turn it on only where that is meant.
 A comment edited after it was carried is carried again, either way, by
 when each was last changed. A comment people wrote here, changed after the
 tracker last changed the job's post of it, has the post changed to what
-would be posted now (unless the post holds that already); a comment from
+would be posted now, unless the post holds that already, as the tracker
+gives back what it was sent (in Jira Data Center's block, GitLab's lines
+starting with `/` escaped, Azure Boards' text read as HTML): a save in
+Lapilli that changed nothing edits nothing in the tracker. A comment from
 the tracker changed there after Lapilli copied it is taken again, as the
 tracker's, with the tracker's time for the change, and Lapilli keeps only
 an edit later than the one it has, so each is taken once. The times are
@@ -345,7 +348,9 @@ alone, without `tracker`, opens the port for a job of your own, named in
 
 Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` (and
 `t_comments` and `t_comment`, for comments; a comment's `edited` time and
-`t_edit`, for its edits, each followed only where the recipe has it) as
+`t_edit`, for its edits, each followed only where the recipe has it, and
+`t_shown` where the tracker gives a comment back otherwise than it was
+sent) as
 `lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
 requests, `gone` for an answer that says an issue isn't there, and the jq
 `kept` for the marker line. Please send it here.

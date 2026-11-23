@@ -294,6 +294,43 @@ func TestTrackerRecipeOwnWithoutEdits(t *testing.T) {
 	}
 }
 
+// A save in Lapilli that changes nothing moves the comment's time, and
+// edits nothing in the tracker, nor tells its watchers, though the post
+// reads back otherwise than it was sent (every tracker): Jira Data
+// Center's in a block, GitLab's line starting with / escaped (a name the
+// sign-in proxy gives, with COMMENT_NAMES), Azure Boards' read as HTML.
+func TestTrackerRecipesCommentEditsUnchanged(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			ctx := context.Background()
+			g.mustRun(t)
+			const who, body = "/cy@example.com", "Raised it: errors < 5 && latency > 2s, at <b>night</b> & noon."
+			mine, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: body}, who)
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
+			if g.f.posts() != 1 {
+				t.Fatalf("posted %d", g.f.posts())
+			}
+			time.Sleep(1100 * time.Millisecond)
+			if _, err := g.s.l.PutComment(ctx, ledger.Comment{ID: mine, Body: body}, who); err != nil {
+				t.Fatal(err)
+			}
+			if c, _ := g.s.l.CommentByID(ctx, mine); !c.Updated.After(c.Created) {
+				t.Fatalf("the save didn't move the comment's time: %+v", c)
+			}
+			out := g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
+			if g.f.edited() != 0 || !strings.Contains(out, "carried 0 edits to issues") {
+				t.Errorf("a save that changed nothing edited the post %d times\n%s", g.f.edited(), out)
+			}
+		})
+	}
+}
+
 // A tracker that refuses to change a comment holds up nothing else: the
 // refusal is said, and passed over, and the tracker's own edit is still
 // taken, run after run.

@@ -323,7 +323,12 @@ needed deciding: which edits, which way, by what, and what is left.
 - **Lapilli to the tracker.** A comment people wrote here, posted to its
   issue, and changed here after the tracker last changed the job's post
   of it, has the post changed to what would be posted now (the comment
-  quoted, its marker last), unless the post holds that already. Only the
+  quoted, its marker last), unless the post holds that already: what it
+  would hold, as the tracker gives back what it was sent (`t_shown`:
+  Jira's from Atlassian Document Format, Jira Data Center's in its block,
+  GitLab's lines starting with `/` escaped, Azure Boards' read as HTML), so
+  a save here that changed nothing, which moves the comment's time, edits
+  nothing in the tracker and tells its watchers nothing. Only the
   job's own post, found by the tracker's id Lapilli keeps for it; the
   tracker changes it (`PATCH`, `PUT` or `POST` to the comment, as each
   takes an edit). Once it has, the post is later than the comment, so it

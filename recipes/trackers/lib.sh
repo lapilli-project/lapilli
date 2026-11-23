@@ -41,6 +41,10 @@
 #   t_edit REF ID FILE  change the job's own comment ID on the issue to
 #                       FILE's text (edits followed, where the recipe
 #                       has it)
+#   t_shown FILE        FILE's text as t_comments gives it back once
+#                       t_comment or t_edit has sent it (in a block, its
+#                       lines escaped, as markup read as text), where it
+#                       isn't as sent; without it, as sent
 #
 # Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
 # may link a task to any issue: an issue someone else wrote is never taken
@@ -647,9 +651,16 @@ sync_edits() {
   fi
   while IFS= read -r c; do
     printf '%s' "$c" | comment_text >"$work/ctext"
-    # What the post holds already: as the tracker gives it back, line ends
-    # and the space at its end aside.
-    if printf '%s' "$c" | jq -e --rawfile t "$work/ctext" 'def plain: gsub("\r"; "") | sub("\\s+\\z"; "");
+    # What the post holds already, as the tracker gives back what it was
+    # sent (t_shown): a save that changed nothing, which moves the
+    # comment's time, edits nothing in the tracker, nor tells its watchers.
+    if command -v t_shown >/dev/null 2>&1; then
+      t_shown "$work/ctext" >"$work/cshown" || cp "$work/ctext" "$work/cshown"
+    else
+      cp "$work/ctext" "$work/cshown"
+    fi
+    # Line ends and the space at the end aside.
+    if printf '%s' "$c" | jq -e --rawfile t "$work/cshown" 'def plain: gsub("\r"; "") | sub("\\s+\\z"; "");
         (.post | plain) == ($t | plain)' >/dev/null; then
       continue
     fi

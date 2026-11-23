@@ -124,4 +124,10 @@ t_edit() {
   gl again PUT "/projects/$enc/issues/$1/notes/$2" "$(note "$3")" >/dev/null
 }
 
+# t_shown: a note as t_comments reads it back, its lines starting with /
+# escaped.
+t_shown() {
+  note "$1" | jq -r '.body'
+}
+
 sync_tasks
