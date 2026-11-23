@@ -2831,5 +2831,6 @@
  "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same.": "終了後に発火したルールです。インシデント中に条件は成立していましたが、\"for\" とメトリクスの到着の遅れが終了を越えました。このインシデントのアラートですが遅すぎたため、黒のままです。",
  "%s after its end": "終了の %s 後",
  "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "検知なしの発火のうち %d 件は、ラベルが合うインシデントの終了後に来ました。インシデント中に条件は成立していましたが、\"for\" とメトリクスの到着の遅れが終了を越えました。遅すぎたアラートで、黒のままです。",
- "fired after its end: %s": "終了後に発火: %s"
+ "fired after its end: %s": "終了後に発火: %s",
+ "More firings came near the ends of incidents than one read looks at: past them, a firing that came after an incident isn't named, so an incident may read as nothing fired.": "インシデントの終了付近の発火が、一度に読む数を超えました。それ以降は、インシデント終了後に来た発火を名指ししないため、そのインシデントは発火なしと読める場合があります。"
 }

@@ -394,6 +394,8 @@ func TestBoundsDecide(t *testing.T) {
 		{"up == 1 and on() up", false},
 		{"errors", false},
 		{"errors > bool 5", false},
+		{"errors > 5 or 1 < # c\n bool up", false}, // a value, its bool behind a comment
+		{"errors > 5 or 1 < # c\n up", true},
 		{"(errors > 5) * 2", false},
 		{"errors > 1e-310 and x > 1", false}, // a number a float doesn't hold to the full, not among Bounds
 		{"errors > 5 and", false},
@@ -406,6 +408,21 @@ func TestBoundsDecide(t *testing.T) {
 	}
 	if (Rule{Expr: "errors > 5", Unsupported: Paused}).BoundsDecide() {
 		t.Error("a rule not replayed")
+	}
+	// A Loki rule's bound behind a comment Loki reads and PromQL doesn't is
+	// Loki's comment, not a bound; one PromQL reads too, a bound.
+	for _, c := range []struct {
+		expr string
+		ok   bool
+	}{
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m]))\n// > 10", false},
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m])) /* > 10 */ > 20", false},
+		{"sum(count_over_time({app=\"x\"} |= \"error\" [5m])) # x\n > 10", true},
+		{"sum(count_over_time({app=\"x\"} |= \"a//b\" [5m])) > 10", true},
+	} {
+		if got := (Rule{Name: "R", Expr: c.expr, Logs: LokiRuler}).BoundsDecide(); got != c.ok {
+			t.Errorf("Loki %q: %v, want %v", c.expr, got, c.ok)
+		}
 	}
 
 	graph := func(st Step) Rule {
@@ -444,5 +461,21 @@ func TestBoundsDecide(t *testing.T) {
 	none := ClassicCond{Query: "A", Reducer: "diff", Type: "no_value", Op: "or"}
 	if !classic(gt, within).BoundsDecide() || classic(gt, eq).BoundsDecide() || classic(gt, none).BoundsDecide() {
 		t.Error("classic conditions")
+	}
+}
+
+// What a bound compares is one value however it is bracketed, spaced or
+// commented around: as Grafana's are written out afresh.
+func TestCompares(t *testing.T) {
+	r := Rule{Name: "R", Expr: "(x) > 1 and ( x  # the same\n) < 5 or rate(y[5m]) > 2"}
+	bs := r.Bounds()
+	if len(bs) != 3 {
+		t.Fatalf("%+v", bs)
+	}
+	if a, b, c := r.Compares(bs[0]), r.Compares(bs[1]), r.Compares(bs[2]); a != "x" || b != "x" || c != "rate(y[5m])" {
+		t.Errorf("%q %q %q", a, b, c)
+	}
+	if got := r.Compares(Bound{At: 9}); got != "" {
+		t.Errorf("not the rule's: %q", got)
 	}
 }

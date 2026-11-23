@@ -158,6 +158,11 @@ func (r Rule) BoundsDecide() bool {
 		return false
 	}
 	if r.Graph == nil {
+		// Of LogQL, a comment Loki reads that PromQL doesn't (// and /* */)
+		// can hide what reads as a bound here: nothing is said of it.
+		if r.Logs != "" && !plainLogQL(r.Expr) {
+			return false
+		}
 		return len(r.Expr) <= maxExpr && len(comparisons(r.Expr)) == len(bs) && decides(r.Expr, 0)
 	}
 	st, ok := r.Graph.Steps[r.Graph.Cond]
@@ -185,6 +190,22 @@ func (r Rule) BoundsDecide() bool {
 		return n == len(bs)
 	}
 	return false
+}
+
+// Compares is what a bound of the rule's compares, as one value is told
+// from another: of PromQL, the expression without brackets around the
+// whole of it, comments and spaces around it, its spaces one, uncut, so
+// that (x) > 1 and x < 5 compare one value; of a Grafana rule, Of, which
+// is written out afresh. "" for a bound not of the rule's.
+func (r Rule) Compares(b Bound) string {
+	if r.Graph != nil {
+		return b.Of
+	}
+	cs := comparisons(r.Expr)
+	if b.At < 0 || b.At >= len(cs) {
+		return ""
+	}
+	return strings.Join(strings.Fields(unwrap(cs[b.At].value)), " ")
 }
 
 // decides is BoundsDecide of a PromQL expression, as operands reads it.
@@ -750,7 +771,8 @@ func compared(expr string) (comparison, bool) {
 		return comparison{}, false
 	}
 	left, right := expr[:o.at], expr[o.end:]
-	if w := strings.Fields(right); len(w) > 0 && strings.EqualFold(w[0], "bool") {
+	// bool, a comment before it or not, makes it a value, not a filter.
+	if w := strings.Fields(stripComments(right)); len(w) > 0 && strings.EqualFold(w[0], "bool") {
 		return comparison{}, false
 	}
 	ln, lok := number(left)

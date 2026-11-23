@@ -150,3 +150,30 @@ func TestUnrecordedBounds(t *testing.T) {
 		t.Errorf("none: %+v %q", u, u.Text())
 	}
 }
+
+// A bound a fifth past which is no float (1.7e308 is +Inf a fifth further)
+// can't be set past: the rule with it so would be another, and the bound
+// after it left where it was. Nothing is said of it; of one past which is
+// a float, as before. Nor of a range on one value narrower than two fifths
+// of its ends, its value bracketed or spaced as it may be.
+func TestDecidingFinite(t *testing.T) {
+	for _, c := range []struct {
+		expr string
+		ok   bool
+	}{
+		{"x > 1.7e308 or y > 5", false},
+		{"y > 5 and x < -1.7e308", false},
+		{"x > 1e307 or y > 5", true},
+		// A narrow range, however its value is bracketed or spaced.
+		{"x > 1 and x < 1.1", false},
+		{"(x) > 1 and x < 1.1", false},
+		{"((x)) > 1 and ( x ) < 1.1", false},
+		{"rate(x[5m]) > 1 and rate(x[5m])  < 1.1", false},
+		{"x > 1 and y < 1.1", true},
+		{"x > 1 and x < 5", true},
+	} {
+		if _, ok := deciding(rules.Rule{Name: "R", Expr: c.expr}); ok != c.ok {
+			t.Errorf("%s: %v, want %v", c.expr, ok, c.ok)
+		}
+	}
+}

@@ -174,7 +174,7 @@ func TestLateOf(t *testing.T) {
 	}
 	// Past what one read looks at, firings against incidents, firings read
 	// or reads: cut, and what was found by then given.
-	for _, bound := range []*int{&lateChecks, &lateRows, &lateSpans} {
+	for _, bound := range []*int{&LateChecks, &LateRows, &LateSpans} {
 		was := *bound
 		*bound = 1
 		x, err := l.LateOf(ctx, t0, t0.Add(7*24*time.Hour), o, true)

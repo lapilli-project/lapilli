@@ -757,6 +757,7 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 		groups[since][name] = true
 	}
 	meta := map[string]*ledger.Rule{}
+	sevs := severitiesBy{}
 	var order []string
 	// The latest first: the rules the run is for, then those catching up,
 	// so one rule far behind doesn't keep the rest from their turn; with
@@ -803,7 +804,7 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 				meta[r.Name] = x
 				order = append(order, r.Name)
 			}
-			x.Severity = ledger.Severities([]string{x.Severity, r.Labels["severity"]})
+			x.Severity = sevs.add(r.Name, r.Labels["severity"])
 			if r.Unsupported != "" && x.Unsupported == "" {
 				// Kept without how often a request was asked, which
 				// differs from run to run; the run's record says it.

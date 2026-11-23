@@ -400,6 +400,7 @@ type ruleOut struct {
 	ActionNo           int      `json:"needed_no_action,omitempty" jsonschema:"firings a person said needed no one to act"`
 	NotJudged          bool     `json:"not_judged,omitempty" jsonschema:"a rule entry says it is judged by nothing (judged: false): its firings are counted, never white nor black"`
 	Late               int      `json:"late,omitempty" jsonschema:"of its firings that caught nothing, those that came after an incident they agree with was over, its condition having held in it, but its for and how late its metrics arrive ran past its end: an alert too late, black all the same"`
+	LateCut            bool     `json:"late_cut,omitempty" jsonschema:"more firings came near the ends of incidents than one read looks at: late may be fewer than they are"`
 }
 
 type ruleEpisodesOut struct {
@@ -432,7 +433,7 @@ func ruleOutOf(l ruleLine) ruleOut {
 		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), ReplayDiffers: l.Differs,
 		ContentProblems: l.Content.Facts + l.Content.Measured, ContentGuesses: l.Content.Guesses, Episodes: ruleEpisodesOutOf(l), NoisyEpisodes: noisyEpisodesOf(l),
 		Unrelated: l.Unrelated, PrecisionByLapilli: pctShare(l.PrecisionByLapilli), ActionYes: l.ActionYes, ActionNo: l.ActionNo, NotJudged: l.NotJudged,
-		Late: l.Late}
+		Late: l.Late, LateCut: l.LateCut}
 }
 
 // pctShare is a share a page shows in percent as a share from 0 to 1, nil
@@ -1050,6 +1051,7 @@ type incidentsOut struct {
 	Match     []string      `json:"matched_on" jsonschema:"the labels a firing and an incident must agree on"`
 	Total     int           `json:"total"`
 	Incidents []incidentOut `json:"incidents" jsonschema:"the latest first"`
+	LateCut   bool          `json:"late_cut,omitempty" jsonschema:"more firings came near the ends of incidents than one read looks at: past them, fired_after isn't given, so an incident may read as missed with an alert after its end not named"`
 }
 
 func (s *Server) toolIncidents(ctx context.Context, _ *mcp.CallToolRequest, in incidentsIn) (*mcp.CallToolResult, incidentsOut, error) {
@@ -1069,7 +1071,7 @@ func (s *Server) toolIncidents(ctx context.Context, _ *mcp.CallToolRequest, in i
 		return nil, out, err
 	}
 	iv := v.(incidentsView)
-	out.Weeks = iv.Weeks
+	out.Weeks, out.LateCut = iv.Weeks, iv.LateCut
 	o, err := s.options(ctx)
 	if err != nil {
 		return nil, out, err

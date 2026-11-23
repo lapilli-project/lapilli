@@ -209,15 +209,18 @@ func deciding(r rules.Rule) ([]rules.Bound, bool) {
 	}
 	bs := r.Bounds()
 	for _, b := range bs {
-		if b.Value == 0 || b.Rest != nil && b.Rest.Value == 0 {
+		// A bound past which no number is a float, as 1.7e308 a fifth
+		// further: set past, it would be no bound, and the rule another.
+		if p := past(b); b.Value == 0 || b.Rest != nil && b.Rest.Value == 0 || math.IsInf(p, 0) || math.IsNaN(p) {
 			return nil, false
 		}
 	}
 	// Of a range on one value, its ends set past each other hold nowhere:
 	// none could go well past both, which says nothing of a narrow one.
+	// One value however it is written: (x) is x (rules.Rule.Compares).
 	for _, lo := range bs {
 		for _, hi := range bs {
-			if lo.Of == hi.Of && lo.Unless == hi.Unless && lo.Above() && !hi.Above() && lo.Value < hi.Value && past(lo) >= past(hi) {
+			if lo.Unless == hi.Unless && lo.Above() && !hi.Above() && lo.Value < hi.Value && past(lo) >= past(hi) && r.Compares(lo) == r.Compares(hi) {
 				return nil, false
 			}
 		}

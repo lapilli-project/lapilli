@@ -15,6 +15,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -139,6 +140,80 @@ func TestServeAfterEnd(t *testing.T) {
 	}
 	if _, rs, err := s.toolRules(ctx, nil, rulesIn{Weeks: 4}); err != nil || len(rs.Rules) != 1 || rs.Rules[0].Late != 1 {
 		t.Errorf("MCP's rules: %+v %v", rs.Rules, err)
+	}
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	pageA11y(t, h, "", "/incidents", "/incidents/INC-L", "/rules/Errors")
+	missing.Lock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
+	missing.Unlock()
+}
+
+// Errors with no for from 15:01:30, a minute and a half after INC-L ended,
+// before its firing of 15:02 that came after it: one version held its
+// condition only from the firing's start, so no version but every one says
+// the firing came after INC-L, and neither the incident's page nor the
+// list says it did, as lapilli verdict asks every version of a period.
+func TestServeAfterEndEveryVersion(t *testing.T) {
+	s := lateServer(t)
+	ctx := context.Background()
+	noFor := strings.Replace(ruleFile, "for: 2m", "for: 0s", 1)
+	if _, err := s.l.AddVersion(ctx, ledger.Version{Since: time.Date(2026, 11, 1, 15, 1, 30, 0, time.UTC), Digest: "no for",
+		Docs: []rules.Doc{{Source: "shop.yaml", Data: []byte(noFor)}}, Names: []string{"Errors"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, path := range []string{"/incidents", "/incidents/INC-L"} {
+		_, body, _ := get(t, h, path)
+		if text := html.UnescapeString(htmlTags.ReplaceAllString(body, "")); strings.Contains(text, "after its end") || strings.Contains(text, "Nothing in time") {
+			t.Errorf("%s says Errors came after INC-L, its condition held from its start by one version", path)
+		}
+	}
+	_, inc, err := s.toolIncidents(ctx, nil, incidentsIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range inc.Incidents {
+		if len(x.FiredAfter) > 0 {
+			t.Errorf("MCP: %s fired after %+v", x.ID, x.FiredAfter)
+		}
+	}
+}
+
+// Past what one read looks at (ledger.LateSpans here), what came after an
+// incident's end isn't all said, and serve says so, not "nothing fired"
+// alone: late_cut in the report and MCP, a line on the pages, in each
+// language.
+func TestServeAfterEndCut(t *testing.T) {
+	was := ledger.LateSpans
+	ledger.LateSpans = 0
+	t.Cleanup(func() { ledger.LateSpans = was })
+	s := lateServer(t)
+	ctx := context.Background()
+	h := s.Handler()
+	from, to := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), now.Add(time.Hour)
+	_, body, _ := get(t, h, "/api/v1/report?from="+from.Format(time.RFC3339)+"&to="+to.Format(time.RFC3339))
+	var rep struct {
+		LateCut bool `json:"late_cut"`
+	}
+	if err := json.Unmarshal([]byte(body), &rep); err != nil || !rep.LateCut {
+		t.Errorf("the report: late_cut %v %v", rep.LateCut, err)
+	}
+	const said = "More firings came near the ends of incidents than one read looks at"
+	for _, path := range []string{"/incidents", "/incidents/INC-L", "/rules/Errors"} {
+		if _, body, _ := get(t, h, path); !strings.Contains(html.UnescapeString(body), said) {
+			t.Errorf("%s doesn't say it was cut", path)
+		}
+	}
+	if _, inc, err := s.toolIncidents(ctx, nil, incidentsIn{}); err != nil || !inc.LateCut {
+		t.Errorf("MCP's incidents: late_cut %v %v", inc.LateCut, err)
+	}
+	if _, r, err := s.toolRule(ctx, nil, ruleIn{Name: "Errors"}); err != nil || !r.Rule.LateCut {
+		t.Errorf("MCP's rule: late_cut %v %v", r.Rule.LateCut, err)
 	}
 	missing.Lock()
 	clear(missing.m)

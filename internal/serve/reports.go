@@ -559,6 +559,11 @@ func (s *Server) missedSection(ctx context.Context, rep *verdict.Report, from, t
 		missed = append(missed, m)
 	}
 	nums := map[string]any{"incidents": n, "missed": orNoneOf(missed), "only_noisy": onlyNoisy}
+	if rep.LateCut {
+		// Past what one read looks at, a missed incident's fired_after
+		// may be none.
+		nums["late_cut"] = true
+	}
 	switch {
 	case n == 0:
 		return tr(l, "No incidents."), nums, nil

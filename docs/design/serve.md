@@ -308,8 +308,12 @@ agreeing, is that incident's alert, too late (docs/how-it-judges.md):
 changes: it is worked out as the ledger is read (`ledger.LateOf`), from the
 firings, the incidents that count and the catches it keeps, and how long
 before its start each rule's condition held, its `for` and lag, the least
-of the versions in effect over the span read (`verdict.HeldFor`,
-`verdict.Options.Held`). A rule copied in, whose condition serve doesn't
+of the versions in effect from the span's start to its end and as long
+after it as a rule's held at most (`verdict.HeldFor`,
+`verdict.Options.Held`): a firing after an incident of the span comes that
+long after its end at most, and every version it could be of must have
+held, as verdict asks every version of its period. An incident's page reads
+the span of the incident itself. A rule copied in, whose condition serve doesn't
 have, held from its start, and so came after nothing. As a firing's
 stones are given against every incident the ledger has, so is this: a
 firing in the span after an incident before it counts for its rule, and an
@@ -324,8 +328,11 @@ incident's own; a rule's page and the rules list, over the weeks shown
 rule). The spans read are the incidents' that count ending from as long
 before the span as a rule's condition held at most, each read once where
 they meet, firings neither white nor excused; a read looks at 4,000,000
-firings against an incident each at most, past which the rest aren't said
-to have come after one, and serve logs it. The pages keep what they read
+firings against an incident each at most, 1,000,000 firings read and
+10,000 reads, past which the rest aren't said to have come after one, and
+serve says so where it shows them: `late_cut` in the report, the digest's
+text and MCP, a line on the Incidents page, an incident's own and a rule's,
+and `late_cut` in a report's missed incidents; and logs it. The pages keep what they read
 by the ledger's generation and their span, as the credit is kept.
 
 **With no record: which conditions** (0.70). How many of a rule's firings
@@ -353,7 +360,9 @@ Left unsaid, as it can't be said soundly: a value beside them under `or`,
 or alone (`errors > 5 or up == 0`: a firing of `up == 0` went past no
 bound); a comparison under `!` or inside arithmetic, which decides it the
 other way round or not alone; `unless` with nothing compared on its left; a
-bound of nothing, which no share of is past; a range on one value narrower
+bound of nothing, which no share of is past, or one a fifth past which is no
+number a float holds (`1.7e308`), which set past would be no bound and the
+rule another; a range on one value narrower
 than two fifths of its ends, which set further holds nowhere (none could go
 well past both, which says nothing of it); classic conditions with one that
 compares no number (`eq`, `ne`, `no_value`); a rule whose bounds changed
