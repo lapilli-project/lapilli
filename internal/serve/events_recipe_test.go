@@ -598,11 +598,14 @@ func TestEventsRecipeRotatedNames(t *testing.T) {
 		if got, want := kept2(t, s), notificationEvents(t, lines[:40]); got != want {
 			t.Errorf("%d deliveries kept, want %d", got, want)
 		}
-		// Rotated again, and the old one gone (compressed): said.
-		os.Remove(events + "-20261123")
-		os.Remove(events)
+		// Rotated again, and the old one gone (compressed): said. The new
+		// file is made while the old ones are still there, as logrotate
+		// makes it: made after, it could take the inode the old one had,
+		// which Linux gives out again at once, and be read as truncated.
+		appendLines(t, events+".new", lines[40:], nil)
 		os.WriteFile(events+".1.gz", []byte("\x1f\x8b compressed"), 0o644)
-		appendLines(t, events, lines[40:], nil)
+		os.Remove(events + "-20261123")
+		os.Rename(events+".new", events)
 		if code, out := runEvents(t, env, "file", events); code != 0 || !strings.Contains(out, "was rotated") {
 			t.Errorf("gone: exit %d: %s", code, out)
 		}
