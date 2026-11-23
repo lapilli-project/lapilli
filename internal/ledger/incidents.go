@@ -471,7 +471,10 @@ func (l *Ledger) Delete(ctx context.Context, key, by string, o verdict.Options) 
 
 // Decide confirms an impact window, writing it down as an incident with
 // that title, or dismisses it, or takes back either. It returns the id of
-// the incident a confirmation writes.
+// the incident a confirmation writes. A window confirmed before, taken
+// back and confirmed again is the incident it wrote then, while the
+// ledger keeps it, as it is now, its title too: no second is written, of
+// the same hours, which would count them twice.
 func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o verdict.Options) (string, error) {
 	if state != "" && state != "confirmed" && state != "dismissed" {
 		return "", fmt.Errorf("state %q: want confirmed, dismissed or none", state)
@@ -501,6 +504,11 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 		}
 		spans := [][2]int64{pair(span(old.Incident, o))}
 		if state == "confirmed" {
+			if made, err = l.confirmedAs(t, key); err != nil {
+				return err
+			}
+		}
+		if state == "confirmed" && made == "" {
 			n, err := l.meta(t.ctx, t, "next_incident")
 			if err != nil {
 				return err
@@ -528,6 +536,8 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 				return err
 			}
 			made = in.ID
+		}
+		if state == "confirmed" {
 			// The incident it wrote takes the window's place in what
 			// people said of firings (docs/design/judging.md, item 3):
 			// confirming changes no person's verdict.
@@ -543,6 +553,45 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 		return l.judgeSpans(t, spans, o)
 	})
 	return made, err
+}
+
+// confirmedAs is the incident an impact window was confirmed as before,
+// the latest the ledger still keeps, written as a person's (ui): "" for
+// none. It is read from the changes a confirmation notes ("impact window
+// KEY confirmed as ID"), by their index on what, those of this window and
+// no other's: one deleted since, or confirmed longer ago than the changes
+// are kept (--keep), is none, and the window is written down anew.
+func (l *Ledger) confirmedAs(t *txn, key string) (string, error) {
+	from := "impact window " + key + " confirmed as "
+	to := from[:len(from)-1] + "!"
+	rows, err := t.QueryContext(t.ctx, "SELECT what FROM changes WHERE what >= ? AND what < ? ORDER BY id DESC LIMIT 50", from, to)
+	if err != nil {
+		return "", err
+	}
+	var ids []string
+	for rows.Next() {
+		var what string
+		if err := rows.Scan(&what); err != nil {
+			rows.Close()
+			return "", err
+		}
+		ids = append(ids, strings.TrimPrefix(what, from))
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	for _, id := range ids {
+		in, err := l.get(t, id)
+		switch {
+		case errors.Is(err, ErrNotFound):
+		case err != nil:
+			return "", err
+		case in.origin == "ui":
+			return id, nil
+		}
+	}
+	return "", nil
 }
 
 // change notes a change made through the UI or API.

@@ -226,7 +226,7 @@ Bounds:
 | `POST /api/v1/incidents` | editor | `id` (the next `L-n` when left out), `title`, `start`, `end`, `labels` (`{"service": ["checkout"]}`), `alerts`, those its tool linked to it (`[{"rule": "CheckoutErrors", "labels": {"service": "checkout"}}]`, 100 at most, docs/design/links.md) | 201, the incident |
 | `PUT /api/v1/incidents/{id}` | editor | as `POST` | the incident with that id, made or replaced |
 | `DELETE /api/v1/incidents/{id}` | editor | | 204 |
-| `POST /api/v1/incidents/{id}/decide` | editor | `state` (`confirmed`, `dismissed`, or `""` to reopen), `title` (of the incident a window confirmed becomes; its own when left out), `together` (`true` dismisses the other named signals' windows at that time not decided yet) | `id`, `state`, and `incident`, the one it was confirmed as |
+| `POST /api/v1/incidents/{id}/decide` | editor | `state` (`confirmed`, `dismissed`, or `""` to reopen), `title` (of the incident a window confirmed becomes; its own when left out), `together` (`true` dismisses the other named signals' windows at that time not decided yet) | `id`, `state`, and `incident`, the one it was confirmed as. A window reopened and confirmed again is the incident it was confirmed as before, while that is kept, as it is: no second is written, and `title` isn't applied |
 
 A write that changes an incident gives the firings their stones again at
 once; one written again as it was changes nothing. An incident from the

@@ -524,6 +524,74 @@ func TestDecideTwice(t *testing.T) {
 	}
 }
 
+// A window confirmed, taken back and confirmed again is the incident it
+// wrote the first time, as it is now, however often: no second is written
+// of the same hours, which would count them twice. Deleted since, it is
+// written down anew; and another window's incident is never taken for it.
+func TestDecideAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	f := Found{From: t0, To: t0.Add(8 * time.Hour), ImpactOn: true, ImpactSince: t0,
+		Impact: []incident.Incident{{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), Candidate: true},
+			{Title: "user impact", Start: t0.Add(5 * time.Hour), End: t0.Add(6 * time.Hour), Candidate: true}},
+		Run: Run{Kind: "test", Started: t0, Finished: t0}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	key, other := "impact-20261102T0100Z", "impact-20261102T0500Z"
+	written := func() []string {
+		t.Helper()
+		incs, err := l.Incidents(ctx, t0, t0.Add(24*time.Hour), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, in := range incs {
+			if !strings.HasPrefix(in.ID, "impact-") {
+				out = append(out, in.ID+" "+in.Title)
+			}
+		}
+		return out
+	}
+	first, err := l.Decide(ctx, key, "confirmed", "Checkout slow", "ana", opts)
+	if err != nil || first == "" {
+		t.Fatalf("confirmed: %q %v", first, err)
+	}
+	theirs, err := l.Decide(ctx, other, "confirmed", "Search slow", "ana", opts)
+	if err != nil || theirs == "" || theirs == first {
+		t.Fatalf("the other window confirmed: %q %v", theirs, err)
+	}
+	for range 3 {
+		if made, err := l.Decide(ctx, key, "", "", "bo", opts); err != nil || made != "" {
+			t.Fatalf("taken back: %q %v", made, err)
+		}
+		again, err := l.Decide(ctx, key, "confirmed", "Another title", "bo", opts)
+		if err != nil || again != first {
+			t.Fatalf("confirmed again: %q %v, want the incident written before, %s", again, err, first)
+		}
+	}
+	if got, want := written(), []string{first + " Checkout slow", theirs + " Search slow"}; !slices.Equal(got, want) {
+		t.Errorf("written down: %q, want %q", got, want)
+	}
+	if in, err := l.IncidentByID(ctx, key); err != nil || in.State != "confirmed" || in.Counts {
+		t.Errorf("the window: %+v %v", in, err)
+	}
+	// Deleted, the window taken back: confirmed, it is written down anew.
+	if _, err := l.Decide(ctx, key, "", "", "bo", opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Delete(ctx, first, "bo", opts); err != nil {
+		t.Fatal(err)
+	}
+	anew, err := l.Decide(ctx, key, "confirmed", "Another title", "bo", opts)
+	if err != nil || anew == "" || anew == first || anew == theirs {
+		t.Fatalf("confirmed once deleted: %q %v", anew, err)
+	}
+	if got, want := written(), []string{anew + " Another title", theirs + " Search slow"}; !slices.Equal(got, want) {
+		t.Errorf("written down once deleted: %q, want %q", got, want)
+	}
+}
+
 // A rule a run couldn't replay is replayed by the next from where it was
 // missed: no firing is lost, and none is folded into another.
 func TestMissed(t *testing.T) {
