@@ -83,6 +83,22 @@ its last change a task done or dropped is still checked against its issue
 (`updated_after`), so tasks closed long ago, however many, aren't paged
 through; `MAX_PAGES` bounds the open tasks and those closed lately, each.
 
+Each token goes where its address points, and `curl` is given that
+address's scheme alone. The tracker's API (`GITHUB_API`, `GITLAB_URL`,
+`JIRA_URL`, `LINEAR_API`, `AZURE_DEVOPS_URL`, `SHORTCUT_API`, where given)
+is `https://`, on whatever port and path, or this machine's over `http://`
+for tests (`127.0.0.1`, `[::1]` or `localhost`); `LAPILLI_URL` is `http://`
+or `https://`, as serve's port is reached inside its cluster, where plain
+http should stay. One with a user or token before `@` is refused, and
+neither an address nor a token is said. A token file holds the token
+alone, on one line, with what an editor leaves after it (spaces, a
+carriage return) dropped: GitHub's, GitLab's and Shortcut's of the
+characters a Bearer token is written in (letters, digits and `- . _ ~ + /
+=`); Lapilli's, Jira's, Azure DevOps' and Linear's of any but a tab or
+another control character. An answer, Lapilli's or the tracker's, is 16 MiB
+at most; `curl` before 8.4 holds to that only an answer that says its
+length, so use 8.4 or later.
+
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
 name, Jira's as `lapilli-team-NAME`; Linear takes them by id, so add

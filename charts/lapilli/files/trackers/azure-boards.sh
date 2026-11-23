@@ -36,6 +36,7 @@ base=${AZURE_DEVOPS_URL:-https://dev.azure.com}
 base=${base%/}
 web=${AZURE_DEVOPS_WEB:-$base}
 web=${web%/}
+tracker_api AZURE_DEVOPS_URL "$base"
 org=$AZURE_DEVOPS_ORG
 project=$AZURE_DEVOPS_PROJECT
 type=${AZURE_BOARDS_TYPE:-Task}
@@ -57,7 +58,9 @@ for v in "$type" "$done_state" "$removed_state"; do
 done
 penc=$(printf '%s' "$project" | jq -sRr @uri)
 tenc=$(printf '%s' "$type" | jq -sRr @uri)
-auth=$(printf ':%s' "$(cat "$AZURE_DEVOPS_TOKEN_FILE")" | base64 | tr -d '\n')
+# One assignment the token, so set -e sees it refused.
+az_token=$(secret_line AZURE_DEVOPS_TOKEN_FILE "$AZURE_DEVOPS_TOKEN_FILE")
+auth=$(printf ':%s' "$az_token" | base64 | tr -d '\n')
 
 # az METHOD PATH [BODY [TYPE]]: Azure DevOps's answer, or a failure for
 # anything but a 2xx. Taken whole before it is read, so a failure isn't

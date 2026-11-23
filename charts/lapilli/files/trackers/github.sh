@@ -29,12 +29,13 @@ api=${GITHUB_API:-https://api.github.com}
 web=${GITHUB_WEB:-https://github.com}
 api=${api%/}
 web=${web%/}
+tracker_api GITHUB_API "$api"
 repo=$GITHUB_REPO
 if ! printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
   say "GITHUB_REPO is OWNER/NAME"
   exit 1
 fi
-gh_token=$(cat "$GITHUB_TOKEN_FILE")
+gh_token=$(secret GITHUB_TOKEN_FILE "$GITHUB_TOKEN_FILE")
 
 # gh METHOD PATH [BODY]: GitHub's answer, or a failure for anything but a
 # 2xx. Taken whole before it is read, so a failure isn't read as nothing.

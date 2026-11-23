@@ -256,6 +256,14 @@ Then, from anywhere that can reach it, by a name it answers to (`lapilli` or
 Give `put.sh` a file: in a pipe, a shell doesn't see the first command fail, and
 the job would look fine with nothing copied.
 
+`put.sh` sends serve's token where its argument points: `http://` or
+`https://` and no other scheme, which `curl` is given alone, with no user
+before `@`. Over plain http the token is read by whatever is on the way, so
+keep that to the cluster serve runs in, as its port is. Its token file holds
+the token on one line, of any characters but a tab or another control
+character (serve takes a token of any), with what an editor leaves after it
+dropped. Neither the token nor the address is said.
+
 Each incident is written by its id, so running this again is safe: one that
 hasn't changed writes nothing. New ones aren't told to `--notify-webhook-file` or
 Slack either, since the tool has told people already, and a first copy of months

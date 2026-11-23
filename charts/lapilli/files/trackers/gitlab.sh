@@ -21,13 +21,14 @@ base=${GITLAB_URL:-https://gitlab.com}
 base=${base%/}
 web=${GITLAB_WEB:-$base}
 web=${web%/}
+tracker_api GITLAB_URL "$base"
 project=$GITLAB_PROJECT
 if ! printf '%s' "$project" | grep -Eq '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$'; then
   say "GITLAB_PROJECT is a project path, such as example/alerts"
   exit 1
 fi
 enc=$(printf '%s' "$project" | jq -sRr @uri)
-gl_token=$(cat "$GITLAB_TOKEN_FILE")
+gl_token=$(secret GITLAB_TOKEN_FILE "$GITLAB_TOKEN_FILE")
 
 # gl METHOD PATH [BODY]: GitLab's answer, or a failure for anything but a
 # 2xx. Taken whole before it is read, so a failure isn't read as nothing.

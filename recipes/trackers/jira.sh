@@ -27,13 +27,16 @@ here=$(dirname "$0")
 base=${JIRA_URL%/}
 web=${JIRA_WEB:-$base}
 web=${web%/}
+tracker_api JIRA_URL "$base"
 project=$JIRA_PROJECT
 if ! printf '%s' "$project" | grep -Eq '^[A-Z][A-Z0-9_]{0,49}$'; then
   say "JIRA_PROJECT is a project key, such as OPS"
   exit 1
 fi
 type=${JIRA_ISSUE_TYPE:-Task}
-auth=$(printf '%s:%s' "$JIRA_EMAIL" "$(cat "$JIRA_TOKEN_FILE")" | base64 | tr -d '\n')
+# One assignment the token, so set -e sees it refused.
+jira_token=$(secret_line JIRA_TOKEN_FILE "$JIRA_TOKEN_FILE")
+auth=$(printf '%s:%s' "$JIRA_EMAIL" "$jira_token" | base64 | tr -d '\n')
 
 # jira METHOD PATH [BODY]: Jira's answer, or a failure for anything but a
 # 2xx. Taken whole before it is read, so a failure isn't read as nothing.

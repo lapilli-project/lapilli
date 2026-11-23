@@ -28,9 +28,10 @@ api=${SHORTCUT_API:-https://api.app.shortcut.com/api/v3}
 api=${api%/}
 web=${SHORTCUT_WEB:-https://app.shortcut.com}
 web=${web%/}
+tracker_api SHORTCUT_API "$api"
 number SHORTCUT_STATE "$SHORTCUT_STATE"
 [ -z "${SHORTCUT_DONE_STATE:-}" ] || number SHORTCUT_DONE_STATE "$SHORTCUT_DONE_STATE"
-sc_token=$(cat "$SHORTCUT_TOKEN_FILE")
+sc_token=$(secret SHORTCUT_TOKEN_FILE "$SHORTCUT_TOKEN_FILE")
 
 # sc METHOD PATH [BODY]: Shortcut's answer, or a failure for anything but a
 # 2xx. Taken whole before it is read, so a failure isn't read as nothing.

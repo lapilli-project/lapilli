@@ -23,12 +23,13 @@ here=$(dirname "$0")
 api=${LINEAR_API:-https://api.linear.app/graphql}
 web=${LINEAR_WEB:-https://linear.app}
 web=${web%/}
+tracker_api LINEAR_API "$api"
 team=$LINEAR_TEAM
 if ! printf '%s' "$team" | grep -Eq '^[0-9a-fA-F-]{36}$'; then
   say "LINEAR_TEAM is a team id, a UUID"
   exit 1
 fi
-li_token=$(cat "$LINEAR_TOKEN_FILE")
+li_token=$(secret_line LINEAR_TOKEN_FILE "$LINEAR_TOKEN_FILE")
 
 # gql QUERY VARIABLES: Linear's data, or a failure for anything but a 2xx
 # without errors, what Linear said kept in $work/errors. Taken whole before
