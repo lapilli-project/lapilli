@@ -152,12 +152,16 @@ t_comments() {
 }
 
 # wiki_comment FILE: a comment as comment_text writes it, in wiki markup:
-# its first line, who wrote it, then the comment, quoted, in a block, so
-# nothing in it becomes a link, a mention or a macro, and its last line,
-# the one it is found again by.
+# the comment, quoted, in a block, so nothing in it becomes a link, a
+# mention or a macro, and its last line, the one it is found again by,
+# after it. Its first line is the block's too when it names who wrote it
+# (COMMENT_NAMES), as the sign-in proxy names them: "Written in Lapilli:"
+# alone comes before it.
 wiki_comment() {
   jq -Rsc "$block"'rtrimstr("\n") | split("\n")
-    | {body: (.[0] + "\n\n" + (.[1:-1] | join("\n") | ltrimstr("\n") | rtrimstr("\n") | block) + "\n\n" + .[-1])}' "$1"
+    | (if .[0] == "Written in Lapilli:" then 1 else 0 end) as $from
+    | {body: ((.[0:$from] | map(. + "\n\n") | join(""))
+        + (.[$from:-1] | join("\n") | ltrimstr("\n") | rtrimstr("\n") | block) + "\n\n" + .[-1])}' "$1"
 }
 
 t_comment() {

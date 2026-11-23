@@ -293,3 +293,28 @@ func TestTrackerRecipeOwnWithoutEdits(t *testing.T) {
 		t.Errorf("edited times, no t_edit: %d\n%s", g.f.edited(), out)
 	}
 }
+
+// Jira Data Center: with COMMENT_NAMES, who wrote a comment, as the
+// sign-in proxy names them, is in the block with the comment, so a name
+// holding wiki markup mentions no one and shows no image.
+func TestTrackerRecipeJiraDCNameInBlock(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "jira-dc")
+	g.mustRun(t)
+	const who = "[~admin] !https://evil.example/i.png!"
+	if _, err := g.s.l.PutComment(context.Background(), ledger.Comment{On: "task", Key: "1", Body: "Raised it."}, who); err != nil {
+		t.Fatal(err)
+	}
+	g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
+	g.f.mu.Lock()
+	cs := g.f.issue(1).comments
+	g.f.mu.Unlock()
+	if len(cs) != 1 {
+		t.Fatalf("posted %d", len(cs))
+	}
+	lines := strings.Split(cs[0].body, "\n")
+	end := slices.Index(lines[1:], "{noformat}") + 1
+	if lines[0] != "{noformat}" || end < 2 || lines[1] != who+" wrote in Lapilli:" || slices.Contains(lines[end:], who+" wrote in Lapilli:") {
+		t.Errorf("the name isn't in the block:\n%s", cs[0].body)
+	}
+}

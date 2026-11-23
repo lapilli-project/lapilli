@@ -98,8 +98,10 @@ personal access token as a Bearer token (Jira 8.14 and later), users by
 their key, and text in wiki markup rather than Atlassian Document Format:
 the task's text and its names go in a `{noformat}` block, so a PromQL
 selector's braces aren't taken for a macro and `[~name]` mentions no one,
-and a comment posted from Lapilli is quoted in one, between who wrote it
-and its marker; a `{noformat}` in either is broken by a zero-width space,
+and a comment posted from Lapilli is quoted in one, before its marker,
+with who wrote it in the block too where `COMMENT_NAMES` names them, so a
+name the sign-in proxy gives mentions no one either; a `{noformat}` in
+either is broken by a zero-width space,
 so it can't end the block. A project whose fields use the plain text
 renderer shows the `{noformat}` lines as they are. A Jira Data Center that
 doesn't give `statuscategorychangedate` is read by `resolutiondate`, as

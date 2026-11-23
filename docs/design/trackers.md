@@ -263,9 +263,10 @@ pages); neither is checked against a real account yet.
   the done category. Users are by `key`, which a rename doesn't change.
   Text is wiki markup, not Atlassian Document Format, and wiki markup has
   no escape that holds everywhere: the task's text and its names go in a
-  `{noformat}` block, and a posted comment is quoted in one, so a PromQL
-  selector's braces aren't a macro, `[~name]` mentions no one and `!URL!`
-  shows no image. Only `{noformat}` ends the block, and one in the text is
+  `{noformat}` block, and a posted comment is quoted in one, with who
+  wrote it where `COMMENT_NAMES` says (a name is the sign-in proxy's, and
+  may be anything), so a PromQL selector's braces aren't a macro,
+  `[~name]` mentions no one and `!URL!` shows no image. Only `{noformat}` ends the block, and one in the text is
   broken by a zero-width space. The link back and the marker line are
   told from the end of what `issue_text` writes, so no line of a task's
   text is taken for them and moved out of the block. A Jira that doesn't
