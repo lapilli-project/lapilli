@@ -2,6 +2,7 @@ package oncall
 
 import (
 	"fmt"
+	"math/bits"
 	"strconv"
 	"strings"
 	"time"
@@ -261,9 +262,10 @@ func (r *rule) periodOf(start, w time.Time) int {
 // the month, or for yearly without BYMONTH in the year), then BYSETPOS.
 // Days a month doesn't have (30 February, the 31st of a month of 30) are
 // skipped, not rolled over. Days before the start are still in it. work
-// is the steps working them out took: one, or one a month a yearly
-// repeat looks at; each day it gives is a step more, as its caller takes
-// it.
+// is the steps working them out took: one for the period, or one for each
+// month a yearly repeat looks at, and one for each day the period made,
+// those BYSETPOS or a limiting part dropped among them, so a rule that
+// makes a year of days to keep one pays for the year.
 func (r *rule) days(start time.Time, p int, buf []time.Time) (out []time.Time, work int) {
 	b := r.begin(start, p)
 	out = buf[:0]
@@ -273,6 +275,7 @@ func (r *rule) days(start time.Time, p int, buf []time.Time) (out []time.Time, w
 	work = 1
 	switch r.freq {
 	case daily:
+		work++
 		y, m, d := b.Date()
 		if r.monthOK(m) && (!r.byMonthDay || r.monthDays(y, m)&(1<<d) != 0) && (!r.byDay || r.plain[b.Weekday()]) {
 			out = append(out, at(y, m, d))
@@ -280,6 +283,7 @@ func (r *rule) days(start time.Time, p int, buf []time.Time) (out []time.Time, w
 	case weekly:
 		if !r.byDay {
 			// The start's weekday, every INTERVAL weeks.
+			work++
 			d := b.AddDate(0, 0, (int(start.Weekday())-int(r.wkst)+7)%7)
 			if r.monthOK(d.Month()) {
 				out = append(out, at(d.Date()))
@@ -288,24 +292,30 @@ func (r *rule) days(start time.Time, p int, buf []time.Time) (out []time.Time, w
 		}
 		for i := range 7 {
 			d := b.AddDate(0, 0, i)
-			if r.plain[d.Weekday()] && r.monthOK(d.Month()) {
+			if !r.plain[d.Weekday()] {
+				continue
+			}
+			if work++; r.monthOK(d.Month()) {
 				out = append(out, at(d.Date()))
 			}
 		}
 	case monthly:
 		y, m, _ := b.Date()
 		if r.monthOK(m) {
-			out = r.inMonth(out, r.monthMask(y, m, start.Day()), y, m, at)
+			mask, made := r.monthMask(y, m, start.Day())
+			work += made
+			out = r.inMonth(out, mask, y, m, at)
 		}
 	case yearly:
 		y := b.Year()
 		// BYDAY without BYMONTH numbers its days in the year.
 		var inYear [13]uint32
+		made := 0
 		numbered := r.byDay && r.months == 0
 		if numbered {
-			inYear = r.byDayInYear(y)
+			inYear, made = r.byDayInYear(y)
 		}
-		work = 0
+		work = made
 		for m := time.January; m <= time.December; m++ {
 			switch {
 			case r.months != 0 && r.months&(1<<m) == 0:
@@ -319,7 +329,9 @@ func (r *rule) days(start time.Time, p int, buf []time.Time) (out []time.Time, w
 			case numbered && r.byMonthDay:
 				mask &= r.monthDays(y, m)
 			case !numbered:
-				mask = r.monthMask(y, m, start.Day())
+				var made int
+				mask, made = r.monthMask(y, m, start.Day())
+				work += made
 			}
 			out = r.inMonth(out, mask, y, m, at)
 		}
@@ -346,19 +358,25 @@ func (r *rule) monthOK(m time.Month) bool { return r.months == 0 || r.months&(1<
 
 // monthMask is the days of a month a monthly repeat holds, or a yearly
 // one numbering its days in the month: by BYMONTHDAY, BYDAY limiting it;
-// by BYDAY; else the start's day of the month, if the month has it.
-func (r *rule) monthMask(y int, m time.Month, day int) uint32 {
+// by BYDAY; else the start's day of the month, if the month has it. made
+// is how many days the part that expands the month made, before BYDAY
+// limited them.
+func (r *rule) monthMask(y int, m time.Month, day int) (mask uint32, made int) {
 	switch {
-	case r.byMonthDay && r.byDay:
-		return r.monthDays(y, m) & r.byDayInMonth(y, m)
 	case r.byMonthDay:
-		return r.monthDays(y, m)
+		mask = r.monthDays(y, m)
+		made = bits.OnesCount32(mask)
+		if r.byDay {
+			mask &= r.byDayInMonth(y, m)
+		}
+		return mask, made
 	case r.byDay:
-		return r.byDayInMonth(y, m)
+		mask = r.byDayInMonth(y, m)
+		return mask, bits.OnesCount32(mask)
 	case day <= daysIn(y, m):
-		return 1 << day
+		return 1 << day, 1
 	}
-	return 0
+	return 0, 0
 }
 
 // monthDays is BYMONTHDAY in a month, bit d for its day d: -1 its last.
@@ -396,9 +414,9 @@ func (r *rule) byDayInMonth(y int, m time.Month) uint32 {
 
 // byDayInYear is BYDAY in a year, by month: each weekday named alone, and
 // the nth of a weekday from the year's start or, for -n, from its end (the
-// 20th Monday of the year, RFC 5545's example).
-func (r *rule) byDayInYear(y int) [13]uint32 {
-	var out [13]uint32
+// 20th Monday of the year, RFC 5545's example); and how many days it
+// made.
+func (r *rule) byDayInYear(y int) (out [13]uint32, made int) {
 	jan1 := time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)
 	days := time.Date(y, 12, 31, 0, 0, 0, 0, time.UTC).YearDay()
 	wd1 := int(jan1.Weekday())
@@ -412,10 +430,11 @@ func (r *rule) byDayInYear(y int) [13]uint32 {
 			if r.plain[d] || r.nth[d][0]&(1<<j) != 0 || r.nth[d][1]&(1<<(count-j+1)) != 0 {
 				day := jan1.AddDate(0, 0, first+7*(j-1))
 				out[day.Month()] |= 1 << day.Day()
+				made++
 			}
 		}
 	}
-	return out
+	return out, made
 }
 
 // inMonth appends the days of mask, in order.

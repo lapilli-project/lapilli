@@ -164,4 +164,10 @@ t_edit() {
   jira again PUT "/issue/$1/comment/$2" "$(doc "$3")" >/dev/null
 }
 
+# t_shown: a comment as t_comments reads it back, from the document it
+# was sent as.
+t_shown() {
+  doc "$1" | jq -r "$adf"'.body | adf'
+}
+
 sync_tasks

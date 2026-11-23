@@ -98,8 +98,10 @@ personal access token as a Bearer token (Jira 8.14 and later), users by
 their key, and text in wiki markup rather than Atlassian Document Format:
 the task's text and its names go in a `{noformat}` block, so a PromQL
 selector's braces aren't taken for a macro and `[~name]` mentions no one,
-and a comment posted from Lapilli is quoted in one, between who wrote it
-and its marker; a `{noformat}` in either is broken by a zero-width space,
+and a comment posted from Lapilli is quoted in one, before its marker,
+with who wrote it in the block too where `COMMENT_NAMES` names them, so a
+name the sign-in proxy gives mentions no one either; a `{noformat}` in
+either is broken by a zero-width space,
 so it can't end the block. A project whose fields use the plain text
 renderer shows the `{noformat}` lines as they are. A Jira Data Center that
 doesn't give `statuscategorychangedate` is read by `resolutiondate`, as
@@ -210,14 +212,19 @@ repository, to everyone. Turn it on only where that is meant.
 A comment edited after it was carried is carried again, either way, by
 when each was last changed. A comment people wrote here, changed after the
 tracker last changed the job's post of it, has the post changed to what
-would be posted now (unless the post holds that already); a comment from
+would be posted now, unless the post holds that already, as the tracker
+gives back what it was sent (in Jira Data Center's block, GitLab's lines
+starting with `/` escaped, Azure Boards' text read as HTML): a save in
+Lapilli that changed nothing edits nothing in the tracker. A comment from
 the tracker changed there after Lapilli copied it is taken again, as the
 tracker's, with the tracker's time for the change, and Lapilli keeps only
 an edit later than the one it has, so each is taken once. The times are
 the tracker's and Lapilli's, two clocks, as with `CLOSE_ISSUES`: an edit
 here within their difference after the post may be missed. Only the job's
 own post is changed; one someone changed in the tracker since isn't
-changed back until the comment is edited again here. A comment deleted
+changed back until the comment is edited again here. An edit the tracker
+refuses (a 4xx) is said and passed over, as it is each run, and holds up
+neither the task's other edits nor the tracker's. A comment deleted
 isn't followed, either way ([trackers.md](../../docs/design/trackers.md),
 "Edits followed"). `MAX_COMMENTS` bounds how many go each way for a task
 in a run, posts, copies and edits each; the rest go the next. A comment changes when an issue last changed, not when
@@ -341,7 +348,9 @@ alone, without `tracker`, opens the port for a job of your own, named in
 
 Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` (and
 `t_comments` and `t_comment`, for comments; a comment's `edited` time and
-`t_edit`, for its edits, each followed only where the recipe has it) as
+`t_edit`, for its edits, each followed only where the recipe has it, and
+`t_shown` where the tracker gives a comment back otherwise than it was
+sent) as
 `lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
 requests, `gone` for an answer that says an issue isn't there, and the jq
 `kept` for the marker line. Please send it here.

@@ -291,8 +291,8 @@ func TestRepeatsHostile(t *testing.T) {
 
 // A repeat steps on the clock it is written on: a weekly 09:00 turn in an
 // IANA zone stays at 09:00 when the clocks change, and a turn written at
-// a time the clocks skip or show twice is read as RFC 5545 reads it (the
-// offset before a gap; the first of two).
+// a time the clocks skip or show twice is read as RFC 5545 (3.3.5) reads a
+// DTSTART (the offset before a gap; the first of two).
 func TestRepeatsOnTheClock(t *testing.T) {
 	cfg := config(t, "  - {name: s, file: x}\n")
 	f, err := Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\n"+
@@ -312,6 +312,54 @@ func TestRepeatsOnTheClock(t *testing.T) {
 	} {
 		if got := whoAt(f.Turns, at); got != who {
 			t.Errorf("at %s: %q, want %q", at, got, who)
+		}
+	}
+}
+
+// Every day a period makes is a step, those BYSETPOS drops too (L17): a
+// yearly repeat of every day that keeps the 366th from the end, none in a
+// year of 365, pays for each year's days, and 2,000 of them (340 KB)
+// pass the steps a feed may take, where each paid for its months alone,
+// 98,000 steps in all, and held a CPU for seconds.
+func TestRepeatsSetPosSteps(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	const rule = "FREQ=YEARLY;BYDAY=SU,MO,TU,WE,TH,FR,SA;BYSETPOS=-366"
+	event := func(uid int) string {
+		return fmt.Sprintf("BEGIN:VEVENT\r\nUID:p%d\r\nDTSTART:20200101T000000Z\r\nDURATION:PT1H\r\nRRULE:%s\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", uid, rule)
+	}
+	parse := func(body string) (*Feed, error) {
+		return Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\n"+body+"END:VCALENDAR\r\n"), cfg.Schedules[0], cfg, now)
+	}
+	// From 2024, as the span read is skipped to, to 2027: four years, each
+	// its 12 months and its 365 or 366 days.
+	f, err := parse(event(0))
+	if err != nil || f.steps < 4*(12+365) || len(f.Turns) != 0 {
+		t.Errorf("one repeat: %v, %d steps, want %d at least, %d turns", err, f.steps, 4*(12+365), len(f.Turns))
+	}
+	var many strings.Builder
+	for i := range 2000 {
+		many.WriteString(event(i))
+	}
+	if _, err := parse(many.String()); err == nil || !strings.Contains(err.Error(), "steps") {
+		t.Errorf("2,000 repeats keeping a day in 366: %v, want the feed's steps passed", err)
+	}
+}
+
+// A repeat's day at a time the clocks skip is kept, moved past the gap,
+// and counted (L20). RFC 5545 3.3.10 says such an occurrence MUST be
+// ignored and not counted, and further on that it is read as 3.3.5 reads a
+// DTSTART: Lapilli does the second, on purpose, as a turn dropped would
+// leave the pager with no one. Daily at 02:30 in Los Angeles, three times
+// from 7 March 2026: the 8th's 02:30 doesn't exist, and is 03:30 PDT.
+func TestRepeatsSkippedTimeKept(t *testing.T) {
+	for _, tz := range []string{"America/Los_Angeles", "Pacific Standard Time"} {
+		f := parseFeed(t, pacific+"BEGIN:VEVENT\r\nDTSTART;TZID="+tz+":20260307T023000\r\nDURATION:PT10M\r\nRRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n")
+		var got []string
+		for _, x := range f.Turns {
+			got = append(got, x.From.UTC().Format("01-02T15:04"))
+		}
+		if want := "03-07T10:30 03-08T10:30 03-09T09:30"; strings.Join(got, " ") != want {
+			t.Errorf("%s: %v, want %s", tz, got, want)
 		}
 	}
 }

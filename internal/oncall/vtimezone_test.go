@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/verdict"
 )
@@ -88,10 +89,10 @@ func TestOutlookVTimezone(t *testing.T) {
 	}
 }
 
-// A time the clocks skip, or show twice, in a feed's own zone is read as
-// RFC 5545 (3.3.5) reads one, and as the IANA zone is: 02:30 on the night
-// the clocks go forward by the offset before (03:30 after); 02:30 or 01:30
-// on the night they go back, the first.
+// A DTSTART at a time the clocks skip, or show twice, in a feed's own zone
+// is read as RFC 5545 (3.3.5) reads one, and as the IANA zone is: 02:30 on
+// the night the clocks go forward by the offset before (03:30 after);
+// 02:30 or 01:30 on the night they go back, the first.
 func TestVTimezoneGapAndOverlap(t *testing.T) {
 	for _, c := range []struct{ tz, iana, at, want string }{
 		{"Pacific Standard Time", "America/Los_Angeles", "20260308T023000", "2026-03-08T10:35:00Z"},
@@ -116,9 +117,10 @@ func TestVTimezoneAfterEvents(t *testing.T) {
 	}
 }
 
-// Which zone a TZID is: an IANA name, though the feed gives a VTIMEZONE
-// of its own for it (Google writes both); else the feed's VTIMEZONE,
-// though the name is a Windows one too; else the Windows name by CLDR's
+// Which zone a TZID is: an IANA name of a place, though the feed gives a
+// VTIMEZONE of its own for it (Google writes both); else the feed's
+// VTIMEZONE, though the name is IANA's for a fixed offset (EST) or a
+// Windows one too; else IANA's name, or the Windows name by CLDR's
 // table. A VTIMEZONE of STANDARD alone is an offset that doesn't change.
 // Outlook's older names, which hold commas, are matched as written. A zone
 // none of these is, is said.
@@ -129,8 +131,15 @@ func TestZoneLookup(t *testing.T) {
 	older := "BEGIN:VTIMEZONE\r\nTZID:(UTC+01:00) Amsterdam\\, Berlin\\, Bern\\, Rome\\, Stockholm\\, Vienna\r\n" +
 		"BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n" +
 		"BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+	est := "BEGIN:VTIMEZONE\r\nTZID:EST\r\n" +
+		"BEGIN:STANDARD\r\nDTSTART:19701101T020000\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\nRRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU\r\nEND:STANDARD\r\n" +
+		"BEGIN:DAYLIGHT\r\nDTSTART:19700308T020000\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
 	for _, c := range []struct{ name, zones, tz, want string }{
 		{"IANA over the feed's", wrongNewYork, "America/New_York", "2026-07-06T13:30:00Z"},
+		// EST is IANA's fixed -0500; the feed's EST keeps summer time (L19).
+		{"the feed's EST over IANA's", est, "EST", "2026-07-06T13:30:00Z"},
+		{"IANA's EST, with none", "", "EST", "2026-07-06T14:30:00Z"},
+		{"the feed's Etc/GMT+5 over IANA's", strings.ReplaceAll(est, "TZID:EST", "TZID:Etc/GMT+5"), "Etc/GMT+5", "2026-07-06T13:30:00Z"},
 		{"the feed's over the table", ninePacific, "Pacific Standard Time", "2026-07-06T00:30:00Z"},
 		{"the table, with no VTIMEZONE", "", "Pacific Standard Time", "2026-07-06T16:30:00Z"},
 		{"the table, a zone east", "", "Korea Standard Time", "2026-07-06T00:30:00Z"},
@@ -203,7 +212,8 @@ func TestVTimezoneHostile(t *testing.T) {
 		}
 		fmt.Fprintf(&rdates, "%04d0101T000000", 1000+i)
 	}
-	daily := part("STANDARD", "19700101T000000", "+0200", "+0100", "RRULE:FREQ=DAILY\r\n") + part("DAYLIGHT", "19700101T120000", "+0100", "+0200", "RRULE:FREQ=DAILY\r\n")
+	often := part("STANDARD", "19700101T000000", "+0200", "+0100", "RRULE:FREQ=YEARLY;BYMONTH=1;BYDAY=MO,TU,WE,TH,FR\r\n") +
+		part("DAYLIGHT", "19700101T120000", "+0100", "+0200", "RRULE:FREQ=YEARLY;BYMONTH=1;BYDAY=MO,TU,WE,TH,FR\r\n")
 	for name, c := range map[string]struct{ zone, says string }{
 		"too many parts":    {zoneOf(parts.String()), "more than 64"},
 		"too many RDATEs":   {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RDATE:"+rdates.String()+"\r\n")), "more than 1000 RDATEs"},
@@ -215,8 +225,11 @@ func TestVTimezoneHostile(t *testing.T) {
 		"no offsets":        {zoneOf("BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nEND:STANDARD\r\n"), "without its DTSTART"},
 		"no parts":          {zoneOf(""), "no STANDARD or DAYLIGHT"},
 		"an onset in UTC":   {zoneOf(part("STANDARD", "19700101T000000Z", "+0100", "+0100", "")), "a time on the clock"},
-		"changing daily":    {zoneOf(daily), "changes more than 16 times"},
-		"counting too many": {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RRULE:FREQ=DAILY;COUNT=5000\r\n")), "more than 2000"},
+		"changing often":    {zoneOf(often), "changes more than 16 times"},
+		"a daily rule":      {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RRULE:FREQ=DAILY\r\n")), "repeats daily, where a zone's repeats yearly"},
+		"a monthly rule":    {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RRULE:FREQ=MONTHLY;BYDAY=-1SU\r\n")), "repeats monthly"},
+		"a year of no day":  {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29\r\n")), "holds no day in 2025"},
+		"counting too many": {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RRULE:FREQ=YEARLY;BYDAY=SU,MO,TU,WE,TH,FR,SA;COUNT=5000\r\n")), "more than 2000"},
 		"a bad rule":        {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RRULE:FREQ=YEARLY;BYDAY=0SU\r\n")), "by day"},
 		"periods":           {zoneOf(part("STANDARD", "19700101T000000", "+0100", "+0100", "RDATE;VALUE=PERIOD:19800101T000000/PT1H\r\n")), "periods"},
 	} {
@@ -239,14 +252,14 @@ func TestVTimezoneHostile(t *testing.T) {
 	if whoAt(f.Turns, "2026-11-03T03:30:00Z") != "Sam Lee" {
 		t.Errorf("-1800: %+v %q", f.Turns, f.Notes)
 	}
-	// 64 parts whose rules never hold a day (30 February): their DTSTARTs
-	// are the onsets, looked back for a few periods each.
+	// 64 parts whose rules never hold a day (30 February): refused at the
+	// first period looked at.
 	var never strings.Builder
 	for i := range maxObservances {
-		never.WriteString(part("STANDARD", fmt.Sprintf("%04d0101T000000", 1601+i), "+0100", "+0300", "RRULE:FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=30\r\n"))
+		never.WriteString(part("STANDARD", fmt.Sprintf("%04d0101T000000", 1601+i), "+0100", "+0300", "RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30\r\n"))
 	}
 	f = parseFeed(t, zoneOf(never.String())+event)
-	if whoAt(f.Turns, "2026-11-02T06:30:00Z") != "Sam Lee" || f.steps > 64*(3*12+lookBack)*3 {
+	if len(f.Turns) != 0 || !strings.Contains(strings.Join(f.Notes, " "), "holds no day") || f.steps > 10 {
 		t.Errorf("rules that never hold a day: %+v %q, %d steps", f.Turns, f.Notes, f.steps)
 	}
 	// Blocks nested deep in a VTIMEZONE, never closed: counted, not
@@ -265,5 +278,45 @@ func TestVTimezoneHostile(t *testing.T) {
 	f = parseFeed(t, zoneOf(everyDay.String())+event)
 	if len(f.Turns) != 0 || !strings.Contains(strings.Join(f.Notes, " "), "changes more than 16") || f.steps > 2*(12+366) {
 		t.Errorf("64 parts by every day: %+v %q, %d steps", f.Turns, f.Notes, f.steps)
+	}
+}
+
+// What a VTIMEZONE says of a time is the same whichever of its times were
+// read before (L18). A part's onset was looked for 8 periods back, or
+// taken from the year before when that was worked out: a monthly rule
+// changing once a year (1 March) gave 10 February 2026 its other part's
+// offset, +0200, read first, and +0100 after a time of 2025. A zone's rule
+// is now yearly, and holds a day every year, so its last onset is in the
+// year of a time or the one before, and each year is worked out alone.
+func TestVTimezoneReadOrder(t *testing.T) {
+	zone := func(rule string) string {
+		return "BEGIN:VTIMEZONE\r\nTZID:Acme Time\r\n" +
+			"BEGIN:STANDARD\r\nDTSTART:20000101T000000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nRRULE:" + rule + "\r\nEND:STANDARD\r\n" +
+			"BEGIN:DAYLIGHT\r\nDTSTART:20000102T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+	}
+	for _, c := range []struct{ name, zone, tz, says, want string }{
+		{"a monthly rule", zone("FREQ=MONTHLY;BYMONTH=3;BYMONTHDAY=1"), "Acme Time", "repeats monthly", ""},
+		{"29 February", zone("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29"), "Acme Time", "holds no day", ""},
+		{"once a year", zone("FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=1"), "Acme Time", "", "2026-02-10T11:00:00Z"},
+		{"Outlook's", pacific, "Pacific Standard Time", "", "2026-02-10T20:00:00Z"},
+	} {
+		feb := single("Sam Lee", c.tz, "20260210T120000", "PT1H")
+		var got []string
+		for _, body := range []string{c.zone + feb, c.zone + single("Ali Kaya", c.tz, "20250601T120000", "PT1H") + feb} {
+			f := parseFeed(t, body)
+			at := ""
+			for _, x := range f.Turns {
+				if x.Who == "Sam Lee" {
+					at = x.From.UTC().Format(time.RFC3339)
+				}
+			}
+			if at != c.want || c.says != "" && !strings.Contains(strings.Join(f.Notes, " "), c.says) {
+				t.Errorf("%s: Sam's turn at %q, want %q; notes %q", c.name, at, c.want, f.Notes)
+			}
+			got = append(got, at)
+		}
+		if got[0] != got[1] {
+			t.Errorf("%s: %q read first, %q after a time of 2025", c.name, got[0], got[1])
+		}
 	}
 }

@@ -305,18 +305,23 @@ attendees, or two events that start together, are said; a turn that starts
 during another holds until it ends. An event that can't be read is passed
 over and said, and the turns kept of whoever it names stay as they were.
 Times are read in UTC, floating (the schedule's `tz`), or with a `TZID`:
-an IANA name; else the feed's own `VTIMEZONE` of that name, as Outlook
-and Exchange write one for `Pacific Standard Time`; else, with none, a
-Windows name by CLDR's table. A time the clocks skip is read by the
-offset before (02:30 is 03:30), one they show twice is the first.
-Daily, weekly, monthly and yearly repeats are expanded on the clock they
-are written on, so a weekly 09:00 turn stays at 09:00 when the clocks
-change: with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (numbered for monthly
-and yearly, as `1MO` or `-1FR`), `BYMONTHDAY`, `BYMONTH`, `BYSETPOS` and
-`WKST`, a day a month doesn't have skipped, with `EXDATE` and
-occurrences replaced by `RECURRENCE-ID`. What can't be read (`BYWEEKNO`,
-`BYYEARDAY`, `BYHOUR`, a repeat more often than daily, a zone none of
-these is) is passed over and said. A feed's URL holds its secret, so it is
+an IANA name of a place, such as `Europe/Berlin`; else the feed's own
+`VTIMEZONE` of that name, as Outlook and Exchange write one for `Pacific
+Standard Time` (it wins over IANA's `EST`, a fixed -0500, when it keeps
+summer time); else, with none, IANA's name or a Windows name by CLDR's
+table. A zone's own rules are yearly, a day each year. A time the clocks
+show twice is the first, as RFC 5545 has it. A time they skip is read by
+the offset before (02:30 is 03:30), as RFC 5545 reads a `DTSTART`; a
+repeat's day there is kept, and counted, where RFC 5545 (3.3.10) also
+says it is ignored: Lapilli does so on purpose, as a turn dropped would
+leave no one on call. Daily, weekly, monthly and yearly repeats are
+expanded on the clock they are written on, so a weekly 09:00 turn stays
+at 09:00 when the clocks change: with `INTERVAL`, `COUNT`, `UNTIL`,
+`BYDAY` (numbered for monthly and yearly, as `1MO` or `-1FR`),
+`BYMONTHDAY`, `BYMONTH`, `BYSETPOS` and `WKST`, a day a month doesn't have
+skipped, with `EXDATE` and occurrences replaced by `RECURRENCE-ID`. What
+can't be read (`BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, a repeat more often than
+daily, a zone none of these is) is passed over and said. A feed's URL holds its secret, so it is
 read from its file, never shown or logged, fetched over https only, with
 no redirect followed, 8 MB and 30 seconds at most. `lapilli serve` reads
 each feed every `every` (30 minutes by default) and keeps the turns in its ledger past what the feed

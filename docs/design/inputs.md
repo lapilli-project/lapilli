@@ -284,16 +284,23 @@ people:
   `BYMONTH` and `BYSETPOS`, as RFC 5545's table of BYxxx parts has them;
   a day a month doesn't have is skipped. Every repeat is worked out on the
   clock it is written on, each day then made an instant in its zone. A
-  `TZID` that isn't an IANA name is read by the feed's own `VTIMEZONE`, or,
-  with none, as a Windows name by CLDR's table; an IANA name still wins,
-  and a `VTIMEZONE` wins over the table. A time the clocks skip, or show
-  twice, is read as RFC 5545 (3.3.5) reads one. `BYWEEKNO`, `BYYEARDAY`,
-  `BYHOUR` and repeats more often than daily are still passed over. The
-  bounds: a step is a period and each day it holds, 2,000,000 a feed, its
-  zones' among them; 100 `VTIMEZONE`s a feed, 64 parts and 1,000 `RDATE`s
-  each, offsets within 18 hours, 16 changes a year; a zone is worked out
-  a year at a time for the years asked, so Outlook's rules from 1601 cost
-  a few steps.
+  `TZID` is read by the feed's own `VTIMEZONE` of its name, or, with none,
+  as IANA's name or a Windows one by CLDR's table; an IANA name of a
+  place (`Europe/Berlin`) still wins over a `VTIMEZONE`, IANA's names for
+  a fixed offset (`EST`, `Etc/GMT+5`) don't. A `VTIMEZONE`'s rules are
+  yearly and hold a day each year, so each year is worked out alone,
+  whatever was read before. A `DTSTART` the clocks skip, or show twice, is
+  read as RFC 5545 (3.3.5) reads one. A repeat's day the clocks skip is
+  read so too, kept and counted: RFC 5545 (3.3.10) says such a day "MUST
+  be ignored", and, further on, that it is read as 3.3.5 says; Lapilli
+  departs from the first on purpose, as a turn dropped would leave the
+  pager with no one. `BYWEEKNO`, `BYYEARDAY`, `BYHOUR` and repeats more
+  often than daily are still passed over. The bounds: a step is a period
+  and each day it makes, BYSETPOS's dropped among them, 2,000,000 a feed,
+  its zones' among them; 100 `VTIMEZONE`s a feed, 64 parts and 1,000
+  `RDATE`s each, offsets within 18 hours, 16 changes a year; a zone is
+  worked out a year at a time for the years asked, so Outlook's rules
+  from 1601 cost a few steps.
 
 ### Attacker's look
 

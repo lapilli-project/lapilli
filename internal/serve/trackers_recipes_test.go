@@ -182,6 +182,8 @@ type fakeTracker struct {
 	// noStatusDate: Jira doesn't give statuscategorychangedate, only
 	// resolutiondate, as a Jira without the field.
 	noStatusDate bool
+	// noEdit: GitHub refuses to change a comment.
+	noEdit bool
 	// lastComment numbers comments; posted counts those the recipe posts,
 	// and edits those it edits.
 	lastComment, posted, edits int
@@ -453,6 +455,10 @@ var trackerAPIs = map[string]trackerAPI{
 						return map[string]any{"id": c.id, "user": map[string]any{"login": login}, "body": c.body, "created_at": c.at.UTC().Format(time.RFC3339),
 							"updated_at": c.editedAt().UTC().Format(time.RFC3339)}
 					}, false), page, 100))
+					return
+				}
+				if cn := commentPath(`^/repos/example/alerts/issues/comments/([0-9]+)$`, r.URL.Path); cn > 0 && r.Method == "PATCH" && f.noEdit {
+					http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
 					return
 				}
 				if cn := commentPath(`^/repos/example/alerts/issues/comments/([0-9]+)$`, r.URL.Path); cn > 0 && r.Method == "PATCH" {

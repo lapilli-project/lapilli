@@ -293,3 +293,94 @@ func TestTrackerRecipeOwnWithoutEdits(t *testing.T) {
 		t.Errorf("edited times, no t_edit: %d\n%s", g.f.edited(), out)
 	}
 }
+
+// A save in Lapilli that changes nothing moves the comment's time, and
+// edits nothing in the tracker, nor tells its watchers, though the post
+// reads back otherwise than it was sent (every tracker): Jira Data
+// Center's in a block, GitLab's line starting with / escaped (a name the
+// sign-in proxy gives, with COMMENT_NAMES), Azure Boards' read as HTML.
+func TestTrackerRecipesCommentEditsUnchanged(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			ctx := context.Background()
+			g.mustRun(t)
+			const who, body = "/cy@example.com", "Raised it: errors < 5 && latency > 2s, at <b>night</b> & noon."
+			mine, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: body}, who)
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
+			if g.f.posts() != 1 {
+				t.Fatalf("posted %d", g.f.posts())
+			}
+			time.Sleep(1100 * time.Millisecond)
+			if _, err := g.s.l.PutComment(ctx, ledger.Comment{ID: mine, Body: body}, who); err != nil {
+				t.Fatal(err)
+			}
+			if c, _ := g.s.l.CommentByID(ctx, mine); !c.Updated.After(c.Created) {
+				t.Fatalf("the save didn't move the comment's time: %+v", c)
+			}
+			out := g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
+			if g.f.edited() != 0 || !strings.Contains(out, "carried 0 edits to issues") {
+				t.Errorf("a save that changed nothing edited the post %d times\n%s", g.f.edited(), out)
+			}
+		})
+	}
+}
+
+// A tracker that refuses to change a comment holds up nothing else: the
+// refusal is said, and passed over, and the tracker's own edit is still
+// taken, run after run.
+func TestTrackerRecipesCommentEditRefused(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	ctx := context.Background()
+	g.mustRun(t)
+	mine, _ := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Raised it."}, "ana@example.com")
+	g.f.mu.Lock()
+	theirs := g.f.comment(g.f.issue(1), "someone", "Fine.")
+	g.f.mu.Unlock()
+	g.mustRun(t, "COMMENTS=true")
+	time.Sleep(1100 * time.Millisecond)
+	g.s.l.PutComment(ctx, ledger.Comment{ID: mine, Body: "Raised it more."}, "ana@example.com")
+	g.f.with(func() {
+		g.f.noEdit = true
+		g.f.reword(g.f.issue(1), theirs, "Fine, but watch Fridays.")
+	})
+	out, err := g.run("COMMENTS=true")
+	if err != nil || !strings.Contains(out, "refused the edit of comment") || !strings.Contains(out, "took 1 edits from them, passed over 1 the tracker refused") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	cs, _ := g.s.l.Comments(ctx, "task", "1")
+	if !slices.ContainsFunc(cs, func(c ledger.Comment) bool { return c.Body == "Fine, but watch Fridays." }) {
+		t.Errorf("the tracker's edit wasn't taken: %+v", cs)
+	}
+}
+
+// Jira Data Center: with COMMENT_NAMES, who wrote a comment, as the
+// sign-in proxy names them, is in the block with the comment, so a name
+// holding wiki markup mentions no one and shows no image.
+func TestTrackerRecipeJiraDCNameInBlock(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "jira-dc")
+	g.mustRun(t)
+	const who = "[~admin] !https://evil.example/i.png!"
+	if _, err := g.s.l.PutComment(context.Background(), ledger.Comment{On: "task", Key: "1", Body: "Raised it."}, who); err != nil {
+		t.Fatal(err)
+	}
+	g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
+	g.f.mu.Lock()
+	cs := g.f.issue(1).comments
+	g.f.mu.Unlock()
+	if len(cs) != 1 {
+		t.Fatalf("posted %d", len(cs))
+	}
+	lines := strings.Split(cs[0].body, "\n")
+	end := slices.Index(lines[1:], "{noformat}") + 1
+	if lines[0] != "{noformat}" || end < 2 || lines[1] != who+" wrote in Lapilli:" || slices.Contains(lines[end:], who+" wrote in Lapilli:") {
+		t.Errorf("the name isn't in the block:\n%s", cs[0].body)
+	}
+}

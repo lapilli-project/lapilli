@@ -263,9 +263,10 @@ pages); neither is checked against a real account yet.
   the done category. Users are by `key`, which a rename doesn't change.
   Text is wiki markup, not Atlassian Document Format, and wiki markup has
   no escape that holds everywhere: the task's text and its names go in a
-  `{noformat}` block, and a posted comment is quoted in one, so a PromQL
-  selector's braces aren't a macro, `[~name]` mentions no one and `!URL!`
-  shows no image. Only `{noformat}` ends the block, and one in the text is
+  `{noformat}` block, and a posted comment is quoted in one, with who
+  wrote it where `COMMENT_NAMES` says (a name is the sign-in proxy's, and
+  may be anything), so a PromQL selector's braces aren't a macro,
+  `[~name]` mentions no one and `!URL!` shows no image. Only `{noformat}` ends the block, and one in the text is
   broken by a zero-width space. The link back and the marker line are
   told from the end of what `issue_text` writes, so no line of a task's
   text is taken for them and moved out of the block. A Jira that doesn't
@@ -322,7 +323,12 @@ needed deciding: which edits, which way, by what, and what is left.
 - **Lapilli to the tracker.** A comment people wrote here, posted to its
   issue, and changed here after the tracker last changed the job's post
   of it, has the post changed to what would be posted now (the comment
-  quoted, its marker last), unless the post holds that already. Only the
+  quoted, its marker last), unless the post holds that already: what it
+  would hold, as the tracker gives back what it was sent (`t_shown`:
+  Jira's from Atlassian Document Format, Jira Data Center's in its block,
+  GitLab's lines starting with `/` escaped, Azure Boards' read as HTML), so
+  a save here that changed nothing, which moves the comment's time, edits
+  nothing in the tracker and tells its watchers nothing. Only the
   job's own post, found by the tracker's id Lapilli keeps for it; the
   tracker changes it (`PATCH`, `PUT` or `POST` to the comment, as each
   takes an edit). Once it has, the post is later than the comment, so it
@@ -331,6 +337,9 @@ needed deciding: which edits, which way, by what, and what is left.
   its issue's last change: an edit made here within their difference after
   the post may be missed, and a post someone changed in the tracker after
   the last edit here isn't changed back until the comment is edited again.
+  An edit the tracker refuses (a 4xx, or a comment's id not of its shape)
+  is said and passed over, each run, and holds up nothing else: the
+  task's other edits go on, and so do the tracker's, below.
 - **The tracker to Lapilli.** A comment copied in, changed in the tracker
   after the time Lapilli keeps for it, is sent again with the tracker's
   time for the change, its text made to fit as when it was copied. Lapilli
