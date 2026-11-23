@@ -127,23 +127,48 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 }
 
 // withHeld is o with how long before its start each rule's condition held
-// (verdict.Options.Held), the least of the versions in effect over [from,
-// to] (verdict.HeldFor): what the ledger says a firing came after an
-// incident was over by (ledger.LateOf), as lapilli verdict says it of the
-// rules it replays. Kept when o has it already.
+// (verdict.Options.Held), the least of the versions in effect from the
+// span's start to its end and as long after it as a rule's held at most
+// (verdict.HeldFor): what the ledger says a firing came after an incident
+// was over by (ledger.LateOf), as lapilli verdict says it of the rules it
+// replays, every version having held. A firing after an incident of the
+// span comes that long after its end at most, so every version it can be
+// of has its say. Kept when o has it already.
 func (s *Server) withHeld(ctx context.Context, o verdict.Options, from, to time.Time) (verdict.Options, error) {
 	if o.Held != nil {
 		return o, nil
 	}
-	vs, err := s.versions(ctx, from, to)
+	held := func(to time.Time) (map[string]time.Duration, int, error) {
+		vs, err := s.versions(ctx, from, to)
+		if err != nil {
+			return nil, 0, err
+		}
+		var rs []rules.Rule
+		for _, v := range vs {
+			rs = append(rs, v.Rules...)
+		}
+		return verdict.HeldFor(rs), len(vs), nil
+	}
+	h, n, err := held(to)
 	if err != nil {
 		return o, err
 	}
-	var rs []rules.Rule
-	for _, v := range vs {
-		rs = append(rs, v.Rules...)
+	var most time.Duration
+	for _, d := range h {
+		most = max(most, d)
 	}
-	o.Held = verdict.HeldFor(rs)
+	if most > 0 {
+		// The versions as long after: what more they hold only lowers what
+		// held, so the longest before is long enough.
+		more, m, err := held(to.Add(most))
+		if err != nil {
+			return o, err
+		}
+		if m > n {
+			h = more
+		}
+	}
+	o.Held = h
 	return o, nil
 }
 

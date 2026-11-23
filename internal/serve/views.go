@@ -2004,7 +2004,9 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 	}
 	v := incidentView{incidentLine: s.incidentLine(lang(r), in, t), Labels: labelText(in.Labels), Match: strings.Join(t.o.Match, ", ")}
 	if in.Counts {
-		late, err := s.lateOf(ctx, in.Start, in.Start.Add(time.Second), t.o)
+		// Over the incident, so that the rules as they stood then and up to
+		// the firings after its end judge them (withHeld).
+		late, err := s.lateOf(ctx, in.Start, later(in.EndOr(t.o.UnknownLen), in.Start.Add(time.Second)), t.o)
 		if err != nil {
 			return nil, err
 		}

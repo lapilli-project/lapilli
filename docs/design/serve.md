@@ -306,8 +306,12 @@ agreeing, is that incident's alert, too late (docs/how-it-judges.md):
 changes: it is worked out as the ledger is read (`ledger.LateOf`), from the
 firings, the incidents that count and the catches it keeps, and how long
 before its start each rule's condition held, its `for` and lag, the least
-of the versions in effect over the span read (`verdict.HeldFor`,
-`verdict.Options.Held`). A rule copied in, whose condition serve doesn't
+of the versions in effect from the span's start to its end and as long
+after it as a rule's held at most (`verdict.HeldFor`,
+`verdict.Options.Held`): a firing after an incident of the span comes that
+long after its end at most, and every version it could be of must have
+held, as verdict asks every version of its period. An incident's page reads
+the span of the incident itself. A rule copied in, whose condition serve doesn't
 have, held from its start, and so came after nothing. As a firing's
 stones are given against every incident the ledger has, so is this: a
 firing in the span after an incident before it counts for its rule, and an

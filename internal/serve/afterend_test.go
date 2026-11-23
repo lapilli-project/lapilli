@@ -15,6 +15,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -150,4 +151,35 @@ func TestServeAfterEnd(t *testing.T) {
 		t.Errorf("%s has no translation for %q", lang, msg)
 	}
 	missing.Unlock()
+}
+
+// Errors with no for from 15:01:30, a minute and a half after INC-L ended,
+// before its firing of 15:02 that came after it: one version held its
+// condition only from the firing's start, so no version but every one says
+// the firing came after INC-L, and neither the incident's page nor the
+// list says it did, as lapilli verdict asks every version of a period.
+func TestServeAfterEndEveryVersion(t *testing.T) {
+	s := lateServer(t)
+	ctx := context.Background()
+	noFor := strings.Replace(ruleFile, "for: 2m", "for: 0s", 1)
+	if _, err := s.l.AddVersion(ctx, ledger.Version{Since: time.Date(2026, 11, 1, 15, 1, 30, 0, time.UTC), Digest: "no for",
+		Docs: []rules.Doc{{Source: "shop.yaml", Data: []byte(noFor)}}, Names: []string{"Errors"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, path := range []string{"/incidents", "/incidents/INC-L"} {
+		_, body, _ := get(t, h, path)
+		if text := html.UnescapeString(htmlTags.ReplaceAllString(body, "")); strings.Contains(text, "after its end") || strings.Contains(text, "Nothing in time") {
+			t.Errorf("%s says Errors came after INC-L, its condition held from its start by one version", path)
+		}
+	}
+	_, inc, err := s.toolIncidents(ctx, nil, incidentsIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range inc.Incidents {
+		if len(x.FiredAfter) > 0 {
+			t.Errorf("MCP: %s fired after %+v", x.ID, x.FiredAfter)
+		}
+	}
 }
