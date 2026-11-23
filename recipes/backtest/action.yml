@@ -99,7 +99,7 @@ inputs:
     description: More of lapilli verdict's flags, split at spaces, such as "--rules-select grafana_alert=1 --tz Asia/Seoul". A file they name in the checkout is refused, as the pull request's. An expression with spaces in it goes in impact.
     default: ""
   target:
-    description: The commit the pull request goes into, as the checkout has it. HEAD^1 is the merge commit's first parent; where the checkout isn't a merge (ref pull_request.head.sha), the pull request's own commit, so the branch it goes into is taken instead (fetch-depth 0).
+    description: The commit the pull request goes into, as the checkout has it. HEAD^1 is the merge commit's first parent; where the checkout isn't the merge GitHub made (ref pull_request.head.sha), the pull request's own commit, so the branch it goes into is taken instead (fetch-depth 0). A checkout that is neither the event's head nor that merge is refused with a gate or status. A branch's name is the branch in full (refs/remotes/NAME, then refs/heads/NAME), and one a tag has too is refused; give refs/remotes/origin/main, or a full hash.
     default: HEAD^1
   key:
     description: Tells apart the comments of several jobs on one pull request.

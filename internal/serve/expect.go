@@ -303,8 +303,9 @@ type expectRule struct {
 	key         string
 	def         *rules.Rule
 	// copied says it is only copied in (its source's, as rules lists it);
-	// spans, what its source's copies cover, each span without a gap, the
-	// earliest first: a week or an incident not inside one is not known.
+	// spans, what its source's copies cover of it, each span without a gap
+	// or a period it was left out of them, the earliest first: a week or
+	// an incident not inside one is not known.
 	copied bool
 	spans  [][2]time.Time
 }
@@ -791,8 +792,10 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	}
 	// A rule only copied in is known where its source's copies cover it,
 	// in any span the ledger keeps of them: elsewhere, a week no firing was
-	// copied in for isn't a week none fired.
+	// copied in for isn't a week none fired. Nor is one in a period the
+	// rule alone was left out of them (ledger.LeaveOut).
 	covered := map[string][][2]time.Time{}
+	leftOut := map[string]map[string][][2]time.Time{}
 	for _, r := range rs {
 		row, ok := table[r.id]
 		if r.def != nil || !ok || r.id == 0 || row.Source == "" {
@@ -804,8 +807,11 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 				return false, err
 			}
 			covered[row.Source] = spans
+			if leftOut[row.Source], err = s.l.LeftOut(ctx, row.Source); err != nil {
+				return false, err
+			}
 		}
-		r.copied, r.spans = true, spans
+		r.copied, r.spans = true, ledger.Without(spans, leftOut[row.Source][row.Sent])
 	}
 	old, err := s.l.ExpectChecks(ctx, ledger.ExpectQuery{})
 	if err != nil {

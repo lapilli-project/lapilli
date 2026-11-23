@@ -1187,8 +1187,13 @@ func (s *Server) postProposalTask(w http.ResponseWriter, r *http.Request) {
 	}
 	// None of its links: a task's link is its tracker's issue, which the
 	// tracker job opens for a task without one. Its page shows the
-	// proposal's pull request, through the proposal.
-	t := ledger.Task{Title: clip(fmt.Sprintf("Proposal #%d: %s, %s", p.ID, kindText(p.Kind), p.Rule), 200), Kind: kind, Rule: p.Rule,
+	// proposal's pull request, through the proposal. The proposal's number
+	// is said without #, as prBody says it: the tracker job makes the title
+	// its issue's, where #12 is the host's issue or pull request 12,
+	// mentioned. The task is the proposal's by its id (TaskID), and its
+	// issue the task's by the marker in its text, neither by the title: a
+	// task titled "Proposal #12: ..." before stays the proposal's.
+	t := ledger.Task{Title: clip(fmt.Sprintf("Proposal %d: %s, %s", p.ID, kindText(p.Kind), p.Rule), 200), Kind: kind, Rule: p.Rule,
 		Body: mdCut(s.prBody(ls[0]), 10000)}
 	id, err := s.l.PutTask(ctx, t, s.user(r))
 	if err != nil {

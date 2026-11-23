@@ -47,6 +47,16 @@ api=${COMPASS_API:-https://api.atlassian.com/compass/cloud/$COMPASS_CLOUD_ID/ops
 # The scheme may be in capitals, as curl takes it. This machine is
 # 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
 # starts with one, such as localhost.example.com.
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "compass.sh" >&2
+    exit 1
+    ;;
+esac
 proto=
 case $api in
   *@*)
@@ -59,10 +69,11 @@ case $api in
       127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
       127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
     esac
+    [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
     ;;
 esac
 if [ -z "$proto" ]; then
-  printf 'compass.sh: COMPASS_API is not https\n' >&2
+  printf 'compass.sh: COMPASS_API is not https (PLAIN_HTTP=true takes plain http, to any host)\n' >&2
   exit 1
 fi
 # secret NAME FILE: what FILE holds, one line with no space. Atlassian
@@ -91,8 +102,34 @@ token=$(secret COMPASS_TOKEN_FILE "$COMPASS_TOKEN_FILE")
 auth=$(printf '%s:%s' "$COMPASS_EMAIL" "$token" | base64 | tr -d '\n')
 all=$(mktemp)
 closes=$(mktemp)
-trap 'rm -f "$all" "$closes" "$closes.json"' EXIT
+got=$(mktemp)
+heads=$(mktemp)
+failed=$(mktemp)
+trap 'rm -f "$all" "$closes" "$closes.json" "$got" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# held CURL-ARGUMENTS: curl's answer on stdout, of a 2xx alone, and 16
+# MiB of it at most whatever curl's version (before 8.4.0, --max-filesize
+# caps only an answer that says its length first). Past it, with curl
+# failing, or of any other answer, a redirect among them, which curl
+# doesn't follow, it fails, saying so. curl's stdin is its own, and it
+# reads no .curlrc (-q).
+held() {
+  : >"$failed"
+  { curl -q "$@" -D "$heads" -o - || echo x >"$failed"; } | head -c 16777217 >"$got"
+  if [ "$(wc -c <"$got")" -gt 16777216 ]; then
+    printf 'compass.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  h_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  case $h_code in
+    2??) cat "$got" ;;
+    *)
+      printf 'compass.sh: the API answered %s; writing nothing\n' "${h_code:-nothing}" >&2
+      return 1
+      ;;
+  esac
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -124,7 +161,7 @@ while :; do
   url="$api/alerts?size=100&offset=$offset&sort=createdAt&order=asc"
   [ "$from" = 0 ] || url="$url&from=$from"
   [ -z "${COMPASS_QUERY:-}" ] || url="$url&query=$(printf '%s' "$COMPASS_QUERY" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
+  page=$(printf 'Authorization: Basic %s\n' "$auth" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
   printf '%s' "$page" | jq -c '.values[]' >>"$all"
   # The next page is the next offset: a link the API gives isn't followed.
   [ -n "$(printf '%s' "$page" | jq -r '.links.next // empty')" ] || break
@@ -155,7 +192,7 @@ for id in $(jq -s -r --arg from "$from" --slurpfile closes "$closes.json" -f "$h
     pages=$((pages + 1))
     url="$api/alerts/$id/logs?size=100"
     [ -z "$after" ] || url="$url&after=$after"
-    page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
+    page=$(printf 'Authorization: Basic %s\n' "$auth" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
     closed=$(printf '%s' "$page" | jq -r --arg since "$closed" -f "$here/compass-closed.jq")
     next=$(printf '%s' "$page" | jq -r '.links.next // empty')
     [ -n "$next" ] || break

@@ -15,9 +15,9 @@ import (
 // lapilli serve copies their firings in under a source of its own,
 // GrafanaSource, which no job may write to, and each such rule and the
 // recorded rule of its name are one rule, as a cloud's alarm and the
-// history copied in for it are (ties.go). Nothing in the ledger's schema
-// changes: rules.source and rules.sent say it, and the names of the rules
-// judged so are kept in meta.
+// history copied in for it are (ties.go). rules.source and rules.sent say
+// it, the names of the rules judged so are kept in meta, and the periods a
+// rule was left out of the copies in left_out (leftout.go).
 
 // GrafanaSource is the source Grafana's history of the rules Lapilli
 // can't replay is copied in under.

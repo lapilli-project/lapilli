@@ -271,6 +271,51 @@ func TestRouteMatch(t *testing.T) {
 	}
 }
 
+// A route names a team as it is, or in another letter case where one team
+// alone has the name. Of two teams a ledger kept from before whose names
+// differ only in letter case (the Teams page lists them apart), a route
+// naming one takes that one's events and never the other's; one naming
+// neither as written takes neither's, and they go to the default.
+func TestRouteTeamsAlike(t *testing.T) {
+	teams := []ledger.Team{{ID: 1, Name: "Payments"}, {ID: 2, Name: "payments"}, {ID: 3, Name: "Checkout"}}
+	o := &owners{byID: map[int64]ledger.Team{1: teams[0], 2: teams[1], 3: teams[2]}, teams: teams,
+		rule: map[string]int64{"Errors": 1, "Latency": 2, "Carts": 3}}
+	c, err := notifyIn([]byte(`notify:
+  routes:
+    - teams: [payments]
+      to: [small-hook]
+    - teams: [PAYMENTS]
+      to: [neither-hook]
+    - teams: [checkout]
+      to: [checkout-hook]
+  default: [slack]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []struct {
+		kind, about string
+		want        []string
+	}{
+		// The team named as it is.
+		{"proposal.made", `{"proposal": {"id": 1, "rule": "Latency", "kind": "for"}}`, []string{"small-hook"}},
+		{"goal.missed", `{"goal": {"name": "g", "team": "payments"}}`, []string{"small-hook"}},
+		{"task.created", `{"task": {"id": 1, "team_id": 2, "title": "t"}}`, []string{"small-hook"}},
+		// The other, whose name differs only in letter case: no route's.
+		{"proposal.made", `{"proposal": {"id": 2, "rule": "Errors", "kind": "for"}}`, []string{"slack"}},
+		{"goal.missed", `{"goal": {"name": "g", "team": "Payments"}}`, []string{"slack"}},
+		{"task.created", `{"task": {"id": 2, "team_id": 1, "title": "t"}}`, []string{"slack"}},
+		// One team alone has the name: in any letter case, as before.
+		{"proposal.made", `{"proposal": {"id": 3, "rule": "Carts", "kind": "for"}}`, []string{"checkout-hook"}},
+		{"goal.missed", `{"goal": {"name": "g", "team": "Checkout"}}`, []string{"checkout-hook"}},
+	} {
+		sub := subjectOf(x.kind, []byte(x.about), o)
+		if got := c.match(sub); !slices.Equal(got, x.want) {
+			t.Errorf("%s %s: %v, want %v (%+v)", x.kind, x.about, got, x.want, sub)
+		}
+	}
+}
+
 // The no-drop default: routes without a default are refused, as the file
 // is, and the routing in force stays. With routes in force, an event their
 // destinations can't take goes to the default's, or else as without

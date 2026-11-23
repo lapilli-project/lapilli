@@ -179,13 +179,18 @@ reaches 029. A ledger at 027 migrates to 029 with nothing else changed
 - **Writes.** One write at a time, with the notifications' turn; a mute a
   replica kept already within a minute takes none.
 - **The count in the digest and the reports.** The span's firings are
-  read without their labels, and those a notification told of passed
-  over. For each rule left, one row of `mutes_rule` says whether a mute of
-  it was told of about them. Only a rule with one has its firings read
-  with their labels, one rule at a time, and its mutes read as a firing's
-  page reads them: the hours about each firing's start and end, each of a
-  rule once, 1,000 rows an hour at most. In all, 200,000 rows are read at
-  most: of firings read with their labels (a statement's `LIMIT`, so many
+  read without their labels, in the order they started, 20,000 a
+  statement and 2,000,000 at most, and those a notification told of
+  passed over; firings past the 2,000,000 aren't read, are in none of the
+  numbers, and the line says some weren't counted (`partial`), as below
+  (`TestUnpagedSpanBounded`). Before 0.69.2 one statement read them all,
+  however many the span held. For each rule left, one row of `mutes_rule`
+  says whether a mute of it was told of about them. Only a rule with one
+  has its firings read with their labels, one rule at a time, and its
+  mutes read as a firing's page reads them: the hours about each firing's
+  start and end, each of a rule once, 1,000 rows an hour at most. In all,
+  200,000 such rows are read at most: of firings read with their labels (a
+  statement's `LIMIT`, so many
   firings beside one forged mute read no more), and of mutes looked at, a
   row counted once for each firing it is looked at for, and an hour not
   read yet as the most it can hold. Past that, the firings not read or

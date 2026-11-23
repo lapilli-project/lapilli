@@ -957,9 +957,9 @@ request refused keeps its hour: what it cost to read and check is what
 `hourly` bounds. An entry has one body read at a time, two of all
 entries at once, each within 5 seconds of its headers. 20 wait at most
 (`--backtest-queue`), 3 of an entry, one of a pull request the token's
-`ref` names (a newer commit's takes the place of the one waiting, of a
-repository the token names by a name kept: one past 200 bytes, or with
-what doesn't show, takes none's, since 0.63.2; a number the job said takes
+`ref` names (a newer commit's takes the place of the one waiting for the
+same repository, by the repository's id as the token says it, since
+0.69.2: renamed meanwhile, it is still itself; a number the job said takes
 none's: GitLab's ID token names a merge request's
 source branch, not its number, and Bitbucket's no pull request, so their
 backtests don't take each other's place); past them, 429 with
@@ -1115,10 +1115,13 @@ a day a write, the `--settle` before each written again. The rule and its
 history are one rule, under the rule's name, as a cloud's alarm read with
 `--alarms` and its history are: its page says so, and its record is what
 the copies cover. No job may write to `grafana`: the port refuses it. A
-day the history can't say all of (refused, more than is read at once,
-changes of a rule it passed over, a firing a write can't hold, or no
-longer kept) is left a gap, logged, never taken for a quiet day, and the
-copy goes on;
+day the history can't be read for (refused, more than is read at once, or
+no longer kept) is left a gap, logged, never taken for a quiet day, and
+the copy goes on. A rule the history can't say all of (another rule of its
+title, changes of it passed over, a firing a write can't hold) is left out
+of the day alone: the other rules' day is written, and the rule has no
+record for the period, on its page and wherever its record is read, also
+once it is judged again;
 `--grafana-history=false` turns it off
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
 
@@ -1200,7 +1203,10 @@ notify:
 
 The first route that takes an event decides, unless it says
 `continue: true`; what none takes goes to `default`, which routes need, so
-nothing is dropped. A template is text and fields (`{{.Event}}`,
+nothing is dropped. A route names a team as it is written, or in another
+letter case where one team alone has the name; of two teams a ledger kept
+from before whose names differ only in letter case, it takes the one it
+names, never the other. A template is text and fields (`{{.Event}}`,
 `{{.Line}}`, `{{.Link}}`, `{{.Rule}}`, `{{.Team}}`, `{{.Title}}`,
 `{{.ID}}`, `{{.By}}`, `{{.Labels}}`, `{{.At}}`), each value escaped for
 where it goes. The Settings page shows the routes in force and how each

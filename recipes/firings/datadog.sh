@@ -27,19 +27,41 @@ if ! printf '%s' "$c" | grep -Eq '^[a-z0-9-]+(\.[a-z0-9-]+)+$'; then
   exit 1
 fi
 api=${DATADOG_API:-https://api.$site}
-# The keys go where api points: over https, or to this machine, for tests.
-# Neither is said: a user and key before @ would be in the log.
+# The keys go where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and key before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "datadog.sh" >&2
+    exit 1
+    ;;
+esac
+proto=
 case $api in
   *@*)
     say "DATADOG_API holds a user or key before @, refused"
     exit 1
     ;;
-  https://* | http://127.0.0.1:* | http://localhost:*) ;;
-  *)
-    say "DATADOG_API is not https"
-    exit 1
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
+    [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
     ;;
 esac
+if [ -z "$proto" ]; then
+  say "DATADOG_API is not https (PLAIN_HTTP=true takes plain http, to any host)"
+  exit 1
+fi
 : "${SINCE:?the start of the period, such as 2026-11-01T00:00:00Z}"
 for t in "$SINCE" "${UNTIL:-$SINCE}"; do
   # grep reads lines: a second line could carry anything past it.
@@ -58,9 +80,18 @@ case $max in
     ;;
 esac
 # key NAME FILE: what FILE holds, one line of the characters a key is
-# written in. Neither the key nor what else the file holds is said.
+# written in, as it goes in a header: a second line would be a header of
+# its own. Neither the key nor what else the file holds is said.
 key() {
   k=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $k in
+      *[[:space:]]) k=${k%?} ;;
+      *) break ;;
+    esac
+  done
   case $k in
     '' | *[!A-Za-z0-9._~+/=-]*)
       say "$1 doesn't hold a key: one line of letters, digits and - . _ ~ + / ="
@@ -99,8 +130,27 @@ from=$((since - 86400000))
 all=$(mktemp)
 page=$(mktemp)
 heads=$(mktemp)
-trap 'rm -f "$all" "$page" "$heads"' EXIT
+failed=$(mktemp)
+trap 'rm -f "$all" "$page" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# into FILE CURL-ARGUMENTS: curl's answer into FILE, 16 MiB of it at most
+# whatever curl's version (before 8.4.0, --max-filesize caps only an
+# answer that says its length first), and its HTTP status, as the headers
+# curl wrote to $heads (-D) say, on stdout. It fails when curl does, or
+# past 16 MiB. curl's stdin is its own, and it reads no .curlrc (-q).
+into() {
+  i_file=$1
+  shift
+  : >"$failed"
+  { curl -q "$@" -o - || echo x >"$failed"; } | head -c 16777217 >"$i_file"
+  if [ "$(wc -c <"$i_file")" -gt 16777216 ]; then
+    printf 'datadog.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  i_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  printf '%s' "${i_code:-000}"
+}
 # header NAME: the whole seconds the last header NAME (lowercase) of the
 # answer says, or nothing; its leading zeros off, as $((...)) would read
 # 08 as octal, and fail.
@@ -129,8 +179,10 @@ fetch() {
   backoff=5
   while :; do
     # The keys go on stdin, not the command line, where ps would show them.
+    # An answer is 16 MiB at most (into): past it, the script stops, and
+    # nothing is written.
     code=$(printf '%s\n' "$headers" |
-      curl -q -sS --max-time 30 -H @- -H 'Accept: application/json' -D "$heads" -o "$page" -w '%{http_code}' "$1") || exit 1
+      into "$page" -sS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" "$1") || exit 1
     case $code in
       2??) return 0 ;;
       429) ;;

@@ -489,6 +489,10 @@ type subject struct {
 	at                        time.Time
 	teams                     []string
 	labels                    map[string][]string
+	// alike are those of teams whose name another team has in another
+	// letter case, as a ledger kept from before schema 019 may hold them
+	// (Payments, payments): a route takes each by its name as it is alone.
+	alike []string
 }
 
 // toldOf is what subjectOf reads of what a notice tells: the parts of the
@@ -650,18 +654,31 @@ func subjectOf(kind string, about []byte, o *owners) subject {
 		rule(x.Rule, false)
 	}
 	team(x.Team)
+	if o != nil {
+		for _, name := range sub.teams {
+			if slices.ContainsFunc(o.teams, func(t ledger.Team) bool { return t.Name != name && strings.EqualFold(t.Name, name) }) {
+				sub.alike = append(sub.alike, name)
+			}
+		}
+	}
 	return sub
 }
 
 // takes says a route takes an event: of one of its kinds, of one of its
-// teams (a team's name in any letter case), and with each of its labels at
-// one of its values; each left out for any.
+// teams, and with each of its labels at one of its values; each left out
+// for any. A team is named as it is, or in another letter case where one
+// team alone has the name, as --config's own teams are matched
+// (ledger.Reconcile): of two teams whose names differ only in letter
+// case, a route naming one takes that one's events, never the other's,
+// and one naming neither as written takes neither's.
 func (r noticeRoute) takes(sub subject) bool {
 	if len(r.Kinds) > 0 && !slices.ContainsFunc(r.Kinds, func(k string) bool { return kindIs(sub.kind, k) }) {
 		return false
 	}
 	if len(r.Teams) > 0 && !slices.ContainsFunc(r.Teams, func(t string) bool {
-		return slices.ContainsFunc(sub.teams, func(u string) bool { return strings.EqualFold(t, u) })
+		return slices.ContainsFunc(sub.teams, func(u string) bool {
+			return t == u || strings.EqualFold(t, u) && !slices.Contains(sub.alike, u)
+		})
 	}) {
 		return false
 	}

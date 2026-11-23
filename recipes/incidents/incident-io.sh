@@ -24,6 +24,16 @@ api=${INCIDENT_IO_API:-https://api.incident.io}
 # The scheme may be in capitals, as curl takes it. This machine is
 # 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
 # starts with one, such as localhost.example.com.
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "incident-io.sh" >&2
+    exit 1
+    ;;
+esac
 proto=
 case $api in
   *@*)
@@ -36,10 +46,11 @@ case $api in
       127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
       127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
     esac
+    [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
     ;;
 esac
 if [ -z "$proto" ]; then
-  printf 'incident-io.sh: INCIDENT_IO_API is not https\n' >&2
+  printf 'incident-io.sh: INCIDENT_IO_API is not https (PLAIN_HTTP=true takes plain http, to any host)\n' >&2
   exit 1
 fi
 : "${INCIDENT_IO_TOKEN_FILE:?a file holding an incident.io API key}"
@@ -70,8 +81,34 @@ ids=$(mktemp)
 linked=$(mktemp)
 out=$(mktemp)
 alertIDs=$(mktemp)
-trap 'rm -f "$all" "$ids" "$linked" "$out" "$alertIDs"' EXIT
+got=$(mktemp)
+heads=$(mktemp)
+failed=$(mktemp)
+trap 'rm -f "$all" "$ids" "$linked" "$out" "$alertIDs" "$got" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# held CURL-ARGUMENTS: curl's answer on stdout, of a 2xx alone, and 16
+# MiB of it at most whatever curl's version (before 8.4.0, --max-filesize
+# caps only an answer that says its length first). Past it, with curl
+# failing, or of any other answer, a redirect among them, which curl
+# doesn't follow, it fails, saying so. curl's stdin is its own, and it
+# reads no .curlrc (-q).
+held() {
+  : >"$failed"
+  { curl -q "$@" -D "$heads" -o - || echo x >"$failed"; } | head -c 16777217 >"$got"
+  if [ "$(wc -c <"$got")" -gt 16777216 ]; then
+    printf 'incident-io.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  h_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  case $h_code in
+    2??) cat "$got" ;;
+    *)
+      printf 'incident-io.sh: the API answered %s; writing nothing\n' "${h_code:-nothing}" >&2
+      return 1
+      ;;
+  esac
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -104,7 +141,7 @@ count() {
     exit 1
   fi
 }
-get() { printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$1"; }
+get() { printf 'Authorization: Bearer %s\n' "$token" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$1"; }
 after=
 pages=0
 while :; do
@@ -116,7 +153,7 @@ while :; do
   url="$api/v2/incidents?page_size=100"
   [ -z "$after" ] || url="$url&after=$(printf '%s' "$after" | jq -sRr @uri)"
   [ -z "${SINCE:-}" ] || url="$url&created_at%5Bgte%5D=$(printf '%s' "$SINCE" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$url")
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- "$url")
   printf '%s' "$page" | jq -c '.incidents[]' >>"$all"
   was=$after
   after=$(printf '%s' "$page" | jq -r '.pagination_meta.after // empty')

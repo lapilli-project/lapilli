@@ -1066,7 +1066,7 @@ func (s *Server) Run(ctx context.Context) error {
 		defer wg.Done()
 		// What runs once among the replicas, while this one leads; at
 		// once with SQLite.
-		s.l.Elect(ctx, ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus, Stuck: s.stuck}, func(lctx context.Context) {
+		s.l.Elect(ctx, s.elected(), func(lctx context.Context) {
 			s.lead(replay.Tracking(prom.Counting(lctx, &s.asked), &s.replayed), failed)
 		})
 	}()

@@ -27,6 +27,16 @@ since=
 # The scheme may be in capitals, as curl takes it. This machine is
 # 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
 # starts with one, such as localhost.example.com.
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "grafana-irm.sh" >&2
+    exit 1
+    ;;
+esac
 proto=
 case $GRAFANA_URL in
   *@*)
@@ -39,10 +49,11 @@ case $GRAFANA_URL in
       127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
       127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
     esac
+    [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
     ;;
 esac
 if [ -z "$proto" ]; then
-  printf 'grafana-irm.sh: GRAFANA_URL is not https\n' >&2
+  printf 'grafana-irm.sh: GRAFANA_URL is not https (PLAIN_HTTP=true takes plain http, to any host)\n' >&2
   exit 1
 fi
 url="${GRAFANA_URL%/}/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidents"
@@ -69,8 +80,34 @@ secret() {
 }
 token=$(secret GRAFANA_IRM_TOKEN_FILE "$GRAFANA_IRM_TOKEN_FILE")
 all=$(mktemp)
-trap 'rm -f "$all"' EXIT
+got=$(mktemp)
+heads=$(mktemp)
+failed=$(mktemp)
+trap 'rm -f "$all" "$got" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# held CURL-ARGUMENTS: curl's answer on stdout, of a 2xx alone, and 16
+# MiB of it at most whatever curl's version (before 8.4.0, --max-filesize
+# caps only an answer that says its length first). Past it, with curl
+# failing, or of any other answer, a redirect among them, which curl
+# doesn't follow, it fails, saying so. curl's stdin is its own, and it
+# reads no .curlrc (-q).
+held() {
+  : >"$failed"
+  { curl -q "$@" -D "$heads" -o - || echo x >"$failed"; } | head -c 16777217 >"$got"
+  if [ "$(wc -c <"$got")" -gt 16777216 ]; then
+    printf 'grafana-irm.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  h_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  case $h_code in
+    2??) cat "$got" ;;
+    *)
+      printf 'grafana-irm.sh: the API answered %s; writing nothing\n' "${h_code:-nothing}" >&2
+      return 1
+      ;;
+  esac
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -90,7 +127,7 @@ while :; do
     '{query: ({limit: 100, orderDirection: "ASC"} + (if $from == "" then {} else {dateFrom: $from} end))}
       + (if $next == "" then {} else {cursor: {nextValue: $next, hasMore: true}} end)')
   page=$(printf 'Authorization: Bearer %s\n' "$token" |
-    curl -q -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Content-Type: application/json; charset=utf-8' --data-binary "$body" "$url")
+    held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Content-Type: application/json; charset=utf-8' --data-binary "$body" "$url")
   # The API can answer 200 and say what went wrong.
   err=$(printf '%s' "$page" | jq -r '.error // empty')
   if [ -n "$err" ]; then

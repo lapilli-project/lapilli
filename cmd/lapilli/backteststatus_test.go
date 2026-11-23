@@ -38,6 +38,13 @@ func headOf(t *testing.T, kind, sha string) (env []string, link string) {
 	return []string{"SYSTEM_PULLREQUEST_SOURCECOMMITID=" + sha, "BUILD_BUILDID=55"}, "/org/my%20project/_build/results?buildId=55"
 }
 
+// githubMerge is what GitHub Actions says of a pull_request event's run
+// beside the event: GITHUB_SHA, the merge it made of the pull request into
+// the branch it goes into, and GITHUB_REF, that merge's ref.
+func githubMerge(sha string) []string {
+	return []string{"GITHUB_SHA=" + sha, "GITHUB_REF=refs/pull/7/merge"}
+}
+
 // STATUS sets a commit status on the pull request's head commit, as each
 // host's API takes one, after the comment: failure when FAIL_MISSED fails
 // the job, success when it passes, the description saying why; and before
@@ -63,6 +70,16 @@ func TestBacktestRecipeStatus(t *testing.T) {
 				link = rr.host.url + link
 			}
 			rr.env = append(rr.env, ci...)
+			switch h.kind {
+			case "github":
+				rr.env = append(rr.env, githubMerge(repo.git("rev-parse", "HEAD"))...)
+			case "gitea":
+				// Gitea's Actions makes no merge: HEAD one is judged against
+				// the branch the event says, as fetched.
+				repo.git("remote", "add", "origin", repo.dir)
+				repo.git("fetch", "--quiet", "origin")
+				rr.env = append(rr.env, "GITHUB_BASE_REF=main")
+			}
 			settings := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true"}
 			args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
 
@@ -317,6 +334,7 @@ func TestBacktestActionStatus(t *testing.T) {
 	sha := repo.git("rev-parse", "pr")
 	rr := newRecipeRun(t, backtestHosts[0], repo)
 	ci, _ := headOf(t, "github", sha)
+	ci = append(ci, githubMerge(repo.git("rev-parse", "HEAD"))...)
 	out, err := runAction(t, rr, map[string]string{"version": "v0.32.0", "paths": "alerts", "incidents": "incidents.yaml", "prometheus-url": prom.URL,
 		"fail-missed": "true", "status": "true"}, ci...)
 	if st, n := rr.host.lastStatus(); err == nil || n != 2 || st.SHA != sha || st.State != "failure" || !strings.Contains(st.Text, "FAIL_MISSED=true") {
@@ -384,15 +402,23 @@ func TestBacktestRecipeOwnParent(t *testing.T) {
 		t.Errorf("a branch not taken: %v\n%s", err, out)
 	}
 
-	// A merge of it into main, the status asked for on main's commit: not
-	// the pull request's, none set.
+	// GitHub's merge of it into main, the status asked for on main's commit:
+	// not the pull request's, none set there; the job's failure goes on the
+	// event's head all the same, where an earlier run's success would else
+	// stand.
 	repo.git("checkout", "--quiet", "--detach", "main")
 	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
+	rr.env = append(rr.env, githubMerge(repo.git("rev-parse", "HEAD"))...)
 	main := repo.git("rev-parse", "main")
 	before := len(rr.host.statuses)
 	out, err = rr.run(append(slices.Clone(settings), "STATUS_SHA="+main), args...)
-	if _, n := rr.host.lastStatus(); n != before || !strings.Contains(out, "is the commit the pull request goes into") {
-		t.Errorf("a status on the commit it goes into: %v, %d statuses\n%s", err, n-before, out)
+	if st, n := rr.host.lastStatus(); n != before+1 || st.SHA != sha || st.State != "failure" || !strings.Contains(out, "is the commit the pull request goes into") {
+		t.Errorf("a status on the commit it goes into: %v, %d statuses, the last %+v\n%s", err, n-before, st, out)
+	}
+	for _, st := range rr.host.statuses[before:] {
+		if st.SHA == main {
+			t.Errorf("a status on the commit it goes into: %+v", st)
+		}
 	}
 	// Its parent that is the pull request's, linking to a page on this
 	// machine, which STATUS_URL takes over http as it says.
@@ -450,22 +476,167 @@ func TestBacktestRecipeOwnParentMerged(t *testing.T) {
 		}
 	}
 	// No base branch: refused, the job failed, with a gate or STATUS alone.
+	// Its status is the one failure, saying why, with no pending before
+	// it: whatever an earlier run left on the head, it is that now.
 	for _, settings := range [][]string{gates, {"PATHS=alerts", "STATUS=true"}, {"PATHS=alerts", "STATUS=true", "TARGET=HEAD~1"}} {
 		before := len(rr.host.statuses)
 		out, err := rr.run(slices.Clone(settings), args...)
 		st, n := rr.host.lastStatus()
-		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n > before && st.State != "failure" {
-			t.Errorf("%v: %v, status %+v\n%s", settings, err, st, out)
+		if err == nil || !strings.Contains(out, "that parent is the pull request's own commit") || n != before+1 || st.State != "failure" || st.SHA != sha ||
+			st.Text != "refused: TARGET is the pull request's own commit, not the branch it goes into" {
+			t.Errorf("%v: %v, %d statuses set, the last %+v\n%s", settings, err, n-before, st, out)
 		}
 	}
-	// GitHub's own merge of it into main: HEAD^2 the event's head, HEAD^1
-	// main's commit, taken as it is.
+	// GitHub's own merge of it into main (GITHUB_SHA): HEAD^2 the event's
+	// head, HEAD^1 main's commit, taken as it is.
 	repo.git("checkout", "--quiet", "--detach", "main")
 	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
+	rr.env = append(rr.env, githubMerge(repo.git("rev-parse", "HEAD"))...)
 	out, err := rr.run(slices.Clone(gates), args...)
 	if st, _ := rr.host.lastStatus(); err == nil || st.State != "failure" || st.SHA != sha || strings.Contains(out, "compared with the branch") ||
 		!strings.Contains(out, "caught by no rule") {
 		t.Errorf("GitHub's merge: %v, status %+v\n%s", err, st, out)
+	}
+}
+
+// A job that checks the pull request's branch out by its name has whatever
+// the branch is at by then: after the event, its author can push a merge of
+// the event's head with anything. HEAD^2 the event's head didn't tell it
+// from GitHub's merge: its first parent, a commit its author chose that
+// holds the change already, was taken for the base, nothing changed
+// against it, the gate passed and a status of success went on the event's
+// head. Only GITHUB_SHA of refs/pull/N/merge is GitHub's merge now. A HEAD
+// that is neither it nor the event's head, a merge or the head's child, is
+// refused with a gate or STATUS: the job fails, and its status is a
+// failure on the event's head, saying so, whatever STATUS_SHA says, so
+// that an earlier run's success or pending there doesn't stand for it;
+// never pending, and none on the commit checked out. With neither, the
+// comment is compared with the branch the pull request goes into.
+func TestBacktestRecipeNotTheCIsMerge(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	repo.git("remote", "add", "origin", repo.dir)
+	repo.git("fetch", "--quiet", "origin")
+	// The pull request's head as the event says: CheckoutErrors held to 2h,
+	// which catches INC-7 no more.
+	repo.git("checkout", "--quiet", "-B", "pr", "main")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "hold CheckoutErrors longer")
+	sha := repo.git("rev-parse", "HEAD")
+	// Its author's own commit, holding the same change ...
+	repo.git("checkout", "--quiet", "-B", "aside", "main")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h"), "NOTES.md": "x\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "the same, aside")
+	// ... and what the branch is at when the job checks it out: a merge of
+	// the event's head into that commit; one of it into main's commit, its
+	// files main's (git commit-tree takes any); or a commit after it that
+	// takes the change back.
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", sha)
+	ontoOwn := repo.git("rev-parse", "HEAD")
+	ontoMain := repo.git("commit-tree", repo.git("rev-parse", "main^{tree}"), "-p", "main", "-p", sha, "-m", "merge")
+	repo.git("checkout", "--quiet", "-B", "later", sha)
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "take it back")
+	child := repo.git("rev-parse", "HEAD")
+	// GitHub's merge of the event's head, which the job didn't check out.
+	theirs := repo.git("commit-tree", repo.git("rev-parse", sha+"^{tree}"), "-p", "main", "-p", sha, "-m", "Merge")
+
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	ci, _ := headOf(t, "github", sha)
+	rr.env = append(rr.env, ci...)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	gates := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "FAIL_MISSED=true"}
+	// An earlier run of the event's head, checked out as it was then, with
+	// no gate: a success on it, after its pending.
+	repo.git("checkout", "--quiet", "--detach", sha)
+	if out, err := rr.run([]string{"PATHS=alerts", "STATUS=true", "GITHUB_BASE_REF=main"}, args...); err != nil {
+		t.Fatalf("the earlier run: %v\n%s", err, out)
+	}
+	if st, n := rr.host.lastStatus(); n != 2 || st.State != "success" || st.SHA != sha || rr.host.statuses[0].State != "pending" {
+		t.Fatalf("the earlier run's statuses: %+v", rr.host.statuses)
+	}
+	const refusal = "refused: HEAD isn't the pull request's head as the CI says, nor the CI's merge of it"
+	for _, at := range []struct{ name, commit string }{{"a merge into its author's commit", ontoOwn}, {"a merge into main's commit", ontoMain}, {"a commit after it", child}} {
+		repo.git("checkout", "--quiet", "--detach", at.commit)
+		for _, settings := range [][]string{
+			append(slices.Clone(gates), "STATUS=true"),
+			append(slices.Clone(gates), "STATUS=true", "GITHUB_BASE_REF=main"),
+			append(slices.Clone(gates), "GITHUB_BASE_REF=main"),
+			{"PATHS=alerts", "STATUS=true", "GITHUB_BASE_REF=main"},
+			{"PATHS=alerts", "STATUS=true", "GITHUB_BASE_REF=main", "TARGET=main"},
+			{"PATHS=alerts", "STATUS=true", "GITHUB_BASE_REF=main", "STATUS_SHA=" + sha},
+			// The status asked for on the commit checked out: on the
+			// event's head all the same.
+			{"PATHS=alerts", "STATUS=true", "GITHUB_BASE_REF=main", "STATUS_SHA=" + at.commit},
+			// GitHub's merge is another commit, or HEAD is named by a ref
+			// that isn't a pull request's merge.
+			append(append(slices.Clone(gates), "STATUS=true", "GITHUB_BASE_REF=main"), githubMerge(theirs)...),
+			append(slices.Clone(gates), "STATUS=true", "GITHUB_BASE_REF=main", "GITHUB_SHA="+at.commit, "GITHUB_REF=refs/heads/pr"),
+		} {
+			// What an earlier run left on the event's head: a success, or
+			// the pending of one that was killed.
+			for _, left := range []string{"success", "pending"} {
+				rr.host.set(func(h *commentHost) { h.statuses = []hostStatus{{SHA: sha, State: left, Context: "lapilli/backtest"}} })
+				out, err := rr.run(settings, args...)
+				if err == nil || !strings.Contains(out, "HEAD "+at.commit+" is neither the pull request's head as the CI says, "+sha+", nor the CI's merge of it") {
+					t.Errorf("%s, %v: %v\n%s", at.name, settings, err, out)
+				}
+				st, n := rr.host.lastStatus()
+				if !slices.Contains(settings, "STATUS=true") {
+					if n != 1 {
+						t.Errorf("%s, %v: %d statuses set without STATUS", at.name, settings, n-1)
+					}
+					continue
+				}
+				if n != 2 || st.State != "failure" || st.SHA != sha || st.Text != refusal || st.Context != "lapilli/backtest" {
+					t.Errorf("%s, %v, an earlier %s on the event's head: %d statuses set, the last %+v, want one failure there\n%s", at.name, settings, left, n-1, st, out)
+				}
+			}
+		}
+	}
+	rr.host.set(func(h *commentHost) { h.statuses = nil })
+	// Neither a gate nor a status: the comment, compared with the branch the
+	// pull request goes into, not with the commit its author chose.
+	repo.git("checkout", "--quiet", "--detach", ontoOwn)
+	out, err := rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "GITHUB_BASE_REF=main"}, args...)
+	if err != nil || !strings.Contains(out, "compared with the branch it goes into, main") || !strings.Contains(rr.body(), "`CheckoutErrors`") {
+		t.Errorf("no gate: %v\n%s\n%s", err, out, rr.body())
+	}
+
+	// GitHub's merge in a clone of depth 1, as actions/checkout makes one
+	// unless told: the CI's merge still, whose parents the clone hasn't. It
+	// is compared with the branch, and said to need more of the history, as
+	// before; it isn't taken for another commit.
+	shallow := *repo
+	shallow.dir = filepath.Join(t.TempDir(), "shallow")
+	repo.git("branch", "--force", "theirs", theirs)
+	repo.git("clone", "--quiet", "--depth", "1", "--branch", "theirs", "file://"+repo.dir, shallow.dir)
+	sr := newRecipeRun(t, backtestHosts[0], &shallow)
+	sr.env = append(append(sr.env, ci...), githubMerge(theirs)...)
+	out, err = sr.run(append(slices.Clone(gates), "STATUS=true", "GITHUB_BASE_REF=main"), args...)
+	if err == nil || strings.Contains(out, "is neither") || !strings.Contains(out, "share no commit in the clone: fetch all of the history (fetch-depth: 0)") {
+		t.Errorf("GitHub's merge at depth 1: %v\n%s", err, out)
+	}
+
+	// The event's head checked out, and GitHub's merge of it, are judged as
+	// they were: INC-7 lost, a failure on the event's head.
+	for _, at := range []struct {
+		commit string
+		env    []string
+	}{{sha, []string{"GITHUB_BASE_REF=main"}}, {theirs, githubMerge(theirs)}, {theirs, append(githubMerge(theirs), "GITHUB_BASE_REF=main")}} {
+		repo.git("checkout", "--quiet", "--detach", at.commit)
+		out, err := rr.run(append(append(slices.Clone(gates), "STATUS=true"), at.env...), args...)
+		if st, _ := rr.host.lastStatus(); err == nil || st.State != "failure" || st.SHA != sha || !strings.Contains(out, "caught by no rule") ||
+			strings.Contains(out, "is neither") {
+			t.Errorf("%s, %v: %v, status %+v\n%s", at.commit, at.env, err, st, out)
+		}
 	}
 }
 

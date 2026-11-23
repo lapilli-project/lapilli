@@ -683,6 +683,38 @@ func TestProposalTask(t *testing.T) {
 	}
 }
 
+// A proposal's task says the proposal's number without #: a tracker recipe
+// makes the title an issue's, where #12 is the host's own issue or pull
+// request 12, mentioned by it. A task made before, titled with #, is still
+// the proposal's, by its id: asked for again, it is the one given, and no
+// second task is made.
+func TestProposalTaskTitle(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/task", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Fatalf("made into a task: %d", code)
+	}
+	taskID := state(t, s, id).TaskID
+	task, err := s.l.TaskByID(ctx, taskID)
+	if want := "Proposal " + itoa(id) + ": " + kindText(ledger.KindFor) + ", Errors"; err != nil || task.Title != want || strings.Contains(task.Title, "#") {
+		t.Errorf("the task's title: %q, want %q (%v)", task.Title, want, err)
+	}
+	if strings.Contains(task.Body, "#"+itoa(id)) {
+		t.Errorf("the task's text says #%d:\n%s", id, task.Body)
+	}
+	// One made before this.
+	ledgerExec(t, s, "UPDATE tasks SET title = ? WHERE id = ?", "Proposal #"+itoa(id)+": "+kindText(ledger.KindFor)+", Errors", taskID)
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/task", bo, "same-origin", url.Values{})
+	if code != http.StatusSeeOther || hd.Get("Location") != "/tasks/"+itoa(taskID) {
+		t.Errorf("asked for again: %d %s, want the task made before, %d", code, hd.Get("Location"), taskID)
+	}
+	if ts, err := s.l.Tasks(ctx, ledger.TaskQuery{}); err != nil || len(ts) != 1 {
+		t.Errorf("tasks: %d, want the one (%v)", len(ts), err)
+	}
+}
+
 // What Lapilli proposes of itself, after the week's digest: only with
 // --changes, once a week, and not again what people turned down.
 func TestProposeFound(t *testing.T) {

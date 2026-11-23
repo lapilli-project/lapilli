@@ -171,11 +171,30 @@ history says the rules it can't replay fired, and judges them by it
 (docs/design/grafanajudged.md), unless `--grafana-history=false`. That
 history is taken as Grafana wrote it. Where Grafana keeps it in Loki,
 whoever can push to that Loki tenant writes these rules' record: their
-firings, and, with changes to a state Grafana has no name for, or of more
-than 1,000 rules' names, every day a gap. Whoever may make a rule in a
-folder Lapilli reads can make every day a gap too, with a rule of a judged
-rule's title, paused or not. Guard the tenant as you guard the Grafana;
-neither is a way past what this says, which a report is welcome of.
+firings, under a rule's uid, or, with no uid, under its name alone; with
+a change to a state Grafana has no name for, no record for the rule of
+its uid, or with no uid every rule of its name; and, with changes of
+more than 1,000 rules, every day a gap. A change is taken for a judged
+rule only where the history says it is that rule's, by its uid (Loki) or
+its id (annotations), the one Grafana's provisioning API lists the
+rule's uid with, and a change the read passes over leaves out, for the
+period, the rule it says it is of alone: whoever may make a rule of a
+judged rule's title, in a folder Lapilli reads or one its token doesn't,
+paused or not, at a round or between two, its changes read or passed
+over, writes nothing into that rule's record and takes nothing away.
+Past 1,000 rules a read passed over changes of, it can't say which, and
+judges none: whoever may make that many rules that fire, with labels
+Grafana's tags keep under one name (`team:a` and `team_a`), in any
+folder, makes that day a gap for every rule. Where the history says no
+rule's uid or id (a Loki line without one; Grafana's annotations of
+alerts always carry one), the rule is judged by its title: a title two
+rules have in any version of the rules in effect across what a round
+writes leaves the judged rule out alone, shown as having no record for
+the period, a rule of the title no read of the rules saw, in a folder
+the token doesn't read or there between two rounds, is taken for it,
+and such a change passed over leaves out every rule of its title. Guard
+the tenant as you guard the Grafana; neither is a way past what this
+says, which a report is welcome of.
 
 ## Versions
 

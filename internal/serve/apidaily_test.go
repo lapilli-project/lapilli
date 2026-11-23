@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,88 @@ func TestAPIDecide(t *testing.T) {
 	s.cfg.ReadOnly = true
 	if code, _, _ := apiAs(t, h, http.MethodPost, path, map[string]any{"state": ""}, vAdmin, "", ""); code != http.StatusForbidden {
 		t.Errorf("--read-only: %d", code)
+	}
+}
+
+// A window confirmed, reopened and confirmed again, through the API or its
+// form, is the incident it was confirmed as before: each gives that
+// incident, and the ledger keeps the one. The title the form or the API
+// gives is its title; the form's sent back as the window's own, or none,
+// leaves it as it was.
+func TestDecideAgainThroughTheAPIAndTheForm(t *testing.T) {
+	s := verdictServer(t, nil)
+	h := s.Handler()
+	ctx := context.Background()
+	path := "/api/v1/incidents/" + impactWindow + "/decide"
+	decide := func(state, title string) string {
+		t.Helper()
+		code, body, _ := apiAs(t, h, http.MethodPost, path, map[string]any{"state": state, "title": title}, vEditor, "", "")
+		var out struct{ Incident string }
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatalf("%q: %d %s", state, code, body)
+		}
+		return out.Incident
+	}
+	first := decide("confirmed", "checkout slow")
+	if !strings.HasPrefix(first, "L-") {
+		t.Fatalf("confirmed as %q", first)
+	}
+	decide("", "")
+	if again := decide("confirmed", "checkout slow, again"); again != first {
+		t.Errorf("confirmed again through the API: %q, want %q", again, first)
+	}
+	decide("", "")
+	code, _, hd := ui(t, h, http.MethodPost, "/incidents/"+impactWindow+"/decide", vEditor, "same-origin", url.Values{"state": {"confirmed"}, "title": {"by the form"}})
+	if code != http.StatusSeeOther || hd.Get("Location") != "/incidents/"+first {
+		t.Errorf("confirmed again by the form: %d %s, want the incident written before, %s", code, hd.Get("Location"), first)
+	}
+	in, err := s.l.IncidentByID(ctx, impactWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incs, err := s.l.Incidents(ctx, in.Start.Add(-time.Hour), in.Start.Add(time.Hour), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written []string
+	for _, x := range incs {
+		if strings.HasPrefix(x.ID, "L-") {
+			written = append(written, x.ID+" "+x.Title)
+		}
+	}
+	if len(written) != 1 || written[0] != first+" by the form" {
+		t.Errorf("written down: %q, want %s alone, titled as the form said", written, first)
+	}
+	// The form as the page gives it, the window's own title in it, and
+	// the API with no title: the incident's title stays.
+	decide("", "")
+	if code, _, hd := ui(t, h, http.MethodPost, "/incidents/"+impactWindow+"/decide", vEditor, "same-origin", url.Values{"state": {"confirmed"}, "title": {in.Title}}); code != http.StatusSeeOther ||
+		hd.Get("Location") != "/incidents/"+first {
+		t.Errorf("confirmed again by the form as the page gives it: %d %s", code, hd.Get("Location"))
+	}
+	decide("", "")
+	decide("confirmed", "")
+	if now, err := s.l.IncidentByID(ctx, first); err != nil || now.Title != "by the form" {
+		t.Errorf("the incident's title, none given: %q (%v), want it as it was", now.Title, err)
+	}
+	// Deleted through the API and written again under its id by an
+	// editor, of another day: another incident, which the window doesn't
+	// take, confirmed again.
+	decide("", "")
+	if code, body, _ := apiAs(t, h, http.MethodDelete, "/api/v1/incidents/"+first, nil, vEditor, "", ""); code != http.StatusNoContent {
+		t.Fatalf("deleted: %d %s", code, body)
+	}
+	other := map[string]any{"title": "search down", "start": in.Start.Add(48 * time.Hour).Format(time.RFC3339), "end": in.Start.Add(49 * time.Hour).Format(time.RFC3339),
+		"labels": map[string][]string{"service": {"search"}}}
+	if code, body, _ := apiAs(t, h, http.MethodPut, "/api/v1/incidents/"+first, other, vEditor, "", ""); code >= 300 {
+		t.Fatalf("written again under %s: %d %s", first, code, body)
+	}
+	again := decide("confirmed", "")
+	if again == "" || again == first {
+		t.Errorf("confirmed again after %s was deleted and written again: %q, want an incident of its own", first, again)
+	}
+	if now, err := s.l.IncidentByID(ctx, first); err != nil || now.Title != "search down" || !now.Start.Equal(in.Start.Add(48*time.Hour)) {
+		t.Errorf("the editor's incident: %+v %v, want it as they wrote it", now, err)
 	}
 }
 

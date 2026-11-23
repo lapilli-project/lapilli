@@ -12,7 +12,8 @@
 #                     read:repository and read:user)
 #   PR                the pull request's number (default, in Actions: the
 #                     event's)
-#   TARGET_BRANCH     default, in Actions without TARGET, the branch the
+#   TARGET_BRANCH     default, in Actions without TARGET, or with lib.sh's
+#                     default HEAD^1 written out, the branch the
 #                     pull request goes into (GITHUB_BASE_REF), as
 #                     fetch-depth: 0 fetched it: Actions checks out the
 #                     pull request's own commit. Fetched only when the
@@ -21,7 +22,11 @@
 # With STATUS=true (see lib.sh), a commit status (POST
 # /repos/OWNER/REPO/statuses/SHA) on the pull request's head commit, the
 # event's in Actions (pull_request.head.sha): the token needs
-# write:repository, its account write access to the repository.
+# write:repository, its account write access to the repository. In
+# Actions, of a pull request into a branch other than the repository's
+# default (the event's repository.default_branch), it is lapilli/backtest
+# (into BRANCH); in an event of no pull request (push), the branch is
+# TARGET_BRANCH, and with none, no status is set.
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks Forgejo Actions for the job's ID token for that audience, which the
@@ -43,17 +48,30 @@ if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   if [ -z "${PR:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
     PR=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
   fi
-  # For STATUS: the pull request's head commit, as the event says.
+  # For STATUS: the pull request's head commit, as the event says; and,
+  # for the status's name, the repository's default branch and the one the
+  # pull request goes into (lib.sh).
+  ci_into=${GITHUB_BASE_REF:-}
   if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
     status_commit=$(jq -r '.pull_request.head.sha // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || status_commit=
+    ci_default=$(jq -r '.repository.default_branch // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_default=
+    [ -n "$ci_into" ] || ci_into=$(jq -r '.pull_request.base.ref // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_into=
   fi
   # Actions checks out the pull request's own commit, not a merge: the
   # branch it goes into is fetched, and compared from where they parted.
-  # A TARGET the job gives is its own, as the CI says the base (lib.sh).
+  # A TARGET the job gives is its own, as the CI says the base (lib.sh);
+  # HEAD^1, lib.sh's default, written out is none given, as lib.sh takes
+  # it: of the pull request's own commit, a merge its author made, it is
+  # whatever first parent they chose.
   ci_base=1
-  if [ -z "${TARGET:-}" ]; then
-    TARGET_BRANCH=${TARGET_BRANCH:-${GITHUB_BASE_REF:-}}
-  fi
+  case ${TARGET:-HEAD^1} in
+    HEAD^1) TARGET_BRANCH=${TARGET_BRANCH:-${GITHUB_BASE_REF:-}} ;;
+  esac
+  # ... and makes no merge, in any event: HEAD a merge is one its author
+  # made, and its first parent isn't taken for the base, but the branch
+  # the pull request goes into (lib.sh's ci_merges and ci_branch).
+  ci_merges=1
+  ci_branch=${GITHUB_BASE_REF:-}
 fi
 : "${GITEA_API:?such as https://git.example.com/api/v1}"
 : "${GITEA_REPO:?such as example/monitoring}"

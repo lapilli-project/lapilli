@@ -436,8 +436,13 @@ type TieState struct {
 	Source string
 	// Since and To are what the source's copies cover without a gap, up to
 	// the end of the latest period copied in (Coverage): an alarm's record
-	// covers the weeks between.
+	// covers the weeks between. Of a rule left out of the copies for a
+	// while (LeaveOut), what they cover of it: from the end of the latest
+	// such period, or, while it is left out, up to its start.
 	Since, To int64
+	// Out is, while the rule is left out of the source's copies
+	// (LeaveOut), as of the latest of them, when that began: 0 otherwise.
+	Out int64
 	// Apart is when the latest firing of the alarm's history held apart
 	// at another severity began: its severity changed. 0 for none.
 	Apart int64
@@ -448,16 +453,42 @@ type TieState struct {
 // Ties are, by the name each alarm read through --alarms and not replayed
 // is judged under, its history tied to it, or why none is.
 func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
+	return l.tiesOf(ctx, nil)
+}
+
+// TieOf is Ties of one rule, by its name, alone: what is read of the
+// periods rules were left out of their source's copies is that rule's.
+func (l *Ledger) TieOf(ctx context.Context, name string) (TieState, bool, error) {
+	ties, err := l.tiesOf(ctx, &name)
+	st, ok := ties[name]
+	return st, ok, err
+}
+
+// tiesOf are Ties, of the rule of name alone when it isn't nil.
+func (l *Ledger) tiesOf(ctx context.Context, name *string) (map[string]TieState, error) {
 	out := map[string]TieState{}
 	list, untied, err := l.latestTies(ctx, l.r)
 	if err != nil || (len(list) == 0 && len(untied) == 0) {
 		return out, err
 	}
+	if name != nil {
+		list = slices.DeleteFunc(list, func(x Tie) bool { return x.Rule != *name })
+		if w, ok := untied[*name]; ok {
+			untied = Untied{*name: w}
+		} else {
+			untied = nil
+		}
+	}
 	found, why, err := l.tied(ctx, l.r, list)
 	if err != nil {
 		return nil, err
 	}
-	type cover struct{ since, to int64 }
+	type cover struct {
+		spans [][2]int64
+		// out are the periods its rules were left out of them, by the name
+		// the source sends each by.
+		out map[string][][2]int64
+	}
 	covers := map[string]cover{}
 	for rule, h := range found {
 		src := ""
@@ -474,16 +505,34 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 		}
 		c, ok := covers[src]
 		if !ok {
-			spans, err := l.spans(ctx, l.r, src)
+			if c.spans, err = l.spans(ctx, l.r, src); err != nil {
+				return nil, err
+			}
+			if name != nil {
+				// One rule's periods alone.
+				var ps [][2]int64
+				if ps, err = l.leftOutOf(ctx, l.r, src, h.sent); err == nil && len(ps) > 0 {
+					c.out = map[string][][2]int64{h.sent: ps}
+				}
+			} else {
+				c.out, err = l.leftOut(ctx, l.r, src)
+			}
 			if err != nil {
 				return nil, err
 			}
-			if len(spans) > 0 {
-				c = cover{spans[len(spans)-1][0], spans[len(spans)-1][1]}
-			}
 			covers[src] = c
 		}
-		out[rule] = TieState{Source: src, Since: c.since, To: c.to, Apart: h.apart}
+		st := TieState{Source: src, Apart: h.apart}
+		// A period the rule was left out of the copies is none of its
+		// record: no gap, and none of those, since Since.
+		left := c.out[h.sent]
+		if own := without(c.spans, left); len(own) > 0 {
+			st.Since, st.To = own[len(own)-1][0], own[len(own)-1][1]
+		}
+		if n, m := len(c.spans), len(left); n > 0 && m > 0 && left[m-1][1] >= c.spans[n-1][1] {
+			st.Out = left[m-1][0]
+		}
+		out[rule] = st
 	}
 	for rule, w := range untied {
 		out[rule] = TieState{Why: w}

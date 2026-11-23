@@ -1103,7 +1103,13 @@ func (l *Ledger) moveVerdictKeys(t *txn, moves []keyMove) error {
 				continue
 			}
 			named++
-			v.Unrelated[i].Key = m.to
+			// One naming both, a window and the incident it was confirmed
+			// as before, names the incident once.
+			if m.from != m.to && slices.ContainsFunc(v.Unrelated, func(u UnrelatedTo) bool { return u.Key == m.to }) {
+				v.Unrelated = slices.Delete(v.Unrelated, i, i+1)
+			} else {
+				v.Unrelated[i].Key = m.to
+			}
 			moved := v.Moved
 			if m.spanChanged && moved == "" {
 				moved = movedSpan + " " + m.to
@@ -1144,6 +1150,7 @@ func (l *Ledger) moveVerdictKeys(t *txn, moves []keyMove) error {
 			if i := slices.Index(k.keys, m.from); i >= 0 {
 				k.keys[i] = m.to
 				slices.Sort(k.keys)
+				k.keys = slices.Compact(k.keys)
 				ks = append(ks, k)
 			}
 		}

@@ -240,7 +240,9 @@ esac`)
 }
 
 // TestFiringRecipesRefuse: what isn't a time, or a project id, or https, is
-// refused before any CLI or API is asked, and the refusal says why.
+// refused before any CLI or API is asked, and the refusal says why, an
+// address never (internal/serve's TestFiringRecipesRefuseWhereAndWhat has
+// the rest of what an address and a token file are refused for).
 func TestFiringRecipesRefuse(t *testing.T) {
 	needTools(t)
 	for _, c := range []struct {
@@ -260,7 +262,7 @@ func TestFiringRecipesRefuse(t *testing.T) {
 		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z\" OR state=\"open", "GOOGLE_CLOUD_PROJECT=shop"}, "is not a time"},
 		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop/../x"}, "is not a project id"},
 		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop", "GOOGLE_MONITORING_API=http://example.com"}, "is not https"},
-		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop", "GOOGLE_MONITORING_API=http://localhost:1@example.com"}, "is not https"},
+		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop", "GOOGLE_MONITORING_API=http://localhost:1@example.com"}, "before @, refused"},
 	} {
 		path, calls := fakeCLI(t, c.cli, "echo '{}'")
 		cmd := exec.Command("sh", recipes+c.script)

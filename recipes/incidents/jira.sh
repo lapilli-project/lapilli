@@ -44,6 +44,16 @@ here=$(dirname "$0")
 : "${JIRA_EMAIL:?the email of the account}"
 : "${JIRA_TOKEN_FILE:?a file holding its API token}"
 : "${JIRA_JQL:?the search that finds your incidents}"
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "jira.sh" >&2
+    exit 1
+    ;;
+esac
 # https NAME URL: the scheme curl speaks to URL, in proto. The token goes
 # where URL points: over https, or to this machine, for tests. Neither is
 # said: a user and password before @ would be in the log.
@@ -63,10 +73,11 @@ https() {
         127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
         127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
       esac
+      [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
       ;;
   esac
   if [ -z "$proto" ]; then
-    printf 'jira.sh: %s is not https\n' "$1" >&2
+    printf 'jira.sh: %s is not https (PLAIN_HTTP=true takes plain http, to any host)\n' "$1" >&2
     exit 1
   fi
 }
@@ -144,8 +155,27 @@ alertIDs=$(mktemp)
 linked=$(mktemp)
 got=$(mktemp)
 heads=$(mktemp)
-trap 'rm -f "$all" "$out" "$ids" "$alertIDs" "$linked" "$got" "$heads"' EXIT
+failed=$(mktemp)
+trap 'rm -f "$all" "$out" "$ids" "$alertIDs" "$linked" "$got" "$heads" "$failed"' EXIT
 trap 'exit 1' INT TERM HUP
+# into FILE CURL-ARGUMENTS: curl's answer into FILE, 16 MiB of it at most
+# whatever curl's version (before 8.4.0, --max-filesize caps only an
+# answer that says its length first), and its HTTP status, as the headers
+# curl wrote to $heads (-D) say, on stdout. It fails when curl does, or
+# past 16 MiB. curl's stdin is its own, and it reads no .curlrc (-q).
+into() {
+  i_file=$1
+  shift
+  : >"$failed"
+  { curl -q "$@" -o - || echo x >"$failed"; } | head -c 16777217 >"$i_file"
+  if [ "$(wc -c <"$i_file")" -gt 16777216 ]; then
+    printf 'jira.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  i_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  printf '%s' "${i_code:-000}"
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -167,7 +197,7 @@ get() {
   backoff=5
   while :; do
     code=$(printf 'Authorization: Basic %s\n' "$auth" |
-      curl -q -sS --proto "$1" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" -o "$got" -w '%{http_code}' "$2") || exit 1
+      into "$got" -sS --proto "$1" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' -D "$heads" "$2") || exit 1
     [ "$code" = 429 ] || return 0
     waits=$((waits + 1))
     wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')

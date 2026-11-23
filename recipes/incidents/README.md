@@ -27,8 +27,12 @@ as is a second line. The address a token goes to (`JIRA_URL`, `JSM_API`,
 `GRAFANA_URL`, or the API a script asks, which `PAGERDUTY_API` and the like
 change) is `https://`, or this machine's over `http://` for tests
 (`127.0.0.1`, `[::1]` or `localhost`, with a port or not), and `curl` speaks
-no other scheme; the scheme may be in capitals. One with a user or token
-before `@` is refused. Neither the token nor the address is said.
+no other scheme; the scheme may be in capitals. With `PLAIN_HTTP=true`
+(default `false`) it may be `http://` to any host, for a self-managed tool,
+such as Grafana or Jira Data Center, reached over plain http inside a
+cluster, its token read by whatever is on the way; `curl` speaks http alone
+then. One with a user or token before `@` is refused, `@` in its query too.
+Neither the token nor the address is said.
 
 `pagerduty.sh`, `incident-io.sh`, `rootly.sh`, `firehydrant.sh` and, for
 Jira Service Management's incidents given `JSM_CLOUD_ID`, `jira.sh` also
@@ -256,6 +260,14 @@ Then, from anywhere that can reach it, by a name it answers to (`lapilli` or
 Give `put.sh` a file: in a pipe, a shell doesn't see the first command fail, and
 the job would look fine with nothing copied.
 
+`put.sh` sends serve's token where its argument points: `http://` or
+`https://` and no other scheme, which `curl` is given alone, with no user
+before `@`. Over plain http the token is read by whatever is on the way, so
+keep that to the cluster serve runs in, as its port is. Its token file holds
+the token on one line, of any characters but a tab or another control
+character (serve takes a token of any), with what an editor leaves after it
+dropped. Neither the token nor the address is said.
+
 Each incident is written by its id, so running this again is safe: one that
 hasn't changed writes nothing. New ones aren't told to `--notify-webhook-file` or
 Slack either, since the tool has told people already, and a first copy of months
@@ -278,10 +290,11 @@ exits non-zero.
 The port takes one write at a time, 20 a second, with bursts of 40; past that it
 answers 429, and `put.sh` waits and tries again. The ledger keeps 20,000 copied
 incidents at most. A script stops after `MAX_PAGES` pages
-(1000), when the tool gives the same page again, or at an answer over 16 MiB,
-and then writes nothing. `curl` before 8.4 holds to that bound only an answer
-that says its length (`Content-Length`); a chunked one it reads whole. Use
-`curl` 8.4 or later.
+(1000), when the tool gives the same page again, at an answer over 16 MiB,
+whatever `curl`'s version (the scripts cut what `curl` writes, as before 8.4
+`--max-filesize` holds to that bound only an answer that says its length), or
+at one that isn't a 2xx, a redirect among them, which `curl` doesn't follow
+with the token; and then writes nothing.
 
 In the chart:
 

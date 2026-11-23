@@ -43,10 +43,23 @@
 # marker: the text is the task's (an editor's, or an agent's proposal's),
 # and only the line the recipe writes after it counts.
 #
+# Each token goes where its address points, and curl speaks that
+# address's scheme alone (--proto). A recipe says where its tracker's API
+# is (tracker_api): https, or this machine over http, for tests; or, with
+# PLAIN_HTTP=true, http to any host, for a tracker reached inside a
+# cluster, its token read by whatever is on the way. Lapilli's
+# is http too, as a Service in the cluster is reached: over plain http its
+# token is read by whatever is on the way, so keep that to the cluster
+# serve runs in. An address with a user or token before @ is refused, and
+# neither an address nor a token is said. A token file holds the token
+# alone, on one line (secret, secret_line). An answer is 16 MiB at most.
+#
 # Lapilli's side, on the port --incidents-listen opens:
 #
-#   LAPILLI_URL         such as http://lapilli:8082 (or the first argument)
-#   LAPILLI_TOKEN_FILE  a file holding the token in --tasks-token-file
+#   LAPILLI_URL         such as http://lapilli:8082 (or the first argument):
+#                       http or https, with no user before @
+#   LAPILLI_TOKEN_FILE  a file holding the token in --tasks-token-file, on
+#                       one line
 #   CLOSE_ISSUES        true to close an issue whose task was done or dropped
 #                       in Lapilli (default false)
 #   MAX_ISSUES          issues made in one run, at most (default 50)
@@ -81,17 +94,107 @@ number() {
   esac
 }
 
-lapilli=${1:-${LAPILLI_URL:-}}
-case $lapilli in
-  http://* | https://*) ;;
+# secret NAME FILE: what FILE holds, one line of the characters a token is
+# written in (a Bearer token's, RFC 6750), as it goes in a header, where a
+# second line, or a carriage return, would be a header of its own. Spaces,
+# tabs and a carriage return after it, as an editor may leave them, are
+# dropped. Neither the token nor what else the file holds is said.
+secret() {
+  s=$(cat "$2")
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
+  case $s in
+    '' | *[!A-Za-z0-9._~+/=-]*)
+      say "$1 doesn't hold a token: one line of letters, digits and - . _ ~ + / ="
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+
+# secret_line NAME FILE: as secret, of any characters but a control
+# character, a tab among them, a space allowed inside: Lapilli's own
+# token, which serve takes of any characters, a tracker's that goes
+# base64'd, and one a tracker says nothing of.
+secret_line() {
+  s=$(cat "$2")
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
+  case $s in
+    '' | *[[:cntrl:]]*)
+      say "$1 doesn't hold a token: one line, with no tab or other control character"
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
   *)
-    say "LAPILLI_URL is where --incidents-listen is, such as http://lapilli:8082"
+    say "PLAIN_HTTP is true or false"
     exit 1
     ;;
 esac
+# tracker_api NAME URL: the tracker's API is at URL, which the variable
+# NAME gave: https, or this machine over http, for tests (127.0.0.1, [::1]
+# or localhost, with a port or not, and no name that only starts with
+# one), the scheme in any case, as curl takes it. fetch gives curl that
+# scheme alone (tracker_proto). Each recipe calls it before it asks.
+tracker_proto=
+tracker_api() {
+  tracker_proto=
+  case $2 in
+    *@*)
+      say "$1 holds a user or token before @, refused"
+      exit 1
+      ;;
+    [Hh][Tt][Tt][Pp][Ss]://*) tracker_proto='=https' ;;
+    [Hh][Tt][Tt][Pp]://*)
+      case ${2#*://} in
+        127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) tracker_proto='=http' ;;
+        127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) tracker_proto='=http' ;;
+      esac
+      [ "${PLAIN_HTTP:-false}" = false ] || tracker_proto='=http'
+      ;;
+  esac
+  if [ -z "$tracker_proto" ]; then
+    say "$1 is not https (PLAIN_HTTP=true takes plain http, to any host)"
+    exit 1
+  fi
+}
+
+lapilli=${1:-${LAPILLI_URL:-}}
+# Lapilli's token goes where LAPILLI_URL points, serve's port: https, or
+# http as a Service in the cluster is reached, and curl speaks no other
+# scheme (lapilli_proto).
+lapilli_proto=
+case $lapilli in
+  *@*)
+    say "LAPILLI_URL holds a user or token before @, refused"
+    exit 1
+    ;;
+  [Hh][Tt][Tt][Pp][Ss]://?*) lapilli_proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://?*) lapilli_proto='=http' ;;
+esac
+if [ -z "$lapilli_proto" ]; then
+  say "LAPILLI_URL is where --incidents-listen is, such as http://lapilli:8082"
+  exit 1
+fi
 lapilli=${lapilli%/}
 : "${LAPILLI_TOKEN_FILE:?a file holding the token in --tasks-token-file}"
-lapilli_token=$(cat "$LAPILLI_TOKEN_FILE")
+lapilli_token=$(secret_line LAPILLI_TOKEN_FILE "$LAPILLI_TOKEN_FILE")
 close=${CLOSE_ISSUES:-false}
 max_issues=${MAX_ISSUES:-50}
 max_pages=${MAX_PAGES:-20}
@@ -153,22 +256,106 @@ issue_text() {
 kept='def kept($m): [. // "" | split("\n")[] | rtrimstr("\r") | select(startswith("Kept in step with Lapilli:"))]
   | last == "Kept in step with Lapilli: " + $m;'
 
-# fetch CURL-ARGUMENTS: the tracker's answer, taken whole before it is
-# read, for a 2xx; anything else is said and fails, its HTTP status kept
-# for gone.
-fetch() {
-  : >"$work/answer"
-  if ! code=$(curl -q -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
-    code=000
-  fi
-  printf '%s\n' "$code" >"$work/status"
-  case $code in
-    2??) cat "$work/answer" ;;
+# capped FILE: stdin into FILE, 16 MiB of it at most; it fails when there
+# was more. Before curl 8.4.0 (Ubuntu 22.04 has 7.81), --max-filesize caps
+# only an answer that says its length first: what curl writes is capped
+# so, whatever its version.
+capped() { head -c 16777217 >"$1" && [ "$(wc -c <"$1")" -le 16777216 ]; }
+
+# status_of FILE: the HTTP status of the last answer whose headers curl
+# wrote to FILE (-D), or nothing.
+status_of() { sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$1" | tail -n 1; }
+
+# again_or_once WORD: refuse a WORD that isn't again or once, which each
+# request is given where it is asked (ask_again).
+again_or_once() {
+  case $1 in
+    again | once) ;;
     *)
-      say "the tracker answered $code: $(head -c 300 "$work/answer" | jq -Rsc .)"
-      return 1
+      say "a request is asked again or once, not $(printf '%s' "$1" | jq -Rc .)"
+      exit 1
       ;;
   esac
+}
+
+# ask_again CODE CURL-EXIT HOW: whether a try is asked again, of its HTTP
+# status (000 for none), curl's exit status, and how the request is asked,
+# as its caller says, not as its method does: Linear's reads are POSTs, as
+# is Azure Boards' search. Every request is asked again on a connection
+# refused (curl's 7), which sent nothing, and a 408 or 429, which the
+# server says it didn't take. One asked again (HOW again), a read, or a
+# write a second try leaves as the first did (a state, a link), is also
+# asked again on a time out (curl's 28), or a 500, 502, 503 or 504, as
+# curl's --retry does. One asked once, a write that makes something, an
+# issue, a comment, a transition, which a second try would make again,
+# isn't: it may have been taken, a 503 too, which a proxy (Envoy) answers
+# after the tracker has the request, and it fails, for the next run, which
+# finds what was made by its marker.
+ask_again() {
+  [ "$2" != 7 ] || return 0
+  case $1 in 408 | 429) return 0 ;; esac
+  [ "$3" = again ] || return 1
+  case $1 in 500 | 502 | 503 | 504) return 0 ;; esac
+  [ "$2" = 28 ]
+}
+
+# pause_for HEADS PAUSE: how long to wait before a try is asked again: as
+# long as the Retry-After of the headers curl wrote to HEADS says, of any
+# number of seconds, a minute at most; or else (none, or a date) PAUSE
+# seconds. Counted by awk, so that no number is too long for the shell.
+pause_for() {
+  tr -d '\r' <"$1" | awk -v pause="$2" 'tolower($1) == "retry-after:" { v = $2 }
+    END { if (v !~ /^[0-9]+$/) { print pause; exit } n = v + 0; if (n > 60) n = 60; print n }'
+}
+
+# fetch HOW CURL-ARGUMENTS: the tracker's answer, taken whole before it is
+# read, for a 2xx; anything else is said and fails, its HTTP status kept
+# for gone. HOW is again or once, as ask_again says. The headers curl is
+# to send come on stdin (-H @-), read once and sent again with each try.
+# An answer is 16 MiB at most (capped): past it, the request fails. A try
+# is asked again as ask_again says, three times at most, a second after
+# the first, twice as long each time after, or as long as Retry-After
+# says, a minute at most: asked by the recipe, as curl's own --retry
+# writes each try's answer after the one before when the answer goes
+# through a pipe.
+fetch() {
+  f_how=$1
+  shift
+  again_or_once "$f_how"
+  f_sent=$(cat)
+  f_tries=0
+  f_pause=1
+  while :; do
+    : >"$work/heads"
+    rm -f "$work/failed"
+    f_over=
+    if ! { printf '%s\n' "$f_sent" | curl -q -sS --proto "${tracker_proto:?tracker_api says where the tracker is}" --max-time 30 --max-filesize 16777216 \
+      -D "$work/heads" -o - "$@" || printf '%s' "$?" >"$work/failed"; } | capped "$work/answer"; then
+      f_over=1
+    fi
+    code=$(status_of "$work/heads")
+    [ -n "$code" ] && [ ! -e "$work/failed" ] || code=000
+    if [ -n "$f_over" ]; then
+      printf '000\n' >"$work/status"
+      say "the tracker's answer is more than 16 MiB: not read"
+      return 1
+    fi
+    if [ "$f_tries" -lt 3 ] && ask_again "$code" "$(cat "$work/failed" 2>/dev/null)" "$f_how"; then
+      f_tries=$((f_tries + 1))
+      sleep "$(pause_for "$work/heads" "$f_pause")"
+      f_pause=$((f_pause * 2))
+      continue
+    fi
+    printf '%s\n' "$code" >"$work/status"
+    case $code in
+      2??) cat "$work/answer" ;;
+      *)
+        say "the tracker answered $code: $(head -c 300 "$work/answer" | jq -Rsc .)"
+        return 1
+        ;;
+    esac
+    return 0
+  done
 }
 
 # gone: whether the tracker's last answer said what was asked for isn't
@@ -178,6 +365,43 @@ gone() {
     404 | 410) return 0 ;;
   esac
   return 1
+}
+
+# lapilli_curl OUT HOW CURL-ARGUMENTS: curl to Lapilli, its answer into
+# OUT (/dev/null for none), and the headers of its answer into
+# $work/lheads: its token on stdin, not the command line, where ps would
+# show it; LAPILLI_URL's scheme alone; and an answer of 16 MiB at most
+# (capped), past which it fails. Each asks with -f, which fails an HTTP
+# error. HOW is again or once, as ask_again says. A try is asked again as
+# fetch asks the tracker, three times at most, OUT holding the last try's
+# answer alone: curl's own --retry writes each try's answer after the one
+# before, as -o - goes through a pipe, so that a read that timed out
+# midway was followed by the next try's whole.
+lapilli_curl() {
+  l_out=$1
+  l_how=$2
+  shift 2
+  again_or_once "$l_how"
+  l_tries=0
+  l_pause=1
+  while :; do
+    : >"$work/lheads"
+    rm -f "$work/lfailed"
+    if ! { printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+      curl -q --proto "$lapilli_proto" --max-time 30 --max-filesize 16777216 -D "$work/lheads" -H @- -o - "$@" ||
+      printf '%s' "$?" >"$work/lfailed"; } | capped "$l_out"; then
+      return 1
+    fi
+    [ -e "$work/lfailed" ] || return 0
+    l_code=$(status_of "$work/lheads")
+    if [ "$l_tries" -lt 3 ] && ask_again "${l_code:-000}" "$(cat "$work/lfailed")" "$l_how"; then
+      l_tries=$((l_tries + 1))
+      sleep "$(pause_for "$work/lheads" "$l_pause")"
+      l_pause=$((l_pause * 2))
+      continue
+    fi
+    return 1
+  done
 }
 
 # lapilli_tasks QUERY FILE: every task the query finds, a JSON object a line.
@@ -191,8 +415,7 @@ lapilli_tasks() {
       say "more than $max_pages pages of tasks; stopping (raise MAX_PAGES)"
       exit 1
     fi
-    if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-      curl -q -fsS --max-time 30 --retry 3 -H @- -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
+    if ! lapilli_curl "$work/page" again -fsS "$lapilli/api/v1/tasks?$1&after=$after"; then
       say "Lapilli didn't give the tasks"
       exit 1
     fi
@@ -214,15 +437,13 @@ lapilli_tasks() {
 
 # lapilli_patch ID JSON: set a task's link or status.
 lapilli_patch() {
-  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
-      --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
+  lapilli_curl /dev/null again -fsS -X PATCH -H 'Content-Type: application/json' \
+    --data-binary "$2" "$lapilli/api/v1/tasks/$1"
 }
 
 # lapilli_comments ID FILE: a task's comments, as Lapilli has them.
 lapilli_comments() {
-  if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -q -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+  if ! lapilli_curl "$2" again -fsS "$lapilli/api/v1/tasks/$1/comments"; then
     return 1
   fi
   jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
@@ -234,17 +455,29 @@ lapilli_comments() {
 # when the task keeps as many as it does), and as sent.
 lapilli_copy() {
   : >"$work/copied"
-  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -q -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
-      --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
+  # A refusal (4xx) fails curl (-f), and is told by its status, of the
+  # headers lapilli_curl keeps.
+  if lapilli_curl "$work/copied" once -fsS -X POST -H 'Content-Type: application/json' \
+    --data-binary "$2" "$lapilli/api/v1/tasks/$1/comments" 2>"$work/lcopy.log"; then
+    l_code=$(status_of "$work/lheads")
+  else
+    l_code=$(status_of "$work/lheads")
+    case $l_code in
+      4??) ;;
+      *)
+        cat "$work/lcopy.log" >&2
+        l_code=000
+        ;;
+    esac
+  fi
+  printf '%s' "${l_code:-000}"
 }
 
 # lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
 # the task's issue as REF, so it is never posted again.
 lapilli_mark() {
-  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
-      --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" -o /dev/null "$lapilli/api/v1/tasks/$1/comments/$2"
+  lapilli_curl /dev/null again -fsS -X PATCH -H 'Content-Type: application/json' \
+    --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" "$lapilli/api/v1/tasks/$1/comments/$2"
 }
 
 # comment_text: a comment people wrote in Lapilli, on stdin, as the issue's

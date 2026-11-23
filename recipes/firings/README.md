@@ -21,7 +21,34 @@ takes, one firing a line:
 | `newrelic.sh` | New Relic alert conditions | what the account keeps of `NrAiIncident` | `curl`; `NEW_RELIC_ACCOUNT_ID`, `NEW_RELIC_API_KEY_FILE`; `NEW_RELIC_REGION`, `SINCE`, `UNTIL` |
 
 They need `sh` and `jq` besides, and only read: each script's header says
-which permissions. Where an alarm is written in PromQL (a CloudWatch PromQL
+which permissions.
+
+The scripts that send a token or a key with `curl` (`datadog.sh`,
+`newrelic.sh`, `google-cloud.sh`, and `put.sh` below) hold it as the
+[incident recipes](../incidents) hold theirs. A file holds the token or the
+key alone, on one line, of the characters a Bearer token is written in
+(letters, digits and `- . _ ~ + / =`); spaces, tabs and a carriage return
+after it, as an editor may leave them, are dropped; inside it they are
+refused, as is a second line, which would be a header of its own. The token
+`gcloud auth print-access-token` writes is held the same. The address it
+goes to, where `DATADOG_API`, `NEW_RELIC_API` or `GOOGLE_MONITORING_API`
+changes it, is `https://`, on whatever port and path, or this machine's
+over `http://` for tests (`127.0.0.1`, `[::1]` or `localhost`, with a port
+or not), and `curl` speaks no other scheme; the scheme may be in capitals.
+With `PLAIN_HTTP=true` (default `false`) it may be `http://` to any host, for
+a tool reached over plain http inside a cluster, its token read by whatever
+is on the way; `curl` speaks http alone then. One with a user or token
+before `@` is refused, `@` in its query too. Neither the token nor the
+address is said. An answer is 16 MiB at most, whatever `curl`'s version
+(before 8.4, `--max-filesize` holds to that bound only an answer that says
+its length; the scripts cut what `curl` writes too): past it a script
+stops, writing nothing. So does an answer that isn't a 2xx, a redirect
+among them, which `curl` doesn't follow with the token.
+`cloudwatch.sh`, `azure-monitor.sh` and `oci.sh` ask through their cloud's
+CLI, signed in however it is: they hold no token and name no address, so
+there is nothing of theirs to check or to pin.
+
+Where an alarm is written in PromQL (a CloudWatch PromQL
 alarm, a Google Cloud policy with a PromQL condition, an Azure Prometheus rule
 group), `--rules` replays it instead, which gives more: change reviews,
 longer `for`s, near misses. See
@@ -236,6 +263,15 @@ those the ledger had from it then. Give both the same `SINCE` and `UNTIL`:
 export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
 ./cloudwatch.sh > firings.jsonl && LAPILLI_TOKEN_FILE=token ./put.sh http://lapilli:8082 cloudwatch-prod < firings.jsonl
 ```
+
+`put.sh` sends serve's token where its first argument points: `http://`
+or `https://` and no other scheme, with no user before `@`. Over plain
+http the token is read by whatever is on the way, so keep that to the
+cluster serve runs in, as its port is. Its token file holds the token on
+one line, of any characters but a tab or another control character (serve
+takes a token of any), with what an editor leaves after it dropped; and
+serve's answer is 16 MiB at most, held to it by `curl` alone (8.4 or later
+for an answer that doesn't say its length: serve's own).
 
 Sent again as they are, they change nothing. Every hour over the last day
 keeps the ledger close behind; every week over what the cloud keeps ends

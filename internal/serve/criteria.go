@@ -1185,6 +1185,7 @@ func (s *Server) shownSources() sourcesSeen {
 // readImpact notes how a read of the impact signal with the criterion key
 // went.
 func (s *Server) readImpact(err error, key string) {
+	s.noteFailing("impact", err)
 	s.sources.Lock()
 	defer s.sources.Unlock()
 	if err != nil {
@@ -1196,6 +1197,7 @@ func (s *Server) readImpact(err error, key string) {
 
 // readFile notes how a read of the incidents file went.
 func (s *Server) readFile(err error) {
+	s.noteFailing("incidents-file", err)
 	s.sources.Lock()
 	defer s.sources.Unlock()
 	if err != nil {

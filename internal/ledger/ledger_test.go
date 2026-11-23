@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -521,6 +522,279 @@ func TestDecideTwice(t *testing.T) {
 	in, err := l.IncidentByID(ctx, key)
 	if err != nil || in.State != "confirmed" || in.By != "ana" {
 		t.Errorf("after another run: %+v %v", in, err)
+	}
+}
+
+// A window confirmed, taken back and confirmed again is the incident it
+// wrote the first time, as it is now, however often: no second is written
+// of the same hours, which would count them twice. Deleted since, it is
+// written down anew; and another window's incident is never taken for it.
+func TestDecideAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	f := Found{From: t0, To: t0.Add(8 * time.Hour), ImpactOn: true, ImpactSince: t0,
+		Impact: []incident.Incident{{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), Candidate: true},
+			{Title: "user impact", Start: t0.Add(5 * time.Hour), End: t0.Add(6 * time.Hour), Candidate: true}},
+		Run: Run{Kind: "test", Started: t0, Finished: t0}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	key, other := "impact-20261102T0100Z", "impact-20261102T0500Z"
+	written := func() []string {
+		t.Helper()
+		incs, err := l.Incidents(ctx, t0, t0.Add(24*time.Hour), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, in := range incs {
+			if !strings.HasPrefix(in.ID, "impact-") {
+				out = append(out, in.ID+" "+in.Title)
+			}
+		}
+		return out
+	}
+	first, err := l.Decide(ctx, key, "confirmed", "Checkout slow", "ana", opts)
+	if err != nil || first == "" {
+		t.Fatalf("confirmed: %q %v", first, err)
+	}
+	theirs, err := l.Decide(ctx, other, "confirmed", "Search slow", "ana", opts)
+	if err != nil || theirs == "" || theirs == first {
+		t.Fatalf("the other window confirmed: %q %v", theirs, err)
+	}
+	// With no title given its title stays; one given is its title now.
+	for _, title := range []string{"", "", "Checkout slow, again"} {
+		if made, err := l.Decide(ctx, key, "", "", "bo", opts); err != nil || made != "" {
+			t.Fatalf("taken back: %q %v", made, err)
+		}
+		if got, want := written(), []string{first + " Checkout slow", theirs + " Search slow"}; !slices.Equal(got, want) {
+			t.Errorf("written down: %q, want %q", got, want)
+		}
+		again, err := l.Decide(ctx, key, "confirmed", title, "bo", opts)
+		if err != nil || again != first {
+			t.Fatalf("confirmed again: %q %v, want the incident written before, %s", again, err, first)
+		}
+	}
+	if got, want := written(), []string{first + " Checkout slow, again", theirs + " Search slow"}; !slices.Equal(got, want) {
+		t.Errorf("written down: %q, want %q", got, want)
+	}
+	if in, err := l.IncidentByID(ctx, key); err != nil || in.State != "confirmed" || in.Counts {
+		t.Errorf("the window: %+v %v", in, err)
+	}
+	// Deleted, the window taken back: confirmed, it is written down anew.
+	if _, err := l.Decide(ctx, key, "", "", "bo", opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Delete(ctx, first, "bo", opts); err != nil {
+		t.Fatal(err)
+	}
+	anew, err := l.Decide(ctx, key, "confirmed", "Another title", "bo", opts)
+	if err != nil || anew == "" || anew == first || anew == theirs {
+		t.Fatalf("confirmed once deleted: %q %v", anew, err)
+	}
+	if got, want := written(), []string{anew + " Another title", theirs + " Search slow"}; !slices.Equal(got, want) {
+		t.Errorf("written down once deleted: %q, want %q", got, want)
+	}
+}
+
+// grownLedger is a ledger with a window of checkout's, 01:00 to 02:00,
+// confirmed; grown since, in the run after, to 04:00, and, in a run over
+// the day again, to cart too, with a firing of each service after 02:00;
+// and taken back. It gives the window's key and the incident it was
+// confirmed as.
+func grownLedger(t *testing.T) (l *Ledger, key, first string) {
+	t.Helper()
+	ctx := context.Background()
+	l = open(t, time.UTC)
+	run := func(from, to time.Time, w incident.Incident, fs ...firing.Firing) {
+		t.Helper()
+		f := Found{From: from, To: to, ImpactOn: true, ImpactSince: t0, ImpactCriterion: "a", Impact: []incident.Incident{w}, Firings: fs,
+			Run: Run{Kind: "test", Started: to, Finished: to, From: from, To: to}}
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(t0, t0.Add(2*time.Hour), incident.Incident{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour),
+		Labels: incident.Labels{"service": {"checkout"}}, Candidate: true})
+	key = "impact-20261102T0100Z"
+	first, err := l.Decide(ctx, key, "confirmed", "Checkout slow", "ana", opts)
+	if err != nil || first == "" {
+		t.Fatalf("confirmed: %q %v", first, err)
+	}
+	fired := []firing.Firing{
+		{Rule: "Disk", Labels: map[string]string{"service": "checkout"}, Start: t0.Add(3 * time.Hour), End: t0.Add(3*time.Hour + 20*time.Minute)},
+		{Rule: "Carts", Labels: map[string]string{"service": "cart"}, Start: t0.Add(3*time.Hour + 30*time.Minute), End: t0.Add(3*time.Hour + 40*time.Minute)}}
+	run(t0.Add(2*time.Hour), t0.Add(5*time.Hour),
+		incident.Incident{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(4 * time.Hour), Labels: incident.Labels{"service": {"checkout"}}, Candidate: true}, fired...)
+	run(t0, t0.Add(5*time.Hour),
+		incident.Incident{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(4 * time.Hour), Labels: incident.Labels{"service": {"cart", "checkout"}}, Candidate: true}, fired...)
+	if w, err := l.IncidentByID(ctx, key); err != nil || !w.End.Equal(t0.Add(4*time.Hour)) || w.State != "confirmed" || !slices.Equal(w.Labels["service"], []string{"cart", "checkout"}) {
+		t.Fatalf("the window after the later runs: %+v %v", w, err)
+	}
+	if _, err := l.Decide(ctx, key, "", "", "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	return l, key, first
+}
+
+// A window confirmed while it was going on, grown since, taken back and
+// confirmed again is the incident it wrote before, with the hours and
+// labels the window has now: a firing during the confirmed impact, after
+// the hour the incident was first written of, catches it, and one of the
+// service the window grew to. No second incident is written.
+func TestDecideAgainOfAWindowThatGrew(t *testing.T) {
+	ctx := context.Background()
+	l, key, first := grownLedger(t)
+	again, err := l.Decide(ctx, key, "confirmed", "", "ana", opts)
+	if err != nil || again != first {
+		t.Fatalf("confirmed again: %q %v, want %s", again, err, first)
+	}
+	in, err := l.IncidentByID(ctx, first)
+	if err != nil || !in.Start.Equal(t0.Add(time.Hour)) || !in.End.Equal(t0.Add(4*time.Hour)) || in.Title != "Checkout slow" ||
+		!slices.Equal(in.Labels["service"], []string{"cart", "checkout"}) {
+		t.Errorf("the incident: %s to %s, %q, %v (%v); want the window's hours and labels as they are now", in.Start, in.End, in.Title, in.Labels, err)
+	}
+	for rule, f := range firingsByRule(t, l) {
+		if !f.White {
+			t.Errorf("%s, fired during the confirmed impact after its first hour: black", rule)
+		}
+	}
+	incs, _ := l.Incidents(ctx, t0, t0.Add(24*time.Hour), true)
+	if len(incs) != 2 {
+		t.Errorf("want the window and one incident: %+v", incs)
+	}
+	// Confirmed again as it is: nothing more is written or noted.
+	cs, _ := l.Changes(ctx, 100)
+	if _, err := l.Decide(ctx, key, "", "", "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := l.Decide(ctx, key, "confirmed", "", "ana", opts); err != nil || again != first {
+		t.Fatalf("confirmed once more: %q %v", again, err)
+	}
+	if now, _ := l.Changes(ctx, 100); len(now) != len(cs)+2 {
+		t.Errorf("confirmed once more, unchanged: %d changes noted, want the two of the window", len(now)-len(cs))
+	}
+}
+
+// A window confirmed again gave its incident the hours and labels it had
+// grown to, through no check of Put's: a person's incident, within Put's
+// bounds, grew past them, labels past 4 KB, hours past 31 days. Grown past
+// them, the confirmation is refused, saying why and which incident would
+// grow, and the incident and the window are left as they were.
+func TestDecideAgainGrownPastPutsBounds(t *testing.T) {
+	ctx := context.Background()
+	vals := func(p string) []string {
+		var vs []string
+		for i := range 30 {
+			vs = append(vs, p+strings.Repeat("x", 100)+string(rune('a'+i%26)))
+		}
+		return vs
+	}
+	key := "impact-20261102T0100Z"
+	for _, c := range []struct {
+		name   string
+		person incident.Incident
+		says   string
+	}{
+		{"labels", incident.Incident{Title: "x", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), Labels: incident.Labels{"team": vals("t")}},
+			"an incident's labels are 4 KB at most in all, as JSON"},
+		{"hours", incident.Incident{Title: "x", Start: t0.Add(2*time.Hour - maxIncident - time.Minute), End: t0.Add(time.Hour)},
+			"an incident lasts 31 days at most"},
+	} {
+		l := open(t, time.UTC)
+		w := incident.Incident{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour),
+			Labels: incident.Labels{"service": vals("s")}, Candidate: true}
+		if c.name == "hours" {
+			w.Labels = incident.Labels{"service": {"checkout"}}
+		}
+		f := Found{From: t0, To: t0.Add(2 * time.Hour), ImpactOn: true, ImpactSince: t0, ImpactCriterion: "a", Impact: []incident.Incident{w},
+			Run: Run{Kind: "test", Started: t0.Add(2 * time.Hour), Finished: t0.Add(2 * time.Hour), From: t0, To: t0.Add(2 * time.Hour)}}
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatal(err)
+		}
+		first, err := l.Decide(ctx, key, "confirmed", "", "ana", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A person changes it, within Put's bounds, and the window is
+		// taken back.
+		c.person.ID = first
+		if _, err := l.Put(ctx, c.person, "eve", opts); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if _, err := l.Decide(ctx, key, "", "", "ana", opts); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := l.IncidentByID(ctx, first)
+		_, err = l.Decide(ctx, key, "confirmed", "", "ana", opts)
+		var bad ErrInvalid
+		if says := "incident " + first + " would grow past its bounds: " + c.says; !errors.As(err, &bad) || err.Error() != says {
+			t.Errorf("%s: confirmed again: %v, want %q", c.name, err, says)
+		} else if _, ok := bad.Args[len(bad.Args)-1].(ErrInvalid); !ok {
+			// For serve to say in the reader's language (message).
+			t.Errorf("%s: why, %T, isn't a refusal of its own", c.name, bad.Args[len(bad.Args)-1])
+		}
+		after, _ := l.IncidentByID(ctx, first)
+		b, _ := json.Marshal(after.Labels)
+		if len(b) > maxLabelBytes || after.End.Sub(after.Start) > maxIncident || !same(l.d, before.Incident, after.Incident) {
+			t.Errorf("%s: the incident is %d bytes of labels, %v long, changed %v", c.name, len(b), after.End.Sub(after.Start), !same(l.d, before.Incident, after.Incident))
+		}
+		if win, _ := l.IncidentByID(ctx, key); win.State != "" {
+			t.Errorf("%s: the window is %q", c.name, win.State)
+		}
+	}
+}
+
+// The incident a window was confirmed as is the window's only while it
+// stands for it: deleted and written again under its id, by whoever, of
+// other hours or the same, or moved by a person to hours the window
+// hasn't, it is another's, and the window is written down anew.
+func TestDecideAgainTakesItsOwnIncidentAlone(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name  string
+		after func(l *Ledger, first string) error
+	}{
+		{"deleted, and written again under its id, of another day", func(l *Ledger, first string) error {
+			if err := l.Delete(ctx, first, "ana", opts); err != nil {
+				return err
+			}
+			_, err := l.Put(ctx, incident.Incident{ID: first, Title: "Search down", Start: t0.Add(30 * time.Hour), End: t0.Add(31 * time.Hour),
+				Labels: incident.Labels{"service": {"search"}}}, "eve", opts)
+			return err
+		}},
+		{"deleted, and written again under its id, of the same hours", func(l *Ledger, first string) error {
+			if err := l.Delete(ctx, first, "ana", opts); err != nil {
+				return err
+			}
+			_, err := l.Put(ctx, incident.Incident{ID: first, Title: "Another's", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}, "eve", opts)
+			return err
+		}},
+		{"moved to another day", func(l *Ledger, first string) error {
+			_, err := l.Put(ctx, incident.Incident{ID: first, Title: "Checkout slow", Start: t0.Add(30 * time.Hour), End: t0.Add(31 * time.Hour),
+				Labels: incident.Labels{"service": {"checkout"}}}, "eve", opts)
+			return err
+		}},
+	} {
+		l, key, first := grownLedger(t)
+		if err := c.after(l, first); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		was, err := l.IncidentByID(ctx, first)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		again, err := l.Decide(ctx, key, "confirmed", "", "ana", opts)
+		if err != nil || again == "" || again == first {
+			t.Errorf("%s: confirmed again as %q (%v), want an incident of its own", c.name, again, err)
+			continue
+		}
+		if in, err := l.IncidentByID(ctx, again); err != nil || !in.Start.Equal(t0.Add(time.Hour)) || !in.End.Equal(t0.Add(4*time.Hour)) {
+			t.Errorf("%s: the window's incident: %+v %v", c.name, in, err)
+		}
+		if now, err := l.IncidentByID(ctx, first); err != nil || !now.Start.Equal(was.Start) || !now.End.Equal(was.End) || now.Title != was.Title {
+			t.Errorf("%s: the other incident changed: %+v, was %+v (%v)", c.name, now, was, err)
+		}
 	}
 }
 

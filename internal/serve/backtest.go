@@ -1186,13 +1186,37 @@ func (a asker) repository() string {
 	return name
 }
 
+// repositoryID is the repository's id as the token says it, the claim its
+// entry pins (knownCIs' repoID): what a repository is known by whatever it
+// is named, and renamed. "" for a plain token's, and for a CI Lapilli
+// doesn't know, whose entries pin what they will. A token passed its
+// entry's pin with it, so it is one of the entry's values, 256 bytes at
+// most with nothing that doesn't show.
+func (a asker) repositoryID() string {
+	if a.claims == nil {
+		return ""
+	}
+	known, ok := knownCIs[a.t.CI]
+	if !ok {
+		return ""
+	}
+	id, ok := signin.ClaimString(a.claims[known.repoID])
+	if !ok || len(id) > 256 {
+		return ""
+	}
+	return id
+}
+
 // supersedes reports whether a newer commit's backtest may take the place
-// of one waiting, matched by the entry, the repository's name and the pull
-// request's number: only when the token names its repository by a name
-// kept as it is. One kept as "" (past 200 bytes, or with what doesn't
-// show) is no repository's, and two repositories an entry pins so would
-// share it, one's pull request 5 superseding the other's.
-func (a asker) supersedes() bool { return a.repository() != "" }
+// of one waiting, matched by the entry, the repository and the pull
+// request's number: the repository by its id, which the token says and
+// the entry pins, so that a repository renamed while one waits is still
+// itself, and two an entry pins never each other; or, for a backtest kept
+// with no id (ledger.Backtest.RepositoryID), by a name kept as it is. A
+// name kept as "" (past 200 bytes, or with what doesn't show) is no
+// repository's, and two repositories an entry pins so would share it, one's
+// pull request 5 superseding the other's.
+func (a asker) supersedes() bool { return a.repositoryID() != "" || a.repository() != "" }
 
 // pullRequest is the pull request's number: from GitHub's or Forgejo's
 // ref when the token says it (byToken), which the job's must agree with;
@@ -1283,7 +1307,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	if n, byToken, ok := a.pullRequest(0); ok && byToken && a.supersedes() {
 		supersedes = n
 	}
-	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repository(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
+	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repositoryID(), a.repository(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
 	switch {
 	case err != nil:
 		s.log.Error("backtest port: reading the queue", "trust", a.t.Name, "err", err)
@@ -1354,7 +1378,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	done()
 	id, key := randomHex(16), randomKey()
 	kh, bh := sha256.Sum256([]byte(key)), sha256.Sum256(body)
-	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), PullRequest: pr, Commit: req.Commit,
+	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), RepositoryID: a.repositoryID(), PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
 		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes()}

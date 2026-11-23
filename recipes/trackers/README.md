@@ -83,6 +83,40 @@ its last change a task done or dropped is still checked against its issue
 (`updated_after`), so tasks closed long ago, however many, aren't paged
 through; `MAX_PAGES` bounds the open tasks and those closed lately, each.
 
+Each token goes where its address points, and `curl` is given that
+address's scheme alone. The tracker's API (`GITHUB_API`, `GITLAB_URL`,
+`JIRA_URL`, `LINEAR_API`, `AZURE_DEVOPS_URL`, `SHORTCUT_API`, where given)
+is `https://`, on whatever port and path, or this machine's over `http://`
+for tests (`127.0.0.1`, `[::1]` or `localhost`); or, with `PLAIN_HTTP=true`
+(default `false`), `http://` to any host, for a self-managed GitLab, Jira or
+Azure DevOps Server reached over plain http inside a cluster, its token read
+by whatever is on the way; `LAPILLI_URL` is `http://`
+or `https://`, as serve's port is reached inside its cluster, where plain
+http should stay. One with a user or token before `@` is refused, and
+neither an address nor a token is said. A token file holds the token
+alone, on one line, with what an editor leaves after it (spaces, a
+carriage return) dropped: GitHub's, GitLab's and Shortcut's of the
+characters a Bearer token is written in (letters, digits and `- . _ ~ + /
+=`); Lapilli's, Jira's, Azure DevOps' and Linear's of any but a tab or
+another control character. An answer, Lapilli's or the tracker's, is 16 MiB
+at most, whatever `curl`'s version: the scripts cut what `curl` writes, as
+before 8.4 `--max-filesize` holds to that bound only an answer that says its
+length. Past it, the task is skipped, or the run stops, as with any answer
+that fails.
+
+A request, Lapilli's or the tracker's, is asked again three times at most,
+by the script, not by `curl --retry`: after a second, then twice as long
+each time, or as long as the answer's `Retry-After` says, a minute at most.
+A read (Linear's queries and Azure Boards' search among them, which go as
+POSTs), or a write a second try leaves as the first did (a state, a link),
+is asked again where the connection was refused, the answer didn't come
+within 30 seconds, or it said 408, 429, 500, 502, 503 or 504. A write that
+makes something (an issue, a comment, a transition) is asked again only
+where it can't have been taken: the connection refused, or a 408 or 429.
+Any other answer may come after the tracker took it (a proxy says 502 or
+503 then), so the task is skipped for the run, and the next run finds the
+issue or the comment by its marker rather than making it twice.
+
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
 name, Jira's as `lapilli-team-NAME`; Linear takes them by id, so add

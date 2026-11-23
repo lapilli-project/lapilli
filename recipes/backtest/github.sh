@@ -21,7 +21,12 @@
 # With STATUS=true (see lib.sh), a commit status (POST
 # /repos/OWNER/REPO/statuses/SHA) on the event's head commit
 # (pull_request.head.sha), linking to the run: the token needs statuses:
-# write (a fine-grained token: commit statuses, write).
+# write (a fine-grained token: commit statuses, write). Of a pull request
+# into a branch other than the repository's default, as the event says
+# (repository.default_branch), it is lapilli/backtest (into BRANCH). In an
+# event of no pull request (push, workflow_run), the event says no branch
+# it goes into: the branch is TARGET_BRANCH, and with none, no status is
+# set.
 #
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks GitHub Actions for the job's ID token for that audience, as
@@ -47,6 +52,12 @@ api=${GITHUB_API:-${GITHUB_API_URL:-https://api.github.com}}
 case $GITHUB_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 case $GITHUB_REPO in */*) ;; *) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 host_api=$api
+# A merge queue's run is of a commit the queue made, no pull request's head
+# nor GitHub's merge of one, and its event says no pull request.
+if [ "${GITHUB_EVENT_NAME:-}" = merge_group ]; then
+  echo "github.sh: a merge queue's run (merge_group) isn't taken yet: its commit is the queue's, neither a pull request's head nor GitHub's merge of one, and no status is set. Run the backtest on pull_request alone, and leave merge_group out of the workflow's on:" >&2
+  exit 1
+fi
 if [ -z "${PR:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
   PR=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
 fi
@@ -63,6 +74,31 @@ ci_branch=${GITHUB_BASE_REF:-}
 # ... and its head, as the event says: HEAD^2 of the merge GitHub makes of
 # it, or HEAD itself where the job checks the head out.
 ci_head=$status_commit
+# ... and that merge, which a pull_request event's run is of: GITHUB_SHA,
+# where GITHUB_REF is refs/pull/N/merge. A merge with the head for its
+# second parent isn't GitHub's by that alone: one the pull request's
+# author pushed since has whatever first parent its author chose.
+ci_merge=
+case ${GITHUB_REF:-} in
+  refs/pull/*/merge) ci_merge=${GITHUB_SHA:-} ;;
+esac
+# In GitHub Actions, that is the one merge GitHub makes: in an event of no
+# pull request (push, workflow_run), HEAD a merge is one its author made,
+# and its first parent isn't taken for the base (lib.sh's ci_merges).
+ci_merges=
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${GITHUB_EVENT_NAME:-}" ]; then
+  ci_merges=1
+fi
+# ... and, for the status's name, the repository's default branch and the
+# one the pull request goes into, as the event says: a pull request into
+# another branch sets lapilli/backtest (into BRANCH), not the default's;
+# in an event that says no pull request, TARGET_BRANCH is the branch, or
+# no status is set (lib.sh).
+ci_default='' ci_into=${GITHUB_BASE_REF:-}
+if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
+  ci_default=$(jq -r '.repository.default_branch // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_default=
+  [ -n "$ci_into" ] || ci_into=$(jq -r '.pull_request.base.ref // empty | strings' "$GITHUB_EVENT_PATH" 2>/dev/null) || ci_into=
+fi
 status_link=
 if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
   status_link=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID

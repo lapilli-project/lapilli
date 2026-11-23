@@ -158,6 +158,7 @@ func (s *Server) readFeeds(ctx context.Context) {
 			st.Err, st.OK, st.Events, st.Notes = "", st.At, f.Events, slices.Clone(f.Notes)
 		}
 		s.onCall.mu.Unlock()
+		s.noteFailing("on-call/"+sc.Name, err)
 		if err != nil {
 			// Never the URL: errors name the host only.
 			s.log.Warn("reading an on-call schedule's feed; its turns kept stay", "schedule", sc.Name, "err", err)
@@ -218,6 +219,23 @@ func (s *Server) onCallView() []onCallRead {
 		out = append(out, v)
 	}
 	return out
+}
+
+// takeOnCallReads sets each schedule's last read of its feed to what by
+// says of it, none where it says nothing, as a replica starts to lead
+// (takeReads); its turns are as this replica keeps them, read from the
+// ledger.
+func (s *Server) takeOnCallReads(by map[string]onCallRead) {
+	if s.cfg.OnCall == nil {
+		return
+	}
+	for _, sc := range s.cfg.OnCall.Schedules {
+		st := s.onCallRead(sc.Name)
+		r := by[sc.Name]
+		s.onCall.mu.Lock()
+		st.At, st.OK, st.Err, st.Events, st.Notes = r.At, r.OK, r.Err, r.Events, slices.Clone(r.Notes)
+		s.onCall.mu.Unlock()
+	}
 }
 
 // onCallShown is each schedule's last read as a status says it: the

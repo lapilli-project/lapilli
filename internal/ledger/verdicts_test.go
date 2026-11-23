@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -1016,6 +1017,58 @@ func TestVerdictWindowConfirmed(t *testing.T) {
 	}
 	if d := firingsByRule(t, l)["Disk"]; d.White || !slices.Equal(d.Unrelated, []string{made}) {
 		t.Errorf("the disk's firing after confirming: %+v", d)
+	}
+}
+
+// A window confirmed again is the incident it wrote before, and a verdict
+// naming both, the window and that incident, names the incident once
+// after it.
+func TestVerdictWindowConfirmedAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	o := opts
+	window := incident.Incident{ID: "impact-20261102T1410Z", Start: vAt(14, 10), End: vAt(14, 40), Labels: incident.Labels{"service": {"checkout"}}, Candidate: true}
+	f := Found{From: t0, To: t0.Add(24 * time.Hour), Firings: []firing.Firing{
+		{Rule: "Disk", Labels: map[string]string{"service": "checkout"}, Start: vAt(14, 5), End: vAt(14, 20)},
+	}, Impact: []incident.Incident{window}, ImpactOn: true, ImpactSince: t0, ImpactCriterion: "a",
+		Run: Run{Kind: "test", Started: t0.Add(24 * time.Hour), Finished: t0.Add(24 * time.Hour), From: t0, To: t0.Add(24 * time.Hour)}}
+	if err := l.Record(ctx, f, o); err != nil {
+		t.Fatal(err)
+	}
+	incs, err := l.Incidents(ctx, t0, t0.Add(24*time.Hour), true)
+	if err != nil || len(incs) != 1 {
+		t.Fatalf("windows: %+v %v", incs, err)
+	}
+	key := incs[0].ID
+	if _, err := l.SetVerdict(ctx, keyOfFiring(firingsByRule(t, l)["Disk"]), VerdictChange{Unrelated: yes()}, editorBy(), o); err != nil {
+		t.Fatal(err)
+	}
+	made, err := l.Decide(ctx, key, "confirmed", "", "ana", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Decide(ctx, key, "", "", "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	// Said of both since, the window counting beside the incident.
+	both, _ := json.Marshal([]UnrelatedTo{{Key: made, Start: window.Start, End: window.End}, {Key: key, Start: window.Start, End: window.End}})
+	if _, err := l.w.ExecContext(ctx, "UPDATE verdicts SET unrelated = ?", string(both)); err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := json.Marshal([]string{made, key})
+	if _, err := l.w.ExecContext(ctx, "UPDATE firings SET unrelated = ? WHERE unrelated != ''", string(keys)); err != nil {
+		t.Fatal(err)
+	}
+	again, err := l.Decide(ctx, key, "confirmed", "", "ana", o)
+	if err != nil || again != made {
+		t.Fatalf("confirmed again: %q %v, want %s", again, err, made)
+	}
+	vs, _ := l.VerdictsIn(ctx, t0, t0.Add(24*time.Hour), nil)
+	if len(vs) != 1 || !slices.Equal(vs[0].Keys(), []string{made}) {
+		t.Errorf("after confirming again: %+v", vs)
+	}
+	if d := firingsByRule(t, l)["Disk"]; !slices.Equal(d.Unrelated, []string{made}) {
+		t.Errorf("the disk's firing after confirming again: %+v", d.Unrelated)
 	}
 }
 

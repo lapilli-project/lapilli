@@ -27,23 +27,27 @@ here=$(dirname "$0")
 base=${JIRA_URL%/}
 web=${JIRA_WEB:-$base}
 web=${web%/}
+tracker_api JIRA_URL "$base"
 project=$JIRA_PROJECT
 if ! printf '%s' "$project" | grep -Eq '^[A-Z][A-Z0-9_]{0,49}$'; then
   say "JIRA_PROJECT is a project key, such as OPS"
   exit 1
 fi
 type=${JIRA_ISSUE_TYPE:-Task}
-auth=$(printf '%s:%s' "$JIRA_EMAIL" "$(cat "$JIRA_TOKEN_FILE")" | base64 | tr -d '\n')
+# One assignment the token, so set -e sees it refused.
+jira_token=$(secret_line JIRA_TOKEN_FILE "$JIRA_TOKEN_FILE")
+auth=$(printf '%s:%s' "$JIRA_EMAIL" "$jira_token" | base64 | tr -d '\n')
 
-# jira METHOD PATH [BODY]: Jira's answer, or a failure for anything but a
-# 2xx. Taken whole before it is read, so a failure isn't read as nothing.
+# jira HOW METHOD PATH [BODY]: Jira's answer, or a failure for anything
+# but a 2xx, the request asked again or once (HOW, as lib.sh's ask_again
+# says). Taken whole before it is read, so a failure isn't read as nothing.
 jira() {
-  if [ $# -gt 2 ]; then
-    printf 'Authorization: Basic %s\n' "$auth" | fetch -X "$1" -H @- \
-      -H 'Accept: application/json' -H 'Content-Type: application/json' --data-binary "$3" "$base/rest/api/3$2"
+  if [ $# -gt 3 ]; then
+    printf 'Authorization: Basic %s\n' "$auth" | fetch "$1" -X "$2" -H @- \
+      -H 'Accept: application/json' -H 'Content-Type: application/json' --data-binary "$4" "$base/rest/api/3$3"
   else
-    printf 'Authorization: Basic %s\n' "$auth" | fetch -X "$1" -H @- \
-      -H 'Accept: application/json' "$base/rest/api/3$2"
+    printf 'Authorization: Basic %s\n' "$auth" | fetch "$1" -X "$2" -H @- \
+      -H 'Accept: application/json' "$base/rest/api/3$3"
   fi
 }
 
@@ -56,13 +60,13 @@ ours='def ours: .fields.creator.accountId == $me
   and ([.fields.labels // [] | .[] | strings | select(startswith("lapilli-task-"))] == [$m]);'
 
 t_me() {
-  out=$(jira GET /myself) || return 1
+  out=$(jira again GET /myself) || return 1
   printf '%s' "$out" | jq -r '.accountId // empty'
 }
 
 t_find() {
   jql=$(printf 'project = %s AND labels = "%s" AND labels = "lapilli" AND creator = currentUser()' "$project" "$1" | jq -sRr @uri)
-  out=$(jira GET "/search/jql?jql=$jql&maxResults=20&fields=creator,labels") || return 1
+  out=$(jira again GET "/search/jql?jql=$jql&maxResults=20&fields=creator,labels") || return 1
   key=$(printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'
     [.issues[] | select(ours and (.fields.labels | index("lapilli")))][0].key // empty')
   [ -z "$key" ] || printf '%s/browse/%s\n' "$web" "$key"
@@ -71,7 +75,7 @@ t_find() {
 t_create() {
   text=$(issue_text <"$1")
   body=$(jq -c --arg text "$text" --arg project "$project" --arg type "$type" -f "$here/jira.jq" "$1")
-  out=$(jira POST "/issue" "$body") || return 1
+  out=$(jira once POST "/issue" "$body") || return 1
   key=$(printf '%s' "$out" | jq -r '.key // empty')
   [ -z "$key" ] || printf '%s/browse/%s\n' "$web" "$key"
 }
@@ -82,10 +86,10 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels,statuscategorychangedate,resolutiondate"); then
+  if ! out=$(jira again GET "/issue/$1?fields=status,updated,resolution,creator,labels,statuscategorychangedate,resolutiondate"); then
     # Not there (deleted), in a project the account still browses.
     gone || return 1
-    jira GET "/project/$project" >/dev/null || return 1
+    jira again GET "/project/$project" >/dev/null || return 1
     echo gone
     return 0
   fi
@@ -97,13 +101,13 @@ t_state() {
 }
 
 t_close() {
-  out=$(jira GET "/issue/$1/transitions") || return 1
+  out=$(jira again GET "/issue/$1/transitions") || return 1
   to=$(printf '%s' "$out" | jq -r '[.transitions[] | select(.to.statusCategory.key == "done")][0].id // empty')
   if [ -z "$to" ]; then
     say "$1 has no transition into done"
     return 1
   fi
-  jira POST "/issue/$1/transitions" "$(jq -cn --arg id "$to" '{transition: {id: $id}}')" >/dev/null
+  jira once POST "/issue/$1/transitions" "$(jq -cn --arg id "$to" '{transition: {id: $id}}')" >/dev/null
 }
 
 # adf: Atlassian Document Format to text, a block a line (a paragraph, a
@@ -129,7 +133,7 @@ adf='def inline: if .type == "text" then .text // ""
 t_comments() {
   start=0
   while [ "$start" -lt 1000 ]; do
-    out=$(jira GET "/issue/$1/comment?startAt=$start&maxResults=100&orderBy=created") || return 1
+    out=$(jira again GET "/issue/$1/comment?startAt=$start&maxResults=100&orderBy=created") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" "$adf"'.comments[] | select(.visibility == null) | {id: (.id | tostring), author: (.author.displayName // "someone"),
       mine: (.author.accountId == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body | adf)}'
     n=$(printf '%s' "$out" | jq '.comments | length')
@@ -144,7 +148,7 @@ t_comments() {
 # t_comment: the text as Atlassian Document Format, a paragraph a line, as
 # text nodes only: nothing in it becomes a link, a mention or a macro.
 t_comment() {
-  out=$(jira POST "/issue/$1/comment" "$(jq -Rsc '{body: {type: "doc", version: 1, content: [split("\n")[] |
+  out=$(jira once POST "/issue/$1/comment" "$(jq -Rsc '{body: {type: "doc", version: 1, content: [split("\n")[] |
     if . == "" then {type: "paragraph", content: []} else {type: "paragraph", content: [{type: "text", text: .}]} end]}}' "$2")") || return 1
   printf '%s' "$out" | jq -r '.id // empty | tostring'
 }

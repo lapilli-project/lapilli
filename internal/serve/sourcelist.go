@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -42,9 +43,95 @@ type sourceRead struct {
 type readsState struct {
 	sync.Mutex
 	m map[string]sourceRead
-	// failing is when each source whose reads aren't counted was first
-	// seen failing, since it last read well, by this replica.
+	// failing is when each source whose reads aren't counted first failed
+	// to read, since it last read well, by this replica (noteFailing).
 	failing map[string]time.Time
+	// led says this replica led, and term is the term it led last
+	// (takeReads).
+	led  bool
+	term int64
+}
+
+// noteFailing keeps when the source id, one whose reads aren't counted
+// (the incidents file, an impact signal, an on-call schedule), first failed
+// to read since it last read well: err is how its read went. It is noted
+// where the source is read, never where the sources are shown, so that
+// looking at them writes nothing.
+func (s *Server) noteFailing(id string, err error) {
+	s.reads.Lock()
+	defer s.reads.Unlock()
+	if err == nil {
+		delete(s.reads.failing, id)
+		return
+	}
+	if _, ok := s.reads.failing[id]; ok {
+		return
+	}
+	if s.reads.failing == nil {
+		s.reads.failing = map[string]time.Time{}
+	}
+	s.reads.failing[id] = s.now()
+}
+
+// takeReads sets what this replica holds of the sources' reads as it
+// starts to lead term (beginTerm): the reads of the term before, whoever led
+// it. Where this replica led it, its own are kept. Where another did, and
+// this replica read what it said (prev, as the ledger's Led gives it), the
+// reads it said are taken, as it last said them: a source it read well
+// all along is read well as late here, and one failing is failing since
+// when it said, so that a leader that changes more often than a source's
+// bound doesn't start the source's clock again each time. Else, none: what
+// this replica read in a term it led earlier, kept while others led,
+// would have a source read well all along quiet or down at once, before
+// this term read it. Each source is then pending until it is read, and
+// one never read well failing from its first failed read in this term.
+// The incidents file, the impact signals, the on-call schedules and the
+// sources counted read by read alike.
+func (s *Server) takeReads(term int64, prev ledger.Leader, ok bool) {
+	s.reads.Lock()
+	own := s.reads.led && s.reads.term == term-1
+	s.reads.led, s.reads.term = true, term
+	s.reads.Unlock()
+	if own {
+		return
+	}
+	var said sharedStatus
+	if ok && !prev.Self && prev.Term == term-1 && json.Unmarshal(prev.Status, &said) != nil {
+		said = sharedStatus{}
+	}
+	s.reads.Lock()
+	s.reads.m, s.reads.failing = maps.Clone(said.Reads), maps.Clone(said.Failing)
+	s.reads.Unlock()
+	seen := sourcesSeen{}
+	if said.Sources != nil {
+		seen = *said.Sources
+	}
+	s.sources.Lock()
+	s.sources.impactRead, s.sources.impactKey, s.sources.impactFailed, s.sources.impactErr = seen.ImpactRead, seen.ImpactKey, seen.ImpactFailed, seen.ImpactErr
+	s.sources.fileRead, s.sources.fileFailed, s.sources.fileErr = seen.FileRead, seen.FileFailed, seen.FileErr
+	s.sources.signals = maps.Clone(seen.Signals)
+	s.sources.Unlock()
+	s.takeOnCallReads(said.OnCall)
+}
+
+// failingNow is when each source this replica reads first failed, as it
+// noted (noteFailing).
+func (s *Server) failingNow() map[string]time.Time {
+	s.reads.Lock()
+	defer s.reads.Unlock()
+	if len(s.reads.failing) == 0 {
+		return nil
+	}
+	return maps.Clone(s.reads.failing)
+}
+
+// shownFailing is failingNow as the pages judge by it: this replica's
+// while it leads, else the leader's, as it last said.
+func (s *Server) shownFailing() map[string]time.Time {
+	if !s.follows() {
+		return s.failingNow()
+	}
+	return s.shownStatus().Failing
 }
 
 // noteRead keeps how a read of the source id went: began when it began,
@@ -303,8 +390,9 @@ func (s *Server) sourceList(ctx context.Context) ([]sourceItem, error) {
 			out = append(out, it)
 		}
 	}
+	failing := s.shownFailing()
 	for i := range out {
-		s.judgeSource(&out[i], now)
+		s.judgeSource(&out[i], now, failing)
 	}
 	return out, nil
 }
@@ -361,9 +449,12 @@ func (s *Server) historySource(ctx context.Context, now time.Time) (sourceItem, 
 // last read failed; quiet, nothing read or written past its bound;
 // pending, not read yet; ok. A source whose reads are counted is down once
 // sourceDownAfter in a row failed; another, once it has failed, or been
-// quiet, past its bound.
-func (s *Server) judgeSource(it *sourceItem, now time.Time) {
-	failing := it.LastError != "" && !it.LastFailed.Before(it.LastOK)
+// quiet, past its bound. failing is when each source that never read well
+// first failed, as the replica that reads it noted (shownFailing). It
+// reads what was noted, and notes nothing: a page judges as often as it is
+// looked at.
+func (s *Server) judgeSource(it *sourceItem, now time.Time, failing map[string]time.Time) {
+	fails := it.LastError != "" && !it.LastFailed.Before(it.LastOK)
 	bound := s.sourceStale()
 	switch it.Kind {
 	case "firings":
@@ -377,19 +468,20 @@ func (s *Server) judgeSource(it *sourceItem, now time.Time) {
 		it.Failures = -1
 	}
 	switch {
-	case failing:
+	case fails:
 		it.State = "failing"
 		if it.counted {
 			it.Down = it.Failures >= sourceDownAfter
 		} else {
-			// Failing since it last read well, or since this replica first
-			// saw it failing, never having read it well: past the bound,
-			// down.
+			// Failing since it last read well, or, never having read well,
+			// since its first read failed: past the bound, down. One no
+			// failed read was noted of yet (a leader that hasn't said)
+			// isn't down for it.
 			since := it.LastOK
 			if since.IsZero() {
-				since = s.seenFailing(it.ID, now)
+				since = failing[it.ID]
 			}
-			it.Down = now.Sub(since) > bound
+			it.Down = !since.IsZero() && now.Sub(since) > bound
 		}
 	case it.LastOK.IsZero(), it.held:
 		it.State = "pending"
@@ -401,27 +493,6 @@ func (s *Server) judgeSource(it *sourceItem, now time.Time) {
 	default:
 		it.State = "ok"
 	}
-	if !failing && !it.counted {
-		s.reads.Lock()
-		delete(s.reads.failing, it.ID)
-		s.reads.Unlock()
-	}
-}
-
-// seenFailing is when this replica first saw the source id failing, now
-// for the first time.
-func (s *Server) seenFailing(id string, now time.Time) time.Time {
-	s.reads.Lock()
-	defer s.reads.Unlock()
-	if s.reads.failing == nil {
-		s.reads.failing = map[string]time.Time{}
-	}
-	at, ok := s.reads.failing[id]
-	if !ok {
-		at = now
-		s.reads.failing[id] = at
-	}
-	return at
 }
 
 // sourceErrors are the failures of the status banner that are a source's

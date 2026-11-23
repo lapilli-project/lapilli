@@ -16,7 +16,8 @@
 #   BITBUCKET_API         default https://api.bitbucket.org/2.0
 #   PR                    the pull request's id (default: Bitbucket
 #                         Pipelines' BITBUCKET_PR_ID)
-#   TARGET_BRANCH         default, without TARGET, the pull request's
+#   TARGET_BRANCH         default, without TARGET (or with HEAD^1, lib.sh's
+#                         default, written out), the pull request's
 #                         destination (BITBUCKET_PR_DESTINATION_BRANCH),
 #                         fetched: Bitbucket Pipelines clones the pull
 #                         request's branch alone, and lets the step fetch
@@ -56,9 +57,10 @@ BITBUCKET_REPO=${BITBUCKET_REPO:-${BITBUCKET_REPO_FULL_NAME:-}}
 : "${BITBUCKET_REPO:?such as example/monitoring}"
 api=${BITBUCKET_API:-https://api.bitbucket.org/2.0}
 PR=${PR:-${BITBUCKET_PR_ID:-}}
-if [ -z "${TARGET:-}" ]; then
-  TARGET_BRANCH=${TARGET_BRANCH:-${BITBUCKET_PR_DESTINATION_BRANCH:-}}
-fi
+# HEAD^1, lib.sh's default, written out is none given, as lib.sh takes it.
+case ${TARGET:-HEAD^1} in
+  HEAD^1) TARGET_BRANCH=${TARGET_BRANCH:-${BITBUCKET_PR_DESTINATION_BRANCH:-}} ;;
+esac
 # A pull request's pipeline says what it goes into: a TARGET the job gives
 # is its own (lib.sh's ci_base).
 [ -z "${BITBUCKET_PR_DESTINATION_BRANCH:-}" ] || ci_base=1

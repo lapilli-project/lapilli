@@ -42,7 +42,7 @@ const (
 // or its value past maxHistoryValue, a rule's name past maxHistoryRule or
 // none, a state past maxHistoryState or Grafana has no name for, or a time
 // outside what was asked, is passed over, and counted: so is every other
-// change of its alert, and its rule is unsure (HistoryRead.Unsure).
+// change of its alert, and its rule is unsure (HistoryRead).
 const (
 	minHistoryPage   = 10
 	maxHistoryLabels = 128
@@ -109,10 +109,13 @@ func unusable(what string, err error) error {
 // token in TokenFile, read again for each request, and redirects not
 // followed, so it goes nowhere else. Limit is the Limiter its requests are
 // asked by, each try of each: --max-rate's, shared with the Grafana's data
-// sources when it has some.
+// sources when it has some. IDs, when set, keeps what Grafana's list of
+// its rules says of the rules judged, for every read that shares it
+// (RuleIDs).
 type GrafanaHistory struct {
 	URL, TokenFile, Agent string
 	Limit                 *prom.Limiter
+	IDs                   *RuleIDs
 }
 
 func (g GrafanaHistory) client() *prom.Client {
@@ -188,12 +191,29 @@ func tagged(version string) bool {
 
 // HistoryRead is what a read of the history couldn't take: how many
 // changes it passed over, as the bounds above say; and the rules some of
-// whose changes it passed over, maxUnsure at most by name, Unsure past
-// them, as what is left of them would say they fired when they didn't.
+// whose changes it passed over, maxUnsure at most, UnsureMore past them,
+// as what is left of them would say they fired when they didn't: by name
+// (Unsure); or, read to tell rules apart (Judge), a change that says its
+// rule by that rule, beside the name it gives it (unsureOf), and Unsure
+// the names of those that say none.
 type HistoryRead struct {
 	Passed     int
 	Unsure     []string
 	UnsureMore bool
+	unsureOf   []passedOf
+	// asked and read are the requests the read asked, and the bytes of
+	// answers it read: what is left of its bounds is Grafana's list of its
+	// rules' (GrafanaHistory.ruleIDs).
+	asked int
+	read  int64
+}
+
+// passedOf is a rule some change of which was passed over: the name the
+// change gives it, and, read to tell rules apart, the rule the change says
+// it is of, zero where it says none.
+type passedOf struct {
+	name string
+	of   firing.RuleOf
 }
 
 // Read reads the changes of state of every alert over [from, to] from
@@ -201,6 +221,13 @@ type HistoryRead struct {
 // read past its bounds fails, as ErrTooManyChanges; one whose answers
 // can't be used, as ErrUnusable.
 func (g GrafanaHistory) Read(ctx context.Context, where string, from, to time.Time) ([]firing.Transition, HistoryRead, error) {
+	return g.read(ctx, where, from, to, false)
+}
+
+// read is Read; with apart, the alerts of two rules of one alert name and
+// the same labels are two, told apart by what the history says of each
+// change's rule (firing.RuleOf), which each change then carries.
+func (g GrafanaHistory) read(ctx context.Context, where string, from, to time.Time, apart bool) ([]firing.Transition, HistoryRead, error) {
 	var read func(context.Context, *prom.Client, time.Time, time.Time, *historyPages) error
 	switch where {
 	case HistoryAnnotations:
@@ -212,6 +239,7 @@ func (g GrafanaHistory) Read(ctx context.Context, where string, from, to time.Ti
 	}
 	c := g.client()
 	p := newHistoryPages(where, from, to)
+	p.apart = apart
 	for a := from; a.Before(to) || a.Equal(from); a = a.Add(historySpan) {
 		b := a.Add(historySpan)
 		if b.After(to) {
@@ -277,9 +305,12 @@ type historyPages struct {
 	seenIDs    map[int64]struct{}
 	seenKeys   map[[16]byte]struct{}
 	bad        map[[32]byte]bool
-	unsure     map[string]bool
+	unsure     map[passedOf]bool
 	unsureMore bool
 	passed     int
+	// apart says an alert is told apart by its rule too, as the history
+	// says it (firing.RuleOf).
+	apart bool
 	// labels is what the labels of the alerts kept take, near enough;
 	// read the answers' bytes, and asked the requests.
 	labels int64
@@ -291,6 +322,7 @@ type keptAlert struct {
 	rule   string
 	labels map[string]string
 	key    string
+	of     firing.RuleOf
 }
 
 type keptChange struct {
@@ -301,7 +333,7 @@ type keptChange struct {
 
 func newHistoryPages(where string, from, to time.Time) *historyPages {
 	return &historyPages{where: where, from: from, to: to, alerts: map[[32]byte]*keptAlert{}, states: map[string]string{},
-		seenIDs: map[int64]struct{}{}, seenKeys: map[[16]byte]struct{}{}, bad: map[[32]byte]bool{}, unsure: map[string]bool{}}
+		seenIDs: map[int64]struct{}{}, seenKeys: map[[16]byte]struct{}{}, bad: map[[32]byte]bool{}, unsure: map[passedOf]bool{}}
 }
 
 // tooMuch is the error of a read past its bounds.
@@ -330,34 +362,50 @@ func (p *historyPages) seen(id int64, key [16]byte, byID bool) (bool, error) {
 	return false, nil
 }
 
-// markUnsure notes a rule some change of which was passed over.
-func (p *historyPages) markUnsure(rule string) {
+// markUnsure notes a rule some change of which was passed over, by the
+// name the change gives it; read to tell rules apart, by the rule it says
+// it is of too (of), where it says one: by its name alone, a rule of the
+// name in a folder Lapilli doesn't read would leave the judged rule out. A
+// name past maxHistoryRule, or none, is no rule's; a uid past
+// maxHistoryName says none.
+func (p *historyPages) markUnsure(rule string, of firing.RuleOf) {
+	if !p.apart || len(of.UID) > maxHistoryName {
+		of = firing.RuleOf{}
+	}
+	x := passedOf{rule, of}
 	switch {
-	case rule == "" || p.unsure[rule]:
+	case rule == "" || len(rule) > maxHistoryRule || p.unsure[x]:
 	case len(p.unsure) >= maxUnsure:
 		p.unsureMore = true
 	default:
-		p.unsure[rule] = true
+		p.unsure[x] = true
 	}
 }
 
 // take keeps one change not seen before: at, of the alert rule and labels
-// (alertname among them or not), from and to states. One past the bounds
-// is counted, its alert marked, and its rule unsure.
-func (p *historyPages) take(at time.Time, rule string, labels map[string]string, from, to string) error {
+// (alertname among them or not), from and to states, and what the history
+// says of its rule besides (of). One past the bounds is counted, its alert
+// marked, and its rule unsure.
+func (p *historyPages) take(at time.Time, rule string, labels map[string]string, from, to string, of firing.RuleOf) error {
 	sum, ok := historyAlert(rule, labels)
+	if ok && p.apart {
+		// The rule's uid or id with its alert.
+		if len(of.UID) > maxHistoryName {
+			ok = false
+		} else {
+			sum = sha256.Sum256(fmt.Appendf(sum[:], "\x00%d:%s\x00%d", len(of.UID), of.UID, of.ID))
+		}
+	}
 	switch {
 	case !ok:
 		p.passed++
-		if rule != "" && len(rule) <= maxHistoryRule {
-			p.markUnsure(rule)
-		}
+		p.markUnsure(rule, of)
 		return nil
 	case len(from) > maxHistoryState || len(to) > maxHistoryState || !firing.GrafanaState(from) || !firing.GrafanaState(to) ||
 		at.Before(p.from.Add(-time.Minute)) || at.After(p.to.Add(time.Minute)):
 		p.bad[sum] = true
 		p.passed++
-		p.markUnsure(rule)
+		p.markUnsure(rule, of)
 		return nil
 	}
 	a := p.alerts[sum]
@@ -365,6 +413,9 @@ func (p *historyPages) take(at time.Time, rule string, labels map[string]string,
 		cost := int64(len(rule)) + 128
 		for k, v := range labels {
 			cost += int64(len(k)+len(v)) + 64
+		}
+		if p.apart {
+			cost += int64(len(of.UID))
 		}
 		if len(p.alerts) >= historyAlerts || p.labels+cost > historyLabels {
 			return p.tooMuch(fmt.Sprintf("more than %d alerts, or %d MiB of their labels", historyAlerts, historyLabels>>20))
@@ -376,6 +427,9 @@ func (p *historyPages) take(at time.Time, rule string, labels map[string]string,
 			}
 		}
 		a = &keptAlert{rule: rule, labels: l, key: string(sum[:16])}
+		if p.apart {
+			a.of = of
+		}
 		p.alerts[sum] = a
 		p.labels += cost
 	}
@@ -411,10 +465,20 @@ func (p *historyPages) result() ([]firing.Transition, HistoryRead, error) {
 			p.passed++
 			continue
 		}
-		out = append(out, firing.Transition{Rule: c.alert.rule, Labels: c.alert.labels, Key: c.alert.key, At: time.UnixMilli(c.ms).UTC(), From: c.from, To: c.to})
+		out = append(out, firing.Transition{Rule: c.alert.rule, Labels: c.alert.labels, Key: c.alert.key, At: time.UnixMilli(c.ms).UTC(), From: c.from, To: c.to, Of: c.alert.of})
 	}
 	slices.SortStableFunc(out, func(a, b firing.Transition) int { return a.At.Compare(b.At) })
-	return out, HistoryRead{Passed: p.passed, Unsure: slices.Sorted(maps.Keys(p.unsure)), UnsureMore: p.unsureMore}, nil
+	read := HistoryRead{Passed: p.passed, UnsureMore: p.unsureMore, asked: p.asked, read: p.read}
+	names := map[string]bool{}
+	for x := range p.unsure {
+		if x.of == (firing.RuleOf{}) {
+			names[x.name] = true
+		} else {
+			read.unsureOf = append(read.unsureOf, x)
+		}
+	}
+	read.Unsure = slices.Sorted(maps.Keys(names))
+	return out, read, nil
 }
 
 // historyAlert is the hash of an alert, its rule and labels; ok is false
@@ -503,9 +567,11 @@ func (p *historyPages) pages(ctx context.Context, c *prom.Client, until int64, p
 
 // annotation is an alert annotation, as GET /api/annotations answers one:
 // from Grafana 12.4 on, its labels are in its tags, NAME:VALUE each, as
-// AnnotationLabels writes them.
+// AnnotationLabels writes them. alertId is its rule's id in Grafana's
+// database, and alertName that rule's title now, "" once it is deleted.
 type annotation struct {
 	ID        int64    `json:"id"`
+	AlertID   int64    `json:"alertId"`
 	AlertName string   `json:"alertName"`
 	PrevState string   `json:"prevState"`
 	NewState  string   `json:"newState"`
@@ -549,12 +615,13 @@ func readAnnotations(ctx context.Context, c *prom.Client, from, to time.Time, p 
 				rule = AnnotationName(a.AlertName)
 			}
 			if !ok {
-				// Its labels can't be told, nor its alert.
+				// Its labels can't be told, nor its alert: its rule is unsure,
+				// by its id where it says one.
 				p.passed++
-				p.markUnsure(AnnotationName(a.AlertName))
+				p.markUnsure(AnnotationName(a.AlertName), firing.RuleOf{ID: a.AlertID})
 				continue
 			}
-			if err := p.take(time.UnixMilli(a.Time), rule, labels, a.PrevState, a.NewState); err != nil {
+			if err := p.take(time.UnixMilli(a.Time), rule, labels, a.PrevState, a.NewState, firing.RuleOf{ID: a.AlertID}); err != nil {
 				return nil, err
 			}
 		}
@@ -668,7 +735,7 @@ func readLokiHistory(ctx context.Context, c *prom.Client, from, to time.Time, p 
 			if rule == "" {
 				rule = l.RuleTitle
 			}
-			if err := p.take(time.UnixMilli(ms), rule, l.Labels, l.Previous, l.Current); err != nil {
+			if err := p.take(time.UnixMilli(ms), rule, l.Labels, l.Previous, l.Current, firing.RuleOf{UID: l.RuleUID}); err != nil {
 				return nil, err
 			}
 		}

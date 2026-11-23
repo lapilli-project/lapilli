@@ -387,6 +387,116 @@ func TestReplicasOneLeads(t *testing.T) {
 	ls.apart(t)
 }
 
+// A replica that starts to lead knows which led before it, in which term,
+// and what that one last said of itself, though it no longer leads: so
+// that it goes on from what the one before read (serve's takeReads).
+func TestReplicasKnowWhoLedBefore(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	ls := &leads{}
+	a, b := openReplica(t, u), openReplica(t, u)
+	if _, ok := b.Led(); ok {
+		t.Fatal("a replica just opened knows of one that led")
+	}
+	stopA := elect(t, a, ls, 0)
+	within(t, 5*time.Second, "a leads", func() bool { return a.Leading() })
+	elect(t, b, ls, 1)
+	within(t, 2*time.Second, "b reads what a says", func() bool { p, ok := b.Led(); return ok && string(p.Status) == `{"who":0}` })
+	stopA()
+	within(t, 3*campaignEvery+time.Second, "b leads", func() bool { return b.Leading() })
+	p, ok := b.Led()
+	now, _ := b.Leader()
+	if !ok || p.ID != a.ReplicaID() || p.Self || p.Term != now.Term-1 || string(p.Status) != `{"who":0}` {
+		t.Errorf("b leads term %d; the one before, as it knows: %+v, %v", now.Term, p, ok)
+	}
+	if _, ok := a.Led(); ok {
+		t.Error("a knows of another that led, none did")
+	}
+}
+
+// A leader whose heartbeat stopped writing its status, as one held up on
+// a lock would, while its lease was still renewed, passed on the status
+// it last wrote, however old: the replica that took the lead after it
+// went on from reads an hour old. Led gives the one before's status only
+// where it was written within a lease, a campaign and a few beats.
+func TestReplicasLedNotOfAStalledBeat(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	ls := &leads{}
+	a, b := openReplica(t, u), openReplica(t, u)
+	var calls atomic.Int64
+	release := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.Elect(ctx, Elected{Version: "test", Status: func() []byte {
+			if calls.Add(1) > 1 {
+				<-release // the beat stalls here; the lease is renewed apart
+			}
+			return []byte(`{"first":true}`)
+		}}, ls.lead(0, a))
+	}()
+	defer func() {
+		cancel()
+		close(release)
+		<-done
+	}()
+	within(t, 5*time.Second, "a leads", func() bool { return ls.current() == 0 })
+	elect(t, b, ls, 1)
+	within(t, 3*time.Second, "b reads what a first says", func() bool { p, ok := b.Led(); return ok && string(p.Status) == `{"first":true}` })
+	// An hour on, by a's row: its beat wrote it last then.
+	within(t, 3*time.Second, "a's beat stalls", func() bool { return calls.Load() > 1 })
+	if _, err := b.rep.side.ExecContext(ctx, "UPDATE replica_members SET seen = seen - interval '1 hour' WHERE id = ?", a.ReplicaID()); err != nil {
+		t.Fatal(err)
+	}
+	within(t, 3*time.Second, "b reads that a wrote its status an hour ago", func() bool { p, ok := b.Led(); return ok && len(p.Status) == 0 })
+	if ls.current() != 0 {
+		t.Fatalf("a no longer leads: %d", ls.current())
+	}
+	cancel() // a stops leading, its beat still stalled
+	within(t, 3*time.Second, "b leads", func() bool { return b.Leading() })
+	p, ok := b.Led()
+	now, _ := b.Leader()
+	if !ok || p.ID != a.ReplicaID() || p.Term != now.Term-1 || len(p.Status) != 0 {
+		t.Errorf("b leads term %d; the one before, as it knows: %+v, %v, want a's term with no status", now.Term, p, ok)
+	}
+}
+
+// A replica that starts to lead is told its term (Begins) before its
+// heartbeat says anything of it (Status): what serve says of the sources
+// from the term's first beat is what it took of the term before, not what
+// it held of an earlier term it led.
+func TestReplicasBeginBeforeTheyBeat(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	a := openReplica(t, u)
+	var began, said, early atomic.Int64
+	var leading atomic.Bool
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.Elect(ctx, Elected{Version: "test",
+			Begins: func(term int64) {
+				leading.Store(a.Leading())
+				began.Store(term)
+			},
+			Status: func() []byte {
+				said.Add(1)
+				if p, _ := a.Leader(); p.Term != began.Load() {
+					early.Add(1)
+				}
+				return []byte(`{}`)
+			}}, func(c context.Context) { <-c.Done() })
+	}()
+	defer func() { cancel(); <-done }()
+	within(t, 5*time.Second, "a says what it holds as it leads", func() bool { return said.Load() >= 3 })
+	if began.Load() == 0 || leading.Load() || early.Load() != 0 {
+		t.Errorf("told of term %d, leading as told %v; %d of %d statuses said before", began.Load(), leading.Load(), early.Load(), said.Load())
+	}
+}
+
 // A leader cut off from the database stops leading by its own clock,
 // before its lease lapses in the database, and another takes the lease
 // once it has: within leaseFor and a campaign of the cut. What the old

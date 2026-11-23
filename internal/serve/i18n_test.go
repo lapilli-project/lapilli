@@ -328,6 +328,21 @@ func TestPagesInEachLanguage(t *testing.T) {
 	}
 }
 
+// A refusal that says another (incident L-1 would grow past its bounds:
+// …) says both in the reader's language, not the one within in English.
+func TestRefusalWithinTranslated(t *testing.T) {
+	err := ledger.ErrInvalid{Format: "incident %s would grow past its bounds: %s",
+		Args: []any{"L-1", ledger.ErrInvalid{Format: "an incident lasts 31 days at most"}}}
+	for lang, want := range map[string]string{
+		"en": "incident L-1 would grow past its bounds: an incident lasts 31 days at most",
+		"ko": "L-1 인시던트가 한도를 넘어 커지게 돼요: 인시던트는 최대 31일까지예요",
+	} {
+		if got := message(lang, err); got != want {
+			t.Errorf("%s: %q, want %q", lang, got, want)
+		}
+	}
+}
+
 var messages = regexp.MustCompile(`(?:\b(?:invalid|bad|checkText)\(|\btr\([\w.]+,|\bstatus\.set\(|\bs\.fail\()\s*"((?:[^"\\]|\\.)*)"`)
 
 // Every message a write can be refused with, kept apart from its values,

@@ -68,12 +68,21 @@ func (c realHistory) file(dir, name string) []byte {
 // recorded is a fake Grafana answering from what a real one answered:
 // its frontend settings, its alert annotations, newest first, from and to
 // within, as many as asked; its state history kept in Loki likewise, to
-// before to, in seconds.
-func (c realHistory) recorded(t *testing.T) GrafanaHistory {
+// before to, in seconds; and its rules as its provisioning API lists them,
+// each rule's id the one its annotations have, and those of more besides.
+func (c realHistory) recorded(t *testing.T, more ...listedRule) GrafanaHistory {
 	t.Helper()
 	settings, err := os.ReadFile(filepath.Join("testdata", c.dir, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The title of each rule's uid, as GRAFANA_ALERTS labels its alerts:
+	// an annotation names its rule by its id and its title alone.
+	titleOf := map[string]string{}
+	if c.where == HistoryAnnotations {
+		for _, f := range c.alerts(t) {
+			titleOf[f.Labels["grafana_rule_uid"]] = f.Rule
+		}
 	}
 	var notes []json.RawMessage
 	var lines struct {
@@ -88,6 +97,16 @@ func (c realHistory) recorded(t *testing.T) GrafanaHistory {
 		}
 	} else if err := json.Unmarshal(c.file(c.dir, "history.json.gz"), &lines); err != nil {
 		t.Fatal(err)
+	}
+	idOf := map[string]int64{}
+	for _, n := range notes {
+		var a annotation
+		json.Unmarshal(n, &a)
+		idOf[a.AlertName] = a.AlertID
+	}
+	listed := slices.Clone(more)
+	for uid, title := range titleOf {
+		listed = append(listed, listedRule{ID: idOf[title], UID: uid, Title: title})
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -109,6 +128,8 @@ func (c realHistory) recorded(t *testing.T) GrafanaHistory {
 			}
 			out = out[:min(len(out), int(limit))] // as recorded, newest first
 			json.NewEncoder(w).Encode(out)
+		case "/api/v1/provisioning/alert-rules":
+			json.NewEncoder(w).Encode(listed)
 		case "/api/v1/rules/history":
 			v := lines.Data.Values
 			var keep []int

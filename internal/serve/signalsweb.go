@@ -980,6 +980,12 @@ func signalsKeys(set map[string]ledger.Setting) map[string]string {
 // renamed to in place: the same signal. Another replica's moves with its
 // next read of it.
 func (s *Server) renamed(from, to string) {
+	s.reads.Lock()
+	if at, ok := s.reads.failing["signal/"+from]; ok {
+		s.reads.failing["signal/"+to] = at
+		delete(s.reads.failing, "signal/"+from)
+	}
+	s.reads.Unlock()
 	s.sources.Lock()
 	if x, ok := s.sources.signals[from]; ok {
 		s.sources.signals[to] = x

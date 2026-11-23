@@ -36,6 +36,7 @@ base=${AZURE_DEVOPS_URL:-https://dev.azure.com}
 base=${base%/}
 web=${AZURE_DEVOPS_WEB:-$base}
 web=${web%/}
+tracker_api AZURE_DEVOPS_URL "$base"
 org=$AZURE_DEVOPS_ORG
 project=$AZURE_DEVOPS_PROJECT
 type=${AZURE_BOARDS_TYPE:-Task}
@@ -57,17 +58,20 @@ for v in "$type" "$done_state" "$removed_state"; do
 done
 penc=$(printf '%s' "$project" | jq -sRr @uri)
 tenc=$(printf '%s' "$type" | jq -sRr @uri)
-auth=$(printf ':%s' "$(cat "$AZURE_DEVOPS_TOKEN_FILE")" | base64 | tr -d '\n')
+# One assignment the token, so set -e sees it refused.
+az_token=$(secret_line AZURE_DEVOPS_TOKEN_FILE "$AZURE_DEVOPS_TOKEN_FILE")
+auth=$(printf ':%s' "$az_token" | base64 | tr -d '\n')
 
-# az METHOD PATH [BODY [TYPE]]: Azure DevOps's answer, or a failure for
-# anything but a 2xx. Taken whole before it is read, so a failure isn't
-# read as nothing.
+# az HOW METHOD PATH [BODY [TYPE]]: Azure DevOps's answer, or a failure
+# for anything but a 2xx, the request asked again or once (HOW, as
+# lib.sh's ask_again says): a search (WIQL) is a POST, and asked again.
+# Taken whole before it is read, so a failure isn't read as nothing.
 az() {
-  if [ $# -gt 2 ]; then
-    printf 'Authorization: Basic %s\n' "$auth" | fetch -X "$1" -H @- -H 'Accept: application/json' \
-      -H "Content-Type: ${4:-application/json}" --data-binary "$3" "$base/$org$2"
+  if [ $# -gt 3 ]; then
+    printf 'Authorization: Basic %s\n' "$auth" | fetch "$1" -X "$2" -H @- -H 'Accept: application/json' \
+      -H "Content-Type: ${5:-application/json}" --data-binary "$4" "$base/$org$3"
   else
-    printf 'Authorization: Basic %s\n' "$auth" | fetch -X "$1" -H @- -H 'Accept: application/json' "$base/$org$2"
+    printf 'Authorization: Basic %s\n' "$auth" | fetch "$1" -X "$2" -H @- -H 'Accept: application/json' "$base/$org$3"
   fi
 }
 
@@ -79,16 +83,16 @@ ours='def tags: .fields["System.Tags"] // "" | split(";") | map(gsub("^ +| +$"; 
   and (tags | index("lapilli")) and ([tags[] | select(startswith("lapilli-task-"))] == [$m]);'
 
 t_me() {
-  out=$(az GET "/_apis/connectionData") || return 1
+  out=$(az again GET "/_apis/connectionData") || return 1
   printf '%s' "$out" | jq -r '.authenticatedUser.id // empty'
 }
 
 t_find() {
   q=$(jq -cn --arg m "$1" '([39] | implode) as $q | {query: ("SELECT [System.Id] FROM workitems WHERE [System.TeamProject] = @project AND [System.Tags] CONTAINS " + $q + $m + $q + " AND [System.CreatedBy] = @Me")}')
-  out=$(az POST "/$penc/_apis/wit/wiql?api-version=7.1" "$q") || return 1
+  out=$(az again POST "/$penc/_apis/wit/wiql?api-version=7.1" "$q") || return 1
   ids=$(printf '%s' "$out" | jq -r '[.workItems[]?.id | numbers][0:20] | map(tostring) | join(",")')
   [ -n "$ids" ] || return 0
-  out=$(az GET "/$penc/_apis/wit/workitems?ids=$ids&fields=System.Tags,System.CreatedBy&api-version=7.1") || return 1
+  out=$(az again GET "/$penc/_apis/wit/workitems?ids=$ids&fields=System.Tags,System.CreatedBy&api-version=7.1") || return 1
   id=$(printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'[.value[] | select(ours)][0].id // empty')
   [ -z "$id" ] || printf '%s/%s/%s/_workitems/edit/%s\n' "$web" "$org" "$penc" "$id"
 }
@@ -97,7 +101,7 @@ t_create() {
   text=$(issue_text <"$1")
   marker=lapilli-task-$(jq -r '.id' "$1")
   body=$(jq -c --arg text "$text" --arg marker "$marker" -f "$here/azure-boards.jq" "$1")
-  out=$(az POST "/$penc/_apis/wit/workitems/%24$tenc?api-version=7.1" "$body" application/json-patch+json) || return 1
+  out=$(az once POST "/$penc/_apis/wit/workitems/%24$tenc?api-version=7.1" "$body" application/json-patch+json) || return 1
   # Its id as given: t_ref checks it is one before it goes anywhere.
   id=$(printf '%s' "$out" | jq -r '.id // empty | tostring')
   [ -z "$id" ] || printf '%s/%s/%s/_workitems/edit/%s\n' "$web" "$org" "$penc" "$id"
@@ -109,10 +113,10 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(az GET "/$penc/_apis/wit/workitems/$1?api-version=7.1"); then
+  if ! out=$(az again GET "/$penc/_apis/wit/workitems/$1?api-version=7.1"); then
     # Not there (deleted), in a project the token still reads.
     gone || return 1
-    az GET "/_apis/projects/$penc?api-version=7.1" >/dev/null || return 1
+    az again GET "/_apis/projects/$penc?api-version=7.1" >/dev/null || return 1
     echo gone
     return 0
   fi
@@ -126,7 +130,7 @@ t_state() {
 t_close() {
   to=$done_state
   [ "$2" != dropped ] || to=$removed_state
-  az PATCH "/$penc/_apis/wit/workitems/$1?api-version=7.1" \
+  az again PATCH "/$penc/_apis/wit/workitems/$1?api-version=7.1" \
     "$(jq -cn --arg s "$to" '[{op: "add", path: "/fields/System.State", value: $s}]')" application/json-patch+json >/dev/null
 }
 
@@ -140,7 +144,7 @@ t_comments() {
     pages=$((pages + 1))
     url="/$penc/_apis/wit/workItems/$1/comments?api-version=7.1-preview.4&order=asc&%24top=200"
     [ -z "$token" ] || url="$url&continuationToken=$token"
-    out=$(az GET "$url") || return 1
+    out=$(az again GET "$url") || return 1
     printf '%s' "$out" | jq -c --arg me "$me" '.comments[]? | select(.isDeleted | not)
       | {id: ((.id // .commentId) | tostring), author: (.createdBy.displayName // "someone"),
          mine: ((.createdBy.id // "" | ascii_downcase) == ($me | ascii_downcase)), at: .createdDate,
@@ -157,7 +161,7 @@ t_comments() {
 
 # t_comment: in Markdown, as Azure Boards takes it with format=markdown.
 t_comment() {
-  out=$(az POST "/$penc/_apis/wit/workItems/$1/comments?format=markdown&api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$2")") || return 1
+  out=$(az once POST "/$penc/_apis/wit/workItems/$1/comments?format=markdown&api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$2")") || return 1
   printf '%s' "$out" | jq -r '(.id // .commentId) // empty | tostring'
 }
 

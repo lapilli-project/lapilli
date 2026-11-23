@@ -585,18 +585,23 @@ func TestReplicasShareWhatPeopleDo(t *testing.T) {
 	if !a.usedOnce(ctx, "state-1", now.Add(time.Hour).Unix()) || b.usedOnce(ctx, "state-1", now.Add(time.Hour).Unix()) {
 		t.Error("a sign-in's state used twice, once on each replica")
 	}
-	// The incidents token's burst is theirs, not each one's.
+	// The incidents token's burst is theirs, not each one's: 40 of the 100
+	// asked of the two in turn, where each one's own would be 80. The
+	// bucket is the ledger's, filled by the database's clock, whatever
+	// time allow is given: at no rate it isn't filled while the test runs,
+	// so the count is the burst, however long the run takes.
+	a.tokenRate.rate, b.tokenRate.rate = 0, 0
 	n := 0
 	for i := range 100 {
 		s := a
 		if i%2 == 1 {
 			s = b
 		}
-		if s.tokenRate.allow(time.Now()) {
+		if s.tokenRate.allow(now) {
 			n++
 		}
 	}
-	if n < 40 || n > 42 {
+	if n != 40 {
 		t.Errorf("a burst of 40 shared by two replicas let %d through", n)
 	}
 }
@@ -645,6 +650,33 @@ func TestReplicasShowTheLeadersSources(t *testing.T) {
 	until(t, 30*time.Second, "the first jobs done", func() bool { return a.ready.Load() })
 	until(t, 10*time.Second, "the follower says the leader's failure", func() bool {
 		return strings.Contains(sourceRowOf(readPage(t, b, "/settings"), "Incidents file"), "failing")
+	})
+}
+
+// A replica that takes the lead goes on from what the leader before it
+// said of the sources: an incidents file never read well is failing since
+// the leader first failed to read it, not since this replica's own first
+// failed read, an hour later by its clock.
+func TestReplicasLeaderTakesTheReadsBefore(t *testing.T) {
+	f := sharedLedger(t)
+	q := quickReplicas(t)
+	rc := newSink(t)
+	gone := func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.gone") }
+	a, b := replica(t, f, rc, gone), replica(t, f, rc, gone)
+	later := now.Add(time.Hour)
+	b.now = func() time.Time { return later }
+	stopA := running(t, a)
+	until(t, 30*time.Second, "a leads", func() bool { return a.l.Leading() })
+	running(t, b)
+	until(t, 30*time.Second, "a's first failed read noted", func() bool { return !a.failingNow()["incidents-file"].IsZero() })
+	until(t, 10*time.Second, "b reads what a says", func() bool {
+		p, ok := b.l.Led()
+		return ok && strings.Contains(string(p.Status), `"incidents-file"`)
+	})
+	stopA()
+	until(t, q.Lease+5*q.Campaign+5*time.Second, "b leads", func() bool { return b.l.Leading() })
+	until(t, 10*time.Second, "b leads, the incidents file failing since a said", func() bool {
+		return b.failingNow()["incidents-file"].Equal(now)
 	})
 }
 

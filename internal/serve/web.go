@@ -1277,7 +1277,9 @@ func bad(format string, args ...any) error {
 }
 
 // message is an error in a language: one whose text was kept apart from
-// its values is translated, or one that is the same text each time.
+// its values is translated, a refusal it says of another (incident L-1
+// would grow past its bounds: …) too, or one that is the same text each
+// time.
 func message(lang string, err error) string {
 	var b badRequest
 	var inv ledger.ErrInvalid
@@ -1285,7 +1287,13 @@ func message(lang string, err error) string {
 	case errors.As(err, &b) && b.format != "":
 		return tr(lang, b.format, b.args...)
 	case errors.As(err, &inv):
-		return tr(lang, inv.Format, inv.Args...)
+		args := slices.Clone(inv.Args)
+		for i, a := range args {
+			if in, ok := a.(ledger.ErrInvalid); ok {
+				args[i] = tr(lang, in.Format, in.Args...)
+			}
+		}
+		return tr(lang, inv.Format, args...)
 	}
 	if t, ok := catalogs[lang][err.Error()]; ok {
 		return t

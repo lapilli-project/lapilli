@@ -19,11 +19,14 @@ import (
 type RuleRow struct {
 	ID int64
 	Rule
+	// Sent is, for a rule copied in, the name its source sends it by: its
+	// Name, but where another rule had that.
+	Sent string
 }
 
 // RuleTable is every rule the ledger has, by id.
 func (l *Ledger) RuleTable(ctx context.Context) (map[int64]RuleRow, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, name, grp, severity, unsupported, source FROM rules")
+	rows, err := l.r.QueryContext(ctx, "SELECT id, name, grp, severity, unsupported, source, sent FROM rules")
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +34,7 @@ func (l *Ledger) RuleTable(ctx context.Context) (map[int64]RuleRow, error) {
 	out := map[int64]RuleRow{}
 	for rows.Next() {
 		var r RuleRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.Group, &r.Severity, &r.Unsupported, &r.Source); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Group, &r.Severity, &r.Unsupported, &r.Source, &r.Sent); err != nil {
 			return nil, err
 		}
 		out[r.ID] = r

@@ -283,8 +283,11 @@ type replicas struct {
 
 	lead   atomic.Pointer[leadership]
 	leader atomic.Pointer[Leader]
-	live   atomic.Int64
-	keys   atomic.Int64
+	// led is the last replica but this one read leading with a status,
+	// kept once it no longer leads (Led).
+	led  atomic.Pointer[Leader]
+	live atomic.Int64
+	keys atomic.Int64
 	// swept is when the leader last swept what is long gone.
 	swept time.Time
 }
@@ -749,6 +752,9 @@ type Leader struct {
 	Status []byte
 	// Self says it is this replica.
 	Self bool
+	// said is when it wrote Status, by this replica's clock: when the
+	// heartbeat read it, less how long before the database had it.
+	said time.Time
 }
 
 // Leader is the replica that leads, as last read, every beatEvery: false
@@ -770,6 +776,35 @@ func (l *Ledger) Leader() (Leader, bool) {
 	}
 	return *p, true
 }
+
+// Led is the last replica but this one that this one read leading, and
+// what it said of itself (Status) as last read: kept once another leads,
+// or none, so that a replica that starts to lead knows what the one
+// before said, and its term. Status is none where that one wrote it
+// longer ago than ledWithin: a leader whose status stopped being written
+// while its lease was still renewed, or that this replica last read long
+// before, said nothing of how things stood when it stopped. False when
+// none was read: a SQLite ledger's process, one just started.
+func (l *Ledger) Led() (Leader, bool) {
+	if l.rep == nil {
+		return Leader{}, false
+	}
+	p := l.rep.led.Load()
+	if p == nil {
+		return Leader{}, false
+	}
+	led := *p
+	if time.Since(led.said) > ledWithin() {
+		led.Status = nil
+	}
+	return led, true
+}
+
+// ledWithin is how long ago the leader before may have written its status
+// for Led to give it: a lease, a campaign and a few beats, as a leader
+// that stopped at once, or was cut off and its lease ran out, last wrote
+// it before another took the lease.
+func ledWithin() time.Duration { return leaseFor + campaignEvery + 3*beatEvery }
 
 // Replicas is how many replicas live, this one with them, as last counted
 // every beatEvery: 1 for a ledger no replicas share.
@@ -843,6 +878,12 @@ type Elected struct {
 	// Stuck says the leader's work has made no progress for longer than it
 	// may: then the lease isn't renewed, and is given up, for another.
 	Stuck func() bool
+	// Begins is told the term as this replica starts to lead it, before
+	// the heartbeat may read Status: what it says of the term from its
+	// first beat is what it holds once Begins returns. It takes no longer
+	// than a moment, as the lease runs meanwhile. Term 0 for a SQLite
+	// ledger's process, or a Postgres one's alone.
+	Begins func(term int64)
 }
 
 // wedged says a write has held the writer for longer than any may (each
@@ -865,6 +906,9 @@ func (l *Ledger) wedged() bool {
 func (l *Ledger) Elect(ctx context.Context, e Elected, lead func(context.Context)) {
 	r := l.rep
 	if r == nil {
+		if e.Begins != nil {
+			e.Begins(0)
+		}
 		lead(ctx)
 		return
 	}
@@ -962,6 +1006,11 @@ func (r *replicas) resign(term int64) {
 // and lead waited for.
 func (l *Ledger) leadFor(ctx context.Context, e Elected, term int64, sent time.Time, lead func(context.Context)) {
 	r := l.rep
+	// Told before the lease is this replica's to beat with, which says
+	// Status from then on.
+	if e.Begins != nil {
+		e.Begins(term)
+	}
 	ld := &leadership{r: r, term: term, since: time.Now(), until: sent.Add(leaseFor - leaseMargin)}
 	lctx, cancel := context.WithCancelCause(context.WithValue(ctx, leaseKey{}, ld))
 	r.lead.Store(ld)
@@ -1074,15 +1123,24 @@ func (r *replicas) beat(ctx context.Context) {
 	}
 	var p Leader
 	var st string
-	err := r.side.QueryRowContext(ctx, `SELECT l.holder, l.term, l.since, coalesce(m.host, ''), coalesce(m.version, ''), coalesce(m.status, '')
+	// How long ago the leader's row was written, by the database's clock,
+	// with what it says (Led).
+	var ago float64
+	asked := time.Now()
+	err := r.side.QueryRowContext(ctx, `SELECT l.holder, l.term, l.since, coalesce(m.host, ''), coalesce(m.version, ''), coalesce(m.status, ''),
+			coalesce(extract(epoch FROM clock_timestamp() - m.seen)::float8, 0)
 		FROM replica_lease l LEFT JOIN replica_members m ON m.id = l.holder WHERE l.until > clock_timestamp()`).
-		Scan(&p.ID, &p.Term, &p.Since, &p.Host, &p.Version, &st)
+		Scan(&p.ID, &p.Term, &p.Since, &p.Host, &p.Version, &st, &ago)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		r.leader.Store(nil)
 	case err == nil:
 		p.Status, p.Self = []byte(st), p.ID == r.id
+		p.said = asked.Add(-time.Duration(ago * float64(time.Second)))
 		r.leader.Store(&p)
+		if !p.Self && st != "" {
+			r.led.Store(&p)
+		}
 	}
 	if ld != nil && ld.valid() && time.Since(r.swept) >= sweepEvery {
 		// The leader sweeps what is over, each sweepEvery: replicas gone a

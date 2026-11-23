@@ -78,9 +78,13 @@ And, as wanted:
   (`HEAD~1`, `HEAD^`, its hash in any case or short, `HASH^0`, the
   branch's `NAME~1`, as git resolves it; a branch's name alone, such as
   `main`, is the branch the job named), is a merge's first parent, taken
-  only of the CI's merge: `HEAD^2` the pull request's head as the CI says
-  (GitHub's `pull_request.head.sha`), or, where it says none, `HEAD` a
-  merge. Of the pull request's own commit, such as GitHub Actions' checkout
+  only of the CI's merge: where the CI says the pull request's head
+  (GitHub's `pull_request.head.sha`), `HEAD` the commit it says it merged
+  it in (a `pull_request` event's `GITHUB_SHA`, of `refs/pull/N/merge`)
+  and `HEAD^2` that head, or, where it says none, `HEAD` a merge. A merge
+  with that head for its second parent isn't GitHub's by that alone: one
+  the pull request's author pushed has whatever first parent its author
+  chose. Of the pull request's own commit, such as GitHub Actions' checkout
   of `pull_request.head.sha`, a merge of its own among them (an "Update
   branch"), it is the pull request's own earlier commit, so with no
   `TARGET_BRANCH` the branch the CI says the pull request goes into is
@@ -88,10 +92,40 @@ And, as wanted:
   says none, a gate (`FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`,
   `EXPECT_REQUIRED`, `FAIL_MISSED`) or `STATUS` is refused, and the job
   fails: give `TARGET` or `TARGET_BRANCH`, or check out the merge. A
+  `HEAD` that is neither the head the CI says nor its merge of it, such as
+  the pull request's branch checked out by its name (`ref:
+  github.head_ref`) after it moved, is refused with a gate or `STATUS`
+  whatever `TARGET` is, as both would say of the event's head what was
+  read of another commit: the job fails, and its status is a failure on
+  the event's head, saying so, whatever `STATUS_SHA` says, so that no
+  earlier run's success or pending there stands for this one. Check out
+  the head's commit (`ref: pull_request.head.sha`) or the merge, the
+  commit GitHub's event names (`GITHUB_SHA`): `refs/pull/N/merge` checked
+  out by its name in a run again after the base moved is GitHub's merge
+  made again, not that commit, and is refused too, as is a `GITHUB_SHA`
+  whose second parent isn't the event's head. In GitHub Actions, an event
+  of no pull request (`push`, `workflow_run`) has no merge GitHub made:
+  the job giving `PR`, `HEAD` a merge is its author's, and `TARGET`
+  `HEAD^1` is refused with a gate or `STATUS`; give `TARGET` or
+  `TARGET_BRANCH`, and with `STATUS`, `TARGET_BRANCH`, as the status's
+  name says the branch. A merge queue's run (`merge_group`) isn't taken yet:
+  its commit is the queue's, and the script says so and fails, setting no
+  status, so a branch whose rules require the job or `lapilli/backtest`
+  can't merge through a queue yet. A
   `TARGET` the job gives where the CI says what the pull request goes into
   (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
   Azure's pull request builds) is the job's, and taken as it is, as one
-  the script takes from the CI is.
+  the script takes from the CI is; `HEAD^1` written out is the default,
+  none given, so the script's own is taken. Gitea's and Forgejo's Actions
+  make no merge, in any event: `HEAD` a merge is its author's, and the
+  branch the pull request goes into is taken. A branch's name in
+  `TARGET`, such as `origin/main`, is that branch in full,
+  `refs/remotes/origin/main`, or
+  else `refs/heads/origin/main`: git reads a name as a tag's first, and
+  anyone who can push a tag could name one `origin/main`, so a name a tag
+  has too, or a short hash one is named as, is refused (with a gate or
+  `STATUS`, the job fails). A full ref (`refs/remotes/origin/main`) or a
+  commit's full hash is taken as it is.
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
@@ -159,17 +193,49 @@ And, as wanted:
   never as an earlier run's success on the same commit: a job ended by a
   signal (a cancel) or by an error of its own sets it failure, saying so,
   and one killed outright leaves it pending. A pending status the host
-  refuses is said, and the run goes on. Each script takes
+  refuses is said, and the run goes on. A job that ends otherwise than
+  passing, before or after, sets the one failure where the head is known:
+  a run refused, a path of `PATHS` in neither commit, a setting found
+  wrong once `STATUS`'s own are read, a clone that hasn't the merge's
+  parents; on the head the CI says, or `STATUS_SHA`, or else `HEAD` where
+  it is a commit of one parent. Each script takes
   the head commit from its CI (GitHub's and Gitea's event, GitLab's
   `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` or `CI_COMMIT_SHA`,
   `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,
   or `HEAD` when it isn't a merge, and sets it only when that is the
   commit read or a parent of it, never the commit the pull request goes
-  into nor the one compared against. `STATUS_URL` links elsewhere, https,
-  or http to this machine. A status is a commit's, not a pull request's:
-  two pull requests of one branch into two bases, each with its job, set
-  the same status on the same commit, the last one's standing for both;
-  give each its own `KEY`. A status the host refuses is said in the job's
+  into nor the one compared against; on GitHub, of a `HEAD` that is
+  neither the event's head nor GitHub's merge of it (`GITHUB_SHA`), the
+  refusal's failure alone, on the event's head. `STATUS_URL` links elsewhere, https,
+  or http to this machine. A status is a commit's and its name's, not a
+  pull request's: the same head opened again as a pull request into a
+  branch its author chose would set the status the default branch's rule
+  requires, judged against that branch. So where the CI says the
+  repository's default branch (GitHub's and Gitea's event,
+  `repository.default_branch`; GitLab's `CI_DEFAULT_BRANCH`), a pull
+  request into another branch sets `lapilli/backtest (into BRANCH)`
+  (`lapilli/backtest/KEY (into BRANCH)`), and the default's is left as its
+  own pull request set it; a branch whose name holds more than letters,
+  digits and `. _ / -`, or 200 of them, sets none. In an event of no pull
+  request (GitHub's `push` or `workflow_run`, Gitea's `push`, GitLab's
+  branch pipeline), the CI says the default branch alone: the branch is
+  `TARGET_BRANCH`, named as the CI's would be, and a job that gives
+  `TARGET` instead, or neither, sets no status, as one of the default's
+  name, judged against whatever `TARGET` is, would stand for the
+  default's pull requests. A rule of another branch requires that
+  branch's name, in place of `lapilli/backtest`, which the same head's
+  pull request into the default branch sets and would meet the rule
+  still; a rule of a pattern (`release/*`) asks one name of every branch
+  it matches, none of them each branch's own, so give each such branch a
+  rule of its own; and require each status by its name in full, never a
+  pattern of names (Gitea's and Forgejo's `lapilli/backtest*`), which
+  would take the names a pull request's author makes by the branch they
+  open it into. Bitbucket Pipelines doesn't say the
+  default branch, and its build status of a key is a commit's: there, two
+  pull requests of one branch into two destinations set the same one, the
+  last standing for both, so run the step only for pull requests into the
+  branches a rule protects. Azure DevOps' status is the pull request's
+  own. A status the host refuses is said in the job's
   log, and fails the job only with `FAIL_ON_ERROR=true`. The token needs more for it
   ([Stopping a merge](../../docs/pr-backtests.md#stopping-a-merge) has
   each host's API and scopes).
