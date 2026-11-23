@@ -146,8 +146,18 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (or $lk.tenant $lk.tokenSecret.name) (not $lk.url) }}
 {{- fail "loki.tenant and loki.tokenSecret go with loki.url" }}
 {{- end }}
-{{- if and $lk.tenant (or (gt (len (toString $lk.tenant)) 150) (regexMatch "[|/\\\r\n]" (toString $lk.tenant)) (has (toString $lk.tenant) (list "." ".."))) }}
+{{- /* A tenant's ID as lapilli takes one (--loki-tenant, --ruler-tenant):
+     150 bytes at most, no |, /, \, line break, nor . or .. alone. The
+     pattern is a raw string: in a quoted one, \ before the line break
+     escapes it, and \ isn't matched. */}}
+{{- $tenantBad := `[|/\\\r\n]` }}
+{{- if and $lk.tenant (or (gt (len (toString $lk.tenant)) 150) (regexMatch $tenantBad (toString $lk.tenant)) (has (toString $lk.tenant) (list "." ".."))) }}
 {{- fail (printf "loki.tenant %q: want a tenant's ID, as Loki takes one" (toString $lk.tenant)) }}
+{{- end }}
+{{- with $r.ruler.tenant }}
+{{- if or (gt (len (toString .)) 150) (regexMatch $tenantBad (toString .)) (has (toString .) (list "." "..")) }}
+{{- fail (printf "rules.ruler.tenant %q: want a tenant's ID, as Mimir and Cortex take one" (toString .)) }}
+{{- end }}
 {{- end }}
 {{- if and (not $r.grafana.history) (not $r.grafana.url) }}
 {{- fail "rules.grafana.history judges the rules rules.grafana.url reads that can't be replayed: it goes with rules.grafana.url" }}

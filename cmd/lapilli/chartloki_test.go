@@ -145,3 +145,28 @@ func podFiles(m manifest) (map[string]string, map[string]string) {
 	}
 	return mounts, vols
 }
+
+// A tenant lapilli refuses (--loki-tenant, --ruler-tenant: a |, /, \ or
+// line break) is refused as the chart renders, not by the pod as it
+// starts: a \ passed the chart's check, quoted, and the pod crash-looped.
+func TestChartTenantRefused(t *testing.T) {
+	for name, c := range map[string]struct{ values, want string }{
+		"Loki's, a backslash":  {"loki:\n  url: http://loki:3100\n  tenant: 'a\\b'\n", "loki.tenant"},
+		"Loki's, a slash":      {"loki:\n  url: http://loki:3100\n  tenant: 'a/b'\n", "loki.tenant"},
+		"Loki's, a line break": {"loki:\n  url: http://loki:3100\n  tenant: \"a\\rb\"\n", "loki.tenant"},
+		"Mimir's, a backslash": {"rules:\n  ruler:\n    url: http://mimir:8080/prometheus/config/v1/rules\n    tenant: 'c\\d'\n", "rules.ruler.tenant"},
+		"Mimir's, a pipe":      {"rules:\n  ruler:\n    url: http://mimir:8080/prometheus/config/v1/rules\n    tenant: 'c|d'\n", "rules.ruler.tenant"},
+	} {
+		f := filepath.Join(t.TempDir(), "values.yaml")
+		os.WriteFile(f, []byte(c.values), 0o600)
+		if out, err := helmTemplate(t, "--set", "mode=serve", "--set", "prometheus.url=http://p", "-f", f); err == nil ||
+			!strings.Contains(out, c.want+" ") || !strings.Contains(out, "want a tenant's ID") {
+			t.Errorf("%s: %v, want %s refused\n%s", name, err, c.want, out)
+		}
+	}
+	f := filepath.Join(t.TempDir(), "values.yaml")
+	os.WriteFile(f, []byte("rules:\n  ruler:\n    url: http://mimir:8080/prometheus/config/v1/rules\n    tenant: team-a\n"), 0o600)
+	if out, err := helmTemplate(t, "--set", "mode=serve", "--set", "prometheus.url=http://p", "-f", f); err != nil || !strings.Contains(out, `"--ruler-tenant=team-a"`) {
+		t.Errorf("a tenant lapilli takes: %v\n%s", err, out)
+	}
+}
