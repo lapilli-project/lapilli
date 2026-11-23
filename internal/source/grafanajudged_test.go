@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -373,6 +374,65 @@ func TestGrafanaJudgedManyShared(t *testing.T) {
 	if got := countAsked(g, "/api/v1/provisioning/alert-rules"); got != 1 {
 		t.Errorf("its rules listed %d times", got)
 	}
+}
+
+// Grafana's list of its rules is asked within the reader's bounds, beside
+// the history: past what the read of the history leaves of its requests or
+// its bytes of answers, it fails as too many, and no rule is judged. Given
+// a RuleIDs, the reads that share it list the rules once.
+func TestGrafanaJudgedListWithinBounds(t *testing.T) {
+	const unsupported = "its condition reads a mysql data source: only PromQL and LogQL are replayed"
+	mine := rules.Rule{Name: "Orders slow", UID: "orders", Unsupported: unsupported}
+	start := func(t *testing.T) (*fakeGrafana, GrafanaHistory) {
+		g := &fakeGrafana{settings: `{"buildInfo": {"version": "12.4.14"}, "unifiedAlerting": {"alertStateHistoryBackend": "annotations"}}`,
+			listed: []listedRule{{7, "orders", "Orders slow"}}}
+		a, b := note(1, min_(1), "Orders slow", "Normal", "Alerting", "service", "orders"), note(2, min_(9), "Orders slow", "Alerting", "Normal", "service", "orders")
+		a.AlertID, b.AlertID = 7, 7
+		g.notes = []annotation{a, b}
+		h, _ := g.start(t)
+		return g, h
+	}
+	judge := func(h GrafanaHistory) (FromHistory, error) {
+		return h.Judge(context.Background(), HistoryAnnotations, []rules.Rule{mine}, nil, nil, min_(0), min_(10))
+	}
+	t.Run("requests", func(t *testing.T) {
+		_, h := start(t)
+		was := historyRequests
+		t.Cleanup(func() { historyRequests = was })
+		historyRequests = 1 // the history's one page
+		if j, err := judge(h); !errors.Is(err, ErrTooManyChanges) || len(j.Firings) != 0 {
+			t.Errorf("%d firings, %v", len(j.Firings), err)
+		}
+	})
+	t.Run("bytes", func(t *testing.T) {
+		_, h := start(t)
+		page, err := h.client().Get(context.Background(), "/api/annotations?from=0&limit=1000&to="+strconv.FormatInt(min_(10).UnixMilli(), 10)+"&type=alert", historyBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		was := historyBytes
+		t.Cleanup(func() { historyBytes = was })
+		historyBytes = int64(len(page)) + 10 // the history's page, and not the list
+		if j, err := judge(h); !errors.Is(err, ErrTooManyChanges) || len(j.Firings) != 0 {
+			t.Errorf("%d firings, %v", len(j.Firings), err)
+		}
+		historyBytes = was
+		if j, err := judge(h); err != nil || firingsOf(j.Firings) != "Orders slow map[service:orders] 07:01-07:09" {
+			t.Errorf("within the bounds: %q, %v", firingsOf(j.Firings), err)
+		}
+	})
+	t.Run("once", func(t *testing.T) {
+		g, h := start(t)
+		h.IDs = &RuleIDs{}
+		for range 3 {
+			if j, err := judge(h); err != nil || len(j.Firings) != 1 {
+				t.Fatalf("%d firings, %v", len(j.Firings), err)
+			}
+		}
+		if n := countAsked(g, "/api/v1/provisioning/alert-rules"); n != 1 {
+			t.Errorf("its rules listed %d times", n)
+		}
+	})
 }
 
 // A list of Grafana's rules that isn't one, or holds more than MaxRules,

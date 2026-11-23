@@ -1145,6 +1145,30 @@ func TestServeGrafanaJudgedReadBackRefused(t *testing.T) {
 	sh.want("copied in", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s", "Stock low/stock -3h0m0s -2h0m0s"})
 }
 
+// A day copied lists Grafana's rules once, though its read and the read
+// back from where a rule was left out both need their ids.
+func TestServeGrafanaJudgedListedOnce(t *testing.T) {
+	g := &shopGrafana{ids: true}
+	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
+	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
+	g.fired("Stock low", "stock", -3*time.Hour, -2*time.Hour)
+	sh := shopServer(t, g)
+	sh.round(0)
+	g.note(shopNote{title: "Stock low", prev: "Normal", next: "Firing", service: "depot", at: now.Add(30 * time.Minute)})
+	sh.round(2 * time.Hour)
+	g.fired("Orders slow", "orders", 150*time.Minute, 170*time.Minute)
+	g.mu.Lock()
+	before := g.listed
+	g.mu.Unlock()
+	sh.round(4 * time.Hour)
+	g.mu.Lock()
+	listed := g.listed - before
+	g.mu.Unlock()
+	sh.want("its rules listed", listed, 1)
+	sh.want("copied in", sh.copied(), []string{"Orders slow/orders -5h0m0s -4h0m0s", "Orders slow/orders 2h30m0s 2h50m0s", "Stock low/stock -3h0m0s -2h0m0s"})
+	sh.want("Stock low's copies", sh.covers("Stock low"), "→0s")
+}
+
 // A rule left out for more than a day, of a change passed over within the
 // period, is judged by a read from a day before the day alone. That read
 // of no use (here, an annotation of no tags in it) leaves the rule out of

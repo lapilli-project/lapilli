@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 )
 
@@ -166,7 +168,7 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 				its = firing.RuleOf{UID: r.UID}
 			default:
 				if ids == nil {
-					if ids, err = g.ruleIDs(ctx, rs); err != nil {
+					if ids, err = g.ruleIDs(ctx, rs, read); err != nil {
 						return FromHistory{}, err
 					}
 				}
@@ -222,6 +224,13 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 	return j, nil
 }
 
+// RuleIDs keeps the ids Grafana's list of its rules gives the rules
+// judged (GrafanaHistory.ruleIDs), so that the reads sharing it, of the
+// same rules, list them once: the reads of a day. One read at a time.
+type RuleIDs struct {
+	ids map[string]int64
+}
+
 // ruleIDs are the ids in Grafana's database of the rules of rs, by uid, as
 // Grafana's provisioning API lists its rules now
 // (/api/v1/provisioning/alert-rules): what an annotation names its rule
@@ -229,10 +238,24 @@ func (g GrafanaHistory) Judge(ctx context.Context, where string, rs, all, ever [
 // export them, which Lapilli reads its rules from, and the export holds no
 // id. A rule it doesn't list, lists twice, or lists under another title
 // than rs has (renamed since they were read) has none. A list past
-// ListLimit or MaxRules can't be used.
-func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule) (map[string]int64, error) {
+// ListLimit or MaxRules can't be used. It is asked within what the read of
+// the history, read, leaves of the reader's bounds of requests and bytes,
+// and past them fails as ErrTooManyChanges; with g.IDs, once.
+func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule, read HistoryRead) (map[string]int64, error) {
+	if g.IDs != nil && g.IDs.ids != nil {
+		return g.IDs.ids, nil
+	}
 	const what = "Grafana's alert rules"
-	body, err := g.client().Get(ctx, "/api/v1/provisioning/alert-rules", ListLimit)
+	tooMuch := fmt.Errorf("%s, listed beside its state history: %w (more than %d requests, or %d MiB of answers)", what, ErrTooManyChanges,
+		historyRequests, historyBytes>>20)
+	limit := min(int64(ListLimit), historyBytes-read.read)
+	if read.asked >= historyRequests || limit <= 0 {
+		return nil, tooMuch
+	}
+	body, err := g.client().Get(ctx, "/api/v1/provisioning/alert-rules", limit)
+	if errors.Is(err, prom.ErrTooLarge) && limit < ListLimit {
+		return nil, tooMuch
+	}
 	if err != nil {
 		return nil, unusable(what, err)
 	}
@@ -279,6 +302,9 @@ func (g GrafanaHistory) ruleIDs(ctx context.Context, rs []rules.Rule) (map[strin
 		if l.n == 1 && l.id > 0 && l.title == title[uid] {
 			ids[uid] = l.id
 		}
+	}
+	if g.IDs != nil {
+		g.IDs.ids = ids
 	}
 	return ids, nil
 }

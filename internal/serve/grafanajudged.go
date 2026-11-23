@@ -313,8 +313,12 @@ func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule
 	if err != nil {
 		return err
 	}
+	// The reads of the day list Grafana's rules once, whichever needs them
+	// first.
+	gh := *s.cfg.JudgedHistory
+	gh.IDs = &source.RuleIDs{}
 	judge := func(read time.Time) (source.FromHistory, error) {
-		return s.cfg.JudgedHistory.Judge(ctx, where, rs, all, ever, read, b)
+		return gh.Judge(ctx, where, rs, all, ever, read, b)
 	}
 	j, err := judge(read)
 	if err != nil {

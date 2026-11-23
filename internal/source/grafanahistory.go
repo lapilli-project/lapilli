@@ -109,10 +109,13 @@ func unusable(what string, err error) error {
 // token in TokenFile, read again for each request, and redirects not
 // followed, so it goes nowhere else. Limit is the Limiter its requests are
 // asked by, each try of each: --max-rate's, shared with the Grafana's data
-// sources when it has some.
+// sources when it has some. IDs, when set, keeps what Grafana's list of
+// its rules says of the rules judged, for every read that shares it
+// (RuleIDs).
 type GrafanaHistory struct {
 	URL, TokenFile, Agent string
 	Limit                 *prom.Limiter
+	IDs                   *RuleIDs
 }
 
 func (g GrafanaHistory) client() *prom.Client {
@@ -198,6 +201,11 @@ type HistoryRead struct {
 	Unsure     []string
 	UnsureMore bool
 	unsureOf   []passedOf
+	// asked and read are the requests the read asked, and the bytes of
+	// answers it read: what is left of its bounds is Grafana's list of its
+	// rules' (GrafanaHistory.ruleIDs).
+	asked int
+	read  int64
 }
 
 // passedOf is a rule some change of which was passed over: the name the
@@ -460,7 +468,7 @@ func (p *historyPages) result() ([]firing.Transition, HistoryRead, error) {
 		out = append(out, firing.Transition{Rule: c.alert.rule, Labels: c.alert.labels, Key: c.alert.key, At: time.UnixMilli(c.ms).UTC(), From: c.from, To: c.to, Of: c.alert.of})
 	}
 	slices.SortStableFunc(out, func(a, b firing.Transition) int { return a.At.Compare(b.At) })
-	read := HistoryRead{Passed: p.passed, UnsureMore: p.unsureMore}
+	read := HistoryRead{Passed: p.passed, UnsureMore: p.unsureMore, asked: p.asked, read: p.read}
 	names := map[string]bool{}
 	for x := range p.unsure {
 		if x.of == (firing.RuleOf{}) {

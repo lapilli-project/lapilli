@@ -40,8 +40,9 @@ history (recorded.md), such a rule can get from Grafana's.
   rule's (0.69.2): kept in Loki, by the rule's uid each line carries; in
   annotations, by the rule's id in Grafana's database (`alertId`), the
   one Grafana's provisioning API lists the rule's uid with
-  (`/api/v1/provisioning/alert-rules`), read once a read when a rule
-  needs its own. Grafana asks of a token the same to list the rules as to
+  (`/api/v1/provisioning/alert-rules`), read once a day copied when a
+  rule needs its own, within what the day's read of the history leaves of
+  the reader's bounds, and 64 MB and 50,000 rules at most. Grafana asks of a token the same to list the rules as to
   export them, which Lapilli reads its rules from; the export holds no
   id. A rule it lists no more, lists twice, or lists under another title
   than the rules read (renamed since) is unsure. A change of another rule
@@ -198,8 +199,8 @@ This reads what another system sends, the Grafana, and through it what
 its data sources answered.
 
 - **How much.** The reader's bounds, unchanged: 16 MiB an answer, 5,000
-  requests, 256 MiB of answers, 200,000 changes of 50,000 alerts, their
-  labels 64 MiB. A day past any is passed over, logged, and the copy goes
+  requests, 256 MiB of answers, Grafana's list of its rules among them,
+  200,000 changes of 50,000 alerts, their labels 64 MiB. A day past any is passed over, logged, and the copy goes
   on from the day after; so is a day of more than 100,000 firings, which
   no write holds. Only a failure worth asking again fails the round.
 - **What is kept.** A firing a write can't hold (more than 32 labels,
@@ -269,7 +270,8 @@ its data sources answered.
   with no record for those days: the other rules' copies go on. What
   still makes a day a gap for every rule judged so is of the whole read:
   the history refused or of no use, Grafana's list of its rules refused
-  or past its bounds (64 MB, 50,000 rules) where a rule needs its id, a
+  or past its bounds (64 MB, 50,000 rules, or what the day's read leaves
+  of the reader's) where the day's read needs a rule's id, a
   day of more changes than the reader's bounds, of changes passed over of
   more than 1,000 rules, or of more than 100,000 firings (one rule
   flapping enough is enough), and more than 5,000 rules to keep as left

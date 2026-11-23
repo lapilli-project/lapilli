@@ -16,6 +16,16 @@ Before upgrading:
   the ledger's disk, or of its database, first
   ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
   A lapilli before this one doesn't open the upgraded ledger.
+- **A Grafana that keeps its alert state history in annotations, its list
+  of alert rules** (`/api/v1/provisioning/alert-rules`, which a token
+  that exports the rules reads too) **past 64 MB or 50,000 rules**, or
+  past what a day's read of the history leaves of the reader's 256 MiB
+  and 5,000 requests, has none of the rules Lapilli can't replay judged
+  from that history, where 0.69.1 judged them by their titles: each day
+  `lapilli serve` copies in for them is a gap, logged, and `lapilli
+  verdict` lists them, saying why. The list is read once a day copied,
+  where its history holds a change of a judged rule's title; with a
+  history kept in Loki, never (Fixed (security)).
 - **A backtest job on GitHub that checks the pull request's branch out by
   its name** (`ref: github.head_ref`), or any commit but the event's head
   or the commit GitHub's event names (`GITHUB_SHA`), GitHub's merge of
@@ -120,7 +130,8 @@ Before upgrading:
   Loki, by the rule's uid; in annotations, by its id (`alertId`), the one
   Grafana's provisioning API lists the rule's uid with
   (`/api/v1/provisioning/alert-rules`, which a token that exports the
-  rules reads too), read once a read. A rule it lists no more, or under
+  rules reads too), read once a day copied, within the reader's bounds. A
+  rule it lists no more, or under
   another title, renamed since the rules were read, is left out. A title
   shared across folders leaves neither rule out, however many rules share
   titles; a rule of a judged rule's title in a folder Lapilli's token
@@ -141,7 +152,8 @@ Before upgrading:
   a gap for every rule judged so is of the whole read: the history
   refused or past the reader's bounds, changes passed over of more than
   1,000 rules, in any folder, Grafana's list of its rules refused or past
-  its own (64 MB, 50,000 rules), more than 100,000 firings in a day, more
+  its own (64 MB, 50,000 rules) or what the day's read leaves of the
+  reader's, more than 100,000 firings in a day, more
   than 5,000 rules to keep as left out, none of them gone from Grafana,
   or none of the rules judged
   ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
