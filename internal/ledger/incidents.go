@@ -472,9 +472,12 @@ func (l *Ledger) Delete(ctx context.Context, key, by string, o verdict.Options) 
 // Decide confirms an impact window, writing it down as an incident with
 // that title, or dismisses it, or takes back either. It returns the id of
 // the incident a confirmation writes. A window confirmed before, taken
-// back and confirmed again is the incident it wrote then, while the
-// ledger keeps it, as it is now, its title too: no second is written, of
-// the same hours, which would count them twice.
+// back and confirmed again is the incident it wrote then, while that
+// stands for it still (confirmedAs): no second is written, of the same
+// hours, which would count them twice. That incident is given what the
+// window has grown to since, its hours and labels, and the title, if one
+// is given; and what its hours and labels touch is judged again, as when a
+// person changes them (Put).
 func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o verdict.Options) (string, error) {
 	if state != "" && state != "confirmed" && state != "dismissed" {
 		return "", fmt.Errorf("state %q: want confirmed, dismissed or none", state)
@@ -504,8 +507,24 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 		}
 		spans := [][2]int64{pair(span(old.Incident, o))}
 		if state == "confirmed" {
-			if made, err = l.confirmedAs(t, key); err != nil {
+			was, ok, err := l.confirmedAs(t, key, old.Incident)
+			if err != nil {
 				return err
+			}
+			if ok {
+				made = was.ID
+				now := grown(was.Incident, old.Incident, title)
+				if !same(l.d, was.Incident, now) {
+					if err := put(t, now, "ui", by, time.Now().Unix()); err != nil {
+						return err
+					}
+					if err := change(t, by, "incident "+made+" changed", was.Incident, now); err != nil {
+						return err
+					}
+					if !sameWhereWhen(l.d, was.Incident, now) {
+						spans = append(spans, pair(span(now, o)), pair(span(was.Incident, o)))
+					}
+				}
 			}
 		}
 		if state == "confirmed" && made == "" {
@@ -555,43 +574,101 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 	return made, err
 }
 
-// confirmedAs is the incident an impact window was confirmed as before,
-// the latest the ledger still keeps, written as a person's (ui): "" for
-// none. It is read from the changes a confirmation notes ("impact window
-// KEY confirmed as ID"), by their index on what, those of this window and
-// no other's: one deleted since, or confirmed longer ago than the changes
-// are kept (--keep), is none, and the window is written down anew.
-func (l *Ledger) confirmedAs(t *txn, key string) (string, error) {
+// confirmedAs is the incident the impact window w, of key, was confirmed
+// as before, while it stands for the window still: ok false for none. It
+// is read from the changes a confirmation notes ("impact window KEY
+// confirmed as ID"), by their index on what, those of this window and no
+// other's, the latest first. The incident is the window's while the
+// ledger keeps it as a person's (ui), no note since says it was deleted
+// (an id deleted and written again is another incident, whoever wrote it),
+// and its hours meet the window's: one a person moved elsewhere is theirs.
+// With none, or one confirmed longer ago than the changes are kept
+// (--keep), the window is written down anew.
+func (l *Ledger) confirmedAs(t *txn, key string, w incident.Incident) (incidentRow, bool, error) {
 	from := "impact window " + key + " confirmed as "
 	to := from[:len(from)-1] + "!"
-	rows, err := t.QueryContext(t.ctx, "SELECT what FROM changes WHERE what >= ? AND what < ? ORDER BY id DESC LIMIT 50", from, to)
+	rows, err := t.QueryContext(t.ctx, "SELECT id, what FROM changes WHERE what >= ? AND what < ? ORDER BY id DESC LIMIT 50", from, to)
 	if err != nil {
-		return "", err
+		return incidentRow{}, false, err
 	}
-	var ids []string
+	// Each note: the change it is, and the incident it names.
+	type note struct {
+		change int64
+		id     string
+	}
+	var notes []note
 	for rows.Next() {
+		var n note
 		var what string
-		if err := rows.Scan(&what); err != nil {
+		if err := rows.Scan(&n.change, &what); err != nil {
 			rows.Close()
-			return "", err
+			return incidentRow{}, false, err
 		}
-		ids = append(ids, strings.TrimPrefix(what, from))
+		n.id = strings.TrimPrefix(what, from)
+		notes = append(notes, n)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return "", err
+		return incidentRow{}, false, err
 	}
-	for _, id := range ids {
-		in, err := l.get(t, id)
-		switch {
-		case errors.Is(err, ErrNotFound):
-		case err != nil:
-			return "", err
-		case in.origin == "ui":
-			return id, nil
+	for _, n := range notes {
+		in, err := l.get(t, n.id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return incidentRow{}, false, err
+		}
+		var gone int
+		err = t.QueryRowContext(t.ctx, "SELECT 1 FROM changes WHERE what = ? AND id > ? LIMIT 1", "incident "+n.id+" deleted", n.change).Scan(&gone)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return incidentRow{}, false, err
+		}
+		if err == nil || in.origin != "ui" || !meets(in.Incident, w) {
+			continue
+		}
+		return in, true, nil
+	}
+	return incidentRow{}, false, nil
+}
+
+// meets reports whether an incident's hours and a window's have a moment in
+// common; one with no end goes on.
+func meets(in, w incident.Incident) bool {
+	return (w.End.IsZero() || !in.Start.After(w.End)) && (in.End.IsZero() || !in.End.Before(w.Start))
+}
+
+// grown is the incident in, which the window w was confirmed as before,
+// as it stands for w now: with the hours w has that it hasn't, earlier or
+// later, never fewer; with w's labels' values that it lacks; and titled
+// title, if one is given that isn't the window's own, which its form
+// sends back unchanged. An incident with no end has none still.
+func grown(in, w incident.Incident, title string) incident.Incident {
+	if w.Start.Before(in.Start) {
+		in.Start = w.Start
+	}
+	if !in.End.IsZero() && w.End.After(in.End) {
+		in.End = w.End
+	}
+	if title != "" && title != w.Title {
+		in.Title = title
+	}
+	labels := incident.Labels{}
+	for k, vs := range in.Labels {
+		labels[k] = slices.Clone(vs)
+	}
+	for k, vs := range w.Labels {
+		for _, v := range vs {
+			if !slices.Contains(labels[k], v) {
+				labels[k] = append(labels[k], v)
+				slices.Sort(labels[k])
+			}
 		}
 	}
-	return "", nil
+	if len(labels) > 0 {
+		in.Labels = labels
+	}
+	return in
 }
 
 // change notes a change made through the UI or API.

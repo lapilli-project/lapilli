@@ -86,7 +86,9 @@ func TestAPIDecide(t *testing.T) {
 
 // A window confirmed, reopened and confirmed again, through the API or its
 // form, is the incident it was confirmed as before: each gives that
-// incident, and the ledger keeps the one.
+// incident, and the ledger keeps the one. The title the form or the API
+// gives is its title; the form's sent back as the window's own, or none,
+// leaves it as it was.
 func TestDecideAgainThroughTheAPIAndTheForm(t *testing.T) {
 	s := verdictServer(t, nil)
 	h := s.Handler()
@@ -128,8 +130,20 @@ func TestDecideAgainThroughTheAPIAndTheForm(t *testing.T) {
 			written = append(written, x.ID+" "+x.Title)
 		}
 	}
-	if len(written) != 1 || written[0] != first+" checkout slow" {
-		t.Errorf("written down: %q, want %s alone, titled as it was", written, first)
+	if len(written) != 1 || written[0] != first+" by the form" {
+		t.Errorf("written down: %q, want %s alone, titled as the form said", written, first)
+	}
+	// The form as the page gives it, the window's own title in it, and
+	// the API with no title: the incident's title stays.
+	decide("", "")
+	if code, _, hd := ui(t, h, http.MethodPost, "/incidents/"+impactWindow+"/decide", vEditor, "same-origin", url.Values{"state": {"confirmed"}, "title": {in.Title}}); code != http.StatusSeeOther ||
+		hd.Get("Location") != "/incidents/"+first {
+		t.Errorf("confirmed again by the form as the page gives it: %d %s", code, hd.Get("Location"))
+	}
+	decide("", "")
+	decide("confirmed", "")
+	if now, err := s.l.IncidentByID(ctx, first); err != nil || now.Title != "by the form" {
+		t.Errorf("the incident's title, none given: %q (%v), want it as it was", now.Title, err)
 	}
 }
 
