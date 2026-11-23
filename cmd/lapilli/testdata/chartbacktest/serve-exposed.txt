@@ -382,19 +382,63 @@ data:
     # wrote to FILE (-D), or nothing.
     status_of() { sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$1" | tail -n 1; }
     
+    # posts CURL-ARGUMENTS: whether the request is a POST (-X POST): one a
+    # try may have made already, though it was answered with an error, or not
+    # in time (ask_again).
+    posts() {
+      p_prev=
+      for p_arg in "$@"; do
+        if [ "$p_prev" = -X ] && [ "$p_arg" = POST ]; then
+          return 0
+        fi
+        p_prev=$p_arg
+      done
+      return 1
+    }
+    
+    # ask_again CODE CURL-EXIT POST: whether a try is asked again, of its HTTP
+    # status (000 for none) and curl's exit status: a connection refused
+    # (curl's 7), which sent nothing, and a 408, 429 or 503, which the server
+    # says it didn't take; and, but of a POST (POST not empty), a time out
+    # (curl's 28), or a 500, 502 or 504, as curl's --retry does. A POST
+    # answered so may have made what it asks for, an issue, a comment, which a
+    # second would make again: it fails, for the next run, which finds what
+    # was made by its marker.
+    ask_again() {
+      [ "$2" != 7 ] || return 0
+      case $1 in 408 | 429 | 503) return 0 ;; esac
+      [ -z "$3" ] || return 1
+      case $1 in 500 | 502 | 504) return 0 ;; esac
+      [ "$2" = 28 ]
+    }
+    
+    # pause_for HEADS PAUSE: how long to wait before a try is asked again: as
+    # long as the Retry-After of the headers curl wrote to HEADS says, a minute
+    # at most, or else PAUSE seconds.
+    pause_for() {
+      p_wait=$(tr -d '\r' <"$1" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
+      case $p_wait in
+        '' | *[!0-9]* | ???*) p_wait=$2 ;;
+        *) [ "$p_wait" -le 60 ] || p_wait=60 ;;
+      esac
+      printf '%s' "$p_wait"
+    }
+    
     # fetch CURL-ARGUMENTS: the tracker's answer, taken whole before it is
     # read, for a 2xx; anything else is said and fails, its HTTP status kept
     # for gone. The headers curl is to send come on stdin (-H @-), read once
     # and sent again with each try. An answer is 16 MiB at most (capped): past
-    # it, the request fails. A time out, or a 408, 429, 500, 502, 503 or 504,
-    # is asked again three times at most, a second after the first, twice as
-    # long each time after, or as long as Retry-After says, a minute at most:
-    # what curl's --retry did, which writes each try's answer after the one
-    # before when the answer goes through a pipe.
+    # it, the request fails. A try is asked again as ask_again says, three
+    # times at most, a second after the first, twice as long each time after,
+    # or as long as Retry-After says, a minute at most: asked by the recipe,
+    # as curl's own --retry writes each try's answer after the one before when
+    # the answer goes through a pipe.
     fetch() {
       f_sent=$(cat)
       f_tries=0
       f_pause=1
+      f_post=
+      ! posts "$@" || f_post=1
       while :; do
         : >"$work/heads"
         rm -f "$work/failed"
@@ -410,17 +454,9 @@ data:
           say "the tracker's answer is more than 16 MiB: not read"
           return 1
         fi
-        again=
-        case $code in 408 | 429 | 500 | 502 | 503 | 504) again=1 ;; esac
-        [ "$(cat "$work/failed" 2>/dev/null)" != 28 ] || again=1
-        if [ -n "$again" ] && [ "$f_tries" -lt 3 ]; then
+        if [ "$f_tries" -lt 3 ] && ask_again "$code" "$(cat "$work/failed" 2>/dev/null)" "$f_post"; then
           f_tries=$((f_tries + 1))
-          f_wait=$(tr -d '\r' <"$work/heads" | awk 'tolower($1) == "retry-after:" { v = $2 } END { print v }')
-          case $f_wait in
-            '' | *[!0-9]* | ???*) f_wait=$f_pause ;;
-            *) [ "$f_wait" -le 60 ] || f_wait=60 ;;
-          esac
-          sleep "$f_wait"
+          sleep "$(pause_for "$work/heads" "$f_pause")"
           f_pause=$((f_pause * 2))
           continue
         fi
@@ -446,18 +482,39 @@ data:
     }
     
     # lapilli_curl OUT CURL-ARGUMENTS: curl to Lapilli, its answer into OUT
-    # (/dev/null for none): its token on stdin, not the command line, where ps
-    # would show it; LAPILLI_URL's scheme alone; and an answer of 16 MiB at
-    # most (capped), past which it fails. Each asks with -f, which writes no
-    # answer of an HTTP error, so a try curl's --retry makes again writes
-    # nothing before the next's.
+    # (/dev/null for none), and the headers of its answer into $work/lheads:
+    # its token on stdin, not the command line, where ps would show it;
+    # LAPILLI_URL's scheme alone; and an answer of 16 MiB at most (capped),
+    # past which it fails. Each asks with -f, which fails an HTTP error. A try
+    # is asked again as fetch asks the tracker, three times at most, OUT
+    # holding the last try's answer alone: curl's own --retry writes each
+    # try's answer after the one before, as -o - goes through a pipe, so that
+    # a read that timed out midway was followed by the next try's whole.
     lapilli_curl() {
       l_out=$1
       shift
-      rm -f "$work/lfailed"
-      { printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-        curl -q --proto "$lapilli_proto" --max-time 30 --max-filesize 16777216 --retry 3 -H @- -o - "$@" || : >"$work/lfailed"; } |
-        capped "$l_out" && [ ! -e "$work/lfailed" ]
+      l_tries=0
+      l_pause=1
+      l_post=
+      ! posts "$@" || l_post=1
+      while :; do
+        : >"$work/lheads"
+        rm -f "$work/lfailed"
+        if ! { printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+          curl -q --proto "$lapilli_proto" --max-time 30 --max-filesize 16777216 -D "$work/lheads" -H @- -o - "$@" ||
+          printf '%s' "$?" >"$work/lfailed"; } | capped "$l_out"; then
+          return 1
+        fi
+        [ -e "$work/lfailed" ] || return 0
+        l_code=$(status_of "$work/lheads")
+        if [ "$l_tries" -lt 3 ] && ask_again "${l_code:-000}" "$(cat "$work/lfailed")" "$l_post"; then
+          l_tries=$((l_tries + 1))
+          sleep "$(pause_for "$work/lheads" "$l_pause")"
+          l_pause=$((l_pause * 2))
+          continue
+        fi
+        return 1
+      done
     }
     
     # lapilli_tasks QUERY FILE: every task the query finds, a JSON object a line.
@@ -511,9 +568,9 @@ data:
     # when the task keeps as many as it does), and as sent.
     lapilli_copy() {
       : >"$work/copied"
-      : >"$work/lheads"
-      # A refusal (4xx) fails curl (-f), and is told by its status.
-      if lapilli_curl "$work/copied" -fsS -X POST -H 'Content-Type: application/json' -D "$work/lheads" \
+      # A refusal (4xx) fails curl (-f), and is told by its status, of the
+      # headers lapilli_curl keeps.
+      if lapilli_curl "$work/copied" -fsS -X POST -H 'Content-Type: application/json' \
         --data-binary "$2" "$lapilli/api/v1/tasks/$1/comments" 2>"$work/lcopy.log"; then
         l_code=$(status_of "$work/lheads")
       else
