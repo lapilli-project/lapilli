@@ -1243,6 +1243,7 @@
  "noisy, with no for": "for なしのノイズルール",
  "a label its expression may not give": "式が返さない可能性のあるラベル",
  "a notification template shows an annotation the rule hasn't": "通知テンプレートがルールにないアノテーションを表示",
+ "a notification template that doesn't parse": "パースできない通知テンプレート",
  "a notification template names a label no firing had": "通知テンプレートが、どの発火にもなかったラベルを参照",
  "a notification template names a label its expression may not give": "通知テンプレートが、式が返さない可能性のあるラベルを参照",
  "Its notification templates weren't checked: %s.": "通知テンプレートはチェックしていません: %s。",

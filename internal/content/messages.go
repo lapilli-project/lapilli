@@ -19,6 +19,7 @@ var messages = map[string]string{
 	AbsentNoFor:     "absent() with no for: a restart pages",
 
 	NotifyNoText:         "a notification template shows an annotation the rule hasn't",
+	NotifyTemplateError:  "a notification template that doesn't parse",
 	NotifyLabelNeverSeen: "a notification template names a label no firing had",
 	NotifyLabelNotGiven:  "a notification template names a label its expression may not give",
 }

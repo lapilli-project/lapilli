@@ -1243,6 +1243,7 @@
  "noisy, with no for": "for 없는 노이즈 규칙",
  "a label its expression may not give": "표현식이 주지 않을 수 있는 라벨",
  "a notification template shows an annotation the rule hasn't": "알림 템플릿이 규칙에 없는 어노테이션을 보여줌",
+ "a notification template that doesn't parse": "파싱되지 않는 알림 템플릿",
  "a notification template names a label no firing had": "알림 템플릿이 쓰는, 어떤 발화에도 없던 라벨",
  "a notification template names a label its expression may not give": "알림 템플릿이 쓰는, 표현식이 주지 않을 수 있는 라벨",
  "Its notification templates weren't checked: %s.": "알림 템플릿은 확인하지 않았어요: %s.",

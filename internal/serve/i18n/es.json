@@ -1243,6 +1243,7 @@
  "noisy, with no for": "ruidosa, sin for",
  "a label its expression may not give": "una etiqueta que su expresión puede no dar",
  "a notification template shows an annotation the rule hasn't": "una plantilla de notificación muestra una anotación que la regla no tiene",
+ "a notification template that doesn't parse": "una plantilla de notificación que no se puede analizar",
  "a notification template names a label no firing had": "una plantilla de notificación nombra una etiqueta que ningún disparo tuvo",
  "a notification template names a label its expression may not give": "una plantilla de notificación nombra una etiqueta que su expresión puede no dar",
  "Its notification templates weren't checked: %s.": "Sus plantillas de notificación no se comprobaron: %s.",

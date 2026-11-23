@@ -49,9 +49,10 @@ const (
 	ShortRange      = "short_range"      // heuristic: a range shorter than two scrapes
 	AbsentNoFor     = "absent_no_for"    // heuristic: absent() with no for
 
-	// What a Grafana rule's notification templates show
-	// (docs/design/serveops.md).
+	// What a rule's notification templates show: Grafana's
+	// (docs/design/serveops.md) and Alertmanager's (docs/design/content.md).
 	NotifyNoText         = "notify_no_text"          // fact: an annotation a template shows the rule hasn't
+	NotifyTemplateError  = "notify_template_error"   // fact: an Alertmanager template that doesn't parse
 	NotifyLabelNeverSeen = "notify_label_never_seen" // measured: a label a template names no firing had
 	NotifyLabelNotGiven  = "notify_label_not_given"  // heuristic: a label a template names the expression can't give
 )
@@ -59,7 +60,7 @@ const (
 // Checks are every check, in the order they are shown: facts, then what is
 // measured, then heuristics.
 var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate, ForOutlasts, NotifyNoText,
-	LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
+	NotifyTemplateError, LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
 
 // Class is the kind of check a check is.
 func Class(check string) string {
@@ -142,6 +143,12 @@ type Options struct {
 	NotifyBy  time.Time
 	Unchecked func(rule, why string)
 	notify    *notifyRun
+	// Alertmanager, when not nil, is what Alertmanager's notification
+	// templates show (ReadAlertmanager), and which a rule written in
+	// Prometheus's templates is sent with: routed as Notify is, with a
+	// budget of its own.
+	Alertmanager *Notifications
+	am           *notifyRun
 	// scrapes are Scrape and Jobs, read once for every rule.
 	scrapes Scrapes
 }
@@ -173,6 +180,9 @@ func Check(rs []rules.Rule, o Options) [][]Finding {
 	o.scrapes = Scrapes{Global: o.Scrape, Jobs: o.Jobs}
 	if o.Notify != nil {
 		o.notify = o.Notify.run(o.NotifyBy)
+	}
+	if o.Alertmanager != nil {
+		o.am = o.Alertmanager.run(o.NotifyBy)
 	}
 	o.scrapes.names = o.scrapes.sorted()
 	sevs := severityCounts(rs)
