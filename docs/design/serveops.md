@@ -977,8 +977,10 @@ links to the page; so does Run history.
 
 A source is down when, of those whose reads are counted, three in a row
 failed (`sourceDownAfter`); of the others, when it has failed since it last
-read well past its bound, or, never having read well, since this replica
-first saw it failing; and when it is quiet. The bounds are the impact
+read well past its bound, or, never having read well, since its first read
+failed, noted where it is read (by the leader, which says it to the
+replicas that follow) and never where the sources are shown: the page and
+the API read what was noted, and write nothing; and when it is quiet. The bounds are the impact
 signal's (`impactStale`: two runs, the hours they settle, and one more),
 and for what a job writes, its own: two days for incidents through the
 port (`receivedQuiet`), `--source-quiet` for firings. An incidents id

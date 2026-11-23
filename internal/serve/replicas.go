@@ -245,6 +245,9 @@ type sharedStatus struct {
 	Goals *goalsBrief `json:"goals,omitempty"`
 	// Reads are how the leader's reads of each source went (sourcelist.go).
 	Reads map[string]sourceRead `json:"reads,omitempty"`
+	// Failing is when each source whose reads aren't counted first failed
+	// to read, since it last read well, as the leader noted (noteFailing).
+	Failing map[string]time.Time `json:"failing,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -267,6 +270,7 @@ func (s *Server) ownStatus() sharedStatus {
 	st.Sources = s.sourcesNow()
 	st.Goals = s.goalsBriefNow()
 	st.Reads = s.readsNow()
+	st.Failing = s.failingNow()
 	return st
 }
 

@@ -158,6 +158,7 @@ func (s *Server) readFeeds(ctx context.Context) {
 			st.Err, st.OK, st.Events, st.Notes = "", st.At, f.Events, slices.Clone(f.Notes)
 		}
 		s.onCall.mu.Unlock()
+		s.noteFailing("on-call/"+sc.Name, err)
 		if err != nil {
 			// Never the URL: errors name the host only.
 			s.log.Warn("reading an on-call schedule's feed; its turns kept stay", "schedule", sc.Name, "err", err)

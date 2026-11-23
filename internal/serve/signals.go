@@ -387,6 +387,7 @@ type signalSeen struct {
 
 // readSignal notes how a read of a named signal went.
 func (s *Server) readSignal(name string, err error) {
+	s.noteFailing("signal/"+name, err)
 	s.sources.Lock()
 	defer s.sources.Unlock()
 	if s.sources.signals == nil {

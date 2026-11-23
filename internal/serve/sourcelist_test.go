@@ -164,6 +164,76 @@ func TestSourceDownByItsBound(t *testing.T) {
 	}
 }
 
+// A source whose reads aren't counted, never read well, is down once it
+// has failed past its bound since its first read failed, as noted where it
+// is read. Looking at the sources, the page or the API,
+// notes nothing: it neither starts that clock nor moves it, however often,
+// and a source no failed read was noted of isn't down for being looked at.
+func TestSourceFailingSinceItsFirstFailedRead(t *testing.T) {
+	ctx := context.Background()
+	s, clock := hookServer(t, func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.yaml") })
+	h := s.Handler()
+	bound := s.sourceStale()
+	file := func() sourceItem {
+		t.Helper()
+		items, err := s.sourceList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(items, func(it sourceItem) bool { return it.ID == "incidents-file" })
+		if i < 0 {
+			t.Fatalf("no incidents file among %+v", items)
+		}
+		return items[i]
+	}
+	look := func() {
+		t.Helper()
+		for _, path := range []string{"/sources", "/api/v1/sources?all=true"} {
+			if code, body, _ := get(t, h, path); code != http.StatusOK {
+				t.Fatalf("%s: %d %s", path, code, body)
+			}
+		}
+	}
+	// Looked at before any read: nothing noted.
+	look()
+	if got := s.failingNow(); len(got) != 0 {
+		t.Errorf("noted by looking: %v", got)
+	}
+	// Its first read fails, with no one looking. Looked at first near its
+	// bound, and read failing again: the clock is the first failed read's,
+	// not the first look's.
+	first := *clock
+	s.readFile(errors.New("incidents.yaml: line 3: bad"))
+	*clock = first.Add(bound - time.Minute)
+	look()
+	s.readFile(errors.New("incidents.yaml: line 3: bad"))
+	look()
+	if got := s.failingNow(); len(got) != 1 || !got["incidents-file"].Equal(first) {
+		t.Errorf("noted %v, want the first failed read's time, %s", got, first)
+	}
+	if it := file(); it.State != "failing" || it.Down {
+		t.Errorf("a minute before its bound: %s, down %v", it.State, it.Down)
+	}
+	*clock = first.Add(bound + time.Minute)
+	if it := file(); it.State != "failing" || !it.Down {
+		t.Errorf("past its bound since its first failed read: %s, down %v", it.State, it.Down)
+	}
+	if err := s.tellSources(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := sourceEvents(t, s); !slices.Equal(got, []string{"source.down incidents-file"}) {
+		t.Errorf("told %q", got)
+	}
+	// Read well: no longer noted.
+	s.readFile(nil)
+	if got := s.failingNow(); len(got) != 0 {
+		t.Errorf("still noted once read well: %v", got)
+	}
+	if it := file(); it.State != "ok" || it.Down {
+		t.Errorf("read well: %s, down %v", it.State, it.Down)
+	}
+}
+
 // What the Sources page, the API and a notice say of a source's error:
 // the paths of serve's files to an admin alone, as Run history says them,
 // and a credential to no one.
