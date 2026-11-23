@@ -175,16 +175,17 @@ firings, under a rule's uid, or, with no uid, under its name alone; with
 a change to a state Grafana has no name for, no record for the rule it
 names; and, with changes of more than 1,000 rules' names, every day a
 gap. A change is taken for a judged rule only where the history says it
-is that rule's, by its uid (Loki) or its id (annotations): whoever may
-make a rule in a folder Lapilli reads, of a judged rule's title, paused
-or not, at a round or between two, writes nothing into that rule's
-record and takes nothing away. In annotations, a rule given a judged
-rule's title in the seconds between a round's read of the rules and of
-the history, firing there while the judged rule is quiet, is taken for
-it. Where the history says no rule's uid or id, a title two rules have
-in any version of the rules in effect across what a round writes leaves
-the judged rule out alone, shown as having no record for the period; a
-rule there between two rounds that no read of the rules saw is taken for
+is that rule's, by its uid (Loki) or its id (annotations), the one
+Grafana's provisioning API lists the rule's uid with: whoever may make a
+rule of a judged rule's title, in a folder Lapilli reads or one its
+token doesn't, paused or not, at a round or between two, writes nothing
+into that rule's record and takes nothing away. Where the history says
+no rule's uid or id (a Loki line without one; Grafana's annotations of
+alerts always carry one), the rule is judged by its title: a title two
+rules have in any version of the rules in effect across what a round
+writes leaves the judged rule out alone, shown as having no record for
+the period, and a rule of the title no read of the rules saw, in a
+folder the token doesn't read or there between two rounds, is taken for
 it. Guard the tenant as you guard the Grafana; neither is a way past what
 this says, which a report is welcome of.
 

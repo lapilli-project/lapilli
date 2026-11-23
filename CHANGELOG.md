@@ -86,28 +86,37 @@ Before upgrading:
   rule's. Judged again, the rule is read back from where it was left out,
   a week at most, and an alert on then is written from there; past a
   week, an alert of it on since before it was left out, that the read
-  says nothing of, is ended where it was left out. Past 5,000 rules, the
-  periods of rules no longer among Grafana's are let go of, those that
-  ended earliest first. And a change of Grafana's history is taken for a
+  says nothing of, is ended where it was left out. A read back past the
+  reader's bounds leaves the rules judged again out once more, not the
+  day. Past 5,000 rules, the periods of rules no longer among Grafana's
+  are let go of, those that ended earliest first: the record of such a
+  rule, kept under its old name once it is renamed or deleted, then reads
+  as copied over them. And a change of Grafana's history is taken for a
   judged rule only where the history says it is that rule's: kept in
-  Loki, by the rule's uid; in annotations, by its id (`alertId`) and its
-  title now (`alertName`), or the id the newest annotation of its uid
-  has (`alertUID`). A title shared across folders leaves neither rule
-  out, and a rule of a judged rule's title made, firing and deleted
-  between two rounds, which 0.68.0 to 0.69.1 took for the judged rule,
-  its firings written into the judged rule's record and its alert ending
-  the judged rule's, writes nothing. Where the history says no rule's uid
-  or id, a rule of a judged rule's title in any version of the rules in
+  Loki, by the rule's uid; in annotations, by its id (`alertId`), the one
+  Grafana's provisioning API lists the rule's uid with
+  (`/api/v1/provisioning/alert-rules`, which a token that exports the
+  rules reads too), read once a read. A rule it lists no more, or under
+  another title, renamed since the rules were read, is left out. A title
+  shared across folders leaves neither rule out, however many rules share
+  titles; a rule of a judged rule's title in a folder Lapilli's token
+  doesn't read takes nothing; and a rule of a judged rule's title made,
+  firing and deleted between two rounds, which 0.68.0 to 0.69.1 took for
+  the judged rule, its firings written into the judged rule's record and
+  its alert ending the judged rule's, writes nothing. Where the history
+  says no rule's uid or id (a Loki line without one, as whoever can push
+  to the tenant may write; Grafana's annotations of alerts always carry
+  one), a rule of a judged rule's title in any version of the rules in
   effect across what a round writes leaves the judged rule out alone, and
-  shows as no record; one there between two rounds that no read of the
-  rules saw is still taken for it; so, in annotations, is one given the
-  title in the seconds between a round's two reads, firing while the
-  judged rule is quiet. A name the read holds no change of is judged,
-  with no firing, whoever else has it. What still makes a day a gap for
-  every rule judged so is of the whole read: the history refused or past
-  the reader's bounds, more than 100,000 firings in a day, more than 5,000
-  rules to keep as left out, none of them gone from Grafana, or none of
-  the rules judged ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
+  shows as no record; one no read of the rules saw, in a folder the token
+  doesn't read or there between two rounds, is still taken for it. A name
+  the read holds no change of is judged, with no firing, whoever else has
+  it. What still makes a day a gap for every rule judged so is of the
+  whole read: the history refused or past the reader's bounds, Grafana's
+  list of its rules refused or past its own (64 MB, 50,000 rules), more
+  than 100,000 firings in a day, more than 5,000 rules to keep as left
+  out, none of them gone from Grafana, or none of the rules judged
+  ([docs/design/grafanajudged.md](docs/design/grafanajudged.md)).
 - **The backtest gate could pass a pull request read from a branch its
   author moved** (affected: 0.32.0 to 0.69.1; the gates that stop a
   merge, and the status, from 0.67.0). 0.68.1 took `HEAD`'s first parent

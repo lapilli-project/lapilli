@@ -269,10 +269,11 @@ func (s *Server) sourceTheirs(ctx context.Context) (bool, error) {
 // kept for it (ledger.LeaveOut): no record of it there, whatever is copied
 // in for the other rules, and whatever the history says of the period
 // later. Judged again, it is read back from where it was left out, a week
-// at most (judgedBack), and written from a as on a first day; one of its
-// alerts on since before then, that the read says nothing of, is ended
-// where it was left out. A day none of the rules is judged for is of no
-// use, and left a gap.
+// at most (judgedBack), and written from a as on a first day; past a week,
+// one of its alerts on since before then, that the read says nothing of,
+// is ended where it was left out. A read back past the reader's bounds
+// leaves the rules judged again out once more. A day none of the rules is
+// judged for is of no use, and left a gap.
 func (s *Server) copyDay(ctx context.Context, where string, rs, all []rules.Rule, twice map[string]bool, a, b time.Time, first bool, o verdict.Options) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
