@@ -702,8 +702,9 @@ func TestSourceIntakeForgotten(t *testing.T) {
 // followed since kept its note: leading again days later, the source was
 // down at once by that old note, before this replica read it at all,
 // though the leader between may have read it well all along. Leading
-// lets go of what the replica noted before; its first failed read in the
-// new term is noted from then.
+// lets go of what the replica noted before, as the term begins, before
+// what it leads runs, which the first heartbeat may come before; its
+// first failed read in the new term is noted from then.
 func TestLeadingAgainForgetsWhatWasNotedFailing(t *testing.T) {
 	ctx := context.Background()
 	s, clock := hookServer(t, func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.yaml") })
@@ -723,11 +724,18 @@ func TestLeadingAgainForgetsWhatWasNotedFailing(t *testing.T) {
 		}
 		return items[i]
 	}
-	// Three days on, it leads again: this term's loops stopped at once.
+	// Three days on, it leads again: this term's work stopped as it starts.
 	*clock = clock.Add(72 * time.Hour)
 	term, cancel := context.WithCancel(ctx)
-	cancel()
-	s.lead(term, make(chan error, 1))
+	var atStart map[string]time.Time
+	s.l.Elect(term, s.elected(), func(c context.Context) {
+		atStart = s.failingNow()
+		cancel()
+		s.lead(c, make(chan error, 1))
+	})
+	if len(atStart) != 0 {
+		t.Errorf("leading again, what was noted before, as what it leads starts: %v", atStart)
+	}
 	if got := s.failingNow(); len(got) != 0 {
 		t.Errorf("leading again, what was noted before: %v", got)
 	}

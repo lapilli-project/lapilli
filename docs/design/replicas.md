@@ -315,7 +315,13 @@ before, as its leader last said them, a follower keeping the last it read
 waiting until it is read, so that what it read in a term it led days ago
 never has a source the leader between read well quiet or down
 (`TestLeadingTakesTheReadsOfTheTermBefore`,
-`TestReplicasLeaderTakesTheReadsBefore`).
+`TestReplicasLeaderTakesTheReadsBefore`). The leader before's are taken
+where its row was written within a lease, a campaign and three beats of
+the handover, as one that stopped, or was cut off, last wrote it: one
+whose beat stopped writing while its lease was still renewed passes none
+on (`TestReplicasLedNotOfAStalledBeat`). They are taken as the term
+begins, before the heartbeat says anything of it (`Elected.Begins`,
+`TestReplicasBeginBeforeTheyBeat`).
 
 ## The outbox claimed
 

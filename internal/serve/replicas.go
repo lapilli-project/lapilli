@@ -18,6 +18,23 @@ import (
 	"lapilli.dev/internal/ledger"
 )
 
+// elected is what Elect is told of this replica.
+func (s *Server) elected() ledger.Elected {
+	return ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus, Stuck: s.stuck, Begins: s.beginTerm}
+}
+
+// beginTerm takes the sources' reads of the term before as this replica
+// starts to lead term, told by Elect before the term's first heartbeat may
+// say them: what this replica read of the sources is of a term it led
+// before, kept while another led, which may have read them well all
+// along. They are the leader's as it last said them, or this replica's
+// own where it led that term itself, or else none (takeReads); what the
+// first beat says is what was taken.
+func (s *Server) beginTerm(term int64) {
+	prev, ok := s.l.Led()
+	s.takeReads(term, prev, ok)
+}
+
 // lead runs what must run once among the replicas, while this one leads,
 // until ctx is done (it no longer leads, or serve stops): the runs and the
 // backfill, the jobs (judging again, the incidents and deploys files, the
@@ -28,18 +45,8 @@ import (
 // a single replica, leads from its start. failed is told of what makes
 // serve stop: the rules' history that can't be added.
 func (s *Server) lead(ctx context.Context, failed chan<- error) {
-	// What this replica read of the sources is of a term it led before,
-	// kept while another led, which may have read them well all along: the
-	// sources' reads are those of the term before, the leader's as it last
-	// said them, or this replica's own where it led that term itself, or
-	// else none (takeReads).
-	var term int64
-	if s.l.Shared() {
-		p, _ := s.l.Leader()
-		term = p.Term
-	}
-	prev, ok := s.l.Led()
-	s.takeReads(term, prev, ok)
+	// The sources' reads are those of the term before, taken as the term
+	// began (beginTerm).
 	if s.l.Shared() {
 		p, _ := s.l.Leader()
 		s.log.Info("leading: this replica runs what is run once", "replica", s.l.ReplicaID(), "term", p.Term)

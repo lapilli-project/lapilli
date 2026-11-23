@@ -74,7 +74,7 @@ func (s *Server) noteFailing(id string, err error) {
 }
 
 // takeReads sets what this replica holds of the sources' reads as it
-// starts to lead term (lead): the reads of the term before, whoever led
+// starts to lead term (beginTerm): the reads of the term before, whoever led
 // it. Where this replica led it, its own are kept. Where another did, and
 // this replica read what it said (prev, as the ledger's Led gives it), the
 // reads it said are taken, as it last said them: a source it read well
