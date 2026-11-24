@@ -595,7 +595,7 @@ func TestOffline(t *testing.T) {
 }
 
 // IDs are every item's id a preflight gives.
-var IDs = []string{"rules.read", "rules.replayable", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
+var IDs = []string{"rules.read", "rules.replayable", "rules.sources", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
 	"history.alerts", "history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
 	"changes.google", "changes.oci", "changes.ruler", "changes.loki", "inputs.files",
 	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "backtest.trust", "backtest.issuers", "access", "estimate.hourly",
@@ -1105,5 +1105,55 @@ func TestPostgresSchemaSaid(t *testing.T) {
 		if it == nil || !strings.HasSuffix(it.What, x.what) || !strings.Contains(it.Fix, x.fix) || strings.Contains(it.What, `"lapilli"`) {
 			t.Errorf("%+v: %+v", x.pr, it)
 		}
+	}
+}
+
+// Grafana's rules on more than one data source for their PromQL are said
+// to be replayed against one history, unknown; on one, or none, nothing is
+// said, and the other items are the same.
+func TestRulesSources(t *testing.T) {
+	grafana := func(uids ...string) []rules.Rule {
+		var b strings.Builder
+		b.WriteString("apiVersion: 1\ngroups:\n  - orgId: 1\n    name: g\n    folder: F\n    interval: 1m\n    rules:\n")
+		for i, uid := range uids {
+			fmt.Fprintf(&b, `      - uid: r%d
+        title: Rule%d
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: %s
+            model: {expr: up, instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`, i, i, uid)
+		}
+		rs, err := rules.Parse([]byte(b.String()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rs
+	}
+	sources := func(rs []rules.Rule) []Item {
+		p := &run{c: config(), r: &Report{}}
+		p.replayable(rs, rules.Picked{})
+		return p.r.Items
+	}
+	items := sources(grafana("prom-a", "prom-b"))
+	if len(items) != 2 || items[1].ID != "rules.sources" || items[1].State != Unknown ||
+		items[1].What != "Grafana's rules query 2 data sources: prom-a, prom-b" ||
+		items[1].Why != "each is replayed against one history, --prometheus; whether they are one Prometheus isn't known" {
+		t.Errorf("two data sources: %+v", items)
+	}
+	if items := sources(grafana("prom-a", "prom-a")); len(items) != 1 {
+		t.Errorf("one data source: %+v", items)
+	}
+	if items := sources(rulesOf(t, 2, 0)); len(items) != 1 {
+		t.Errorf("rules that aren't Grafana's: %+v", items)
+	}
+	many := sources(grafana("p1", "p2", "p3", "p4", "p5", "p6", "p7"))
+	if !strings.HasSuffix(many[1].What, "7 data sources: p1, p2, p3, p4, p5 and 2 more") {
+		t.Errorf("seven: %q", many[1].What)
 	}
 }
