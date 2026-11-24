@@ -19,6 +19,7 @@ import (
 // a CloudWatch alarm and a rule of one name told apart by the source, the
 // PromQL alarm replayed, the alarm that isn't PromQL listed.
 func TestAlarmsRules(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	cw := alarmtest.NewCloudWatch("eu-west-1")
@@ -55,6 +56,7 @@ func TestAlarmsRules(t *testing.T) {
 
 // --alarms is refused, before anything is read, where it can't go.
 func TestAlarmsFlags(t *testing.T) {
+	parallel(t)
 	incidents := write(t, "incidents.yaml", "incidents: []\n")
 	base := []string{"verdict", "--prometheus", "http://p", "--incidents", incidents}
 	cw := "cloudwatch-prod=https://monitoring.eu-west-1.amazonaws.com"
@@ -87,6 +89,7 @@ func TestAlarmsFlags(t *testing.T) {
 // --alarms of its cloud, with --changes; a SOURCE: entry of --changes-in
 // for an --alarms source.
 func TestServeAlarmsFlags(t *testing.T) {
+	parallel(t)
 	signed := []string{"--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com", "--prometheus", "http://p"}
 	cw := []string{"--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com"}
 	gcp := []string{"--alarms", "gcp=https://monitoring.googleapis.com/v3/projects/shop/alertPolicies"}
@@ -124,6 +127,7 @@ func TestServeAlarmsFlags(t *testing.T) {
 // identity only for an alarm source of its cloud, the OCI key's Secret
 // mounted only with changes on. It needs helm.
 func TestChartAlarms(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("no helm")
 	}
@@ -200,6 +204,7 @@ func TestChartAlarms(t *testing.T) {
 // alarm of its name isn't taken for its. Without the history, the alarm
 // isn't compared, and says why.
 func TestCheckReplayAlarms(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	cw := alarmtest.NewCloudWatch("eu-west-1")

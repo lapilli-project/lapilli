@@ -324,7 +324,9 @@ group only on its own event, `merge_group`, beside `pull_request`. On that event
 action) backtests the head against the base, both as the event says,
 `INCIDENTS` and the expectations of the rules in place read from the
 base; posts no comment, as no pull request is the run's, and writes the
-report to the job's log instead; and with `STATUS` sets the status on the
+report to the job's log instead, and to the step's summary, which the
+run's page shows ([below](#the-report-in-the-steps-summary)); and with
+`STATUS` sets the status on the
 head, `lapilli/backtest`, or, of a queue into a branch other than the
 default, `lapilli/backtest (into BRANCH)`, as a pull request's is named.
 `FAIL_MISSED` and the expectations hold it as they hold a pull request:
@@ -362,7 +364,8 @@ What GitHub's run says is held to the queue's, and a run that isn't is
 refused:
 
 - The event must hold a `merge_group`, its `head_sha` and `base_sha` two
-  commits' full hashes and its `base_ref` a branch's, `refs/heads/BRANCH`;
+  commits' full hashes and its `base_ref` a branch's, `refs/heads/BRANCH`,
+  of letters, digits and `. _ / -`, 255 at most, as serve takes one;
   `GITHUB_REF` must be the queue's ref for that branch, the event's
   `merge_group.head_ref`, `refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`;
   and `GITHUB_SHA` the group's head. Otherwise the job fails at once,
@@ -400,6 +403,28 @@ queued it, is run in the group in the repository's own context, with its
 secrets and its ID token. Its workflow is the group's head's, which the
 pull request may change, as a pull request's run is: have a code owner
 review `.github/workflows/`.
+
+### The report in the step's summary
+
+In GitHub Actions, `github.sh` (and the action) adds the report to the
+step's summary, `GITHUB_STEP_SUMMARY`, which GitHub shows on the run's
+page: of a merge queue's run, where no comment is posted, beside the copy
+in the job's log; of a pull request's, beside its comment, and when no
+comment is posted too (nothing that decides when a rule fires changed,
+or the host refused it), so that the run's page says what its status
+says. It is the comment as it would be posted, but its hidden first line:
+the same Markdown, made safe as the comment is (what the pull request
+holds in code spans, what went wrong in a fenced block, of serve's report
+only the lines Lapilli writes), nothing added. The run's page is read by
+whoever can read the repository, as the pull request is.
+
+GitHub takes 1 MiB of a step's summary, and shows none of a step past
+it. The comment is under 65,000 bytes; after what the step wrote there
+before, the report goes in a block of its own, a blank line first, and
+where the two would pass 1 MiB it isn't added, the job's log saying so.
+A `GITHUB_STEP_SUMMARY` that isn't a file the job can read gets none.
+Nothing else changes: a summary not written fails no job, and the status
+is set as before. The other hosts' scripts write none.
 
 ### A merge train
 
@@ -483,10 +508,33 @@ trust:
 Name it only for a repository whose queue you want backtested: a group
 holds the pull requests someone who may write to the repository queued, a
 fork's among them, and its run gets an ID token in the repository's own
-context, which a fork's `pull_request` run never does. The pull request's
-number the job sends is the one the queue's ref names, kept as the job
-says it, as the token's ref says none: the group's backtest takes the
-place of none waiting.
+context, which a fork's `pull_request` run never does.
+
+Serve reads the group's pull request from the token's `ref`, the queue's,
+`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`, signed by GitHub: N, and
+the branch, are that ref's alone. A `pull_request` the job sends that
+isn't N is refused, as a pull request's is against its
+`refs/pull/N/merge`, and a `merge_group` token whose `ref` isn't a queue's
+is refused as a token (401, serve's log saying why). The queue builds a
+group again when one ahead of it fails or a pull request leaves the queue,
+and its new run's backtest takes the place of the one of the same
+repository, branch and pull request still waiting, answered as superseded,
+as a pull request's newer commit takes the place of its own: only one of
+another commit (the group's head the job sends), and of the same workflow
+only one of an earlier run of it, by the token's `run_number`, which
+GitHub numbers up with each new run of a workflow and keeps when a run is
+run again. So two jobs of one run (a `key` each) never take each other's
+place; nor does a group's job that asks late, having waited for a runner
+while the queue built the group again, nor the earlier run run again, take
+the newer group's; nor a run of another workflow. The job of the group let
+go says so, and with a gate (`fail-missed`, `fail-on-expectations`,
+`expect-required`, `fail-on-error`) fails, its status a failure on that
+group's head: the head of a group the queue built again since, which it no
+longer reads. A group's backtest never takes the place of a pull request's
+own backtest of the same number, nor of a group of another pull request or
+of another branch's queue, nor a pull request's newer commit of a group's;
+a pull request's run of an earlier commit that asks late takes no newer
+commit's place either.
 
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate

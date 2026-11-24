@@ -29,6 +29,7 @@ import (
 // --impact; each stack's metrics the metrics its --impact reads, and the
 // selector counted of each one that its others narrow.
 func TestImpactStacksDocumented(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "impact.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +114,7 @@ func (h askedHistory) QueryRange(ctx context.Context, expr string, start, end ti
 }
 
 func TestImpactSuggest(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	var asked []string
 	fail, status := "", 0
@@ -213,6 +215,7 @@ func TestImpactSuggest(t *testing.T) {
 // ./cmd/lapilli -run TestImpactSuggestDocumented -write-docs writes it
 // again.
 func TestImpactSuggestDocumented(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	var asked []string
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return askedHistory{asked: &asked}, nil }
@@ -244,6 +247,7 @@ func TestImpactSuggestDocumented(t *testing.T) {
 }
 
 func TestImpactSuggestNoneFound(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return unreachableNone{}, nil }
 	var stdout, stderr bytes.Buffer
@@ -262,6 +266,7 @@ func (unreachableNone) QueryRange(context.Context, string, time.Time, time.Time,
 }
 
 func TestImpactSuggestFlags(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return unreachableNone{}, nil }
 	token := write(t, "token", "secret\n")
 	for args, want := range map[string]string{
@@ -297,6 +302,7 @@ func TestImpactSuggestFlags(t *testing.T) {
 // token, one count a stack and the --impact of each stack found, a day a
 // request; and it says nothing of the token.
 func TestImpactSuggestReads(t *testing.T) {
+	alone(t)
 	newHistory = realHistory
 	now = func() time.Time { return t0 }
 	var mu sync.Mutex

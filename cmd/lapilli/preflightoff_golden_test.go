@@ -49,6 +49,7 @@ func preflightOffNormal(s, dir string) string {
 // against a stand-in Prometheus and identity provider beside a ledger of
 // this release's schema, as text and as JSON.
 func TestPreflightOffGolden(t *testing.T) {
+	alone(t)
 	was := now
 	now = func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() { now = was })

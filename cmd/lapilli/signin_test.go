@@ -8,6 +8,7 @@ import (
 // A sign-in of lapilli's own is one way to say who people are, given whole,
 // or lapilli serve doesn't start.
 func TestServeSignInFlags(t *testing.T) {
+	parallel(t)
 	hook := write(t, "hook", "https://hooks.example/x")
 	secret := write(t, "secret", "s3cret\n")
 	empty := write(t, "empty", "\n")

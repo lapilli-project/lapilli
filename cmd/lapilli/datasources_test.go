@@ -39,6 +39,7 @@ groups:
 // in as Grafana does: 30s makes $__rate_interval 2m. One that can't be
 // read is said, and taken as --scrape-interval says, or as Grafana's 15s.
 func TestGrafanaDataSourceScrape(t *testing.T) {
+	parallel(t)
 	refuse := false
 	var asked int
 	var auth string
@@ -133,6 +134,7 @@ groups:
 // --scrape-interval doesn't; where neither does, at Grafana's resolution,
 // not the server's own, which steps over a spike Grafana's points see.
 func TestReplayScrapeIntervals(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", maxRule)
 	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Spike, start: 2026-11-01T22:30:00Z, end: 2026-11-01T22:40:00Z}\n")

@@ -35,6 +35,10 @@
 # the report going to the job's log; the status on the head, named for the
 # branch (merge_group.base_ref) as a pull request's is.
 #
+# In GitHub Actions, the report, as the comment has it, is added to the
+# step's summary (GITHUB_STEP_SUMMARY), which the run's page shows: a merge
+# queue's run's and a pull request's alike (lib.sh's job_summary).
+#
 # Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
 # asks GitHub Actions for the job's ID token for that audience, as
 # core.getIDToken does, which the job's permissions: id-token: write
@@ -51,6 +55,8 @@ here=$(dirname "$0")
 # masked in GitHub Actions' log (::add-mask::).
 ci_tokens=actions
 ci_masks=github
+# The report goes in the step's summary too, where the job has one.
+ci_summary=github
 : "${GITHUB_TOKEN_FILE:?a file holding a token that may comment on the pull request}"
 [ -r "$GITHUB_TOKEN_FILE" ] || { echo "github.sh: GITHUB_TOKEN_FILE $GITHUB_TOKEN_FILE can't be read" >&2; exit 1; }
 GITHUB_REPO=${GITHUB_REPO:-${GITHUB_REPOSITORY:-}}
@@ -70,7 +76,7 @@ host_api=$api
 # into the run, never from a ref a pull request can move; the checkout
 # must be that head (lib.sh's ci_queue), and GITHUB_REF the queue's own
 # ref for that branch. There is no pull request to comment on: the report
-# goes to the job's log. An event, a GITHUB_REF or a GITHUB_SHA that isn't
+# goes to the job's log, and to the step's summary. An event, a GITHUB_REF or a GITHUB_SHA that isn't
 # so is refused at once, with no status set, which a branch rule doesn't
 # take as passing; a setting of the job's that names another base or
 # head (ci_wrong) fails the job, with STATUS its status a failure on the
@@ -106,13 +112,15 @@ if [ "${GITHUB_EVENT_NAME:-}" = merge_group ]; then
     queue_refused "the event's merge_group.head_sha and base_sha aren't two commits' full hashes"
   fi
   # The branch the queue merges into, refs/heads/BRANCH: a name lib.sh
-  # takes as a branch's (letters, digits and . _ / -).
+  # takes as a branch's (letters, digits and . _ / -), 255 at most, as
+  # lapilli serve takes one from the queue's ref in the job's ID token.
   queue_branch=${queue_base_ref#refs/heads/}
   case $queue_branch in
-    "$queue_base_ref" | '' | -* | *[!A-Za-z0-9._/-]* | *..* | */ | /* | *//*)
-      queue_refused "the event's merge_group.base_ref isn't refs/heads/BRANCH, a branch's name of letters, digits and . _ / -"
-      ;;
+    "$queue_base_ref" | '' | -* | *[!A-Za-z0-9._/-]* | *..* | */ | /* | *//*) queue_branch= ;;
   esac
+  if [ -z "$queue_branch" ] || [ "${#queue_branch}" -gt 255 ]; then
+    queue_refused "the event's merge_group.base_ref isn't refs/heads/BRANCH, a branch's name of letters, digits and . _ / -, 255 at most"
+  fi
   # The queue's ref for that branch, as the event names it, GITHUB_REF:
   # refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA, N its pull request's
   # number; and GITHUB_SHA, its head.

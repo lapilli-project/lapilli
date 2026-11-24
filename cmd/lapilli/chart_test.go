@@ -32,6 +32,7 @@ var serveValues = []string{"--set", "mode=serve", "--set", "prometheus.url=http:
 // serve.everyoneAdmin says everyone may make them. Off by default, and
 // refused beside roles or serve.readOnly.
 func TestChartEveryoneAdmin(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, serveValues...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -60,6 +61,7 @@ func TestChartEveryoneAdmin(t *testing.T) {
 // tag kept with the release's own digest would run the release's image
 // under another version's name: refused.
 func TestChartImageDigest(t *testing.T) {
+	parallel(t)
 	d := "sha256:" + strings.Repeat("ab", 32)
 	cron := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}
 	for _, values := range [][]string{cron, serveValues} {
@@ -113,6 +115,7 @@ func TestChartImageDigest(t *testing.T) {
 // identity reads it; the pod mounts it nowhere else), and EKS's and
 // Azure's webhooks are told to pass the init containers over.
 func TestChartIdentityOnlyLapilli(t *testing.T) {
+	parallel(t)
 	history := []string{"--set", "serve.rulesHistory.repository=https://git.example.com/ops/monitoring.git", "--set", "serve.rulesHistory.paths=alerts/",
 		"--set", "serve.rulesHistory.render=helm template m charts/monitoring"}
 	aws := append([]string{"--set", "mode=serve", "--set", "rules.configMaps={rules}", "--set", "prometheus.auth=aws",
@@ -201,6 +204,7 @@ type podSpec struct {
 // ingress-only policy let the pod reach a cloud's metadata server and the
 // Kubernetes API.
 func TestChartEgress(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, serveValues...)
 	if err != nil || strings.Contains(out, "Egress") {
 		t.Errorf("by default: %v\n%s", err, out)
@@ -249,6 +253,7 @@ func TestChartEgress(t *testing.T) {
 // The trackers' image is a digest, as the chart's documentation says: a
 // tag could be moved to an image that reads both tokens.
 func TestChartTrackersImageDigest(t *testing.T) {
+	parallel(t)
 	trackers := append(serveValues, "--set", "serve.trackers.tokenSecret.name=tasks", "--set", "serve.trackers.tracker=github",
 		"--set", "serve.trackers.trackerTokenSecret.name=gh")
 	for image, ok := range map[string]bool{
@@ -336,6 +341,7 @@ func historyPodOf(t *testing.T, out string) map[string]historyContainer {
 // read-only, so nothing render runs can change what the next fetch runs
 // with; render runs in renderImage, pinned by digest.
 func TestChartRulesHistory(t *testing.T) {
+	parallel(t)
 	base := []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090",
 		"--set", "serve.rulesHistory.repository=https://git.example.com/ops/platform.git", "--set", "serve.rulesHistory.paths=charts/monitoring/",
 		"--set", "serve.rulesHistory.tokenSecret.name=git"}
@@ -447,6 +453,7 @@ func chartValues(t *testing.T) (v struct{ image, renderImage string }) {
 // from before the backfill and a day go. --changes has nothing to write to
 // when the rules are a followed history alone.
 func TestChartRulesHistoryBounded(t *testing.T) {
+	parallel(t)
 	base := []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "serve.backfill=10d",
 		"--set", "serve.rulesHistory.repository=https://git.example.com/ops/platform.git", "--set", "serve.rulesHistory.paths=charts/monitoring/",
 		"--set", "serve.rulesHistory.render=helm template m charts/monitoring"}
@@ -538,6 +545,7 @@ type historyLimited struct {
 // database and nothing more. Still one replica. Beside existingClaim, or
 // with egress and nowhere for the database, it is refused.
 func TestChartPostgres(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, serveValues...)
 	if err != nil || !strings.Contains(out, "- --ledger=/var/lib/lapilli\n") || !strings.Contains(out, "kind: PersistentVolumeClaim") ||
 		strings.Contains(out, "ledger-url-file") {
@@ -593,6 +601,7 @@ func TestChartPostgres(t *testing.T) {
 
 // maxSamples is --max-samples, in both modes; none when 0, the default.
 func TestChartMaxSamples(t *testing.T) {
+	parallel(t)
 	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {
 		out, err := helmTemplate(t, mode...)
 		if err != nil || strings.Contains(out, "--max-samples") {
@@ -644,6 +653,7 @@ func TestChartMatchStrict(t *testing.T) {
 
 // linkedOnly is --linked-only, in both modes; none by default.
 func TestChartLinkedOnly(t *testing.T) {
+	parallel(t)
 	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {
 		out, err := helmTemplate(t, mode...)
 		if err != nil || strings.Contains(out, "--linked-only") {
@@ -684,6 +694,7 @@ func TestChartLinkedOnly(t *testing.T) {
 // each one's keys side by side, and one --rules; the CronJob, which takes a
 // --rules a ConfigMap, keeps a volume each.
 func TestChartServeRuleConfigMaps(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, "--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main,shared,noc}")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -709,6 +720,7 @@ func TestChartServeRuleConfigMaps(t *testing.T) {
 // what it applied (Argo CD's server-side apply and diff) sees the pod spec
 // as changed for as long as it runs. The chart says each.
 func TestChartSaysAtomicDefaults(t *testing.T) {
+	parallel(t)
 	for _, args := range [][]string{
 		{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main}"},
 		{"--set", "mode=serve", "--set", "gcpProject=my-project", "--set", "rules.configMaps={main}"},
@@ -763,6 +775,7 @@ func TestChartSaysAtomicDefaults(t *testing.T) {
 // serve.mark the expressions, each with the labels its windows keep: the
 // flags as the command takes them, and none by default.
 func TestChartMarked(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, serveValues...)
 	if err != nil || strings.Contains(out, "--mark") {
 		t.Fatalf("by default: %v\n%s", err, out)
@@ -788,6 +801,7 @@ func TestChartMarked(t *testing.T) {
 // signals and the rule entries, written to a ConfigMap as --impact-file
 // reads them (docs/design/signals.md), which serve and verdict take.
 func TestChartImpactSignals(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, append(serveValues, "--set", "impact=up == 0")...)
 	if err != nil || !strings.Contains(out, `- "--impact=up == 0"`) || strings.Contains(out, "--impact-file") {
 		t.Fatalf("a string: %v\n%s", err, out)
@@ -849,6 +863,7 @@ func TestChartImpactSignals(t *testing.T) {
 // --notify-webhook-secret-file from the Secret mounted already. None
 // without it, and refused without the Secret, or as the URL's own key.
 func TestChartNotifySigningKey(t *testing.T) {
+	parallel(t)
 	hook := append(slices.Clone(serveValues), "--set", "serve.notify.webhookSecret.name=lapilli-hook")
 	out, err := helmTemplate(t, hook...)
 	if err != nil || !strings.Contains(out, `- "--notify-webhook-file=/var/run/lapilli/notify/url"`) || strings.Contains(out, "--notify-webhook-secret-file") {
@@ -880,6 +895,7 @@ func TestChartNotifySigningKey(t *testing.T) {
 // TestChartVerdictExit: the CronJob passes each of the exit options only
 // when it differs from the CLI's default.
 func TestChartVerdictExit(t *testing.T) {
+	parallel(t)
 	cron := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}
 	for _, c := range []struct {
 		name string

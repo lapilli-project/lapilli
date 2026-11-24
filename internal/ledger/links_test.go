@@ -137,14 +137,14 @@ func TestMigrate028(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031, undo030, undo029, undo028), "UPDATE schema_version SET version = 27") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028), "UPDATE schema_version SET version = 27") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
 		}
 		c.Close(ctx)
 	} else {
-		for _, q := range append(slices.Concat(undo032, undo031, undo030, undo029, undo028), "PRAGMA user_version = 27") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028), "PRAGMA user_version = 27") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}

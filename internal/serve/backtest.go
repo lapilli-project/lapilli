@@ -417,6 +417,17 @@ func (s *Server) who(ctx context.Context, w http.ResponseWriter, r *http.Request
 			why = "its " + claim + " claim isn't as the entry pins it"
 			continue
 		}
+		// A merge queue's run is known by its ref alone, the queue's,
+		// which says the pull request and the branch: one that isn't is no
+		// merge group GitHub's merge queue made, and nothing else the token
+		// says tells which pull request it is of.
+		if (asker{t: t, claims: tok.Claims}).mergeGroup() {
+			ref, _ := signin.ClaimString(tok.Claims["ref"])
+			if _, _, ok := queueRef(ref); !ok {
+				why = "it is a merge queue's (event_name merge_group), and its ref isn't the queue's, refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA"
+				continue
+			}
+		}
 		// Known by its jti; or, with none, by what it says as it was
 		// signed, never how it was written, which a lax decoder reads in
 		// several ways as one.
@@ -1199,6 +1210,90 @@ func (s *Server) backtestQueue() int {
 // gitRef is a pull request's ref, as GitHub's and Forgejo's tokens say it.
 var gitRef = regexp.MustCompile(`^refs/pull/([0-9]{1,10})/(merge|head)$`)
 
+// GitHub's merge queue names a merge group's branch
+// refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA, BRANCH the branch it merges
+// into, N the pull request the group is made for (the last of it, those
+// ahead in the queue beside it) and SHA that pull request's head; a merge
+// queue's run's ID token says it as its ref. queueTail is its last part,
+// the queue's own, after any / a branch's name holds; queueBranch the
+// branch, a name the recipes take as one: letters, digits and . _ / -,
+// not first a - or a /, nor .., //, or a / last, 255 at most.
+var (
+	queueTail   = regexp.MustCompile(`^pr-([1-9][0-9]{0,9})-(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+	queueBranch = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._/-]{0,254}$`)
+)
+
+// queueRef is the branch and the pull request's number a merge group's
+// ref names, ok false for a ref that isn't a merge queue's.
+func queueRef(ref string) (branch string, pr int64, ok bool) {
+	rest, found := strings.CutPrefix(ref, "refs/heads/gh-readonly-queue/")
+	i := strings.LastIndexByte(rest, '/')
+	if !found || i < 0 {
+		return "", 0, false
+	}
+	branch, tail := rest[:i], rest[i+1:]
+	m := queueTail.FindStringSubmatch(tail)
+	if m == nil || !queueBranch.MatchString(branch) || strings.Contains(branch, "..") || strings.Contains(branch, "//") || strings.HasSuffix(branch, "/") {
+		return "", 0, false
+	}
+	pr, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || pr > math.MaxInt32 {
+		return "", 0, false
+	}
+	return branch, pr, true
+}
+
+// mergeGroup reports whether the token is a merge queue's run's, GitHub's
+// merge_group, as its event_name says, which a GitHub entry pins.
+func (a asker) mergeGroup() bool {
+	if a.claims == nil || a.t.CI != "github" {
+		return false
+	}
+	ev, _ := signin.ClaimString(a.claims["event_name"])
+	return ev == "merge_group"
+}
+
+// runNumber is a run's number as GitHub's tokens write it, a decimal.
+var runNumber = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
+
+// run is, of a GitHub Actions job's token, the workflow its run is of,
+// its file (workflow_ref before its @ref, which names the run's ref), and
+// the run's number (run_number), which GitHub's contexts reference says
+// begins at 1 for a workflow's first run and increments with each new
+// run, and doesn't change when a run is run again: what tells an earlier
+// run from a later one, as run_id, said only to be unique, doesn't. "", 0
+// for any other CI's, whose backtest supersedes by the commit alone, as
+// before; and for a GitHub token that doesn't say both plainly, whose
+// backtest supersedes none, as its run's place among its workflow's isn't
+// known.
+func (a asker) run() (string, int64) {
+	if a.claims == nil || a.t.CI != "github" {
+		return "", 0
+	}
+	ref, _ := signin.ClaimString(a.claims["workflow_ref"])
+	wf, _, cut := strings.Cut(ref, "@refs/")
+	num, _ := signin.ClaimString(a.claims["run_number"])
+	if !cut || wf == "" || len(wf) > 512 || !signin.Plain(wf) || !runNumber.MatchString(num) {
+		return "", 0
+	}
+	n, err := strconv.ParseInt(num, 10, 64)
+	if err != nil {
+		return "", 0
+	}
+	return wf, n
+}
+
+// queue is the branch the merge queue a token's run is of merges into, as
+// its ref says it: "" for any run but a merge queue's.
+func (a asker) queue() string {
+	if !a.mergeGroup() {
+		return ""
+	}
+	ref, _ := signin.ClaimString(a.claims["ref"])
+	branch, _, _ := queueRef(ref)
+	return branch
+}
+
 // repository is the repository a token names, as a name the Run history
 // shows: none, "", over 200 bytes or with what doesn't show, as a proxy's
 // name is no one's then; a plain token's entry's name.
@@ -1239,8 +1334,11 @@ func (a asker) repositoryID() string {
 }
 
 // supersedes reports whether a newer commit's backtest may take the place
-// of one waiting, matched by the entry, the repository and the pull
-// request's number: the repository by its id, which the token says and
+// of one waiting, matched by the entry, the repository, the pull
+// request's number and, of a merge queue's run, the queue's branch (a
+// group the queue built again, never a pull request's own backtest of
+// the same number, nor one of another branch's queue): the repository by
+// its id, which the token says and
 // the entry pins, so that a repository renamed while one waits is still
 // itself, and two an entry pins never each other; or, for a backtest kept
 // with no id (ledger.Backtest.RepositoryID), by a name kept as it is. A
@@ -1253,8 +1351,17 @@ func (a asker) supersedes() bool { return a.repositoryID() != "" || a.repository
 // ref when the token says it (byToken), which the job's must agree with;
 // or the job's, which a newer backtest of it doesn't take the place of: a
 // job that says another's number can't push that one out of the queue.
+// Of a merge queue's run, from the queue's ref alone, never the job's (who
+// takes no token of one whose ref isn't the queue's).
 func (a asker) pullRequest(given int64) (n int64, byToken, ok bool) {
 	ref, _ := signin.ClaimString(a.claims["ref"])
+	if a.mergeGroup() {
+		_, n, parsed := queueRef(ref)
+		if !parsed || given != 0 && given != n {
+			return 0, false, false
+		}
+		return n, true, true
+	}
 	m := gitRef.FindStringSubmatch(ref)
 	if m == nil || (a.t.CI != "github" && a.t.CI != "forgejo") {
 		return given, false, true
@@ -1333,12 +1440,13 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	}
 	// The pull request a newer commit of would supersede the one waiting:
 	// the token's own, as the body can't say otherwise, of a repository
-	// it names (supersedes).
+	// it names (supersedes); of a merge queue's run, a group of it the
+	// same queue built again.
 	supersedes := int64(-1)
 	if n, byToken, ok := a.pullRequest(0); ok && byToken && a.supersedes() {
 		supersedes = n
 	}
-	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repositoryID(), a.repository(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
+	used, full, err := s.l.BacktestRoom(ctx, a.t.Name, a.token, a.repositoryID(), a.repository(), a.queue(), supersedes, s.backtestQueue(), backtestsOfEntry, s.now())
 	switch {
 	case err != nil:
 		s.log.Error("backtest port: reading the queue", "trust", a.t.Name, "err", err)
@@ -1407,12 +1515,13 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	done()
+	workflow, run := a.run()
 	id, key := randomHex(16), randomKey()
 	kh, bh := sha256.Sum256([]byte(key)), sha256.Sum256(body)
-	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), RepositoryID: a.repositoryID(), PullRequest: pr, Commit: req.Commit,
+	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), RepositoryID: a.repositoryID(), QueueBranch: a.queue(), Workflow: workflow, RunNumber: run, PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
-		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes()}
+		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes() && (a.t.CI != "github" || workflow != "")}
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):

@@ -11,6 +11,7 @@ import (
 // Changes are refused, before lapilli serve starts, without what makes
 // approval a known person's, or with what would make two tokens one.
 func TestServeChangesFlags(t *testing.T) {
+	parallel(t)
 	hook := write(t, "hook", "https://hooks.example/x")
 	tok := write(t, "tok", "changes-token-0123456789\n")
 	other := write(t, "other", "changes-token-0123456789\n")
@@ -56,6 +57,7 @@ func TestServeChangesFlags(t *testing.T) {
 // pauses them is the one its docs name, for a release named ops as for
 // one named lapilli. It needs helm.
 func TestChartChanges(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("no helm")
 	}
@@ -107,6 +109,7 @@ func TestChartChanges(t *testing.T) {
 // serve.changes: the write credentials mounted only with changes on, each
 // for its own kind of ruler. It needs helm.
 func TestChartRulers(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("no helm")
 	}

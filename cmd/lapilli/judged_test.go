@@ -124,6 +124,7 @@ func (g *judgedGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // miss. --grafana-history=false lists them, as before; a history that
 // can't be read lists them, and says why.
 func TestVerdictGrafanaJudged(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
 	now = func() time.Time { return t0 }
 	g := &judgedGrafana{}
@@ -243,6 +244,7 @@ func TestVerdictGrafanaJudged(t *testing.T) {
 // each change's rule by its id, isn't judged from the history: it is listed
 // as before, and stderr says why, not that its changes were passed over.
 func TestVerdictGrafanaJudgedUnlisted(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
 	now = func() time.Time { return t0 }
 	srv := httptest.NewServer(&judgedGrafana{unlisted: true})
@@ -263,6 +265,7 @@ func TestVerdictGrafanaJudgedUnlisted(t *testing.T) {
 // "Orders_ slow" alike in an annotation's tags, judges neither, though
 // --rule picks one: the history doesn't say which fired.
 func TestVerdictGrafanaJudgedShared(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
 	now = func() time.Time { return t0 }
 	two := strings.Replace(judgedRules, "title: Orders slow", `title: "Orders: slow"`, 1) + `      - uid: orders2

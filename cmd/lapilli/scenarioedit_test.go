@@ -19,6 +19,7 @@ import (
 // with another rule changed beside it. A test file alike on both sides
 // runs nothing, and nothing changed is said as it was.
 func TestCompareScenarioTestEdited(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", shopRules("5m"))
@@ -81,6 +82,7 @@ func TestCompareScenarioTestEdited(t *testing.T) {
 // FAIL_ON_EXPECTATIONS fails the job. One that edits neither a rule nor a
 // test file posts nothing, as before.
 func TestBacktestRecipeScenarioTestEdited(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	promtool := scenariotest.Install(t)

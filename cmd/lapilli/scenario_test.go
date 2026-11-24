@@ -33,6 +33,7 @@ func writeIn(t *testing.T, dir string, files map[string]string) {
 // --fail-expectations covers them. Without it, each is not known. One
 // that couldn't be run after is on the summary: scenarios_unrun.
 func TestCompareScenarios(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	base := write(t, "base.yaml", shopRules("5m"))
@@ -115,6 +116,7 @@ func TestCompareScenarios(t *testing.T) {
 // isn't read; PROMTOOL in the checkout, without EXPECT, or with
 // LAPILLI_SERVE, is refused, as is --promtool given as an argument.
 func TestBacktestRecipeScenarios(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	promtool := scenariotest.Install(t)
@@ -188,6 +190,7 @@ func TestBacktestRecipeScenarios(t *testing.T) {
 // of, --expect's or --config's, resolved at start; alone, or one that
 // isn't there, it is refused.
 func TestServePromtool(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", shopRules("5m"))
 	expect := write(t, "expect.yaml", "expectations:\n  - rule: CheckoutErrors\n    scenarios: [t.yaml]\n")
 	for _, c := range []struct {
@@ -208,6 +211,7 @@ func TestServePromtool(t *testing.T) {
 // unless given, a whole number of Mi or Gi, 64Mi at least, and only with
 // --promtool.
 func TestPromtoolMemoryFlag(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", shopRules("5m"))
 	expect := write(t, "expectations.yaml", "expectations:\n  - rule: CheckoutErrors\n    scenarios: [t.yaml]\n")
 	promtool := scenariotest.Install(t)

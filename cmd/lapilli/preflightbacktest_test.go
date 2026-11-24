@@ -36,6 +36,7 @@ import (
 // report names no repository's id, sub, audience or plain token, nor the
 // token's length.
 func TestPreflightBacktests(t *testing.T) {
+	alone(t)
 	was := now
 	// The last noon UTC, not now: the estimates below count a backtest's
 	// requests as serve's port would at that moment, and from 01:00 to
@@ -128,7 +129,7 @@ func TestPreflightBacktests(t *testing.T) {
 	if iss := items["backtest.issuers"]["what"].(string); !strings.Contains(iss, "(alerts, alerts-push), 1 key for RS256") || !strings.Contains(iss, "(monitoring), 1 key for RS256") {
 		t.Errorf("backtest.issuers: %s", iss)
 	}
-	if !strings.Contains(items["ledger.sqlite"]["what"].(string), "schema 032, this release's") {
+	if !strings.Contains(items["ledger.sqlite"]["what"].(string), "schema 033, this release's") {
 		t.Errorf("%v", items["ledger.sqlite"])
 	}
 	if !strings.Contains(items["access"]["what"].(string), "--backtest-listen") || items["estimate.backtests"] == nil {
@@ -188,6 +189,7 @@ func TestPreflightBacktests(t *testing.T) {
 // words; serve takes it exactly when preflight says so. And the port's flags that serve.New refuses beside
 // the file (rules to replay) are said alike.
 func TestPreflightTrustAsServe(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	dir := t.TempDir()
 	put := func(name, body string) string {
 		p := filepath.Join(dir, name)
@@ -302,6 +304,7 @@ func TestPreflightTrustAsServe(t *testing.T) {
 // --offline with rules read from an API (--ruler, --grafana): the rules
 // aren't read, so what a backtest of them asks is unknown, never ok.
 func TestPreflightBacktestsRulesUnread(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: /etc/lapilli/backtest/token}\n")
 	for _, src := range [][]string{{"--ruler", "http://mimir.example.com/prometheus/config/v1/rules"},
 		{"--grafana", "https://grafana.example.com", "--grafana-token-file", "/etc/lapilli/grafana-token"}} {
@@ -320,6 +323,7 @@ func TestPreflightBacktestsRulesUnread(t *testing.T) {
 // issuer beside it is on: that one is said as it is, with the scrubber
 // the command has.
 func TestPreflightBacktestsEnterpriseIssuer(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })

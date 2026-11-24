@@ -18,6 +18,7 @@ import (
 // to --prometheus alone, in place of --ruler-tenant, which --ruler is
 // still sent. Without it, --prometheus is sent --ruler-tenant, as before.
 func TestPrometheusTenant(t *testing.T) {
+	alone(t)
 	newHistory = realHistory
 	defer func() { newHistory = realHistory }()
 	now = func() time.Time { return t0 }
@@ -73,6 +74,7 @@ func TestPrometheusTenant(t *testing.T) {
 // impact suggest take it as verdict does; what a pull request's comment and
 // a preflight print says it as [--prometheus-tenant].
 func TestPrometheusTenantCommands(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	st, err := readServe([]string{"--prometheus", "http://mimir:8080/prometheus", "--prometheus-tenant", "history-b",
 		"--ruler", "http://mimir:8080/prometheus/config/v1/rules", "--ruler-tenant", "team-a"}, true)
@@ -121,6 +123,7 @@ func TestPrometheusTenantCommands(t *testing.T) {
 // The chart's prometheus.tenant: --prometheus-tenant, checked as lapilli
 // checks it, with prometheus.url only; lapilli serve takes it.
 func TestChartPrometheusTenant(t *testing.T) {
+	parallel(t)
 	m, _ := render(t, append(append([]string{}, serveValues...), "--set", "prometheus.tenant=history-b")...)
 	args := m.args(t)
 	if !slices.Contains(args, "--prometheus-tenant=history-b") {

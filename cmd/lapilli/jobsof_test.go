@@ -28,6 +28,7 @@ func (h jobbed) QueryRange(ctx context.Context, expr string, start, end time.Tim
 // lapilli verdict --check-content counts a range over a selector that names
 // no job with the interval of the jobs its series come from, as asked.
 func TestCheckContentJobsOf(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return jobbed{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:

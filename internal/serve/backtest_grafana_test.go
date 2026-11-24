@@ -552,9 +552,14 @@ func TestBacktestGrafanaProbePoints(t *testing.T) {
 	parallel(t)
 	b, _, _ := btGrafana(t, true, nil)
 	prom := func(expr string) string { return fmt.Sprintf(`{expr: '%s', datasource: {type: prometheus}}`, expr) }
+	// Each taken a newer commit of the pull request, which takes the place
+	// of the one before.
+	n := 0
 	for interval, refused := range map[string]bool{"1s": true, "7s": true, "8s": false, "10s": false, "1m": false, "5m": false} {
 		rule := strings.Replace(prGrafana(gRule("p1", "Raised", "A", gQuery("A", "prom-a", prom("errors > 1")))), "interval: 1m", "interval: "+interval, 1)
-		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btAdding(added("grafana.yaml", rule, false)))
+		n++
+		body := strings.Replace(string(btAdding(added("grafana.yaml", rule, false))), `"commit":"0123abcd"`, `"commit":"`+commitN(n)+`"`, 1)
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), []byte(body))
 		why, _ := m["error"].(string)
 		switch {
 		case refused && (code != 400 || !strings.Contains(why, "an interval of 8s or more")):

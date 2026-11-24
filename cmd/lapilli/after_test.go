@@ -13,6 +13,7 @@ import (
 // with "for" 0 when it fired and 40m only later, a firing just after an
 // incident held only once it fired, and came after nothing.
 func TestFiredAfterVersions(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	v1 := write(t, "v1.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: Errors, expr: errors > 5}\n")

@@ -4,6 +4,13 @@
 
 ### Added
 
+- **The backtest's report in the step's summary**: in GitHub Actions the
+  recipe adds it to `GITHUB_STEP_SUMMARY`, shown on the run's page, the
+  comment's Markdown without its hidden first line. A merge queue's run,
+  which posts no comment, has it there as well as in its log; a pull
+  request's run has it whether or not a comment was posted. Nothing is
+  added past the 1 MiB GitHub takes of a step's summary, or to a summary
+  that is a link, and the job's log says so.
 - `lapilli verdict --firings FILE` goes beside rules replayed (`--rules`,
   `--loaded-rules`, `--grafana`, `--ruler`, `--alarms`, `--loki-rules`,
   `--rules-history`): what a cloud's own alarms fired, as recipes/firings
@@ -55,6 +62,22 @@
 
 ### Changed
 
+- **lapilli serve reads a merge group's pull request number and branch
+  from its ID token's `ref`**, the queue's, and only from there: a body
+  that names another number is refused, and a `merge_group` token whose
+  `ref` isn't a queue's is refused (401). A group the queue built again
+  takes the place of the one waiting for the same repository, branch and
+  pull request, never a pull request's own backtest's place, nor a pull
+  request's newer commit a group's. A backtest takes the place only of one
+  of another commit and, of a GitHub workflow, of an earlier run of it (by
+  the token's `run_number`), so that two jobs of one run, a run that asks
+  late, or an earlier run run again take no newer one's place. **Ledger
+  schema 033** (`backtests.queue_branch`, `workflow`, `run_number`), one
+  start, no backfill: keep a copy of the ledger first.
+- **The command's tests in a third of the time**: `cmd/lapilli`'s tests
+  that keep to their own files and stand-ins run in parallel, as serve's
+  have since 0.71.0, and a test that sets one of the command's hooks sets
+  it back as it ends (`cmd/lapilli` 316 s → 87 s here, run back to back).
 - The end-to-end tests on kind of the chart's CronJob and of the whole
   service (`test/e2e/run.sh`, `service.sh`) take `PROMETHEUS_IMAGE` and
   `GRAFANA_IMAGE`, as the scripts in Docker have since 0.71.0, and
@@ -72,6 +95,14 @@
 
 ### Fixed
 
+- **Two backtest jobs of one pull request's commit took each other's
+  place** through serve (since 0.61.0), with two `KEY`s in one workflow:
+  the first failed under its gate while serve was busy. A backtest takes
+  the place only of one of another commit now.
+- `RENDER` and `RENDER_PREPARE` run without GitHub Actions' step files
+  (`GITHUB_STEP_SUMMARY`, `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`,
+  `GITHUB_STATE`); a merge group's branch is 255 characters at most in
+  `github.sh`, as in serve.
 - `lapilli serve` restarted on a ledger it had run panicked on its
   overview's first view, before anything was written again.
 - One rule left out of a report is said to be ("is left out"), in the

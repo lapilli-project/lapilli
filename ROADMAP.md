@@ -242,17 +242,15 @@ Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
 never leaves a success. Through serve too since 0.70, which judges the
 rules left alone by its record, compared as parsed PromQL since 0.71; and
-in GitHub's merge queue (`merge_group`), on the merge group's head (0.71).
-Still to do:
+in GitHub's merge queue (`merge_group`), on the merge group's head (0.71),
+its report in the step's summary and a group built again taking the place
+of the one waiting (0.72). Still to do:
 
 - Through serve, a rule left alone that serve doesn't run: an incident
   only it may catch is not known, where it could be replayed. And a rule
   serve reads from an API that leaves out what its file says (a group's
   `query_offset`, which Prometheus's rules API doesn't report); and a Loki
   ruler's, a Grafana rule and a cloud alarm, still compared by their text.
-- A merge group's report in the job's summary (`GITHUB_STEP_SUMMARY`)
-  rather than its log; serve reading the queue ref's `pr-N`, so that a
-  group built again takes the place of the one waiting.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left
@@ -388,8 +386,9 @@ times: the statements a page or a write sends the ledger, the rows it
 writes and the tables it reads, what a read allocates, and the work a
 parser or router does. So a change that makes the ledger or a reader do
 more fails CI on any runner, however slow; on Postgres too, by the
-statements sent, in CI's job for it. Still to do: `cmd/lapilli`'s tests,
-now as long as serve's, run in parallel as serve's are.
+statements sent, in CI's job for it. The tests that keep to their own
+ledger, files and stand-ins run in parallel, serve's (0.71) and the
+command's (`cmd/lapilli/parallel_test.go`, 0.72).
 
 ## Packaging and trust
 

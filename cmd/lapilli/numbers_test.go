@@ -131,6 +131,7 @@ func jq(t *testing.T, prog, file string, args ...string) string {
 // by its jq, from a report lapilli verdict wrote, and comes out as the
 // report has it: the document says what the code does.
 func TestNumbersRecount(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}
@@ -223,6 +224,7 @@ func TestNumbersRecount(t *testing.T) {
 // --csv: the firings a row each, in the columns docs/numbers.md lists, and
 // the same stones as --json.
 func TestVerdictCSV(t *testing.T) {
+	parallel(t)
 	rows, err := csv.NewReader(strings.NewReader(numbersReport(t, "--csv"))).ReadAll()
 	if err != nil {
 		t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 // service, host or incident; the numbers stay; --redact-key's key is read
 // from its file and never said.
 func TestVerdictRedact(t *testing.T) {
+	parallel(t)
 	incidents := write(t, "incidents.yaml", `incidents:
   - {id: OPS-31337, title: Basket service melted, start: 2026-10-20T00:00:00Z, end: 2026-10-20T01:00:00Z, labels: {service: basket-api}}
 `)

@@ -36,7 +36,9 @@
 # branch it goes into that its CI says, TARGET, with ci_base: no pull
 # request is commented on, the report going to the job's log; HEAD must
 # be ci_head, gates or not; and TARGET must be an ancestor of it, the
-# base compared against. And ci_wrong, a setting of the job's the script
+# base compared against. And ci_summary=github, that the CI shows a
+# step's summary, GitHub Actions' GITHUB_STEP_SUMMARY, which the report
+# is added to (job_summary). And ci_wrong, a setting of the job's the script
 # found wrong, said once the status can be set: the job fails, its status
 # a failure on ci_head. And ci_merge_only, that the base is said of the
 # CI's merge alone (GitLab's merge trains): HEAD must be ci_merge, its
@@ -297,7 +299,8 @@
 # its report: its summary line as serve wrote it, or no report, and of the
 # rest only lines lapilli writes, any other left out (report_of_serve).
 # RENDER and RENDER_PREPARE run what the pull request holds, with the
-# job's rights: they run without the variables CIs keep tokens in, and with a
+# job's rights: they run without the variables CIs keep tokens in, nor
+# GitHub Actions' files a step writes to (GITHUB_STEP_SUMMARY, ...), and with a
 # HOME of their own for each commit, the base first, but can read whatever
 # the job can, the token's file included, and on Linux the environment the
 # job's processes started with (/proc/PID/environ). Run this only for pull requests
@@ -1580,11 +1583,16 @@ expect_tree() {
 
 # in_tree SIDE COMMAND: RENDER or RENDER_PREPARE, in a commit's files, with
 # a HOME of that commit's own (what Helm caches there is fetched once a
-# commit), without the variables CIs keep tokens in; REPO is the clone. It
-# runs what the pull request holds, with the job's rights.
+# commit), without the variables CIs keep tokens in, nor GitHub Actions'
+# files a step writes its summary, outputs, environment, PATH and state
+# to (a report of the pull request's own made to look like Lapilli's, a
+# summary filled to its 1 MiB, a fence left open before the report); REPO
+# is the clone. It runs what the pull request holds, with the job's
+# rights: a command that looks for those files can still find them.
 in_tree() {
   mkdir -p "$tmp/$1-home"
   (cd "$tmp/$1" && env -u GITHUB_TOKEN_FILE -u GITLAB_TOKEN_FILE -u BITBUCKET_TOKEN_FILE -u AZURE_DEVOPS_TOKEN_FILE \
+    -u GITHUB_STEP_SUMMARY -u GITHUB_OUTPUT -u GITHUB_ENV -u GITHUB_PATH -u GITHUB_STATE \
     -u GITEA_TOKEN_FILE -u LAPILLI_INPUT_TOKEN -u LAPILLI_ID_TOKEN -u LAPILLI_SERVE_TOKEN_FILE -u GITHUB_TOKEN -u GH_TOKEN -u GITEA_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
     -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u CI_JOB_TOKEN -u CI_JOB_JWT -u CI_JOB_JWT_V1 -u CI_JOB_JWT_V2 \
     -u CI_REGISTRY_PASSWORD -u CI_DEPLOY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_BUILD_TOKEN \
@@ -2267,7 +2275,12 @@ through_serve() {
             ;;
           200/superseded)
             bt_live=
-            trouble "a newer commit's backtest took this one's place in lapilli serve's queue"
+            if [ -n "${ci_queue:-}" ]; then
+              # serve read the group's pull request from the token's ref.
+              trouble "the merge queue built this pull request's group again: the newer group's backtest took this one's place in lapilli serve's queue"
+            else
+              trouble "a newer commit's backtest took this one's place in lapilli serve's queue"
+            fi
             return 1
             ;;
           200/cancelled)
@@ -2521,8 +2534,10 @@ comment() {
 
 # post: the comment on the pull request, in place of the one posted
 # before, if there is one. Of a merge queue's run, which has no pull
-# request, the comment as it would be, in the job's log.
+# request, the comment as it would be, in the job's log. And, either way,
+# in the step's summary (job_summary).
 post() {
+  job_summary
   if [ -n "${ci_queue:-}" ]; then
     say "a merge queue's run, of no pull request to comment on: the report, as a comment would have it"
     sed 1d "$tmp/comment.md" >"$tmp/queue.md"
@@ -2548,6 +2563,58 @@ post() {
   else
     post_comment "$tmp/comment.md" || return 1
     say "commented on pull request $PR"
+  fi
+}
+
+# job_summary: where the CI shows a step's summary (ci_summary=github,
+# GitHub Actions' GITHUB_STEP_SUMMARY, when the job has one), the comment
+# compose made, but its hidden first line, added to it: GitHub shows it on
+# the run's page, to whoever can read the repository, a merge queue's run's
+# where no comment is posted, a pull request's beside the comment, and one
+# whose comment wasn't posted (nothing changed, or the host refused it)
+# all the same. It is the comment's own Markdown, as made safe for the
+# comment (what comes from the rules in code spans, what went wrong in a
+# fenced block, serve's report its lines lapilli writes), and nothing
+# else, so that it does no more there than the comment does. GitHub takes
+# 1 MiB of a step's summary at most, and shows none of a step past it:
+# with what the step wrote there already, the report is added within it,
+# or not at all, the job's log saying so. A summary that isn't a file the
+# job can read gets none, nor one that is a symbolic link, which could
+# lead the report to another file, or make one where it leads. Never
+# fails: the comment, or the job's log, has the report.
+job_summary() {
+  [ "${ci_summary:-}" = github ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  if [ -L "$GITHUB_STEP_SUMMARY" ]; then
+    say "GITHUB_STEP_SUMMARY is a symbolic link: the report isn't added to the step's summary"
+    return 0
+  fi
+  had=0
+  if [ -e "$GITHUB_STEP_SUMMARY" ]; then
+    had=
+    # Never read but as a file: a FIFO would hold the job.
+    [ ! -f "$GITHUB_STEP_SUMMARY" ] || [ ! -r "$GITHUB_STEP_SUMMARY" ] || had=$(wc -c <"$GITHUB_STEP_SUMMARY" | tr -d ' ')
+    case $had in
+      '' | *[!0-9]*)
+        say "GITHUB_STEP_SUMMARY isn't a file the job can read: the report isn't added to the step's summary"
+        return 0
+        ;;
+    esac
+  fi
+  {
+    # After what the step wrote there, a block of its own: a blank line
+    # first, as the summary line, a link reference definition, would else
+    # be read on in a paragraph left open, and shown.
+    [ "$had" -eq 0 ] || printf '\n\n'
+    sed 1d "$tmp/comment.md"
+  } >"$tmp/summary.md"
+  if [ $((had + $(wc -c <"$tmp/summary.md" | tr -d ' '))) -gt 1048576 ]; then
+    say "the report isn't added to the step's summary: with the $had bytes the step wrote there, it would pass the 1 MiB GitHub takes of one"
+    return 0
+  fi
+  if cat "$tmp/summary.md" 2>/dev/null >>"$GITHUB_STEP_SUMMARY"; then
+    say "the report added to the step's summary (GITHUB_STEP_SUMMARY), as the comment has it"
+  else
+    say "the report couldn't be added to the step's summary (GITHUB_STEP_SUMMARY)"
   fi
 }
 

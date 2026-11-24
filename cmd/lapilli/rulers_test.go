@@ -16,6 +16,7 @@ import (
 // token and its tenant; rules of one name in two namespaces are told apart
 // by both.
 func TestRulerRules(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,7 @@ payments:
 // go: Amazon's query URL, Amazon or Azure without their credentials, a
 // token or a tenant for a cloud, or without --ruler.
 func TestRulerFlags(t *testing.T) {
+	parallel(t)
 	incidents := write(t, "incidents.yaml", "incidents: []\n")
 	tok := write(t, "tok", "ruler-token-0123456789\n")
 	base := []string{"verdict", "--prometheus", "http://p", "--incidents", incidents}
@@ -81,6 +83,7 @@ func TestRulerFlags(t *testing.T) {
 // lapilli serve's changes through a ruler: each credential for its own
 // kind of ruler, with --changes, and --changes-in for --ruler.
 func TestServeRulerFlags(t *testing.T) {
+	parallel(t)
 	tok := write(t, "tok", "ruler-writes-0123456789\n")
 	same := write(t, "same", "ruler-writes-0123456789\n")
 	signed := []string{"--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com"}
@@ -119,6 +122,7 @@ func TestServeRulerFlags(t *testing.T) {
 // a token of their own to write with, and no Loki namespace named without
 // Loki's ruler read.
 func TestServeLokiChangesFlags(t *testing.T) {
+	parallel(t)
 	tok := write(t, "tok", "loki-writes-0123456789\n")
 	same := write(t, "same", "loki-writes-0123456789\n")
 	signed := []string{"--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com"}

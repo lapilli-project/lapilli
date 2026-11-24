@@ -18,9 +18,9 @@ import (
 	"lapilli.dev/internal/incident"
 )
 
-// ask is a backtest asked for, for the tests.
+// ask is a backtest asked for, for the tests, each of a commit of its own.
 func ask(id, trust string, pr int64, token string) BacktestAsk {
-	return BacktestAsk{Backtest: Backtest{ID: id, Trust: trust, Repository: "example/alerts", PullRequest: pr, Commit: "0123abcd", Rules: 2, Requests: 80, KeyHash: "k-" + id},
+	return BacktestAsk{Backtest: Backtest{ID: id, Trust: trust, Repository: "example/alerts", PullRequest: pr, Commit: "commit-" + id, Rules: 2, Requests: 80, KeyHash: "k-" + id},
 		Body: []byte(`{"after":[]}` + id), Token: token, BodyHash: "h-" + id, Until: t0.Add(2 * time.Hour), Queue: 20, PerTrust: 3, Supersede: pr > 0}
 }
 
@@ -157,7 +157,7 @@ func TestBacktestRoom(t *testing.T) {
 	defer l.Close()
 	room := func(trust, token string, pr int64, queue int, at time.Time) (bool, bool) {
 		t.Helper()
-		used, full, err := l.BacktestRoom(ctx, trust, token, "", "example/alerts", pr, queue, 3, at)
+		used, full, err := l.BacktestRoom(ctx, trust, token, "", "example/alerts", "", pr, queue, 3, at)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -390,7 +390,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -401,7 +401,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -538,7 +538,7 @@ func TestBacktestSupersedeByID(t *testing.T) {
 	}
 	room := func(repoID, repo string, pr int64, perTrust int) bool {
 		t.Helper()
-		_, full, err := l.BacktestRoom(ctx, "alerts", "t-room", repoID, repo, pr, 50, perTrust, t0)
+		_, full, err := l.BacktestRoom(ctx, "alerts", "t-room", repoID, repo, "", pr, 50, perTrust, t0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -610,7 +610,7 @@ func TestMigrate031(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031), "UPDATE schema_version SET version = 30") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031), "UPDATE schema_version SET version = 30") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -621,7 +621,7 @@ func TestMigrate031(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031), "PRAGMA user_version = 30") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031), "PRAGMA user_version = 30") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -645,6 +645,201 @@ func TestMigrate031(t *testing.T) {
 	b, _, sup, err := l2.AskBacktest(ctx, askOf("new", "111", "example/alerts", 7), t0)
 	if err != nil || sup != 1 || b.RepositoryID != "111" {
 		t.Errorf("its newer commit after migrating: %+v %d %v", b, sup, err)
+	}
+	if old, _, _ := l2.Backtest(ctx, "old"); old.State != BacktestSuperseded {
+		t.Errorf("the older commit: %+v", old)
+	}
+}
+
+// askQueue is askOf, of a merge queue's run into branch: "" for a pull
+// request's.
+func askQueue(id, branch string, pr int64) BacktestAsk {
+	a := askOf(id, "111", "example/alerts", pr)
+	a.QueueBranch = branch
+	return a
+}
+
+// A merge group's backtest takes the place of the one waiting for the
+// same entry, repository, pull request and queue's branch: a group the
+// queue built again. Never one of another pull request, of another
+// branch's queue, nor a pull request's own backtest of the same number,
+// whose newer commit takes no group's place either, even of one entry.
+// BacktestRoom counts alike.
+func TestBacktestSupersedeQueue(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	asked := func(a BacktestAsk, want int, what string) {
+		t.Helper()
+		a.Queue, a.PerTrust = 50, 50
+		if _, _, sup, err := l.AskBacktest(ctx, a, t0); err != nil || sup != want {
+			t.Errorf("%s: %d superseded, want %d: %v", what, sup, want, err)
+		}
+	}
+	room := func(branch string, pr int64, perTrust int) bool {
+		t.Helper()
+		_, full, err := l.BacktestRoom(ctx, "alerts", "t-room", "111", "example/alerts", branch, pr, 50, perTrust, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+	asked(askQueue("pr5", "", 5), 0, "pull request 5")
+	asked(askQueue("g5", "main", 5), 0, "pull request 5's merge group, beside its own backtest")
+	asked(askQueue("g6", "main", 6), 0, "another pull request's group")
+	asked(askQueue("r5", "release", 5), 0, "pull request 5's group in another branch's queue")
+	// Four wait: a group of 5 into main built again would leave three.
+	if room("main", 5, 4) || room("", 5, 4) || !room("main", 7, 4) || !room("release/2.x", 5, 4) || !room("", 8, 4) {
+		t.Errorf("the room for a group built again: its own one waiting would go, and no other's")
+	}
+	asked(askQueue("g5b", "main", 5), 1, "pull request 5's group, built again")
+	asked(askQueue("pr5b", "", 5), 1, "pull request 5's newer commit")
+	want := map[string]string{"pr5": BacktestSuperseded, "g5": BacktestSuperseded, "g6": BacktestWaiting, "r5": BacktestWaiting,
+		"g5b": BacktestWaiting, "pr5b": BacktestWaiting}
+	for id, state := range want {
+		b, ok, err := l.Backtest(ctx, id)
+		branch := map[bool]string{true: "", false: map[string]string{"g": "main", "r": "release"}[id[:1]]}[strings.HasPrefix(id, "pr")]
+		if err != nil || !ok || b.State != state || b.QueueBranch != branch {
+			t.Errorf("%s: %+v, want %s of %q: %v", id, b, state, branch, err)
+		}
+	}
+	// A number the job said supersedes nothing, a group's as a pull
+	// request's.
+	said := askQueue("g5c", "main", 5)
+	said.Supersede = false
+	asked(said, 0, "pull request 5's group, by the job's word")
+	// Two jobs of one run, each a KEY of its own, of the same commit: the
+	// second takes no place of the first's, a group's as a pull request's.
+	for _, branch := range []string{"main", ""} {
+		first, second := askQueue("key-prom-"+branch, branch, 9), askQueue("key-loki-"+branch, branch, 9)
+		second.Commit = first.Commit
+		asked(first, 0, "the first job's, into "+branch)
+		asked(second, 0, "the second job's, of the same commit, into "+branch)
+		if b, _, _ := l.Backtest(ctx, first.ID); b.State != BacktestWaiting {
+			t.Errorf("the first job's, into %q: %+v", branch, b)
+		}
+	}
+}
+
+// askRun is askQueue, of a GitHub Actions run: of workflow, its number
+// run.
+func askRun(id, branch string, pr int64, workflow string, run int64) BacktestAsk {
+	a := askQueue(id, branch, pr)
+	a.Workflow, a.RunNumber = workflow, run
+	return a
+}
+
+// Of a workflow, a backtest takes the place only of one of an earlier run
+// of it: a run that asks late (it waited for a runner while the queue
+// built its group again, or a newer commit was pushed), or an earlier run
+// run again, keeping its number, takes no newer run's place, a merge
+// group's as a pull request's; nor does a run of another workflow. One
+// kept with no workflow (asked before 033) is taken the place of as
+// before, and so are those of a CI whose tokens say no run.
+func TestBacktestSupersedeLaterRun(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	asked := func(a BacktestAsk, want int, what string) {
+		t.Helper()
+		a.Queue, a.PerTrust = 50, 50
+		if _, _, sup, err := l.AskBacktest(ctx, a, t0); err != nil || sup != want {
+			t.Errorf("%s: %d superseded, want %d: %v", what, sup, want, err)
+		}
+	}
+	const wf, other = "example/alerts/.github/workflows/backtest.yml", "example/alerts/.github/workflows/loki.yml"
+	for _, branch := range []string{"main", ""} {
+		pr := map[string]int64{"main": 5, "": 6}[branch]
+		asked(askRun("new-"+branch, branch, pr, wf, 11), 0, "run 11, into "+branch)
+		// Run 10 asks late, and run 10 again: neither takes run 11's place.
+		asked(askRun("late-"+branch, branch, pr, wf, 10), 0, "run 10, late, into "+branch)
+		asked(askRun("again-"+branch, branch, pr, wf, 10), 0, "run 10 run again, into "+branch)
+		// Another workflow's run 99 takes no place of this one's.
+		asked(askRun("other-"+branch, branch, pr, other, 99), 0, "another workflow's run, into "+branch)
+		// Run 12 takes the place of each earlier run of its workflow.
+		asked(askRun("newest-"+branch, branch, pr, wf, 12), 3, "run 12, into "+branch)
+		for id, state := range map[string]string{"new-": BacktestSuperseded, "late-": BacktestSuperseded, "again-": BacktestSuperseded,
+			"other-": BacktestWaiting, "newest-": BacktestWaiting} {
+			if b, ok, err := l.Backtest(ctx, id+branch); err != nil || !ok || b.State != state {
+				t.Errorf("%s%s: %+v, want %s: %v", id, branch, b, state, err)
+			}
+		}
+		if b, _, _ := l.Backtest(ctx, "newest-"+branch); b.Workflow != wf || b.RunNumber != 12 {
+			t.Errorf("kept %q, run %d", b.Workflow, b.RunNumber)
+		}
+	}
+	// Kept with no workflow, as before 033: taken the place of by a run.
+	asked(askQueue("before", "main", 7), 0, "one kept with no workflow")
+	asked(askRun("run", "main", 7, wf, 1), 1, "a run's, after it")
+	// A CI whose tokens say no run: by the commit alone, as before.
+	asked(askQueue("no-run", "main", 8), 0, "of no run")
+	asked(askQueue("no-run-newer", "main", 8), 1, "of no run, another commit")
+}
+
+// A ledger at 032 with a backtest waiting, in SQLite or, with
+// LAPILLI_TEST_POSTGRES, in Postgres, migrates to 033 with it as it was,
+// of no merge queue: a pull request's newer commit takes its place, and a
+// merge group of the same number doesn't.
+func TestMigrate033(t *testing.T) {
+	ctx := context.Background()
+	where := place(t)
+	l, err := openAt(ctx, where, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := l.AskBacktest(ctx, askOf("old", "111", "example/alerts", 7), t0); err != nil {
+		t.Fatal(err)
+	}
+	was, _, err := l.Backtest(ctx, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+
+	// Back to 032.
+	if strings.HasPrefix(where, "postgres") {
+		c, err := pgx.Connect(ctx, where)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range append(slices.Clone(undo033), "UPDATE schema_version SET version = 32") {
+			if _, err := c.Exec(ctx, q); err != nil {
+				t.Fatal(q, err)
+			}
+		}
+		c.Close(ctx)
+	} else {
+		l, err := Open(ctx, where, time.UTC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range append(slices.Clone(undo033), "PRAGMA user_version = 32") {
+			if _, err := l.w.ExecContext(ctx, q); err != nil {
+				t.Fatal(q, err)
+			}
+		}
+		l.Close()
+	}
+
+	l2, err := openAt(ctx, where, time.UTC)
+	if err != nil {
+		t.Fatalf("migrating to 033: %v", err)
+	}
+	defer l2.Close()
+	if b, _, err := l2.Backtest(ctx, "old"); err != nil || b != was || b.QueueBranch != "" || b.State != BacktestWaiting {
+		t.Errorf("after migrating: %+v, not %+v: %v", b, was, err)
+	}
+	if _, _, sup, err := l2.AskBacktest(ctx, askQueue("group", "main", 7), t0); err != nil || sup != 0 {
+		t.Errorf("pull request 7's merge group: %d %v", sup, err)
+	}
+	if _, _, sup, err := l2.AskBacktest(ctx, askOf("new", "111", "example/alerts", 7), t0); err != nil || sup != 1 {
+		t.Errorf("its newer commit after migrating: %d %v", sup, err)
 	}
 	if old, _, _ := l2.Backtest(ctx, "old"); old.State != BacktestSuperseded {
 		t.Errorf("the older commit: %+v", old)

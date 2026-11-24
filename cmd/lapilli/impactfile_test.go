@@ -12,6 +12,7 @@ import (
 // repeat a value past what the file's bytes bound, is refused, and a rule
 // entry's labels are held as a team's are (64 values of 256 bytes a label).
 func TestImpactFileBounded(t *testing.T) {
+	parallel(t)
 	signals := "signals:\n  - {name: probe, expr: probe_success == 0}\n"
 	for _, c := range []struct{ name, text, want string }{
 		{"an alias", signals + "rules:\n  - rules: &r ^Errors$\n    signals: [probe]\n  - rules: *r\n    signals: [probe]\n", "anchor or alias"},
@@ -39,6 +40,7 @@ func TestImpactFileBounded(t *testing.T) {
 // entries all say it needs no signal; signals: [] is refused naming it,
 // and judged: false beside signals, or with true, is refused.
 func TestImpactFileJudgedFalse(t *testing.T) {
+	parallel(t)
 	signals := "signals:\n  - {name: probe, expr: probe_success == 0}\n"
 	for _, c := range []struct{ name, text, want string }{
 		{"signals: []", signals + "rules:\n  - {rules: ^Watchdog$, signals: []}\n", "judged: false"},

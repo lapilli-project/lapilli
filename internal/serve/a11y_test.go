@@ -215,7 +215,7 @@ func backtestsServer(t *testing.T) *Server {
 		n++
 		id := fmt.Sprintf("bt-%d", n)
 		if _, _, _, err := s.l.AskBacktest(ctx, ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: trust, Repository: repo, PullRequest: pr,
-			Commit: "0123abcd", Rules: n, Requests: 40, KeyHash: "k-" + id}, Body: []byte(`{"after":[]}`), BodyHash: "h-" + id,
+			Commit: fmt.Sprintf("0123abc%d", n), Rules: n, Requests: 40, KeyHash: "k-" + id}, Body: []byte(`{"after":[]}`), BodyHash: "h-" + id,
 			Until: at.Add(2 * time.Hour), Queue: 20, PerTrust: 10, Supersede: pr > 0}, at); err != nil {
 			t.Fatal(err)
 		}

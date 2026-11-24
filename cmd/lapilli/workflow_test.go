@@ -75,6 +75,7 @@ func reached(t *testing.T, changed ...string) (reach, all []string) {
 // next push, no other run by anything. The checks the branch ruleset
 // requires run on every pull request, by their names.
 func TestWorkflowMainRunsEverything(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
 	}
@@ -133,6 +134,7 @@ func TestWorkflowMainRunsEverything(t *testing.T) {
 // reaches, a script and what it alone reads its job, the docs and Go's
 // tests none, and a path reached.sh doesn't name every job.
 func TestWorkflowReached(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
 	}

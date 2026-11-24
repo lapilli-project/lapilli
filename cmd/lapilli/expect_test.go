@@ -18,6 +18,7 @@ import (
 // for a rule added that nothing holds. A file it can't read fails the run
 // before anything is replayed.
 func TestCompareExpectations(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	base := `groups:
@@ -108,6 +109,7 @@ func TestCompareExpectations(t *testing.T) {
 // no incident; it drafts the rules judged, not a change, nor a redacted
 // report.
 func TestDraftExpectations(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:

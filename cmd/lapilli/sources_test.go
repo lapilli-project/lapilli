@@ -32,6 +32,7 @@ func grafanaOn(uids ...string) string {
 // PromQL are said to be replayed against the one --prometheus: a warning,
 // the exit status as it was; one data source, or none, says nothing.
 func TestVerdictWarnsOfSeveralHistories(t *testing.T) {
+	alone(t)
 	was, wasNow := newHistory, now
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
