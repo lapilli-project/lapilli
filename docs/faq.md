@@ -107,7 +107,7 @@ is deployed ([Use `lapilli verdict`](verdict.md),
 ### Which rules, data sources and clouds?
 
 Rules: Prometheus rule files, `PrometheusRule` resources, Grafana alerting
-provisioning files, each cloud's managed rule groups and its alarms written
+provisioning files, Terraform's JSON of `grafana_rule_group`, each cloud's managed rule groups and its alarms written
 in PromQL, ConfigMaps holding any of them, Loki ruler rule files
 (`--loki-rules`), and directories of them; or as an API holds them:
 `--loaded-rules` (Prometheus, Thanos, Mimir, vmalert through

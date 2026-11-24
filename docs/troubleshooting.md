@@ -353,7 +353,7 @@ context`, and line `N` is where it stopped reading.
 ### `no alert rules`
 
 ```
-lapilli verdict: FILE: no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, a cloud's rule groups or alerting policies, or a ConfigMap holding one
+lapilli verdict: FILE: no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, Terraform's JSON of grafana_rule_group (terraform show -json), a cloud's rule groups or alerting policies, or a ConfigMap holding one
 lapilli verdict: DIR: no file in it holds alert rules
 lapilli verdict: no alert rules to replay
 ```

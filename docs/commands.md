@@ -60,8 +60,10 @@ Usage:
 Where the firings come from (pick one):
   --rules FILE        replay these alert rules against history (repeatable):
                       Prometheus rule files, PrometheusRule resources, Grafana
-                      alerting provisioning files, or ConfigMaps holding them;
-                      or a directory of them, such as a mounted ConfigMap
+                      alerting provisioning files, Terraform's JSON of
+                      grafana_rule_group (terraform show -json), or ConfigMaps
+                      holding them; or a directory of them, such as a mounted
+                      ConfigMap
   --rules FILE@TIME   the rules as they stood from TIME (RFC 3339) on, for a
                       period in which they changed; give every file in effect
                       from TIME with the same TIME, and the rules from before

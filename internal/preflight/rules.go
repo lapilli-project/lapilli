@@ -203,6 +203,9 @@ func counted(rs []rules.Rule, recording int) string {
 		switch {
 		case r.Cloud != "":
 			kinds["a cloud's alarms"]++
+		case r.Address != "":
+			// Terraform's JSON of grafana_rule_group, paused rules too.
+			kinds["Grafana, from Terraform"]++
 		case r.Graph != nil:
 			kinds["Grafana"]++
 		case r.Logs != "":
@@ -212,7 +215,7 @@ func counted(rs []rules.Rule, recording int) string {
 		}
 	}
 	var parts []string
-	for _, k := range []string{"Prometheus", "Grafana", "Loki", "a cloud's alarms"} {
+	for _, k := range []string{"Prometheus", "Grafana", "Grafana, from Terraform", "Loki", "a cloud's alarms"} {
 		if kinds[k] > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", kinds[k], k))
 		}

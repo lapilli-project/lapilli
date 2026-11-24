@@ -192,6 +192,29 @@ over changes of it, or gives its title to another rule too), it is listed
 as before, and stderr says why. `--grafana-history=false` lists them all
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
 
+## Rules kept in Terraform
+
+Grafana alerting managed with the Grafana provider's `grafana_rule_group`
+is read from the JSON Terraform writes once its values are resolved
+(variables, modules and functions included), not from the HCL: `--rules`
+takes it as it takes any rules, by what it holds. Of a saved plan:
+
+```sh
+terraform plan -refresh=false -out=tfplan && terraform show -json tfplan > rules.json
+lapilli verdict --rules rules.json --prometheus http://prometheus:9090 --incidents incidents.yaml
+```
+
+or of the state, `terraform show -json > rules.json`. Every
+`grafana_rule_group` in the root module and in its child modules is read,
+as the Grafana provisioning file it describes: a rule is replayed, a
+paused one is listed as paused, a recording rule is read as recorded. A
+plan has the values the resources will have, so a group the plan destroys
+isn't in it. A value Terraform can't know before it applies, such as a
+`folder_uid` taken from a folder made in the same plan or a rule's `uid`,
+is empty. `lapilli preflight` counts such rules as Grafana, from Terraform.
+A pull request's backtest can render it: see
+[recipes/backtest](../recipes/backtest/README.md#rules-rendered-from-terraform).
+
 ## Any Prometheus-compatible API
 
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,

@@ -1157,3 +1157,12 @@ func TestRulesSources(t *testing.T) {
 		t.Errorf("seven: %q", many[1].What)
 	}
 }
+
+// Rules read from Terraform's JSON are counted as Grafana's, from Terraform,
+// a paused one too.
+func TestCountedTerraform(t *testing.T) {
+	rs := []rules.Rule{{Name: "a", Address: "grafana_rule_group.g", Graph: &rules.Graph{}}, {Name: "b", Address: "grafana_rule_group.g", Unsupported: rules.Paused}}
+	if got, want := counted(rs, -1), "2 alert rules (Grafana, from Terraform)"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}

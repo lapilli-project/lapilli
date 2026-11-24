@@ -2,6 +2,14 @@
 
 ## Replaying and judging
 
+- Terraform is read as the JSON `terraform show -json` writes of a plan or
+  a state, never as HCL, and only its `grafana_rule_group` resources: not
+  other resources (contact points, notification policies, folders), nor a
+  rule group a plan destroys, nor a value Terraform can't know before it
+  applies. A rule read from it can't be changed by a proposal: the change
+  is made where the HCL is
+  ([verdict.md](verdict.md#rules-kept-in-terraform)).
+
 - Queries to data sources that are neither PromQL nor LogQL (SQL,
   Elasticsearch, InfluxDB, a cloud's own logs) can't be replayed. Read with
   `--grafana`, such a rule is judged from what Grafana's own alert state

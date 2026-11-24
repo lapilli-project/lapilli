@@ -124,7 +124,9 @@ lapilli verdict --rules alert-rules/ --prometheus http://prometheus:9090 \
 
 `--rules` replays the rules against the history at `--prometheus`:
 Prometheus rule files, `PrometheusRule` resources, Grafana alerting
-provisioning files, ConfigMaps holding them, or a directory of them. The
+provisioning files, Terraform's JSON of `grafana_rule_group`
+([docs/verdict.md](verdict.md#rules-kept-in-terraform)), ConfigMaps holding
+them, or a directory of them. The
 period is the last 7 days (`--since 7d`), or `--from` to `--to` in RFC
 3339, its times shown in the machine's zone or in `--tz`. `--match service`
 keeps an alert about one service from catching an incident in another

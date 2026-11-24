@@ -502,6 +502,26 @@ the job does next. Helm's `template` runs no code of the chart's; a
 Kustomize plugin, or a `RENDER` that runs the repository's scripts, does.
 That is one reason forks are kept out.
 
+## Rules rendered from Terraform
+
+Rules kept with the Grafana provider's `grafana_rule_group` are read from
+the JSON Terraform writes of a plan, where every value is resolved:
+
+```yaml
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          render-prepare: terraform init -input=false >&2
+          render: terraform plan -refresh=false -out=tfplan >/dev/null && terraform show -json tfplan
+          prometheus-url: ${{ vars.PROMETHEUS_URL }}
+```
+
+The job needs Terraform, and `terraform init` (in `RENDER_PREPARE`) so that
+the provider is there. Whether the plan also needs the provider's own
+settings (the Grafana's URL and credentials) isn't something Lapilli has
+checked: give the job what your configuration needs to plan. Only the
+`grafana_rule_group` resources are read, from the root module and its child
+modules; the rest of the plan is passed over.
+
 ## Judged by user impact
 
 Without incidents, the comment counts firings: what fired before the

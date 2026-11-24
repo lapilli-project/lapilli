@@ -10,6 +10,7 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
 - `--rules FILE`: replay alert rules against history, so it works on rules you
   just wrote and on history from before you had Lapilli. It reads Prometheus
   rule files, `PrometheusRule` resources, Grafana alerting provisioning files,
+  Terraform's JSON of `grafana_rule_group`,
   each cloud's managed rule groups and its alarms written in PromQL (see
   below), ConfigMaps holding any of them, and directories of them, below them too; below the top, files that
   don't parse, such as a Helm chart's templates, are passed over. Grafana rules are evaluated the way
