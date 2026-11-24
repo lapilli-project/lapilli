@@ -588,7 +588,7 @@ func TestOffline(t *testing.T) {
 
 // IDs are every item's id a preflight gives.
 var IDs = []string{"rules.read", "rules.replayable", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
-	"history.alerts", "history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
+	"history.alerts", "history.intervals", "grafana.notifications", "content.alertmanager", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
 	"changes.google", "changes.oci", "changes.ruler", "changes.loki", "inputs.files",
 	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "backtest.trust", "backtest.issuers", "access", "estimate.hourly",
 	"estimate.backfill", "estimate.nights", "estimate.beside", "estimate.backtests", "estimate.memory"}

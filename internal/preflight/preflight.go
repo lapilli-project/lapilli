@@ -129,6 +129,7 @@ func Run(ctx context.Context, c Config) *Report {
 	p.expressions()
 	p.history(ctx, read)
 	p.grafana(ctx)
+	p.alertmanager(ctx)
 	p.changes(ctx)
 	p.files(ctx)
 	p.secrets()

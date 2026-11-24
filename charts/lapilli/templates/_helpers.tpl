@@ -189,8 +189,44 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq $kind "azure") (ne $p.auth "azure") }}
 {{- fail "rules.ruler.url on Azure is read with the pod's identity: set prometheus.auth to azure" }}
 {{- end }}
-{{- if and (or $r.ruler.tokenSecret.name $r.ruler.tenant) (ne $kind "config") }}
-{{- fail "rules.ruler.tokenSecret and rules.ruler.tenant are a Mimir's or a Cortex's, for rules.ruler.url" }}
+{{- $am := include "lapilli.alertmanager" . | fromJson }}
+{{- if and (or $r.ruler.tokenSecret.name $r.ruler.tenant) (ne $kind "config") (or $r.ruler.url (not $am.url)) }}
+{{- fail "rules.ruler.tokenSecret and rules.ruler.tenant are a Mimir's or a Cortex's, for rules.ruler.url or serve.checkContent.alertmanager.url" }}
+{{- end }}
+{{- /* Alertmanager's configuration, one way: a file from a Secret or a
+     ConfigMap, the template files beside it, or Mimir's or Cortex's API,
+     on the ruler's scheme and host when the ruler's token is sent. */}}
+{{- $amFrom := 0 }}
+{{- if ($am.secret).name }}{{ $amFrom = add1 $amFrom }}{{ end }}
+{{- if ($am.configMap).name }}{{ $amFrom = add1 $amFrom }}{{ end }}
+{{- if $am.url }}{{ $amFrom = add1 $amFrom }}{{ end }}
+{{- if gt (int $amFrom) 1 }}
+{{- fail "serve.checkContent.alertmanager: give one of secret, configMap and url" }}
+{{- end }}
+{{- if and $am.templateConfigMaps (not (or ($am.secret).name ($am.configMap).name)) }}
+{{- fail "serve.checkContent.alertmanager.templateConfigMaps are mounted beside the configuration: give secret or configMap" }}
+{{- end }}
+{{- range $k := list ($am.secret).key ($am.configMap).key }}
+{{- if and $k (not (regexMatch "^[-._a-zA-Z0-9]+$" (toString $k))) }}
+{{- fail (printf "serve.checkContent.alertmanager: the key %q: a Secret's or a ConfigMap's key, letters, digits, -, _ and ." (toString $k)) }}
+{{- end }}
+{{- end }}
+{{- with $am.url }}
+{{- if not (regexMatch "^https?://[^/?#@]+(/[^?#]*)?$" (toString .)) }}
+{{- fail (printf "serve.checkContent.alertmanager.url %q: want a Mimir's or a Cortex's configuration API, such as http://mimir:8080/api/v1/alerts, with no user, query or anchor" (toString .)) }}
+{{- end }}
+{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+{{- $a := urlParse (toString .) }}
+{{- $b := urlParse (toString $r.ruler.url) }}
+{{- if or (ne (lower $a.scheme) (lower $b.scheme)) (ne (lower $a.host) (lower $b.host)) }}
+{{- fail "serve.checkContent.alertmanager.url isn't on rules.ruler.url's scheme and host, and rules.ruler.tokenSecret is the ruler's: give Mimir's or Cortex's /api/v1/alerts on the same host" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- with ($s.checkContent).alertmanager }}
+{{- if and (or (.secret).name (.configMap).name .url) (eq $.Values.mode "serve") (not ($s.checkContent).enabled) }}
+{{- fail "serve.checkContent.alertmanager goes with the content check, which serve.checkContent.enabled turns off" }}
+{{- end }}
 {{- end }}
 {{- if and (not $history) (or (gt (int $from) 0) $r.alarms .Values.impact) }}
 {{- fail "rules and impact are replayed against history: give prometheus.url or gcpProject" }}
@@ -554,6 +590,28 @@ together at /var/run/lapilli/backtest/tokens/SECRET/. */}}
 {{- toJson $by -}}
 {{- end -}}
 
+{{/* serve.checkContent.alertmanager as serve reads it: nothing in cronjob
+mode, or with the content check off. A release upgraded with
+--reuse-values from before it has none. */}}
+{{- define "lapilli.alertmanager" -}}
+{{- $s := .Values.serve -}}
+{{- if and (eq .Values.mode "serve") (($s.checkContent).enabled) -}}
+{{- toJson (($s.checkContent).alertmanager | default dict) -}}
+{{- else -}}
+{{- toJson dict -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Whether rules.ruler's tenant and token are given: with rules.ruler.url,
+or, without it, for serve.checkContent.alertmanager.url, Mimir's or
+Cortex's Alertmanager, which is read with them (--alertmanager-config). */}}
+{{- define "lapilli.rulerCreds" -}}
+{{- $am := include "lapilli.alertmanager" . | fromJson -}}
+{{- if or .Values.rules.ruler.url $am.url -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{/* The kind of ruler rules.ruler.url is, by its host, as lapilli tells it:
 amazon, azure, config (Mimir's or Cortex's API), or none. */}}
 {{- define "lapilli.rulerKind" -}}
@@ -625,10 +683,10 @@ the rules and the incidents are, and how to judge. */}}
 {{- with $r.ruler.url }}
 - {{ printf "--ruler=%s" . | quote }}
 {{- end }}
-{{- if and $r.ruler.url $r.ruler.tenant }}
+{{- if and (include "lapilli.rulerCreds" .) $r.ruler.tenant }}
 - {{ printf "--ruler-tenant=%s" $r.ruler.tenant | quote }}
 {{- end }}
-{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+{{- if and (include "lapilli.rulerCreds" .) $r.ruler.tokenSecret.name }}
 - {{ printf "--ruler-token-file=/var/run/lapilli/ruler/%s" ($r.ruler.tokenSecret.key | default "token") | quote }}
 {{- end }}
 {{- range $r.alarms }}
@@ -724,7 +782,7 @@ the rules and the incidents are, and how to judge. */}}
   mountPath: /var/run/lapilli/grafana
   readOnly: true
 {{- end }}
-{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+{{- if and (include "lapilli.rulerCreds" .) $r.ruler.tokenSecret.name }}
 - name: ruler-token
   mountPath: /var/run/lapilli/ruler
   readOnly: true
@@ -797,7 +855,7 @@ which must not share a name, side by side. */}}
   secret:
     secretName: {{ $r.grafana.tokenSecret.name }}
 {{- end }}
-{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+{{- if and (include "lapilli.rulerCreds" .) $r.ruler.tokenSecret.name }}
 - name: ruler-token
   secret:
     secretName: {{ $r.ruler.tokenSecret.name }}

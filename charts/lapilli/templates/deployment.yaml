@@ -128,6 +128,14 @@ spec:
             {{- with $s.checkContent.runbookBase }}
             - {{ printf "--runbook-base=%s" . | quote }}
             {{- end }}
+            {{- $am := include "lapilli.alertmanager" $ | fromJson }}
+            {{- if $am.url }}
+            - {{ printf "--alertmanager-config=%s" $am.url | quote }}
+            {{- else if ($am.secret).name }}
+            - {{ printf "--alertmanager-config=/etc/lapilli/alertmanager/%s" ($am.secret.key | default "alertmanager.yaml") | quote }}
+            {{- else if ($am.configMap).name }}
+            - {{ printf "--alertmanager-config=/etc/lapilli/alertmanager/%s" ($am.configMap.key | default "alertmanager.yaml") | quote }}
+            {{- end }}
             {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
             {{- with $s.userHeader }}
@@ -490,6 +498,15 @@ spec:
               mountPath: /etc/lapilli/on-call
               readOnly: true
             {{- end }}
+            {{- $am := include "lapilli.alertmanager" $ | fromJson }}
+            {{- if or ($am.secret).name ($am.configMap).name }}
+            # The whole directory, not a subPath: the kubelet updates it as
+            # the Secret or the ConfigMaps change, and serve reads it again
+            # each hour.
+            - name: alertmanager
+              mountPath: /etc/lapilli/alertmanager
+              readOnly: true
+            {{- end }}
             {{- if $s.config }}
             # The whole directory, not a subPath: the kubelet updates it as
             # the ConfigMap changes.
@@ -664,6 +681,25 @@ spec:
         - name: on-call
           configMap:
             name: {{ $s.onCall.configMap.name }}
+        {{- end }}
+        {{- $am := include "lapilli.alertmanager" $ | fromJson }}
+        {{- if or ($am.secret).name ($am.configMap).name }}
+        # Alertmanager's configuration and its template files, side by
+        # side in one directory, as templates: globs are read beside it.
+        - name: alertmanager
+          projected:
+            sources:
+              {{- if ($am.secret).name }}
+              - secret:
+                  name: {{ $am.secret.name }}
+              {{- else }}
+              - configMap:
+                  name: {{ $am.configMap.name }}
+              {{- end }}
+              {{- range $am.templateConfigMaps }}
+              - configMap:
+                  name: {{ . }}
+              {{- end }}
         {{- end }}
         {{- if $s.config }}
         - name: config

@@ -136,4 +136,11 @@ four. Prometheus is asked for its scrape intervals once a day, and Grafana
 and `--alertmanager-config` for their notification templates once an hour.
 `--check-content=false` turns it off, and so does the chart's
 `serve.checkContent.enabled`; `serve.checkContent.severities` and
-`scrapeInterval` give the rest.
+`scrapeInterval` give the rest, and `serve.checkContent.alertmanager`
+`--alertmanager-config`: Alertmanager's configuration from a Secret (it
+often holds a receiver's keys) or a ConfigMap, mounted whole with the
+template files' ConfigMaps (`templateConfigMaps`) beside it, or a Mimir's
+or a Cortex's `url`, read with `rules.ruler.tenant` and
+`rules.ruler.tokenSecret`. `lapilli preflight` reads it once, as serve
+would, and says how many receivers and templates it found, or what serve
+would pass over (`content.alertmanager`).

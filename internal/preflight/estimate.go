@@ -562,6 +562,9 @@ func (p *run) beside(rd *read) {
 	if s.CheckContent && s.Grafana != "" {
 		by["grafana_notifications"] = 3 * 24
 	}
+	if s.CheckContent && source.AlertmanagerURL(s.AlertmanagerConfig) {
+		by["alertmanager_config"] = 24
+	}
 	if rd != nil && len(rd.dataSources) > 0 {
 		by["grafana_data_sources"] = 24 * (len(rd.dataSources) + rd.unread)
 	}
@@ -600,6 +603,7 @@ var besideSaid = map[string]string{
 	"check_replay":          "the replay check",
 	"scrape_intervals":      "the scrape intervals",
 	"grafana_notifications": "Grafana's templates",
+	"alertmanager_config":   "the Alertmanager's configuration, each hour",
 	"grafana_data_sources":  "Grafana's data sources, each hour",
 	"on_call":               "the on-call feeds",
 }
