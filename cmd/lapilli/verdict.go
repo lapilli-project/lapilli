@@ -1093,9 +1093,18 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	// is the rules.
 	following := serve != nil && f.rulesHistory != "" && len(f.rules) == 0
 	sources := 0
-	for _, on := range []bool{len(f.rules) > 0 || following, f.loadedRules, f.grafana != "", f.ruler != "", f.alerts, f.firings != ""} {
-		if on {
+	var given []string // the flags that say where the firings come from, as given
+	rulesFlag := "--rules"
+	if following {
+		rulesFlag = "--rules-history"
+	}
+	for _, src := range []struct {
+		on   bool
+		flag string
+	}{{len(f.rules) > 0 || following, rulesFlag}, {f.loadedRules, "--loaded-rules"}, {f.grafana != "", "--grafana"}, {f.ruler != "", "--ruler"}, {f.alerts, "--alerts"}, {f.firings != "", "--firings"}} {
+		if src.on {
 			sources++
+			given = append(given, src.flag)
 		}
 	}
 	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.anyImpact() ||
@@ -1128,8 +1137,10 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			}
 		}
 		switch {
-		case sources > 1 || sources == 0 && !f.firingsToken && len(f.alarms) == 0 && !lokiToo:
-			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --alarms or --loki-rules; or take them copied in, with --firings-token-file")
+		case sources > 1:
+			return nil, tooManySources(given)
+		case sources == 0 && !f.firingsToken && len(f.alarms) == 0 && !lokiToo:
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --alarms or --loki-rules; or take them copied in, with --firings-token-file" + ruleIsAName(f))
 		case f.alerts && lokiToo:
 			return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts")
 		case f.alerts && len(f.alarms) > 0:
@@ -1151,9 +1162,9 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		case validRuler(f) != nil:
 			return nil, validRuler(f)
 		case f.promURL == "" && f.gcpProj == "" && rulesToo:
-			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
+			return nil, errors.New("say where the history is: " + historyAt)
 		case f.promURL == "" && f.gcpProj == "" && f.anyImpact():
-			return nil, errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
+			return nil, errors.New("--impact reads history: add " + historyAt)
 		}
 		return f, validHistory(f)
 	}
@@ -1165,8 +1176,10 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		return nil, errors.New("--severities goes with --check-content")
 	case f.amConfig != "":
 		return nil, errors.New("--alertmanager-config goes with --check-content")
-	case sources > 1 || sources == 0 && len(f.alarms) == 0 && !lokiToo:
-		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules")
+	case sources > 1:
+		return nil, tooManySources(given)
+	case sources == 0 && len(f.alarms) == 0 && !lokiToo:
+		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules" + ruleIsAName(f))
 	case lokiToo && (f.alerts || f.firings != ""):
 		return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts or --firings")
 	case lokiToo && len(f.compare) > 0:
@@ -1230,7 +1243,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	case validHistory(f) != nil:
 		return nil, validHistory(f)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
-		return nil, errors.New("replays, --alerts, --impact and --check-replay read history: add --prometheus URL or --gcp-project ID")
+		return nil, errors.New("replays, --alerts, --impact and --check-replay read history: add " + historyAt)
 	case f.from.IsZero() != f.to.IsZero():
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
@@ -1281,6 +1294,35 @@ func validLoki(f *verdictFlags, serve bool) error {
 }
 
 // validContent checks the flags of lapilli verdict --check-content.
+// historyAt is what the messages that want a history to read say to give:
+// a cloud's managed Prometheus takes --prometheus with --auth (see
+// cloud.Kinds), Google's also --gcp-project.
+const historyAt = "--prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID"
+
+// tooManySources is the refusal of two flags that each say where the
+// firings come from.
+func tooManySources(given []string) error {
+	names, all := given[0]+" and "+given[1], "both"
+	if len(given) > 2 {
+		names, all = strings.Join(given[:len(given)-1], ", ")+" and "+given[len(given)-1], "all"
+	}
+	return fmt.Errorf("%s %s say where the firings come from: give one of them", names, all)
+}
+
+// ruleIsAName is, when no source was given, what to add if --rule holds
+// what looks like a path, as it does when --rules was meant: --rule is a
+// regexp of rule names.
+func ruleIsAName(f *verdictFlags) string {
+	if f.ruleRE == nil {
+		return ""
+	}
+	v := f.ruleRE.String()
+	if _, err := os.Stat(v); err == nil || strings.Contains(v, "/") {
+		return "; --rule picks rules by name: for a file or a directory, --rules"
+	}
+	return ""
+}
+
 func validContent(f *verdictFlags, sources int) error {
 	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
 	switch {
@@ -1303,9 +1345,9 @@ func validContent(f *verdictFlags, sources int) error {
 	case validRuler(f) != nil:
 		return validRuler(f)
 	case f.loadedRules && f.promURL == "" && f.gcpProj == "":
-		return errors.New("--loaded-rules reads the rules from the API: add --prometheus URL or --gcp-project ID")
+		return errors.New("--loaded-rules reads the rules from the API: add " + historyAt)
 	case f.anyImpact() && f.promURL == "" && f.gcpProj == "":
-		return errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
+		return errors.New("--impact reads history: add " + historyAt)
 	case f.from.IsZero() != f.to.IsZero():
 		return errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):

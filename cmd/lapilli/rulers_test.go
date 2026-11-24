@@ -68,7 +68,7 @@ func TestRulerFlags(t *testing.T) {
 		"a token, no ruler":     {[]string{"--rules", incidents, "--ruler-token-file", tok}, "go with --ruler"},
 		"a tenant, no ruler":    {[]string{"--rules", incidents, "--ruler-tenant", "a"}, "go with --ruler"},
 		"a tenant with a slash": {[]string{"--ruler", "http://mimir/rules", "--ruler-tenant", "a/b"}, "a tenant's ID"},
-		"two places":            {[]string{"--ruler", "http://mimir/rules", "--rules", incidents}, "one of --rules"},
+		"two places":            {[]string{"--ruler", "http://mimir/rules", "--rules", incidents}, "both say where the firings come from"},
 		"history":               {[]string{"--ruler", "http://mimir/rules", "--rules-history", t.TempDir()}, "--rules-history"},
 	} {
 		var out, errs strings.Builder
