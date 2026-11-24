@@ -1401,6 +1401,7 @@ and sends nothing anywhere (docs/design/demo.md).
 Usage:
   lapilli demo [--json] [--tz ZONE]
   lapilli demo --serve [--listen ADDR] [--tz ZONE]
+  lapilli demo --write DIR [--tz ZONE]
 
   --json              the whole report, every firing included, as lapilli
                       verdict --json gives it
@@ -1419,6 +1420,13 @@ Usage:
   --listen ADDR       with --serve, where to listen: a loopback address and
                       a port, 127.0.0.1:PORT or [::1]:PORT, and no other
                       (default 127.0.0.1:0, a free port)
+  --write DIR         write the sample's rules and incidents into DIR, as
+                      rules.yaml and incidents.yaml, with a README.txt, to
+                      see the format of both and to run them with lapilli
+                      verdict. DIR is made if it is missing, and none of
+                      the three is overwritten: one that exists is refused.
+                      It replays nothing and listens on nothing, and does
+                      not go with --serve or --json
 
 The same on your own rules, and incidents written down:
   lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \

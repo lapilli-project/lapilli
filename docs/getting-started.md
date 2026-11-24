@@ -22,6 +22,9 @@ slept. `--json` gives the whole report as JSON, and `--tz` the zone the
 sample's week is laid in. With Go and nothing installed, `go run
 lapilli.dev/cmd/lapilli@latest demo` does the same
 ([docs/design/demo.md](design/demo.md)).
+`lapilli demo --write sample/` writes the sample's rules and incidents
+there, as `rules.yaml` and `incidents.yaml`, to see the format of both and
+copy it for your own.
 
 ```sh
 lapilli demo --serve
