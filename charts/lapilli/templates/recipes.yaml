@@ -155,7 +155,8 @@ spec:
                     path: {{ ($v.key | default "token") | quote }}
             {{- end }}
             - name: tmp
-              emptyDir: {}
+              emptyDir:
+                sizeLimit: {{ $cp.tmpSizeLimit | quote }}
           {{- include "lapilli.placement" $ | nindent 10 }}
 {{- end }}
 {{- end }}
@@ -258,8 +259,8 @@ spec:
                 # helper only answers git's get: the file is mounted
                 # read-only, and git asking it to store or erase after a
                 # push changes nothing.
-                {{- if not (regexMatch "^[-._a-zA-Z0-9]+$" $git.key) }}
-                {{- fail "serve.changes.pullRequests.gitCredentialsSecret.key must be a Secret's key: letters, digits, '-', '_' and '.'" }}
+                {{- if or (not (regexMatch "^[-._a-zA-Z0-9]+$" $git.key)) (eq $git.key ".") (eq $git.key "..") }}
+                {{- fail "serve.changes.pullRequests.gitCredentialsSecret.key must be a Secret's key: letters, digits, '-', '_' and '.', and not . or .." }}
                 {{- end }}
                 - name: GIT_CONFIG_COUNT
                   value: "1"
@@ -323,6 +324,7 @@ spec:
                     path: {{ $git.key | quote }}
             {{- end }}
             - name: tmp
-              emptyDir: {}
+              emptyDir:
+                sizeLimit: {{ $pr.tmpSizeLimit | quote }}
           {{- include "lapilli.placement" . | nindent 10 }}
 {{- end }}

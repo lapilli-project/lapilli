@@ -218,3 +218,36 @@ func TestChartJobSecretsProjectOneKey(t *testing.T) {
 	check("CronJob/ops-lapilli-changes-pr", map[string]string{"lapilli-changes": "changes", "github-pr": "token", "github-git": "credentials"})
 	check("CronJob/ops-lapilli-trackers", map[string]string{"tasks": "token", "gh": "token"})
 }
+
+// The jobs' /tmp is an emptyDir with a size limit, from a value: 256Mi for
+// the copy jobs and 2Gi for the pull requests', which holds a clone; and a
+// git credentials key of . or .. is refused.
+func TestChartJobTmpSizeLimit(t *testing.T) {
+	limit := func(m manifest, job string) any {
+		vols, _ := dig(m[job], "spec", "jobTemplate", "spec", "template", "spec", "volumes").([]any)
+		for _, v := range vols {
+			if dig(v, "name") == "tmp" {
+				return dig(v, "emptyDir", "sizeLimit")
+			}
+		}
+		return nil
+	}
+	m, _ := render(t, slices.Concat(serveValues, recipesCopyValues, recipesPRValues)...)
+	if got := limit(m, "CronJob/ops-lapilli-incidents-pagerduty"); got != "256Mi" {
+		t.Errorf("copy job's /tmp limit %v, want 256Mi", got)
+	}
+	if got := limit(m, "CronJob/ops-lapilli-changes-pr"); got != "2Gi" {
+		t.Errorf("pull requests' /tmp limit %v, want 2Gi", got)
+	}
+	m, _ = render(t, slices.Concat(serveValues, recipesCopyValues, recipesPRValues,
+		[]string{"--set", "serve.incidentsAPI.copy.tmpSizeLimit=64Mi", "--set", "serve.changes.pullRequests.tmpSizeLimit=5Gi"})...)
+	if a, b := limit(m, "CronJob/ops-lapilli-incidents-pagerduty"), limit(m, "CronJob/ops-lapilli-changes-pr"); a != "64Mi" || b != "5Gi" {
+		t.Errorf("set limits %v and %v, want 64Mi and 5Gi", a, b)
+	}
+	for _, key := range []string{".", ".."} {
+		out, err := helmTemplate(t, slices.Concat(serveValues, recipesPRValues, []string{"--set", "serve.changes.pullRequests.gitCredentialsSecret.key=" + key})...)
+		if err == nil || !strings.Contains(out, "gitCredentialsSecret.key must be a Secret's key") {
+			t.Errorf("key %q: %v\n%s", key, err, out)
+		}
+	}
+}

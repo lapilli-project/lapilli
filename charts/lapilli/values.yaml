@@ -668,6 +668,9 @@ serve:
       url: ""              # serve's incidents port, this release's Service when empty
       activeDeadlineSeconds: 1200
       resources: {}
+      # The most the jobs' /tmp (an emptyDir, where a recipe keeps what it
+      # reads before it sends it) may hold.
+      tmpSizeLimit: 256Mi
       jobs: []
   # Firings recorded elsewhere, such as a cloud's own alarm history, taken on
   # the incidentsAPI port from a job holding the token in this Secret, its
@@ -1044,6 +1047,8 @@ serve:
       url: ""              # serve's incidents port, this release's Service when empty
       activeDeadlineSeconds: 900
       resources: {}
+      # The most the job's /tmp (an emptyDir) may hold: the clone is there.
+      tmpSizeLimit: 2Gi
       # The recipe's settings, as its README lists them: CLONE and
       # RULES_PATHS are required, then the host's repository (GITHUB_REPO,
       # GITLAB_PROJECT, ...), API and login, BASE, EXPECT_FILE. The tokens'
