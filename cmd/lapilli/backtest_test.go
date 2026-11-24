@@ -930,6 +930,14 @@ func TestBacktestRecipeFails(t *testing.T) {
 		strings.Contains(block, "10.") || !strings.Contains(block, `https://elsewhere.example/x ([address], [address]) read from [hidden].`) {
 		t.Errorf("the block: %q", block)
 	}
+	// The history's own tenant is taken out as the ruler's and Loki's are.
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	tenant := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(tenant, []byte("#!/bin/sh\necho 'lapilli verdict: --prometheus-tenant \"history-team/prod\": not a tenant' >&2\nexit 2\n"), 0o755)
+	rr.run([]string{"PATHS=alerts", "LAPILLI=" + tenant}, "--prometheus", "http://prom.corp.example:9090", "--prometheus-tenant", "history-team/prod")
+	if block := rr.body(); strings.Contains(block, "history-team") || !strings.Contains(block, "[hidden]") {
+		t.Errorf("--prometheus-tenant in the block: %q", block)
+	}
 
 	// A lapilli from before --markdown says so.
 	rr.host.set(func(h *commentHost) { h.comments = nil })

@@ -1626,13 +1626,13 @@ hidden() {
   while [ $# -gt 0 ]; do
     v=
     case $1 in
-      --prometheus | --loki | --grafana | --ruler | --gcp-project | --alarms | --ruler-tenant | --loki-tenant)
+      --prometheus | --loki | --grafana | --ruler | --gcp-project | --alarms | --ruler-tenant | --loki-tenant | --prometheus-tenant)
         if [ $# -ge 2 ]; then
           v=$2
           shift
         fi
         ;;
-      --prometheus=* | --loki=* | --grafana=* | --ruler=* | --gcp-project=* | --alarms=* | --ruler-tenant=* | --loki-tenant=*) v=${1#*=} ;;
+      --prometheus=* | --loki=* | --grafana=* | --ruler=* | --gcp-project=* | --alarms=* | --ruler-tenant=* | --loki-tenant=* | --prometheus-tenant=*) v=${1#*=} ;;
     esac
     shift
     [ -n "$v" ] || continue
