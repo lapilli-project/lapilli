@@ -236,7 +236,7 @@ func parseSuggestFlags(args []string) (*verdictFlags, error) {
 	}
 	switch {
 	case f.promURL == "" && f.gcpProj == "":
-		return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
+		return nil, errors.New("say where the history is: " + historyAt)
 	case f.from.IsZero() != f.to.IsZero():
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):

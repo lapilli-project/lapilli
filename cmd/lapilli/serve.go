@@ -1397,7 +1397,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	case deployTimes && cfg.Deploys == "":
 		err = fmt.Errorf("--deploy-before and --deploy-after go with --deploys, the file deploys are read from")
 	case len(marks) > 0 && f.promURL == "" && f.gcpProj == "":
-		err = fmt.Errorf("--mark is asked of the history: add --prometheus URL or --gcp-project ID")
+		err = errors.New("--mark is asked of the history: add " + historyAt)
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	case cfg.ConfigPrune && cfg.Config == "":
@@ -1419,7 +1419,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	case yieldForSet && !cfg.Yield:
 		err = fmt.Errorf("--yield-for is how long --yield-on-429 leaves an API alone after a 429: give --yield-on-429")
 	case cfg.Guard != "" && f.promURL == "" && f.gcpProj == "":
-		err = fmt.Errorf("--guard is asked of the history: add --prometheus URL or --gcp-project ID")
+		err = errors.New("--guard is asked of the history: add " + historyAt)
 	case cfg.CatchUpHours != nil && cfg.CatchUpHours.Len() < cfg.Every:
 		err = fmt.Errorf("--catch-up-hours %s is shorter than --every %s: a run might never fall in it", cfg.CatchUpHours, time.Duration(cfg.Every))
 	case cfg.BacktestListen != "" && trustFile == "":
@@ -1431,7 +1431,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	case cfg.BacktestListen != "" && f.alerts:
 		err = fmt.Errorf("--backtest-listen replays a pull request's rules, and --alerts judges the ALERTS series, not rules")
 	case cfg.BacktestListen != "" && f.promURL == "" && f.gcpProj == "":
-		err = fmt.Errorf("--backtest-listen replays a pull request's rules against the history: add --prometheus URL or --gcp-project ID")
+		err = errors.New("--backtest-listen replays a pull request's rules against the history: add " + historyAt)
 	}
 	var trustErr error
 	if err == nil && trustFile != "" {

@@ -48,12 +48,16 @@ Give the rules to replay, or where firings were recorded;
 [How it judges](how-it-judges.md) says what each reads. `lapilli serve`
 says it without `--firings`, and adds `--firings-token-file`, for firings
 copied in ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)).
+`--rule` is a regexp of rule names, not where the rules are: given a path, the
+message adds that `--rules` is for a file or a directory. Two of the flags
+together say `--rules and --firings both say where the firings come from: give
+one of them`.
 
 ### `read history: add --prometheus URL`
 
 ```
-lapilli verdict: replays, --alerts, --impact and --check-replay read history: add --prometheus URL or --gcp-project ID
-lapilli serve: say where the history is: --prometheus URL or --gcp-project ID
+lapilli verdict: replays, --alerts, --impact and --check-replay read history: add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID
+lapilli serve: say where the history is: --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID
 ```
 
 A replay asks a PromQL API for the history the rules are evaluated
