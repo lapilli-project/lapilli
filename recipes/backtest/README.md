@@ -108,10 +108,11 @@ And, as wanted:
   the job giving `PR`, `HEAD` a merge is its author's, and `TARGET`
   `HEAD^1` is refused with a gate or `STATUS`; give `TARGET` or
   `TARGET_BRANCH`, and with `STATUS`, `TARGET_BRANCH`, as the status's
-  name says the branch. A merge queue's run (`merge_group`) isn't taken yet:
-  its commit is the queue's, and the script says so and fails, setting no
-  status, so a branch whose rules require the job or `lapilli/backtest`
-  can't merge through a queue yet. A
+  name says the branch. In a merge queue's run (`merge_group`), the base
+  is the event's, `merge_group.base_sha`, and the head its
+  `merge_group.head_sha`, which the checkout must be, gates or not; a
+  `TARGET` but `HEAD^1`, a `TARGET_BRANCH` or a `STATUS_SHA` of another
+  commit is refused ([GitHub Actions](#github-actions)). A
   `TARGET` the job gives where the CI says what the pull request goes into
   (Gitea's Actions, GitLab's merge request pipelines, Bitbucket's and
   Azure's pull request builds) is the job's, and taken as it is, as one
@@ -200,7 +201,8 @@ And, as wanted:
   wrong once `STATUS`'s own are read, a clone that hasn't the merge's
   parents; on the head the CI says, or `STATUS_SHA`, or else `HEAD` where
   it is a commit of one parent. Each script takes
-  the head commit from its CI (GitHub's and Gitea's event, GitLab's
+  the head commit from its CI (GitHub's and Gitea's event, a merge
+  queue's `merge_group.head_sha` among them, GitLab's
   `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` or `CI_COMMIT_SHA`,
   `BITBUCKET_COMMIT`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`), or `STATUS_SHA`,
   or `HEAD` when it isn't a merge, and sets it only when that is the
@@ -273,7 +275,9 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    line is `[//]: # (lapilli-backtest KEY)`, a link reference definition,
    which no host shows. It edits that one, or posts one. When nothing that
    decides when a rule fires changed and there is no comment yet, it posts
-   none; when there is one, it says that nothing changes now.
+   none; when there is one, it says that nothing changes now. A merge
+   queue's run, of no pull request, posts none: the report goes to the
+   job's log.
 6. With `STATUS`, sets the commit status on the pull request's head
    commit, success or failure as the job is about to end, and ends it;
    pending from step 1 on, once the commits are found.
@@ -312,6 +316,24 @@ jobs:
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
           since: 14d
 ```
+
+In a merge queue, run it on `merge_group` too, with the same `with:`:
+the merge group's head (`merge_group.head_sha`) is backtested against the
+commit GitHub's event names as its base (`merge_group.base_sha`), the
+pull requests ahead in the queue in the head too; no comment is posted,
+the report going to the step's log; and `status` sets
+`lapilli/backtest` on the head, where the queue reads a required status.
+The `if:` above skips a group's run, whose event names no pull request,
+so say so (`github.event_name == 'merge_group' || ...`), and fetch the
+history (`fetch-depth: 0`): a group behind another holds more than one
+commit over its base. A run whose event has no `merge_group`, whose
+`GITHUB_REF` isn't the queue's for the branch
+(`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`, the event's
+`merge_group.head_ref`), or whose `GITHUB_SHA` isn't the head, is refused
+at once, with no status; one whose checkout isn't the head, or whose base
+isn't an ancestor of it, fails, its status a failure on the head.
+[Stopping a merge](../../docs/pr-backtests.md#a-merge-queue) has the
+workflow.
 
 `fetch-depth: 2` fetches the merge commit's parents; `persist-credentials:
 false` keeps the job's token out of the checkout's git configuration,
@@ -924,7 +946,11 @@ runner inside your network:
   repository, "Send write tokens to workflows from pull requests" is on:
   keep that setting off. The trust entry's pins don't: a fork's run in the
   repository carries the repository's own `repository_id`, as a branch's
-  does. Self-hosted runners that
+  does. A merge queue's run (`merge_group`) of a fork's pull request,
+  once someone who may write to the repository queued it, runs in the
+  repository's own context, with its secrets and an ID token, and the
+  `if:` doesn't skip it: through lapilli serve, a trust entry takes it only
+  where it names `event_name: merge_group`. Self-hosted runners that
   reach your Prometheus: require approval for workflows from outside
   collaborators, and don't give them to public repositories.
 - **Forgejo.** Its reference says `enable-openid-connect` "is disabled for

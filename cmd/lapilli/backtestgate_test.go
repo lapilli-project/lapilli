@@ -403,23 +403,6 @@ func TestBacktestRecipeMergeOfAnotherHead(t *testing.T) {
 	}
 }
 
-// A merge queue's run (merge_group) is said plainly to be one not taken
-// yet, whatever PR says, rather than as a pull request's number missing.
-func TestBacktestRecipeMergeGroup(t *testing.T) {
-	needRecipeTools(t)
-	repo, bad, _ := gateRepo(t)
-	squash := repo.git("commit-tree", repo.git("rev-parse", bad+"^{tree}"), "-p", "main", "-m", "squashed (#7)")
-	repo.git("checkout", "--quiet", "--detach", squash)
-	rr := newRecipeRun(t, backtestHosts[0], repo)
-	rr.env = append(rr.env, "GITHUB_ACTIONS=true", "GITHUB_EVENT_NAME=merge_group", "GITHUB_SHA="+squash)
-	for _, pr := range []string{"PR=", "PR=7"} {
-		out, err := rr.run([]string{"PATHS=alerts", "STATUS=true", "FAIL_MISSED=true", "INCIDENTS=incidents.yaml", pr})
-		if err == nil || !strings.Contains(out, "a merge queue's run (merge_group) isn't taken yet") {
-			t.Errorf("%s: %v\n%s", pr, err, out)
-		}
-	}
-}
-
 // What an earlier run left on the commit, success or the pending of one
 // killed, stood where a run with STATUS ended before it set the status:
 // refused where the CI says no head and STATUS_SHA isn't given; PATHS in
