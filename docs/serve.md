@@ -83,9 +83,10 @@ Grafana dashboard of them.
 ## The sidebar, search and filters
 
 The pages are in a sidebar of four groups, named as a console names them
-(Monitoring: Overview, Rules, Incidents, Alert history; Improve: Tasks,
-Proposals, Quiet windows; Reporting: Reports, Outcomes;
-Administration: Teams, Roles, Settings, Sources, Run history, Cleanup), a
+(Monitoring: Overview, Rules, Incidents, Marked windows, Alert history;
+Improve: Tasks, Proposals, Quiet windows; Reporting: Reports, Outcomes,
+Goals; Administration: Teams, Roles, for an admin only, Settings, Sources,
+Run history, Cleanup), a
 menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
@@ -763,6 +764,13 @@ ok       memory              no firing read: at most 5.2 GB, the caps' bound (8 
                              set: the most a run can take, not what one takes, which is worked
                              out from a day of the history's alerts when it has any
 ```
+
+Memory is the item to read twice. `lapilli preflight --offline` reads no
+firing, so it gives the caps' bound: `--parallel` times `--max-samples`
+times 64 bytes, beside the caches. That is the most a run can take, not an
+estimate of what it will. Run `lapilli preflight` against the history for
+what the rules take, and set the chart's `resources` from it (its defaults
+are a request of 256Mi and a limit of 1Gi, under the bound at the default caps).
 
 It writes nothing and replays nothing, held by the code: every request it
 sends goes through an allowlist that refuses any other before it is sent
