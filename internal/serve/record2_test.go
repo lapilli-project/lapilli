@@ -274,7 +274,10 @@ func TestHoursWithNoRecord(t *testing.T) {
 // TestContentCheckBounded: a rule written to be slow to read for whether
 // it counts events (31 sums deep, 16 KB, a summary naming 3,300 labels) is
 // checked in well under a second: its for is asked of it once, and an
-// expression that long isn't read for it.
+// expression that long isn't read for it (rules' TestEventWindowBounded
+// counts the bytes read). Held here to the allocations the check makes, a
+// few for each label its summary names, not to its time, so that a slow
+// runner fails none; it runs alone, as what it allocates is the process's.
 func TestContentCheckBounded(t *testing.T) {
 	ctx := context.Background()
 	s, _ := saying(t, nil)
@@ -292,8 +295,10 @@ func TestContentCheckBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took > 2*time.Second {
-		t.Errorf("checked in %s, %d findings", took, len(st.findings["Slow"]))
+	n := testing.AllocsPerRun(1, func() { s.checkContent(ctx, []rules.Rule{r}, s.scrapes()) })
+	t.Logf("checked in %s, %d findings, %.0f allocations", time.Since(start), len(st.findings["Slow"]), n)
+	if most := 40 * 3300.0; n > most {
+		t.Errorf("checked with %.0f allocations, over %.0f: more than a few for each of the 3,300 labels", n, most)
 	}
 }
 
