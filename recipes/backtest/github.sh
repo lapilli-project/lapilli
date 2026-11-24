@@ -85,8 +85,11 @@ if [ "${GITHUB_EVENT_NAME:-}" = merge_group ]; then
   if [ -z "${GITHUB_EVENT_PATH:-}" ] || [ ! -f "$GITHUB_EVENT_PATH" ]; then
     queue_refused "GitHub's event (GITHUB_EVENT_PATH) can't be read"
   fi
+  # A field of the event's merge_group, a string of visible characters
+  # alone, or nothing: one a line break or a space would cut isn't read
+  # as its first part.
   queue_field() {
-    jq -r --arg f "$1" '.merge_group | if type == "object" then .[$f] // empty | strings else empty end' "$GITHUB_EVENT_PATH" 2>/dev/null | head -n 1
+    jq -r --arg f "$1" '.merge_group | if type == "object" then .[$f] // empty | strings | select(test("^[!-~]+$")) else empty end' "$GITHUB_EVENT_PATH" 2>/dev/null
   }
   queue_head=$(queue_field head_sha) queue_base=$(queue_field base_sha)
   queue_head_ref=$(queue_field head_ref) queue_base_ref=$(queue_field base_ref)

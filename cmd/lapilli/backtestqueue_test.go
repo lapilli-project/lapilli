@@ -189,6 +189,11 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 		{"no event", append(queueRun(event, ref, second), "GITHUB_EVENT_PATH="), "can't be read"},
 		{"a merge_group of no hashes", queueRun(write(`{"merge_group": {"head_sha": "HEAD", "base_sha": "main", "head_ref": "`+ref+`", "base_ref": "refs/heads/main"}}`), ref, second),
 			"aren't two commits' full hashes"},
+		// A line break after a field's first part: never read as that part.
+		{"a base_ref of two lines", queueRun(write(`{"merge_group": {"head_sha": "`+second+`", "base_sha": "`+main+`", "head_ref": "`+ref+`", "base_ref": "refs/heads/main\nx"}}`), ref, second),
+			"isn't refs/heads/BRANCH"},
+		{"a head_sha of two lines", queueRun(write(`{"merge_group": {"head_sha": "`+second+`\n`+bad+`", "base_sha": "`+main+`", "head_ref": "`+ref+`", "base_ref": "refs/heads/main"}}`), ref, second),
+			"aren't two commits' full hashes"},
 		{"a base_ref of a tag", queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second), ""},
 		{"another branch's queue", queueRun(queueEvent(t, second, main, "main", queueRef("release", "7", bad), "main"), queueRef("release", "7", bad), second),
 			"isn't the queue's ref for main"},
