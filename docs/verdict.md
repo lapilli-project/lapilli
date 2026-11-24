@@ -32,6 +32,13 @@ metrics that keep their names. `--metrics` gives `lapilli_rule_firings`, `lapill
 [episodes](numbers.md#episodes), and those caught), `lapilli_incidents`
 (by `state` and `source`) and `lapilli_incident_detection_delay_seconds`.
 
+Grafana's rules, from files or from `--grafana`, are all replayed against
+one history, `--prometheus`, whatever PromQL data source they name (only
+Loki's are asked of their own). With rules on several, `verdict` warns, and
+[`preflight`](design/preflight.md)'s `rules.sources` says so: replay each
+data source's rules in a run of their own, against its Prometheus (`--rule`
+picks them by name).
+
 ## How it asks the history
 
 A replay asks for each query a day at a time, once for every rule that needs

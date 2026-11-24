@@ -36,6 +36,12 @@
   to one that divides the rule's interval and the window too, so a sample
   is seen at the first evaluation after it, as Grafana sees it (a rule
   every 10s on series scraped every 15s is asked every 5s).
+- Grafana's rules are all replayed against one history, `--prometheus`,
+  whatever PromQL data source their queries name, from files and with
+  `--grafana` alike: with several, `verdict` warns and `preflight` says so
+  (`rules.sources`), and a rule on another Prometheus than that one is
+  judged by the wrong history. Replay each data source's rules in a run of
+  their own, against its Prometheus (`--rule` picks them by name).
 - A Grafana rule's query on another data source than its condition's (a
   Loki query whose values an annotation shows) isn't replayed: when it
   returns nothing, Grafana takes the rule as having no data, which the

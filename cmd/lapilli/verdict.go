@@ -1629,6 +1629,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			source.TellApart(v.Rules)
 		}
 	}
+	warnHistories(stderr, versions)
 
 	// Impact first: a query, and one a selector for where its data
 	// begins, and a replay that runs out of time should still be judged
@@ -2375,6 +2376,32 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	}
 	f.replaying().Apply(kept)
 	return kept, nil
+}
+
+// warnHistories says when Grafana's rules, from files or from --grafana,
+// name more than one data source for their PromQL: every one is replayed
+// against the one history, --prometheus, so the rules of the others are
+// judged by the wrong one. It is a warning, as the run can still be what
+// is wanted when they are all one Prometheus.
+func warnHistories(stderr io.Writer, versions []replay.Version) {
+	var all []rules.Rule
+	for _, v := range versions {
+		all = append(all, v.Rules...)
+	}
+	uids := rules.HistoryUIDs(all)
+	if len(uids) < 2 {
+		return
+	}
+	shown := make([]string, 0, 5)
+	for _, u := range uids[:min(len(uids), 5)] {
+		shown = append(shown, verdict.Clean(u))
+	}
+	more := ""
+	if n := len(uids) - len(shown); n > 0 {
+		more = fmt.Sprintf(" and %d more", n)
+	}
+	fmt.Fprintf(stderr, "lapilli verdict: Grafana's rules query %d data sources (%s%s), and every one is replayed against one history, --prometheus: replay each data source's rules in a run of their own against its Prometheus (--rule picks them by name), or the others' are judged by the wrong history\n",
+		len(uids), strings.Join(shown, ", "), more)
 }
 
 // appendMatching adds to rs the rules of more whose names match re.
