@@ -17,14 +17,18 @@ import (
 	"lapilli.dev/internal/rules"
 )
 
-// slow stretches the time budgets under the race detector (race_test.go).
+// slow is more than 1 under the race detector (race_test.go), which the
+// tests of the biggest reads skip under. No budget is of time: a slow
+// runner fails none.
 var slow = 1
 
 // A ruler's unit (GET .../NAMESPACE/GROUP, read when a change to one of its
 // rules is proposed or applied, 4 MB at most) is decoded to its nodes and
 // then to values (rules.UnmarshalYAML, DecodeYAML): straight into Go
 // values, WrapGroup and rules.TreeHash took time that grows with the
-// square of a mapping's keys, a hostile ruler's 4 MB unit minutes.
+// square of a mapping's keys, a hostile ruler's 4 MB unit minutes. Held to
+// a few times what decoding the unit to its nodes allocates (allocs), not
+// to a multiple of its time, so that a slow runner fails none.
 func TestRulerUnitDecodeLinear(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("name: g\nrules:\n- alert: A\n  expr: up\n  labels: {")
@@ -33,23 +37,25 @@ func TestRulerUnitDecodeLinear(t *testing.T) {
 	}
 	b.WriteString("z: y}\n")
 	unit := []byte(b.String())
-	// What decoding the unit to its nodes takes, in linear time.
-	start := time.Now()
+	// What decoding the unit to its nodes allocates, in linear time.
 	var n yaml.Node
 	if err := yaml.Unmarshal(unit, &n); err != nil {
 		t.Fatal(err)
 	}
-	nodes := time.Since(start)
+	nodes := allocs(func() { var n yaml.Node; yaml.Unmarshal(unit, &n) })
 	// Read in linear time, or refused: a mapping of more than
 	// rules.MaxKeys keys is, as when the rules are read.
-	start = time.Now()
-	raw, err := WrapGroup(unit)
-	if err == nil {
-		_, err = rules.TreeHash(raw)
-	}
-	if took := time.Since(start); took > 30*nodes {
-		t.Errorf("a unit of 256 KiB, one mapping of %d keys: WrapGroup and TreeHash took %v (%v), %.0f times its nodes' %v: quadratic in its keys",
-			len(n.Content[0].Content[3].Content[0].Content[5].Content)/2, took, err, float64(took)/float64(nodes), nodes)
+	var raw []byte
+	var err error
+	took := allocs(func() {
+		if raw, err = WrapGroup(unit); err == nil {
+			_, err = rules.TreeHash(raw)
+		}
+	})
+	t.Logf("a unit of 256 KiB, one mapping of %d keys: %.1f times its nodes' allocations", len(n.Content[0].Content[3].Content[0].Content[5].Content)/2, took/nodes)
+	if took > 3*nodes {
+		t.Errorf("a unit of 256 KiB, one mapping of %d keys: WrapGroup and TreeHash allocated %.0f (%v), %.1f times its nodes' %.0f: quadratic in its keys",
+			len(n.Content[0].Content[3].Content[0].Content[5].Content)/2, took, err, took/nodes, nodes)
 	}
 	// Under MaxKeys, read whole, in linear time: a unit of 20 rules of
 	// 9,000 keys each.
@@ -63,17 +69,15 @@ func TestRulerUnitDecodeLinear(t *testing.T) {
 		b.WriteString("z: y}\n")
 	}
 	unit = []byte(b.String())
-	start = time.Now()
-	if err := yaml.Unmarshal(unit, &n); err != nil {
-		t.Fatal(err)
-	}
-	nodes = time.Since(start)
-	start = time.Now()
-	if raw, err = WrapGroup(unit); err == nil {
-		_, err = rules.TreeHash(raw)
-	}
-	if took := time.Since(start); err != nil || took > 20*nodes {
-		t.Errorf("a unit of 20 rules of 9,000 label keys each, %d KiB: %v, %.0f times its nodes' %v, %v", b.Len()>>10, took, float64(took)/float64(nodes), nodes, err)
+	nodes = allocs(func() { var n yaml.Node; yaml.Unmarshal(unit, &n) })
+	took = allocs(func() {
+		if raw, err = WrapGroup(unit); err == nil {
+			_, err = rules.TreeHash(raw)
+		}
+	})
+	t.Logf("a unit of 20 rules of 9,000 label keys each: %.1f times its nodes' allocations", took/nodes)
+	if err != nil || took > 10*nodes {
+		t.Errorf("a unit of 20 rules of 9,000 label keys each, %d KiB: %.0f allocations, %.1f times its nodes' %.0f, %v", b.Len()>>10, took, took/nodes, nodes, err)
 	}
 }
 
@@ -204,17 +208,17 @@ func TestRulerListSplitLinear(t *testing.T) {
 	}
 	b.WriteString("z: y}\n")
 	whole := []byte(b.String())
-	start := time.Now()
 	var n yaml.Node
 	if err := yaml.Unmarshal(whole, &n); err != nil {
 		t.Fatal(err)
 	}
-	nodes := time.Since(start)
+	nodes := allocs(func() { var n yaml.Node; yaml.Unmarshal(whole, &n) })
 	split := append(whole, "x: [\n"...) // a namespace that doesn't parse
-	start = time.Now()
-	_, _, err := ConfigDocs("http://ruler", split)
-	if took := time.Since(start); took > 30*nodes {
-		t.Errorf("a list of 384 KiB split at its namespaces: %v (%v), %.0f times its nodes' %v: quadratic in its keys", took, err, float64(took)/float64(nodes), nodes)
+	var err error
+	took := allocs(func() { _, _, err = ConfigDocs("http://ruler", split) })
+	t.Logf("a list of 384 KiB split at its namespaces: %.1f times its nodes' allocations", took/nodes)
+	if took > 10*nodes {
+		t.Errorf("a list of 384 KiB split at its namespaces: %.0f allocations (%v), %.1f times its nodes' %.0f: quadratic in its keys", took, err, took/nodes, nodes)
 	}
 }
 
@@ -308,3 +312,7 @@ func TestGrafanaExportOf25000Rules(t *testing.T) {
 	}
 	runtime.KeepAlive(rs)
 }
+
+// allocs is how many allocations f makes, as testing.AllocsPerRun counts
+// them: a measure of its work that doesn't hang on the runner's clock.
+func allocs(f func()) float64 { return testing.AllocsPerRun(1, f) }
