@@ -132,7 +132,19 @@ rule() { # uid, condition, noDataState, for, data...
   jq -nc --arg u "$uid" --arg c "$cond" --arg n "$nodata" --arg f "$for" --slurpfile d <(printf '%s\n' "$@") \
     '{uid: $u, title: $u, condition: $c, noDataState: $n, execErrState: "Error", for: $f, labels: {team: "logs"}, data: $d}'
 }
+promq() { # refId: vector(1) on Prometheus, instant
+  jq -nc --arg r "$1" '{refId: $r, queryType: "instant", relativeTimeRange: {from: 600, to: 0}, datasourceUid: "prom",
+    model: {expr: "vector(1)", queryType: "instant", refId: $r, intervalMs: 1000, maxDataPoints: 43200}}'
+}
+cond() { # evaluator, params, operator, query, reducer: one classic condition
+  jq -nc --arg e "$1" --argjson p "$2" --arg o "$3" --arg q "$4" --arg r "$5" \
+    '{evaluator: {type: $e, params: $p}, operator: {type: $o}, query: {params: [$q]}, reducer: {type: $r}}'
+}
+classic() { # refId, conditions as JSON objects joined by commas
+  step "$1" "{\"type\":\"classic_conditions\",\"conditions\":[$2]}"
+}
 errors='sum(count_over_time({app="shop", level="error"}[30s]))'
+cart='sum(count_over_time({app="cart", level="error"}[30s]))'
 {
   rule LkInstant B OK 0s "$(query A "$errors" instant 600)" "$(threshold B A 20)"
   rule LkNoData B NoData 0s "$(query A 'sum by (app) (count_over_time({level="error"}[1m]))' instant 600)" "$(threshold B A 30)"
@@ -144,6 +156,25 @@ errors='sum(count_over_time({app="shop", level="error"}[30s]))'
     "$(step C '{"type":"math","expression":"$A / $B > 0.3"}')"
   rule LkClassic B OK 0s "$(query A "$errors" range 60)" \
     "$(step B '{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[10]},"operator":{"type":"and"},"query":{"params":["A"]},"reducer":{"type":"avg"}}]}')"
+  # Each classic reducer over Loki, a range, no_value, conditions joined by
+  # or and logic-or, one that is no data (the replay reduces them itself),
+  # and a condition on Prometheus with a Loki query beside it.
+  for r in "max gt 20" "min gt 5" "sum gt 400" "count gt 55" "last gt 30" "median gt 15" "diff gt 10" "diff_abs gt 25" \
+    "percent_diff gt 50" "percent_diff_abs gt 80" "count_non_null lt 30"; do
+    set -- $r
+    rule "LkClassic$1" B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond "$2" "[$3]" and A "$1")")"
+  done
+  rule LkClassicRange B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond within_range "[5,30]" and A avg)")"
+  rule LkClassicNoValue B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond no_value "[]" and A last)")"
+  rule LkClassicOr C OK 0s "$(query A "$errors" range 60)" "$(query B "$cart" range 60)" \
+    "$(classic C "$(cond gt "[30]" and A max),$(cond gt "[10]" or B max)")"
+  rule LkClassicLogicOr C NoData 0s "$(query A "$errors" range 60)" "$(query B "$cart" range 60)" \
+    "$(classic C "$(cond gt "[30]" and A max),$(cond gt "[10]" logic-or B max)")"
+  rule LkClassicNoData B NoData 0s "$(query A 'sum by (app) (count_over_time({level="error"}[1m]))' range 120)" \
+    "$(classic B "$(cond gt "[10]" and A avg)")"
+  rule LkBeside B NoData 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" instant 600)"
+  rule LkBesideRange B NoData 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" range 120)"
+  rule LkBesideOK B OK 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" instant 600)"
   rule LkSQL B OK 0s '{"refId":"A","relativeTimeRange":{"from":600,"to":0},"datasourceUid":"orders","model":{"refId":"A","rawSql":"SELECT 1"}}' \
     "$(threshold B A 5)"
 } | jq -s '{apiVersion: 1, groups: [{orgId: 1, name: "logs", folder: "logs", interval: "10s", rules: .}]}' >"$work/prov/alerting/rules.json"
@@ -231,6 +262,13 @@ listed=$("$work/lapilli" verdict --check-replay --grafana "$gf" --grafana-token-
 for want in "LkSQL: its condition reads a mysql data source"; do
   if grep -qF "$want" <<<"$listed"; then echo "ok: listed: $want"; else echo "FAILED: not listed: $want"; fail=1; fi
 done
+# The classic conditions over Loki and the rules with a Loki query beside
+# their condition are replayed, none listed as not.
+if grep -E "^ *(LkClassic|LkBeside)[A-Za-z]*:" <<<"$listed"; then echo "FAILED: listed, not replayed"; fail=1; else echo "ok: classic and beside rules replayed"; fi
+for name in LkClassicMax LkClassicPercentDiff LkClassicNoData LkClassicLogicOr LkBeside LkBesideRange LkBesideOK; do
+  n=$(jq --arg n "$name" '[.rules[] | select(.rule == $n)] | length' <<<"$out")
+  if [ "$n" = 1 ]; then echo "ok: $name checked"; else echo "FAILED: $name not in the check"; fail=1; fi
+done
 
 # Loki's ruler, changed through its configuration API. Its local store,
 # above, is read-only to the API; this Loki keeps its rules on the
@@ -268,7 +306,7 @@ lpost() { curl -sf "${tenant[@]}" -X POST -H 'Content-Type: application/yaml' --
 lput() { printf '%s' "$2" | lpost "$1"; } # namespace, group: retried as one
 lns() { curl -s "${tenant[@]}" "$lrules/$1"; }
 lloaded() { # namespace, alert: the rule as Loki's ruler has loaded it
-  curl -s "${tenant[@]}" "$lw/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.name == $n)'
+  curl -s "${tenant[@]}" "$lw/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.rule == $n)'
 }
 shop_api='name: api
 interval: 1m
