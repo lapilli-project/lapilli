@@ -186,6 +186,7 @@ type legendItem struct {
 // badge (Undecided). Its status colour is statusKinds', by the same key.
 var badgeMeans = map[string][3]string{
 	"perf/noisy":       {"perf-noisy", "●", "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running."},
+	"perf/nothing":     {"perf-nothing", "⚠\uFE0E", "Fired a few times, under the noisy bar, and none of the firings judged caught an incident: not noisy yet, and not OK."},
 	"perf/unrecorded":  {"perf-unrecorded", "?", "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known."},
 	"perf/ok":          {"perf-ok", "○", "Fired over the weeks shown, and isn't noisy."},
 	"perf/silent":      {"perf-silent", "–", "No firing in the weeks shown."},

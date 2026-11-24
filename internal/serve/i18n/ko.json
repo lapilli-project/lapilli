@@ -1562,6 +1562,7 @@
  "Fired over the weeks shown, and isn't noisy.": "보이는 기간 동안 울렸고, 노이즈 규칙이 아니에요.",
  "No firing in the weeks shown.": "보이는 기간 동안 발화가 없었어요.",
  "Another rule caught every incident it caught, as soon, at the same severity or above.": "이 규칙이 잡은 인시던트를 다른 규칙이 같은 심각도 이상으로, 같거나 더 빨리 모두 잡았어요.",
+ "Fired a few times, under the noisy bar, and none of the firings judged caught an incident: not noisy yet, and not OK.": "노이즈 기준에 못 미치는 횟수만 울렸고, 판정된 발화 중 인시던트를 잡은 것이 없어요. 아직 노이즈 규칙은 아니지만 OK 도 아니에요.",
  "Over the last week checked, its replay differed from what really fired.": "마지막으로 확인한 일주일 동안 백테스트가 실제 발화와 달랐어요.",
  "Lapilli can't replay it; its page says why.": "Lapilli 가 백테스트할 수 없어요. 이유는 규칙 페이지에 있어요.",
  "Copied in from where it fired: what it fired is known, not its condition.": "울린 곳에서 기록을 가져왔어요. 발화는 알지만 조건은 몰라요.",
