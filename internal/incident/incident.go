@@ -335,12 +335,22 @@ func Load(path string) ([]Incident, error) {
 	return doc.Incidents, nil
 }
 
+// maxTypeErrors is how many of a YAML type error's errors oneLine keeps.
+const maxTypeErrors = 5
+
 // oneLine is a YAML type error on one line, not the parser's own list
-// of lines under a heading.
+// of lines under a heading: the first maxTypeErrors of them, then how many
+// more there are.
 func oneLine(err error) error {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
-		return errors.New(strings.Join(te.Errors, "; "))
+		list := te.Errors
+		more := ""
+		if len(list) > maxTypeErrors {
+			more = fmt.Sprintf("; and %d more", len(list)-maxTypeErrors)
+			list = list[:maxTypeErrors]
+		}
+		return errors.New(strings.Join(list, "; ") + more)
 	}
 	return err
 }

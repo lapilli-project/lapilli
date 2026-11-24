@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/prom"
+
+	"go.yaml.in/yaml/v3"
 )
 
 var t0 = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -377,5 +379,22 @@ func TestAlerts(t *testing.T) {
 	}
 	if err := CheckAlerts(SortAlerts(same)); err != nil {
 		t.Errorf("one alert %d times: %v", len(same), err)
+	}
+}
+
+// TestOneLineCut: a YAML type error of many errors is five of them and a
+// count of the rest, on one line.
+func TestOneLineCut(t *testing.T) {
+	var errs []string
+	for i := 1; i <= 8; i++ {
+		errs = append(errs, fmt.Sprintf("line %d: cannot unmarshal !!str into int", i))
+	}
+	got := oneLine(&yaml.TypeError{Errors: errs}).Error()
+	want := strings.Join(errs[:5], "; ") + "; and 3 more"
+	if got != want || strings.Contains(got, "\n") {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got := oneLine(&yaml.TypeError{Errors: errs[:5]}).Error(); got != strings.Join(errs[:5], "; ") {
+		t.Errorf("five errors: %q", got)
 	}
 }
