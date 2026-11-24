@@ -52,7 +52,11 @@ type Backtest struct {
 	// says it and its entry pins it: "" for a plain token's, for a CI
 	// Lapilli doesn't know, and for a backtest asked before ids were kept
 	// (031.sql).
-	RepositoryID          string
+	RepositoryID string
+	// QueueBranch is, of a merge queue's run (GitHub's merge_group), the
+	// branch the queue merges into, as the ref its ID token names says it
+	// (032.sql): "" for a pull request's, and any other run's.
+	QueueBranch           string
 	PullRequest           int64
 	State                 string
 	Asked, Started, Ended time.Time
@@ -83,9 +87,11 @@ type BacktestAsk struct {
 	// Queue is how many may wait in all, PerTrust how many of one entry.
 	Queue, PerTrust int
 	// Supersede says the pull request's number is the token's own (its
-	// ref): one waiting for the same entry, repository and pull request
-	// is superseded (sameRepository). A number the job said supersedes
-	// nothing.
+	// ref): one waiting for the same entry, repository, pull request and
+	// QueueBranch is superseded (sameRepository), a merge group's by a
+	// group of the same pull request the same queue built again, never by
+	// a pull request's, nor a pull request's by it. A number the job said
+	// supersedes nothing.
 	Supersede bool
 }
 
@@ -113,9 +119,10 @@ var (
 // (full): those waiting, in all against queue and trust's against
 // perTrust, less those of the repository's pull request a newer commit
 // would supersede (pullRequest, -1 for none; the repository by its id,
-// or its name, as sameRepository says). AskBacktest decides again, at
-// the token's key, once the body is read.
-func (l *Ledger) BacktestRoom(ctx context.Context, trust, token, repositoryID, repository string, pullRequest int64, queue, perTrust int, now time.Time) (used, full bool, err error) {
+// or its name, as sameRepository says; of a merge queue's run, the
+// queue's branch, queueBranch, "" for none). AskBacktest decides again,
+// at the token's key, once the body is read.
+func (l *Ledger) BacktestRoom(ctx context.Context, trust, token, repositoryID, repository, queueBranch string, pullRequest int64, queue, perTrust int, now time.Time) (used, full bool, err error) {
 	if token != "" {
 		if err := l.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM backtest_tokens WHERE trust = ? AND token = ? AND until_at >= ?)",
 			trust, token, now.Unix()).Scan(&used); err != nil || used {
@@ -124,8 +131,8 @@ func (l *Ledger) BacktestRoom(ctx context.Context, trust, token, repositoryID, r
 	}
 	var all, theirs int
 	if err := l.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(CASE WHEN trust = ?3 THEN 1 ELSE 0 END), 0) FROM backtests
-		WHERE state = ?4 AND NOT (trust = ?3 AND pull_request = ?5 AND `+sameRepository("?1", "?2")+`)`,
-		repositoryID, repository, trust, BacktestWaiting, pullRequest).Scan(&all, &theirs); err != nil {
+		WHERE state = ?4 AND NOT (trust = ?3 AND pull_request = ?5 AND queue_branch = ?6 AND `+sameRepository("?1", "?2")+`)`,
+		repositoryID, repository, trust, BacktestWaiting, pullRequest, queueBranch).Scan(&all, &theirs); err != nil {
 		return false, false, err
 	}
 	return false, all >= queue || theirs >= perTrust, nil
@@ -135,9 +142,9 @@ func (l *Ledger) BacktestRoom(ctx context.Context, trust, token, repositoryID, r
 // body, both or neither. A token that started one already gives that one
 // back, again true, for the same body, and ErrBacktestToken for another:
 // the token's key is the check, so that replicas given it at once agree.
-// One waiting for the same entry, repository and pull request is
-// superseded, and said in superseded: the repository by its id, or, for
-// a row with none, its name (sameRepository). Past the queue's bounds,
+// One waiting for the same entry, repository, pull request and queue's
+// branch is superseded, and said in superseded: the repository by its id,
+// or, for a row with none, its name (sameRepository). Past the queue's bounds,
 // ErrBacktestsFull, and nothing is kept.
 func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) (b Backtest, again bool, superseded int, err error) {
 	if len(a.Body) > MaxBacktestBody {
@@ -177,8 +184,8 @@ func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) 
 		}
 		if a.Supersede && a.PullRequest > 0 {
 			res, err := t.ExecContext(t.ctx, `UPDATE backtests SET state = ?3, ended_at = ?4, body = NULL
-				WHERE trust = ?5 AND pull_request = ?6 AND state = ?7 AND `+sameRepository("?1", "?2"),
-				a.RepositoryID, a.Repository, BacktestSuperseded, now.Unix(), a.Trust, a.PullRequest, BacktestWaiting)
+				WHERE trust = ?5 AND pull_request = ?6 AND state = ?7 AND queue_branch = ?8 AND `+sameRepository("?1", "?2"),
+				a.RepositoryID, a.Repository, BacktestSuperseded, now.Unix(), a.Trust, a.PullRequest, BacktestWaiting, a.QueueBranch)
 			if err != nil {
 				return err
 			}
@@ -197,8 +204,8 @@ func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) 
 		if err := t.QueryRowContext(t.ctx, "SELECT coalesce(max(n), 0) + 1 FROM backtests").Scan(&n); err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, `INSERT INTO backtests (id, n, trust, repository, repository_id, pull_request, commit_sha, state, asked_at, rules, requests, key_hash, body)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, a.ID, n, a.Trust, a.Repository, a.RepositoryID, a.PullRequest, a.Commit, BacktestWaiting, now.Unix(),
+		if _, err := t.ExecContext(t.ctx, `INSERT INTO backtests (id, n, trust, repository, repository_id, queue_branch, pull_request, commit_sha, state, asked_at, rules, requests, key_hash, body)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, a.ID, n, a.Trust, a.Repository, a.RepositoryID, a.QueueBranch, a.PullRequest, a.Commit, BacktestWaiting, now.Unix(),
 			a.Rules, a.Requests, a.KeyHash, body); err != nil {
 			return err
 		}
@@ -243,13 +250,13 @@ func pruneBacktests(t *txn, now time.Time) error {
 	return nil
 }
 
-const backtestColumns = "id, trust, repository, repository_id, pull_request, commit_sha, state, asked_at, started_at, ended_at, rules, requests, asked, key_hash, cancel, error"
+const backtestColumns = "id, trust, repository, repository_id, queue_branch, pull_request, commit_sha, state, asked_at, started_at, ended_at, rules, requests, asked, key_hash, cancel, error"
 
 func scanBacktest(sc interface{ Scan(...any) error }) (Backtest, error) {
 	var b Backtest
 	var asked, started, ended int64
 	var cancel int
-	err := sc.Scan(&b.ID, &b.Trust, &b.Repository, &b.RepositoryID, &b.PullRequest, &b.Commit, &b.State, &asked, &started, &ended,
+	err := sc.Scan(&b.ID, &b.Trust, &b.Repository, &b.RepositoryID, &b.QueueBranch, &b.PullRequest, &b.Commit, &b.State, &asked, &started, &ended,
 		&b.Rules, &b.Requests, &b.Made, &b.KeyHash, &cancel, &b.Error)
 	b.Asked, b.Cancel = unix(asked), cancel != 0
 	if started > 0 {

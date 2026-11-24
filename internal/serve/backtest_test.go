@@ -338,36 +338,47 @@ func TestBacktestTokensRefused(t *testing.T) {
 	}
 }
 
-// A merge queue's run (GitHub's merge_group) is of the pull requests
-// someone who may write to the repository queued, a fork's among them, in
-// the repository's own context, with its ID token: an entry that pins
-// pull_request doesn't take its token, and one that names merge_group
-// does, alone of its events. Its ref is the queue's, which says no pull
-// request's number serve reads: the job's is kept as it says it, and its
-// backtest takes the place of none waiting, a pull request's of the same
-// number least of all.
-func TestBacktestMergeGroupNamed(t *testing.T) {
-	queue := func(change map[string]any) map[string]any {
-		c := map[string]any{"event_name": "merge_group", "ref": "refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567",
-			"sub":          "repo:example/alerts:ref:refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567",
-			"workflow_ref": "example/alerts/.github/workflows/backtest.yml@refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567",
-			"head_ref":     "", "base_ref": ""}
-		maps.Copy(c, change)
-		return c
-	}
-	// Not named: refused, as any event but the entry's.
-	b := btServer(t, nil, "", nil)
-	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(queue(nil)), btBody(ruleFile, changedRules, map[string]any{"pull_request": 42})); code != http.StatusUnauthorized {
-		t.Errorf("merge_group, no entry naming it: %d %v", code, m)
-	}
-	b = btServer(t, nil, `  - name: alerts-queue
+// queueClaims are the claims of a merge queue's run's ID token (GitHub's
+// merge_group), the merge group of pull request pr into branch, its head
+// sha (its pull request's): ref, sub and workflow_ref name the queue's
+// ref, refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA; head_ref and
+// base_ref are a pull request's, and empty. change changes them.
+func queueClaims(branch, pr, sha string, change map[string]any) map[string]any {
+	ref := "refs/heads/gh-readonly-queue/" + branch + "/pr-" + pr + "-" + sha
+	c := map[string]any{"event_name": "merge_group", "ref": ref, "sub": "repo:example/alerts:ref:" + ref,
+		"workflow_ref": "example/alerts/.github/workflows/backtest.yml@" + ref, "head_ref": "", "base_ref": ""}
+	maps.Copy(c, change)
+	return c
+}
+
+// queueEntry is a trust entry for the repository's merge queue, beside
+// btTrust's for its pull requests.
+const queueEntry = `  - name: alerts-queue
     issuer: {{github}}
     ci: github
     audience: https://lapilli-ci.example.com
     claims:
       repository_id: "123456789"
       event_name: merge_group
-`, nil)
+`
+
+// A merge queue's run (GitHub's merge_group) is of the pull requests
+// someone who may write to the repository queued, a fork's among them, in
+// the repository's own context, with its ID token: an entry that pins
+// pull_request doesn't take its token, and one that names merge_group
+// does, alone of its events. Its ref is the queue's, which names the pull
+// request the group is made for: its backtest is kept of that number, and
+// takes the place of no pull request's of the same number.
+func TestBacktestMergeGroupNamed(t *testing.T) {
+	queue := func(change map[string]any) map[string]any {
+		return queueClaims("main", "42", "0123456789abcdef0123456789abcdef01234567", change)
+	}
+	// Not named: refused, as any event but the entry's.
+	b := btServer(t, nil, "", nil)
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(queue(nil)), btBody(ruleFile, changedRules, map[string]any{"pull_request": 42})); code != http.StatusUnauthorized {
+		t.Errorf("merge_group, no entry naming it: %d %v", code, m)
+	}
+	b = btServer(t, nil, queueEntry, nil)
 	ask := func(token string, pr int) (int, map[string]any) {
 		t.Helper()
 		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", token, btBody(ruleFile, changedRules, map[string]any{"pull_request": pr}))
@@ -398,14 +409,150 @@ func TestBacktestMergeGroupNamed(t *testing.T) {
 	}
 	got := map[string]string{}
 	for _, x := range bs {
-		got[x.Trust] = fmt.Sprint(x.PullRequest, " ", x.State)
+		got[x.Trust] = fmt.Sprint(x.PullRequest, " ", x.QueueBranch, " ", x.State)
 	}
-	if want := map[string]string{"alerts": "42 " + ledger.BacktestWaiting, "alerts-queue": "42 " + ledger.BacktestWaiting}; !maps.Equal(got, want) {
+	if want := map[string]string{"alerts": "42  " + ledger.BacktestWaiting, "alerts-queue": "42 main " + ledger.BacktestWaiting}; !maps.Equal(got, want) {
 		t.Errorf("kept %v, want %v", got, want)
 	}
 	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] + b.s.btPort.ended[[2]string{"alerts-queue", ledger.BacktestSuperseded}]; n != 0 {
 		t.Errorf("%d superseded", n)
 	}
+}
+
+// A merge group's pull request is the one its ref names, signed into its
+// token, and only that: a body that says another is refused, and one
+// that says none takes the ref's. A group the queue built again, its
+// head another, takes the place of the one waiting for the same
+// repository, branch and pull request, as a pull request's newer commit
+// does of its own, and so fits where the entry's three wait: never one of
+// another pull request, of another branch's queue (one whose name holds
+// the first's ref too), or a pull request's own backtest of the same
+// number, nor a pull request's newer commit a group's. A merge queue's
+// token whose ref isn't the queue's names no pull request: refused before
+// its body is read.
+func TestBacktestMergeGroupSupersede(t *testing.T) {
+	parallel(t)
+	b := btServer(t, nil, queueEntry, nil)
+	sha := func(c byte) string { return strings.Repeat(string(c), 40) }
+	n := 0
+	ask := func(claims, body map[string]any) (int, map[string]any) {
+		t.Helper()
+		n++
+		claims["jti"] = fmt.Sprint("t", n)
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(claims), btBody(ruleFile, changedRules, body))
+		return code, m
+	}
+	group := func(branch, pr string, c byte) map[string]any { return queueClaims(branch, pr, sha(c), nil) }
+	superseded := func() int {
+		return b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] + b.s.btPort.ended[[2]string{"alerts-queue", ledger.BacktestSuperseded}]
+	}
+	ids := map[string]string{}
+	queued := func(name string, claims, body map[string]any, wantSuperseded int) {
+		t.Helper()
+		before := superseded()
+		code, m := ask(claims, body)
+		if code != http.StatusAccepted {
+			t.Fatalf("%s: %d %v", name, code, m)
+		}
+		ids[name], _ = m["id"].(string)
+		if got := superseded() - before; got != wantSuperseded {
+			t.Errorf("%s: %d superseded, want %d", name, got, wantSuperseded)
+		}
+	}
+	// Pull request 5's own backtest, then its merge group into main, by
+	// the ref alone: the body says no number.
+	queued("pull request 5", idptest.GitHub("123456789", "5"), nil, 0)
+	queued("group 5 into main", group("main", "5", 'a'), nil, 0)
+	// The body may say the ref's number; never another.
+	queued("group 6 into main", group("main", "6", 'b'), map[string]any{"pull_request": 6}, 0)
+	if code, m := ask(group("main", "6", 'c'), map[string]any{"pull_request": 5}); code != http.StatusBadRequest ||
+		m["error"] != "pull_request isn't the one the token's ref names" {
+		t.Errorf("group 6, the body saying 5: %d %v", code, m)
+	}
+	queued("group 5 into release/1.x", group("release/1.x", "5", 'd'), nil, 0)
+	// The entry's three wait: a group of none of them doesn't fit, nor
+	// group 5 of another branch's queue, told before the body is read.
+	for name, claims := range map[string]map[string]any{"group 9 into main": group("main", "9", 'e'), "group 5 into release/2.x": group("release/2.x", "5", 'e')} {
+		n++
+		claims["jti"] = fmt.Sprint("t", n)
+		if code, m, read := btPostCounting(t, b, b.github(claims), btBody(ruleFile, changedRules, nil)); code != http.StatusTooManyRequests || read != 0 {
+			t.Errorf("%s, three waiting: %d %v, %d bytes read", name, code, m, read)
+		}
+	}
+	// Group 5 into main, built again: it takes the first's place, alone,
+	// and so fits.
+	queued("group 5 into main, again", group("main", "5", 'f'), nil, 1)
+	// Pull request 5's newer commit takes its own one's place, not a
+	// group's.
+	queued("pull request 5, a newer commit", idptest.GitHub("123456789", "5"), nil, 1)
+	// Room again, and a group of a branch whose name holds the first's
+	// ref: another queue's.
+	for _, name := range []string{"group 6 into main", "group 5 into release/1.x"} {
+		if ok, err := b.s.l.CancelBacktest(context.Background(), ids[name], b.s.now()); err != nil || !ok {
+			t.Fatalf("cancelling %s: %t %v", name, ok, err)
+		}
+	}
+	queued("group 7 into main/pr-5-...", group("main/pr-5-"+sha('a'), "7", '1'), nil, 0)
+	queued("group 5 into main/pr-5-...", group("main/pr-5-"+sha('a'), "5", '2'), nil, 0)
+	want := map[string]string{
+		"pull request 5":                 "alerts 5  " + ledger.BacktestSuperseded,
+		"group 5 into main":              "alerts-queue 5 main " + ledger.BacktestSuperseded,
+		"group 6 into main":              "alerts-queue 6 main " + ledger.BacktestCancelled,
+		"group 5 into release/1.x":       "alerts-queue 5 release/1.x " + ledger.BacktestCancelled,
+		"group 5 into main, again":       "alerts-queue 5 main " + ledger.BacktestWaiting,
+		"pull request 5, a newer commit": "alerts 5  " + ledger.BacktestWaiting,
+		"group 7 into main/pr-5-...":     "alerts-queue 7 main/pr-5-" + sha('a') + " " + ledger.BacktestWaiting,
+		"group 5 into main/pr-5-...":     "alerts-queue 5 main/pr-5-" + sha('a') + " " + ledger.BacktestWaiting,
+	}
+	for name, w := range want {
+		x, ok, err := b.s.l.Backtest(context.Background(), ids[name])
+		if got := fmt.Sprint(x.Trust, " ", x.PullRequest, " ", x.QueueBranch, " ", x.State); err != nil || !ok || got != w {
+			t.Errorf("%s: %q, want %q (%t %v)", name, got, w, ok, err)
+		}
+	}
+
+	// The queue's tokens whose ref isn't a merge queue's: refused, before
+	// the body is read, taking no place.
+	for name, ref := range map[string]string{
+		"a branch":                     "refs/heads/main",
+		"a pull request's merge":       "refs/pull/5/merge",
+		"the queue's, no branch":       "refs/heads/gh-readonly-queue/pr-5-" + sha('a'),
+		"the queue's, an empty branch": "refs/heads/gh-readonly-queue//pr-5-" + sha('a'),
+		"a number of a leading zero":   "refs/heads/gh-readonly-queue/main/pr-05-" + sha('a'),
+		"no number":                    "refs/heads/gh-readonly-queue/main/pr--" + sha('a'),
+		"past an int32":                "refs/heads/gh-readonly-queue/main/pr-2147483648-" + sha('a'),
+		"no head":                      "refs/heads/gh-readonly-queue/main/pr-5",
+		"a short head":                 "refs/heads/gh-readonly-queue/main/pr-5-" + sha('a')[:39],
+		"a head in capitals":           "refs/heads/gh-readonly-queue/main/pr-5-" + strings.Repeat("A", 40),
+		"more after the head":          "refs/heads/gh-readonly-queue/main/pr-5-" + sha('a') + "-x",
+		"a branch of ..":               "refs/heads/gh-readonly-queue/main/../pr-5-" + sha('a'),
+		"a branch of a space":          "refs/heads/gh-readonly-queue/ma in/pr-5-" + sha('a'),
+		"a branch ending in /":         "refs/heads/gh-readonly-queue/main//pr-5-" + sha('a'),
+		"a branch first a -":           "refs/heads/gh-readonly-queue/-main/pr-5-" + sha('a'),
+		"the queue's under refs/pull":  "refs/pull/gh-readonly-queue/main/pr-5-" + sha('a'),
+		"no ref":                       "",
+	} {
+		claims := group("main", "5", 'a')
+		claims["ref"] = ref
+		if ref == "" {
+			delete(claims, "ref")
+		}
+		before := superseded()
+		n++
+		claims["jti"] = fmt.Sprint("t", n)
+		code, m, read := btPostCounting(t, b, b.github(claims), btBody(ruleFile, changedRules, nil))
+		if code != http.StatusUnauthorized || read != 0 || superseded() != before {
+			t.Errorf("%s: %d %v, %d bytes read", name, code, m, read)
+		}
+	}
+	if !strings.Contains(b.log.String(), "its ref isn't the queue's") {
+		t.Errorf("the log doesn't say why:\n%s", b.log.String())
+	}
+	// A SHA-256 repository's head: 64 hex digits.
+	if ok, err := b.s.l.CancelBacktest(context.Background(), ids["group 7 into main/pr-5-..."], b.s.now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	queued("group 8, a SHA-256 head", queueClaims("main", "8", strings.Repeat("0", 64), nil), nil, 0)
 }
 
 // btPostCounting posts body with token, answering what btAsk does and
