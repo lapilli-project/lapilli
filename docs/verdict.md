@@ -159,8 +159,10 @@ refused as written). `--json` lists both in `unreplayed`, each with `failed`
 true when its replay failed for the run and another run may replay it; in a
 comparison, each with its side, `before` or `after`, but a rule alike in
 both, replayed once for both, which has none. The exit stays 0, since what
-was replayed holds; `--fail-unreplayed` exits 1 instead, for a check that a
-run that couldn't read the history shouldn't pass; so too for a rule whose
+was replayed holds, unless no rule was: a run in which every replay failed
+exits 1, as it judges nothing (`--fail-nothing-replayed=false` exits 0
+instead, and `--compare` is left as it was); `--fail-unreplayed` exits 1 for a
+single rule that failed, for a check that a run that couldn't read the history shouldn't pass; so too for a rule whose
 labels on each of its series are more than `--max-samples` lets a replay
 hold (`too many labels on its series to replay`), which a rule's writer
 could do to keep it out of a backtest unseen. It doesn't count a query

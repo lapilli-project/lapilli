@@ -448,6 +448,12 @@ Output:
                       at a minute holds 1,440 samples a series firing all
                       through it, so the default is some 6,900 such series;
                       a longer --step holds fewer
+  --fail-nothing-replayed=false
+                      exit 0 when the replay of every rule failed because the
+                      history couldn't be read, as lapilli exits 1 then, the
+                      report judging nothing; a run in which some rule was
+                      replayed exits 0 either way, unless --fail-unreplayed.
+                      Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
@@ -628,6 +634,9 @@ type verdictFlags struct {
 	maxSamples              int
 	noProgress, progressSet bool
 	failUnreplayed          bool
+	// noFailNothingReplayed is --fail-nothing-replayed=false, and
+	// failNothingSet whether the flag was given.
+	noFailNothingReplayed, failNothingSet bool
 	// lokiLimit is the Limiter every client of --loki shares, made once
 	// (lokiSource).
 	lokiLimit *prom.Limiter
@@ -704,7 +713,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		}
 		switch name {
-		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress":
+		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed":
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
 				return nil, err
@@ -718,6 +727,8 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 				f.checkContent, f.checkContentSet = on, true
 			case "--grafana-history":
 				f.noGrafanaHistory, f.grafanaHistorySet = !on, true
+			case "--fail-nothing-replayed":
+				f.noFailNothingReplayed, f.failNothingSet = !on, true
 			default:
 				f.noProgress, f.progressSet = !on, true
 			}
@@ -1130,6 +1141,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
+			{f.failNothingSet, "--fail-nothing-replayed"},
 			{f.draft != "", "--draft-expectations: ask GET /api/v1/expectations/draft"},
 			{f.extrasSet, "--extras: each run's steps after the replays take what --timeout leaves"}} {
 			if no.on {
@@ -2009,6 +2021,20 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules didn't finish within --timeout %s; raise it, or shorten the period\n",
 			len(unfinished), len(all), f.timeout)
 		return 1
+	}
+	if !f.noFailNothingReplayed && cmp == nil && len(dropped) > 0 {
+		judged := false
+		for _, rep := range reports {
+			for _, r := range rep.Rules {
+				if r.Unsupported == "" || r.ByHistory() {
+					judged = true
+				}
+			}
+		}
+		if !judged {
+			fmt.Fprintf(stderr, "lapilli verdict: no rule was replayed: the replays of %d rules failed, as the history couldn't be read, so the report judges nothing (--fail-nothing-replayed=false to exit 0)\n", len(dropped))
+			return 1
+		}
 	}
 	if f.failUnreplayed && len(dropped) > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)\n", len(dropped), len(all))

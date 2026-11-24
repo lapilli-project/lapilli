@@ -124,9 +124,17 @@ The run didn't reach `--prometheus`: nothing listens at that port, the
 name doesn't resolve where lapilli runs, the URL says `https` to a server
 that speaks `http`, or it has no `http://` at all. In a cluster, a
 NetworkPolicy may stand between. The rule is left out of the rest of the
-report, and another run, with its access mended, may replay it. The run
-exits 0, as what was replayed holds; with `--fail-unreplayed` it exits 1
-instead:
+report, and another run, with its access mended, may replay it. When some
+rule was replayed, the run exits 0, as what was replayed holds; with
+`--fail-unreplayed` it exits 1 instead. When none was, the report judges
+nothing and the run exits 1, saying so, unless
+`--fail-nothing-replayed=false`:
+
+```
+lapilli verdict: no rule was replayed: the replays of N rules failed, as the history couldn't be read, so the report judges nothing (--fail-nothing-replayed=false to exit 0)
+```
+
+With `--fail-unreplayed`:
 
 ```
 lapilli verdict: N of M rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)

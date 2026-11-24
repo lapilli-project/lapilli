@@ -529,7 +529,7 @@ func TestHistoryUnread(t *testing.T) {
 		{"refused as written", answer(400, "", `{"status":"error","errorType":"bad_data","error":"parse error"}`), nil, false},
 		{"not done", answer(501, "", `{"status":"error","error":"not implemented"}`), nil, false},
 	} {
-		code, out, errs := unreadRun(t, c.answer, append(c.args, "--fail-unreplayed")...)
+		code, out, errs := unreadRun(t, c.answer, append(c.args, "--fail-nothing-replayed=false", "--fail-unreplayed")...)
 		top := strings.Contains(out, "! 2 of 2 rules couldn't be replayed, and are left out of what follows:\n  A, B: "+rules.HistoryUnread)
 		if c.unread && (code != 1 || !top || !strings.Contains(errs, "2 of 2 rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)")) {
 			t.Errorf("%s: exit %d\n%s\n%s", c.name, code, errs, out)

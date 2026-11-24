@@ -39,7 +39,7 @@ func TestTooWideFailsUnreplayed(t *testing.T) {
 		code := run(append([]string{"verdict", "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC", "--rules", rs}, args...), &stdout, &stderr)
 		return code, stdout.String(), stderr.String()
 	}
-	code, out, _ := verdictOf("--json")
+	code, out, _ := verdictOf("--json", "--fail-nothing-replayed=false")
 	var rep verdict.Report
 	if err := json.Unmarshal([]byte(out), &rep); err != nil || code != 0 {
 		t.Fatalf("exit %d: %v", code, err)
@@ -47,7 +47,7 @@ func TestTooWideFailsUnreplayed(t *testing.T) {
 	if len(rep.Unreplayed) != 1 || !strings.HasPrefix(rep.Unreplayed[0].Reason, rules.TooWide) || strings.HasPrefix(rep.Unreplayed[0].Reason, rules.QueryFailed) {
 		t.Errorf("unreplayed %+v", rep.Unreplayed)
 	}
-	if code, _, errs := verdictOf("--fail-unreplayed"); code != 1 || !strings.Contains(errs, "1 of 1 rules couldn't be replayed") {
+	if code, _, errs := verdictOf("--fail-nothing-replayed=false", "--fail-unreplayed"); code != 1 || !strings.Contains(errs, "1 of 1 rules couldn't be replayed") {
 		t.Errorf("--fail-unreplayed: exit %d: %s", code, errs)
 	}
 }

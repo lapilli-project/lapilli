@@ -460,6 +460,12 @@ Output:
                       at a minute holds 1,440 samples a series firing all
                       through it, so the default is some 6,900 such series;
                       a longer --step holds fewer
+  --fail-nothing-replayed=false
+                      exit 0 when the replay of every rule failed because the
+                      history couldn't be read, as lapilli exits 1 then, the
+                      report judging nothing; a run in which some rule was
+                      replayed exits 0 either way, unless --fail-unreplayed.
+                      Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
