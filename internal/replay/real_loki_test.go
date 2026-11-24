@@ -1,6 +1,7 @@
 package replay
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -116,6 +117,38 @@ func (c logsCase) kept(t *testing.T, name, url string, header map[string]string)
 		t.Fatal(err)
 	}
 	return b
+}
+
+// keepFolder is a Grafana's export of its rules, as it wrote it, with only
+// the groups in the folder.
+func keepFolder(t *testing.T, export []byte, folder string) []byte {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal(export, &doc); err != nil || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		t.Fatalf("not an export: %v", err)
+	}
+	root := doc.Content[0]
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "groups" {
+			continue
+		}
+		groups := root.Content[i+1]
+		groups.Content = slices.DeleteFunc(groups.Content, func(g *yaml.Node) bool {
+			for j := 0; j+1 < len(g.Content); j += 2 {
+				if g.Content[j].Value == "folder" {
+					return g.Content[j+1].Value != folder
+				}
+			}
+			return true
+		})
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(4)
+	if err := enc.Encode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 // lokiRules reads a Loki ruler's configuration API's answer, a namespace
@@ -239,7 +272,16 @@ func TestRealLokiGrafana(t *testing.T) {
 			token = strings.TrimSpace(string(b))
 			auth["Authorization"] = "Bearer " + token
 		}
-		rs, err := rules.Parse(c.kept(t, "rules.yaml", gf+"/api/v1/provisioning/alert-rules/export?format=yaml", auth))
+		exported := c.kept(t, "rules.yaml", gf+"/api/v1/provisioning/alert-rules/export?format=yaml", auth)
+		if os.Getenv("LAPILLI_RECORD") != "" {
+			// Grafana holds the rules of every recording: these are the ones in
+			// the folder Logs.
+			exported = keepFolder(t, exported, "Logs")
+			if err := os.WriteFile(c.path("rules.yaml"), exported, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rs, err := rules.Parse(exported)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,4 +343,24 @@ func TestRealLokiGrafana(t *testing.T) {
 			t.Errorf("check: %d replayed, %d real, %d alike", check.Replayed, check.Real, check.Alike)
 		}
 	})
+}
+
+// TestKeepFolder: what keepFolder leaves of an export is written as
+// Grafana wrote it, and the groups of other folders are gone.
+func TestKeepFolder(t *testing.T) {
+	b, err := os.ReadFile("testdata/grafana-13.3.1-loki/rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keepFolder(t, b, "Logs"); !bytes.Equal(got, b) {
+		t.Errorf("an export of one folder, kept, is not as it was written: %d bytes, then %d", len(b), len(got))
+	}
+	other, err := os.ReadFile("testdata/grafana-13.3.1-export/rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	both := append(slices.Clone(b), bytes.TrimPrefix(other, []byte("apiVersion: 1\ngroups:\n"))...)
+	if got := keepFolder(t, both, "Logs"); !bytes.Equal(got, b) {
+		t.Errorf("with another folder's group beside, %d bytes, then %d", len(b), len(got))
+	}
 }

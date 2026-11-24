@@ -607,8 +607,18 @@ reset), which the replay ends at the reset.
 
 ## Running the measurement again
 
-Prometheus 3.5.0 with `--web.enable-remote-write-receiver`, and Grafana
-13.3.1 with
+`test/e2e/measure.sh` does it, at any version of the three servers:
+
+```
+test/e2e/measure.sh                       # up, record, down: an hour and a little
+PROMETHEUS_IMAGE=prom/prometheus:v3.6.0 GRAFANA_IMAGE=grafana/grafana:13.4.0 \
+  LOKI_IMAGE=grafana/loki:3.8.0 test/e2e/measure.sh
+test/e2e/measure.sh up                    # the servers, kept until `down`
+test/e2e/measure.sh record                # asks them again: minutes, not an hour
+test/e2e/measure.sh down
+```
+
+It runs Prometheus with `--web.enable-remote-write-receiver`, Grafana with
 
 ```
 GF_UNIFIED_ALERTING_STATE_HISTORY_ENABLED=true
@@ -618,34 +628,44 @@ GF_UNIFIED_ALERTING_STATE_HISTORY_PROMETHEUS_TARGET_DATASOURCE_UID=prom
 
 and its Prometheus data source provisioned with `uid: prom` and
 `jsonData.prometheusType: Prometheus` (Grafana writes to `/api/v1/push`
-otherwise, which Prometheus doesn't serve). The rules are in
-`internal/replay/testdata`: Grafana's as `rules.json`, provisioned as they
-are, and Prometheus's as `rules.yml` (the test reads them from its rules
-API, `api.json`, as `--loaded-rules` does). After an hour:
+otherwise, which Prometheus doesn't serve), and Loki with its ruler on
+(`loki.md`), all in Docker, on ports that aren't their defaults. The rules
+are those of the newest recording of each kind in `internal/replay/testdata`:
+Grafana's as `rules.json`, provisioned as they are, and Prometheus's as
+`rules.yml`. For an hour (`MINUTES`) it feeds them (`test/e2e/measure-feed`:
+the scraped metrics and the log lines below, all functions of the clock),
+then records each with the tests' own recording, `LAPILLI_RECORD` (the
+tests are told which directory with `LAPILLI_RECORD_DIR`), into a directory
+named for the version it finds running: `grafana-13.4.0`,
+`prometheus-3.6.0`, and the same with `-export`, `-scraped`, `-change` and
+`-loki`, and `loki-3.8.0`. In each is its `period.json`, read by the test:
+the period asked about, `from`, `to` and `step`, and for `-change` when the
+rule was changed. A recording of a new version is a new directory, and
+nothing else changes: `go test ./internal/replay` replays every one. The
+Prometheus of the recording keeps what it has been given until `down`, so a
+replay that asks other queries is recorded again in minutes.
 
-```
-LAPILLI_RECORD=http://127.0.0.1:9090 go test ./internal/replay -run TestReal
-```
-
-with the periods in `real_test.go` set to what was recorded. The replay
-reads the recording with a scrape interval of 10s: the queries are
+One Prometheus, Grafana and Loki run every recording's rules at once, so
+what really fired is taken for the rules of the recording alone (the
+tests choose by rule name; the export of Grafana's rules, by folder). The
+replay reads the recording with a scrape interval of 10s: the queries are
 functions of `time()`, whose numbers change every second, so a coarser
 resolution reads a different `median` than Grafana's 1s.
 
-The verification's recordings, `grafana-13.3.1-scraped` and
-`grafana-13.3.1-change`, are of real scrapes: Prometheus scraping, every
-15s, a target serving `fv_spiky`, 100 for the first 15s of every two
-minutes and 1 otherwise, `fv_dippy` the other way round, and `fv_gappy`,
-there for the first minute of every 15. Grafana has a second Prometheus
-data source, `uid: prom30`, with `jsonData.timeInterval: 30s`. The rules
-are Grafana's export (`rules.yaml`, which provisions as it is), the
-`fid2api` group made through its API and changed at 17:45:05
-(`rules-before.yaml`, `rules-after.yaml`); what Grafana said of its data
-sources, and Prometheus's configuration and targets, are kept beside
-them. Recorded with
+The verification's recordings, `-scraped` and `-change`, are of real
+scrapes: Prometheus scraping, every 15s, a target serving `fv_spiky`, 100
+for the first 15s of every two minutes and 1 otherwise, `fv_dippy` the other
+way round, and `fv_gappy`, there for the first minute of every 15. Grafana
+has a second Prometheus data source, `uid: prom30`, with
+`jsonData.timeInterval: 30s`. The rules are Grafana's export (`rules.yaml`,
+which provisions as it is), the `fid2api` group made through its API and
+changed seven minutes into the recording (`rules-before.yaml`,
+`rules-after.yaml`, which the script takes from Grafana's export just before
+and after, and `changed` in `period.json`); what Grafana said of its data
+sources, and Prometheus's configuration and targets, are kept beside them.
+The script makes the group and the change through Grafana's provisioning
+API, and takes the three the way it took them first.
 
-```
-LAPILLI_RECORD=http://127.0.0.1:9090 go test ./internal/replay -run 'TestRealGrafana(Scraped|Change)$'
-```
-
-which asks only for the periods of those two.
+Run by hand as the workflow `measure` (`.github/workflows/measure.yml`),
+with the images as inputs, it writes nothing to the repository: the
+recordings are the run's artifact, to unpack and commit.
