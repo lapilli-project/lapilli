@@ -36,6 +36,7 @@ import (
 // report names no repository's id, sub, audience or plain token, nor the
 // token's length.
 func TestPreflightBacktests(t *testing.T) {
+	alone(t)
 	was := now
 	// The last noon UTC, not now: the estimates below count a backtest's
 	// requests as serve's port would at that moment, and from 01:00 to
@@ -320,6 +321,7 @@ func TestPreflightBacktestsRulesUnread(t *testing.T) {
 // issuer beside it is on: that one is said as it is, with the scrubber
 // the command has.
 func TestPreflightBacktestsEnterpriseIssuer(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })

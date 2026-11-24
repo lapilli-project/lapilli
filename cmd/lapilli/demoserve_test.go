@@ -239,6 +239,7 @@ func readReport(t *testing.T, what, body string) demoReport {
 // name, takes no write from another site, asks no history and sends no
 // request; ended by SIGINT or SIGTERM, it removes its ledger.
 func TestDemoServe(t *testing.T) {
+	alone(t)
 	_, cli, _ := demo(t, "--json", "--tz", "UTC")
 	want := readReport(t, "lapilli demo --json", cli)
 
@@ -364,6 +365,7 @@ func (d *demoRun) teamsAndProposal(en http.Header) {
 // number, are refused before anything is read or written; and --listen
 // and --json are refused beside what they don't go with.
 func TestDemoServeListen(t *testing.T) {
+	alone(t)
 	for _, args := range [][]string{
 		{"--serve", "--listen", "0.0.0.0:8080"}, {"--serve", "--listen", ":8080"}, {"--serve", "--listen", "[::]:8080"},
 		{"--serve", "--listen", "192.0.2.1:8080"}, {"--serve", "--listen", "localhost:8080"}, {"--serve", "--listen=lapilli.example.com:80"},

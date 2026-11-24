@@ -215,6 +215,7 @@ func TestRulesSelect(t *testing.T) {
 // Set beside each other, the rules --rules and --compare read each say what
 // they passed over, and which they are.
 func TestCompareSaysWhichSide(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	proposed := write(t, "proposed.yaml", renderedChart("15m"))

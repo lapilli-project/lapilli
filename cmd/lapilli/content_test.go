@@ -41,6 +41,7 @@ func (configured) StatusConfig(context.Context) (string, error) {
 }
 
 func TestCheckContent(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return configured{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", sayingRules)
@@ -157,6 +158,7 @@ func TestCheckContentFlags(t *testing.T) {
 
 // An expression left open is checked for what can be, and breaks nothing.
 func TestCheckContentMalformed(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
   - name: shop
@@ -201,6 +203,7 @@ func TestErrorsOf(t *testing.T) {
 // runbook is in its playbook annotation has none when only runbook_url is
 // named, and has one when playbook is.
 func TestRunbookAnnotations(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
   - name: g

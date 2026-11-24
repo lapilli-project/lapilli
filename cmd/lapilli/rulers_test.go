@@ -16,6 +16,7 @@ import (
 // token and its tenant; rules of one name in two namespaces are told apart
 // by both.
 func TestRulerRules(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -26,6 +26,7 @@ import (
 // the bearer token there is quoted without it, as in every other error of
 // the API's.
 func TestTokenNotInPRComment(t *testing.T) {
+	alone(t)
 	const token = "glsa_ci-reader-0123456789abcdef"
 	was, wasNow := newHistory, now
 	t.Cleanup(func() { newHistory, now = was, wasNow })
@@ -72,6 +73,7 @@ func line(s, sub string) string {
 // what doesn't show as \u{1b} besides (verdict.LabelValue), as every other
 // output does.
 func TestMetricsEscapes(t *testing.T) {
+	alone(t)
 	was, wasNow := newHistory, now
 	t.Cleanup(func() { newHistory, now = was, wasNow })
 	newHistory = realHistory
@@ -172,6 +174,7 @@ func acts(s string) bool {
 // the errors of --check-replay, --check-content and serve's start, and
 // the readers' warnings.
 func TestErrorsAndWarningsShown(t *testing.T) {
+	alone(t)
 	was := newHistory
 	t.Cleanup(func() { newHistory = was })
 	newHistory = func(context.Context, *verdictFlags) (history, error) {

@@ -193,6 +193,7 @@ func dirFiles(t *testing.T, dir string) map[string]string {
 // Postgres): every request it sends is one a stand-in serves and the
 // report counts, none is refused or off its list, and nothing is written.
 func TestPreflightAgainstFakes(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -477,6 +478,7 @@ func TestPreflightFlags(t *testing.T) {
 // request's comment is: the URL given as its flag, its host and user, an
 // address, what acts on a terminal; and cut.
 func TestPreflightRedacted(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -506,6 +508,7 @@ func TestPreflightRedacted(t *testing.T) {
 // Every source of rules serve reads is read through the allowlist with
 // nothing refused: a refusal is a bug of lapilli's, never the setup's.
 func TestPreflightEverySource(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -603,6 +606,7 @@ func TestPreflightOfflineSecrets(t *testing.T) {
 // files name: a cloud's alarms, the sign-in, the ledger's server, an
 // on-call feed's host.
 func TestPreflightRedactedEverywhere(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -834,6 +838,7 @@ func TestPreflightPostgresNames(t *testing.T) {
 // what would make it known; the report says neither the account nor the
 // role, as the real scrubber has them.
 func TestPreflightWritesRedacted(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })

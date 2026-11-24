@@ -62,6 +62,7 @@ func caughtBy(t *testing.T, out string) []string {
 // says the leads; the report gives them, and numbers.md's blocks count the
 // stones again from it.
 func TestLeads(t *testing.T) {
+	alone(t)
 	h, args := leadsWorld(t)
 	var plain string
 	for _, extra := range [][]string{{"--impact", "errors=" + errorsExpr}, {"--impact-file", write(t, "plain.yaml", "signals:\n  - {name: errors, expr: '"+errorsExpr+"'}\n")}} {

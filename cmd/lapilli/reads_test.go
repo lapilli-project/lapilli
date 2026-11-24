@@ -28,6 +28,7 @@ import (
 // failed, as another run is refused too; the exit stays 0 unless
 // --fail-unreplayed, which counts only the first.
 func TestUnreplayedShown(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rs := write(t, "rules.yaml", `groups:
@@ -140,6 +141,7 @@ func TestUnreplayedShown(t *testing.T) {
 // and nothing of it on stdout; --progress=false says nothing; a 429 from
 // the history is said once at the end.
 func TestProgress(t *testing.T) {
+	alone(t)
 	after, every := progressAfter, progressEvery
 	progressAfter, progressEvery = 50*time.Millisecond, 50*time.Millisecond
 	defer func() { progressAfter, progressEvery = after, every }()
@@ -295,6 +297,7 @@ func TestGrafanaDataSourcesApart(t *testing.T) {
 // TestProgressCounts: the rules a run replays are counted, each once, when
 // replayed; what asks the history after (near misses, suggestions) isn't.
 func TestProgressCounts(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	var total, done int64
@@ -348,6 +351,7 @@ func (h slowHistory) QueryRange(ctx context.Context, expr string, start, end tim
 // here as a report fails to go to Slack after the replay, and the two don't
 // race (go test -race).
 func TestStderrShared(t *testing.T) {
+	alone(t)
 	after, every := progressAfter, progressEvery
 	progressAfter, progressEvery = time.Millisecond, time.Millisecond
 	defer func() { progressAfter, progressEvery = after, every }()
@@ -423,6 +427,7 @@ func (h countingHistory) QueryRange(ctx context.Context, expr string, start, end
 // and near misses, and the report says so; --extras DUR cuts them short
 // when they take longer, and the report says that.
 func TestExtras(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	defer func() { newHistory = realHistory }()
 	rs := write(t, "rules.yaml", `groups:
@@ -499,6 +504,7 @@ func unreadRun(t *testing.T, answer http.HandlerFunc, args ...string) (int, stri
 // the report, and --fail-unreplayed exits 1. One that refuses the queries
 // as written fails neither.
 func TestHistoryUnread(t *testing.T) {
+	alone(t)
 	answer := func(status int, header, body string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if k, v, ok := strings.Cut(header, ": "); ok {
@@ -555,6 +561,7 @@ func TestHistoryUnread(t *testing.T) {
 // the deadline would: exit 1, saying to raise --timeout, at once rather
 // than after the wait; and a turn by --max-rate isn't said to be the API's.
 func TestWaitPastTimeout(t *testing.T) {
+	alone(t)
 	var asked atomic.Int64
 	start := time.Now()
 	code, out, errs := unreadRun(t, func(w http.ResponseWriter, r *http.Request) {
@@ -683,6 +690,7 @@ func TestImpactShortLate(t *testing.T) {
 // many at once as --parallel, and what is suggested, in the rules' order,
 // is the same as one at a time.
 func TestSuggestParallel(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rs := write(t, "rules.yaml", `groups:

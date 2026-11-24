@@ -18,6 +18,7 @@ import (
 // to --prometheus alone, in place of --ruler-tenant, which --ruler is
 // still sent. Without it, --prometheus is sent --ruler-tenant, as before.
 func TestPrometheusTenant(t *testing.T) {
+	alone(t)
 	newHistory = realHistory
 	defer func() { newHistory = realHistory }()
 	now = func() time.Time { return t0 }

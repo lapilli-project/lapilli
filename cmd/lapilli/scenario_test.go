@@ -33,6 +33,7 @@ func writeIn(t *testing.T, dir string, files map[string]string) {
 // --fail-expectations covers them. Without it, each is not known. One
 // that couldn't be run after is on the summary: scenarios_unrun.
 func TestCompareScenarios(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	base := write(t, "base.yaml", shopRules("5m"))

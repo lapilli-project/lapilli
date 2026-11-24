@@ -19,6 +19,7 @@ import (
 // a CloudWatch alarm and a rule of one name told apart by the source, the
 // PromQL alarm replayed, the alarm that isn't PromQL listed.
 func TestAlarmsRules(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	cw := alarmtest.NewCloudWatch("eu-west-1")
@@ -200,6 +201,7 @@ func TestChartAlarms(t *testing.T) {
 // alarm of its name isn't taken for its. Without the history, the alarm
 // isn't compared, and says why.
 func TestCheckReplayAlarms(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	cw := alarmtest.NewCloudWatch("eu-west-1")

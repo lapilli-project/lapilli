@@ -36,6 +36,7 @@ func demo(t *testing.T, args ...string) (int, string, string) {
 // firings that woke people; then how to run it on one's own rules. In
 // another zone it is the same but for the zone it names.
 func TestDemo(t *testing.T) {
+	alone(t)
 	code, out, errs := demo(t, "--tz", "UTC")
 	if code != 0 || errs != "" {
 		t.Fatalf("exit %d: %s", code, errs)
@@ -76,6 +77,7 @@ func TestDemo(t *testing.T) {
 // TestDemoJSON: with --json, stdout is verdict's JSON alone, and what to
 // run next is said on stderr.
 func TestDemoJSON(t *testing.T) {
+	alone(t)
 	code, out, errs := demo(t, "--json", "--tz", "UTC")
 	if code != 0 || errs != demoNext {
 		t.Fatalf("exit %d, stderr %q", code, errs)
@@ -100,6 +102,7 @@ func TestDemoJSON(t *testing.T) {
 // TestDemoFlags: lapilli demo takes --json and --tz, and refuses anything
 // else before it reads anything.
 func TestDemoFlags(t *testing.T) {
+	alone(t)
 	for _, args := range [][]string{{"--rules", "x.yaml"}, {"--tz"}, {"--tz", "Nowhere/Else"}, {"--tz="}, {"--tz", ""}, {"--json=1"}, {"--prometheus", "http://p"}} {
 		if code, out, errs := demo(t, args...); code != 2 || out != "" || !strings.Contains(errs, `Run "lapilli demo -h"`) {
 			t.Errorf("%q: exit %d, %q %q", args, code, out, errs)

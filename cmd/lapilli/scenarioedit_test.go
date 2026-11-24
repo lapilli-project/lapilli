@@ -19,6 +19,7 @@ import (
 // with another rule changed beside it. A test file alike on both sides
 // runs nothing, and nothing changed is said as it was.
 func TestCompareScenarioTestEdited(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", shopRules("5m"))

@@ -121,6 +121,7 @@ func write(t *testing.T, name, body string) string {
 }
 
 func TestRun(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
@@ -454,6 +455,7 @@ func TestSend(t *testing.T) {
 }
 
 func TestGrafanaRules(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	var auth string
@@ -534,6 +536,7 @@ func TestServeFlags(t *testing.T) {
 }
 
 func TestCheckReplay(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
@@ -799,6 +802,7 @@ func (unreachable) QueryRange(ctx context.Context, expr string, start, end time.
 // change; --markdown doesn't say where the history is, which the job's log
 // does; and none of it goes with --check-content.
 func TestComparePullRequest(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	base := `groups:
@@ -887,6 +891,7 @@ func TestComparePullRequest(t *testing.T) {
 // A pull request that changes only an Azure rule group's recording rule
 // changes what its alerts see: not "nothing changed".
 func TestCompareAzureRecording(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	group := func(expr string) string {

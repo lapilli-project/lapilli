@@ -12,6 +12,7 @@ import (
 // Terraform's JSON of a plan, or of a state, is given to --rules as any
 // rules are: its rules are replayed, with no flag to say what it is.
 func TestVerdictRulesTerraformJSON(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Errors, start: 2026-11-01T22:30:00Z, end: 2026-11-01T22:40:00Z}\n")
 	for _, f := range []string{"terraform-plan.json", "terraform-state.json"} {

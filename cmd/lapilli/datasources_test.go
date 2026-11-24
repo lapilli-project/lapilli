@@ -133,6 +133,7 @@ groups:
 // --scrape-interval doesn't; where neither does, at Grafana's resolution,
 // not the server's own, which steps over a spike Grafana's points see.
 func TestReplayScrapeIntervals(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", maxRule)
 	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Spike, start: 2026-11-01T22:30:00Z, end: 2026-11-01T22:40:00Z}\n")

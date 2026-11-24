@@ -15,6 +15,7 @@ import (
 // does keeps it caught. It goes with --compare and the incidents, and
 // with --fail-expectations, either failing fails the run.
 func TestCompareFailMissed(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesWith := func(forDur, more string) string {
@@ -132,6 +133,7 @@ func TestCompareFailMissed(t *testing.T) {
 // --fail-unreplayed, with --changed-only (the rules left alone replayed
 // apart) as without.
 func TestCompareFailMissedNotKnown(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesWith := func(forDur string) string {

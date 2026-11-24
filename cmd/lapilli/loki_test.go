@@ -32,6 +32,7 @@ func (l lokiHistory) QueryRange(ctx context.Context, expr string, start, end tim
 // beside the Prometheus rules, are judged alike; their LogQL is never
 // asked of Prometheus.
 func TestVerdictLokiRules(t *testing.T) {
+	alone(t)
 	var asked []string
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	newLoki = func(*verdictFlags) history { return lokiHistory{&asked} }
@@ -99,6 +100,7 @@ func TestLokiFlags(t *testing.T) {
 // TestLokiPlainHTTP: a token sent to --loki over plain http is said, as
 // --grafana's is; over https, or with no token, nothing is.
 func TestLokiPlainHTTP(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	var asked []string
 	newLoki = func(*verdictFlags) history { return lokiHistory{&asked} }

@@ -13,6 +13,7 @@ import (
 // shifts naming a schedule the file doesn't are refused before anything is
 // read.
 func TestVerdictOnCall(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	// The checkout rule fires from 3h to 2h before t0 (2026-11-02 00:00
