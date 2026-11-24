@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,9 +32,16 @@ func (r Rule) Parsed() (string, bool) {
 	if !ok {
 		return "", false
 	}
+	// Its labels apart from Key's, each name and value in quotes: Key's
+	// a=b=c is a="b=c" and, of a name Prometheus 3 takes, "a=b"="c".
+	labels := r.AlertLabels()
+	var l strings.Builder
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		l.WriteString(strconv.Quote(k) + "=" + strconv.Quote(labels[k]) + ",")
+	}
 	w := r
-	w.Expr, w.Labels, w.GroupLabels = e, r.AlertLabels(), nil
-	return fmt.Sprintf("parsed %s limit %d", w.Key(), r.Limit), true
+	w.Expr, w.Labels, w.GroupLabels = e, nil, nil
+	return fmt.Sprintf("parsed %s limit %d labels %s", w.Key(), r.Limit, l.String()), true
 }
 
 // parsedExpr is a PromQL expression in one form, ok false when it isn't
@@ -397,7 +405,8 @@ func (p *pq) args() []*pqExpr {
 // labels reads the labels of by, without, on, ignoring, group_left and
 // group_right, in their parentheses: names Prometheus reads outside braces,
 // PromQL's words among them as written, or strings; a comma after the last
-// or not. Each is written as one, in order of what is written.
+// or not. Each is written as one, and they are sorted so: in any order,
+// they are the same labels.
 func (p *pq) labels() []string {
 	p.expect('(')
 	out := []string{}
@@ -448,8 +457,8 @@ func (p *pq) labelName(colons bool) string {
 
 // braces reads a selector's braces, for the metric name, "" for none
 // before them: its matchers, each written as one, the name's among them,
-// in order of what is written. A name given twice (before the braces and
-// in them) isn't read: it would stand for one once written as one.
+// sorted so. A name given twice (before the braces and in them) isn't
+// read: it would stand for one once written as one.
 func (p *pq) braces(name string) []string {
 	p.expect('{')
 	var out []string

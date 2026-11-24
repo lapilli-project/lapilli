@@ -337,6 +337,12 @@ func TestRuleParsed(t *testing.T) {
 			t.Errorf("%s: the same Parsed", name)
 		}
 	}
+	// Labels whose Key is one, of a name Prometheus 3 takes: two.
+	eq, in := base, base
+	eq.Labels, in.Labels = map[string]string{"a=b": "c"}, map[string]string{"a": "b=c"}
+	if eq.Key() != in.Key() || one(eq) == one(in) {
+		t.Errorf("a=b=c: Key %t, Parsed %t", eq.Key() == in.Key(), one(eq) == one(in))
+	}
 	for name, r := range map[string]Rule{
 		"a Grafana rule":   {Name: "G", Graph: &Graph{}},
 		"a Loki rule":      {Name: "L", Expr: `sum(count_over_time({app="a"}[1m])) > 1`, Logs: LokiRuler},
