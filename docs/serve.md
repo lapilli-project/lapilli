@@ -963,7 +963,11 @@ trust:
   a list, one of them enough; and the event, `event_name` (GitLab's
   `pipeline_source`), to `pull_request` or `push` (`merge_request_event`
   or `push`): another can run a fork's pull request in the repository's
-  own context. For Bitbucket Pipelines (`ci: bitbucket`, known from its
+  own context. GitHub's may be `merge_group` too, a merge queue's run,
+  taken only of an entry that names it, one of its own beside the pull
+  requests': a group holds what someone who may write to the repository
+  queued, a fork's pull request among them, run with an ID token in the
+  repository's own context ([pr-backtests.md](pr-backtests.md#a-merge-queue)). For Bitbucket Pipelines (`ci: bitbucket`, known from its
   issuer, a workspace's,
   `https://api.bitbucket.org/2.0/workspaces/WORKSPACE/pipelines-config/identity/oidc`),
   the entry pins `repositoryUuid`, which may be a list, and

@@ -680,6 +680,7 @@ func TestRulerAzureElsewhere(t *testing.T) {
 // --changes-in: names, prefixes, and Azure's RG/NAME, or NAME when
 // --ruler names one resource group, in any letter case.
 func TestChangesIn(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		ruler     string
 		in        []string

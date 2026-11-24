@@ -64,7 +64,11 @@ func TestKeptLabelsTurnsApart(t *testing.T) {
 // each other step: a hostile API's one series of 15,000 labels firing 20
 // times holds the ledger's writer, in Record, for seconds (70 ms at
 // 05a1887), some 150 ms a firing; 100,000 labels, 0.55 s a firing, 720
-// firings a day. The run's context has no deadline there.
+// firings a day. The run's context has no deadline there. Counted, not
+// timed, so that a slow runner fails none: the series and its labels
+// written once, a few rows for each firing, and a few statements in all;
+// what keptLabels does is held to its labels in verdict's
+// TestKeptLabelsLinear. The time is logged.
 func TestWideSeriesRecordCost(t *testing.T) {
 	m := map[string]string{"alertname": "Down"}
 	for i := range 15000 {
@@ -75,12 +79,11 @@ func TestWideSeriesRecordCost(t *testing.T) {
 		s := t0.Add(time.Duration(2*i) * time.Minute)
 		fs = append(fs, firing.Firing{Rule: "Down", Labels: m, Start: s, End: s.Add(time.Minute)})
 	}
-	l := open(t, time.UTC)
+	l, where := openWatched(t)
 	began := time.Now()
-	record(t, l, t0, t0.Add(time.Hour), fs)
-	took := time.Since(began)
-	t.Logf("20 firings of one series of 15,000 labels recorded in %s", took)
-	if took > time.Second*time.Duration(slow) {
-		t.Errorf("20 firings of one wide series took %s to record, the ledger's writer held: the labels are kept again for each firing", took)
+	w := doing(t, l, where, func() { record(t, l, t0, t0.Add(time.Hour), fs) })
+	t.Logf("20 firings of one series of 15,000 labels recorded: %d statements, %d rows written, in %s", w.statements, w.rows, time.Since(began))
+	if w.statements > 200 || w.rows > 20*int64(len(fs)) {
+		t.Errorf("20 firings of one wide series: %d statements, over 200, and %d rows written, over %d: the labels kept again for each firing?", w.statements, w.rows, 20*len(fs))
 	}
 }

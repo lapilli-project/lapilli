@@ -63,6 +63,7 @@ func call(t *testing.T, cs *mcp.ClientSession, tool string, args map[string]any,
 // An agent reads what the pages show, and an editor's agent replays a
 // change it proposes; a page elsewhere can't reach it.
 func TestMCP(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader = "X-Forwarded-Email"
@@ -246,6 +247,7 @@ groups:
 // group, picked by its labels among rules told apart by them; any other is
 // added, told apart from those in effect.
 func TestProposed(t *testing.T) {
+	parallel(t)
 	show := func(rs []rules.Rule) string {
 		var have []string
 		for _, r := range rs {

@@ -39,6 +39,7 @@ func waitsInLock(fn string) bool {
 // compare or test_expectation) waits for it, as a change's backtest does,
 // and is carried out once it is over: it isn't failed for good.
 func TestAddCarriedOutWhileComparing(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
@@ -80,6 +81,7 @@ func TestAddCarriedOutWhileComparing(t *testing.T) {
 // git add merged by hand before anyone approved it is applied, its
 // expectations never kept.
 func TestAddsUnkeptHoldNoneUp(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	h := s.Handler()
@@ -143,6 +145,7 @@ func TestAddsUnkeptHoldNoneUp(t *testing.T) {
 // added to the second's is written there, the first as it was; a new group
 // isn't offered in it, which would take it isn't the file's to say.
 func TestAddToEitherPrometheusRule(t *testing.T) {
+	parallel(t)
 	s, dir := changesServer(t, nil)
 	two := "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata:\n  name: a\nspec:\n  groups:\n  - name: one\n    rules:\n    - alert: A\n      expr: errors > 3\n---\n" +
 		"apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata:\n  name: b\nspec:\n  groups:\n  - name: two\n    rules:\n    - alert: B\n      expr: errors > 4\n"
@@ -199,6 +202,7 @@ func grafanaTold(t *testing.T, told map[string]string) (*grafanaStandIn, *Server
 // none, where every rule there names one since, is refused, nothing
 // written.
 func TestAddGrafanaWhomItTells(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	_, s := grafanaTold(t, map[string]string{"abc": "payments-slack", "def": "oncall"})
 	h := s.Handler()

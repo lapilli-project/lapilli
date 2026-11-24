@@ -33,6 +33,7 @@ func (b *readCounter) Read(p []byte) (int, error) {
 // paths the token alone proves; on the paths a signature of the body
 // proves, only a few bodies are read at once before they have.
 func TestNotifyBodyAfterProof(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	am := notifyFixture(t, "alertmanager.json")
@@ -71,6 +72,7 @@ func TestNotifyBodyAfterProof(t *testing.T) {
 // A certificate URL is taken only as SNS spells it, on the host of the
 // topic's region: another spelling of the same certificate isn't fetched.
 func TestSNSCertSpelling(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -128,6 +130,7 @@ func TestSNSCertSpelling(t *testing.T) {
 // past the fetches allowed, a message is answered 503, which SNS tries
 // again.
 func TestSNSProvenStays(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.fetches = &limiter{rate: 1000, burst: 1000}
@@ -176,6 +179,7 @@ func TestSNSProvenStays(t *testing.T) {
 // under either SignatureVersion; the same message under a longer key is
 // taken.
 func TestSNSCertKeyOf2048BitsAtLeast(t *testing.T) {
+	parallel(t)
 	subject := "[FIRING:1]"
 	for _, version := range []string{"1", "2"} {
 		for _, bits := range []int{1024, 2047, 2048} {
@@ -200,6 +204,7 @@ func TestSNSCertKeyOf2048BitsAtLeast(t *testing.T) {
 // taken; the same message again is answered as kept without a turn, and
 // one source's notifications don't use up another's.
 func TestSNSReplays(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -239,6 +244,7 @@ func TestSNSReplays(t *testing.T) {
 // Whether SNS's topic is taken isn't said: a topic not taken and a
 // signature that doesn't hold get the same answer.
 func TestSNSTopicNotSaid(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -262,6 +268,7 @@ func TestSNSTopicNotSaid(t *testing.T) {
 // past the minute two alike are one, it is answered as kept and kept no
 // more.
 func TestGrafanaReplay(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	body := notifyFixture(t, "grafana.json")
@@ -286,6 +293,7 @@ func TestGrafanaReplay(t *testing.T) {
 // doesn't show, or too long, or with too many labels, is refused 400,
 // which an alert manager doesn't send again.
 func TestNotifyNames(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	var base map[string]any

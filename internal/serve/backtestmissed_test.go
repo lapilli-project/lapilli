@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -67,6 +70,7 @@ func missedOf(t *testing.T, rep map[string]any) (map[string]any, []string) {
 // and the comment, which says the run fails. Not held, it says nothing of
 // it, as before.
 func TestBacktestFailMissed(t *testing.T) {
+	parallel(t)
 	b := btServing(t, rulesOf(errorsRule))
 	held := map[string]any{"days": 3, "fail_missed": true}
 	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule), rulesOf(errorsLate), held))
@@ -101,6 +105,7 @@ func TestBacktestFailMissed(t *testing.T) {
 // of serve's the pull request doesn't hold at all. Nothing of them is
 // asked of the history.
 func TestBacktestFailMissedLeftAlone(t *testing.T) {
+	parallel(t)
 	b := btServing(t, rulesOf(errorsRule, moreErrorsRule))
 	held := map[string]any{"days": 3, "fail_missed": true}
 	for name, sides := range map[string][2]string{
@@ -127,6 +132,7 @@ func TestBacktestFailMissedLeftAlone(t *testing.T) {
 // change that couldn't be replayed, a rule the pull request leaves alone
 // that serve doesn't run, or one serve couldn't replay.
 func TestBacktestFailMissedNotKnown(t *testing.T) {
+	parallel(t)
 	held := map[string]any{"days": 3, "fail_missed": true}
 	for _, c := range []struct {
 		name, serving, before, after string
@@ -158,6 +164,7 @@ func TestBacktestFailMissedNotKnown(t *testing.T) {
 // is not known, never caught. So too of a rule serve runs that the pull
 // request doesn't hold.
 func TestBacktestFailMissedAnotherText(t *testing.T) {
+	parallel(t)
 	moreLate := strings.Replace(moreErrorsRule, "for: 5m", "for: 2h", 1)
 	held := map[string]any{"days": 3, "fail_missed": true}
 	for name, sides := range map[string][2]string{
@@ -197,6 +204,7 @@ func TestBacktestFailMissedAnotherText(t *testing.T) {
 // needs the runs to cover the incident's time, and to be in effect as the
 // pull request has it, and replayed, over it.
 func TestLeftAloneCatches(t *testing.T) {
+	parallel(t)
 	t0 := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
 	in := incident.Incident{ID: "INC-1", Start: t0, End: t0.Add(30 * time.Minute)}
 	at := caughtAt{in.ID, in.Start.Unix()}
@@ -270,17 +278,270 @@ func TestLeftAloneCatches(t *testing.T) {
 	if nameBase("Errors [shop]") != "Errors" || nameBase("Errors [a] [b]") != "Errors" || nameBase("[x]") != "[x]" || nameBase("Errors [shop") != "Errors [shop" {
 		t.Error(nameBase("Errors [shop]"), nameBase("Errors [a] [b]"))
 	}
-	// Two rules of a name written otherwise are one ambiguous text.
-	m := map[string]aloneText{}
-	addAloneText(m, rulesRule("A", "x > 1"))
-	addAloneText(m, rulesRule("A", "x > 1"))
+	// Two rules of a name written otherwise are one ambiguous text; the
+	// same rule twice, written otherwise, isn't.
+	m, texts := map[string]aloneText{}, aloneTexts{}
+	addAloneText(m, "A", texts.of(rulesRule("A", "x > 1")))
+	addAloneText(m, "A", texts.of(rulesRule("A", "(x) >  1.0")))
 	if m["A"].ambiguous {
 		t.Error("the same rule twice is ambiguous")
 	}
-	addAloneText(m, rulesRule("A", "x > 2"))
+	addAloneText(m, "A", texts.of(rulesRule("A", "x > 2")))
 	if !m["A"].ambiguous {
 		t.Error("two rules of a name written otherwise aren't ambiguous")
 	}
 }
 
+// A rule left alone is the same rule in serve's record when it is as
+// parsed (rules.Rule.Parsed): as its file writes it, and as Prometheus's
+// rules API prints it again. One whose expression isn't read so is the
+// same only by its text (rules.Rule.Whole): the same text is one, and
+// another, or the same rule read so on one side alone, is another.
+func TestAloneTextParsed(t *testing.T) {
+	file := rules.Rule{Name: "Errors", Group: "shop", Expr: "sum(errors) by (service) > 5", For: 2 * time.Minute, Interval: time.Minute,
+		Labels: map[string]string{"severity": "page"}}
+	api := file
+	api.Expr, api.Source = "sum by (service) (errors) > 5", "api"
+	texts := aloneTexts{}
+	if file.Whole() == api.Whole() || aloneTextOf(file) != aloneTextOf(api) || texts.of(file) != texts.of(api) {
+		t.Errorf("a rule and its API's printing aren't one")
+	}
+	tighter := api
+	tighter.Expr = "sum by (service) (errors) >= 5"
+	if aloneTextOf(file) == aloneTextOf(tighter) {
+		t.Errorf("> and >= are one")
+	}
+	// Not read as PromQL: MetricsQL's limit after by.
+	metricsQL := file
+	metricsQL.Expr = "sum(errors) by (service) limit 3 > 5"
+	if _, ok := metricsQL.Parsed(); ok {
+		t.Fatal("read as PromQL")
+	}
+	again := metricsQL
+	again.Source = "api"
+	spaced := metricsQL
+	spaced.Expr = "sum(errors) by (service)  limit 3 > 5"
+	readable := metricsQL
+	readable.Expr = "sum(errors) by (service) > 5"
+	switch {
+	case aloneTextOf(metricsQL) != aloneTextOf(again):
+		t.Error("the same text isn't one")
+	case aloneTextOf(metricsQL) == aloneTextOf(spaced):
+		t.Error("a text read otherwise, not parsed, is one")
+	case aloneTextOf(metricsQL) == aloneTextOf(readable):
+		t.Error("a text not parsed and a parsed one are one")
+	}
+	// A Grafana rule, a Loki ruler's: by their text.
+	loki := rules.Rule{Name: "L", Group: "g", Expr: `sum(count_over_time({app="a"}[1m])) > 1`, Logs: rules.LokiRuler}
+	lokiAPI := loki
+	lokiAPI.Expr = `(sum(count_over_time({app="a"}[1m])) > 1)`
+	if aloneTextOf(loki) == aloneTextOf(lokiAPI) {
+		t.Error("a Loki ruler's rule parsed as PromQL")
+	}
+}
+
 func rulesRule(name, expr string) rules.Rule { return rules.Rule{Name: name, Group: "g", Expr: expr} }
+
+// reprinting is the tests' history behind a Prometheus whose rules API
+// (--loaded-rules) answers with answer: each rule's expression printed
+// again, as Prometheus 3.5.0's promql/parser prints it. Asked an
+// expression as printed, it answers as for the one as written (as).
+type reprinting struct {
+	*history
+	answer string
+	as     map[string]string
+}
+
+func (h *reprinting) Rules(context.Context) ([]byte, error) { return []byte(h.answer), nil }
+
+func (h *reprinting) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if written, ok := h.as[expr]; ok {
+		expr = written
+	}
+	return h.history.QueryRange(ctx, expr, start, end, step)
+}
+
+// reprinted is a Prometheus's rules API answering with Errors and
+// MoreErrors, the shop group's interval 60 seconds, MoreErrors's
+// expression printed again: sum(errors) by (service) > 1 as sum by
+// (service) (errors) > 1.
+func reprinted() *reprinting {
+	return &reprinting{history: &history{}, as: map[string]string{"sum by (service) (errors) > 1": "errors > 1"},
+		answer: `{"status":"success","data":{"groups":[{"name":"shop","file":"/etc/prometheus/rules/shop.yaml","interval":60,"limit":0,
+		  "evaluationTime":0.001,"lastEvaluation":"0001-01-01T00:00:00Z","rules":[
+		  {"state":"inactive","name":"Errors","query":"errors > 5","duration":120,"keepFiringFor":0,"labels":{"severity":"page"},
+		   "annotations":{},"alerts":[],"health":"ok","type":"alerting"},
+		  {"state":"inactive","name":"MoreErrors","query":"sum by (service) (errors) > 1","duration":300,"keepFiringFor":0,"labels":{},
+		   "annotations":{},"alerts":[],"health":"ok","type":"alerting"}]}]}}`}
+}
+
+// configured is a reprinting Prometheus that serves its configuration
+// (/api/v1/status/config) as config, or fails with err.
+type configured struct {
+	*reprinting
+	config string
+	err    error
+}
+
+func (h *configured) StatusConfig(context.Context) (string, error) { return h.config, h.err }
+
+// prometheus350Config is the configuration a real Prometheus 3.5.0 served,
+// which writes every default: its evaluation_interval 1m.
+func prometheus350Config(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("../content/testdata/prometheus-3.5.0/status-config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a struct {
+		Data struct{ YAML string } `json:"data"`
+	}
+	if err := json.Unmarshal(b, &a); err != nil || !strings.Contains(a.Data.YAML, "evaluation_interval: 1m") {
+		t.Fatalf("%v: %.200s", err, a.Data.YAML)
+	}
+	return a.Data.YAML
+}
+
+// rulesEvery is a rule file of the shop group, a minute apart, holding
+// each rule given: as a Prometheus whose rules API says interval 60 runs
+// it.
+func rulesEvery(rs ...string) string {
+	return "groups:\n  - name: shop\n    interval: 1m\n    rules:\n" + strings.Join(rs, "")
+}
+
+// Serve reads its rules from Prometheus's rules API (--loaded-rules),
+// which prints each expression again: MoreErrors, written sum(errors) by
+// (service) > 1, is sum by (service) (errors) > 1 there, its for 300
+// seconds. A pull request that leaves it as its file has it and makes
+// Errors miss INC-1 keeps INC-1 caught by MoreErrors' catch in serve's
+// record: the same rule, as parsed, where its text is another, which left
+// INC-1 not known before. Left alone as >= in the pull request, it is
+// another rule than serve's record is of: not known.
+func TestBacktestFailMissedReprinted(t *testing.T) {
+	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1 # any error\n        for: 5m\n"
+	h := reprinted()
+	b := btServer(t, h, "", func(c *Config) { c.RulesPath, c.Loaded = "", true })
+	ctx := context.Background()
+	incs, err := b.s.l.Incidents(ctx, now.Add(-3*24*time.Hour), now, false)
+	if err != nil || len(incs) != 1 || !strings.Contains(fmt.Sprint(incs[0].CaughtBy), "MoreErrors") {
+		t.Fatalf("the record: %+v %v", incs, err)
+	}
+	// The rule as the file has it and as serve read it: two texts.
+	file, _ := rules.Parse([]byte(rulesEvery(moreWritten)))
+	latest, _, _ := b.s.l.Latest(ctx)
+	served, _ := b.s.parse(ctx, latest)
+	var api *rules.Rule
+	for i := range served {
+		if served[i].Name == "MoreErrors" {
+			api = &served[i]
+		}
+	}
+	if len(file) != 1 || api == nil || file[0].Whole() == api.Whole() {
+		t.Fatalf("the file's %+v, serve's %+v", file, api)
+	}
+	held := map[string]any{"days": 3, "fail_missed": true}
+	md, rep := b.done(t, b.plain, btBody(rulesEvery(errorsRule, moreWritten), rulesEvery(errorsLate, moreWritten), held))
+	sum, missed := missedOf(t, rep)
+	if sum["missed_checked"] != true || sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(0) || len(missed) != 0 {
+		t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+	}
+	if !strings.Contains(md, "Every incident a rule caught before the change is caught after it too (`--fail-missed`).") {
+		t.Errorf("the comment:\n%s", md)
+	}
+	// Left alone as another rule: serve's record isn't of it.
+	other := strings.Replace(moreWritten, "> 1", ">= 1", 1)
+	_, rep = b.done(t, b.plain, btBody(rulesEvery(errorsRule, other), rulesEvery(errorsLate, other), held))
+	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+		t.Errorf("held as >=: summary %v, missed %v", sum, missed)
+	}
+}
+
+// A rule file's group with no interval of its own runs at Prometheus's
+// evaluation_interval, which its rules API says of the group (60) and the
+// file doesn't: a pull request leaving MoreErrors alone in such a file is
+// taken at it where serve read the configuration (once a day, with the
+// scrape intervals): as a real Prometheus 3.5.0 writes it, 1m. INC-1 stays
+// caught. Where the configuration can't be read, says another interval,
+// or says none, as no Prometheus's does, MoreErrors in the file is another
+// rule than serve's record is of: not known. So too
+// where vmalert answers (its groups say their concurrency), whose groups
+// run at its own -evaluationInterval, whatever a configuration says.
+func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
+	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
+	held := map[string]any{"days": 3, "fail_missed": true}
+	for _, c := range []struct {
+		name           string
+		config         string
+		err            error
+		vmalert, known bool
+		scrape         time.Duration
+	}{
+		{"Prometheus 3.5.0's", prometheus350Config(t), nil, false, true, 0},
+		{"none said", "global:\n  scrape_interval: 15s\n", nil, false, false, 0},
+		{"not served", "", errors.New("HTTP 404"), false, false, 0},
+		{"another", "global:\n  evaluation_interval: 30s\n", nil, false, false, 0},
+		{"vmalert's", "global:\n  evaluation_interval: 1m\n", nil, true, false, 0},
+		// --scrape-interval given, the configuration is read for this alone.
+		{"--scrape-interval too", prometheus350Config(t), nil, false, true, 30 * time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := &configured{reprinting: reprinted(), config: c.config, err: c.err}
+			if c.vmalert {
+				h.answer = strings.Replace(h.answer, `"interval":60,`, `"interval":60,"concurrency":1,`, 1)
+			}
+			b := btServer(t, h, "", func(cfg *Config) { cfg.RulesPath, cfg.Loaded, cfg.ScrapeInterval = "", true, c.scrape })
+			if incs, err := b.s.l.Incidents(context.Background(), now.Add(-3*24*time.Hour), now, false); err != nil || len(incs) != 1 ||
+				!strings.Contains(fmt.Sprint(incs[0].CaughtBy), "MoreErrors") {
+				t.Fatalf("the record: %+v %v", incs, err)
+			}
+			md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
+			sum, missed := missedOf(t, rep)
+			notKnown := float64(1)
+			if c.known {
+				notKnown = 0
+			}
+			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != notKnown || len(missed) != 0 {
+				t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+			}
+		})
+	}
+	// Without --loaded-rules, serve's rules files: no interval is taken
+	// from the configuration, whatever it says.
+	s := &Server{cfg: Config{}}
+	s.saidRules.evaluation = time.Minute
+	if s.evaluationInterval() != 0 {
+		t.Error("an evaluation interval without --loaded-rules")
+	}
+}
+
+// Serve reads Prometheus's configuration once a day, and its rules every
+// look. Its evaluation_interval was 30s, as the shop group ran, when it
+// was read; since, it is 1m, and the group runs at 60s in serve's latest
+// version of the rules, the configuration not read again. A pull
+// request's MoreErrors with no interval runs at 1m after the merge: not
+// the 30s rule serve's record over INC-1 is of. It isn't taken at the 30s
+// still kept: not known.
+func TestBacktestFailMissedEvaluationIntervalSince(t *testing.T) {
+	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
+	h := &configured{reprinting: reprinted(), config: "global:\n  evaluation_interval: 30s\n"}
+	h.answer = strings.Replace(h.answer, `"interval":60,`, `"interval":30,`, 1)
+	b := btServer(t, h, "", func(c *Config) { c.RulesPath, c.Loaded = "", true })
+	ctx := context.Background()
+	if incs, err := b.s.l.Incidents(ctx, now.Add(-3*24*time.Hour), now, false); err != nil || len(incs) != 1 ||
+		!strings.Contains(fmt.Sprint(incs[0].CaughtBy), "MoreErrors") {
+		t.Fatalf("the record: %+v %v", incs, err)
+	}
+	h.answer, h.config = reprinted().answer, "global:\n  evaluation_interval: 1m\n"
+	raw := ""
+	if err := b.s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := b.s.l.Versions(ctx, now.Add(-3*24*time.Hour), now, false); len(vs) != 2 || b.s.evaluationInterval() != 30*time.Second {
+		t.Fatalf("%d versions, the evaluation interval %s", len(vs), b.s.evaluationInterval())
+	}
+	held := map[string]any{"days": 3, "fail_missed": true}
+	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
+	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+		t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+	}
+}

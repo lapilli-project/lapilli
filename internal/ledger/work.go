@@ -740,6 +740,11 @@ func civil(t time.Time) int64 {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / 86400
 }
 
+// coversLooked, when set, is told of each time Covers looks a repeating
+// window's schedule up: the tests count them (TestWindowsScale), which
+// Excusing works out once a span rather than once a firing.
+var coversLooked func()
+
 // Covers reports whether a time falls in the window, or in one of its
 // repeats.
 func (w Window) Covers(t time.Time) bool {
@@ -758,6 +763,9 @@ func (w Window) Covers(t time.Time) bool {
 		w.resolve()
 		if w.sch == nil {
 			return false
+		}
+		if coversLooked != nil {
+			coversLooked()
 		}
 		due := w.sch.Last(w.lastAt(t), loc)
 		if due.IsZero() || due.Before(w.Start) {

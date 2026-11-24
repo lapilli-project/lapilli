@@ -40,6 +40,7 @@ func (h *jobsOfHistory) QueryRange(ctx context.Context, expr string, start, end 
 // the jobs its series come from, asked once a day; refused, as before,
 // and asked again an hour later.
 func TestContentJobsOf(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := server(t, func(c *Config) { c.CheckContent = true })
 	h := &jobsOfHistory{targetsHistory: &targetsHistory{history: &history{}}, refuse: true}

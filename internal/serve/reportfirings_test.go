@@ -221,6 +221,7 @@ func TestReportFirings(t *testing.T) {
 
 // --config declares a report holding it, as the form and the API make one.
 func TestReportFiringsDeclared(t *testing.T) {
+	parallel(t)
 	s, _ := configServer(t, strings.Replace(configFile, "sections: [summary, noise]", "sections: [firings, summary]", 1), nil)
 	rs, err := s.l.Scheduleds(context.Background())
 	if err != nil || len(rs) != 1 || !rs[0].Declared || !reflect.DeepEqual(rs[0].Sections, []string{"summary", "firings"}) {

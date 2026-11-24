@@ -295,13 +295,6 @@ jobs:
           status: true
 ```
 
-A merge queue's run (GitHub's `merge_group`) isn't taken yet: its commit
-is the queue's, neither a pull request's head nor GitHub's merge of one,
-and the event names no pull request. `github.sh` says so and fails,
-setting no status, so a branch whose rules require the job or
-`lapilli/backtest` can't merge through a queue yet: leave `merge_group`
-out of the workflow's `on:`, and the queue off for that branch.
-
 ### Each host's status and token
 
 Each host sets it through its own API, and the token needs more than the
@@ -309,8 +302,8 @@ comment does:
 
 | Host | Status | The token |
 |---|---|---|
-| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha`, when the checkout is that commit or GitHub's merge of it (`GITHUB_SHA`): of another, such as the branch checked out by name after it moved, the run is refused, the job fails, and the status is a `failure` there saying so. Into a branch other than `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
-| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit; into a branch other than `CI_DEFAULT_BRANCH`, named `lapilli/backtest (into BRANCH)` | the Developer role (the comment's Reporter can't), scope `api` |
+| GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha`, when the checkout is that commit or GitHub's merge of it (`GITHUB_SHA`): of another, such as the branch checked out by name after it moved, the run is refused, the job fails, and the status is a `failure` there saying so. In a merge queue's run, on `merge_group.head_sha`, the checkout. Into a branch other than `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
+| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit (in a merged results or merge train pipeline, it isn't); into a branch other than `CI_DEFAULT_BRANCH`, named `lapilli/backtest (into BRANCH)` | the Developer role (the comment's Reporter can't), scope `api` |
 | Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, `INPROGRESS` then `SUCCESSFUL` or `FAILED`, key `lapilli-backtest` (a key's status written over by the next, a pull request's into another destination too, as Pipelines doesn't say the default branch), its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
 | Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`; in Actions, into a branch other than the event's `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
 | Azure DevOps | a pull request status, `POST .../pullRequests/{id}/statuses`, `pending` then `succeeded` or `failed`, genre `lapilli` and name `backtest`, on the iteration at the head commit (`GET .../iterations`): none when there is no such iteration, as one on the pull request alone would stay after a later push | a personal access token's Code (status), `vso.code_status`, or the build service's Contribute to pull requests (not checked against an account) |
@@ -318,6 +311,115 @@ comment does:
 Each is tested against its reference's documented answers, with a server
 standing in; Gitea's also in CI's run against a real Gitea
 (`test/e2e/backtest.sh`).
+
+### A merge queue
+
+GitHub's merge queue checks each pull request it holds on a commit of its
+own, a merge group's head (`merge_group.head_sha`): the branch the pull
+requests go into, with the pull requests ahead in the queue and this one
+on it. Its event names a base too, `merge_group.base_sha`, "the SHA of
+the merge group's parent commit", its webhook reference says. A required
+status is read on the head, and GitHub's Actions runs a workflow for the
+group only on its own event, `merge_group`, beside `pull_request`. On that event, `github.sh` (and the
+action) backtests the head against the base, both as the event says,
+`INCIDENTS` and the expectations of the rules in place read from the
+base; posts no comment, as no pull request is the run's, and writes the
+report to the job's log instead; and with `STATUS` sets the status on the
+head, `lapilli/backtest`, or, of a queue into a branch other than the
+default, `lapilli/backtest (into BRANCH)`, as a pull request's is named.
+`FAIL_MISSED` and the expectations hold it as they hold a pull request:
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+jobs:
+  backtest:
+    # A merge group's event says no pull request: its run is never skipped.
+    if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          paths: alerts
+          incidents: incidents.yaml
+          prometheus-url: ${{ vars.PROMETHEUS_URL }}
+          since: 14d
+          fail-missed: true
+          status: true
+```
+
+What GitHub's run says is held to the queue's, and a run that isn't is
+refused:
+
+- The event must hold a `merge_group`, its `head_sha` and `base_sha` two
+  commits' full hashes and its `base_ref` a branch's, `refs/heads/BRANCH`;
+  `GITHUB_REF` must be the queue's ref for that branch, the event's
+  `merge_group.head_ref`, `refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`;
+  and `GITHUB_SHA` the group's head. Otherwise the job fails at once,
+  setting no status, which the queue doesn't take as passing.
+- The checkout must be the group's head, gates or not: a branch checked
+  out by its name, or a pull request's head, is refused, the job fails,
+  and its status is a failure on the head.
+- The base must be an ancestor of the head in the clone, as the queue
+  made the head on it. A group behind another, or of a queue that merges
+  by rebasing, holds more than one commit over its base: `fetch-depth: 0`.
+- `TARGET` (but `HEAD^1`, the action's default), `TARGET_BRANCH`,
+  `STATUS_SHA` other than the head, and a `PR` other than the number the
+  queue's ref names, would name another base or head: each fails the job,
+  its status a failure on the head.
+
+Keep "Only merge non-failing pull requests" on in the branch's merge
+queue settings, GitHub's default, when the gate is required. GitHub
+doesn't say what `merge_group.base_sha` is of a group queued behind
+another: the branch's commit, so that the change judged holds the pull
+requests ahead too, or the head of the group ahead, its parent commit, so
+that each group is judged on what it adds alone. The recipe judges the
+head against that base, whichever it is, and can't tell which it was
+given. With the setting on, a pull request merges only once its own
+group passed, either way. With it off, a pull request whose group failed
+merges once a group behind it passes, and of the second reading, that
+group was judged on a diff that didn't hold it.
+
+Run the job on the queue's event without a `paths:` filter, which
+`merge_group` doesn't take: a group whose rules didn't change passes,
+saying so, and a group of a pull request the job didn't run on would
+never get the status. The `if:` of a pull request's run, which keeps a
+fork's out, doesn't hold for a group: its event names no pull request,
+and a fork's pull request, once someone who may write to the repository
+queued it, is run in the group in the repository's own context, with its
+secrets and its ID token. Its workflow is the group's head's, which the
+pull request may change, as a pull request's run is: have a code owner
+review `.github/workflows/`.
+
+### A merge train
+
+A GitLab merge train's pipeline (`CI_MERGE_REQUEST_EVENT_TYPE` is
+`merge_train`) runs on a merge commit, `CI_COMMIT_SHA`, of the source
+branch's head (`CI_MERGE_REQUEST_SOURCE_BRANCH_SHA`) on the target branch
+with the merge requests ahead in the train, GitLab's [merge request
+pipelines' reference](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/)
+says; its first parent is the commit the pipeline is based on, from which
+a diff holds the merge request's changes alone (as its
+`CI_MERGE_REQUEST_PIPELINE_BASE_SHA` is described). `gitlab.sh` compares
+that merge with its first parent, `INCIDENTS` and the expectations of the
+rules in place read from it, and sets the status on the source branch's
+head, as in a merged results pipeline. It doesn't take
+`CI_MERGE_REQUEST_TARGET_BRANCH_SHA` there, which the reference says of
+merged results pipelines alone. A checkout that isn't that merge, or a
+train's commit that isn't one of the source branch's head (its second
+parent), is refused, gates or not, the job failing: the reference says
+the base of that merge alone. A `TARGET` or `TARGET_BRANCH` the job gives
+is taken as it is, as in a merge request's other pipelines.
 
 ## Through lapilli serve
 
@@ -361,17 +463,58 @@ write tokens to workflows from pull requests" is on: keep that setting off
 don't: a fork's run in the repository carries the repository's own
 `repository_id`.
 
+A merge queue's run asks with a token whose `event_name` is
+`merge_group` (its `ref` the queue's, `refs/heads/gh-readonly-queue/...`),
+which an entry that pins `pull_request` doesn't take. Serve takes it only
+of an entry that names it, one of its own beside the pull requests':
+
+```yaml
+trust:
+  - name: alerts
+    issuer: https://token.actions.githubusercontent.com
+    audience: https://lapilli-ci.example.com
+    claims: {repository_id: "123456789", event_name: pull_request}
+  - name: alerts-queue
+    issuer: https://token.actions.githubusercontent.com
+    audience: https://lapilli-ci.example.com
+    claims: {repository_id: "123456789", event_name: merge_group}
+```
+
+Name it only for a repository whose queue you want backtested: a group
+holds the pull requests someone who may write to the repository queued, a
+fork's among them, and its run gets an ID token in the repository's own
+context, which a fork's `pull_request` run never does. The pull request's
+number the job sends is the one the queue's ref names, kept as the job
+says it, as the token's ref says none: the group's backtest takes the
+place of none waiting.
+
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate
 (`fail-on-expectations`, `expect-required`) reads the summary line as it
 reads Lapilli's. `fail-missed` holds the change to serve's incidents: the
 rules that differ are judged by the backtest, the rules left alone by
 serve's record of them, which rules caught each incident, not replayed: a
-catch counts only where the rule was written then as it is after the
-change. An incident a rule left alone may have caught with no record of
-it (serve doesn't run the rule as the pull request has it, or its runs
-don't cover the incident's time), or that a rule written otherwise then
-caught, is not known, which fails the step as a gate that can't judge
+catch counts only where the rule was then the rule it is after the change,
+as parsed: a rule serve reads from Prometheus's rules API, which prints
+its expression again (`sum by (a) (x)` for `sum(x) by (a)`, `5m` for
+`300s`, its `for` in seconds), is the rule its file writes. An incident
+a rule left alone may have caught with no record of it (serve doesn't run
+the rule as the pull request has it, or its runs don't cover the
+incident's time), or that a rule written otherwise then caught, is not
+known, which fails the step as a gate that can't judge
+([backtests.md](design/backtests.md#held-to-the-incidents-step-4)); so is
+one a rule caught whose expression Lapilli compares only by its text (a
+Grafana rule, a Loki ruler's, what MetricsQL reads otherwise than
+Prometheus). A rule file's group with no `interval` runs at Prometheus's
+`evaluation_interval`, which serve reads from `/api/v1/status/config`
+with `--loaded-rules`: where that isn't served (most managed services
+don't serve it), or doesn't say it, or the rule is
+vmalert's, the group is another than the one the rules API says, and its
+rules' catches are not known: give the group its `interval`. A known
+limit: Prometheus's rules API doesn't say a group's `query_offset`, so
+serve's record of a rule read from it is of the rule without one. A file
+group that gives one is another, its catches not known; one that gives
+none is that rule, whatever offset the group Prometheus ran had
 ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through

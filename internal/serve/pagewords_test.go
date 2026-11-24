@@ -13,6 +13,7 @@ import (
 // whole weeks had one, as "1 of 3", in every language; Korean and Japanese
 // put the whole first, and said "0 of 3" as "3 of 0".
 func TestRefiredWeeksInOrder(t *testing.T) {
+	parallel(t)
 	for lang, want := range map[string]string{
 		"en": "re-fired: 11% of firings, 1 of 3 whole weeks",
 		"ko": "재발화: 발화의 11%, 온전한 3주 중 1주",
@@ -29,6 +30,7 @@ func TestRefiredWeeksInOrder(t *testing.T) {
 // what a column of what caught something, or of the rule that caught an
 // incident, means; those say 정탐 (of firings) and 탐지 (of incidents).
 func TestCaughtNotNoise(t *testing.T) {
+	parallel(t)
 	for _, key := range []string{"Caught", "caught", "○ Caught", "● Nothing", "✓ Caught", "✓ caught", "○ Caught now", "○ Would catch",
 		"caught it, %s", "caught it, %s, and noisy that week", "caught by %s", "%s caught it first, noisy that week"} {
 		if got := tr("ko", key); strings.Contains(got, "잡음") {
@@ -44,6 +46,7 @@ func TestCaughtNotNoise(t *testing.T) {
 // so and links to the closed ones, with nothing to clear; with none at
 // all, no filters are offered.
 func TestProposalsNoneOpen(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	if v := proposalsFor(t, s, ""); v.Total != 0 || v.Empty == nil || v.Empty.Title != "No proposals yet." {
 		t.Fatalf("none: %+v", v.Empty)
@@ -78,6 +81,7 @@ func TestProposalsNoneOpen(t *testing.T) {
 // TestMatchInEffectSaid: a named signal's choice to follow the match in
 // effect says what that is.
 func TestMatchInEffectSaid(t *testing.T) {
+	parallel(t)
 	for match, want := range map[string]string{"service": "<code><bdi>service</bdi></code>", "": "no label"} {
 		s := signalServer(t, shopHistory(), func(c *Config) {
 			c.Options.Match = nil

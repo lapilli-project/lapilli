@@ -201,6 +201,7 @@ func probeGone(t *testing.T, s *Server) {
 // caught by the rule with no entry alone. The window's page, MCP and the
 // Incident sources panel say so.
 func TestSignalRemovedWindowsCaughtByRulesWithNoEntry(t *testing.T) {
+	parallel(t)
 	s := goneServer(t, latencyOnly)
 	// In effect, its window is Other's alone too: Errors' entry keeps it
 	// from probe's windows, as it does once probe is gone.
@@ -236,6 +237,7 @@ func TestSignalRemovedWindowsCaughtByRulesWithNoEntry(t *testing.T) {
 
 // Taken away on the Settings page: the same.
 func TestSignalTakenAwayOnPageJudgesNoOne(t *testing.T) {
+	parallel(t)
 	s := goneServer(t, latencyOnly)
 	if code, body := adminPost(t, s, "/settings/signals", url.Values{"was": {"probe"}, "remove": {"1"}}, "ana@example.com"); code != http.StatusSeeOther {
 		t.Fatalf("taken away: %d %s", code, body)
@@ -246,6 +248,7 @@ func TestSignalTakenAwayOnPageJudgesNoOne(t *testing.T) {
 
 // Set aside at a start past eight, the UI's newest: the same.
 func TestSignalSetAsideJudgesNoOne(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := goneServer(t, latencyOnly)
 	values := map[string]string{}
@@ -279,6 +282,7 @@ func TestSignalSetAsideJudgesNoOne(t *testing.T) {
 // keeps everyone's record, Errors' firings of its week judged, black, as
 // Errors catches it no more than it caught the window; Other catches it.
 func TestSignalGoneWindowConfirmed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := goneServer(t, latencyOnly)
 	restartWithout(s, "probe")
@@ -318,6 +322,7 @@ func TestSignalGoneWindowConfirmed(t *testing.T) {
 // written down alone, and catches no window, probe's neither. The rule's
 // page and MCP say so. An incident written down judges it.
 func TestEntryNamingNoSignalInEffectServe(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := goneServer(t, nil)
 	es, _ := json.Marshal([]verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}}})
@@ -373,6 +378,7 @@ func TestEntryNamingNoSignalInEffectServe(t *testing.T) {
 // the entries are read for the windows of named signals, now none's, which
 // keep no record, and which Errors, an entry's, doesn't catch.
 func TestSignalsAllGone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := goneServer(t, nil)
 	es, _ := json.Marshal(latencyOnly)
@@ -403,6 +409,7 @@ func TestSignalsAllGone(t *testing.T) {
 // what they catch and the record they keep counted again as the report
 // has them.
 func TestNumbersRecountNotInEffect(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}

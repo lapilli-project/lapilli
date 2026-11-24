@@ -20,6 +20,7 @@ import (
 // line with context=all; side by side, a run taken out beside the run put
 // in after it, line by line, and the lines the same on both sides.
 func TestShapeDiff(t *testing.T) {
+	parallel(t)
 	var a, b []string
 	for i := range 20 {
 		a = append(a, fmt.Sprint("line ", i))
@@ -81,6 +82,7 @@ func TestShapeDiff(t *testing.T) {
 // asked, side by side in a table headed with the two; the options are
 // what the page is cached by on that tab alone, and only those it has.
 func TestVersionsDiffOptions(t *testing.T) {
+	parallel(t)
 	s, rules := server(t, nil)
 	ctx := context.Background()
 	for i := range 2 {

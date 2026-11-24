@@ -20,13 +20,18 @@ import (
 // TestChangePagesScale: at two thousand rules, four weeks of their firings
 // and a thousand proposals, the proposals list, a proposal's page in each
 // way it is shown, the tasks and the Manage page, worked out afresh, and a
-// quiet window's preview, each take under a second.
+// quiet window's preview, each hold to a budget of what the ledger does
+// (ledgerWork), not of time, so that a slow runner fails none: a few
+// statements for each table a page reads, a tenth of the rules past any of
+// them; one for each rule, proposal or firing, far past. A preview writes
+// nothing. The time each took is logged.
 func TestChangePagesScale(t *testing.T) {
+	parallel(t)
 	if testing.Short() {
 		t.Skip("short")
 	}
 	ctx := context.Background()
-	s, rules := server(t, nil)
+	s, rules := server(t, counting)
 	const n = 2000
 	var b strings.Builder
 	b.WriteString("groups:\n")
@@ -79,6 +84,19 @@ func TestChangePagesScale(t *testing.T) {
 		}
 	}
 	h := s.Handler()
+	pageMost := int64(n / 10)
+	// The first view of the proposals reads, for each open proposal of a
+	// for its rule's hash isn't found among the rules in effect by (none
+	// has one here), the version it was made against, and keeps what it
+	// works out of it (outlastsNow): a statement a proposal at most,
+	// beside the page's own. The pages below are worked out afresh but
+	// for that.
+	w := httptest.NewRecorder()
+	did := ledgerDid(t, s, func() { h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/proposals", nil)) })
+	t.Logf("%-60s %d %8d bytes  %d statements, the first view", "/proposals", w.Code, w.Body.Len(), did.statements)
+	if most := 1000 + pageMost; w.Code != http.StatusOK || did.statements > most {
+		t.Errorf("/proposals, the first view: %d, %d statements, over %d", w.Code, did.statements, most)
+	}
 	for _, path := range []string{"/proposals", "/proposals?state=all", "/proposals?state=all&kind=for&by=person&team=team3", "/proposals/1",
 		"/proposals/1?diff=split&context=all", "/proposals/2", "/proposals/4", "/tasks", "/tasks?status=all", "/manage"} {
 		s.cache.Lock()
@@ -86,14 +104,14 @@ func TestChangePagesScale(t *testing.T) {
 		s.cache.Unlock()
 		began := time.Now()
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		did := ledgerDid(t, s, func() { h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil)) })
 		took := time.Since(began)
-		t.Logf("%-60s %d %8d bytes  %s", path, w.Code, w.Body.Len(), took.Round(time.Microsecond))
+		t.Logf("%-60s %d %8d bytes  %d statements  %s", path, w.Code, w.Body.Len(), did.statements, took.Round(time.Microsecond))
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d", path, w.Code)
 		}
-		if budget := time.Duration(float64(time.Second) * slow); took > budget {
-			t.Errorf("%s took %s, over %s", path, took, budget)
+		if did.statements > pageMost {
+			t.Errorf("%s: %d statements, over %d: one for each rule, proposal or firing?", path, did.statements, pageMost)
 		}
 	}
 	// A quiet window's preview, every day over the four weeks, and once
@@ -108,14 +126,15 @@ func TestChangePagesScale(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Sec-Fetch-Site", "same-origin")
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
+		did := ledgerDid(t, s, func() { h.ServeHTTP(w, req) })
 		took := time.Since(began)
-		t.Logf("%-60s %d %8d bytes  %s", name, w.Code, w.Body.Len(), took.Round(time.Microsecond))
+		t.Logf("%-60s %d %8d bytes  %d statements %d rows  %s", name, w.Code, w.Body.Len(), did.statements, did.rows, took.Round(time.Microsecond))
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d\n%s", name, w.Code, w.Body.String())
 		}
-		if budget := time.Duration(float64(time.Second) * slow); took > budget {
-			t.Errorf("%s took %s, over %s", name, took, budget)
+		// rows is -1 on Postgres, which counts statements alone.
+		if did.statements > pageMost || did.rows > 0 {
+			t.Errorf("%s: %d statements, over %d, and %d rows written, want none", name, did.statements, pageMost, did.rows)
 		}
 	}
 }

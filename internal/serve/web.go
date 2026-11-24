@@ -613,7 +613,7 @@ func (s *Server) withToken(tk token, h http.HandlerFunc) http.HandlerFunc {
 		// A job copying incidents or firings needs a few writes a second,
 		// and someone who has its token shouldn't get more: each write
 		// holds the ledger's one writer, and is kept.
-		if !tk.rate.allow(time.Now()) {
+		if !tk.rate.allow(s.wall()) {
 			w.Header().Set("Retry-After", strconv.Itoa(tk.rate.wait()))
 			http.Error(w, "too many writes: try again in a few seconds", http.StatusTooManyRequests)
 			return

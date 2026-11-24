@@ -282,6 +282,7 @@ var recipeHosts = []recipeHost{
 // (Azure's 4,000 characters) is cut as mdCut cuts a task's: at a line's
 // end, no code span cut open, a fenced block cut open closed.
 func TestChangeRecipesCutClosed(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}
@@ -321,6 +322,7 @@ func TestChangeRecipesCutClosed(t *testing.T) {
 }
 
 func TestChangeRecipes(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -388,6 +390,7 @@ func TestChangeRecipes(t *testing.T) {
 // A document no file in the clone is: Lapilli is told the change failed,
 // and why; nothing is pushed.
 func TestChangeRecipeNoFile(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -432,6 +435,7 @@ func TestChangeRecipeNoFile(t *testing.T) {
 // else takes over nothing; and none, when the host can't say who the token
 // is.
 func TestChangeRecipeTakesOnlyItsOwn(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -490,6 +494,7 @@ func TestChangeRecipeTakesOnlyItsOwn(t *testing.T) {
 // from the branch in the repository itself, into BASE, is the change's,
 // whoever opened it; one from a fork, or into another branch, never is.
 func TestChangeRecipeOpenAlready(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -544,6 +549,7 @@ func TestChangeRecipeOpenAlready(t *testing.T) {
 // of a workflow, would otherwise have the recipe push that workflow to the
 // repository, which a push runs with its secrets before anyone reviews it.
 func TestChangeRecipeOnlyRulesPaths(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	workflow := "on: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: promtool check rules alerts/*.yaml\n"
 	script := "#!/bin/sh\nmake test\n"

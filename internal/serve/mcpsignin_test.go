@@ -63,6 +63,7 @@ type signedInWay struct {
 // their own twenty an hour. It was kept as "anonymous"'s, which the person
 // could approve alone, and every agent shared one limit.
 func TestAgentProposesSignedIn(t *testing.T) {
+	parallel(t)
 	oidc := func(session bool) func(t *testing.T) (signedInWay, func(*Config)) {
 		return func(t *testing.T) (signedInWay, func(*Config)) {
 			idp := idptest.New(t, "lapilli", "the-client-secret", func() time.Time { return now })
@@ -254,6 +255,7 @@ func (b *browser) form(method, target string, form url.Values) *httptest.Respons
 // everyone is an admin and no one is named, an agent proposes as anyone
 // there does, "anonymous".
 func TestAgentProposesAsNoOne(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	if _, _, err := s.toolPropose(ctx, &mcp.CallToolRequest{}, proposeIn{Rule: "Errors", Kind: "for", For: "15m"}); err == nil {

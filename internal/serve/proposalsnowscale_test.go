@@ -24,16 +24,19 @@ import (
 // rules of its own (TestProposalsColdScale has them alone). What is worked out of each when it is read (whether it
 // is stale, whether its for outlasts one event, whether its backtest's
 // period had a record) keeps the proposals list, its stale ones, and the
-// API's list each under a second, worked out afresh: cold, nothing of it
-// worked out before (the for_outlasts kept while serve runs forgotten
-// too), and warm. The times and what each allocated are logged, the
-// median of seven warm; a cold one allocates less than budgetCold.
+// API's list each to a statement for each proposal at most, worked out
+// afresh: cold, nothing of it worked out before (the for_outlasts kept
+// while serve runs forgotten too), and warm, never one for each rule of
+// a version (ledgerWork); and a cold one allocates less than budgetCold:
+// counts, not times, so that a slow runner fails none. The times, the
+// median of seven warm, what each allocated and the statements are
+// logged. It runs alone: what it allocates is the process's.
 func TestProposalsNowScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
 	ctx := context.Background()
-	s, dir := server(t, nil)
+	s, dir := server(t, counting)
 	const n = 1000
 	var b strings.Builder
 	b.WriteString("groups:\n")
@@ -83,7 +86,7 @@ func TestProposalsNowScale(t *testing.T) {
 		}
 	}
 	h := s.Handler()
-	ask := func(path string, cold bool) (*httptest.ResponseRecorder, time.Duration, uint64) {
+	ask := func(path string, cold bool) (*httptest.ResponseRecorder, time.Duration, uint64, int64) {
 		s.cache.Lock()
 		s.cache.gen = ""
 		s.cache.Unlock()
@@ -97,29 +100,34 @@ func TestProposalsNowScale(t *testing.T) {
 		runtime.ReadMemStats(&m0)
 		began := time.Now()
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		did := ledgerDid(t, s, func() { h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil)) })
 		took := time.Since(began)
 		runtime.ReadMemStats(&m1)
-		return w, took, m1.TotalAlloc - m0.TotalAlloc
+		return w, took, m1.TotalAlloc - m0.TotalAlloc, did.statements
 	}
 	const budgetCold = 400 << 20
 	for _, path := range []string{"/proposals", "/proposals?state=all", "/proposals?stale=1", "/api/v1/proposals", "/api/v1/proposals?state=proposed"} {
-		w, cold, coldBytes := ask(path, true)
+		w, cold, coldBytes, coldSent := ask(path, true)
 		var took []time.Duration
 		var bytes uint64
+		var warmSent int64
 		for range 7 {
 			var d time.Duration
-			w, d, bytes = ask(path, false)
+			var sent int64
+			w, d, bytes, sent = ask(path, false)
 			took = append(took, d)
+			warmSent = max(warmSent, sent)
 		}
 		slices.Sort(took)
-		t.Logf("%-34s %d %7d bytes  cold %s, %d MB  warm median %s (%s to %s), %d MB", path, w.Code, w.Body.Len(), cold.Round(time.Microsecond), coldBytes>>20,
-			took[3].Round(time.Microsecond), took[0].Round(time.Microsecond), took[6].Round(time.Microsecond), bytes>>20)
+		t.Logf("%-34s %d %7d bytes  cold %s, %d MB, %d statements  warm median %s (%s to %s), %d MB, %d statements at most", path, w.Code, w.Body.Len(),
+			cold.Round(time.Microsecond), coldBytes>>20, coldSent, took[3].Round(time.Microsecond), took[0].Round(time.Microsecond), took[6].Round(time.Microsecond), bytes>>20, warmSent)
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d", path, w.Code)
 		}
-		if budget := time.Duration(float64(time.Second) * slow); took[3] > budget || cold > budget {
-			t.Errorf("%s took %s cold, %s warm, over %s", path, cold, took[3], budget)
+		// Twelve hundred proposals, a statement each at most (the API's,
+		// of the two hundred applied: some 200), and a few for the page.
+		if most := int64(n + 200 + 100); coldSent > most || warmSent > most {
+			t.Errorf("%s: %d statements cold and %d warm, over %d", path, coldSent, warmSent, most)
 		}
 		if coldBytes > budgetCold*uint64(slow) {
 			t.Errorf("%s allocated %d MB cold, over %d", path, coldBytes>>20, budgetCold>>20)

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +17,18 @@ import (
 func TestMain(m *testing.M) {
 	// Run as promtool, through scenariotest.Install's link: a stand-in.
 	scenariotest.Fake()
-	os.Exit(m.Run())
+	done, err := freshLedgers()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "the fresh ledger:", err)
+		os.Exit(1)
+	}
+	// SQLite's connection hook is registered before any test opens a
+	// ledger: registered by the first test that counts, it would be written
+	// while tests running in parallel open theirs.
+	watchLedgers()
+	code := m.Run()
+	done()
+	os.Exit(code)
 }
 
 // scenarioServer is serve with its rules read and run once, held to an
@@ -169,6 +181,7 @@ func TestExpectationScenarios(t *testing.T) {
 // Without --promtool, a scenario is not known, never met, and nothing is
 // run.
 func TestExpectationScenariosNoPromtool(t *testing.T) {
+	parallel(t)
 	s, _, _, count := scenarioServer(t, "expectations:\n  - rule: Errors\n    scenarios: [tests/errors.yaml]\n",
 		map[string]string{"tests/errors.yaml": scenariotest.Test("pass")}, false)
 	checkAgain(t, s)
@@ -182,6 +195,7 @@ func TestExpectationScenariosNoPromtool(t *testing.T) {
 // and whatever files beside its own --expect the paths name: each is said
 // as not run through lapilli serve, counted as nothing unrun.
 func TestBacktestScenariosNotRun(t *testing.T) {
+	parallel(t)
 	link := scenariotest.Install(t)
 	count := scenariotest.Counted(t, link)
 	dir := t.TempDir()

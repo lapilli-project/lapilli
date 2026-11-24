@@ -30,6 +30,7 @@ import (
 // hundred a few for each of them, writing no more rows than the firings
 // kept. The time each took is logged.
 func TestManyAtOnceScale(t *testing.T) {
+	parallel(t)
 	if testing.Short() {
 		t.Skip("short")
 	}

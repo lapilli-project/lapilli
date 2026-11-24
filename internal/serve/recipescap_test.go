@@ -104,6 +104,7 @@ func TestRecipesHoldTheirAnswersWhateverCurl(t *testing.T) {
 // incident recipes that ask with -f, which fails a 4xx or a 5xx alone,
 // one as a page of nothing; each exited 0.
 func TestRecipesTakeA2xxAlone(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	// Sent elsewhere, with nothing in the answer.
 	moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

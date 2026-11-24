@@ -169,6 +169,7 @@ func reportOf(t *testing.T, s *Server) verdict.Report {
 // checkout firing waits for the probe's too, which keeps no record of the
 // week its data began in.
 func TestSignalsJudgedByTheirOwn(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
 	rows, err := s.l.SignalRows(ctx)
@@ -234,6 +235,7 @@ func TestSignalsJudgedByTheirOwn(t *testing.T) {
 // signal, each matched on its own labels; what is decided of one holds for
 // it alone, and a run after it goes on with each signal's own.
 func TestSignalWindowsKeyed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	at := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC) // when Errors fires for checkout
@@ -311,6 +313,7 @@ func TestSignalWindowsKeyed(t *testing.T) {
 // rest; a later run reads it from where it was missed, its windows in
 // from there, and its record stands meanwhile.
 func TestSignalMissedCatchesUp(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, nil)
@@ -376,6 +379,7 @@ func TestSignalMissedCatchesUp(t *testing.T) {
 // A rule entry keeps its rules from the windows of signals it doesn't
 // name: they neither catch them nor wait for those signals.
 func TestSignalRuleEntry(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	at := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
@@ -424,6 +428,7 @@ func signalWindowsHistory() *sigHistory {
 // when each signal keeps the record; impacts.by_signal; each incident's
 // signal, and a rule's signals and what its record waits for.
 func TestSignalsShown(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, signalWindowsHistory(), nil)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/metrics")
@@ -493,6 +498,7 @@ func TestSignalsShown(t *testing.T) {
 // tied to it; and the summary's unjudged counted again from the report of
 // its week.
 func TestNumbersRecountSignalsServe(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}
@@ -552,6 +558,7 @@ func TestNumbersRecountSignalsServe(t *testing.T) {
 // as TestMetricsStable holds the rest: on lapilli serve's /metrics, with
 // named signals.
 func TestSignalMetricsStable(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, signalWindowsHistory(), nil)
 	_, body, _ := get(t, s.Handler(), "/metrics")
 	doc, err := os.ReadFile("../../docs/numbers.md")
@@ -591,6 +598,7 @@ func TestSignalMetricsStable(t *testing.T) {
 // signal's criterion held, the rule entries and the match in effect: a
 // change to any of them holds the proposals it could change.
 func TestSignalsHeld(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
 	a, err := s.impactHeld(ctx)
@@ -610,6 +618,7 @@ func TestSignalsHeld(t *testing.T) {
 // A signal taken away is turned off: its windows stay, as incidents, with
 // its name; it keeps no record, and no firing waits for it.
 func TestSignalRemoved(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, signalWindowsHistory(), nil)
 	s.cfg.Signals = s.cfg.Signals[:1] // started again without the probe
@@ -636,6 +645,7 @@ func TestSignalRemoved(t *testing.T) {
 // that judges reads it as tied to no alert, and says so, rather than
 // failing.
 func TestSignalWithNoRowYet(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, signalWindowsHistory(), nil)
 	s.cfg.Signals = append(s.cfg.Signals, ledger.SignalDef{Name: "latency", Expr: "latency_seconds > 1", For: 5 * time.Minute, Record: true})
 	s.sigs.Lock()
@@ -663,6 +673,7 @@ func TestSignalWithNoRowYet(t *testing.T) {
 // Started with named signals, the pages are served before the leader's
 // first round keeps them in the ledger.
 func TestSignalPagesBeforeFirstSync(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	rulesDir := filepath.Join(dir, "rules")
 	os.MkdirAll(rulesDir, 0o755)
@@ -716,6 +727,7 @@ func reportSearch(rep verdict.Report) []verdict.Judged {
 // what it sees now, and their firings judged again, as one started with
 // the new expression ties them.
 func TestSignalExprChangedTiesAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	narrow := `http_requests_total{service="checkout"}`
 	hist := func() *sigHistory {
@@ -755,6 +767,7 @@ func TestSignalExprChangedTiesAgain(t *testing.T) {
 // alert is tied again on it, and every firing judged again, as one started
 // on it ties and judges them.
 func TestSignalMatchChangedTiesAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	t.Run("following signals", func(t *testing.T) {
 		s := signalServer(t, shopHistory(), func(c *Config) { c.Signals[1].Match = nil })
@@ -802,6 +815,7 @@ func TestSignalMatchChangedTiesAgain(t *testing.T) {
 // judges them; and a bit a tally still carries isn't given to a signal
 // added in place of the one that had it.
 func TestSignalsChangeRejudgeDurable(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := signalWindowsHistory()
 	s := signalServer(t, h, nil)
@@ -840,6 +854,7 @@ func TestSignalsChangeRejudgeDurable(t *testing.T) {
 // only a named signal's window keeps doesn't hold a proposal backtested
 // just now with a record.
 func TestSignalsBacktestRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	from, to := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	// No windows: the week of 2 November is judged by errors' start alone.
@@ -887,6 +902,7 @@ func TestSignalsBacktestRecord(t *testing.T) {
 // With named signals, the report, /metrics and the summary say no record
 // alike: none of the period's, or the row's, firings judged.
 func TestSignalsNoRecordAlike(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), func(c *Config) {
 		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}}}
 	})
@@ -922,6 +938,7 @@ func TestSignalsNoRecordAlike(t *testing.T) {
 // no record by its signals, the judged firings, which say whether it is
 // noisy, are its white ones.
 func TestSignalsJudgedHoldsWhite(t *testing.T) {
+	parallel(t)
 	mid := func(w int64) time.Time { return time.Unix(w*86400, 0).UTC() }
 	w := ledger.Week(20393)                                                                 // a Monday's day
 	sig := verdict.NewSignals([]verdict.Signal{{Name: "probe", Record: true, Bit: 0}}, nil) // no start: no record by reading
@@ -945,6 +962,7 @@ func TestSignalsJudgedHoldsWhite(t *testing.T) {
 // would take the place of the impact mapping, and every named signal with
 // it.
 func TestSignalsSettingsYAML(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	if err := s.l.SetSettings(context.Background(), map[string]string{"impact": "errors > 5", "impact-for": "10m"}, "ana@example.com"); err != nil {
 		t.Fatal(err)
@@ -961,6 +979,9 @@ func TestSignalsSettingsYAML(t *testing.T) {
 // others': each signal is asked each round, the slow one alone missed,
 // from the round it first hangs, first in turn.
 func TestSlowSignalStarvesNone(t *testing.T) {
+	// Beside the others: what it waits on is the hung signal's share, and
+	// the probe it holds to it answers at once.
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, func(c *Config) { c.Timeout = 2 * time.Second })
@@ -1021,6 +1042,7 @@ func TestSignalWeekBoundCountsOnce(t *testing.T) {
 // label's name, as PromQL names one, is never put in a query a named
 // signal asks (source.SeenFrom).
 func TestSignalsMatchNeverInPromQL(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, nil)
@@ -1050,6 +1072,7 @@ func TestSignalsMatchNeverInPromQL(t *testing.T) {
 // A rule no entry names that hasn't fired: what its record waits for comes
 // with its alerts, as MCP says it, not that no signal keeps the record.
 func TestSignalRuleNeverFired(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	o, _ := s.options(context.Background())
 	rs, err := s.ruleSignalsOf(context.Background(), o, "Quiet")
@@ -1064,6 +1087,7 @@ func TestSignalRuleNeverFired(t *testing.T) {
 // A window's labels, from what Prometheus answered, are kept as an
 // incident's are: 4 KB at most in all, each value cut as an alert's.
 func TestSignalWindowLabelsBounded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	at := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
@@ -1084,6 +1108,7 @@ func TestSignalWindowLabelsBounded(t *testing.T) {
 // and asks nothing: there is no one criterion with no name beside them
 // (each signal's form has a try of its own: TestSignalsTry).
 func TestSignalsTryRefused(t *testing.T) {
+	parallel(t)
 	h := shopHistory()
 	s := signalServer(t, h, nil)
 	h.mu.Lock()
@@ -1106,6 +1131,7 @@ func TestSignalsTryRefused(t *testing.T) {
 // new signal has it, its own; no two share one, and each firing is tied as
 // it was, by the probe's new name.
 func TestSignalReplaceOneOfEight(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, signalWindowsHistory(), func(c *Config) {
 		for i := 2; i < 8; i++ {
@@ -1169,6 +1195,7 @@ func TestSignalReplaceOneOfEight(t *testing.T) {
 // longer than an alert's is kept, found again (a read again of a new
 // expression) is known by them, and keeps its key and what was decided.
 func TestUnnamedWindowLongLabelKeepsKey(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	at := now.Add(-5 * time.Hour)
@@ -1225,6 +1252,7 @@ func (h *lookStarts) QueryRange(ctx context.Context, expr string, start, end tim
 // again from where its reads began, its since: a value read only in the
 // weeks before is learned again, not only from the next run on.
 func TestSignalSeenAgainFromSince(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, nil)
@@ -1351,6 +1379,10 @@ func TestHeavySignalsTakeTurns(t *testing.T) {
 		// what is kept for its turn.
 		{"one heavy, one in its share", heavy, 450 * time.Millisecond, false}} {
 		t.Run(c.name, func(t *testing.T) {
+			// Beside each other, each with a server of its own, and alone
+			// of the package's other tests: each waits out its own --timeout,
+			// using little of the machine while it does.
+			parallel(t)
 			h := shopHistory()
 			s := signalServer(t, h, func(c *Config) { c.Timeout = timeout })
 			sl := &slowly{sigHistory: h, slow: map[string]time.Duration{}}
@@ -1430,6 +1462,7 @@ func TestHeavyCatchesUpBesideHung(t *testing.T) {
 	const timeout, perHour, rounds = 300 * time.Millisecond, 70 * time.Millisecond, 30 // a run's 3h read: 210ms
 	for _, hung := range []int{2, 3} {
 		t.Run(fmt.Sprintf("%d hung", hung), func(t *testing.T) {
+			parallel(t) // beside each other alone, as TestHeavySignalsTakeTurns's
 			h := shopHistory()
 			s := signalServer(t, h, func(c *Config) {
 				c.Timeout = timeout
@@ -1520,6 +1553,7 @@ func TestSignalDataLooksTakeTurns(t *testing.T) {
 // Signals the ledger doesn't keep (keeping them failed: here, nine) aren't
 // read, and no run makes their rows, nor gives them a bit another has.
 func TestSignalsNotKeptNotRead(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, nil)
@@ -1588,6 +1622,7 @@ func (h *wide) QueryRange(ctx context.Context, expr string, start, end time.Time
 // where the last ended (ledger.PieceResume); a piece larger than the one
 // before, past it, is let go.
 func TestPiecesHeldToMaxSamples(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		name      string
 		per, then int
@@ -1692,6 +1727,7 @@ func TestQuickSignalReadWithWhatIsLeft(t *testing.T) {
 // confirmation's says it is matched as its window was; a rule's page what
 // it is judged against and what its record waits for.
 func TestSignalPages(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, signalWindowsHistory(), func(c *Config) { c.Editors = []string{"bo@example.com"} })
 	h := s.Handler()
@@ -1756,6 +1792,7 @@ func TestSignalPages(t *testing.T) {
 // A rule an entry names says so on its page, and what its record waits
 // for: the entry's signals alone.
 func TestSignalRulePageEntry(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), func(c *Config) {
 		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}, Match: []string{}}}
 	})
@@ -1773,6 +1810,7 @@ func TestSignalRulePageEntry(t *testing.T) {
 // line against each window would: the first withMost to start, the rest
 // counted.
 func TestWindowsWithAsEachAgainstEach(t *testing.T) {
+	parallel(t)
 	rnd := rand.New(rand.NewPCG(1, 2))
 	base := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	at := func() time.Time { return base.Add(time.Duration(rnd.IntN(600)) * time.Minute) }
@@ -1818,6 +1856,7 @@ func TestWindowsWithAsEachAgainstEach(t *testing.T) {
 // A signal picked on the Incidents page stays picked by its other tabs:
 // the period, the week's chip, and how they were caught.
 func TestSignalPickedKeptByTabs(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, signalWindowsHistory(), nil)
 	_, body := askAs(t, s.Handler(), http.MethodGet, "/incidents?source=impact&signal=probe&weeks=4", nil, "ana@example.com", "same-origin")
 	links := regexp.MustCompile(`href="(/incidents\?[^"]*)"`).FindAllStringSubmatch(body, -1)
@@ -1845,6 +1884,7 @@ func TestSignalPickedKeptByTabs(t *testing.T) {
 // signals' windows caught, or not, as states; a confirmation with no
 // match in effect says so, not "on ,".
 func TestSignalPagesSayIt(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, signalWindowsHistory(), func(c *Config) {
 		c.Editors = []string{"bo@example.com"}

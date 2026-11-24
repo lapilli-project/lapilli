@@ -48,6 +48,7 @@ func options(t *testing.T, s *Server) time.Time {
 // On a first start, a selector whose data begins within the runs' span
 // keeps the weeks before its first whole week out of the record.
 func TestImpactDataFirstStart(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.Incidents = "" })
 	hist(s).begins = map[string][]time.Time{"impact": {now.Add(-30 * time.Hour)}}
 	raw := ""
@@ -64,6 +65,7 @@ func TestImpactDataFirstStart(t *testing.T) {
 // An existing ledger, kept by a lapilli before 0.49, whose impact_since is
 // before its selector's data: moved forward, at the first round that runs.
 func TestImpactDataUpgrade(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	old := now.Add(-20 * 24 * time.Hour)
@@ -85,6 +87,7 @@ func TestImpactDataUpgrade(t *testing.T) {
 // series added late moves nothing; one with no data at all keeps no record,
 // and the pages say so.
 func TestImpactDataSelectors(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for _, c := range []struct {
 		name   string
@@ -138,6 +141,7 @@ func TestImpactDataSelectors(t *testing.T) {
 // It holds nothing back, and the page says why, not that there is no
 // record.
 func TestImpactDataNarrowed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
@@ -164,6 +168,7 @@ func TestImpactDataNarrowed(t *testing.T) {
 // rename, a relabelling) had nothing it could match before: its stand-in,
 // the series with that label, holds the record back to where it begins.
 func TestImpactDataLabelLater(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}, `probe_failed{code!=""}`: {now.Add(-30 * time.Hour)}}
@@ -186,6 +191,7 @@ func TestImpactDataLabelLater(t *testing.T) {
 // looked for, and the record is kept from impact_since; the sources panel
 // no longer says no data.
 func TestImpactDataStandInUpgrade(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
@@ -227,6 +233,7 @@ func TestImpactDataStandInUpgrade(t *testing.T) {
 // "of" let go: given back at the next round, not taken for a selector the
 // expression reads, nor looked for twice.
 func TestImpactDataStandInDowngraded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
@@ -266,6 +273,7 @@ func TestImpactDataStandInDowngraded(t *testing.T) {
 // run no PromQL of theirs. The expression's own are looked for all the
 // same.
 func TestImpactDataOnlyHeldSelectors(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
@@ -311,6 +319,7 @@ func TestImpactDataOnlyHeldSelectors(t *testing.T) {
 // A selector whose own data begins later than its stand-in's, a first 5xx,
 // begins by its stand-in: the page says from when, and by what.
 func TestImpactDataStandInEarlier(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(-30 * time.Hour)}}
@@ -331,6 +340,7 @@ func TestImpactDataStandInEarlier(t *testing.T) {
 // A record a stand-in kept stays when the selector's own first sample
 // comes: a first 5xx moves impact_since nowhere.
 func TestImpactDataFirstMatchKeeps(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
@@ -356,6 +366,7 @@ func TestImpactDataFirstMatchKeeps(t *testing.T) {
 // before the leader's first round that isn't the command line's: read
 // again over the last four weeks, not taken as read all along.
 func TestImpactUpgradeSavedFirst(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	began, _ := s.l.RunsFrom(ctx)
@@ -376,6 +387,7 @@ func TestImpactUpgradeSavedFirst(t *testing.T) {
 // meanwhile: they take the ledger's for the command line's, which is kept,
 // the new one read from a floor on, and the read again is still due.
 func TestImpactUpgradeRunFirst(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	began, _ := s.l.RunsFrom(ctx)
@@ -398,6 +410,7 @@ func TestImpactUpgradeRunFirst(t *testing.T) {
 // Of a ledger before 0.49 whose runs began to read the signal within the
 // last four weeks, the weeks before are read again, not taken as read.
 func TestImpactUpgradeLateStart(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	asBefore049(t, s, now.Add(-2*time.Hour))
@@ -410,6 +423,7 @@ func TestImpactUpgradeLateStart(t *testing.T) {
 // that can't be is refused, nothing saved; one a try read lately is saved
 // with no read more.
 func TestImpactSaveReadsFirst(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	h := s.Handler()
@@ -467,6 +481,7 @@ func staleOf(t *testing.T, s *Server, id int64) *staleWhy {
 // is stale once another is read again in its place, though its weeks keep
 // their record (staleImpact); the try said it would be, the same count.
 func TestImpactStaleImpact(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil) // INC-1 keeps the record
 	id := impactProposed(t, s, "5m impact")
@@ -489,6 +504,7 @@ func TestImpactStaleImpact(t *testing.T) {
 // Tried, the criterion in effect, read already, changes nothing: no
 // measure changes, and no proposal would be held.
 func TestImpactTrySame(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	impactProposed(t, s, "5m impact")
 	// Kept from a Monday three weeks before the runs began.
@@ -503,6 +519,7 @@ func TestImpactTrySame(t *testing.T) {
 // A try says what it would cost the weeks before its span the record is
 // kept of now.
 func TestImpactTryEarlierWeeks(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	monday := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC) // three weeks before
 	ledgerExec(t, s, "UPDATE impact_signals SET since = ? WHERE name = ''", strconv.FormatInt(monday.Unix(), 10))
@@ -514,6 +531,7 @@ func TestImpactTryEarlierWeeks(t *testing.T) {
 
 // A try's reads are bounded by tryWithin, whatever --timeout is.
 func TestImpactTryWithin(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, func(c *Config) { c.Timeout = time.Hour })
 	hist(s).within = nil
 	if code, _ := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact=impact+%3E+1", nil, "ana@example.com", "same-origin"); code != 200 {
@@ -532,6 +550,7 @@ func TestImpactTryWithin(t *testing.T) {
 // A try is from this site's page, or typed: a request that says neither
 // (no Sec-Fetch-Site) is refused.
 func TestImpactTryFromHere(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	path := "/settings?impact-try=1&impact=impact+%3E+1"
 	if code, _ := askAs(t, s.Handler(), http.MethodGet, path, nil, "ana@example.com", ""); code != 400 {
@@ -545,6 +564,7 @@ func TestImpactTryFromHere(t *testing.T) {
 // A save of --impact-for alone reads the criterion, as one of a new
 // expression does, and counts among the tries.
 func TestImpactForSaveCounts(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	h := s.Handler()
 	for i := range impactTriesAnHour {
@@ -576,6 +596,7 @@ func TestImpactSaveHeavyTurn(t *testing.T) {
 // An expression is 4,096 characters at most, as its field counts them;
 // a range or a subquery over a day is refused.
 func TestImpactChecks(t *testing.T) {
+	parallel(t)
 	long := strings.Repeat("가", maxImpactExpr-10) + " > 1"
 	for expr, ok := range map[string]bool{
 		long:                           true,
@@ -614,6 +635,7 @@ func manySelectors(n int) string {
 
 // A try's query may carry an expression its field takes.
 func TestImpactTryLongQuery(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	// Some 9 KB escaped, past maxQuery.
 	expr := "impact > " + strings.Repeat("(", 1400) + "1" + strings.Repeat(")", 1400)
@@ -638,6 +660,7 @@ func TestImpactTryTooMany(t *testing.T) {
 // "Waiting to be read again" is said only when it will be: not of a new
 // ledger whose runs read the signal from their first.
 func TestImpactNoWaiting(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
 	if strings.Contains(body, "Waiting to be read again") {
@@ -648,6 +671,7 @@ func TestImpactNoWaiting(t *testing.T) {
 // The impact row waits once another criterion is saved, until it is read
 // with it; and is quiet when not read for longer than two runs.
 func TestSourcesImpactRead(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
@@ -667,6 +691,7 @@ func TestSourcesImpactRead(t *testing.T) {
 
 // The quiet sources are listed first, never among those past the list.
 func TestSourcesQuietFirst(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	token := "an-incidents-token-0123"
 	s := criteriaServer(t, false, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, token) })
@@ -687,6 +712,7 @@ func TestSourcesQuietFirst(t *testing.T) {
 // An incidents file's error is said without its path to a reader who isn't
 // an admin.
 func TestSourcesFileErrorPath(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
 	s.cfg.Incidents += ".gone"
@@ -712,6 +738,7 @@ func TestSourcesFileErrorPath(t *testing.T) {
 // The Cleanup page lists the tasks kept on an impact window read again
 // that nothing found covers now.
 func TestOrphansImpactNotes(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	key := "impact-20261103T0600Z"
@@ -761,6 +788,7 @@ func readsAgain(s *Server) {
 // no record at all, though the one kept had data all along; its selector
 // with no data says nothing more.
 func TestImpactPendingNoData(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{"gone": {}}
@@ -789,6 +817,7 @@ func TestImpactPendingNoData(t *testing.T) {
 // read by a run: no record from the first one's first read on, the second
 // with data all along, the first with none.
 func TestImpactTwoSavesPending(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{"gone": {}}
@@ -810,6 +839,7 @@ func TestImpactTwoSavesPending(t *testing.T) {
 // read again failing: its window isn't split at each run's start, and no
 // record is kept until it is read again.
 func TestImpactRevertPendingNoSplit(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, func(c *Config) { c.Impact = "always" })
 	saveFailing(t, s, "impact > 1")
@@ -840,6 +870,7 @@ func TestImpactRevertPendingNoSplit(t *testing.T) {
 // one kept saved back and read by a run: no record, the data of the other
 // saying nothing of it.
 func TestImpactRevertPendingNoData(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Incidents = "" })
 	hist(s).begins = map[string][]time.Time{"impact": {}}
@@ -866,6 +897,7 @@ func TestImpactRevertPendingNoData(t *testing.T) {
 // needs no read again, and the runs reading it: read again all the same,
 // which lifts it.
 func TestImpactFloorLeft(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	s.jobs(ctx, false) // marked: read from the runs' first
@@ -888,6 +920,7 @@ func TestImpactFloorLeft(t *testing.T) {
 // Of an expression's selectors, one whose look fails doesn't keep the
 // others from being looked for.
 func TestImpactLookForPassesFailing(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).failLong = map[string]bool{"count(a)": true}
@@ -904,6 +937,7 @@ func TestImpactLookForPassesFailing(t *testing.T) {
 // A proposal backtested while a floor stands is labeled with it, a label
 // no criterion kept is: held once the criterion saved is read again.
 func TestImpactHeldInGap(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
 	saveFailing(t, s, "impact > 1")
@@ -924,6 +958,7 @@ func TestImpactHeldInGap(t *testing.T) {
 
 // The same, the one kept saved back: held once it is read again.
 func TestImpactHeldAfterRevert(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
 	saveFailing(t, s, "impact > 1")
@@ -951,6 +986,7 @@ func TestImpactHeldAfterRevert(t *testing.T) {
 // An offset moves where a selector's data is read: its data begins an
 // offset after its metric's.
 func TestImpactDataOffset(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{"x": {now.Add(-80 * time.Hour)}, "x offset 1w": {now.Add(-30 * time.Hour)}}
@@ -968,6 +1004,7 @@ func TestImpactDataOffset(t *testing.T) {
 // the saver's reads, a try lately or not: saving back and forth is held to
 // the same twelve an hour.
 func TestImpactSavesCounted(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	h := s.Handler()
 	for _, e := range []string{"impact+%3E+1", "impact+%3E+2"} {
@@ -993,6 +1030,7 @@ func TestImpactSavesCounted(t *testing.T) {
 // again would hold, one on from before the span however long before it
 // started.
 func TestImpactTryLongDecided(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	began, _ := s.l.RunsFrom(ctx)

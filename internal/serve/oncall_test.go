@@ -27,6 +27,7 @@ const onCallFeed = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nDTSTART:20
 // UTC, it is the other way round. The turns are kept in the ledger, and a
 // feed that later looks back less, or fails, takes none away.
 func TestOnCallTeam(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	feedFile := filepath.Join(dir, "payments.ics")
@@ -157,6 +158,7 @@ func TestOnCallTeam(t *testing.T) {
 // the turns kept before the span read away (L3); a name the ledger won't
 // keep passes that event over, not the read (L2).
 func TestOnCallKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	feedFile := filepath.Join(dir, "storage.ics")
@@ -252,6 +254,7 @@ func TestOnCallKept(t *testing.T) {
 // summary longer than the ledger keeps names is cut to fit, not a failed
 // read (F2).
 func TestOnCallHeld(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	feedFile := filepath.Join(dir, "payments.ics")

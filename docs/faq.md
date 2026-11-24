@@ -10,7 +10,8 @@ VictoriaMetrics 1.156.0); the rules, as files or from the API that holds
 them; and a record of what went wrong. Of the history it asks
 `/api/v1/query_range`, and, where they are served, `/api/v1/status/config`
 and `/api/v1/targets` for the scrape intervals; `--loaded-rules` asks
-`/api/v1/rules` too. `--grafana` needs a service account token with
+`/api/v1/rules` too, and serve's `/api/v1/status/config` for the
+evaluation interval, `--scrape-interval` or not. `--grafana` needs a service account token with
 Viewer, and each cloud the read permission in the table in
 [Use `lapilli verdict`](verdict.md).
 

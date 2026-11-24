@@ -87,6 +87,7 @@ func proposalsFor(t *testing.T, s *Server, query string) proposalsView {
 // its facet with what the others pick, a chip for each filter in effect,
 // and the team's proposals alone, picked in the bar.
 func TestProposalsFacets(t *testing.T) {
+	parallel(t)
 	s := listServer(t)
 	ids := func(v proposalsView) []string {
 		var out []string
@@ -211,6 +212,7 @@ func TestProposalsFacets(t *testing.T) {
 // the list, or out of its counts; past the two hundred shown, the list
 // says so.
 func TestProposalsOldNotHidden(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	ctx := context.Background()
 	old, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Old", Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: bo})
@@ -260,6 +262,7 @@ func TestProposalsOldNotHidden(t *testing.T) {
 // for approval is the team in effect's, as the proposals list's is, on
 // every page; all teams' with none.
 func TestSidebarProposalsOfTheTeam(t *testing.T) {
+	parallel(t)
 	s, h, _ := withProposal(t, nil) // for Errors, which payments owns
 	ctx := context.Background()
 	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Err"}, ana); err != nil {

@@ -14,6 +14,7 @@ import (
 // Config.Listening is told where the UI's listener was bound, which then
 // answers: what lapilli demo --serve pins, and says the URL of.
 func TestClockAndListening(t *testing.T) {
+	parallel(t)
 	s0, _ := server(t, nil)
 	cfg := s0.cfg
 	s0.Close()

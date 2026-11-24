@@ -973,6 +973,10 @@ func (t *tier) loadSpans(spansOf map[string][][2]int64) error {
 	return read()
 }
 
+// tieLooked, when set, is told of each firing an alert is set beside to be
+// tied: the tests count them (TestTieOneBusyRule).
+var tieLooked func()
+
 // tie is the firing an alert tells of: its rule's firing whose labels are
 // all among the alert's (which also carries labels the replay doesn't, such
 // as Prometheus's external labels), started within two evaluations of the
@@ -996,6 +1000,9 @@ func (t *tier) tie(a Alert) (*tied, error) {
 	near := t.near[a.Rule]
 	from, _ := slices.BinarySearchFunc(near, s-w, func(f tied, at int64) int { return cmp.Compare(f.start, at) })
 	for i := from; i < len(near) && near[i].start <= s+w; i++ {
+		if tieLooked != nil {
+			tieLooked()
+		}
 		f := &near[i]
 		d := abs(f.start - s)
 		if !among(f.labels, a.Labels) {

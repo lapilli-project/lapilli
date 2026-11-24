@@ -83,6 +83,7 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 			skipped = append(skipped, fmt.Sprintf("template files of more than %d MB in all: those after are passed over", MaxTemplateBytes>>20))
 			break
 		}
+		n.read.Files++
 		defs, err := parseNotify(string(f.Text), MaxTemplateFile)
 		if err != nil {
 			why := bound(fmt.Sprintf("%s: %s", f.Name, notifyErr(err)))
@@ -94,6 +95,7 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 		}
 		maps.Copy(n.defs, defs)
 	}
+	n.read.Templates = len(n.defs)
 	recvs, _ := m["receivers"].([]any)
 	fields := 0
 	// The defaults the files define in Alertmanager's place, by kind,
@@ -109,6 +111,7 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 		if name == "" || len(name) > 1024 {
 			continue
 		}
+		n.read.Receivers++
 		uses := map[string]bool{}
 		use := func(def string) bool {
 			if uses[def] {

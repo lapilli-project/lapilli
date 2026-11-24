@@ -36,7 +36,7 @@ func tokenRecipes() []tokenRecipe {
 		{"incident-io.sh", "INCIDENT_IO_API", "INCIDENT_IO_TOKEN_FILE", nil, `{"incidents": [], "pagination_meta": {}}`, bearer},
 		{"rootly.sh", "ROOTLY_API", "ROOTLY_TOKEN_FILE", nil, `{"data": [], "meta": {}}`, bearer},
 		{"firehydrant.sh", "FIREHYDRANT_API", "FIREHYDRANT_TOKEN_FILE", nil, `{"data": [], "pagination": {}}`, bearer},
-		{"grafana-irm.sh", "GRAFANA_URL", "GRAFANA_IRM_TOKEN_FILE", nil, `{"incidents": [], "cursor": {"hasMore": false}}`, bearer},
+		{"grafana-irm.sh", "GRAFANA_URL", "GRAFANA_IRM_TOKEN_FILE", nil, `{"incidentPreviews": [], "cursor": {"hasMore": false}}`, bearer},
 		{"jira.sh", "JIRA_URL", "JIRA_TOKEN_FILE", []string{"JIRA_EMAIL=ana@example.com", "JIRA_JQL=project = OPS"},
 			`{"issues": [], "isLast": true}`, basic},
 		{"compass.sh", "COMPASS_API", "COMPASS_TOKEN_FILE", []string{"COMPASS_CLOUD_ID=35273b54", "COMPASS_EMAIL=ana@example.com"},
@@ -54,6 +54,7 @@ func tokenRecipes() []tokenRecipe {
 // address. The scheme in capitals, and this machine with a port or not,
 // are taken.
 func TestIncidentRecipesRefuseWhereAndWhat(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	bin := t.TempDir()
 	args := filepath.Join(bin, "args")
@@ -185,6 +186,7 @@ func askedStandIn(t *testing.T, r tokenRecipe, listen string, where func(port st
 // 127.0.0.1, [::1] or localhost, in any case, and so is the scheme, as
 // curl takes it; a recipe asks the stand-in there, with its token.
 func TestIncidentRecipesTakeThisMachineHoweverWritten(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, f := range []struct{ name, listen, url string }{
 		{"HTTP", "127.0.0.1:0", "HTTP://127.0.0.1:%s"},
@@ -212,6 +214,7 @@ func TestIncidentRecipesTakeThisMachineHoweverWritten(t *testing.T) {
 // (made up here) is taken, and sent as it is; spaces, tabs and a carriage
 // return after it, as an editor may leave them, are dropped.
 func TestIncidentRecipesTakeTheirTokens(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	tokens := map[string]string{
 		"pagerduty.sh":   "u+Ab_cD-12.ef~GH/5=",
@@ -241,6 +244,7 @@ func TestIncidentRecipesTakeTheirTokens(t *testing.T) {
 // run, past which it stops with nothing written, though each page answers
 // after its 429. sleep stands in, so the waits are counted, not waited.
 func TestRootlyWaitsTenMinutesInAll(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, c := range []struct {
 		name string
@@ -316,6 +320,7 @@ func padded(answer string) []byte {
 // of incidents or of an incident's alerts, stops a recipe with nothing
 // written, rather than all of it read into the shell.
 func TestIncidentRecipesTakeNoAnswerOver16MiB(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	run := func(name string, handler http.HandlerFunc, env func(url string) []string, script string) {
 		srv := httptest.NewServer(handler)
@@ -369,6 +374,7 @@ func jiraPages(t *testing.T, w http.ResponseWriter, r *http.Request) {
 // only the one just before, would go round until MAX_ALERT_REQUESTS: it
 // stops the script with nothing written.
 func TestJiraRefusesAPageOfAlertsAgain(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	const cloud = "35273b54-3f06-40d2-880f-dd28cf8daafa"
 	var mu sync.Mutex

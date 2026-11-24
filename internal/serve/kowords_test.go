@@ -79,6 +79,7 @@ func stoneWord(s string) string {
 // that caught nothing 오탐 (●), one a quiet window excused 면제 (◌); never
 // the stones the English names them by, which read as a game to them.
 func TestKoreanSaysNoStones(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		text  string
 		stone bool
@@ -113,6 +114,7 @@ func TestKoreanSaysNoStones(t *testing.T) {
 // a firing with no record (docs/design/ui.md, "Times, and Korean", and
 // bundle 65).
 func TestKoreanTerms(t *testing.T) {
+	parallel(t)
 	for en, ko := range catalogs["ko"] {
 		for _, w := range []string{"무언가를 잡", "아무것도 못 잡", "재생", "괜히", "헛알림", "깨운", "깨움", "원장", "표시 구간", "은퇴", "에피소드", "판정 안 함"} {
 			if strings.Contains(ko, w) && !strings.Contains(en, "returned anything") {
@@ -133,6 +135,7 @@ func TestKoreanTerms(t *testing.T) {
 // 안 됨 and 판정 안 함, Japanese 判定なし and 判定しない; bundle 66: English
 // "? Not judged" and "Not judged").
 func TestJudgedApart(t *testing.T) {
+	parallel(t)
 	for lang, want := range map[string]string{"en": "judged by nothing", "ko": "판정 제외", "ja": "判定対象外", "es": "fuera del juicio"} {
 		none := strings.ToLower(tr(lang, "not judged"))
 		for _, off := range []string{"Judged by nothing", "judged by nothing"} {
@@ -147,6 +150,7 @@ func TestJudgedApart(t *testing.T) {
 // TestMovedSaysWhatMoved: the Goals page's line of what people moved says
 // the parts that aren't zero alone, and nothing when none is (bundle 65).
 func TestMovedSaysWhatMoved(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		p    goalPeople
 		lang string
@@ -170,6 +174,7 @@ func TestMovedSaysWhatMoved(t *testing.T) {
 // say: no incident, or an entry that judges them by nothing; a rule judged
 // by nothing alone says nothing of incidents (bundle 67).
 func TestDigestSaysWhyUnjudged(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		rules               []verdict.RuleResult
 		noRecord, byNothing bool

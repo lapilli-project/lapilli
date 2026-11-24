@@ -17,6 +17,7 @@ import (
 // and the Manage page's card say so, and that the weekly digest, worked
 // out every week, goes nowhere, in words.
 func TestNotifyStatusNowhere(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.Handler()
 	nowhere := "The weekly digest is worked out <bdi>Mondays 09:00</bdi> and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page"
@@ -44,6 +45,7 @@ func TestNotifyStatusNowhere(t *testing.T) {
 // notices failed, as it is now, though sending empties no page kept; and a
 // digest or a report on with nowhere to go is said so.
 func TestNotifyStatusSent(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	hook := filepath.Join(dir, "hook")
@@ -166,6 +168,7 @@ func TestNotifyStatusInEachLanguage(t *testing.T) {
 // (digest-sent alone), and a later week's digest that failed (a run's
 // error), as a warning.
 func TestNotifyStatusSlackPost(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	posts := 0
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { posts++ }))

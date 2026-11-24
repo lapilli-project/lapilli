@@ -71,6 +71,7 @@ func recipeShell() string { return cmp.Or(os.Getenv("RECIPE_SH"), "sh") }
 // serve takes, is sent as it is, what an editor leaves after it dropped.
 // An answer over 16 MiB fails the write.
 func TestIncidentPutRefusesWhereAndWhat(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	path, args := recordingCurl(t)
 	run := func(url, file string, env ...string) (string, error) {
@@ -206,6 +207,7 @@ func (r trackerRecipe) command(lapilli, lapilliToken, api, token string, env ...
 // as a tracker writes one. Each is refused before curl runs, saying
 // neither the token nor the address.
 func TestTrackerRecipesRefuseWhereAndWhat(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	path, args := recordingCurl(t)
 	good := tokenFile(t, "x")
@@ -333,6 +335,7 @@ const oneTask = `{"tasks": [{"id": 1, "title": "t", "kind": "tune", "status": "o
 // in it too; spaces, tabs and a carriage return after either, as an editor
 // may leave them, are dropped.
 func TestTrackerRecipesTakeTheirTokens(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	const tasks = "a tasks token of its own"
 	for _, r := range trackerTokenRecipes() {
@@ -354,6 +357,7 @@ func TestTrackerRecipesTakeTheirTokens(t *testing.T) {
 // TestTrackerRecipesTakeNoAnswerOver16MiB: an answer over 16 MiB, Lapilli's
 // or the tracker's, stops a recipe, rather than all of it read.
 func TestTrackerRecipesTakeNoAnswerOver16MiB(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	big := padded(`{}`)
 	for _, r := range trackerTokenRecipes() {

@@ -33,6 +33,7 @@ func allMutes(t *testing.T, s *Server) []ledger.Mute {
 // 0.35.0's notification saying it was muted, by what it doesn't say.
 // Sent again, nothing changes.
 func TestEventRecorderMutes(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		file, silence string
 		either        bool
@@ -127,6 +128,7 @@ func muteOf(e map[string]any) map[string]any {
 // format; what can't be read as the recorder's is refused, that event
 // alone, as a notification's would be, the rest of a batch kept.
 func TestEventRecorderMuteReads(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	path := "/v1/alertmanager/events"

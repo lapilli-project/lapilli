@@ -154,9 +154,9 @@ noisy: a rule that fires as often says what its firings were (0.41).
   comparison under `!`, or inside arithmetic, is still read only as a whole.
 - Shifts read from where on-call schedules are kept: built (0.27)
   (`--on-call`, iCalendar feeds); monthly and yearly repeats, a feed's own
-  `VTIMEZONE` and Windows zone names (0.70). Still to do: checking each
-  tool's feed against a real account; `RDATE` in events, which is read as
-  nothing.
+  `VTIMEZONE` and Windows zone names (0.70); `RDATE`'s dates, days and
+  periods (0.71). Still to do: checking each tool's feed against a real
+  account.
 
 ## Where rules and alarms come from
 
@@ -239,22 +239,28 @@ expectation, and sets a commit status on the pull request's head commit
 Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
 never leaves a success. Through serve too since 0.70, which judges the
-rules left alone by its record. Still to do:
+rules left alone by its record, compared as parsed PromQL since 0.71; and
+in GitHub's merge queue (`merge_group`), on the merge group's head (0.71).
+Still to do:
 
 - Through serve, a rule left alone that serve doesn't run: an incident
   only it may catch is not known, where it could be replayed. And a rule
-  serve reads from an API that writes its expression otherwise
-  (Prometheus's rules API): compared by text, its catches count for
-  nothing; compared as parsed, they would.
+  serve reads from an API that leaves out what its file says (a group's
+  `query_offset`, which Prometheus's rules API doesn't report); and a Loki
+  ruler's, a Grafana rule and a cloud alarm, still compared by their text.
+- A merge group's report in the job's summary (`GITHUB_STEP_SUMMARY`)
+  rather than its log; serve reading the queue ref's `pr-N`, so that a
+  group built again takes the place of the one waiting.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left
   running, which its reference doesn't say). Today each is tested against
   its API's documented answers, with a server standing in; Gitea against
-  a real one. GitLab's merged results pipelines are tested (0.70); its
-  merge train pipelines (`CI_MERGE_REQUEST_EVENT_TYPE=merge_train`), whose
-  commits its reference doesn't describe, are taken the same way,
-  untested.
+  a real one. GitLab's merged results pipelines are tested (0.70), and its
+  merge train pipelines (0.71), as its merge request pipelines' reference
+  describes them: a merge of the source head, compared with its first
+  parent; another commit is refused. GitHub's merge queue is tested
+  against its event as its webhook reference writes it.
 
 ## Incidents in
 
@@ -274,8 +280,8 @@ is built in and none is favoured.
   suggest` (0.67) says which stacks' metrics the history has, and the
   `--impact` to give ([docs/design/suggest.md](docs/design/suggest.md)).
   `lapilli serve` says a firing came after its incident ended, as verdict
-  does, since 0.70. Still to do: a tenant flag of the history's own, for a
-  Mimir or a Cortex with no gateway.
+  does, since 0.70. A tenant of the history's own (`--prometheus-tenant`),
+  for a Mimir or a Cortex with no gateway, since 0.71.
 
 - Recipes checked against real accounts. Today each is tested against its
   API's published schema, with a server standing in.
@@ -288,9 +294,9 @@ is built in and none is favoured.
   labels, FireHydrant's and Jira Service Management's since 0.68, and near
   misses are looked for by the link too (0.68). Grafana IRM's APIs don't
   say which alerts an incident came from (links.md, "Grafana IRM"): its
-  linked alerts are read once they do. Still to do: `--linked-only` as a
-  setting in the UI; Grafana IRM's `QueryIncidents`, which its reference
-  marks deprecated, read by what takes its place.
+  linked alerts are read once they do; its incidents are read by
+  `QueryIncidentPreviews` since 0.71. Still to do: `--linked-only` as a
+  setting in the UI.
 
 ## lapilli serve
 
@@ -349,9 +355,9 @@ is built in and none is favoured.
   checked beside each rule (0.25, serveops.md); Alertmanager's templates,
   which a ruler's rules are sent with, from its configuration or Mimir's
   and Cortex's, and a range over a selector that names no job by the jobs
-  its metric comes from (0.70). Still to do: Grafana's rules sent to an
-  outside Alertmanager; `--alertmanager-config` in the chart and in
-  `lapilli preflight`.
+  its metric comes from (0.70); `--alertmanager-config` in the chart and in
+  `lapilli preflight` (0.71). Still to do: Grafana's rules sent to an
+  outside Alertmanager.
 - An accessibility review of the UI and its charts, to WCAG 2.2 AA, is
   built (0.28): axe-core over every page in a browser, and tests that hold
   each page's structure, its contrast and its charts' numbers in tables
@@ -375,8 +381,13 @@ is built in and none is favoured.
   (RDS, Cloud SQL, Azure Database) for real, a failover among them.
 
 The performance budgets are part of the tests (`TestScale`,
-`TestPagesScale`), so a change that slows the ledger fails CI; on Postgres
-too, in CI's job for it.
+`TestPagesScale`, `TestManyAtOnceScale` and the others), as counts, not
+times: the statements a page or a write sends the ledger, the rows it
+writes and the tables it reads, what a read allocates, and the work a
+parser or router does. So a change that makes the ledger or a reader do
+more fails CI on any runner, however slow; on Postgres too, by the
+statements sent, in CI's job for it. Still to do: `cmd/lapilli`'s tests,
+now as long as serve's, run in parallel as serve's are.
 
 ## Packaging and trust
 

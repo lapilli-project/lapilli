@@ -106,6 +106,7 @@ notify:
 // takes to the default; nothing to the places no route names. The digest
 // still goes where its own settings send it.
 func TestRoutesSendByKindAndTeam(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := routedServer(t, routesConfig, nil)
 	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Pay"}, "ana")
@@ -163,6 +164,7 @@ func TestRoutesSendByKindAndTeam(t *testing.T) {
 // what happens is told as before routes, byte for byte: to the webhook and
 // Slack alone, the same rows; the named destinations get nothing.
 func TestNoRoutesAsBefore(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	write := func(s *Server) map[string][]ledger.Notice {
 		if _, err := s.l.PutTask(ctx, ledger.Task{Title: "tune Errors", Kind: "tune", Rule: "Errors"}, "ana"); err != nil {
@@ -230,6 +232,7 @@ func withoutClock(t *testing.T, b []byte) string {
 // the routes alone: one whose value is a destination's name, or a URL,
 // sends nothing there.
 func TestRouteMatch(t *testing.T) {
+	parallel(t)
 	o := &owners{byID: map[int64]ledger.Team{1: {ID: 1, Name: "payments", Labels: map[string][]string{"service": {"pay"}}}},
 		teams: []ledger.Team{{ID: 1, Name: "payments", Labels: map[string][]string{"service": {"pay"}}}},
 		rule:  map[string]int64{"Errors": 1}, ruleLabels: map[string]map[string]string{"Errors": {"severity": "page", "to": "checkout-hook", "url": "https://attacker.example/x"}}}
@@ -289,6 +292,7 @@ func TestRouteMatch(t *testing.T) {
 // naming one takes that one's events and never the other's; one naming
 // neither as written takes neither's, and they go to the default.
 func TestRouteTeamsAlike(t *testing.T) {
+	parallel(t)
 	teams := []ledger.Team{{ID: 1, Name: "Payments"}, {ID: 2, Name: "payments"}, {ID: 3, Name: "Checkout"}}
 	o := &owners{byID: map[int64]ledger.Team{1: teams[0], 2: teams[1], 3: teams[2]}, teams: teams,
 		rule: map[string]int64{"Errors": 1, "Latency": 2, "Carts": 3}}
@@ -334,6 +338,7 @@ func TestRouteTeamsAlike(t *testing.T) {
 // routes, to the webhook and Slack; with neither, nowhere, never to every
 // place; and is counted.
 func TestRoutesNeverDrop(t *testing.T) {
+	parallel(t)
 	_, err := ParseConfig([]byte("notify:\n  routes:\n    - {kinds: [task.created], to: [ops]}\n"), time.UTC)
 	var ce configError
 	if !errors.As(err, &ce) || ce.format != "routes need a default: where what no route takes goes, so that nothing is dropped" || ce.line != 2 {
@@ -406,6 +411,7 @@ func TestRoutesNeverDrop(t *testing.T) {
 // in force, and a team's event goes where its team's route sends it, not
 // to another team's destination, nor to every place.
 func TestRoutesPastAnotherError(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	const file = `teams: []
 windows: nope
@@ -462,6 +468,7 @@ notify:
 // to, isn't somewhere to tell it, and a task overdue isn't marked told with
 // no notice written.
 func TestToldToAsBeforeRoutes(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := routedServer(t, "teams: []\n", func(c *Config) {
 		c.NotifyWebhook, c.Slack, c.NotifySlack = "", "", false
@@ -498,6 +505,7 @@ func TestToldToAsBeforeRoutes(t *testing.T) {
 // the first seconds, before the owners are kept every configEvery, goes
 // where its team's route sends it.
 func TestRoutesOwnersAtStart(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := unstartedRoutedServer(t, routesConfig, nil)
 	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Pay"}, "ana")
@@ -592,6 +600,7 @@ func TestGoneDestSwept(t *testing.T) {
 // configEvery apart; one that can't be used leaves the routing in force,
 // and is said with its line; back to the one in force, nothing is said.
 func TestRoutesReadTwice(t *testing.T) {
+	parallel(t)
 	s, _, file := routedServer(t, routesConfig, nil)
 	first := s.routing.table.Load()
 	if first == nil || len(first.conf.Routes) != 3 {
@@ -626,6 +635,7 @@ func TestRoutesReadTwice(t *testing.T) {
 // What notify: can be told is wrong with, each with its line, in each
 // language: the file is refused as a whole.
 func TestNotifyConfigRefused(t *testing.T) {
+	parallel(t)
 	for _, x := range []struct{ file, want string }{
 		{"notify:\n", "line 1: notify has nothing after it"},
 		{"notify: [a]\n", "line 1: want notify as a mapping of routes, default, templates"},
@@ -688,6 +698,7 @@ func TestNotifyConfigRefused(t *testing.T) {
 // Every kind the outbox is told of is one routes can name, or one that
 // goes its own way: a kind added is a line in routeKinds.
 func TestRouteKindsKnown(t *testing.T) {
+	parallel(t)
 	literal := regexp.MustCompile(`"([a-z]+\.[a-z_]+)"`)
 	told := regexp.MustCompile(`tell\(|TellOnce\(|routeTold\(|var events = map|StateFailed: "|event, value = "`)
 	var found []string

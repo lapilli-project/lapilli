@@ -449,6 +449,7 @@ func statusOf(doc *html.Node) [][2]string {
 // whose firings was judged (NoRecord) with an ok or bad badge, whatever
 // it says. Every notice starts with its sign.
 func TestStatusKinds(t *testing.T) {
+	parallel(t)
 	s, paths := a11yServer(t)
 	more, named := statusStates(t, s)
 	paths = append(paths, more...)
@@ -619,6 +620,7 @@ func perfBadges(doc *html.Node, rule string) []*html.Node {
 // failed, and they are up to date: behind, it is under way (info); with a
 // run that failed, bad.
 func TestOutcomesRunsKind(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	runs := func(now time.Time, failed bool) string {
 		s, _ := server(t, nil)
@@ -669,6 +671,7 @@ func TestOutcomesRunsKind(t *testing.T) {
 // Oliveira and Fernandes (2009) simulate them at full severity, and caught
 // and missed apart in lightness too, in light and dark.
 func TestChartFillsApart(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)

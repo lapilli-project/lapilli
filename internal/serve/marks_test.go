@@ -17,6 +17,7 @@ import (
 // applies to a rule of the team's, besides the rules' changes; each can be
 // turned off and on by a link, and the table of the weeks says the same.
 func TestChartMarks(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := drillServer(t, false)
 	o := s.cfg.Options

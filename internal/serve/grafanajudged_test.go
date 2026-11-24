@@ -143,6 +143,7 @@ func judgingServer(t *testing.T, g http.Handler) *Server {
 // before a copy that the history then says ended is ended. No job may
 // write to the source.
 func TestServeGrafanaJudged(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &ordersGrafana{}
 	s := ordersServer(t, g)
@@ -214,6 +215,7 @@ func TestServeGrafanaJudged(t *testing.T) {
 // rules list and MCP, though the recorded rule its firings are copied in
 // as keeps none.
 func TestServeGrafanaJudgedSeverity(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := ordersServer(t, &ordersGrafana{})
 	s.jobs(ctx, true)
@@ -281,6 +283,7 @@ func TestServeGrafanaJudgedFlipping(t *testing.T) {
 // name for, here) makes the day of no use: nothing of it is written, so
 // what is copied in already stays, and the copies reach no further.
 func TestServeGrafanaJudgedUnsure(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &ordersGrafana{}
 	s := ordersServer(t, g)
@@ -309,6 +312,7 @@ func TestServeGrafanaJudgedUnsure(t *testing.T) {
 // A copy behind the history's retention passes over the days it no
 // longer holds, a gap, rather than taking them for quiet ones.
 func TestServeGrafanaJudgedRetention(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &ordersGrafana{}
 	s := ordersServer(t, g)
@@ -376,6 +380,7 @@ func TestServeGrafanaJudgedTooMany(t *testing.T) {
 // A source of its name a job copied firings in under, before 0.68, isn't
 // written over: Grafana's history isn't copied in, and it is said once.
 func TestServeGrafanaJudgedTheirs(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := ordersServer(t, &ordersGrafana{})
 	if _, err := s.l.PutFirings(ctx, ledger.GrafanaSource, now.Add(-2*time.Hour), now.Add(-time.Hour), nil, ledger.FiringsCopier, s.cfg.Options); err != nil {
@@ -426,6 +431,7 @@ func (d *dupGrafana) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // what was copied in for it within the --settle the next round reads
 // again: the write is of the rules judged now alone.
 func TestServeGrafanaJudgedLeftOut(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &ordersGrafana{more: []alertChange{
 		{"Normal", "Alerting", "search", now.Add(-40 * time.Minute)},
@@ -458,6 +464,7 @@ func TestServeGrafanaJudgedLeftOut(t *testing.T) {
 // in and of the round after, which writes from when a version of the
 // rules held the other rule.
 func TestServeGrafanaJudgedGapsStay(t *testing.T) {
+	parallel(t)
 	for name, c := range map[string]struct {
 		rounds []bool // a round each two hours, a title shared or not
 		ended  int    // hours past now the firing ends
@@ -522,6 +529,7 @@ func TestServeGrafanaJudgedGapsStay(t *testing.T) {
 // round the title is shared in, and of the round after, which writes from
 // when a version of the rules held the other rule.
 func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &dupGrafana{ordersGrafana: &ordersGrafana{more: append(beat(-2*time.Hour, 8*time.Hour),
 		alertChange{"Normal", "Alerting", "search", now.Add(2*time.Hour + 15*time.Minute)})}}
@@ -580,6 +588,7 @@ func TestServeGrafanaJudgedGapFiringKept(t *testing.T) {
 // rules say which, and in whatever order: critical, warning, critical is
 // critical/warning, as verdict says it, not critical/critical/warning.
 func TestJudgedSeveritiesJoinedOnce(t *testing.T) {
+	parallel(t)
 	sev := func(s string) map[string]string { return map[string]string{"severity": s} }
 	rs := []rules.Rule{{Name: "Orders slow", Labels: sev("critical")}, {Name: "Orders slow", Labels: sev("warning")}, {Name: "Orders slow", Labels: sev("critical")},
 		{Name: "Stock low"}, {Name: "Cart", Labels: sev("page")}}

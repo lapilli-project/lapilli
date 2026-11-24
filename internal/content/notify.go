@@ -41,6 +41,23 @@ type Notifications struct {
 	// alertmanager says they are Alertmanager's (ReadAlertmanager): the
 	// rules sent with them are Prometheus's, routed by their labels alone.
 	alertmanager bool
+	// read is what ReadAlertmanager read (Read).
+	read Read
+}
+
+// Read is how much of Alertmanager's configuration ReadAlertmanager read:
+// the receivers it names, the template files within the bounds, and the
+// templates they define, by name; those that don't parse among them.
+type Read struct {
+	Receivers, Files, Templates int
+}
+
+// Read says how much ReadAlertmanager read; nothing of Grafana's.
+func (n *Notifications) Read() Read {
+	if n == nil {
+		return Read{}
+	}
+	return n.read
 }
 
 // shown is what a template shows: the labels and annotations it names,
@@ -341,6 +358,12 @@ func (b *budget) spend(k int) bool {
 	return b.why == ""
 }
 
+// routeWork, when set, is told of the work a rule's routing does: each
+// policy it looks at, matched or not, and the words of contact points of
+// each way it puts together. The tests hold routing to it (TestPolicyTreeCost),
+// and the words to the steps spent, which are charged by them.
+var routeWork func(policies, words int)
+
 // outcomes are the sets of contact points a rule's alerts can be sent to,
 // one a way the routing can go, each a set of ids; why says why there is
 // none told: too many ways, policies past those read, or the budget spent.
@@ -375,6 +398,9 @@ func (r *route) outcomes(known map[string]string, parent, size, depth int, b *bu
 	}
 	all := []way{{recvs: newWays(size)}}
 	for _, c := range r.routes {
+		if routeWork != nil {
+			routeWork(1, 0)
+		}
 		m := c.match(known)
 		if m == no || !slices.ContainsFunc(all, func(w way) bool { return !w.stopped }) {
 			continue
@@ -390,6 +416,9 @@ func (r *route) outcomes(known map[string]string, parent, size, depth int, b *bu
 		var next []way
 		seen := map[string]bool{}
 		keep := func(w way) {
+			if routeWork != nil {
+				routeWork(0, len(w.recvs))
+			}
 			if k := key(w); !seen[k] {
 				seen[k] = true
 				next = append(next, w)

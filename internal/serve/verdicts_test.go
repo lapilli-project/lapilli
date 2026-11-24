@@ -153,6 +153,7 @@ func verdictOn(t *testing.T, s *Server, f ledger.Firing) ledger.Verdict {
 // their undoing of both undoing theirs alone; an editor of every team and
 // an admin "unrelated" too; --read-only no one.
 func TestVerdictRoles(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	f := errorsFiring(t, s)
@@ -351,6 +352,7 @@ func TestVerdictLimits(t *testing.T) {
 // is: a page elsewhere can't post, put or delete a verdict with a
 // signed-in person's cookie.
 func TestVerdictCrossOrigin(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	f := errorsFiring(t, s)
@@ -384,6 +386,7 @@ func TestVerdictCrossOrigin(t *testing.T) {
 // "Unrelated" and "This was real" are exclusive, and "unrelated" needs a
 // catch; the page offers neither where it can't be.
 func TestVerdictRealExclusiveServe(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	f := errorsFiring(t, s)
@@ -419,6 +422,7 @@ func TestVerdictRealExclusiveServe(t *testing.T) {
 // each part with who, when and the note, and whether it moved; 31 days at
 // most; a viewer's.
 func TestVerdictsAPI(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	f := errorsFiring(t, s)
@@ -490,6 +494,7 @@ func TestVerdictsAPIBounded(t *testing.T) {
 // MCP reads people's verdicts and sets none: no tool writes one, and the
 // firings it gives say what was said.
 func TestMCPReadsVerdicts(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, func(c *Config) { c.MCPCompare = "editors" })
 	f := errorsFiring(t, s)
 	o, _ := s.options(context.Background())
@@ -560,6 +565,7 @@ func summaryRowOf(t *testing.T, h http.Handler, day string) summaryRow {
 // once 80% of the row's firings are answered. numbers.md's "people" counts
 // them again from the week's report; /metrics gives each rule's answers.
 func TestVerdictsInTheSummary(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}
@@ -654,6 +660,7 @@ func TestVerdictsInTheSummary(t *testing.T) {
 // precision as Lapilli judged it; what people's word moved is said beside
 // it.
 func TestActionShareGoal(t *testing.T) {
+	parallel(t)
 	share := ledger.Goal{Name: "acted", Measure: "action.share", AtLeast: "0.25", Each: "week"}
 	row := func(firings, answered, yes int) *summaryRow {
 		r := &summaryRow{Firings: firings, whole: true}
@@ -707,6 +714,7 @@ func TestActionShareGoal(t *testing.T) {
 // "Judged by nothing", apart from "? Not judged" (no record), and their
 // stones catch nothing.
 func TestNotJudgedServe(t *testing.T) {
+	parallel(t)
 	no := false
 	s := verdictServer(t, func(c *Config) { c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Judged: &no}} })
 	h := s.Handler()
@@ -767,6 +775,7 @@ func mustOptions(t *testing.T, s *Server) verdict.Options {
 // writes nothing, rather than every answer picked cleared; "none" clears
 // them (bundle 65).
 func TestBulkAnswerPicked(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	f := errorsFiring(t, s)

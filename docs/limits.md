@@ -125,8 +125,11 @@
   for their APIs, as they document them. A backtest's comment stops no
   merge by itself: a job stops one when it fails (`FAIL_MISSED`, an
   expectation broken) and sets a commit status (`STATUS`) a branch rule
-  requires; never a GitHub check run, and not GitHub's merge queue
-  (`merge_group`) yet ([pr-backtests.md](pr-backtests.md)).
+  requires, GitHub's merge queue's (`merge_group`) on the merge group's
+  head; never a GitHub check run ([pr-backtests.md](pr-backtests.md)).
+  A GitLab merge train's pipeline is backtested only on a merge commit of
+  the source branch's head, as GitLab's reference says it is: another is
+  refused.
 - A pull request is opened only for a file in the repository that is the
   document Lapilli read. A rule file mounted from a ConfigMap whose manifest
   is what git holds, rules rendered from a chart, and rules read back from a

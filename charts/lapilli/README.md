@@ -24,7 +24,10 @@ It needs:
   VictoriaMetrics), or a cloud's managed Prometheus with `prometheus.auth`
   set to `aws`, `azure` or `google` and read access given through the
   cluster's workload identity. On Oracle Cloud, give the Prometheus you run
-  on OKE, with no auth.
+  on OKE, with no auth. `prometheus.tenant` is the tenant of a Mimir or a
+  Cortex with tenants and no gateway (`--prometheus-tenant`, sent as
+  `X-Scope-OrgID` to `prometheus.url` alone); without it, `prometheus.url`
+  is sent `rules.ruler.tenant`.
 - the rules, from one of `rules.configMaps` (ConfigMaps in the release's
   namespace holding Prometheus rule files, PrometheusRule resources, Grafana
   provisioning files or a cloud's rule groups), `rules.loaded` (those the API
@@ -1231,6 +1234,14 @@ and the digest, `/metrics` and `/api/v1/summary`. `serve.config`'s
 `serve.checkContent.runbookAnnotations` names the annotations a runbook is
 read from, the first a rule has; `serve.checkContent.runbookBase`, an https
 URL a runbook that is a path in the rules' repository is a link under.
+`serve.checkContent.alertmanager` gives Alertmanager's configuration, for
+the notification templates the rules it sends are sent with
+(`--alertmanager-config`, docs/check-content.md): `secret` or `configMap`,
+mounted whole at `/etc/lapilli/alertmanager/` with the ConfigMaps of
+`templateConfigMaps` beside it, so that its `templates:` globs find the
+files there; or `url`, a Mimir's or a Cortex's `/api/v1/alerts`, read with
+`rules.ruler.tenant` and `rules.ruler.tokenSecret`, with `rules.ruler.url`
+or without it (on its scheme and host when both are given).
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, which honours
 lapilli's labels (`honorLabels`: a rule's `team` stays `team`, not

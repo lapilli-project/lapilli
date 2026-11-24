@@ -12,6 +12,7 @@ import (
 // now, and a rule's page; two that differ never read "+0 pt", "+0%" or
 // "+0s".
 func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
+	parallel(t)
 	week := func(f, w int, delays ...time.Duration) *weekView {
 		return &weekView{Firings: f, White: w, Black: f - w, Delays: delays, Kept: true}
 	}

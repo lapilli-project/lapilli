@@ -14,6 +14,7 @@ import (
 // A FIFO for a deploys file or a history is refused, not read: a read of
 // one would hold the worker up for good.
 func TestDeploysFIFO(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	if err := syscall.Mkfifo(filepath.Join(dir, "h.txt"), 0o644); err != nil {
 		t.Skip(err)
@@ -42,6 +43,7 @@ func TestDeploysFIFO(t *testing.T) {
 // says so by the file's path, which a reader who isn't an admin is shown
 // without (redactPaths), never by its directory's.
 func TestDeploysDirectorySaidByTheFile(t *testing.T) {
+	parallel(t)
 	dir := filepath.Join(t.TempDir(), "private-mount")
 	os.Mkdir(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "h.txt"), nil, 0o644)

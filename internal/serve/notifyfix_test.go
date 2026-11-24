@@ -16,6 +16,7 @@ import (
 
 // SNS hosts are named by a region: the S3 bucket named sns is not one.
 func TestSNSHosts(t *testing.T) {
+	parallel(t)
 	for host, ok := range map[string]bool{
 		"sns.us-east-1.amazonaws.com": true, "sns.ap-northeast-2.amazonaws.com": true, "sns.us-gov-west-1.amazonaws.com": true,
 		"sns.cn-north-1.amazonaws.com.cn": true, "sns.il-central-1.amazonaws.com": true, "sns.eusc-de-east-1.amazonaws.eu": true,
@@ -32,6 +33,7 @@ func TestSNSHosts(t *testing.T) {
 // What SNS signs, field by field, as AWS's documentation lists them: the
 // test signs with signed() too, so this holds it to the text.
 func TestSNSSignedText(t *testing.T) {
+	parallel(t)
 	subject := "s"
 	n := snsMessage{Type: "Notification", MessageID: "m", TopicArn: "arn", Subject: &subject, Message: "body", Timestamp: "ts"}
 	if got := string(n.signed()); got != "Message\nbody\nMessageId\nm\nSubject\ns\nTimestamp\nts\nTopicArn\narn\nType\nNotification\n" {
@@ -48,6 +50,7 @@ func TestSNSSignedText(t *testing.T) {
 // of the fetches a certificate needs; real certificates are fetched a few
 // a minute, and past them the port answers 503, which SNS tries again.
 func TestSNSFetchesBounded(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -111,6 +114,7 @@ func TestSNSFetchesBounded(t *testing.T) {
 // An Azure alert that isn't a Prometheus rule's carries the labels
 // recipes/firings/azure-monitor.jq gives its firing, and ties to it.
 func TestAzureTiesRecorded(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	ctx := context.Background()
 	start := time.Date(2026, 11, 2, 7, 0, 0, 0, time.UTC)
@@ -147,6 +151,7 @@ func TestAzureTiesRecorded(t *testing.T) {
 // The notifications token can't be the incidents or the firings token: it
 // sits in Azure's and Google Cloud's webhook URLs.
 func TestNotifyTokenOwn(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, notifyToken) })
 	body := notifyFixture(t, "azure-fired.json")
 	if code, _, _ := send(t, s.NotifyHandler(), "/v1/azure", body, basicAuth("x", notifyToken)); code != http.StatusUnauthorized {
@@ -161,6 +166,7 @@ func TestNotifyTokenOwn(t *testing.T) {
 // The certificate cache can't be filled with one certificate under many
 // names, and a certificate not cached before still gets in when it is full.
 func TestSNSCertCache(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.fetches = &limiter{rate: 1000, burst: 1000}

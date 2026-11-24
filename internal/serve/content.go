@@ -61,6 +61,11 @@ type saidRules struct {
 	// job's, asked once a day; a zero global when it gave none.
 	scrape   content.Scrapes
 	scrapeAt time.Time
+	// evaluation is the evaluation_interval Prometheus's configuration
+	// gave, asked with the scrape intervals, with --loaded-rules: what a
+	// rule group of its with no interval of its own runs at; 0 when not
+	// known.
+	evaluation time.Duration
 	// jobsOf are the jobs each selector that names none comes from, as
 	// asked (askJobs), and jobsAt when each was asked: kept a day, or an
 	// hour when its query failed.
@@ -146,10 +151,15 @@ type targetsAPI interface {
 // work out, at the interval of the series they read. Where that isn't
 // served, the range check is off, and those reduces are asked at
 // Grafana's resolution. Its targets, where they are served, say the job
-// label each job's ends up with.
+// label each job's ends up with. With --loaded-rules, its configuration
+// is read for its evaluation_interval too, --scrape-interval or not: what
+// a group of its rules with no interval of its own runs at, which a
+// backtest held to the incidents takes a pull request's rule file at
+// (evaluationInterval).
 func (s *Server) askScrape(ctx context.Context) {
 	sc, ok := replay.Base(s.h).(statusConfig)
-	if s.cfg.ScrapeInterval > 0 || !ok {
+	scrapes := s.cfg.ScrapeInterval == 0
+	if !ok || !scrapes && !s.cfg.Loaded {
 		return
 	}
 	s.saidRules.Lock()
@@ -164,12 +174,23 @@ func (s *Server) askScrape(ctx context.Context) {
 	switch cfg, err := sc.StatusConfig(ctx); {
 	case err == nil:
 		got, _ = content.ScrapeConfig(cfg)
-	case errors.Is(err, prom.ErrTooLarge):
+	case errors.Is(err, prom.ErrTooLarge) && scrapes:
 		// Not a store that doesn't serve it: one whose configuration is
 		// too large to read, which whoever runs lapilli can mend.
 		s.log.Warn("Prometheus's configuration is larger than is read of it: the range check is off; give --scrape-interval", "err", err)
-	default:
+	case scrapes:
 		s.log.Debug("no scrape interval from Prometheus: the range check is off", "err", err)
+	default:
+		s.log.Debug("no evaluation interval from Prometheus: a rule file's group with no interval is another rule than one of its rules API's", "err", err)
+	}
+	s.saidRules.Lock()
+	s.saidRules.evaluation = got.Evaluation
+	s.saidRules.Unlock()
+	if !scrapes {
+		s.saidRules.Lock()
+		s.saidRules.scrapeAt = s.now()
+		s.saidRules.Unlock()
+		return
 	}
 	if ta, ok := replay.Base(s.h).(targetsAPI); ok && got.Global > 0 {
 		if b, err := ta.Targets(ctx); err == nil {
@@ -416,6 +437,19 @@ func (s *Server) notifications() (*content.Notifications, string) {
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
 	return s.saidRules.notify, s.saidRules.notifySum
+}
+
+// evaluationInterval is the evaluation_interval of the Prometheus whose
+// rules API serve reads (--loaded-rules), as its configuration says; 0
+// when serve doesn't read its rules so, or the configuration wasn't read
+// or doesn't say it.
+func (s *Server) evaluationInterval() time.Duration {
+	if !s.cfg.Loaded {
+		return 0
+	}
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	return s.saidRules.evaluation
 }
 
 // scrapes are the intervals the range check counts with; a zero global

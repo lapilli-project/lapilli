@@ -144,6 +144,7 @@ const errorsOnProbe = "- rules: ^Errors$\n  signals: [probe]\n  match: []\n"
 // judged with, the second by the round after, the options of the one
 // under way, read before, judging nothing the save pended.
 func TestSignalEntriesSavedDuringRound(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for _, during := range []bool{false, true} {
 		h := probeAtFive()
@@ -178,6 +179,7 @@ func TestSignalEntriesSavedDuringRound(t *testing.T) {
 // no name: no window of the signal with no name is kept after it was made
 // the signal impact.
 func TestFirstNamedSavedDuringRun(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := &duringHistory{sigHistory: shopHistory(), expr: "always"}
 	s := duringServer(t, h, "always")
@@ -296,6 +298,7 @@ func TestSignalTryAsSavedFirstNamed(t *testing.T) {
 // make a 32 KB form megabytes kept, are refused; so are a label's values
 // past a team's bounds, and entries kept past maxEntriesJSON.
 func TestSignalEntriesBounded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
 	big := strings.Repeat("x", 4000)
@@ -336,6 +339,7 @@ func TestSignalEntriesBounded(t *testing.T) {
 // and what /settings.yaml gives names no signal it doesn't declare, as
 // --impact-file reads it.
 func TestSignalEntriesNameNoSignalGone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), func(c *Config) {
 		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}}}
@@ -387,6 +391,7 @@ func TestSignalEntriesNameNoSignalGone(t *testing.T) {
 // new signal's: its windows (the dismissed one, its comment) would be the
 // new one's, and its read again would take their place.
 func TestSignalAddOntoKeptNameRefused(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, signalWindowsHistory(), nil)
 	ws, _ := s.l.ImpactWindows(ctx, now.Add(-30*24*time.Hour), now)
@@ -417,6 +422,7 @@ func TestSignalAddOntoKeptNameRefused(t *testing.T) {
 
 // A signal set aside, past the eight at most, can't be renamed over.
 func TestSignalRenameOverAsideRefused(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
 	values := map[string]string{}
@@ -446,6 +452,7 @@ func TestSignalRenameOverAsideRefused(t *testing.T) {
 // Tried, a signal read in full stands for saving it within triedFor: the
 // save reads it no more.
 func TestSignalTryThenSaveReadsOnce(t *testing.T) {
+	parallel(t)
 	h := shopHistory()
 	s := signalServer(t, h, nil)
 	q := signalPost("", "latency", "latency_p99 > 1", "10m", "", true)
@@ -501,6 +508,7 @@ func TestSignalChangesPlannedApart(t *testing.T) {
 // An admin's read again that fails is said to them, and is no run's
 // failure: the sources panel says nothing of it.
 func TestSignalReadAgainFailureTheAdmins(t *testing.T) {
+	parallel(t)
 	h := signalWindowsHistory()
 	s := signalServer(t, h, nil)
 	h.mu.Lock()
@@ -519,6 +527,7 @@ func TestSignalReadAgainFailureTheAdmins(t *testing.T) {
 // Options are read with the named signals' generation, before the
 // settings: those read before a change judge nothing it pended.
 func TestOptionsCarrySignalsGen(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
 	before, err := s.options(ctx)
@@ -549,6 +558,7 @@ func TestOptionsCarrySignalsGen(t *testing.T) {
 // valid UTF-8, or has a control character, however it came, is refused by
 // the bounds a team's labels are held to.
 func TestSignalEntriesTextOnly(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
 	raw := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("\xff", 200)))
@@ -576,6 +586,7 @@ func TestSignalEntriesTextOnly(t *testing.T) {
 // read back, a value that isn't text among them: a round keeps them once,
 // and the next ones write nothing, judging nothing again.
 func TestSignalEntriesStartedKeptOnce(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), func(c *Config) {
 		c.ImpactRules = []verdict.RuleEntry{{Labels: incident.Labels{"service": {"\xff\xfe"}}, Signals: []string{"probe"}}}
@@ -595,6 +606,7 @@ func TestSignalEntriesStartedKeptOnce(t *testing.T) {
 // again and notes the entries naming it before and after: among the reads
 // and saves an admin may ask for in an hour.
 func TestSignalRenamesCounted(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	names := []string{"probe", "synthetic"}
 	for i := 0; i < impactTriesAnHour; i++ {
@@ -615,6 +627,7 @@ func TestSignalRenamesCounted(t *testing.T) {
 // what the save pended is judged with them, or left, never with those
 // before.
 func TestSignalsFollowerOptionsOfTheGeneration(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	f := sharedLedger(t)
 	rc := newSink(t)
@@ -665,6 +678,7 @@ func TestSignalsFollowerOptionsOfTheGeneration(t *testing.T) {
 // by its expression in effect, as one serve was started with: it keeps
 // the record from its start.
 func TestSignalSetHereLooksForItsData(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	// Its data begins after it is read again: looked for, it is found later.

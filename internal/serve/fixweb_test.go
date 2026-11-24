@@ -37,6 +37,7 @@ func tasksFor(t *testing.T, s *Server, query string) tasksView {
 // all, and an older link's status as it was (doing, or one there is no
 // such of, the open ones); the team kept in the form.
 func TestTasksFacet(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	ctx := context.Background()
 	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^P"}, "ana")
@@ -106,6 +107,7 @@ func TestTasksFacet(t *testing.T) {
 // translation: some are shown only in states the pages rendered elsewhere
 // aren't in.
 func TestFixTextsTranslated(t *testing.T) {
+	parallel(t)
 	texts := map[string]bool{}
 	for st := range stateGroups {
 		b := badgeOf(st)
@@ -178,6 +180,7 @@ func windowForm(title, start, end string, more ...string) url.Values {
 // It is checked as saving is: the role, the team, the same site; what was
 // typed comes back escaped, and a window that couldn't be kept is refused.
 func TestWindowPreview(t *testing.T) {
+	parallel(t)
 	s, pay, search := rolesServer(t, nil)
 	h := s.Handler()
 	ctx := context.Background()
@@ -305,6 +308,7 @@ func a11yPreviews(mux *http.ServeMux, s *Server) []string {
 // TestPreviewAccessible: a quiet window's preview, to add one and to
 // change one, passes the pages' checks in each language.
 func TestPreviewAccessible(t *testing.T) {
+	parallel(t)
 	s, _ := a11yServer(t)
 	mux := http.NewServeMux()
 	pageA11y(t, mux, "", a11yPreviews(mux, s)...)
@@ -316,6 +320,7 @@ func TestPreviewAccessible(t *testing.T) {
 // admins alone; the sidebar's Administration links to it, with the page
 // context; and the breadcrumbs of the group's pages start with it.
 func TestManagePage(t *testing.T) {
+	parallel(t)
 	s, _, _ := rolesServer(t, nil)
 	h := s.Handler()
 	cards := func(who string) []string {
@@ -355,6 +360,7 @@ func TestManagePage(t *testing.T) {
 // TestOffTextsTranslated: every action a template shows disabled, with
 // offOf or offTeam, is named in each language.
 func TestOffTextsTranslated(t *testing.T) {
+	parallel(t)
 	tpls, err := files.ReadDir("templates")
 	if err != nil {
 		t.Fatal(err)
@@ -385,6 +391,7 @@ func TestOffTextsTranslated(t *testing.T) {
 // settings', a report's, an incident's, and a rule's (what to do first,
 // its note, what it says, proposing a change, a task about it).
 func TestFormsDisabledWithWhy(t *testing.T) {
+	parallel(t)
 	t.Run("read-only", func(t *testing.T) {
 		s := pagesServer(t)
 		s.cfg.ReadOnly = true
@@ -485,6 +492,7 @@ func init() {
 // shown disabled, and the Manage page, pass the pages' checks in each
 // language.
 func TestDisabledAccessible(t *testing.T) {
+	parallel(t)
 	ro, _ := a11yServer(t)
 	ro.cfg.ReadOnly = true
 	pageA11y(t, ro.Handler(), "", "/incidents/impact-20261103T0600Z", "/teams?edit=1", "/rules/Errors?tab=proposals", "/rules/Errors?tab=activity", "/manage")

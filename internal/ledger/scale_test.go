@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,32 +14,19 @@ import (
 	"lapilli.dev/internal/incident"
 )
 
-// slow stretches the budgets under the race detector, which slows SQLite
-// many times over (race_test.go), and on CI runners. race says the race
-// detector is on: the tests that hold big runs to a budget skip under it,
-// and only under it.
-var (
-	slow = 1.0
-	race bool
-)
-
-// GitHub's runners write SQLite at less than half the speed of a laptop,
-// and unevenly, while the other packages' tests run beside these: a week of
-// 100,000 firings copied in takes 2 s on a laptop and up to 5 s there, on
-// macOS and, since the recipe tests made internal/serve's run twice as long,
-// on Linux too. The budgets hold as they are on a laptop; on those runners
-// they are doubled.
-func init() {
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		slow = max(slow, 2)
-	}
-}
+// race says the race detector is on (race_test.go), which slows SQLite
+// many times over: the tests of big runs skip under it, and only under it.
+// Their budgets are counts, not times, so that a slow runner fails none.
+var race bool
 
 // TestScale fills a ledger with twelve weeks of a busy set of rules, as
 // backfill and hourly runs would, and holds what a person waits on to a
-// budget: an hourly run, writing an incident, reading twelve weeks, a
-// week's report. LAPILLI_SCALE multiplies the firings (default 1: about
-// 200,000); budgets are generous, for a slow CI runner.
+// budget of what the ledger does: an hourly run, writing an incident,
+// reading twelve weeks, a week's incidents and report, a page of firings,
+// judging everything again. LAPILLI_SCALE multiplies the firings (default
+// 1: about 200,000). The budgets are counts, not times (work), so that a
+// slow runner fails none: the statements sent, the rows written, the
+// tables read and a query's plan.
 func TestScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -48,7 +36,7 @@ func TestScale(t *testing.T) {
 		k, _ = strconv.ParseFloat(v, 64)
 	}
 	ctx := context.Background()
-	l := open(t, time.UTC)
+	l, where := openWatched(t)
 	r := rand.New(rand.NewPCG(1, 2))
 	const rules, weeks = 400, 12
 	perHour := int(100 * k)
@@ -92,55 +80,92 @@ func TestScale(t *testing.T) {
 	}
 	t.Logf("backfill: %d firings in %s", total, time.Since(began).Round(time.Millisecond))
 
-	budget := func(what string, max time.Duration, f func()) {
+	// Each held to what it makes the ledger do (work), not to how long it
+	// takes, so that a slow runner fails none; the time is logged. A day
+	// holds some 2,400 firings, the twelve weeks some 200,000.
+	day := 24 * perHour
+	measure := func(what string, f func()) work {
 		t.Helper()
 		began := time.Now()
-		f()
-		took := time.Since(began)
-		t.Logf("%s: %s", what, took.Round(time.Microsecond))
-		if max = time.Duration(float64(max) * slow); took > max {
-			t.Errorf("%s took %s, over %s", what, took, max)
+		w := doing(t, l, where, f)
+		t.Logf("%s: %s, %d statements, %d rows written, read %v", what, time.Since(began).Round(time.Microsecond), w.statements, w.rows, w.tables())
+		return w
+	}
+	// A write judges again the days it meets, and their lead and re-fires:
+	// a run's or an incident's, two days. It writes no more rows than they
+	// hold, and sends fewer statements than half a day's firings: one for
+	// each firing judged again, or each firing of the twelve weeks written
+	// again, is past both.
+	wrote := func(what string, w work, days int) {
+		t.Helper()
+		if most := int64(day / 2); w.statements > most {
+			t.Errorf("%s: %d statements, over %d", what, w.statements, most)
+		}
+		if most := int64(days * day); w.rows > most {
+			t.Errorf("%s: %d rows written, over the %d firings of the %d days it judges again", what, w.rows, most, days)
 		}
 	}
-	budget("an hourly run", 2*time.Second, func() {
+	// A read of what is kept by the day or week sends a few statements and
+	// reads the tallies, never the firings (on SQLite, the tables read).
+	readTallies := func(what string, w work, most int64) {
+		t.Helper()
+		if w.statements > most || w.read["firings"] {
+			t.Errorf("%s: %d statements, over %d, read %v: the firings read, not their tallies?", what, w.statements, most, w.tables())
+		}
+	}
+	wrote("an hourly run", measure("an hourly run", func() {
 		fs := append(hour(t0.Add(-2*time.Hour)), hour(t0.Add(-time.Hour))...)
 		f := Found{From: t0.Add(-2 * time.Hour), To: t0, Firings: fs, Run: Run{Kind: "hourly", Started: t0, Finished: t0}}
 		if err := l.Record(ctx, f, opts); err != nil {
 			t.Fatal(err)
 		}
-	})
-	budget("writing an incident", time.Second, func() {
+	}), 2)
+	wrote("writing an incident", measure("writing an incident", func() {
 		if _, err := l.Put(ctx, incident.Incident{Start: t0.Add(-30 * time.Hour), End: t0.Add(-28 * time.Hour),
 			Labels: incident.Labels{"service": {"checkout"}}}, "ana", opts); err != nil {
 			t.Fatal(err)
 		}
-	})
-	budget("twelve weeks by rule", time.Second, func() {
+	}), 2)
+	readTallies("twelve weeks by rule", measure("twelve weeks by rule", func() {
 		w := Week(l.Day(t0))
 		ws, err := l.Weeks(ctx, w-7*weeks, w)
 		if err != nil || len(ws) == 0 {
 			t.Fatal(ws, err)
 		}
-	})
-	budget("a week's incidents", time.Second, func() {
+	}), 5)
+	readTallies("a week's incidents", measure("a week's incidents", func() {
 		if _, err := l.Incidents(ctx, t0.Add(-7*24*time.Hour), t0, true); err != nil {
 			t.Fatal(err)
 		}
-	})
-	budget("a page of firings", 500*time.Millisecond, func() {
+	}), 10)
+	readTallies("a week's report, without firings", measure("a week's report, without firings", func() {
+		if _, err := l.Report(ctx, t0.Add(-7*24*time.Hour), t0, opts, false); err != nil {
+			t.Fatal(err)
+		}
+	}), 50)
+	// A page of a rule's firings, and the next: a few statements each, the
+	// firings found by the rule's index, not every firing of the twelve
+	// weeks scanned.
+	var page []Firing
+	w := measure("a page of firings", func() {
 		fs, err := l.Firings(ctx, FiringQuery{From: start, To: t0, Rule: "Rule007", Limit: 100})
 		if err != nil || len(fs) == 0 {
 			t.Fatal(err)
 		}
+		page = fs
 		if _, err := l.Firings(ctx, FiringQuery{From: start, To: t0, Rule: "Rule007", Limit: 100, Before: fs[len(fs)-1].ID}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	budget("a week's report, without firings", 3*time.Second, func() {
-		if _, err := l.Report(ctx, t0.Add(-7*24*time.Hour), t0, opts, false); err != nil {
-			t.Fatal(err)
+	if w.statements > 20 {
+		t.Errorf("a page of firings: %d statements, over 20", w.statements)
+	}
+	for _, q := range []FiringQuery{{From: start, To: t0, Rule: "Rule007", Limit: 100}, {From: start, To: t0, Rule: "Rule007", Limit: 100, Before: page[len(page)-1].ID}} {
+		sq, args := firingsQuery(q)
+		if p := plan(t, l, sq, args...); !strings.Contains(p, "firings_rule") {
+			t.Errorf("a page of firings, not by the rule's index: %s", p)
 		}
-	})
+	}
 	// Marked windows of hours: a sale each Friday evening, a launch each
 	// morning, a campaign of three days. Each firing is set beside the
 	// few occurrences that started within the longest before it
@@ -156,13 +181,18 @@ func TestScale(t *testing.T) {
 	most, looked := 0, 0
 	markLooked = func(n int) { most, looked = max(most, n), looked+1 }
 	defer func() { markLooked = nil }()
-	budget("judging everything again", time.Duration(60*k)*time.Second, func() {
+	// Judged again, all twelve weeks: a few dozen statements a day, and no
+	// more rows than the firings kept, each written once at most.
+	w = measure("judging everything again", func() {
 		o := opts
 		o.Lead = 10 * time.Minute
 		if err := l.JudgeAll(ctx, o, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
+	if most := int64(50 * weeks * 7); w.statements > most || w.rows > int64(total) {
+		t.Errorf("judging everything again: %d statements, over %d, and %d rows written, over the %d firings kept", w.statements, most, w.rows, total)
+	}
 	t.Logf("marked windows: %d firings set beside %d occurrences at most", looked, most)
 	if looked < total || most > 5 {
 		t.Errorf("marked windows: %d firings set beside occurrences, %d at most; want every firing, beside 5 at most: the three days of the campaign hold three mornings and a Friday", looked, most)

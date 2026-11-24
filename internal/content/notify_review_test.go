@@ -66,9 +66,11 @@ func usedBy(n *Notifications, r rules.Rule) []string {
 }
 
 // A policy tree a real Grafana 13.3.1 accepted and gave back, 1,993
-// policies, three levels, routes a rule in well under a second: what a
-// child gives is worked out once, not once for each way that reaches it,
-// and a way's contact points are a set.
+// policies, three levels, routes a rule with little work: what a child
+// gives is worked out once, not once for each way that reaches it, so each
+// policy is looked at once; and a way's contact points are a set, a few
+// words of them put together for each policy. The work is counted, not
+// timed, so that a slow runner fails none (routeCost); the time is logged.
 func TestPolicyTreeCost(t *testing.T) {
 	n, _, err := ReadNotifications([]byte(`[]`), []byte(`[{"name": "plain-hook", "settings": {"message": "{{ .CommonLabels.cluster }}"}}]`),
 		reviewFile(t, "policies-wide.json"))
@@ -76,15 +78,16 @@ func TestPolicyTreeCost(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs, _ := grafana13(t)
-	began := time.Now()
 	for _, name := range []string{"Disk", "ShopErrors", "PayLatency"} {
 		// Every way goes to plain-hook, whose message is a template.
-		if got := usedBy(n, ruleNamed(t, rs, name)); len(got) != 1 || got[0] != "plain-hook/0" {
+		var got []string
+		c := routeCostOf(t, func() { got = usedBy(n, ruleNamed(t, rs, name)) })
+		if len(got) != 1 || got[0] != "plain-hook/0" {
 			t.Errorf("%s: %q", name, got)
 		}
-	}
-	if took := time.Since(began); took > 2*time.Second*time.Duration(slowFactor()) {
-		t.Errorf("three rules routed in %s", took)
+		if c.policies > 1993 || c.words > 2*1993 {
+			t.Errorf("%s: %s, over each of the 1,993 policies once, two words each", name, c)
+		}
 	}
 	// Built: 64 ways at each of two levels, each to contact points of its
 	// own, the inner level under every outer way, and two thousand
@@ -107,12 +110,14 @@ func TestPolicyTreeCost(t *testing.T) {
 	if n, _, err = ReadNotifications([]byte(`[]`), []byte(`[]`), policies); err != nil {
 		t.Fatal(err)
 	}
-	began = time.Now()
-	if steps := maxSteps; !routes(n, ruleNamed(t, rs, "ShopErrors"), &steps) {
-		t.Error("64 ways through 1,986 policies weren't routed")
-	}
-	if took := time.Since(began); took > time.Second*time.Duration(slowFactor()) {
-		t.Errorf("64 ways through 1,986 policies routed in %s", took)
+	steps := maxSteps
+	c := routeCostOf(t, func() {
+		if !routes(n, ruleNamed(t, rs, "ShopErrors"), &steps) {
+			t.Error("64 ways through 1,986 policies weren't routed")
+		}
+	})
+	if c.policies > 1986 || c.words > maxSteps-steps {
+		t.Errorf("64 ways through 1,986 policies: %s, %d steps spent: each policy once, and no more words than the steps charged", c, maxSteps-steps)
 	}
 	// Two: the inner under each of 64 outer ways, too many ways to tell,
 	// told quickly.
@@ -123,10 +128,8 @@ func TestPolicyTreeCost(t *testing.T) {
 	if n, _, err = ReadNotifications([]byte(`[]`), []byte(`[]`), policies); err != nil {
 		t.Fatal(err)
 	}
-	began = time.Now()
-	n.For(ruleNamed(t, rs, "ShopErrors"))
-	if took := time.Since(began); took > time.Second*time.Duration(slowFactor()) {
-		t.Errorf("a two-level tree of 1,993 policies routed one rule in %s", took)
+	if c := routeCostOf(t, func() { n.For(ruleNamed(t, rs, "ShopErrors")) }); c.policies > 1993 || c.words > maxSteps {
+		t.Errorf("a two-level tree of 1,993 policies, one rule: %s, over each policy once and a rule's steps", c)
 	}
 	// More work than a rule's routing may take: given up on, not guessed,
 	// and quickly. 64 ways, each through 280 policies, each of which may
@@ -141,17 +144,40 @@ func TestPolicyTreeCost(t *testing.T) {
 	if n, _, err = ReadNotifications([]byte(`[]`), []byte(`[]`), policies); err != nil {
 		t.Fatal(err)
 	}
-	began = time.Now()
-	if steps := maxSteps; routes(n, ruleNamed(t, rs, "ShopErrors"), &steps) {
-		t.Error("routed past the steps a rule may take")
-	}
-	if took := time.Since(began); took > time.Second*time.Duration(slowFactor()) {
-		t.Errorf("given up on in %s", took)
+	steps = maxSteps
+	c = routeCostOf(t, func() {
+		if routes(n, ruleNamed(t, rs, "ShopErrors"), &steps) {
+			t.Error("routed past the steps a rule may take")
+		}
+	})
+	if policies := 6 + 280*7; c.policies > policies || c.words > maxSteps+overStep(n) {
+		t.Errorf("given up on after %s, over each of the %d policies once and a rule's %d steps", c, policies, maxSteps)
 	}
 }
 
-// raceOn is set under the race detector, which slows everything.
-var raceOn bool
+// A routeCost is the work a rule's routing did, as routeWork counts it:
+// the policies looked at, and the words of contact points of the ways put
+// together, the steps charged by.
+type routeCost struct{ policies, words int }
+
+func (c routeCost) String() string {
+	return fmt.Sprintf("%d policies looked at, %d words of contact points", c.policies, c.words)
+}
+
+// routeCostOf is the work routing did while f ran.
+func routeCostOf(t *testing.T, f func()) (c routeCost) {
+	t.Helper()
+	routeWork = func(p, w int) { c.policies, c.words = c.policies+p, c.words+w }
+	defer func() { routeWork = nil }()
+	f()
+	return c
+}
+
+// overStep is the most a rule's routing may do past its steps, in the
+// policy it runs out in: a way's words for each of the child's ways.
+func overStep(n *Notifications) int {
+	return (1 + maxOutcomes) * ((len(n.names) + 63) / 64)
+}
 
 // routes reports whether a rule's routing is told.
 func routes(n *Notifications, r rules.Rule, steps *int) bool {
@@ -164,20 +190,6 @@ func routes(n *Notifications, r rules.Rule, steps *int) bool {
 	_, why := n.route.outcomes(known, 0, len(n.names), 0, b)
 	*steps = b.rule
 	return why == ""
-}
-
-// slowFactor stretches a budget under the race detector.
-func slowFactor() int {
-	switch {
-	case raceOn:
-		return 10
-	case os.Getenv("GITHUB_ACTIONS") == "true":
-		// GitHub's runners run the packages' tests side by side on a few
-		// cores: a budget made on a laptop is about twice as tight there,
-		// and the regressions these catch cost tens of seconds.
-		return 4
-	}
-	return 1
 }
 
 // Alertmanager's older match and match_re, which Grafana 13.3.1 keeps and
@@ -314,7 +326,10 @@ func TestOrFallback(t *testing.T) {
 // words of its contact points, and all the rules of a check stop at the
 // check's, so 500 rules take well under the time pages wait; past a time
 // given, none is routed. Each rule given up says why (a verification of
-// the fixes found 500 rules taking twelve minutes).
+// the fixes found 500 rules taking twelve minutes). The work is counted
+// (routeCostOf), not timed, so that a slow runner fails none: a rule's
+// steps, and the check's, bound the words put together, and each policy
+// is looked at once a rule at most. The times are logged.
 func TestPolicyTreeBudget(t *testing.T) {
 	rs, _ := grafana13(t)
 	r := ruleNamed(t, rs, "ShopErrors")
@@ -330,17 +345,23 @@ func TestPolicyTreeBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 		began := time.Now()
-		if steps := maxSteps; routes(n, r, &steps) {
-			t.Errorf("%s: routed past a rule's budget", f)
-		}
-		if took := time.Since(began); took > 200*time.Millisecond*time.Duration(slowFactor()) {
-			t.Errorf("%s: one rule given up on in %s", f, took)
+		c := routeCostOf(t, func() {
+			if steps := maxSteps; routes(n, r, &steps) {
+				t.Errorf("%s: routed past a rule's budget", f)
+			}
+		})
+		t.Logf("%s: one rule given up on after %s, in %s", f, c, time.Since(began))
+		if policies := 1697; c.policies > policies || c.words > maxSteps+overStep(n) {
+			t.Errorf("%s: one rule given up on after %s, over each of the %d policies once and a rule's %d steps", f, c, policies, maxSteps)
 		}
 		why := map[string]int{}
 		began = time.Now()
-		Check(many, Options{Notify: n, Unchecked: func(_, w string) { why[w]++ }})
-		if took := time.Since(began); took > 2*time.Second*time.Duration(slowFactor()) {
-			t.Errorf("%s: 500 rules checked in %s", f, took)
+		c = routeCostOf(t, func() { Check(many, Options{Notify: n, Unchecked: func(_, w string) { why[w]++ }}) })
+		t.Logf("%s: 500 rules checked after %s, in %s", f, c, time.Since(began))
+		// The check's steps run out after some twenty rules' worth: each
+		// policy looked at once for each of those, and none for the rest.
+		if policies := (maxCheckSteps/maxSteps + 1) * 1697; c.policies > policies || c.words > maxCheckSteps+len(many)*overStep(n) {
+			t.Errorf("%s: 500 rules checked after %s, over %d policies and the check's %d steps", f, c, policies, maxCheckSteps)
 		}
 		if why[WhySteps] == 0 || why[WhyAllSteps] == 0 || why[WhySteps]+why[WhyAllSteps] != 500 {
 			t.Errorf("%s: unchecked %v", f, why)

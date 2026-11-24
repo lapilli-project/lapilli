@@ -125,6 +125,7 @@ func utc(s string) time.Time {
 }
 
 func TestPagerDutyRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Token token=pd-secret" || !strings.Contains(r.Header.Get("Accept"), "pagerduty+json;version=2") {
@@ -192,6 +193,7 @@ func TestPagerDutyRecipe(t *testing.T) {
 }
 
 func TestIncidentIORecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer iio-secret" {
@@ -255,6 +257,7 @@ func TestIncidentIORecipe(t *testing.T) {
 }
 
 func TestJiraRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
@@ -307,6 +310,7 @@ func TestJiraRecipe(t *testing.T) {
 // one with no alertname, and one deleted since, are left out, and so is
 // an issue the API says isn't an incident. A 429 is waited out.
 func TestJiraRecipeLinkedAlerts(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	const cloud = "35273b54-3f06-40d2-880f-dd28cf8daafa"
 	var mu sync.Mutex
@@ -457,6 +461,7 @@ func TestJiraRecipeLinkedAlerts(t *testing.T) {
 // written, and any other answer that isn't a 2xx stops it, saying its
 // status. Under sh and dash alike.
 func TestJiraRecipeSearchWaits(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	shells := []string{"sh"}
 	if _, err := exec.LookPath("dash"); err == nil {
@@ -537,6 +542,7 @@ func TestJiraRecipeSearchWaits(t *testing.T) {
 // one is kept with no end. With every issue skipped, nothing is written and
 // the script fails.
 func TestJiraRecipeFields(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	var asked []string
 	body := fixture(t, "jira-fields.json")
@@ -677,6 +683,7 @@ func TestJiraRecipeFields(t *testing.T) {
 // One issue edited to hold more than serve takes doesn't have its incident
 // refused: the values past it are left out, and said by the issue's key.
 func TestJiraRecipeLabelBounds(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	value := func(i int, s string) map[string]string {
 		return map[string]string{"value": fmt.Sprintf("%s-%02d", s, i)}
@@ -763,6 +770,7 @@ func loadIncidents(t *testing.T, out string) []incident.Incident {
 }
 
 func TestGitHubRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	cmd := exec.Command("jq", "-f", recipes+"github.jq", recipes+"testdata/github.json")
 	out, err := cmd.CombinedOutput()
@@ -783,6 +791,7 @@ func TestGitHubRecipe(t *testing.T) {
 // From the tool to the ledger: a recipe's output, through put.sh, into the
 // port that takes incidents. Done again, it changes nothing.
 func TestPutRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	token := "a-token-long-enough"
 	file := tokenFile(t, token)
@@ -852,6 +861,7 @@ func TestPutRecipe(t *testing.T) {
 // The port takes incidents, from the token's holder, and nothing else; it
 // believes no header, and the UI's port doesn't take the token.
 func TestIncidentsPort(t *testing.T) {
+	parallel(t)
 	const token = "a-token-long-enough"
 	file := tokenFile(t, token)
 	s, _ := server(t, func(c *Config) {
@@ -937,6 +947,7 @@ func TestIncidentsPort(t *testing.T) {
 // isn't a list of incidents: a green job with nothing copied is the failure to
 // fear.
 func TestRecipesFailLoudly(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	pages := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -984,6 +995,7 @@ func TestRecipesFailLoudly(t *testing.T) {
 // What goes in a URL is encoded: a zone's + would otherwise reach the tool as a
 // space.
 func TestRecipeEncodesTimes(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("since"); got != "2026-10-01T00:00:00+09:00" {
@@ -1000,6 +1012,7 @@ func TestRecipeEncodesTimes(t *testing.T) {
 // an incident a person wrote, and a vendor id that happens to be L-1 can't
 // write over one.
 func TestTokenKeepsToItsOwn(t *testing.T) {
+	parallel(t)
 	const token = "a-token-long-enough"
 	file := tokenFile(t, token)
 	s, _ := server(t, func(c *Config) {
@@ -1063,6 +1076,7 @@ func TestTokenKeepsToItsOwn(t *testing.T) {
 // A job needs a few writes a second; more is told to slow down, and put.sh
 // waits and tries again.
 func TestTokenRate(t *testing.T) {
+	parallel(t)
 	const token = "a-token-long-enough"
 	file := tokenFile(t, token)
 	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
@@ -1072,6 +1086,10 @@ func TestTokenRate(t *testing.T) {
 	if ledgertest.On() {
 		s.tokenRate.rate = 1
 	}
+	// In this process's bucket, by the server's wall clock, stopped: the
+	// burst of 40 through, the rest refused, however long they take.
+	at := time.Now()
+	s.wall = func() time.Time { return at }
 	port := s.IncidentsHandler()
 	codes := map[int]int{}
 	for i := range 60 {
@@ -1084,7 +1102,11 @@ func TestTokenRate(t *testing.T) {
 			t.Error("no Retry-After")
 		}
 	}
-	if codes[http.StatusTooManyRequests] == 0 || codes[http.StatusOK] < 40 {
+	if !s.l.Shared() && (codes[http.StatusOK] != 40 || codes[http.StatusTooManyRequests] != 20) {
+		t.Errorf("codes: %v, want the burst's 40 through and 20 refused", codes)
+	}
+	// Shared among replicas, the bucket is the ledger's, by its own clock.
+	if s.l.Shared() && (codes[http.StatusTooManyRequests] == 0 || codes[http.StatusOK] < 40) {
 		t.Errorf("codes: %v", codes)
 	}
 	// A token rotated to one too short is no token.
@@ -1101,6 +1123,7 @@ func TestTokenRate(t *testing.T) {
 // put.sh: told to slow down, it tries again; sent elsewhere, it says it
 // wrote nothing.
 func TestPutRetriesAndRedirects(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	tries := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1140,6 +1163,7 @@ func TestPutRetriesAndRedirects(t *testing.T) {
 
 // A tool that says there is always more is stopped, and nothing is written.
 func TestRecipePageCap(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"incidents": [], "more": true, "pagination_meta": {"after": "same"}}`))
@@ -1162,6 +1186,7 @@ func TestRecipePageCap(t *testing.T) {
 // One token write at a time; and what is wrong with the incidents file stays
 // on the status, and in the metrics, until the file reads cleanly.
 func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
+	parallel(t)
 	const token = "a-token-long-enough"
 	file := tokenFile(t, token)
 	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
@@ -1207,6 +1232,7 @@ func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
 
 // A MAX_PAGES that isn't a number is refused, not taken for no cap.
 func TestRecipeMaxPagesIsANumber(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	cmd := exec.Command("sh", recipes+"pagerduty.sh")
 	cmd.Env = append(os.Environ(), "PAGERDUTY_API=http://127.0.0.1:1", "PAGERDUTY_TOKEN_FILE="+tokenFile(t, "x"), "MAX_PAGES=1k")
@@ -1217,6 +1243,7 @@ func TestRecipeMaxPagesIsANumber(t *testing.T) {
 }
 
 func TestCompassRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	var logs []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1268,6 +1295,7 @@ func TestCompassRecipe(t *testing.T) {
 // alert id that isn't one stops the run; past MAX_LOGS, an alert ends at
 // its last update.
 func TestCompassLogsBounded(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	alert := func(id string) string {
 		return `{"values": [{"id": "` + id + `", "tinyId": "7", "createdAt": "2026-10-28T03:00:00Z", "updatedAt": "2026-10-28T04:00:00Z",
@@ -1338,52 +1366,133 @@ func TestCompassLogsBounded(t *testing.T) {
 	}
 }
 
-// Grafana IRM's incidents, as IncidentsService.QueryIncidents gives them.
-// One has a ref to OnCall, as the reference's example has: the recipe
-// writes no alerts for it, and asks nothing else, as no documented API
+// Grafana IRM's incidents, as IncidentsService.QueryIncidentPreviews gives
+// them (QueryIncidents, which the recipe read before, is deprecated in
+// Grafana IRM's reference): newest first, as asked, the pages stopping at
+// the first that reaches before SINCE, and every page without it. A
+// preview has no refs: the recipe writes no alerts, as no documented API
 // says which alerts an incident came from (docs/design/links.md).
 func TestGrafanaIRMRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
+	var mu sync.Mutex
+	var asked []string
+	order := "DESC"
+	// pages are the pages asked since the last call, the order to answer
+	// in set.
+	pages := func(next string) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		was := asked
+		asked, order = nil, next
+		return was
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer glsa_secret" || r.Method != http.MethodPost ||
-			r.URL.Path != "/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidents" {
+			r.URL.Path != "/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidentPreviews" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		var req struct {
-			Query struct {
-				Limit          int    `json:"limit"`
-				OrderDirection string `json:"orderDirection"`
-				DateFrom       string `json:"dateFrom"`
-			} `json:"query"`
-			Cursor *struct {
-				NextValue string `json:"nextValue"`
-			} `json:"cursor"`
-		}
+		// The request, as the reference documents it: a query of these
+		// three and a cursor, nothing else (no dateFrom, no queryString,
+		// which would have the rest ignored).
+		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 		}
-		if req.Query.Limit != 100 || req.Query.OrderDirection != "ASC" || req.Query.DateFrom != "2026-10-01T00:00:00Z" {
-			t.Errorf("query = %+v", req.Query)
+		q, _ := req["query"].(map[string]any)
+		if len(q) != 3 || q["limit"] != 100.0 || q["orderField"] != "createdTime" || q["orderDirection"] != "DESC" || len(req) > 2 {
+			t.Errorf("request = %v", req)
 		}
 		name := "grafana-irm-1.json"
-		if req.Cursor != nil {
-			if req.Cursor.NextValue != "123e4567-e89b-12d3-a456-426614174000" {
-				t.Errorf("cursor = %+v", req.Cursor)
+		if c, ok := req["cursor"].(map[string]any); ok {
+			switch c["nextValue"] {
+			case "123e4567-e89b-12d3-a456-426614174000":
+				name = "grafana-irm-2.json"
+			case "223e4567-e89b-12d3-a456-426614174001":
+				name = "grafana-irm-3.json"
+			default:
+				t.Errorf("cursor = %v", c)
 			}
-			name = "grafana-irm-2.json"
 		}
-		w.Write(fixture(t, name))
+		mu.Lock()
+		asked = append(asked, name)
+		ascending := order == "ASC"
+		mu.Unlock()
+		page := fixture(t, name)
+		if ascending && name == "grafana-irm-1.json" {
+			page = []byte(strings.Replace(string(page), `"createdTime": "2026-10-31T02:40:00Z"`, `"createdTime": "2026-10-01T02:40:00Z"`, 1))
+		}
+		w.Write(page)
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "grafana-irm.sh", "GRAFANA_URL="+srv.URL+"/", "GRAFANA_IRM_TOKEN_FILE="+tokenFile(t, "glsa_secret"), "SINCE=2026-10-01")
+	env := []string{"GRAFANA_URL=" + srv.URL + "/", "GRAFANA_IRM_TOKEN_FILE=" + tokenFile(t, "glsa_secret")}
+	got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-01")...)
 	wantIncidents(t, got,
 		incident.Incident{ID: "IRM-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
 		incident.Incident{ID: "IRM-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search", "cart"}}},
 		incident.Incident{ID: "IRM-44", Title: "Batch stuck", Start: utc("2026-10-31T02:38:00Z"), End: utc("2026-10-31T03:10:20.574137Z")})
+	if was := pages("DESC"); strings.Join(was, " ") != "grafana-irm-1.json grafana-irm-2.json" {
+		t.Errorf("asked %v: the pages go on past SINCE", was)
+	}
+	// Created an instant after SINCE, as an offset and a fraction write
+	// it: kept, and one before it not.
+	if got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-28T03:05:00.1Z")...); len(got) != 3 || got[0].ID != "IRM-41" {
+		t.Errorf("SINCE to the second: %+v", got)
+	}
+	if got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-28T12:05:00.2+09:00")...); len(got) != 2 || got[0].ID != "IRM-43" {
+		t.Errorf("SINCE in another zone: %+v", got)
+	}
+	// A SINCE that reads as a date but isn't one is refused, not taken as
+	// none.
+	cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd.Env = append(append(os.Environ(), env...), "SINCE=2026-13-45")
+	if out, err := cmd.Output(); err == nil || len(out) != 0 {
+		t.Errorf("SINCE 2026-13-45: %v, wrote %q", err, out)
+	}
+	// Without SINCE, every page.
+	pages("DESC")
+	got = runRecipe(t, "grafana-irm.sh", env...)
+	if was := pages("ASC"); len(got) != 5 || got[0].ID != "IRM-39" || got[1].ID != "IRM-40" || got[4].ID != "IRM-44" || len(was) != 3 {
+		t.Errorf("without SINCE: asked %v, %+v", was, got)
+	}
+	// Not newest first, with SINCE: an incident after it might be left
+	// out, so nothing is written.
+	cmd = exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd.Env = append(append(os.Environ(), env...), "SINCE=2026-10-01")
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "not newest first") {
+		t.Errorf("not newest first: %v, wrote %q, said %q", err, stdout.String(), stderr.String())
+	}
+}
+
+// An answer that says there is more but not where, or that has no list of
+// incidents, writes nothing: the incidents not read would be left out
+// with the job saying nothing of it.
+func TestGrafanaIRMRecipeUnclearPage(t *testing.T) {
+	parallel(t)
+	needTools(t)
+	for name, answer := range map[string]string{
+		"more, but not where":  `{"incidentPreviews": [{"incidentID": "IRM-1", "title": "x", "createdTime": "2026-10-28T03:01:00Z"}], "cursor": {"hasMore": true}}`,
+		"more, an empty where": `{"incidentPreviews": [], "cursor": {"hasMore": true, "nextValue": ""}}`,
+		"no list":              `{"cursor": {"hasMore": false}}`,
+		"a list that isn't":    `{"incidentPreviews": {"incidentID": "IRM-1"}, "cursor": {"hasMore": false}}`,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(answer)) }))
+		cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+		cmd.Env = append(os.Environ(), "GRAFANA_URL="+srv.URL+"/", "GRAFANA_IRM_TOKEN_FILE="+tokenFile(t, "glsa_secret"))
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "writing nothing") {
+			t.Errorf("%s: %v, wrote %q, said %q", name, err, stdout.String(), stderr.String())
+		}
+		srv.Close()
+	}
 }
 
 func TestRootlyRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer rootly-secret" {
@@ -1431,6 +1540,7 @@ func TestRootlyRecipe(t *testing.T) {
 }
 
 func TestFireHydrantRecipe(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	var mu sync.Mutex
 	limited := 1
@@ -1555,6 +1665,7 @@ func TestFireHydrantRecipe(t *testing.T) {
 // request; a page that fails, a tool that always has more, and Grafana
 // IRM's 200 that says it failed, each stop the script with nothing written.
 func TestNewRecipesFailLoudly(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	type recipe struct {
 		script string
@@ -1569,7 +1680,7 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 		}, `{"values": [], "links": {"next": "/v1/alerts?offset=100&size=100"}}`},
 		{"grafana-irm.sh", func(u string) []string {
 			return []string{"GRAFANA_URL=" + u, "GRAFANA_IRM_TOKEN_FILE=" + tokenFile(t, "x")}
-		}, `{"incidents": [], "cursor": {"hasMore": true, "nextValue": "same"}, "error": ""}`},
+		}, `{"incidentPreviews": [], "cursor": {"hasMore": true, "nextValue": "same"}, "error": ""}`},
 		{"rootly.sh", func(u string) []string {
 			return []string{"ROOTLY_API=" + u, "ROOTLY_TOKEN_FILE=" + tokenFile(t, "x")}
 		}, `{"data": [], "links": {}, "meta": {"current_page": 1, "next_page": 2, "prev_page": null, "total_count": 0, "total_pages": 9}}`},
@@ -1622,7 +1733,7 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 		srv.Close()
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"incidents": [], "cursor": {"hasMore": false}, "error": "\u001b]0;x\u0007permission denied"}`))
+		w.Write([]byte(`{"incidentPreviews": [], "cursor": {"hasMore": false}, "error": "\u001b]0;x\u0007permission denied"}`))
 	}))
 	defer srv.Close()
 	cmd := exec.Command("sh", recipes+"grafana-irm.sh")
@@ -1639,6 +1750,7 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 // argument): one in the job's HOME could send what it asks, and the token
 // it is given, through a proxy of its choosing.
 func TestRecipesCurlReadsNoCurlrc(t *testing.T) {
+	parallel(t)
 	// curl as a word followed by a flag, wherever it is in a line: after
 	// a pipe, $(, {, if, !, command, env, timeout N or a backtick alike;
 	// prose ("curl isn't installed", "command -v curl") gives it none.

@@ -62,6 +62,7 @@ const jobsFile = `groups:
 // The range check counts each rule's range with its job's own interval, as
 // Prometheus's configuration and targets give them, and says whose.
 func TestContentByJob(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := server(t, func(c *Config) { c.CheckContent = true })
 	th := &targetsHistory{history: &history{}}
@@ -133,6 +134,7 @@ func fakeGrafana(t *testing.T, refuse *bool) (*httptest.Server, *int) {
 // written with are checked beside it, read once an hour; refused, the
 // check goes on without them.
 func TestContentNotifyTemplates(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	refuse := true
 	g, asked := fakeGrafana(t, &refuse)
@@ -177,6 +179,7 @@ func TestContentNotifyTemplates(t *testing.T) {
 // up on, says so on its page, and why; the log says how many, once a
 // check.
 func TestContentNotifyUnchecked(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := "../content/testdata/grafana-13.3.1/"
 	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

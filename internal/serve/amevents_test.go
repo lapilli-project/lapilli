@@ -63,6 +63,7 @@ func notificationEvents(t *testing.T, bodies [][]byte) int {
 // reason, its alerts' starts and whether each had resolved; every other
 // event is answered and passed over.
 func TestEventRecorder(t *testing.T) {
+	parallel(t)
 	for _, file := range []string{"alertmanager-0.33.1.jsonl", "alertmanager-0.34.2.jsonl", "alertmanager-0.35.0.jsonl", "alertmanager-0.35.0-batch.jsonl"} {
 		t.Run(file, func(t *testing.T) {
 			s := notifyServer(t, nil)
@@ -175,6 +176,7 @@ func alert0(e map[string]any) map[string]any {
 // isn't read before the token, and what can't be read is refused rather
 // than kept as something else.
 func TestEventRecorderRefuses(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	path := "/v1/alertmanager/events"
@@ -256,6 +258,7 @@ func TestEventRecorderRefuses(t *testing.T) {
 // ?skip= names passed over; a second integration of a receiver named
 // apart; a time the recorder can't have sent taken as now.
 func TestEventRecorderReads(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	path := "/v1/alertmanager/events"
@@ -326,6 +329,7 @@ func TestEventRecorderReads(t *testing.T) {
 // Events that carry no notification don't use up the rate notifications
 // are taken at: a burst of mutes, and a delivery after it is still kept.
 func TestEventRecorderRate(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	other := []byte(`{"@timestamp":"2026-11-03T11:59:00Z","instance":"am-0","data":{"silenceMutedAlert":{"silence":{"id":"s-1"},"mutedAlert":{"labels":{"alertname":"Errors"}}}}}`)
@@ -354,6 +358,7 @@ func TestEventRecorderRate(t *testing.T) {
 // mutedAlerts by hash; 0.35.0 lists it in alerts too, and in mutedAlerts
 // by fingerprint. Either way only the alert delivered is kept.
 func TestEventRecorderMuted(t *testing.T) {
+	parallel(t)
 	for _, file := range []string{"alertmanager-0.34.2-muted.jsonl", "alertmanager-0.35.0-muted.jsonl"} {
 		t.Run(file, func(t *testing.T) {
 			s := notifyServer(t, nil)
@@ -383,6 +388,7 @@ func TestEventRecorderMuted(t *testing.T) {
 // are kept, and the answer counts what was refused, as /metrics does, by
 // source, a whole request refused's too.
 func TestEventRecorderBatchRefusesOne(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	good := func(flush string) string {
@@ -424,6 +430,7 @@ func TestEventRecorderBatchRefusesOne(t *testing.T) {
 // them, once their own rate is spent, doesn't make a delivery refused; a
 // token's holder sending large bodies is refused by what is read of them.
 func TestEventRecorderStorm(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	other := []byte(`{"@timestamp":"2026-11-03T11:59:00Z","instance":"am-0","data":{"alertCreated":{}}}`)

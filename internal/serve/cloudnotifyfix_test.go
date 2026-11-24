@@ -17,6 +17,7 @@ import (
 // once the firing is in: on the rule's pages, its firings, and since when
 // the rule's notifications are counted.
 func TestNotifyOCIBeforeItsFiring(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	grouped := edit(t, notifyFixture(t, "oci-grouped.json"), func(m map[string]any) { m["title"] = "WARNING alarm at 06:02" })
@@ -50,6 +51,7 @@ func TestNotifyOCIBeforeItsFiring(t *testing.T) {
 // EventBridge's other CloudWatch events, a change to an alarm's
 // configuration among them, are of no firing: kept as nothing.
 func TestNotifyEventBridgeOtherEvents(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -70,6 +72,7 @@ func TestNotifyEventBridgeOtherEvents(t *testing.T) {
 // the same shape and the same labels: not an alert manager's message in
 // the same group, nor another alert of the group.
 func TestNotifyStartsOnlyFromTheirOwn(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := notifyServer(t, nil)
 	arn := "arn:aws:cloudwatch:us-east-1:123456789012:alarm:disk-full"
@@ -101,6 +104,7 @@ func TestNotifyStartsOnlyFromTheirOwn(t *testing.T) {
 // Notifications kept before 0.21 named an Azure resource as Azure wrote it,
 // in any case: they still tie to a firing the recipe lower-cased.
 func TestNotifyAzureOldCase(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := notifyServer(t, nil)
 	copyIn(t, s, "azure-shop", firing.Firing{Rule: "payment-errors", Start: at06,

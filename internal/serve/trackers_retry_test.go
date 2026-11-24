@@ -89,6 +89,7 @@ exec '` + real + `' "$@"
 // been taken, a 408 or 429, or a connection refused; otherwise it fails,
 // and the next run finds the issue made by its marker.
 func TestTrackerRecipePostAnsweredBadly(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -265,6 +266,7 @@ func badFirst(is func(r *http.Request, body string) bool, taken bool, asked *ato
 // an issue made and answered 502 isn't made again, and the next run finds
 // it.
 func TestTrackerRecipePostsThatRead(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -314,6 +316,7 @@ func TestTrackerRecipePostsThatRead(t *testing.T) {
 // not the minute it is held to. Any number of seconds waits as long, a
 // minute at most; a date, or none, the pause given.
 func TestTrackerRecipeRetryAfter(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, c := range []struct{ header, want string }{
 		{"Retry-After: 45", "45"}, {"Retry-After: 60", "60"}, {"Retry-After: 61", "60"}, {"Retry-After: 120", "60"},

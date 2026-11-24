@@ -34,8 +34,11 @@ const (
 	// maxExdates is how many dates one event may leave out.
 	maxExdates = 1000
 	// maxFeedSteps is how many steps every repeat of a feed may take in
-	// all, to reach the span it is read over and through it.
+	// all, to reach the span it is read over and through it. Each date an
+	// RDATE adds takes one.
 	maxFeedSteps = 2_000_000
+	// maxPeriod is the longest an RDATE's period may be, as a DURATION.
+	maxPeriod = 366 * 24 * time.Hour
 )
 
 // maxZones is how many zones a feed's TZIDs may name, each loaded once:
@@ -59,8 +62,16 @@ type event struct {
 	duration             string
 	rrule                string
 	exdates              []exdate
-	recurrence           *stamp
-	attendees            []string
+	// rdates are the dates an RDATE adds to its repeat, those within the
+	// span read; rdateSteps how many it was given, for maxSteps.
+	rdates     []rdate
+	rdateSteps int
+	// exTimes and exDays are exdates, by the instant and by the day, as
+	// excluded looks them up.
+	exTimes    map[int64]bool
+	exDays     map[[3]int]bool
+	recurrence *stamp
+	attendees  []string
 	// names are the attendees' common names (CN).
 	names []string
 	// err is why the event can't be read: it is passed over, and said.
@@ -84,6 +95,15 @@ type stamp struct {
 type exdate struct {
 	t    time.Time
 	date bool
+}
+
+// rdate is a date an RDATE adds to a repeat (RFC 5545 3.8.5.2): the
+// instant it starts, the clock it was written on, whether it is a day,
+// and the end its period gives it (zero for a DATE-TIME or a DATE, which
+// take the event's length).
+type rdate struct {
+	t, wall, end time.Time
+	date         bool
 }
 
 // Feed is what a feed said: its turns, flattened, the earliest first, and
@@ -176,6 +196,10 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 	readStamp := func(params map[string]string, v string) (stamp, error) {
 		return parseStamp(params, v, floating, resolve)
 	}
+	from, to := now.Add(-Back), now.Add(Ahead)
+	// rdatesKept is how many RDATEs' dates the feed's events keep, those
+	// within the span read: each is a turn, and a feed has maxTurns.
+	rdatesKept := 0
 	lines := 0
 	for line := range bytes.SplitSeq(data, []byte("\n")) {
 		if lines++; lines%1024 == 0 && ctx.Err() != nil {
@@ -247,6 +271,34 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 				}
 				cur.exdates = append(cur.exdates, ex)
 			}
+		case "RDATE":
+			period := strings.EqualFold(params["VALUE"], "PERIOD")
+			for v := range strings.SplitSeq(value, ",") {
+				// Each date a step, of the feed's and of the event's, as
+				// a repeat's days are.
+				if steps--; steps < 0 {
+					err = errTooManySteps
+					break
+				}
+				if cur.rdateSteps++; cur.rdateSteps > maxSteps {
+					err = fmt.Errorf("an RDATE of more than %d dates", maxSteps)
+					break
+				}
+				r, e := readRdate(params, v, period, readStamp)
+				if e != nil {
+					err = e
+					break
+				}
+				// Only those that may meet the span read are kept, as a
+				// repeat's are (expand).
+				if r.t.After(to) || r.t.Before(from.Add(-Ahead)) && !r.end.After(from) {
+					continue
+				}
+				if rdatesKept++; rdatesKept > maxTurns {
+					return nil, errTooManyTurns
+				}
+				cur.rdates = append(cur.rdates, r)
+			}
 		case "RECURRENCE-ID":
 			var x stamp
 			x, err = readStamp(params, value)
@@ -281,7 +333,6 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			replaced[e.uid][e.recurrence.t.UnixNano()] = true
 		}
 	}
-	from, to := now.Add(-Back), now.Add(Ahead)
 	var turns []verdict.RotaTurn
 	for k, e := range events {
 		if k%256 == 0 && ctx.Err() != nil {
@@ -316,7 +367,10 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 		}
 		// once is an event that holds one turn, not a repeat: it is held
 		// only over that turn (from its start, to its end when known).
-		once := e.rrule == "" || e.recurrence != nil
+		once := e.rrule == "" && e.rdateSteps == 0 || e.recurrence != nil
+		if e.err == nil && !once {
+			e.err = e.rdatesAgree()
+		}
 		if e.err != nil {
 			passOver(e.err, onceEnd(once, e.start.t, nil))
 			continue
@@ -334,8 +388,14 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			note("%q: %s", clip(e.summary), said)
 		}
 		starts := []time.Time{e.start.t}
+		// ends are the ends RDATEs' periods give, by the start.
+		var ends map[int64]time.Time
 		if !once {
-			starts, err = expand(ctx, e, from, to, maxTurns-len(turns), &steps)
+			if e.rrule != "" {
+				starts, err = expand(ctx, e, from, to, maxTurns-len(turns), &steps)
+			} else if e.excluded(e.start.t, e.start.wall) {
+				starts = nil // DTSTART left out by EXDATE
+			}
 			switch {
 			case errors.Is(err, errTooManyTurns), errors.Is(err, errTooManySteps), errors.Is(err, ctx.Err()) && ctx.Err() != nil:
 				return nil, err
@@ -343,6 +403,7 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 				passOver(err, time.Time{})
 				continue
 			}
+			starts, ends = e.addRdates(starts)
 		}
 		// The event's turns, kept only once all are known: one whose end
 		// can't be worked out passes the event over.
@@ -355,10 +416,12 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			if replaced[e.uid][st.UnixNano()] && e.recurrence == nil {
 				continue
 			}
-			end, err := length(st)
-			if err != nil {
-				lengthErr = err
-				break
+			end, ok := ends[st.UnixNano()]
+			if !ok {
+				if end, err = length(st); err != nil {
+					lengthErr = err
+					break
+				}
 			}
 			// Within the span read: an event from long ago, or far ahead,
 			// is no turn of it, and can't push kept turns out.
@@ -698,16 +761,6 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 			}
 		}
 	}
-	// Dates left out, looked up rather than searched each step.
-	exTimes, exDates := map[int64]bool{}, map[[3]int]bool{}
-	for _, x := range e.exdates {
-		if x.date {
-			y, m, d := x.t.Date()
-			exDates[[3]int{y, int(m), d}] = true
-		} else {
-			exTimes[x.t.Unix()] = true
-		}
-	}
 	var out []time.Time
 	n := 0 // occurrences so far, for COUNT
 	full := false
@@ -719,8 +772,7 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 		if r.count >= 0 && n > r.count {
 			return false
 		}
-		y, m, d := w.Date()
-		if !t.Before(from.Add(-Ahead)) && !exTimes[t.Unix()] && !exDates[[3]int{y, int(m), d}] {
+		if !t.Before(from.Add(-Ahead)) && !e.excluded(t, w) {
 			if len(out) >= most {
 				full = true
 				return false
@@ -778,6 +830,130 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 			}
 		}
 	}
+}
+
+// excluded reports whether EXDATE leaves out an occurrence that starts at
+// t, written as w on its clock: by the instant, or by the day.
+func (e *event) excluded(t, w time.Time) bool {
+	if len(e.exdates) == 0 {
+		return false
+	}
+	if e.exTimes == nil {
+		// Looked up rather than searched each step.
+		e.exTimes, e.exDays = map[int64]bool{}, map[[3]int]bool{}
+		for _, x := range e.exdates {
+			if x.date {
+				y, m, d := x.t.Date()
+				e.exDays[[3]int{y, int(m), d}] = true
+			} else {
+				e.exTimes[x.t.Unix()] = true
+			}
+		}
+	}
+	y, m, d := w.Date()
+	return e.exTimes[t.Unix()] || e.exDays[[3]int{y, int(m), d}]
+}
+
+// readRdate reads one of an RDATE's values (RFC 5545 3.8.5.2): a DATE-TIME
+// or a DATE, as a DTSTART is read, its TZID too; or, with VALUE=PERIOD, a
+// time and its end, or its length, as a DURATION is read (3.3.9). A
+// period is of times, a year at most, and ends after it starts; any other
+// is refused, saying why.
+func readRdate(params map[string]string, v string, period bool, read func(map[string]string, string) (stamp, error)) (rdate, error) {
+	if !period {
+		st, err := read(params, v)
+		if err != nil {
+			return rdate{}, err
+		}
+		return rdate{t: st.t, wall: st.wall, date: st.date}, nil
+	}
+	from, to, ok := strings.Cut(strings.TrimSpace(v), "/")
+	if !ok {
+		return rdate{}, fmt.Errorf("an RDATE's period %q isn't a start, a /, and its end or its length", clip(v))
+	}
+	st, err := read(params, from)
+	if err != nil {
+		return rdate{}, err
+	}
+	if st.date {
+		return rdate{}, fmt.Errorf("an RDATE's period %q starts on a day: a period is of times", clip(v))
+	}
+	var end time.Time
+	if strings.HasPrefix(to, "P") || strings.HasPrefix(to, "+P") {
+		days, d, err := parseDuration(to)
+		if err != nil {
+			return rdate{}, err
+		}
+		if end, err = later(st.z, st.t, days, d); err != nil {
+			return rdate{}, err
+		}
+	} else {
+		en, err := read(params, to)
+		if err != nil {
+			return rdate{}, err
+		}
+		if en.date {
+			return rdate{}, fmt.Errorf("an RDATE's period %q ends on a day: a period is of times", clip(v))
+		}
+		end = en.t
+	}
+	switch {
+	case !end.After(st.t):
+		return rdate{}, fmt.Errorf("an RDATE's period %q doesn't end after it starts", clip(v))
+	case end.Sub(st.t) > maxPeriod:
+		return rdate{}, fmt.Errorf("an RDATE's period %q is longer than a year", clip(v))
+	}
+	return rdate{t: st.t, wall: st.wall, end: end}, nil
+}
+
+// rdatesAgree refuses an RDATE whose dates aren't of DTSTART's kind: a day
+// beside a DTSTART of a time, which doesn't say the time of day, or a time
+// or a period beside one of a day, whose turns are whole days. RFC 5545
+// has each of a repeat's dates of one kind.
+func (e *event) rdatesAgree() error {
+	for _, r := range e.rdates {
+		switch {
+		case r.date && !e.start.date:
+			return errors.New("an RDATE of days beside a DTSTART of a time: it doesn't say when in the day")
+		case !r.date && e.start.date:
+			return errors.New("an RDATE of times beside a DTSTART of a day")
+		}
+	}
+	return nil
+}
+
+// addRdates adds an event's RDATEs to the starts of its occurrences, as
+// RFC 5545 has a repeat (3.8.5.2): the union of DTSTART, RRULE's and
+// RDATE's, each once, less what EXDATE leaves out; in order. ends are the
+// ends RDATEs' periods give, by their starts: a period's end, where RRULE
+// gives the same start, is the period's.
+func (e *event) addRdates(starts []time.Time) ([]time.Time, map[int64]time.Time) {
+	if len(e.rdates) == 0 {
+		return starts, nil
+	}
+	seen := make(map[int64]bool, len(starts)+len(e.rdates))
+	for _, t := range starts {
+		seen[t.UnixNano()] = true
+	}
+	var ends map[int64]time.Time
+	for _, r := range e.rdates {
+		if e.excluded(r.t, r.wall) {
+			continue
+		}
+		k := r.t.UnixNano()
+		if !r.end.IsZero() {
+			if ends == nil {
+				ends = map[int64]time.Time{}
+			}
+			ends[k] = r.end
+		}
+		if !seen[k] {
+			seen[k] = true
+			starts = append(starts, r.t)
+		}
+	}
+	slices.SortFunc(starts, func(a, b time.Time) int { return a.Compare(b) })
+	return starts, ends
 }
 
 // Flatten makes turns that overlap into turns that don't: at each time, the

@@ -19,6 +19,7 @@ import (
 // to check it by. Others are refused unread, and take no place, so they
 // can't keep SNS's and Grafana's messages out.
 func TestNotifyBodyOnlyWhenItCould(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	unread := func(path string, hdr map[string]string, want int) {
@@ -91,6 +92,7 @@ func TestNotifyDayBySource(t *testing.T) {
 // A body that doesn't come whole, too slowly or cut off, is told so, not
 // that it was too large.
 func TestNotifyBodyCut(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	r := httptest.NewRequest(http.MethodPost, "/v1/alertmanager", &failing{})
 	r.Header.Set("Authorization", "Bearer "+notifyToken)
@@ -108,6 +110,7 @@ func (failing) Read([]byte) (int, error) { return 0, os.ErrDeadlineExceeded }
 // A group key past its length, or with a character that doesn't show, is
 // kept as its hash: an alert manager drops a notification it got 400 for.
 func TestNotifyLongGroupKey(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	am := notifyFixture(t, "alertmanager.json")
 	long := `"groupKey": "{}/{namespace=~\"` + strings.Repeat("ns-a|", 300) + `\"}:{alertname=\"x\"}`
@@ -124,6 +127,7 @@ func TestNotifyLongGroupKey(t *testing.T) {
 // The firings token's 429 says how long until a write is taken: five
 // seconds, as a job's retries need.
 func TestFiringsRetryAfter(t *testing.T) {
+	parallel(t)
 	const tok = "a-firings-token-long-enough"
 	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, tok) })
 	port := s.IncidentsHandler()
@@ -147,6 +151,7 @@ func TestFiringsRetryAfter(t *testing.T) {
 // A source that writes a period running on past now has written up to now:
 // a later write still moves it on, and the digest still waits for it.
 func TestRecordedPeriodToNow(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	ctx := context.Background()
 	hour := time.Now().Truncate(time.Hour)

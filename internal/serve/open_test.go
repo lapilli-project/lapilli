@@ -17,6 +17,7 @@ import (
 // Beyond loopback, everyone now may only look, and the log says so at
 // start.
 func TestNoRolesClosedBeyondLoopback(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		listen        string
 		everyoneAdmin bool
@@ -68,6 +69,7 @@ func TestNoRolesClosedBeyondLoopback(t *testing.T) {
 }
 
 func TestLoopbackOnly(t *testing.T) {
+	parallel(t)
 	for addr, want := range map[string]bool{
 		"127.0.0.1:8080": true, "127.1.2.3:80": true, "[::1]:8080": true, "localhost:8080": true, "LOCALHOST:1": true,
 		":8080": false, "0.0.0.0:8080": false, "[::]:8080": false, "10.0.0.1:8080": false, "lapilli:8080": false,
@@ -84,6 +86,7 @@ func TestLoopbackOnly(t *testing.T) {
 // and /etc/hosts can make it another address. A listener bound beyond
 // loopback is closed; --everyone-admin opens it anyway.
 func TestOpenOnlyWhereBound(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		listen        string
 		everyoneAdmin bool

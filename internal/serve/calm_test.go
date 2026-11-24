@@ -27,6 +27,7 @@ import (
 // its image unnamed and sized; the tab's icon is the mark at 16 and 32 px;
 // the two circles drawn for it before are gone.
 func TestBrandMark(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/")
@@ -56,6 +57,7 @@ func TestBrandMark(t *testing.T) {
 // one height, and nothing to press is a pill; a tab is underlined by a
 // bar, not filled; no card has a shadow under it.
 func TestControlsOneShape(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +100,7 @@ func TestControlsOneShape(t *testing.T) {
 // TestOverviewLookFirst: what to look at is under the tiles, before the
 // charts; no link on the overview has an arrow after it.
 func TestOverviewLookFirst(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	_, body, _ := get(t, s.Handler(), "/")
 	tiles, look, charts := strings.Index(body, `<section class="tiles`), strings.Index(body, `id="look-h"`), strings.Index(body, "Firings by week")
@@ -118,6 +121,7 @@ func TestOverviewLookFirst(t *testing.T) {
 // column of their own, not a note under ● Nothing, and the firings
 // asleep among those that caught nothing aren't said to be all judged.
 func TestRuleNumbersAlone(t *testing.T) {
+	parallel(t)
 	notes := regexp.MustCompile(`<tr class="more">(?:<td class="pick"></td>)?<td colspan="(\d+)"><p class="row-notes">`)
 	cellNotes := regexp.MustCompile(`<td class="n">[^<]*<br>`)
 	// spans checks each line of notes spans every column but the pick's,
@@ -179,6 +183,7 @@ func TestRuleNumbersAlone(t *testing.T) {
 // TestNoRecordInALine: a limit of the record is said in a line, once, with
 // where to write incidents down; its why is behind "Why".
 func TestNoRecordInALine(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	raw := ""
@@ -219,6 +224,7 @@ func TestNoRecordInALine(t *testing.T) {
 // is a line saying so, with the way to the table, not an empty grid; with
 // one, the chart as it was.
 func TestPrecisionChartNone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	none := filepath.Join(t.TempDir(), "incidents.yaml")
 	if err := os.WriteFile(none, []byte("incidents: []\n"), 0o644); err != nil {
@@ -254,6 +260,7 @@ func TestPrecisionChartNone(t *testing.T) {
 // not called worse, nor fewer better: one may be an alert that really
 // went off again.
 func TestRefiredToldNotJudged(t *testing.T) {
+	parallel(t)
 	ws := []*weekView{{Refired: 1, Kept: true}, {Refired: 5, Kept: true}, {}}
 	for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "", "", "", false, func() (int, int) { return 0, 0 }) {
 		if x.key == "Refired" {
@@ -270,6 +277,7 @@ func TestRefiredToldNotJudged(t *testing.T) {
 // a word, and the line of notes under a row doesn't widen the columns it
 // spans (docs/design/ui.md, "The table fits a laptop's screen").
 func TestRuleColumnRoom(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
 	if !regexp.MustCompile(`<a class="chip label" href="[^"]*"><span class="vh">Only those with the label </span><bdi>[^<=]+=<wbr>[^<]+</bdi></a>`).MatchString(body) {
@@ -293,6 +301,7 @@ func TestRuleColumnRoom(t *testing.T) {
 // found, as the rule's page does: by its note, its name or its labels
 // (docs/design/ui.md, "Why a rule is a team's").
 func TestTeamSaidHow(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
 	// Errors is payments' by its note, which comes before the team's
@@ -309,6 +318,7 @@ func TestTeamSaidHow(t *testing.T) {
 // out its 12 weeks' column, which each rule's page has, so that the rule's
 // column has room; the column is marked in the head, each row and the sum.
 func TestNarrowRulesTable(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -329,6 +339,7 @@ func TestNarrowRulesTable(t *testing.T) {
 // TestLookSaysWhatToCheck: What to look at's lines say what to check, not
 // ask it, in every language (docs/design/ui.md, "Times, and Korean").
 func TestLookSaysWhatToCheck(t *testing.T) {
+	parallel(t)
 	first, _ := firstUseServer(t)
 	// A rule another catches each incident of as soon: the spare rule's
 	// line (TestSpareOnlyOfWhatCanFire's ledger).
@@ -378,6 +389,7 @@ func TestLookSaysWhatToCheck(t *testing.T) {
 // impact" on the pages, its flag left out; the API gives its title as it
 // was kept.
 func TestImpactTitleSaid(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	_, page, _ := get(t, s.Handler(), "/incidents")
 	if !strings.Contains(page, "user impact") || strings.Contains(page, "(--impact)") {
@@ -399,6 +411,7 @@ func TestImpactTitleSaid(t *testing.T) {
 // was filled with, the page's words in the reader's language, is written
 // down with the window's own; one written in its place is kept as written.
 func TestConfirmKeepsTitle(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"bo@example.com"}
@@ -480,6 +493,7 @@ func TestConfirmKeepsTitle(t *testing.T) {
 // language, on every page the tests serve and on a first-time user's; in
 // the pages' font two hyphens read as one dash (docs/design/ui.md).
 func TestFlagsAsCode(t *testing.T) {
+	parallel(t)
 	first, firstPaths := firstUseServer(t)
 	// With people's verdicts, one to look at again on the Cleanup page.
 	pages := pagesServer(t)
@@ -529,6 +543,7 @@ func containsPlain(s, sub string) bool {
 // as t does, its verbs as they are, its flags as code: a disabled
 // button's why of a team not found isn't Sprintf's %!s(MISSING).
 func TestTbdiWithoutArguments(t *testing.T) {
+	parallel(t)
 	if got := string(trBDI("en", "Only %s's editors")); got != "Only %s&#39;s editors" {
 		t.Errorf("no arguments: %q", got)
 	}
@@ -544,6 +559,7 @@ func TestTbdiWithoutArguments(t *testing.T) {
 // translated, sets each flag's name in it as code, as a translation's
 // are (bundle 67); and a flag's name in a URL's path or query stays text.
 func TestRefusalFlagsAsCode(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) { c.Changes = false })
 	h := s.Handler()
 	id := proposeFor(t, h, "15m")
@@ -568,6 +584,7 @@ func TestRefusalFlagsAsCode(t *testing.T) {
 // font in eight sentences of 0.64's routes, boundaries and activity log
 // (bundle 67).
 func TestSentencesSetFlagsAsCode(t *testing.T) {
+	parallel(t)
 	said := regexp.MustCompile(`\{\{-?\s*t "((?:[^"\\]|\\.)*)"`)
 	pages, err := fs.Glob(files, "templates/*.html")
 	if err != nil || len(pages) == 0 {

@@ -77,6 +77,7 @@ var stableMetrics = []struct {
 // rename, or a label renamed or added, fails here; and the document lists
 // each with its labels.
 func TestMetricsStable(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	// A goal of everyone's and one of each team's, as the leader worked
 	// them out after its last round (docs/design/goals.md).
@@ -234,6 +235,7 @@ func TestReportCSV(t *testing.T) {
 // verdict's (cmd/lapilli's TestNumbersRecount); and the summary's numbers
 // counted again from the report of the same week.
 func TestNumbersRecountServe(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}

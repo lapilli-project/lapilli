@@ -18,6 +18,7 @@ import (
 // numbers as they were; the rules', the team's, the services' and the
 // incidents' names nowhere in it.
 func TestReportRedacted(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	h := s.Handler()
 	span := "from=" + nocBase.Add(-15*24*time.Hour).UTC().Format(time.RFC3339) + "&to=" + now.Add(time.Hour).UTC().Format(time.RFC3339)
@@ -69,6 +70,7 @@ func TestReportRedacted(t *testing.T) {
 // is named, a rule is one alias in every row, and its team is said, by
 // its alias.
 func TestReportCSVRedacted(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	ctx := context.Background()
 	at := nocBase.Add(-20 * time.Hour)

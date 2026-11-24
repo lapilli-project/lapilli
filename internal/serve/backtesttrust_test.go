@@ -15,6 +15,7 @@ import (
 // A trust file is read strictly, and one that can't be used, or would trust
 // more than it says, is refused, each with why: serve doesn't start on it.
 func TestReadTrustRefused(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	short := filepath.Join(dir, "short")
 	os.WriteFile(short, []byte("only-twenty-characters"), 0o600)
@@ -62,6 +63,8 @@ func TestReadTrustRefused(t *testing.T) {
 		"no event":                       {gh("      repository_id: \"1\"\n"), "pin event_name"},
 		"pull_request_target":            {gh("      repository_id: \"1\"\n      event_name: pull_request_target\n"), "fork"},
 		"workflow_run":                   {gh("      repository_id: \"1\"\n      event_name: workflow_run\n"), "fork"},
+		"Forgejo's merge_group":          {"trust:\n  - name: f\n    issuer: https://code.example.com/api/actions\n    audience: https://lapilli-ci.example.com\n    claims: {repository_id: '1', event_name: merge_group}\n", "want pull_request or push;"},
+		"generic issuer's merge_group":   {"trust:\n  - {name: a, issuer: 'https://ci.example.com', audience: x, claims: {sub: y, event_name: merge_group}}\n", "want pull_request or push;"},
 		"an owner's list":                {gh("      repository_id: [\"1\", \"2\"]\n      repository_owner_id: [\"4200\", \"4300\"]\n      event_name: pull_request\n"), "only repository_id may be one"},
 		"GitLab without source":          {"trust:\n  - name: g\n    issuer: https://gitlab.com\n    audience: https://lapilli-ci.example.com\n    claims: {project_id: '42'}\n", "pin pipeline_source"},
 		"GitLab's job project":           {"trust:\n  - name: g\n    issuer: https://gitlab.com\n    audience: https://lapilli-ci.example.com\n    claims: {job_project_id: '42', pipeline_source: merge_request_event}\n", "pin project_id"},
@@ -79,7 +82,8 @@ func TestReadTrustRefused(t *testing.T) {
 		"a schedule":                     {gh("      repository_id: \"1\"\n      event_name: schedule\n"), "no one asking"},
 		"a GitLab of its own, no ci:":    {"trust:\n  - name: g\n    issuer: https://gitlab.example.com\n    audience: https://lapilli-ci.example.com\n    claims: {project_id: '42', pipeline_source: merge_request_event}\n", "needs ci:"},
 		"GHEC's, owner alone":            {"trust:\n  - name: g\n    issuer: https://token.actions.githubusercontent.com/example\n    audience: https://lapilli-ci.example.com\n    claims: {repository_owner_id: '4200', event_name: pull_request}\n", "pin repository_id"},
-		"GHES's, a fork event":           {"trust:\n  - name: g\n    issuer: https://github.example.com/_services/token\n    audience: https://lapilli-ci.example.com\n    claims: {repository_id: '1', event_name: pull_request_target}\n", "fork"},
+		"GHES's, a fork event":           {"trust:\n  - name: g\n    issuer: https://github.example.com/_services/token\n    audience: https://lapilli-ci.example.com\n    claims: {repository_id: '1', event_name: pull_request_target}\n", "want pull_request, push or merge_group;"},
+		"GitHub's two events":            {gh("      repository_id: \"1\"\n      event_name: [pull_request, merge_group]\n"), "only repository_id may be one"},
 		"Bitbucket, no repository":       {bb(ws), "pin repositoryUuid"},
 		"Bitbucket, no workspace":        {bb(repo), "pin workspaceUuid"},
 		"Bitbucket, sub alone":           {bb("      sub: \"{11111111-2222-4333-8444-555555555555}:{8f2c4a1e-5b7d-4e3a-9c6f-1a2b3c4d5e6f}\"\n"), "pin repositoryUuid"},
@@ -113,7 +117,7 @@ func TestReadTrustRefused(t *testing.T) {
 // trustWords are the words of Lapilli's own a trust file holds too, which
 // a refusal may say: its keys, the claims and events it names, its CIs.
 var trustWords = append(append(append([]string{}, knownClaims...), []string{"trust", "true", "false", "repository_id", "project_id", "event_name", "pipeline_source", "sub",
-	"repository", "project_path", "pull_request", "push", "merge_request_event", "github", "gitlab", "forgejo", "bitbucket", "workspace", "https", "http", "sigstore"}...), append(trustFields, checkedClaims...)...)
+	"repository", "project_path", "pull_request", "push", "merge_group", "merge_request_event", "github", "gitlab", "forgejo", "bitbucket", "workspace", "https", "http", "sigstore"}...), append(trustFields, checkedClaims...)...)
 
 // leaked is a word of the file's that said says, "" for none: every
 // scalar of the file, keys among them, outside trust: too, and every run
@@ -162,6 +166,7 @@ func leaked(file, said string) string {
 // merge keys from outside trust:, an audience with spaces after it. Nor
 // does a value change Lapilli's own words.
 func TestReadTrustSaid(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	f := filepath.Join(dir, "trust.yaml")
 	for name, c := range map[string]struct {
@@ -214,6 +219,7 @@ func TestReadTrustSaid(t *testing.T) {
 // or strings; its defaults filled in; a generic issuer by sub; the CI
 // worked out from the issuer.
 func TestReadTrust(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	tok := filepath.Join(dir, "azure-token")
 	os.WriteFile(tok, []byte(strings.Repeat("a", 40)+"\n"), 0o600)
@@ -253,6 +259,10 @@ func TestReadTrust(t *testing.T) {
     issuer: https://github.example.com/_services/token
     audience: https://lapilli-ci.example.com
     claims: {repository_id: "6", event_name: pull_request}
+  - name: alerts-queue
+    issuer: https://token.actions.githubusercontent.com
+    audience: https://lapilli-ci.example.com
+    claims: {repository_id: "123456789", event_name: merge_group}
   - name: monitoring-azure
     token_file: `+tok+`
   - name: monitoring-bitbucket
@@ -267,10 +277,14 @@ func TestReadTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(trust) != 8 || trust[4].CI != "github" || trust[5].CI != "github" {
+	if len(trust) != 9 || trust[4].CI != "github" || trust[5].CI != "github" {
 		t.Fatalf("%+v", trust)
 	}
-	if b := trust[7]; b.CI != "bitbucket" || !b.Claims["repositoryUuid"].List || len(b.Claims["repositoryUuid"].Values) != 2 || b.Claims["workspaceUuid"].List {
+	// A merge queue's runs, of GitHub's alone, by an entry that names them.
+	if q := trust[6]; q.CI != "github" || q.Claims["event_name"].Values[0] != "merge_group" {
+		t.Errorf("%+v", q)
+	}
+	if b := trust[8]; b.CI != "bitbucket" || !b.Claims["repositoryUuid"].List || len(b.Claims["repositoryUuid"].Values) != 2 || b.Claims["workspaceUuid"].List {
 		t.Errorf("%+v", b)
 	}
 	if a := trust[0]; a.CI != "github" || !a.Claims["repository_id"].List || strings.Join(a.Claims["repository_id"].Values, ",") != "123456789,987654321" || a.Claims["repository_owner_id"].List {
@@ -296,6 +310,7 @@ func TestReadTrust(t *testing.T) {
 // entry's own: a key of the file's own naming, which may hold a value
 // (repository_id:987650013), never.
 func TestTrustAtLine(t *testing.T) {
+	parallel(t)
 	b := []byte("trust:\n  - name: a\n    repository_id:987650013:\n      - x\n    days:\n      - 1\n  - {name: b, days: x, hourly: y}\n")
 	for _, c := range []struct {
 		line, entry int

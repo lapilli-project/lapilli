@@ -362,8 +362,17 @@ func (c *converting) letGo(n *yaml.Node, i int) {
 	}
 }
 
+// keysRead, when set, is told of each mapping converted and how many keys
+// it has: the tests count them (TestYAMLManyKeys), each mapping's keys
+// read once, into a map, not compared with each other as yaml.v3's own
+// decoding does.
+var keysRead func(n int)
+
 // mapping is a mapping as yaml.v3 decodes one into an any.
 func (c *converting) mapping(n *yaml.Node, depth int) (any, error) {
+	if keysRead != nil {
+		keysRead(len(n.Content) / 2)
+	}
 	if len(n.Content)/2 > MaxKeys {
 		return nil, errNode{fmt.Sprintf("line %d: a mapping of more than %d keys", n.Line, MaxKeys)}
 	}

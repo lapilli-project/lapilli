@@ -21,6 +21,7 @@ func (samplesHeld) MaxSamples() int { return 1 }
 // dropped and the window recorded as replayed empty, never to be tried
 // again.
 func TestTooWideKept(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	s.h = samplesHeld{&history{}}
 	ctx := context.Background()

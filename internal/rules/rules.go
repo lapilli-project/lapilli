@@ -135,6 +135,12 @@ type Rule struct {
 	// which Loki 3.7.9 runs without keep_firing_for and query_offset; not
 	// from its API, which gives a rule as Loki holds it.
 	LokiFile bool
+	// Vmalert says the rule was read from vmalert's rules API, which says
+	// its group's concurrency where Prometheus's doesn't
+	// (app/vmalert/rule/web.go, v1.156.0): a group that gives no interval
+	// runs at vmalert's -evaluationInterval, not at the evaluation_interval
+	// of a Prometheus's configuration. Not in Key.
+	Vmalert bool
 	// unread is a Grafana rule that couldn't be read into a Graph, as
 	// written, to read again once its data sources' types are known
 	// (Replaying.Kinds): a SQL query has no expr to read.
@@ -1631,7 +1637,7 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
 				KeepFiringFor: secs(max(x.KeepFiringFor, x.KeepFiringForVM)), Interval: secs(g.Interval), Limit: limit, Phase: phase, Labels: l,
-				Says: annotated(a, TemplatePrometheus), Prometheus: true})
+				Says: annotated(a, TemplatePrometheus), Prometheus: true, Vmalert: g.Concurrency != nil})
 		}
 	}
 	return shownRules(out), nil

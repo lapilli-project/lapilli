@@ -232,6 +232,7 @@ func checkedToToday(t *testing.T, s *Server) {
 // as the annotations' tags hold them (an instance's port, a title's colon),
 // what differs, alerts no rule is named; the runs page says so.
 func TestCheckReplayGrafanaHistory(t *testing.T) {
+	parallel(t)
 	g := &stateHistory{settings: annotationsSettings}
 	s, _ := historyServer(t, g, false, nil)
 	ctx := context.Background()
@@ -285,6 +286,7 @@ func TestCheckReplayGrafanaHistory(t *testing.T) {
 // days a round checks; --rule leaves out what really fired of the alerts
 // it doesn't match, as it does of the series.
 func TestCheckReplayGrafanaHistoryAsked(t *testing.T) {
+	parallel(t)
 	g := &stateHistory{settings: annotationsSettings}
 	s, _ := historyServer(t, g, false, func(c *Config) { c.RuleRE = regexp.MustCompile(`^GErrors`) })
 	ctx := context.Background()
@@ -327,6 +329,7 @@ func TestCheckReplayGrafanaHistoryAsked(t *testing.T) {
 // if it never really happened; one that keeps it in Prometheus alone is
 // checked against GRAFANA_ALERTS, as before.
 func TestCheckReplayGrafanaHistoryNone(t *testing.T) {
+	parallel(t)
 	g := &stateHistory{settings: annotationsSettings, none: true}
 	s, _ := historyServer(t, g, false, nil)
 	ctx := context.Background()
@@ -360,6 +363,7 @@ func TestCheckReplayGrafanaHistoryNone(t *testing.T) {
 // Prometheus too: while GRAFANA_ALERTS holds anything, it is read, as it
 // was before; where it holds nothing, the history.
 func TestCheckReplayGrafanaHistoryMultiple(t *testing.T) {
+	parallel(t)
 	multiple := `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting":{"alertStateHistoryBackend":"multiple","alertStateHistoryPrimary":"annotations"}}`
 	g := &stateHistory{settings: multiple}
 	s, h := historyServer(t, g, false, nil)
@@ -391,6 +395,7 @@ func TestCheckReplayGrafanaHistoryMultiple(t *testing.T) {
 // rule passed over. Grafana's rules aren't checked that day; the
 // Prometheus rule beside is, and the check goes on, each time.
 func TestCheckReplayGrafanaHistoryUnusable(t *testing.T) {
+	parallel(t)
 	for name, g := range map[string]*stateHistory{
 		"403":       {settings: annotationsSettings, refuse: true},
 		"same time": {settings: annotationsSettings, sameTime: true},
@@ -570,6 +575,7 @@ func TestCheckReplayGrafanaHistoryMisses(t *testing.T) {
 // refused for good (403) are taken as no history, GRAFANA_ALERTS read as
 // before, and the check goes on.
 func TestCheckReplayGrafanaHistoryToken(t *testing.T) {
+	parallel(t)
 	g := &stateHistory{settings: annotationsSettings, status: http.StatusUnauthorized}
 	s, _ := historyServer(t, g, false, nil)
 	ctx := context.Background()
@@ -604,6 +610,7 @@ func TestCheckReplayGrafanaHistoryToken(t *testing.T) {
 // Two rules whose names are one in an annotation's tags, as a colon and
 // an underscore are, can't be told apart there: neither is checked.
 func TestCheckReplayGrafanaHistoryNames(t *testing.T) {
+	parallel(t)
 	g := &stateHistory{settings: annotationsSettings}
 	other := strings.NewReplacer("uid: gerrors", "uid: gerrors2", `title: "GErrors: shop"`, `title: "GErrors_ shop"`, "name: shop", "name: shop2").Replace(grafanaRule)
 	s, _ := historyServer(t, g, false, nil, other)

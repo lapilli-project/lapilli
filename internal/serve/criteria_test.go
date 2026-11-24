@@ -63,6 +63,7 @@ func askAs(t *testing.T, h http.Handler, method, path string, form url.Values, w
 // are refused, and nothing is saved; an editor may not; empty turns the
 // command line's off; back to the start is the command line's again.
 func TestImpactSaveChecked(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	h := s.Handler()
@@ -120,6 +121,7 @@ func TestImpactSaveChecked(t *testing.T) {
 // place of the one before's, and from then on the record is kept by it;
 // settings.yaml gives it as Helm values.
 func TestImpactSavedReadAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	// Read by the runs, the one before finds no window.
 	s := criteriaServer(t, false, func(c *Config) { c.Impact = "impact > 9" })
@@ -173,6 +175,7 @@ func TestImpactSavedReadAgain(t *testing.T) {
 // round; meanwhile the runs read it from where they are, which keeps the
 // record from their own start alone.
 func TestImpactReadAgainFails(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	if err := s.l.SetSettings(ctx, map[string]string{"impact": "turned"}, "ana@example.com"); err != nil {
@@ -202,6 +205,7 @@ func TestImpactReadAgainFails(t *testing.T) {
 // from this site, and saves nothing: the windows it finds, which would
 // count, and the verdict in effect and with them.
 func TestImpactTry(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
 	h := s.Handler()
@@ -238,6 +242,7 @@ func TestImpactTry(t *testing.T) {
 // Tries are counted, impactTriesAnHour an admin an hour, made or refused
 // once checked: past them, refused before anything is read.
 func TestImpactTriesLimited(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	h := s.Handler()
 	for i := range impactTriesAnHour + 1 {
@@ -261,6 +266,7 @@ func TestImpactTriesLimited(t *testing.T) {
 // and it is backtested again before it is approved. The try before said
 // so.
 func TestImpactStalesProposals(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, func(c *Config) { c.Impact = "" })
 	yes := true
@@ -303,6 +309,7 @@ func TestImpactStalesProposals(t *testing.T) {
 // Saved in the UI with no rules and no --impact, the impact signal is a
 // run to make: the runs begin.
 func TestImpactRuns(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.RulesPath, c.Impact = "", "" })
 	if s.running(ctx) {
@@ -323,6 +330,7 @@ func TestImpactRuns(t *testing.T) {
 // The judging settings and the incident criteria are kept apart: an
 // incident criterion saved is no judging setting the UI couldn't parse.
 func TestImpactNotAJudgingSetting(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1", "impact-for": "10m"}, "ana"); err != nil {

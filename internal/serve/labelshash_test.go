@@ -20,6 +20,7 @@ import (
 // apart from the one it reads as), so the 20,000 alerts a rule's replay
 // is kept with (CHANGELOG 0.34.1, docs/design/serve.md) don't bound it.
 func TestWithinSeriesSeparatorCollision(t *testing.T) {
+	parallel(t)
 	const n = 16 // 2^15 = 32,768 label sets, past maxRuleSeries (20,000)
 	names := make([]string, n)
 	for i := range names {
@@ -59,6 +60,7 @@ func TestWithinSeriesSeparatorCollision(t *testing.T) {
 // labelsHash is seeded: under two seeds, a set hashes apart, as a hash an
 // API could know (FNV-64a, unseeded) doesn't.
 func TestLabelsHashSeeded(t *testing.T) {
+	parallel(t)
 	a, b := maphash.MakeSeed(), maphash.MakeSeed()
 	for _, m := range []map[string]string{{}, {"a": "x"}, {"alertname": "Errors", "pod": "api-7d8f9"}} {
 		if labelsHash(a, m) == labelsHash(b, m) {

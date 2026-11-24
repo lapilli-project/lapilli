@@ -116,11 +116,19 @@ var asciiJSON = func() (n [utf8.RuneSelf]int) {
 	return n
 }()
 
+// lengthCounted, when set, is told of each label's name or value whose
+// length as JSON is counted: the tests count them (TestKeptLabelsLinear),
+// once each, not once for each comparison of a sort.
+var lengthCounted func()
+
 // jsonLen is how long s is as encoding/json writes it, quoted, its HTML
 // escaped: an ASCII text counted, not written. Past ASCII it is written,
 // once: how a byte that isn't UTF-8 is written, or U+2028, differs from
 // one Go to the next (go1.27 writes U+FFFD as it is, before it "\ufffd").
 func jsonLen(s string) int {
+	if lengthCounted != nil {
+		lengthCounted()
+	}
 	n := 2
 	for i := 0; i < len(s); i++ {
 		c := s[i]

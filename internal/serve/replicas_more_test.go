@@ -46,6 +46,7 @@ func pgConn(t *testing.T, s *Server) *pgx.Conn {
 // someone in keeps its state once, and its callback replayed to another
 // replica is refused there.
 func TestReplicasSignInStatesWriteNothingUnsigned(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	if !s.l.Shared() {
 		t.Skip("the ledgers are SQLite's")
@@ -145,6 +146,7 @@ func TestReplicasSessionKeysRotate(t *testing.T) {
 // The UI's port, which answers anyone whatever the host, says ok and no
 // more; the metrics' port says which replica leads.
 func TestReplicasReadinessSaysLittle(t *testing.T) {
+	parallel(t)
 	f := sharedLedger(t)
 	rc := newSink(t)
 	a := replica(t, f, rc, nil)
@@ -261,6 +263,7 @@ func TestReplicasDigestAfterAClaim(t *testing.T) {
 // the ledger alone: the follower, leading later, doesn't judge again what
 // was judged.
 func TestReplicasRejudgeAskedOnAFollower(t *testing.T) {
+	parallel(t)
 	f := sharedLedger(t)
 	rc := newSink(t)
 	a, b := replica(t, f, rc, nil), replica(t, f, rc, nil)
@@ -316,6 +319,7 @@ func TestReplicasSteppingDown(t *testing.T) {
 // With replicas, a session is refused when who signed out can't be read:
 // another replica may have kept a sign-out this one hasn't read.
 func TestReplicasSignOutsUnreadRefuse(t *testing.T) {
+	parallel(t)
 	s, _ := oidcServer(t, nil)
 	if !s.l.Shared() {
 		t.Skip("the ledgers are SQLite's")
@@ -388,6 +392,7 @@ func TestReplicasSignOutKeptWhenUnread(t *testing.T) {
 // for someone a role lets in. With a provider anyone can sign in to,
 // strangers can't fill it, and refuse everyone their sign-in.
 func TestReplicasStrangersKeepNoSignInStates(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	if !s.l.Shared() {
 		t.Skip("the ledgers are SQLite's")
@@ -429,6 +434,7 @@ func TestReplicasStrangersKeepNoSignInStates(t *testing.T) {
 // its state checked by this replica's own set: no one is refused their
 // sign-in until the uses over are swept.
 func TestReplicasSignInWhenStatesFull(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	if !s.l.Shared() {
 		t.Skip("the ledgers are SQLite's")
@@ -515,6 +521,7 @@ func TestReplicasStuckWork(t *testing.T) {
 // what a version holds is parsed for its ledger, not taken from another's
 // kept under the same id.
 func TestReplicasVersionsParsedPerLedger(t *testing.T) {
+	parallel(t)
 	rc := newSink(t)
 	ctx := context.Background()
 	for i, name := range []string{"Checkout", "Search"} {

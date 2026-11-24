@@ -14,6 +14,7 @@ import (
 // Rootly takes five GETs a minute: a 429 is waited out as its Retry-After
 // says, and the run goes on.
 func TestRootlyWaitsOutTooMany(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	var asked atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +40,7 @@ func TestRootlyWaitsOutTooMany(t *testing.T) {
 // Numbered pages with no order can give an incident twice: it is one, and
 // the file still loads.
 func TestRecipesOneIncidentOnTwoPages(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, c := range []struct {
 		script, first, second, page string
@@ -81,6 +83,7 @@ func TestRecipesOneIncidentOnTwoPages(t *testing.T) {
 // Compass answers the first 20,000 alerts of a search and refuses a page
 // that reaches past them: the recipe stops before asking for one.
 func TestCompassStopsAt20000(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	var last atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

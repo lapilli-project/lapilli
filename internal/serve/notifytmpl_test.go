@@ -24,6 +24,7 @@ const hostile = "<!channel> <@U123|ana> <https://attacker.example|click> & ``` \
 // ends a code block, starts a line, or breaks the JSON; the template's own
 // text is the admin's, and mentions and links as written.
 func TestTemplateEscapes(t *testing.T) {
+	parallel(t)
 	tp, err := parseTemplate("ops", "<!here> *{{.Event}}* ```{{.Title}}``` <{{.Link}}|open> {{ .Labels }}")
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +67,7 @@ func TestTemplateEscapes(t *testing.T) {
 // overrides and isolates) are left out of every value, Slack's and JSON's,
 // so that none hides a word or shows a title's words in another order.
 func TestTemplateBackquotesAndFormat(t *testing.T) {
+	parallel(t)
 	tp, err := parseTemplate("ops", "{{.Title}}{{.Rule}}{{.Team}} `{{.ID}}`")
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +94,7 @@ func TestTemplateBackquotesAndFormat(t *testing.T) {
 // maxFieldValue bytes, the whole to maxTemplated, cut at a letter's end;
 // and the template itself to maxTemplate.
 func TestTemplateBounded(t *testing.T) {
+	parallel(t)
 	tp, err := parseTemplate("ops", strings.Repeat("{{.Title}}", 199))
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +120,7 @@ func TestTemplateBounded(t *testing.T) {
 // text a JSON string whatever its values; a name the flags no longer give
 // posts nothing.
 func TestRoutedSendByRow(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, hs, _ := routedServer(t, `notify:
   routes:
@@ -183,6 +187,7 @@ func TestRoutedSendByRow(t *testing.T) {
 // A --webhook-dest whose key can't be used fails, posting nothing, and
 // says the flag that gave the key, not --notify-webhook-secret-file.
 func TestWebhookDestKeyNamed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	short := filepath.Join(t.TempDir(), "short")
 	os.WriteFile(short, []byte("too short"), 0o600)
@@ -209,6 +214,7 @@ func TestWebhookDestKeyNamed(t *testing.T) {
 
 // A source down or back is told by its name: a template's {{.Title}}.
 func TestSourceNoticeTitled(t *testing.T) {
+	parallel(t)
 	s, _, _ := routedServer(t, "teams: []\n", nil)
 	for _, kind := range []string{"source.down", "source.back"} {
 		about := []byte(`{"event": "` + kind + `", "source_read": {"id": "prometheus", "kind": "prometheus", "name": "prometheus-main", "state": "error"}}`)
@@ -222,6 +228,7 @@ func TestSourceNoticeTitled(t *testing.T) {
 // The webhook and Slack with templates of their own: what happens in their
 // words, the digest as it was, its text the digest's.
 func TestTemplatedWebhookAndSlack(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, hs, _ := routedServer(t, `notify:
   templates:

@@ -38,7 +38,9 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
   through the API that writes them: a Mimir's or a Cortex's configuration
   API (`http://mimir:8080/prometheus/config/v1/rules`,
   `http://cortex:9009/api/v1/rules`), with a token in `--ruler-token-file`
-  and, for one with tenants and no gateway, `--ruler-tenant`; Amazon Managed
+  and, for one with tenants and no gateway, `--ruler-tenant`, which
+  `--prometheus` is sent too unless `--prometheus-tenant` gives the
+  history a tenant of its own; Amazon Managed
   Service for Prometheus's control plane
   (`https://aps.REGION.amazonaws.com/workspaces/ID`, with `--auth aws`); or
   Azure's Prometheus rule groups in a subscription or a resource group
@@ -335,9 +337,17 @@ expanded on the clock they are written on, so a weekly 09:00 turn stays
 at 09:00 when the clocks change: with `INTERVAL`, `COUNT`, `UNTIL`,
 `BYDAY` (numbered for monthly and yearly, as `1MO` or `-1FR`),
 `BYMONTHDAY`, `BYMONTH`, `BYSETPOS` and `WKST`, a day a month doesn't have
-skipped, with `EXDATE` and occurrences replaced by `RECURRENCE-ID`. What
-can't be read (`BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, a repeat more often than
-daily, a zone none of these is) is passed over and said. A feed's URL holds its secret, so it is
+skipped, with `EXDATE` and occurrences replaced by `RECURRENCE-ID`. The
+dates `RDATE` adds are occurrences too, with or without an `RRULE`, as RFC
+5545 has them: times (in UTC, floating, or with a `TZID`, read as
+`DTSTART`'s), days, or periods (`VALUE=PERIOD`) of a time and its end or
+its length, which give that occurrence its own end; each start once, and
+`EXDATE` leaves any of them out, `DTSTART` too. What can't be read
+(`BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, a repeat more often than daily, a zone
+none of these is; an `RDATE` of days beside a `DTSTART` of a time, which
+doesn't say when in the day, or the other way round; a period of days, of
+more than a year, or that doesn't end after it starts) is passed over and
+said. A feed's URL holds its secret, so it is
 read from its file, never shown or logged, fetched over https only, with
 no redirect followed, 8 MB and 30 seconds at most. `lapilli serve` reads
 each feed every `every` (30 minutes by default) and keeps the turns in its ledger past what the feed

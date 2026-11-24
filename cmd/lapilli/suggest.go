@@ -41,6 +41,9 @@ Where the history is, as lapilli verdict takes it:
                       --auth google
   --bearer-token-file FILE
                       send this token with each query
+  --prometheus-tenant ID
+                      the tenant of a Mimir or a Cortex with tenants and no
+                      gateway to set it, sent as X-Scope-OrgID
   --max-rate N        ask the API N requests a second at most, from 0.001
   --max-samples N     read the answers to one query to N samples in all at
                       most (default 10000000)
@@ -153,7 +156,7 @@ type suggestMetric struct {
 // suggest takes, each read as verdict reads it (readFlags): true for one
 // with a value.
 var suggestTakes = map[string]bool{
-	"--prometheus": true, "--gcp-project": true, "--auth": true, "--aws-region": true, "--bearer-token-file": true,
+	"--prometheus": true, "--gcp-project": true, "--auth": true, "--aws-region": true, "--bearer-token-file": true, "--prometheus-tenant": true,
 	"--max-rate": true, "--max-samples": true,
 	"--since": true, "--from": true, "--to": true, "--step": true, "--tz": true,
 	"--timeout": true, "--json": false,

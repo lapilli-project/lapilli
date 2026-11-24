@@ -37,6 +37,14 @@ type Scrapes struct {
 	Jobs map[string]time.Duration
 	// names are Jobs' names, sorted, once for every range checked.
 	names []string
+	// Evaluation is the global evaluation_interval, which a rule group
+	// that gives no interval of its own runs at; 0 where the configuration
+	// wasn't read, doesn't say it, or says no duration. Prometheus writes
+	// every default in the configuration it serves (config.go, 3.5.0: an
+	// evaluation_interval of 0 is its default, 1m): one that doesn't say
+	// it isn't Prometheus's, and its 1m is no one's. Not in String, which
+	// is of the scrapes.
+	Evaluation time.Duration
 }
 
 // sorted is the jobs' names, sorted.
@@ -44,8 +52,16 @@ func (s Scrapes) sorted() []string {
 	if s.names != nil || len(s.Jobs) == 0 {
 		return s.names
 	}
+	if jobsSorted != nil {
+		jobsSorted()
+	}
 	return slices.Sorted(maps.Keys(s.Jobs))
 }
+
+// jobsSorted and jobCompiled, when set, are told of each sort of the
+// jobs' names and each job matcher's regular expression compiled: the
+// tests count them (TestShortRangeByJobCost).
+var jobsSorted, jobCompiled func()
 
 // String is the intervals in one line, the same for the same.
 func (s Scrapes) String() string {
@@ -67,7 +83,8 @@ const maxJobs = 10000
 func ScrapeConfig(config string) (s Scrapes, ok bool) {
 	var c struct {
 		Global struct {
-			ScrapeInterval string `yaml:"scrape_interval"`
+			ScrapeInterval     string `yaml:"scrape_interval"`
+			EvaluationInterval string `yaml:"evaluation_interval"`
 		} `yaml:"global"`
 		ScrapeConfigs []struct {
 			JobName        string `yaml:"job_name"`
@@ -84,6 +101,9 @@ func ScrapeConfig(config string) (s Scrapes, ok bool) {
 			return Scrapes{}, false
 		}
 		s.Global = d
+	}
+	if d, ok := ParseDuration(c.Global.EvaluationInterval); ok && d > 0 {
+		s.Evaluation = d
 	}
 	for _, j := range c.ScrapeConfigs[:min(len(c.ScrapeConfigs), maxJobs)] {
 		if j.JobName == "" {
@@ -256,6 +276,9 @@ type Matcher struct {
 // compileJob is a job matcher's regular expression, anchored as PromQL's
 // are; nil when it doesn't compile, and matches no job.
 func compileJob(v string) *regexp.Regexp {
+	if jobCompiled != nil {
+		jobCompiled()
+	}
 	re, err := regexp.Compile("^(?:" + v + ")$")
 	if err != nil {
 		return nil

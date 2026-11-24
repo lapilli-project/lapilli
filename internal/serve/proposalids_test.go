@@ -20,6 +20,7 @@ import (
 // chips, taken away by Clear; what isn't a proposal's id is left out, and
 // twenty are taken at most.
 func TestProposalsPickedByID(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	ctx := context.Background()
 	var ids []string

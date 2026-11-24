@@ -18,6 +18,7 @@ import (
 // team something happened to, and to the team that has a webhook of its own;
 // and one team's that is down holds up no one else's.
 func TestDigestTold(t *testing.T) {
+	parallel(t)
 	var mu sync.Mutex
 	got := map[string][]string{}
 	down := true
@@ -130,6 +131,7 @@ func TestDigestTold(t *testing.T) {
 // What a rule adds is reckoned against every rule, whichever team's are shown:
 // another team's rule catching an incident as soon is as good.
 func TestCreditAcrossTeams(t *testing.T) {
+	parallel(t)
 	s, rules := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour })
 	os.WriteFile(filepath.Join(rules, "more.yaml"), []byte("groups:\n  - name: more\n    rules:\n      - {alert: Errors2, expr: errors > 1, for: 2m, labels: {severity: page}}\n"), 0o644)
 	h := s.Handler()
@@ -175,6 +177,7 @@ func TestCreditAcrossTeams(t *testing.T) {
 // A webhook added on a Friday doesn't hear of Monday's digest; it hears of the
 // next.
 func TestDigestNotToldLate(t *testing.T) {
+	parallel(t)
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("http://127.0.0.1:1/x"), 0o600)
 	s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour })
@@ -198,6 +201,7 @@ func TestDigestNotToldLate(t *testing.T) {
 // A rule taken away, as asked, stops being asked about, and stops covering the
 // one left, which was spare only while it was there.
 func TestSpareOnlyOfWhatCanFire(t *testing.T) {
+	parallel(t)
 	s, rules := server(t, func(c *Config) {
 		c.Backfill = 28 * 24 * time.Hour
 		c.Options.NoisyFirings = 1000 // the stand-in's errors fire twenty times on search too

@@ -189,15 +189,20 @@ var (
 // repository by its id, which an entry must pin, alone of its claims a
 // list; the claim of the event the job runs for, which it must pin too,
 // to one of events, those a fork's pull request can't run in the
-// repository's own context with ("" for a CI whose tokens say no event);
-// the claim that names the repository, which the Run history shows; and
-// other claims an entry must pin, one value each.
+// repository's own context with unless someone who may write to it chose
+// to ("" for a CI whose tokens say no event); the claim that names the
+// repository, which the Run history shows; and other claims an entry must
+// pin, one value each. GitHub's merge_group, a merge queue's run, is of
+// the pull requests someone who may write to the repository queued, a
+// fork's among them, run in the repository's own context with its ID
+// token: taken only of an entry that names it, never of one that names
+// pull_request.
 var knownCIs = map[string]struct {
 	repoID, event, repoName string
 	events                  []string
 	also                    []string
 }{
-	"github":  {"repository_id", "event_name", "repository", []string{"pull_request", "push"}, nil},
+	"github":  {"repository_id", "event_name", "repository", []string{"pull_request", "push", "merge_group"}, nil},
 	"forgejo": {"repository_id", "event_name", "repository", []string{"pull_request", "push"}, nil},
 	"gitlab":  {"project_id", "pipeline_source", "project_path", []string{"merge_request_event", "push"}, nil},
 	// Bitbucket's tokens say no event, and name the repository by its UUID
@@ -570,14 +575,18 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 			}
 		}
 	}
+	known, ok := knownCIs[t.CI]
 	for _, name := range slices.Sorted(maps.Keys(eventClaims)) {
+		// A known CI's own claim of the event takes its own events.
 		events := eventClaims[name]
+		if ok && name == known.event {
+			events = known.events
+		}
 		if p, ok := t.Claims[name]; ok && !slices.Contains(events, p.Values[0]) {
-			return refuseClaim(name, fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, strings.Join(events, " or ")),
-				fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, p.Values[0], strings.Join(events, " or ")))
+			return refuseClaim(name, fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, orList(events)),
+				fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, p.Values[0], orList(events)))
 		}
 	}
-	known, ok := knownCIs[t.CI]
 	if !ok {
 		// Another issuer: pinned by sub and by the event, each one value.
 		for _, name := range slices.Sorted(maps.Keys(t.Claims)) {
@@ -628,13 +637,21 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 	}
 	ev, ok := t.Claims[known.event]
 	if !ok {
-		return refuseAs("claims", fmt.Sprintf("claims: pin %s to %s: the event the job runs for", known.event, strings.Join(known.events, " or ")))
+		return refuseAs("claims", fmt.Sprintf("claims: pin %s to %s: the event the job runs for", known.event, orList(known.events)))
 	}
 	if !slices.Contains(known.events, ev.Values[0]) {
-		return refuseClaim(known.event, fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context", known.event, strings.Join(known.events, " or ")),
-			fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context", known.event, ev.Values[0], strings.Join(known.events, " or ")))
+		return refuseClaim(known.event, fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context", known.event, orList(known.events)),
+			fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context", known.event, ev.Values[0], orList(known.events)))
 	}
 	return nil
+}
+
+// orList is words as a list said with "or": a, b or c.
+func orList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
 }
 
 // issuerURL says what is wrong with an issuer's URL, or its keys': https,

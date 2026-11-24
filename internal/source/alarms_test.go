@@ -200,7 +200,9 @@ func TestAlarmsCloudWatchNamedApart(t *testing.T) {
 }
 
 // A budget: 5,000 alarms read a page of 100 at a time, parsed, and kept
-// as documents, in a few seconds.
+// as documents, a few hundred allocations each (some 470, the stand-in's
+// answers among them), counted, not timed, so that a slow runner fails
+// none; the time is logged.
 func TestAlarmsBudget(t *testing.T) {
 	cw := alarmtest.NewCloudWatch("eu-west-1")
 	for i := range 5000 {
@@ -210,15 +212,20 @@ func TestAlarmsBudget(t *testing.T) {
 	}
 	a, tr := reader(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw)
 	start := time.Now()
-	rs, docs, err := a.Read(context.Background())
+	var rs []rules.Rule
+	var docs []rules.Doc
+	var err error
+	n := testing.AllocsPerRun(1, func() { rs, docs, err = a.Read(context.Background()) })
 	if err != nil || len(rs) != 5000 || len(docs) != 5000 {
 		t.Fatalf("%d %d %v", len(rs), len(docs), err)
 	}
-	if took := time.Since(start); took > 20*time.Second {
-		t.Errorf("5,000 alarms took %s", took)
+	t.Logf("5,000 alarms: %.0f allocations each, in %s", n/5000, time.Since(start))
+	if n > 2000*5000 {
+		t.Errorf("5,000 alarms: %.0f allocations, over 2,000 each", n)
 	}
-	if n := tr.Hosts["monitoring.eu-west-1.amazonaws.com"]; n != 50 {
-		t.Errorf("%d requests, want 50 pages", n)
+	// Read twice: testing.AllocsPerRun's run, and the one before it.
+	if n := tr.Hosts["monitoring.eu-west-1.amazonaws.com"]; n != 2*50 {
+		t.Errorf("%d requests, want 50 pages each read", n)
 	}
 }
 

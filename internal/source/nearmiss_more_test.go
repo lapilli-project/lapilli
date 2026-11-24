@@ -23,10 +23,18 @@ import (
 type spans struct {
 	by    map[string][][2]time.Time
 	asked atomic.Int64
+	// widest is the longest range asked over, in nanoseconds.
+	widest atomic.Int64
 }
 
 func (c *spans) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	c.asked.Add(1)
+	for w := int64(end.Sub(start)); ; {
+		was := c.widest.Load()
+		if w <= was || c.widest.CompareAndSwap(was, w) {
+			break
+		}
+	}
 	if strings.Contains(expr, "broken") {
 		return nil, errors.New("bad_data")
 	}
@@ -136,7 +144,9 @@ func TestNearMissCostExcused(t *testing.T) {
 }
 
 // An incident whose end is far off, as some tools mark one still open,
-// is looked at within the period, and quickly.
+// is looked at within the period, and quickly: no range asked reaches past
+// the week and its lead, and a few dozen are asked, a day each at most
+// (counted, not timed, so that a slow runner fails none).
 func TestNearMissFarEnd(t *testing.T) {
 	o := week()
 	h := &spans{by: map[string][][2]time.Time{"c": {{at(10, 2, 0), at(10, 4, 0)}}}}
@@ -149,10 +159,12 @@ func TestNearMissFarEnd(t *testing.T) {
 	versions := []replay.Version{{Rules: []rules.Rule{r, long}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	began := time.Now()
+	began, asked := time.Now(), h.asked.Load()
 	nms, done, _ := NearMisses(ctx, h, versions, rep, incs, o, time.Minute, 4, nil)
-	if !done || len(nms) != 1 || nms[0].Rule != "R" || time.Since(began) > 2*time.Second {
-		t.Fatalf("%v %s %+v", done, time.Since(began), nms)
+	widest, n := time.Duration(h.widest.Load()), h.asked.Load()-asked
+	t.Logf("%d ranges asked, the widest %s, in %s", n, widest, time.Since(began))
+	if !done || len(nms) != 1 || nms[0].Rule != "R" || widest > 14*24*time.Hour || n > 100 {
+		t.Fatalf("%v %+v: %d ranges asked, the widest %s", done, nms, n, widest)
 	}
 }
 

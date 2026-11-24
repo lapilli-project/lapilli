@@ -74,6 +74,7 @@ func commentsOn(t *testing.T, s *Server, id int64) []string {
 // one a person made with the button either; goal.missed is told all the
 // same.
 func TestGoalsNoTasksWithoutTheFlag(t *testing.T) {
+	parallel(t)
 	s := hooked(t, false)
 	declare(t, s, theGoals)
 	ctx := context.Background()
@@ -130,6 +131,7 @@ func TestGoalCommentsBounded(t *testing.T) {
 // team's tells its teams missed in one notice, and Slack's line names
 // them.
 func TestGoalsToldOnce(t *testing.T) {
+	parallel(t)
 	s := hooked(t, true)
 	declare(t, s, "goals:\n  - {name: paged-low, team: payments, measure: critical.firings, at_most: 1}\n  - {name: quiet, team: \"*\", measure: firings, at_most: 0}\n")
 	again(t, s)
@@ -181,6 +183,7 @@ func TestGoalsToldOnce(t *testing.T) {
 // The week the cursor hasn't passed the end of is open: /metrics gives it
 // known 0, and neither met nor a value.
 func TestGoalMetricsOpenWeek(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, theGoals)
 	// A week on, the ledger's firings still up to the last one.
@@ -201,6 +204,7 @@ func TestGoalMetricsOpenWeek(t *testing.T) {
 // bytes whatever the goals; the lines are kept in the ledger, for the
 // replicas that follow, when they change, and not again when they don't.
 func TestGoalsSharedInBrief(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, theGoals)
 	ctx := context.Background()
@@ -248,6 +252,7 @@ func TestGoalsSharedInBrief(t *testing.T) {
 // the bound: down for at_least, up for at_most; a quotient a hair off a
 // tenth of a percent is that tenth.
 func TestGoalValueCut(t *testing.T) {
+	parallel(t)
 	f := func(v float64) *float64 { return &v }
 	least, most := ledger.Goal{Measure: "precision", AtLeast: "0.8"}, ledger.Goal{Measure: "refired.share", AtMost: "0.1"}
 	for _, c := range []struct {
@@ -282,6 +287,7 @@ func TestGoalValueCut(t *testing.T) {
 // A goal met at its bound exactly is met: at_least is a floor, at_most a
 // ceiling, both included.
 func TestGoalAtItsBound(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, "goals:\n  - {name: all-caught, measure: critical.share_caught, at_least: 1}\n  - {name: two-paged, measure: critical.firings, at_most: 2}\n")
 	sum := summaryOfGoals(t, s)
@@ -296,6 +302,7 @@ func TestGoalAtItsBound(t *testing.T) {
 // notice, 50 named with their values, how many more counted, and every
 // one of them marked told.
 func TestGoalNoticeNamesFifty(t *testing.T) {
+	parallel(t)
 	s := hooked(t, false)
 	ctx := context.Background()
 	for i := range 55 {
@@ -335,6 +342,7 @@ func TestGoalNoticeNamesFifty(t *testing.T) {
 // another leader says another. The status says the sum of what was kept,
 // not of what was worked out and not written.
 func TestGoalsFollowed(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	ctx := context.Background()
 	brief := func(g *goalsShown) *goalsBrief {
@@ -384,6 +392,7 @@ func TestGoalsFollowed(t *testing.T) {
 // series through a failover, and a first round that works out the same
 // writes nothing. As it ends, what this replica worked out is let go.
 func TestGoalsTerm(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, theGoals)
 	ctx := context.Background()

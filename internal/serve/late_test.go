@@ -20,6 +20,7 @@ import (
 // --late too: with its metrics taken to arrive 10m late, a rule added
 // catches INC-1 10m later than without.
 func TestCompareLate(t *testing.T) {
+	parallel(t)
 	added := `groups:
   - name: shop
     rules:
@@ -68,6 +69,7 @@ func TestCompareLate(t *testing.T) {
 // Errors's metrics taken to arrive 30m late, for: 2m catches INC-1 31m in
 // and for: 15m, 44m in, after it ended at 39m; on time, both catch it.
 func TestBacktestLate(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		late rules.Lateness
 		lost []string
@@ -85,6 +87,7 @@ func TestBacktestLate(t *testing.T) {
 // it, as Grafana does: its runs, and anything replayed, read 2m for a
 // data source of 30s.
 func TestGrafanaDataSourceScrape(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	var asked int
 	refuse := true
@@ -169,6 +172,7 @@ func (h *askedHistory) StatusConfig(context.Context) (string, error) {
 // server works out at the interval Prometheus's configuration says the
 // series it reads are scraped at, the range check on or not.
 func TestServeReplayScrape(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := server(t, nil)
 	os.Remove(filepath.Join(dir, "shop.yaml"))

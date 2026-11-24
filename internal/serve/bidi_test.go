@@ -23,6 +23,7 @@ var turningChars = []rune{0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D
 // (rules.Shown), as the ledger takes a tracker's comment (textShows), and
 // the pages set names apart in <bdi>.
 func TestRuleNamesDontTurnPages(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, keepRecord) // the digest's week judged: a suggestion names the rule
 	// The rule file is the one source here; a ruler or Grafana gives the
@@ -72,6 +73,7 @@ func TestRuleNamesDontTurnPages(t *testing.T) {
 // language; and an expression, which a page can't change, is shown with
 // what turns text around as U+FFFD.
 func TestNamesInSentencesSetApart(t *testing.T) {
+	parallel(t)
 	if got := string(trBDI("en", "Group %s.", "a<b>\u202e")); got != "Group <bdi>a&lt;b&gt;\u202e</bdi>." {
 		t.Errorf("%q", got)
 	}
@@ -107,6 +109,7 @@ func TestNamesInSentencesSetApart(t *testing.T) {
 // shown as what shows: a template that doesn't would let a name from
 // another source than rules.Shown takes turn the text after it around.
 func TestTemplatesSetNamesApart(t *testing.T) {
+	parallel(t)
 	link := regexp.MustCompile(`<a href="/rules/\{\{path [^}]*\}\}"[^>]*>(.{0,6})`)
 	files, _ := filepath.Glob("templates/*.html")
 	for _, f := range files {

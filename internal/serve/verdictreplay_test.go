@@ -43,6 +43,7 @@ func backtestOf(t *testing.T, s *Server, id int64) *backtest {
 // verdict it is white on both. A verdict said in its period since it was
 // backtested makes it stale, and so does one undone.
 func TestBacktestCarriesVerdicts(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h := s.Handler()

@@ -78,6 +78,7 @@ func serveTest(t *testing.T, s *Server, addr string, h http.Handler) {
 // TestLoopbackListener: a test server listens on loopback alone; asked to
 // listen anywhere else, it refuses before it listens.
 func TestLoopbackListener(t *testing.T) {
+	parallel(t)
 	ln, err := loopbackListener("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

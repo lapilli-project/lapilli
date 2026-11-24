@@ -113,6 +113,11 @@ type cachedZone struct {
 	err error
 }
 
+// zoneLooked, when set, is told of each zone a feed looks up, which
+// time.LoadLocation reads from disk each time: the tests count them
+// (TestFeedZoneEachDate), once a zone a feed, not once a date.
+var zoneLooked func()
+
 // lookupZone is the zone a TZID names: an IANA name of a place, an Area
 // and a City such as Europe/Berlin, which wins over a VTIMEZONE of the
 // same name (Google writes both); else the feed's own VTIMEZONE (Outlook
@@ -122,6 +127,9 @@ type cachedZone struct {
 // that aren't a place's, such as EST, a fixed -0500 all year, or
 // Etc/GMT+5: a feed's EST whose VTIMEZONE keeps summer time means that.
 func lookupZone(tz string, own map[string]*vzone) (zone, error) {
+	if zoneLooked != nil {
+		zoneLooked()
+	}
 	name := strings.TrimPrefix(tz, "/")
 	if place(name) {
 		if l, err := LoadZone(name); err == nil {

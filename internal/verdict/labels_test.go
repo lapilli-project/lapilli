@@ -139,3 +139,25 @@ func TestLabelsAgreeKept(t *testing.T) {
 		t.Error("a long value apart, taken as alike")
 	}
 }
+
+// A set of labels past what is kept is worked out in time that grows with
+// its labels: each name's and value's length as JSON counted once or twice
+// (as read, and as kept), not again at each comparison of the sort that
+// picks the longest to fold, which held the ledger's writer for seconds
+// for a series of 15,000 labels (ledger's TestWideSeriesRecordCost).
+// Counted (lengthCounted), not timed.
+func TestKeptLabelsLinear(t *testing.T) {
+	m := map[string]string{"alertname": "Down"}
+	for i := range 15000 {
+		m[fmt.Sprintf("l%06d", i)] = "v"
+	}
+	counted := 0
+	lengthCounted = func() { counted++ }
+	defer func() { lengthCounted = nil }()
+	if got := KeptLabels(m); got[CutLabel] == "" {
+		t.Fatalf("15,000 labels kept as they are: %d", len(got))
+	}
+	if most := 4*len(m) + 4; counted > most {
+		t.Errorf("%d labels: %d lengths counted, over %d: once for each comparison of the sort?", len(m), counted, most)
+	}
+}

@@ -259,8 +259,10 @@ the above, or the above left it open:
 
 ## Alertmanager's templates
 
-Status: built, for the next release. [serveops.md](serveops.md) checks the
-notification templates a Grafana rule is sent with. The other rules,
+Status: built (0.70); the chart's `serve.checkContent.alertmanager` and
+`lapilli preflight`'s `content.alertmanager`, for the next release.
+[serveops.md](serveops.md) checks the notification templates a Grafana
+rule is sent with. The other rules,
 Prometheus's, a ruler's and Loki's, are sent by Alertmanager, whose
 receivers' fields are templates too. This checks those the same way.
 

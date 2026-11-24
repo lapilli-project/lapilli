@@ -13,6 +13,7 @@ import (
 // response as it is written, not held whole besides, and isn't kept; one
 // the cache keeps is kept.
 func TestBigPageStreamed(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	big := bytes.Repeat([]byte("x"), cacheOne/4)
 	for _, c := range []struct {

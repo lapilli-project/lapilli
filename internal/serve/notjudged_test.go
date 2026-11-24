@@ -80,6 +80,7 @@ func hourSums(t *testing.T, body string) []int {
 // named signals, those whose signals keep no record (TestSignalsJudged-
 // ByTheirOwn), beside others judged the same day.
 func TestNotJudgedAlike(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for _, c := range []struct {
 		name string
@@ -196,6 +197,7 @@ func TestNotJudgedAlike(t *testing.T) {
 // column however few of them are drawn: a sliver too thin to draw beside a
 // tall week still has its column.
 func TestStonesChartUnjudgedTooThinToDraw(t *testing.T) {
+	parallel(t)
 	ws := []*weekView{
 		{Start: now.AddDate(0, 0, -14), Firings: 600, Black: 600, Kept: true},
 		{Start: now.AddDate(0, 0, -7), Firings: 30, White: 10, Black: 20, Kept: true, Unjudged: 1},
@@ -212,6 +214,7 @@ func TestStonesChartUnjudgedTooThinToDraw(t *testing.T) {
 // tiles it can't fill say only that they aren't known; seven or eight
 // tiles are laid in rows of four.
 func TestOverviewNoRecordSaidOnce(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
 	raw := ""

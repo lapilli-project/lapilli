@@ -90,6 +90,7 @@ func id(t *testing.T, body string) int64 {
 // its, and nothing of another team's or of everyone's; nor anything an
 // editor or an admin may.
 func TestTeamEditors(t *testing.T) {
+	parallel(t)
 	s, pay, search := rolesServer(t, nil)
 	h := s.Handler()
 	const boss, pat = "boss@example.com", "pat@example.com"
@@ -252,6 +253,7 @@ func asPage(t *testing.T, h http.Handler, path, who string) (int, string) {
 // Only an admin gives roles, and only an editor's; from the page, on this
 // site; with roles on. An editor of every team given in the UI is an editor.
 func TestGivingRoles(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	h := s.Handler()
 	const boss = "boss@example.com"
@@ -296,6 +298,7 @@ func TestGivingRoles(t *testing.T) {
 // Roles in the ledger need --admins, and --read-only gives no one anything,
 // granted or not.
 func TestRolesOff(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, func(c *Config) { c.Admins = nil })
 	h := s.Handler()
 	if code, body := callAs(t, h, "POST", "/api/v1/roles", "ed@example.com", "", `{"who": "user:pat@example.com"}`, ""); code != http.StatusForbidden {
@@ -324,6 +327,7 @@ func TestRolesOff(t *testing.T) {
 // shown as it repeats; its first repeat refused when it isn't one of the
 // schedule's times, saying the next.
 func TestWindowByScheduleForm(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.Handler()
 	for _, c := range []struct {
@@ -358,6 +362,7 @@ func TestWindowByScheduleForm(t *testing.T) {
 // The Reports page offers a team's editor their team's reports, to its own
 // destination, and never the digest; an admin, everything.
 func TestReportsPageForTeamEditors(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	h := s.Handler()
 	if _, err := s.l.PutGrant(context.Background(), ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
@@ -384,6 +389,7 @@ func TestReportsPageForTeamEditors(t *testing.T) {
 // window: each team's window quiets its own rules, and the window's page
 // says whose each firing it excused was.
 func TestTeamWindowQuietsOnlyItsRules(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	h := s.Handler()
 	ctx := context.Background()
@@ -432,6 +438,7 @@ func TestTeamWindowQuietsOnlyItsRules(t *testing.T) {
 // to change its title, it is refused rather than given to everyone (a
 // review found the browser sending the first option, everyone's).
 func TestRemovedTeamWindowForm(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	ctx := context.Background()
 	o, _ := s.options(ctx)
@@ -463,6 +470,7 @@ func TestRemovedTeamWindowForm(t *testing.T) {
 // the changes without the roles given and taken (a review found them
 // there).
 func TestRunsPageHidesRoles(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	h := s.Handler()
 	callAs(t, h, "POST", "/api/v1/roles", "boss@example.com", "", `{"who": "user:pat@example.com", "team_id": `+itoa(pay)+`}`, "")
@@ -485,6 +493,7 @@ func TestRunsPageHidesRoles(t *testing.T) {
 // name named in --editors is an editor (a verification found them made
 // viewers).
 func TestInvisibleCharactersAreNoOne(t *testing.T) {
+	parallel(t)
 	persian, emoji := "\u0645\u0647\u062f\u06cc\u200c\u0632\u0627\u062f\u0647@example.com", "dev\U0001F468\u200d\U0001F4BB@example.com"
 	s, _, _ := rolesServer(t, func(c *Config) { c.Editors = append(c.Editors, "user:"+persian, "user:"+emoji) })
 	h := s.Handler()
@@ -510,6 +519,7 @@ func TestInvisibleCharactersAreNoOne(t *testing.T) {
 // Every write this batch adds is refused from another site, a sibling
 // one or a page elsewhere, and under --read-only (a review checked them).
 func TestNewWritesCrossSiteAndReadOnly(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	h := s.Handler()
 	ro, _, _ := rolesServer(t, func(c *Config) { c.ReadOnly = true })
@@ -558,6 +568,7 @@ func TestNewWritesCrossSiteAndReadOnly(t *testing.T) {
 // team's pattern names: its editors can't take the rule by a note, nor
 // comment on it (a verification's check of the owner order).
 func TestLabelTeamCantTakeANamedRule(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := rolesServer(t, nil)
 	a, err := s.l.PutTeam(ctx, ledger.Team{Name: "alpha", Labels: map[string][]string{"severity": {"page"}}}, "boss")
@@ -597,6 +608,7 @@ func TestLabelTeamCantTakeANamedRule(t *testing.T) {
 // write transaction: 1,500 of them took judging 21 firings from 0.5 ms to
 // 111 ms.
 func TestTeamEditorWindowsLimited(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, nil)
 	ctx := context.Background()
 	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:payer@example.com", TeamID: pay}, "boss"); err != nil {

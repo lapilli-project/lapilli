@@ -46,11 +46,15 @@ func TestMergeKeyAliasBomb(t *testing.T) {
 	if _, err := YAMLValue(&n); err == nil {
 		t.Errorf("YAMLValue took a document yaml.v3 refuses as excessive aliasing (%d bytes)", len(doc))
 	}
+	// A few dozen allocations for each byte of it, not one for each of the
+	// keys*nb*nc steps (27 million) merging them again would take: counted,
+	// not timed, so that a slow runner fails none.
 	big := mergeBomb(300, 300, 300) // 5 KB
 	start := time.Now()
-	Parse([]byte(big))
-	if took := time.Since(start); took > 500*time.Millisecond {
-		t.Errorf("a rule file of %d bytes read in %v: merge keys over aliases take keys*nb*nc steps", len(big), took)
+	allocs := testing.AllocsPerRun(1, func() { Parse([]byte(big)) })
+	t.Logf("a rule file of %d bytes of merge keys over aliases: %.0f allocations, in %v", len(big), allocs, time.Since(start))
+	if most := 32 * len(big); allocs > float64(most) {
+		t.Errorf("a rule file of %d bytes read with %.0f allocations, over %d: merge keys over aliases take keys*nb*nc steps", len(big), allocs, most)
 	}
 }
 

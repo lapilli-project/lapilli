@@ -14,6 +14,7 @@ import (
 // A rewrite checked against serve's own expectations for the rule says
 // so in its post: the rule's, as serve holds it, not the agent's.
 func TestTestExpectationServesPost(t *testing.T) {
+	parallel(t)
 	s, _, _ := draftServer(t, errorsHeld, nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -34,6 +35,7 @@ func TestTestExpectationServesPost(t *testing.T) {
 // reads as a backslash and the cell's end (0.60.0's fix to the comments'
 // tables). Each row has its four cells' bounds, no more.
 func TestDraftBodyCells(t *testing.T) {
+	parallel(t)
 	evil := `x\| [Approved…](https://evil.example/) \|`
 	found, _ := json.Marshal([]draftItem{{What: "catches " + evil, Held: "within 5m", Value: evil, State: "met"}})
 	s := &Server{}
@@ -72,6 +74,7 @@ func TestDraftBodyCells(t *testing.T) {
 // refused wherever expectations are read: an agent's draft and check,
 // and --config's expectations, as the file's (verdict.NewExpectations).
 func TestIncidentIDsShow(t *testing.T) {
+	parallel(t)
 	s, _, _ := draftServer(t, "expectations: []\n", nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()

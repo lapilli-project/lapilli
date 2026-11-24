@@ -155,6 +155,7 @@ func versionsOf(t *testing.T, s *Server) []ledger.Version {
 // what hangs on it (a team's list, a note, a task, its firings), and a
 // change proposed, merged or applied then goes on as it would have.
 func TestUpgradeGroups(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	want := []string{"Errors", "Busy [shop-eu]", "Busy [shop-us]"}
 
@@ -330,6 +331,7 @@ func TestUpgradeGroups(t *testing.T) {
 // Following a history of the rules, a version that changes only a group's
 // labels is a version; one that changes nothing isn't.
 func TestFollowGroupLabels(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	add := func(at time.Time, group string) {

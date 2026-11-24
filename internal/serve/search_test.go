@@ -14,6 +14,7 @@ import (
 )
 
 func TestTokens(t *testing.T) {
+	parallel(t)
 	got := tokens(`  err is:noisy "job:rate5m x" Label:team=pay severity: foo:bar group:shop 10:30 is:loud has:facts label:"a=b c" team:"a b" x:"y z" a"b`)
 	want := []qword{{Value: "err"}, {Key: "is", Value: "noisy"}, {Value: "job:rate5m x", Quoted: true}, {Key: "label", Value: "team=pay"},
 		{Key: "severity", Bad: "value"}, {Key: "foo", Value: "bar", Bad: "key"}, {Key: "group", Value: "shop"}, {Value: "10:30"},
@@ -34,6 +35,7 @@ func TestTokens(t *testing.T) {
 }
 
 func TestCanonical(t *testing.T) {
+	parallel(t)
 	teams := []string{"payments", "search"}
 	for _, c := range []struct {
 		q, want string
@@ -80,6 +82,7 @@ func TestCanonical(t *testing.T) {
 // kind; a filter searches the rules; nothing found says so. Every redirect
 // stays on this server.
 func TestSearch(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	for _, c := range []struct{ q, to string }{
@@ -139,6 +142,7 @@ func TestSearch(t *testing.T) {
 // the rules page set apart, with what turns text around read as U+FFFD,
 // as names are: a link someone sends can't turn the page's text around.
 func TestQueryTurnsNothingAround(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	q := "\u202eevil label:a=\u2067b foo:\u202ec"
@@ -161,6 +165,7 @@ func TestQueryTurnsNothingAround(t *testing.T) {
 // words reads them as words, in every team, so that it shows what was
 // counted.
 func TestSearchBounded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, nil)
 	var b strings.Builder

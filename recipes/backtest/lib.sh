@@ -31,7 +31,16 @@
 # CI that makes none, is its author's, not the CI's; and ci_default and
 # ci_into, the repository's default branch and
 # the one the pull request goes into, as its CI says them, for the
-# status's name.
+# status's name. And ci_queue, that the run is a merge queue's (GitHub's
+# merge_group), of a commit the queue made, ci_head, on the commit of the
+# branch it goes into that its CI says, TARGET, with ci_base: no pull
+# request is commented on, the report going to the job's log; HEAD must
+# be ci_head, gates or not; and TARGET must be an ancestor of it, the
+# base compared against. And ci_wrong, a setting of the job's the script
+# found wrong, said once the status can be set: the job fails, its status
+# a failure on ci_head. And ci_merge_only, that the base is said of the
+# CI's merge alone (GitLab's merge trains): HEAD must be ci_merge, its
+# second parent ci_head, gates or not, and its first parent is the base.
 #
 # In a clone of the repository with the pull request checked out, it
 # installs a pinned Lapilli release, checked against the release's
@@ -108,7 +117,8 @@
 #                    and the rules left alone are judged by serve's record
 #                    of them (fail_missed)
 #   STATUS           true (or 1): also sets a commit status on the pull
-#                    request's head commit, lapilli/backtest (with KEY,
+#                    request's head commit (of a merge queue's run, the
+#                    merge group's), lapilli/backtest (with KEY,
 #                    lapilli/backtest/KEY; of a pull request into a branch
 #                    other than the default, where the CI says both,
 #                    lapilli/backtest (into BRANCH); where the CI says the
@@ -550,6 +560,10 @@ settings_failed() {
   rm -rf "$tmp"
 }
 trap 'rc=$?; [ "$rc" = 0 ] || settings_failed || :; exit "$rc"' EXIT
+if [ -n "${ci_wrong:-}" ]; then
+  say "$ci_wrong"
+  exit 1
+fi
 case ${FAIL_ON_ERROR:-false} in
   true) strict=1 ;;
   false | '') strict= ;;
@@ -1244,7 +1258,14 @@ commits() {
   # there stands for this one. So is the CI's merge whose second parent,
   # where the clone has it, isn't that head: a merge of an earlier head,
   # made before the event that says the later one.
-  if [ -n "${ci_head:-}" ] && [ "$head" != "$ci_head" ] && [ "$head" != "${ci_merge:-}" ]; then
+  if [ -n "${ci_queue:-}" ] && [ "$head" != "${ci_head:-}" ]; then
+    # A merge queue's run is of its head alone, gates or not: there is no
+    # pull request's commit beside it to read instead.
+    strayed=1
+    refused="HEAD isn't the merge group's head as the CI says"
+    trouble "HEAD $head isn't the merge group's head as the CI says, ${ci_head:-}: the gates and the status would say of that head what was read of another commit. Check out the merge group's head, the commit GitHub's event names (GITHUB_SHA)"
+    return 1
+  elif [ -n "${ci_head:-}" ] && [ "$head" != "$ci_head" ] && [ "$head" != "${ci_merge:-}" ]; then
     strayed=1
     if [ -n "$strict$held$required$missed_gate$status_on" ]; then
       refused="HEAD isn't the pull request's head as the CI says, nor the CI's merge of it"
@@ -1258,6 +1279,15 @@ commits() {
       trouble "HEAD $head is the CI's merge of $of, not of the pull request's head as the CI says, $ci_head: the gates and the status would say of that head what was read of another commit. Run the job again, once the CI has merged the head, or check out the pull request's head commit"
       return 1
     fi
+  fi
+  # Where the base is said of the CI's merge alone, its first parent
+  # (ci_merge_only: GitLab's merge trains), HEAD must be that merge, its
+  # second parent the head the CI says, gates or not: of any other
+  # commit, nothing says the base.
+  if [ -n "${ci_merge_only:-}" ] && ! ci_merged; then
+    refused="HEAD isn't the CI's merge of the pull request's head as the CI says"
+    trouble "HEAD $head isn't the merge the CI says it made, ${ci_merge:-}, of the pull request's head as the CI says, ${ci_head:-}, its second parent: the base, its first parent, is said of that merge alone. Check out the pipeline's own commit, or leave the job out of the pipelines that make such a merge"
+    return 1
   fi
   # HEAD^1 is the first parent of a merge the CI made: of HEAD that isn't
   # one, the pull request's own commit, which it would be judged against,
@@ -1327,6 +1357,13 @@ commits() {
   fi
   if ! base=$(git -C "$repo" merge-base "$head" "$target" 2>"$tmp/git.log"); then
     trouble "HEAD and TARGET $TARGET share no commit in the clone: fetch all of the history (fetch-depth: 0)" "$tmp/git.log"
+    return 1
+  fi
+  # A merge queue's head is made on its base: compared from another
+  # commit, the change judged would be more, or other, than the queue's.
+  if [ -n "${ci_queue:-}" ] && [ "$base" != "$target" ]; then
+    refused="the merge group's base isn't an ancestor of its head in the clone"
+    trouble "the merge group's base, $target, isn't an ancestor of its head, $head, in the clone, which the queue made it on: fetch all of the history (fetch-depth: 0)"
     return 1
   fi
   say "the rules of $head, beside those of $base"
@@ -1589,13 +1626,13 @@ hidden() {
   while [ $# -gt 0 ]; do
     v=
     case $1 in
-      --prometheus | --loki | --grafana | --ruler | --gcp-project | --alarms | --ruler-tenant | --loki-tenant)
+      --prometheus | --loki | --grafana | --ruler | --gcp-project | --alarms | --ruler-tenant | --loki-tenant | --prometheus-tenant)
         if [ $# -ge 2 ]; then
           v=$2
           shift
         fi
         ;;
-      --prometheus=* | --loki=* | --grafana=* | --ruler=* | --gcp-project=* | --alarms=* | --ruler-tenant=* | --loki-tenant=*) v=${1#*=} ;;
+      --prometheus=* | --loki=* | --grafana=* | --ruler=* | --gcp-project=* | --alarms=* | --ruler-tenant=* | --loki-tenant=* | --prometheus-tenant=*) v=${1#*=} ;;
     esac
     shift
     [ -n "$v" ] || continue
@@ -2453,8 +2490,15 @@ comment() {
 }
 
 # post: the comment on the pull request, in place of the one posted
-# before, if there is one.
+# before, if there is one. Of a merge queue's run, which has no pull
+# request, the comment as it would be, in the job's log.
 post() {
+  if [ -n "${ci_queue:-}" ]; then
+    say "a merge queue's run, of no pull request to comment on: the report, as a comment would have it"
+    sed 1d "$tmp/comment.md" >"$tmp/queue.md"
+    logged "$tmp/queue.md"
+    return 0
+  fi
   me=
   if ! me=$(host_me) || [ -z "$me" ]; then
     say "the host didn't say who the token is: an earlier comment can't be told from someone else's, so none is looked for"

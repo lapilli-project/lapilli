@@ -41,6 +41,7 @@ func fakeCLI(t *testing.T, name, script string) string {
 // with put.sh, land in the ledger a source each; sent again, they change
 // nothing.
 func TestFiringsThroughThePort(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	const token = "a-firings-token-long-enough"
 	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, token) })
@@ -189,6 +190,7 @@ esac`)}, 3},
 // can't write firings; neither believes a header; a write that is too big,
 // or of a period that can't be, is refused with nothing written.
 func TestFiringsPort(t *testing.T) {
+	parallel(t)
 	const incTok, firTok = "an-incidents-token-long-enough", "a-firings-token-long-enough"
 	s, _ := server(t, func(c *Config) {
 		c.IncidentsListen, c.IncidentsToken, c.FiringsToken = "127.0.0.1:0", tokenFile(t, incTok), tokenFile(t, firTok)
@@ -292,6 +294,7 @@ func TestFiringsPort(t *testing.T) {
 // --impact alone, with no rules, replays nothing, whatever rules the ledger
 // kept from before.
 func TestImpactAlone(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	ctx := context.Background()
 	raw := ""
@@ -307,6 +310,7 @@ func TestImpactAlone(t *testing.T) {
 
 // With only the firings token, there are no incidents paths on the port.
 func TestFiringsPortAlone(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough")
 	})
@@ -323,6 +327,7 @@ func TestFiringsPortAlone(t *testing.T) {
 // Its jobs judge what comes and replay nothing; the pages, the digest and
 // MCP's reading tools work, and compare says why it can't.
 func TestServeWithoutRules(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	cfg := Config{
 		Options: verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}},
@@ -404,6 +409,7 @@ func firingsAt(from time.Time) []firing.Firing {
 // copied in and of the notifications sent; a team's, of its rules'
 // notifications only.
 func TestDigestTellsCopiedAndSent(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, func(c *Config) {
 		c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough")
 	})
@@ -467,6 +473,7 @@ func TestDigestTellsCopiedAndSent(t *testing.T) {
 // is told of, once, to the webhook and Slack; written again and quiet
 // again, once more.
 func TestSourceQuiet(t *testing.T) {
+	parallel(t)
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("https://hooks.example/x"), 0o600)
 	s, _ := server(t, func(c *Config) {
@@ -529,6 +536,7 @@ func TestSourceQuiet(t *testing.T) {
 // With no runs, a week is in the ledger once every source not gone quiet
 // has written through it.
 func TestCopiedTo(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough")
 	})
@@ -560,6 +568,7 @@ func TestCopiedTo(t *testing.T) {
 // catches: not at the week's end alone (docs/design/judging.md, "--settle,
 // a signal's for, a rule's for").
 func TestDigestWaitsForSources(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	cfg := Config{
 		Options: verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
@@ -614,6 +623,7 @@ func TestDigestWaitsForSources(t *testing.T) {
 // isn't tied to that rule's firings: what is counted against a rule is by
 // the alert's rule name.
 func TestNamedApartNotTied(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	ctx := context.Background()
 	o := s.cfg.Options
@@ -639,6 +649,7 @@ func TestNamedApartNotTied(t *testing.T) {
 // people can read: the firings or incidents token holding the same isn't
 // taken, so those readers can't write with it.
 func TestFiringsTokenNotTheNotifyToken(t *testing.T) {
+	parallel(t)
 	const tok = "a-token-in-a-webhook-url-long-enough"
 	s, _ := server(t, func(c *Config) {
 		c.IncidentsListen, c.FiringsToken, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, tok), tokenFile(t, "an-incidents-token-long-enough")

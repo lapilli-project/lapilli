@@ -16,6 +16,7 @@ import (
 // and none of another's, nor about an incident; those disabled for one
 // reason share the sentence that says it.
 func TestOverviewTaskDisabled(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, search := bulkServer(t, nil)
 	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:sam@example.com", TeamID: search}, "boss"); err != nil {
