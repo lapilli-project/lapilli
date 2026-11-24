@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// The backtest recipes in a merge queue's run: GitHub's merge_group, as
-// its reference says the commits it makes.
+// The backtest recipes in a merge queue's run: GitHub's merge_group and
+// GitLab's merge trains, each as its reference says the commits it makes.
 
 // queueRef is the ref GitHub's merge queue names a merge group's branch
 // by: refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA.
@@ -297,5 +297,136 @@ func TestBacktestServeRecipeMergeGroup(t *testing.T) {
 	}
 	if st, n := rr.host.lastStatus(); n != 2 || st.SHA != second || st.State != "success" || st.Context != "lapilli/backtest" {
 		t.Errorf("%d statuses, the last %+v", n, st)
+	}
+}
+
+// gitlab.sh in a merge train's pipeline, as GitLab's merge request
+// pipelines' reference says it: the job checks out a merge commit
+// (CI_COMMIT_SHA) of the source branch's head
+// (CI_MERGE_REQUEST_SOURCE_BRANCH_SHA), whose first parent is the commit
+// the pipeline is based on, the target branch with the merge requests
+// ahead in the train. The change is that merge, compared against that
+// first parent, INCIDENTS its, never CI_MERGE_REQUEST_TARGET_BRANCH_SHA,
+// which the reference says of merged results pipelines alone; the status
+// goes on the source branch's head, as in a merged results pipeline. A
+// checkout of another commit, or a train's commit that isn't such a
+// merge, is refused, gates or not: its base is a commit GitLab doesn't say.
+func TestBacktestRecipeGitLabMergeTrain(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
+	old := repo.git("rev-parse", "HEAD")
+	// The target branch moves on.
+	repo.write(map[string]string{"README.md": "x\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "the target moves on")
+	tip := repo.git("rev-parse", "HEAD")
+	// The merge request ahead in the train, which adds a rule file and an
+	// incident, merged on the target's head as the train merges it.
+	repo.git("checkout", "--quiet", "-b", "ahead", old)
+	repo.write(map[string]string{"alerts/api.yaml": "# the one ahead's\ngroups: []\n",
+		"incidents.yaml": "incidents:\n  - {id: INC-9, start: 2026-11-10T00:00:00Z, end: 2026-11-10T01:00:00Z}\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "ahead")
+	repo.git("checkout", "--quiet", "--detach", tip)
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", "ahead")
+	car1 := repo.git("rev-parse", "HEAD")
+	// This merge request, its source branch parted from the target before
+	// it moved, merged on the one ahead.
+	repo.git("checkout", "--quiet", "-b", "pr", old)
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo.git("commit", "--quiet", "-am", "slower")
+	source := repo.git("rev-parse", "HEAD")
+	repo.git("checkout", "--quiet", "--detach", car1)
+	repo.git("merge", "--quiet", "--no-ff", "--no-edit", "pr")
+	car2 := repo.git("rev-parse", "HEAD")
+	if parents := repo.git("rev-list", "--parents", "-n", "1", car2); parents != car2+" "+car1+" "+source {
+		t.Fatalf("the merge's parents: %s", parents)
+	}
+	repo.git("remote", "add", "origin", repo.dir)
+
+	kept := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(fake, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in\n"+
+		"    --rules) rm -rf '"+kept+"/rules'; cp -R \"$2\" '"+kept+"/rules' ;;\n"+
+		"    --compare) rm -rf '"+kept+"/compare'; cp -R \"$2\" '"+kept+"/compare' ;;\n"+
+		"    --incidents) cp \"$2\" '"+kept+"/incidents' ;;\n  esac\n  shift\ndone\n"+
+		"echo '[//]: # (lapilli-compare {\"nothing_changed\":false,\"changed\":1,\"unreplayed\":0})'\n"), 0o755)
+	given := func(p ...string) string {
+		b, _ := os.ReadFile(filepath.Join(append([]string{kept}, p...)...))
+		return string(b)
+	}
+	// CI_MERGE_REQUEST_TARGET_BRANCH_SHA set, to the target's head: taken,
+	// the change would hold what the one ahead changed.
+	job := []string{"CI_MERGE_REQUEST_IID=7", "CI_PIPELINE_SOURCE=merge_request_event", "CI_MERGE_REQUEST_EVENT_TYPE=merge_train",
+		"CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main", "CI_MERGE_REQUEST_TARGET_BRANCH_SHA=" + tip, "CI_MERGE_REQUEST_DIFF_BASE_SHA=" + old,
+		"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA=" + source, "CI_COMMIT_SHA=" + car2, "CI_DEFAULT_BRANCH=main", "CI_PIPELINE_ID=314",
+		"CI_JOB_URL=https://gitlab.example.com/o/r/-/jobs/27"}
+	settings := []string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "STATUS=true", "FAIL_ON_ERROR=true", "LAPILLI=" + fake}
+	repo.git("checkout", "--quiet", "--detach", car2)
+	rr := newRecipeRun(t, backtestHosts[2], repo)
+	out, err := rr.run(append(slices.Clone(settings), job...), "--prometheus", "http://127.0.0.1:9")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "the rules of "+car2+", beside those of "+car1) {
+		t.Errorf("not the train's merge beside its first parent:\n%s", out)
+	}
+	if given("rules", "shop.yaml") != shopRules("2h") || given("compare", "shop.yaml") != shopRules("5m") {
+		t.Errorf("shop.yaml: %q beside %q", given("rules", "shop.yaml"), given("compare", "shop.yaml"))
+	}
+	// What the one ahead changed is on both sides: never this merge
+	// request's.
+	if a, b := given("rules", "api.yaml"), given("compare", "api.yaml"); a == "" || a != b {
+		t.Errorf("api.yaml: %q beside %q", a, b)
+	}
+	if !strings.Contains(given("incidents"), "INC-9") {
+		t.Errorf("the incidents aren't the first parent's: %q", given("incidents"))
+	}
+	if n := len(rr.host.statuses); n != 2 {
+		t.Fatalf("%d statuses: %+v", n, rr.host.statuses)
+	}
+	for _, st := range rr.host.statuses {
+		if st.SHA != source || st.Pipeline != 0 || st.Context != "lapilli/backtest" || st.URL != "https://gitlab.example.com/o/r/-/jobs/27" {
+			t.Errorf("a status %+v, want on %s, no pipeline_id", st, source)
+		}
+	}
+	if st, _ := rr.host.lastStatus(); st.State != "success" {
+		t.Errorf("the status: %+v", st)
+	}
+
+	// Refused, gates or not: the checkout the source branch's head; a
+	// train's commit that isn't a merge (squashed on the one ahead); a
+	// merge of another head.
+	squash := repo.git("commit-tree", repo.git("rev-parse", car2+"^{tree}"), "-p", car1, "-m", "squashed")
+	other := repo.git("commit-tree", repo.git("rev-parse", car2+"^{tree}"), "-p", car1, "-p", repo.git("rev-parse", "ahead"), "-m", "another's")
+	for _, c := range []struct {
+		name, checkout, commit string
+	}{
+		{"the source branch's head", source, car2},
+		{"a squash", squash, squash},
+		{"a merge of another head", other, other},
+	} {
+		repo.git("checkout", "--quiet", "--detach", c.checkout)
+		for _, gated := range []bool{true, false} {
+			rr := newRecipeRun(t, backtestHosts[2], repo)
+			s := []string{"PATHS=alerts", "LAPILLI=" + fake}
+			if gated {
+				s = slices.Clone(settings)
+			}
+			out, err := rr.run(append(append(s, job...), "CI_COMMIT_SHA="+c.commit), "--prometheus", "http://127.0.0.1:9")
+			if err == nil || !strings.Contains(out, "the base, its first parent, is said of that merge alone") && !strings.Contains(out, "not of the pull request's head as the CI says") {
+				t.Errorf("%s, gated %t: %v\n%s", c.name, gated, err, lastLines(out, 3))
+			}
+			st, n := rr.host.lastStatus()
+			if gated && (n != 1 || st.State != "failed" || st.SHA != source) || !gated && n != 0 {
+				t.Errorf("%s, gated %t: %d statuses, the last %+v", c.name, gated, n, st)
+			}
+		}
+	}
+	// A train's commits GitLab didn't say: refused at once.
+	rr = newRecipeRun(t, backtestHosts[2], repo)
+	out, err = rr.run(append(append(slices.Clone(settings), job...), "CI_MERGE_REQUEST_SOURCE_BRANCH_SHA="), "--prometheus", "http://127.0.0.1:9")
+	if err == nil || !strings.Contains(out, "a merge train's pipeline whose CI_COMMIT_SHA and CI_MERGE_REQUEST_SOURCE_BRANCH_SHA aren't two commits' full hashes") {
+		t.Errorf("no source head: %v\n%s", err, lastLines(out, 3))
 	}
 }

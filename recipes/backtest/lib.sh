@@ -38,7 +38,9 @@
 # be ci_head, gates or not; and TARGET must be an ancestor of it, the
 # base compared against. And ci_wrong, a setting of the job's the script
 # found wrong, said once the status can be set: the job fails, its status
-# a failure on ci_head.
+# a failure on ci_head. And ci_merge_only, that the base is said of the
+# CI's merge alone (GitLab's merge trains): HEAD must be ci_merge, its
+# second parent ci_head, gates or not, and its first parent is the base.
 #
 # In a clone of the repository with the pull request checked out, it
 # installs a pinned Lapilli release, checked against the release's
@@ -1277,6 +1279,15 @@ commits() {
       trouble "HEAD $head is the CI's merge of $of, not of the pull request's head as the CI says, $ci_head: the gates and the status would say of that head what was read of another commit. Run the job again, once the CI has merged the head, or check out the pull request's head commit"
       return 1
     fi
+  fi
+  # Where the base is said of the CI's merge alone, its first parent
+  # (ci_merge_only: GitLab's merge trains), HEAD must be that merge, its
+  # second parent the head the CI says, gates or not: of any other
+  # commit, nothing says the base.
+  if [ -n "${ci_merge_only:-}" ] && ! ci_merged; then
+    refused="HEAD isn't the CI's merge of the pull request's head as the CI says"
+    trouble "HEAD $head isn't the merge the CI says it made, ${ci_merge:-}, of the pull request's head as the CI says, ${ci_head:-}, its second parent: the base, its first parent, is said of that merge alone. Check out the pipeline's own commit, or leave the job out of the pipelines that make such a merge"
+    return 1
   fi
   # HEAD^1 is the first parent of a merge the CI made: of HEAD that isn't
   # one, the pull request's own commit, which it would be judged against,

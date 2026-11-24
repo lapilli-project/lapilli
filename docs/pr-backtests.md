@@ -291,7 +291,7 @@ comment does:
 | Host | Status | The token |
 |---|---|---|
 | GitHub | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`, on the event's `pull_request.head.sha`, when the checkout is that commit or GitHub's merge of it (`GITHUB_SHA`): of another, such as the branch checked out by name after it moved, the run is refused, the job fails, and the status is a `failure` there saying so. In a merge queue's run, on `merge_group.head_sha`, the checkout. Into a branch other than `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | GitHub Actions' `statuses: write`; a fine-grained token, commit statuses (write) |
-| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit; into a branch other than `CI_DEFAULT_BRANCH`, named `lapilli/backtest (into BRANCH)` | the Developer role (the comment's Reporter can't), scope `api` |
+| GitLab | a commit status, `POST /projects/:id/statuses/:sha`, `running` then `success` or `failed`, on the merge request's source commit, an external job of the pipeline when it is the pipeline's commit (in a merged results or merge train pipeline, it isn't); into a branch other than `CI_DEFAULT_BRANCH`, named `lapilli/backtest (into BRANCH)` | the Developer role (the comment's Reporter can't), scope `api` |
 | Bitbucket Cloud | a build status, `POST /repositories/{workspace}/{repo_slug}/commit/{commit}/statuses/build`, `INPROGRESS` then `SUCCESSFUL` or `FAILED`, key `lapilli-backtest` (a key's status written over by the next, a pull request's into another destination too, as Pipelines doesn't say the default branch), its `refname` the pull request's source branch | the comment's pull requests (write): the reference asks the repository scope, which it implies |
 | Gitea, Forgejo | a commit status, `POST /repos/{owner}/{repo}/statuses/{sha}`, `pending` then `success` or `failure`; in Actions, into a branch other than the event's `repository.default_branch`, named `lapilli/backtest (into BRANCH)` | `write:repository` beside the comment's scopes, and an account that may write to the repository |
 | Azure DevOps | a pull request status, `POST .../pullRequests/{id}/statuses`, `pending` then `succeeded` or `failed`, genre `lapilli` and name `backtest`, on the iteration at the head commit (`GET .../iterations`): none when there is no such iteration, as one on the pull request alone would stay after a later push | a personal access token's Code (status), `vso.code_status`, or the build service's Contribute to pull requests (not checked against an account) |
@@ -377,6 +377,26 @@ queued it, is run in the group in the repository's own context, with its
 secrets and its ID token. Its workflow is the group's head's, which the
 pull request may change, as a pull request's run is: have a code owner
 review `.github/workflows/`.
+
+### A merge train
+
+A GitLab merge train's pipeline (`CI_MERGE_REQUEST_EVENT_TYPE` is
+`merge_train`) runs on a merge commit, `CI_COMMIT_SHA`, of the source
+branch's head (`CI_MERGE_REQUEST_SOURCE_BRANCH_SHA`) on the target branch
+with the merge requests ahead in the train, GitLab's [merge request
+pipelines' reference](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/)
+says; its first parent is the commit the pipeline is based on, from which
+a diff holds the merge request's changes alone (as its
+`CI_MERGE_REQUEST_PIPELINE_BASE_SHA` is described). `gitlab.sh` compares
+that merge with its first parent, `INCIDENTS` and the expectations of the
+rules in place read from it, and sets the status on the source branch's
+head, as in a merged results pipeline. It doesn't take
+`CI_MERGE_REQUEST_TARGET_BRANCH_SHA` there, which the reference says of
+merged results pipelines alone. A checkout that isn't that merge, or a
+train's commit that isn't one of the source branch's head (its second
+parent), is refused, gates or not, the job failing: the reference says
+the base of that merge alone. A `TARGET` or `TARGET_BRANCH` the job gives
+is taken as it is, as in a merge request's other pipelines.
 
 ## Through lapilli serve
 

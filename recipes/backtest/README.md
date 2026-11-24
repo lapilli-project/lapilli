@@ -385,7 +385,16 @@ are in. The rules are compared from where the two parted either way, and
 `INCIDENTS` is read from the target as it is. A target branch whose name
 holds more than letters, digits and `. _ / -` leaves the merge base
 (`CI_MERGE_REQUEST_DIFF_BASE_SHA`), `INCIDENTS` read from it, the job's
-log saying so.
+log saying so. In a merge train's pipeline (`CI_MERGE_REQUEST_EVENT_TYPE`
+`merge_train`), the job checks out a merge commit (`CI_COMMIT_SHA`) of the
+source branch's head on the target branch with the merge requests ahead
+in the train, GitLab's reference says: it is compared with its first
+parent, the commit the pipeline is based on, `INCIDENTS` that commit's,
+not with `CI_MERGE_REQUEST_TARGET_BRANCH_SHA`, which the reference says of
+merged results pipelines alone; a checkout of another commit, or a
+train's commit that isn't a merge of the source branch's head, is
+refused, gates or not ([A merge
+train](../../docs/pr-backtests.md#a-merge-train)).
 
 ### Bitbucket Pipelines
 
