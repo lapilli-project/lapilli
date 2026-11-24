@@ -194,6 +194,14 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 			"isn't refs/heads/BRANCH"},
 		{"a head_sha of two lines", queueRun(write(`{"merge_group": {"head_sha": "`+second+`\n`+bad+`", "base_sha": "`+main+`", "head_ref": "`+ref+`", "base_ref": "refs/heads/main"}}`), ref, second),
 			"aren't two commits' full hashes"},
+		// Nor one with a line break at its end, which $ in jq matches before
+		// and the shell's $(...) would take off.
+		{"a head_sha and a line break", queueRun(write(`{"merge_group": {"head_sha": "`+second+`\n", "base_sha": "`+main+`", "head_ref": "`+ref+`", "base_ref": "refs/heads/main"}}`), ref, second),
+			"aren't two commits' full hashes"},
+		{"a base_ref and a line break", queueRun(write(`{"merge_group": {"head_sha": "`+second+`", "base_sha": "`+main+`", "head_ref": "`+ref+`", "base_ref": "refs/heads/main\n"}}`), ref, second),
+			"isn't refs/heads/BRANCH"},
+		{"a head_ref and a line break", queueRun(write(`{"merge_group": {"head_sha": "`+second+`", "base_sha": "`+main+`", "head_ref": "`+ref+`\n", "base_ref": "refs/heads/main"}}`), ref, second),
+			"isn't the queue's ref for main"},
 		{"a base_ref of a tag", queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second), ""},
 		{"another branch's queue", queueRun(queueEvent(t, second, main, "main", queueRef("release", "7", bad), "main"), queueRef("release", "7", bad), second),
 			"isn't the queue's ref for main"},
