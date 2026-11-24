@@ -354,6 +354,20 @@ func (r Rule) ValueOf(b Bound) (Rule, bool) {
 	return value, true
 }
 
+// Operand is the expression a Prometheus rule's bound b compares with its
+// number, as written: ok is false for a Grafana rule, a rule that can't be
+// replayed, a bound of the rule without Values, or one the rule hasn't.
+func (r Rule) Operand(b Bound) (expr string, ok bool) {
+	if r.Graph != nil || r.Unsupported != "" || !b.Values {
+		return "", false
+	}
+	cs := comparisons(r.Expr)
+	if b.At < 0 || b.At >= len(cs) || cs[b.At].op != b.Op {
+		return "", false
+	}
+	return cs[b.At].value, cs[b.At].value != ""
+}
+
 // WithBound is the rule with b's number set to v; the rule itself when b
 // isn't one of its Bounds.
 func (r Rule) WithBound(b Bound, v float64) Rule {

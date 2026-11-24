@@ -209,6 +209,11 @@ type RuleResult struct {
 	Unsupported string `json:"unsupported,omitempty"`
 	// Unseen is what its replay can't see, as rules.Rule.Unseen says.
 	Unseen []string `json:"unseen,omitempty"`
+	// NoData is, of a rule that never fired, the values its condition
+	// compares that had no series at all in the period, so it couldn't
+	// have fired. It is set only when looked for, a step after the replays
+	// (--extras).
+	NoData []string `json:"no_data,omitempty"`
 	// Outlasts, when not nil, says its "for" is as long as the range its
 	// condition counts events over, or longer: one event alone can never
 	// fire it (rules.Rule.ForOutlasts). Of a rule replayed.

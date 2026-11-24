@@ -135,7 +135,10 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	if len(silent) > 0 {
-		fmt.Fprintf(w, "\n%d rules never fired.\n", len(silent))
+		fmt.Fprintf(w, "\n%s\n", neverFired(silent))
+		if s := noData(silent); s != "" {
+			fmt.Fprintln(w, s)
+		}
 	}
 	// What the top of the report named isn't listed again.
 	top := shownAtTop(r.Unreplayed)
@@ -228,11 +231,68 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	}
 	switch r.Extras {
 	case "skipped":
-		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record weren't looked for (--extras 0).")
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything weren't looked for (--extras 0).")
 	case "cut":
-		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record are in part: the steps after the replays ran out of time (--extras, or --timeout).")
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything are in part: the steps after the replays ran out of time (--extras, or --timeout).")
 	}
 	return nil
+}
+
+// neverNamed is how many of the rules that never fired are named in the
+// text; --json has all.
+const neverNamed = 10
+
+// neverFired is the line that names the rules that never fired, ten at
+// most.
+func neverFired(silent []RuleResult) string {
+	names := make([]string, 0, min(len(silent), neverNamed))
+	for _, rr := range silent[:min(len(silent), neverNamed)] {
+		names = append(names, Clean(rr.Rule))
+	}
+	s := fmt.Sprintf("%d rules never fired: %s", len(silent), strings.Join(names, ", "))
+	if len(silent) == 1 {
+		s = "1 rule never fired: " + names[0]
+	}
+	if more := len(silent) - len(names); more > 0 {
+		return fmt.Sprintf("%s and %d more, all in --json", s, more)
+	}
+	return s + "."
+}
+
+// noDataNamed is how many rules the warning of noData names.
+const noDataNamed = 5
+
+// noData is the warning for the rules that never fired whose condition
+// compared values with no series at all in the period (RuleResult.NoData),
+// "" when there are none.
+func noData(silent []RuleResult) string {
+	var parts []string
+	n := 0
+	for _, rr := range silent {
+		if len(rr.NoData) == 0 {
+			continue
+		}
+		n++
+		if n > noDataNamed {
+			continue
+		}
+		exprs := make([]string, len(rr.NoData))
+		for i, e := range rr.NoData {
+			exprs[i] = cut(Clean(e), 80)
+		}
+		parts = append(parts, Clean(rr.Rule)+" ("+strings.Join(exprs, ", ")+")")
+	}
+	if n == 0 {
+		return ""
+	}
+	s := strings.Join(parts, ", ")
+	if n > noDataNamed {
+		s += fmt.Sprintf(" and %d more", n-noDataNamed)
+	}
+	if n == 1 {
+		return "! 1 of them read what had no series at all in the period, so it couldn't have fired: " + s + "."
+	}
+	return fmt.Sprintf("! %d of them read what had no series at all in the period, so they couldn't have fired: %s.", n, s)
 }
 
 // signals are the named impact signals a report was judged by, none for an

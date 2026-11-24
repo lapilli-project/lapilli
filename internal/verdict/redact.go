@@ -365,6 +365,10 @@ func (x *Redactor) ruleResult(rr RuleResult) RuleResult {
 	rr.Source = x.alias("source", rr.Source)
 	rr.Unsupported = reason(rr.Unsupported)
 	rr.Unseen = slices.Clone(rr.Unseen)
+	if rr.NoData != nil {
+		// Expressions: metrics' and labels' names.
+		rr.NoData = slices.Repeat([]string{Redacted}, len(rr.NoData))
+	}
 	if rr.Marked != nil {
 		m := make(map[string]MarkedCount, len(rr.Marked))
 		for k, c := range rr.Marked {

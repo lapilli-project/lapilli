@@ -424,8 +424,9 @@ Output:
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
   --extras DUR        let the steps after the replays take this long at most:
-                      a longer "for" for the noisy rules, near misses and
-                      what fired with no record, each a replay or questions
+                      a longer "for" for the noisy rules, near misses,
+                      what fired with no record and whether the rules that
+                      never fired read anything, each a replay or questions
                       of the history again, as long again as the replays at
                       times; 0 skips them (default: what --timeout leaves)
   --parallel N        replay up to N rules at once against each history
@@ -1849,10 +1850,18 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %s\n", verdict.Clean(err.Error()))
 			}
 		}
+		// Of the rules that never fired, those that read no series at all.
+		if !brief && len(versions) > 0 {
+			err := source.NoData(ectx, h, versions, rep, rep.From, rep.To, f.step)
+			cut = cut || err != nil && ectx.Err() != nil
+			if err != nil && ectx.Err() == nil {
+				fmt.Fprintf(stderr, "lapilli verdict: looking at the rules that never fired: %s\n", verdict.Clean(err.Error()))
+			}
+		}
 		if cut {
 			rep.Extras = "cut"
 			if ctx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses and what fired with no record are in part\n", f.extras)
+				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses, what fired with no record and whether the rules that never fired read anything are in part\n", f.extras)
 			}
 		}
 		cancelExtras()

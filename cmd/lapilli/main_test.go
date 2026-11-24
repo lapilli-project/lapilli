@@ -249,7 +249,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --impact impact",
 			code: 0, stdout: "? 1 of 2 incidents had no alert from the 2 rules replayed: the 1 that couldn't be replayed may have caught them."},
 		{args: "verdict --rules " + rulesFile + " --rule ^Quiet$ --prometheus http://p --incidents " + incidents,
-			code: 0, stdout: "1 rules never fired."},
+			code: 0, stdout: "1 rule never fired:"},
 		{args: "verdict --rules " + slowRules + " --prometheus http://p --incidents " + incidents + " --timeout 1s --tz UTC",
 			code: 1, stdout: "CheckoutErrors +5m", stderr: "1 of 2 rules didn't finish within --timeout 1s"},
 		{args: "verdict --rules " + rulesFile + " --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents + " --tz UTC",

@@ -43,7 +43,7 @@ payments:
 	args := []string{"verdict", "--ruler", srv.URL + "/prometheus/config/v1/rules", "--ruler-token-file", token, "--ruler-tenant", "team-a",
 		"--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}
 	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "CheckoutErrors [shop/shop] +5m") ||
-		!strings.Contains(stdout.String(), "1 rules never fired.") {
+		!strings.Contains(stdout.String(), "1 rule never fired:") {
 		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
 	}
 }
