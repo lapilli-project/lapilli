@@ -760,8 +760,8 @@ ok       nights              2 nights at least, in 01:00-06:00 at 0.5 a second, 
                              backfill's requests a night
 ok       memory              no firing read: at most 5.2 GB, the caps' bound (8 x 10,000,000 x 64
                              bytes, beside 64 MB of caches), which --parallel and --max-samples
-                             set; asked of the history, without --offline, preflight says what
-                             the rules' alerts take
+                             set: the most a run can take, not what one takes, which is worked
+                             out from a day of the history's alerts when it has any
 ```
 
 It writes nothing and replays nothing, held by the code: every request it

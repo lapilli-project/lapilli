@@ -668,7 +668,7 @@ func (p *run) memory(rs []rules.Rule) {
 		m.PeakBytes = int64(s.Parallel)*int64(most)*prom.SampleBytes + cacheBytes
 		// A bound, not an estimate: no request or limit is advised from it,
 		// as it is the most a run can take, not what one takes.
-		it.What = fmt.Sprintf("no firing read: at most %s, the caps' bound (%d x %s x %d bytes, beside 64 MB of caches), which --parallel and --max-samples set; asked of the history, without --offline, preflight says what the rules' alerts take",
+		it.What = fmt.Sprintf("no firing read: at most %s, the caps' bound (%d x %s x %d bytes, beside 64 MB of caches), which --parallel and --max-samples set: the most a run can take, not what one takes, which is worked out from a day of the history's alerts when it has any",
 			bytesOf(uint64(m.PeakBytes)), s.Parallel, num(most), prom.SampleBytes)
 	}
 	const mib = 64 << 20

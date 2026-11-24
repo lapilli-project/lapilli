@@ -90,7 +90,7 @@ exit 0
     {
       "id": "estimate.memory",
       "state": "ok",
-      "what": "no firing read: at most 80 MB, the caps' bound (2 x 100,000 x 64 bytes, beside 64 MB of caches), which --parallel and --max-samples set; asked of the history, without --offline, preflight says what the rules' alerts take"
+      "what": "no firing read: at most 80 MB, the caps' bound (2 x 100,000 x 64 bytes, beside 64 MB of caches), which --parallel and --max-samples set: the most a run can take, not what one takes, which is worked out from a day of the history's alerts when it has any"
     }
   ],
   "estimates": {
