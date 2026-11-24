@@ -550,8 +550,10 @@ and proposes; docs/design/changes.md):
                       proposes, after each week's digest: longer fors for
                       noisy rules, thresholds and fors for near misses,
                       retiring spare rules and those that never fired. Needs
-                      --user-header and --admins (without roles, whoever may
-                      change anything is an admin)
+                      a sign-in (--user-header, --oidc-issuer or
+                      --proxy-jwt), roles (--editors or --admins: without
+                      them, whoever may change anything is an admin) and
+                      who approves (--approvers or --admins)
   --approvers LIST    who may approve a change, as --editors lists people
                       and groups (default: the admins). Approving is a form
                       on the proposal's page, in a browser: never the API,

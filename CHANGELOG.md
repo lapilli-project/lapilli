@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `lapilli serve -h` said `--changes` needs `--user-header` and
+  `--admins`; it needs a sign-in (`--user-header`, `--oidc-issuer` or
+  `--proxy-jwt`), roles (`--editors` or `--admins`) and who approves
+  (`--approvers` or `--admins`), as serve has refused it without them
+  since 0.30.0. And docs/limits.md said a backtest can't stop a merge,
+  where a job's failure and its commit status (`STATUS`) do.
+
 ## [0.70.0] - 2026-11-23
 
 `lapilli demo --serve`, the sample in serve's own pages. `FAIL_MISSED`
