@@ -248,6 +248,12 @@ func (p *run) allowAll() {
 		for _, x := range []string{"templates", "contact-points", "policies"} {
 			a.add(allow{api: "grafana", method: http.MethodGet, host: host, path: path + "/api/v1/provisioning/" + x})
 		}
+		if c.Serve.CheckContent && c.Serve.AlertmanagerConfig != "" {
+			// Where Grafana sends its alerts (source.GrafanaAlertmanagers).
+			for _, x := range []string{"/api/v1/ngalert/admin_config", "/api/v1/ngalert/alertmanagers", "/api/datasources"} {
+				a.add(allow{api: "grafana", method: http.MethodGet, host: host, path: path + x})
+			}
+		}
 	}
 	if host, path, ok := at(c.Serve.Ruler); ok {
 		a.add(allow{api: "ruler", method: http.MethodGet, host: host, path: path, under: true, query: anyQuery})

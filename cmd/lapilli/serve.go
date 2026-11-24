@@ -232,7 +232,10 @@ each history API (lapilli_serve_history_*). Off by default:
                       configuration, read once an hour, and its templates
                       checked beside each rule it is sent; a file that
                       can't be read, or an API that refuses, leaves the
-                      check as it was, and the log says why once
+                      check as it was, and the log says why once. With
+                      --grafana, where Grafana sends its alerts is asked
+                      once an hour: to an external Alertmanager, its rules
+                      are checked against this configuration too
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config

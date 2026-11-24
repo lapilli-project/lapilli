@@ -246,18 +246,43 @@ func grafanaInterval(s string) time.Duration {
 // them, with the token that reads its rules. Each answer is 8 MB at most;
 // redirects aren't followed. It only reads.
 func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (templates, contactPoints, policies []byte, err error) {
+	get, err := grafanaGetter(ctx, base, tokenFile, agent)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	call := func(path string) ([]byte, error) {
+		body, _, err := get(path)
+		return body, err
+	}
+	if templates, err = call("/api/v1/provisioning/templates"); err != nil {
+		return nil, nil, nil, err
+	}
+	if contactPoints, err = call("/api/v1/provisioning/contact-points"); err != nil {
+		return nil, nil, nil, err
+	}
+	if policies, err = call("/api/v1/provisioning/policies"); err != nil {
+		return nil, nil, nil, err
+	}
+	return templates, contactPoints, policies, nil
+}
+
+// grafanaGetter reads the token once and gives a read of a Grafana path:
+// the body and the HTTP status, with an error for any status but 2xx (the
+// status is still given). Each answer is 8 MB at most; no redirect is
+// followed.
+func grafanaGetter(ctx context.Context, base, tokenFile, agent string) (func(path string) ([]byte, int, error), error) {
 	var token string
 	if tokenFile != "" {
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("--grafana-token-file: %w", err)
+			return nil, fmt.Errorf("--grafana-token-file: %w", err)
 		}
 		token = strings.TrimSpace(string(b))
 	}
-	get := func(path string) ([]byte, error) {
+	return func(path string) ([]byte, int, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		req.Header.Set("User-Agent", agent)
 		req.Header.Set("Accept", "application/json")
@@ -266,31 +291,21 @@ func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (t
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		defer resp.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
 		if err != nil {
-			return nil, err
+			return nil, resp.StatusCode, err
 		}
 		if len(body) > 8<<20 {
-			return nil, fmt.Errorf("%s: more than 8 MB", path)
+			return nil, resp.StatusCode, fmt.Errorf("%s: more than 8 MB", path)
 		}
 		if resp.StatusCode/100 != 2 {
-			return nil, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, answered([]byte(prom.Redact(string(body), req)), 200))
+			return nil, resp.StatusCode, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, answered([]byte(prom.Redact(string(body), req)), 200))
 		}
-		return body, nil
-	}
-	if templates, err = get("/api/v1/provisioning/templates"); err != nil {
-		return nil, nil, nil, err
-	}
-	if contactPoints, err = get("/api/v1/provisioning/contact-points"); err != nil {
-		return nil, nil, nil, err
-	}
-	if policies, err = get("/api/v1/provisioning/policies"); err != nil {
-		return nil, nil, nil, err
-	}
-	return templates, contactPoints, policies, nil
+		return body, resp.StatusCode, nil
+	}, nil
 }
 
 // Split sorts the rules in place (was) and those proposed (is) into the

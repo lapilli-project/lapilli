@@ -248,6 +248,9 @@ What the rules say:
                       --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
+                      With --grafana, a Grafana that sends its alerts to an
+                      external Alertmanager has its rules checked against it
+                      too (Lapilli takes this configuration for the one)
                       Only read: no field that holds a secret is parsed
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
@@ -760,7 +763,10 @@ each history API (lapilli_serve_history_*). Off by default:
                       configuration, read once an hour, and its templates
                       checked beside each rule it is sent; a file that
                       can't be read, or an API that refuses, leaves the
-                      check as it was, and the log says why once
+                      check as it was, and the log says why once. With
+                      --grafana, where Grafana sends its alerts is asked
+                      once an hour: to an external Alertmanager, its rules
+                      are checked against this configuration too
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
