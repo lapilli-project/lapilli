@@ -46,7 +46,6 @@
   values assigned and never read, code nothing called, loops an `append`
   does, and go-jose's deprecated `ParseSigned`. Nothing a user sees
   changes.
-
 - The rules whose replay failed are listed once, at the top, those that
   failed for the same reason on one line; counts of one say "1 rule"; the
   hours a report counts out of hours by name the zone as its first line
