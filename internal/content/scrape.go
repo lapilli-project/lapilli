@@ -44,8 +44,16 @@ func (s Scrapes) sorted() []string {
 	if s.names != nil || len(s.Jobs) == 0 {
 		return s.names
 	}
+	if jobsSorted != nil {
+		jobsSorted()
+	}
 	return slices.Sorted(maps.Keys(s.Jobs))
 }
+
+// jobsSorted and jobCompiled, when set, are told of each sort of the
+// jobs' names and each job matcher's regular expression compiled: the
+// tests count them (TestShortRangeByJobCost).
+var jobsSorted, jobCompiled func()
 
 // String is the intervals in one line, the same for the same.
 func (s Scrapes) String() string {
@@ -256,6 +264,9 @@ type Matcher struct {
 // compileJob is a job matcher's regular expression, anchored as PromQL's
 // are; nil when it doesn't compile, and matches no job.
 func compileJob(v string) *regexp.Regexp {
+	if jobCompiled != nil {
+		jobCompiled()
+	}
 	re, err := regexp.Compile("^(?:" + v + ")$")
 	if err != nil {
 		return nil

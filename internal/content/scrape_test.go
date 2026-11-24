@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,7 +120,10 @@ func TestShortRangeByJob(t *testing.T) {
 
 // A job's regular expression is compiled once, not once for each job
 // Prometheus has, and the jobs are sorted once: 2,000 rules of two ranges
-// each, over 2,000 jobs, are checked within a second (0.3 s on a laptop).
+// each, over 2,000 jobs, compile each range's one matcher once, 4,000 in
+// all (once for each job would be 8 million), and sort the jobs once for
+// the check, not once for each range. Counted, not timed, so that a slow
+// runner fails none; the time is logged (0.3 s on a laptop).
 func TestShortRangeByJobCost(t *testing.T) {
 	jobs := map[string]time.Duration{}
 	for i := range 1000 {
@@ -131,10 +135,17 @@ func TestShortRangeByJobCost(t *testing.T) {
 		rs = append(rs, rules.Rule{Name: fmt.Sprintf("r%d", i), Group: "g",
 			Expr: fmt.Sprintf(`sum(rate(x{job=~"app%d|app%d-canary"}[5m])) / sum(rate(y{job=~"app%d.*"}[5m])) > 1`, i%1000, i%1000, i%1000)})
 	}
+	var compiled, sorts atomic.Int64
+	jobCompiled, jobsSorted = func() { compiled.Add(1) }, func() { sorts.Add(1) }
+	defer func() { jobCompiled, jobsSorted = nil, nil }()
 	began := time.Now()
 	Check(rs, Options{Scrape: time.Minute, Jobs: jobs})
-	if took := time.Since(began); took > time.Second*time.Duration(slowFactor()) {
-		t.Errorf("2,000 rules over 2,000 jobs: %s", took)
+	t.Logf("2,000 rules over 2,000 jobs: %d regular expressions compiled, the jobs sorted %d times, in %s", compiled.Load(), sorts.Load(), time.Since(began))
+	if n := compiled.Load(); n > 2*int64(len(rs)) {
+		t.Errorf("2,000 rules of two ranges over 2,000 jobs: %d regular expressions compiled, want one for each range's matcher, 4,000", n)
+	}
+	if n := sorts.Load(); n != 1 {
+		t.Errorf("the jobs sorted %d times, want once", n)
 	}
 	// A regular expression that doesn't compile names no job.
 	s := Scrapes{Global: time.Minute, Jobs: map[string]time.Duration{"a": 2 * time.Minute}}
