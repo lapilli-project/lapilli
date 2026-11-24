@@ -308,7 +308,38 @@ whatever `curl`'s version (the scripts cut what `curl` writes, as before 8.4
 at one that isn't a 2xx, a redirect among them, which `curl` doesn't follow
 with the token; and then writes nothing.
 
-In the chart:
+### In the chart
+
+`serve.incidentsAPI.copy` runs these scripts as CronJobs, one a job, with the
+scripts mounted from the chart's own copy, so no ConfigMap or CronJob of your
+own is needed. It needs an image with `sh`, `curl` and `jq`
+([an example Dockerfile](../../docs/serve.md#copying-incidents-and-opening-pull-requests-from-the-chart));
+Lapilli's own has no shell. Each job takes its recipe's settings in `env`
+and its tool's token from a Secret, the variable being the recipe's own
+(`PAGERDUTY_TOKEN_FILE`):
+
+```yaml
+serve:
+  networkPolicy: {enabled: true}   # lets these jobs reach the incidents port, no one else
+  incidentsAPI:
+    tokenSecret: {name: lapilli-incidents, key: token}
+    copy:
+      enabled: true
+      image: registry.example.com/tools/recipes:1.0@sha256:...
+      jobs:
+        - name: pagerduty
+          schedule: "*/15 * * * *"
+          recipe: pagerduty
+          env: {SINCE: "2026-10-01"}
+          tokenFiles:
+            PAGERDUTY_TOKEN_FILE: {name: pagerduty-read-token, key: token}
+```
+
+A run keeps nothing for the next, so each asks the tool again for what
+`SINCE` (or the script's default) says. The `github` recipe needs `gh`, signed
+in, in the image. A job of your own is the same with the ConfigMap below.
+
+Without the chart's jobs:
 
 ```yaml
 serve:
