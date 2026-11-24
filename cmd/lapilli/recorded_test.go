@@ -199,3 +199,25 @@ func TestRecordedFiringsAndFailedReplays(t *testing.T) {
 		t.Errorf("--fail-unreplayed: exit %d\n%s", code, errs)
 	}
 }
+
+// --rule keeping only the rules recorded: nothing is replayed, and what was
+// recorded is judged. Keeping none at all is still no rules to replay.
+func TestRecordedFiringsOnlyKeptByRule(t *testing.T) {
+	h, args := recordedWorld(t, "cloud/StorageFull")
+	args = append(args, "--rule", "^cloud/", "--json")
+	code, out, errs := runRecorded(t, h, args...)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, errs)
+	}
+	var rep verdict.Report
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rules) != 1 || rep.Rules[0].Rule != "cloud/StorageFull" || !rep.Rules[0].Recorded() || rep.Rules[0].Firings != 2 {
+		t.Errorf("rules: %+v", rep.Rules)
+	}
+	code, _, errs = runRecorded(t, h, append(args, "--rule", "^nothing$")...)
+	if code != 1 || !strings.Contains(errs, "no alert rules to replay") {
+		t.Errorf("none kept: exit %d\n%s", code, errs)
+	}
+}

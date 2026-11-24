@@ -1774,6 +1774,14 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(clashSaid(clash)))
 			return 2
 		}
+		// --rule kept none of the rules to replay: what is recorded is
+		// judged alone, if it is any.
+		if !slices.ContainsFunc(versions, func(v replay.Version) bool { return len(v.Rules) > 0 }) {
+			if len(recorded) == 0 {
+				return fail(errors.New("no alert rules to replay"))
+			}
+			versions = nil
+		}
 	}
 
 	// Impact first: a query, and one a selector for where its data
@@ -2555,7 +2563,8 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 			kept = appendMatching(kept, more, f.ruleRE)
 		}
 	}
-	if len(kept) == 0 && len(f.rules) == 0 {
+	if len(kept) == 0 && len(f.rules) == 0 && f.firings == "" {
+		// With --firings, the rules recorded may be all --rule keeps.
 		return nil, errors.New("no alert rules to replay")
 	}
 	if f.grafana != "" {
@@ -2753,6 +2762,9 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 	switch first := versions[0].From; {
 	case n == 0 && len(f.compare) > 0:
 		// All taken away: compared with nothing.
+	case n == 0 && f.firings != "":
+		// --rule may keep only the rules recorded with --firings: the run
+		// says so when it has read them.
 	case n == 0:
 		return nil, errors.New("no alert rules to replay")
 	case first.After(f.opts.From):
