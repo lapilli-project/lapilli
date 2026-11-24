@@ -943,6 +943,11 @@ As above, with the answers settled for v0.23, except:
   `--ruler` (a Mimir's or a Cortex's), and is sent as `X-Scope-OrgID` to
   `--ruler` and `--prometheus` alike, as Reading says. The chart's is
   `rules.ruler.tenant`, beside the URL it is for, not `prometheus.tenant`.
+  For the next release, the history takes a tenant of its own,
+  `--prometheus-tenant` (the chart's `prometheus.tenant`), sent to
+  `--prometheus` alone and in place of `--ruler-tenant` there: a Mimir or
+  a Cortex with no gateway whose history is in another tenant than its
+  rules, and `lapilli impact suggest`, which reads no ruler.
 - **Amazon and Azure need `--auth`** of their cloud (`aws`, `azure`), with
   `--ruler`: their rules are read with the pod's identity, as the queries
   are. `--ruler-token-file` and `--ruler-tenant` are refused for them, and

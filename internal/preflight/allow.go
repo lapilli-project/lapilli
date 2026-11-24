@@ -252,6 +252,12 @@ func (p *run) allowAll() {
 	if host, path, ok := at(c.Serve.Ruler); ok {
 		a.add(allow{api: "ruler", method: http.MethodGet, host: host, path: path, under: true, query: anyQuery})
 	}
+	if s := c.Serve; s.CheckContent && source.AlertmanagerURL(s.AlertmanagerConfig) {
+		// Mimir's or Cortex's Alertmanager configuration, that URL alone,
+		// never said.
+		p.allowURL("alertmanager", s.AlertmanagerConfig)
+		p.hide("--alertmanager-config", s.AlertmanagerConfig)
+	}
 	for _, x := range c.Serve.Alarms {
 		host, path, ok := at(x.URL)
 		if !ok {

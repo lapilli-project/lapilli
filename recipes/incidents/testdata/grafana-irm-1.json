@@ -1,39 +1,45 @@
 {
-  "incidents": [
+  "incidentPreviews": [
     {
-      "incidentID": "41",
-      "severity": "critical",
-      "labels": [
-        {"key": "service", "label": "checkout", "description": "", "colorHex": "#ff0000"},
-        {"key": "tags", "label": "customers-affected"}
-      ],
-      "isDrill": false,
+      "incidentID": "44",
+      "severityID": "sev-major",
+      "severityLabel": "major",
       "incidentType": "internal",
-      "createdTime": "2026-10-28T03:05:00Z",
-      "modifiedTime": "2026-10-28T04:00:00Z",
-      "closedTime": "2026-10-28T03:45:00Z",
-      "durationSeconds": 2400,
+      "labels": [],
+      "isDrill": false,
+      "createdTime": "2026-10-31T02:40:00Z",
+      "modifiedTime": "2026-10-31T03:20:00Z",
+      "closedTime": "2026-10-31T03:15:00Z",
+      "title": "Batch stuck",
+      "description": "",
+      "summary": "",
       "status": "resolved",
-      "title": "Checkout errors",
-      "overviewURL": "/a/grafana-irm-app/incidents/41",
-      "incidentStart": "2026-10-28T03:01:00Z",
-      "incidentEnd": "2026-10-28T03:40:00Z",
-      "refs": [
-        {"key": "com.grafana.oncall", "ref": "I68T24C13IFW1", "url": "https://example.grafana.net/a/grafana-irm-app/alert-groups/I68T24C13IFW1"}
-      ]
+      "slug": "batch-stuck",
+      "incidentStart": "2026-10-31T02:38:00Z",
+      "incidentEnd": "2026-10-31 03:10:20.574137",
+      "fieldValues": [],
+      "version": 4
     },
     {
-      "incidentID": "42",
-      "severity": "minor",
-      "labels": [],
-      "isDrill": true,
-      "createdTime": "2026-10-29T01:00:00Z",
-      "status": "resolved",
-      "title": "Game day",
-      "closedTime": "2026-10-29T02:00:00Z"
+      "incidentID": "43",
+      "severityID": "sev-major",
+      "severityLabel": "major",
+      "incidentType": "internal",
+      "labels": [{"key": "service", "label": "search", "description": "", "colorHex": "#00aa00"}, {"key": "service", "label": "cart"}],
+      "isDrill": false,
+      "createdTime": "2026-10-30T09:15:00Z",
+      "modifiedTime": "2026-10-30T09:40:00Z",
+      "closedTime": "2026-10-30T09:40:00Z",
+      "title": "Search timeouts",
+      "status": "active",
+      "slug": "search-timeouts",
+      "incidentStart": "",
+      "incidentEnd": "0001-01-01T00:00:00Z",
+      "fieldValues": [],
+      "version": 2
     }
   ],
-  "query": {"limit": 100, "orderDirection": "ASC", "dateFrom": "2026-10-01T00:00:00Z"},
+  "query": {"limit": 100, "orderDirection": "DESC", "orderField": "createdTime", "queryString": ""},
   "cursor": {"hasMore": true, "nextValue": "123e4567-e89b-12d3-a456-426614174000"},
   "error": ""
 }

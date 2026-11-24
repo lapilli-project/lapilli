@@ -1338,49 +1338,104 @@ func TestCompassLogsBounded(t *testing.T) {
 	}
 }
 
-// Grafana IRM's incidents, as IncidentsService.QueryIncidents gives them.
-// One has a ref to OnCall, as the reference's example has: the recipe
-// writes no alerts for it, and asks nothing else, as no documented API
+// Grafana IRM's incidents, as IncidentsService.QueryIncidentPreviews gives
+// them (QueryIncidents, which the recipe read before, is deprecated in
+// Grafana IRM's reference): newest first, as asked, the pages stopping at
+// the first that reaches before SINCE, and every page without it. A
+// preview has no refs: the recipe writes no alerts, as no documented API
 // says which alerts an incident came from (docs/design/links.md).
 func TestGrafanaIRMRecipe(t *testing.T) {
 	needTools(t)
+	var mu sync.Mutex
+	var asked []string
+	order := "DESC"
+	// pages are the pages asked since the last call, the order to answer
+	// in set.
+	pages := func(next string) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		was := asked
+		asked, order = nil, next
+		return was
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer glsa_secret" || r.Method != http.MethodPost ||
-			r.URL.Path != "/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidents" {
+			r.URL.Path != "/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidentPreviews" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		var req struct {
-			Query struct {
-				Limit          int    `json:"limit"`
-				OrderDirection string `json:"orderDirection"`
-				DateFrom       string `json:"dateFrom"`
-			} `json:"query"`
-			Cursor *struct {
-				NextValue string `json:"nextValue"`
-			} `json:"cursor"`
-		}
+		// The request, as the reference documents it: a query of these
+		// three and a cursor, nothing else (no dateFrom, no queryString,
+		// which would have the rest ignored).
+		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 		}
-		if req.Query.Limit != 100 || req.Query.OrderDirection != "ASC" || req.Query.DateFrom != "2026-10-01T00:00:00Z" {
-			t.Errorf("query = %+v", req.Query)
+		q, _ := req["query"].(map[string]any)
+		if len(q) != 3 || q["limit"] != 100.0 || q["orderField"] != "createdTime" || q["orderDirection"] != "DESC" || len(req) > 2 {
+			t.Errorf("request = %v", req)
 		}
 		name := "grafana-irm-1.json"
-		if req.Cursor != nil {
-			if req.Cursor.NextValue != "123e4567-e89b-12d3-a456-426614174000" {
-				t.Errorf("cursor = %+v", req.Cursor)
+		if c, ok := req["cursor"].(map[string]any); ok {
+			switch c["nextValue"] {
+			case "123e4567-e89b-12d3-a456-426614174000":
+				name = "grafana-irm-2.json"
+			case "223e4567-e89b-12d3-a456-426614174001":
+				name = "grafana-irm-3.json"
+			default:
+				t.Errorf("cursor = %v", c)
 			}
-			name = "grafana-irm-2.json"
 		}
-		w.Write(fixture(t, name))
+		mu.Lock()
+		asked = append(asked, name)
+		ascending := order == "ASC"
+		mu.Unlock()
+		page := fixture(t, name)
+		if ascending && name == "grafana-irm-1.json" {
+			page = []byte(strings.Replace(string(page), `"createdTime": "2026-10-31T02:40:00Z"`, `"createdTime": "2026-10-01T02:40:00Z"`, 1))
+		}
+		w.Write(page)
 	}))
 	defer srv.Close()
-	got := runRecipe(t, "grafana-irm.sh", "GRAFANA_URL="+srv.URL+"/", "GRAFANA_IRM_TOKEN_FILE="+tokenFile(t, "glsa_secret"), "SINCE=2026-10-01")
+	env := []string{"GRAFANA_URL=" + srv.URL + "/", "GRAFANA_IRM_TOKEN_FILE=" + tokenFile(t, "glsa_secret")}
+	got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-01")...)
 	wantIncidents(t, got,
 		incident.Incident{ID: "IRM-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
 		incident.Incident{ID: "IRM-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search", "cart"}}},
 		incident.Incident{ID: "IRM-44", Title: "Batch stuck", Start: utc("2026-10-31T02:38:00Z"), End: utc("2026-10-31T03:10:20.574137Z")})
+	if was := pages("DESC"); strings.Join(was, " ") != "grafana-irm-1.json grafana-irm-2.json" {
+		t.Errorf("asked %v: the pages go on past SINCE", was)
+	}
+	// Created an instant after SINCE, as an offset and a fraction write
+	// it: kept, and one before it not.
+	if got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-28T03:05:00.1Z")...); len(got) != 3 || got[0].ID != "IRM-41" {
+		t.Errorf("SINCE to the second: %+v", got)
+	}
+	if got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-28T12:05:00.2+09:00")...); len(got) != 2 || got[0].ID != "IRM-43" {
+		t.Errorf("SINCE in another zone: %+v", got)
+	}
+	// A SINCE that reads as a date but isn't one is refused, not taken as
+	// none.
+	cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd.Env = append(append(os.Environ(), env...), "SINCE=2026-13-45")
+	if out, err := cmd.Output(); err == nil || len(out) != 0 {
+		t.Errorf("SINCE 2026-13-45: %v, wrote %q", err, out)
+	}
+	// Without SINCE, every page.
+	pages("DESC")
+	got = runRecipe(t, "grafana-irm.sh", env...)
+	if was := pages("ASC"); len(got) != 5 || got[0].ID != "IRM-39" || got[1].ID != "IRM-40" || got[4].ID != "IRM-44" || len(was) != 3 {
+		t.Errorf("without SINCE: asked %v, %+v", was, got)
+	}
+	// Not newest first, with SINCE: an incident after it might be left
+	// out, so nothing is written.
+	cmd = exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd.Env = append(append(os.Environ(), env...), "SINCE=2026-10-01")
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "not newest first") {
+		t.Errorf("not newest first: %v, wrote %q, said %q", err, stdout.String(), stderr.String())
+	}
 }
 
 func TestRootlyRecipe(t *testing.T) {
@@ -1569,7 +1624,7 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 		}, `{"values": [], "links": {"next": "/v1/alerts?offset=100&size=100"}}`},
 		{"grafana-irm.sh", func(u string) []string {
 			return []string{"GRAFANA_URL=" + u, "GRAFANA_IRM_TOKEN_FILE=" + tokenFile(t, "x")}
-		}, `{"incidents": [], "cursor": {"hasMore": true, "nextValue": "same"}, "error": ""}`},
+		}, `{"incidentPreviews": [], "cursor": {"hasMore": true, "nextValue": "same"}, "error": ""}`},
 		{"rootly.sh", func(u string) []string {
 			return []string{"ROOTLY_API=" + u, "ROOTLY_TOKEN_FILE=" + tokenFile(t, "x")}
 		}, `{"data": [], "links": {}, "meta": {"current_page": 1, "next_page": 2, "prev_page": null, "total_count": 0, "total_pages": 9}}`},
@@ -1622,7 +1677,7 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 		srv.Close()
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"incidents": [], "cursor": {"hasMore": false}, "error": "\u001b]0;x\u0007permission denied"}`))
+		w.Write([]byte(`{"incidentPreviews": [], "cursor": {"hasMore": false}, "error": "\u001b]0;x\u0007permission denied"}`))
 	}))
 	defer srv.Close()
 	cmd := exec.Command("sh", recipes+"grafana-irm.sh")

@@ -112,7 +112,8 @@ Where the firings come from (pick one):
                       --alertmanager-config URL
   --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
                       gateway to set it, sent as X-Scope-OrgID to --ruler,
-                      --alertmanager-config and --prometheus alike
+                      --alertmanager-config and, without
+                      --prometheus-tenant, --prometheus
   --alarms SOURCE=URL also read a cloud's own alarms through its API, beside
                       any of the above or alone (repeatable): PromQL alarms
                       are replayed, the others listed. SOURCE names them, as
@@ -338,6 +339,11 @@ Where the history is (needed for --rules, --alerts and --impact):
                       --auth google
   --bearer-token-file FILE
                       send this token with each query
+  --prometheus-tenant ID
+                      the tenant of a Mimir or a Cortex with tenants and no
+                      gateway to set it, sent as X-Scope-OrgID to
+                      --prometheus alone, in place of --ruler-tenant: for a
+                      history whose tenant isn't the ruler's
   --loki URL          a Loki's API, which rules written in LogQL are replayed
                       against: --loki-rules, --loki-loaded-rules, and
                       Grafana's rules on Loki read from files. Grafana's
@@ -1322,6 +1328,9 @@ Where the history is, as lapilli verdict takes it:
                       --auth google
   --bearer-token-file FILE
                       send this token with each query
+  --prometheus-tenant ID
+                      the tenant of a Mimir or a Cortex with tenants and no
+                      gateway to set it, sent as X-Scope-OrgID
   --max-rate N        ask the API N requests a second at most, from 0.001
   --max-samples N     read the answers to one query to N samples in all at
                       most (default 10000000)

@@ -173,9 +173,11 @@ answers with a server standing in, not against real accounts.
 Grafana IRM's incident API and its OnCall API were read for this (0.70),
 and between them they don't say which alerts an incident came from:
 
-- **The incident API** (`IncidentsService.QueryIncidents`, `GetIncident`)
-  gives an incident's `labels` (its own, `key` and `label`), and its
-  `refs`, "associated IDs in third-party systems", each a `key`, a `ref`
+- **The incident API** (`IncidentsService.QueryIncidents`, `GetIncident`;
+  the recipe reads `QueryIncidentPreviews`, which takes the place of the
+  first, deprecated, for the next release, and whose previews have no
+  `refs` at all) gives an incident's `labels` (its own, `key` and
+  `label`), and its `refs`, "associated IDs in third-party systems", each a `key`, a `ref`
   and the `url` of "the incident in the third-party system". No method of
   its ten services (activity, fields, incidents, integrations, key
   updates, roles, severities, status, tasks, users) lists an incident's

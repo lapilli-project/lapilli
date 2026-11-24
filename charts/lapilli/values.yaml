@@ -37,6 +37,10 @@ prometheus:
   tokenSecret:
     name: ""
     key: token
+  # The tenant of a Mimir or a Cortex with tenants and no gateway to set it,
+  # sent as X-Scope-OrgID to url alone (--prometheus-tenant): for a history
+  # whose tenant isn't the ruler's. Empty, url is sent rules.ruler.tenant.
+  tenant: ""
 # The same as prometheus.url for Google Cloud Managed Service for Prometheus
 # in this project, with auth google.
 gcpProject: ""
@@ -88,8 +92,9 @@ rules:
   #             .../resourceGroups/RG, with prometheus.auth azure and a role
   #             that reads Microsoft.AlertsManagement/prometheusRuleGroups
   # tenant is a Mimir's or a Cortex's with tenants and no gateway to set
-  # it, sent as X-Scope-OrgID to url and prometheus.url alike; tokenSecret a
-  # token that may read their rules (rules:read).
+  # it, sent as X-Scope-OrgID to url, and to prometheus.url unless
+  # prometheus.tenant gives the history's own; tokenSecret a token that may
+  # read their rules (rules:read).
   ruler:
     url: ""
     tenant: ""
@@ -231,6 +236,33 @@ serve:
     # https://git.example.com/org/monitoring/blob/main/.
     runbookAnnotations: []
     runbookBase: ""
+    # Alertmanager's configuration (--alertmanager-config,
+    # docs/check-content.md), for the notification templates the rules
+    # Alertmanager sends are sent with, read again each hour. One of:
+    alertmanager:
+      # alertmanager.yml under key in a Secret, as it often holds a
+      # receiver's keys and passwords, or in a ConfigMap. Every key of it
+      # is mounted at /etc/lapilli/alertmanager/, with the template files
+      # of templateConfigMaps beside them, so that its templates: globs
+      # find them there (an absolute one, such as
+      # /etc/alertmanager/templates/*.tmpl, by its last element). A file in
+      # Mimir's format (alertmanager_config, template_files) is read as
+      # Mimir holds it.
+      secret:
+        name: ""
+        key: alertmanager.yaml
+      configMap:
+        name: ""
+        key: alertmanager.yaml
+      # ConfigMaps holding the template files, each key a file: their keys
+      # and the configuration's must not share a name.
+      templateConfigMaps: []
+      # Or a Mimir's or a Cortex's configuration API, such as
+      # http://mimir:8080/api/v1/alerts, read with rules.ruler.tenant and
+      # rules.ruler.tokenSecret, with rules.ruler.url or without it: on
+      # rules.ruler.url's scheme and host when both are given, as the
+      # ruler's token goes nowhere else.
+      url: ""
   # Versions of the rules, read from the git repository they are kept in
   # (docs/design/history.md). An init container clones the branch and runs
   # recipes/versions/git.sh on each start, so a first start's backfill

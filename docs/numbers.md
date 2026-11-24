@@ -987,17 +987,17 @@ out when it is zero or empty, as in the report.
 
 The ids: `rules.read`, `rules.replayable`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
-`history.intervals`, `grafana.notifications`, `grafana.write`,
-`changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
+`history.intervals`, `grafana.notifications`, `content.alertmanager`,
+`grafana.write`, `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
 `changes.oci`, `changes.ruler`, `changes.loki`, `inputs.files`, `secrets.files`,
 `ledger.sqlite`, `ledger.postgres`, `signin`, `backtest.trust`,
 `backtest.issuers`, `access`, `estimate.hourly`, `estimate.backfill`,
 `estimate.nights`, `estimate.beside`, `estimate.backtests`,
 `estimate.memory`. The keys of `asked.by` and of the estimates' `by` are the
-APIs asked (`prometheus`, `loki`, `grafana`, `ruler`, `alarms:SOURCE`,
-`signin`, `on-call`, `credentials`, `backtest` (the backtest port's
+APIs asked (`prometheus`, `loki`, `grafana`, `ruler`, `alertmanager` (a Mimir's
+or a Cortex's `--alertmanager-config`), `alarms:SOURCE`, `signin`, `on-call`, `credentials`, `backtest` (the backtest port's
 issuers' discovery documents and keys), and what a cloud's identity may write
 is asked of, `iam:aws`, `iam:azure`, `iam:google`, `iam:oci`); of `estimates.beside.by`, what asks
 (`rules`, `loki_rules`, `alarms`, `check_replay`, `scrape_intervals`,
-`grafana_notifications`, `grafana_data_sources`, `on_call`). The texts of
-`what`, `why` and `fix` may change in any release.
+`grafana_notifications`, `alertmanager_config`, `grafana_data_sources`,
+`on_call`). The texts of `what`, `why` and `fix` may change in any release.

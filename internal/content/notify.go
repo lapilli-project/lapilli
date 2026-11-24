@@ -41,6 +41,23 @@ type Notifications struct {
 	// alertmanager says they are Alertmanager's (ReadAlertmanager): the
 	// rules sent with them are Prometheus's, routed by their labels alone.
 	alertmanager bool
+	// read is what ReadAlertmanager read (Read).
+	read Read
+}
+
+// Read is how much of Alertmanager's configuration ReadAlertmanager read:
+// the receivers it names, the template files within the bounds, and the
+// templates they define, by name; those that don't parse among them.
+type Read struct {
+	Receivers, Files, Templates int
+}
+
+// Read says how much ReadAlertmanager read; nothing of Grafana's.
+func (n *Notifications) Read() Read {
+	if n == nil {
+		return Read{}
+	}
+	return n.read
 }
 
 // shown is what a template shows: the labels and annotations it names,
