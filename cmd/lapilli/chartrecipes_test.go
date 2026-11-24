@@ -145,7 +145,7 @@ func TestChartRecipeJobs(t *testing.T) {
 		env[dig(e, "name").(string)], _ = dig(e, "value").(string)
 	}
 	for k, v := range map[string]string{"LAPILLI_URL": "http://ops-lapilli:8082", "LAPILLI_TOKEN_FILE": "/var/run/lapilli/changes-token/token", "GITHUB_TOKEN_FILE": "/var/run/lapilli/host-token/token",
-		"CLONE": "https://github.com/example/monitoring.git", "RULES_PATHS": "alerts", "GITHUB_REPO": "example/monitoring", "GIT_CONFIG_VALUE_0": "store --file=/var/run/lapilli/git-credentials/credentials"} {
+		"CLONE": "https://github.com/example/monitoring.git", "RULES_PATHS": "alerts", "GITHUB_REPO": "example/monitoring", "GIT_CONFIG_VALUE_0": `!f() { test "$1" = get || exit 0; exec git credential-store --file=/var/run/lapilli/git-credentials/credentials get; }; f`} {
 		if env[k] != v {
 			t.Errorf("env %s = %q, want %q", k, env[k], v)
 		}

@@ -246,13 +246,19 @@ spec:
                   value: /tmp
                 {{- if $git.name }}
                 # git pushes with the credentials in that Secret's file, a
-                # git-credentials line (https://USER:TOKEN@host).
+                # git-credentials line (https://USER:TOKEN@host). The
+                # helper only answers git's get: the file is mounted
+                # read-only, and git asking it to store or erase after a
+                # push changes nothing.
+                {{- if not (regexMatch "^[-._a-zA-Z0-9]+$" $git.key) }}
+                {{- fail "serve.changes.pullRequests.gitCredentialsSecret.key must be a Secret's key: letters, digits, '-', '_' and '.'" }}
+                {{- end }}
                 - name: GIT_CONFIG_COUNT
                   value: "1"
                 - name: GIT_CONFIG_KEY_0
                   value: credential.helper
                 - name: GIT_CONFIG_VALUE_0
-                  value: {{ printf "store --file=/var/run/lapilli/git-credentials/%s" $git.key | quote }}
+                  value: {{ printf "!f() { test \"$1\" = get || exit 0; exec git credential-store --file=/var/run/lapilli/git-credentials/%s get; }; f" $git.key | quote }}
                 {{- end }}
                 {{- range $k, $v := ($pr.env | default dict) }}
                 - name: {{ $k }}
