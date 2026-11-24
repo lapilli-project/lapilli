@@ -100,6 +100,7 @@ firing fails on any machine.
 - **CI runs:**
   - the tests on Linux, macOS and the latest Go, and govulncheck: the
     checks a pull request must pass to merge
+  - staticcheck, with the checks `staticcheck.conf` names
   - the tests on Postgres 15 and 18, in two shards each
   - the chart end to end on kind, and served at a URL there
   - the whole service on kind: a scenario of user impact, a re-fire and a
@@ -134,6 +135,12 @@ firing fails on any machine.
   anything a user would notice.
 
 ## Where things live
+
+To read your way in: [docs/how-it-judges.md](docs/how-it-judges.md) for
+what a verdict is, then `internal/replay` and `internal/verdict`, which
+are small; [docs/design/README.md](docs/design/README.md) lists the design
+notes by area, so the one for the part you are changing is the only one to
+read.
 
 - `cmd/lapilli`: the commands and their flags: `verdict`, `serve`,
   `preflight`, `ledger copy`, `impact suggest` and `demo`, whose made-up
