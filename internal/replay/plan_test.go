@@ -203,3 +203,48 @@ func TestPlanLogReduce(t *testing.T) {
 		}
 	}
 }
+
+// A Grafana rule on a Loki that asks a query with no reduce over it is
+// asked of that Loki as the others are, in pieces, and Plan counts them so:
+// a rule that reads Prometheus and Loki together isn't replayed, so every
+// ask of a rule goes to the one history Plan counts by.
+func TestPlanGrafanaLokiPlainAsk(t *testing.T) {
+	doc := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: logs
+    folder: Logs
+    interval: 1m
+    rules:
+      - uid: r1
+        title: R1
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: lk
+            model: {datasource: {type: loki, uid: lk}, expr: 'sum(count_over_time({app="shop"}[1m]))', queryType: range, intervalMs: 1000, maxDataPoints: 43200}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [1]}}]}
+`
+	rs, err := rules.Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules.Replaying{Kinds: map[string]string{"lk": rules.KindLoki}}.Apply(rs)
+	r := rs[0]
+	if r.Unsupported != "" || r.Logs != "lk" || len(r.Graph.Asks) != 0 {
+		t.Fatalf("%q %q %v: want a Loki rule with no reduce", r.Unsupported, r.Logs, r.Graph.Asks)
+	}
+	to := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	from := to.Add(-3 * 24 * time.Hour)
+	loki := &tallied{mu: &sync.Mutex{}, name: "grafana/lk", by: map[string]int{}, asks: map[request]int{}, loki: true}
+	h := WithLogs(noPrometheus{}, func(rules.Rule) (History, error) { return loki, nil })
+	vs := []Version{{Rules: []rules.Rule{r}}}
+	plan := Plan(h, vs, from, to, time.Minute)
+	Run(context.Background(), h, vs, from, to, time.Minute, 1)
+	if sent := loki.by[loki.name]; sent == 0 || plan.Requests != sent {
+		t.Errorf("Plan counts %d (%v), Run sent %d", plan.Requests, plan.By, sent)
+	}
+}
