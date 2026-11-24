@@ -132,7 +132,8 @@ func TestChangePagesScale(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d\n%s", name, w.Code, w.Body.String())
 		}
-		if did.statements > pageMost || did.rows != 0 {
+		// rows is -1 on Postgres, which counts statements alone.
+		if did.statements > pageMost || did.rows > 0 {
 			t.Errorf("%s: %d statements, over %d, and %d rows written, want none", name, did.statements, pageMost, did.rows)
 		}
 	}
