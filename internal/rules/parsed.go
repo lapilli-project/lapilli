@@ -275,7 +275,7 @@ func (p *pq) term() pqTerm {
 	t.signs = string(signs)
 	t.prim = p.primary()
 	if !p.bad {
-		t.post = p.postfixes()
+		t.post = p.postfixes(t.prim.kind == 'v')
 	}
 	return t
 }
@@ -712,14 +712,20 @@ func (p *pq) duration() time.Duration {
 	return d
 }
 
-// postfixes reads what follows a term: ranges, subqueries, offsets and @.
-// An offset of 0 is none, as Prometheus prints it.
-func (p *pq) postfixes() []pqPost {
+// postfixes reads what follows a term, a selector or not: ranges,
+// subqueries, offsets and @. Between two of the brackets, one offset and
+// one @ at most, as Prometheus refuses another. An offset of 0 is none, as
+// Prometheus prints it, where Prometheus takes one: on a selector, or
+// after a range or a subquery; elsewhere (sum(x) offset 0s) it isn't
+// read, as an expression Prometheus refuses would be one it runs.
+func (p *pq) postfixes(selector bool) []pqPost {
 	var out []pqPost
+	bracket, offset, at := false, false, false
 	for !p.bad {
 		p.space(true)
 		switch {
 		case p.peek() == '[':
+			bracket, offset, at = true, false, false
 			p.i++
 			p.space(false)
 			d := p.duration()
@@ -738,6 +744,11 @@ func (p *pq) postfixes() []pqPost {
 			p.expect(']')
 			out = append(out, pqPost{kind, text + "]"})
 		case p.peek() == '@':
+			if at {
+				p.bad = true
+				break
+			}
+			at = true
 			p.i++
 			p.space(true)
 			if w := strings.ToLower(p.word()); w == "start" || w == "end" {
@@ -776,6 +787,11 @@ func (p *pq) postfixes() []pqPost {
 			if !strings.EqualFold(w, "offset") {
 				return out
 			}
+			if offset {
+				p.bad = true
+				break
+			}
+			offset = true
 			p.i += len(w)
 			p.space(true)
 			neg := p.peek() == '-'
@@ -783,11 +799,14 @@ func (p *pq) postfixes() []pqPost {
 				p.i++
 				p.space(true)
 			}
-			if d := p.duration(); d != 0 {
+			switch d := p.duration(); {
+			case d != 0:
 				if neg {
 					d = -d
 				}
 				out = append(out, pqPost{'o', "d:" + strconv.FormatInt(int64(d), 10)})
+			case !selector && !bracket:
+				p.bad = true
 			}
 		}
 	}
