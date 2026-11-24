@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The end-to-end tests on kind of the chart's CronJob and of the whole
+  service (`test/e2e/run.sh`, `service.sh`) take `PROMETHEUS_IMAGE` and
+  `GRAFANA_IMAGE`, as the scripts in Docker have since 0.71.0, and
+  `upstream.yml` runs them weekly against the latest release of each
+  with the rest.
+
 ## [0.71.0] - 2026-11-24
 
 Backtests in a merge queue: GitHub's `merge_group`, and GitLab's merge
