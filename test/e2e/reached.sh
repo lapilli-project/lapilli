@@ -12,7 +12,10 @@
 # of the repository. e2e-compat, which replays against Thanos and
 # VictoriaMetrics, is reached by the packages that read the history and
 # replay it alone (internal/prom, internal/replay, internal/rules and
-# internal/source), not by the rest of lapilli. A path that reaches none
+# internal/source), not by the rest of lapilli; e2e-kubernetes, which checks
+# the replay of a real rule set against what Prometheus fired, by those and
+# by what sets the replay beside it (internal/verdict, internal/firing, and
+# the verdict command, cmd/lapilli/check.go and verdict.go). A path that reaches none
 # is named so (Markdown, docs/, site/, assets/, Go's tests and
 # test/shard.sh, other workflows); a path named nowhere here reaches every
 # job.
@@ -20,7 +23,7 @@
 set -euo pipefail
 
 lapilli="e2e e2e-replicas e2e-serve-lb e2e-service e2e-postgres e2e-signin e2e-changes e2e-backtest e2e-loki e2e-rendered e2e-dashboard e2e-ratelimit"
-jobs="$lapilli e2e-compat"
+jobs="$lapilli e2e-compat e2e-kubernetes"
 chart="e2e e2e-replicas e2e-serve-lb e2e-service e2e-rendered e2e-dashboard"
 image="e2e e2e-replicas e2e-serve-lb e2e-service"
 
@@ -38,6 +41,8 @@ while IFS= read -r f || [ -n "$f" ]; do
     *_test.go | */testdata/* | test/shard.sh | test/screenshots/*) ;;
     # what reads the history and replays it, which e2e-compat checks too
     internal/prom/* | internal/replay/* | internal/rules/* | internal/source/*) to $jobs ;;
+    # what sets the replay beside what really fired
+    internal/verdict/* | internal/firing/* | cmd/lapilli/check.go | cmd/lapilli/verdict.go) to $lapilli e2e-kubernetes ;;
     cmd/* | internal/*) to $lapilli ;;
     charts/*) to $chart ;;
     Dockerfile | .dockerignore) to $image ;;
@@ -60,6 +65,7 @@ while IFS= read -r f || [ -n "$f" ]; do
     test/e2e/dashboard.sh) to e2e-dashboard ;;
     test/e2e/ratelimit.sh) to e2e-ratelimit ;;
     test/e2e/compat.sh) to e2e-compat ;;
+    test/e2e/kubernetes-rules.sh) to e2e-kubernetes ;;
     # the other recipes are run by Go's tests, against stand-ins
     recipes/firings/* | recipes/incidents/* | recipes/trackers/*) ;;
     *) to $jobs ;;

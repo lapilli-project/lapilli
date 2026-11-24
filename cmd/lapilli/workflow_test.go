@@ -131,7 +131,8 @@ func TestWorkflowMainRunsEverything(t *testing.T) {
 
 // What a pull request's changes reach: lapilli itself every end-to-end
 // job but e2e-compat, which only what reads the history and replays it
-// reaches, a script and what it alone reads its job, the docs and Go's
+// reaches, and e2e-kubernetes, which those and what sets the replay beside
+// what really fired reach, a script and what it alone reads its job, the docs and Go's
 // tests none, and a path reached.sh doesn't name every job.
 func TestWorkflowReached(t *testing.T) {
 	parallel(t)
@@ -140,7 +141,8 @@ func TestWorkflowReached(t *testing.T) {
 	}
 	_, all := reached(t)
 	slices.Sort(all)
-	lapilli := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" })
+	lapilli := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" || j == "e2e-kubernetes" })
+	checks := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" })
 	chart := []string{"e2e", "e2e-dashboard", "e2e-rendered", "e2e-replicas", "e2e-serve-lb", "e2e-service"}
 	for _, c := range []struct {
 		changed []string
@@ -152,10 +154,12 @@ func TestWorkflowReached(t *testing.T) {
 		{[]string{"internal/replay/replay_test.go", "internal/source/testdata/a.json"}, nil},
 		{[]string{"internal/serve/web.go"}, lapilli},
 		{[]string{"internal/serve/templates/rules.html"}, lapilli},
-		{[]string{"cmd/lapilli/verdict.go"}, lapilli},
+		{[]string{"cmd/lapilli/verdict.go", "cmd/lapilli/check.go", "internal/verdict/check.go", "internal/firing/firing.go"}, checks},
+		{[]string{"cmd/lapilli/serve.go"}, lapilli},
 		{[]string{"internal/replay/replay.go"}, all},
 		{[]string{"internal/prom/prom.go", "internal/rules/rules.go", "internal/source/source.go"}, all},
 		{[]string{"test/e2e/compat.sh"}, []string{"e2e-compat"}},
+		{[]string{"test/e2e/kubernetes-rules.sh"}, []string{"e2e-kubernetes"}},
 		{[]string{"go.sum"}, all},
 		{[]string{".github/workflows/ci.yml"}, all},
 		{[]string{"test/e2e/reached.sh"}, all},
