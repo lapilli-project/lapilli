@@ -32,8 +32,9 @@
   approval, its backtest with it, to look at: made by the demo itself in
   its own ledger, which every request still only reads.
 - docs/serve.md's Sizing: the ledger on disk and serve's memory, measured
-  by rules, firings a week and weeks kept, and how to measure them again
-  (`LAPILLI_SIZING=1`).
+  on SQLite and on Postgres by rules, firings a week (up to a million) and
+  weeks kept, and how to measure them again (`LAPILLI_SIZING=1`). A
+  Postgres ledger takes about three times SQLite's a firing.
 - `--check-no-data=false` skips, of the steps after the replays, only the
   one that asks whether the rules that never fired read anything. The
   chart's CronJob takes `failUnreplayed`, `failNothingReplayed` and
