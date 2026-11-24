@@ -50,6 +50,16 @@ lapilli demo
 4 週間をバックテストすると、最もノイズの多いルールの発火は 177
 回でした。そのチームが手作業で数えた通知の数と同じです。
 
+## アラートが鳴りました。その次は？ {#the-alert-fired-then-what}
+
+アラートが教えてくれるのは、何かがしきい値を超えたことだけです。人を呼び出したのが正しかったかどうかは教えてくれません。残るのは三つの問いです。
+
+<div class="grid">
+  <div><h3>本当に問題はあったのか？</h3><p>午前三時に呼び出されたのに、直すものは何もありませんでした。一度きりなのか、このルールはいつもそうなのか。Lapilli はルールごとに、インシデントを検知した発火（白い石）と何も起きていなかった発火（黒い石）を数えます。</p></div>
+  <div><h3>そのインシデントを検知したアラートはあったのか？</h3><p>アラートより先に顧客がインシデントに気づきました。Lapilli は、どのルールも検知しなかったインシデントと、もう少しで検知できたルールを示します。条件は成立したものの <code>for</code> に届かなかった、あるいはしきい値のすぐ下で止まったルールです。</p></div>
+  <div><h3>この変更で何が変わるのか？</h3><p><code>for</code> を延ばす、しきい値を変える、ルールを廃止する。推測でマージし、結果は次のインシデントで初めて分かります。Lapilli は、マージする前に過去数週間に対してその変更をバックテストします。</p></div>
+</div>
+
 ## 一度だけ：`lapilli verdict` {#once-lapilli-verdict}
 
 1 週間、1 か月、あるいはこれからマージする変更をバックテストすると、石の数、睡眠中に無駄に人を起こした発火、ノイズルールとそれを静かにする長めの
@@ -125,6 +135,23 @@ impact-1  CheckoutLatency  reached 0.86  > 0.9 → 0.85   +6m         0 → 2  0
 に表示され、チームはそこで対応します。デプロイする前に `lapilli preflight`
 に同じフラグを渡すと、何に直面するかを示します。バックテストできるルール、履歴とそこへのサインイン、台帳、そして実行にかかるリクエスト数とメモリです。読み取るだけで、何も書き込みません。
 
+<div class="tour">
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rules-dark.png' | relative_url }}">
+  <img alt="lapilli serve のルール一覧。直近 4 週間のノイズルールで絞り込んであり、ルールごとにバッジ、ラベル、チーム、数値が表示されています" src="{{ '/serve-rules.png' | relative_url }}" class="end" width="1240" height="1600" loading="lazy">
+</picture>
+<figcaption><h3>コストの高いルールを見つける</h3><p>ノイズルールで絞り込んだルール一覧です。ルールごとに石の数、静かにするための <code>for</code> の提案、人が眠っている間に鳴った発火が並びます。</p><p class="go"><a href="{{ '/docs/serve/#rules-and-proposals' | relative_url }}">ルール一覧のドキュメント（英語）</a></p></figcaption>
+</figure>
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rule-dark.png' | relative_url }}">
+  <img alt="lapilli serve のノイズルールのページ。バッジと操作、直前の 4 週間と並んだ五つの数値、直近 84 日を表すマスの帯があります" src="{{ '/serve-rule.png' | relative_url }}" width="1240" height="980" loading="lazy">
+</picture>
+<figcaption><h3>一つのルールを週ごとに読む</h3><p>ルールのページです。適合率と発火数を直前の期間と並べ、直近 84 日を 1 日 1 マスで、ルールの各バージョンと最初にすべきことを示します。変更はバックテストとともに提案され、人が承認します。</p><p class="go"><a href="{{ '/docs/changing-rules/' | relative_url }}">ルール変更のドキュメント（英語）</a></p></figcaption>
+</figure>
+</div>
+
 <div class="grid">
   <div><h3>ダッシュボード</h3><p>先週の適合率、発火、見逃したインシデント、ノイズルール、睡眠中に無駄に人を起こした発火を前週と並べて表示します。12 週間の週別推移、ルール別・週別のノイズの所在、まず確認すべきことも示します。</p></div>
   <div><h3>すべての変更をバックテスト</h3><p>ルールの新しいバージョンは、その直前の 1 週間でバックテストされます。その変更が何をもたらしたはずかが分かります。</p></div>
@@ -175,6 +202,19 @@ Prometheus 互換の API ならどれでも使えます。Prometheus、Thanos、
 がないため、OKE ではそこで自分で運用している Prometheus を使ってください。クラウド独自の形式のアラーム（CloudWatch、Azure Monitor、Cloud Monitoring、OCI
 Monitoring）は、クラウドごとの小さなスクリプトを使って履歴から判定します。`lapilli serve`
 は、その履歴をクラウドの保存期間を超えて保持します。連携は汎用的で、特定のトラッカーではなく Webhook を使います。
+
+## 今あるものから始める {#start-from-what-you-have}
+
+先に移したり書き直したりするものはありません。以下はどれも、リポジトリの <a href="{{ site.repo }}/tree/main/recipes">recipes</a> にあるスクリプトか、いくつかのフラグです。
+
+<div class="grid">
+  <div><h3>リポジトリにあるルール</h3><p>アラートルールを変更するプルリクエストに、バックテストの結果がコメントとして付き、マージを止められるステータスも付きます。GitHub、GitLab、Bitbucket、Azure DevOps、Gitea に対応しています。</p><p class="go"><a href="{{ '/docs/pr-backtests/' | relative_url }}">Pull request backtests（英語）</a> · <a href="{{ site.repo }}/tree/main/recipes/backtest"><code>recipes/backtest</code></a></p></div>
+  <div><h3>ツールにあるインシデント</h3><p>PagerDuty、incident.io、FireHydrant、Rootly、Grafana IRM、Compass、Jira、GitHub Issues から、スクリプトがインシデントを取り込みます。ツールが各インシデントに関連付けたアラートも一緒です。</p><p class="go"><a href="{{ '/docs/incidents/' | relative_url }}">Incidents kept elsewhere（英語）</a> · <a href="{{ site.repo }}/tree/main/recipes/incidents"><code>recipes/incidents</code></a></p></div>
+  <div><h3>クラウドのアラーム履歴</h3><p>CloudWatch、Azure Monitor、Cloud Monitoring、OCI のアラーム、Datadog のモニター、New Relic のアラート条件を、実際に発火した履歴から判定します。</p><p class="go"><a href="{{ '/docs/cloud-alarms/' | relative_url }}">A cloud's own alarms（英語）</a> · <a href="{{ site.repo }}/tree/main/recipes/firings"><code>recipes/firings</code></a></p></div>
+  <div><h3>当時のルール</h3><p>git、Argo CD、Flux からルールの過去のバージョンを取り込み、各週をその時点のルールでバックテストします。</p><p class="go"><a href="{{ '/docs/how-it-judges/#rules-that-changed' | relative_url }}">Rules that changed（英語）</a> · <a href="{{ site.repo }}/tree/main/recipes/versions"><code>recipes/versions</code></a></p></div>
+  <div><h3>プルリクエストになる変更</h3><p>承認された変更は、ルールが置かれているリポジトリにプルリクエストとして開かれます。</p><p class="go"><a href="{{ '/docs/changing-rules/#carrying-out-a-change' | relative_url }}">Changing rules（英語）</a> · <a href="{{ site.repo }}/tree/main/recipes/changes"><code>recipes/changes</code></a></p></div>
+  <div><h3>トラッカーのタスク</h3><p>Jira、Linear、GitHub、GitLab、Azure Boards、Shortcut、YouTrack の課題を、Lapilli のタスクと同期します。</p><p class="go"><a href="{{ '/docs/serve/#tasks-kept-in-step-with-a-tracker' | relative_url }}">Tasks kept in step with a tracker（英語）</a> · <a href="{{ site.repo }}/tree/main/recipes/trackers"><code>recipes/trackers</code></a></p></div>
+</div>
 
 ## 信頼して使えるように {#built-to-be-trusted}
 

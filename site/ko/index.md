@@ -55,6 +55,16 @@ lapilli demo
 백테스트하니 가장 시끄러운 룰의 알림이 177건으로, 그 팀이 손으로 센 알림 수와
 같았습니다.
 
+## 알림이 울렸습니다. 그다음은요? {#the-alert-fired-then-what}
+
+알림은 무언가 기준선을 넘었다는 것만 알려 줍니다. 사람을 호출한 것이 옳았는지는 알려 주지 않습니다. 그래서 세 가지 질문이 남습니다.
+
+<div class="grid">
+  <div><h3>정말 문제가 있었나요?</h3><p>새벽 세 시에 호출을 받았는데 고칠 것이 없었습니다. 한 번뿐이었을까요, 이 룰이 늘 그런 걸까요? Lapilli는 룰마다 장애를 잡은 알림(정탐)과 아무 일도 없었던 알림(오탐)을 셉니다.</p></div>
+  <div><h3>그 장애를 잡은 알림이 있었나요?</h3><p>알림보다 고객이 먼저 장애를 찾았습니다. Lapilli는 어떤 룰도 잡지 못한 미탐 장애와, 거의 잡을 뻔한 룰을 보여 줍니다. 조건은 맞았지만 <code>for</code>를 채우지 못했거나 임계값 바로 아래에서 멈춘 룰입니다.</p></div>
+  <div><h3>이 변경은 무엇을 바꿀까요?</h3><p><code>for</code>를 늘리고, 임계값을 바꾸고, 룰을 없앱니다. 짐작으로 병합하고, 결과는 다음 장애 때에야 압니다. Lapilli는 병합하기 전에 지난 몇 주에 대해 그 변경을 백테스트합니다.</p></div>
+</div>
+
 ## 한 번: `lapilli verdict` {#once-lapilli-verdict}
 
 일주일, 한 달, 또는 병합하려는 변경을 백테스트하면 다음을 받습니다. 정탐과 오탐,
@@ -136,6 +146,23 @@ impact-1  CheckoutLatency  reached 0.86  > 0.9 → 0.85   +6m         0 → 2  0
 될지 알려 줍니다. 백테스트할 수 있는 룰, 이력과 그 이력에 접속하는 인증, 이력 DB,
 그리고 실행에 드는 요청 수와 메모리입니다. 읽기만 하고 아무것도 쓰지 않습니다.
 
+<div class="tour">
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rules-dark.png' | relative_url }}">
+  <img alt="lapilli serve의 룰 목록. 최근 4주의 노이즈 룰만 걸러 보았고, 룰마다 배지, 라벨, 팀, 숫자가 나옵니다" src="{{ '/serve-rules.png' | relative_url }}" class="end" width="1240" height="1600" loading="lazy">
+</picture>
+<figcaption><h3>비용이 큰 룰부터 찾기</h3><p>노이즈 룰만 걸러 본 룰 목록입니다. 룰마다 정탐·오탐 수, 조용하게 만들 <code>for</code> 제안, 사람들이 자는 동안 울린 알림이 함께 나옵니다.</p><p class="go"><a href="{{ '/docs/serve/#rules-and-proposals' | relative_url }}">룰 목록 문서 (영어)</a></p></figcaption>
+</figure>
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rule-dark.png' | relative_url }}">
+  <img alt="lapilli serve의 노이즈 룰 페이지. 배지와 작업 버튼, 직전 4주와 나란히 놓인 숫자 다섯 개, 최근 84일을 칸으로 나타낸 띠가 있습니다" src="{{ '/serve-rule.png' | relative_url }}" width="1240" height="980" loading="lazy">
+</picture>
+<figcaption><h3>룰 하나를 주 단위로 읽기</h3><p>룰 페이지입니다. 정탐률과 알림 수를 직전 기간과 나란히 보고, 최근 84일을 하루 한 칸으로, 룰의 버전별 변화와 먼저 할 일을 봅니다. 변경은 백테스트와 함께 제안되고 사람이 승인합니다.</p><p class="go"><a href="{{ '/docs/changing-rules/' | relative_url }}">룰 변경 문서 (영어)</a></p></figcaption>
+</figure>
+</div>
+
 <div class="grid">
   <div><h3>대시보드</h3><p>지난주 정탐률, 알림 수, 미탐 장애, 노이즈 룰, 괜히 사람을 깨운 알림을 전주와 나란히 봅니다. 12주 주별 추이, 룰별·주별 노이즈 분포, 먼저 볼 것까지 한 화면에 있습니다.</p></div>
   <div><h3>모든 변경을 백테스트</h3><p>룰의 새 버전이 들어오면 그 전 일주일에 대해 백테스트해서, 그 변경이 무엇을 했을지 보여 줍니다.</p></div>
@@ -196,6 +223,19 @@ Oracle Cloud에는 관리형 Prometheus가 없으니, OKE에서는 직접 운영
 그 이력으로 정탐·오탐을 가리고, 클라우드마다 작은 스크립트가 있으며, `lapilli serve`는 클라우드가
 보관하는 기간보다 오래 그 이력을 보관합니다. 연동은 범용입니다. 특정 트래커가 아니라
 웹훅입니다.
+
+## 지금 있는 것에서 시작하세요 {#start-from-what-you-have}
+
+먼저 옮기거나 다시 쓸 것은 없습니다. 아래는 모두 저장소의 <a href="{{ site.repo }}/tree/main/recipes">recipes</a>에 있는 스크립트이거나 플래그 몇 개입니다.
+
+<div class="grid">
+  <div><h3>저장소에 있는 룰</h3><p>알림 룰을 바꾸는 PR에 백테스트 결과가 댓글로 달리고, 병합을 막을 수 있는 상태 체크가 붙습니다. GitHub, GitLab, Bitbucket, Azure DevOps, Gitea용이 있습니다.</p><p class="go"><a href="{{ '/docs/pr-backtests/' | relative_url }}">Pull request backtests (영어)</a> · <a href="{{ site.repo }}/tree/main/recipes/backtest"><code>recipes/backtest</code></a></p></div>
+  <div><h3>도구에 있는 장애 기록</h3><p>PagerDuty, incident.io, FireHydrant, Rootly, Grafana IRM, Compass, Jira, GitHub 이슈에서 스크립트가 장애를 복사해 옵니다. 도구가 장애에 연결해 둔 알림도 함께 가져옵니다.</p><p class="go"><a href="{{ '/docs/incidents/' | relative_url }}">Incidents kept elsewhere (영어)</a> · <a href="{{ site.repo }}/tree/main/recipes/incidents"><code>recipes/incidents</code></a></p></div>
+  <div><h3>클라우드 알람 이력</h3><p>CloudWatch, Azure Monitor, Cloud Monitoring, OCI 알람과 Datadog 모니터, New Relic 알림 조건을 실제로 울린 이력으로 정탐·오탐을 가립니다.</p><p class="go"><a href="{{ '/docs/cloud-alarms/' | relative_url }}">A cloud's own alarms (영어)</a> · <a href="{{ site.repo }}/tree/main/recipes/firings"><code>recipes/firings</code></a></p></div>
+  <div><h3>그때의 룰</h3><p>git, Argo CD, Flux에서 룰의 이전 버전을 가져와, 주마다 그 시점의 룰로 백테스트합니다.</p><p class="go"><a href="{{ '/docs/how-it-judges/#rules-that-changed' | relative_url }}">Rules that changed (영어)</a> · <a href="{{ site.repo }}/tree/main/recipes/versions"><code>recipes/versions</code></a></p></div>
+  <div><h3>PR로 나가는 변경</h3><p>승인된 변경은 룰이 보관된 저장소에 PR로 열립니다.</p><p class="go"><a href="{{ '/docs/changing-rules/#carrying-out-a-change' | relative_url }}">Changing rules (영어)</a> · <a href="{{ site.repo }}/tree/main/recipes/changes"><code>recipes/changes</code></a></p></div>
+  <div><h3>트래커의 작업</h3><p>Jira, Linear, GitHub, GitLab, Azure Boards, Shortcut, YouTrack의 이슈가 Lapilli의 작업과 상태를 맞춥니다.</p><p class="go"><a href="{{ '/docs/serve/#tasks-kept-in-step-with-a-tracker' | relative_url }}">Tasks kept in step with a tracker (영어)</a> · <a href="{{ site.repo }}/tree/main/recipes/trackers"><code>recipes/trackers</code></a></p></div>
+</div>
 
 ## 믿고 쓸 수 있게 {#built-to-be-trusted}
 

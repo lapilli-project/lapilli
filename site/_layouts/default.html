@@ -168,6 +168,17 @@
   .grid > div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .9rem 1rem; box-shadow: var(--shadow); }
   .grid h3 { margin: 0 0 .3rem; font-size: 1.02rem; }
   .grid p { margin: 0; color: var(--dim); font-size: .95rem; }
+  /* A card's links, under its words; and two screens of lapilli serve side
+     by side, each cut to one shape, from its top or (.end) its end, with what
+     it is for and where the docs show it whole. */
+  .go { font-size: .9rem; }
+  .grid p.go, .tour p.go { margin-top: .5rem; }
+  .tour { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: 1.2rem; margin: 1.4rem 0 1.8rem; }
+  .tour figure { margin: 0; min-width: 0; }
+  .tour img { display: block; width: 100%; aspect-ratio: 1240 / 980; object-fit: cover; object-position: top; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .tour img.end { object-position: bottom; }
+  .tour h3 { margin: .9rem 0 .3rem; font-size: 1.02rem; }
+  .tour p { margin: 0; color: var(--dim); font-size: .95rem; }
   /* The front page: what's new, the way in and the commands to start
      with, the facts at a glance, and the ways to install. */
   .tags { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin: 2.6rem 0 0; font-size: .88rem; }
