@@ -15,6 +15,7 @@ import (
 // A trust file is read strictly, and one that can't be used, or would trust
 // more than it says, is refused, each with why: serve doesn't start on it.
 func TestReadTrustRefused(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	short := filepath.Join(dir, "short")
 	os.WriteFile(short, []byte("only-twenty-characters"), 0o600)
@@ -165,6 +166,7 @@ func leaked(file, said string) string {
 // merge keys from outside trust:, an audience with spaces after it. Nor
 // does a value change Lapilli's own words.
 func TestReadTrustSaid(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	f := filepath.Join(dir, "trust.yaml")
 	for name, c := range map[string]struct {
@@ -217,6 +219,7 @@ func TestReadTrustSaid(t *testing.T) {
 // or strings; its defaults filled in; a generic issuer by sub; the CI
 // worked out from the issuer.
 func TestReadTrust(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	tok := filepath.Join(dir, "azure-token")
 	os.WriteFile(tok, []byte(strings.Repeat("a", 40)+"\n"), 0o600)
@@ -307,6 +310,7 @@ func TestReadTrust(t *testing.T) {
 // entry's own: a key of the file's own naming, which may hold a value
 // (repository_id:987650013), never.
 func TestTrustAtLine(t *testing.T) {
+	parallel(t)
 	b := []byte("trust:\n  - name: a\n    repository_id:987650013:\n      - x\n    days:\n      - 1\n  - {name: b, days: x, hourly: y}\n")
 	for _, c := range []struct {
 		line, entry int

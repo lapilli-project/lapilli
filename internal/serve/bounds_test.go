@@ -103,6 +103,7 @@ func approveAs(t *testing.T, s *Server, id int64, who string) (int, string) {
 // rule, and a rule no team owns, are refused before the rules are read
 // again (no try spent); what they propose keeps whose it was.
 func TestTeamEditorProposes(t *testing.T) {
+	parallel(t)
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()
 	id, code := proposeSaysAs(t, h, pat, "PayDown")
@@ -145,6 +146,7 @@ func TestTeamEditorProposes(t *testing.T) {
 // group's labels made it another team's since, or a change that would
 // rename it or relabel it into another team's, isn't a team's editor's.
 func TestTeamEditorBothTexts(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := boundsServer(t, teamsConfig, nil)
 	// Read again, PayDown is checkout's: the ledger's last version still
@@ -185,6 +187,7 @@ func TestTeamEditorBothTexts(t *testing.T) {
 // was proposed; not another team's, not no team's, and not with a form
 // made for them: the server asks, whatever the page offered.
 func TestTeamApprover(t *testing.T) {
+	parallel(t)
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()
 	pay, _ := proposeSaysAs(t, h, bo, "PayDown")
@@ -225,6 +228,7 @@ func TestTeamApprover(t *testing.T) {
 // them a team's approver; the same person, listed both for every team and
 // for theirs, is one.
 func TestTeamApproverTwoApprovals(t *testing.T) {
+	parallel(t)
 	s, _ := boundsServer(t, strings.Replace(teamsConfig, "[user:quinn@example.com]", "[user:quinn@example.com, user:cy@example.com]", 1),
 		func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
@@ -249,6 +253,7 @@ func TestTeamApproverTwoApprovals(t *testing.T) {
 // A team's approver is who the sign-in says, and their groups as the
 // proxy's header says them only where --groups-header trusts it.
 func TestTeamApproverGroup(t *testing.T) {
+	parallel(t)
 	config := strings.Replace(teamsConfig, "[user:quinn@example.com]", "[group:pay-leads]", 1)
 	for _, trusted := range []bool{true, false} {
 		s, _ := boundsServer(t, config, func(c *Config) {
@@ -275,6 +280,7 @@ func TestTeamApproverGroup(t *testing.T) {
 // it, its page says why; one approved by its team's approver before the
 // rule moved is refused as it is carried out.
 func TestTeamMovedBetween(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()
@@ -361,6 +367,7 @@ func TestTeamChangesIn(t *testing.T) {
 // before waits, said once, and isn't handed out; once it ends, at its end
 // and not before, it is carried out.
 func TestFreeze(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
 	s, _ := boundsServer(t, teamsConfig, nil)
@@ -420,6 +427,7 @@ func TestFreeze(t *testing.T) {
 // A freeze holds what --approvals lowered would approve, and an undo asked
 // for.
 func TestFreezeHoldsPromoteAndUndo(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
 	s, dir := boundsServer(t, teamsConfig, func(c *Config) { c.Approvals = 2 })
@@ -474,6 +482,7 @@ func TestFreezeHoldsPromoteAndUndo(t *testing.T) {
 // A team's editor drops what they proposed for their team, and nothing
 // else; backtests again only their team's.
 func TestTeamEditorDropsOwn(t *testing.T) {
+	parallel(t)
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()
 	own, _ := proposeSaysAs(t, h, pat, "PayDown")
@@ -503,6 +512,7 @@ func TestTeamEditorDropsOwn(t *testing.T) {
 // A bulk proposal from the rules list, by a team's editor: their team's
 // rules proposed, another team's counted as not theirs.
 func TestTeamEditorBulkProposes(t *testing.T) {
+	parallel(t)
 	s, _ := boundsServer(t, teamsConfig, nil)
 	form := url.Values{"do": {"propose"}, "propose": {"retire"}, "rule": {"CartSlow", "PayDown", "Errors"}, "back": {"/rules"}}
 	code, _, hd := ui(t, s.Handler(), http.MethodPost, "/rules/bulk", pat, "same-origin", form)
@@ -525,6 +535,7 @@ func TestTeamEditorBulkProposes(t *testing.T) {
 // ledger in the write that keeps it to the file, the same file writing
 // nothing again; given back as the export gives it; gone without a file.
 func TestBoundsDeclared(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for body, want := range map[string]string{
 		"teams:\n  - {name: a, approvers: [ana]}\n":                                                                  "write user:NAME",
@@ -581,6 +592,7 @@ func TestBoundsDeclared(t *testing.T) {
 // A repeating freeze spanning midnight, in --tz: covered and ended as the
 // calendar there says, its end included; the next one after.
 func TestFreezeSpan(t *testing.T) {
+	parallel(t)
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
 		t.Skip(err)
@@ -636,6 +648,7 @@ func TestFreezeSpan(t *testing.T) {
 // "team" and the Cleanup page's move alike; the note's other fields are
 // still an editor's.
 func TestNoteTeamAdminsOnly(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := boundsServer(t, teamsConfig, func(c *Config) { c.Editors = append(c.Editors, rob) })
 	h := s.Handler()
@@ -768,6 +781,7 @@ func TestNoteMovedHeldByBoth(t *testing.T) {
 // holds its undo, and the undo an approver of every team asks for is no
 // one team's.
 func TestNoteMovedUndo(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := boundsServer(t, teamsConfig, nil)
 	s.wall = func() time.Time { return time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC) }
@@ -890,6 +904,7 @@ func (h *freezingHistory) QueryRange(ctx context.Context, expr string, start, en
 // team the ledger didn't keep leaves its boundaries holding nothing, and
 // the Settings page says so.
 func TestBoundsTeamNames(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
 	spaced := strings.Replace(teamsConfig, "name: payments", `name: "payments "`, 1) +
@@ -932,6 +947,7 @@ func TestBoundsTeamNames(t *testing.T) {
 // the Settings page are drawn, saying so, approving and undoing taken
 // away and dropping left; nothing they would hold goes ahead.
 func TestBoundsUnreadPages(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()
@@ -960,6 +976,7 @@ func TestBoundsUnreadPages(t *testing.T) {
 // source compares names in: an Azure alarm's in any, beside a ruler that
 // isn't Azure's; a CloudWatch alarm's as written, beside an Azure ruler.
 func TestWithinChangesInFoldsBySource(t *testing.T) {
+	parallel(t)
 	alarms := []*source.Alarms{{Source: "cw", Kind: source.AlarmsAWS}, {Source: "az", Kind: source.AlarmsAzure}}
 	for _, c := range []struct {
 		ruler string
@@ -1005,6 +1022,7 @@ func proposeAddAs(t *testing.T, s *Server, who, file, group, name, labels string
 // checkout's holds and checkout's approver does; added in pay's group,
 // whose labels are payments's, one with no label of its own is payments's.
 func TestTeamBoundsAddByLabels(t *testing.T) {
+	parallel(t)
 	at := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
 	s, _ := boundsServer(t, teamsConfig, nil)
 	s.wall = func() time.Time { return at }
@@ -1065,6 +1083,7 @@ func TestTeamBoundsAddByLabels(t *testing.T) {
 // spent); and not one whose group's labels make it another team's, refused
 // once it is read back there.
 func TestTeamEditorAdds(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := boundsServer(t, teamsConfig, nil)
 	// checkout owns what has shop=cart, as the basket group does.
@@ -1127,6 +1146,7 @@ func TestTeamAddMovedByItsGroup(t *testing.T) {
 // form's key, which says who saw the page, lets in no one an approver of
 // another team: one demoted, or who saw the form before.
 func TestDraftAcceptedByItsTeamsApprover(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()

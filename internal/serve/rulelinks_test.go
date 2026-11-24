@@ -25,6 +25,7 @@ import (
 // on a rule to the comments on its activity tab, a replay that differs to
 // the rules whose replay does.
 func TestNoticeLinks(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.ExternalURL = "https://lapilli.example.com/" })
 	for _, c := range []struct {
 		n    notice
@@ -73,6 +74,7 @@ func TestNoticeLinks(t *testing.T) {
 // from the rules list opens a rule over its weeks. Pages without a period
 // of their own carry the weeks as their URL has them.
 func TestRuleLinksPeriod(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	h := s.Handler()
 	toRule := regexp.MustCompile(`href="(/rules/[^"]*)"`)
@@ -143,6 +145,7 @@ func searchForm(body string) string {
 // what the rule's page lists to check, in the same words, and links to
 // that list; the list's facet of problems of fact still picks those alone.
 func TestRuleChecksCounted(t *testing.T) {
+	parallel(t)
 	s, _ := a11yServer(t)
 	// Errors changed since its proposal was made: the proposal is stale.
 	os.WriteFile(filepath.Join(s.cfg.RulesPath, "shop.yaml"), []byte(strings.Replace(ruleFile, "errors > 5", "errors > 6", 1)), 0o644)
@@ -192,6 +195,7 @@ func TestRuleChecksCounted(t *testing.T) {
 // note in Lapilli; only without one, to the one the rule names, said to be
 // the rule's, with the host it goes to beside it.
 func TestRuleRunbook(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	h := s.Handler()
 	header := func() string {

@@ -16,7 +16,10 @@ import (
 
 // A rule of many label keys is read in time that grows with them, not with
 // their square, as yaml.v3's own decoding to Go values does; a mapping of
-// more than MaxKeys keys, or nested past MaxDepth, is refused.
+// more than MaxKeys keys, or nested past MaxDepth, is refused. Counted, not
+// timed, so that a slow runner fails none: each mapping's keys read once
+// by YAMLValue (keysRead), which compares none of them with another, and a
+// few allocations for each key; the time is logged.
 func TestYAMLManyKeys(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("groups:\n- name: g\n  rules:\n")
@@ -27,15 +30,21 @@ func TestYAMLManyKeys(t *testing.T) {
 		}
 		b.WriteString("z: y}\n")
 	}
+	read := 0
+	keysRead = func(n int) { read += n }
 	start := time.Now()
 	rs, err := Parse([]byte(b.String()))
 	took := time.Since(start)
+	keysRead = nil
 	if err != nil || len(rs) != 20 || len(rs[0].Labels) != MaxKeys {
 		t.Fatalf("%d rules, %v", len(rs), err)
 	}
-	t.Logf("20 rules of %d label keys, %d KiB: %v", MaxKeys, b.Len()>>10, took)
-	if took > 1500*time.Millisecond*time.Duration(slow) {
-		t.Errorf("20 rules of %d label keys read in %v: the time grows with the square of a mapping's keys", MaxKeys, took)
+	t.Logf("20 rules of %d label keys, %d KiB: %d keys read, in %v", MaxKeys, b.Len()>>10, read, took)
+	if read < 20*MaxKeys || read > 20*(MaxKeys+10)+10 {
+		t.Errorf("20 rules of %d label keys: %d keys read, want each once: not read as yaml.v3 decodes them, whose time grows with the square of a mapping's keys?", MaxKeys, read)
+	}
+	if n := testing.AllocsPerRun(1, func() { Parse([]byte(b.String())) }); n > 20*float64(20*MaxKeys) {
+		t.Errorf("20 rules of %d label keys: %.0f allocations, over 20 for each key", MaxKeys, n)
 	}
 	over := "groups:\n- name: g\n  rules:\n  - alert: A\n    expr: up\n    labels: {" + strings.Repeat("x: y, ", 0)
 	for i := range MaxKeys + 1 {

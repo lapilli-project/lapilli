@@ -125,6 +125,7 @@ func rowNames(rows []ruleRow) []string {
 // and what the others pick; and the rules shown are those each filter
 // lets through.
 func TestFacetCounts(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	all := rulesFor(t, s, "weeks=4")
 	if all.Total != 25 {
@@ -191,6 +192,7 @@ func TestFacetCounts(t *testing.T) {
 
 // TestRulesFilters: what the URL asks for, and how the page says it.
 func TestRulesFilters(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	h := s.Handler()
 
@@ -284,6 +286,7 @@ func TestRulesFilters(t *testing.T) {
 // TestRulesSameData: the URLs the rules page took before show the rules
 // they showed, in the same order, with the same numbers.
 func TestRulesSameData(t *testing.T) {
+	parallel(t)
 	for name, s := range map[string]*Server{"pages": pagesServer(t), "facets": facetServer(t)} {
 		for _, q := range []string{"", "weeks=1", "weeks=12", "team=payments", "weeks=12&team=payments&sort=refired", "sort=deploys&weeks=12", "sort=refired"} {
 			r := httptest.NewRequest(http.MethodGet, "/rules?"+q, nil)
@@ -311,13 +314,18 @@ func TestRulesSameData(t *testing.T) {
 
 // TestRulesListScale: the rules list over two thousand rules, twelve weeks
 // of firings, with filters, and a rule's page in each tab, each worked out
-// afresh, holds to a budget.
+// afresh, holds to a budget of what the ledger does (ledgerWork), not of
+// time, so that a slow runner fails none: a page reads the tallies, the
+// rules and what people keep a statement or a few each, and a tenth of the
+// rules is past any of them; one for each rule, or each firing, far past.
+// The time each took is logged.
 func TestRulesListScale(t *testing.T) {
+	parallel(t)
 	if testing.Short() {
 		t.Skip("short")
 	}
 	ctx := context.Background()
-	s, rules := server(t, nil)
+	s, rules := server(t, counting)
 	const n = 2000
 	var b strings.Builder
 	b.WriteString("groups:\n")
@@ -362,14 +370,14 @@ func TestRulesListScale(t *testing.T) {
 		s.cache.Unlock()
 		began := time.Now()
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		did := ledgerDid(t, s, func() { h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil)) })
 		took := time.Since(began)
-		t.Logf("%-70s %d %8d bytes  %s", path, w.Code, w.Body.Len(), took.Round(time.Microsecond))
+		t.Logf("%-70s %d %8d bytes  %d statements  %s", path, w.Code, w.Body.Len(), did.statements, took.Round(time.Microsecond))
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d", path, w.Code)
 		}
-		if budget := time.Duration(float64(time.Second) * slow); took > budget {
-			t.Errorf("%s took %s, over %s", path, took, budget)
+		if most := int64(n / 10); did.statements > most {
+			t.Errorf("%s: %d statements, over %d: one for each rule or firing?", path, did.statements, most)
 		}
 	}
 }
@@ -380,6 +388,7 @@ func TestRulesListScale(t *testing.T) {
 // each once; and the links the page makes to itself hold what it read,
 // not what else the URL had.
 func TestRulesAskBounded(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	h := s.Handler()
 	all := rulesFor(t, s, "")
@@ -463,6 +472,7 @@ func TestRulesAskBounded(t *testing.T) {
 // TestRulesSortLinks: an order is the same page, every filter and the
 // search kept, in that order; the one in effect says so.
 func TestRulesSortLinks(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules?perf=noisy&severity=critical&q=r0+label:tier=t1&team=payments&weeks=12&sort=refired")
 	for _, want := range []string{
@@ -482,6 +492,7 @@ func TestRulesSortLinks(t *testing.T) {
 // URL or the search box writes it, so that one is one option and one chip;
 // and it is shown as a name is.
 func TestSeveritySpelled(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	h := s.Handler()
 	want := rulesFor(t, s, "severity=critical")
@@ -510,6 +521,7 @@ func TestSeveritySpelled(t *testing.T) {
 // refused, 414, with a page of its own size, in the reader's language;
 // one of 8192 is a page.
 func TestLongQueryRefused(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	h := s.Handler()
 	for _, path := range []string{"/", "/rules", "/rules/R01", "/search", "/tasks", "/incidents"} {
@@ -536,6 +548,7 @@ func TestLongQueryRefused(t *testing.T) {
 // though it didn't fire in the weeks shown: its badge, its count, and its
 // row when Silent is picked.
 func TestQuietDiffers(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := facetServer(t)
 	s.cfg.CheckReplay = true
@@ -569,6 +582,7 @@ func TestQuietDiffers(t *testing.T) {
 // title alone, the rule's page says in words: why it isn't replayed, and
 // where it is recorded, a rule that never fired too.
 func TestBadgeReasonsSaid(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, func(c *Config) { c.Backfill = 3 * time.Hour })
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(ruleFile+"      - alert: Turned\n        expr: turned\n"), 0o644)
@@ -601,6 +615,7 @@ func TestBadgeReasonsSaid(t *testing.T) {
 // TestBadgesInKorean: the badges and facets say what a DevOps team says,
 // a backtest, a firing, in Korean, not a replay or "quiet".
 func TestBadgesInKorean(t *testing.T) {
+	parallel(t)
 	for en, ko := range map[string]string{"Not replayed": "백테스트 불가", "Not replayed: %s": "백테스트하지 못함: %s", "not replayed: %s": "백테스트하지 못함: %s", "Silent": "발화 없음"} {
 		if got := catalogs["ko"][en]; got != ko {
 			t.Errorf("%q in Korean: %q, want %q", en, got, ko)
@@ -620,6 +635,7 @@ func TestBadgesInKorean(t *testing.T) {
 // are those its filters pick, the search box's words too; and with some
 // listed, the list doesn't say none matches.
 func TestQuietFiltered(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	for q, want := range map[string][]string{
 		"q=r2":                  {"R20", "R21", "R22", "R23"},

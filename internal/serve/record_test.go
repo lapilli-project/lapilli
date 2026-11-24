@@ -60,6 +60,7 @@ func keepRecordIn(t *testing.T, s *Server) {
 // once; so do the overview, first among what to look at, a rule's page,
 // the summary and MCP.
 func TestFacetsNoRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := facetServerOf(t, false)
 	all := rulesFor(t, s, "weeks=4")
@@ -154,6 +155,7 @@ func TestFacetsNoRecord(t *testing.T) {
 // down in it or in the week before it: the digest counts them and doesn't
 // judge them, says so once, and suggests no longer "for".
 func TestDigestNoRecord(t *testing.T) {
+	parallel(t)
 	var got string
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)

@@ -46,6 +46,7 @@ func approval(t *testing.T, h http.Handler, id int64, who string) string {
 // reads them on the Roles page; anyone else is told only that an approver
 // other than its maker approves it, nothing of the flags.
 func TestApproversAsTheyAre(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
 	if _, body, _ := ui(t, h, http.MethodGet, "/roles", ana, "", nil); !containsPlain(body, "<td>Those --approvers names: <bdi>ana@example.com, cy@example.com</bdi>.</td>") {
@@ -97,6 +98,7 @@ func TestApproversAsTheyAre(t *testing.T) {
 // where there is one of the name, as listed takes it), is anyone, and
 // nothing is said to be stuck.
 func TestApproversNoOneLeft(t *testing.T) {
+	parallel(t)
 	generic := "No one can approve this yet; an admin sees why on the Roles page."
 	told := func(h http.Handler, id int64, admin, said string) {
 		t.Helper()

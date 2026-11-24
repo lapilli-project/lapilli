@@ -130,6 +130,7 @@ func TestAlarmTiedToHistory(t *testing.T) {
 // has an alert of the rule still on. It waits approved, uncounted, saying
 // why, and is carried out once the alert ends.
 func TestRetireWaitsWhileFiring(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	fire := func(s *Server, rule string, end time.Time) {
 		t.Helper()

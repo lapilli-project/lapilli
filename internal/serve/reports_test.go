@@ -117,6 +117,7 @@ func reportServer(t *testing.T, rv *receiver, change func(*Config)) *Server {
 // webhook; one destination down holds up none of the others, and is tried
 // again; the next span is sent at the next time it falls due.
 func TestReportsSent(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	h := s.Handler()
@@ -211,6 +212,7 @@ func TestReportsSent(t *testing.T) {
 // due (or half its span, when shorter), it goes with what there is, and
 // says how far that is.
 func TestReportWaits(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	ctx := context.Background()
@@ -253,6 +255,7 @@ func TestReportWaits(t *testing.T) {
 // last time it fell due, if that was no longer ago than the time between it
 // and the one before.
 func TestReportAfterRestart(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	ctx := context.Background()
@@ -297,6 +300,7 @@ func TestReportAfterRestart(t *testing.T) {
 // on the ledger, past midnight, its six hours out; an hourly one over a day,
 // half an hour on, while the ledger is stalled.
 func TestReportLateFromDue(t *testing.T) {
+	parallel(t)
 	t.Run("monthly", func(t *testing.T) {
 		rv := newReceiver(t)
 		s := reportServer(t, rv, nil)
@@ -387,6 +391,7 @@ func TestReportLateFromDue(t *testing.T) {
 // The span a report sets itself beside never overlaps it: an hourly report
 // over a day is set beside the day before that.
 func TestReportSpanBefore(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	ctx := context.Background()
@@ -412,6 +417,7 @@ func TestReportSpanBefore(t *testing.T) {
 // A team's report is of its rules alone, its times in its zone when it says
 // so; one whose team is removed stops, and the pages say why.
 func TestReportOfATeam(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	ctx := context.Background()
@@ -451,6 +457,7 @@ func TestReportOfATeam(t *testing.T) {
 // A report whose team is removed stays stopped when a new team is given
 // the removed one's id: it never follows another team.
 func TestReportTeamIDReused(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	ctx := context.Background()
@@ -487,6 +494,7 @@ func TestReportTeamIDReused(t *testing.T) {
 // What reaches Slack from outside, an incident's title, is escaped, as the
 // digest's is.
 func TestReportEscaped(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
 	ctx := context.Background()
@@ -509,6 +517,7 @@ func TestReportEscaped(t *testing.T) {
 // previews; a destination is a name lapilli serve gave, never a URL; the
 // weekly digest is shown as the flags define it; --read-only refuses all.
 func TestReportsRoles(t *testing.T) {
+	parallel(t)
 	rv := newReceiver(t)
 	s := reportServer(t, rv, func(c *Config) {
 		c.UserHeader, c.Editors, c.Admins = "X-Forwarded-Email", []string{"ed@example.com"}, []string{"boss@example.com"}

@@ -24,6 +24,7 @@ import (
 // tracker by someone isn't changed back by a Lapilli comment older than
 // that, nor copied.
 func TestTrackerRecipesCommentEdits(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -116,6 +117,7 @@ func TestTrackerRecipesCommentEdits(t *testing.T) {
 // An edit in the tracker whose text doesn't show as written is taken as
 // what does, and once: Lapilli keeps its time, so it isn't sent each run.
 func TestTrackerRecipesCommentEditsShown(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -144,6 +146,7 @@ func TestTrackerRecipesCommentEditsShown(t *testing.T) {
 // person's comment, not another task's, not with posted beside it, not
 // with an older or the same time, nothing past the bounds; nothing told.
 func TestTrackerCommentEdited(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, func(c *Config) { c.NotifyWebhook = tokenFile(t, "https://hooks.example.com/lapilli") })
 	h := s.IncidentsHandler()
 	ctx := context.Background()
@@ -229,6 +232,7 @@ func TestTrackerCommentEdited(t *testing.T) {
 // with no edited time and no t_edit (github.sh as it was): its comments
 // are still kept in step both ways, once, and no edit is sent either way.
 func TestTrackerRecipeOwnWithoutEdits(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -300,6 +304,7 @@ func TestTrackerRecipeOwnWithoutEdits(t *testing.T) {
 // Center's in a block, GitLab's line starting with / escaped (a name the
 // sign-in proxy gives, with COMMENT_NAMES), Azure Boards' read as HTML.
 func TestTrackerRecipesCommentEditsUnchanged(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -335,6 +340,7 @@ func TestTrackerRecipesCommentEditsUnchanged(t *testing.T) {
 // refusal is said, and passed over, and the tracker's own edit is still
 // taken, run after run.
 func TestTrackerRecipesCommentEditRefused(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -364,6 +370,7 @@ func TestTrackerRecipesCommentEditRefused(t *testing.T) {
 // sign-in proxy names them, is in the block with the comment, so a name
 // holding wiki markup mentions no one and shows no image.
 func TestTrackerRecipeJiraDCNameInBlock(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "jira-dc")
 	g.mustRun(t)

@@ -120,6 +120,7 @@ func keepOutcomes(t *testing.T, s *Server, today time.Time) {
 // TestOutcomes checks what the outcomes make of keepOutcomes' ledger
 // against sums done by hand.
 func TestOutcomes(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
 	today := time.Now().UTC().Truncate(24 * time.Hour)
@@ -243,6 +244,7 @@ func TestOutcomes(t *testing.T) {
 // gone quiet, on the page, in the overview and in the digest, whatever
 // impact windows --impact finds.
 func TestOutcomesQuiet(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Incidents = "" })
 	o := s.cfg.Options

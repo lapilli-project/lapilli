@@ -712,13 +712,7 @@ func (l *Ledger) SharedLabels(ctx context.Context) (map[string]map[string]string
 	if l.shared.m != nil && l.shared.at == at {
 		return l.shared.m, nil
 	}
-	// Each label and value counted once over the alerts, beside how many
-	// alerts the rule has: those all have.
-	rows, err := l.r.QueryContext(ctx, `WITH n AS (SELECT s.rule_id, count(*) AS alerts FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE r.source != '' GROUP BY s.rule_id),
-		kv AS (SELECT s.rule_id, j.key, j.value, count(*) AS alerts FROM n JOIN series s ON s.rule_id = n.rule_id, `+l.d.keys("s.labels", "j")+`
-			GROUP BY s.rule_id, j.key, j.value)
-		SELECT r.name, kv.key, kv.value FROM kv JOIN n ON n.rule_id = kv.rule_id AND n.alerts = kv.alerts JOIN rules r ON r.id = kv.rule_id`)
+	rows, err := l.r.QueryContext(ctx, qSharedLabels(l.d))
 	if err != nil {
 		return nil, err
 	}
@@ -739,6 +733,17 @@ func (l *Ledger) SharedLabels(ctx context.Context) (map[string]map[string]string
 	}
 	l.shared.at, l.shared.m = at, m
 	return m, nil
+}
+
+// qSharedLabels reads, of each rule recorded from a source, the labels and
+// values all its alerts have: each label and value counted once over the
+// alerts, beside how many alerts the rule has.
+func qSharedLabels(d dialect) string {
+	return `WITH n AS (SELECT s.rule_id, count(*) AS alerts FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE r.source != '' GROUP BY s.rule_id),
+		kv AS (SELECT s.rule_id, j.key, j.value, count(*) AS alerts FROM n JOIN series s ON s.rule_id = n.rule_id, ` + d.keys("s.labels", "j") + `
+			GROUP BY s.rule_id, j.key, j.value)
+		SELECT r.name, kv.key, kv.value FROM kv JOIN n ON n.rule_id = kv.rule_id AND n.alerts = kv.alerts JOIN rules r ON r.id = kv.rule_id`
 }
 
 // Sources are the sources firings are recorded from, by name.

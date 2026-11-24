@@ -87,6 +87,7 @@ func TestFiredOn(t *testing.T) {
 // With no team that owns by labels, the digest keeps no rule as fired on
 // another team's.
 func TestFiredOnNoLabels(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Errors$"}, "ana"); err != nil {

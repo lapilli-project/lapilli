@@ -104,6 +104,7 @@ func periodIn(t *testing.T, sum summary, week, team, name, title string) summary
 // is on, over its at_most so far; and the occurrence's from, to, title
 // and key. schema stays 1.
 func TestGoalsOverPeriod(t *testing.T) {
+	parallel(t)
 	s := periodServer(t, nil)
 	sum := summaryOfGoals(t, s)
 	if sum.Schema != 1 {
@@ -188,6 +189,7 @@ func TestGoalsOverPeriod(t *testing.T) {
 // row's goals of each week, and every other field of the summary, the
 // same as with the weekly goal declared alone.
 func TestGoalsPeriodLeaveWeeksAlone(t *testing.T) {
+	parallel(t)
 	s := periodServer(t, nil)
 	_, both, _ := get(t, s.Handler(), "/api/v1/summary?from=2026-10-05&to=2026-11-02&team=*")
 	declare(t, s, "goals:\n  - {name: none-missed, measure: incidents.missed, at_most: 0}\n")
@@ -275,6 +277,7 @@ func TestGoalPeriodNoWorseDirection(t *testing.T) {
 // kind: not its own week, not a fifth week back, and not three; of the
 // rest of its kind's firings and incidents, none.
 func TestGoalPeriodBeforeWindow(t *testing.T) {
+	parallel(t)
 	s := periodServer(t, nil)
 	ctx := context.Background()
 	sum := summaryOfGoals(t, s)
@@ -646,6 +649,7 @@ func TestGoalsPeriodPages(t *testing.T) {
 // section, over the occurrences that ended in its span, whole weeks or
 // not.
 func TestGoalsPeriodDigestAndReports(t *testing.T) {
+	parallel(t)
 	s := periodServer(t, nil)
 	ctx := context.Background()
 	from, to := dayAt("2026-10-26", 0), dayAt("2026-11-02", 0)
@@ -683,6 +687,7 @@ func TestGoalsPeriodDigestAndReports(t *testing.T) {
 // goals: in --config takes a goal over a period, and the export gives it
 // back as declared.
 func TestParseConfigPeriodGoals(t *testing.T) {
+	parallel(t)
 	s, _ := configServer(t, "teams:\n  - {name: payments, rules: ^Errors$}\n"+thePeriodGoals, nil)
 	gs, err := s.l.Goals(context.Background())
 	if err != nil || len(gs) != 7 {
@@ -706,6 +711,7 @@ func TestParseConfigPeriodGoals(t *testing.T) {
 // occurrences, and says how many earlier ones it leaves out: a daily
 // stand-up over three weeks is twenty-one of them.
 func TestGoalsPeriodPageBounded(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	ctx := context.Background()
 	if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "standup", Title: "Stand-up", Start: dayAt("2026-10-12", 9), End: dayAt("2026-10-12", 9).Add(15 * time.Minute),
@@ -732,6 +738,7 @@ func TestGoalsPeriodPageBounded(t *testing.T) {
 // digest, a report, Make it a task), and the Marked windows page of the
 // sale alone, which lists one window.
 func TestGoalsPeriodBeforeAnySpan(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.Incidents, c.Impact = "", "" })
 	ctx := context.Background()
 	o := s.cfg.Options
@@ -805,6 +812,7 @@ func TestGoalsPeriodBeforeAnySpan(t *testing.T) {
 // though a later occurrence was told of already; and said on the goal's
 // open task, missed again.
 func TestGoalsPeriodToldWhenMissedLate(t *testing.T) {
+	parallel(t)
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
 	s := periodServer(t, func(c *Config) { c.NotifyWebhook, c.GoalTasks = hook, true })
@@ -850,6 +858,7 @@ func TestGoalsPeriodToldWhenMissedLate(t *testing.T) {
 // cart sale with it, missed too, told and said missed again; and a search
 // sale with them, met, of which nothing is said that isn't so.
 func TestGoalsPeriodSameEnd(t *testing.T) {
+	parallel(t)
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
 	s := periodServer(t, func(c *Config) { c.NotifyWebhook, c.GoalTasks = hook, true })
@@ -976,6 +985,7 @@ func TestGoalsPeriodToldBounded(t *testing.T) {
 // teams missed first, then those not known, a team none of whose
 // occurrences ended among them, and met last.
 func TestGoalsPeriodPageSort(t *testing.T) {
+	parallel(t)
 	s := periodServer(t, nil)
 	ctx := context.Background()
 	id, err := s.l.PutTeam(ctx, ledger.Team{Name: "web-cart", Rules: "^Cart$", Labels: incident.Labels{"service": {"cart"}}}, "ana")
@@ -999,6 +1009,7 @@ func TestGoalsPeriodPageSort(t *testing.T) {
 
 // A slack reads unsigned, a lead's as a time: by 1m, not by +1m.
 func TestGoalPeriodSlackText(t *testing.T) {
+	parallel(t)
 	g := ledger.Goal{Name: "g", Measure: "incidents.median_lead_seconds", NoWorseThan: "before", By: "60", Each: "sale"}
 	before := 300.0
 	if got := goalTarget("en", g); got != "no worse than before, by 1m" {
@@ -1020,6 +1031,7 @@ func TestGoalPeriodSlackText(t *testing.T) {
 // miss is told once, said on its task once (as made), and, the task done,
 // no task is made for it again.
 func TestGoalsPeriodExpressionReadAgain(t *testing.T) {
+	parallel(t)
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
 	s := goalServer(t, func(c *Config) { c.NotifyWebhook, c.GoalTasks = hook, true })
@@ -1079,6 +1091,7 @@ func TestGoalsPeriodExpressionReadAgain(t *testing.T) {
 // renamed is the same occurrence, and its miss isn't told again; one whose
 // end a person changes is another, and is told once more.
 func TestGoalsPeriodHeldByContent(t *testing.T) {
+	parallel(t)
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
 	s := periodServer(t, func(c *Config) { c.NotifyWebhook = hook })

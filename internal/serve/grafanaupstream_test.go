@@ -112,6 +112,7 @@ func funcName(l string) string {
 // error lapilli serve fails reading the rules with is the status line of
 // every page, for anyone who may read a page, and holds no token.
 func TestGrafanaEchoedTokenNotOnPages(t *testing.T) {
+	parallel(t)
 	const token = "glsa_s3cretTokenValue_0123456789abcdef"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized: refused header Authorization: "+r.Header.Get("Authorization"), http.StatusUnauthorized)
@@ -141,6 +142,7 @@ func TestGrafanaEchoedTokenNotOnPages(t *testing.T) {
 // A change read back from Grafana, refused by a Grafana that echoes the
 // write token bare: the reason, kept and sent to Slack, doesn't hold it.
 func TestGrafanaWriteEchoedToken(t *testing.T) {
+	parallel(t)
 	const token = "glsa_writer-0123456789abcdef"
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +166,7 @@ func TestGrafanaWriteEchoedToken(t *testing.T) {
 // Grafana's error, said in a change's reason, holds no bearer token, nor
 // what doesn't show.
 func TestGrafanaFailedText(t *testing.T) {
+	parallel(t)
 	err := grafanaFailed(401, []byte("refused Authorization: Bearer glsa_writer-0123456789abcdef \x1b[2J"))
 	if m := err.Error(); strings.Contains(m, "glsa_") || strings.ContainsRune(m, 0x1b) || !strings.Contains(m, "Bearer [redacted]") {
 		t.Errorf("%q", m)
@@ -182,6 +185,7 @@ func (*bigConfig) StatusConfig(context.Context) (string, error) {
 // so in the log, as a warning: whoever runs lapilli can give
 // --scrape-interval.
 func TestConfigTooLargeSaid(t *testing.T) {
+	parallel(t)
 	var logs bytes.Buffer
 	s, _ := server(t, nil)
 	s.h, s.log = &bigConfig{&history{}}, slog.New(slog.NewTextHandler(&logs, nil))

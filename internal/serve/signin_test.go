@@ -126,6 +126,7 @@ func me(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 // Signed in through the provider, a person comes back to the page they
 // asked for, with the role the lists give their name or their groups.
 func TestSignInFlow(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	for _, c := range []struct {
@@ -185,6 +186,7 @@ func TestSignInFlow(t *testing.T) {
 // agent and a form get 401; the health checks, the static files and the
 // choice of language are anyone's.
 func TestNotSignedIn(t *testing.T) {
+	parallel(t)
 	s, _ := oidcServer(t, nil)
 	h := s.Handler()
 	for path, want := range map[string]int{
@@ -241,6 +243,7 @@ func TestNotSignedIn(t *testing.T) {
 
 // Each way a sign-in can be forged, replayed or misled is refused.
 func TestSignInRefusals(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	start := func() (*browser, string) {
@@ -319,6 +322,7 @@ func TestSignInRefusals(t *testing.T) {
 
 // After signing in, the browser goes only to a page of this server's.
 func TestSignInNoOpenRedirect(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	for _, next := range []string{"//evil.example.com/x", "https://evil.example.com/", "/\\evil.example.com", "javascript:alert(1)", "/%2F%2Fevil.example.com", "\t//evil.example.com"} {
@@ -482,6 +486,7 @@ func TestSignInNoRoles(t *testing.T) {
 // what its role allows, but never approve a change, which is a person's,
 // in a browser.
 func TestSignInBearer(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	call := func(method, path, tok, body string) *httptest.ResponseRecorder {
@@ -533,6 +538,7 @@ func TestSignInBearer(t *testing.T) {
 // A sign-in in front that signs its header (Google's IAP here): who it
 // says, with the role the lists give; nothing without it.
 func TestProxyJWT(t *testing.T) {
+	parallel(t)
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	keys := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "iap", Algorithm: "ES256", Use: "sig"}}})
@@ -635,6 +641,7 @@ func TestSignInPages(t *testing.T) {
 // An identity provider that can't be reached is asked again at most every
 // ten seconds, however many browsers come to sign in.
 func TestSignInProviderDown(t *testing.T) {
+	parallel(t)
 	asked := 0
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		asked++

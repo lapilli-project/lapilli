@@ -63,6 +63,7 @@ func edit(t *testing.T, b []byte, change func(m map[string]any)) []byte {
 // out of ALARM resolves the alert the move in started; a move between OK
 // and INSUFFICIENT_DATA is of no firing.
 func TestNotifyCloudWatch(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -114,6 +115,7 @@ func TestNotifyCloudWatch(t *testing.T) {
 // with its attributes; so does EventBridge's state change, for the alarm
 // and for a contributor.
 func TestNotifyCloudWatchShapes(t *testing.T) {
+	parallel(t)
 	contributor := "arn:aws:cloudwatch:us-east-1:123456789012:alarm:DynamoDBInsightsAlarm/6d442278dba546f6"
 	var s *Server
 	var g *snsSigner
@@ -158,6 +160,7 @@ func TestNotifyCloudWatchShapes(t *testing.T) {
 // not what the query found; the resource and its group are lower-cased, as
 // recipes/firings/azure-monitor.jq writes them, so the two tie.
 func TestNotifyAzureOwnAlerts(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	labels := map[string]string{"severity": "Sev2", "resource": "shop-logs", "resource_group": "shop", "service": "checkout"}
@@ -186,6 +189,7 @@ func TestNotifyAzureOwnAlerts(t *testing.T) {
 // absence or a log match: named by the policy, labelled with its user
 // labels, its resource's and its metric's, as the recipe labels its firing.
 func TestNotifyGoogleConditions(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	for _, c := range []struct {
@@ -228,6 +232,7 @@ func ociSend(t *testing.T, h http.Handler, source string, body []byte, hdr map[s
 // from the message that began it; a message tried again is kept once; the
 // alarm's OCID ties it to its source's firing, whatever its title.
 func TestNotifyOCI(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	copyIn(t, s, "oci-prod", firing.Firing{Rule: "cpu-high", Start: at06,
@@ -304,6 +309,7 @@ func TestNotifyOCI(t *testing.T) {
 // /v1/oci takes the token as the password, checked before the body is read;
 // without it, a 401 asking for it, as Oracle requires of an endpoint.
 func TestNotifyOCIProof(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	for name, hdr := range map[string]map[string]string{
@@ -331,6 +337,7 @@ func TestNotifyOCIProof(t *testing.T) {
 // the token only, only from a Notifications API host over https, each URL
 // once; any other is left for someone to confirm by hand.
 func TestNotifyOCIConfirm(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	var mu sync.Mutex
@@ -403,6 +410,7 @@ func TestNotifyOCITurn(t *testing.T) {
 // name, from its condition's) or not (Azure's common alert schema has no
 // rule id), and to one copied in before the label was, alike.
 func TestNotifyTiesWithAlarmID(t *testing.T) {
+	parallel(t)
 	const arn = "arn:aws:cloudwatch:us-east-1:123456789012:alarm:disk-full"
 	for _, withID := range []bool{false, true} {
 		s := notifyServer(t, nil)

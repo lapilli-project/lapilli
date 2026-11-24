@@ -72,6 +72,7 @@ func (h *alertsHistory) QueryRange(ctx context.Context, expr string, start, end 
 // time, over the days the runs won't replay again, and kept: each firing
 // once, what differs by rule, and alerts no rule is named.
 func TestCheckReplay(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.CheckReplay = true })
 	s.h = &alertsHistory{}
 	ctx := context.Background()
@@ -139,6 +140,7 @@ func TestCheckReplay(t *testing.T) {
 // A store that keeps no ALERTS checks nothing, and says so, rather than
 // every replayed firing looking as if it never really happened.
 func TestCheckReplayNoSeries(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.CheckReplay = true })
 	s.h = &alertsHistory{none: true}
 	ctx := context.Background()
@@ -162,6 +164,7 @@ func TestCheckReplayNoSeries(t *testing.T) {
 // together under it: what really fired doesn't tell them apart, and their
 // firings aren't taken for an alert no rule is named.
 func TestCheckReplayShared(t *testing.T) {
+	parallel(t)
 	s, rulesDir := server(t, func(c *Config) { c.CheckReplay = true })
 	s.h = &alertsHistory{}
 	two := ruleFile + "  - name: web\n    rules:\n      - alert: Errors\n        expr: errors > 5\n        for: 2m\n        labels: {severity: page}\n"
@@ -194,6 +197,7 @@ func TestCheckReplayShared(t *testing.T) {
 // A rule a run couldn't replay isn't checked over the days of that run, and
 // what really fired of it isn't taken for an alert no rule is named.
 func TestCheckReplayFailed(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	s.h = &alertsHistory{}
 	ctx := context.Background()

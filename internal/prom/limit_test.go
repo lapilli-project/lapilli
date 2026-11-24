@@ -175,13 +175,15 @@ func TestCancelledTakesNoTurn(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	w := recordWaits(t)
 	start := time.Now()
 	if err := l.take(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	l.done(200, 0)
-	if took := time.Since(start); took > 2*time.Second {
-		t.Errorf("the next request waited %s, for the turns of requests given up", took)
+	// A turn's wait at most: the twenty given up held none.
+	if d := w.longest(); d > 500*time.Millisecond {
+		t.Errorf("the next request waited %s (in %s), for the turns of requests given up", d, time.Since(start))
 	}
 }
 
@@ -223,6 +225,7 @@ func TestPaceShared(t *testing.T) {
 	if limit, _, _ := b.state(); limit != 64 {
 		t.Errorf("b's limit %d, after a's push back", limit)
 	}
+	w := recordWaits(t)
 	start := time.Now()
 	for range 3 {
 		if err := b.take(context.Background()); err != nil {
@@ -230,8 +233,10 @@ func TestPaceShared(t *testing.T) {
 		}
 		b.done(200, 0)
 	}
-	if took := time.Since(start); took < 150*time.Millisecond || took > 10*time.Second {
-		t.Errorf("b asked 3 in %s: want its turns by the rate, not a's wait", took)
+	// Its turns by the rate, a tenth of a second each at most: not a's
+	// wait of an hour.
+	if took, d := time.Since(start), w.longest(); took < 150*time.Millisecond || d > 100*time.Millisecond {
+		t.Errorf("b asked 3 in %s, waiting %s at most: want its turns by the rate, not a's wait", took, d)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -344,15 +349,17 @@ func TestLimiterRateWithinContext(t *testing.T) {
 	l.done(200, 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	w := recordWaits(t)
 	start := time.Now()
-	// The rate's turn, not a wait the API asked for.
-	if err := l.take(ctx); !errors.Is(err, ErrPastDeadline) || err.Error() != turnPast || time.Since(start) > 2*time.Second {
+	// The rate's turn, not a wait the API asked for: none begun.
+	if err := l.take(ctx); !errors.Is(err, ErrPastDeadline) || err.Error() != turnPast || w.longest() != 0 {
 		t.Errorf("%v after %s", err, time.Since(start))
 	}
+	// Its wait for the turn ends with its context: cancelled, not let in.
 	ctx, cancel = context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Millisecond, cancel)
 	start = time.Now()
-	if err := l.take(ctx); !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second {
+	if err := l.take(ctx); !errors.Is(err, context.Canceled) {
 		t.Errorf("%v after %s", err, time.Since(start))
 	}
 	if _, in, _ := l.state(); in != 0 {

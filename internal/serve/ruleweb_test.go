@@ -31,6 +31,7 @@ import (
 // TestRuleTabOf: tab= is one of the five, or the overview: a value it
 // doesn't have, in any case, is the overview, and the page doesn't say it.
 func TestRuleTabOf(t *testing.T) {
+	parallel(t)
 	for q, want := range map[string]string{"": "overview", "tab=": "overview", "tab=firings": "firings", "tab=versions": "versions",
 		"tab=proposals": "proposals", "tab=activity": "activity", "tab=overview": "overview", "tab=Firings": "overview",
 		"tab=firings+": "overview", "tab=x&tab=firings": "overview", "tab=firings&tab=x": "firings", "tab=%3Cscript%3E": "overview"} {
@@ -175,6 +176,7 @@ func rulePageParts(t *testing.T) map[string]string {
 // sections are in the tabs they belong in, once; and each tab, rendered,
 // shows its own sections alone.
 func TestRuleSectionsKept(t *testing.T) {
+	parallel(t)
 	parts := rulePageParts(t)
 	lit := func(x string) string {
 		if strings.HasPrefix(x, "template ") || strings.HasPrefix(x, "define ") {
@@ -267,6 +269,7 @@ func notifySome(t *testing.T, s *Server) {
 // pointer to its tab; every link the pages make to a part of a rule's page
 // goes to a tab that has it.
 func TestRuleOldLinks(t *testing.T) {
+	parallel(t)
 	s, paths := a11yServer(t)
 	h := s.Handler()
 	ids := func(path string) map[string]*html.Node {
@@ -331,6 +334,7 @@ func TestRuleOldLinks(t *testing.T) {
 // TestRuleConds: what to check, as the header lists it, in order, each
 // with where it is explained; none, and there is no list.
 func TestRuleConds(t *testing.T) {
+	parallel(t)
 	v := ruleView{ruleLine: ruleLine{Unsupported: "why", Source: "cloud", Differs: true, Content: contentCount{Facts: 2}},
 		Unseen: []string{"Replayed in part: x."}, ruleChanges: ruleChanges{Proposals: []proposalLine{
 			{Proposal: ledger.Proposal{State: ledger.StateProposed}, Stale: true}, {Proposal: ledger.Proposal{State: ledger.StateMerged}, Stale: true},
@@ -377,6 +381,7 @@ func TestRuleConds(t *testing.T) {
 // edit the note; to a reader who may not, each is disabled, with why, said
 // once for those disabled alike.
 func TestRuleActions(t *testing.T) {
+	parallel(t)
 	s, _ := a11yServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules/Errors?team=payments")
 	for _, want := range []string{`<a class="button" href="/rules/Errors?tab=proposals&amp;team=payments#propose">Propose a change</a>`,
@@ -445,6 +450,7 @@ func TestRuleActions(t *testing.T) {
 // TestRuleBar: the bar of a rule's page picks the period for it, in the tab
 // it shows, and sends nothing else it was asked.
 func TestRuleBar(t *testing.T) {
+	parallel(t)
 	s, _ := a11yServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules/Errors?tab=firings&zzz=1&edit=note&team=payments")
 	// Each period a link, taken at once, keeping the tab and the team.
@@ -468,6 +474,7 @@ func TestRuleBar(t *testing.T) {
 // TestRuleBadgeLegend: the rules list says what each badge means, named
 // and signed as the facets and the badges are.
 func TestRuleBadgeLegend(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules")
 	doc, err := html.Parse(strings.NewReader(body))
@@ -517,6 +524,7 @@ func TestRuleBadgeLegend(t *testing.T) {
 // label; one taken away, one written again; and one too long to set
 // beside line by line, whole, after the one before.
 func TestVersionDiff(t *testing.T) {
+	parallel(t)
 	a := change{Expr: "rate(x[5m])\n  > 1", For: "2m", labels: map[string]string{"severity": "page", "team": "a severity=critical"}}
 	b := change{Expr: "rate(x[5m])\n  > 2", For: "2m", Keep: "1m", labels: map[string]string{"severity": "page", "team": "a", "x y": "1"}}
 	text := func(ds []diffLine, whole bool) string {
@@ -559,6 +567,7 @@ func TestVersionDiff(t *testing.T) {
 // TestVersionsBounded: a rule's versions tab sets the latest twenty
 // versions beside the one before each; older ones are in the table alone.
 func TestVersionsBounded(t *testing.T) {
+	parallel(t)
 	s, rules := server(t, nil)
 	ctx := context.Background()
 	for i := 0; i < 25; i++ {
@@ -594,6 +603,7 @@ func TestVersionsBounded(t *testing.T) {
 // week, every month and by cron, often or once a year; each starting at,
 // or lasting over, the times the clocks skip or repeat.
 func TestWindowDays(t *testing.T) {
+	parallel(t)
 	for _, zone := range []string{"UTC", "America/Santiago", "America/New_York", "Europe/London", "Australia/Lord_Howe"} {
 		t.Run(zone, func(t *testing.T) {
 			loc, err := time.LoadLocation(zone)
@@ -671,6 +681,7 @@ func TestWindowDays(t *testing.T) {
 // TestFiringsDay: /firings?day= shows that day's firings, from where the
 // day starts, also where its midnight is skipped.
 func TestFiringsDay(t *testing.T) {
+	parallel(t)
 	loc, err := time.LoadLocation("America/Santiago")
 	if err != nil {
 		t.Fatal(err)
@@ -707,6 +718,7 @@ func TestFiringsDay(t *testing.T) {
 // something, whatever else; else one that caught nothing; else excused; else
 // no firing.
 func TestDayKind(t *testing.T) {
+	parallel(t)
 	for sp, want := range map[ledger.Span]string{
 		{Firings: 3, White: 1, Excused: 2}: "caught", {Firings: 1, White: 1}: "caught", {Firings: 2, Excused: 5}: "nothing",
 		{Firings: 1}: "nothing", {Excused: 1}: "excused", {}: "none", {Caught: 1}: "none",
@@ -834,6 +846,7 @@ func glanceServer(t *testing.T) *Server {
 // the rule changed, a deploy of what it is about came, and a quiet window
 // covered it; the table under it, the same numbers.
 func TestRuleGlance(t *testing.T) {
+	parallel(t)
 	s := glanceServer(t)
 	h := s.Handler()
 	view := func(q string) ruleView {
@@ -1053,6 +1066,7 @@ func TestRuleGlance(t *testing.T) {
 // TestRulePanelText: a cell with nothing to say says "–", and the panel
 // says which period it is of.
 func TestRulePanelText(t *testing.T) {
+	parallel(t)
 	s := facetServer(t)
 	code, body, _ := get(t, s.Handler(), "/rules/R20")
 	if code != http.StatusOK {
@@ -1078,6 +1092,7 @@ func TestRulePanelText(t *testing.T) {
 // pages: in a list of their own, "This rule", each from its own text in
 // every language, the first Summary, where the sidebar has Overview.
 func TestRuleTabNames(t *testing.T) {
+	parallel(t)
 	for lang, c := range catalogs {
 		for _, tab := range ruleTabs {
 			if _, ok := c["rule tab|"+tab.name]; !ok {

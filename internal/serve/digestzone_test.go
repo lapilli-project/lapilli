@@ -12,6 +12,7 @@ import (
 // The digest's header names the zone serve counts days in, with each
 // offset its period took: a week the clocks went back in, in Berlin.
 func TestDigestZone(t *testing.T) {
+	parallel(t)
 	berlin, err := time.LoadLocation("Europe/Berlin")
 	if err != nil {
 		t.Skip("no zone database here")

@@ -108,6 +108,7 @@ func added(path, content string, loki bool) map[string]any {
 // the data sources replayed, by uid and as asked, never one only beside a
 // condition, nor a paused rule's; a Loki ruler's rule.
 func TestBacktestReadsInEffect(t *testing.T) {
+	parallel(t)
 	b, _, _ := btGrafana(t, true, nil)
 	e, err := b.s.readsInEffect(context.Background())
 	if err != nil {
@@ -138,6 +139,7 @@ func TestBacktestReadsInEffect(t *testing.T) {
 // paused rule's, and a data source asked as LogQL where the rules in effect
 // ask it as PromQL, and the reverse. Nothing is queued, and nothing asked.
 func TestBacktestGrafanaRefused(t *testing.T) {
+	parallel(t)
 	b, h, logs := btGrafana(t, true, nil)
 	h.Lock()
 	h.exprs = nil
@@ -209,6 +211,7 @@ func TestBacktestGrafanaRefused(t *testing.T) {
 // through the lane; its LogQL of serve's Loki. An expression's model naming
 // another data source is the expression's alone: nothing reads it.
 func TestBacktestGrafanaTaken(t *testing.T) {
+	parallel(t)
 	b, h, logs := btGrafana(t, false, nil)
 	h.Lock()
 	h.exprs = nil
@@ -248,6 +251,7 @@ func TestBacktestGrafanaTaken(t *testing.T) {
 // serve has --loki and its rules in effect hold one, and asked of it; a
 // Grafana rule in a file said to be a Loki ruler's is refused.
 func TestBacktestLokiRules(t *testing.T) {
+	parallel(t)
 	rule := strings.Replace(lokiRules, "> 5", "> 2", 1)
 	for name, c := range map[string]struct {
 		loki    bool
@@ -288,6 +292,7 @@ func TestBacktestLokiRules(t *testing.T) {
 // query, each stream named by a label's value, its range and offset within
 // eight days, no subquery and no @, past a comment as well.
 func TestBacktestGrafanaLokiBounds(t *testing.T) {
+	parallel(t)
 	b, _, _ := btGrafana(t, true, nil)
 	prom := func(expr string) string { return fmt.Sprintf(`{expr: '%s', datasource: {type: prometheus}}`, expr) }
 	var many, wide []string
@@ -347,6 +352,7 @@ func TestBacktestGrafanaLokiBounds(t *testing.T) {
 // Loki's pace, which the runs keep for it only while a backtest asking that
 // Loki runs; with serve's tenant, which the request can't name.
 func TestBacktestLokiLane(t *testing.T) {
+	parallel(t)
 	var mu sync.Mutex
 	var tenants []string
 	var held []bool
@@ -418,6 +424,7 @@ func TestBacktestLokiLane(t *testing.T) {
 // backtest: one whose data source no rule in effect reads by then fails,
 // saying so, having asked nothing.
 func TestBacktestGrafanaInEffectChanged(t *testing.T) {
+	parallel(t)
 	b, h, _ := btGrafana(t, false, nil)
 	rule := gRule("p1", "ErrorsRaised", "A", gQuery("A", "prom-a", `{expr: 'errors > 1', datasource: {type: prometheus}}`))
 	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btAdding(added("grafana.yaml", prGrafana(rule), false))); code != 202 {
@@ -452,6 +459,7 @@ func TestBacktestGrafanaInEffectChanged(t *testing.T) {
 // query behind a comment, which the replay doesn't take, asks Loki
 // nothing.
 func TestBacktestLogQLComments(t *testing.T) {
+	parallel(t)
 	b, _, _ := btGrafana(t, true, nil)
 	loki := func(expr string) string {
 		return fmt.Sprintf("groups:\n  - name: logs\n    rules:\n      - alert: Raised\n        expr: %q\n", expr)
@@ -512,6 +520,7 @@ func TestBacktestLogQLComments(t *testing.T) {
 // source, which a pull request could otherwise read back from the
 // refusal. A Loki ruler's rule, which has no macros, is quoted as before.
 func TestBacktestGrafanaRefusalQuotesNothing(t *testing.T) {
+	parallel(t)
 	b, _, _ := btGrafana(t, true, nil)
 	b.s.dataSources.Lock()
 	b.s.dataSources.ds = rules.DataSources{"prom-a": 37 * time.Second}
@@ -540,6 +549,7 @@ func TestBacktestGrafanaRefusalQuotesNothing(t *testing.T) {
 // is refused, 86,400 points a series at 1s; 8s, 10s, a minute and five,
 // as Grafana's groups run, are taken.
 func TestBacktestGrafanaProbePoints(t *testing.T) {
+	parallel(t)
 	b, _, _ := btGrafana(t, true, nil)
 	prom := func(expr string) string { return fmt.Sprintf(`{expr: '%s', datasource: {type: prometheus}}`, expr) }
 	for interval, refused := range map[string]bool{"1s": true, "7s": true, "8s": false, "10s": false, "1m": false, "5m": false} {

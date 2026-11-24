@@ -177,6 +177,7 @@ func goalIn(t *testing.T, sum summary, week, team, name string) summaryGoal {
 // summary is asked; a team's row holding its own goals and each team's,
 // everyone's its own; schema 1.
 func TestGoalsWeekByWeek(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, theGoals)
 	sum := summaryOfGoals(t, s)
@@ -252,6 +253,7 @@ func TestGoalsWeekByWeek(t *testing.T) {
 // the leader's work after a run writes nothing, tells nothing and makes
 // no task.
 func TestGoalsNothingChanges(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, func(c *Config) {
 		hook := filepath.Join(t.TempDir(), "hook")
 		os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
@@ -479,6 +481,7 @@ func TestGoalsAfterRun(t *testing.T) {
 // a week the goal wasn't missed refused; a team's editor makes one of
 // their team's goal, not of everyone's. Then the line links to it.
 func TestGoalTaskButton(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, func(c *Config) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"boss@example.com"}, []string{"ed@example.com"}
 	})
@@ -611,6 +614,7 @@ func TestGoalsPage(t *testing.T) {
 // report's goals section over the span's whole weeks, for whom each is
 // for.
 func TestGoalsDigestAndReports(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, theGoals)
 	ctx := context.Background()
@@ -647,6 +651,7 @@ func TestGoalsDigestAndReports(t *testing.T) {
 // isn't skipped and said; and an export gives them back as the file
 // declares them.
 func TestParseConfigGoals(t *testing.T) {
+	parallel(t)
 	d, err := ParseConfig([]byte("teams:\n  - name: payments\n"+theGoals), time.UTC)
 	if err != nil {
 		t.Fatal(err)

@@ -144,6 +144,7 @@ func (g *grafanaFolders) securityToo() {
 // its folder's alone, another folder of that title since, is refused as
 // it is carried out, nothing written.
 func TestAddGrafanaFolderTitleTwice(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	_, s := alertsFolders(t, true)
 	for _, o := range mustPlaces(t, s) {
@@ -219,6 +220,7 @@ func TestAddReadsAVersionOnce(t *testing.T) {
 // carried out (promtool gone), holds it as a broken one does: refused,
 // nothing handed out. What was met is what its approver approved.
 func TestAddCarriedOutNotKnown(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	link := scenariotest.Install(t)
 	s, _ := changesServer(t, func(c *Config) { c.Promtool = link })
@@ -248,6 +250,7 @@ func TestAddCarriedOutNotKnown(t *testing.T) {
 // approved by the team that owned it then: payments's approver approved
 // it, and it is checkout's now.
 func TestTeamAddMovedAsItIsCarriedOut(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := boundsServer(t, teamsConfig, nil)
 	id, code, body := proposeAddAs(t, s, bo, "pay.yaml", "pay", "PayErrors", "")
@@ -270,6 +273,7 @@ func TestTeamAddMovedAsItIsCarriedOut(t *testing.T) {
 // A team's editor, who may post a rule added of their team's, is shown its
 // form, and the link to it; a viewer isn't.
 func TestTeamEditorSeesNewRuleForm(t *testing.T) {
+	parallel(t)
 	s, _ := boundsServer(t, teamsConfig, nil)
 	h := s.Handler()
 	if code, body, _ := ui(t, h, http.MethodGet, "/proposals/new", pat, "", nil); code != 200 || !strings.Contains(body, `name="place"`) {

@@ -25,6 +25,7 @@ import (
 // episode's first firing), the goals, the rules list and its facet, a
 // rule's page, the overview, the digest, MCP, the CSV and /metrics.
 func TestEpisodesShown(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := nocServer(t)
 	declare(t, s, "goals:\n  - {name: few-episodes, measure: episodes.total, at_most: 5}\n"+

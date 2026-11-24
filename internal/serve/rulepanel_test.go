@@ -189,6 +189,7 @@ func firedIn(t *testing.T, s *Server, rule string, from, to time.Time) int {
 // the rule fired in both; firings and incidents, whenever the span is
 // held. The page shows what is set beside, and nothing else.
 func TestPanelBesideNone(t *testing.T) {
+	parallel(t)
 	precision, firings, incidents := besides(ruleLine{Firings: 4, White: 1, Incidents: 1}, ledger.Span{})
 	if precision.On || !firings.On || firings.By != 4 || !incidents.On || incidents.By != 1 {
 		t.Errorf("none before: %+v %+v %+v", precision, firings, incidents)
@@ -210,6 +211,7 @@ func TestPanelBesideNone(t *testing.T) {
 // TestSharePct: a share's change is that of the shares the page shows,
 // rounded as they are.
 func TestSharePct(t *testing.T) {
+	parallel(t)
 	for all := 1; all <= 200; all++ {
 		for n := 0; n <= all; n++ {
 			if got, _ := sharePct(n, all); fmt.Sprintf("%d%%", got) != pct(n, all) {
@@ -226,6 +228,7 @@ func TestSharePct(t *testing.T) {
 // page alone, and each version beside the one before only on its versions
 // tab; MCP's rule tool, which reads the rest, has none of them.
 func TestRuleOnlyHTML(t *testing.T) {
+	parallel(t)
 	s := glanceServer(t)
 	r := httptest.NewRequest(http.MethodGet, "/rules/Errors", nil)
 	r.SetPathValue("name", "Errors")
@@ -258,6 +261,7 @@ func TestRuleOnlyHTML(t *testing.T) {
 // of its query, however it is asked: what else is in the URL, in any
 // order, is nothing to it, and isn't said back on it.
 func TestRulePageCached(t *testing.T) {
+	parallel(t)
 	s := glanceServer(t)
 	h := s.Handler()
 	var first string
@@ -297,6 +301,7 @@ func TestRulePageCached(t *testing.T) {
 // TestMoved: a change is signed; better or worse as more is better or not,
 // in colour and in words, in each language; no change, neither.
 func TestMoved(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		m           moved
 		text, class string
@@ -338,6 +343,7 @@ func TestMoved(t *testing.T) {
 // period: its weeks of re-fires and the alerts that re-fired most, and its
 // replay beside what really fired.
 func TestRulePeriod(t *testing.T) {
+	parallel(t)
 	s := besideServer(t)
 	for q, want := range map[string]struct{ weeks, worst int }{"weeks=1": {1, 1}, "weeks=4": {4, 1}, "weeks=12": {12, 2}} {
 		v := ruleViewOf(t, s, "Errors", q)
@@ -366,6 +372,7 @@ func TestRulePeriod(t *testing.T) {
 // the period, the versions, the proposals not finished with, the tasks and
 // comments; the tab shown is current.
 func TestRuleTabsCounted(t *testing.T) {
+	parallel(t)
 	v := ruleView{ruleLine: ruleLine{Firings: 7}, Tab: "versions", Changes: make([]change, 4), ruleChanges: ruleChanges{Proposals: []proposalLine{
 		{Proposal: ledger.Proposal{State: ledger.StateProposed}}, {Proposal: ledger.Proposal{State: ledger.StateMerged}},
 		{Proposal: ledger.Proposal{State: ledger.StateApplied}}, {Proposal: ledger.Proposal{State: ledger.StateRefused}}}},
@@ -391,6 +398,7 @@ func TestRuleTabsCounted(t *testing.T) {
 // the latest week that names an incident says: one an earlier week said
 // it nearly caught, and a later week another rule, isn't its.
 func TestNearOf(t *testing.T) {
+	parallel(t)
 	s := glanceServer(t)
 	ctx := context.Background()
 	week := s.l.Midnight(ledger.Week(s.l.Day(now)))

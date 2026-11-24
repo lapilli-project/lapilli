@@ -90,6 +90,7 @@ func madeTo(t *testing.T, s *Server, loc string) []string {
 // teams made, once; a value that isn't a plain name is left to make by
 // hand, said so; and a rule's page says its label is why it is its team's.
 func TestTeamsSuggested(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := labelledServer(t, labelledRules, nil)
 	h := s.Handler()
@@ -194,6 +195,7 @@ func TestTeamsSuggested(t *testing.T) {
 // --team-labels names the labels read. Each rule's page says how its team
 // was found, as owners found it.
 func TestTeamsSuggestedAsOwnersWould(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := labelledServer(t, labelledRules+`      - {alert: Charge, expr: charge > 1, labels: {team: payments, service: checkout}}
       - {alert: Web1, expr: web1 > 1, labels: {team: Web}}
@@ -280,6 +282,7 @@ func TestTeamsSuggestedAsOwnersWould(t *testing.T) {
 // TestTeamsSuggestedAdminsOnly: making the teams is an admin's, the server
 // checks it, and anyone else sees the button disabled, with why.
 func TestTeamsSuggestedAdminsOnly(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := labelledServer(t, labelledRules, func(c *Config) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"*"}
@@ -315,6 +318,7 @@ func TestTeamsSuggestedAdminsOnly(t *testing.T) {
 // rules are suggested and made, the rest counted; a crafted result says no
 // more than maxSuggested.
 func TestTeamsSuggestedBounded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	var b strings.Builder
 	b.WriteString("groups:\n  - name: many\n    rules:\n")

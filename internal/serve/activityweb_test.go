@@ -75,6 +75,7 @@ func whatsOf(ls []apiLogged) []string {
 // The activity log filters by who, kind, team and period, as the page and
 // the API alike read them, and refuses what it can't read.
 func TestActivityFilters(t *testing.T) {
+	parallel(t)
 	s := activityServer(t)
 	h := s.Handler()
 	got, _ := activityOf(t, h, "who=ben", vViewer)
@@ -111,6 +112,7 @@ func TestActivityFilters(t *testing.T) {
 // Past a page, the activity log goes on from where it ended, on the page
 // as through the API, with nothing given twice or left out.
 func TestActivityPages(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := activityServer(t)
 	for i := range 150 {
@@ -157,6 +159,7 @@ func TestActivityPages(t *testing.T) {
 // the API and in the export, as on Run history; anyone but an admin reads
 // the paths of serve's files as the flags that gave them.
 func TestActivityWhoReadsWhat(t *testing.T) {
+	parallel(t)
 	s := activityServer(t)
 	h := s.Handler()
 	for _, c := range []struct {
@@ -191,6 +194,7 @@ func TestActivityWhoReadsWhat(t *testing.T) {
 // -, @, a tab or a carriage return, or their full-width forms, starts with
 // '. It is the API's, with the page's filters, and kept by no cache.
 func TestActivityCSV(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := activityServer(t)
 	evil := []string{`=HYPERLINK("https://evil.example","x")`, "+1+1", "-2+3", "@SUM(A1)", "\t=1", "  =1", "＝1"}
@@ -248,6 +252,7 @@ func TestActivityCSV(t *testing.T) {
 // --keep-activity keeps the activity log past --keep: a change older than
 // the firings kept stays, one older than the activity log kept goes.
 func TestKeepActivity(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Keep, c.KeepActivity = 30*24*time.Hour, 60*24*time.Hour })
 	if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", Note: "x"}, "ana"); err != nil {
@@ -285,6 +290,7 @@ func TestKeepActivity(t *testing.T) {
 // request looks up activityLookups at most, says where it stopped, and the
 // next goes on from there, so that no change is passed over.
 func TestActivityTeamBounded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := activityServer(t)
 	for i := range activityLookups + 50 {

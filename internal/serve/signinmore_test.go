@@ -21,6 +21,7 @@ import (
 // the API alike, and '*' gives a role only once --viewers says who comes
 // in at all.
 func TestSignInOnlyThoseNamed(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	b := newBrowser(t, h)
@@ -77,6 +78,7 @@ func TestSignInOnlyThoseNamed(t *testing.T) {
 
 // --viewers with a proxy's plain header: only those named come in.
 func TestViewersBehindAProxy(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader, c.Viewers, c.Editors = "X-Forwarded-Email", []string{"*@example.com"}, []string{"ed@other.example"}
 	})
@@ -99,6 +101,7 @@ func TestViewersBehindAProxy(t *testing.T) {
 // of none (gmail.com), is refused; and Google is told to offer only that
 // domain's.
 func TestSignInHostedDomain(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, func(c *Config) { c.OIDC.HostedDomains = []string{"example.com"} })
 	h := s.Handler()
 	w := newBrowser(t, h).do("GET", "/auth/login", nil)
@@ -198,6 +201,7 @@ func TestBearerRefusals(t *testing.T) {
 // A JWT a proxy puts in Authorization (oauth2-proxy's) is a bearer token:
 // whoever holds one sends it as easily, and doesn't approve a change.
 func TestProxyJWTInAuthorizationIsBearer(t *testing.T) {
+	parallel(t)
 	idp := idptest.New(t, "oauth2-proxy", "", func() time.Time { return now })
 	s, _ := server(t, func(c *Config) {
 		c.Proxy = &signin.Proxy{Kind: signin.JWKS, Header: "Authorization", JWKS: idp.URL + "/keys", Issuer: idp.URL,
@@ -219,6 +223,7 @@ func TestProxyJWTInAuthorizationIsBearer(t *testing.T) {
 
 // Two tabs signing in at once each come back to their own sign-in.
 func TestSignInTwoTabs(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	b := newBrowser(t, h)
@@ -238,6 +243,7 @@ func TestSignInTwoTabs(t *testing.T) {
 // other too, and neither writes over the other's: two replicas of a
 // Postgres ledger, or two processes of one SQLite file.
 func TestSignOutTwoProcesses(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	s.now = func() time.Time { return now.Add(-time.Minute) }
 	ed := newBrowser(t, s.Handler())
@@ -278,6 +284,7 @@ func TestSignOutTwoProcesses(t *testing.T) {
 // groups overage is said in the log; a refusal is said to people in their
 // language, and what went wrong only in the log.
 func TestSignInClaimsRead(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	var logs bytes.Buffer
 	s.log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -309,6 +316,7 @@ func TestSignInClaimsRead(t *testing.T) {
 // An issuer given as the provider doesn't say it is a setting to put
 // right, said at start as an ERROR, not an outage.
 func TestSignInMisconfigured(t *testing.T) {
+	parallel(t)
 	idp := idptest.New(t, "lapilli", "", func() time.Time { return now })
 	var logs bytes.Buffer
 	s, _ := server(t, func(c *Config) {
@@ -329,6 +337,7 @@ func TestSignInMisconfigured(t *testing.T) {
 // A session key is never kept in the ledger: without --session-key-file,
 // one is made for the process, and sessions end when it restarts.
 func TestSessionKeyNotInLedger(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, func(c *Config) { c.SessionKey = "" })
 	b := newBrowser(t, s.Handler())
 	b.signIn(idp, "/", claimsOf("ed@example.com"))
@@ -354,6 +363,7 @@ func TestSessionKeyNotInLedger(t *testing.T) {
 // process finished one: after a restart a Prometheus that hangs doesn't
 // keep the UI out of a load balancer.
 func TestReadyOnceARunIsRecorded(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.MetricsHandler()
 	if code, _, _ := get(t, h, "/readyz"); code != http.StatusServiceUnavailable {
@@ -371,6 +381,7 @@ func TestReadyOnceARunIsRecorded(t *testing.T) {
 // A proxy's plain header is held to what a claim is: a name with spacing
 // that looks like nothing is no one's.
 func TestPlainNamesFromHeaders(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.UserHeader, c.Admins = "X-Forwarded-Email", []string{"boss@example.com"} })
 	h := s.Handler()
 	for n, want := range map[string]string{"boss@example.com": "admin", "boss@example.com ": "viewer", "boss@example.com　": "viewer", "boss@⁠example.com": "viewer"} {

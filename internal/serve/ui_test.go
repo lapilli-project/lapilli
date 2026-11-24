@@ -25,6 +25,7 @@ import (
 )
 
 func TestLink(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		ctx    pageCtx
 		target string
@@ -55,6 +56,7 @@ func TestLink(t *testing.T) {
 // GET: those that choose another team or period choose it, and say so. A
 // page that finds nothing carries neither.
 func TestContextCarried(t *testing.T) {
+	parallel(t)
 	s, paths := a11yServer(t)
 	h := s.Handler()
 	links, forms := 0, 0
@@ -170,6 +172,7 @@ func TestContextCarried(t *testing.T) {
 // script, though one of Hangul is 4.5 KB in a URL; past 500, the page
 // says it is too long; neither is refused.
 func TestLongSearchAnyScript(t *testing.T) {
+	parallel(t)
 	h := facetServer(t).Handler()
 	for _, ch := range []string{"a", "가", "検"} {
 		for _, path := range []string{"/rules", "/search"} {
@@ -189,6 +192,7 @@ func TestLongSearchAnyScript(t *testing.T) {
 // what the sign-in's cookie holds: past it, the page alone, else the
 // overview.
 func TestShortNext(t *testing.T) {
+	parallel(t)
 	long := strings.Repeat("a", maxNext)
 	for _, c := range []struct{ in, want string }{
 		{"/rules?perf=noisy", "/rules?perf=noisy"},
@@ -217,6 +221,7 @@ func toPage(href string) bool {
 // or no team's, whatever team the page is looked at for; an incident's is
 // no team's.
 func TestTaskAboutItsOwner(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	link := regexp.MustCompile(`<a (?:class="button quiet" )?href="([^"]*)">Add a task(?: about this (?:rule|incident))?</a>`)
@@ -254,6 +259,7 @@ func TestTaskAboutItsOwner(t *testing.T) {
 // the team or period the URL names, and not the reader's own team. A
 // stranger reads nothing from it, not even whether a team is there.
 func TestErrorPagesBare(t *testing.T) {
+	parallel(t)
 	s, pay, _ := rolesServer(t, func(c *Config) { c.Viewers = []string{"*@example.com"}; c.Version = "v9.9.9" })
 	ctx := context.Background()
 	// A run that failed, its error naming a host inside: the pages say so
@@ -320,6 +326,7 @@ func TestErrorPagesBare(t *testing.T) {
 // TestDefaultTeam: with no team= in the URL, a reader who edits one team,
 // and only one, sees that team's; everyone else, all teams.
 func TestDefaultTeam(t *testing.T) {
+	parallel(t)
 	s, pay, search := rolesServer(t, nil)
 	ctx := context.Background()
 	for _, g := range []ledger.Grant{{Who: "user:pat@example.com", TeamID: pay}, {Who: "user:two@example.com", TeamID: pay},
@@ -390,6 +397,7 @@ func TestDefaultTeam(t *testing.T) {
 // may use it, and for everyone else the button disabled, with why beside
 // it, tied to it.
 func TestActionDisabled(t *testing.T) {
+	parallel(t)
 	disabled := func(label, why string) string {
 		return `<button type="button" disabled aria-describedby="action-why">` + label + `</button> <span id="action-why" class="why">` + why + `</span>`
 	}
@@ -460,6 +468,7 @@ func TestActionDisabled(t *testing.T) {
 // TestSidebar: the pages in their groups, the page the reader is on, and
 // Roles only for whoever may open it.
 func TestSidebar(t *testing.T) {
+	parallel(t)
 	s, _, _ := rolesServer(t, nil)
 	h := s.Handler()
 	for who, roles := range map[string]bool{"boss@example.com": true, "ed@example.com": false, "": false} {
@@ -502,6 +511,7 @@ func TestSidebar(t *testing.T) {
 // the menu, the page and the tab agree. The overview alone is headed by
 // what it shows, and named Overview in the sidebar and its breadcrumb.
 func TestPageNamedAsInTheSidebar(t *testing.T) {
+	parallel(t)
 	h := pagesServer(t).Handler()
 	for _, n := range names {
 		for _, g := range navLayout {
@@ -560,6 +570,7 @@ func TestPageNamedAsInTheSidebar(t *testing.T) {
 // has a translation: some are shown only in states the pages rendered in
 // TestPagesInEachLanguage aren't in.
 func TestFrameTextsTranslated(t *testing.T) {
+	parallel(t)
 	texts := map[string]bool{}
 	tpls, err := files.ReadDir("templates")
 	if err != nil {
@@ -607,6 +618,7 @@ func TestFrameTextsTranslated(t *testing.T) {
 // TestBarNamed: the bar's form is named for what it chooses: the team, the
 // period, or both.
 func TestBarNamed(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	alone, _ := server(t, nil)
 	for _, c := range []struct {
@@ -638,6 +650,7 @@ func inPicker(n *html.Node) bool {
 // pick shows it at once: no select and no Show to press after (bundle 69).
 // A choice of one keeps the other only as the reader chose it.
 func TestBarTakesAChoiceAtOnce(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules?q=i&team=payments&weeks=12")
@@ -670,6 +683,7 @@ func TestBarTakesAChoiceAtOnce(t *testing.T) {
 // for every team (bundle 69's review): the choices carry the team and the
 // weeks alone.
 func TestBarKeepsALongQueryOnce(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	junk := strings.Repeat("!", 4000)
 	_, body, _ := get(t, s.Handler(), "/rules?zz="+junk+"&team=payments&weeks=12")

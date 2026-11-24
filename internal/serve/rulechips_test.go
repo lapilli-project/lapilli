@@ -113,6 +113,7 @@ func chipRows(t *testing.T, body string) []chipRow {
 // asked, which shows exactly the rows that have it, the chip drawn there as
 // picked; and none a link the search couldn't take.
 func TestRuleLabelChips(t *testing.T) {
+	parallel(t)
 	s := chipsServer(t)
 	h := s.Handler()
 	code, body := getAs(t, h, "/rules?weeks=12", "")

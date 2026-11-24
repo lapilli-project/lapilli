@@ -471,6 +471,7 @@ func jdcServe(f *fakeTracker) http.HandlerFunc {
 // the rest out of it. A comment posted from Lapilli is quoted in a block
 // too, its first line (who wrote it) and its last (the marker) outside.
 func TestTrackerRecipeJiraDCWikiText(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "jira-dc")
 	g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
@@ -529,6 +530,7 @@ func TestTrackerRecipeJiraDCWikiText(t *testing.T) {
 // out as long as Retry-After says, and asked again: the run makes its
 // issues, each once.
 func TestTrackerRecipeDCRetryAfter(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, c := range []struct {
 		name, path string

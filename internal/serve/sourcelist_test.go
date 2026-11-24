@@ -62,6 +62,7 @@ func hookServer(t *testing.T, change func(*Config)) (*Server, *time.Time) {
 // sourceBackAfter; down again no sooner than sourceRenotify after it was
 // told back.
 func TestSourceDownAndBack(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, clock := hookServer(t, nil)
 	raw := ""
@@ -123,6 +124,7 @@ func TestSourceDownAndBack(t *testing.T) {
 // A source that flaps, failing three reads and reading one well, over and
 // over, is told down once: one read well isn't back.
 func TestSourceFlapping(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, clock := hookServer(t, nil)
 	for i := range 240 {
@@ -145,6 +147,7 @@ func TestSourceFlapping(t *testing.T) {
 // past two runs and more, is down; firings copied in are told of as
 // source.quiet alone.
 func TestSourceDownByItsBound(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, clock := hookServer(t, func(c *Config) { c.Deploys = filepath.Join(t.TempDir(), "deploys.yaml") })
 	os.WriteFile(s.cfg.Deploys, []byte("deploys: []\n"), 0o644)
@@ -173,6 +176,7 @@ func TestSourceDownByItsBound(t *testing.T) {
 // notes nothing: it neither starts that clock nor moves it, however often,
 // and a source no failed read was noted of isn't down for being looked at.
 func TestSourceFailingSinceItsFirstFailedRead(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, clock := hookServer(t, func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.yaml") })
 	h := s.Handler()
@@ -241,6 +245,7 @@ func TestSourceFailingSinceItsFirstFailedRead(t *testing.T) {
 // the paths of serve's files to an admin alone, as Run history says them,
 // and a credential to no one.
 func TestSourcesRedacted(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := hookServer(t, func(c *Config) {
 		c.UserHeader, c.Admins, c.Viewers = "X-Forwarded-Email", []string{"boss@example.com"}, []string{"*"}
@@ -301,6 +306,7 @@ func TestSourcesRedacted(t *testing.T) {
 // What may be a credential is taken out of what a source says, wherever it
 // is in the text.
 func TestScrubSecrets(t *testing.T) {
+	parallel(t)
 	for in, want := range map[string]string{
 		`Get "https://user:pw@h.example/x": refused`:         `Get "https://***@h.example/x": refused`,
 		`dial https://tok3n@h.example:443`:                   `dial https://***@h.example:443`,
@@ -336,6 +342,7 @@ func TestScrubSecrets(t *testing.T) {
 // is. An error that only names a credential, or a header, and an address
 // without one, an @ in its path too, read as they were.
 func TestScrubSecretsEveryForm(t *testing.T) {
+	parallel(t)
 	// fake is a made-up value, s and as many x after it as make n
 	// characters, as long as its maker's token is.
 	fake := func(s string, n int) string { return s + strings.Repeat("x", n-len(s)) }
@@ -519,6 +526,7 @@ func TestScrubSecretsEveryForm(t *testing.T) {
 // from, as before; with all=true, every source; anything else, 400. The
 // status banner's failure to read a source links to the page.
 func TestSourcesAPIAndBanner(t *testing.T) {
+	parallel(t)
 	s, _ := hookServer(t, nil)
 	h := s.Handler()
 	code, body, _ := get(t, h, "/api/v1/sources")
@@ -552,6 +560,7 @@ func TestSourcesAPIAndBanner(t *testing.T) {
 // time ran out on before it was read waits, held, however long since it
 // last read well.
 func TestSourceBesideAFailingOne(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "loki")
 	os.MkdirAll(dir, 0o755)
@@ -668,6 +677,7 @@ func TestSourceBackOnce(t *testing.T) {
 // told so; one nothing was written to in 14 days was an id's one-off
 // prefix, not a job's: left out of the list, and never told down.
 func TestSourceIntakeForgotten(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := hookServer(t, func(c *Config) {
 		c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, "incidents-token-0123456789")
@@ -706,6 +716,7 @@ func TestSourceIntakeForgotten(t *testing.T) {
 // what it leads runs, which the first heartbeat may come before; its
 // first failed read in the new term is noted from then.
 func TestLeadingAgainForgetsWhatWasNotedFailing(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, clock := hookServer(t, func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.yaml") })
 	s.readFile(errors.New("incidents.yaml: mounted late"))
@@ -758,6 +769,7 @@ func TestLeadingAgainForgetsWhatWasNotedFailing(t *testing.T) {
 // term before: the leader's, as it last said them; its own, where it led
 // that term; else none.
 func TestLeadingTakesTheReadsOfTheTermBefore(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	s, clock := hookServer(t, func(c *Config) {

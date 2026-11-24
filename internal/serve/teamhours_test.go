@@ -24,6 +24,7 @@ import (
 // twenty come 8 asleep, 4 off hours and 8 at work; by Tokyo's, 10 asleep,
 // 3 off hours and 7 at work.
 func TestTeamHours(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, func(c *Config) {
 		c.Options.Hours = verdict.DefaultHours(time.UTC)
@@ -164,6 +165,7 @@ func TestTeamHours(t *testing.T) {
 
 // A team's hours count when the server counts by none.
 func TestTeamHoursAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	// As the command line gives "none": hours with nothing in them.
 	none := verdict.DefaultHours(time.UTC)
@@ -214,6 +216,7 @@ func TestTeamHoursAlone(t *testing.T) {
 // A team in shifts: one turn, in Tokyo, counts as Tokyo's hours do, and is
 // kept from the form and shown as shifts.
 func TestTeamShifts(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, func(c *Config) {
 		c.Options.Hours = verdict.DefaultHours(time.UTC)

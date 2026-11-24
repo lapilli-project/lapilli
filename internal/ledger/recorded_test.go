@@ -432,13 +432,17 @@ func TestRecordedFractions(t *testing.T) {
 }
 
 // What a team owns a recorded rule by is worked out in time that grows with
-// its alerts, not their square.
+// its alerts, not their square: in one statement, which reads the alerts
+// once and looks each rule's up by its index, and the rule's count by the
+// one SQLite makes for it, not by reading the rules' counts again for each
+// label. Counted (work) and planned, not timed, so that a slow runner
+// fails none; the time is logged.
 func TestRecordedSharedLabelsScale(t *testing.T) {
 	if testing.Short() || race {
 		t.Skip("short, or the race detector")
 	}
 	ctx := context.Background()
-	l := open(t, time.UTC)
+	l, where := openWatched(t)
 	var fs []firing.Firing
 	for i := range 30000 {
 		fs = append(fs, firing.Firing{Rule: "cpu", Labels: map[string]string{"service": "checkout", "instance": fmt.Sprintf("i-%05d", i)},
@@ -446,15 +450,24 @@ func TestRecordedSharedLabelsScale(t *testing.T) {
 	}
 	putFirings(t, l, "cw", t0, t0.Add(24*time.Hour), fs)
 	began := time.Now()
-	got, err := l.SharedLabels(ctx)
+	var got map[string]map[string]string
+	var err error
+	w := doing(t, l, where, func() { got, err = l.SharedLabels(ctx) })
 	took := time.Since(began)
 	if err != nil || !reflect.DeepEqual(got["cpu"], map[string]string{"service": "checkout"}) {
 		t.Errorf("shared: %v %v", got, err)
 	}
-	if took > 2*time.Second {
-		t.Errorf("30,000 alerts took %s", took)
+	t.Logf("30,000 alerts: %d statements, in %s", w.statements, took.Round(time.Millisecond))
+	// One statement: on SQLite, its three SELECTs, each counted.
+	if w.statements > 3 {
+		t.Errorf("30,000 alerts read in %d statements, want one", w.statements)
 	}
-	t.Logf("30,000 alerts: %s", took.Round(time.Millisecond))
+	if l.d == sqlite {
+		p := plan(t, l, qSharedLabels(l.d))
+		if strings.Count(p, "SCAN s ") > 1 || !strings.Contains(p, "SEARCH s USING") || strings.Contains(p, "SCAN n;") && !strings.Contains(p, "SEARCH n USING") {
+			t.Errorf("the alerts read more than once, or a rule's count not looked up: %s", p)
+		}
+	}
 }
 
 // What a source's copies cover without a gap: periods that meet or overlap

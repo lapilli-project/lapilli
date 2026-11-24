@@ -386,14 +386,18 @@ func TestFeedBounds(t *testing.T) {
 		t.Errorf("1,001 dates left out: %v %d %q", err, len(f.Turns), f.Notes)
 	}
 
-	// Twenty thousand daily repeats from 1970: refused, at once.
+	// Twenty thousand daily repeats from 1970: refused, at once, by what
+	// the feed may take (its turns or its steps, counted), not after all of
+	// them were worked out. The time is logged.
 	var many strings.Builder
 	for i := range 20000 {
 		fmt.Fprintf(&many, "BEGIN:VEVENT\r\nUID:%d\r\nDTSTART:19700101T000000Z\r\nDTEND:19700101T010000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", i)
 	}
 	began := time.Now()
-	if _, err := Parse(ctx, ev(many.String()), s, cfg, now); err == nil || time.Since(began) > 5*time.Second {
-		t.Errorf("20,000 daily repeats from 1970: %v, in %s", err, time.Since(began))
+	_, err = Parse(ctx, ev(many.String()), s, cfg, now)
+	t.Logf("20,000 daily repeats from 1970: %v, in %s", err, time.Since(began))
+	if !errors.Is(err, errTooManySteps) && !errors.Is(err, errTooManyTurns) {
+		t.Errorf("20,000 daily repeats from 1970: %v, want refused by the feed's steps or turns", err)
 	}
 	// Repeats counted from 1970 that end before the span read take their
 	// steps all the same: bounded in all, not each.
@@ -402,8 +406,10 @@ func TestFeedBounds(t *testing.T) {
 		fmt.Fprintf(&counted, "BEGIN:VEVENT\r\nUID:c%d\r\nDTSTART:19700101T000000Z\r\nDTEND:19700101T010000Z\r\nRRULE:FREQ=DAILY;COUNT=19000\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", i)
 	}
 	began = time.Now()
-	if _, err := Parse(ctx, ev(counted.String()), s, cfg, now); err == nil || !strings.Contains(err.Error(), "steps") || time.Since(began) > 5*time.Second {
-		t.Errorf("2,000 counted repeats from 1970: %v, in %s", err, time.Since(began))
+	_, err = Parse(ctx, ev(counted.String()), s, cfg, now)
+	t.Logf("2,000 counted repeats from 1970: %v, in %s", err, time.Since(began))
+	if !errors.Is(err, errTooManySteps) {
+		t.Errorf("2,000 counted repeats from 1970: %v, want refused by the feed's steps", err)
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()

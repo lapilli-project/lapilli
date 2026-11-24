@@ -21,6 +21,7 @@ import (
 // template files beside it, or from Mimir's API with the ruler's tenant.
 // Not read, the check goes on as it was, and the log says why once.
 func TestContentAlertmanager(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "alertmanager.yml")

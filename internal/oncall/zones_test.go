@@ -52,14 +52,15 @@ func TestFeedZoneCacheFull(t *testing.T) {
 	if len(data) > MaxFeed {
 		t.Fatalf("%d bytes, over MaxFeed", len(data))
 	}
-	const bound = time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), 3*bound/2)
-	defer cancel()
+	// Each zone looked up once, the 65th none past the 64 kept: counted
+	// (zoneLooked), not timed, so that a slow runner fails none.
+	looked := 0
+	zoneLooked = func() { looked++ }
+	defer func() { zoneLooked = nil }()
 	began := time.Now()
-	_, err := Parse(ctx, data, s, cfg, now)
-	took := time.Since(began)
-	t.Logf("%d bytes, 64 zones then 100 events x 1,000 EXDATEs in a 65th: %s, err %v", len(data), took, err)
-	if took > bound || err != nil {
-		t.Errorf("1.6 MB of zoned dates behind 64 zones isn't read within %s: %s, %v", bound, took, err)
+	_, err := Parse(context.Background(), data, s, cfg, now)
+	t.Logf("%d bytes, 64 zones then 100 events x 1,000 EXDATEs in a 65th: %d zones looked up, in %s, err %v", len(data), looked, time.Since(began), err)
+	if looked > maxZones || err != nil {
+		t.Errorf("1.6 MB of zoned dates behind 64 zones looked a zone up %d times, over the %d kept: %v", looked, maxZones, err)
 	}
 }

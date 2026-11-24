@@ -98,6 +98,7 @@ func (w *digestWorld) took() string {
 // to go; off, nothing goes but the week is still worked out; it never goes
 // back to an older week; and it can be given back to the flags.
 func TestDigestSet(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	tuesday := now                                          // 2026-11-03 12:00, the week to 11-02 due
 	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC) // the next week's
@@ -225,6 +226,7 @@ func ledgerTeam(name, rules string) ledger.Team { return ledger.Team{Name: name,
 // nowhere goes once where the digest is first set to go; and a week told
 // isn't worked out again each round (what reviews found).
 func TestDigestSetReview(t *testing.T) {
+	parallel(t)
 	tuesday := now
 	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
@@ -288,6 +290,7 @@ func TestDigestSetReview(t *testing.T) {
 // could go: the Reports page offers to set it, and set to ops the day after
 // its week fell due, that week goes to ops, once.
 func TestDigestFirstSet(t *testing.T) {
+	parallel(t)
 	tuesday := now
 	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	w := &digestWorld{got: map[string][]string{}}
@@ -334,6 +337,7 @@ func TestDigestFirstSet(t *testing.T) {
 // TellOnce keeps. A --team-digest naming a team the ledger hasn't logs
 // once each time the digest is worked out for telling: count them.
 func TestDigestNotRebuiltEachRound(t *testing.T) {
+	parallel(t)
 	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	w := newDigestWorld(t)
 	ghost := filepath.Join(t.TempDir(), "ghost")
@@ -370,6 +374,7 @@ func TestDigestNotRebuiltEachRound(t *testing.T) {
 // ops; back to Slack, the webhook and shop's, they hear of the next week
 // (a verification found Slack hearing of the same week again).
 func TestDigestBackToFlags(t *testing.T) {
+	parallel(t)
 	tuesday := now
 	w := newDigestWorld(t)
 	h := w.s.Handler()
@@ -394,6 +399,7 @@ func TestDigestBackToFlags(t *testing.T) {
 // after the upgrade; the next week is, once (a verification found one
 // state sending a week 0.24 had passed over).
 func TestDigestUpgradeFrom024(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	tuesday := now
 	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)

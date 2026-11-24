@@ -140,6 +140,7 @@ func eightNamed() []ledger.SignalDef {
 // with no name in its bit, and the windows tied. The rounds judge, and
 // none wakes the next at once.
 func TestUnnamedWindowsTiedBesideEight(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	eight := eightNamed()
 	entries := []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"s0"}}}
@@ -182,6 +183,7 @@ func TestUnnamedWindowsTiedBesideEight(t *testing.T) {
 // the same, the windows judged as they are, and no round wakes the next at
 // once: the next round, at its time, tries again.
 func TestUnnamedWindowsTieRefused(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	refused := func(s *Server) {
 		if s.cfg.LedgerURLFile == "" {
@@ -261,6 +263,7 @@ func errorsFirings(t *testing.T, s *Server) (verdict.Report, []verdict.Judged) {
 // kept from before; the log says it once, and the Run history notes it.
 // Started again so, nothing more is done.
 func TestUnnamedWindowsTiedToImpact(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir, file := unnamedFirst(t)
 	var logs logBuffer
@@ -339,6 +342,7 @@ func TestUnnamedWindowsTiedToImpact(t *testing.T) {
 // alone, is unjudged in their weeks too, and catches none of them, as
 // lapilli verdict judges it with the same file.
 func TestUnnamedWindowsTiedToNoneRead(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir, file := unnamedFirst(t)
 	var logs logBuffer
@@ -368,6 +372,7 @@ func TestUnnamedWindowsTiedToNoneRead(t *testing.T) {
 // With the signal with no name still given (no named signal), nothing is
 // tied, and nothing said.
 func TestUnnamedWindowsKeptUnnamed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir, file := unnamedFirst(t)
 	var logs logBuffer
@@ -384,6 +389,7 @@ func TestUnnamedWindowsKeptUnnamed(t *testing.T) {
 // Started with named signals on a ledger with no window of the signal with
 // no name: nothing is tied, and nothing said.
 func TestNamedWithNoUnnamedWindows(t *testing.T) {
+	parallel(t)
 	var logs logBuffer
 	s := restarted(t, "", "", &sigHistory{}, &logs, func(c *Config) {
 		c.Signals = []ledger.SignalDef{{Name: "impact", Expr: "impact > 1", For: 5 * time.Minute, Record: true}, paymentsSignal}
@@ -401,6 +407,7 @@ func TestNamedWithNoUnnamedWindows(t *testing.T) {
 // The windows tied are judged again from --lead before them, the lead in
 // effect: the UI's, when it set one.
 func TestSignalsFromLead(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	if got, _ := s.signalsFrom(nil); got.Lead != 15*time.Minute {
 		t.Errorf("the command line's lead: %v", got.Lead)

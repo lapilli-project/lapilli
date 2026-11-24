@@ -19,8 +19,9 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// slow stretches the budgets under the race detector, which slows reading
-// SQLite many times over (race_test.go).
+// slow stretches the budgets of what a page allocates under the race
+// detector (race_test.go), whose sync.Pool keeps less. No budget is of
+// time: a slow runner fails none.
 var slow = 1.0
 
 // TestPagesScale fills a ledger with twelve weeks of a busy set of rules

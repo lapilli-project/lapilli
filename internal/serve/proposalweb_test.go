@@ -37,6 +37,7 @@ func withProposal(t *testing.T, more func(*Config)) (*Server, http.Handler, int6
 // options asked, the file a pull request changes beside it; and the
 // backtest as a table, now beside as proposed.
 func TestProposalPage(t *testing.T) {
+	parallel(t)
 	_, h, id := withProposal(t, nil)
 	path := "/proposals/" + itoa(id)
 	_, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil)
@@ -82,6 +83,7 @@ func TestProposalPage(t *testing.T) {
 // TestProposalMissesMore: a backtest that misses an incident the rule
 // catches now has a warning above its table, naming it.
 func TestProposalMissesMore(t *testing.T) {
+	parallel(t)
 	s, h, id := withProposal(t, nil)
 	p := state(t, s, id)
 	ev := proposalEvidence(p)
@@ -113,6 +115,7 @@ var approveForm = regexp.MustCompile(`(?s)<form method="post" action="/proposals
 // read the backtest: required on the page, and checked again when the
 // approval comes, refused with why without it.
 func TestApproveReadFirst(t *testing.T) {
+	parallel(t)
 	s, h, id := withProposal(t, nil)
 	_, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
 	f := approveForm.FindString(body)
@@ -148,6 +151,7 @@ func offButton(label, id, why string) string {
 // who approved it already; no one signed in; changes off; a change for a
 // person to make.
 func TestApproveDisabledWithWhy(t *testing.T) {
+	parallel(t)
 	s, h, id := withProposal(t, func(c *Config) { c.Approvals = 2 })
 	approve(t, h, id, cy)
 	path := "/proposals/" + itoa(id)
@@ -199,6 +203,7 @@ func TestApproveDisabledWithWhy(t *testing.T) {
 // pull request opened (with its link), merged, applied; an undo asked for,
 // linked to the proposal it is; and the proposal undone.
 func TestProposalHistory(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -275,6 +280,7 @@ func TestProposalHistory(t *testing.T) {
 // keeps (--keep pruned its changes) says its older steps aren't shown;
 // one whose making is kept, nothing of it.
 func TestProposalStepsGone(t *testing.T) {
+	parallel(t)
 	s, h, id := withProposal(t, nil)
 	path := "/proposals/" + itoa(id)
 	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); strings.Contains(body, "aren&#39;t shown") {
@@ -296,6 +302,7 @@ func TestProposalStepsGone(t *testing.T) {
 // closing one past Lapilli's hands (an admin's), making it a task (an
 // editor's). None is a form to post.
 func TestProposalActionsDisabled(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, func(c *Config) { c.Editors = []string{bo} })
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -348,6 +355,7 @@ func TestProposalActionsDisabled(t *testing.T) {
 // TestProposalSteps: a proposal's steps are its own, not another's whose
 // number starts the same (#1, #12).
 func TestProposalSteps(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	ctx := context.Background()
 	var ids []int64
@@ -439,6 +447,7 @@ func waitingDeletion(t *testing.T) (*Server, int64) {
 // that Lapilli approved it; and a step's reason is said under the step
 // that gave it, not again under each after it.
 func TestProposalHistoryWaits(t *testing.T) {
+	parallel(t)
 	s, id := waitingDeletion(t)
 	steps := historyOf(t, s, id)
 	want := []string{
@@ -457,6 +466,7 @@ func TestProposalHistoryWaits(t *testing.T) {
 // TestProposalHistoryByID: a proposal's steps are in the order the ledger
 // kept them, not by their times, which replicas' clocks set to the second.
 func TestProposalHistoryByID(t *testing.T) {
+	parallel(t)
 	s, id := waitingDeletion(t)
 	// The merge kept by a replica whose clock is two hours behind.
 	ledgerExec(t, s, "UPDATE changes SET at = at - 7200 WHERE what = ?", fmt.Sprintf("proposal #%d merged", id))
@@ -470,6 +480,7 @@ func TestProposalHistoryByID(t *testing.T) {
 // steps, and says older ones aren't shown; its making, from the proposal
 // itself, first.
 func TestProposalHistoryLatest(t *testing.T) {
+	parallel(t)
 	s, id := waitingDeletion(t)
 	at := time.Now().Unix()
 	for i := range 150 {
@@ -521,6 +532,7 @@ func appliedByAgent(t *testing.T) (*Server, int64, int64) {
 // backtest is the change's, read the other way, with the change beside
 // after undoing it. An undo keeps of the change only the edit.
 func TestUndoPage(t *testing.T) {
+	parallel(t)
 	s, id, uid := appliedByAgent(t)
 	u := state(t, s, uid)
 	if ev := proposalEvidence(u); ev.Reason != "" || ev.From != "" || ev.Backtest != nil || ev.Incident != "" || ev.Edit == nil {
@@ -597,6 +609,7 @@ var undoForm = regexp.MustCompile(`(?s)<form method="post" action="/proposals/\d
 // puts back the whole rule as it was, annotations too, and the undo's page
 // says it again.
 func TestUndoReadFirst(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	s := grafanaServer(t, g)
@@ -645,6 +658,7 @@ func TestUndoReadFirst(t *testing.T) {
 // one order: another parameter, an option it doesn't take, or another
 // order, is the same page, worked out and kept once.
 func TestProposalPageCachedByWhatItReads(t *testing.T) {
+	parallel(t)
 	s, h, id := withProposal(t, nil)
 	path := "/proposals/" + itoa(id)
 	cached := func() int {
@@ -692,6 +706,7 @@ func TestProposalPageCachedByWhatItReads(t *testing.T) {
 // its new one from its edit; with neither known, the new one alone. Each
 // value is one line, a text's control characters shown as U+FFFD.
 func TestProposalHeadingFromWhatItKeeps(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, h, id := withProposal(t, nil)
 	h1 := func(id int64) string {
@@ -739,6 +754,7 @@ func TestProposalHeadingFromWhatItKeeps(t *testing.T) {
 // whole, the one side then the other, and the page says so, as the
 // versions tab does; one shorter, nothing of it.
 func TestProposalLongRuleSaid(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, h, id := withProposal(t, nil)
 	said := "Too long to set beside each other line by line: the rule as it is, taken out, then as proposed."
@@ -768,6 +784,7 @@ func TestProposalLongRuleSaid(t *testing.T) {
 // a line the same in a diff, a proposal or a task of one, an approval of
 // one, a team, a report, a firing a quiet window would have excused.
 func TestOnesInEnglish(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, h, id := withProposal(t, nil)
 	_, body, _ := ui(t, h, http.MethodGet, "/proposals", cy, "", nil)
@@ -838,6 +855,7 @@ func TestOnesInEnglish(t *testing.T) {
 // an honorific and Lapilli without: what Lapilli made is "Lapilli 가 만듦",
 // not "Lapilli 님이".
 func TestNoHonorificForLapilli(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	id, err := s.propose(context.Background(), ask{Rule: "Errors", Kind: ledger.KindFor, For: 15 * time.Minute, From: "suggestion"}, ledger.Proposer, false, true)
 	if err != nil {
@@ -868,6 +886,7 @@ func TestNoHonorificForLapilli(t *testing.T) {
 // applied again (sent to Grafana, not read back yet), is a step of its own:
 // its history doesn't say it waits as its rule fires.
 func TestProposalHistoryStillApplying(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindDelete, Path: ledger.PathGit, MadeBy: bo, Before: "x"})
@@ -901,6 +920,7 @@ func TestProposalHistoryStillApplying(t *testing.T) {
 // reads it, so asking with one names nothing new: the page is the same, and
 // cached once, whatever name it was asked with.
 func TestProposalPageTeamNoOneHas(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindDelete, Path: ledger.PathGit, MadeBy: bo, Before: "x"})

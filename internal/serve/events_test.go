@@ -106,6 +106,7 @@ func TestForOutlastsShown(t *testing.T) {
 // The same, of the restart rule written in Grafana: a query, a reduce
 // (last) and a threshold (> 0.5).
 func TestForOutlastsGrafana(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, func(c *Config) { c.CheckContent = true })
 	rule := func(title, for_ string) string {

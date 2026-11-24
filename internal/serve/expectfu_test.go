@@ -58,6 +58,7 @@ func TestReasonTextTranslated(t *testing.T) {
 // scenario is not known in Lapilli's words (its test file not there);
 // what promtool said of one failing is shown as promtool said it.
 func TestExpectationReasonsInLanguage(t *testing.T) {
+	parallel(t)
 	expect := "expectations:\n  - rule: Errors\n    scenarios: [tests/none.yaml, tests/errors.yaml]\n"
 	s, _, _, _ := scenarioServer(t, expect, map[string]string{"tests/errors.yaml": scenariotest.Test("fail")}, true)
 	checkAgain(t, s)
@@ -91,6 +92,7 @@ func TestExpectationReasonsInLanguage(t *testing.T) {
 // isn't theirs to read. So is what it and --config's expectations can't
 // hold together, which names what --config declares.
 func TestExpectUnreadToReaders(t *testing.T) {
+	parallel(t)
 	s := expectServer(t, theExpectations, false)
 	os.WriteFile(s.cfg.Expect, []byte("expectations:\n  - rule: Paged\n    budjet: {week: 1}\n"), 0o600)
 	s.readExpect()

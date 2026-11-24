@@ -145,6 +145,7 @@ var ruleFileCases = []fileCase{
 // Those of this repository too: every file it reads alert rules from and
 // can change a rule in (rules.EditDoc; a cloud's own formats it can't).
 func TestRuleFile(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	cases := slices.Clone(ruleFileCases)
 	cases = append(cases, fileCase{"x.yaml", `---
@@ -328,6 +329,7 @@ func randomDocs(seed uint64, n int) []string {
 // YAML reads the file at all. Files made at random, and those above, are
 // held to it.
 func TestDocsAsYAMLReads(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	bodies := randomDocs(21, 300)
 	for _, c := range ruleFileCases {
@@ -405,6 +407,7 @@ func fitsSays(t *testing.T, pairs [][3]string) []bool {
 // and notification policies to a Grafana file, or a ClusterRoleBinding
 // after a PrometheusRule: each took, as it was alert rules in shape.
 func TestFits(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	st := stack(t)
 	longer := func(s string) string { return strings.Replace(s, "for: 2m", "for: 15m", 1) }
@@ -457,6 +460,7 @@ func TestFits(t *testing.T) {
 // files of rules changed at random, a line put in, taken out or changed,
 // a document added, are held to it.
 func TestFitsAsYAMLReads(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	bases := []string{ruleFile, promRule, monitor, rulesCM, grafana, stack(t), "groups: []\n---\non: push\njobs: {}\n"}
 	pieces := []string{"jobs: {}\n", "  jobs: {}\n", "    - alert: X\n      expr: x\n", "---\n", "--- # c\n", "---#x: 1\n", " kind: Job\n",
@@ -583,6 +587,7 @@ func mergeKeys(a, b map[string]any) map[string]bool {
 // GitOps controller to apply once merged. Now none is; a rule changed,
 // beside a ServiceMonitor or in a ConfigMap, still is.
 func TestChangeRecipeChangesOnlyRules(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")

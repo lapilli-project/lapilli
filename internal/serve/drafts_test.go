@@ -67,6 +67,7 @@ const errorsHeld = "expectations:\n  - rule: Errors\n    budget: {week: 10}\n   
 // misses a catch's delay, or loses an incident, with none. Nothing is
 // kept.
 func TestTestExpectation(t *testing.T) {
+	parallel(t)
 	s, _, _ := draftServer(t, "expectations: []\n", nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -203,6 +204,7 @@ func (f failingFor) QueryRange(ctx context.Context, expr string, start, end time
 // never fires, and misses INC-1) would go unseen. No post, and the note
 // says why.
 func TestTestExpectationUnreplayed(t *testing.T) {
+	parallel(t)
 	s, _, _ := draftServer(t, "expectations: []\n", nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -235,6 +237,7 @@ func TestTestExpectationUnreplayed(t *testing.T) {
 // as promtool would expand it before anything runs, and refused past the
 // bounds, promtool never started for it.
 func TestTestExpectationScenarios(t *testing.T) {
+	parallel(t)
 	s, _, count := draftServer(t, "expectations: []\n", nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -322,6 +325,7 @@ func TestTestExpectationScenarios(t *testing.T) {
 // alone. Drafts count with proposals toward the person's hour; a draft
 // holds its rule by rule: alone.
 func TestProposeExpectation(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir, _ := draftServer(t, "# the team's\nexpectations: []\n", func(c *Config) { c.ChangesToken = tokenFile(t, changesToken) })
 	ts := httptest.NewServer(s.Handler())
@@ -515,6 +519,7 @@ func ownKey(s *Server, d ledger.ExpectDraft, who string) string { return s.draft
 // rule's tab by an editor, made by them, for another to accept; dropped
 // by an editor.
 func TestHistoryDraft(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := expectServer(t, "expectations: []\n", false)
 	s.cfg.UserHeader, s.cfg.Editors, s.cfg.Admins = "X-Forwarded-Email", []string{"ed@example.com"}, []string{"boss@example.com"}
@@ -613,6 +618,7 @@ func getAsWithHeaders(t *testing.T, h http.Handler, path, who string) (int, stri
 // put where the file comes from; kept to serve's configuration, the
 // entries to add there. Nothing says it was applied.
 func TestAcceptDraftWithoutGitPath(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := draftServer(t, "# ours\nexpectations:\n  - rule: Errors\n    budget: {week: 50, asleep: 3}\n", nil)
 	h := s.Handler()

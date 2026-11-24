@@ -145,6 +145,7 @@ func nocServerOf(t *testing.T, withMarked bool) *Server {
 // The deploys file: a history a recipe wrote, and a deploy written down;
 // refused whole when it says something it shouldn't.
 func TestLoadDeploys(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	write := func(name, text string) string {
 		p := filepath.Join(dir, name)
@@ -210,6 +211,7 @@ func TestLoadDeploys(t *testing.T) {
 // on the rules, a section on a rule's page, a tile and a column on the
 // overview.
 func TestNOCPages(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules?weeks=4")
@@ -258,6 +260,7 @@ func TestNOCPages(t *testing.T) {
 // The incidents, by team and by where they come from, with how soon the
 // first alert came and what nearly caught those nothing did.
 func TestNOCIncidents(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/incidents?source=impact")
@@ -284,6 +287,7 @@ func TestNOCIncidents(t *testing.T) {
 // /api/v1/summary: each week, for everyone and each team, in a shape that
 // keeps its schema.
 func TestSummaryAPI(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	h := s.Handler()
 	code, body, _ := get(t, h, "/api/v1/summary?from=2026-10-26&to=2026-11-02&team=*&critical=critical")
@@ -386,6 +390,7 @@ func TestSummaryAPI(t *testing.T) {
 // with a re-fire, everyone's and each team's; each incident by the teams
 // that own it; when notifications and deploys last came.
 func TestNOCMetrics(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	_, body, _ := get(t, s.Handler(), "/metrics")
 	for _, want := range []string{
@@ -429,6 +434,7 @@ func TestNOCMetrics(t *testing.T) {
 // The weekly digest, and a report's sections, say how many re-fired, the
 // alert that did most, and the firings during deploys.
 func TestNOCDigest(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	ctx := context.Background()
 	from := s.l.Midnight(ledger.Week(s.l.Day(now)) - 7)
@@ -467,6 +473,7 @@ func TestNOCDigest(t *testing.T) {
 // gives them, and only the variables it defines; each panel and query has
 // an id of its own. test/e2e/dashboard.sh asks a real Grafana each query.
 func TestDashboardMetrics(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile("../../charts/lapilli/dashboards/lapilli.json")
 	if err != nil {
 		t.Fatal(err)
@@ -662,6 +669,7 @@ func (shiftHistory) QueryRange(ctx context.Context, expr string, start, end time
 // /metrics: its catches judged noisy or not by the rule's stones in the
 // incident's week, not over the seven days to now.
 func TestIncidentStateEverywhere(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, nil)
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte("groups:\n  - name: shop\n    rules:\n      - alert: Flaky\n        expr: flaky > 0\n        labels: {severity: critical}\n"), 0o644)
@@ -694,6 +702,7 @@ func TestIncidentStateEverywhere(t *testing.T) {
 // token: /metrics gives each a series, and which teams own them in no more
 // than 500 series, not one series for each incident and team.
 func TestIncidentSeriesBounded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	var vals []string
@@ -725,6 +734,7 @@ func TestIncidentSeriesBounded(t *testing.T) {
 // Before the first run, /metrics gives no time for it, nor for how far the
 // ledger has firings: a dashboard shows none, not the year 1.
 func TestNoRunNoTime(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	_, body, _ := get(t, s.Handler(), "/metrics")
 	for _, name := range []string{"lapilli_last_run_timestamp_seconds", "lapilli_serve_cursor_timestamp_seconds"} {
@@ -739,6 +749,7 @@ func TestNoRunNoTime(t *testing.T) {
 // firings during deploys, near misses on the incidents; and the tables
 // that scroll sideways do so in a box the keyboard reaches.
 func TestNOCRendered(t *testing.T) {
+	parallel(t)
 	s, paths := a11yServer(t)
 	h := s.Handler()
 	seen := map[string]bool{}
@@ -762,6 +773,7 @@ func TestNOCRendered(t *testing.T) {
 // Without --deploys, a ledger that keeps deploys says so on the status,
 // with how to take them away; given a file again, the status clears.
 func TestDeploysUnread(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	ctx := context.Background()
 	file := s.cfg.Deploys
@@ -781,6 +793,7 @@ func TestDeploysUnread(t *testing.T) {
 // A runbook that is a path in the rules' repository is a link on the rule's
 // page under --runbook-base, and a path without it.
 func TestRunbookBase(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for base, want := range map[string]string{
 		"": "<code>docs/runbooks/errors.md#high</code>",
@@ -802,6 +815,7 @@ func TestRunbookBase(t *testing.T) {
 // The chart's ServiceMonitor keeps lapilli's labels (a rule's team stays
 // team, not exported_team) and bounds a scrape.
 func TestChartServiceMonitor(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile("../../charts/lapilli/templates/service.yaml")
 	if err != nil {
 		t.Fatal(err)

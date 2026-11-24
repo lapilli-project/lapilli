@@ -206,6 +206,7 @@ func post(t *testing.T, h http.Handler, path string, form url.Values, site strin
 }
 
 func TestServe(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	// INC-0 keeps the week before's record: every firing is judged.
 	s, rules := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email"; keepRecord(c) })
@@ -337,6 +338,7 @@ func TestServe(t *testing.T) {
 // A run before the rules have been read replays nothing and leaves the
 // cursor where it was, so the backfill isn't passed over.
 func TestRulesFirst(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	s.jobs(ctx, true)
@@ -355,6 +357,7 @@ func TestRulesFirst(t *testing.T) {
 }
 
 func TestReadOnly(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.ReadOnly = true })
 	h := s.Handler()
 	if code, _, _ := post(t, h, "/incidents", url.Values{"title": {"x"}, "start": {"2026-11-02T10:00"}}, "same-origin"); code != http.StatusForbidden {
@@ -367,6 +370,7 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestDigest(t *testing.T) {
+	parallel(t)
 	var got string
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -399,6 +403,7 @@ func TestDigest(t *testing.T) {
 }
 
 func TestWeekly(t *testing.T) {
+	parallel(t)
 	w, err := ParseWeekly("mon@09:00")
 	if err != nil {
 		t.Fatal(err)
@@ -452,6 +457,7 @@ func TestTimeout(t *testing.T) {
 
 // A rule keeps its name when a rule of the same name comes or goes.
 func TestNames(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, nil)
 	write := func(severities ...string) {
@@ -481,6 +487,7 @@ func TestNames(t *testing.T) {
 
 // A request given up on isn't kept as the page.
 func TestCancelledNotCached(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	raw := ""

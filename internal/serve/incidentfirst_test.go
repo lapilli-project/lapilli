@@ -19,6 +19,7 @@ import (
 // whether it was noisy that week. The list used to name the noisy rule
 // beside the other's lead, as if the noisy rule had made the catch.
 func TestIncidentFirstNotNoisy(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	raw := ""

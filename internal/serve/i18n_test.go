@@ -41,6 +41,7 @@ func verbs(s string) []string {
 // Every translation takes the same arguments as its English, and gives
 // back what it is given.
 func TestCatalogs(t *testing.T) {
+	parallel(t)
 	for lang, m := range catalogs {
 		for en, x := range m {
 			if a, b := verbs(en), verbs(x); !slices.Equal(a, b) {
@@ -331,6 +332,7 @@ func TestPagesInEachLanguage(t *testing.T) {
 // A refusal that says another (incident L-1 would grow past its bounds:
 // …) says both in the reader's language, not the one within in English.
 func TestRefusalWithinTranslated(t *testing.T) {
+	parallel(t)
 	err := ledger.ErrInvalid{Format: "incident %s would grow past its bounds: %s",
 		Args: []any{"L-1", ledger.ErrInvalid{Format: "an incident lasts 31 days at most"}}}
 	for lang, want := range map[string]string{
@@ -351,6 +353,7 @@ var messages = regexp.MustCompile(`(?:\b(?:invalid|bad|checkText)\(|\btr\([\w.]+
 // are shown only when something is refused, told or being done, so
 // rendering the pages doesn't find them.
 func TestRefusalsTranslated(t *testing.T) {
+	parallel(t)
 	for _, dir := range []string{".", "../ledger", "../schedule"} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
@@ -384,6 +387,7 @@ func TestRefusalsTranslated(t *testing.T) {
 
 // No catalog gives one English text twice: the second would quietly win.
 func TestCatalogsNoDuplicates(t *testing.T) {
+	parallel(t)
 	files, err := catalogFiles.ReadDir("i18n")
 	if err != nil {
 		t.Fatal(err)
@@ -418,6 +422,7 @@ func TestCatalogsNoDuplicates(t *testing.T) {
 // TestChartLangs: the Helm chart lets serve.notify.lang be every language --lang
 // takes (values.yaml says "en, es, ja or ko").
 func TestChartLangs(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile("../../charts/lapilli/templates/_helpers.tpl")
 	if err != nil {
 		t.Fatal(err)
@@ -442,6 +447,7 @@ func TestChartLangs(t *testing.T) {
 // --loki-rules), as the CHANGELOG says the chart takes them; checked with
 // helm template beside this test.
 func TestChartLokiAlone(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile("../../charts/lapilli/templates/_helpers.tpl")
 	if err != nil {
 		t.Fatal(err)

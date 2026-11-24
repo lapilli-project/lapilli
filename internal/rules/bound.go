@@ -518,11 +518,20 @@ func operands(expr string, off, depth int, unless, values, part bool, out *[]com
 	operands(expr[start:], off+start, depth, against, false, true, out)
 }
 
+// exprRead, when set, is told how many bytes of an expression each walk
+// over it, and each setOps, reads: the tests count what reading a rule's
+// expression costs by them (TestBoundsEdges, TestEventWindowBounded), each
+// level of brackets reading the text inside again, to maxDepth.
+var exprRead func(n int)
+
 // walk calls f with the offset of each byte of expr outside comments and
 // spaces, and the depth of brackets it is at: a bracket at the depth
 // outside it, and a string as its two quotes. ok is false when a string
 // doesn't end or a bracket isn't matched.
 func walk(expr string, f func(i, depth int)) bool {
+	if exprRead != nil {
+		exprRead(len(expr))
+	}
 	depth := 0
 	for i := 0; i < len(expr); i++ {
 		c := expr[i]
@@ -595,6 +604,9 @@ type setOp struct {
 
 // setOps are expr's set operators outside brackets, in order.
 func setOps(expr string) ([]setOp, bool) {
+	if exprRead != nil {
+		exprRead(len(expr))
+	}
 	var ops []setOp
 	depth := 0
 	for i := 0; i < len(expr); i++ {

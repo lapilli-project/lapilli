@@ -358,6 +358,12 @@ func (b *budget) spend(k int) bool {
 	return b.why == ""
 }
 
+// routeWork, when set, is told of the work a rule's routing does: each
+// policy it looks at, matched or not, and the words of contact points of
+// each way it puts together. The tests hold routing to it (TestPolicyTreeCost),
+// and the words to the steps spent, which are charged by them.
+var routeWork func(policies, words int)
+
 // outcomes are the sets of contact points a rule's alerts can be sent to,
 // one a way the routing can go, each a set of ids; why says why there is
 // none told: too many ways, policies past those read, or the budget spent.
@@ -392,6 +398,9 @@ func (r *route) outcomes(known map[string]string, parent, size, depth int, b *bu
 	}
 	all := []way{{recvs: newWays(size)}}
 	for _, c := range r.routes {
+		if routeWork != nil {
+			routeWork(1, 0)
+		}
 		m := c.match(known)
 		if m == no || !slices.ContainsFunc(all, func(w way) bool { return !w.stopped }) {
 			continue
@@ -407,6 +416,9 @@ func (r *route) outcomes(known map[string]string, parent, size, depth int, b *bu
 		var next []way
 		seen := map[string]bool{}
 		keep := func(w way) {
+			if routeWork != nil {
+				routeWork(0, len(w.recvs))
+			}
 			if k := key(w); !seen[k] {
 				seen[k] = true
 				next = append(next, w)

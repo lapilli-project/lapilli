@@ -42,6 +42,7 @@ func takeLedger(t *testing.T, s *Server) {
 // one whose writer's session went, while another process took the ledger
 // and will post it, posts nothing.
 func TestDigestHoldsTheLedger(t *testing.T) {
+	parallel(t)
 	if !ledgertest.On() {
 		t.Skip("the ledgers are SQLite's")
 	}
@@ -68,6 +69,7 @@ func TestDigestHoldsTheLedger(t *testing.T) {
 // process that lost the ledger and the one that took it both send it. A
 // new one fails this test until it is held, or said here why it needn't be.
 func TestSendersHoldTheLedger(t *testing.T) {
+	parallel(t)
 	ways := map[string]string{
 		"send":        "a notice of the outbox: sendDue holds the ledger before each",
 		"postDigest":  "the week's digest: holds the ledger before it posts",

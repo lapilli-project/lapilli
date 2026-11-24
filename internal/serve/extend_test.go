@@ -41,6 +41,7 @@ func as(t *testing.T, h http.Handler, method, path, who, groups string, form url
 // Viewers look, editors write, admins also change the settings and the
 // teams; the pages offer only what the reader may do.
 func TestRoles(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader, c.GroupsHeader = "X-Forwarded-Email", "X-Forwarded-Groups"
 		c.Editors, c.Admins = []string{"ed@example.com", "sre"}, []string{"boss@example.com"}
@@ -151,6 +152,7 @@ func TestRoles(t *testing.T) {
 // What happens is told to the webhook, as JSON with a link, and to Slack, as
 // a line in --lang; one that fails is tried again.
 func TestNotify(t *testing.T) {
+	parallel(t)
 	var mu sync.Mutex
 	got := map[string][]string{}
 	var keys []string
@@ -268,6 +270,7 @@ func TestNotify(t *testing.T) {
 
 // A quiet window that repeats, kept from the form and shown as it repeats.
 func TestRepeatingWindowForm(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.Handler()
 	form := url.Values{"title": {"nightly batch"}, "start": {"2026-11-03T02:00"}, "end": {"2026-11-03T03:00"}, "every": {"day"}, "until": {"2026-11-30"}}
@@ -297,6 +300,7 @@ func TestRepeatingWindowForm(t *testing.T) {
 // A repeating window excuses the firings in each of its repeats, and its
 // page lists them all.
 func TestRepeatingWindowExcuses(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	raw := ""
@@ -329,6 +333,7 @@ func TestRepeatingWindowExcuses(t *testing.T) {
 // The UI's font comes from the server itself, as a font, with its licence;
 // the CSP lets fonts load from there and nowhere else.
 func TestFont(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.Handler()
 	for path, want := range map[string]string{"/static/heebo-latin.woff2": "font/woff2", "/static/heebo-latin-ext.woff2": "font/woff2", "/static/OFL-Heebo.txt": "text/plain"} {
@@ -357,6 +362,7 @@ func TestFont(t *testing.T) {
 // A page kept by a browser isn't taken for the page of another process on
 // the same ledger, a new release's above all: the generation starts again.
 func TestETagAcrossRestarts(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	at := func() string {
 		s, _ := server(t, func(c *Config) { c.Ledger = dir })
@@ -373,6 +379,7 @@ func TestETagAcrossRestarts(t *testing.T) {
 // rebinding) is refused, reading or writing; the names the server is
 // reached by are answered.
 func TestHosts(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.ExternalURL = "https://lapilli.example.com"
 		c.AllowedHosts = []string{"ui.corp.example"}
@@ -461,6 +468,7 @@ func TestHeavyReport(t *testing.T) {
 // of the UI, the API or MCP: a NetworkPolicy can let Prometheus reach it
 // alone.
 func TestMetricsListener(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	h := s.MetricsHandler()
 	for path, want := range map[string]int{"/metrics": 200, "/healthz": 200, "/readyz": 503,
@@ -474,6 +482,7 @@ func TestMetricsListener(t *testing.T) {
 // "user:" names a person alone and "group:" a group alone, so one who can
 // pick their own name can't take a group's role.
 func TestRolePrefixes(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader, c.GroupsHeader = "X-Forwarded-Email", "X-Forwarded-Groups"
 		c.Admins = []string{"group:sre team", "user:boss@example.com"}

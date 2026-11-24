@@ -196,7 +196,10 @@ func TestTopAlerts(t *testing.T) {
 }
 
 // TopAlerts is one pass over the alerts, the most read TopRead: 40,000
-// alerts with labels of their own each, in a fraction of a second.
+// alerts with labels of their own each, a few dozen allocations for each
+// of the TopRead read (their labels' text) at most, not for each of the
+// 40,000. Counted (testing.AllocsPerRun), not timed, so that a slow
+// runner fails none; the time is logged.
 func TestTopAlertsBounded(t *testing.T) {
 	all := make([]AlertCount, 40000)
 	for i := range all {
@@ -204,8 +207,15 @@ func TestTopAlertsBounded(t *testing.T) {
 	}
 	start := time.Now()
 	top := TopAlerts(all)
-	if took := time.Since(start); took > 500*time.Millisecond || len(top) != TopShown {
-		t.Errorf("%d in %s", len(top), took)
+	if len(top) != TopShown {
+		t.Errorf("%d shown, want %d", len(top), TopShown)
+	}
+	// Some 9,000 (11,000 under the race detector); for each of the 40,000,
+	// some 330,000.
+	n := testing.AllocsPerRun(3, func() { TopAlerts(all) })
+	t.Logf("40,000 alerts: %s, %.0f allocations", time.Since(start), n)
+	if n > 40*TopRead {
+		t.Errorf("40,000 alerts: %.0f allocations, over %d: each alert's labels read, not TopRead's?", n, 40*TopRead)
 	}
 }
 

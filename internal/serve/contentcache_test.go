@@ -19,6 +19,7 @@ import (
 // doesn't run it again; the firings judged again, or the rules read anew,
 // do.
 func TestContentCheckedWhenItsInputsChange(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	ctx := context.Background()
 	checked := func() int {
@@ -62,6 +63,7 @@ func TestContentCheckedWhenItsInputsChange(t *testing.T) {
 // Asked at once by many, the check runs once: the others wait for it and
 // take what it found.
 func TestContentCheckedOnceAtATime(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	ctx := context.Background()
 	var rs []rules.Rule
@@ -95,6 +97,7 @@ func TestContentCheckedOnceAtATime(t *testing.T) {
 // A report's content section is the problems now, by check, the guesses
 // apart, in its JSON as in its line.
 func TestReportContentCounts(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, func(c *Config) { c.ReportDests = map[string]string{"ops": filepath.Join(t.TempDir(), "ops")} })
 	ctx := context.Background()
 	id, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "content", Schedule: "daily@09:00", Sections: []string{"content"}, Dests: []string{"ops"}, Enabled: true},

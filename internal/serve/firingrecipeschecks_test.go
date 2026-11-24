@@ -78,6 +78,7 @@ func (r firingRecipe) command(url, file string, env ...string) *exec.Cmd {
 // the address. The scheme in capitals, this machine with a port or not,
 // and an https port and path of the deployment's own are taken.
 func TestFiringRecipesRefuseWhereAndWhat(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	bin := t.TempDir()
 	args := filepath.Join(bin, "args")
@@ -200,6 +201,7 @@ func askedFiringStandIn(t *testing.T, r firingRecipe, listen string, where func(
 // 127.0.0.1, [::1] or localhost, in any case, and so is the scheme, as
 // curl takes it; a recipe asks the stand-in there, with its token.
 func TestFiringRecipesTakeThisMachineHoweverWritten(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, f := range []struct{ name, listen, url string }{
 		{"HTTP", "127.0.0.1:0", "HTTP://127.0.0.1:%s"},
@@ -228,6 +230,7 @@ func TestFiringRecipesTakeThisMachineHoweverWritten(t *testing.T) {
 // after it, as an editor may leave them, are dropped. serve's own, which
 // put.sh sends, is of any characters, a space among them.
 func TestFiringRecipesTakeTheirTokens(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	tokens := map[string][]string{
 		"datadog.sh, a token":            {"ddpat_Ab12-cd.34~ef+56/gh=="},
@@ -254,6 +257,7 @@ func TestFiringRecipesTakeTheirTokens(t *testing.T) {
 // recipe with nothing written, rather than all of it read; put.sh, of
 // serve's answer, fails.
 func TestFiringRecipesTakeNoAnswerOver16MiB(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, r := range firingTokenRecipes(t) {
 		_, out, said, err := askedFiringStandIn(t, r, "127.0.0.1:0", func(port string) string { return "http://127.0.0.1:" + port },
@@ -269,6 +273,7 @@ func TestFiringRecipesTakeNoAnswerOver16MiB(t *testing.T) {
 // is: its line's end dropped, and more than one line refused before the
 // API is asked, rather than sent as a header of its own.
 func TestGoogleCloudRecipeHoldsGcloudsToken(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	var mu sync.Mutex
 	var sent []http.Header

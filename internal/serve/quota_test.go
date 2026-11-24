@@ -86,6 +86,7 @@ func (q *quotaAPI) total() int {
 // set beside what really fired, and /metrics counts it. The next run
 // replays the rule from where it was missed.
 func TestYieldOn429(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	q := &quotaAPI{asked: map[string]int{}}
 	q.full.Store(true)
@@ -142,6 +143,7 @@ func TestYieldOn429(t *testing.T) {
 // TestYieldFor: --yield-for leaves the API alone after a 429: a run in the
 // meantime asks nothing, and is kept as held, once.
 func TestYieldFor(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	q := &quotaAPI{asked: map[string]int{}}
 	q.full.Store(true)
@@ -209,6 +211,7 @@ func (g *guardHistory) QueryRange(ctx context.Context, expr string, start, end t
 // kept as held once for each reason, not as failed; it is asked between
 // the days of a catch-up as well, and the run waits there.
 func TestGuard(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Guard, c.CheckReplay = "evaluation_failures > 0", true })
 	g := &guardHistory{up: func(int) bool { return true }}
@@ -284,6 +287,7 @@ func TestGuard(t *testing.T) {
 // TestCatchUpHours: a catch-up waits for --catch-up-hours, then catches up
 // in them; a run that isn't behind runs at any hour.
 func TestCatchUpHours(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	w, err := ParseWindow("01:00-03:00")
 	if err != nil {
@@ -341,6 +345,7 @@ func TestCatchUpHours(t *testing.T) {
 // --catch-up-rate: at one every 1,000 seconds, a second request's turn
 // would come past a run's deadline, and it isn't asked. Caught up, it is.
 func TestCatchUpRate(t *testing.T) {
+	parallel(t)
 	q := &quotaAPI{asked: map[string]int{}}
 	api := httptest.NewServer(q)
 	t.Cleanup(api.Close)
@@ -365,6 +370,7 @@ func TestCatchUpRate(t *testing.T) {
 }
 
 func TestWindow(t *testing.T) {
+	parallel(t)
 	for _, c := range []struct {
 		in    string
 		len   time.Duration
@@ -429,6 +435,7 @@ func quotaServer(t *testing.T, q *quotaAPI, change func(*Config)) *Server {
 // TestYieldParallel: six rules, four at once, all answered 429: no more
 // are asked than were in flight, and every rule is missed, with why.
 func TestYieldParallel(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	q := &quotaAPI{asked: map[string]int{}}
 	q.full.Store(true)
@@ -451,6 +458,7 @@ func TestYieldParallel(t *testing.T) {
 // TestYieldImpact: the --impact query answered 429, under --yield-on-429,
 // holds the run, not fails it.
 func TestYieldImpact(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	q := &quotaAPI{asked: map[string]int{}}
 	q.full.Store(true)
@@ -471,6 +479,7 @@ func TestYieldImpact(t *testing.T) {
 // TestGuardYields: --guard answered 429, under --yield-on-429, holds the
 // run at once, and nothing else is asked.
 func TestGuardYields(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	q := &quotaAPI{asked: map[string]int{}}
 	q.full.Store(true)
@@ -490,6 +499,7 @@ func TestGuardYields(t *testing.T) {
 // none is given up; once the API answers again, every hour is replayed,
 // the first day's firing too.
 func TestYieldNoHourLost(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	start := now.Add(-10 * 24 * time.Hour)
 	fired := start.Add(27 * time.Hour)
@@ -535,6 +545,7 @@ func TestYieldNoHourLost(t *testing.T) {
 // the history, not even to set the replay beside what really fired over
 // the days it recorded; the next round, answered, does.
 func TestYieldDefersFollowUps(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	q := &quotaAPI{asked: map[string]int{}, okFirst: 4}
 	api := httptest.NewServer(q)

@@ -109,6 +109,7 @@ func worked(t *testing.T, s *Server) (notes map[string]ledger.Note, tasks []stri
 // team, the same notes and tasks, the same lines in the changes log; and
 // what it refuses, it counts.
 func TestBulkRules(t *testing.T) {
+	parallel(t)
 	const ed, pat, boss, vi = "ed@example.com", "pat@example.com", "boss@example.com", "vi@example.com"
 	picks := []string{"Errors", "SearchLatency", "Nobody"}
 	base, _, _ := bulkServer(t, nil)
@@ -200,6 +201,7 @@ func canonicalURL(t *testing.T, u string) string {
 // nothing, from another site, past 100 rules, or for what it can't do; and
 // it goes back only to the rules list, with what it did said once.
 func TestBulkRulesRefused(t *testing.T) {
+	parallel(t)
 	const ed = "ed@example.com"
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
@@ -262,6 +264,7 @@ func TestBulkRulesRefused(t *testing.T) {
 // TestBulkResultShown: the rules list says once what a bulk write did,
 // read within bounds, and its links don't carry it on.
 func TestBulkResultShown(t *testing.T) {
+	parallel(t)
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
 	for q, want := range map[string]string{
@@ -316,6 +319,7 @@ func TestBulkResultShown(t *testing.T) {
 // tasks and set dispositions, not teams, and sees the rest disabled, with
 // why.
 func TestBulkDisabled(t *testing.T) {
+	parallel(t)
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
 	for who, want := range map[string][]string{
@@ -355,6 +359,7 @@ func TestBulkDisabled(t *testing.T) {
 // change nothing: the bar, the firings' buttons and the overview's
 // suggestions disabled, with why.
 func TestBulkAccessibleReadOnly(t *testing.T) {
+	parallel(t)
 	s, _ := a11yServer(t)
 	s.cfg.ReadOnly = true
 	pageA11y(t, s.Handler(), "", "/", "/rules", "/rules?weeks=12&bulk=task&done=1", "/firings?day=2026-11-02", "/incidents/INC-1")
@@ -379,6 +384,7 @@ func failOn(t *testing.T, s *Server, table, column, value string) {
 // failed, logs once, and stops there: it ends on the list it came from,
 // saying how many weren't tried.
 func TestBulkPartial(t *testing.T) {
+	parallel(t)
 	s, ids := realServer(t)
 	h := s.Handler()
 	ctx := context.Background()
@@ -451,6 +457,7 @@ func mustInt(t *testing.T, v string) int64 {
 // still open has one already, counted so, and none is made; one done
 // doesn't count.
 func TestBulkTasksOnce(t *testing.T) {
+	parallel(t)
 	const ed = "ed@example.com"
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
@@ -494,6 +501,7 @@ func TestBulkTasksOnce(t *testing.T) {
 // picked, changes that alone of each rule's note: its text, its runbook and
 // the rest are as they were.
 func TestBulkKeepsNotes(t *testing.T) {
+	parallel(t)
 	const ed = "ed@example.com"
 	ctx := context.Background()
 	s, pay, search := bulkServer(t, nil)
@@ -535,6 +543,7 @@ func TestBulkKeepsNotes(t *testing.T) {
 // down (masculine); and the phrases the reviews found wanting say what
 // they mean.
 func TestBulkResultInWords(t *testing.T) {
+	parallel(t)
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
 	for _, c := range []struct{ lang, path, want string }{
@@ -583,6 +592,7 @@ func editOn(t *testing.T, s *Server, rule, other, text string) {
 // written, as its own form would send it: a note changed while the rules
 // before it were written is kept as it was changed, its disposition set.
 func TestBulkNoteReadEach(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := bulkServer(t, nil)
 	for _, rule := range []string{"Errors", "SearchLatency"} {

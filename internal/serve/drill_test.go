@@ -129,6 +129,7 @@ func viewOf(t *testing.T, s *Server, name, target string, view func(*http.Reques
 // its number, with the same team and over the same week, and that list,
 // all told, comes to the tile's number: for every team.
 func TestDrillDown(t *testing.T) {
+	parallel(t)
 	for _, notify := range []bool{false, true} {
 		drillDown(t, drillServer(t, notify), notify)
 	}
@@ -284,6 +285,7 @@ func drillDown(t *testing.T, s *Server, notify bool) {
 // in it is its Monday; another, or this week, is no week, and the list is
 // over its period. The week is a chip, and the lists' links keep it.
 func TestWeekAsked(t *testing.T) {
+	parallel(t)
 	s := drillServer(t, false)
 	for q, want := range map[string]string{"week=2026-10-26": "2026-10-26", "week=2026-10-28": "2026-10-26", "week=2026-11-01": "2026-10-26",
 		"week=2026-11-02": "", "week=2026-11-03": "", "week=2026-08-17": "2026-08-17", "week=2026-08-16": "", "week=2026-13-01": "", "week=x": "",
@@ -343,6 +345,7 @@ func TestWeekAsked(t *testing.T) {
 // TestStateCounts: state= lists, of each state, the incidents judged
 // against: one the ledger says isn't, whatever caught it, is in none.
 func TestStateCounts(t *testing.T) {
+	parallel(t)
 	s := drillServer(t, false)
 	ledgerExec(t, s, "UPDATE incidents SET counts = 0 WHERE key = ?", "P-1")
 	for _, st := range []string{"caught", "noisy", "missed"} {

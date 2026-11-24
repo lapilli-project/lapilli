@@ -51,6 +51,7 @@ func sourceRowOf(body, name string) string {
 // quiet when nothing came for two days. Only an admin sees the port and
 // the token's file; no one, the token.
 func TestSourcesIntake(t *testing.T) {
+	parallel(t)
 	token := "an-incidents-token-0123"
 	file := tokenFile(t, token)
 	s := criteriaServer(t, false, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
@@ -89,6 +90,7 @@ func TestSourcesIntake(t *testing.T) {
 // A source's writes are kept once in receivedEvery by a replica, not each
 // write: a job writes every incident each hour.
 func TestSourcesReceivedSeldom(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	token := "an-incidents-token-0123"
 	s := criteriaServer(t, false, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, token) })
@@ -109,6 +111,7 @@ func TestSourcesReceivedSeldom(t *testing.T) {
 // The incidents file and the impact signal: read, or failing with why; a
 // source not set up says so, in no colour.
 func TestSourcesReadOrFailing(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
 	h := s.Handler()
@@ -175,6 +178,7 @@ func sourcesStates(t *testing.T) map[string]*Server {
 // its path to a reader who isn't an admin, in the status banner of every
 // page, as the incidents file's is: by what it is.
 func TestFilePathsInBannerAnAdminsAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for _, which := range []string{"deploys", "marked"} {
 		t.Run(which, func(t *testing.T) {
@@ -212,6 +216,7 @@ func TestFilePathsInBannerAnAdminsAlone(t *testing.T) {
 // the longest first, as given and as a path joined under one says it; a
 // bare name is left in the sentences it is a word of.
 func TestRedactPaths(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	s, _ := server(t, func(c *Config) {
 		c.RulesPath, c.Config = dir+"/rules/", dir+"/rules/config.yaml"
@@ -236,6 +241,7 @@ func TestRedactPaths(t *testing.T) {
 // word of; a path is taken out where a separator follows it, and kept in
 // a longer name; and what is put in place of one isn't looked in again.
 func TestRedactPathsWhole(t *testing.T) {
+	parallel(t)
 	sentences := []string{
 		"reading the rules: a rule's expression didn't parse",
 		"the ledger: database or disk is full; data kept as it was",
@@ -276,6 +282,7 @@ func TestRedactPathsWhole(t *testing.T) {
 // walked where the link leads (rules.History), and what fails there says
 // that path: it is taken out too, as the path given is.
 func TestRedactPathsLinkTarget(t *testing.T) {
+	parallel(t)
 	base := t.TempDir()
 	real := filepath.Join(base, "store", "rev-1")
 	team := filepath.Join(real, "2026-11-01T00:00:00Z", "team")
@@ -310,6 +317,7 @@ func TestRedactPathsLinkTarget(t *testing.T) {
 // in the overview's last run. The digest's webhook file that can't be read
 // is one.
 func TestRunsFailedPathsAnAdminsAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hook := filepath.Join(t.TempDir(), "private-mount", "slack-hook")
 	s := criteriaServer(t, true, func(c *Config) { c.Slack = hook })
@@ -353,6 +361,7 @@ func TestRunsFailedPathsAnAdminsAlone(t *testing.T) {
 // overview, as the status banner does; and so does a tool's error to an
 // agent acting for anyone else.
 func TestRunsUnreachedAnAdminsToRead(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
 	why := fmt.Errorf(`the ledger: %w: the server says: password authentication failed for user "svc-user", database "store-db" at 10.1.2.3`, ledger.ErrConnect)

@@ -114,6 +114,7 @@ func writtenOnce(t *testing.T, s *Server, what string, n int) {
 // time, by two people, writes each firing down once: one incident, one
 // notice. The second press, or the later post, finds it caught.
 func TestRealOnce(t *testing.T) {
+	parallel(t)
 	s, ids := realServer(t)
 	h := s.Handler()
 	var wg sync.WaitGroup
@@ -149,6 +150,7 @@ func TestRealOnce(t *testing.T) {
 // the ledger has as caught nothing still (as a ledger changed from outside
 // could), is not written down again: one incident from it is there.
 func TestRealWrittenFrom(t *testing.T) {
+	parallel(t)
 	s, ids := realServer(t)
 	h := s.Handler()
 	if code, _, hd := postAs(t, h, realPathOf(ids[0]), realFormOf(ids[0]), "ana@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") == "" {
@@ -168,6 +170,7 @@ func TestRealWrittenFrom(t *testing.T) {
 // TestRealBack: "These were real" goes back to the firings it came from,
 // with the team and the period they were looked at for.
 func TestRealBack(t *testing.T) {
+	parallel(t)
 	s, ids := realServer(t)
 	h := s.Handler()
 	if _, err := s.l.PutTeam(context.Background(), ledger.Team{Name: "payments", Rules: "^R0"}, "ana"); err != nil {
@@ -189,6 +192,7 @@ func TestRealBack(t *testing.T) {
 // counted as a change: the ledger's generation, which what pages keep
 // hangs on, stands.
 func TestRealNothingCounted(t *testing.T) {
+	parallel(t)
 	s, ids := realServer(t)
 	h := s.Handler()
 	if code, _, _ := postAs(t, h, realPathOf(ids[0]), realFormOf(ids[0]), "ana@example.com", "same-origin"); code != http.StatusSeeOther {

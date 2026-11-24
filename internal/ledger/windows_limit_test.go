@@ -178,14 +178,16 @@ func TestWindowsScale(t *testing.T) {
 			Labels: map[string]string{"service": "checkout", "instance": fmt.Sprint(i)}, Start: start, End: start.Add(3 * time.Minute)})
 	}
 	record(t, l, t0, t0.Add(7*24*time.Hour), fs)
+	looked := 0
+	coversLooked = func() { looked++ }
+	defer func() { coversLooked = nil }()
 	began := time.Now()
 	if err := l.JudgeAll(ctx, opts, nil); err != nil {
 		t.Fatal(err)
 	}
-	took := time.Since(began)
-	t.Logf("judging 10,000 firings again beside %d quiet windows: %s", MaxWindows, took.Round(time.Millisecond))
-	if budget := time.Duration(float64(2*time.Second) * slow); took > budget {
-		t.Errorf("judging 10,000 firings again beside %d quiet windows took %s, over %s", MaxWindows, took, budget)
+	t.Logf("judging 10,000 firings again beside %d quiet windows: %d schedules looked up, in %s", MaxWindows, looked, time.Since(began).Round(time.Millisecond))
+	if looked > len(fs) {
+		t.Errorf("judging 10,000 firings again beside %d quiet windows looked a schedule up %d times, over once a firing", MaxWindows, looked)
 	}
 }
 
@@ -252,7 +254,6 @@ func TestWindowsCoverScale(t *testing.T) {
 	if race {
 		t.Skip("the race detector slows SQLite many times over")
 	}
-	budget := map[int]time.Duration{0: 2 * time.Second, MaxTeamWindows: 2 * time.Second, MaxWindows: 3 * time.Second}
 	for _, n := range []struct{ team, all int }{{0, 0}, {MaxTeamWindows, MaxTeamWindows}, {MaxTeamWindows, MaxWindows}} {
 		ctx := context.Background()
 		l := open(t, time.UTC)
@@ -280,12 +281,14 @@ func TestWindowsCoverScale(t *testing.T) {
 			fs = append(fs, firing.Firing{Rule: fmt.Sprintf("Pay%02d", r.IntN(40)),
 				Labels: map[string]string{"service": "checkout", "instance": fmt.Sprint(i)}, Start: start, End: start.Add(3 * time.Minute)})
 		}
+		looked := 0
+		coversLooked = func() { looked++ }
 		began := time.Now()
 		record(t, l, t0.Add(6*24*time.Hour), t0.Add(7*24*time.Hour), fs)
-		took := time.Since(began)
-		t.Logf("recording a day's 10,000 firings beside %d windows (%d a team's): %s", n.all, n.team, took.Round(time.Millisecond))
-		if max := time.Duration(float64(budget[n.all]) * slow); took > max {
-			t.Errorf("recording a day's 10,000 firings beside %d windows took %s, over %s", n.all, took, max)
+		coversLooked = nil
+		t.Logf("recording a day's 10,000 firings beside %d windows (%d a team's): %d schedules looked up, in %s", n.all, n.team, looked, time.Since(began).Round(time.Millisecond))
+		if looked > len(fs) {
+			t.Errorf("recording a day's 10,000 firings beside %d windows looked a schedule up %d times, over once a firing", n.all, looked)
 		}
 	}
 }

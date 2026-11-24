@@ -64,6 +64,7 @@ func bitbucket(bb *idptest.CI, change map[string]any) string {
 // braces, no jti), gets a backtest; so does one naming serve's audience
 // alone. The repository kept is its UUID; the pull request the job's word.
 func TestBacktestBitbucket(t *testing.T) {
+	parallel(t)
 	b, bb, _ := bbServer(t)
 	for name, token := range map[string]string{
 		"beside the default": bitbucket(bb, nil),
@@ -98,6 +99,7 @@ func TestBacktestBitbucket(t *testing.T) {
 // workspace's; fresh, as every CI's token is. Only a Bitbucket entry takes
 // two audiences.
 func TestBacktestBitbucketRefused(t *testing.T) {
+	parallel(t)
 	b, bb, other := bbServer(t)
 	def := idptest.BitbucketAudience(bbWorkspace)
 	fromOther := idptest.Bitbucket(bbRepo, bbWorkspace, btAudience)
@@ -158,6 +160,7 @@ func mapWith(m map[string]any, k string, v any) map[string]any {
 // place, as a GitLab merge request's don't. Each step's token is its own,
 // known by what it says (no jti), and starts one backtest.
 func TestBacktestBitbucketNoSupersede(t *testing.T) {
+	parallel(t)
 	b, bb, _ := bbServer(t)
 	for i, step := range []string{"{8f2c4a1e-5b7d-4e3a-9c6f-1a2b3c4d5e6f}", "{9a3d5b2f-6c8e-4f4b-8d7a-2b3c4d5e6f70}"} {
 		tok := bitbucket(bb, map[string]any{"stepUuid": step, "sub": bbRepo + ":" + step})

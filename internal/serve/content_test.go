@@ -72,6 +72,7 @@ func saying(t *testing.T, change func(*Config)) (*Server, string) {
 }
 
 func TestContentFindings(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	cf, err := s.contentFindings(context.Background())
 	if err != nil {
@@ -104,6 +105,7 @@ func TestContentFindings(t *testing.T) {
 // A rule's page says what it says, escaped, and what to fix in it, the
 // guesses apart; a runbook is a link only when it is one to follow.
 func TestContentPages(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules/Errors")
@@ -133,6 +135,7 @@ func TestContentPages(t *testing.T) {
 }
 
 func TestContentMetrics(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	_, body, _ := get(t, s.Handler(), "/metrics")
 	for _, want := range []string{"# TYPE lapilli_rule_content_problems gauge",
@@ -182,6 +185,7 @@ func TestContentLine(t *testing.T) {
 
 // A new summary is no new version: the pages show it all the same.
 func TestContentChangesWithoutVersion(t *testing.T) {
+	parallel(t)
 	s, dir := saying(t, nil)
 	ctx := context.Background()
 	h := s.Handler()
@@ -218,6 +222,7 @@ func TestContentChangesWithoutVersion(t *testing.T) {
 // Prometheus is asked for its scrape interval once a day, unless it is
 // given; where none is known, the range check is off.
 func TestContentScrapeInterval(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	ctx := context.Background()
 	ch := s.h.(*configHistory)
@@ -260,6 +265,7 @@ func TestContentScrapeInterval(t *testing.T) {
 }
 
 func TestContentOff(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, func(c *Config) { c.CheckContent = false })
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules/Errors")
@@ -278,6 +284,7 @@ func TestContentOff(t *testing.T) {
 // An agent gets what a rule says, its problems and its guesses apart, and
 // is told it is data.
 func TestContentMCP(t *testing.T) {
+	parallel(t)
 	s, _ := saying(t, nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()

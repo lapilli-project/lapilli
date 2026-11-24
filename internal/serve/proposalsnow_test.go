@@ -122,6 +122,7 @@ func apiProposalOf(t *testing.T, h http.Handler, id int64) map[string]any {
 // and it is stale, its approval held until it is backtested again, on the
 // page and by the server.
 func TestOldProposalReadNow(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, nil)
 	h := s.Handler()
@@ -205,6 +206,7 @@ func TestOldProposalReadNow(t *testing.T) {
 // is no longer stale, so it is approved. A fresh one isn't backtested
 // again.
 func TestBacktestAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
@@ -255,6 +257,7 @@ func TestBacktestAgain(t *testing.T) {
 // tries an hour; and refused when the rule changed since, which the page
 // says, as the API does.
 func TestBacktestAgainRefused(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := restartsServer(t, func(c *Config) { c.Editors = []string{bo} })
 	h := s.Handler()
@@ -402,6 +405,7 @@ func TestStaleWhy(t *testing.T) {
 // as dev when there is none. The demo's proposal, made by one of no
 // version, isn't either.
 func TestStaleNotByVersion(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, func(c *Config) { c.Version = "" })
 	id, err := s.propose(ctx, ask{Rule: "RestartsNow", Kind: ledger.KindFor, For: 10 * time.Minute, From: "person"}, bo, false, true)
@@ -431,6 +435,7 @@ func TestStaleNotByVersion(t *testing.T) {
 // approval that are stale alone, counted, with a chip that takes it away,
 // carried by the form and the other links; with none, says so.
 func TestProposalsStaleFilter(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, nil)
 	h := s.Handler()
 	fresh := proposeFor(t, h, "15m")
@@ -460,6 +465,7 @@ func TestProposalsStaleFilter(t *testing.T) {
 // where --mcp-propose lets it propose, for the person it acts for, its
 // tries counted apart from theirs; without it, there is no such tool.
 func TestBacktestAgainByAgent(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -682,6 +688,7 @@ func TestOutlastsOldVersionsBounded(t *testing.T) {
 // its evidence too: evidence kept anew, as backtesting again keeps it, is
 // read anew.
 func TestOutlastsByEvidence(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, nil)
 	id := keptAs(t, s, verdict.Semantics, "test", unrecordedFrom, unrecordedTo, nil)
@@ -839,6 +846,7 @@ func TestFlightsFail(t *testing.T) {
 // says what it would miss, never that its firings were counted, not
 // judged.
 func TestOldNoRecordJudged(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, nil)
 	f, err := s.current(ctx, "RestartsNow", false)
@@ -878,6 +886,7 @@ func TestOldNoRecordJudged(t *testing.T) {
 // the backtest replaced named; and what is checked again when it is
 // carried out isn't refused for missing it, which was said.
 func TestEarlierMissKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, nil)
 	h := s.Handler()
@@ -923,6 +932,7 @@ func TestEarlierMissKept(t *testing.T) {
 // the webhook and Slack, naming whose approvals were withdrawn and whether
 // an agent asked for it; Lapilli's own too.
 func TestBacktestedTold(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	s.l.TellTo([]string{"webhook"})
@@ -966,6 +976,7 @@ func TestBacktestedTold(t *testing.T) {
 // isn't backtested again for ten minutes, with this replica's tries
 // forgotten as another's would be, and the reader is told why.
 func TestBacktestAgainLedgerBound(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, nil)
 	h := s.Handler()
 	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
@@ -992,6 +1003,7 @@ func TestBacktestAgainLedgerBound(t *testing.T) {
 // the approvals it now needs is approved, unless it waits to be backtested
 // again: held, as an approval of it is.
 func TestPromoteHoldsStale(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	stale := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
@@ -1116,6 +1128,7 @@ func TestLapilliBacktestsStale(t *testing.T) {
 // newer one would undo: proposals don't go back and forth between them. A
 // person may.
 func TestNewerSemanticsHeld(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := restartsServer(t, nil)
 	newer := keptAs(t, s, semantics+1, "v9.0.0", unrecordedFrom, unrecordedTo, nil)
@@ -1175,6 +1188,7 @@ func againCount(t *testing.T, s *Server, ids []int64) (n int) {
 // period's record changed since is a person's: an incident written down
 // and taken away doesn't make Lapilli replay twelve weeks.
 func TestLapilliBacktestsOnRunsAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, ids := staleServer(t, 2, nil)
 	yes := true
@@ -1226,6 +1240,7 @@ func TestLapilliBacktestsOnRunsAlone(t *testing.T) {
 // approval: the proposal keeps its complete evidence, and isn't tried
 // again for an hour.
 func TestLapilliUnfinishedKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, ids := staleServer(t, 1, func(c *Config) { c.Approvals = 2 })
 	if _, err := s.l.Approve(ctx, ids[0], ana, 2, time.Time{}); err != nil {
@@ -1271,6 +1286,7 @@ func (pastDeadline) QueryRange(context.Context, string, time.Time, time.Time, ti
 // one it was made for, is a code span of its own: a backtick or a line
 // break in one can't end it, so a mention or a link in it stays text.
 func TestPRBodyIDsAsCode(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, nil)
 	evil := "a`b\nc @team [x](y)"
 	ev := evidence{From: "near miss", Incident: evil, EarlierLost: []string{evil + "1"},
@@ -1300,6 +1316,7 @@ func TestPRBodyIDsAsCode(t *testing.T) {
 // and the task made of it, each is a code span, so a mention, an image or a
 // link in one notifies no one and shows nothing but its text.
 func TestPRBodyNamesAsCode(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, nil)
 	rule := "Errors @example-org/everyone <img src=https://evil.example/p.png> [approve](https://evil.example/x)"
 	detail := "runbook_url `https://evil.example` @example-org/everyone ![i](https://evil.example/i.png)"
@@ -1328,6 +1345,7 @@ func TestPRBodyNamesAsCode(t *testing.T) {
 // goes on without approving any as fewer approvals are needed, those to
 // wait for approval again among them.
 func TestReadTimeFailsSoft(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := restartsServer(t, nil)
 	ids := againstVersions(t, s, dir, 1, 2, ledger.StateApproved)
@@ -1647,6 +1665,7 @@ func TestFlightsBounded(t *testing.T) {
 // TestComparingBusyText: Lapilli's own backtests again tell a comparison
 // running by the text backtestWithin refuses one with: the two alike.
 func TestComparingBusyText(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, nil)
 	s.comparing.Lock()
 	defer s.comparing.Unlock()
@@ -1779,6 +1798,7 @@ func TestLapilliTryCutShort(t *testing.T) {
 // step saying so, its try with it; and MCP's backtested_again is the last
 // kept, however many tries came after it.
 func TestLapilliTriesShownOnce(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, ids := staleServer(t, 1, nil)
 	id := ids[0]
@@ -1816,6 +1836,7 @@ func TestLapilliTriesShownOnce(t *testing.T) {
 // whatever error it gave (a database driver's own, say), not only an
 // unfinished replay or a deadline.
 func TestAgainLate(t *testing.T) {
+	parallel(t)
 	if !againLate(errors.New("sqlite: interrupted"), true) || !againLate(errUnfinished, false) || !againLate(context.DeadlineExceeded, false) {
 		t.Error("a try out of time not taken so")
 	}
@@ -1827,6 +1848,7 @@ func TestAgainLate(t *testing.T) {
 // TestLapilliComparingBusy: a person's comparison running, Lapilli's own
 // backtests again wait for the next run: none tried, none left for long.
 func TestLapilliComparingBusy(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, ids := staleServer(t, 3, nil)
 	s.comparing.Lock()
@@ -1900,6 +1922,7 @@ func TestCloseOnce(t *testing.T) {
 // long name's mentions, images and links read as Markdown after it; a
 // fenced block cut open is closed. A name is cut before it is a span.
 func TestBodyCutClosed(t *testing.T) {
+	parallel(t)
 	s, _ := restartsServer(t, nil)
 	evil := " @example-org/everyone ![i](https://evil.example/i.png) [x](https://evil.example/x)"
 	rule := "Errors" + strings.Repeat(evil, 120)

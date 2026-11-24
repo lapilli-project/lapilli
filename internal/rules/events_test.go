@@ -105,6 +105,7 @@ func FuzzEventWindow(f *testing.F) {
 // What EventWindow reads is bounded: an expression longer than eventMaxExpr
 // isn't read, and the longest, deepest one that is costs little, so a rule
 // writer can't make the content check, which asks it of every rule, slow.
+// What it costs is the bytes it reads (exprRead), counted, not timed.
 func TestEventWindowBounded(t *testing.T) {
 	deep := func(levels, size int) string {
 		e := "increase(x{a=\"" + strings.Repeat("y", size) + "\"}[30m])"
@@ -113,25 +114,27 @@ func TestEventWindowBounded(t *testing.T) {
 		}
 		return e + " > 0.5"
 	}
+	n := 0
+	exprRead = func(k int) { n += k }
+	defer func() { exprRead = nil }()
 	long := Rule{Expr: deep(31, 16<<10), For: time.Hour}
-	start := time.Now()
-	if _, ok := long.EventWindow(); ok || time.Since(start) > 10*time.Millisecond {
-		t.Errorf("16 KB, 31 deep: %v in %s", ok, time.Since(start))
+	if _, ok := long.EventWindow(); ok || n != 0 {
+		t.Errorf("16 KB, 31 deep: %v, %d bytes read, want none", ok, n)
 	}
 	worst := Rule{Expr: deep(7, eventMaxExpr-200), For: time.Hour}
 	if len(worst.Expr) > eventMaxExpr {
 		t.Fatal(len(worst.Expr))
 	}
-	start = time.Now()
+	n = 0
+	start := time.Now()
 	for range 100 {
 		if _, ok := worst.EventWindow(); !ok {
 			t.Fatal("7 sums deep, under 4 KB: counts events")
 		}
 	}
-	if took := time.Since(start); took > time.Second {
-		t.Errorf("100 of the deepest, longest read: %s", took)
-	} else {
-		t.Logf("100 of the deepest, longest read: %s", took)
+	t.Logf("100 of the deepest, longest read: %d bytes each, in %s", n/100, time.Since(start))
+	if most := readMost(worst.Expr, eventMaxDepth); n/100 > most {
+		t.Errorf("the deepest, longest: %d bytes read, over %d", n/100, most)
 	}
 }
 

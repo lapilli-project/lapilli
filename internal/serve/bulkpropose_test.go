@@ -141,6 +141,7 @@ func proposalsKept(t *testing.T, s *Server) []string {
 // and backtest, path and diff, the same lines in the changes log, by whom;
 // what is refused, counted by why, and the proposals made linked to.
 func TestBulkPropose(t *testing.T) {
+	parallel(t)
 	picks := []string{"Errors", "BulkA", "BulkB", "BulkC", "BulkD", "Gone"}
 	for _, c := range []struct {
 		what, kind string
@@ -272,6 +273,7 @@ func TestBulkPropose(t *testing.T) {
 // (Grafana's) proposes turning each off, as its page's form does, the
 // same proposals as one at a time, approved each as one.
 func TestBulkProposeOff(t *testing.T) {
+	parallel(t)
 	bulk := grafanaServer(t, &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}})
 	one := grafanaServer(t, &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}})
 	code, _, hd := postAs(t, bulk.Handler(), "/rules/bulk", url.Values{"do": {"propose"}, "propose": {"retire"}, "rule": {"Errors", "Other"}, "back": {"/rules"}}, bo, "same-origin")
@@ -311,6 +313,7 @@ func TestBulkProposeOff(t *testing.T) {
 // change"): another team's, or no team's, is counted as not theirs, as the
 // single form refuses it.
 func TestBulkProposeRefused(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	h := s.Handler()
 	var many []string
@@ -370,6 +373,7 @@ func TestBulkProposeRefused(t *testing.T) {
 // TestBulkProposeLimit: the hour's twenty proposals count those made in
 // bulk as one by one: past them, each is refused, and said so.
 func TestBulkProposeLimit(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	ctx := context.Background()
 	for i := range ledger.ProposalsAnHour - 1 {
@@ -511,6 +515,7 @@ func TestBulkProposeTimeUp(t *testing.T) {
 // only or a viewer, sees a line saying why in place of the bar; and a
 // lapilli serve with no rules of its own says why to anyone.
 func TestBulkProposeBar(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	for who, want := range map[string]string{
 		bo:                `<button class="quiet-button" name="do" value="propose">Propose</button>`,
@@ -549,6 +554,7 @@ func TestBulkProposeBar(t *testing.T) {
 // another's nor what the address claims; twenty at most; and none of the
 // page's links or forms carries it on.
 func TestBulkProposeResult(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	ctx := context.Background()
 	mine := func(rule, by string, agent bool) string {
@@ -605,6 +611,7 @@ func TestBulkProposeResult(t *testing.T) {
 // one it classifies is one propose gives: a text added or changed there
 // fails here until it is said which it is. And each is counted by its why.
 func TestProposeWhyKept(t *testing.T) {
+	parallel(t)
 	reached := refusalsOf(t, "propose")
 	for text, in := range reached {
 		if _, ok := proposeWhy[text]; !ok {
@@ -765,6 +772,7 @@ func TestBulkProposeWritesBack(t *testing.T) {
 // they may not propose at all, each with a link to the one that waits,
 // in each language. Once that one is finished with, the form is back.
 func TestFirstProposeWhileOneWaits(t *testing.T) {
+	parallel(t)
 	// Its week's record kept: a suggestion is shown for a week with one.
 	s := proposeServer(t, nil)
 	keepRecordIn(t, s)
@@ -826,6 +834,7 @@ func finish(t *testing.T, s *Server, id string) {
 // alone propose, with the link too: in each language. Once that one is
 // dropped, the editor's forms send again.
 func TestProposeFormsWhileOneWaits(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, func(c *Config) { c.CheckContent = true })
 	h := s.Handler()
 	sends := func(when string) {

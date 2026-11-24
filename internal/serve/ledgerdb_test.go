@@ -210,6 +210,7 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 // one whose writer's session went, while a process took the ledger alone,
 // sends nothing.
 func TestSendDueHoldsTheLedger(t *testing.T) {
+	parallel(t)
 	if !ledgertest.On() {
 		t.Skip("the ledgers are SQLite's")
 	}
@@ -251,6 +252,7 @@ func TestSendDueHoldsTheLedger(t *testing.T) {
 // it, in the status banner and on a page that failed for it; anyone else,
 // that it can't be reached.
 func TestLedgerUnreachedAnAdminsToRead(t *testing.T) {
+	parallel(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	// A port nothing listens on, on this machine: refused at once.
