@@ -1,8 +1,10 @@
 # The words of the site's header and footer, in each language the front
 # page is in: site/index.md, and site/LANG/index.md with lang: LANG. docs/
-# is in English only, so a page with no lang is English, and the language
-# menu on it goes to each language's front page. The languages are those of
-# lapilli serve's UI, in the order of its menu.
+# is in English, and docs/ko/ has pages in Korean (site/docs.sh), so a page
+# with no lang is English, and the language menu on it goes to each
+# language's front page, or to the page's translation where it has one. The
+# languages are those of lapilli serve's UI, in the order of its menu.
+# in_english, stale and original are used on Korean pages only.
 order: [en, es, ja, ko]
 
 en:
@@ -10,6 +12,7 @@ en:
   code: EN
   locale: en_US
   home: /
+  docs_url: /docs/
   skip: Skip to the content
   site_nav: Site
   docs: Docs
@@ -19,7 +22,7 @@ en:
   roadmap: Roadmap
   menu: Menu
   language: Language
-  others_home: The docs are in English; the front page is in each of these.
+  others_home: "The docs are in English, some of them also in Korean; the front page is in each of these."
   star: Star
   star_more: " Lapilli on GitHub"
   start: Get started
@@ -53,12 +56,17 @@ en:
   around: The pages before and after
   prev: Previous
   next: Next
+  edit: "Edit this page on GitHub"
+  original: ""
+  stale: ""
+  in_english: ""
 
 es:
   name: Español
   code: ES
   locale: es_ES
   home: /es/
+  docs_url: /docs/
   skip: Saltar al contenido
   site_nav: Sitio
   docs: Documentación
@@ -68,7 +76,7 @@ es:
   roadmap: Hoja de ruta
   menu: Menú
   language: Idioma
-  others_home: ""
+  others_home: "La documentación está en inglés, y una parte también en coreano; la página principal está en cada uno de estos idiomas."
   star: Star
   star_more: " a Lapilli en GitHub"
   start: Empezar
@@ -102,12 +110,17 @@ es:
   around: Las páginas anterior y siguiente
   prev: Anterior
   next: Siguiente
+  edit: "Editar esta página en GitHub"
+  original: ""
+  stale: ""
+  in_english: ""
 
 ja:
   name: 日本語
   code: JA
   locale: ja_JP
   home: /ja/
+  docs_url: /docs/
   skip: 本文へスキップ
   site_nav: サイト
   docs: ドキュメント
@@ -117,7 +130,7 @@ ja:
   roadmap: ロードマップ
   menu: メニュー
   language: 言語
-  others_home: ""
+  others_home: "ドキュメントは英語で、一部は韓国語もあります。トップページは各言語にあります。"
   star: Star
   star_more: " (GitHub の Lapilli)"
   start: はじめる
@@ -151,12 +164,17 @@ ja:
   around: 前後のページ
   prev: 前へ
   next: 次へ
+  edit: "GitHub でこのページを編集"
+  original: ""
+  stale: ""
+  in_english: ""
 
 ko:
   name: 한국어
   code: KO
   locale: ko_KR
   home: /ko/
+  docs_url: /ko/docs/
   skip: 본문으로 건너뛰기
   site_nav: 사이트
   docs: 문서
@@ -166,7 +184,7 @@ ko:
   roadmap: 로드맵
   menu: 메뉴
   language: 언어
-  others_home: ""
+  others_home: "문서는 영어이고 일부는 한국어로도 있어요. 첫 화면은 이 언어마다 있어요."
   star: Star
   star_more: " (GitHub 의 Lapilli)"
   start: 시작하기
@@ -200,3 +218,7 @@ ko:
   around: 앞뒤 문서
   prev: 이전
   next: 다음
+  edit: "GitHub에서 이 페이지 고치기"
+  original: "영어 원문"
+  stale: "이 번역 뒤에 영어 원문이 바뀌었습니다. 최신 내용은 [link]을 보세요."
+  in_english: "영어"

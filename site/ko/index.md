@@ -18,8 +18,8 @@ description: "Lapilli는 울린 알림 하나하나를 실제로 일어난 장�
 잡지 못한 장애는 미탐 장애로 드러납니다.</p>
 
 <div class="cta">
-  <a class="primary" href="{{ '/docs/getting-started/' | relative_url }}">시작하기 <span aria-hidden="true">→</span></a>
-  <a href="{{ '/docs/' | relative_url }}">문서 읽기 (영어)</a>
+  <a class="primary" href="{{ '/ko/docs/getting-started/' | relative_url }}">시작하기 <span aria-hidden="true">→</span></a>
+  <a href="{{ '/ko/docs/' | relative_url }}">문서 읽기</a>
   <a href="#help-build-it">함께 만들기</a>
 </div>
 
@@ -327,7 +327,7 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 릴리스는 게시 전에 점검하고, 게시한 뒤에는 바꿀 수 없습니다. 받은 파일은
 [Checking a release (영어)]({{ site.repo }}/blob/main/SECURITY.md#checking-a-release)로
 검증할 수 있습니다.
-[Getting started (영어)]({{ '/docs/getting-started/' | relative_url }})는 여기서부터
+[시작하기]({{ '/ko/docs/getting-started/' | relative_url }})는 여기서부터
 내 알림에 대한 첫 리포트까지 안내합니다.
 
 ## 이름 {#the-name}

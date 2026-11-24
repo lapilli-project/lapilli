@@ -1,6 +1,34 @@
 {%- assign lang = page.lang | default: "en" -%}
 {%- assign t = site.data.i18n[lang] -%}
 {%- assign home = t.home | relative_url -%}
+{%- comment -%}
+The docs in a language: on a Korean page the Korean ones, where there are
+any (site/docs.sh writes site/_data/docs_ko.yml), and for each page linked
+from here the Korean one if it is translated, else the English.
+{%- endcomment -%}
+{%- assign docs_url = t.docs_url -%}
+{%- assign korean = "" -%}
+{%- if lang == "ko" and site.data.docs_ko -%}
+  {%- for g in site.data.docs_ko -%}
+    {%- for p in g.pages -%}
+      {%- if p.lang == "ko" -%}{%- assign korean = korean | append: p.url | append: " " -%}{%- endif -%}
+    {%- endfor -%}
+  {%- endfor -%}
+{%- else -%}
+  {%- assign docs_url = site.data.i18n.en.docs_url -%}
+{%- endif -%}
+{%- assign d_start = "/docs/getting-started/" -%}
+{%- assign d_how = "/docs/how-it-judges/" -%}
+{%- assign d_verdict = "/docs/verdict/" -%}
+{%- assign d_serve = "/docs/serve/" -%}
+{%- assign d_faq = "/docs/faq/" -%}
+{%- assign d_trouble = "/docs/troubleshooting/" -%}
+{%- if korean contains "/ko/docs/getting-started/ " -%}{%- assign d_start = "/ko/docs/getting-started/" -%}{%- endif -%}
+{%- if korean contains "/ko/docs/how-it-judges/ " -%}{%- assign d_how = "/ko/docs/how-it-judges/" -%}{%- endif -%}
+{%- if korean contains "/ko/docs/verdict/ " -%}{%- assign d_verdict = "/ko/docs/verdict/" -%}{%- endif -%}
+{%- if korean contains "/ko/docs/serve/ " -%}{%- assign d_serve = "/ko/docs/serve/" -%}{%- endif -%}
+{%- if korean contains "/ko/docs/faq/ " -%}{%- assign d_faq = "/ko/docs/faq/" -%}{%- endif -%}
+{%- if korean contains "/ko/docs/troubleshooting/ " -%}{%- assign d_trouble = "/ko/docs/troubleshooting/" -%}{%- endif -%}
 <!doctype html>
 <html lang="{{ lang }}" data-copy="{{ t.copy }}" data-copied="{{ t.copied }}">
 <head>
@@ -25,6 +53,12 @@
 <link rel="alternate" hreflang="{{ l }}" href="{{ site.data.i18n[l].home | absolute_url }}">
 {%- endfor %}
 <link rel="alternate" hreflang="x-default" href="{{ '/' | absolute_url }}">
+{%- elsif page.translations %}
+<link rel="alternate" hreflang="{{ lang }}" href="{{ page.url | absolute_url }}">
+{%- for tr in page.translations %}
+<link rel="alternate" hreflang="{{ tr[0] }}" href="{{ tr[1] | absolute_url }}">
+{%- endfor %}
+<link rel="alternate" hreflang="x-default" href="{% if lang == 'en' %}{{ page.url | absolute_url }}{% else %}{{ page.translations.en | absolute_url }}{% endif %}">
 {%- endif %}
 <meta name="go-import" content="lapilli.dev git https://github.com/lapilli-project/lapilli">
 <meta name="go-source" content="lapilli.dev https://github.com/lapilli-project/lapilli https://github.com/lapilli-project/lapilli/tree/main{/dir} https://github.com/lapilli-project/lapilli/blob/main{/dir}/{file}#L{line}">
@@ -265,6 +299,10 @@
   .around a span { display: block; color: var(--dim); font-size: .8rem; }
   .around .next { grid-column: 2; text-align: right; }
   .edit { margin-top: 1.4rem; font-size: .9rem; }
+  /* A translation's note that the English page has changed since it; and
+     the mark, in a list in another language, of a page that is in English. */
+  .stale { margin: 1.4rem 0 0; padding: .6rem 1rem; background: var(--accent-soft); border: 1px solid var(--line-strong); border-radius: 14px; font-size: .92rem; }
+  .other { margin-left: .3rem; padding: 0 .4rem; border: 1px solid var(--line-strong); border-radius: 9999px; color: var(--dim); font-size: .72rem; font-weight: 400; white-space: nowrap; }
   @media (max-width: 1200px) {
     .docs { grid-template-columns: 14rem minmax(0, 1fr); }
     .left { grid-row: 1 / span 2; }
@@ -292,7 +330,7 @@
 <body{% if page.layout == "docs" %} class="docs-page"{% endif %}>
 <a class="skip" href="#{% if page.layout == "docs" %}content{% else %}main{% endif %}">{{ t.skip }}</a>
 {%- capture links %}
-  <a href="{{ '/docs/' | relative_url }}">{{ t.docs }}</a>
+  <a href="{{ docs_url | relative_url }}">{{ t.docs }}</a>
   <a href="{{ home }}#how-it-judges">{{ t.how }}</a>
   <a href="{{ home }}#install">{{ t.install }}</a>
   <a href="{{ home }}#help-build-it">{{ t.contribute }}</a>
@@ -302,7 +340,7 @@
 <a class="btn star" href="{{ site.repo }}"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>{{ t.star }}<span class="vh">{{ t.star_more }}</span></a>
 {%- endcapture %}
 {%- capture start -%}
-<a class="btn primary start" href="{{ '/docs/getting-started/' | relative_url }}">{{ t.start }}</a>
+<a class="btn primary start" href="{{ d_start | relative_url }}">{{ t.start }}</a>
 {%- endcapture %}
 <header class="site">
 <div class="bar">
@@ -316,13 +354,13 @@
     <details class="pick lang">
       <summary class="btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span class="vh">{{ t.language }}: </span>{{ t.code }}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
       <div class="pop">
-        {%- if t.others_home != "" and page.home != true %}
+        {%- if t.others_home != "" and page.home != true and page.translations == nil %}
         <p class="note">{{ t.others_home }}</p>
         {%- endif %}
         <ul>
         {%- for l in site.data.i18n.order %}
         {%- assign o = site.data.i18n[l] %}
-          <li><a href="{{ o.home | relative_url }}" lang="{{ l }}" hreflang="{{ l }}"{% if l == lang %} aria-current="true"{% endif %}>{{ o.name }}<span class="code" aria-hidden="true">{{ o.code }}</span></a></li>
+          <li><a href="{{ page.translations[l] | default: o.home | relative_url }}" lang="{{ l }}" hreflang="{{ l }}"{% if l == lang %} aria-current="true"{% endif %}>{{ o.name }}<span class="code" aria-hidden="true">{{ o.code }}</span></a></li>
         {%- endfor %}
         </ul>
       </div>
@@ -357,8 +395,8 @@
   <nav aria-labelledby="f-project">
     <h2 id="f-project">{{ t.f_project }}</h2>
     <ul>
-      <li><a href="{{ '/docs/getting-started/' | relative_url }}">{{ t.getting_started }}</a></li>
-      <li><a href="{{ '/docs/how-it-judges/' | relative_url }}">{{ t.how }}</a></li>
+      <li><a href="{{ d_start | relative_url }}">{{ t.getting_started }}</a></li>
+      <li><a href="{{ d_how | relative_url }}">{{ t.how }}</a></li>
       <li><a href="{{ home }}#install">{{ t.install }}</a></li>
       <li><a href="{{ site.repo }}/releases">{{ t.releases }}</a></li>
       <li><a href="{{ site.repo }}/blob/main/ROADMAP.md">{{ t.roadmap }}</a></li>
@@ -367,11 +405,11 @@
   <nav aria-labelledby="f-docs">
     <h2 id="f-docs">{{ t.f_docs }}</h2>
     <ul>
-      <li><a href="{{ '/docs/' | relative_url }}">{{ t.docs_home }}</a></li>
-      <li><a href="{{ '/docs/verdict/' | relative_url }}">lapilli verdict</a></li>
-      <li><a href="{{ '/docs/serve/' | relative_url }}">lapilli serve</a></li>
-      <li><a href="{{ '/docs/faq/' | relative_url }}">{{ t.faq }}</a></li>
-      <li><a href="{{ '/docs/troubleshooting/' | relative_url }}">{{ t.troubleshooting }}</a></li>
+      <li><a href="{{ docs_url | relative_url }}">{{ t.docs_home }}</a></li>
+      <li><a href="{{ d_verdict | relative_url }}">lapilli verdict</a></li>
+      <li><a href="{{ d_serve | relative_url }}">lapilli serve</a></li>
+      <li><a href="{{ d_faq | relative_url }}">{{ t.faq }}</a></li>
+      <li><a href="{{ d_trouble | relative_url }}">{{ t.troubleshooting }}</a></li>
     </ul>
   </nav>
   <nav aria-labelledby="f-community">
@@ -394,7 +432,7 @@
     <ul>
     {%- for l in site.data.i18n.order %}
     {%- assign o = site.data.i18n[l] %}
-      <li><a href="{{ o.home | relative_url }}" lang="{{ l }}" hreflang="{{ l }}"{% if l == lang %} aria-current="true"{% endif %}>{{ o.name }}</a></li>
+      <li><a href="{{ page.translations[l] | default: o.home | relative_url }}" lang="{{ l }}" hreflang="{{ l }}"{% if l == lang %} aria-current="true"{% endif %}>{{ o.name }}</a></li>
     {%- endfor %}
     </ul>
   </nav>

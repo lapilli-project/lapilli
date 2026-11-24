@@ -4,7 +4,9 @@
 
 .DS_Store
 site/docs/
+site/ko/docs/
 site/_data/docs.yml
+site/_data/docs_ko.yml
 
 # What a lapilli serve run in place leaves, its default --ledger.
 lapilli-ledger/
