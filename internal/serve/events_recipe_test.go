@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -657,10 +658,24 @@ func TestEventsRecipeTokenRotated(t *testing.T) {
 		cmd.Env = recipeEnv(srv.URL, token, "", "FOLLOW=true", "POLL=1")
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
+		// Its own process group, so that what it starts is stopped with it.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		defer cmd.Process.Kill()
+		// Stopped, and waited for, before t.TempDir is removed: a recipe
+		// still running, or a child of it, makes files in the directory
+		// while it is. SIGTERM to the group ends the command the shell is
+		// in, and the shell's trap then removes what it made and exits;
+		// SIGKILL is only for a run that doesn't end, so that the test
+		// can't hang.
+		defer func() {
+			pid := cmd.Process.Pid
+			kill := time.AfterFunc(30*time.Second, func() { syscall.Kill(-pid, syscall.SIGKILL) })
+			defer kill.Stop()
+			syscall.Kill(-pid, syscall.SIGTERM)
+			cmd.Wait()
+		}()
 		waitFor := func(what string, ok func() bool) {
 			t.Helper()
 			for range 1200 { // a minute, at most, for a loaded machine

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/verdict"
 )
@@ -175,7 +176,12 @@ func TestBacktestActionMergeGroup(t *testing.T) {
 func TestBacktestRecipeStepSummary(t *testing.T) {
 	needRecipeTools(t)
 	prom := promStandIn(t)
-	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	// The report's heading has its period to the minute, and the period
+	// ends now unless it is given: two runs a minute apart would head their
+	// reports differently. One period for every run, the default's length.
+	to := time.Now().UTC().Truncate(time.Second)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC",
+		"--from", to.Add(-7 * 24 * time.Hour).Format(time.RFC3339), "--to", to.Format(time.RFC3339)}
 	read := func(p string) string {
 		t.Helper()
 		b, err := os.ReadFile(p)
