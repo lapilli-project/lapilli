@@ -724,6 +724,64 @@ func TestBacktestSupersedeQueue(t *testing.T) {
 	}
 }
 
+// askRun is askQueue, of a GitHub Actions run: of workflow, its number
+// run.
+func askRun(id, branch string, pr int64, workflow string, run int64) BacktestAsk {
+	a := askQueue(id, branch, pr)
+	a.Workflow, a.RunNumber = workflow, run
+	return a
+}
+
+// Of a workflow, a backtest takes the place only of one of an earlier run
+// of it: a run that asks late (it waited for a runner while the queue
+// built its group again, or a newer commit was pushed), or an earlier run
+// run again, keeping its number, takes no newer run's place, a merge
+// group's as a pull request's; nor does a run of another workflow. One
+// kept with no workflow (asked before 032) is taken the place of as
+// before, and so are those of a CI whose tokens say no run.
+func TestBacktestSupersedeLaterRun(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	asked := func(a BacktestAsk, want int, what string) {
+		t.Helper()
+		a.Queue, a.PerTrust = 50, 50
+		if _, _, sup, err := l.AskBacktest(ctx, a, t0); err != nil || sup != want {
+			t.Errorf("%s: %d superseded, want %d: %v", what, sup, want, err)
+		}
+	}
+	const wf, other = "example/alerts/.github/workflows/backtest.yml", "example/alerts/.github/workflows/loki.yml"
+	for _, branch := range []string{"main", ""} {
+		pr := map[string]int64{"main": 5, "": 6}[branch]
+		asked(askRun("new-"+branch, branch, pr, wf, 11), 0, "run 11, into "+branch)
+		// Run 10 asks late, and run 10 again: neither takes run 11's place.
+		asked(askRun("late-"+branch, branch, pr, wf, 10), 0, "run 10, late, into "+branch)
+		asked(askRun("again-"+branch, branch, pr, wf, 10), 0, "run 10 run again, into "+branch)
+		// Another workflow's run 99 takes no place of this one's.
+		asked(askRun("other-"+branch, branch, pr, other, 99), 0, "another workflow's run, into "+branch)
+		// Run 12 takes the place of each earlier run of its workflow.
+		asked(askRun("newest-"+branch, branch, pr, wf, 12), 3, "run 12, into "+branch)
+		for id, state := range map[string]string{"new-": BacktestSuperseded, "late-": BacktestSuperseded, "again-": BacktestSuperseded,
+			"other-": BacktestWaiting, "newest-": BacktestWaiting} {
+			if b, ok, err := l.Backtest(ctx, id+branch); err != nil || !ok || b.State != state {
+				t.Errorf("%s%s: %+v, want %s: %v", id, branch, b, state, err)
+			}
+		}
+		if b, _, _ := l.Backtest(ctx, "newest-"+branch); b.Workflow != wf || b.RunNumber != 12 {
+			t.Errorf("kept %q, run %d", b.Workflow, b.RunNumber)
+		}
+	}
+	// Kept with no workflow, as before 032: taken the place of by a run.
+	asked(askQueue("before", "main", 7), 0, "one kept with no workflow")
+	asked(askRun("run", "main", 7, wf, 1), 1, "a run's, after it")
+	// A CI whose tokens say no run: by the commit alone, as before.
+	asked(askQueue("no-run", "main", 8), 0, "of no run")
+	asked(askQueue("no-run-newer", "main", 8), 1, "of no run, another commit")
+}
+
 // A ledger at 031 with a backtest waiting, in SQLite or, with
 // LAPILLI_TEST_POSTGRES, in Postgres, migrates to 032 with it as it was,
 // of no merge queue: a pull request's newer commit takes its place, and a

@@ -1253,6 +1253,34 @@ func (a asker) mergeGroup() bool {
 	return ev == "merge_group"
 }
 
+// runNumber is a run's number as GitHub's tokens write it, a decimal.
+var runNumber = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
+
+// run is, of a GitHub Actions job's token, the workflow its run is of,
+// its file (workflow_ref before its @ref, which names the run's ref), and
+// the run's number (run_number), which GitHub's contexts reference says
+// begins at 1 for a workflow's first run and increments with each new
+// run, and doesn't change when a run is run again: what tells an earlier
+// run from a later one, as run_id, said only to be unique, doesn't. "", 0
+// for any other CI's, and for a token that doesn't say both plainly: its
+// backtest supersedes by the commit alone, as before.
+func (a asker) run() (string, int64) {
+	if a.claims == nil || a.t.CI != "github" {
+		return "", 0
+	}
+	ref, _ := signin.ClaimString(a.claims["workflow_ref"])
+	wf, _, cut := strings.Cut(ref, "@refs/")
+	num, _ := signin.ClaimString(a.claims["run_number"])
+	if !cut || wf == "" || len(wf) > 512 || !signin.Plain(wf) || !runNumber.MatchString(num) {
+		return "", 0
+	}
+	n, err := strconv.ParseInt(num, 10, 64)
+	if err != nil {
+		return "", 0
+	}
+	return wf, n
+}
+
 // queue is the branch the merge queue a token's run is of merges into, as
 // its ref says it: "" for any run but a merge queue's.
 func (a asker) queue() string {
@@ -1485,9 +1513,10 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	done()
+	workflow, run := a.run()
 	id, key := randomHex(16), randomKey()
 	kh, bh := sha256.Sum256([]byte(key)), sha256.Sum256(body)
-	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), RepositoryID: a.repositoryID(), QueueBranch: a.queue(), PullRequest: pr, Commit: req.Commit,
+	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), RepositoryID: a.repositoryID(), QueueBranch: a.queue(), Workflow: workflow, RunNumber: run, PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
 		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes()}

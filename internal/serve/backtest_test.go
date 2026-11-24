@@ -40,6 +40,9 @@ type btSet struct {
 	gh, gl, fj *idptest.CI
 	plain      string
 	log        *lockedBuffer
+	// runs numbers the runs of the GitHub tokens made (github), each a
+	// later run than the one before, as GitHub numbers a workflow's.
+	runs atomic.Int64
 }
 
 type lockedBuffer struct {
@@ -142,9 +145,11 @@ func btServer(t *testing.T, h replay.History, extra string, more func(*Config)) 
 }
 
 // github is a GitHub Actions job's token for pull request 42 of the
-// repository 123456789, with claims changed.
+// repository 123456789, of a run later than the token before's
+// (run_number), with claims changed.
 func (b *btSet) github(change map[string]any) string {
 	c := idptest.GitHub("123456789", "42")
+	c["run_number"] = fmt.Sprint(b.runs.Add(1))
 	for k, v := range change {
 		c[k] = v
 	}
@@ -472,7 +477,13 @@ func TestBacktestMergeGroupSupersede(t *testing.T) {
 	}
 	// Pull request 5's own backtest, then its merge group into main, by
 	// the ref alone: the body says no number.
-	queued("pull request 5", idptest.GitHub("123456789", "5"), nil, 0)
+	// A pull request's token, its run numbered by b.github.
+	pr5 := func() map[string]any {
+		c := idptest.GitHub("123456789", "5")
+		delete(c, "run_number")
+		return c
+	}
+	queued("pull request 5", pr5(), nil, 0)
 	queued("group 5 into main", group("main", "5", 'a'), nil, 0)
 	// The body may say the ref's number; never another.
 	queued("group 6 into main", group("main", "6", 'b'), map[string]any{"pull_request": 6}, 0)
@@ -495,7 +506,7 @@ func TestBacktestMergeGroupSupersede(t *testing.T) {
 	queued("group 5 into main, again", group("main", "5", 'f'), nil, 1)
 	// Pull request 5's newer commit takes its own one's place, not a
 	// group's.
-	queued("pull request 5, a newer commit", idptest.GitHub("123456789", "5"), nil, 1)
+	queued("pull request 5, a newer commit", pr5(), nil, 1)
 	// Room again, and a group of a branch whose name holds the first's
 	// ref: another queue's.
 	for _, name := range []string{"group 6 into main", "group 5 into release/1.x"} {
@@ -575,8 +586,9 @@ func TestBacktestTwoJobsOneRun(t *testing.T) {
 	parallel(t)
 	b := btServer(t, nil, queueEntry, nil)
 	head := commitN(1)
+	// Of one run: its number the same.
 	for name, claims := range map[string]func() map[string]any{
-		"a merge group's":  func() map[string]any { return queueClaims("main", "5", commitN(2), nil) },
+		"a merge group's":  func() map[string]any { return queueClaims("main", "5", commitN(2), map[string]any{"run_number": "3"}) },
 		"a pull request's": func() map[string]any { return idptest.GitHub("123456789", "5") },
 	} {
 		for _, key := range []string{"prom", "loki"} {
@@ -592,6 +604,70 @@ func TestBacktestTwoJobsOneRun(t *testing.T) {
 	}
 	if by, err := b.s.l.BacktestsWaiting(context.Background()); err != nil || by["alerts"] != 2 || by["alerts-queue"] != 2 {
 		t.Errorf("waiting %v: %v", by, err)
+	}
+}
+
+// A run that asks late takes no newer run's place: an earlier group's job
+// that waited for a runner while the queue built the group again, or the
+// earlier run run again (run_attempt 2, its run_number the same), leaves
+// the newer group's backtest waiting, as does a run of another workflow;
+// a later run of the workflow takes the place of each earlier one. A pull
+// request's run of an earlier commit, asking after its newer commit's,
+// takes no place either. By the token's run_number and workflow_ref,
+// which GitHub signs.
+func TestBacktestLateRun(t *testing.T) {
+	parallel(t)
+	b := btServer(t, nil, queueEntry, nil)
+	superseded := func() int {
+		return b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] + b.s.btPort.ended[[2]string{"alerts-queue", ledger.BacktestSuperseded}]
+	}
+	ids := map[string]string{}
+	n := 0
+	ask := func(name string, claims map[string]any, commit int, want, wantSuperseded int) {
+		t.Helper()
+		n++
+		claims["jti"] = fmt.Sprint("t", n)
+		before := superseded()
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(claims), btBody(ruleFile, changedRules, map[string]any{"commit": commitN(commit)}))
+		ids[name], _ = m["id"].(string)
+		if code != want || superseded()-before != wantSuperseded {
+			t.Errorf("%s: %d %v, %d superseded; want %d, %d", name, code, m, superseded()-before, want, wantSuperseded)
+		}
+	}
+	group := func(run, attempt string, change map[string]any) map[string]any {
+		c := queueClaims("main", "5", commitN(9), map[string]any{"run_number": run, "run_attempt": attempt})
+		maps.Copy(c, change)
+		return c
+	}
+	ask("run 11", group("11", "1", nil), 11, http.StatusAccepted, 0)
+	ask("run 10, late", group("10", "1", nil), 10, http.StatusAccepted, 0)
+	ask("run 10, again", group("10", "2", nil), 10, http.StatusAccepted, 0)
+	// The entry's three wait, none of them another workflow's to take.
+	ask("another workflow's run 99", group("99", "1", map[string]any{"workflow_ref": "example/alerts/.github/workflows/loki.yml@refs/heads/gh-readonly-queue/main/pr-5-" + commitN(9)}),
+		99, http.StatusTooManyRequests, 0)
+	ask("run 12", group("12", "1", nil), 12, http.StatusAccepted, 3)
+	for name, state := range map[string]string{"run 11": ledger.BacktestSuperseded, "run 10, late": ledger.BacktestSuperseded,
+		"run 10, again": ledger.BacktestSuperseded, "run 12": ledger.BacktestWaiting} {
+		x, ok, err := b.s.l.Backtest(context.Background(), ids[name])
+		if err != nil || !ok || x.State != state {
+			t.Errorf("%s: %+v, want %s: %v", name, x, state, err)
+		}
+	}
+	if x, _, _ := b.s.l.Backtest(context.Background(), ids["run 12"]); x.Workflow != "example/alerts/.github/workflows/backtest.yml" || x.RunNumber != 12 {
+		t.Errorf("kept workflow %q, run %d", x.Workflow, x.RunNumber)
+	}
+
+	// A pull request: its newer commit's run 21, then run 20 of the commit
+	// before, late.
+	pr := func(run string) map[string]any {
+		c := idptest.GitHub("123456789", "6")
+		c["run_number"] = run
+		return c
+	}
+	ask("pull request 6, run 21", pr("21"), 21, http.StatusAccepted, 0)
+	ask("pull request 6, run 20, late", pr("20"), 20, http.StatusAccepted, 0)
+	if x, _, _ := b.s.l.Backtest(context.Background(), ids["pull request 6, run 21"]); x.State != ledger.BacktestWaiting {
+		t.Errorf("the newer commit's: %+v", x)
 	}
 }
 
