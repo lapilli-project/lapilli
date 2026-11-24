@@ -774,8 +774,10 @@ func (o Options) agrees(j judging, labels map[string]string, in incident.Inciden
 // agreesLoose is agrees, and whether it agreed though the firing lacks a
 // label of the match in effect that the incident has (Options.Match): a
 // firing with no service agrees with every service's incident. With
-// --match-strict that firing doesn't agree, and loose is never true.
-func (o Options) agreesLoose(j judging, labels map[string]string, in incident.Incident) (agrees, loose bool) {
+// --match-strict that firing doesn't agree, and lacked is never given.
+// lacked names the labels it lacks, of the match in effect: the incident's
+// own, the rule entry's, or else Options.Match.
+func (o Options) agreesLoose(j judging, labels map[string]string, in incident.Incident) (agrees bool, lacked []string) {
 	match := o.Match
 	if in.Match != nil {
 		match = in.Match
@@ -787,7 +789,7 @@ func (o Options) agreesLoose(j judging, labels map[string]string, in incident.In
 	}
 	if e := j.entry; e != nil {
 		if !slices.Contains(e.Signals, in.Signal) {
-			return false, false
+			return false, nil
 		}
 		if e.Match != nil {
 			match = e.Match
@@ -796,7 +798,7 @@ func (o Options) agreesLoose(j judging, labels map[string]string, in incident.In
 		// a node's alert with no service catches no service's window.
 		for _, k := range e.Require {
 			if _, ok := labels[k]; !ok || len(in.Labels[k]) == 0 {
-				return false, false
+				return false, nil
 			}
 		}
 	}
@@ -804,13 +806,17 @@ func (o Options) agreesLoose(j judging, labels map[string]string, in incident.In
 }
 
 // agreeOn says whether the incident's labels agree with a firing's on the
-// match, given ok, and whether it is loose (agreesLoose).
-func (o Options) agreeOn(ok bool, labels map[string]string, in incident.Incident, match []string) (agrees, loose bool) {
+// match, given ok, and which labels of it the firing lacks when it agrees
+// loose (agreesLoose).
+func (o Options) agreeOn(ok bool, labels map[string]string, in incident.Incident, match []string) (agrees bool, lacked []string) {
 	if !ok || !in.Labels.Agree(labels, match) {
-		return false, false
+		return false, nil
 	}
-	if in.Labels.Lacks(labels, match) {
-		return !o.MatchStrict, !o.MatchStrict
+	if l := in.Labels.Lacked(labels, match); len(l) > 0 {
+		if o.MatchStrict {
+			return false, nil
+		}
+		return true, l
 	}
-	return true, false
+	return true, nil
 }

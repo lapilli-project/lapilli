@@ -266,14 +266,21 @@ func (l Labels) Agree(other map[string]string, names []string) bool {
 // Lacks reports whether the other labels lack one of the names that these
 // have: what Agree lets through, that has nothing to disagree with.
 func (l Labels) Lacks(other map[string]string, names []string) bool {
+	return len(l.Lacked(other, names)) > 0
+}
+
+// Lacked is the names of those that the other labels lack and these have,
+// in the order of names.
+func (l Labels) Lacked(other map[string]string, names []string) []string {
+	var lacked []string
 	for _, name := range names {
 		if _, ok := other[name]; !ok {
-			if _, mine := l[name]; mine {
-				return true
+			if _, mine := l[name]; mine && !slices.Contains(lacked, name) {
+				lacked = append(lacked, name)
 			}
 		}
 	}
-	return false
+	return lacked
 }
 
 // MaxFile is the most of a file of incidents Load reads: more is refused.

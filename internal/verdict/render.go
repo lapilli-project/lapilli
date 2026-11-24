@@ -804,7 +804,8 @@ func caughtBy(in IncidentResult, unknownLen time.Duration, match []string) strin
 
 // marks are what a catch is said with: by an alert the incident lists
 // (linked), by a noisy rule (noisy), by a rule with no label of match
-// (no service, Loose), or more.
+// (no service, Loose; the labels it lacked, or match for one that kept
+// none), or more.
 func (c Catch) marks(match []string) string {
 	var m []string
 	if c.Linked {
@@ -814,7 +815,7 @@ func (c Catch) marks(match []string) string {
 		m = append(m, "noisy")
 	}
 	if c.Loose {
-		m = append(m, NoLabelMark(match))
+		m = append(m, NoLabelMark(c.LackedOr(match)))
 	}
 	if len(m) == 0 {
 		return ""
@@ -1119,12 +1120,22 @@ func unseen(w io.Writer, rs []RuleResult) {
 }
 
 // NoLabelMark is what a loose catch (Catch.Loose) is marked with: no
-// service, for --match service; with several, their names alike.
-func NoLabelMark(match []string) string {
-	if len(match) == 0 {
+// service, for a firing that lacks service; with several, their names
+// after the one no: no service, team.
+func NoLabelMark(lacked []string) string {
+	if len(lacked) == 0 {
 		return "no label"
 	}
-	return "no " + strings.Join(match, "/")
+	return "no " + strings.Join(lacked, ", ")
+}
+
+// LackedOr is the labels the catch lacked, or, for a catch kept with none
+// named (a report written before Lacked), those of the match.
+func (c Catch) LackedOr(match []string) []string {
+	if len(c.Lacked) > 0 {
+		return c.Lacked
+	}
+	return match
 }
 
 // matchOf is the labels a report was matched on.
@@ -1140,20 +1151,21 @@ const looseNamed = 5
 
 // LooseNote says, without --match-strict, how many catches were loose
 // (Catch.Loose) and by which rules, as the line that follows the incidents
-// table; "" when none were, or when --match-strict is given, or there is
-// no --match.
+// table, naming the labels they lacked; "" when none were, or when
+// --match-strict is given, or there is no --match.
 func LooseNote(r *Report) string {
 	if r.Settings == nil || r.Settings.MatchStrict || len(r.Settings.Match) == 0 {
 		return ""
 	}
 	n := 0
 	seen := map[string]bool{}
-	var names []string
+	var names, lacked []string
 	for _, in := range r.Incidents {
 		for _, c := range in.CaughtBy {
 			if !c.Loose {
 				continue
 			}
+			lacked = MergeLacked(lacked, c.LackedOr(r.Settings.Match))
 			n++
 			if !seen[c.Rule] {
 				seen[c.Rule] = true
@@ -1165,7 +1177,7 @@ func LooseNote(r *Report) string {
 		return ""
 	}
 	slices.Sort(names)
-	label := strings.Join(r.Settings.Match, "/")
+	label := strings.Join(lacked, ", ")
 	rest := ""
 	if more := len(names) - looseNamed; more > 0 {
 		names, rest = names[:looseNamed], fmt.Sprintf(" and %d more", more)

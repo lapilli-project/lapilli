@@ -93,7 +93,7 @@ func TestLooseCatchAfterUpgrade(t *testing.T) {
 	h := s.Handler()
 	// The ledger as 031 left it: nothing loose, and judged by the release
 	// before, which wrote no version into meta.
-	ledgerExec(t, s, `UPDATE catches SET loose = 0`)
+	ledgerExec(t, s, `UPDATE catches SET loose = ''`)
 	if err := s.l.SetMeta(ctx, linkedMeta, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -121,5 +121,36 @@ func TestLooseCatchAfterUpgrade(t *testing.T) {
 	start()
 	if n != 1 {
 		t.Errorf("after the second start: judged all %d times, want still 1", n)
+	}
+}
+
+// The mark names the labels that firings lacked, not all of --match: with
+// --match service,team, a rule whose firings carry the service but no team
+// is marked no team, and one with neither, no service, team.
+func TestLooseCatchServeNamesTheLabelsLacked(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) {
+		extra := "groups:\n  - name: nodes\n    rules:\n      - alert: DiskFull\n        expr: disk > 1\n        for: 2m\n"
+		if err := os.WriteFile(filepath.Join(c.RulesPath, "nodes.yaml"), []byte(extra), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		inc := "incidents:\n  - {id: INC-1, title: Checkout down, start: 2026-11-02T06:01:00Z, end: 2026-11-02T06:40:00Z, labels: {service: checkout, team: pay}}\n"
+		if err := os.WriteFile(c.Incidents, []byte(inc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c.Options.Match = []string{"service", "team"}
+	})
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+	_, page, _ := get(t, h, "/incidents/INC-1")
+	if !strings.Contains(page, "(no service, team label)") || !strings.Contains(page, "(no team label)") || strings.Contains(page, "(no service/team label)") {
+		t.Errorf("incident page:\n%s", page)
+	}
+	if _, body, _ := get(t, h, "/rules/Errors"); !strings.Contains(body, "(no team label)") || strings.Contains(body, "(no service") {
+		t.Errorf("rule page of a rule with the service: %s", body)
 	}
 }

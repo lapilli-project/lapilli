@@ -248,12 +248,17 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 	for rows.Next() {
 		var id, delay int64
 		var name string
-		var linked, loose bool
+		var linked bool
+		var loose string
 		if err := rows.Scan(&id, &name, &delay, &linked, &loose); err != nil {
 			return nil, err
 		}
 		in := &out[index[id]]
-		in.CaughtBy = append(in.CaughtBy, verdict.Catch{Rule: name, Delay: time.Duration(delay) * time.Second, Linked: linked, Loose: loose})
+		c := verdict.Catch{Rule: name, Delay: time.Duration(delay) * time.Second, Linked: linked}
+		if loose != "" {
+			c.Loose, c.Lacked = true, strings.Split(loose, ",")
+		}
+		in.CaughtBy = append(in.CaughtBy, c)
 	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)

@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -98,5 +99,41 @@ func TestMatchStrictDropsLoose(t *testing.T) {
 	var b bytes.Buffer
 	if err := Text(&b, r, time.UTC); err != nil || strings.Contains(b.String(), "no service") {
 		t.Errorf("strict text: %v\n%s", err, b.String())
+	}
+}
+
+// The mark and the note name the labels the firing lacked, of the match in
+// effect: an incident that matches on team, under a global --match service,
+// is caught loose by a firing with no team, and says team; with several,
+// they come in one list.
+func TestLooseCatchNamesTheLabelsLacked(t *testing.T) {
+	fs := []firing.Firing{{Rule: "DiskFull", Labels: map[string]string{"service": "checkout"}, Start: m(105), End: m(130)}}
+	incs := []incident.Incident{{ID: "INC-7", Start: m(100), End: m(140), Match: []string{"team"},
+		Labels: incident.Labels{"service": {"checkout"}, "team": {"pay"}}}}
+	o := opts()
+	o.Match = []string{"service"}
+	r := Judge(nil, fs, incs, o)
+	c := catchesOf(r.Incidents[0])["DiskFull"]
+	if !c.Loose || !slices.Equal(c.Lacked, []string{"team"}) {
+		t.Fatalf("caught by %+v, want loose, lacking team", r.Incidents[0].CaughtBy)
+	}
+	var b bytes.Buffer
+	if err := Text(&b, r, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "DiskFull +5m (no team)") || !strings.Contains(out, "with no team label") || strings.Contains(out, "no service") {
+		t.Errorf("the text names the wrong label:\n%s", out)
+	}
+
+	incs[0].Match = []string{"service", "team"}
+	fs[0].Labels = map[string]string{"node": "n1"}
+	r = Judge(nil, fs, incs, o)
+	if c := catchesOf(r.Incidents[0])["DiskFull"]; !slices.Equal(c.Lacked, []string{"service", "team"}) {
+		t.Fatalf("caught by %+v, want lacking service and team", r.Incidents[0].CaughtBy)
+	}
+	b.Reset()
+	if err := Text(&b, r, time.UTC); err != nil || !strings.Contains(b.String(), "DiskFull +5m (no service, team)") || !strings.Contains(b.String(), "with no service, team label") {
+		t.Errorf("several: %v\n%s", err, b.String())
 	}
 }

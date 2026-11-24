@@ -360,6 +360,10 @@ type Catch struct {
 	// service, it agrees with every service's incident. A rule that also
 	// fired with the label caught it as any other.
 	Loose bool `json:"loose,omitempty"`
+	// Lacked names those labels, of the match that judged the catch (the
+	// incident's own, a rule entry's, or --match); Loose is true when it
+	// has any.
+	Lacked []string `json:"lacked,omitempty"`
 }
 
 func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White, at) }
@@ -647,10 +651,13 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	after := make([]map[string]time.Duration, len(inPeriod))
 	// The rules a firing the incident lists caught it with.
 	linked := make([]map[string]bool, len(inPeriod))
-	// The rules a firing that isn't loose caught it with (Catch.Loose).
+	// The rules a firing that isn't loose caught it with (Catch.Loose),
+	// and the labels the loose ones lacked (Catch.Lacked).
 	proper := make([]map[string]bool, len(inPeriod))
+	lacks := make([]map[string][]string, len(inPeriod))
 	for i := range catches {
 		catches[i], after[i], linked[i], proper[i] = map[string]time.Duration{}, map[string]time.Duration{}, map[string]bool{}, map[string]bool{}
+		lacks[i] = map[string][]string{}
 	}
 
 	last := map[string]time.Time{} // rule and labels to when it last resolved
@@ -689,7 +696,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if nj {
 				continue
 			}
-			caught, link, loose := CatchesLinked(f, in, o)
+			caught, link, lacked := CatchesLinked(f, in, o)
 			if !caught {
 				continue
 			}
@@ -704,8 +711,10 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if link {
 				linked[i][f.Rule] = true
 			}
-			if !loose {
+			if len(lacked) == 0 {
 				proper[i][f.Rule] = true
+			} else {
+				lacks[i][f.Rule] = MergeLacked(lacks[i][f.Rule], lacked)
 			}
 			d := f.Start.Sub(in.Start)
 			if have, ok := catches[i][f.Rule]; !ok || d < have {
@@ -772,7 +781,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	for i, in := range inPeriod {
 		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
-			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule], Loose: !proper[i][rule]})
+			c := Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule]}
+			if !proper[i][rule] {
+				c.Loose, c.Lacked = true, lacks[i][rule]
+			}
+			ir.CaughtBy = append(ir.CaughtBy, c)
 		}
 		sortCatches(ir.CaughtBy)
 		for rule, d := range after[i] {
@@ -899,29 +912,35 @@ func Catches(f firing.Firing, in incident.Incident, o Options) bool {
 // the incident lists: such a firing catches it whatever their labels say
 // on the labels matched on (docs/design/links.md). And whether it caught it
 // loose: it lacks a label of the match in effect that the incident has,
-// where --match-strict would have it not catch it (Catch.Loose).
-func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, linked, loose bool) {
+// where --match-strict would have it not catch it (Catch.Loose): lacked
+// names those labels.
+func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, linked bool, lacked []string) {
 	to := in.EndOr(o.UnknownLen)
 	// A rule judged by nothing catches nothing, written incidents
 	// included (docs/design/judging.md, "Rules judged by nothing").
 	if o.Signals.NotJudgedRules() && o.NotJudged(f.Rule) {
-		return false, false, false
+		return false, false, nil
 	}
 	if f.Start.After(to) || f.Start.Before(in.Start.Add(-o.MaxLead())) {
-		return false, false, false
+		return false, false, nil
 	}
 	j := o.judgingOf(f.Rule, in)
 	if f.Start.Before(in.Start.Add(-o.leadOf(j, in))) {
-		return false, false, false
+		return false, false, nil
 	}
 	if in.Links(f.Rule, f.Labels) {
-		return true, true, false
+		return true, true, nil
 	}
 	if o.LinkedOnly && len(in.Alerts) > 0 {
-		return false, false, false
+		return false, false, nil
 	}
-	caught, loose = o.agreesLoose(j, f.Labels, in)
-	return caught, false, loose
+	caught, lacked = o.agreesLoose(j, f.Labels, in)
+	return caught, false, lacked
+}
+
+// MergeLacked is the names of both, sorted, each once.
+func MergeLacked(a, b []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(slices.Concat(a, b))))
 }
 
 // About reports whether a firing of rule with labels is about an incident,

@@ -3,6 +3,7 @@ package verdict
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -123,7 +124,7 @@ func TestFiredAfterReadBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	again := Judge(nil, back, incs, opts())
-	if a, b := again.Incidents[0].FiredAfter, r.Incidents[0].FiredAfter; !slices.Equal(a, b) {
+	if a, b := again.Incidents[0].FiredAfter, r.Incidents[0].FiredAfter; !reflect.DeepEqual(a, b) {
 		t.Errorf("read back %+v, the report %+v", a, b)
 	}
 	late := func(rep *Report) (n int) {

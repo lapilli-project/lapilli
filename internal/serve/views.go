@@ -1314,7 +1314,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		l.Linked = slices.ContainsFunc(in.CaughtBy, func(c verdict.Catch) bool { return c.Rule == name && c.Linked })
 		for _, c := range in.CaughtBy {
 			if c.Rule == name && c.Loose {
-				l.Loose, l.NoLabel = true, strings.Join(t.o.Match, "/")
+				l.Loose, l.NoLabel = true, strings.Join(c.LackedOr(t.o.Match), ", ")
 			}
 		}
 		v.Caught = append(v.Caught, l)
@@ -1748,7 +1748,7 @@ func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incid
 	first := -1
 	for i, c := range in.CaughtBy {
 		noisy := t.noisyAll(w, t.id(c.Rule))
-		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy, NoLabel: strings.Join(t.o.Match, "/")})
+		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy, NoLabel: strings.Join(c.LackedOr(t.o.Match), ", ")})
 		if first < 0 && (!noisy || state != "caught") {
 			first = i
 		}

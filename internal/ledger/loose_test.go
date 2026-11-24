@@ -59,5 +59,10 @@ func TestLooseCatchKept(t *testing.T) {
 		if n := len(kept.CaughtBy); strict && (n != 1 || len(loose) != 0) || !strict && (n != 2 || !slices.Equal(loose, []string{"DiskFull"})) {
 			t.Errorf("strict %v: caught by %+v, want DiskFull, loose, and without --match-strict alone", strict, kept.CaughtBy)
 		}
+		for _, c := range kept.CaughtBy {
+			if c.Loose != (len(c.Lacked) > 0) || c.Loose && !slices.Equal(c.Lacked, []string{"service"}) {
+				t.Errorf("strict %v: %+v, want the loose one to have lacked service", strict, c)
+			}
+		}
 	}
 }
