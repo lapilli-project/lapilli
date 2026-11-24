@@ -48,13 +48,15 @@ Still to do:
   written again here (`internal/sse`), not read from Grafana. Built: the
   real-server scripts in `test/e2e` take `PROMETHEUS_IMAGE`,
   `GRAFANA_IMAGE` and `LOKI_IMAGE` (and the Thanos and VictoriaMetrics
-  ones), and `upstream.yml` runs them weekly against each one's latest
-  image, so a change in how a server evaluates is found by a failing run
-  before a user's `--check-replay` finds it. Still to do: the
-  measurements kept as test data (`internal/replay/testdata/grafana-13.3.1*`,
-  `prometheus-3.5.0`, `loki-3.7.9`) are taken by hand, and are of those
-  versions; the jobs on kind (`stack.yaml`, `service.yaml`) run the pinned
-  images only; and nothing opens the pull request that moves a pin.
+  ones), as do the chart's CronJob and the whole service on kind
+  (`run.sh`, `service.sh`) for the first two, and `upstream.yml` runs them
+  weekly against each one's latest image, so a change in how a server
+  evaluates is found by a failing run before a user's `--check-replay`
+  finds it. Still to do: the measurements kept as test data
+  (`internal/replay/testdata/grafana-13.3.1*`, `prometheus-3.5.0`,
+  `loki-3.7.9`) are taken by hand, and are of those versions; and nothing
+  opens the pull request that moves a pin, by choice so far (a workflow
+  that could would need to write to the repository).
 - Query errors. History can't say when a query failed, so a rule's error
   states aren't replayed: Grafana's error alerts are left out of what really
   fired, and `--check-replay` says how many; `serve` keeps no count of them.

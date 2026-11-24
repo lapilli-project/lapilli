@@ -114,8 +114,9 @@ firing fails on any machine.
     (`pages.yml`)
   - every day, govulncheck on the latest release (`latest-release.yml`);
     weekly, OpenSSF Scorecard
-  - weekly, the end-to-end jobs that use real servers in Docker, against
-    each server's latest image instead of the pinned one (`upstream.yml`).
+  - weekly, the end-to-end jobs that use real servers, in Docker and on
+    kind (the chart's CronJob, the whole service), against each server's
+    latest image instead of the pinned one (`upstream.yml`).
     By hand, one script against another image:
     `GRAFANA_IMAGE=grafana/grafana:latest test/e2e/loki.sh`
 

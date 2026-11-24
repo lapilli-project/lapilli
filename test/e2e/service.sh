@@ -53,12 +53,15 @@
 #
 # Needs Docker, Go, kubectl, helm, curl and jq, on Linux (where a
 # LoadBalancer's address is reachable from the host); deletes the cluster
-# afterwards unless KEEP is set.
+# afterwards unless KEEP is set. PROMETHEUS_IMAGE and GRAFANA_IMAGE run other
+# images than the pinned ones.
 # shellcheck disable=SC2016,SC2329 # PromQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # shellcheck source=test/e2e/signin-lib.sh
 . test/e2e/signin-lib.sh
+# shellcheck source=test/e2e/images.sh
+. test/e2e/images.sh
 
 cluster=lapilli-service
 arch=$(go env GOARCH)
@@ -186,7 +189,8 @@ values=(
   --set 'serve.roles.viewers={viewer@example.com}'
 )
 helm upgrade --install lapilli charts/lapilli -n monitoring "${values[@]}"
-kubectl apply -f test/e2e/service.yaml
+images_check
+manifest test/e2e/service.yaml | kubectl apply -f -
 kubectl -n shop rollout status deploy/shop --timeout=3m
 kubectl -n monitoring rollout status deploy/prometheus deploy/grafana --timeout=5m
 kubectl -n dex rollout status deploy/dex --timeout=3m

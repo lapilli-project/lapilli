@@ -161,6 +161,7 @@ func TestWorkflowReached(t *testing.T) {
 		{[]string{"test/e2e/lib.sh"}, all},
 		{[]string{"charts/lapilli/values.yaml"}, chart},
 		{[]string{"Dockerfile"}, []string{"e2e", "e2e-replicas", "e2e-serve-lb", "e2e-service"}},
+		{[]string{"test/e2e/images.sh"}, []string{"e2e", "e2e-service"}},
 		{[]string{"test/e2e/signin-lib.sh"}, []string{"e2e-serve-lb", "e2e-service", "e2e-signin"}},
 		{[]string{"test/a11y/package-lock.json"}, []string{"e2e-service"}},
 		{[]string{"recipes/backtest/gitea.sh", "test/e2e/loki.sh"}, []string{"e2e-backtest", "e2e-loki"}},

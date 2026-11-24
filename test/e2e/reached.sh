@@ -42,6 +42,8 @@ while IFS= read -r f || [ -n "$f" ]; do
     charts/*) to $chart ;;
     Dockerfile | .dockerignore) to $image ;;
     test/e2e/stack.yaml) to e2e e2e-replicas e2e-serve-lb ;;
+    # sourced by run.sh and service.sh, which take their images through it
+    test/e2e/images.sh) to e2e e2e-service ;;
     test/e2e/signin-lib.sh) to e2e-signin e2e-serve-lb e2e-service ;;
     test/e2e/run.sh) to e2e ;;
     test/e2e/replicas.sh) to e2e-replicas ;;

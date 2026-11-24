@@ -1,6 +1,7 @@
 name: upstream
 
-# The real-server jobs of ci.yml with the newest release of each server in
+# The real-server jobs of ci.yml, in Docker and on kind (the chart's
+# CronJob, the whole service), with the newest release of each server in
 # place of the pinned one: Prometheus, Grafana, Loki, Thanos,
 # VictoriaMetrics and vmalert, as test/e2e's scripts take them from the
 # environment. A failure here is a server that changed how it evaluates or
@@ -71,6 +72,10 @@ jobs:
             minutes: 20
           - script: ratelimit
             minutes: 20
+          - script: run
+            minutes: 20
+          - script: service
+            minutes: 45
     env:
       PROMETHEUS_IMAGE: ${{ inputs.prometheus || 'prom/prometheus:latest' }}
       GRAFANA_IMAGE: ${{ inputs.grafana || 'grafana/grafana:latest' }}
