@@ -220,6 +220,12 @@ identity, the cloud's CLI):
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
 `--auth google`. Lapilli only reads from these.
 
+Of these, the Google path has been run against a real project. The Amazon
+and Azure paths are tested against SigV4 and token checks written apart from
+the SDKs, not yet against a real workspace; the reading of CloudWatch's
+PromQL alarms and Google Cloud's PromQL policies, and their firing recipes,
+against their documentation's answers, not yet a real account.
+
 CloudWatch answers PromQL over the metrics sent to its OpenTelemetry
 endpoint, and over AWS's own metrics once their OpenTelemetry enrichment is
 turned on. It answers at most 500 series a query and says so only in a
