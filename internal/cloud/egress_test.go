@@ -95,7 +95,7 @@ func TestAzureThroughGuard(t *testing.T) {
 	t.Setenv("AZURE_CLIENT_SECRET", "example-secret")
 	t.Setenv("AZURE_AUTHORITY_HOST", "https://login.example.invalid/")
 	seen := guarded(t)
-	signed := func(as string) (error, []string) {
+	signed := func(as string) ([]string, error) {
 		before := len(seen())
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -105,15 +105,15 @@ func TestAzureThroughGuard(t *testing.T) {
 		}
 		req, _ := http.NewRequestWithContext(ctx, "GET", "https://management.azure.com/subscriptions/x", nil)
 		err = sign(req)
-		return err, seen()[before:]
+		return seen()[before:], err
 	}
-	if err, got := signed(""); err == nil || len(got) == 0 {
+	if got, err := signed(""); err == nil || len(got) == 0 {
 		t.Errorf("the default credential: %v; the guard saw %v", err, got)
 	}
 	token := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(token, []byte("example.federated.token"), 0o600)
 	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", token)
-	if err, got := signed("00000000-0000-0000-0000-000000000003"); err == nil || len(got) == 0 {
+	if got, err := signed("00000000-0000-0000-0000-000000000003"); err == nil || len(got) == 0 {
 		t.Errorf("a user-assigned identity: %v; the guard saw %v", err, got)
 	}
 }
