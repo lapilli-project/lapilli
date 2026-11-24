@@ -503,10 +503,10 @@ func TestKeysRSAOf2048BitsAtLeast(t *testing.T) {
 	}
 }
 
-// A token is read as go-oidc reads it before its signature is checked
-// here: compact, the spaces in it left out, or in the JSON serialization;
-// signed once, with an algorithm taken.
-func TestKeysReadAsGoOIDCReads(t *testing.T) {
+// A token is a compact JWS, as every identity provider issues one: signed
+// once, with an algorithm taken. One with a space inside it, or in the JSON
+// serialization, is refused, though go-jose's ParseSigned took them.
+func TestKeysTakeCompactTokensOnly(t *testing.T) {
 	ctx := context.Background()
 	key, other := mustRSA(t).(*rsa.PrivateKey), mustRSA(t).(*rsa.PrivateKey)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -534,9 +534,10 @@ func TestKeysReadAsGoOIDCReads(t *testing.T) {
 		ok        bool
 	}{
 		{"compact", tok, true},
-		{"compact, spaces in it", " " + tok[:20] + "\n\t" + tok[20:] + " ", true},
-		{"the JSON serialization", jws.FullSerialize(), true},
-		{"the JSON serialization, spaces before it", "\n " + jws.FullSerialize(), true},
+		{"compact, a space inside it", tok[:20] + " " + tok[20:], false},
+		{"compact, a newline inside it", tok[:20] + "\n" + tok[20:], false},
+		{"the JSON serialization", jws.FullSerialize(), false},
+		{"the JSON serialization, spaces before it", "\n " + jws.FullSerialize(), false},
 		{"signed twice", twice.FullSerialize(), false},
 		{"an algorithm not taken", idptest.Sign(key, "k", jose.RS384, claims), false},
 		{"nothing", "", false},
