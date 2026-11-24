@@ -535,7 +535,11 @@ keep tokens in (`GITHUB_TOKEN_FILE` and the other scripts' token files,
 `GITHUB_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `CI_JOB_TOKEN`,
 `CI_REPOSITORY_URL`, `CI_DEPENDENCY_PROXY_PASSWORD`, `SYSTEM_ACCESSTOKEN`,
 `BITBUCKET_STEP_OIDC_TOKEN` and the like), so a chart doesn't take one by
-chance. That isn't a wall. What runs is the job's own user: it can read
+chance; nor GitHub Actions' files a step writes its summary, outputs,
+environment, `PATH` and state to (`GITHUB_STEP_SUMMARY`, `GITHUB_OUTPUT`,
+`GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STATE`), so that a report of the
+pull request's own doesn't stand beside the backtest's in the run's
+summary by chance. That isn't a wall. What runs is the job's own user: it can read
 any file the job can, the token's file among them; on Linux, the
 environment every process of the job started with, the recipe's and the
 CI's runner's included, under `/proc/PID/environ`, whatever was unset
