@@ -691,14 +691,14 @@ spec:
             sources:
               {{- if ($am.secret).name }}
               - secret:
-                  name: {{ $am.secret.name }}
+                  name: {{ $am.secret.name | quote }}
               {{- else }}
               - configMap:
-                  name: {{ $am.configMap.name }}
+                  name: {{ $am.configMap.name | quote }}
               {{- end }}
               {{- range $am.templateConfigMaps }}
               - configMap:
-                  name: {{ . }}
+                  name: {{ . | quote }}
               {{- end }}
         {{- end }}
         {{- if $s.config }}
