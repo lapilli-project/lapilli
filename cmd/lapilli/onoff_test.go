@@ -30,6 +30,7 @@ func TestOnOffFlags(t *testing.T) {
 		"--linked-only":           func(f *verdictFlags) bool { return f.opts.LinkedOnly },
 		"--grafana-history":       func(f *verdictFlags) bool { return !f.noGrafanaHistory },
 		"--progress":              func(f *verdictFlags) bool { return !f.noProgress },
+		"--check-no-data":         func(f *verdictFlags) bool { return !f.noCheckNoData },
 		"--fail-nothing-replayed": func(f *verdictFlags) bool { return !f.noFailNothingReplayed },
 	}
 	for name, on := range read {

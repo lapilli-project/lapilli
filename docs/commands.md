@@ -441,6 +441,11 @@ Output:
                       never fired read anything, each a replay or questions
                       of the history again, as long again as the replays at
                       times; 0 skips them (default: what --timeout leaves)
+  --check-no-data=false
+                      skip the question to the history, for each rule that
+                      never fired, of whether it read any series at all in
+                      the period; the other steps after the replays still
+                      run, and the report says nothing of it
   --parallel N        replay up to N rules at once against each history
                       API, --prometheus, --loki and each of Grafana's data
                       sources, and ask a Grafana N requests at once at most

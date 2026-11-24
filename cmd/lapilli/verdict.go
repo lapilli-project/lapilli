@@ -429,6 +429,11 @@ Output:
                       never fired read anything, each a replay or questions
                       of the history again, as long again as the replays at
                       times; 0 skips them (default: what --timeout leaves)
+  --check-no-data=false
+                      skip the question to the history, for each rule that
+                      never fired, of whether it read any series at all in
+                      the period; the other steps after the replays still
+                      run, and the report says nothing of it
   --parallel N        replay up to N rules at once against each history
                       API, --prometheus, --loki and each of Grafana's data
                       sources, and ask a Grafana N requests at once at most
@@ -637,6 +642,10 @@ type verdictFlags struct {
 	// noFailNothingReplayed is --fail-nothing-replayed=false, and
 	// failNothingSet whether the flag was given.
 	noFailNothingReplayed, failNothingSet bool
+	// noCheckNoData is --check-no-data=false, which skips the step that
+	// asks whether the rules that never fired read any series, and
+	// checkNoDataSet whether the flag was given.
+	noCheckNoData, checkNoDataSet bool
 	// lokiLimit is the Limiter every client of --loki shares, made once
 	// (lokiSource).
 	lokiLimit *prom.Limiter
@@ -713,7 +722,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		}
 		switch name {
-		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed":
+		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed", "--check-no-data":
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
 				return nil, err
@@ -727,6 +736,8 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 				f.checkContent, f.checkContentSet = on, true
 			case "--grafana-history":
 				f.noGrafanaHistory, f.grafanaHistorySet = !on, true
+			case "--check-no-data":
+				f.noCheckNoData, f.checkNoDataSet = !on, true
 			case "--fail-nothing-replayed":
 				f.noFailNothingReplayed, f.failNothingSet = !on, true
 			default:
@@ -1141,7 +1152,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
-			{f.failNothingSet, "--fail-nothing-replayed"},
+			{f.failNothingSet, "--fail-nothing-replayed"}, {f.checkNoDataSet, "--check-no-data"},
 			{f.draft != "", "--draft-expectations: ask GET /api/v1/expectations/draft"},
 			{f.extrasSet, "--extras: each run's steps after the replays take what --timeout leaves"}} {
 			if no.on {
@@ -1905,7 +1916,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			}
 		}
 		// Of the rules that never fired, those that read no series at all.
-		if !brief && len(versions) > 0 {
+		if !brief && !f.noCheckNoData && len(versions) > 0 {
 			err := source.NoData(ectx, h, versions, rep, rep.From, rep.To, f.step)
 			cut = cut || err != nil && ectx.Err() != nil
 			if err != nil && ectx.Err() == nil {
