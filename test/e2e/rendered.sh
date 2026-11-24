@@ -20,12 +20,18 @@
 #
 # Needs Docker, Go, git, curl, jq, helm and yq. Leaves everything up when
 # KEEP is set.
+# PROMETHEUS_IMAGE runs another Prometheus than the pinned one.
 # shellcheck disable=SC2329 # cleanup runs from the trap
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-prom=prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
 gitea=gitea/gitea:28.3.0-rootless@sha256:40c5a68a0463c0940e1ae32626c8300dd0572f3558e390073ad8379ca67c0e1d
+# Which images this run was given (an override is pulled, and its digest said).
+if [ -n "${PROMETHEUS_IMAGE:-}" ]; then
+  docker pull -q "$PROMETHEUS_IMAGE" >/dev/null 2>&1 || true
+  echo "PROMETHEUS_IMAGE=$PROMETHEUS_IMAGE ($(docker image inspect --format '{{index .RepoDigests 0}}' "$PROMETHEUS_IMAGE" 2>/dev/null || true))"
+fi
 p=lapilli-e2e-rnd
 port=${PORT:-28280}
 

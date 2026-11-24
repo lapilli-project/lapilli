@@ -10,10 +10,10 @@ is a piece someone can take on and come to own; see
 What comes first: the replay and `lapilli verdict`, with the pull request
 backtests built on them. Everyone starts there, and a verdict wrong there
 is wrong in every page after it, so a replay that differs from what really
-fired is fixed before anything is added. `lapilli serve` is the larger
-part of the code already; its pages, roles and integrations grow where
-someone running it asks for them, in an issue or a discussion, not ahead
-of that.
+fired is fixed before anything is added. What is large and will have to
+be built anyway is built, not put off for being large. And where Lapilli
+doesn't do something by default that someone may need, it is an option: a
+flag that turns it on or off, or a value they can set.
 
 Some areas need what the current maintainer doesn't have: an AWS or Azure
 account with a managed Prometheus, Loki alerts in real use, an incident
@@ -44,13 +44,17 @@ reducer, `query_offset`, a Grafana window ending before now, `--late`, and
 groups placed where Prometheus places them, for rules read from its API.
 Still to do:
 
-- Newer Grafana, Prometheus and Loki. What is measured is measured against
-  the versions `test/e2e` pins, and what Grafana's expressions mean is
-  written again here (`internal/sse`), not read from Grafana: nothing runs
-  the measurements against a newer release until someone moves a pin. A
-  job that runs them weekly against each one's latest image, and says what
-  came out differently, would find a change before a user's
-  `--check-replay` does.
+- Newer Grafana, Prometheus and Loki. What Grafana's expressions mean is
+  written again here (`internal/sse`), not read from Grafana. Built: the
+  real-server scripts in `test/e2e` take `PROMETHEUS_IMAGE`,
+  `GRAFANA_IMAGE` and `LOKI_IMAGE` (and the Thanos and VictoriaMetrics
+  ones), and `upstream.yml` runs them weekly against each one's latest
+  image, so a change in how a server evaluates is found by a failing run
+  before a user's `--check-replay` finds it. Still to do: the
+  measurements kept as test data (`internal/replay/testdata/grafana-13.3.1*`,
+  `prometheus-3.5.0`, `loki-3.7.9`) are taken by hand, and are of those
+  versions; the jobs on kind (`stack.yaml`, `service.yaml`) run the pinned
+  images only; and nothing opens the pull request that moves a pin.
 - Query errors. History can't say when a query failed, so a rule's error
   states aren't replayed: Grafana's error alerts are left out of what really
   fired, and `--check-replay` says how many; `serve` keeps no count of them.

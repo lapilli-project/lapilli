@@ -1,0 +1,99 @@
+name: upstream
+
+# The real-server jobs of ci.yml with the newest release of each server in
+# place of the pinned one: Prometheus, Grafana, Loki, Thanos,
+# VictoriaMetrics and vmalert, as test/e2e's scripts take them from the
+# environment. A failure here is a server that changed how it evaluates or
+# answers, which is a finding for the replay's fidelity (ROADMAP.md,
+# "Replay fidelity"), or a script that leans on the version it pins. It is
+# not a required check, and not part of what must pass on main before a
+# release. Once a run here passes, the pins move by a pull request.
+#
+# When asked, a server's image reference can be given (a tag, or a digest);
+# left empty, it is that server's latest. Thanos's repository has no latest
+# tag: its newest release's tag is asked of GitHub.
+
+on:
+  schedule:
+    - cron: "23 5 * * 3" # weekly, on Wednesday
+  workflow_dispatch:
+    inputs:
+      prometheus:
+        description: Prometheus image (default prom/prometheus:latest)
+        type: string
+      grafana:
+        description: Grafana image (default grafana/grafana:latest)
+        type: string
+      loki:
+        description: Loki image (default grafana/loki:latest)
+        type: string
+      thanos:
+        description: Thanos image (default quay.io/thanos/thanos at its newest release's tag)
+        type: string
+      victoriametrics:
+        description: VictoriaMetrics image (default victoriametrics/victoria-metrics:latest)
+        type: string
+      vmalert:
+        description: vmalert image (default victoriametrics/vmalert:latest)
+        type: string
+
+permissions:
+  contents: read
+
+# Two runs of the same kind don't overlap; the one started later waits,
+# and a run in progress is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    # One script of test/e2e a job, each with the time its job has in
+    # ci.yml. A script that fails doesn't stop the others.
+    name: ${{ matrix.script }} on the latest images
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - script: loki
+            minutes: 35
+          - script: compat
+            minutes: 30
+          - script: changes
+            minutes: 15
+          - script: dashboard
+            minutes: 15
+          - script: backtest
+            minutes: 15
+          - script: rendered
+            minutes: 20
+          - script: ratelimit
+            minutes: 20
+    env:
+      PROMETHEUS_IMAGE: ${{ inputs.prometheus || 'prom/prometheus:latest' }}
+      GRAFANA_IMAGE: ${{ inputs.grafana || 'grafana/grafana:latest' }}
+      LOKI_IMAGE: ${{ inputs.loki || 'grafana/loki:latest' }}
+      THANOS_IMAGE: ${{ inputs.thanos }}
+      VICTORIAMETRICS_IMAGE: ${{ inputs.victoriametrics || 'victoriametrics/victoria-metrics:latest' }}
+      VMALERT_IMAGE: ${{ inputs.vmalert || 'victoriametrics/vmalert:latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Thanos's newest release
+        if: matrix.script == 'compat' && env.THANOS_IMAGE == ''
+        run: |
+          set -euo pipefail
+          tag=$(gh api repos/thanos-io/thanos/releases/latest --jq .tag_name)
+          printf '%s\n' "$tag" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || { echo "not a version: $tag" >&2; exit 1; }
+          echo "THANOS_IMAGE=quay.io/thanos/thanos:$tag" >>"$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: "test/e2e/$SCRIPT.sh"
+        env:
+          SCRIPT: ${{ matrix.script }}
