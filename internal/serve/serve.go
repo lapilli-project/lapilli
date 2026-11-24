@@ -497,8 +497,9 @@ type Server struct {
 	// backtesting are the proposals being backtested again here, which
 	// expiry leaves.
 	backtesting inFlight
-	// wall is the clock proposals are made and expire by, and the
-	// webhook's posts are signed at: time.Now but in tests.
+	// wall is the clock proposals are made and expire by, the webhook's
+	// posts are signed at, and the tokens' writes are let through by (in
+	// this process's buckets): time.Now but in tests.
 	wall func() time.Time
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.

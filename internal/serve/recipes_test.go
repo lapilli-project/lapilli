@@ -1086,6 +1086,10 @@ func TestTokenRate(t *testing.T) {
 	if ledgertest.On() {
 		s.tokenRate.rate = 1
 	}
+	// In this process's bucket, by the server's wall clock, stopped: the
+	// burst of 40 through, the rest refused, however long they take.
+	at := time.Now()
+	s.wall = func() time.Time { return at }
 	port := s.IncidentsHandler()
 	codes := map[int]int{}
 	for i := range 60 {
@@ -1098,7 +1102,11 @@ func TestTokenRate(t *testing.T) {
 			t.Error("no Retry-After")
 		}
 	}
-	if codes[http.StatusTooManyRequests] == 0 || codes[http.StatusOK] < 40 {
+	if !s.l.Shared() && (codes[http.StatusOK] != 40 || codes[http.StatusTooManyRequests] != 20) {
+		t.Errorf("codes: %v, want the burst's 40 through and 20 refused", codes)
+	}
+	// Shared among replicas, the bucket is the ledger's, by its own clock.
+	if s.l.Shared() && (codes[http.StatusTooManyRequests] == 0 || codes[http.StatusOK] < 40) {
 		t.Errorf("codes: %v", codes)
 	}
 	// A token rotated to one too short is no token.
