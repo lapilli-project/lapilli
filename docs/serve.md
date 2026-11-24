@@ -523,7 +523,7 @@ estimates ([above](#before-it-is-deployed)): what it says a run takes is
 not in the numbers here. To set the chart, from the nearest row:
 `serve.ledger.size` is the weeks kept times a week's firings times the
 bytes a firing, and half as much again for growth (the default `2Gi` holds
-about 15 million firings at 135 bytes, computed); `resources.requests.memory`
+about 10 million firings at 135 bytes with the half to spare, computed); `resources.requests.memory`
 is the process memory above, and `resources.limits.memory` that and what
 `lapilli preflight` says a run takes. The chart's defaults (a request of
 `256Mi`, a limit of `1Gi`) are above the process memory of every row here,
