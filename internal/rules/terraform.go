@@ -98,10 +98,11 @@ func terraformRules(ctx context.Context, doc map[string]any, rec *[]Recording) (
 			found = true
 			out = append(out, rs...)
 		}
-		if depth >= terraformDepth {
-			return nil
+		kids := list(m["child_modules"])
+		if depth >= terraformDepth && len(kids) > 0 {
+			return fmt.Errorf("Terraform's JSON: modules nested more than %d deep", terraformDepth)
 		}
-		for _, c := range list(m["child_modules"]) {
+		for _, c := range kids {
 			cm, _ := c.(map[string]any)
 			if err := walk(cm, depth+1); err != nil {
 				return err

@@ -124,6 +124,25 @@ func TestTerraformRealPlan(t *testing.T) {
 	}
 }
 
+// A module tree nested past terraformDepth is refused, not read as having
+// no rules; one at the depth is read.
+func TestTerraformTooDeep(t *testing.T) {
+	nest := func(n int) string {
+		m := `{"resources":[{"address":"grafana_rule_group.g","mode":"managed","type":"grafana_rule_group","name":"g","values":{"name":"g","folder_uid":"f","interval_seconds":60,"rule":[{"name":"R","uid":"r","condition":"A","data":[{"ref_id":"A","datasource_uid":"p","model":"{\"expr\":\"up\"}"}]}]}}]}`
+		for range n {
+			m = `{"child_modules":[` + m + `]}`
+		}
+		return `{"format_version":"1.0","values":{"root_module":` + m + `}}`
+	}
+	rs, err := Parse([]byte(nest(terraformDepth)))
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("at the depth: %d rules, %v", len(rs), err)
+	}
+	if _, err := Parse([]byte(nest(terraformDepth + 1))); err == nil || !strings.Contains(err.Error(), "modules nested more than 64 deep") {
+		t.Errorf("past the depth: %v", err)
+	}
+}
+
 func FuzzTerraform(f *testing.F) {
 	for _, p := range terraformFiles {
 		b, err := os.ReadFile(p)
