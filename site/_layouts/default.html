@@ -67,6 +67,7 @@
   :root[data-theme="dark"] { color-scheme: dark; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html { scroll-padding-top: 5rem; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
@@ -104,7 +105,7 @@
   .skip { position: absolute; left: .8rem; top: -5rem; z-index: 20; padding: .5rem 1rem; border-radius: 9999px; background: var(--accent); color: var(--on-accent); text-decoration: none; }
   .skip:focus { top: .6rem; }
   /* The header: the mark and the version, the site's pages, the language,
-     a star on GitHub and the way in. Under 1040px (where Japanese and
+     a star on GitHub and the way in. Under 1072px (where Japanese and
      Spanish no longer fit on one row) the pages, the star and the way in
      fold into a menu. Both menus are <details>, so they work
      with no script; the script at the end closes them on Escape or a click
@@ -148,10 +149,13 @@
   .pop .note { max-width: 15rem; margin: .3rem .7rem .45rem; color: var(--dim); font-size: .8rem; line-height: 1.4; }
   .pop .btn { justify-content: center; margin: .35rem .3rem .15rem; }
   .menu { display: none; }
-  @media (max-width: 1040px) {
+  @media (max-width: 1072px) {
     .links, .acts > .star, .acts > .start { display: none; }
     .menu { display: block; }
   }
+  /* On a phone the version, which the footer has too, makes way for the
+     theme's button: the header stays on one row. */
+  @media (max-width: 400px) { .bar .ver { display: none; } }
   /* On a phone, the menu's button is its icon, its name kept for a
      screen reader. */
   @media (max-width: 520px) {
@@ -286,7 +290,7 @@
 </style>
 </head>
 <body{% if page.layout == "docs" %} class="docs-page"{% endif %}>
-<a class="skip" href="#main">{{ t.skip }}</a>
+<a class="skip" href="#{% if page.layout == "docs" %}content{% else %}main{% endif %}">{{ t.skip }}</a>
 {%- capture links %}
   <a href="{{ '/docs/' | relative_url }}">{{ t.docs }}</a>
   <a href="{{ home }}#how-it-judges">{{ t.how }}</a>
@@ -471,12 +475,23 @@ it.
       link.className = 'anchor';
       link.href = '#' + h.id;
       link.textContent = '#';
-      link.setAttribute('aria-label', toc.dataset.link + ': ' + name);
+      // The sections' list has each of them for the keyboard and a screen
+      // reader; this one is for the pointer, and read once, not twice.
+      link.setAttribute('aria-hidden', 'true');
+      link.tabIndex = -1;
       h.appendChild(link);
     });
     if (entries.length > 1) {
       toc.hidden = false;
-      toc.open = !narrow.matches;
+      // Folded only under 1200px; above it the heading isn't a toggle.
+      var summary = toc.querySelector('summary');
+      var fit = function () {
+        toc.open = !narrow.matches;
+        if (narrow.matches) summary.removeAttribute('tabindex'); else summary.tabIndex = -1;
+      };
+      summary.addEventListener('click', function (e) { if (!narrow.matches) e.preventDefault(); });
+      fit();
+      if (narrow.addEventListener) narrow.addEventListener('change', fit);
       list.addEventListener('click', function (e) { if (e.target.closest('a') && narrow.matches) toc.open = false; });
       var mark = function () {
         var at = entries[0];
@@ -495,12 +510,16 @@ it.
       mark();
     }
   }
-  // On a narrow screen the list of pages is above the page: folded.
-  var side = document.querySelector('details.side');
-  if (side && window.matchMedia('(max-width: 900px)').matches) side.open = false;
+  // On a narrow screen the list of pages is above the page: folded; open
+  // again when the screen widens, where its heading is gone.
+  var side = document.querySelector('details.side'), narrowSide = window.matchMedia('(max-width: 900px)');
+  if (side) {
+    side.open = !narrowSide.matches;
+    if (narrowSide.addEventListener) narrowSide.addEventListener('change', function () { side.open = !narrowSide.matches; });
+  }
   // The search: every word typed must be in a page's title or description,
   // or in one of its headings with the title. The index (site/docs.sh) is
-  // fetched when the box is first used. "/" goes to the box.
+  // fetched when the box is first used.
   var find = document.querySelector('.find');
   if (find && window.fetch) {
     var box = find.querySelector('input'), hits = find.querySelector('.hits'), status = find.querySelector('[role=status]');
@@ -548,12 +567,6 @@ it.
     box.addEventListener('input', function () { load(); search(); });
     box.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && box.value) { box.value = ''; search(); e.stopPropagation(); }
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
-      e.preventDefault();
-      box.focus();
     });
   }
   // A menu closes on a click outside it or on one of its links (a link to

@@ -102,16 +102,21 @@ done
     printf '%s\n' "$sep"
     sep=,
     awk -F '\t' -v n="$n" -v url="$base$url" '
-      function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
+      function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, "\\t", s); gsub(/[\001-\010\013-\037\177]/, "", s); return "\"" s "\"" }
       function plain(s) { gsub(/`/, "", s); while (match(s, /\[[^]]*\]\([^)]*\)/)) { t = substr(s, RSTART + 1); sub(/\].*/, "", t); s = substr(s, 1, RSTART - 1) t substr(s, RSTART + RLENGTH) } return s }
       FNR == NR { if ($1 == n) desc = $2; next }
       /^(```|~~~)/ { fence = !fence; next }
       fence { next }
-      /^# / && title == "" { title = plain(substr($0, 3)); next }
-      /^###? / {
-        text = $0; sub(/^#+ +/, "", text); sub(/ +\{#[^}]*\} *$/, "", text)
+      /^# / && title == "" { title = plain(substr($0, 3)) }
+      /^#+ / && match($0, /^#+/) && RLENGTH <= 6 {
+        # Every heading takes the id kramdown gives it, so that a repeat of
+        # one on the page gets -1, -2 as kramdown counts them, whatever its
+        # level; only the ## and ### ones are listed.
+        text = $0; lvl = RLENGTH; sub(/^#+ +/, "", text); sub(/ +\{#[^}]*\} *$/, "", text)
         id = tolower(text); gsub(/[^a-z0-9_ \t-]/, "", id); gsub(/[ \t]/, "-", id)
-        heads = heads (heads == "" ? "" : ",") "[" q(id) "," q(plain(text)) "]"
+        if (id == "") id = "section"
+        if (id in seen) id = id "-" ++seen[id]; else seen[id] = 0
+        if (lvl == 2 || lvl == 3) heads = heads (heads == "" ? "" : ",") "[" q(id) "," q(plain(text)) "]"
       }
       END { printf "{\"title\":%s,\"url\":%s,\"description\":%s,\"headings\":[%s]}", q(title), q(url), q(desc), heads }
     ' "$tmp/descriptions" "$src"

@@ -55,7 +55,7 @@ screen all three are above the page, in this order, the lists folded.
   <summary>{{ t.on_this_page }}</summary>
   <nav aria-label="{{ t.on_this_page }}"><ul></ul></nav>
 </details>
-<article class="doc">
+<article class="doc" id="content" tabindex="-1">
 {{ content }}
 {%- if before or after %}
 <nav class="around" aria-label="{{ t.around }}">

@@ -85,9 +85,16 @@ for (const entry of index) {
     found.push({ scheme: 'search', path, id: 'search-page', help: 'the search lists a page that is not there' });
     continue;
   }
-  const ids = new Set(await page.evaluate(() => [...document.querySelectorAll('article.doc [id]')].map((e) => e.id)));
-  for (const [id, text] of entry.headings) {
-    if (!ids.has(id)) found.push({ scheme: 'search', path, id: 'search-anchor', help: `the search goes to #${id} ("${text}"), which the page does not have` });
+  // The ids of the page's ## and ### headings, in order, are exactly the
+  // index's: a heading kramdown numbered (-1) and the index didn't, or the
+  // other way round, is a result that goes to the wrong section.
+  const ids = await page.evaluate(() => [...document.querySelectorAll('article.doc :is(h2, h3)[id]')].map((e) => e.id));
+  const want = entry.headings.map((h) => h[0]);
+  for (let i = 0; i < Math.max(ids.length, want.length); i++) {
+    if (ids[i] !== want[i]) {
+      found.push({ scheme: 'search', path, id: 'search-anchor', help: `the ${i + 1}th heading is #${ids[i]} on the page and #${want[i]} ("${entry.headings[i]?.[1]}") in the index` });
+      break;
+    }
   }
 }
 await browser.close();
