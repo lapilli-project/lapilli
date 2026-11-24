@@ -209,9 +209,19 @@ question 6, decided). Every other pinned claim is one value.
   `repository_id`, and `event_name: pull_request`; `repository_owner_id`
   and `runner_environment` (`github-hosted`, `self-hosted`) if wanted.
   `ref` is `refs/pull/N/merge` for a pull request, which is where the pull
-  request's number is taken from. `workflow_ref` names the workflow file
-  at the pull request's own ref, which the pull request can change, so
-  pinning it keeps out no one who can push a branch.
+  request's number is taken from. A merge queue's run is `event_name:
+  merge_group`, its `ref` the queue's,
+  `refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA` ("the git ref that
+  triggered the workflow run", GitHub's OpenID Connect reference has
+  `ref`, and its events reference has `GITHUB_REF` of `merge_group` the
+  merge group's ref): taken only of an entry of its own that pins it,
+  never of one that pins `pull_request`, as a group holds what someone
+  who may write to the repository queued, a fork's pull request among
+  them, run in the repository's own context. Its number isn't read from
+  that ref: the job's is kept as it says it, and supersedes nothing.
+  `workflow_ref` names the workflow file at the pull request's own ref,
+  which the pull request can change, so pinning it keeps out no one who
+  can push a branch.
 - **GitLab CI.** Issuer the instance's URL (`https://gitlab.com`). The job
   names a token under `id_tokens:` with `aud:`; it expires with the job's
   timeout, or after five minutes. Pin `project_id` and `pipeline_source:
@@ -354,7 +364,10 @@ the event pinned, and the pins keep forks out:
   write tokens to workflows from pull requests", and then a fork's run gets
   one no claim tells apart (`head_ref` is a branch name). Keep it off.
   `pull_request_target` runs in the base's context and gets a token; the
-  pinned `event_name` refuses it.
+  pinned `event_name` refuses it. A merge queue's run (`merge_group`) of a
+  fork's pull request, once someone who may write to the repository
+  queued it, runs in the base's context too, with a token: only an entry
+  that pins `merge_group` takes it, which a repository opts into.
 - GitLab names a merge request pipeline's source project in `project_id`,
   so a fork's merge request carries the fork's, and is refused, run in the
   parent project too (its `job_project_id` would be the parent's).

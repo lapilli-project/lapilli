@@ -27,6 +27,36 @@
 #             prometheus-url: ${{ vars.PROMETHEUS_URL }}
 #             since: 14d
 #
+# In a merge queue too: on merge_group beside pull_request, the merge
+# group's head (merge_group.head_sha) is backtested against the commit the
+# event names as its base (merge_group.base_sha), no comment is posted,
+# the report going to the step's log, and status sets lapilli/backtest on
+# that head, where a branch rule's required status is read in a queue:
+#
+#   on:
+#     pull_request:
+#       branches: [main]
+#     merge_group:
+#       types: [checks_requested]
+#       branches: [main]
+#   permissions:
+#     contents: read
+#     pull-requests: write
+#     statuses: write
+#   jobs:
+#     backtest:
+#       if: github.event_name == 'merge_group' || github.event.pull_request.head.repo.full_name == github.repository
+#       ...
+#         - uses: actions/checkout@v4
+#           with: {fetch-depth: 0, persist-credentials: false}
+#         - uses: lapilli-project/lapilli/recipes/backtest@COMMIT # vX.Y.Z
+#           with:
+#             paths: alerts
+#             incidents: incidents.yaml
+#             prometheus-url: ${{ vars.PROMETHEUS_URL }}
+#             fail-missed: true
+#             status: true
+#
 # Or through lapilli serve's backtest port (serve-url), which backtests the
 # rules with its own access to the history, judged by its record: nothing
 # is installed, and the job holds no credential for the metrics, only the
@@ -99,7 +129,7 @@ inputs:
     description: More of lapilli verdict's flags, split at spaces, such as "--rules-select grafana_alert=1 --tz Asia/Seoul". A file they name in the checkout is refused, as the pull request's. An expression with spaces in it goes in impact.
     default: ""
   target:
-    description: The commit the pull request goes into, as the checkout has it. HEAD^1 is the merge commit's first parent; where the checkout isn't the merge GitHub made (ref pull_request.head.sha), the pull request's own commit, so the branch it goes into is taken instead (fetch-depth 0). A checkout that is neither the event's head nor that merge is refused with a gate or status. A branch's name is the branch in full (refs/remotes/NAME, then refs/heads/NAME), and one a tag has too is refused; give refs/remotes/origin/main, or a full hash.
+    description: The commit the pull request goes into, as the checkout has it. HEAD^1 is the merge commit's first parent; where the checkout isn't the merge GitHub made (ref pull_request.head.sha), the pull request's own commit, so the branch it goes into is taken instead (fetch-depth 0). A checkout that is neither the event's head nor that merge is refused with a gate or status. A branch's name is the branch in full (refs/remotes/NAME, then refs/heads/NAME), and one a tag has too is refused; give refs/remotes/origin/main, or a full hash. In a merge queue's run (merge_group), the base is the event's, merge_group.base_sha, and any but HEAD^1 is refused.
     default: HEAD^1
   key:
     description: Tells apart the comments of several jobs on one pull request.
@@ -120,7 +150,7 @@ inputs:
     description: true, with incidents or impact, fails the step when the change leaves an incident a rule caught before it caught by no rule after it, once the comment says which (lapilli's --fail-missed); also when a rule that differs couldn't be replayed, as what it catches can't be judged. With serve-url, serve's incidents judge, the rules left alone by serve's record of them.
     default: "false"
   status:
-    description: true also sets a commit status, lapilli/backtest (with key, lapilli/backtest/KEY), on the pull request's head commit, pending while the step runs and success or failure as it ends, linking to the run, which a branch rule can require; the token needs statuses write (the job's permissions statuses write).
+    description: true also sets a commit status, lapilli/backtest (with key, lapilli/backtest/KEY), on the pull request's head commit, or in a merge queue's run (merge_group) on the merge group's head, pending while the step runs and success or failure as it ends, linking to the run, which a branch rule can require; the token needs statuses write (the job's permissions statuses write).
     default: "false"
   promtool:
     description: promtool on the runner, its path or its name on PATH, outside the checkout (install it in a step before), which runs the scenarios expect names (scenarios, promtool's own test files) of the rules that differ, before and after, each against the rule's group as Lapilli writes it; with fail-on-expectations, a scenario that couldn't be run after the change fails the step too. Without it, each scenario is not known. Refused with serve-url, which runs none.

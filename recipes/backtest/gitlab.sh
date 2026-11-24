@@ -16,7 +16,11 @@
 #                      CI_MERGE_REQUEST_IID)
 #   TARGET             default, in a merged results pipeline, the target
 #                      branch's commit (CI_MERGE_REQUEST_TARGET_BRANCH_SHA);
-#                      HEAD^1, lib.sh's default, written out is none given
+#                      in a merge train's, HEAD^1, the first parent of the
+#                      merge the train made (CI_COMMIT_SHA, its second
+#                      parent CI_MERGE_REQUEST_SOURCE_BRANCH_SHA), which
+#                      HEAD must be; HEAD^1, lib.sh's default, written out
+#                      is none given
 #   TARGET_BRANCH      default, in another merge request pipeline, the
 #                      target branch (CI_MERGE_REQUEST_TARGET_BRANCH_NAME),
 #                      fetched from origin with the job's own credentials
@@ -60,7 +64,35 @@ PR=${PR:-${CI_MERGE_REQUEST_IID:-}}
 # of a merge request's own commit, a merge its author made, it is
 # whatever first parent they chose.
 [ "${TARGET:-}" != HEAD^1 ] || TARGET=
-if [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ]; then
+# A merge train's pipeline (CI_MERGE_REQUEST_EVENT_TYPE merge_train) is of
+# a merge commit, CI_COMMIT_SHA, GitLab's merge request pipelines'
+# reference says, of the source branch's head
+# (CI_MERGE_REQUEST_SOURCE_BRANCH_SHA) on the target branch with the merge
+# requests ahead in the train: its first parent is the commit the
+# pipeline is based on, a diff from which to CI_COMMIT_SHA holds the merge
+# request's changes alone, as CI_MERGE_REQUEST_PIPELINE_BASE_SHA is
+# described. The reference says CI_MERGE_REQUEST_TARGET_BRANCH_SHA of
+# merged results pipelines alone, so it isn't taken here. The change is
+# that merge, compared against its first parent (lib.sh's ci_merge and
+# ci_head), INCIDENTS that parent's; a HEAD that isn't such a merge, its
+# second parent the source branch's head, is refused (ci_merge_only),
+# gates or not, as its base would be a commit GitLab doesn't say.
+train=
+if [ "${CI_MERGE_REQUEST_EVENT_TYPE:-}" = merge_train ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
+  train=1
+  train_hash() {
+    case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
+    [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
+  }
+  if ! train_hash "${CI_COMMIT_SHA:-}" || ! train_hash "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-}"; then
+    echo "gitlab.sh: a merge train's pipeline whose CI_COMMIT_SHA and CI_MERGE_REQUEST_SOURCE_BRANCH_SHA aren't two commits' full hashes: refused, as what the train merged can't be told" >&2
+    exit 1
+  fi
+  ci_head=$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA ci_merge=$CI_COMMIT_SHA
+fi
+if [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ] && [ -n "$train" ]; then
+  ci_merge_only=1
+elif [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ]; then
   if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-}" ]; then
     TARGET=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA
   else

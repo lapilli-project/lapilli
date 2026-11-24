@@ -216,6 +216,8 @@ func TestPreflightTrustAsServe(t *testing.T) {
 		{"no repository's id", gh("      event_name: pull_request\n"), nil},
 		{"no event", gh("      repository_id: \"123456789\"\n"), nil},
 		{"a fork's event", gh("      repository_id: \"123456789\"\n      event_name: pull_request_target\n"), nil},
+		{"a merge queue's", gh("      repository_id: \"123456789\"\n      event_name: merge_group\n"), nil},
+		{"a merge queue's of Forgejo", "trust:\n  - name: alerts\n    issuer: https://code.example.com/api/actions\n    audience: https://lapilli-ci.example.com\n    claims: {repository_id: \"7\", event_name: merge_group}\n", nil},
 		{"a list of events", gh("      repository_id: \"123456789\"\n      event_name: [pull_request, push]\n"), nil},
 		{"a generic issuer without sub", "trust:\n  - name: ci\n    issuer: https://ci.example.com\n    audience: https://lapilli-ci.example.com\n    claims: {event_name: push, job: x}\n", nil},
 		{"an issuer of plain http", "trust:\n  - name: ci\n    issuer: http://ci.example.com\n    audience: https://lapilli-ci.example.com\n    claims: {sub: x, event_name: push}\n", nil},

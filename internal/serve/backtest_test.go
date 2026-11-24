@@ -99,7 +99,9 @@ func btServer(t *testing.T, h replay.History, extra string, more func(*Config)) 
 	plainFile := filepath.Join(dir, "plain-token")
 	os.WriteFile(plainFile, []byte(b.plain+"\n"), 0o600)
 	trustFile := filepath.Join(dir, "trust.yaml")
-	os.WriteFile(trustFile, []byte(btTrust(b.gh, b.gl, b.fj, plainFile, extra)), 0o600)
+	// An entry extra names GitHub's issuer by {{github}}, the one the
+	// test's GitHub tokens are of.
+	os.WriteFile(trustFile, []byte(btTrust(b.gh, b.gl, b.fj, plainFile, strings.ReplaceAll(extra, "{{github}}", b.gh.Issuer))), 0o600)
 	trust, err := ReadTrust(trustFile, nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -331,6 +333,76 @@ func TestBacktestTokensRefused(t *testing.T) {
 	b.h.ServeHTTP(w, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("with an Origin: %d", w.Code)
+	}
+}
+
+// A merge queue's run (GitHub's merge_group) is of the pull requests
+// someone who may write to the repository queued, a fork's among them, in
+// the repository's own context, with its ID token: an entry that pins
+// pull_request doesn't take its token, and one that names merge_group
+// does, alone of its events. Its ref is the queue's, which says no pull
+// request's number serve reads: the job's is kept as it says it, and its
+// backtest takes the place of none waiting, a pull request's of the same
+// number least of all.
+func TestBacktestMergeGroupNamed(t *testing.T) {
+	queue := func(change map[string]any) map[string]any {
+		c := map[string]any{"event_name": "merge_group", "ref": "refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567",
+			"sub":          "repo:example/alerts:ref:refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567",
+			"workflow_ref": "example/alerts/.github/workflows/backtest.yml@refs/heads/gh-readonly-queue/main/pr-42-0123456789abcdef0123456789abcdef01234567",
+			"head_ref":     "", "base_ref": ""}
+		maps.Copy(c, change)
+		return c
+	}
+	// Not named: refused, as any event but the entry's.
+	b := btServer(t, nil, "", nil)
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(queue(nil)), btBody(ruleFile, changedRules, map[string]any{"pull_request": 42})); code != http.StatusUnauthorized {
+		t.Errorf("merge_group, no entry naming it: %d %v", code, m)
+	}
+	b = btServer(t, nil, `  - name: alerts-queue
+    issuer: {{github}}
+    ci: github
+    audience: https://lapilli-ci.example.com
+    claims:
+      repository_id: "123456789"
+      event_name: merge_group
+`, nil)
+	ask := func(token string, pr int) (int, map[string]any) {
+		t.Helper()
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", token, btBody(ruleFile, changedRules, map[string]any{"pull_request": pr}))
+		return code, m
+	}
+	// A pull request's backtest of 42, waiting, by the entry that pins
+	// pull_request.
+	if code, m := ask(b.github(map[string]any{"jti": "pr"}), 42); code != http.StatusAccepted {
+		t.Fatalf("pull request 42: %d %v", code, m)
+	}
+	// The queue's, by the entry that names merge_group: taken, beside it.
+	if code, m := ask(b.github(queue(map[string]any{"jti": "q1"})), 42); code != http.StatusAccepted || m["position"] != float64(1) {
+		t.Fatalf("the queue's: %d %v", code, m)
+	}
+	// Another repository's queue, and another event of the queue entry's
+	// repository's: refused.
+	for name, token := range map[string]string{
+		"another repository's queue": b.github(queue(map[string]any{"jti": "q2", "repository_id": "111"})),
+		"workflow_run":               b.github(queue(map[string]any{"jti": "q3", "event_name": "workflow_run"})),
+	} {
+		if code, m := ask(token, 42); code != http.StatusUnauthorized {
+			t.Errorf("%s: %d %v", name, code, m)
+		}
+	}
+	bs, err := b.s.l.Backtests(context.Background(), 10)
+	if err != nil || len(bs) != 2 {
+		t.Fatalf("%d backtests: %v", len(bs), err)
+	}
+	got := map[string]string{}
+	for _, x := range bs {
+		got[x.Trust] = fmt.Sprint(x.PullRequest, " ", x.State)
+	}
+	if want := map[string]string{"alerts": "42 " + ledger.BacktestWaiting, "alerts-queue": "42 " + ledger.BacktestWaiting}; !maps.Equal(got, want) {
+		t.Errorf("kept %v, want %v", got, want)
+	}
+	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] + b.s.btPort.ended[[2]string{"alerts-queue", ledger.BacktestSuperseded}]; n != 0 {
+		t.Errorf("%d superseded", n)
 	}
 }
 
