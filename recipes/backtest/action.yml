@@ -30,8 +30,10 @@
 # In a merge queue too: on merge_group beside pull_request, the merge
 # group's head (merge_group.head_sha) is backtested against the commit the
 # event names as its base (merge_group.base_sha), no comment is posted,
-# the report going to the step's log, and status sets lapilli/backtest on
-# that head, where a branch rule's required status is read in a queue:
+# the report going to the step's log and its summary, which the run's page
+# shows (a pull request's run adds its comment's there too), and status
+# sets lapilli/backtest on that head, where a branch rule's required
+# status is read in a queue:
 #
 #   on:
 #     pull_request:

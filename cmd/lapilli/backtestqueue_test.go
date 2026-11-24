@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"lapilli.dev/internal/verdict"
 )
 
 // The backtest recipes in a merge queue's run: GitHub's merge_group and
@@ -134,7 +137,7 @@ func TestBacktestRecipeMergeGroup(t *testing.T) {
 // The action, in a merge queue's run: the event names no pull request,
 // so the number the action gives is none, and target is its default,
 // HEAD^1, which is none given; the merge group's head is judged against
-// its base, and the status goes on it.
+// its base, the status goes on it, and the report in the step's summary.
 func TestBacktestActionMergeGroup(t *testing.T) {
 	parallel(t)
 	needRecipeTools(t)
@@ -144,13 +147,150 @@ func TestBacktestActionMergeGroup(t *testing.T) {
 	repo.git("checkout", "--quiet", "--detach", second)
 	rr := newRecipeRun(t, backtestHosts[0], repo)
 	ref := queueRef("main", "7", bad)
-	env := append(queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second), "PR=")
+	summary := filepath.Join(t.TempDir(), "step_summary")
+	env := append(queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second), "PR=", "GITHUB_STEP_SUMMARY="+summary)
 	out, err := runAction(t, rr, map[string]string{"version": "v0.32.0", "paths": "alerts", "incidents": "incidents.yaml", "prometheus-url": prom.URL,
 		"args": "--tz UTC", "fail-missed": "true", "status": "true"}, env...)
 	st, n := rr.host.lastStatus()
 	if err == nil || !strings.Contains(out, "the rules of "+second+", beside those of "+main) || !strings.Contains(out, "caught by no rule") ||
 		n != 2 || st.SHA != second || st.State != "failure" || st.Context != "lapilli/backtest" || rr.host.posts != 0 {
 		t.Errorf("%v, %d statuses, the last %+v, %d posted\n%s", err, n, st, rr.host.posts, lastLines(out, 4))
+	}
+	if b, _ := os.ReadFile(summary); !strings.HasPrefix(string(b), verdict.SummaryLine) || !strings.Contains(string(b), "`CheckoutErrors`") {
+		t.Errorf("the step's summary: %q", b)
+	}
+}
+
+// In GitHub Actions, the report is added to the step's summary
+// (GITHUB_STEP_SUMMARY), which the run's page shows: of a merge queue's
+// run, where no comment is posted, the report its log has, line for line;
+// of a pull request's, its comment but the hidden first line, posted or
+// not (nothing changed). It is that Markdown and nothing else, made safe
+// as the comment is. After what the step wrote there, a block of its own;
+// past the 1 MiB GitHub takes of a step's summary, none, and the run is
+// as it would be. Without GITHUB_STEP_SUMMARY, with one that isn't a
+// file, or of another host's recipe, none is written.
+func TestBacktestRecipeStepSummary(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	args := []string{"--prometheus", prom.URL, "--tz", "UTC"}
+	read := func(p string) string {
+		t.Helper()
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	// An empty file, as the runner makes one for each step.
+	fresh := func(body string) string {
+		t.Helper()
+		f := filepath.Join(t.TempDir(), "step_summary")
+		if err := os.WriteFile(f, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	const added = "the report added to the step's summary (GITHUB_STEP_SUMMARY), as the comment has it"
+
+	repo, _, second, bad, _ := queueRepo(t)
+	main := repo.git("rev-parse", "main")
+	repo.git("checkout", "--quiet", "--detach", second)
+	ref := queueRef("main", "7", bad)
+	queue := func(settings ...string) (string, error) {
+		t.Helper()
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		rr.env = append(rr.env, queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second)...)
+		out, err := rr.run(append([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml", "FAIL_MISSED=true", "STATUS=true", "PR="}, settings...), args...)
+		if rr.host.posts != 0 {
+			t.Errorf("a merge queue's run commented")
+		}
+		return out, err
+	}
+	summary := fresh("")
+	out, err := queue("GITHUB_STEP_SUMMARY=" + summary)
+	got := read(summary)
+	if err == nil || !strings.Contains(out, added) || !strings.HasPrefix(got, verdict.SummaryLine) || !strings.Contains(got, "\n### Lapilli backtest, ") ||
+		!strings.Contains(got, "`CheckoutErrors`") || strings.Contains(got, "lapilli-backtest") || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("%v, the summary:\n%s\n%s", err, got, lastLines(out, 5))
+	}
+	// The report as the job's log has it.
+	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		if !strings.Contains(out, "  | "+line+"\n") {
+			t.Errorf("a line of the summary isn't the log's: %q", line)
+		}
+	}
+	// After what the step wrote there: a blank line, then the report.
+	summary = fresh("## Written before\nby the step")
+	if out, err := queue("GITHUB_STEP_SUMMARY=" + summary); err == nil || read(summary) != "## Written before\nby the step\n\n"+got {
+		t.Errorf("after the step's own: %v\n%q\n%s", err, read(summary), lastLines(out, 3))
+	}
+	// Without GITHUB_STEP_SUMMARY, or with one that is empty or a
+	// directory: none, and the run as it is.
+	for _, settings := range [][]string{nil, {"GITHUB_STEP_SUMMARY="}, {"GITHUB_STEP_SUMMARY=" + t.TempDir()}} {
+		out, err := queue(settings...)
+		if err == nil || strings.Contains(out, added) || !strings.Contains(out, "  | ### Lapilli backtest, ") {
+			t.Errorf("%v: %v\n%s", settings, err, lastLines(out, 3))
+		}
+		if len(settings) == 1 && strings.HasSuffix(settings[0], "=") == strings.Contains(out, "isn't a file the job can read") {
+			t.Errorf("%v: said %t", settings, !strings.HasSuffix(settings[0], "="))
+		}
+	}
+
+	// 1 MiB a step: a report of a known size, with what the step wrote
+	// there to the byte, is added; a byte more, and it isn't.
+	fake := filepath.Join(t.TempDir(), "lapilli")
+	report := verdict.SummaryLine + `{"nothing_changed":false,"changed":1,"unreplayed":0})` + "\n### Lapilli backtest, a report of a known size\n"
+	os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s' '"+report+"'\n"), 0o755)
+	room := 1<<20 - len("\n\n"+report)
+	for _, c := range []struct {
+		had   int
+		added bool
+	}{{room, true}, {room + 1, false}} {
+		before := strings.Repeat("x", c.had)
+		summary := fresh(before)
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		rr.env = append(rr.env, queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second)...)
+		out, err := rr.run([]string{"PATHS=alerts", "PR=", "LAPILLI=" + fake, "GITHUB_STEP_SUMMARY=" + summary}, args...)
+		want := before
+		if c.added {
+			want += "\n\n" + report
+		}
+		if err != nil || read(summary) != want || strings.Contains(out, added) != c.added ||
+			!c.added && !strings.Contains(out, fmt.Sprintf("with the %d bytes the step wrote there, it would pass the 1 MiB GitHub takes of one", c.had)) {
+			t.Errorf("%d bytes there: %v, %d bytes after\n%s", c.had, err, len(read(summary)), lastLines(out, 3))
+		}
+		if len(read(summary)) > 1<<20 {
+			t.Errorf("%d bytes there: the summary is %d bytes, past 1 MiB", c.had, len(read(summary)))
+		}
+	}
+
+	// A pull request's run: its comment, but its first line, posted.
+	pr := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "README.md": "rules\n"})
+	pr.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], pr)
+	summary = fresh("")
+	if out, err := rr.run([]string{"PATHS=alerts", "GITHUB_STEP_SUMMARY=" + summary}, args...); err != nil || rr.host.posts != 1 || !strings.Contains(out, added) {
+		t.Fatalf("%v, %d posted\n%s", err, rr.host.posts, lastLines(out, 3))
+	}
+	if _, body, _ := strings.Cut(rr.body(), "\n"); read(summary) != body || !strings.Contains(body, "`CheckoutErrors`") {
+		t.Errorf("the summary isn't the comment:\n%q\n%q", read(summary), body)
+	}
+	// ... and one that changes no rule, which posts none.
+	same := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "README.md": "rules\n"})
+	same.pullRequest(map[string]string{"README.md": "more rules\n"})
+	rr = newRecipeRun(t, backtestHosts[0], same)
+	summary = fresh("")
+	if out, err := rr.run([]string{"PATHS=alerts", "GITHUB_STEP_SUMMARY=" + summary}, args...); err != nil || rr.host.posts != 0 ||
+		!strings.Contains(read(summary), `{"nothing_changed":true`) {
+		t.Errorf("no rule changed: %v, %d posted, the summary %q\n%s", err, rr.host.posts, read(summary), lastLines(out, 3))
+	}
+	// Gitea's recipe, whose Actions show no step's summary: none.
+	pr.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr = newRecipeRun(t, backtestHosts[1], pr)
+	summary = fresh("")
+	if out, err := rr.run([]string{"PATHS=alerts", "GITHUB_STEP_SUMMARY=" + summary}, args...); err != nil || read(summary) != "" || strings.Contains(out, added) {
+		t.Errorf("gitea.sh: %v, the summary %q", err, read(summary))
 	}
 }
 
@@ -284,8 +424,9 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 
 // Through lapilli serve, a merge queue's run sends the merge group's
 // head as the commit and the pull request its ref names, and logs serve's
-// report where a pull request's would be commented; the status goes on
-// the head.
+// report where a pull request's would be commented, and adds it to the
+// step's summary; the status goes on the head. A group serve says a newer
+// one took the place of is said so, the merge queue having built it again.
 func TestBacktestServeRecipeMergeGroup(t *testing.T) {
 	parallel(t)
 	needRecipeTools(t)
@@ -298,9 +439,13 @@ func TestBacktestServeRecipeMergeGroup(t *testing.T) {
 	rr := serveRun(t, backtestHosts[0], repo, srv)
 	ref := queueRef("main", "7", bad)
 	rr.env = append(rr.env, queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second)...)
-	out, err := rr.run([]string{"PATHS=alerts", "STATUS=true", "PR="}, "--since", "14d")
+	summary := filepath.Join(t.TempDir(), "step_summary")
+	out, err := rr.run([]string{"PATHS=alerts", "STATUS=true", "PR=", "GITHUB_STEP_SUMMARY=" + summary}, "--since", "14d")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(summary); string(b) != markdown {
+		t.Errorf("the step's summary isn't serve's report:\n%q\n%q", b, markdown)
 	}
 	body := srv.sent()
 	if body["pull_request"] != json.Number("7") || body["commit"] != second {
@@ -314,6 +459,22 @@ func TestBacktestServeRecipeMergeGroup(t *testing.T) {
 	}
 	if st, n := rr.host.lastStatus(); n != 2 || st.SHA != second || st.State != "success" || st.Context != "lapilli/backtest" {
 		t.Errorf("%d statuses, the last %+v", n, st)
+	}
+	// Superseded: the group built again. Held to the incidents, the job
+	// fails, its status a failure on this group's head.
+	srv.answers([]serveAnswer{{202, nil, `{"id":"` + serveID + `","key":"` + serveKey + `","position":1,"requests":80}`}},
+		[]serveAnswer{serveState(200, map[string]any{"state": "superseded"})})
+	rr = serveRun(t, backtestHosts[0], repo, srv)
+	rr.env = append(rr.env, queueRun(queueEvent(t, second, main, "main", ref, "main"), ref, second)...)
+	summary = filepath.Join(t.TempDir(), "step_summary")
+	out, err = rr.run([]string{"PATHS=alerts", "STATUS=true", "FAIL_MISSED=true", "PR=", "GITHUB_STEP_SUMMARY=" + summary}, "--since", "14d")
+	b, _ := os.ReadFile(summary)
+	why := "the merge queue built this pull request's group again: the newer group's backtest took this one's place in lapilli serve's queue"
+	if st, _ := rr.host.lastStatus(); err == nil || st.State != "failure" || st.SHA != second || rr.host.posts != 0 {
+		t.Errorf("superseded: %v, the status %+v\n%s", err, st, lastLines(out, 4))
+	}
+	if block := failure(t, "[//]: # (lapilli-backtest default)\n"+string(b), why); block == "" {
+		t.Errorf("the summary: %q", b)
 	}
 }
 

@@ -1122,7 +1122,10 @@ same repository, by the repository's id as the token says it, since
 0.69.2: renamed meanwhile, it is still itself; a number the job said takes
 none's: GitLab's ID token names a merge request's
 source branch, not its number, and Bitbucket's no pull request, so their
-backtests don't take each other's place); past them, 429 with
+backtests don't take each other's place; a GitHub merge queue's group, by
+its token's `ref`, the queue's, of the same repository, branch and pull
+request, a group the queue built again, never a pull request's own);
+past them, 429 with
 `Retry-After`. One the leader stopped while running is run again by the
 next, twice at most. A job reads its backtest by its id and key, told from
 the keys each replica holds: those it queued, and the ledger's, listed one

@@ -277,7 +277,9 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    decides when a rule fires changed and there is no comment yet, it posts
    none; when there is one, it says that nothing changes now. A merge
    queue's run, of no pull request, posts none: the report goes to the
-   job's log.
+   job's log. In GitHub Actions, the report, as the comment has it but
+   its first line, is also added to the step's summary, which the run's
+   page shows, whether or not a comment was posted.
 6. With `STATUS`, sets the commit status on the pull request's head
    commit, success or failure as the job is about to end, and ends it;
    pending from step 1 on, once the commits are found.
@@ -321,7 +323,7 @@ In a merge queue, run it on `merge_group` too, with the same `with:`:
 the merge group's head (`merge_group.head_sha`) is backtested against the
 commit GitHub's event names as its base (`merge_group.base_sha`), the
 pull requests ahead in the queue in the head too; no comment is posted,
-the report going to the step's log; and `status` sets
+the report going to the step's log and its summary; and `status` sets
 `lapilli/backtest` on the head, where the queue reads a required status.
 The `if:` above skips a group's run, whose event names no pull request,
 so say so (`github.event_name == 'merge_group' || ...`), and fetch the
@@ -338,6 +340,12 @@ group's base, behind another group, is the branch's commit or the head
 of the group ahead, and with it off, a pull request whose group failed
 merges once a group behind it passes. [Stopping a
 merge](../../docs/pr-backtests.md#a-merge-queue) has the workflow.
+
+The report is added to the step's summary (`GITHUB_STEP_SUMMARY`) in
+every run, a pull request's beside its comment: the comment's Markdown,
+but its hidden first line, and nothing else, within the 1 MiB GitHub
+takes of a step's summary ([The report in the step's
+summary](../../docs/pr-backtests.md#the-report-in-the-steps-summary)).
 
 `fetch-depth: 2` fetches the merge commit's parents; `persist-credentials:
 false` keeps the job's token out of the checkout's git configuration,
@@ -881,13 +889,18 @@ serve out of reach; the token refused (401: serve's log says why); the
 request refused (400: the rules, a bound, or the period, with what period
 would fit); a token that started another backtest (409); the same request
 asked twice; no room in the queue within `SERVE_WAIT`; a newer commit's
-backtest that took this one's place; one that failed in serve, or didn't
+backtest that took this one's place (of a merge queue's run, a group the
+queue built again); one that failed in serve, or didn't
 finish within its `--backtest-timeout`; one that didn't come back within
 `SERVE_WAIT`.
 
 **A newer commit takes the place** of a backtest of the same pull request
 still waiting only on GitHub and Forgejo, whose ID token names the pull
-request (`ref`, `refs/pull/N/merge`). GitLab's names a merge request's
+request (`ref`, `refs/pull/N/merge`). In GitHub's merge queue, a group
+the queue built again takes the place of the one of the same pull
+request and branch still waiting, by the queue's `ref`
+(`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`), never a pull request's
+own backtest. GitLab's names a merge request's
 source branch, not its number, and Bitbucket's names no pull request, so
 a GitLab merge request's or a Bitbucket pull request's older backtests
 aren't superseded: each waits its turn and is posted, the newest last,
