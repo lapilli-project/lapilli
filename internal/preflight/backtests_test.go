@@ -585,7 +585,7 @@ func TestBacktestTrustHidden(t *testing.T) {
 		{"ids: &ids [\"987650003\", 0x3ade]\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
 			"    claims:\n      repository_id: *ids\n      event_name: pull_request\n", "decimal", []string{"987650003", "0x3ade"}},
 		{fmt.Sprintf(gh, "https://lapilli-ci.example.com", "      repository_id: \"123456789\"\n      repository_owner_id: 4200917\n      event_name: pull_request_target\n"),
-			"event_name: want pull_request or push", []string{"123456789", "4200917", "pull_request_target"}},
+			"event_name: want pull_request, push or merge_group", []string{"123456789", "4200917", "pull_request_target"}},
 		{"trust:\n  - {name: alerts, issuer: 'https://token.actions.githubusercontent.com', audience: x, claims: {repository_id: '1', event_name: push}, days: 30}\n",
 			"line 2, entry 1: days is 1 to 14", []string{"30"}},
 	} {
