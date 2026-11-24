@@ -1,7 +1,8 @@
 // Checks lapilli.dev, the front page and the docs, with axe-core against
 // WCAG 2.2 AA, in light and in dark, and that no page scrolls sideways at
 // 320 CSS px (WCAG 1.4.10): every page its sitemap.xml lists, which
-// jekyll-sitemap writes from every page there is. Run by
+// jekyll-sitemap writes from every page there is. And that every result of
+// the docs' search goes to a section there is. Run by
 // .github/workflows/pages.yml over the site it builds, or by hand:
 //
 //   cd test/a11y && npm ci && BASE=https://lapilli.dev node site.mjs
@@ -71,6 +72,35 @@ for (const path of paths) {
   await page.goto(base + path, { waitUntil: 'networkidle' });
   const w = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
   if (w[0] > w[1]) found.push({ scheme: '320px', path, id: 'reflow', help: `scrolls sideways at 320 CSS px: ${w[0]} > ${w[1]}` });
+}
+// The docs' search (site/docs.sh writes its indexes, /docs/search.json and,
+// where there are translations, /ko/docs/search.json): every result goes to
+// a page there is, and to a section of it there is, by the id kramdown gave
+// the heading.
+for (const where of ['/docs/search.json', '/ko/docs/search.json']) {
+  const res = await fetch(base + where);
+  if (where !== '/docs/search.json' && res.status === 404) continue;
+  const index = await res.json();
+  if (index.length < (where === '/docs/search.json' ? 10 : 1)) found.push({ scheme: 'search', path: where, id: 'search-index', help: `lists ${index.length} pages: too few to be the docs'` });
+  for (const entry of index) {
+    const path = new URL(entry.url, base).pathname;
+    const r = await page.goto(base + path, { waitUntil: 'domcontentloaded' });
+    if (!r || !r.ok()) {
+      found.push({ scheme: 'search', path, id: 'search-page', help: `${where} lists a page that is not there` });
+      continue;
+    }
+    // The ids of the page's ## and ### headings, in order, are exactly the
+    // index's: a heading kramdown numbered (-1) and the index didn't, or the
+    // other way round, is a result that goes to the wrong section.
+    const ids = await page.evaluate(() => [...document.querySelectorAll('article.doc :is(h2, h3)[id]')].map((e) => e.id));
+    const want = entry.headings.map((h) => h[0]);
+    for (let i = 0; i < Math.max(ids.length, want.length); i++) {
+      if (ids[i] !== want[i]) {
+        found.push({ scheme: 'search', path, id: 'search-anchor', help: `${where}: the ${i + 1}th heading is #${ids[i]} on the page and #${want[i]} ("${entry.headings[i]?.[1]}") in the index` });
+        break;
+      }
+    }
+  }
 }
 await browser.close();
 server?.close();

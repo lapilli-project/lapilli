@@ -2,23 +2,83 @@
 layout: default
 ---
 {%- comment -%}
-A page of docs/, put here by site/docs.sh: the pages beside it, from
-site/_data/docs.yml (docs/README.md's lists), and the page.
+A page of docs/, put here by site/docs.sh. On the left, a search of the
+pages and the pages themselves, from site/_data/docs.yml (docs/README.md's
+lists); on the right, this page's sections; under the page, the pages
+before and after it in that list. The search and the sections are filled in
+by the script in default.html, and stay hidden without it; on a narrow
+screen all three are above the page, in this order, the lists folded.
 {%- endcomment -%}
+{%- assign lang = page.lang | default: "en" -%}
+{%- assign t = site.data.i18n[lang] -%}
+{%- if lang == "ko" -%}
+  {%- assign nav = site.data.docs_ko -%}
+  {%- assign docs_home = "/ko/docs/" -%}
+{%- else -%}
+  {%- assign nav = site.data.docs -%}
+  {%- assign docs_home = "/docs/" -%}
+{%- endif -%}
+{%- assign before = nil -%}
+{%- assign after = nil -%}
+{%- assign seen = false -%}
+{%- for g in nav -%}
+  {%- for p in g.pages -%}
+    {%- if p.url == page.url -%}
+      {%- assign seen = true -%}
+    {%- elsif seen == false -%}
+      {%- assign before = p -%}
+    {%- elsif after == nil -%}
+      {%- assign after = p -%}
+    {%- endif -%}
+  {%- endfor -%}
+{%- endfor -%}
+{%- if seen == false -%}
+  {%- assign before = nil -%}
+  {%- assign after = nav.first.pages.first -%}
+{%- endif -%}
+{%- capture original_link %}<a href="{{ page.original | relative_url }}" hreflang="en">{{ t.original }}</a>{% endcapture -%}
 <div class="docs">
-<article class="doc">
+<div class="left">
+  <div class="find" data-index="{{ docs_home | append: 'search.json' | relative_url }}" data-none="{{ t.search_none }}" hidden>
+    <label class="vh" for="find">{{ t.search }}</label>
+    <input id="find" type="search" placeholder="{{ t.search }}" autocomplete="off" spellcheck="false">
+    <p class="vh" role="status"></p>
+    <ul class="hits" aria-label="{{ t.search }}"></ul>
+  </div>
+  <details class="side" open>
+    <summary>{{ t.pages }}</summary>
+    <nav aria-label="{{ t.docs }}">
+      <a class="home{% if page.url == docs_home %} here{% endif %}" href="{{ docs_home | relative_url }}"{% if page.url == docs_home %} aria-current="page"{% endif %}>{{ t.docs }}</a>
+      {%- for g in nav %}
+      <p>{{ g.group | markdownify | remove: '<p>' | remove: '</p>' | strip }}</p>
+      <ul>
+        {%- for p in g.pages %}
+        <li><a href="{{ p.url | relative_url }}"{% if p.url == page.url %} class="here" aria-current="page"{% endif %}>{{ p.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}{% if p.lang and p.lang != lang %} <small class="other">{{ t.in_english }}</small>{% endif %}</a></li>
+        {%- endfor %}
+      </ul>
+      {%- endfor %}
+    </nav>
+  </details>
+</div>
+<details class="toc" data-link="{{ t.section_link }}" hidden>
+  <summary>{{ t.on_this_page }}</summary>
+  <nav aria-label="{{ t.on_this_page }}"><ul></ul></nav>
+</details>
+<article class="doc" id="content" tabindex="-1">
+{%- if page.stale %}
+<p class="stale" role="note">{{ t.stale | replace: '[link]', original_link }}</p>
+{%- endif %}
 {{ content }}
-<p class="edit"><a href="https://github.com/lapilli-project/lapilli/blob/main/{{ page.source }}">Edit this page on GitHub</a></p>
-</article>
-<nav class="side" aria-label="Docs">
-  <a class="home{% if page.url == '/docs/' %} here{% endif %}" href="{{ '/docs/' | relative_url }}"{% if page.url == '/docs/' %} aria-current="page"{% endif %}>Docs</a>
-  {%- for g in site.data.docs %}
-  <p>{{ g.group | markdownify | remove: '<p>' | remove: '</p>' | strip }}</p>
-  <ul>
-    {%- for p in g.pages %}
-    <li><a href="{{ p.url | relative_url }}"{% if p.url == page.url %} class="here" aria-current="page"{% endif %}>{{ p.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}</a></li>
-    {%- endfor %}
-  </ul>
-  {%- endfor %}
+{%- if before or after %}
+<nav class="around" aria-label="{{ t.around }}">
+  {%- if before %}
+  <a class="prev" href="{{ before.url | relative_url }}"><span>{{ t.prev }}</span>{{ before.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}{% if before.lang and before.lang != lang %} <small class="other">{{ t.in_english }}</small>{% endif %}</a>
+  {%- endif %}
+  {%- if after %}
+  <a class="next" href="{{ after.url | relative_url }}"><span>{{ t.next }}</span>{{ after.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}{% if after.lang and after.lang != lang %} <small class="other">{{ t.in_english }}</small>{% endif %}</a>
+  {%- endif %}
 </nav>
+{%- endif %}
+<p class="edit"><a href="https://github.com/lapilli-project/lapilli/blob/main/{{ page.source }}">{{ t.edit }}</a>{% if page.original %} · <a href="{{ page.original | relative_url }}" hreflang="en">{{ t.original }}</a>{% endif %}</p>
+</article>
 </div>

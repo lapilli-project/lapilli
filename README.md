@@ -118,7 +118,8 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
 [wiki](https://github.com/lapilli-project/lapilli/wiki):
 
 - Start here: [Getting started](docs/getting-started.md),
-  [Words](docs/glossary.md), [Questions](docs/faq.md)
+  [Words](docs/glossary.md), [Questions](docs/faq.md),
+  [What it reads, keeps and sends](docs/data.md)
 - Judging a period: [How it judges](docs/how-it-judges.md),
   [Use `lapilli verdict`](docs/verdict.md), [The numbers](docs/numbers.md),
   [A cloud's own alarms](docs/cloud-alarms.md),
