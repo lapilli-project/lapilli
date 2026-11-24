@@ -221,3 +221,34 @@ func TestRecordedFiringsOnlyKeptByRule(t *testing.T) {
 		t.Errorf("none kept: exit %d\n%s", code, errs)
 	}
 }
+
+// With --firings-prefix, an incident's alerts name a recorded rule by the
+// name the report gives it, the prefix too: the tool's own name for the
+// alert (X) doesn't link to cloud/X.
+func TestRecordedFiringsPrefixLinked(t *testing.T) {
+	h, args := recordedWorld(t)
+	args = append(args, "--firings-prefix", "cloud/", "--linked-only", "--json")
+	for _, c := range []struct {
+		alert  string
+		caught bool
+	}{{"cloud/StorageFull", true}, {"StorageFull", false}} {
+		args[6] = write(t, "incidents.yaml", `incidents:
+  - id: INC-2
+    title: Disk full
+    start: `+ts(at(2, 3, 5))+`
+    end: `+ts(at(2, 4, 0))+`
+    alerts: [{rule: `+c.alert+`}]
+`)
+		code, out, errs := runRecorded(t, h, args...)
+		if code != 0 {
+			t.Fatalf("%s: exit %d\n%s", c.alert, code, errs)
+		}
+		var rep verdict.Report
+		if err := json.Unmarshal([]byte(out), &rep); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(rep.Incidents[0].CaughtBy) == 1; got != c.caught {
+			t.Errorf("alert %s: caught by %v", c.alert, rep.Incidents[0].CaughtBy)
+		}
+	}
+}
