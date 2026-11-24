@@ -315,13 +315,12 @@ standing in; Gitea's also in CI's run against a real Gitea
 ### A merge queue
 
 GitHub's merge queue checks each pull request it holds on a commit of its
-own, a merge group: the branch the pull requests go into, at the commit
-GitHub's event names as its base (`merge_group.base_sha`, "the SHA of the
-merge group's parent commit", its webhook reference says), with the pull
-requests ahead in the queue and this one on it, the group's head
-(`merge_group.head_sha`). A required status is read on that head, and
-GitHub's Actions runs a workflow for the group only on its own event,
-`merge_group`, beside `pull_request`. On that event, `github.sh` (and the
+own, a merge group's head (`merge_group.head_sha`): the branch the pull
+requests go into, with the pull requests ahead in the queue and this one
+on it. Its event names a base too, `merge_group.base_sha`, "the SHA of
+the merge group's parent commit", its webhook reference says. A required
+status is read on the head, and GitHub's Actions runs a workflow for the
+group only on its own event, `merge_group`, beside `pull_request`. On that event, `github.sh` (and the
 action) backtests the head against the base, both as the event says,
 `INCIDENTS` and the expectations of the rules in place read from the
 base; posts no comment, as no pull request is the run's, and writes the
@@ -378,6 +377,18 @@ refused:
   `STATUS_SHA` other than the head, and a `PR` other than the number the
   queue's ref names, would name another base or head: each fails the job,
   its status a failure on the head.
+
+Keep "Only merge non-failing pull requests" on in the branch's merge
+queue settings, GitHub's default, when the gate is required. GitHub
+doesn't say what `merge_group.base_sha` is of a group queued behind
+another: the branch's commit, so that the change judged holds the pull
+requests ahead too, or the head of the group ahead, its parent commit, so
+that each group is judged on what it adds alone. The recipe judges the
+head against that base, whichever it is, and can't tell which it was
+given. With the setting on, a pull request merges only once its own
+group passed, either way. With it off, a pull request whose group failed
+merges once a group behind it passes, and of the second reading, that
+group was judged on a diff that didn't hold it.
 
 Run the job on the queue's event without a `paths:` filter, which
 `merge_group` doesn't take: a group whose rules didn't change passes,
