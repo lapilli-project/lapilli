@@ -38,10 +38,15 @@ import (
 // With LAPILLI_TEST_POSTGRES set (internal/ledger/ledgertest) the ledgers
 // are Postgres's instead, each in a schema of its own, dropped when its
 // rows are measured; "on disk" is then pg_total_relation_size (tables,
-// indexes and TOAST) summed over the schema's tables, as the ledger and
-// the database's autovacuum have left them: serve runs no VACUUM of its
-// own. The server's own files (its WAL, other schemas, the catalogs) are
-// not in it. The table says which in its Ledger column.
+// indexes and TOAST) summed over the schema's tables. Each hourly run
+// rewrites the rows of the days and the week it falls in, so a table holds
+// rows no longer live until it is vacuumed: autovacuum, given the hour
+// between two runs, would have done it, but the test writes a week in
+// seconds, so it runs VACUUM on the schema's tables itself after each run
+// (not VACUUM FULL: the space freed is reused, not given back, as
+// autovacuum's is). serve runs no VACUUM of its own. The server's own
+// files (its WAL, other schemas, the catalogs) are not in it. The table
+// says which in its Ledger column.
 //
 // Nothing here is held to a bound: the test measures. A ledger is written
 // as hourly runs write it (ledger.Record, one run an hour), weeks of it
@@ -95,6 +100,15 @@ func TestSizing(t *testing.T) {
 				dir := t.TempDir()
 				path := filepath.Join(dir, "ledger.db")
 				pg := ledgertest.URL(t) // a schema of this cell's, dropped after it; "" for SQLite
+				vacuum := func() {}
+				if pg != "" {
+					c, err := pgx.Connect(ctx, pg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer c.Close(ctx)
+					vacuum = func() { sizingVacuum(t, ctx, c) }
+				}
 				r := rand.New(rand.NewPCG(uint64(rules), uint64(perWeek)))
 				services := []string{"checkout", "search", "cart", "auth", "billing", "media"}
 				var firings int
@@ -113,7 +127,7 @@ func TestSizing(t *testing.T) {
 					upTo := map[int]int{0: 1, 1: 4, 4: 12, 12: 12}[week]
 					for ; week < min(upTo, maxWeeks); week++ {
 						began := time.Now()
-						firings += sizingWeek(t, ctx, l, r, week, rules, perWeek, services)
+						firings += sizingWeek(t, ctx, l, r, week, rules, perWeek, services, vacuum)
 						t.Logf("rules %d, %d a week: week %d written, %d firings, in %s", rules, perWeek, week+1, firings, time.Since(began).Round(time.Second))
 					}
 					row := sizingRow{Ledger: kind, Rules: rules, PerWeek: perWeek, Weeks: week, Firings: firings}
@@ -183,6 +197,27 @@ func sizingSchemaBytes(t *testing.T, ctx context.Context, conn string) int64 {
 	return n
 }
 
+// sizingVacuum runs VACUUM on the tables of the schema c's search_path
+// names, as autovacuum would in the hour between two runs.
+func sizingVacuum(t *testing.T, ctx context.Context, c *pgx.Conn) {
+	t.Helper()
+	rows, err := c.Query(ctx, `SELECT quote_ident(current_schema()) || '.' || quote_ident(relname) FROM pg_class
+		WHERE relnamespace = current_schema()::regnamespace AND relkind = 'r' ORDER BY relname`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) == 0 {
+		return
+	}
+	if _, err := c.Exec(ctx, "VACUUM "+strings.Join(names, ", ")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func sizingBytes(path string) int64 {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -193,8 +228,9 @@ func sizingBytes(path string) int64 {
 
 // sizingWeek writes a week as the hourly runs do, an hour a run, and gives
 // the firings written. A busy hour's firings start in it, a minute to
-// an hour long, with the labels of TestScale's.
-func sizingWeek(t *testing.T, ctx context.Context, l *ledger.Ledger, r *rand.Rand, week, rules, perWeek int, services []string) int {
+// an hour long, with the labels of TestScale's. after is called after
+// each run.
+func sizingWeek(t *testing.T, ctx context.Context, l *ledger.Ledger, r *rand.Rand, week, rules, perWeek int, services []string, after func()) int {
 	t.Helper()
 	o := verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}, Zone: time.UTC,
 		Hours: verdict.DefaultHours(time.UTC)}
@@ -228,6 +264,7 @@ func sizingWeek(t *testing.T, ctx context.Context, l *ledger.Ledger, r *rand.Ran
 		if err := l.Record(ctx, f, o); err != nil {
 			t.Fatal(err)
 		}
+		after()
 	}
 	return total
 }
@@ -334,13 +371,32 @@ func TestSizingVisit(t *testing.T) {
 	close(done)
 	m.Peak = <-peak
 	m.After = heap()
-	var ru syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err == nil {
-		m.RSS = uint64(ru.Maxrss)
-		if runtime.GOOS != "darwin" { // KB there, bytes on macOS
-			m.RSS *= 1024
-		}
-	}
+	m.RSS = sizingPeakRSS()
 	b, _ := json.Marshal(m)
 	fmt.Printf("SIZING %s\n", b)
+}
+
+// sizingPeakRSS is this process's peak resident set, in bytes. On Linux it
+// is /proc's VmHWM, this address space's own: getrusage's ru_maxrss there
+// is kept across execve, and Go starts a child with vfork, sharing the
+// parent's address space until the exec, so it would be the parent's peak,
+// the writing's. Elsewhere ru_maxrss (bytes on macOS).
+func sizingPeakRSS() uint64 {
+	if b, err := os.ReadFile("/proc/self/status"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if rest, ok := strings.CutPrefix(line, "VmHWM:"); ok {
+				if kb, err := strconv.ParseUint(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), "kB")), 10, 64); err == nil {
+					return kb * 1024
+				}
+			}
+		}
+	}
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		return 0
+	}
+	if runtime.GOOS == "darwin" {
+		return uint64(ru.Maxrss)
+	}
+	return uint64(ru.Maxrss) * 1024 // KB elsewhere
 }
