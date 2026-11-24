@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rules from Terraform: the JSON `terraform show -json` writes of a plan
+  or a state is read wherever rules files are (`--rules`, serve's rules,
+  preflight, a pull request's backtest), each `grafana_rule_group` as the
+  Grafana alerting provisioning file it stands for. A backtest keeps only
+  those rule groups of it: the recipe cuts the rest out before anything
+  leaves the job, and serve's backtest port keeps nothing else, as a
+  plan's JSON holds every resource's values, sensitive ones too.
+- `lapilli demo --serve` holds three teams and a proposal waiting for
+  approval, its backtest with it, to look at: made by the demo itself in
+  its own ledger, which every request still only reads.
+- docs/serve.md's Sizing: the ledger on disk and serve's memory, measured
+  by rules, firings a week and weeks kept, and how to measure them again
+  (`LAPILLI_SIZING=1`).
+- `--check-no-data=false` skips, of the steps after the replays, only the
+  one that asks whether the rules that never fired read anything. The
+  chart's CronJob takes `failUnreplayed`, `failNothingReplayed` and
+  `checkNoData`.
+
 ### Changed
 
 - The end-to-end tests on kind of the chart's CronJob and of the whole
@@ -9,6 +29,18 @@
   `GRAFANA_IMAGE`, as the scripts in Docker have since 0.71.0, and
   `upstream.yml` runs them weekly against the latest release of each
   with the rest.
+- `lapilli verdict` exits 1 when no rule was replayed, every replay
+  having failed (the history unread, or too many labels on a rule's
+  series): the report judges nothing. `--fail-nothing-replayed=false`
+  exits 0 as before; a run that replayed some rules, and `--compare`, are
+  as they were.
+
+### Fixed
+
+- `lapilli serve` restarted on a ledger it had run panicked on its
+  overview's first view, before anything was written again.
+- One rule left out of a report is said to be ("is left out"), in the
+  text and in a pull request's comment.
 
 ## [0.71.0] - 2026-11-24
 
@@ -106,23 +138,6 @@ Before upgrading:
   every one is replayed against `--prometheus`, read from files or with
   `--grafana`.
 - docs/getting-started.md says what each column of the report says.
-- Rules from Terraform: the JSON `terraform show -json` writes of a plan
-  or a state is read wherever rules files are (`--rules`, serve's rules,
-  preflight, a pull request's backtest), each `grafana_rule_group` as the
-  Grafana alerting provisioning file it stands for. A backtest keeps only
-  those rule groups of it: the recipe cuts the rest out before anything
-  leaves the job, and serve's backtest port keeps nothing else, as a
-  plan's JSON holds every resource's values, sensitive ones too.
-- `lapilli demo --serve` holds three teams and a proposal waiting for
-  approval, its backtest with it, to look at: made by the demo itself in
-  its own ledger, which every request still only reads.
-- docs/serve.md's Sizing: the ledger on disk and serve's memory, measured
-  by rules, firings a week and weeks kept, and how to measure them again
-  (`LAPILLI_SIZING=1`).
-- `--check-no-data=false` skips, of the steps after the replays, only the
-  one that asks whether the rules that never fired read anything. The
-  chart's CronJob takes `failUnreplayed`, `failNothingReplayed` and
-  `checkNoData`.
 
 ### Changed
 
@@ -178,11 +193,6 @@ Before upgrading:
   points to `--rules`; two sources given are named; where the history is
   wanted, a managed Prometheus's URL with `--auth` is said beside
   `--gcp-project`.
-- `lapilli verdict` exits 1 when no rule was replayed, every replay
-  having failed (the history unread, or too many labels on a rule's
-  series): the report judges nothing. `--fail-nothing-replayed=false`
-  exits 0 as before; a run that replayed some rules, and `--compare`, are
-  as they were.
 
 ### Fixed
 
@@ -209,10 +219,6 @@ Before upgrading:
   values said serve takes one rules ConfigMap, where it mounts them all as
   one directory; docs/verdict.md says which cloud paths were run against
   real accounts.
-- `lapilli serve` restarted on a ledger it had run panicked on its
-  overview's first view, before anything was written again.
-- One rule left out of a report is said to be ("is left out"), in the
-  text and in a pull request's comment.
 
 ## [0.70.1] - 2026-11-24
 
