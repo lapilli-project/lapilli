@@ -625,13 +625,13 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   is lost to them.
 - **The rules left alone** are judged by serve's record: such an incident
   is still caught when the ledger says a rule the change doesn't name
-  caught it, and only from the same text. A catch in the record was made
+  caught it, and only from the same rule. A catch in the record was made
   by the rule as it was written then; `lapilli verdict` replays a rule
-  left alone as it is now. So a catch counts only when the rule's text
-  (`rules.Rule.Whole`: what decides when it fires), in every version of
-  serve's rules over the incident's catch window and its condition's
-  reach before it (its `for` and its group's interval), is the text it has
-  after the change:
+  left alone as it is now. So a catch counts only when the rule (what
+  decides when it fires), in every version of serve's rules over the
+  incident's catch window and its condition's reach before it (its `for`
+  and its group's interval), is the rule it is after the change, as
+  parsed (below):
   - of a rule the pull request holds alike on both sides, the pull
     request's, read as serve reads its own (`replayedAs`);
   - of a rule serve runs now (in its latest version of the rules) that
@@ -639,18 +639,78 @@ each incident (its catches). A request with `fail_missed: true` is held so:
     Grafana's), serve's latest: the change doesn't touch it, and after the
     merge it runs as it does now.
 
-  Where the text then was another, or a version over that time isn't in
-  the ledger, or a version holds two rules of the name written otherwise,
-  the incident is not known, never caught. A rule serve runs no longer,
+  Where the rule then was another, or a version over that time isn't in
+  the ledger, or a version holds two rules of the name that differ, the
+  incident is not known, never caught. A rule serve runs no longer,
   and the pull request doesn't hold, catches nothing after the change;
   one whose firings serve copies in and no version of its rules holds now
   (a cloud's alarm copied in, a Grafana rule judged from Grafana's history
-  and since deleted) has no text to hold, and its catch leaves the
+  and since deleted) has no rule to hold, and its catch leaves the
   incident not known. A rule's name is the ledger's, as every page has
   it; a rule of the pull request's is the ledger's rule of the same name.
-  A rule serve reads from an API that writes its expression otherwise
-  than the pull request's file (Prometheus's rules API prints PromQL
-  again) has another text: its catch is not known.
+- **As parsed** (`rules.Rule.Parsed`). Two writings of a rule are one: a
+  rule file's, and the one an API that runs it answers with, which prints
+  its expression again. Prometheus's rules API (`--loaded-rules`), and
+  Mimir's and Thanos' through the same printer, write `on()` as `on ()`,
+  `sum(x) by (a)` as `sum by (a) (x)`, `300s` as `5m`, a selector's
+  matchers sorted, `'a'` as `"a"`, `1e3` as `1000`, and a `for` in seconds.
+  The expression is read as PromQL and written in one form: comments and
+  space aside; numbers and durations by value, a number's signs with it;
+  strings by value, whatever their quotes; a selector's matchers, and the
+  labels of `by`, `without`, `on`, `ignoring`, `group_left` and
+  `group_right`, in any order; `by` and `without` before or after an
+  aggregation's parentheses; PromQL's words in any case; `@` before or
+  after an offset; an offset of 0, `by ()`, and `ignoring ()` without
+  `group_left` or `group_right`, as none; and parentheses that change
+  nothing: around the whole expression or a whole argument, or around one
+  term with no sign and nothing after them, never around a range or a
+  subquery. The rest is `rules.Rule.Whole`'s, by value already: `for`,
+  `keep_firing_for`, the group's interval, `query_offset` and limit; and
+  the labels its alerts carry, as one map, its group's written apart (a
+  file) or among its own (an API's answer). Each form is one as
+  Prometheus 3.5.0 reads and prints it (`promql/parser`), and as
+  VictoriaMetrics' MetricsQL reads it: what two histories may read
+  otherwise is never one (`0x10` and `010` only as written; a label's or
+  a metric's name in quotes apart from one without; `ignoring ()` with
+  `group_left`, which Prometheus 3.5.0 prints as nothing, so as another
+  rule). The rules of the Prometheus 3.5.0 recorded in
+  `internal/replay/testdata` and its rules API's answer are one each, but
+  the group with `query_offset`, which that API doesn't say.
+
+  An expression it doesn't read, and a rule that isn't PromQL, are
+  compared by their text (`rules.Rule.Whole`), as before: one only where
+  it is the same, so the catch of one an API prints again is not known.
+  Those are what MetricsQL or Prometheus 2 reads otherwise than
+  Prometheus 3 (Prometheus 3's durations as numbers, `x > 5m`, and
+  numbers as durations, `rate(x[300])`; `1d-1y`; a backtick's string
+  ending in `\`; a name in quotes with a `\` in it; MetricsQL's own
+  words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
+  a comma after a call's last argument), an expression past 16 KiB or 32
+  levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
+  LogQL again too; and a cloud's alarm. And a rule is another, its catch
+  not known, where its file leaves out what the API says or the other way
+  round: a group's `query_offset`, which Prometheus 3.5.0's API leaves
+  out. Not a group's interval, where serve knows it:
+- **A group with no interval.** A rule file's group that gives no
+  `interval` runs at Prometheus's `evaluation_interval`, which its rules
+  API says of the group (`"interval": 60`) and the file doesn't. With
+  `--loaded-rules`, serve reads Prometheus's configuration
+  (`/api/v1/status/config`, once a day with the scrape intervals, 2 MiB at
+  most, `--scrape-interval` or not) for its `evaluation_interval`, 1m
+  where a configuration read doesn't say it (Prometheus 3.5.0 writes every
+  default, so says it). A rule of the pull request's left alone, in a
+  group with no interval, is taken at it when every rule of its name in
+  serve's latest version was read from that Prometheus's rules API: there
+  it runs, after the merge as before. Where the configuration isn't read
+  (most managed services don't serve it), says an interval that isn't a
+  duration, or the rule is serve's from elsewhere (`--rules`, `--ruler`,
+  a Loki ruler, Grafana) or vmalert's,
+  whose groups run at its own `-evaluationInterval` (its rules API says
+  its groups' `concurrency`, Prometheus's doesn't), the rule is as its
+  file has it, and another than the API's: its catch is not known. A rule
+  of serve's isn't taken so: its rules API says every group's interval,
+  and a version of rules read otherwise (files, earlier) ran wherever they
+  ran.
 - **Not known, not missed**, as in `lapilli verdict`: an incident is not
   known (`missed_not_known`) when a rule after the change couldn't be
   replayed; or when a rule the pull request leaves alone may have caught it
@@ -670,9 +730,10 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   period and their catches, the rules and the latest version of them, where
   the runs began and have got to, the versions of the rules over the
   period and its reach before (14 days at most, each version read as the
-  runs read it, of the texts of the rules left alone and of those that
-  caught an incident kept by their hash; past 200 versions none, and every
-  incident that hangs on them is not known), and the runs that couldn't
+  runs read it, the rules left alone and those that caught an incident
+  kept, as parsed, by their hash, each parsed once however many versions
+  hold it; past 200 versions none, and every incident that hangs on them
+  is not known), and the runs that couldn't
   replay a rule. Nothing more is asked of the history, and the planner's
   count, the queue and the hour are as they are.
 - **What it says.** The report, as `--fail-missed` writes it: the summary's
@@ -686,9 +747,8 @@ What it doesn't do:
 
 - **Judge a rule of the pull request's that serve runs otherwise** (the
   commit the pull request goes into ahead of what is deployed): its record
-  is of another text, and an incident that hangs on it is not known. Send
-  the rules serve runs, as serve reads them, or backtest without
-  `LAPILLI_SERVE`.
+  is of another rule, and an incident that hangs on it is not known. Send
+  the rules serve runs, or backtest without `LAPILLI_SERVE`.
 - **Replay a rule left alone that serve has no record of.** That is a
   backtest of every rule, with its requests and its share of the rate; the
   incident is not known instead, and the job held to it fails, as a gate
@@ -745,10 +805,14 @@ How much can a holder make Lapilli read, fetch, keep or judge?
   which rule, nor anything of its firings. A pull request can ask so, a
   name at a time, whether serve runs a rule of that name, as a refusal
   tells a uid at a time whether one is in effect: each a backtest of the
-  entry's hour; and whether a rule's text over that time is the one the
-  pull request leaves alone, a rule at a time. What it reads is the
+  entry's hour; and whether a rule over that time is, as parsed, the one
+  the pull request leaves alone, a rule at a time. A pull request can't
+  make its rule count by serve's record of another: two are one only
+  where Prometheus and MetricsQL read them alike, and what either may
+  read otherwise is two, or compared by its text. What it reads is the
   ledger's, once a backtest, whatever the request (an incident's catches
-  are a lookup; the versions, 200 at most, and the failed runs read once).
+  are a lookup; the versions, 200 at most, and the failed runs read once;
+  each rule parsed once, 16 KiB and 32 levels at most).
 
 Where do the names they choose end up? A rule's name, group, labels and
 expression, an expectation's `rule:` and `group:`, a catch's incident id,
@@ -1420,4 +1484,5 @@ step 3 does otherwise than the sections above say, or says more:
 3. Grafana and Loki rules: built, on the data sources the rules in effect
    read (open question 2).
 4. A change held to the incidents (`FAIL_MISSED`, `fail_missed`), the
-   rules left alone judged by serve's record: built.
+   rules left alone judged by serve's record: built, a rule compared as
+   parsed, so that one read from Prometheus's rules API is its file's.

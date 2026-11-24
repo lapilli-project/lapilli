@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -21,20 +22,20 @@ import (
 // in the record was made by the rule as it was written then, and lapilli
 // verdict replays a rule left alone as it is now: so an incident is still
 // caught only when the ledger says it was caught by a rule the change
-// doesn't name whose text, in every version of serve's rules over the
-// incident's time, is the text it has after the change: the pull
-// request's own, of a rule it holds alike on both sides; serve's latest,
-// of one serve runs now that the pull request doesn't hold. It is not
-// known, not missed, when:
+// doesn't name that, in every version of serve's rules over the
+// incident's time, is the rule it is after the change, as parsed
+// (aloneTextOf): the pull request's own, of a rule it holds alike on both
+// sides; serve's latest, of one serve runs now that the pull request
+// doesn't hold. It is not known, not missed, when:
 //
-//   - such a rule's text over the incident's time was another, or isn't
-//     in the record (a version before the ledger's first, one of two
-//     rules of a name);
+//   - such a rule over the incident's time was another, or isn't in the
+//     record (a version before the ledger's first, one of two rules of a
+//     name);
 //   - a rule that caught it has a name told apart from one the pull
 //     request holds ("Errors [shop]" beside "Errors"), which may be the
 //     rule the change changes, or the name of one it changes and one it
 //     leaves alone, alike in group and labels, which the ledger counts as
-//     one; or it is a rule whose firings serve copies in, whose text no
+//     one; or it is a rule whose firings serve copies in, which no
 //     version holds;
 //   - a rule the pull request leaves alone may have caught it unrecorded:
 //     serve's runs didn't cover its time (before the first, past the
@@ -66,8 +67,8 @@ func (s *Server) holdMissed(ctx context.Context, cmp *verdict.Comparison, pr *pr
 const leftAloneVersions = 200
 
 // leftAloneReach is the furthest back, before the period's first catch
-// window, a rule's text is looked at: a rule whose for reaches further is
-// not known.
+// window, a rule is looked at: a rule whose for reaches further is not
+// known.
 const leftAloneReach = 14 * 24 * time.Hour
 
 // leftAlone is what serve's record holds of the rules a backtest's change
@@ -82,14 +83,14 @@ type leftAlone struct {
 	// before what told them apart; copied, those of the rules whose
 	// firings serve copies in, which no version of its rules holds now.
 	changed, same, bases, copied map[string]bool
-	// want is the text each rule a catch may be counted by has after the
+	// want is each rule a catch may be counted by as it is after the
 	// change: the pull request's, of one it leaves alike; serve's latest,
 	// of one serve runs now that the pull request doesn't hold.
 	want map[string]aloneText
 	// versions are the versions of serve's rules over the period, the
-	// earliest first, each with the texts of the rules a catch may be
-	// counted by, and whether it holds every rule the pull request leaves
-	// alike as the pull request has it (sameAll); sameReach is the longest
+	// earliest first, each with the rules a catch may be counted by, and
+	// whether it holds every rule the pull request leaves alike as the
+	// pull request has it (sameAll); sameReach is the longest
 	// of those rules' reach. read says they were read, fewer than
 	// leftAloneVersions.
 	versions  []aloneVersion
@@ -111,29 +112,52 @@ type caughtAt struct {
 	start int64
 }
 
-// aloneText is a rule's text as it decides when it fires (rules.Rule.Whole),
-// by its hash, and how long before a firing's start its condition is read
-// (its for and its group's interval); ambiguous, of two rules of a name
-// that differ.
+// aloneText is a rule as it decides when it fires, by a hash: of it as
+// parsed (rules.Rule.Parsed), so that a rule read from a file and the same
+// rule read from an API that prints its expression again (Prometheus's
+// rules API, Mimir's) are one; or, of a rule whose expression isn't read so
+// (a Grafana rule, a Loki ruler's, one Parsed refuses), of its text
+// (rules.Rule.Whole), and one read otherwise is another. reach is how long
+// before a firing's start its condition is read (its for and its group's
+// interval); ambiguous, of two rules of a name that differ.
 type aloneText struct {
 	sum       [sha256.Size]byte
 	reach     time.Duration
 	ambiguous bool
 }
 
+// aloneTextOf is r as aloneText has it. A parsed rule's hash is never a
+// text's: Parsed begins otherwise than any Whole does.
 func aloneTextOf(r rules.Rule) aloneText {
-	return aloneText{sum: sha256.Sum256([]byte(r.Whole())), reach: r.For + max(r.Interval, time.Minute)}
+	text, ok := r.Parsed()
+	if !ok {
+		text = r.Whole()
+	}
+	return aloneText{sum: sha256.Sum256([]byte(text)), reach: r.For + max(r.Interval, time.Minute)}
 }
 
-// addAloneText keeps r's text under its name in m: a second rule of the name,
-// written otherwise, makes it ambiguous.
-func addAloneText(m map[string]aloneText, r rules.Rule) {
-	t := aloneTextOf(r)
-	if was, ok := m[r.Name]; ok && (was.sum != t.sum || was.ambiguous) {
+// aloneTexts are the rules read, each as aloneText has it, by what it is
+// worked out from: a rule the same in every version is parsed once.
+type aloneTexts map[[sha256.Size]byte]aloneText
+
+func (m aloneTexts) of(r rules.Rule) aloneText {
+	k := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%q\x00%t", r.Whole(), r.Cloud, r.Graph != nil)))
+	t, ok := m[k]
+	if !ok {
+		t = aloneTextOf(r)
+		m[k] = t
+	}
+	return t
+}
+
+// addAloneText keeps t, a rule's, under its name in m: a second rule of the
+// name, written otherwise, makes it ambiguous.
+func addAloneText(m map[string]aloneText, name string, t aloneText) {
+	if was, ok := m[name]; ok && (was.sum != t.sum || was.ambiguous) {
 		t.ambiguous = true
 		t.reach = max(t.reach, was.reach)
 	}
-	m[r.Name] = t
+	m[name] = t
 }
 
 type aloneVersion struct {
@@ -150,15 +174,44 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 	for _, r := range slices.Concat(pr.gone, pr.came) {
 		a.changed[r.Name], a.bases[nameBase(r.Name)] = true, true
 	}
+	// The latest version: the rules serve runs now.
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var now []rules.Rule
+	if ok {
+		if now, err = s.parse(ctx, latest); err != nil {
+			return nil, err
+		}
+	}
 	// The pull request's rules left alike, as serve replays its own: so
-	// that a text read from a file and serve's of the same file are one.
+	// that a rule read from a file and serve's of the same file are one.
+	// Of a rule serve reads, every one of its name, from the rules API of
+	// the Prometheus it reads them from (--loaded-rules), a group of the
+	// file with no interval of its own runs there at its
+	// evaluation_interval, which the API says of serve's, and the file
+	// doesn't: the rule is taken at it, once serve knows it.
 	same := slices.Clone(pr.same)
 	s.replayedAs().Apply(same)
+	if every := s.evaluationInterval(); every > 0 {
+		there := map[string]bool{}
+		for _, r := range now {
+			there[r.Name] = there[r.Name] || !loadedFrom(r)
+		}
+		for i, r := range same {
+			if bad, ok := there[r.Name]; ok && !bad && r.Interval == 0 {
+				same[i].Interval = every
+			}
+		}
+	}
+	texts := aloneTexts{}
 	prText := map[string]aloneText{}
 	for _, r := range same {
 		a.same[r.Name], a.bases[nameBase(r.Name)] = true, true
-		addAloneText(prText, r)
-		a.sameReach = max(a.sameReach, aloneTextOf(r).reach)
+		t := texts.of(r)
+		addAloneText(prText, r.Name, t)
+		a.sameReach = max(a.sameReach, t.reach)
 	}
 	incs, err := s.l.Incidents(ctx, from, to, false)
 	if err != nil {
@@ -171,21 +224,10 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 			caughtBy[k.Rule] = true
 		}
 	}
-	// The latest version: the rules serve runs now.
-	latest, ok, err := s.l.Latest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var now []rules.Rule
-	if ok {
-		if now, err = s.parse(ctx, latest); err != nil {
-			return nil, err
-		}
-	}
 	running := map[string]aloneText{}
 	for _, r := range now {
 		if caughtBy[r.Name] && !a.same[r.Name] && !a.changed[r.Name] {
-			addAloneText(running, r)
+			addAloneText(running, r.Name, texts.of(r))
 		}
 	}
 	reach := a.sameReach
@@ -239,7 +281,7 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 			all := map[string]aloneText{}
 			for _, r := range rs {
 				if a.want[r.Name] != (aloneText{}) || a.same[r.Name] {
-					addAloneText(all, r)
+					addAloneText(all, r.Name, texts.of(r))
 				}
 			}
 			vt.sameAll = true
@@ -265,6 +307,14 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 	return a, nil
 }
 
+// loadedFrom says serve read r from a Prometheus's rules API, as
+// --loaded-rules reads one: not vmalert's, whose groups run at its own
+// -evaluationInterval; not a Loki ruler's, a Grafana rule, nor a cloud's
+// alarm.
+func loadedFrom(r rules.Rule) bool {
+	return r.Source == "api" && r.Prometheus && !r.Vmalert && r.Logs == "" && r.Graph == nil && r.Cloud == ""
+}
+
 // catches says whether, by serve's record, a rule the change leaves alone
 // caught in, and whether the record says so at all (verdict.LeftAlone).
 func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
@@ -278,7 +328,7 @@ func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
 		case a.changed[k.Rule]:
 			// The rule as it was, which the backtest judged.
 		case a.same[k.Rule]:
-			// Caught by the text the pull request has, or not known.
+			// Caught by the rule as the pull request has it, or not known.
 			if a.held(k.Rule, in) {
 				return true, true
 			}
@@ -288,7 +338,7 @@ func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
 			// told apart from: maybe the rule the change changes.
 			known = false
 		case a.want[k.Rule] != (aloneText{}):
-			// Serve runs it now: caught by the text it has now, or not
+			// Serve runs it now: caught by the rule as it is now, or not
 			// known.
 			if a.held(k.Rule, in) {
 				return true, true
@@ -328,9 +378,10 @@ func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
 	return false, true
 }
 
-// held reports whether the rule of that name had the text it has after the
-// change (want) in every version of serve's rules over in's catch window,
-// back as far as its condition is read before a firing's start.
+// held reports whether the rule of that name was the rule it is after the
+// change (want), as parsed, in every version of serve's rules over in's
+// catch window, back as far as its condition is read before a firing's
+// start.
 func (a *leftAlone) held(name string, in incident.Incident) bool {
 	w := a.want[name]
 	if w.ambiguous {
