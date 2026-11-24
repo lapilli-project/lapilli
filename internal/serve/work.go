@@ -65,11 +65,18 @@ var judgeAll = (*ledger.Ledger).JudgeAll
 // the ledger's stones were last all given by: linkedText's.
 const linkedMeta = "linked-only"
 
-// linkedText is --linked-only and --match-strict as meta keeps them: "1"
-// for the first, "m" for the second, both in that order, or "" as a ledger
-// before they were judged.
+// judgedBy is the version of what the ledger's stones are judged by, ahead
+// of the flags in linkedText: a release that changes what a stone says
+// (schema 032's loose catches) raises it, and a ledger last judged under
+// the one before judges every firing again once at its first start, as a
+// change of a flag does.
+const judgedBy = "j2"
+
+// linkedText is judgedBy, then --linked-only as "1" and --match-strict as
+// "m", in that order, as meta keeps them: a ledger before they were judged
+// has "", and one judged before judgedBy has the flags alone.
 func linkedText(o verdict.Options) string {
-	v := ""
+	v := judgedBy
 	if o.LinkedOnly {
 		v += "1"
 	}
@@ -80,10 +87,14 @@ func linkedText(o verdict.Options) string {
 }
 
 // linkedSaid is linkedText's --linked-only as the log says it.
-func linkedSaid(v string) string { return onOff(strings.Contains(v, "1")) }
+func linkedSaid(v string) string {
+	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "1"))
+}
 
 // strictSaid is linkedText's --match-strict as the log says it.
-func strictSaid(v string) string { return onOff(strings.Contains(v, "m")) }
+func strictSaid(v string) string {
+	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "m"))
+}
 
 func onOff(on bool) string {
 	if on {

@@ -104,7 +104,7 @@ turn.
 | 029 | 0.67.0 | Mutes from Alertmanager's event recorder (`mutes`): a row an alert, a silence or an inhibiting alert, and an hour, with when it was first and last told of; nothing to backfill |
 | 030 | 0.69.2 | The periods a rule judged from Grafana's own alert state history was left out of what was copied in (`left_out`): by source and rule, those that meet kept as one; nothing to backfill, as before it a day such a rule was in was a gap for every rule |
 | 031 | 0.69.2 | The repository's id on a pull request's backtest (`backtests.repository_id`, as the ID token says it and its entry pins it, `''` for a plain token's and for a row from before): a newer commit's takes the place of the one waiting by it; nothing to backfill, a row with none matched by the repository's name as before |
-| 032 | unreleased | Whether a catch was loose (`catches.loose`: by firings that lack a `--match` label the incident has); nothing to backfill, a catch from before shows no mark until its incident is judged again |
+| 032 | unreleased | Whether a catch was loose (`catches.loose`: by firings that lack a `--match` label the incident has); the first start after the upgrade judges every firing again, once (how long it takes scales with the ledger, as a `--linked-only` change does), so that a catch from before shows its mark |
 
 The image has no shell and no `sqlite3`, so the schema a ledger is at is
 read where its data can be reached: `sqlite3 COPY/ledger.db 'PRAGMA
