@@ -49,11 +49,17 @@ screen all three are above the page, in this order, the lists folded.
     <summary>{{ t.pages }}</summary>
     <nav aria-label="{{ t.docs }}">
       <a class="home{% if page.url == docs_home %} here{% endif %}" href="{{ docs_home | relative_url }}"{% if page.url == docs_home %} aria-current="page"{% endif %}>{{ t.docs }}</a>
+      {%- comment -%} Pages not yet translated open in English: said once, here, not beside each. {%- endcomment -%}
+      {%- assign others = false -%}
+      {%- for g in nav -%}{%- for p in g.pages -%}{%- if p.lang and p.lang != lang -%}{%- assign others = true -%}{%- endif -%}{%- endfor -%}{%- endfor -%}
+      {%- if others and t.untranslated != "" %}
+      <p class="side-note">{{ t.untranslated }}</p>
+      {%- endif %}
       {%- for g in nav %}
       <p>{{ g.group | markdownify | remove: '<p>' | remove: '</p>' | strip }}</p>
       <ul>
         {%- for p in g.pages %}
-        <li><a href="{{ p.url | relative_url }}"{% if p.url == page.url %} class="here" aria-current="page"{% endif %}>{{ p.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}{% if p.lang and p.lang != lang %} <small class="other">{{ t.in_english }}</small>{% endif %}</a></li>
+        <li><a href="{{ p.url | relative_url }}"{% if p.url == page.url %} class="here" aria-current="page"{% endif %}{% if p.lang and p.lang != lang %} hreflang="{{ p.lang }}"{% endif %}>{{ p.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}</a></li>
         {%- endfor %}
       </ul>
       {%- endfor %}
@@ -72,10 +78,10 @@ screen all three are above the page, in this order, the lists folded.
 {%- if before or after %}
 <nav class="around" aria-label="{{ t.around }}">
   {%- if before %}
-  <a class="prev" href="{{ before.url | relative_url }}"><span>{{ t.prev }}</span>{{ before.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}{% if before.lang and before.lang != lang %} <small class="other">{{ t.in_english }}</small>{% endif %}</a>
+  <a class="prev" href="{{ before.url | relative_url }}"{% if before.lang and before.lang != lang %} hreflang="{{ before.lang }}"{% endif %}><span>{{ t.prev }}</span>{{ before.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}</a>
   {%- endif %}
   {%- if after %}
-  <a class="next" href="{{ after.url | relative_url }}"><span>{{ t.next }}</span>{{ after.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}{% if after.lang and after.lang != lang %} <small class="other">{{ t.in_english }}</small>{% endif %}</a>
+  <a class="next" href="{{ after.url | relative_url }}"{% if after.lang and after.lang != lang %} hreflang="{{ after.lang }}"{% endif %}><span>{{ t.next }}</span>{{ after.title | markdownify | remove: '<p>' | remove: '</p>' | strip }}</a>
   {%- endif %}
 </nav>
 {%- endif %}

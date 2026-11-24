@@ -4,7 +4,7 @@
 # with no lang is English, and the language menu on it goes to each
 # language's front page, or to the page's translation where it has one. The
 # languages are those of lapilli serve's UI, in the order of its menu.
-# in_english, stale and original are used on Korean pages only.
+# untranslated, stale and original are used on Korean pages only.
 order: [en, es, ja, ko]
 
 en:
@@ -59,7 +59,7 @@ en:
   edit: "Edit this page on GitHub"
   original: ""
   stale: ""
-  in_english: ""
+  untranslated: ""
 
 es:
   name: Español
@@ -113,7 +113,7 @@ es:
   edit: "Editar esta página en GitHub"
   original: ""
   stale: ""
-  in_english: ""
+  untranslated: ""
 
 ja:
   name: 日本語
@@ -167,7 +167,7 @@ ja:
   edit: "GitHub でこのページを編集"
   original: ""
   stale: ""
-  in_english: ""
+  untranslated: ""
 
 ko:
   name: 한국어
@@ -221,4 +221,4 @@ ko:
   edit: "GitHub에서 이 페이지 고치기"
   original: "영어 원문"
   stale: "이 번역 뒤에 영어 원문이 바뀌었습니다. 최신 내용은 [link]을 보세요."
-  in_english: "영어"
+  untranslated: "번역 전 문서는 영어로 열립니다."
