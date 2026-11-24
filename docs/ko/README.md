@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob d1bd96ee70d5126de152f6e3ce7c89f14ea25ddc -->
+<!-- translated from docs/README.md at blob 19643a206519dab4062ad36703b87301afcfeb33 -->
 
 # Lapilli 문서
 
@@ -21,6 +21,9 @@ docs/를 변경할 때마다 다시 써서 만든 사본입니다. Lapilli가 �
 - [용어](glossary.md): 돌, 알림, 장애, 이력 DB 등 이 문서가 쓰는 말
 - [자주 묻는 질문](faq.md): 무엇이 필요한지, 무엇을 기록하는지, 무엇을
   어디로 보내는지
+- [읽는 것, 보관하는 것, 보내는 것](../data.md): 명령마다 읽는 것, `serve`가
+  보관하는 것과 기간, 누가 접근할 수 있는지, 무엇을 어디로 보내는지, 무엇을
+  바꿀 수 있는지
 
 ## 기간을 정해 가리기
 

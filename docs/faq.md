@@ -72,7 +72,9 @@ people to read goes only to a destination a flag names:
 These hold rule names, labels, incident titles and counts. `lapilli
 verdict --redact` gives every name an alias, in what it sends too
 ([Showing a report outside](redact.md)). The UI's pages run no scripts and
-load nothing from elsewhere.
+load nothing from elsewhere. What each command reads, what `lapilli serve`
+keeps and for how long, and what it can change are on one page:
+[What it reads, keeps and sends](data.md).
 
 ### How much history does it need, and how far back can it go?
 
