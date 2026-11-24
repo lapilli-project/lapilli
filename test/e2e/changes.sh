@@ -421,15 +421,26 @@ until_true 60 is "$sf" "$id" refused || true
 check "kept by another tool: refused" "$(reason "$sf" "$id")" 'another tool keeps this rule'
 
 # The TestData rule, judged from Grafana's history: from a minute past the
-# history's first change, once Pulse has fired twice since.
+# history's first change, to the minute after Pulse's second change into
+# Alerting since, so that both of its firings are in what is read. Cut at
+# the start of the minute the second was seen in, the window left the
+# second out, and held two firings only if Pulse was firing as it began
+# (it held one, once).
 notes() { curl -s -H "Authorization: Bearer $(cat "$work/secrets/grafana-Viewer")" "$gf/api/annotations?type=alert&limit=5000"; }
 noted() { [ "$(notes | jq length)" -gt 0 ]; }
 until_true 120 noted
 minute=$(($(notes | jq '[.[].time] | min') / 60000))
 since=$((minute * 60 + 60))
-pulsed() { [ "$(notes | jq --argjson s "$since" '[.[] | select(.alertName == "Pulse" and .newState == "Alerting" and .time >= $s * 1000)] | length')" -ge 2 ]; }
+pulses() { notes | jq -c --argjson s "$since" '[.[] | select(.alertName == "Pulse" and .newState == "Alerting" and .time >= $s * 1000) | .time] | sort'; }
+pulsed() { [ "$(pulses | jq length)" -ge 2 ]; }
 until_true 420 pulsed || true
-to=$(($(date +%s) / 60 * 60))
+second=$(pulses | jq '.[1] // empty')
+if [ -n "$second" ]; then
+  to=$(((second / 60000 + 1) * 60))
+  until_true 75 sh -c '[ "$(date +%s)" -ge "$1" ]' _ "$to" || true
+else
+  to=$(($(date +%s) / 60 * 60)) # never fired twice: the check below says so
+fi
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
 printf 'incidents:\n  - {id: INC-1, title: Long ago, start: 2026-01-01T00:00:00Z, end: 2026-01-01T01:00:00Z}\n' >"$work/incidents.yaml"
 judge=("$work/lapilli" verdict --grafana "$gf" --grafana-token-file "$work/secrets/grafana-Viewer" --prometheus "$pu"
