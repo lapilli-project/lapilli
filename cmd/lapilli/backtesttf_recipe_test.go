@@ -12,6 +12,7 @@ import (
 // sensitive ones among them: what the recipe sends serve holds the plan's
 // rule groups, and nothing else of it.
 func TestBacktestRecipeTerraformRuleGroupsOnly(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	raw, err := os.ReadFile("../../internal/rules/testdata/terraform-plan-real.json")
 	if err != nil {

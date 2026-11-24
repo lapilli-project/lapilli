@@ -42,9 +42,11 @@ jobs:
       - run: go vet ./...
       # serve's tests that keep to their own ledger and server run in
       # parallel (internal/serve/parallel_test.go), after those that run
-      # alone. Many of them wait more than they work: on a recipe's shell
-      # and curl, or on a second to pass. -parallel 8 lets more of them wait
-      # at once than a runner has cores: on three cores, serve's package
+      # alone, as do the command's that keep to their own files and
+      # stand-ins (cmd/lapilli/parallel_test.go). Many of them wait more
+      # than they work: on a recipe's shell and curl, or on a second to
+      # pass. -parallel 8 lets more of them wait at once than a runner has
+      # cores: on three cores, serve's package
       # took five minutes rather than seven. They took ten minutes on Linux
       # and eighteen on macOS one at a time, where twenty left a slow
       # runner's package unfinished (11-23): forty, so that a slow runner
@@ -64,9 +66,11 @@ jobs:
       - run: go vet ./...
       # serve's tests that keep to their own ledger and server run in
       # parallel (internal/serve/parallel_test.go), after those that run
-      # alone. Many of them wait more than they work: on a recipe's shell
-      # and curl, or on a second to pass. -parallel 8 lets more of them wait
-      # at once than a runner has cores: on three cores, serve's package
+      # alone, as do the command's that keep to their own files and
+      # stand-ins (cmd/lapilli/parallel_test.go). Many of them wait more
+      # than they work: on a recipe's shell and curl, or on a second to
+      # pass. -parallel 8 lets more of them wait at once than a runner has
+      # cores: on three cores, serve's package
       # took five minutes rather than seven. They took ten minutes on Linux
       # and eighteen on macOS one at a time, where twenty left a slow
       # runner's package unfinished (11-23): forty, so that a slow runner

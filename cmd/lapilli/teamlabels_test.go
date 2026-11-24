@@ -9,6 +9,7 @@ import (
 // --team-labels names the labels whose values the Teams page suggests as
 // teams: label names, eight at most; anything else is refused at start.
 func TestServeTeamLabelsFlag(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	for _, bad := range []string{"", ",", "team=x", "9team", "a,b,c,d,e,f,g,h,i", "team owner"} {
 		var errs strings.Builder
@@ -27,6 +28,7 @@ func TestServeTeamLabelsFlag(t *testing.T) {
 
 // serve.teamLabels gives --team-labels; none by default.
 func TestChartTeamLabels(t *testing.T) {
+	parallel(t)
 	out, err := helmTemplate(t, serveValues...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

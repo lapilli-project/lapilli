@@ -13,6 +13,7 @@ import (
 // them against; writes taken. Each wrong is refused before serve starts,
 // saying why.
 func TestServeBacktestFlags(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	token := write(t, "token", strings.Repeat("t", 40))
 	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: "+token+"}\n")
@@ -69,6 +70,7 @@ func TestServeBacktestFlags(t *testing.T) {
 
 // The flags as serve takes them.
 func TestServeBacktestFlagsRead(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	token := write(t, "token", strings.Repeat("t", 40))
 	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: "+token+", hourly: 5}\n")
@@ -88,6 +90,7 @@ func TestServeBacktestFlagsRead(t *testing.T) {
 // are added, and the run is a comparison, not an error. lapilli serve's
 // backtests take it so.
 func TestCompareNoneSelected(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	doc := func(team string) string {
@@ -105,6 +108,7 @@ func TestCompareNoneSelected(t *testing.T) {
 // it: an error, as it was before a side could be empty, never two sets
 // alike.
 func TestCompareNoneSelectedEither(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	doc := "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata: {name: r, labels: {team: shop}}\nspec:\n  groups:\n  - name: g\n    rules:\n    - {alert: A, expr: errors > 5}\n"

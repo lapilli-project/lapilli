@@ -32,6 +32,7 @@ type workflow struct {
 // workflow had no concurrency, so latest could be left on the older. A dry
 // run, which has no publish job, never waits for a release.
 func TestReleaseNewestIsLatest(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {
 		t.Fatal(err)

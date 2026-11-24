@@ -41,6 +41,7 @@ func (configured) StatusConfig(context.Context) (string, error) {
 }
 
 func TestCheckContent(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return configured{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", sayingRules)
@@ -108,12 +109,14 @@ func TestCheckContent(t *testing.T) {
 
 // A name from the rules can't move the terminal or the table about.
 func TestContentPrintable(t *testing.T) {
+	parallel(t)
 	if got := printable("a\x1b[2J\tb\u202ec\n"); got != "a [2J b c " {
 		t.Errorf("%q", got)
 	}
 }
 
 func TestCheckContentFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", sayingRules)
 	for _, c := range []struct {
 		args []string
@@ -157,6 +160,7 @@ func TestCheckContentFlags(t *testing.T) {
 
 // An expression left open is checked for what can be, and breaks nothing.
 func TestCheckContentMalformed(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
   - name: shop
@@ -178,6 +182,7 @@ func TestCheckContentMalformed(t *testing.T) {
 // --scrape-interval is also how a replay asks for Grafana's reduces: it
 // goes with a verdict as it is, not only with --check-content.
 func TestScrapeIntervalForReplay(t *testing.T) {
+	parallel(t)
 	f, err := parseVerdictFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--incidents", "i.yaml", "--scrape-interval", "15s"})
 	if err != nil || f.replaying().Scrape != 15*time.Second || f.checkContent {
 		t.Errorf("%+v %v", f, err)
@@ -187,6 +192,7 @@ func TestScrapeIntervalForReplay(t *testing.T) {
 // Grafana's error alerts are counted of the rules checked, not of every
 // rule the series holds.
 func TestErrorsOf(t *testing.T) {
+	parallel(t)
 	fs := []firing.Firing{{Rule: "Disk"}, {Rule: "Disk"}, {Rule: "Elsewhere"}}
 	got := errorsOf(fs, []rules.Rule{{Name: "Disk"}, {Name: "Quiet"}})
 	if len(got) != 1 || got["Disk"] != 2 {
@@ -201,6 +207,7 @@ func TestErrorsOf(t *testing.T) {
 // runbook is in its playbook annotation has none when only runbook_url is
 // named, and has one when playbook is.
 func TestRunbookAnnotations(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
   - name: g
@@ -236,6 +243,7 @@ func TestRunbookAnnotations(t *testing.T) {
 // --deploy-before and --deploy-after go with --deploys; each is a day at
 // most. --runbook-base is an https URL with no user name.
 func TestServeDeployAndRunbookFlags(t *testing.T) {
+	parallel(t)
 	deploys := write(t, "deploys.yaml", "deploys: []\n")
 	for _, c := range []struct {
 		args []string

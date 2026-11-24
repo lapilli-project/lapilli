@@ -193,6 +193,7 @@ func dirFiles(t *testing.T, dir string) map[string]string {
 // Postgres): every request it sends is one a stand-in serves and the
 // report counts, none is refused or off its list, and nothing is written.
 func TestPreflightAgainstFakes(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -421,6 +422,7 @@ func TestPreflightAgainstFakes(t *testing.T) {
 // --backfill is ten years at most, for serve and for lapilli preflight,
 // which counts it a day at a time; ten years is taken.
 func TestBackfillAtMost(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
 	// Its --ledger is a file, so that a serve that took the flag stops
 	// at once, and makes no ledger.
@@ -441,6 +443,7 @@ func TestBackfillAtMost(t *testing.T) {
 // Its own flags are taken out before serve's reader, which refuses what
 // serve refuses, and it exits 2 then; -h says its options.
 func TestPreflightFlags(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
 	for _, x := range []struct {
 		args []string
@@ -477,6 +480,7 @@ func TestPreflightFlags(t *testing.T) {
 // request's comment is: the URL given as its flag, its host and user, an
 // address, what acts on a terminal; and cut.
 func TestPreflightRedacted(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -506,6 +510,7 @@ func TestPreflightRedacted(t *testing.T) {
 // Every source of rules serve reads is read through the allowlist with
 // nothing refused: a refusal is a bug of lapilli's, never the setup's.
 func TestPreflightEverySource(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -583,6 +588,7 @@ func TestPreflightEverySource(t *testing.T) {
 // --offline reads no secret's file and no --ledger-url-file, which CI
 // doesn't hold: it says so, and goes on.
 func TestPreflightOfflineSecrets(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
 	gone := filepath.Join(t.TempDir(), "not-here")
 	args := []string{"--rules", rules, "--prometheus", "http://prometheus:9090", "--ledger-url-file", gone,
@@ -603,6 +609,7 @@ func TestPreflightOfflineSecrets(t *testing.T) {
 // files name: a cloud's alarms, the sign-in, the ledger's server, an
 // on-call feed's host.
 func TestPreflightRedactedEverywhere(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })
@@ -653,6 +660,7 @@ func TestPreflightRedactedEverywhere(t *testing.T) {
 // start before an ellipsis, is redacted too; a word that only begins as
 // it does isn't.
 func TestScrubberCut(t *testing.T) {
+	parallel(t)
 	f := &verdictFlags{promURL: "http://prometheus-0123456789.monitoring.example.com:9090"}
 	scrub := f.scrubber()
 	for in, want := range map[string]string{
@@ -674,6 +682,7 @@ func TestScrubberCut(t *testing.T) {
 // workload identity pool, as Google names them. A time, a MAC address, a
 // "::" in other text, or a word that only holds the project, isn't.
 func TestScrubberAddressesAndProject(t *testing.T) {
+	parallel(t)
 	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "sample-proj-123"}
 	scrub := f.scrubber()
 	for in, want := range map[string]string{
@@ -708,6 +717,7 @@ func TestScrubberAddressesAndProject(t *testing.T) {
 // gives under it, and of no other domain: a project named monitoring
 // leaves monitoring.googleapis.com as it is.
 func TestScrubberZoneAndGoogleNames(t *testing.T) {
+	parallel(t)
 	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "monitoring"}
 	scrub := f.scrubber()
 	for in, want := range map[string]string{
@@ -785,6 +795,7 @@ func refusingPostgres(t *testing.T) string {
 // the password. Named in the string, or taken from PGUSER and PGDATABASE,
 // or the user this process runs as.
 func TestPreflightPostgresNames(t *testing.T) {
+	// Alone, not parallel: t.Setenv.
 	addr := refusingPostgres(t)
 	me, err := user.Current()
 	if err != nil {
@@ -834,6 +845,7 @@ func TestPreflightPostgresNames(t *testing.T) {
 // what would make it known; the report says neither the account nor the
 // role, as the real scrubber has them.
 func TestPreflightWritesRedacted(t *testing.T) {
+	alone(t)
 	was := now
 	now = time.Now
 	t.Cleanup(func() { now = was })

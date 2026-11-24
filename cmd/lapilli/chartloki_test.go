@@ -15,6 +15,7 @@ import (
 // with changes on; and Grafana's history turned off. lapilli serve takes
 // the flags the chart gives it.
 func TestChartLoki(t *testing.T) {
+	parallel(t)
 	loki := []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "loki.url=http://loki:3100",
 		"--set", "loki.tenant=acme", "--set", "loki.tokenSecret.name=loki-read"}
 	loaded := append(append([]string{}, loki...), "--set", "rules.loki.loaded=true")
@@ -158,6 +159,7 @@ func podFiles(m manifest) (map[string]string, map[string]string) {
 // line break) is refused as the chart renders, not by the pod as it
 // starts: a \ passed the chart's check, quoted, and the pod crash-looped.
 func TestChartTenantRefused(t *testing.T) {
+	parallel(t)
 	for name, c := range map[string]struct{ values, want string }{
 		"Loki's, a backslash":  {"loki:\n  url: http://loki:3100\n  tenant: 'a\\b'\n", "loki.tenant"},
 		"Loki's, a slash":      {"loki:\n  url: http://loki:3100\n  tenant: 'a/b'\n", "loki.tenant"},

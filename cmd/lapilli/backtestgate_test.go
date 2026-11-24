@@ -44,6 +44,7 @@ func gateRepo(t *testing.T) (repo *prRepo, bad, aside string) {
 // the branch in full now, and one a tag has too is refused; a full hash,
 // or a full ref, is taken as it is, a tag of its name or not.
 func TestBacktestRecipeTargetNameIsATag(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, _, aside := gateRepo(t)
@@ -136,6 +137,7 @@ func lastOf(h *commentHost, sha, context string) (hostStatus, bool) {
 // request left it; one into the default, or where the CI doesn't say, is
 // named as before. A branch a status's name can't hold sets none.
 func TestBacktestRecipeSecondPullRequest(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, bad, aside := gateRepo(t)
@@ -219,6 +221,7 @@ func TestBacktestRecipeSecondPullRequest(t *testing.T) {
 // as the CI's would be; a TARGET, or none, names no branch, and no status
 // is set.
 func TestBacktestRecipeNoPullRequestStatusName(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, _, aside := gateRepo(t)
@@ -276,6 +279,7 @@ func TestBacktestRecipeNoPullRequestStatusName(t *testing.T) {
 // script; and Gitea's Actions, which makes no merge in any event, never
 // takes HEAD a merge for one.
 func TestBacktestRecipeHeadParentWrittenOut(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, bad, aside := gateRepo(t)
@@ -324,6 +328,7 @@ func TestBacktestRecipeHeadParentWrittenOut(t *testing.T) {
 // refs/pull/N/merge), so one it doesn't say isn't taken: refused with a
 // gate or STATUS, unless TARGET or TARGET_BRANCH says the base.
 func TestBacktestRecipeNoEventHead(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, bad, _ := gateRepo(t)
@@ -376,6 +381,7 @@ func TestBacktestRecipeNoEventHead(t *testing.T) {
 // status couldn't be set, and the job passed on what the earlier head
 // held. It is refused now, its failure on the event's head.
 func TestBacktestRecipeMergeOfAnotherHead(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, bad, _ := gateRepo(t)
@@ -410,6 +416,7 @@ func TestBacktestRecipeMergeOfAnotherHead(t *testing.T) {
 // depth 1, whose parents the clone hasn't. Each sets the one failure now,
 // on the head the CI says, or HEAD where it says none.
 func TestBacktestRecipeEndsWithAFailure(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, bad, _ := gateRepo(t)

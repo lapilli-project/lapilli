@@ -19,6 +19,7 @@ import (
 // byte for byte the same; serve.configPrune or serve.goalTasks without
 // serve.config is refused.
 func TestChartConfig(t *testing.T) {
+	parallel(t)
 	plain, err := helmTemplate(t, serveValues...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, plain)
@@ -113,6 +114,7 @@ func TestChartConfig(t *testing.T) {
 // not false, and 0123 stays 0123. Given as a mapping, what Helm turned into
 // a boolean where a name is wanted is refused, not taken as "false".
 func TestChartConfigText(t *testing.T) {
+	parallel(t)
 	text := "teams:\n  - name: no\n    rules: ^A\ngrants:\n  - user: \"0123\"\n    team: no\n"
 	values := filepath.Join(t.TempDir(), "values.yaml")
 	os.WriteFile(values, []byte("serve:\n  config: |\n"+indent(text, "    ")), 0o644)

@@ -18,6 +18,7 @@ import (
 // a second time is refused, as is a ledger that isn't there. No error says
 // the connection string.
 func TestLedgerCopy(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	from := filepath.Join(t.TempDir(), "ledger")
 	os.MkdirAll(from, 0o750)

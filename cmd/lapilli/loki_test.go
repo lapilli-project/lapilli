@@ -32,6 +32,7 @@ func (l lokiHistory) QueryRange(ctx context.Context, expr string, start, end tim
 // beside the Prometheus rules, are judged alike; their LogQL is never
 // asked of Prometheus.
 func TestVerdictLokiRules(t *testing.T) {
+	alone(t)
 	var asked []string
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	newLoki = func(*verdictFlags) history { return lokiHistory{&asked} }
@@ -71,6 +72,7 @@ func TestVerdictLokiRules(t *testing.T) {
 }
 
 func TestLokiFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "loki.yaml", "groups: []\n")
 	for _, c := range []struct {
 		args []string
@@ -99,6 +101,7 @@ func TestLokiFlags(t *testing.T) {
 // TestLokiPlainHTTP: a token sent to --loki over plain http is said, as
 // --grafana's is; over https, or with no token, nothing is.
 func TestLokiPlainHTTP(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	var asked []string
 	newLoki = func(*verdictFlags) history { return lokiHistory{&asked} }
@@ -128,6 +131,7 @@ func TestLokiPlainHTTP(t *testing.T) {
 // reads and replays (TestServeLokiRulesAlone in internal/serve); without
 // --prometheus it is refused, as what really fired is read there.
 func TestServeLokiAloneParses(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	f, err := parseFlags([]string{"--prometheus", "http://p:9090", "--loki", "http://l:3100", "--loki-rules", dir},
 		func(string, string) (bool, error) { return false, nil })

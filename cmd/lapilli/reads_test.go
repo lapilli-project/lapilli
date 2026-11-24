@@ -28,6 +28,7 @@ import (
 // failed, as another run is refused too; the exit stays 0 unless
 // --fail-unreplayed, which counts only the first.
 func TestUnreplayedShown(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rs := write(t, "rules.yaml", `groups:
@@ -140,6 +141,7 @@ func TestUnreplayedShown(t *testing.T) {
 // and nothing of it on stdout; --progress=false says nothing; a 429 from
 // the history is said once at the end.
 func TestProgress(t *testing.T) {
+	alone(t)
 	after, every := progressAfter, progressEvery
 	progressAfter, progressEvery = 50*time.Millisecond, 50*time.Millisecond
 	defer func() { progressAfter, progressEvery = after, every }()
@@ -202,6 +204,7 @@ func TestProgress(t *testing.T) {
 }
 
 func TestReadFlags(t *testing.T) {
+	parallel(t)
 	asServe := func(name, val string) (bool, error) { return false, nil }
 	f, err := parseFlags([]string{"--rules", "r", "--prometheus", "http://p", "--max-rate", "0.5", "--loki", "http://l", "--loki-rules", "x"}, asServe)
 	if err != nil || f.prometheus().MaxRate != 0.5 || f.lokiSource().MaxRate != 0.5 {
@@ -237,6 +240,7 @@ func TestReadFlags(t *testing.T) {
 // asked by a Limiter of its own, as Grafana passes on what each answers, so
 // one that pushes back doesn't hold another; --max-rate is of them all.
 func TestGrafanaDataSourcesApart(t *testing.T) {
+	parallel(t)
 	var noisy atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/datasources/proxy/uid/noisy/") {
@@ -295,6 +299,7 @@ func TestGrafanaDataSourcesApart(t *testing.T) {
 // TestProgressCounts: the rules a run replays are counted, each once, when
 // replayed; what asks the history after (near misses, suggestions) isn't.
 func TestProgressCounts(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	var total, done int64
@@ -348,6 +353,7 @@ func (h slowHistory) QueryRange(ctx context.Context, expr string, start, end tim
 // here as a report fails to go to Slack after the replay, and the two don't
 // race (go test -race).
 func TestStderrShared(t *testing.T) {
+	alone(t)
 	after, every := progressAfter, progressEvery
 	progressAfter, progressEvery = time.Millisecond, time.Millisecond
 	defer func() { progressAfter, progressEvery = after, every }()
@@ -367,6 +373,7 @@ func TestStderrShared(t *testing.T) {
 // TestProgressLine: a comparison counts replays, as a rule changed is
 // replayed before and after.
 func TestProgressLine(t *testing.T) {
+	parallel(t)
 	var p replay.Progress
 	var c prom.Counts
 	p.Total.Store(32)
@@ -383,6 +390,7 @@ func TestProgressLine(t *testing.T) {
 // TestProgressStep: once the rules are replayed, the line says the step
 // after them it is at, and how far it is.
 func TestProgressStep(t *testing.T) {
+	parallel(t)
 	var p replay.Progress
 	var c prom.Counts
 	p.Total.Store(3)
@@ -423,6 +431,7 @@ func (h countingHistory) QueryRange(ctx context.Context, expr string, start, end
 // and near misses, and the report says so; --extras DUR cuts them short
 // when they take longer, and the report says that.
 func TestExtras(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	defer func() { newHistory = realHistory }()
 	rs := write(t, "rules.yaml", `groups:
@@ -499,6 +508,7 @@ func unreadRun(t *testing.T, answer http.HandlerFunc, args ...string) (int, stri
 // the report, and --fail-unreplayed exits 1. One that refuses the queries
 // as written fails neither.
 func TestHistoryUnread(t *testing.T) {
+	alone(t)
 	answer := func(status int, header, body string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if k, v, ok := strings.Cut(header, ": "); ok {
@@ -555,6 +565,7 @@ func TestHistoryUnread(t *testing.T) {
 // the deadline would: exit 1, saying to raise --timeout, at once rather
 // than after the wait; and a turn by --max-rate isn't said to be the API's.
 func TestWaitPastTimeout(t *testing.T) {
+	alone(t)
 	var asked atomic.Int64
 	start := time.Now()
 	code, out, errs := unreadRun(t, func(w http.ResponseWriter, r *http.Request) {
@@ -579,6 +590,7 @@ func TestWaitPastTimeout(t *testing.T) {
 // Limiter of its own, are asked --parallel at once in all, not --parallel
 // each, as a replay's pools of each would: one Grafana answers them all.
 func TestGrafanaCap(t *testing.T) {
+	parallel(t)
 	var cur, peak atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := cur.Add(1)
@@ -617,6 +629,7 @@ func TestGrafanaCap(t *testing.T) {
 // TestLokiShared: --loki's queries, and its ruler, which lapilli serve
 // reads each minute, are asked by one Limiter.
 func TestLokiShared(t *testing.T) {
+	parallel(t)
 	f := &verdictFlags{loki: "http://loki:3100"}
 	var cfg serve.Config
 	f.lokiInto(&cfg)
@@ -629,6 +642,7 @@ func TestLokiShared(t *testing.T) {
 // --impact-for, of those that could be judged, and the most common of how
 // long they need, the shortest when two are as common.
 func TestImpactShort(t *testing.T) {
+	parallel(t)
 	rs := []rules.Rule{
 		{Name: "Errors", For: 5 * time.Minute, Interval: time.Minute},
 		{Name: "Slow", For: 10 * time.Minute, Interval: time.Minute},
@@ -655,6 +669,7 @@ func TestImpactShort(t *testing.T) {
 // longer: "for" 3m, evaluated every minute, 3m late, needs 7m, longer
 // than impact of 6m.
 func TestImpactShortLate(t *testing.T) {
+	parallel(t)
 	rs := []rules.Rule{
 		{Name: "LB5xx", For: 3 * time.Minute, Interval: time.Minute, Late: 3 * time.Minute},
 		{Name: "Offset", For: 3 * time.Minute, Interval: time.Minute, QueryOffset: 2 * time.Minute},
@@ -683,6 +698,7 @@ func TestImpactShortLate(t *testing.T) {
 // many at once as --parallel, and what is suggested, in the rules' order,
 // is the same as one at a time.
 func TestSuggestParallel(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rs := write(t, "rules.yaml", `groups:

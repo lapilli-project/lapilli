@@ -79,6 +79,7 @@ var trackersValues = []string{"--set", "serve.trackers.tokenSecret.name=tasks", 
 // Serving the UI outside the cluster with no sign-in is refused unless
 // asked for.
 func TestChartService(t *testing.T) {
+	parallel(t)
 	m, _ := render(t, append(serveValues, trackersValues...)...)
 	svc := m["Service/ops-lapilli"]
 	if dig(svc, "spec", "type") != "ClusterIP" || !slices.Equal(ports(svc), []string{"http", "metrics", "incidents"}) || m["Service/ops-lapilli-ui"] != nil {
@@ -152,6 +153,7 @@ func TestChartService(t *testing.T) {
 // --allowed-hosts are worked out from it, so the host check and the
 // sign-in's redirect hold, unless serve.externalURL is given.
 func TestChartIngressAndRoute(t *testing.T) {
+	parallel(t)
 	signedIn := append(append([]string{}, serveValues...), "--set", "serve.userHeader=X-Forwarded-Email", "--set", "serve.networkPolicy.othersKeptOut=true")
 	m, _ := render(t, append(signedIn, "--set", "serve.ingress.enabled=true", "--set", "serve.ingress.className=nginx",
 		"--set", "serve.ingress.hosts={*.example.com,lapilli.example.com,ui.example.org}", "--set", "serve.ingress.tls[0].secretName=lapilli-tls",
@@ -229,6 +231,7 @@ func TestChartIngressAndRoute(t *testing.T) {
 // rules it is given whole by. Roles and changes take it as they take
 // userHeader, without the NetworkPolicy plain headers need.
 func TestChartSignIn(t *testing.T) {
+	parallel(t)
 	oidc := append(append([]string{}, serveValues...), "--set", "serve.signIn.oidc.issuer=https://idp.example.com", "--set", "serve.signIn.oidc.clientId=lapilli",
 		"--set", "serve.externalURL=https://lapilli.example.com", "--set", "serve.roles.viewers={*@example.com}")
 	m, _ := render(t, append(oidc, "--set", "serve.signIn.oidc.clientSecret.name=lapilli-oidc", "--set", "serve.signIn.oidc.scopes={email,groups}",
@@ -304,6 +307,7 @@ func TestChartSignIn(t *testing.T) {
 // An upgrade with --reuse-values keeps the old release's values, without
 // the keys this chart added: it renders as with their defaults.
 func TestChartReuseValues(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("no helm")
 	}
@@ -342,6 +346,7 @@ func TestChartReuseValues(t *testing.T) {
 // With serve.signIn.oidc, the chart makes the key sessions are signed with,
 // a Secret kept across upgrades, unless one of the user's is named.
 func TestChartSessionKey(t *testing.T) {
+	parallel(t)
 	oidc := append(append([]string{}, serveValues...), "--set", "serve.signIn.oidc.issuer=https://idp.example.com", "--set", "serve.signIn.oidc.clientId=lapilli",
 		"--set", "serve.externalURL=https://lapilli.example.com", "--set", "serve.roles.viewers={*@example.com}")
 	m, _ := render(t, oidc...)

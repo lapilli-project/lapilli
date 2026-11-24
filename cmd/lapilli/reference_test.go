@@ -18,6 +18,7 @@ import (
 // it is gone, fails here.
 
 func TestAPIDocumented(t *testing.T) {
+	parallel(t)
 	page := readDoc(t, filepath.Join("..", "..", "docs", "api.md"))
 	routes := codeMatches(t, regexp.MustCompile(`"((?:GET|POST|PUT|PATCH|DELETE) /(?:api/)?v1/[^"]+)"`), "internal/serve")
 	if len(routes) < 20 {
@@ -39,6 +40,7 @@ func TestAPIDocumented(t *testing.T) {
 }
 
 func TestMetricsDocumented(t *testing.T) {
+	parallel(t)
 	page := readDoc(t, filepath.Join("..", "..", "docs", "metrics.md"))
 	// A name in a string, or in the # HELP line of one written out whole;
 	// one that ends in _ is the start of names made from it.
@@ -76,6 +78,7 @@ next:
 }
 
 func TestSchemasDocumented(t *testing.T) {
+	parallel(t)
 	page := readDoc(t, filepath.Join("..", "..", "docs", "upgrading.md"))
 	schema := filepath.Join("..", "..", "internal", "ledger", "schema")
 	files, err := filepath.Glob(filepath.Join(schema, "[0-9][0-9][0-9].sql"))

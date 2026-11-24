@@ -59,6 +59,7 @@ func (restartHistory) QueryRange(ctx context.Context, expr string, start, end ti
 // what the restart rule's firings were, and that a for of 1h is one a
 // restart can't outlast.
 func TestVerdictNoRecord(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return restartHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
@@ -163,6 +164,7 @@ func (h impactHistory) QueryRange(ctx context.Context, expr string, start, end t
 // the restarts are judged, and noisy; a for one restart can't outlast is
 // never suggested all the same.
 func TestVerdictImpactKeepsRecord(t *testing.T) {
+	alone(t)
 	var asked []time.Time
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return impactHistory{asked: &asked}, nil }
 	now = func() time.Time { return t0 }
@@ -199,6 +201,7 @@ func TestVerdictImpactKeepsRecord(t *testing.T) {
 // restart that caught nothing can't be told from one nobody saw, and is
 // counted, not judged; and with no data, it keeps none.
 func TestVerdictImpactDataBegins(t *testing.T) {
+	alone(t)
 	rulesFile := write(t, "rules.yaml", `groups:
   - name: pods
     rules:
@@ -307,6 +310,7 @@ func (h ongoingImpact) QueryRange(ctx context.Context, expr string, start, end t
 // the period alone was read: the restarts in it catch it, as they did,
 // though the signal is read from two weeks before for the record.
 func TestVerdictImpactOngoing(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return ongoingImpact{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:

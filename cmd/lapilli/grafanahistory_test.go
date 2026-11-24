@@ -60,6 +60,7 @@ groups:
 // before the period, so one on since before it is seen; its error alerts
 // left out and said.
 func TestCheckReplayGrafanaHistory(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
 	now = func() time.Time { return t0 }
 	var mu sync.Mutex
@@ -121,6 +122,7 @@ func TestCheckReplayGrafanaHistory(t *testing.T) {
 }
 
 func TestCheckGrafanaFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "grafana.yaml", gErrorsRule)
 	token := write(t, "token", "glsa_viewer")
 	base := []string{"--rules", rulesFile, "--prometheus", "http://x"}
@@ -174,6 +176,7 @@ func TestCheckGrafanaFlags(t *testing.T) {
 // GRAFANA_ALERTS, as before), annotations before Grafana 12.4, which hold
 // no labels, or a history that holds nothing from before the period.
 func TestCheckReplayGrafanaHistoryFails(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	prometheus := write(t, "rules.yaml", "groups:\n  - name: shop\n    rules:\n      - {alert: CheckoutErrors, expr: errors > 5, for: 5m}\n")
@@ -225,6 +228,7 @@ func TestCheckReplayGrafanaHistoryFails(t *testing.T) {
 // tags keep them: an instance's port with an underscore; a rule's title
 // with a colon, by its name there.
 func TestCheckReplayGrafanaHistoryTagged(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return portHistory{}, nil }
 	now = func() time.Time { return t0 }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +275,7 @@ func (portHistory) QueryRange(ctx context.Context, expr string, start, end time.
 // Kept in several places, GRAFANA_ALERTS is read first while it holds
 // anything, and the history isn't asked.
 func TestCheckReplayGrafanaHistoryUnsureAndSeries(t *testing.T) {
+	alone(t)
 	now = func() time.Time { return t0 }
 	settings := `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting":{"alertStateHistoryBackend":"annotations"}}`
 	var asked []string

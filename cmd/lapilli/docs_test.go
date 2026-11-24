@@ -20,6 +20,7 @@ import (
 // to the same, and each starts with its marker, is listed in docs/ko/README.md
 // as NAME.md, and that lists every page docs/README.md does.
 func TestDocsLinks(t *testing.T) {
+	parallel(t)
 	root := filepath.Join("..", "..")
 	pages, err := filepath.Glob(filepath.Join(root, "docs", "*.md"))
 	if err != nil || len(pages) < 2 {

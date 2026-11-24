@@ -23,6 +23,7 @@ import (
 // isn't replayed, said with the bound and how to read it all the same; with
 // a larger --max-samples, the same run reads.
 func TestMaxSamples(t *testing.T) {
+	alone(t)
 	was, wasHistory, wasNow := prom.DefaultMaxSamples, newHistory, now
 	prom.DefaultMaxSamples = 2000
 	// Other tests leave a history of their own, and a clock.
@@ -96,6 +97,7 @@ func TestMaxSamples(t *testing.T) {
 // --loki and a Grafana's Loki data sources; and lapilli serve takes it, as
 // it takes lapilli verdict's flags.
 func TestMaxSamplesEveryHistory(t *testing.T) {
+	alone(t)
 	// Other tests leave a --loki of their own (newGrafanaLoki is as
 	// built).
 	wasLoki := newLoki

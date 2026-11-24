@@ -62,6 +62,7 @@ func caughtBy(t *testing.T, out string) []string {
 // says the leads; the report gives them, and numbers.md's blocks count the
 // stones again from it.
 func TestLeads(t *testing.T) {
+	alone(t)
 	h, args := leadsWorld(t)
 	var plain string
 	for _, extra := range [][]string{{"--impact", "errors=" + errorsExpr}, {"--impact-file", write(t, "plain.yaml", "signals:\n  - {name: errors, expr: '"+errorsExpr+"'}\n")}} {
@@ -144,6 +145,7 @@ rules:
 // A lead is from 0 to a day, a named signal's alone, given once; with
 // --impact-file, in the file. require: is held as match is.
 func TestLeadsRefused(t *testing.T) {
+	parallel(t)
 	file := func(body string) string { return write(t, "impact.yaml", body) }
 	base := []string{"verdict", "--firings", write(t, "f.jsonl", ""), "--prometheus", "http://p"}
 	for _, c := range []struct {

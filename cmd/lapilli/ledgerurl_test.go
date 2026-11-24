@@ -11,6 +11,7 @@ import (
 // lapilli serve takes --ledger-url-file, refused beside --ledger, and an
 // empty file is refused at once.
 func TestServeLedgerURLFile(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	empty := filepath.Join(t.TempDir(), "url")
 	os.WriteFile(empty, []byte("\n"), 0o600)

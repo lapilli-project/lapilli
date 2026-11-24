@@ -18,6 +18,7 @@ import (
 // --fail-nothing-replayed=false exits 0; one rule replayed keeps the exit 0,
 // and --compare is left as it was.
 func TestFailNothingReplayed(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	none := write(t, "none.yaml", `groups:
@@ -74,6 +75,7 @@ func (c questionCounter) QueryRange(ctx context.Context, expr string, start, end
 // TestCheckNoData: --check-no-data=false skips the question, for each rule
 // that never fired, of whether it read any series, and no other step.
 func TestCheckNoData(t *testing.T) {
+	alone(t)
 	var n atomic.Int64
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return questionCounter{n: &n}, nil }
 	now = func() time.Time { return t0 }

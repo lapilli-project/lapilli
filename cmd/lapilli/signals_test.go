@@ -178,6 +178,7 @@ func unnamedImpact(t *testing.T) (signalHistory, []string) {
 // (docs/design/marked.md), [] in lapilli verdict, and its unrelated and
 // action (docs/design/judging.md, item 3), [] and empty with no verdict.
 func TestUnnamedImpactUnchanged(t *testing.T) {
+	alone(t)
 	h, args := unnamedImpact(t)
 	var asked []string
 	h.asked = &asked
@@ -309,6 +310,7 @@ func runSignals(t *testing.T, h signalHistory, args ...string) string {
 // them on its labels; each firing judged by the signals that could have
 // seen it, from each one's start, the probe's where its data begins.
 func TestNamedSignals(t *testing.T) {
+	alone(t)
 	h, file, args := namedSignals(t)
 	var asked []string
 	h.asked = &asked
@@ -429,6 +431,7 @@ func TestNamedSignals(t *testing.T) {
 // The flags say what the file says, but the rule entries: the same signals
 // judge the same.
 func TestNamedSignalsFlags(t *testing.T) {
+	alone(t)
 	h, _, args := namedSignals(t)
 	file := write(t, "impact.yaml", `impact:
   signals:
@@ -450,6 +453,7 @@ func TestNamedSignalsFlags(t *testing.T) {
 
 // What the flags and the file are refused for.
 func TestSignalFlagsRefused(t *testing.T) {
+	parallel(t)
 	big := write(t, "big.yaml", "signals:\n  - {name: a, expr: x}\n#"+strings.Repeat("x", 1<<20)+"\n")
 	file := func(body string) string { return write(t, "impact.yaml", body) }
 	nine := "signals:\n"
@@ -547,6 +551,7 @@ func TestSignalFlagsRefused(t *testing.T) {
 // and matched on its entry's, a firing judged by its signals' starts and
 // their windows.
 func TestNumbersRecountSignals(t *testing.T) {
+	alone(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}
@@ -601,6 +606,7 @@ func TestNumbersRecountSignals(t *testing.T) {
 // change that gives a rule a label an entry names keeps it from the
 // windows of the signals the entry doesn't name.
 func TestCompareSignals(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	base := `groups:
@@ -644,6 +650,7 @@ rules:
 // the metrics, says a rule entry's pattern is redacted, and gives its
 // labels' values aliases: a signal is named for what it measures.
 func TestRedactSignals(t *testing.T) {
+	alone(t)
 	h, file, args := namedSignals(t)
 	for _, flag := range []string{"--json", "--metrics", ""} {
 		a := append(slices.Clone(args), "--impact-file", file, "--redact")
@@ -666,6 +673,7 @@ func TestRedactSignals(t *testing.T) {
 // name, and of the rules judged against its windows alone: --impact-for
 // with no name sets no named signal's.
 func TestImpactShortSignal(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
 	rulesFile := write(t, "rules.yaml", `groups:
@@ -711,6 +719,7 @@ rules:
 // A rule's entry by labels is found by the newest version of the rules
 // that has it; a rule with none, by the labels all its firings have.
 func TestIndexSignals(t *testing.T) {
+	parallel(t)
 	sig := verdict.NewSignals([]verdict.Signal{{Name: "latency", Record: true}},
 		[]verdict.RuleEntry{{Labels: incident.Labels{"kind": {"latency"}}, Signals: []string{"latency"}}})
 	versions := []replay.Version{
@@ -739,6 +748,7 @@ func TestIndexSignals(t *testing.T) {
 // service that served none) from where its stand-in's does, the series
 // with the label it narrows by; not one an absent() reads.
 func TestUnnamedImpactSelectors(t *testing.T) {
+	alone(t)
 	const ratio = `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`
 	// Everyone's 5xx with a route: everyone's 5xx's stand-in for the route's,
 	// with data only once a 5xx came.
@@ -802,6 +812,7 @@ func TestUnnamedImpactSelectors(t *testing.T) {
 // latest start of all; a selector that only narrows another is counted
 // through its stand-in, so a 5xx it never saw ties nothing apart.
 func TestNamedSignalsSeenFromReads(t *testing.T) {
+	alone(t)
 	night := func(h signalHistory, file string, args []string) verdict.Judged {
 		t.Helper()
 		var rep verdict.Report
@@ -839,6 +850,7 @@ func TestNamedSignalsSeenFromReads(t *testing.T) {
 // dots is no label PromQL names, and a named signal never puts it in a
 // query (source.SeenFrom takes it to have seen every value).
 func TestMatchTakesAnyName(t *testing.T) {
+	parallel(t)
 	for _, v := range []string{"service.name", "9lives"} {
 		f, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
 		if err != nil || !slices.Equal(f.opts.Match, []string{v}) {
@@ -850,6 +862,7 @@ func TestMatchTakesAnyName(t *testing.T) {
 // A selector of what a signal reads whose count fails adds nothing: the
 // run goes on, says so on stderr, and the others' counts still tie.
 func TestNamedSignalsSeenFails(t *testing.T) {
+	alone(t)
 	h, file, args := namedSignals(t)
 	h.counted = map[string][]map[string]string{"http_requests_total": {{"service": "web", "team": "edge"}}}
 	h.failing = map[string]bool{"probe_success": true}

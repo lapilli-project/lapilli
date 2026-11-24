@@ -12,6 +12,7 @@ import (
 // slack, webhook or team:, nor one --report-dest gives; a key names a
 // --webhook-dest; and either needs --config, where the routes are.
 func TestServeWebhookDestFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	config := write(t, "config.yaml", "notify:\n  default: [payments-hook]\n")
 	hook := write(t, "hook", "https://hooks.example.com/payments")

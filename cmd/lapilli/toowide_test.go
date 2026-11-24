@@ -26,6 +26,7 @@ func (samplesHeld) MaxSamples() int { return 1000 }
 // unseen, where it was taken for a query refused as written and the run
 // passed.
 func TestTooWideFailsUnreplayed(t *testing.T) {
+	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return samplesHeld{}, nil }
 	now = func() time.Time { return t0 }
 	var labels strings.Builder

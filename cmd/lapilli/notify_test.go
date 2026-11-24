@@ -9,6 +9,7 @@ import (
 // The notifications port wants what lets a notification in, and refuses
 // what isn't one.
 func TestServeNotifyFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	short := write(t, "short", "too short")
 	good := write(t, "good", "a-token-long-enough")
@@ -35,6 +36,7 @@ func TestServeNotifyFlags(t *testing.T) {
 // what it is: unreadable, shorter than 32 bytes once a line break at its
 // end is let go, or with no webhook to sign the posts to.
 func TestServeNotifyWebhookSecretFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	hook := write(t, "hook", "https://hooks.example/lapilli")
 	short := write(t, "short", "0123456789abcdef0123456789abcde\n") // 31 bytes and a line break

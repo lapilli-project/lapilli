@@ -53,6 +53,7 @@ func githubMerge(sha string) []string {
 // parent of it; with none, or another, no status is set, and the job goes
 // on as it would.
 func TestBacktestRecipeStatus(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -60,6 +61,7 @@ func TestBacktestRecipeStatus(t *testing.T) {
 		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
 	for _, h := range backtestHosts {
 		t.Run(h.kind, func(t *testing.T) {
+			parallel(t) // each host's repository and stand-in its own
 			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
 			repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 			sha := repo.git("rev-parse", "pr")
@@ -191,6 +193,7 @@ func TestBacktestRecipeStatus(t *testing.T) {
 // refused, and so is Azure DevOps' pull request with no iteration at the
 // commit. Nothing changed, the status says so, and no comment is posted.
 func TestBacktestRecipeStatusCommit(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -241,6 +244,7 @@ func TestBacktestRecipeStatusCommit(t *testing.T) {
 // and a rule that differs not replayed fails the job, as what it catches
 // can't be judged. Wrong settings for it, and for STATUS, fail at once.
 func TestBacktestRecipeFailMissed(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -327,6 +331,7 @@ func TestBacktestRecipeFailMissed(t *testing.T) {
 // The action's fail-missed and status reach github.sh as FAIL_MISSED and
 // STATUS: the step fails, and the head commit's status says why.
 func TestBacktestActionStatus(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -354,6 +359,7 @@ func TestBacktestActionStatus(t *testing.T) {
 // with none, a gate or a status is refused. Of a merge, the status goes
 // on the pull request's parent alone, never the commit it goes into.
 func TestBacktestRecipeOwnParent(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -439,6 +445,7 @@ func TestBacktestRecipeOwnParent(t *testing.T) {
 // parent written otherwise (HEAD~1, HEAD^, its hash) is too; and STATUS
 // alone, refused, fails the job, never a success.
 func TestBacktestRecipeOwnParentMerged(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -516,6 +523,7 @@ func TestBacktestRecipeOwnParentMerged(t *testing.T) {
 // never pending, and none on the commit checked out. With neither, the
 // comment is compared with the branch the pull request goes into.
 func TestBacktestRecipeNotTheCIsMerge(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -650,6 +658,7 @@ func TestBacktestRecipeNotTheCIsMerge(t *testing.T) {
 // request goes into (Gitea's Actions), the base's hash, which a pull
 // request of one commit's HEAD^1 is, is the job's, and taken.
 func TestBacktestRecipeTargetForms(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()

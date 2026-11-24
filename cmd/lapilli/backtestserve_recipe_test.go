@@ -261,6 +261,7 @@ func serveRun(t *testing.T, h backtestHost, repo *prRepo, srv *serveStandIn) *re
 // saying where the backtest is, and posts the Markdown serve gave as the
 // comment. Nothing is installed or run.
 func TestBacktestServeRecipe(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := serveRepo(t)
 	head := repo.git("rev-parse", "HEAD")
@@ -335,6 +336,7 @@ func TestBacktestServeRecipe(t *testing.T) {
 // token, kept out of what the recipe runs: neither curl's command line nor
 // its environment has it, nor RENDER's, under either name.
 func TestBacktestServeRecipeIDToken(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	for _, h := range []backtestHost{backtestHosts[2], backtestHosts[3]} {
 		t.Run(h.kind, func(t *testing.T) {
@@ -382,6 +384,7 @@ func TestBacktestServeRecipeIDToken(t *testing.T) {
 // string or a list; capitals are the same. One with serve's audience
 // beside the workspace's is sent.
 func TestBacktestServeRecipeBitbucketDefaultAudience(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -459,6 +462,7 @@ func actionsIDTokens(t *testing.T, audience, token string) (*httptest.Server, *i
 // Forgejo documents no ::add-mask::, though its runner says GITHUB_ACTIONS
 // too.
 func TestBacktestServeRecipeAsksForIDToken(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -530,6 +534,7 @@ func (rr *recipeRun) runSplit(settings []string, args ...string) (string, string
 // could use there; the job's log says when it isn't LAPILLI_SERVE. The
 // action's audience is it.
 func TestBacktestServeRecipeAudience(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -591,6 +596,7 @@ func TestBacktestServeRecipeAudience(t *testing.T) {
 // What can go wrong through serve is said in the comment, in serve's words
 // where it has them, and the job succeeds unless FAIL_ON_ERROR=true.
 func TestBacktestServeRecipeFails(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -661,6 +667,7 @@ func TestBacktestServeRecipeFails(t *testing.T) {
 // again: the POST, and the GET. SERVE_RETRY_MIN, for tests, lowers the
 // least it waits from 5 seconds to Retry-After's 1.
 func TestBacktestServeRecipeRetryAfter(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -694,6 +701,7 @@ func TestBacktestServeRecipeRetryAfter(t *testing.T) {
 // A backtest that doesn't come back within SERVE_WAIT is cancelled
 // (DELETE), and said.
 func TestBacktestServeRecipeWait(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -722,6 +730,7 @@ func TestBacktestServeRecipeWait(t *testing.T) {
 // command, and the comment only in the fenced block, nothing in it able to
 // end the block or hide what is shown.
 func TestBacktestServeRecipeInert(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -759,6 +768,7 @@ func TestBacktestServeRecipeInert(t *testing.T) {
 // report has, as from lapilli's: a change that breaks one, or adds a rule
 // none holds, and a backtest that couldn't judge them.
 func TestBacktestServeRecipeExpectations(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations: []\n"})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -841,6 +851,7 @@ func missedReport(t *testing.T, caught, known bool) string {
 // that doesn't hold a change to them. A rule left alone that serve's
 // record says still catches INC-1 keeps it caught, and the job passes.
 func TestBacktestServeRecipeFailMissed(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -905,6 +916,7 @@ func TestBacktestServeRecipeFailMissed(t *testing.T) {
 // UTF-8 text, a request past 4 MiB, two files of one name from two of
 // PATHS.
 func TestBacktestServeRecipeRequest(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	srv := newServeStandIn(t)
 	for _, c := range []struct {
@@ -960,6 +972,7 @@ const pageEveryone = `groups:
 // trouble, as any rule file that isn't UTF-8 text; a hidden file that
 // isn't text and has no BOM, a .DS_Store, isn't sent, and isn't trouble.
 func TestBacktestRecipeHiddenRuleFile(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	base := map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"}
@@ -1018,6 +1031,7 @@ func utf16LE(s string) string {
 // no proxy, whatever http_proxy says, where the token would be in the
 // clear.
 func TestBacktestServeRecipeClusterURL(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1049,6 +1063,7 @@ func TestBacktestServeRecipeClusterURL(t *testing.T) {
 // Through serve, what serve decides, and what isn't sent, is refused at
 // once, saying why; so is what serve mode alone reads, without it.
 func TestBacktestServeRecipeSettings(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1164,6 +1179,7 @@ func TestBacktestServeRecipeSettings(t *testing.T) {
 // LOKI_PATHS's files are sent beside PATHS's, each marked a Loki ruler's,
 // as --loki-rules would read them; a path of it in neither commit is said.
 func TestBacktestServeRecipeLokiPaths(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	logs := "groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"x\"}[5m])) > %d\n"
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "loki/logs.yaml": fmt.Sprintf(logs, 1)})
@@ -1200,6 +1216,7 @@ func TestBacktestServeRecipeLokiPaths(t *testing.T) {
 // the job's ID token for audience, as core.getIDToken(audience) does, and
 // sends the rules to serve; without serve-url, the action is as it was.
 func TestBacktestActionServe(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1407,6 +1424,7 @@ func realReports(t *testing.T) map[string]string {
 // A report CompareMarkdown wrote is posted as serve wrote it, byte for
 // byte, whatever came from the rules: each a code span.
 func TestBacktestServeRecipeReportAsWritten(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1442,6 +1460,7 @@ func TestBacktestServeRecipeReportAsWritten(t *testing.T) {
 // a link or an image, a fence, a code span a table splits, or one not
 // closed on its line, a <details> that isn't lapilli's or isn't closed.
 func TestBacktestServeRecipeReportLeftOut(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1522,6 +1541,7 @@ func TestBacktestServeRecipeReportLeftOut(t *testing.T) {
 // object of numbers and true or false, or there is no report: the job's
 // gates read it, and the comment doesn't show what isn't it.
 func TestBacktestServeRecipeReportSummaryLine(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations: []\n"})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1556,6 +1576,7 @@ func TestBacktestServeRecipeReportSummaryLine(t *testing.T) {
 // closed, saying so; one past the 65536 characters lapilli never writes is
 // read no further.
 func TestBacktestServeRecipeLongReport(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1610,6 +1631,7 @@ func TestBacktestServeRecipeLongReport(t *testing.T) {
 // is sent "expect": "", and "expect_before" when the commit it goes into
 // has one; a field is left out only when there is no file.
 func TestBacktestServeRecipeEmptyExpect(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	srv := newServeStandIn(t)
 	empty := func(r *prRepo) {
@@ -1666,6 +1688,7 @@ func TestBacktestServeRecipeEmptyExpect(t *testing.T) {
 // A Retry-After of 0, or none, is waited 5 seconds at least, or
 // SERVE_POLL if longer: serve asked to wait isn't asked in a loop.
 func TestBacktestServeRecipeRetryAfterZero(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})

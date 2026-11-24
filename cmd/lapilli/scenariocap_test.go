@@ -25,6 +25,7 @@ var standInMemory = []string{"--promtool-memory", "512Mi"}
 // promtool's RLIMIT_DATA, through the lapilli binary started again
 // (scenario's wrapper, linked into it); elsewhere, said to be no cap.
 func TestVerdictPromtoolMemory(t *testing.T) {
+	alone(t)
 	rulesFile := write(t, "rules.yaml", shopRules("5m"))
 	expect := write(t, "expectations.yaml", "expectations:\n  - rule: CheckoutErrors\n    scenarios: [t.yaml]\n")
 	promtool := scenariotest.Install(t)
