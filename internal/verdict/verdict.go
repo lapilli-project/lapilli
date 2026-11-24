@@ -381,6 +381,14 @@ type ImpactShort struct {
 // Missed reports whether no rule caught the incident.
 func (i IncidentResult) Missed() bool { return len(i.CaughtBy) == 0 }
 
+// knownMissed reports whether nothing caught the incident and that is
+// known: it isn't NotKnown.
+func (i IncidentResult) knownMissed() bool { return i.Missed() && !i.NotKnown }
+
+// unknown reports whether nothing caught the incident and whether one did
+// isn't known (NotKnown).
+func (i IncidentResult) unknown() bool { return i.Missed() && i.NotKnown }
+
 // OnlyNoisy reports whether only noisy rules caught the incident, which is
 // little better than missing it.
 func (i IncidentResult) OnlyNoisy() bool {

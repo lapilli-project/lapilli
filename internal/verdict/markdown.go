@@ -115,7 +115,12 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 			return m
 		}
 		totals.rows = append(totals.rows, fmt.Sprintf("| Incidents with no alert, of %d | %d | %d |\n", n,
-			count(c.Before, IncidentResult.Missed), count(c.After, IncidentResult.Missed)))
+			count(c.Before, IncidentResult.knownMissed), count(c.After, IncidentResult.knownMissed)))
+		// Not known, as Text says "?": no rule replayed caught them, and a
+		// rule that couldn't be replayed may have.
+		if b, a := count(c.Before, IncidentResult.unknown), count(c.After, IncidentResult.unknown); b+a > 0 {
+			totals.rows = append(totals.rows, fmt.Sprintf("| Incidents not known: no alert from the rules replayed, a rule couldn't be replayed | %d | %d |\n", b, a))
+		}
 		if b, a := count(c.Before, IncidentResult.OnlyNoisy), count(c.After, IncidentResult.OnlyNoisy); b+a > 0 {
 			totals.rows = append(totals.rows, fmt.Sprintf("| Incidents caught only by noisy rules | %d | %d |\n", b, a))
 		}
