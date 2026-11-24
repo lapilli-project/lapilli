@@ -390,6 +390,9 @@ func TestPhaseOfVmalert(t *testing.T) {
 		if r.Phase != want[r.Name] {
 			t.Errorf("%s: phase %v, want %v", r.Name, r.Phase, want[r.Name])
 		}
+		if !r.Vmalert {
+			t.Errorf("%s: not said to be vmalert's", r.Name)
+		}
 	}
 	// As vmalert's Truncate has it.
 	at := time.Date(2026, 11, 20, 10, 4, 23, 0, time.UTC)
@@ -400,7 +403,7 @@ func TestPhaseOfVmalert(t *testing.T) {
 	// evaluation, as before.
 	rs, err = FromAPI([]byte(`{"status":"success","data":{"groups":[{"name":"g","file":"a.yaml","interval":60,"limit":0,"evaluationTime":0.001,
 	  "lastEvaluation":"2026-11-20T10:04:23.417Z","rules":[{"type":"alerting","name":"A","query":"up == 0"}]}]}}`))
-	if err != nil || len(rs) != 1 || rs[0].Phase != 23*time.Second {
+	if err != nil || len(rs) != 1 || rs[0].Phase != 23*time.Second || rs[0].Vmalert {
 		t.Errorf("Prometheus's: %+v %v", rs, err)
 	}
 }

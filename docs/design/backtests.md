@@ -675,10 +675,29 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   a comma after a call's last argument), an expression past 16 KiB or 32
   levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
   LogQL again too; and a cloud's alarm. And a rule is another, its catch
-  not known, where the API says what its file doesn't, or the other way:
-  a group whose file gives no `interval`, which runs at Prometheus's
-  `evaluation_interval`, as the API says; a group's `query_offset`, which
-  Prometheus 3.5.0's API leaves out.
+  not known, where its file leaves out what the API says or the other way
+  round: a group's `query_offset`, which Prometheus 3.5.0's API leaves
+  out. Not a group's interval, where serve knows it:
+- **A group with no interval.** A rule file's group that gives no
+  `interval` runs at Prometheus's `evaluation_interval`, which its rules
+  API says of the group (`"interval": 60`) and the file doesn't. With
+  `--loaded-rules`, serve reads Prometheus's configuration
+  (`/api/v1/status/config`, once a day with the scrape intervals, 2 MiB at
+  most, `--scrape-interval` or not) for its `evaluation_interval`, 1m
+  where a configuration read doesn't say it (Prometheus 3.5.0 writes every
+  default, so says it). A rule of the pull request's left alone, in a
+  group with no interval, is taken at it when every rule of its name in
+  serve's latest version was read from that Prometheus's rules API: there
+  it runs, after the merge as before. Where the configuration isn't read
+  (most managed services don't serve it), says an interval that isn't a
+  duration, or the rule is serve's from elsewhere (`--rules`, `--ruler`,
+  a Loki ruler, Grafana) or vmalert's,
+  whose groups run at its own `-evaluationInterval` (its rules API says
+  its groups' `concurrency`, Prometheus's doesn't), the rule is as its
+  file has it, and another than the API's: its catch is not known. A rule
+  of serve's isn't taken so: its rules API says every group's interval,
+  and a version of rules read otherwise (files, earlier) ran wherever they
+  ran.
 - **Not known, not missed**, as in `lapilli verdict`: an incident is not
   known (`missed_not_known`) when a rule after the change couldn't be
   replayed; or when a rule the pull request leaves alone may have caught it

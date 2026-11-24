@@ -142,3 +142,29 @@ func TestShortRangeByJobCost(t *testing.T) {
 		t.Errorf("%s %q", d, job)
 	}
 }
+
+// The evaluation interval a group with no interval of its own runs at: as
+// Prometheus 3.5.0 says it (its configuration writes every default, 1m
+// here), 1m where a configuration read doesn't say, and none where it
+// isn't read or doesn't say a duration.
+func TestScrapeConfigEvaluation(t *testing.T) {
+	if s := realScrapes(t); s.Evaluation != time.Minute {
+		t.Errorf("Prometheus 3.5.0's: %s", s.Evaluation)
+	}
+	for config, want := range map[string]time.Duration{
+		"global:\n  evaluation_interval: 30s\n":                          30 * time.Second,
+		"global:\n  scrape_interval: 15s\n":                              time.Minute,
+		"scrape_configs:\n- job_name: a\n":                               time.Minute,
+		"global:\n  evaluation_interval: soon\n":                         0,
+		"global:\n  evaluation_interval: 0s\n":                           0,
+		"global: [":                                                      0,
+		"global:\n  scrape_interval: soon\n  evaluation_interval: 30s\n": 0,
+	} {
+		if s, _ := ScrapeConfig(config); s.Evaluation != want {
+			t.Errorf("%q: %s, want %s", config, s.Evaluation, want)
+		}
+	}
+	if (Scrapes{Global: time.Minute}).String() != (Scrapes{Global: time.Minute, Evaluation: time.Minute}).String() {
+		t.Error("the evaluation interval in String, which is of the scrapes")
+	}
+}

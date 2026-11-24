@@ -15,9 +15,12 @@ import (
 	"lapilli.dev/internal/rules"
 )
 
-// defaultScrape is the scrape interval Prometheus uses when its
-// configuration gives none.
-const defaultScrape = time.Minute
+// defaultScrape and defaultEvaluation are the scrape interval and the
+// evaluation interval Prometheus uses when its configuration gives none.
+const (
+	defaultScrape     = time.Minute
+	defaultEvaluation = time.Minute
+)
 
 // ScrapeInterval is the global scrape interval in a Prometheus
 // configuration, as /api/v1/status/config gives it; ok is false when the
@@ -37,6 +40,11 @@ type Scrapes struct {
 	Jobs map[string]time.Duration
 	// names are Jobs' names, sorted, once for every range checked.
 	names []string
+	// Evaluation is the global evaluation_interval, which a rule group
+	// that gives no interval of its own runs at: Prometheus's 1m where the
+	// configuration read doesn't say; 0 where it wasn't read, or what it
+	// says isn't a duration. Not in String, which is of the scrapes.
+	Evaluation time.Duration
 }
 
 // sorted is the jobs' names, sorted.
@@ -67,7 +75,8 @@ const maxJobs = 10000
 func ScrapeConfig(config string) (s Scrapes, ok bool) {
 	var c struct {
 		Global struct {
-			ScrapeInterval string `yaml:"scrape_interval"`
+			ScrapeInterval     string `yaml:"scrape_interval"`
+			EvaluationInterval string `yaml:"evaluation_interval"`
 		} `yaml:"global"`
 		ScrapeConfigs []struct {
 			JobName        string `yaml:"job_name"`
@@ -84,6 +93,14 @@ func ScrapeConfig(config string) (s Scrapes, ok bool) {
 			return Scrapes{}, false
 		}
 		s.Global = d
+	}
+	s.Evaluation = defaultEvaluation
+	if c.Global.EvaluationInterval != "" {
+		if d, ok := ParseDuration(c.Global.EvaluationInterval); ok && d > 0 {
+			s.Evaluation = d
+		} else {
+			s.Evaluation = 0
+		}
 	}
 	for _, j := range c.ScrapeConfigs[:min(len(c.ScrapeConfigs), maxJobs)] {
 		if j.JobName == "" {

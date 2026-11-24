@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -354,6 +356,47 @@ func (h *reprinting) QueryRange(ctx context.Context, expr string, start, end tim
 	return h.history.QueryRange(ctx, expr, start, end, step)
 }
 
+// reprinted is a Prometheus's rules API answering with Errors and
+// MoreErrors, the shop group's interval 60 seconds, MoreErrors's
+// expression printed again: sum(errors) by (service) > 1 as sum by
+// (service) (errors) > 1.
+func reprinted() *reprinting {
+	return &reprinting{history: &history{}, as: map[string]string{"sum by (service) (errors) > 1": "errors > 1"},
+		answer: `{"status":"success","data":{"groups":[{"name":"shop","file":"/etc/prometheus/rules/shop.yaml","interval":60,"limit":0,
+		  "evaluationTime":0.001,"lastEvaluation":"0001-01-01T00:00:00Z","rules":[
+		  {"state":"inactive","name":"Errors","query":"errors > 5","duration":120,"keepFiringFor":0,"labels":{"severity":"page"},
+		   "annotations":{},"alerts":[],"health":"ok","type":"alerting"},
+		  {"state":"inactive","name":"MoreErrors","query":"sum by (service) (errors) > 1","duration":300,"keepFiringFor":0,"labels":{},
+		   "annotations":{},"alerts":[],"health":"ok","type":"alerting"}]}]}}`}
+}
+
+// configured is a reprinting Prometheus that serves its configuration
+// (/api/v1/status/config) as config, or fails with err.
+type configured struct {
+	*reprinting
+	config string
+	err    error
+}
+
+func (h *configured) StatusConfig(context.Context) (string, error) { return h.config, h.err }
+
+// prometheus350Config is the configuration a real Prometheus 3.5.0 served,
+// which writes every default: its evaluation_interval 1m.
+func prometheus350Config(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("../content/testdata/prometheus-3.5.0/status-config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a struct {
+		Data struct{ YAML string } `json:"data"`
+	}
+	if err := json.Unmarshal(b, &a); err != nil || !strings.Contains(a.Data.YAML, "evaluation_interval: 1m") {
+		t.Fatalf("%v: %.200s", err, a.Data.YAML)
+	}
+	return a.Data.YAML
+}
+
 // rulesEvery is a rule file of the shop group, a minute apart, holding
 // each rule given: as a Prometheus whose rules API says interval 60 runs
 // it.
@@ -371,13 +414,7 @@ func rulesEvery(rs ...string) string {
 // another rule than serve's record is of: not known.
 func TestBacktestFailMissedReprinted(t *testing.T) {
 	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1 # any error\n        for: 5m\n"
-	h := &reprinting{history: &history{}, as: map[string]string{"sum by (service) (errors) > 1": "errors > 1"},
-		answer: `{"status":"success","data":{"groups":[{"name":"shop","file":"/etc/prometheus/rules/shop.yaml","interval":60,"limit":0,
-		  "evaluationTime":0.001,"lastEvaluation":"0001-01-01T00:00:00Z","rules":[
-		  {"state":"inactive","name":"Errors","query":"errors > 5","duration":120,"keepFiringFor":0,"labels":{"severity":"page"},
-		   "annotations":{},"alerts":[],"health":"ok","type":"alerting"},
-		  {"state":"inactive","name":"MoreErrors","query":"sum by (service) (errors) > 1","duration":300,"keepFiringFor":0,"labels":{},
-		   "annotations":{},"alerts":[],"health":"ok","type":"alerting"}]}]}}`}
+	h := reprinted()
 	b := btServer(t, h, "", func(c *Config) { c.RulesPath, c.Loaded = "", true })
 	ctx := context.Background()
 	incs, err := b.s.l.Incidents(ctx, now.Add(-3*24*time.Hour), now, false)
@@ -411,5 +448,63 @@ func TestBacktestFailMissedReprinted(t *testing.T) {
 	_, rep = b.done(t, b.plain, btBody(rulesEvery(errorsRule, other), rulesEvery(errorsLate, other), held))
 	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
 		t.Errorf("held as >=: summary %v, missed %v", sum, missed)
+	}
+}
+
+// A rule file's group with no interval of its own runs at Prometheus's
+// evaluation_interval, which its rules API says of the group (60) and the
+// file doesn't: a pull request leaving MoreErrors alone in such a file is
+// taken at it where serve read the configuration (once a day, with the
+// scrape intervals): as a real Prometheus 3.5.0 writes it, 1m; or as one
+// that leaves it out, Prometheus's own 1m. INC-1 stays caught. Where the
+// configuration can't be read, or says another interval, MoreErrors in
+// the file is another rule than serve's record is of: not known. So too
+// where vmalert answers (its groups say their concurrency), whose groups
+// run at its own -evaluationInterval, whatever a configuration says.
+func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
+	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
+	held := map[string]any{"days": 3, "fail_missed": true}
+	for _, c := range []struct {
+		name           string
+		config         string
+		err            error
+		vmalert, known bool
+		scrape         time.Duration
+	}{
+		{"Prometheus 3.5.0's", prometheus350Config(t), nil, false, true, 0},
+		{"none said", "global:\n  scrape_interval: 15s\n", nil, false, true, 0},
+		{"not served", "", errors.New("HTTP 404"), false, false, 0},
+		{"another", "global:\n  evaluation_interval: 30s\n", nil, false, false, 0},
+		{"vmalert's", "global:\n  evaluation_interval: 1m\n", nil, true, false, 0},
+		// --scrape-interval given, the configuration is read for this alone.
+		{"--scrape-interval too", prometheus350Config(t), nil, false, true, 30 * time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := &configured{reprinting: reprinted(), config: c.config, err: c.err}
+			if c.vmalert {
+				h.answer = strings.Replace(h.answer, `"interval":60,`, `"interval":60,"concurrency":1,`, 1)
+			}
+			b := btServer(t, h, "", func(cfg *Config) { cfg.RulesPath, cfg.Loaded, cfg.ScrapeInterval = "", true, c.scrape })
+			if incs, err := b.s.l.Incidents(context.Background(), now.Add(-3*24*time.Hour), now, false); err != nil || len(incs) != 1 ||
+				!strings.Contains(fmt.Sprint(incs[0].CaughtBy), "MoreErrors") {
+				t.Fatalf("the record: %+v %v", incs, err)
+			}
+			md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
+			sum, missed := missedOf(t, rep)
+			notKnown := float64(1)
+			if c.known {
+				notKnown = 0
+			}
+			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != notKnown || len(missed) != 0 {
+				t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+			}
+		})
+	}
+	// Without --loaded-rules, serve's rules files: no interval is taken
+	// from the configuration, whatever it says.
+	s := &Server{cfg: Config{}}
+	s.saidRules.evaluation = time.Minute
+	if s.evaluationInterval() != 0 {
+		t.Error("an evaluation interval without --loaded-rules")
 	}
 }

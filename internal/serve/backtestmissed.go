@@ -174,10 +174,37 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 	for _, r := range slices.Concat(pr.gone, pr.came) {
 		a.changed[r.Name], a.bases[nameBase(r.Name)] = true, true
 	}
+	// The latest version: the rules serve runs now.
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var now []rules.Rule
+	if ok {
+		if now, err = s.parse(ctx, latest); err != nil {
+			return nil, err
+		}
+	}
 	// The pull request's rules left alike, as serve replays its own: so
 	// that a rule read from a file and serve's of the same file are one.
+	// Of a rule serve reads, every one of its name, from the rules API of
+	// the Prometheus it reads them from (--loaded-rules), a group of the
+	// file with no interval of its own runs there at its
+	// evaluation_interval, which the API says of serve's, and the file
+	// doesn't: the rule is taken at it, once serve knows it.
 	same := slices.Clone(pr.same)
 	s.replayedAs().Apply(same)
+	if every := s.evaluationInterval(); every > 0 {
+		there := map[string]bool{}
+		for _, r := range now {
+			there[r.Name] = there[r.Name] || !loadedFrom(r)
+		}
+		for i, r := range same {
+			if bad, ok := there[r.Name]; ok && !bad && r.Interval == 0 {
+				same[i].Interval = every
+			}
+		}
+	}
 	texts := aloneTexts{}
 	prText := map[string]aloneText{}
 	for _, r := range same {
@@ -195,17 +222,6 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 		a.by[caughtAt{in.ID, in.Start.Unix()}] = in.CaughtBy
 		for _, k := range in.CaughtBy {
 			caughtBy[k.Rule] = true
-		}
-	}
-	// The latest version: the rules serve runs now.
-	latest, ok, err := s.l.Latest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var now []rules.Rule
-	if ok {
-		if now, err = s.parse(ctx, latest); err != nil {
-			return nil, err
 		}
 	}
 	running := map[string]aloneText{}
@@ -289,6 +305,14 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 		}
 	}
 	return a, nil
+}
+
+// loadedFrom says serve read r from a Prometheus's rules API, as
+// --loaded-rules reads one: not vmalert's, whose groups run at its own
+// -evaluationInterval; not a Loki ruler's, a Grafana rule, nor a cloud's
+// alarm.
+func loadedFrom(r rules.Rule) bool {
+	return r.Source == "api" && r.Prometheus && !r.Vmalert && r.Logs == "" && r.Graph == nil && r.Cloud == ""
 }
 
 // catches says whether, by serve's record, a rule the change leaves alone

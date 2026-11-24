@@ -364,10 +364,14 @@ the rule as the pull request has it, or its runs don't cover the
 incident's time), or that a rule written otherwise then caught, is not
 known, which fails the step as a gate that can't judge
 ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)); so is
-one a rule caught whose file gives no group `interval` while serve reads
-it from an API, which says the interval it runs at, or whose expression
-Lapilli compares only by its text (a Grafana rule, a Loki ruler's, what
-MetricsQL reads otherwise than Prometheus).
+one a rule caught whose expression Lapilli compares only by its text (a
+Grafana rule, a Loki ruler's, what MetricsQL reads otherwise than
+Prometheus). A rule file's group with no `interval` runs at Prometheus's
+`evaluation_interval`, which serve reads from `/api/v1/status/config`
+with `--loaded-rules` (1m where the configuration doesn't say it): where
+that isn't served (most managed services don't serve it), or the rule is
+vmalert's, the group is another than the one the rules API says, and its
+rules' catches are not known: give the group its `interval`.
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through
 lapilli serve, and `promtool` is refused with `serve-url`; run `promtool
