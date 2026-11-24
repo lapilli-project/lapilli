@@ -21,7 +21,7 @@ import "lapilli.dev/internal/ledger"
 // what it is a state of and its value. A value not listed is unknown.
 var statusKinds = map[string]string{
 	// How a rule did, over the weeks shown.
-	"perf/ok": "ok", "perf/noisy": "warn", "perf/unrecorded": "unknown", "perf/silent": "unknown", "perf/spare": "unknown",
+	"perf/ok": "ok", "perf/noisy": "warn", "perf/nothing": "warn", "perf/unrecorded": "unknown", "perf/silent": "unknown", "perf/spare": "unknown",
 	// Its backtest, when it can't be taken for granted.
 	"trust/differs": "warn", "trust/unreplayed": "warn", "trust/recorded": "info",
 	// What people mean to do with it, as its note says.

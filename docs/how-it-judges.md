@@ -187,7 +187,11 @@ an incident that is likely chance. Its catches are shown marked `(noisy)`, not
 dropped, since a noisy rule can also fire for the right reason. An incident
 caught only by noisy rules is reported as such, and its detection delay is
 taken from the first rule that isn't noisy. `--noisy-firings` and
-`--noisy-precision` move the line.
+`--noisy-precision` move the line (the chart's `noisyFirings` and
+`noisyPrecision`; in `lapilli serve` the Settings page too). A rule with
+fewer firings than that, none of them caught anything, isn't noisy yet, and
+`lapilli serve` badges it "Caught nothing", not "OK"; a rule's page says the
+bar in effect beside its badge.
 
 ## No record, no verdict
 

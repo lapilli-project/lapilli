@@ -63,6 +63,7 @@
 <fieldset><legend>Performance</legend>
   <label class="opt zero"><input type="checkbox" name="perf" value="noisy"> <span>Noisy</span> <span class="n">0</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="noisy-episodes"> <span>Noisy by episodes</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="nothing"> <span>Caught nothing</span> <span class="n">0</span></label>
   <label class="opt"><input type="checkbox" name="perf" value="unrecorded"> <span>No record</span> <span class="n">1</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="ok"> <span>OK</span> <span class="n">0</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="silent"> <span>Silent</span> <span class="n">0</span></label>
@@ -90,6 +91,7 @@
 <fieldset><legend>Performance</legend>
   <label class="opt zero"><input type="checkbox" name="perf" value="noisy"> <span>Noisy</span> <span class="n">0</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="noisy-episodes"> <span>Noisy by episodes</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="nothing"> <span>Caught nothing</span> <span class="n">0</span></label>
   <label class="opt"><input type="checkbox" name="perf" value="unrecorded"> <span>No record</span> <span class="n">1</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="ok"> <span>OK</span> <span class="n">0</span></label>
   <label class="opt zero"><input type="checkbox" name="perf" value="silent"> <span>Silent</span> <span class="n">0</span></label>
@@ -133,7 +135,7 @@
 <tbody>
 <tr class=" has-more">
   
-  <td class="rule"><a href="/rules/Errors?weeks=4"><bdi>Errors</bdi></a> <span class="badges"><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></span></td>
+  <td class="rule"><a href="/rules/Errors?weeks=4"><bdi>Errors</bdi></a> <span class="badges"><span class="badge perf-unrecorded status-unknown" title="noisy at 10 firings or more with under 20% caught"><span aria-hidden="true">?</span> No record</span></span></td>
   <td class="name">–</td>
   <td class="name"><bdi>page</bdi></td>
   <td class="n">21</td><td class="n">3</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td class="n">1</td>

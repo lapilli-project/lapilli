@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -273,6 +274,11 @@ type ruleLine struct {
 	// precision isn't known, and it isn't noisy; Unrecorded, that it fired
 	// as often as a noisy rule fires, with no record to judge it by.
 	NoRecord, Unrecorded bool
+	// NoisyFirings and NoisyShare are the bar for noisy in effect: that
+	// many judged firings or more, with under that share caught
+	// (verdict.NoisyAt, as --noisy-firings and --noisy-precision say it).
+	NoisyFirings int
+	NoisyShare   string
 	// Unjudged are its firings in weeks with no record: in Firings and
 	// Black, and in no precision (deploysUnjudged, of those during deploys).
 	Unjudged        int
@@ -684,6 +690,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Black = l.Firings - l.White
 		judged := l.Firings - l.Unjudged
 		l.Noisy = verdict.IsNoisy(judged, l.White, at)
+		l.NoisyFirings, l.NoisyShare = at.Firings, strconv.FormatFloat(100*at.Precision, 'f', -1, 64)+"%"
 		l.NoRecord = l.Firings > 0 && judged == 0
 		l.Unrecorded = !l.Noisy && l.Unjudged >= at.Firings
 		l.Precision = pct(l.White, judged)

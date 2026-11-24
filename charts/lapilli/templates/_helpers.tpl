@@ -740,6 +740,12 @@ the rules and the incidents are, and how to judge. */}}
 {{- range .Values.match }}
 - {{ printf "--match=%s" . | quote }}
 {{- end }}
+{{- with .Values.noisyFirings }}
+- {{ printf "--noisy-firings=%d" (int .) | quote }}
+{{- end }}
+{{- with .Values.noisyPrecision }}
+- {{ printf "--noisy-precision=%v" . | quote }}
+{{- end }}
 {{- if .Values.matchStrict }}
 - --match-strict
 {{- end }}

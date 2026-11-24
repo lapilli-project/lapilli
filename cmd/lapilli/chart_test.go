@@ -605,6 +605,25 @@ func TestChartMaxSamples(t *testing.T) {
 	}
 }
 
+// noisyFirings and noisyPrecision are --noisy-firings and
+// --noisy-precision, in both modes, passed only when set.
+func TestChartNoisyBar(t *testing.T) {
+	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {
+		out, err := helmTemplate(t, mode...)
+		if err != nil || strings.Contains(out, "--noisy-") {
+			t.Errorf("by default: %v\n%s", err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set", "noisyFirings=5", "--set", "noisyPrecision=0.125")...)
+		if err != nil || !strings.Contains(out, `- "--noisy-firings=5"`) || !strings.Contains(out, `- "--noisy-precision=0.125"`) {
+			t.Errorf("set: %v\n%s", err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set-string", "noisyPrecision=20%")...)
+		if err != nil || strings.Contains(out, "--noisy-firings") || !strings.Contains(out, `- "--noisy-precision=20%"`) {
+			t.Errorf("a percent: %v\n%s", err, out)
+		}
+	}
+}
+
 // matchStrict is --match-strict, in both modes; none by default.
 func TestChartMatchStrict(t *testing.T) {
 	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {

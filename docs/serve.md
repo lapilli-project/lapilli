@@ -91,7 +91,7 @@ menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
 one it finds. The rules list gives each rule a badge on three axes (Noisy,
-No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
+Caught nothing, No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
 name and `is:noisy`, `noisy:episodes`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
