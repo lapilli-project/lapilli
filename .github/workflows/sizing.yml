@@ -19,7 +19,7 @@ jobs:
   sizing:
     name: sizing, SQLite and Postgres
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     services:
       postgres:
         # The latest major ci.yml tests.
@@ -54,7 +54,7 @@ jobs:
         run: |
           if [ "$BIG" = true ]; then export LAPILLI_SIZING_BIG=1; fi
           LAPILLI_SIZING=1 LAPILLI_SIZING_OUT="$RUNNER_TEMP/sizing-postgres.md" \
-            go test ./internal/serve -run '^TestSizing$' -v -timeout 120m
+            go test ./internal/serve -run '^TestSizing$' -v -timeout 180m
       - name: Summary
         if: ${{ !cancelled() }}
         run: |

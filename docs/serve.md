@@ -462,89 +462,139 @@ measures it with two million, on your own machine.
 ### Sizing
 
 How much disk the ledger takes and how much memory serve needs, measured
-with SQLite, by how many rules there are, how many firings a week and how
-many weeks are kept. The ledger was written as hourly runs write it, a week
-at a time, and measured after weeks 1, 4 and 12 of the same ledger; serve
-was then started on it, in a process of its own, and asked for what a
-visit asks for: the overview, the rules over twelve weeks, a rule's page
-over twelve weeks and a week's report, each worked out afresh.
+with SQLite and with Postgres, by how many rules there are, how many
+firings a week and how many weeks are kept. The ledger was written as
+hourly runs write it, a week at a time, and measured after weeks 1, 4 and
+12 of the same ledger (1 and 4 at a million firings a week); serve was
+then started on it, in a process of its own, and asked for what a visit
+asks for: the overview, the rules over twelve weeks, a rule's page over
+twelve weeks and a week's report, each worked out afresh.
+
+SQLite:
 
 | Rules | Firings a week | Weeks kept | Firings kept | Ledger on disk | Bytes a firing | Heap at rest | Heap at most while reading | Process memory at most |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 100 | 10,000 | 1 | 10,000 | 3 MB | 255 | 9 MB | 19 MB | 90 MB |
-| 100 | 10,000 | 4 | 40,000 | 7 MB | 179 | 9 MB | 22 MB | 94 MB |
-| 100 | 10,000 | 12 | 120,000 | 16 MB | 134 | 8 MB | 25 MB | 98 MB |
-| 100 | 100,000 | 1 | 100,000 | 14 MB | 136 | 9 MB | 25 MB | 98 MB |
-| 100 | 100,000 | 4 | 400,000 | 42 MB | 104 | 9 MB | 28 MB | 100 MB |
-| 100 | 100,000 | 12 | 1,200,000 | 117 MB | 97 | 8 MB | 27 MB | 99 MB |
-| 1,000 | 10,000 | 1 | 10,000 | 3 MB | 304 | 8 MB | 43 MB | 121 MB |
-| 1,000 | 10,000 | 4 | 40,000 | 10 MB | 256 | 8 MB | 44 MB | 118 MB |
-| 1,000 | 10,000 | 12 | 120,000 | 28 MB | 237 | 9 MB | 51 MB | 130 MB |
-| 1,000 | 100,000 | 1 | 100,000 | 22 MB | 216 | 9 MB | 46 MB | 121 MB |
-| 1,000 | 100,000 | 4 | 400,000 | 70 MB | 175 | 9 MB | 58 MB | 129 MB |
-| 1,000 | 100,000 | 12 | 1,200,000 | 161 MB | 134 | 8 MB | 53 MB | 131 MB |
+| 100 | 10,000 | 1 | 10,000 | 3 MB | 255 | 8 MB | 20 MB | 95 MB |
+| 100 | 10,000 | 4 | 40,000 | 7 MB | 179 | 8 MB | 22 MB | 100 MB |
+| 100 | 10,000 | 12 | 120,000 | 16 MB | 134 | 8 MB | 27 MB | 103 MB |
+| 100 | 100,000 | 1 | 100,000 | 14 MB | 136 | 9 MB | 26 MB | 106 MB |
+| 100 | 100,000 | 4 | 400,000 | 42 MB | 104 | 8 MB | 27 MB | 104 MB |
+| 100 | 100,000 | 12 | 1,200,000 | 117 MB | 97 | 8 MB | 26 MB | 104 MB |
+| 100 | 1,000,000 | 1 | 1,000,000 | 101 MB | 101 | 8 MB | 27 MB | 108 MB |
+| 100 | 1,000,000 | 4 | 4,000,000 | 393 MB | 98 | 8 MB | 26 MB | 108 MB |
+| 1,000 | 10,000 | 1 | 10,000 | 3 MB | 304 | 8 MB | 42 MB | 121 MB |
+| 1,000 | 10,000 | 4 | 40,000 | 10 MB | 256 | 8 MB | 51 MB | 130 MB |
+| 1,000 | 10,000 | 12 | 120,000 | 28 MB | 237 | 8 MB | 53 MB | 131 MB |
+| 1,000 | 100,000 | 1 | 100,000 | 22 MB | 216 | 8 MB | 44 MB | 125 MB |
+| 1,000 | 100,000 | 4 | 400,000 | 70 MB | 175 | 8 MB | 46 MB | 127 MB |
+| 1,000 | 100,000 | 12 | 1,200,000 | 161 MB | 134 | 8 MB | 51 MB | 140 MB |
+| 1,000 | 1,000,000 | 1 | 1,000,000 | 137 MB | 137 | 8 MB | 48 MB | 138 MB |
+| 1,000 | 1,000,000 | 4 | 4,000,000 | 433 MB | 108 | 8 MB | 49 MB | 138 MB |
 
-Measured on an Apple M4 Pro, 24 GB, macOS, Go 1.26.11, at commit
-`792f5394` (two runs; the heap moved by a few MB between them). The ledger is
-the SQLite file with its WAL, after the checkpoint, and was not vacuumed
-(serve doesn't vacuum it either).
+Postgres:
+
+| Rules | Firings a week | Weeks kept | Firings kept | Ledger on disk | Bytes a firing | Heap at rest | Heap at most while reading | Process memory at most |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 10,000 | 1 | 10,000 | 7 MB | 747 | 8 MB | 20 MB | 95 MB |
+| 100 | 10,000 | 4 | 40,000 | 21 MB | 513 | 8 MB | 23 MB | 99 MB |
+| 100 | 10,000 | 12 | 120,000 | 49 MB | 405 | 8 MB | 27 MB | 101 MB |
+| 100 | 100,000 | 1 | 100,000 | 42 MB | 420 | 8 MB | 27 MB | 101 MB |
+| 100 | 100,000 | 4 | 400,000 | 143 MB | 357 | 9 MB | 27 MB | 102 MB |
+| 100 | 100,000 | 12 | 1,200,000 | 412 MB | 342 | 9 MB | 27 MB | 103 MB |
+| 100 | 1,000,000 | 1 | 1,000,000 | 327 MB | 326 | 8 MB | 27 MB | 102 MB |
+| 100 | 1,000,000 | 4 | 4,000,000 | 1,267 MB | 316 | 8 MB | 26 MB | 103 MB |
+| 1,000 | 10,000 | 1 | 10,000 | 10 MB | 973 | 8 MB | 43 MB | 121 MB |
+| 1,000 | 10,000 | 4 | 40,000 | 40 MB | 1,001 | 8 MB | 50 MB | 128 MB |
+| 1,000 | 10,000 | 12 | 120,000 | 96 MB | 798 | 8 MB | 54 MB | 130 MB |
+| 1,000 | 100,000 | 1 | 100,000 | 58 MB | 575 | 9 MB | 53 MB | 129 MB |
+| 1,000 | 100,000 | 4 | 400,000 | 202 MB | 504 | 8 MB | 48 MB | 125 MB |
+| 1,000 | 100,000 | 12 | 1,200,000 | 507 MB | 422 | 8 MB | 52 MB | 133 MB |
+| 1,000 | 1,000,000 | 1 | 1,000,000 | 377 MB | 377 | 8 MB | 48 MB | 133 MB |
+| 1,000 | 1,000,000 | 4 | 4,000,000 | 1,322 MB | 330 | 8 MB | 58 MB | 143 MB |
+
+Measured on GitHub's `ubuntu-latest` runner (Ubuntu 26.04, amd64), Go
+1.26.11, with Postgres 18.6 in a service container on the same runner, at
+commit `60e1f1d1`, by `.github/workflows/sizing.yml` run by hand with
+`big`. The SQLite ledger is its file with its WAL, after the checkpoint,
+and was not vacuumed (serve doesn't vacuum it either; SQLite reuses the
+pages rows leave). The Postgres ledger is its schema's tables with their
+indexes and TOAST (`pg_total_relation_size`); the server's own files (its
+WAL, the catalogs, other databases) are not in it. Each hourly run writes
+the rows of the days and the week it falls in again, which leaves the old
+ones dead until the table is vacuumed: a server's autovacuum does it in
+the hour between two runs, but the test writes a week in seconds, so it
+runs `VACUUM` (not `VACUUM FULL`) on the tables itself after each run.
+Without it, a thousand rules at 10,000 firings a week took 54 MB at one
+week, not 10. Autovacuum's defaults wait until about a fifth of a table's
+rows are dead, so a server's tables may hold up to about that much more
+than these (computed, not measured); with autovacuum off they keep
+growing.
+
 Heap is Go's heap in use, after a garbage collection at rest, and the most
-sampled while the pages were read, above the 27 MB the test binary held
+sampled while the pages were read, above the 28 MB the test binary held
 before serve opened the ledger; it counts garbage not yet collected, so a
 `GOMEMLIMIT` holds it lower. Process memory is the process's peak resident
-set, which holds that binary and SQLite's page cache: a pod's
-`resources.limits.memory` counts it, not the heap alone. The firings are
-spread evenly over the rules, each with a `service` of six, a `pod` of 50
-and a `severity`, and 40 incidents a week: a ledger of more labels, or
-longer ones, takes more a firing.
+set (`VmHWM`), which holds that binary and, on SQLite, SQLite's page
+cache: a pod's `resources.limits.memory` counts it, not the heap alone. A
+Postgres server's own memory isn't in it. The firings are spread evenly
+over the rules, each with a `service` of six, a `pod` of 50 and a
+`severity`, and 40 incidents a week: a ledger of more labels, or longer
+ones, takes more a firing.
 
-What grows the ledger is the firings kept: the bytes a firing fall from
-about 250 to 100 as the weeks pile up, since a rule's rows for each day
-and week are spread over more firings. A thousand rules cost more a firing
-than a hundred: at 12 weeks, 37 bytes more at 100,000 firings a week (134
-against 97) and 103 more at 10,000 (237 against 134). Incidents (40 a week here)
-are in the sizes above; tasks, comments and teams were not written, and are
-rows of people's own, not of each firing. The heap at the most grows
-little with the weeks kept: at a thousand rules and 10,000 firings a week it
-was 44 MB at 4 weeks and 51 at 12, at 100,000 a week 58 and 53, and at a
-hundred rules 22 and 25, 28 and 27. It grows with the rules: about 25 MB
-more at a thousand than at a hundred.
+What grows the ledger is the firings kept: on SQLite the bytes a firing
+fall from about 250 to 100 as the weeks pile up, since a rule's rows for
+each day and week are spread over more firings. A thousand rules cost more
+a firing than a hundred: at 12 weeks, 37 bytes more at 100,000 firings a
+week (134 against 97) and 103 more at 10,000 (237 against 134). Postgres
+takes about three times SQLite's a firing: at 12 weeks and 100,000 a week
+342 bytes against 97, and 422 against 134; at a million a week and 4 weeks
+316 against 98, and 330 against 108. Incidents (40 a week here) are in the
+sizes above; tasks, comments and teams were not written, and are rows of
+people's own, not of each firing. The heap at the most grows with the
+rules, not with the firings kept: 20 to 27 MB at a hundred rules and 42 to
+58 at a thousand, on every row of either ledger, four weeks of a million
+firings a week included (26 and 49 MB on SQLite, 26 and 58 on Postgres).
+The process memory at the most was 95 to 143 MB on every row.
 
 How long it keeps: `--keep` (default 400 days) drops firings older than
 that, and `--keep-activity` (default 800 days, never less than `--keep`)
 the activity log's; `--keep 0` keeps everything. The grid stops at 12
-weeks; past that, the default's 400 days (57 weeks) included, the disk is
-computed from the bytes a firing at 12 weeks, not measured: at 100,000 firings a week the 400 days (57 weeks)
-hold about 5.7 million firings, some 0.6 to 0.8 GB at 100 to 135 bytes. A
-million firings a week was left out: writing a week of 100,000 took about
-25 seconds here, so four weeks of a million would take over fifteen
-minutes, and a ledger of about 1 GB at four weeks (computed the same way).
-Postgres was not measured.
+weeks, and at 4 at a million firings a week; past that, the default's 400
+days (57 weeks) included, the disk is computed from the bytes a firing of
+the longest row, not measured. At 100,000 firings a week the 400 days hold
+about 5.7 million firings: some 0.55 to 0.76 GB on SQLite (97 to 134
+bytes), 1.9 to 2.4 GB on Postgres (342 to 422). At a million a week they
+hold about 57 million: some 5.6 to 6.2 GB on SQLite (98 to 108 bytes), 18
+to 19 GB on Postgres (316 to 330).
 
 The replay's own memory is on top of this, and is what `lapilli preflight`
 estimates ([above](#before-it-is-deployed)): what it says a run takes is
 not in the numbers here. To set the chart, from the nearest row:
-`serve.ledger.size` is the weeks kept times a week's firings times the
-bytes a firing, and half as much again for growth (the default `2Gi` holds
-about 10 million firings at 135 bytes with the half to spare, computed); `resources.requests.memory`
-is the process memory above, and `resources.limits.memory` that and what
-`lapilli preflight` says a run takes. The chart's defaults (a request of
-`256Mi`, a limit of `1Gi`) are above the process memory of every row here,
-without a run's replay.
+`serve.ledger.size` (SQLite's volume) is the weeks kept times a week's
+firings times the bytes a firing, and half as much again for growth (the
+default `2Gi` holds about 10 million firings at 135 bytes with the half to
+spare, computed); a Postgres ledger (`serve.ledger.postgres`) is sized the
+same way from its own table, with autovacuum's fifth on top.
+`resources.requests.memory` is the process memory above, and
+`resources.limits.memory` that and what `lapilli preflight` says a run
+takes. The chart's defaults (a request of `256Mi`, a limit of `1Gi`) are
+above the process memory of every row here, without a run's replay.
 
-The table is SQLite's, up to 100,000 firings a week. The Postgres rows
-(the same test, a ledger in a schema of its own, its size the schema's
-tables with their indexes) and the 1,000,000-a-week rows come from
-`.github/workflows/sizing.yml`, run by hand, and are to be filled in
-from its first run.
-
-Reproduce it, on your machine (about nine to eleven minutes, and the ledgers under
-`TMPDIR`, deleted as each is measured, the largest 161 MB):
+Reproduce it, on your machine (SQLite, without the million a week: about
+nine to eleven minutes, and the ledgers under `TMPDIR`, deleted as each is
+measured, the largest 161 MB):
 
 ```sh
 LAPILLI_SIZING=1 LAPILLI_SIZING_OUT=sizing.md \
   go test ./internal/serve -run '^TestSizing$' -v -timeout 60m
 ```
+
+`LAPILLI_SIZING_BIG=1` adds the million a week (the largest ledger then
+433 MB on SQLite), and `LAPILLI_TEST_POSTGRES=postgres://...` measures
+Postgres ledgers instead, each in a schema of its own made and dropped in
+the database it names. The tables above are the workflow's: `gh workflow
+run sizing.yml -f big=true` took about an hour for SQLite and 45 minutes
+for Postgres on the runner.
 
 ## Teams, quiet windows and tasks
 
