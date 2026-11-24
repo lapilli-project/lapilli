@@ -64,9 +64,19 @@ written down in its pull request:
   tests and builds the binaries, the image and the chart, checks the code
   and each binary with govulncheck before publishing, and attests their
   provenance; the latest release is checked again every day.
+- **When:** what adds or changes something waits for the next minor
+  release, and there are at most two of those a week, each with everything
+  merged since the last. A fix for a vulnerability, or for what a release
+  broke, doesn't wait: it is a patch release as soon as it is ready. A
+  release that changes the ledger's schema says so at the top of its
+  changelog entry, since a release from before can't open the ledger after
+  ([docs/upgrading.md](docs/upgrading.md)).
 - **Numbering:** while the version is 0.x, a minor release may change flags
   or the API, and its changelog entry says how. A security fix may change
-  behaviour in a patch release too; its entry says how.
+  behaviour in a patch release too; its entry says how. What keeps its
+  name and meaning across releases (the report's fields, the metrics, the
+  CSV's columns), and how one of them is changed when it must be, is listed
+  in [docs/numbers.md](docs/numbers.md#what-stays-the-same).
 
 ## Conduct
 

@@ -51,13 +51,13 @@ func (l *Ledger) walkEpisodes(t *txn, lo, hi int64, o verdict.Options) error {
 		return err
 	}
 	type row struct {
-		id, series, rule, day     int64
-		start, end                time.Time
-		white, excused            bool
-		episode, was, whiteWas    int64
-		labels                    map[string]string
-		first                     int // the index of its episode's first firing
-		episodeWhite, walkedWhite bool
+		id, series, rule, day int64
+		start, end            time.Time
+		white, excused        bool
+		was, whiteWas         int64
+		labels                map[string]string
+		first                 int // the index of its episode's first firing
+		walkedWhite           bool
 	}
 	var fs []row
 	for rows.Next() {

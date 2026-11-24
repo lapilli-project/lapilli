@@ -780,12 +780,6 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 	}
 }
 
-func sameDate(a, b time.Time) bool {
-	y1, m1, d1 := a.Date()
-	y2, m2, d2 := b.Date()
-	return y1 == y2 && m1 == m2 && d1 == d2
-}
-
 // Flatten makes turns that overlap into turns that don't: at each time, the
 // turn that started last holds; when it ends, the one under it resumes.
 // Turns of one person that meet are one.

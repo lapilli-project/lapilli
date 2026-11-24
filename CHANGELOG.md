@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Releases are gathered: at most two minor releases a week, each with
+  what merged since the last; a fix for a vulnerability or for what a
+  release broke is still a patch as soon as it is ready (GOVERNANCE.md).
+  The README says where to read what stays the same across releases
+  (docs/numbers.md, docs/upgrading.md), ROADMAP.md what comes first, and
+  docs/design/README.md lists the design notes by area.
+- CI runs staticcheck (`staticcheck.conf`), and what it found is gone:
+  values assigned and never read, code nothing called, loops an `append`
+  does, and go-jose's deprecated `ParseSigned`. Nothing a user sees
+  changes.
+
 ## [0.70.1] - 2026-11-24
 
 Eight modules a patch or a minor release on, `go-jose` among them, which

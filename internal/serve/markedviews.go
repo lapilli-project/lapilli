@@ -69,15 +69,9 @@ func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*m
 	return x, nil
 }
 
-// unjudged are, of the firings of kind in week w of the rules mine says,
-// those that caught nothing and had no record by the signals tied to them
-// (tallies.judgedPart).
-func (x *markedSpan) unjudged(w int64, kind string, mine func(string) bool, t *tallies) int {
-	n, _ := x.unjudgedBoth(w, kind, mine, t)
-	return n
-}
-
-// unjudgedBoth is unjudged, and of the episodes whose first firing is
+// unjudgedBoth are, of the firings of kind in week w of the rules mine
+// says, those that caught nothing and had no record by the signals tied to
+// them (tallies.judgedPart); and of the episodes whose first firing is
 // marked with kind, those not judged likewise.
 func (x *markedSpan) unjudgedBoth(w int64, kind string, mine func(string) bool, t *tallies) (firings, episodes int) {
 	for _, m := range x.parts {

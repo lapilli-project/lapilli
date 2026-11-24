@@ -1326,7 +1326,6 @@ func TestWritesNothingWrittenAndRedacted(t *testing.T) {
 			Identity: "https://identity.eu-frankfurt-1.oci.oraclecloud.com"}, nil
 	}
 	t.Cleanup(func() { take, googleAs, ociConfigUser = was, wasG, wasO })
-	const rg = "/subscriptions/00000000-0000-0000-0000-00000000000a/resourceGroups/shop-rg"
 	var asked []string
 	// Grafana's a server of its own: its rules are read by a client with
 	// a transport of its own (source.Grafana), its list through egress.

@@ -1617,8 +1617,8 @@ func TestBacktestSyntaxError(t *testing.T) {
 // come after, and a key not kept is refused while none can go.
 func TestPerKeyFullFailsClosed(t *testing.T) {
 	p := perKey{rate: 1, burst: 2}
-	if !p.allow("victim", now) || !p.allow("victim", now) || p.allow("victim", now) {
-		t.Fatal("a bucket of two")
+	if first, second, third := p.allow("victim", now), p.allow("victim", now), p.allow("victim", now); !first || !second || third {
+		t.Fatalf("a bucket of two: %v, %v, %v", first, second, third)
 	}
 	for i := range perKeyMost - 1 {
 		if !p.allow(fmt.Sprintf("10.0.%d.%d", i/256, i%256), now) {

@@ -20,13 +20,13 @@ func Covers(a, b string) bool { return readSel(a).covers(readSel(b)) }
 // and @, spaces made one.
 func selectorParts(sel string) (matchers []string, mods string, ok bool) {
 	sel = strings.TrimSpace(sel)
-	body, rest := sel, ""
+	rest := ""
 	if i := strings.IndexByte(sel, '{'); i >= 0 {
 		end := closingBrace(sel, i)
 		if end < 0 {
 			return nil, "", false
 		}
-		body, rest = sel[:end+1], sel[end+1:]
+		rest = sel[end+1:]
 		name := strings.TrimSpace(sel[:i])
 		if name != "" {
 			matchers = append(matchers, `__name__="`+name+`"`)
@@ -47,6 +47,7 @@ func selectorParts(sel string) (matchers []string, mods string, ok bool) {
 			}
 		}
 	} else {
+		body := sel
 		if i := strings.IndexAny(sel, " \t\n\r"); i >= 0 {
 			body, rest = sel[:i], sel[i:]
 		}
