@@ -58,3 +58,56 @@ func TestNoDataStep(t *testing.T) {
 		t.Error("an ended context didn't stop it")
 	}
 }
+
+// TestNoDataVersions: with several versions of the rules, each is asked over
+// the span it was in effect, and a rule has NoData only when every span had
+// none; rules sharing a name all need to have none.
+func TestNoDataVersions(t *testing.T) {
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(4 * time.Hour)
+	at := func(h int) time.Time { return from.Add(time.Duration(h) * time.Hour) }
+	run := func(versions []replay.Version) map[string][]string {
+		t.Helper()
+		rep := &verdict.Report{From: from, To: to, Rules: []verdict.RuleResult{{Rule: "Slow"}, {Rule: "Late"}}}
+		if err := NoData(context.Background(), onlyQueue{}, versions, rep, from, to, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		by := map[string][]string{}
+		for _, rr := range rep.Rules {
+			by[rr.Rule] = rr.NoData
+		}
+		return by
+	}
+	typo := func(name, metric string) rules.Rule { return rules.Rule{Name: name, Expr: metric + " > 1"} }
+
+	// Fixed in the second version: it read nothing only until then.
+	by := run([]replay.Version{
+		{From: from, Rules: []rules.Rule{typo("Slow", "queue_dept")}},
+		{From: at(2), Rules: []rules.Rule{typo("Slow", "queue_depth")}},
+	})
+	if by["Slow"] != nil {
+		t.Errorf("a version that read data: %q", by["Slow"])
+	}
+	// Both versions read nothing: the last one's expression.
+	by = run([]replay.Version{
+		{From: from, Rules: []rules.Rule{typo("Slow", "old_metric")}},
+		{From: at(2), Rules: []rules.Rule{typo("Slow", "queue_dept"), typo("Late", "queue_dept")}},
+	})
+	if !slices.Equal(by["Slow"], []string{"queue_dept"}) {
+		t.Errorf("every span without data: %q", by["Slow"])
+	}
+	// Late is only in the second version.
+	if !slices.Equal(by["Late"], []string{"queue_dept"}) {
+		t.Errorf("a rule of the last version only: %q", by["Late"])
+	}
+	// Two rules of one name: one reads data, so not NoData; both none, one
+	// expression each, deduplicated.
+	by = run([]replay.Version{{From: from, Rules: []rules.Rule{typo("Slow", "queue_dept"), typo("Slow", "queue_depth")}}})
+	if by["Slow"] != nil {
+		t.Errorf("one of two rules read data: %q", by["Slow"])
+	}
+	by = run([]replay.Version{{From: from, Rules: []rules.Rule{typo("Slow", "queue_dept"), typo("Slow", "queue_dept"), typo("Slow", "gone_total")}}})
+	if !slices.Equal(by["Slow"], []string{"queue_dept", "gone_total"}) {
+		t.Errorf("two rules without data: %q", by["Slow"])
+	}
+}
