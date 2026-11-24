@@ -151,7 +151,8 @@ Where the firings come from (pick one; --firings may go beside any but --alerts)
   --firings-prefix STR
                       put STR before the name of each rule --firings records
                       (default none), to keep it apart from a replayed rule
-                      of the name
+                      of the name; only beside rules replayed, as --firings
+                      alone has no name to clash with
 
 Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):

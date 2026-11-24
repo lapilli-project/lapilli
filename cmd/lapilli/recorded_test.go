@@ -166,6 +166,10 @@ func TestRecordedFiringsRefused(t *testing.T) {
 	if code != 2 || !strings.Contains(errs, "--firings-prefix") {
 		t.Errorf("a prefix with no firings: exit %d\n%s", code, errs)
 	}
+	code, _, errs = runRecorded(t, h, "verdict", "--firings", args[4], "--firings-prefix", "x", "--incidents", args[6], "--prometheus", "http://p")
+	if code != 2 || !strings.Contains(errs, "--firings-prefix goes with rules replayed beside --firings: alone, the firings' names can't clash") {
+		t.Errorf("a prefix with firings alone: exit %d\n%s", code, errs)
+	}
 }
 
 // Recorded rules aren't counted among those replayed: a run whose replays

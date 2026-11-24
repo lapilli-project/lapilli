@@ -139,7 +139,8 @@ Where the firings come from (pick one; --firings may go beside any but --alerts)
   --firings-prefix STR
                       put STR before the name of each rule --firings records
                       (default none), to keep it apart from a replayed rule
-                      of the name
+                      of the name; only beside rules replayed, as --firings
+                      alone has no name to clash with
 
 Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
@@ -1251,6 +1252,8 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --firings, which records what a cloud's own alarms fired")
 	case f.firingsPrefix != "" && f.firings == "":
 		return nil, errors.New("--firings-prefix names the rules --firings records: it goes with --firings")
+	case f.firingsPrefix != "" && !f.replaysRules():
+		return nil, errors.New("--firings-prefix goes with rules replayed beside --firings: alone, the firings' names can't clash")
 	case len(f.alarms) > 0 && len(f.compare) > 0:
 		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --alarms")
 	case f.grafanaTk != "" && f.grafana == "" && f.checkGrafana == "":

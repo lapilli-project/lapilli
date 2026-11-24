@@ -209,7 +209,7 @@ replayed: a run in which every replay failed exits 1 though the recorded
 firings were judged, the report then judging only what was recorded. A rule's firings come from one place: a name both a rule replayed
 and the file have is refused, exit 2, listing up to five of them.
 `--firings-prefix STR` puts `STR` before every recorded name, to keep the
-two apart on purpose. `--firings` doesn't go with `--alerts` or `--compare`.
+two apart on purpose; alone, with `--firings` and no rules replayed, it is refused, exit 2. `--firings` doesn't go with `--alerts` or `--compare`.
 
 ## Rules kept in Terraform
 
