@@ -276,7 +276,8 @@ lapilli verdict: --ruler: the ruler: HTTP 401: TEXT
 same credentials; `invalid character '<'` is an HTML page where the API's
 JSON was wanted, as [above](#not-a-prometheus-api-response). A Mimir's or a
 Cortex's ruler takes the token in `--ruler-token-file`, and, with tenants
-and no gateway, `--ruler-tenant`; Amazon's and Azure's are read with
+and no gateway, `--ruler-tenant`, sent to `--prometheus` too: a history in
+another tenant takes its own, `--prometheus-tenant`; Amazon's and Azure's are read with
 `--auth` ([How it judges](how-it-judges.md)).
 
 ## Files

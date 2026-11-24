@@ -62,7 +62,7 @@ Those of `lapilli verdict` that reach a Prometheus and say the period,
 read by verdict's own code (`readFlags`, split from `parseFlags` for it)
 and checked as verdict checks them (`validHistory`): `--prometheus`,
 `--gcp-project`, `--auth`, `--aws-region`, `--bearer-token-file`,
-`--max-rate`, `--max-samples`, `--since`, `--from`, `--to`, `--step`,
+`--prometheus-tenant` (for the next release), `--max-rate`, `--max-samples`, `--since`, `--from`, `--to`, `--step`,
 `--tz`, `--timeout`, and `--json`. Any other flag is refused, so that
 `--rules` or `--impact-for` given by habit doesn't pass unread.
 
@@ -113,3 +113,5 @@ the history's client gives names its URL, as verdict's do.
 1. A Mimir or a Cortex with tenants and no gateway: verdict sends
    `--ruler-tenant` to `--prometheus` only with `--ruler`, so suggest
    doesn't take it. A tenant flag of the history's own would serve both.
+   Answered, for the next release: `--prometheus-tenant`, which suggest
+   takes, sent to `--prometheus` alone.

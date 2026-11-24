@@ -24,7 +24,10 @@ It needs:
   VictoriaMetrics), or a cloud's managed Prometheus with `prometheus.auth`
   set to `aws`, `azure` or `google` and read access given through the
   cluster's workload identity. On Oracle Cloud, give the Prometheus you run
-  on OKE, with no auth.
+  on OKE, with no auth. `prometheus.tenant` is the tenant of a Mimir or a
+  Cortex with tenants and no gateway (`--prometheus-tenant`, sent as
+  `X-Scope-OrgID` to `prometheus.url` alone); without it, `prometheus.url`
+  is sent `rules.ruler.tenant`.
 - the rules, from one of `rules.configMaps` (ConfigMaps in the release's
   namespace holding Prometheus rule files, PrometheusRule resources, Grafana
   provisioning files or a cloud's rule groups), `rules.loaded` (those the API

@@ -37,6 +37,10 @@ prometheus:
   tokenSecret:
     name: ""
     key: token
+  # The tenant of a Mimir or a Cortex with tenants and no gateway to set it,
+  # sent as X-Scope-OrgID to url alone (--prometheus-tenant): for a history
+  # whose tenant isn't the ruler's. Empty, url is sent rules.ruler.tenant.
+  tenant: ""
 # The same as prometheus.url for Google Cloud Managed Service for Prometheus
 # in this project, with auth google.
 gcpProject: ""
@@ -88,8 +92,9 @@ rules:
   #             .../resourceGroups/RG, with prometheus.auth azure and a role
   #             that reads Microsoft.AlertsManagement/prometheusRuleGroups
   # tenant is a Mimir's or a Cortex's with tenants and no gateway to set
-  # it, sent as X-Scope-OrgID to url and prometheus.url alike; tokenSecret a
-  # token that may read their rules (rules:read).
+  # it, sent as X-Scope-OrgID to url, and to prometheus.url unless
+  # prometheus.tenant gives the history's own; tokenSecret a token that may
+  # read their rules (rules:read).
   ruler:
     url: ""
     tenant: ""

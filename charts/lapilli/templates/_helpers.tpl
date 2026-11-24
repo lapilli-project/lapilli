@@ -160,6 +160,14 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- fail (printf "rules.ruler.tenant %q: want a tenant's ID, as Mimir and Cortex take one" (toString .)) }}
 {{- end }}
 {{- end }}
+{{- with $p.tenant }}
+{{- if or (gt (len (toString .)) 150) (regexMatch $tenantBad (toString .)) (has (toString .) (list "." "..")) }}
+{{- fail (printf "prometheus.tenant %q: want a tenant's ID, as Mimir and Cortex take one" (toString .)) }}
+{{- end }}
+{{- if not $p.url }}
+{{- fail "prometheus.tenant is the tenant of a Mimir or a Cortex at prometheus.url: it goes with prometheus.url" }}
+{{- end }}
+{{- end }}
 {{- if and (not $r.grafana.history) (not $r.grafana.url) }}
 {{- fail "rules.grafana.history judges the rules rules.grafana.url reads that can't be replayed: it goes with rules.grafana.url" }}
 {{- end }}
@@ -659,6 +667,9 @@ the rules and the incidents are, and how to judge. */}}
 {{- end }}
 {{- if $p.tokenSecret.name }}
 - {{ printf "--bearer-token-file=/var/run/lapilli/token/%s" $p.tokenSecret.key | quote }}
+{{- end }}
+{{- with $p.tenant }}
+- {{ printf "--prometheus-tenant=%s" . | quote }}
 {{- end }}
 {{- else if .Values.gcpProject }}
 - {{ printf "--gcp-project=%s" .Values.gcpProject | quote }}

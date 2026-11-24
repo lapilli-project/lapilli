@@ -36,7 +36,9 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
   through the API that writes them: a Mimir's or a Cortex's configuration
   API (`http://mimir:8080/prometheus/config/v1/rules`,
   `http://cortex:9009/api/v1/rules`), with a token in `--ruler-token-file`
-  and, for one with tenants and no gateway, `--ruler-tenant`; Amazon Managed
+  and, for one with tenants and no gateway, `--ruler-tenant`, which
+  `--prometheus` is sent too unless `--prometheus-tenant` gives the
+  history a tenant of its own; Amazon Managed
   Service for Prometheus's control plane
   (`https://aps.REGION.amazonaws.com/workspaces/ID`, with `--auth aws`); or
   Azure's Prometheus rule groups in a subscription or a resource group

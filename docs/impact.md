@@ -61,8 +61,8 @@ check both before giving one to lapilli verdict (lapilli.dev/docs/impact).
   found alone, a day a request.
 
 It takes `lapilli verdict`'s flags for the history (`--prometheus`,
-`--auth`, `--gcp-project`, `--bearer-token-file`, `--max-rate` and the
-others) and the period (`--since`, `--from`, `--to`, `--step`, `--tz`),
+`--auth`, `--gcp-project`, `--bearer-token-file`, `--prometheus-tenant`,
+`--max-rate` and the others) and the period (`--since`, `--from`, `--to`, `--step`, `--tz`),
 and `--json` for the same as JSON. It chooses none of them: they are in
 the table's order, whatever they found. It writes and sends nothing;
 check the labels and the threshold, then give the one you choose to

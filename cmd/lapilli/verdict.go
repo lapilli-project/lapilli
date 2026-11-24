@@ -100,7 +100,8 @@ Where the firings come from (pick one):
                       --alertmanager-config URL
   --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
                       gateway to set it, sent as X-Scope-OrgID to --ruler,
-                      --alertmanager-config and --prometheus alike
+                      --alertmanager-config and, without
+                      --prometheus-tenant, --prometheus
   --alarms SOURCE=URL also read a cloud's own alarms through its API, beside
                       any of the above or alone (repeatable): PromQL alarms
                       are replayed, the others listed. SOURCE names them, as
@@ -326,6 +327,11 @@ Where the history is (needed for --rules, --alerts and --impact):
                       --auth google
   --bearer-token-file FILE
                       send this token with each query
+  --prometheus-tenant ID
+                      the tenant of a Mimir or a Cortex with tenants and no
+                      gateway to set it, sent as X-Scope-OrgID to
+                      --prometheus alone, in place of --ruler-tenant: for a
+                      history whose tenant isn't the ruler's
   --loki URL          a Loki's API, which rules written in LogQL are replayed
                       against: --loki-rules, --loki-loaded-rules, and
                       Grafana's rules on Loki read from files. Grafana's
@@ -520,8 +526,10 @@ type verdictFlags struct {
 	grafana, grafanaTk string
 
 	// ruler is --ruler, rulerTk its token's file, and rulerTenant its
-	// tenant.
+	// tenant; promTenant is --prometheus-tenant, the history's own, which
+	// --prometheus is sent in place of rulerTenant (prometheus).
 	ruler, rulerTk, rulerTenant string
+	promTenant                  string
 	// alarms are each --alarms, its source and its URL.
 	alarms []alarmsFlag
 
@@ -847,7 +855,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 		case "--loki-token-file":
 			f.lokiTk = val
 		case "--loki-tenant":
-			if val == "" || len(val) > 150 || strings.ContainsAny(val, "|/\\\r\n") || val == "." || val == ".." {
+			if !tenantID(val) {
 				return nil, fmt.Errorf("--loki-tenant %q: want a tenant's ID, as Loki takes one", val)
 			}
 			f.lokiTenant = val
@@ -873,7 +881,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 		case "--ruler-token-file":
 			f.rulerTk = val
 		case "--ruler-tenant":
-			if val == "" || len(val) > 150 || strings.ContainsAny(val, "|/\\\r\n") || val == "." || val == ".." {
+			if !tenantID(val) {
 				return nil, fmt.Errorf("--ruler-tenant %q: want a tenant's ID, as Mimir and Cortex take one", val)
 			}
 			f.rulerTenant = val
@@ -905,6 +913,11 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.awsRegion = val
 		case "--bearer-token-file":
 			f.tokenFile = val
+		case "--prometheus-tenant":
+			if !tenantID(val) {
+				return nil, fmt.Errorf("--prometheus-tenant %q: want a tenant's ID, as Mimir and Cortex take one", val)
+			}
+			f.promTenant = val
 		case "--since":
 			f.since, err = dur(time.Minute)
 		case "--from", "--to":
@@ -1363,6 +1376,8 @@ func validHistory(f *verdictFlags) error {
 		return errors.New("--auth goes with --prometheus URL")
 	case f.awsRegion != "" && f.auth != "aws":
 		return errors.New("--aws-region goes with --auth aws")
+	case f.promTenant != "" && f.promURL == "":
+		return errors.New("--prometheus-tenant is the tenant of a Mimir or a Cortex at --prometheus: it goes with --prometheus URL")
 	}
 	return nil
 }
@@ -1395,8 +1410,24 @@ var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
 }
 
 func (f *verdictFlags) prometheus() source.Prometheus {
-	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile, Tenant: f.rulerTenant,
+	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile, Tenant: f.historyTenant(),
 		MaxRate: f.maxRate, MaxSamples: f.maxSamples}
+}
+
+// tenantID reports whether s is a tenant's ID as Mimir, Cortex and Loki
+// take one (--ruler-tenant, --prometheus-tenant, --loki-tenant): 150 bytes
+// at most, no |, /, \, line break, nor . or .. alone.
+func tenantID(s string) bool {
+	return s != "" && len(s) <= 150 && !strings.ContainsAny(s, "|/\\\r\n") && s != "." && s != ".."
+}
+
+// historyTenant is the tenant --prometheus is asked in: --prometheus-tenant,
+// or, without it, --ruler-tenant, as before it.
+func (f *verdictFlags) historyTenant() string {
+	if f.promTenant != "" {
+		return f.promTenant
+	}
+	return f.rulerTenant
 }
 
 var now = time.Now
@@ -2040,7 +2071,7 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 	}
 	var hide []hid
 	given := [][2]string{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
-		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}}
+		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--prometheus-tenant", f.promTenant}, {"--loki-tenant", f.lokiTenant}}
 	for _, w := range append(given, more...) {
 		flag, val := w[0], w[1]
 		if val == "" {
