@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- lapilli.dev's docs pages list their own sections beside them, with a
+  search over every page's title, description and sections, the pages
+  before and after at the end, and a button for the dark theme. Nine long
+  pages have the headings to go with it.
+- The docs in Korean, at lapilli.dev/ko/docs: Getting started, Words and
+  Questions so far, from `docs/ko/`; a page not yet translated is listed
+  with its Korean title and opens in English, and a translation older
+  than its English page says so.
+- `docs/data.md`: what each command reads, what `lapilli serve` keeps and
+  for how long, who can reach it, what it sends where, and what it can
+  change, on one page.
+
 ### Changed
 
 - Releases are gathered: at most two minor releases a week, each with
