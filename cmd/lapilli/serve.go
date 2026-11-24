@@ -1515,6 +1515,8 @@ type serveWith struct {
 	history   history
 	clock     func() time.Time
 	listening func(net.Addr)
+	// seed, when given, is serve's Config.Seed.
+	seed func(ctx context.Context, s *serve.Server) bool
 }
 
 // serveOn is lapilli serve; with demo, as lapilli demo --serve runs it.
@@ -1533,7 +1535,7 @@ func serveOn(args []string, demo *serveWith, stdout, stderr io.Writer) int {
 	cfg, f := st.cfg, st.f
 	var level slog.Level
 	if demo != nil {
-		cfg.Clock, cfg.Listening, level = demo.clock, demo.listening, slog.LevelWarn
+		cfg.Clock, cfg.Listening, cfg.Seed, level = demo.clock, demo.listening, demo.seed, slog.LevelWarn
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
 	if f.checkGrafana != "" && f.grafanaTk != "" && plainHTTP(f.checkGrafana) {

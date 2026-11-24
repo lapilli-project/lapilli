@@ -393,6 +393,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("the weekly digest", err)
 		}
 	}
+	if s.cfg.Seed != nil && !s.seeded.Load() && !waiting && s.still(ctx) {
+		s.seeded.Store(s.cfg.Seed(ctx, s))
+	}
 	// After a digest worked out afresh, the next round: the digest holds the
 	// runs up for --timeout and firedOnWithin at most, and the two together
 	// not for twice --timeout.

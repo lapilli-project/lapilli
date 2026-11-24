@@ -299,6 +299,7 @@ func TestDemoServe(t *testing.T) {
 	if code, body := d.do(http.MethodPost, "settings", cross, strings.NewReader("lead=30m")); code != http.StatusForbidden || !strings.Contains(body, "cross-origin") {
 		t.Errorf("a post from another site: %d %s", code, body)
 	}
+	d.teamsAndProposal(en)
 	d.end(syscall.SIGINT)
 
 	// Ended by SIGTERM as by SIGINT; in another zone, its week laid there.
@@ -311,6 +312,51 @@ func TestDemoServe(t *testing.T) {
 		t.Errorf("in Asia/Seoul:\n%s", pageText(body))
 	}
 	d.end(syscall.SIGTERM)
+}
+
+// teamsAndProposal checks what the demo seeds: its three teams, each with
+// the rules it owns and the numbers of its own; and the one proposal waiting
+// for approval, backtested, which no request can approve. serve keeps the
+// proposal in a round after the digest, so it is waited for.
+func (d *demoRun) teamsAndProposal(en http.Header) {
+	t := d.t
+	t.Helper()
+	page := func(path string) string {
+		t.Helper()
+		code, body := d.get(path, en)
+		if code != http.StatusOK {
+			t.Fatalf("/%s: %d %.300s", path, code, pageText(body))
+		}
+		return pageText(body)
+	}
+	says := func(path string, want ...string) {
+		t.Helper()
+		text := page(path)
+		for _, w := range want {
+			if !strings.Contains(text, w) {
+				t.Errorf("/%s doesn't say %q:\n%s", path, w, text)
+			}
+		}
+	}
+	says("teams", "checkout The shop's checkout and its payments. ^(Checkout|Payments) service=checkout service=payments the server's 3",
+		"platform The queues, nodes and certificates under the rest. ^(Orders|Node|Certificate) service=orders the server's 3",
+		"search Search and its timeouts. ^Search service=search the server's 1")
+	// A team's overview is of its rules alone: checkout's one incident,
+	// and not the other two.
+	says("?team=checkout", "Team checkout", "Incidents missed 0 of 1", "Quiet CheckoutLatencyP99 \"for\" 1m → 5m")
+	says("?team=platform", "Incidents missed 1 of 1")
+	for !strings.Contains(page("proposals"), "1 of 1 proposal") {
+		d.wait()
+	}
+	says("proposals", "CheckoutLatencyP99 a new for a pull request ◷ awaiting approval 0 of 1 approvals", "lapilli demo", "a new for 1")
+	says("proposals/1", "CheckoutLatencyP99's for, 1m → 5m", "awaiting approval", "made by lapilli demo", "team checkout",
+		"Backtest Replayed from 2026-11-09 to 2026-11-16, as the rule is now and as proposed.", "Fired 14 2 −12", "Approval 0 of 1 approval")
+	// Approving is refused, as every write is.
+	h := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}, "Sec-Fetch-Site": {"same-origin"}}
+	if code, body := d.do(http.MethodPost, "proposals/1/approve", h, strings.NewReader("x=1")); code != http.StatusForbidden {
+		t.Errorf("approving the proposal: %d %s", code, body)
+	}
+	says("proposals/1", "awaiting approval")
 }
 
 // TestDemoServeListen: lapilli demo --serve listens on loopback alone: an
