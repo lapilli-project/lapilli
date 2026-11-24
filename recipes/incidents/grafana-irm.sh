@@ -70,14 +70,21 @@ if [ -z "$proto" ]; then
 fi
 url="${GRAFANA_URL%/}/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidentPreviews"
 # epoch: an RFC 3339 time, or Grafana's own "2026-10-31 03:10:20.574137"
-# (UTC), as seconds since 1970; null for anything else, Go's zero time
-# among them.
+# (UTC), as seconds since 1970; null for anything else, Go's zero time and
+# a date that isn't one (2026-13-45) among them.
+# shellcheck disable=SC2016 # $m and $b are jq's
 epoch='def epoch: if type == "string" and (startswith("0001-") | not) then
-  (capture("\\A(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2})[T ](?<t>[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})?\\z")
-    | ((.d + "T" + .t + "Z") | fromdateiso8601) + (("0" + (.f // "")) | tonumber)
-      - (if .z == null or .z == "Z" then 0
-         else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end))
+  (capture("\\A(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2})[T ](?<t>[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})?\\z") as $m
+    | (($m.d + "T" + $m.t + "Z") | try fromdateiso8601 catch null) as $b
+    | if $b == null then null
+      else $b + (("0" + ($m.f // "")) | tonumber)
+        - (if $m.z == null or $m.z == "Z" then 0
+           else (if $m.z[0:1] == "-" then -1 else 1 end) * (($m.z[1:3] | tonumber) * 3600 + ($m.z[4:6] | tonumber) * 60) end) end)
   // null else null end;'
+if [ -n "$since" ] && ! printf '%s' "$since" | jq -e -R "$epoch"' epoch != null' >/dev/null; then
+  printf 'grafana-irm.sh: SINCE is a date such as 2026-10-01, or an RFC 3339 time\n' >&2
+  exit 1
+fi
 # secret NAME FILE: what FILE holds, one line of the characters a token
 # is written in (a Bearer token's, RFC 6750), as it goes in a header.
 # Neither the token nor what else the file holds is said.

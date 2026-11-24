@@ -1414,6 +1414,13 @@ func TestGrafanaIRMRecipe(t *testing.T) {
 	if got := runRecipe(t, "grafana-irm.sh", append(env, "SINCE=2026-10-28T12:05:00.2+09:00")...); len(got) != 2 || got[0].ID != "IRM-43" {
 		t.Errorf("SINCE in another zone: %+v", got)
 	}
+	// A SINCE that reads as a date but isn't one is refused, not taken as
+	// none.
+	cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd.Env = append(append(os.Environ(), env...), "SINCE=2026-13-45")
+	if out, err := cmd.Output(); err == nil || len(out) != 0 {
+		t.Errorf("SINCE 2026-13-45: %v, wrote %q", err, out)
+	}
 	// Without SINCE, every page.
 	pages("DESC")
 	got = runRecipe(t, "grafana-irm.sh", env...)
@@ -1422,7 +1429,7 @@ func TestGrafanaIRMRecipe(t *testing.T) {
 	}
 	// Not newest first, with SINCE: an incident after it might be left
 	// out, so nothing is written.
-	cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd = exec.Command("sh", recipes+"grafana-irm.sh")
 	cmd.Env = append(append(os.Environ(), env...), "SINCE=2026-10-01")
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
