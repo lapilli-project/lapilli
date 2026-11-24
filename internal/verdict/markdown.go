@@ -86,7 +86,11 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	if len(p.broken) > 0 {
 		// Said here, as its count, and below once, with why: a long table
 		// shouldn't hide that the numbers leave rules out.
-		text(fmt.Sprintf("**%d of the rules that differ couldn't be replayed**, and are left out of what follows: the list below says why.\n\n", len(p.broken)))
+		left := "are"
+		if len(p.broken) == 1 {
+			left = "is"
+		}
+		text(fmt.Sprintf("**%d of the rules that differ couldn't be replayed**, and %s left out of what follows: the list below says why.\n\n", len(p.broken), left))
 	}
 
 	// The totals, before and after.
