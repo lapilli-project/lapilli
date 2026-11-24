@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -1362,9 +1363,16 @@ func show(o verdict.Options, key string) string {
 		if p == 0 {
 			p = verdict.NoisyPrecision
 		}
-		return strconv.FormatFloat(100*p, 'f', -1, 64) + "%"
+		return percentOf(p)
 	}
 	return ""
+}
+
+// percentOf is a share as a percentage of at most two decimals, trailing
+// zeros dropped: 0.29 is 29%, 0.125 is 12.5%, where 100*0.29 is
+// 28.999999999999996.
+func percentOf(p float64) string {
+	return strconv.FormatFloat(math.Round(100*p*100)/100, 'f', -1, 64) + "%"
 }
 
 // MaxBackfill is the longest --backfill: ten years. A first start replays

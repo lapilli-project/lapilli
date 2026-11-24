@@ -24,8 +24,10 @@ type ruleRow struct {
 	ruleLine
 	// Perf is how it did over the weeks shown: noisy, unrecorded (none of
 	// its firings judged, or as many unjudged as a noisy rule fires: no
-	// record to judge them by), ok (judged, and not noisy), silent (no
-	// firing) or spare (another rule caught what it caught, as soon).
+	// record to judge them by), nothing (some judged and none caught
+	// anything, too few of them to be noisy), ok (judged, and not noisy),
+	// silent (no firing) or spare (another rule caught what it caught, as
+	// soon).
 	Perf string
 	// Trust are what its stones can't be taken for granted for: differs
 	// (replayed otherwise than it really fired), unreplayed, recorded
@@ -184,6 +186,7 @@ type legendItem struct {
 // badge (Undecided). Its status colour is statusKinds', by the same key.
 var badgeMeans = map[string][3]string{
 	"perf/noisy":       {"perf-noisy", "●", "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running."},
+	"perf/nothing":     {"perf-nothing", "⚠\uFE0E", "Fired a few times, under the noisy bar, and none of the firings judged caught an incident: not noisy yet, and not OK."},
 	"perf/unrecorded":  {"perf-unrecorded", "?", "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known."},
 	"perf/ok":          {"perf-ok", "○", "Fired over the weeks shown, and isn't noisy."},
 	"perf/silent":      {"perf-silent", "–", "No firing in the weeks shown."},
@@ -288,7 +291,7 @@ var facetsOf = []struct {
 	values      []string
 	labels      []string
 }{
-	{"perf", "Performance", perfValues, []string{"Noisy", "Noisy by episodes", "No record", "OK", "Silent", "Spare"}},
+	{"perf", "Performance", perfValues, []string{"Noisy", "Noisy by episodes", "Caught nothing", "No record", "OK", "Silent", "Spare"}},
 	{"severity", "Severity", nil, nil},
 	{"trust", "Trust", trustValues, []string{"Differs", "Not replayed", "Recorded only"}},
 	{"status", "Disposition", statusValues, []string{"keep", "tune", "retire", "Undecided"}},
@@ -924,6 +927,10 @@ func rowOf(l ruleLine, facts int) ruleRow {
 	// noisy rule, is what the overview's panel lists.
 	case l.Unrecorded || l.NoRecord:
 		r.Perf = "unrecorded"
+	// Judged, and none of it caught anything: too few firings to be
+	// noisy, but not OK either.
+	case l.Firings-l.Unjudged > 0 && l.White == 0:
+		r.Perf = "nothing"
 	case l.Spare:
 		r.Perf = "spare"
 	default:

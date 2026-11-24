@@ -39,7 +39,10 @@ spec:
     {{- end }}
     {{- $t := .Values.serve.trackers }}
     {{- $job := and $t.tokenSecret.name $t.tracker }}
-    {{- if and (include "lapilli.incidentsPort" .) (or .Values.serve.incidentsAPI.from $job) }}
+    {{- /* The chart's incidents copy and pull request jobs are let in too. */}}
+    {{- $copy := and .Values.serve.incidentsAPI.copy.enabled .Values.serve.incidentsAPI.tokenSecret.name }}
+    {{- $prs := and .Values.serve.changes.pullRequests.enabled .Values.serve.changes.enabled .Values.serve.changes.tokenSecret.name }}
+    {{- if and (include "lapilli.incidentsPort" .) (or .Values.serve.incidentsAPI.from $job $copy $prs) }}
     - from:
         {{- with .Values.serve.incidentsAPI.from }}
         {{- toYaml . | nindent 8 }}
@@ -51,6 +54,22 @@ spec:
               app.kubernetes.io/name: {{ .Chart.Name }}
               app.kubernetes.io/instance: {{ .Release.Name }}
               app.kubernetes.io/component: trackers
+        {{- end }}
+        {{- if $copy }}
+        # The chart's own jobs copying incidents in (serve.incidentsAPI.copy).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Chart.Name }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: incidents-copy
+        {{- end }}
+        {{- if $prs }}
+        # The chart's own job opening pull requests (serve.changes.pullRequests).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Chart.Name }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: changes-pr
         {{- end }}
       ports:
         - port: incidents

@@ -377,6 +377,9 @@ Judging:
                       incident can list several values. A firing of an
                       alert the incident's tool linked to it (alerts: in
                       the incidents file) catches it whatever they say
+  --match-strict      a firing that lacks a --match label the incident has
+                      doesn't catch it; by default it does, and the report
+                      says how many catches were by such rules
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone, not by any other firing
                       at the time; one that lists none is caught as ever
@@ -734,7 +737,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 		"--alerts": &f.alerts, "--json": &f.json, "--csv": &f.csv, "--markdown": &f.markdown, "--metrics": &f.metrics,
 		"--changed-only": &f.changedOnly, "--fail-expectations": &f.failExpect, "--expect-required": &f.expectRequired,
 		"--fail-missed": &f.failMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
-		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly,
+		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly, "--match-strict": &f.opts.MatchStrict,
 	}
 	// redactOff is --redact=false, which --redact-key can't go with.
 	redactOff := false

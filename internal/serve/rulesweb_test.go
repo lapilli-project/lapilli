@@ -135,7 +135,7 @@ func TestFacetCounts(t *testing.T) {
 	for _, o := range all.Facets[0].Options {
 		perf[o.Value] = o.Count
 	}
-	if want := map[string]int{"noisy": 6, "noisy-episodes": 0, "unrecorded": 0, "ok": 11, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
+	if want := map[string]int{"noisy": 6, "noisy-episodes": 0, "nothing": 11, "unrecorded": 0, "ok": 0, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
 		t.Errorf("performance: %v, want %v", perf, want)
 	}
 	if all.Shown != 17 || len(all.Quiet) != 8 || !all.QuietOlder {

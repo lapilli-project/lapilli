@@ -38,6 +38,27 @@
   one that asks whether the rules that never fired read anything. The
   chart's CronJob takes `failUnreplayed`, `failNothingReplayed` and
   `checkNoData`.
+- The chart runs the recipes for `lapilli serve`, each off until turned
+  on: `serve.incidentsAPI.copy` copies incidents from a tool (PagerDuty,
+  incident.io, Jira and the rest of recipes/incidents) on a schedule, and
+  `serve.changes.pullRequests` opens the pull requests for the changes
+  people approved (recipes/changes). The recipes ship in the chart; the
+  jobs take an image of yours with sh, curl and jq (and git), each
+  Secret's one key they read, and `/tmp` held to `tmpSizeLimit`.
+- `--match-strict` (verdict, serve, the chart's `matchStrict`): a firing
+  that lacks a `--match` label the incident has doesn't catch it. Without
+  it, as before, such a catch counts, and is now said: `(no service)` in
+  the incidents table, a line naming the rules, `lacked` in `--json`, and
+  the same mark in serve's pages.
+- serve badges a rule whose judged firings caught nothing `Caught
+  nothing`, not OK, and says the noisy bar beside a rule's badge; the
+  chart takes `noisyFirings` and `noisyPrecision`.
+- `lapilli demo --write DIR` writes the sample's rules and incidents, and
+  a README with the command to run them against your own Prometheus.
+- `.github/workflows/sizing.yml`, run by hand, measures the ledger and
+  serve's memory on SQLite and Postgres (docs/serve.md, Sizing).
+- docs/design/rendered-changes.md proposes writing an approved change to
+  a rule rendered from a chart into the values file it comes from.
 
 ### Changed
 
@@ -51,7 +72,7 @@
   of another commit and, of a GitHub workflow, of an earlier run of it (by
   the token's `run_number`), so that two jobs of one run, a run that asks
   late, or an earlier run run again take no newer one's place. **Ledger
-  schema 032** (`backtests.queue_branch`, `workflow`, `run_number`), one
+  schema 033** (`backtests.queue_branch`, `workflow`, `run_number`), one
   start, no backfill: keep a copy of the ledger first.
 - **The command's tests in a third of the time**: `cmd/lapilli`'s tests
   that keep to their own files and stand-ins run in parallel, as serve's
@@ -67,6 +88,10 @@
   series): the report judges nothing. `--fail-nothing-replayed=false`
   exits 0 as before; a run that replayed some rules, and `--compare`, are
   as they were.
+- Schema 032: a catch keeps the labels its firings lacked. serve's first
+  start after the upgrade judges every firing again once, as a
+  `--linked-only` change does. A release before it can't open the ledger
+  after: keep a copy first (docs/upgrading.md).
 
 ### Fixed
 
@@ -82,6 +107,9 @@
   overview's first view, before anything was written again.
 - One rule left out of a report is said to be ("is left out"), in the
   text and in a pull request's comment.
+- `lapilli preflight` counted none of the Loki requests of a Grafana rule
+  that reduces a LogQL query (its estimate was 0 where the replay asked
+  about 2,000 over 28 days); it counts them as the replay asks them.
 
 ## [0.71.0] - 2026-11-24
 

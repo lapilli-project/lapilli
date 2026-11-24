@@ -61,22 +61,43 @@ func (s *Server) work(ctx context.Context) {
 // count how often.
 var judgeAll = (*ledger.Ledger).JudgeAll
 
-// linkedMeta is the key in meta of the --linked-only the ledger's stones
-// were last all given by: linkedText's.
+// linkedMeta is the key in meta of the --linked-only and --match-strict
+// the ledger's stones were last all given by: linkedText's.
 const linkedMeta = "linked-only"
 
-// linkedText is --linked-only as meta keeps it: "1", or "" as a ledger
-// before it was judged.
-func linkedText(on bool) string {
-	if on {
-		return "1"
+// judgedBy is the version of what the ledger's stones are judged by, ahead
+// of the flags in linkedText: a release that changes what a stone says
+// (schema 032's loose catches) raises it, and a ledger last judged under
+// the one before judges every firing again once at its first start, as a
+// change of a flag does.
+const judgedBy = "j2"
+
+// linkedText is judgedBy, then --linked-only as "1" and --match-strict as
+// "m", in that order, as meta keeps them: a ledger before they were judged
+// has "", and one judged before judgedBy has the flags alone.
+func linkedText(o verdict.Options) string {
+	v := judgedBy
+	if o.LinkedOnly {
+		v += "1"
 	}
-	return ""
+	if o.MatchStrict {
+		v += "m"
+	}
+	return v
 }
 
-// linkedSaid is linkedText's as the log says it.
+// linkedSaid is linkedText's --linked-only as the log says it.
 func linkedSaid(v string) string {
-	if v == "1" {
+	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "1"))
+}
+
+// strictSaid is linkedText's --match-strict as the log says it.
+func strictSaid(v string) string {
+	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "m"))
+}
+
+func onOff(on bool) string {
+	if on {
 		return "on"
 	}
 	return "off"
@@ -84,7 +105,7 @@ func linkedSaid(v string) string {
 
 // linkedAgain reads what the ledger's stones were last all given by
 // (linkedMeta), and says whether this replica, leading, judges every
-// firing again with its own --linked-only: when the ledger's is the other
+// firing again with its own --linked-only and --match-strict: when the ledger's is the other
 // value and still the one this replica knew, as it found it at start or
 // as it last agreed with its flag. One another replica wrote since is a
 // change newer than this replica's flag, as in a rolling update: leading,
@@ -107,16 +128,16 @@ func (s *Server) linkedAgain(ctx context.Context, own string) (was string, again
 // this replica's --linked-only isn't what the ledger was last judged by:
 // both values, and whether it judges every firing again (linkedAgain).
 func (s *Server) logLinked(ctx context.Context) {
-	own := linkedText(s.cfg.Options.LinkedOnly)
+	own := linkedText(s.cfg.Options)
 	was, again, err := s.linkedAgain(ctx, own)
 	switch {
 	case err != nil || was == own:
 	case again:
-		s.log.Info("--linked-only isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
-			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
+		s.log.Info("--linked-only or --match-strict isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was), "match_strict", strictSaid(own), "ledger_match_strict", strictSaid(was))
 	default:
-		s.log.Warn("--linked-only isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same, and start this one again once they have it, which judges every firing again if the ledger's is still the other",
-			"linked_only", linkedSaid(own), "ledger", linkedSaid(was))
+		s.log.Warn("--linked-only or --match-strict isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same, and start this one again once they have it, which judges every firing again if the ledger's is still the other",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was), "match_strict", strictSaid(own), "ledger_match_strict", strictSaid(was))
 	}
 }
 
@@ -153,7 +174,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// with it, and the ledger told so once that is done
 	// (docs/design/links.md); not to undo another replica's newer change
 	// (linkedAgain).
-	linked := linkedText(o.LinkedOnly)
+	linked := linkedText(o)
 	relinked := false
 	if _, again, err := s.linkedAgain(ctx, linked); err != nil {
 		s.fail("settings", err)

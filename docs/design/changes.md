@@ -148,6 +148,8 @@ be edited so. A document no file in the clone matches (rules rendered from
 a Helm chart, Kustomize, Jsonnet, Terraform) gets no edit: the recipe opens
 a pull request, or an issue, with the diff of the rendered rule and the
 evidence, for a person to make the change where it is written.
+[rendered-changes.md](rendered-changes.md) proposes tracing a rendered
+rule's field to the values file it comes from, and writing it there.
 
 ### Through the API, for rules kept nowhere else
 
