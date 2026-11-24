@@ -21,14 +21,22 @@
 #
 # Needs Docker, Go, curl and jq. Takes 13 to 19 minutes (MINUTES=4 for
 # fewer: a multiple of four). Leaves everything up when KEEP is set.
+# PROMETHEUS_IMAGE, THANOS_IMAGE, VICTORIAMETRICS_IMAGE and VMALERT_IMAGE run
+# other images than the pinned ones.
 # shellcheck disable=SC2016,SC2329 # PromQL and jq, not the shell's; cleanup and has run through trap and until_true
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-prom=prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
-thanos=quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7
-vm=victoriametrics/victoria-metrics:v1.156.0@sha256:da8a90ac0912f16589be2b96a6441a2fca4bca415c83783d972d92e3b5b66970
-vmalert=victoriametrics/vmalert:v1.156.0@sha256:4fea7d1a888d4db4ff18804434ef0f3ca8eb6482e289c50d32001c2db218287c
+prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
+thanos=${THANOS_IMAGE:-quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7}
+vm=${VICTORIAMETRICS_IMAGE:-victoriametrics/victoria-metrics:v1.156.0@sha256:da8a90ac0912f16589be2b96a6441a2fca4bca415c83783d972d92e3b5b66970}
+vmalert=${VMALERT_IMAGE:-victoriametrics/vmalert:v1.156.0@sha256:4fea7d1a888d4db4ff18804434ef0f3ca8eb6482e289c50d32001c2db218287c}
+# Which images this run was given (an override is pulled, and its digest said).
+for o in PROMETHEUS_IMAGE THANOS_IMAGE VICTORIAMETRICS_IMAGE VMALERT_IMAGE; do
+  [ -n "${!o:-}" ] || continue
+  docker pull -q "${!o}" >/dev/null 2>&1 || true
+  echo "$o=${!o} ($(docker image inspect --format '{{index .RepoDigests 0}}' "${!o}" 2>/dev/null || true))"
+done
 p=lapilli-e2e-compat-$$
 minutes=${MINUTES:-8}
 if [ $((minutes % 4)) != 0 ] || [ "$minutes" -lt 4 ]; then

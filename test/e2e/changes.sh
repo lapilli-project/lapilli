@@ -22,6 +22,7 @@
 # only.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
+# PROMETHEUS_IMAGE and GRAFANA_IMAGE run other images than the pinned ones.
 #
 # GitLab is too heavy to start each run (ten minutes, 4 GB). Checked by
 # hand against GitLab CE 19.5.4 on 2026-11-11: recipes/changes/gitlab.sh
@@ -35,10 +36,16 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 repo=$PWD
 
-prom=prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
-grafana=grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
+grafana=${GRAFANA_IMAGE:-grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf}
 gitea=gitea/gitea:28.3.0-rootless@sha256:40c5a68a0463c0940e1ae32626c8300dd0572f3558e390073ad8379ca67c0e1d
 mimir=grafana/mimir:3.2.4@sha256:e4ff85d922c7c0a5131576d2659a1b98b3abfd73c92448dccf8ad3a6049a7ed8
+# Which images this run was given (an override is pulled, and its digest said).
+for o in PROMETHEUS_IMAGE GRAFANA_IMAGE; do
+  [ -n "${!o:-}" ] || continue
+  docker pull -q "${!o}" >/dev/null 2>&1 || true
+  echo "$o=${!o} ($(docker image inspect --format '{{index .RepoDigests 0}}' "${!o}" 2>/dev/null || true))"
+done
 p=lapilli-e2e-chg
 port=${PORT:-28180} # serve takes port to port+5
 

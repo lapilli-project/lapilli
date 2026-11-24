@@ -23,13 +23,21 @@
 #
 # Needs Docker, Go, curl and jq. Takes 17 to 24 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
+# PROMETHEUS_IMAGE, GRAFANA_IMAGE and LOKI_IMAGE run other images than the
+# pinned ones.
 # shellcheck disable=SC2016,SC2329 # LogQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-prom=prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
-grafana=grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
-loki=grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
+grafana=${GRAFANA_IMAGE:-grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf}
+loki=${LOKI_IMAGE:-grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28}
+# Which images this run was given (an override is pulled, and its digest said).
+for o in PROMETHEUS_IMAGE GRAFANA_IMAGE LOKI_IMAGE; do
+  [ -n "${!o:-}" ] || continue
+  docker pull -q "${!o}" >/dev/null 2>&1 || true
+  echo "$o=${!o} ($(docker image inspect --format '{{index .RepoDigests 0}}' "${!o}" 2>/dev/null || true))"
+done
 p=lapilli-e2e-loki
 minutes=${MINUTES:-10}
 port=${PORT:-28190} # serve takes port

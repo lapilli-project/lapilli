@@ -14,12 +14,18 @@
 #
 # Needs Docker, Go and jq. Takes 6 to 8 minutes, and 4 more with OLD.
 # Leaves everything up when KEEP is set.
+# PROMETHEUS_IMAGE runs another Prometheus than the pinned one.
 # shellcheck disable=SC2016,SC2329 # nginx's variables, not the shell's; cleanup runs on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-prom=prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
 nginx=nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
+# Which images this run was given (an override is pulled, and its digest said).
+if [ -n "${PROMETHEUS_IMAGE:-}" ]; then
+  docker pull -q "$PROMETHEUS_IMAGE" >/dev/null 2>&1 || true
+  echo "PROMETHEUS_IMAGE=$PROMETHEUS_IMAGE ($(docker image inspect --format '{{index .RepoDigests 0}}' "$PROMETHEUS_IMAGE" 2>/dev/null || true))"
+fi
 p=lapilli-e2e-ratelimit
 rate=${RATE:-2}
 burst=${BURST:-4}

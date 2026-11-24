@@ -98,9 +98,9 @@ firing fails on any machine.
   three reviews of 0.20.0's new ports, all of what they did, missed that
   one read a body before its token (GHSA-ggwv-m6g7-jchx).
 - **CI runs:**
-  - the tests on Linux, macOS and the latest Go, and govulncheck: the
-    checks a pull request must pass to merge
-  - staticcheck, with the checks `staticcheck.conf` names
+  - the tests on Linux, macOS and the latest Go, govulncheck, and
+    staticcheck (with the checks `staticcheck.conf` names): the checks a
+    pull request must pass to merge
   - the tests on Postgres 15 and 18, in two shards each
   - the chart end to end on kind, and served at a URL there
   - the whole service on kind: a scenario of user impact, a re-fire and a
@@ -114,6 +114,10 @@ firing fails on any machine.
     (`pages.yml`)
   - every day, govulncheck on the latest release (`latest-release.yml`);
     weekly, OpenSSF Scorecard
+  - weekly, the end-to-end jobs that use real servers in Docker, against
+    each server's latest image instead of the pinned one (`upstream.yml`).
+    By hand, one script against another image:
+    `GRAFANA_IMAGE=grafana/grafana:latest test/e2e/loki.sh`
 
   On a pull request, an end-to-end job runs only when the changes reach
   it: lapilli itself, which each one builds (`go.mod`, `go.sum`, `cmd/`
@@ -124,7 +128,7 @@ firing fails on any machine.
   `internal/source`), and `go.mod` and `go.sum`. A change to the
   docs alone runs none of them. A new push to a pull request cancels the
   run in progress. On each push to main every job runs, and weekly the
-  fuzzing too. The four checks above must pass to merge; everything that
+  fuzzing too. The five checks above must pass to merge; everything that
   runs must pass on main before a release.
 - **Dependencies.** A new one needs a reason. Versions are at least two weeks
   old, except for security fixes.

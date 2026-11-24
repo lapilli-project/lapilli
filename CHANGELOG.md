@@ -36,6 +36,15 @@
 
 ### Changed
 
+- The real-server end-to-end scripts take `PROMETHEUS_IMAGE`,
+  `GRAFANA_IMAGE`, `LOKI_IMAGE`, `THANOS_IMAGE`, `VICTORIAMETRICS_IMAGE`
+  and `VMALERT_IMAGE`, and `upstream.yml` runs them weekly against each
+  one's latest release; the pinned images are still what a pull request
+  runs.
+- serve's sign-in takes a token in the compact serialization only (what
+  every identity provider issues); a JWS in the JSON serialization, or
+  with spaces inside it, which go-jose's old parser let through to the
+  signature check, is refused before it.
 - Releases are gathered: at most two minor releases a week, each with
   what merged since the last; a fix for a vulnerability or for what a
   release broke is still a patch as soon as it is ready (GOVERNANCE.md).

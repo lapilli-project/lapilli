@@ -30,7 +30,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	jose "github.com/go-jose/go-jose/v4"
 
@@ -127,10 +126,15 @@ func (k *Keys) Algs() []string {
 	return out
 }
 
-// VerifySignature checks a JWS against the keys and gives its payload. It
-// is go-oidc's KeySet.
+// VerifySignature checks a compact JWS against the keys and gives its
+// payload. It is go-oidc's KeySet.
 func (k *Keys) VerifySignature(ctx context.Context, raw string) ([]byte, error) {
-	jws, err := parseSigned(raw, k.algs)
+	// Go's base64 decoder skips a carriage return and a newline, so the
+	// parser would take one inside a part.
+	jws, err := jose.ParseSignedCompact(raw, k.algs)
+	if err == nil && strings.ContainsAny(raw, "\r\n") {
+		err = errors.New("a line break in it")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("not a token signed with %v: %v", k.algs, err)
 	}
@@ -160,24 +164,6 @@ func (k *Keys) VerifySignature(ctx context.Context, raw string) ([]byte, error) 
 		return nil, fmt.Errorf("the identity provider signed with an RSA key under %d bits, which isn't taken", MinRSABits)
 	}
 	return nil, errors.New("no key of the identity provider's verifies the signature")
-}
-
-// parseSigned reads a JWS as go-oidc reads it before asking for its
-// signature to be checked (go-jose's ParseSigned): in the JSON
-// serialization when it begins with {, after any spaces; otherwise
-// compact, every space in it left out.
-func parseSigned(raw string, algs []jose.SignatureAlgorithm) (*jose.JSONWebSignature, error) {
-	if strings.HasPrefix(strings.TrimLeftFunc(raw, unicode.IsSpace), "{") {
-		return jose.ParseSignedJSON(raw, algs)
-	}
-	var b strings.Builder
-	b.Grow(len(raw))
-	for _, r := range raw {
-		if !unicode.IsSpace(r) {
-			b.WriteRune(r)
-		}
-	}
-	return jose.ParseSignedCompact(b.String(), algs)
 }
 
 // held reports whether a key is among those held: any, for a token that
