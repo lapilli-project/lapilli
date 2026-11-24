@@ -839,3 +839,42 @@ func TestChartNotifySigningKey(t *testing.T) {
 		}
 	}
 }
+
+// TestChartVerdictExit: the CronJob passes each of the exit options only
+// when it differs from the CLI's default.
+func TestChartVerdictExit(t *testing.T) {
+	cron := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}
+	for _, c := range []struct {
+		name string
+		set  []string
+		want []string
+		not  []string
+	}{
+		{"default", nil, nil, []string{"--fail-unreplayed", "--fail-nothing-replayed", "--check-no-data"}},
+		{"all three", []string{"--set", "failUnreplayed=true", "--set", "failNothingReplayed=false", "--set", "checkNoData=false"},
+			[]string{`"--fail-unreplayed"`, `"--fail-nothing-replayed=false"`, `"--check-no-data=false"`}, nil},
+		{"the defaults said", []string{"--set", "failUnreplayed=false", "--set", "failNothingReplayed=true", "--set", "checkNoData=true"},
+			nil, []string{"--fail-unreplayed", "--fail-nothing-replayed", "--check-no-data"}},
+	} {
+		out, err := helmTemplate(t, append(append([]string{}, cron...), c.set...)...)
+		if err != nil {
+			t.Errorf("%s: %v\n%s", c.name, err, out)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: no %s in\n%s", c.name, w, out)
+			}
+		}
+		for _, n := range c.not {
+			if strings.Contains(out, n) {
+				t.Errorf("%s: %s in\n%s", c.name, n, out)
+			}
+		}
+	}
+	// Serve has no exit status to set: its Deployment takes none of them.
+	out, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "failUnreplayed=true", "--set", "checkNoData=false")...)
+	if err != nil || strings.Contains(out, "--fail-unreplayed") || strings.Contains(out, "--check-no-data") {
+		t.Errorf("serve: %v\n%s", err, out)
+	}
+}
