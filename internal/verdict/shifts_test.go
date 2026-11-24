@@ -192,7 +192,7 @@ func TestShiftsUsed(t *testing.T) {
 }
 
 // Turns far from the first one come round as near ones do, at once: worked
-// out, not stepped to, a few turns stepped over at most (turnStepped,
+// out, not stepped to, ten turns' starts worked out at most (turnStepped,
 // counted, not timed); and a first turn written at a time the clocks skip
 // keeps that time on other days.
 func TestShiftsFar(t *testing.T) {
@@ -207,8 +207,8 @@ func TestShiftsFar(t *testing.T) {
 	for _, when := range []time.Time{time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(1970, 1, 1, 0, 30, 0, 0, time.UTC), time.Date(9999, 12, 31, 23, 0, 0, 0, time.UTC)} {
 		stepped = 0
 		i, from, to := sh.turn(when)
-		if stepped > 8 || from.After(when) || !to.After(when) || to.Sub(from) != time.Hour || i < 0 || i > 2 {
-			t.Errorf("%s: turn %d from %s to %s, %d turns stepped over", when, i, from, to, stepped)
+		if stepped == 0 || stepped > 10 || from.After(when) || !to.After(when) || to.Sub(from) != time.Hour || i < 0 || i > 2 {
+			t.Errorf("%s: turn %d from %s to %s, %d turns' starts worked out", when, i, from, to, stepped)
 		}
 	}
 	berlin, _ := time.LoadLocation("Europe/Berlin")

@@ -973,14 +973,14 @@ func (t *tier) loadSpans(spansOf map[string][][2]int64) error {
 	return read()
 }
 
-// tie is the firing an alert tells of: its rule's firing whose labels are
-// all among the alert's (which also carries labels the replay doesn't, such
-// as Prometheus's external labels), started within two evaluations of the
-// alert, the nearest; nil for none.
 // tieLooked, when set, is told of each firing an alert is set beside to be
 // tied: the tests count them (TestTieOneBusyRule).
 var tieLooked func()
 
+// tie is the firing an alert tells of: its rule's firing whose labels are
+// all among the alert's (which also carries labels the replay doesn't, such
+// as Prometheus's external labels), started within two evaluations of the
+// alert, the nearest; nil for none.
 func (t *tier) tie(a Alert) (*tied, error) {
 	k, err := a.key()
 	if err != nil {
