@@ -95,8 +95,8 @@ func TestSizing(t *testing.T) {
 				}
 				row.Disk = sizingBytes(path) + sizingBytes(path+"-wal") + sizingBytes(path+"-shm")
 				sizingVisit(t, dir, sizingStart.Add(time.Duration(week)*7*24*time.Hour), &row)
-				t.Logf("rules %d, %d a week, %d weeks: %.1f MB, %d bytes a firing, heap %.1f MB at rest, %.1f MB at most", rules, perWeek, week,
-					float64(row.Disk)/1e6, row.Disk/int64(firings), float64(row.Rest)/1e6, float64(row.Peak)/1e6)
+				t.Logf("rules %d, %d a week, %d weeks: %.1f MB, %d bytes a firing, heap +%.1f MB at rest, +%.1f MB at most", rules, perWeek, week,
+					float64(row.Disk)/1e6, row.Disk/int64(firings), float64(row.Rest-row.Base)/1e6, float64(row.Peak-row.Base)/1e6)
 				rows = append(rows, row)
 			}
 			os.RemoveAll(dir)
@@ -108,9 +108,9 @@ func TestSizing(t *testing.T) {
 	mb := func(n uint64) string { return fmt.Sprintf("%.0f MB", float64(n)/1e6) }
 	for _, r := range rows {
 		fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %d | %s | %s | %s | %s |\n", sizingInt(r.Rules), sizingInt(r.PerWeek), r.Weeks, sizingInt(r.Firings),
-			mb(uint64(r.Disk)), r.Disk/int64(r.Firings), mb(r.Rest), mb(r.Peak), mb(r.After), mb(r.RSS))
+			mb(uint64(r.Disk)), r.Disk/int64(r.Firings), mb(r.Rest-r.Base), mb(r.Peak-r.Base), mb(r.After-r.Base), mb(r.RSS))
 	}
-	fmt.Fprintf(&b, "\nHeap before serve opened the ledger: %s, the test binary's own (taken out of none of the rows).\n", mb(rows[0].Base))
+	fmt.Fprintf(&b, "\nHeap is Go's HeapInuse above the %s the test binary held before serve opened the ledger; process memory is the peak resident set, the binary among it.\n", mb(rows[0].Base))
 	t.Log("\n" + b.String())
 	if out := os.Getenv("LAPILLI_SIZING_OUT"); out != "" {
 		if err := os.WriteFile(out, []byte(b.String()), 0o644); err != nil {
