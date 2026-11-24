@@ -28,7 +28,11 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
   loaded, as `GET /api/v1/rules` lists them: Prometheus, Thanos, Mimir,
   vmalert, Amazon Managed Service for Prometheus. Each group is evaluated at
   the second of its interval it last ran at, as the API says, where
-  Prometheus placed it.
+  Prometheus placed it. Groups read from files are placed the same way when
+  the API lists a group of their name once ([limits](limits.md)); the
+  period starts from each placed group's last evaluation before it, so a
+  firing on at the start that ends before the group's first evaluation in
+  the period isn't left out.
 - `--grafana URL`: replay the alert rules a Grafana holds, made in its UI
   or not, read through its provisioning export API with the service account
   token in `--grafana-token-file`; and the scrape interval each data source
