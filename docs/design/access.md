@@ -91,10 +91,20 @@ the tracker link at least 24px square (2.5.8). There is no animation, so
 nothing for reduced motion. The look is otherwise unchanged; screenshots
 were compared light, dark and at 320px.
 
-**Not fixed.** The heatmap cuts a long rule's name short; the whole name is
-in its link and on the rule's page. The rules page is about 9% larger for
-the weeks its sparklines now read out; its render time and the scale
-budget are unchanged.
+**Fixed after, for the next release.** The heatmap cuts a long rule's
+name short to keep its layout, and the whole name was in the link's title,
+which the keyboard and a touch screen don't show. Now the name is in the
+markup whole (a screen reader reads it), and with the pointer on the link
+or the focus in it, the whole name is laid over the cells beside it, in the
+row's own height, so nothing moves: the cut is on the link, and the name is
+in its `data-name`, shown by CSS with an empty alternative, so a screen
+reader doesn't read it twice. A title would show it a second time, so it is
+gone. `TestHeatmapNameReachable` holds it, and axe over every page stays
+clean.
+
+**Not fixed.** The rules page is about 9% larger for the weeks its
+sparklines now read out; its render time and the scale budget are
+unchanged.
 
 **Builder's decision.** No script, as the principle has it: every fix is
 HTML and CSS. The axe check isn't in CI: it pulls a browser image; the Go
