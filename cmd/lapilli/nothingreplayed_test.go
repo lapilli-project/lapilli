@@ -43,7 +43,7 @@ func TestFailNothingReplayed(t *testing.T) {
 		code := run(append([]string{"verdict", "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}, args...), &stdout, &stderr)
 		return code, stderr.String()
 	}
-	const said = "lapilli verdict: no rule was replayed: the replays of 2 rules failed, as the history couldn't be read, so the report judges nothing (--fail-nothing-replayed=false to exit 0)\n"
+	const said = "lapilli verdict: no rule was replayed: the replays of 2 rules failed, as the history couldn't be read or their labels on their series were too many, so the report judges nothing (--fail-nothing-replayed=false to exit 0)\n"
 	if code, errs := verdictOf("--rules", none); code != 1 || !strings.Contains(errs, said) {
 		t.Errorf("every replay failed: exit %d\n%s", code, errs)
 	}

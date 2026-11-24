@@ -131,7 +131,7 @@ nothing and the run exits 1, saying so, unless
 `--fail-nothing-replayed=false`:
 
 ```
-lapilli verdict: no rule was replayed: the replays of N rules failed, as the history couldn't be read, so the report judges nothing (--fail-nothing-replayed=false to exit 0)
+lapilli verdict: no rule was replayed: the replays of N rules failed, as the history couldn't be read or their labels on their series were too many, so the report judges nothing (--fail-nothing-replayed=false to exit 0)
 ```
 
 With `--fail-unreplayed`:

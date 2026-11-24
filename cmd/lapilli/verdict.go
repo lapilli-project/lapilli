@@ -2045,7 +2045,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			}
 		}
 		if !judged {
-			fmt.Fprintf(stderr, "lapilli verdict: no rule was replayed: the replays of %d rules failed, as the history couldn't be read, so the report judges nothing (--fail-nothing-replayed=false to exit 0)\n", len(dropped))
+			fmt.Fprintf(stderr, "lapilli verdict: no rule was replayed: the replays of %d rules failed, as the history couldn't be read or their labels on their series were too many, so the report judges nothing (--fail-nothing-replayed=false to exit 0)\n", len(dropped))
 			return 1
 		}
 	}
