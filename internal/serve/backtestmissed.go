@@ -191,13 +191,16 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 	// the Prometheus it reads them from (--loaded-rules), a group of the
 	// file with no interval of its own runs there at its
 	// evaluation_interval, which the API says of serve's, and the file
-	// doesn't: the rule is taken at it, once serve knows it.
+	// doesn't: the rule is taken at it, once serve knows it, and where
+	// serve's latest of it runs at it too. Serve reads the configuration
+	// once a day and the rules every look: an interval changed since is
+	// another, and the rule is as its file has it.
 	same := slices.Clone(pr.same)
 	s.replayedAs().Apply(same)
 	if every := s.evaluationInterval(); every > 0 {
 		there := map[string]bool{}
 		for _, r := range now {
-			there[r.Name] = there[r.Name] || !loadedFrom(r)
+			there[r.Name] = there[r.Name] || !loadedFrom(r) || r.Interval != every
 		}
 		for i, r := range same {
 			if bad, ok := there[r.Name]; ok && !bad && r.Interval == 0 {

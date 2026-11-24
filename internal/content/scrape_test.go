@@ -156,16 +156,16 @@ func TestShortRangeByJobCost(t *testing.T) {
 
 // The evaluation interval a group with no interval of its own runs at: as
 // Prometheus 3.5.0 says it (its configuration writes every default, 1m
-// here), 1m where a configuration read doesn't say, and none where it
-// isn't read or doesn't say a duration.
+// here); none where it isn't read, doesn't say a duration, or doesn't say
+// one at all, which no Prometheus's does.
 func TestScrapeConfigEvaluation(t *testing.T) {
 	if s := realScrapes(t); s.Evaluation != time.Minute {
 		t.Errorf("Prometheus 3.5.0's: %s", s.Evaluation)
 	}
 	for config, want := range map[string]time.Duration{
 		"global:\n  evaluation_interval: 30s\n":                          30 * time.Second,
-		"global:\n  scrape_interval: 15s\n":                              time.Minute,
-		"scrape_configs:\n- job_name: a\n":                               time.Minute,
+		"global:\n  scrape_interval: 15s\n":                              0,
+		"scrape_configs:\n- job_name: a\n":                               0,
 		"global:\n  evaluation_interval: soon\n":                         0,
 		"global:\n  evaluation_interval: 0s\n":                           0,
 		"global: [":                                                      0,

@@ -460,10 +460,10 @@ func TestBacktestFailMissedReprinted(t *testing.T) {
 // evaluation_interval, which its rules API says of the group (60) and the
 // file doesn't: a pull request leaving MoreErrors alone in such a file is
 // taken at it where serve read the configuration (once a day, with the
-// scrape intervals): as a real Prometheus 3.5.0 writes it, 1m; or as one
-// that leaves it out, Prometheus's own 1m. INC-1 stays caught. Where the
-// configuration can't be read, or says another interval, MoreErrors in
-// the file is another rule than serve's record is of: not known. So too
+// scrape intervals): as a real Prometheus 3.5.0 writes it, 1m. INC-1 stays
+// caught. Where the configuration can't be read, says another interval,
+// or says none, as no Prometheus's does, MoreErrors in the file is another
+// rule than serve's record is of: not known. So too
 // where vmalert answers (its groups say their concurrency), whose groups
 // run at its own -evaluationInterval, whatever a configuration says.
 func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
@@ -477,7 +477,7 @@ func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 		scrape         time.Duration
 	}{
 		{"Prometheus 3.5.0's", prometheus350Config(t), nil, false, true, 0},
-		{"none said", "global:\n  scrape_interval: 15s\n", nil, false, true, 0},
+		{"none said", "global:\n  scrape_interval: 15s\n", nil, false, false, 0},
 		{"not served", "", errors.New("HTTP 404"), false, false, 0},
 		{"another", "global:\n  evaluation_interval: 30s\n", nil, false, false, 0},
 		{"vmalert's", "global:\n  evaluation_interval: 1m\n", nil, true, false, 0},
@@ -511,5 +511,37 @@ func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 	s.saidRules.evaluation = time.Minute
 	if s.evaluationInterval() != 0 {
 		t.Error("an evaluation interval without --loaded-rules")
+	}
+}
+
+// Serve reads Prometheus's configuration once a day, and its rules every
+// look. Its evaluation_interval was 30s, as the shop group ran, when it
+// was read; since, it is 1m, and the group runs at 60s in serve's latest
+// version of the rules, the configuration not read again. A pull
+// request's MoreErrors with no interval runs at 1m after the merge: not
+// the 30s rule serve's record over INC-1 is of. It isn't taken at the 30s
+// still kept: not known.
+func TestBacktestFailMissedEvaluationIntervalSince(t *testing.T) {
+	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
+	h := &configured{reprinting: reprinted(), config: "global:\n  evaluation_interval: 30s\n"}
+	h.answer = strings.Replace(h.answer, `"interval":60,`, `"interval":30,`, 1)
+	b := btServer(t, h, "", func(c *Config) { c.RulesPath, c.Loaded = "", true })
+	ctx := context.Background()
+	if incs, err := b.s.l.Incidents(ctx, now.Add(-3*24*time.Hour), now, false); err != nil || len(incs) != 1 ||
+		!strings.Contains(fmt.Sprint(incs[0].CaughtBy), "MoreErrors") {
+		t.Fatalf("the record: %+v %v", incs, err)
+	}
+	h.answer, h.config = reprinted().answer, "global:\n  evaluation_interval: 1m\n"
+	raw := ""
+	if err := b.s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := b.s.l.Versions(ctx, now.Add(-3*24*time.Hour), now, false); len(vs) != 2 || b.s.evaluationInterval() != 30*time.Second {
+		t.Fatalf("%d versions, the evaluation interval %s", len(vs), b.s.evaluationInterval())
+	}
+	held := map[string]any{"days": 3, "fail_missed": true}
+	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
+	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+		t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
 	}
 }

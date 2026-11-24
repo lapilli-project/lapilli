@@ -683,25 +683,42 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   Those are what MetricsQL or Prometheus 2 reads otherwise than
   Prometheus 3 (Prometheus 3's durations as numbers, `x > 5m`, and
   numbers as durations, `rate(x[300])`; `1d-1y`; a backtick's string
-  ending in `\`; a name in quotes with a `\` in it; MetricsQL's own
+  ending in `\`; a name in quotes with a `\` in it; a `\r` in a comment,
+  which ends it for Prometheus and not for MetricsQL; MetricsQL's own
   words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
   a comma after a call's last argument), an expression past 16 KiB or 32
   levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
-  LogQL again too; and a cloud's alarm. And a rule is another, its catch
-  not known, where its file leaves out what the API says or the other way
-  round: a group's `query_offset`, which Prometheus 3.5.0's API leaves
-  out. Not a group's interval, where serve knows it:
+  LogQL again too; and a cloud's alarm.
+- **A known limit: a group's `query_offset`.** Prometheus's rules API
+  doesn't say it (3.5.0's `RuleGroup` has no such field), so a rule serve
+  reads from it has none, and serve's record is of the rule replayed
+  without one. A pull request's group that gives one is another than that
+  rule: its catches are not known, as the recorded Prometheus 3.5.0
+  group with `query_offset: 1m` is. A group that gives none is the same
+  rule, whether or not the group Prometheus ran had one: the gate can't
+  tell, as nothing it reads says. What it judges then is the rule as
+  replayed, which is the one the pull request's file runs after the
+  merge; how Prometheus ran the group before it, its query read back by
+  the offset, the record never held. Holding such a rule as not known
+  instead would hold every rule read from the API so, as the API never
+  says a `query_offset`: so it isn't. A rule's group with `query_offset`
+  is held to the incidents through serve only where serve reads it from
+  its files (`--rules`) or a ruler that says it.
 - **A group with no interval.** A rule file's group that gives no
   `interval` runs at Prometheus's `evaluation_interval`, which its rules
   API says of the group (`"interval": 60`) and the file doesn't. With
   `--loaded-rules`, serve reads Prometheus's configuration
   (`/api/v1/status/config`, once a day with the scrape intervals, 2 MiB at
-  most, `--scrape-interval` or not) for its `evaluation_interval`, 1m
-  where a configuration read doesn't say it (Prometheus 3.5.0 writes every
-  default, so says it). A rule of the pull request's left alone, in a
+  most, `--scrape-interval` or not) for its `evaluation_interval`, which
+  Prometheus writes even as its default (3.5.0 writes every default): a
+  configuration that doesn't say it isn't a Prometheus's, and gives none.
+  A rule of the pull request's left alone, in a
   group with no interval, is taken at it when every rule of its name in
-  serve's latest version was read from that Prometheus's rules API: there
-  it runs, after the merge as before. Where the configuration isn't read
+  serve's latest version was read from that Prometheus's rules API and
+  runs at it: there it runs, after the merge as before. Serve reads the
+  configuration once a day and the rules every look, so an interval
+  changed since leaves the rule as its file has it. Where the
+  configuration isn't read
   (most managed services don't serve it), says an interval that isn't a
   duration, or the rule is serve's from elsewhere (`--rules`, `--ruler`,
   a Loki ruler, Grafana) or vmalert's,

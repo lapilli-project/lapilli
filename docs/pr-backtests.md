@@ -507,10 +507,15 @@ one a rule caught whose expression Lapilli compares only by its text (a
 Grafana rule, a Loki ruler's, what MetricsQL reads otherwise than
 Prometheus). A rule file's group with no `interval` runs at Prometheus's
 `evaluation_interval`, which serve reads from `/api/v1/status/config`
-with `--loaded-rules` (1m where the configuration doesn't say it): where
-that isn't served (most managed services don't serve it), or the rule is
+with `--loaded-rules`: where that isn't served (most managed services
+don't serve it), or doesn't say it, or the rule is
 vmalert's, the group is another than the one the rules API says, and its
-rules' catches are not known: give the group its `interval`.
+rules' catches are not known: give the group its `interval`. A known
+limit: Prometheus's rules API doesn't say a group's `query_offset`, so
+serve's record of a rule read from it is of the rule without one. A file
+group that gives one is another, its catches not known; one that gives
+none is that rule, whatever offset the group Prometheus ran had
+([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through
 lapilli serve, and `promtool` is refused with `serve-url`; run `promtool
