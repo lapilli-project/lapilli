@@ -900,9 +900,13 @@ finish within its `--backtest-timeout`; one that didn't come back within
 
 **A newer commit takes the place** of a backtest of the same pull request
 still waiting only on GitHub and Forgejo, whose ID token names the pull
-request (`ref`, `refs/pull/N/merge`). In GitHub's merge queue, a group
-the queue built again takes the place of the one of the same pull
-request and branch still waiting, by the queue's `ref`
+request (`ref`, `refs/pull/N/merge`): only of another commit, and on
+GitHub, of the same workflow, only of an earlier run of it (the token's
+`run_number`), so that two jobs of one run (a `KEY` each) never take
+each other's place, nor a run that asks late, or an earlier run run
+again, a newer one's. In GitHub's merge queue, a group the queue built
+again takes the place of the one of the same pull request and branch
+still waiting so, by the queue's `ref`
 (`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`), never a pull request's
 own backtest. GitLab's names a merge request's
 source branch, not its number, and Bitbucket's names no pull request, so
