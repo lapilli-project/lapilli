@@ -508,3 +508,35 @@ func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 		t.Error("an evaluation interval without --loaded-rules")
 	}
 }
+
+// Serve reads Prometheus's configuration once a day, and its rules every
+// look. Its evaluation_interval was 30s, as the shop group ran, when it
+// was read; since, it is 1m, and the group runs at 60s in serve's latest
+// version of the rules, the configuration not read again. A pull
+// request's MoreErrors with no interval runs at 1m after the merge: not
+// the 30s rule serve's record over INC-1 is of. It isn't taken at the 30s
+// still kept: not known.
+func TestBacktestFailMissedEvaluationIntervalSince(t *testing.T) {
+	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
+	h := &configured{reprinting: reprinted(), config: "global:\n  evaluation_interval: 30s\n"}
+	h.answer = strings.Replace(h.answer, `"interval":60,`, `"interval":30,`, 1)
+	b := btServer(t, h, "", func(c *Config) { c.RulesPath, c.Loaded = "", true })
+	ctx := context.Background()
+	if incs, err := b.s.l.Incidents(ctx, now.Add(-3*24*time.Hour), now, false); err != nil || len(incs) != 1 ||
+		!strings.Contains(fmt.Sprint(incs[0].CaughtBy), "MoreErrors") {
+		t.Fatalf("the record: %+v %v", incs, err)
+	}
+	h.answer, h.config = reprinted().answer, "global:\n  evaluation_interval: 1m\n"
+	raw := ""
+	if err := b.s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if vs, _ := b.s.l.Versions(ctx, now.Add(-3*24*time.Hour), now, false); len(vs) != 2 || b.s.evaluationInterval() != 30*time.Second {
+		t.Fatalf("%d versions, the evaluation interval %s", len(vs), b.s.evaluationInterval())
+	}
+	held := map[string]any{"days": 3, "fail_missed": true}
+	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
+	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+		t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+	}
+}

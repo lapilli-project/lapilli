@@ -688,8 +688,11 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   where a configuration read doesn't say it (Prometheus 3.5.0 writes every
   default, so says it). A rule of the pull request's left alone, in a
   group with no interval, is taken at it when every rule of its name in
-  serve's latest version was read from that Prometheus's rules API: there
-  it runs, after the merge as before. Where the configuration isn't read
+  serve's latest version was read from that Prometheus's rules API and
+  runs at it: there it runs, after the merge as before. Serve reads the
+  configuration once a day and the rules every look, so an interval
+  changed since leaves the rule as its file has it. Where the
+  configuration isn't read
   (most managed services don't serve it), says an interval that isn't a
   duration, or the rule is serve's from elsewhere (`--rules`, `--ruler`,
   a Loki ruler, Grafana) or vmalert's,
