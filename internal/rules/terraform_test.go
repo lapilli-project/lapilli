@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // terraformFiles are what terraform show -json writes of a saved plan and
@@ -82,6 +83,44 @@ func TestTerraformRefusals(t *testing.T) {
 	rs, err := Parse([]byte(`{"format_version":"1.0","values":{"root_module":{"resources":[{"address":"grafana_rule_group.g","mode":"managed","type":"grafana_rule_group","name":"g","values":{"name":"g","folder_uid":"f","interval_seconds":60,"rule":[{"name":"Cost $5","uid":"c","condition":"A","labels":{"b":"$5"},"data":[{"ref_id":"A","datasource_uid":"p","model":"{\"expr\":\"up\"}"}]}]}}]}}}`))
 	if err != nil || len(rs) != 1 || rs[0].Name != "Cost $5" || rs[0].Labels["b"] != "$5" {
 		t.Errorf("%+v %v", rs, err)
+	}
+}
+
+// terraform-plan-real.json is what terraform show -json wrote of a plan made
+// with Terraform 1.12.2 and the grafana/grafana provider 4.55.0 (terraform
+// plan -refresh=false, nothing applied) of one new grafana_rule_group with
+// one rule. Being new, the rule has no uid (computed, unknown until apply)
+// and its queries' query_type is null: neither is a fault.
+func TestTerraformRealPlan(t *testing.T) {
+	rs, rec := readAs(t, "testdata/terraform-plan-real.json")
+	if len(rs) != 1 || len(rec) != 0 {
+		t.Fatalf("%d rules, %d recordings", len(rs), len(rec))
+	}
+	r := rs[0]
+	if r.Name != "CheckoutErrors" || r.Group != "alerts-folder/checkout" || r.Address != "grafana_rule_group.checkout" || r.For != 5*time.Minute {
+		t.Errorf("%+v", r)
+	}
+	if r.UID != "" {
+		t.Errorf("uid %q, none is known", r.UID)
+	}
+	if len(r.Labels) < 2 || r.Labels["severity"] != "page" || r.Labels["service"] != "checkout" {
+		t.Errorf("labels %v", r.Labels)
+	}
+	if r.Says.Summary != "errors over 5 dollars $5" {
+		t.Errorf("summary %q", r.Says.Summary)
+	}
+	g := r.Graph
+	if g == nil || g.Cond != "C" || len(g.Queries) != 1 || g.Queries["A"] != `sum(rate(http_errors_total{service="checkout"}[5m]))` {
+		t.Fatalf("graph %+v", g)
+	}
+	if g.Data["A"].UID != "prom-a" {
+		t.Errorf("data %+v", g.Data)
+	}
+	if _, ok := g.Steps["C"]; !ok {
+		t.Errorf("steps %+v", g.Steps)
+	}
+	if r.Unsupported != "" {
+		t.Errorf("unsupported %q", r.Unsupported)
 	}
 }
 
