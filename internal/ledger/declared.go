@@ -684,14 +684,12 @@ func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reco
 	return nil
 }
 
-// The most of each kind the ledger keeps made in the UI (uiMost), and of
-// both kinds together (allMost): what a file declares has its own most,
-// as many again, but what it gives back to the UI doesn't make the UI's
-// grow past its own.
-var (
-	uiMost  = map[string]int{"teams": MaxTeams, "windows": MaxWindows, "reports": MaxScheduled, "grants": MaxGrants}
-	allMost = map[string]int{"teams": MaxTeams + MaxDeclaredTeams, "windows": 2 * MaxWindows, "reports": 2 * MaxScheduled, "grants": 2 * MaxGrants}
-)
+// allMost is the most of each kind the ledger keeps, declared and made in
+// the UI together. Of those made in the UI it keeps MaxTeams, MaxWindows,
+// MaxScheduled and MaxGrants: what a file declares has its own most, as
+// many again, but what it gives back to the UI doesn't make the UI's grow
+// past its own.
+var allMost = map[string]int{"teams": MaxTeams + MaxDeclaredTeams, "windows": 2 * MaxWindows, "reports": 2 * MaxScheduled, "grants": 2 * MaxGrants}
 
 // MaxTeams is how many teams the ledger keeps made in the UI.
 const MaxTeams = 1000

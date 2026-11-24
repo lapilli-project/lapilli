@@ -206,7 +206,7 @@ func (l Loki) Ruler(agent string, warn func(string)) *Ruler {
 // not where it runs each group.
 func LokiRules(ctx context.Context, l Loki, agent string, warn func(string)) ([]rules.Rule, []rules.Doc, error) {
 	r := l.Ruler(agent, warn)
-	rs, docs, err := r.Read(ctx)
+	_, docs, err := r.Read(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -215,7 +215,8 @@ func LokiRules(ctx context.Context, l Loki, agent string, warn func(string)) ([]
 	for i := range docs {
 		docs[i].Logs = rules.LokiRuler
 	}
-	if rs, err = rules.FromDocs(docs); err != nil {
+	rs, err := rules.FromDocs(docs)
+	if err != nil {
 		return nil, nil, fmt.Errorf("--loki-loaded-rules: %w", err)
 	}
 	return rs, docs, nil

@@ -1239,9 +1239,7 @@ func (s *Server) proposeAdd(ctx context.Context, q addAsk, by string, agent bool
 	items, unreplayed := addItemsOf(c)
 	ev.Add = &addEvidence{Place: place, Rule: string(a.YAML()), Items: items, Weeks: c.out.Weeks, Note: c.out.Note, Unreplayed: unreplayed, Labels: labels}
 	if ev.Backtest != nil {
-		for _, in := range c.caughtBy() {
-			ev.Backtest.Gained = append(ev.Backtest.Gained, in)
-		}
+		ev.Backtest.Gained = append(ev.Backtest.Gained, c.caughtBy()...)
 	}
 	p := ledger.Proposal{Rule: a.Alert, Kind: ledger.KindAdd, Path: place.Path, MadeBy: by, Agent: agent, Source: b.source, DocHash: b.docHash,
 		Document: string(b.doc), After: ruleText(b.rule), AfterHash: ruleHash(b.rule), Diff: b.diff, Expect: string(expect)}
