@@ -164,9 +164,9 @@ YAML
   rm -f "$state"/prov/alerting/*
   cp "$gm/rules.json" "$state/prov/alerting/fidelity.json"
   cp "$gl/rules.yaml" "$state/prov/alerting/logs.yaml"
-  yq '.groups |= map(select(.name == "dollars"))' "$gx/rules.yaml" >"$state/prov/alerting/dollars.yaml"
+  yq -I4 '.groups |= map(select(.name == "dollars"))' "$gx/rules.yaml" >"$state/prov/alerting/dollars.yaml"
   # The group the change is made to is made through the API, below.
-  yq '.groups |= map(select(.name == "fid2"))' "$gs/rules.yaml" >"$state/prov/alerting/fid2.yaml"
+  yq -I4 '.groups |= map(select(.name == "fid2"))' "$gs/rules.yaml" >"$state/prov/alerting/fid2.yaml"
   chmod -R u+rwX,go+rX "$state"
   # A title or a uid twice would be one rule lost to the other.
   f=$(rule_ids | sort | uniq -d)
@@ -288,11 +288,11 @@ up() {
   # The change, at a second a little past a rule evaluation's, between two.
   sleep_until $((cfrom + 7 * 60 + 5))
   gcurl "$gu/api/v1/provisioning/alert-rules/export?format=yaml" |
-    yq '.groups |= map(select(.folder == "fid2"))' >"$state/rules-before.yaml"
+    yq -I4 '.groups |= map(select(.folder == "fid2"))' >"$state/rules-before.yaml"
   put_group "$folder" "$gc/rules-after.yaml"
   changed=$(date +%s)
   gcurl "$gu/api/v1/provisioning/alert-rules/export?format=yaml" |
-    yq '.groups |= map(select(.folder == "fid2"))' >"$state/rules-after.yaml"
+    yq -I4 '.groups |= map(select(.folder == "fid2"))' >"$state/rules-after.yaml"
   printf 'changed=%q\n' "$changed" >>"$state/env"
   echo "up: $(iso "$r"); the periods end $(iso "$e"); Prometheus $pu, Grafana $gu, Loki $lu"
 }
@@ -346,9 +346,9 @@ record() {
   [ "$sm" = "$out/$gm" ] || cp "$sm/rules.json" "$out/$gm/rules.json"
   [ "$sp" = "$out/$pm" ] || cp "$sp/rules.yml" "$out/$pm/rules.yml"
   gcurl "$gu/api/v1/provisioning/alert-rules/export?format=yaml" |
-    yq '.groups |= map(select(.name == "dollars"))' >"$out/$gx/rules.yaml"
+    yq -I4 '.groups |= map(select(.name == "dollars"))' >"$out/$gx/rules.yaml"
   gcurl "$gu/api/v1/provisioning/alert-rules/export?format=yaml" |
-    yq '.groups |= map(select(.folder == "fid2"))' >"$out/$gs/rules.yaml"
+    yq -I4 '.groups |= map(select(.folder == "fid2"))' >"$out/$gs/rules.yaml"
   cp "$state/rules-before.yaml" "$out/$gc/rules-before.yaml"
   cp "$state/rules-after.yaml" "$out/$gc/rules-after.yaml"
   # What Grafana said of its data sources (the scrape interval of each),

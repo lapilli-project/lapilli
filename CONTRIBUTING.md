@@ -42,6 +42,7 @@ test/e2e/service.sh      # the whole service on kind: Grafana's alerts, Lapilli 
 test/e2e/ratelimit.sh    # runs at once against a real Prometheus behind nginx's rate limit (429); needs Docker
 test/e2e/compat.sh       # verdict and --check-replay against a real Thanos, and VictoriaMetrics with vmalert; needs Docker, jq
 test/e2e/kubernetes-rules.sh # --check-replay of kube-prometheus-stack's default rules beside what Prometheus fired, on kind; about 40 minutes; needs Docker, kubectl, helm, jq
+test/e2e/measure.sh      # the replay's measurements taken again at any version of Prometheus, Grafana and Loki (the images from the environment), into internal/replay/testdata; an hour; needs Docker, Go, curl, jq, yq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Go and Docker
 ```
 
@@ -122,6 +123,8 @@ firing fails on any machine.
     latest image instead of the pinned one (`upstream.yml`).
     By hand, one script against another image:
     `GRAFANA_IMAGE=grafana/grafana:latest test/e2e/loki.sh`
+  - by hand, `measure.yml`: the replay's measurements taken at the images
+    given, the new recordings as the run's artifact
 
   On a pull request, an end-to-end job runs only when the changes reach
   it: lapilli itself, which each one builds (`go.mod`, `go.sum`, `cmd/`
