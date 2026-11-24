@@ -45,7 +45,7 @@ took to catch.
 Usage:
   lapilli verdict [flags]
 
-Where the firings come from (pick one):
+Where the firings come from (pick one; --firings may go beside any but --alerts):
   --rules FILE        replay these alert rules against history (repeatable):
                       Prometheus rule files, PrometheusRule resources, Grafana
                       alerting provisioning files, Terraform's JSON of
@@ -128,7 +128,18 @@ Where the firings come from (pick one):
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."};
-                      recipes/firings writes each cloud's alarm history so
+                      recipes/firings writes each cloud's alarm history in that form.
+                      Alone it says where the firings come from; beside one
+                      of the above (not --alerts or --compare) they are
+                      judged with the firings replayed, over the same period,
+                      against the same incidents, as rules of the report,
+                      marked as recorded: no longer "for", near misses or
+                      backtests for them. A name both have is refused (exit
+                      2): a rule's firings come from one place
+  --firings-prefix STR
+                      put STR before the name of each rule --firings records
+                      (default none), to keep it apart from a replayed rule
+                      of the name
 
 Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
@@ -466,7 +477,10 @@ Output:
                       history couldn't be read, as lapilli exits 1 then, the
                       report judging nothing; a run in which some rule was
                       replayed exits 0 either way, unless --fail-unreplayed.
-                      Not with --compare
+                      Rules recorded with --firings aren't replayed and are
+                      not counted: a run whose replays all failed, but whose
+                      recorded firings were judged, judges something, and
+                      exits 0. Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
@@ -583,6 +597,9 @@ type verdictFlags struct {
 	scrapeInterval     time.Duration
 	alerts             bool
 	firings, incidents string
+	// firingsPrefix is --firings-prefix: put before the name of each rule
+	// --firings records, when it is read beside rules replayed.
+	firingsPrefix string
 	// noGrafanaHistory is --grafana-history=false: the rules --grafana
 	// holds that can't be replayed are listed, not judged from Grafana's
 	// own alert state history; grafanaHistorySet, --grafana-history given.
@@ -912,6 +929,8 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.rulerTenant = val
 		case "--firings":
 			f.firings = val
+		case "--firings-prefix":
+			f.firingsPrefix = val
 		case "--redact-key":
 			key, rerr := readRedactKey(val)
 			if rerr != nil {
@@ -1104,8 +1123,8 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		switch {
 		case err != nil:
 			return nil, fmt.Errorf("--rules-history %v", err)
-		case f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts || f.firings != "":
-			return nil, errors.New("--rules-history is earlier versions of rule files: it goes with --rules, not --loaded-rules, --grafana, --ruler, --alerts or --firings")
+		case f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts:
+			return nil, errors.New("--rules-history is earlier versions of rule files: it goes with --rules, not --loaded-rules, --grafana, --ruler or --alerts")
 		case len(f.compare) > 0:
 			return nil, errors.New("--compare sets two sets of rules side by side over one period: leave out --rules-history")
 		case serve == nil:
@@ -1135,10 +1154,15 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	if following {
 		rulesFlag = "--rules-history"
 	}
+	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
+	// --firings beside rules to replay is firings added to theirs, not a
+	// place of its own they come from; beside --alerts it is one too many.
+	replays := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || lokiToo
+	recordedToo := f.firings != "" && replays && !f.alerts
 	for _, src := range []struct {
 		on   bool
 		flag string
-	}{{len(f.rules) > 0 || following, rulesFlag}, {f.loadedRules, "--loaded-rules"}, {f.grafana != "", "--grafana"}, {f.ruler != "", "--ruler"}, {f.alerts, "--alerts"}, {f.firings != "", "--firings"}} {
+	}{{len(f.rules) > 0 || following, rulesFlag}, {f.loadedRules, "--loaded-rules"}, {f.grafana != "", "--grafana"}, {f.ruler != "", "--ruler"}, {f.alerts, "--alerts"}, {f.firings != "" && !recordedToo, "--firings"}} {
 		if src.on {
 			sources++
 			given = append(given, src.flag)
@@ -1146,7 +1170,6 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	}
 	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.anyImpact() ||
 		f.checkReplay && f.checkReplaySet
-	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
 	rulesToo := sources > 0 || len(f.alarms) > 0 || lokiToo
 	if err := validLoki(f, serve != nil); err != nil {
 		return nil, err
@@ -1161,7 +1184,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		for _, no := range []struct {
 			on   bool
 			flag string
-		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
+		}{{f.firings != "", "--firings"}, {f.firingsPrefix != "", "--firings-prefix"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
 			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired || f.failMissed, "--expect, --expect-before, --fail-expectations, --expect-required or --fail-missed: they hold a change to the rules, which --compare backtests"},
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
@@ -1218,12 +1241,16 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		return nil, tooManySources(given)
 	case sources == 0 && len(f.alarms) == 0 && !lokiToo:
 		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules" + ruleIsAName(f))
-	case lokiToo && (f.alerts || f.firings != ""):
-		return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts or --firings")
+	case lokiToo && f.alerts:
+		return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts")
 	case lokiToo && len(f.compare) > 0:
 		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --loki-rules and --loki-loaded-rules")
-	case len(f.alarms) > 0 && (f.alerts || f.firings != ""):
-		return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts or --firings")
+	case len(f.alarms) > 0 && f.alerts:
+		return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts")
+	case f.firings != "" && len(f.compare) > 0:
+		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --firings, which records what a cloud's own alarms fired")
+	case f.firingsPrefix != "" && f.firings == "":
+		return nil, errors.New("--firings-prefix names the rules --firings records: it goes with --firings")
 	case len(f.alarms) > 0 && len(f.compare) > 0:
 		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --alarms")
 	case f.grafanaTk != "" && f.grafana == "" && f.checkGrafana == "":
@@ -1730,6 +1757,22 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	}
 	warnHistories(stderr, versions)
 
+	// With rules to replay, --firings is firings recorded elsewhere, to be
+	// judged with theirs: read now, as a name both have is refused before
+	// any replay is run.
+	var recorded []firing.Firing
+	var recordedNames map[string]bool
+	if f.firings != "" && f.replaysRules() {
+		var clash []string
+		if recorded, recordedNames, clash, err = f.recordedFirings(versions); err != nil {
+			return fail(err)
+		}
+		if len(clash) > 0 {
+			fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(clashSaid(clash)))
+			return 2
+		}
+	}
+
 	// Impact first: a query, and one a selector for where its data
 	// begins, and a replay that runs out of time should still be judged
 	// against it.
@@ -1823,6 +1866,8 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			return fail(fmt.Errorf("reading ALERTS: %w", err))
 		}
 		fs = firing.FromAlerts(series, f.step, f.opts.To)
+	case f.firings != "" && f.replaysRules():
+		// Firings recorded, judged with those of the rules (below).
 	default:
 		file, err := os.Open(f.firings)
 		if err != nil {
@@ -1834,6 +1879,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			return fail(fmt.Errorf("%s: %w", f.firings, err))
 		}
 	}
+	fs = append(fs, recorded...)
 	// The rules are replayed: what asks the history from here on (near
 	// misses, suggestions) replays no more of them.
 	ctx = replay.Tracking(ctx, nil)
@@ -1872,6 +1918,9 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		for i := range rep.Rules {
 			if byHistory[rep.Rules[i].Rule] {
 				rep.Rules[i].Source = verdict.GrafanaSource
+			}
+			if recordedNames[rep.Rules[i].Rule] {
+				rep.Rules[i].Source, rep.Rules[i].Unsupported = verdict.FiringsSource, verdict.RecordedReason
 			}
 		}
 		rep.MarkNotKnown()
@@ -2052,6 +2101,9 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	all, unfinished, dropped := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, rep := range reports {
 		for _, r := range rep.Rules {
+			if r.Recorded() {
+				continue
+			}
 			all[r.Rule] = true
 			if r.Unsupported == replay.Unfinished {
 				unfinished[r.Rule] = true

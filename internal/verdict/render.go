@@ -69,9 +69,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
 
-	var fired, silent, unsupported, byHistory []RuleResult
+	var fired, silent, unsupported, byHistory, recorded []RuleResult
 	for _, rr := range r.Rules {
-		if rr.ByHistory() {
+		switch {
+		case rr.Recorded():
+			recorded = append(recorded, rr)
+		case rr.ByHistory():
 			byHistory = append(byHistory, rr)
 		}
 		switch {
@@ -162,6 +165,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, "\nJudged from what their history says they fired, not replayed, %s: no longer \"for\", near misses or backtests for them.\n", plural(len(byHistory), "rule", "rules"))
 		for _, rr := range byHistory {
 			fmt.Fprintf(w, "  %s, from %s: %s\n", Clean(rr.Rule), historyOf(rr.Source), Clean(rr.Unsupported))
+		}
+	}
+	if len(recorded) > 0 {
+		fmt.Fprintf(w, "\nJudged from what was recorded, not replayed, %s: no longer \"for\", near misses or backtests for them.\n", plural(len(recorded), "rule", "rules"))
+		for _, rr := range recorded {
+			fmt.Fprintf(w, "  %s\n", Clean(rr.Rule))
 		}
 	}
 	unseen(w, r.Rules)
