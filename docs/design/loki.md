@@ -260,9 +260,8 @@ needed:
   that returns nothing is NoData as any query is, once it has returned
   something. One that fails is not known, as a query outside the condition
   of a rule on Prometheus is, and the rule says so (`Failed`). One a Loki
-  refuses as written (400) is not taken as no data: for a Prometheus query
-  that was seen, and Grafana's answer for a Loki one hasn't been measured,
-  so it is not known too. The rule isn't replayed when there is no Loki to
+  refuses as written (400) is not taken as no data, as a Prometheus one is:
+  see Builder's decisions. The rule isn't replayed when there is no Loki to
   ask; without `--grafana` or `--loki` its Loki queries are left as queries
   on another data source, and the rule is replayed in part.
 
@@ -465,6 +464,14 @@ Taken while building; each is open to the review.
   seconds late, as for a cloud's metrics (states.md, section 4).
 - **A Grafana rule's Loki through Grafana's proxy**, decided in review, as
   built.
+- **A 400 from Loki on a query beside the condition is not known, not no
+  data.** A 400 at replay time is a query that would have failed when Grafana
+  evaluated it too, so the rule was in Grafana's error state, which history
+  can't show; taking it as no data would make up a state. The rule says it
+  (`Failed`, "replayed in part": a query beside the condition failed). The
+  Prometheus path takes a 400 on a query outside the condition as no data,
+  as Grafana 13.3.1 was seen to (`internal/replay/replay.go`, `condition`,
+  the `http.StatusBadRequest` case): left as it is.
 
 ## Questions for review
 
