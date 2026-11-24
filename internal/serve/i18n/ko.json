@@ -2823,6 +2823,7 @@
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s 는 lapilli serve 가 Grafana 의 알림 상태 이력을 복사해 오는 출처예요. 다른 이름을 써 주세요",
  "Loki's ruler's API": "Loki 룰러 API",
  "it is a Loki ruler's rule whose group and namespace Lapilli can't name to write to: a person changes it where it is kept": "Loki 룰러의 규칙인데 그룹과 네임스페이스를 특정할 수 없어 Lapilli 가 직접 바꾸지 않아요. 사람이 규칙이 있는 곳에서 바꿔 주세요",
+ "Loki doesn't run a keep_firing_for written in a rule file: leave it out, or add the rule to Loki's ruler, through its API": "Loki 는 규칙 파일에 적은 keep_firing_for 를 실행하지 않아요. 빼거나, Loki 룰러의 API 로 규칙을 추가해 주세요",
  "its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE": "--changes-in 에 loki:NAMESPACE 로 적힌 Loki 룰러의 네임스페이스가 아니에요",
  "All %d went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "%d건 모두 판정을 가른 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
  "%d of them went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "그중 %d건은 판정을 가른 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",

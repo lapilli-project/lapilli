@@ -2823,6 +2823,7 @@
  "%s is the source lapilli serve copies Grafana's own alert state history in under: name another": "%s es la fuente bajo la que lapilli serve copia el historial de estados de alerta del propio Grafana: usa otro nombre",
  "Loki's ruler's API": "API del ruler de Loki",
  "it is a Loki ruler's rule whose group and namespace Lapilli can't name to write to: a person changes it where it is kept": "es una regla de un ruler de Loki cuyo grupo y espacio de nombres Lapilli no puede nombrar para escribir: la cambia una persona donde se guarda",
+ "Loki doesn't run a keep_firing_for written in a rule file: leave it out, or add the rule to Loki's ruler, through its API": "Loki no ejecuta un keep_firing_for escrito en un archivo de reglas: quítelo, o añada la regla al ruler de Loki, por su API",
  "its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE": "su namespace en el ruler de Loki no es uno de los que nombra --changes-in, como loki:NAMESPACE",
  "All %d went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "Los %d pasaron con creces los umbrales que los decidieron (%s), no un parpadeo en un borde: ocurrieron.",
  "%d of them went well past the bounds that decided them (%s), not a flicker at an edge: these happened.": "%d de ellos pasaron con creces los umbrales que los decidieron (%s), no un parpadeo en un borde: ocurrieron.",
