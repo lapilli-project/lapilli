@@ -347,7 +347,12 @@ Grafana gives, so a rule that isn't replayed says why.
 - **Changing Loki's rules** (changes.md). Loki's configuration API is
   Cortex's, which the ruler path writes; a proposal for a Loki rule was for
   a person. Built for v0.70.0 for the rules its API gives
-  ([rulers.md](rulers.md#lokis-ruler)); its rule files stay for a person.
+  ([rulers.md](rulers.md#lokis-ruler)). For v0.72.0 its rule files go the
+  git path too: a rule read with `--loki-rules` is edited in its file, as
+  LogQL, and a rule is added to a Loki rule file or to Loki's ruler
+  ([changes.md](changes.md)). What a file read as Loki's drops
+  (`keep_firing_for`, `query_offset`) stays in the file, which the edit
+  doesn't touch, and isn't added to it.
 
 ## Builder's decisions
 

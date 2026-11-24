@@ -415,7 +415,9 @@ agent with `propose`, kind `add`: one Prometheus alerting rule (`alert`,
 from every rule; where it goes, among the places serve offers (a group of
 a rule file under `--rules`, or a new group in it; a Grafana folder's
 group, and the data source its query reads; a group of a ruler's namespace
-`--changes-in` names, or a new group in it; CloudWatch's or Google Cloud's
+`--changes-in` names, or a new group in it (Loki's, as `loki:NAMESPACE`); a
+group of a Loki rule file under `--loki-rules`, or a new group in it, whose
+rule is LogQL; CloudWatch's or Google Cloud's
 `--alarms`, under a name `--changes-in` names there), and whom it tells,
 of whom the rules there already tell: in Grafana, a contact point of its
 group's rules, one of theirs where each of them names one, or none where
