@@ -59,10 +59,14 @@ api=${GITHUB_API:-${GITHUB_API_URL:-https://api.github.com}}
 case $GITHUB_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 case $GITHUB_REPO in */*) ;; *) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 host_api=$api
-# A merge queue's run (merge_group) is of the commit the queue made: the
-# branch its pull requests go into, at merge_group.base_sha, with them
-# (those ahead in the queue too) on it, merge_group.head_sha, which a
-# required status is read on. Both are taken from GitHub's event, signed
+# A merge queue's run (merge_group) is of the commit the queue made, the
+# branch its pull requests go into with them (those ahead in the queue
+# too) on it, merge_group.head_sha, which a required status is read on,
+# against the base its event names, merge_group.base_sha ("the merge
+# group's parent commit": of a group behind another, GitHub doesn't say
+# whether the branch's commit or the head of the group ahead, so keep the
+# queue's "Only merge non-failing pull requests" on, docs/pr-backtests.md
+# says). Both are taken from GitHub's event, signed
 # into the run, never from a ref a pull request can move; the checkout
 # must be that head (lib.sh's ci_queue), and GITHUB_REF the queue's own
 # ref for that branch. There is no pull request to comment on: the report

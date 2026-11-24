@@ -332,8 +332,12 @@ commit over its base. A run whose event has no `merge_group`, whose
 `merge_group.head_ref`), or whose `GITHUB_SHA` isn't the head, is refused
 at once, with no status; one whose checkout isn't the head, or whose base
 isn't an ancestor of it, fails, its status a failure on the head.
-[Stopping a merge](../../docs/pr-backtests.md#a-merge-queue) has the
-workflow.
+Keep the queue's "Only merge non-failing pull requests" on, GitHub's
+default, where the status is required: GitHub doesn't say whether a
+group's base, behind another group, is the branch's commit or the head
+of the group ahead, and with it off, a pull request whose group failed
+merges once a group behind it passes. [Stopping a
+merge](../../docs/pr-backtests.md#a-merge-queue) has the workflow.
 
 `fetch-depth: 2` fetches the merge commit's parents; `persist-credentials:
 false` keeps the job's token out of the checkout's git configuration,
