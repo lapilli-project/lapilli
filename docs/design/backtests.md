@@ -223,7 +223,9 @@ question 6, decided). Every other pinned claim is one value.
   body that says another number is refused, and a `merge_group` token
   whose `ref` isn't a queue's names no pull request, and is refused as a
   token. A group the queue builds again takes the place of the one
-  waiting ("Queueing and limits").
+  waiting ("Queueing and limits"). `run_number` and `workflow_ref` (its
+  file, before its `@ref`) are kept beside it, as they say which of a
+  workflow's runs is the later.
   `workflow_ref` names the workflow file at the pull request's own ref,
   which the pull request can change, so pinning it keeps out no one who
   can push a branch.
@@ -422,8 +424,10 @@ they need:
   a merge queue's group of a pull request: a group the queue built again
   (it does when a group ahead fails, or a pull request leaves the queue)
   takes the place of the one of the same entry, repository, queue's
-  branch and pull request, never of a pull request's own. Past them,
-  429 with `Retry-After`.
+  branch and pull request, never of a pull request's own. Either way only
+  one of another commit, and of a GitHub workflow only one of an earlier
+  run of it: two jobs of one run don't take each other's place, nor a run
+  that asks late a newer one's. Past them, 429 with `Retry-After`.
 - **An hour.** An entry's `hourly`, 30 unless given, from a bucket every
   replica shares (`ledger.Take`, as the token ports' rates are shared,
   `shareLimits`).
@@ -473,6 +477,9 @@ credential in CI, and the job's log says where it is in the queue.
   it (`repository_id`, schema 031), the pull request's number from GitHub's `ref`
   claim or as the job sent it, of a merge queue's run the branch the
   queue's ref names (`queue_branch`, schema 032; `''` for any other run's),
+  of a GitHub Actions job's its workflow's file and its run's number
+  (`workflow`, `run_number`, schema 032, from the token's `workflow_ref`
+  and `run_number`),
   the commit sent, its state, when it was
   asked, started and ended, the requests it made, a hash of its key, the
   files and expectations sent (gzipped, 4 MiB at most) until it ends, and
@@ -866,7 +873,11 @@ queue merges into, as the queue's `ref` names it, is kept on the row
 (`queue_branch`) to tell one queue's groups from another's, and shown
 nowhere: a queue is a ruleset's, a repository admin's to set, and its
 branch is held to what the recipes take as one (letters, digits and
-`. _ / -`, 255 at most), or the token is refused.
+`. _ / -`, 255 at most), or the token is refused. So is a GitHub
+workflow's file, as `workflow_ref` names it before its `@ref`
+(`workflow`), which a pull request can name, as it can add a workflow:
+512 bytes at most with nothing that doesn't show, or it is none, and its
+backtest supersedes by the commit alone.
 
 The paths for the review: the port's handler (`backtestHandler`), the
 token's check (`internal/signin`, `Keys`, the claims' pins), the body's
@@ -1153,7 +1164,24 @@ Where step 1 does otherwise than the sections above say, or says more:
   rather than taken without superseding, as the number would then be the
   job's word for a run of the repository's own context, and GitHub's queue
   makes no such run (the recipe refuses one whose `GITHUB_REF` isn't the
-  queue's ref too). The leader takes the oldest of the entry that started
+  queue's ref too). And since schema 032, a pull request's backtest or a
+  group's takes the place only of one of another commit (as the job sends
+  it): two jobs of one run, a `KEY` each, sent the same commit through one
+  entry, and the second took the first's place, failing it under its gate,
+  and in a merge queue its group with it. Of a GitHub Actions workflow,
+  only of one of an earlier run of it (`workflow` and `run_number`, the
+  token's: GitHub's contexts reference says a workflow's `run_number`
+  begins at 1 and increments with each new run, and doesn't change when a
+  run is run again; `run_id` is said only to be unique, and isn't taken
+  for an order). So a group's job that asks late, having waited for a
+  runner while the queue built the group again, or the earlier run run
+  again, takes no newer group's place, nor a pull request's run of an
+  earlier commit a newer commit's; a run of another workflow takes no
+  place of this one's. A row with no workflow, asked before 032, is taken
+  the place of as before; Forgejo's backtests, whose run isn't read, by
+  the commit alone; a GitHub token whose run can't be read plainly (a
+  `workflow_ref` with no `@ref`, a `run_number` that isn't a decimal)
+  supersedes none. The leader takes the oldest of the entry that started
   one least lately. One started twice whose leader stopped each time
   (`attempts`, in 023) fails, saying so; one that panics fails. What ended
   a day ago goes at each of the leader's rounds, the port on or not.

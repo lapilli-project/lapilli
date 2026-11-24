@@ -112,13 +112,15 @@ if [ "${GITHUB_EVENT_NAME:-}" = merge_group ]; then
     queue_refused "the event's merge_group.head_sha and base_sha aren't two commits' full hashes"
   fi
   # The branch the queue merges into, refs/heads/BRANCH: a name lib.sh
-  # takes as a branch's (letters, digits and . _ / -).
+  # takes as a branch's (letters, digits and . _ / -), 255 at most, as
+  # lapilli serve takes one from the queue's ref in the job's ID token.
   queue_branch=${queue_base_ref#refs/heads/}
   case $queue_branch in
-    "$queue_base_ref" | '' | -* | *[!A-Za-z0-9._/-]* | *..* | */ | /* | *//*)
-      queue_refused "the event's merge_group.base_ref isn't refs/heads/BRANCH, a branch's name of letters, digits and . _ / -"
-      ;;
+    "$queue_base_ref" | '' | -* | *[!A-Za-z0-9._/-]* | *..* | */ | /* | *//*) queue_branch= ;;
   esac
+  if [ -z "$queue_branch" ] || [ "${#queue_branch}" -gt 255 ]; then
+    queue_refused "the event's merge_group.base_ref isn't refs/heads/BRANCH, a branch's name of letters, digits and . _ / -, 255 at most"
+  fi
   # The queue's ref for that branch, as the event names it, GITHUB_REF:
   # refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA, N its pull request's
   # number; and GITHUB_SHA, its head.

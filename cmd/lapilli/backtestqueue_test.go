@@ -169,7 +169,9 @@ func TestBacktestActionMergeGroup(t *testing.T) {
 // as the comment is. After what the step wrote there, a block of its own;
 // past the 1 MiB GitHub takes of a step's summary, none, and the run is
 // as it would be. Without GITHUB_STEP_SUMMARY, with one that isn't a
-// file, or of another host's recipe, none is written.
+// file or is a symbolic link, or of another host's recipe, none is
+// written. RENDER and RENDER_PREPARE, the pull request's, run without
+// GitHub Actions' files a step writes to: the summary is the report alone.
 func TestBacktestRecipeStepSummary(t *testing.T) {
 	needRecipeTools(t)
 	prom := promStandIn(t)
@@ -237,6 +239,27 @@ func TestBacktestRecipeStepSummary(t *testing.T) {
 		}
 	}
 
+	// A symbolic link, to a file and to none: the report goes to neither.
+	target := fresh("")
+	link := filepath.Join(t.TempDir(), "step_summary")
+	os.Symlink(target, link)
+	dangling := filepath.Join(t.TempDir(), "step_summary")
+	os.Symlink(filepath.Join(t.TempDir(), "made"), dangling)
+	for name, f := range map[string]string{"a link to a file": link, "a link to none": dangling} {
+		out, err := queue("GITHUB_STEP_SUMMARY=" + f)
+		if err == nil || strings.Contains(out, added) || !strings.Contains(out, "GITHUB_STEP_SUMMARY is a symbolic link") {
+			t.Errorf("%s: %v\n%s", name, err, lastLines(out, 3))
+		}
+	}
+	if read(target) != "" {
+		t.Errorf("written through the link: %q", read(target))
+	}
+	if made, err := os.Readlink(dangling); err != nil {
+		t.Error(err)
+	} else if _, err := os.Lstat(made); err == nil {
+		t.Errorf("a file made where the dangling link leads: %s", made)
+	}
+
 	// 1 MiB a step: a report of a known size, with what the step wrote
 	// there to the byte, is added; a byte more, and it isn't.
 	fake := filepath.Join(t.TempDir(), "lapilli")
@@ -275,6 +298,35 @@ func TestBacktestRecipeStepSummary(t *testing.T) {
 	}
 	if _, body, _ := strings.Cut(rr.body(), "\n"); read(summary) != body || !strings.Contains(body, "`CheckoutErrors`") {
 		t.Errorf("the summary isn't the comment:\n%q\n%q", read(summary), body)
+	}
+	// RENDER and RENDER_PREPARE, the pull request's, find none of the files
+	// GitHub Actions has a step write to, to write a report of their own.
+	files := map[string]string{}
+	for _, v := range []string{"GITHUB_STEP_SUMMARY", "GITHUB_OUTPUT", "GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"} {
+		files[v] = fresh("")
+	}
+	render := filepath.Join(t.TempDir(), "render.sh")
+	os.WriteFile(render, []byte(`for v in GITHUB_STEP_SUMMARY GITHUB_OUTPUT GITHUB_ENV GITHUB_PATH GITHUB_STATE; do
+  eval "f=\${$v:-}"
+  [ -z "$f" ] || { echo "$v reached the pull request's command" >&2; printf '### Lapilli backtest, all good\n`+"```"+`\n' >>"$f"; }
+done
+[ "$1" = prepare ] || cat alerts/shop.yaml
+`), 0o644)
+	rr = newRecipeRun(t, backtestHosts[0], pr)
+	settings := []string{"RENDER=sh " + render, "RENDER_PREPARE=sh " + render + " prepare"}
+	for v, f := range files {
+		settings = append(settings, v+"="+f)
+	}
+	if out, err := rr.run(settings, args...); err != nil || rr.host.posts != 1 || strings.Contains(out, "reached the pull request's command") {
+		t.Fatalf("RENDER: %v, %d posted\n%s", err, rr.host.posts, lastLines(out, 5))
+	}
+	if _, body, _ := strings.Cut(rr.body(), "\n"); read(files["GITHUB_STEP_SUMMARY"]) != body {
+		t.Errorf("RENDER: the summary isn't the comment alone:\n%q\n%q", read(files["GITHUB_STEP_SUMMARY"]), body)
+	}
+	for v, f := range files {
+		if v != "GITHUB_STEP_SUMMARY" && read(f) != "" {
+			t.Errorf("RENDER wrote %s: %q", v, read(f))
+		}
 	}
 	// ... and one that changes no rule, which posts none.
 	same := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "README.md": "rules\n"})
@@ -315,6 +367,7 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 	ref := queueRef("main", "7", bad)
 	event := queueEvent(t, second, main, "main", ref, "main")
 	repo.git("checkout", "--quiet", "--detach", second)
+	long := "release/" + strings.Repeat("x", 248)
 
 	// GitHub's own says no merge group of the queue's: refused at once.
 	write := func(body string) string {
@@ -358,6 +411,9 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 		{"a ref of no head", queueRun(queueEvent(t, second, main, "main", "refs/heads/gh-readonly-queue/main/pr-7", "main"),
 			"refs/heads/gh-readonly-queue/main/pr-7", second), "isn't the queue's ref for main"},
 		{"GITHUB_SHA another", queueRun(event, ref, bad), "isn't the merge group's head"},
+		// 255 at most, as lapilli serve takes a branch from the queue's ref.
+		{"a branch of 256", queueRun(queueEvent(t, second, main, long, queueRef(long, "7", bad), "main"), queueRef(long, "7", bad), second),
+			"255 at most"},
 	} {
 		if c.says == "" {
 			// A base_ref of a tag, written into the event.
@@ -377,6 +433,14 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 				t.Errorf("%s, %v: %v, %d statuses, %d posted\n%s", c.name, settings, err, len(rr.host.statuses), rr.host.posts, lastLines(out, 3))
 			}
 		}
+	}
+
+	// A branch of 255 is taken.
+	taken := newRecipeRun(t, backtestHosts[0], repo)
+	long = long[:255]
+	taken.env = append(taken.env, queueRun(queueEvent(t, second, main, long, queueRef(long, "7", bad), "main"), queueRef(long, "7", bad), second)...)
+	if out, err := taken.run([]string{"PATHS=alerts", "PR="}, args...); err != nil || strings.Contains(out, "refused") {
+		t.Errorf("a branch of 255: %v\n%s", err, lastLines(out, 3))
 	}
 
 	// Of a merge group: the job fails, and its status is the one failure,

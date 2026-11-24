@@ -299,7 +299,8 @@
 # its report: its summary line as serve wrote it, or no report, and of the
 # rest only lines lapilli writes, any other left out (report_of_serve).
 # RENDER and RENDER_PREPARE run what the pull request holds, with the
-# job's rights: they run without the variables CIs keep tokens in, and with a
+# job's rights: they run without the variables CIs keep tokens in, nor
+# GitHub Actions' files a step writes to (GITHUB_STEP_SUMMARY, ...), and with a
 # HOME of their own for each commit, the base first, but can read whatever
 # the job can, the token's file included, and on Linux the environment the
 # job's processes started with (/proc/PID/environ). Run this only for pull requests
@@ -1582,11 +1583,16 @@ expect_tree() {
 
 # in_tree SIDE COMMAND: RENDER or RENDER_PREPARE, in a commit's files, with
 # a HOME of that commit's own (what Helm caches there is fetched once a
-# commit), without the variables CIs keep tokens in; REPO is the clone. It
-# runs what the pull request holds, with the job's rights.
+# commit), without the variables CIs keep tokens in, nor GitHub Actions'
+# files a step writes its summary, outputs, environment, PATH and state
+# to (a report of the pull request's own made to look like Lapilli's, a
+# summary filled to its 1 MiB, a fence left open before the report); REPO
+# is the clone. It runs what the pull request holds, with the job's
+# rights: a command that looks for those files can still find them.
 in_tree() {
   mkdir -p "$tmp/$1-home"
   (cd "$tmp/$1" && env -u GITHUB_TOKEN_FILE -u GITLAB_TOKEN_FILE -u BITBUCKET_TOKEN_FILE -u AZURE_DEVOPS_TOKEN_FILE \
+    -u GITHUB_STEP_SUMMARY -u GITHUB_OUTPUT -u GITHUB_ENV -u GITHUB_PATH -u GITHUB_STATE \
     -u GITEA_TOKEN_FILE -u LAPILLI_INPUT_TOKEN -u LAPILLI_ID_TOKEN -u LAPILLI_SERVE_TOKEN_FILE -u GITHUB_TOKEN -u GH_TOKEN -u GITEA_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
     -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u CI_JOB_TOKEN -u CI_JOB_JWT -u CI_JOB_JWT_V1 -u CI_JOB_JWT_V2 \
     -u CI_REGISTRY_PASSWORD -u CI_DEPLOY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_BUILD_TOKEN \
@@ -2573,10 +2579,15 @@ post() {
 # 1 MiB of a step's summary at most, and shows none of a step past it:
 # with what the step wrote there already, the report is added within it,
 # or not at all, the job's log saying so. A summary that isn't a file the
-# job can read gets none. Never fails: the comment, or the job's log, has
-# the report.
+# job can read gets none, nor one that is a symbolic link, which could
+# lead the report to another file, or make one where it leads. Never
+# fails: the comment, or the job's log, has the report.
 job_summary() {
   [ "${ci_summary:-}" = github ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  if [ -L "$GITHUB_STEP_SUMMARY" ]; then
+    say "GITHUB_STEP_SUMMARY is a symbolic link: the report isn't added to the step's summary"
+    return 0
+  fi
   had=0
   if [ -e "$GITHUB_STEP_SUMMARY" ]; then
     had=

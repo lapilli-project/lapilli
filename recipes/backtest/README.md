@@ -535,7 +535,11 @@ keep tokens in (`GITHUB_TOKEN_FILE` and the other scripts' token files,
 `GITHUB_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `CI_JOB_TOKEN`,
 `CI_REPOSITORY_URL`, `CI_DEPENDENCY_PROXY_PASSWORD`, `SYSTEM_ACCESSTOKEN`,
 `BITBUCKET_STEP_OIDC_TOKEN` and the like), so a chart doesn't take one by
-chance. That isn't a wall. What runs is the job's own user: it can read
+chance; nor GitHub Actions' files a step writes its summary, outputs,
+environment, `PATH` and state to (`GITHUB_STEP_SUMMARY`, `GITHUB_OUTPUT`,
+`GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STATE`), so that a report of the
+pull request's own doesn't stand beside the backtest's in the run's
+summary by chance. That isn't a wall. What runs is the job's own user: it can read
 any file the job can, the token's file among them; on Linux, the
 environment every process of the job started with, the recipe's and the
 CI's runner's included, under `/proc/PID/environ`, whatever was unset
@@ -896,9 +900,13 @@ finish within its `--backtest-timeout`; one that didn't come back within
 
 **A newer commit takes the place** of a backtest of the same pull request
 still waiting only on GitHub and Forgejo, whose ID token names the pull
-request (`ref`, `refs/pull/N/merge`). In GitHub's merge queue, a group
-the queue built again takes the place of the one of the same pull
-request and branch still waiting, by the queue's `ref`
+request (`ref`, `refs/pull/N/merge`): only of another commit, and on
+GitHub, of the same workflow, only of an earlier run of it (the token's
+`run_number`), so that two jobs of one run (a `KEY` each) never take
+each other's place, nor a run that asks late, or an earlier run run
+again, a newer one's. In GitHub's merge queue, a group the queue built
+again takes the place of the one of the same pull request and branch
+still waiting so, by the queue's `ref`
 (`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`), never a pull request's
 own backtest. GitLab's names a merge request's
 source branch, not its number, and Bitbucket's names no pull request, so

@@ -364,7 +364,8 @@ What GitHub's run says is held to the queue's, and a run that isn't is
 refused:
 
 - The event must hold a `merge_group`, its `head_sha` and `base_sha` two
-  commits' full hashes and its `base_ref` a branch's, `refs/heads/BRANCH`;
+  commits' full hashes and its `base_ref` a branch's, `refs/heads/BRANCH`,
+  of letters, digits and `. _ / -`, 255 at most, as serve takes one;
   `GITHUB_REF` must be the queue's ref for that branch, the event's
   `merge_group.head_ref`, `refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`;
   and `GITHUB_SHA` the group's head. Otherwise the job fails at once,
@@ -518,13 +519,22 @@ is refused as a token (401, serve's log saying why). The queue builds a
 group again when one ahead of it fails or a pull request leaves the queue,
 and its new run's backtest takes the place of the one of the same
 repository, branch and pull request still waiting, answered as superseded,
-as a pull request's newer commit takes the place of its own: the job of
-the group let go says so, and with a gate (`fail-missed`,
-`fail-on-expectations`) fails, its status a failure on that group's head,
-of a group built again a head the queue no longer reads. A group's
-backtest never takes the place of a pull request's own backtest of the
-same number, nor of a group of another pull request or of another branch's
-queue, nor a pull request's newer commit of a group's.
+as a pull request's newer commit takes the place of its own: only one of
+another commit (the group's head the job sends), and of the same workflow
+only one of an earlier run of it, by the token's `run_number`, which
+GitHub numbers up with each new run of a workflow and keeps when a run is
+run again. So two jobs of one run (a `key` each) never take each other's
+place; nor does a group's job that asks late, having waited for a runner
+while the queue built the group again, nor the earlier run run again, take
+the newer group's; nor a run of another workflow. The job of the group let
+go says so, and with a gate (`fail-missed`, `fail-on-expectations`,
+`expect-required`, `fail-on-error`) fails, its status a failure on that
+group's head: the head of a group the queue built again since, which it no
+longer reads. A group's backtest never takes the place of a pull request's
+own backtest of the same number, nor of a group of another pull request or
+of another branch's queue, nor a pull request's newer commit of a group's;
+a pull request's run of an earlier commit that asks late takes no newer
+commit's place either.
 
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate
