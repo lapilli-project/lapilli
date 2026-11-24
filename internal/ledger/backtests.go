@@ -88,10 +88,12 @@ type BacktestAsk struct {
 	Queue, PerTrust int
 	// Supersede says the pull request's number is the token's own (its
 	// ref): one waiting for the same entry, repository, pull request and
-	// QueueBranch is superseded (sameRepository), a merge group's by a
-	// group of the same pull request the same queue built again, never by
-	// a pull request's, nor a pull request's by it. A number the job said
-	// supersedes nothing.
+	// QueueBranch, of another commit, is superseded (sameRepository), a
+	// merge group's by a group of the same pull request the same queue
+	// built again, never by a pull request's, nor a pull request's by it.
+	// One of the same commit isn't: another job of the same run (a KEY of
+	// its own), or the same run again. A number the job said supersedes
+	// nothing.
 	Supersede bool
 }
 
@@ -143,7 +145,8 @@ func (l *Ledger) BacktestRoom(ctx context.Context, trust, token, repositoryID, r
 // back, again true, for the same body, and ErrBacktestToken for another:
 // the token's key is the check, so that replicas given it at once agree.
 // One waiting for the same entry, repository, pull request and queue's
-// branch is superseded, and said in superseded: the repository by its id,
+// branch, of another commit, is superseded, and said in superseded: the
+// repository by its id,
 // or, for a row with none, its name (sameRepository). Past the queue's bounds,
 // ErrBacktestsFull, and nothing is kept.
 func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) (b Backtest, again bool, superseded int, err error) {
@@ -184,8 +187,8 @@ func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) 
 		}
 		if a.Supersede && a.PullRequest > 0 {
 			res, err := t.ExecContext(t.ctx, `UPDATE backtests SET state = ?3, ended_at = ?4, body = NULL
-				WHERE trust = ?5 AND pull_request = ?6 AND state = ?7 AND queue_branch = ?8 AND `+sameRepository("?1", "?2"),
-				a.RepositoryID, a.Repository, BacktestSuperseded, now.Unix(), a.Trust, a.PullRequest, BacktestWaiting, a.QueueBranch)
+				WHERE trust = ?5 AND pull_request = ?6 AND state = ?7 AND queue_branch = ?8 AND commit_sha != ?9 AND `+sameRepository("?1", "?2"),
+				a.RepositoryID, a.Repository, BacktestSuperseded, now.Unix(), a.Trust, a.PullRequest, BacktestWaiting, a.QueueBranch, a.Commit)
 			if err != nil {
 				return err
 			}

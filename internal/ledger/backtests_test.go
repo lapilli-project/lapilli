@@ -18,9 +18,9 @@ import (
 	"lapilli.dev/internal/incident"
 )
 
-// ask is a backtest asked for, for the tests.
+// ask is a backtest asked for, for the tests, each of a commit of its own.
 func ask(id, trust string, pr int64, token string) BacktestAsk {
-	return BacktestAsk{Backtest: Backtest{ID: id, Trust: trust, Repository: "example/alerts", PullRequest: pr, Commit: "0123abcd", Rules: 2, Requests: 80, KeyHash: "k-" + id},
+	return BacktestAsk{Backtest: Backtest{ID: id, Trust: trust, Repository: "example/alerts", PullRequest: pr, Commit: "commit-" + id, Rules: 2, Requests: 80, KeyHash: "k-" + id},
 		Body: []byte(`{"after":[]}` + id), Token: token, BodyHash: "h-" + id, Until: t0.Add(2 * time.Hour), Queue: 20, PerTrust: 3, Supersede: pr > 0}
 }
 
@@ -711,6 +711,17 @@ func TestBacktestSupersedeQueue(t *testing.T) {
 	said := askQueue("g5c", "main", 5)
 	said.Supersede = false
 	asked(said, 0, "pull request 5's group, by the job's word")
+	// Two jobs of one run, each a KEY of its own, of the same commit: the
+	// second takes no place of the first's, a group's as a pull request's.
+	for _, branch := range []string{"main", ""} {
+		first, second := askQueue("key-prom-"+branch, branch, 9), askQueue("key-loki-"+branch, branch, 9)
+		second.Commit = first.Commit
+		asked(first, 0, "the first job's, into "+branch)
+		asked(second, 0, "the second job's, of the same commit, into "+branch)
+		if b, _, _ := l.Backtest(ctx, first.ID); b.State != BacktestWaiting {
+			t.Errorf("the first job's, into %q: %+v", branch, b)
+		}
+	}
 }
 
 // A ledger at 031 with a backtest waiting, in SQLite or, with

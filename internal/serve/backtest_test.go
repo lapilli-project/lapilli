@@ -165,6 +165,9 @@ const changedRules = `groups:
         for: 5m
 `
 
+// commitN is the full hash of a commit of the tests', n.
+func commitN(n int) string { return fmt.Sprintf("%040x", n) }
+
 func btBody(before, after string, more map[string]any) []byte {
 	m := map[string]any{"before": []map[string]string{{"path": "alerts/shop.yaml", "content": before}},
 		"after": []map[string]string{{"path": "alerts/shop.yaml", "content": after}}, "commit": "0123abcd"}
@@ -435,10 +438,18 @@ func TestBacktestMergeGroupSupersede(t *testing.T) {
 	b := btServer(t, nil, queueEntry, nil)
 	sha := func(c byte) string { return strings.Repeat(string(c), 40) }
 	n := 0
+	// Each of a commit of its own, a group's head.
 	ask := func(claims, body map[string]any) (int, map[string]any) {
 		t.Helper()
 		n++
 		claims["jti"] = fmt.Sprint("t", n)
+		body = maps.Clone(body)
+		if body == nil {
+			body = map[string]any{}
+		}
+		if _, ok := body["commit"]; !ok {
+			body["commit"] = commitN(n)
+		}
 		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(claims), btBody(ruleFile, changedRules, body))
 		return code, m
 	}
@@ -553,6 +564,35 @@ func TestBacktestMergeGroupSupersede(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 	queued("group 8, a SHA-256 head", queueClaims("main", "8", strings.Repeat("0", 64), nil), nil, 0)
+}
+
+// Two jobs of one run, each with a KEY of its own (one for Prometheus's
+// rules, one for Loki's), ask through one entry with the same pull
+// request, branch and commit: neither takes the other's place, a merge
+// group's as a pull request's. The first doesn't fail as superseded, nor
+// its group with it.
+func TestBacktestTwoJobsOneRun(t *testing.T) {
+	parallel(t)
+	b := btServer(t, nil, queueEntry, nil)
+	head := commitN(1)
+	for name, claims := range map[string]func() map[string]any{
+		"a merge group's":  func() map[string]any { return queueClaims("main", "5", commitN(2), nil) },
+		"a pull request's": func() map[string]any { return idptest.GitHub("123456789", "5") },
+	} {
+		for _, key := range []string{"prom", "loki"} {
+			c := claims()
+			c["jti"] = name + key
+			if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(c), btBody(ruleFile, changedRules, map[string]any{"commit": head})); code != http.StatusAccepted {
+				t.Fatalf("%s job %s: %d %v", name, key, code, m)
+			}
+		}
+	}
+	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] + b.s.btPort.ended[[2]string{"alerts-queue", ledger.BacktestSuperseded}]; n != 0 {
+		t.Errorf("%d superseded", n)
+	}
+	if by, err := b.s.l.BacktestsWaiting(context.Background()); err != nil || by["alerts"] != 2 || by["alerts-queue"] != 2 {
+		t.Errorf("waiting %v: %v", by, err)
+	}
 }
 
 // btPostCounting posts body with token, answering what btAsk does and
@@ -877,7 +917,7 @@ func TestBacktestQueueBounds(t *testing.T) {
 	// takes the place of the one waiting.
 	for i := range 2 {
 		tok := b.github(map[string]any{"jti": fmt.Sprint("s", i), "ref": "refs/pull/50/merge"})
-		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 || m["position"] != float64(3) {
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, map[string]any{"commit": commitN(50 + i)})); code != 202 || m["position"] != float64(3) {
 			t.Errorf("pull request 50, the %dth: %d %v", i+1, code, m)
 		}
 	}
@@ -1007,7 +1047,7 @@ func TestBacktestRefusedBeforeBody(t *testing.T) {
 			t.Fatalf("pull request %d: %d %v", 71+i, code, m)
 		}
 	}
-	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(map[string]any{"jti": "w9", "ref": "refs/pull/72/merge"}), btBody(ruleFile, changedRules, nil)); code != 202 {
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(map[string]any{"jti": "w9", "ref": "refs/pull/72/merge"}), btBody(ruleFile, changedRules, map[string]any{"commit": commitN(72)})); code != 202 {
 		t.Errorf("a newer commit of 72: %d %v", code, m)
 	}
 	if code, m, n := btPostCounting(t, b, b.github(map[string]any{"jti": "w8", "ref": "refs/pull/79/merge"}), btBody(ruleFile, changedRules, nil)); code != 429 || n != 0 {
@@ -1903,7 +1943,7 @@ func TestBacktestSupersedeUnnamed(t *testing.T) {
 		position float64
 	}{{"111", long, 0}, {"123456789", "example/" + "alerts​", 1}, {"123456789", long, 1}} {
 		tok := b.github(map[string]any{"jti": fmt.Sprint("u", i), "repository_id": c.id, "repository": c.name})
-		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 || m["position"] != c.position {
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, map[string]any{"commit": commitN(i + 1)})); code != 202 || m["position"] != c.position {
 			t.Fatalf("repository %s's pull request 42: %d %v", c.id, code, m)
 		}
 	}
@@ -1928,10 +1968,13 @@ func TestBacktestSupersedeUnnamed(t *testing.T) {
 func TestBacktestSupersedeRenamed(t *testing.T) {
 	parallel(t)
 	b := btServer(t, nil, "", nil)
+	// Each of a newer commit.
+	commits := 0
 	ask := func(jti, id, name string) (int, map[string]any) {
 		t.Helper()
+		commits++
 		tok := b.github(map[string]any{"jti": jti, "repository_id": id, "repository": name})
-		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil))
+		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, map[string]any{"commit": commitN(commits)}))
 		return code, m
 	}
 	superseded := func() int { return b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}] }
