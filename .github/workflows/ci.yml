@@ -40,10 +40,16 @@ jobs:
       - name: go.mod is tidy
         run: go mod tidy -diff
       - run: go vet ./...
-      # The serve tests take ten minutes on Linux and eighteen on macOS,
-      # where twenty left a slow runner's package unfinished (11-23):
-      # forty, so that a slow runner fails a test, not the clock.
-      - run: go test -timeout 40m ./...
+      # serve's tests that keep to their own ledger and server run in
+      # parallel (internal/serve/parallel_test.go), after those that run
+      # alone. Many of them wait more than they work: on a recipe's shell
+      # and curl, or on a second to pass. -parallel 8 lets more of them wait
+      # at once than a runner has cores: on three cores, serve's package
+      # took five minutes rather than seven. They took ten minutes on Linux
+      # and eighteen on macOS one at a time, where twenty left a slow
+      # runner's package unfinished (11-23): forty, so that a slow runner
+      # fails a test, not the clock. No test is bounded by time.
+      - run: go test -timeout 40m -parallel 8 ./...
 
   latest-go:
     name: test on the latest Go
@@ -56,10 +62,16 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      # The serve tests take ten minutes on Linux and eighteen on macOS,
-      # where twenty left a slow runner's package unfinished (11-23):
-      # forty, so that a slow runner fails a test, not the clock.
-      - run: go test -timeout 40m ./...
+      # serve's tests that keep to their own ledger and server run in
+      # parallel (internal/serve/parallel_test.go), after those that run
+      # alone. Many of them wait more than they work: on a recipe's shell
+      # and curl, or on a second to pass. -parallel 8 lets more of them wait
+      # at once than a runner has cores: on three cores, serve's package
+      # took five minutes rather than seven. They took ten minutes on Linux
+      # and eighteen on macOS one at a time, where twenty left a slow
+      # runner's package unfinished (11-23): forty, so that a slow runner
+      # fails a test, not the clock. No test is bounded by time.
+      - run: go test -timeout 40m -parallel 8 ./...
 
   postgres:
     # The ledger's, serve's and the command's tests with the ledger in
