@@ -13,7 +13,8 @@ import (
 type Planned struct {
 	// By are the requests by the history asked: "" the one Run is given
 	// (--prometheus), "loki" a Loki ruler's rules' Loki, and grafana/UID
-	// the Loki data source a Grafana rule reads, by its uid.
+	// the Loki data source a Grafana rule reads, or has a query beside its
+	// condition on, by its uid.
 	By map[string]int
 	// Requests are By's, in all.
 	Requests int
