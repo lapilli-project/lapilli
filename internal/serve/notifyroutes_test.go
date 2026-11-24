@@ -187,7 +187,7 @@ func TestNoRoutesAsBefore(t *testing.T) {
 			t.Fatalf("%s: %d and %d", d, len(b[d]), len(r[d]))
 		}
 		for i := range b[d] {
-			if x, y := withoutAt(t, b[d][i].Body), withoutAt(t, r[d][i].Body); x != y || b[d][i].Event != r[d][i].Event || b[d][i].ID != r[d][i].ID {
+			if x, y := withoutClock(t, b[d][i].Body), withoutClock(t, r[d][i].Body); x != y || b[d][i].Event != r[d][i].Event || b[d][i].ID != r[d][i].ID {
 				t.Errorf("%s %d: %s\nnot %s", d, i, y, x)
 			}
 		}
@@ -199,15 +199,27 @@ func TestNoRoutesAsBefore(t *testing.T) {
 	}
 }
 
-// withoutAt is a notice's body with its time, which the clock gives, left
-// out.
-func withoutAt(t *testing.T, b []byte) string {
+// withoutClock is a notice's body without the times the clock gave it:
+// when it was written, and when what it tells of was created and last
+// changed. Two servers written to a moment apart differ in those alone.
+func withoutClock(t *testing.T, b []byte) string {
 	t.Helper()
 	var m map[string]any
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	delete(m, "at")
+	var strip func(map[string]any)
+	strip = func(m map[string]any) {
+		for _, k := range []string{"at", "created", "updated"} {
+			delete(m, k)
+		}
+		for _, v := range m {
+			if in, ok := v.(map[string]any); ok {
+				strip(in)
+			}
+		}
+	}
+	strip(m)
 	out, _ := json.Marshal(m)
 	return string(out)
 }
