@@ -22,6 +22,10 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "the fresh ledger:", err)
 		os.Exit(1)
 	}
+	// SQLite's connection hook is registered before any test opens a
+	// ledger: registered by the first test that counts, it would be written
+	// while tests running in parallel open theirs.
+	watchLedgers()
 	code := m.Run()
 	done()
 	os.Exit(code)
