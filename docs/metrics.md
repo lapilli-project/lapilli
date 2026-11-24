@@ -81,6 +81,7 @@ problem ([What an alert says](check-content.md)).
 | Metric | Labels | What it counts |
 |---|---|---|
 | `lapilli_incidents` | `state`, `source` | Incidents in the seven days, by `state`: `caught`, `noisy_only` (caught only by noisy rules) or `missed`; and `source`: `written` (written down) or `impact` (a window `--impact` found). All six series, 0 among them |
+| `lapilli_incidents_not_known` | `source` | Of the `missed` incidents, those no rule replayed caught while a rule couldn't be replayed, which may have caught them: they are counted as missed, but whether they were isn't known. Both series, 0 among them |
 | `lapilli_incident_detection_delay_seconds` | `incident` | From each caught incident's start to the first alert of a rule that isn't noisy; negative when the alert came first. None for an incident missed or caught only by noisy rules |
 | `lapilli_incident_state` | `incident`, `source`, `signal`, `state` | 1 for each incident of the seven days, in its state, by the rules' stones in its week. `signal` is on a named signal's windows |
 | `lapilli_incident_lead_seconds` | `incident`, `source`, `signal` | How long before each caught incident's start the first alert of a rule that isn't noisy came, negative when after: the delay the other way round ([Lead](numbers.md#lead)) |

@@ -348,6 +348,10 @@ type IncidentResult struct {
 	// over, their condition having held in it (Judged.After), each by its
 	// first such firing: Delay from its start, as CaughtBy's.
 	FiredAfter []Catch `json:"fired_after,omitempty"`
+	// NotKnown says no rule replayed caught it, while a rule judged
+	// couldn't be replayed (its Unsupported set, and not ByHistory), which
+	// may have caught it. It is still counted by Missed.
+	NotKnown bool `json:"not_known,omitempty"`
 }
 
 // ImpactShort is of the rules judged, those that fire only once their
@@ -745,9 +749,21 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		return x.Rule < y.Rule
 	})
+	rep.MarkNotKnown()
 	rep.countEpisodes(o, at)
 	rep.Credit(nil)
 	return rep
+}
+
+// MarkNotKnown sets NotKnown on each incident nothing caught, while a rule
+// couldn't be replayed: that rule may have caught it. A rule judged from
+// its history (ByHistory) was judged, and doesn't count. Judge does it; a
+// caller that sets a rule's Source after Judge does it again.
+func (r *Report) MarkNotKnown() {
+	unsure := slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" && !rr.ByHistory() })
+	for i := range r.Incidents {
+		r.Incidents[i].NotKnown = len(r.Incidents[i].CaughtBy) == 0 && unsure
+	}
 }
 
 // sortCatches puts catches in order of their delay, then of their rule.

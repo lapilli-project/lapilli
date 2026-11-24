@@ -73,7 +73,7 @@ func TestCompareMarkdown(t *testing.T) {
 		"| `Flappy` | `ticket` → – | 3 → – | 0 → – | 3 → – | 0% → – | 1 → – |\n",
 		"| `SearchLatency` | – → – | – → 1 | – → 1 | – → 0 | – → 100% | – → 0 |\n",
 		"| `Typo` | – | ? → 0 | ? → 0 | ? → 0 | ? → – | ? → 0 |\n",
-		"#### Could not replay 1 rules\n\n- `Typo`, before: `query failed: bad_data`\n",
+		"#### Could not replay 1 rule\n\n- `Typo`, before: `query failed: bad_data`\n",
 		"<details><summary>1 changed rules keep the same stones</summary>\n\n- `CheckoutErrors`\n\n</details>\n",
 		"#### Incidents caught differently\n\n| Incident | Start | Before | After |\n| --- | --- | --- | --- |\n" +
 			"| `INC-1` `Checkout errors` | 2026-10-26 10:40 | `CheckoutErrors` +2m | `CheckoutErrors` +20m |\n" +

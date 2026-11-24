@@ -257,7 +257,7 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 			same++
 		}
 	}
-	fmt.Fprintf(w, "%d rules fired alike, %d differ, %d fired neither way.\n", same, len(differ), c.Silent)
+	fmt.Fprintf(w, "%s fired alike, %d differ, %d fired neither way.\n", plural(same, "rule", "rules"), len(differ), c.Silent)
 	if c.Unfinished {
 		fmt.Fprintln(w, "Time ran out before every rule was compared: these are the rules that were.")
 	}
@@ -277,7 +277,7 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 		}
 	}
 	if len(unsupported) > 0 {
-		fmt.Fprintf(w, "\nCould not replay %d rules:\n", len(unsupported))
+		fmt.Fprintf(w, "\nCould not replay %s:\n", plural(len(unsupported), "rule", "rules"))
 		for _, r := range unsupported {
 			fmt.Fprintf(w, "  %s: %s\n", Clean(r.Rule), Clean(r.Unsupported))
 		}

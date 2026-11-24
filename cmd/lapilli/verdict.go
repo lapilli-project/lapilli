@@ -1775,6 +1775,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 				rep.Rules[i].Source = verdict.GrafanaSource
 			}
 		}
+		rep.MarkNotKnown()
 		for _, v := range versions {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)

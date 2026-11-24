@@ -86,6 +86,10 @@ lapilli_incidents{state="noisy_only",source="written"} 0
 lapilli_incidents{state="noisy_only",source="impact"} 0
 lapilli_incidents{state="missed",source="written"} 0
 lapilli_incidents{state="missed",source="impact"} 1
+# HELP lapilli_incidents_not_known Of the missed incidents, those no rule replayed caught while a rule couldn't be replayed, which may have: missed isn't known.
+# TYPE lapilli_incidents_not_known gauge
+lapilli_incidents_not_known{source="written"} 0
+lapilli_incidents_not_known{source="impact"} 0
 # HELP lapilli_incident_detection_delay_seconds From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.
 # TYPE lapilli_incident_detection_delay_seconds gauge
 lapilli_incident_detection_delay_seconds{incident="impact-1"} -600

@@ -162,7 +162,7 @@ func TestFiredAfterText(t *testing.T) {
 	for _, want := range []string{
 		"✗ nothing in time; after its end: LB5xx +3m",
 		"! 1 of the black firings came after an incident they agree with was over (LB5xx 1)",
-		"✗ 1 of 1 incidents had no alert.\n  1 of them had one only once they were over (\"after its end\" above).",
+		"✗ 1 of 1 incident had no alert.\n  1 of them had one only once they were over (\"after its end\" above).",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)

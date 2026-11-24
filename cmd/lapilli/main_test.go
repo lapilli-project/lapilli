@@ -247,7 +247,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Typo: query failed: HTTP 400: bad_data: parse error"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --impact impact",
-			code: 0, stdout: "✗ 1 of 2 incidents had no alert."},
+			code: 0, stdout: "? 1 of 2 incidents had no alert from the 2 rules replayed: the 1 that couldn't be replayed may have caught them."},
 		{args: "verdict --rules " + rulesFile + " --rule ^Quiet$ --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "1 rules never fired."},
 		{args: "verdict --rules " + slowRules + " --prometheus http://p --incidents " + incidents + " --timeout 1s --tz UTC",
@@ -551,7 +551,7 @@ func TestCheckReplay(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{`Replay beside ALERTS{alertstate="firing"}`, "1 firings alike, 0 only in the replay, 0 only in what really fired: 100% alike.",
-		"1 rules fired alike, 0 differ, 1 fired neither way.", "Typo", "Really fired, but no rule given has the name: Watchdog."} {
+		"1 rule fired alike, 0 differ, 1 fired neither way.", "Typo", "Really fired, but no rule given has the name: Watchdog."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}

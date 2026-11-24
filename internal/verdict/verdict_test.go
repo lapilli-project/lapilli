@@ -110,14 +110,14 @@ func TestText(t *testing.T) {
 	}
 	out := b.String()
 	for _, want := range []string{
-		"6 firings, 1 incidents written down, 1 more found by --impact",
+		"6 firings, 1 incident written down, 1 more found by --impact",
 		"RULE",
 		"1 rules never fired.",
 		"Broken: classic_conditions expressions",
 		"INC-1 Checkout errors",
 		"CheckoutErrors +2m",
-		"✗ nothing fired",
-		"✗ 1 of 2 incidents had no alert.",
+		"? not known",
+		"? 1 of 2 incidents had no alert from the 4 rules replayed: the 1 that couldn't be replayed may have caught them.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text lacks %q:\n%s", want, out)

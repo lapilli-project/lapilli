@@ -29,8 +29,8 @@ func TestPartialTop(t *testing.T) {
 	var b strings.Builder
 	partial(&b, us, len(r.Rules), true)
 	want := "! 13 of 16 rules couldn't be replayed, and are left out of what follows:\n" +
-		"  Late: not finished before the timeout\n  R01: query failed: the history couldn't be read: HTTP 429: slow down\n"
-	if !strings.HasPrefix(b.String(), want) || !strings.HasSuffix(b.String(), "  R09: query failed: the history couldn't be read: HTTP 429: slow down\n  and 3 more, listed below\n") ||
+		"  Late: not finished before the timeout\n  R01, R02, R03, R04, R05, R06, R07, R08, R09: query failed: the history couldn't be read: HTTP 429: slow down\n  and 3 more, listed below\n"
+	if b.String() != want ||
 		strings.Contains(b.String(), "cpu-high") || strings.Contains(b.String(), "Typo") {
 		t.Errorf("got\n%s", b.String())
 	}
@@ -89,7 +89,7 @@ func TestPartialCompare(t *testing.T) {
 	}
 	out := b.String()
 	if !strings.Contains(out, "! 13 rules couldn't be replayed") || !strings.Contains(out, "  and 3 more, all in --json\n") ||
-		!strings.Contains(out, "  Changed (after): ") || !strings.Contains(out, "  S08: ") || strings.Contains(out, "  S09: ") ||
+		!strings.Contains(out, "  Changed (before), Changed (after), S00, ") || !strings.Contains(out, ", S08: ") || strings.Contains(out, "S09") ||
 		strings.Contains(out, "listed below") {
 		t.Errorf("got\n%s", out)
 	}
@@ -104,7 +104,7 @@ func TestTextFromLedger(t *testing.T) {
 	if err := Text(&b, r, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(b.String(), "left out of what follows") || !strings.Contains(b.String(), "Could not replay 1 rules:\n  B: "+rules.HistoryUnread) {
+	if strings.Contains(b.String(), "left out of what follows") || !strings.Contains(b.String(), "Could not replay 1 rule:\n  B: "+rules.HistoryUnread) {
 		t.Errorf("got\n%s", b.String())
 	}
 	r.Unreplayed = r.UnreplayedRules()

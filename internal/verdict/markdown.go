@@ -163,7 +163,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	if len(p.broken) > 0 {
 		// A row a rule, its reasons on each side in it: a note that leaves
 		// rows out counts rules.
-		broken := mdPart{head: fmt.Sprintf("#### Could not replay %d rules\n\n", len(p.broken)), foot: "\n", noun: "rules that couldn't be replayed"}
+		broken := mdPart{head: fmt.Sprintf("#### Could not replay %s\n\n", plural(len(p.broken), "rule", "rules")), foot: "\n", noun: "rules that couldn't be replayed"}
 		for _, rc := range p.broken {
 			var why []string
 			for _, side := range []struct {
