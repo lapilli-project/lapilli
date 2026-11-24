@@ -1,0 +1,300 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.8",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "grafana_folder.ops",
+          "mode": "managed",
+          "type": "grafana_folder",
+          "name": "ops",
+          "provider_name": "registry.terraform.io/grafana/grafana",
+          "schema_version": 0,
+          "values": {
+            "uid": "ops-folder",
+            "title": "Ops"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "grafana_rule_group.checkout",
+          "mode": "managed",
+          "type": "grafana_rule_group",
+          "name": "checkout",
+          "provider_name": "registry.terraform.io/grafana/grafana",
+          "schema_version": 0,
+          "values": {
+            "org_id": "1",
+            "name": "checkout",
+            "folder_uid": "ops-folder",
+            "interval_seconds": 60,
+            "disable_provenance": false,
+            "rule": [
+              {
+                "uid": "checkout-errors",
+                "name": "Checkout errors high",
+                "condition": "C",
+                "for": "5m",
+                "keep_firing_for": "",
+                "labels": {
+                  "severity": "page",
+                  "team": "shop"
+                },
+                "annotations": {
+                  "summary": "Checkout errors at {{ $values.C }}"
+                },
+                "no_data_state": "NoData",
+                "exec_err_state": "Error",
+                "is_paused": false,
+                "missing_series_evals_to_resolve": 0,
+                "notification_settings": [],
+                "record": [],
+                "data": [
+                  {
+                    "ref_id": "A",
+                    "datasource_uid": "prom-main",
+                    "query_type": "",
+                    "relative_time_range": [
+                      {
+                        "from": 600,
+                        "to": 0
+                      }
+                    ],
+                    "model": "{\"expr\":\"sum(rate(checkout_errors_total[5m]))\",\"instant\":true,\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"A\"}"
+                  },
+                  {
+                    "ref_id": "B",
+                    "datasource_uid": "prom-main",
+                    "query_type": "",
+                    "relative_time_range": [
+                      {
+                        "from": 600,
+                        "to": 0
+                      }
+                    ],
+                    "model": "{\"expr\":\"sum(rate(checkout_requests_total[5m]))\",\"instant\":true,\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"B\"}"
+                  },
+                  {
+                    "ref_id": "C",
+                    "datasource_uid": "__expr__",
+                    "query_type": "",
+                    "relative_time_range": [
+                      {
+                        "from": 600,
+                        "to": 0
+                      }
+                    ],
+                    "model": "{\"type\":\"math\",\"expression\":\"$A / $B > 0.05\",\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"C\"}"
+                  }
+                ]
+              },
+              {
+                "uid": "checkout-slow",
+                "name": "Checkout slow",
+                "condition": "C",
+                "for": "10m",
+                "keep_firing_for": "",
+                "labels": {
+                  "severity": "ticket"
+                },
+                "annotations": {},
+                "no_data_state": "OK",
+                "exec_err_state": "Alerting",
+                "is_paused": true,
+                "missing_series_evals_to_resolve": 0,
+                "notification_settings": [],
+                "record": [],
+                "data": [
+                  {
+                    "ref_id": "A",
+                    "datasource_uid": "prom-main",
+                    "query_type": "",
+                    "relative_time_range": [
+                      {
+                        "from": 600,
+                        "to": 0
+                      }
+                    ],
+                    "model": "{\"expr\":\"histogram_quantile(0.95, sum by (le) (rate(checkout_seconds_bucket[5m])))\",\"instant\":true,\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"A\"}"
+                  },
+                  {
+                    "ref_id": "B",
+                    "datasource_uid": "__expr__",
+                    "query_type": "",
+                    "relative_time_range": [
+                      {
+                        "from": 600,
+                        "to": 0
+                      }
+                    ],
+                    "model": "{\"type\":\"reduce\",\"expression\":\"A\",\"reducer\":\"last\",\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"B\"}"
+                  },
+                  {
+                    "ref_id": "C",
+                    "datasource_uid": "__expr__",
+                    "query_type": "",
+                    "relative_time_range": [
+                      {
+                        "from": 600,
+                        "to": 0
+                      }
+                    ],
+                    "model": "{\"type\":\"threshold\",\"expression\":\"B\",\"conditions\":[{\"evaluator\":{\"params\":[2],\"type\":\"gt\"}}],\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"C\"}"
+                  }
+                ]
+              }
+            ]
+          },
+          "sensitive_values": {}
+        }
+      ],
+      "child_modules": [
+        {
+          "address": "module.edge",
+          "resources": [
+            {
+              "address": "data.grafana_data_source.prom",
+              "mode": "data",
+              "type": "grafana_data_source",
+              "name": "prom",
+              "values": {
+                "uid": "prom-main"
+              },
+              "sensitive_values": {}
+            },
+            {
+              "address": "module.edge.grafana_rule_group.edge",
+              "mode": "managed",
+              "type": "grafana_rule_group",
+              "name": "edge",
+              "provider_name": "registry.terraform.io/grafana/grafana",
+              "schema_version": 0,
+              "values": {
+                "org_id": "1",
+                "name": "edge",
+                "folder_uid": "ops-folder",
+                "interval_seconds": 120,
+                "disable_provenance": false,
+                "rule": [
+                  {
+                    "uid": "edge-down",
+                    "name": "Edge down",
+                    "condition": "C",
+                    "for": "2m",
+                    "labels": {
+                      "severity": "page"
+                    },
+                    "annotations": {},
+                    "no_data_state": "Alerting",
+                    "exec_err_state": "Error",
+                    "is_paused": false,
+                    "notification_settings": [
+                      {
+                        "contact_point": "pager",
+                        "group_by": [
+                          "alertname"
+                        ],
+                        "group_wait": "30s"
+                      }
+                    ],
+                    "record": [],
+                    "data": [
+                      {
+                        "ref_id": "A",
+                        "datasource_uid": "prom-main",
+                        "query_type": "",
+                        "relative_time_range": [
+                          {
+                            "from": 600,
+                            "to": 0
+                          }
+                        ],
+                        "model": "{\"expr\":\"up{job=\\\"edge\\\"}\",\"instant\":true,\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"A\"}"
+                      },
+                      {
+                        "ref_id": "B",
+                        "datasource_uid": "__expr__",
+                        "query_type": "",
+                        "relative_time_range": [
+                          {
+                            "from": 600,
+                            "to": 0
+                          }
+                        ],
+                        "model": "{\"type\":\"reduce\",\"expression\":\"A\",\"reducer\":\"min\",\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"B\"}"
+                      },
+                      {
+                        "ref_id": "C",
+                        "datasource_uid": "__expr__",
+                        "query_type": "",
+                        "relative_time_range": [
+                          {
+                            "from": 600,
+                            "to": 0
+                          }
+                        ],
+                        "model": "{\"type\":\"threshold\",\"expression\":\"B\",\"conditions\":[{\"evaluator\":{\"params\":[1],\"type\":\"lt\"}}],\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"C\"}"
+                      }
+                    ]
+                  },
+                  {
+                    "uid": "edge-rate",
+                    "name": "edge requests per second",
+                    "condition": "",
+                    "for": "0",
+                    "labels": {},
+                    "annotations": {},
+                    "no_data_state": "NoData",
+                    "exec_err_state": "Error",
+                    "is_paused": false,
+                    "notification_settings": [],
+                    "record": [
+                      {
+                        "metric": "edge_requests_per_second",
+                        "from": "A",
+                        "target_datasource_uid": "prom-main"
+                      }
+                    ],
+                    "data": [
+                      {
+                        "ref_id": "A",
+                        "datasource_uid": "prom-main",
+                        "query_type": "",
+                        "relative_time_range": [
+                          {
+                            "from": 600,
+                            "to": 0
+                          }
+                        ],
+                        "model": "{\"expr\":\"sum(rate(edge_requests_total[1m]))\",\"instant\":true,\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"A\"}"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "sensitive_values": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "grafana_rule_group.old",
+      "mode": "managed",
+      "type": "grafana_rule_group",
+      "name": "old",
+      "change": {
+        "actions": [
+          "delete"
+        ],
+        "before": {
+          "name": "old"
+        },
+        "after": null
+      }
+    }
+  ]
+}

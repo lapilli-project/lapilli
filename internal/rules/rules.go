@@ -40,6 +40,10 @@ type Rule struct {
 	Alert  string
 	Group  string
 	Source string // the file it came from
+	// Address is, for a rule read from Terraform's JSON, the address of the
+	// grafana_rule_group it is in (module path included), as Terraform
+	// names it; "" for any other.
+	Address string
 	// Expr, for a Prometheus rule, returns a series while the condition
 	// holds.
 	Expr string
@@ -513,7 +517,7 @@ func (r Rule) Slowest() time.Duration {
 var ErrNoneInDir = errors.New("no file in it holds alert rules")
 
 // errNoRules is a document with no alert rules in it.
-var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, a cloud's rule groups or alerting policies, or a ConfigMap holding one")
+var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, Terraform's JSON of grafana_rule_group (terraform show -json), a cloud's rule groups or alerting policies, or a ConfigMap holding one")
 
 // Load reads every alert rule in a file, or in the files of a directory and
 // those below it, such as a ConfigMap mounted in a pod. In a directory,
@@ -908,6 +912,10 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)
 		}
 		return rs, true, nil
+	case isTerraform(doc):
+		// terraform show -json, of a plan or a state: the rule groups the
+		// Grafana provider manages.
+		return terraformRules(ctx, doc, rec)
 	case doc["apiVersion"] != nil && hasGrafanaRules(doc):
 		rs, err := grafana(ctx, doc, rec)
 		return rs, true, err
