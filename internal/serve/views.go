@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -690,7 +689,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Black = l.Firings - l.White
 		judged := l.Firings - l.Unjudged
 		l.Noisy = verdict.IsNoisy(judged, l.White, at)
-		l.NoisyFirings, l.NoisyShare = at.Firings, strconv.FormatFloat(100*at.Precision, 'f', -1, 64)+"%"
+		l.NoisyFirings, l.NoisyShare = at.Firings, percentOf(at.Precision)
 		l.NoRecord = l.Firings > 0 && judged == 0
 		l.Unrecorded = !l.Noisy && l.Unjudged >= at.Firings
 		l.Precision = pct(l.White, judged)

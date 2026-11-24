@@ -154,3 +154,13 @@ func TestLooseCatchServeNamesTheLabelsLacked(t *testing.T) {
 		t.Errorf("rule page of a rule with the service: %s", body)
 	}
 }
+
+// The bar for noisy is told as a round percentage: 0.29 is 29%, not
+// 28.999999999999996%.
+func TestPercentOf(t *testing.T) {
+	for p, want := range map[float64]string{0.29: "29%", 0.07: "7%", 0.125: "12.5%", 0.5: "50%", 0.3: "30%", 0.1234: "12.34%", 1: "100%"} {
+		if got := percentOf(p); got != want {
+			t.Errorf("percentOf(%v) = %q, want %q", p, got, want)
+		}
+	}
+}
