@@ -263,6 +263,19 @@ func (l Labels) Agree(other map[string]string, names []string) bool {
 	return true
 }
 
+// Lacks reports whether the other labels lack one of the names that these
+// have: what Agree lets through, that has nothing to disagree with.
+func (l Labels) Lacks(other map[string]string, names []string) bool {
+	for _, name := range names {
+		if _, ok := other[name]; !ok {
+			if _, mine := l[name]; mine {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // MaxFile is the most of a file of incidents Load reads: more is refused.
 // Years of incidents are a few megabytes.
 const MaxFile = 64 << 20

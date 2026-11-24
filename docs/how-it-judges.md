@@ -154,7 +154,13 @@ the incident and its end, and agrees with it on any `--match` labels both
 carry: `--match service` keeps an alert about one service from catching an
 incident in another just because they came at the same time. An incident that
 lists several values agrees with any of them, and an alert without the label
-(a database or a node) is not held to it. An alert that was already firing before that caught nothing: it was on
+(a database or a node) is not held to it. That catch is marked `(no service)`,
+for `--match service` (`loose` in `--json`), and the report says after the
+incidents table how many catches were so and by which rules, for such a rule
+catches every service's incident and its precision shows it. With
+`--match-strict` a firing that lacks a `--match` label the incident has doesn't
+catch it; a rule that also fired with the label caught it as any other.
+An alert that was already firing before that caught nothing: it was on
 anyway. A firing that comes within `--refire` (1h) of the same alert resolving
 is counted as refired.
 

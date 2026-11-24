@@ -212,7 +212,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 				if len(cs) == 0 {
 					return "✗ nothing fired"
 				}
-				return mdCatches(cs)
+				return mdCatches(cs, c.matchOf())
 			}
 			incs := mdPart{head: "#### Incidents caught differently\n\n" + mdRow([]string{"Incident", "Start", "Before", "After"}) +
 				mdRow([]string{"---", "---", "---", "---"}), foot: "\n", noun: "incidents"}
@@ -237,10 +237,10 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 
 // mdCatches is the rules that caught an incident, each with how long it
 // took, for a cell of a table.
-func mdCatches(cs []Catch) string {
+func mdCatches(cs []Catch, match []string) string {
 	var out []string
 	for _, k := range cs {
-		out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marks())
+		out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marks(match))
 	}
 	return strings.Join(out, ", ")
 }
@@ -267,7 +267,7 @@ func missedPart(c *Comparison, loc *time.Location) mdPart {
 		if ic.Title != "" {
 			name += " " + md(ic.Title, 200, true)
 		}
-		part.rows = append(part.rows, mdRow([]string{name, ic.Start.In(loc).Format("2006-01-02 15:04"), mdCatches(ic.Before)}))
+		part.rows = append(part.rows, mdRow([]string{name, ic.Start.In(loc).Format("2006-01-02 15:04"), mdCatches(ic.Before, c.matchOf())}))
 	}
 	return part
 }

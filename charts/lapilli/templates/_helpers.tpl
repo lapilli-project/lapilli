@@ -21,6 +21,7 @@ values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
 {{- $s := .Values.serve -}}
 {{- include "lapilli.bool" (dict "in" .Values "key" "linkedOnly" "name" "linkedOnly") -}}
+{{- include "lapilli.bool" (dict "in" .Values "key" "matchStrict" "name" "matchStrict") -}}
 {{- /* A Loki's, its ruler's rules, and Grafana's history: 0.70.0's. */ -}}
 {{- include "lapilli.fill" (dict "in" .Values "key" "loki" "with" (dict "url" "" "tenant" "")) -}}
 {{- include "lapilli.fill" (dict "in" .Values.loki "key" "tokenSecret" "with" (dict "name" "" "key" "token")) -}}
@@ -738,6 +739,9 @@ the rules and the incidents are, and how to judge. */}}
 {{- end }}
 {{- range .Values.match }}
 - {{ printf "--match=%s" . | quote }}
+{{- end }}
+{{- if .Values.matchStrict }}
+- --match-strict
 {{- end }}
 {{- if .Values.linkedOnly }}
 - --linked-only

@@ -631,7 +631,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		return err
 	}
 	defer del.Close()
-	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked) VALUES (?, ?, ?, ?)")
+	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked, loose) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -644,6 +644,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		}
 		first := map[int64]int64{}
 		linked := map[int64]bool{} // the rules a firing it lists caught it with
+		proper := map[int64]bool{} // the rules a firing that isn't loose caught it with
 		for rows.Next() {
 			var rule, sid, start int64
 			var text, name, unrelated string
@@ -663,11 +664,12 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			}
 			// With its rule, whose entry may keep it from a signal's
 			// windows (docs/design/signals.md, "Judged by its own match").
-			caught, link := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			caught, link, loose := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
 			if !caught {
 				continue
 			}
 			linked[rule] = linked[rule] || link
+			proper[rule] = proper[rule] || !loose
 			d := start - in.Start.Unix()
 			if have, ok := first[rule]; !ok || d < have {
 				first[rule] = d
@@ -681,7 +683,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			return err
 		}
 		for _, rule := range slices.Sorted(maps.Keys(first)) {
-			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule]); err != nil {
+			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule], !proper[rule]); err != nil {
 				return err
 			}
 		}

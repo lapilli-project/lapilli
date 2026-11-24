@@ -329,7 +329,7 @@ func MissedText(w io.Writer, c *Comparison, loc *time.Location) error {
 	fmt.Fprintf(w, "\nThe run fails (--fail-missed): %d incidents a rule caught before the change are caught by no rule after it%s.\n", len(c.Missed), c.leftAloneToo())
 	rows := [][]string{{"INCIDENT", "START", "CAUGHT BEFORE BY"}}
 	for _, ic := range c.Missed {
-		rows = append(rows, []string{incidentName(ic.Incident), ic.Start.In(loc).Format("2006-01-02 15:04"), caughtBy(IncidentResult{CaughtBy: ic.Before}, 0)})
+		rows = append(rows, []string{incidentName(ic.Incident), ic.Start.In(loc).Format("2006-01-02 15:04"), caughtBy(IncidentResult{CaughtBy: ic.Before}, 0, c.matchOf())})
 	}
 	return table(w, rows)
 }
@@ -649,7 +649,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		if len(cs) == 0 && c.ChangedOnly {
 			return "no changed rule fired"
 		}
-		return caughtBy(IncidentResult{CaughtBy: cs}, 0)
+		return caughtBy(IncidentResult{CaughtBy: cs}, 0, c.matchOf())
 	}
 	var b strings.Builder
 	b.WriteString(pad("INCIDENT") + "START\n")
@@ -732,4 +732,15 @@ func both(rc RuleChange, f func(RuleResult) string) string {
 		return f(*r)
 	}
 	return side(rc.Before) + " → " + side(rc.After)
+}
+
+// matchOf is the labels the comparison's reports were matched on.
+func (c *Comparison) matchOf() []string {
+	if c.After != nil && c.After.Settings != nil {
+		return c.After.Settings.Match
+	}
+	if c.Before != nil {
+		return matchOf(c.Before.Settings)
+	}
+	return nil
 }

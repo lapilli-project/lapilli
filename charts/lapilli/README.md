@@ -53,6 +53,11 @@ false` (`--grafana-history=false`) lists the Grafana rules Lapilli can't
 replay, with why, rather than judging them by Grafana's own alert state
 history.
 
+A rule whose firings lack a `match` label that an incident has catches it, and
+the report marks the catch (`(no service)`) and says how many were so; with
+`matchStrict: true` (`--match-strict`, in both modes) it doesn't catch it. In
+serve mode a change judges every firing again, once.
+
 An incident may list the alerts its tool linked to it (`alerts:`, which the
 PagerDuty, incident.io, Rootly, FireHydrant and Jira Service Management
 recipes write; `docs/incidents.md` in the

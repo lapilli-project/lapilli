@@ -605,6 +605,24 @@ func TestChartMaxSamples(t *testing.T) {
 	}
 }
 
+// matchStrict is --match-strict, in both modes; none by default.
+func TestChartMatchStrict(t *testing.T) {
+	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {
+		out, err := helmTemplate(t, mode...)
+		if err != nil || strings.Contains(out, "--match-strict") {
+			t.Errorf("by default: %v\n%s", err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set", "matchStrict=true")...)
+		if err != nil || strings.Count(out, "- --match-strict\n") != 1 {
+			t.Errorf("matchStrict: %v\n%s", err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set-string", "matchStrict=false")...)
+		if err != nil || strings.Contains(out, "--match-strict") {
+			t.Errorf(`matchStrict: "false": %v\n%s`, err, out)
+		}
+	}
+}
+
 // linkedOnly is --linked-only, in both modes; none by default.
 func TestChartLinkedOnly(t *testing.T) {
 	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {

@@ -623,6 +623,8 @@ type catchOut struct {
 	Noisy bool    `json:"noisy,omitempty"`
 	// Linked, by an alert the incident's tool linked to it.
 	Linked bool `json:"linked,omitempty" jsonschema:"caught by one of the alerts the incident's tool linked to it"`
+	// Loose, by firings that lack a label of --match the incident has.
+	Loose bool `json:"loose,omitempty" jsonschema:"caught while its firings lacked a --match label the incident has: it agrees with any incident's"`
 }
 
 type incidentOut struct {
@@ -676,7 +678,7 @@ func incidentOutOf(l incidentLine) incidentOut {
 	x := incidentOut{ID: l.ID, Title: l.Title, Start: l.Start, End: l.End, Labels: l.Labels, Origin: l.Origin, Status: l.Status,
 		ToDecide: l.Origin == "impact" && l.State == "" && l.Counts, Signal: l.Signal, CaughtBy: []catchOut{}}
 	for _, c := range l.CaughtBy {
-		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Linked: c.Linked})
+		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Linked: c.Linked, Loose: c.Loose})
 	}
 	for _, c := range l.FiredAfter {
 		x.FiredAfter = append(x.FiredAfter, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds()})

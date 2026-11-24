@@ -29,6 +29,10 @@ type Options struct {
 	// have them, for the firing to catch the incident: service, team. An
 	// incident's label can have several values, any of which agrees.
 	Match []string
+	// MatchStrict says a firing that lacks a label of Match that the
+	// incident has doesn't catch it (--match-strict), where it would by
+	// default: the label isn't there to disagree.
+	MatchStrict bool
 	// LinkedOnly says an incident that lists the alerts its tool linked to
 	// it (incident.Incident.Alerts) is caught by those alone
 	// (--linked-only, docs/design/links.md); one that lists none is
@@ -351,6 +355,11 @@ type Catch struct {
 	// Linked says a firing of the rule that caught it is one of the alerts
 	// the incident tool linked to it (incident.Incident.Alerts).
 	Linked bool `json:"linked,omitempty"`
+	// Loose says the rule caught it while its firings lacked a label of
+	// the match in effect that the incident has (Options.Match): with no
+	// service, it agrees with every service's incident. A rule that also
+	// fired with the label caught it as any other.
+	Loose bool `json:"loose,omitempty"`
 }
 
 func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White, at) }
@@ -504,6 +513,9 @@ type Settings struct {
 	Lead time.Duration `json:"lead_ns"`
 	// Match are the labels a firing and an incident must agree on.
 	Match []string `json:"match"`
+	// MatchStrict says a firing without a label of Match that the incident
+	// has doesn't catch it (--match-strict).
+	MatchStrict bool `json:"match_strict,omitempty"`
 	// LinkedOnly says an incident that lists its linked alerts is caught
 	// by them alone (--linked-only).
 	LinkedOnly bool `json:"linked_only,omitempty"`
@@ -553,7 +565,7 @@ func (o Options) Settings() *Settings {
 	if match == nil {
 		match = []string{}
 	}
-	s := &Settings{Lead: o.Lead, Match: match, LinkedOnly: o.LinkedOnly, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
+	s := &Settings{Lead: o.Lead, Match: match, MatchStrict: o.MatchStrict, LinkedOnly: o.LinkedOnly, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
 		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil,
 		Zone: o.zone().String()}
 	if o.Signals.Named() {
@@ -635,8 +647,10 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	after := make([]map[string]time.Duration, len(inPeriod))
 	// The rules a firing the incident lists caught it with.
 	linked := make([]map[string]bool, len(inPeriod))
+	// The rules a firing that isn't loose caught it with (Catch.Loose).
+	proper := make([]map[string]bool, len(inPeriod))
 	for i := range catches {
-		catches[i], after[i], linked[i] = map[string]time.Duration{}, map[string]time.Duration{}, map[string]bool{}
+		catches[i], after[i], linked[i], proper[i] = map[string]time.Duration{}, map[string]time.Duration{}, map[string]bool{}, map[string]bool{}
 	}
 
 	last := map[string]time.Time{} // rule and labels to when it last resolved
@@ -675,7 +689,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if nj {
 				continue
 			}
-			caught, link := CatchesLinked(f, in, o)
+			caught, link, loose := CatchesLinked(f, in, o)
 			if !caught {
 				continue
 			}
@@ -689,6 +703,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			j.Incidents = append(j.Incidents, in.ID)
 			if link {
 				linked[i][f.Rule] = true
+			}
+			if !loose {
+				proper[i][f.Rule] = true
 			}
 			d := f.Start.Sub(in.Start)
 			if have, ok := catches[i][f.Rule]; !ok || d < have {
@@ -755,7 +772,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	for i, in := range inPeriod {
 		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
-			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule]})
+			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule], Loose: !proper[i][rule]})
 		}
 		sortCatches(ir.CaughtBy)
 		for rule, d := range after[i] {
@@ -874,34 +891,37 @@ func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches
 // on (Options.Agrees: Match, or a signal's or a rule entry's). One already
 // firing before that caught nothing: it was on anyway.
 func Catches(f firing.Firing, in incident.Incident, o Options) bool {
-	caught, _ := CatchesLinked(f, in, o)
+	caught, _, _ := CatchesLinked(f, in, o)
 	return caught
 }
 
 // CatchesLinked is Catches, and whether it caught it as one of the alerts
 // the incident lists: such a firing catches it whatever their labels say
-// on the labels matched on (docs/design/links.md).
-func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, linked bool) {
+// on the labels matched on (docs/design/links.md). And whether it caught it
+// loose: it lacks a label of the match in effect that the incident has,
+// where --match-strict would have it not catch it (Catch.Loose).
+func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, linked, loose bool) {
 	to := in.EndOr(o.UnknownLen)
 	// A rule judged by nothing catches nothing, written incidents
 	// included (docs/design/judging.md, "Rules judged by nothing").
 	if o.Signals.NotJudgedRules() && o.NotJudged(f.Rule) {
-		return false, false
+		return false, false, false
 	}
 	if f.Start.After(to) || f.Start.Before(in.Start.Add(-o.MaxLead())) {
-		return false, false
+		return false, false, false
 	}
 	j := o.judgingOf(f.Rule, in)
 	if f.Start.Before(in.Start.Add(-o.leadOf(j, in))) {
-		return false, false
+		return false, false, false
 	}
 	if in.Links(f.Rule, f.Labels) {
-		return true, true
+		return true, true, false
 	}
 	if o.LinkedOnly && len(in.Alerts) > 0 {
-		return false, false
+		return false, false, false
 	}
-	return o.agrees(j, f.Labels, in), false
+	caught, loose = o.agreesLoose(j, f.Labels, in)
+	return caught, false, loose
 }
 
 // About reports whether a firing of rule with labels is about an incident,

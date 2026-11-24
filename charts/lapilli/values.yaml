@@ -148,6 +148,11 @@ incidents: []
 impact: null
 # Labels a firing and an incident must agree on, such as [service].
 match: []
+# true passes --match-strict, in both modes: a firing that lacks a label of
+# match that the incident has doesn't catch it. By default it does, as it
+# has nothing to disagree with, and the report says how many catches were
+# so. In serve mode a change judges every firing again, once.
+matchStrict: false
 # true passes --linked-only, in both modes: an incident that lists the
 # alerts its tool linked to it (alerts:, which the PagerDuty, incident.io,
 # Rootly, FireHydrant and Jira Service Management recipes write) is caught by those alone, not by any other

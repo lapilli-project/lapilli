@@ -2832,5 +2832,8 @@
  "%s after its end": "끝나고 %s 뒤",
  "%d of the firings that caught nothing came after an incident they agree with was over: its condition held in it, but its for and how late its metrics arrive ran past its end. An alert too late, black all the same.": "오탐 중 %d건은 라벨이 맞는 인시던트가 끝난 뒤에 울렸어요. 인시던트 동안 조건이 참이었지만 \"for\"와 메트릭이 늦게 들어오는 시간 때문에 끝난 뒤에 울린 거예요. 너무 늦은 알림이라 오탐으로 쳐요.",
  "fired after its end: %s": "끝난 뒤 울림: %s",
- "More firings came near the ends of incidents than one read looks at: past them, a firing that came after an incident isn't named, so an incident may read as nothing fired.": "인시던트가 끝날 무렵 울린 알림이 한 번에 읽는 양보다 많았어요. 그 뒤로는 인시던트가 끝난 뒤에 울린 알림을 이름으로 밝히지 않아서, 그런 인시던트가 울린 알림 없음으로 보일 수 있어요."
+ "More firings came near the ends of incidents than one read looks at: past them, a firing that came after an incident isn't named, so an incident may read as nothing fired.": "인시던트가 끝날 무렵 울린 알림이 한 번에 읽는 양보다 많았어요. 그 뒤로는 인시던트가 끝난 뒤에 울린 알림을 이름으로 밝히지 않아서, 그런 인시던트가 울린 알림 없음으로 보일 수 있어요.",
+ "no %s label": "%s 라벨 없음",
+ "On: a firing that lacks a --match label the incident has doesn't catch it.": "켜짐: 인시던트에 있는 --match 라벨이 없는 알림은 그 인시던트를 탐지한 것으로 세지 않아요.",
+ "Off: a firing that lacks a --match label the incident has catches it, marked with the label it lacks.": "꺼짐: 인시던트에 있는 --match 라벨이 없는 알림도 그 인시던트를 탐지한 것으로 세고, 없는 라벨을 표시해요."
 }

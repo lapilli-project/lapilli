@@ -389,6 +389,9 @@ Judging:
                       incident can list several values. A firing of an
                       alert the incident's tool linked to it (alerts: in
                       the incidents file) catches it whatever they say
+  --match-strict      a firing that lacks a --match label the incident has
+                      doesn't catch it; by default it does, and the report
+                      says how many catches were by such rules
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone, not by any other firing
                       at the time; one that lists none is caught as ever
@@ -628,6 +631,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       the rule's page links to it
   --lead, --match, --refire, --noisy-firings, --noisy-precision
                       the defaults; the UI can change them
+  --match-strict      a firing that lacks a --match label the incident has
+                      doesn't catch it; changed at a start, every firing is
+                      judged again with it
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone; changed at a start,
                       every firing is judged again with it

@@ -1305,6 +1305,11 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		l := s.incidentLine(lang(r), in, t)
 		// Caught by an alert its tool linked to it (docs/design/links.md).
 		l.Linked = slices.ContainsFunc(in.CaughtBy, func(c verdict.Catch) bool { return c.Rule == name && c.Linked })
+		for _, c := range in.CaughtBy {
+			if c.Rule == name && c.Loose {
+				l.Loose, l.NoLabel = true, strings.Join(t.o.Match, "/")
+			}
+		}
 		v.Caught = append(v.Caught, l)
 	}
 	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: time.Unix(0, 0), To: s.now().Add(time.Hour), Rule: name, Limit: 50})
@@ -1469,6 +1474,10 @@ type incidentLine struct {
 	// Linked says, on a rule's page, that the rule caught it by an alert
 	// its tool linked to it.
 	Linked bool `json:"-"`
+	// Loose says, on a rule's page, that the rule caught it with firings
+	// that lack a label of --match the incident has; NoLabel names it.
+	Loose   bool   `json:"-"`
+	NoLabel string `json:"-"`
 	// lead is, of one caught, how long before its start First fired.
 	lead time.Duration
 	Mine bool // written in the UI, so it can be changed there
@@ -1707,6 +1716,9 @@ func (sp *spans) from(node, nlo, nhi, lo, hi int, a time.Time) int {
 type catchLine struct {
 	verdict.Catch
 	Noisy bool // noisy the week the incident started
+	// NoLabel names the labels of --match a Loose catch lacks, as the mark
+	// says them.
+	NoLabel string
 }
 
 // incidentLine is an incident as it is listed, judged by t as of the week
@@ -1729,7 +1741,7 @@ func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incid
 	first := -1
 	for i, c := range in.CaughtBy {
 		noisy := t.noisyAll(w, t.id(c.Rule))
-		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy})
+		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy, NoLabel: strings.Join(t.o.Match, "/")})
 		if first < 0 && (!noisy || state != "caught") {
 			first = i
 		}
@@ -2291,8 +2303,11 @@ type settingsView struct {
 	// LinkedOnly is --linked-only, a flag where serve is started, not a
 	// setting the UI changes (docs/design/links.md).
 	LinkedOnly bool `json:"linked_only"`
+	// MatchStrict is --match-strict, a flag as --linked-only is.
+	MatchStrict bool `json:"match_strict"`
 	// LinkedOnlyJudging says every firing is still to be judged again with
-	// it: the ledger's stones were last all given by the other value.
+	// --linked-only and --match-strict: the ledger's stones were last all
+	// given by other values.
 	LinkedOnlyJudging bool `json:"linked_only_judging"`
 	// Criteria are the incident criteria (criteria.go); Sources, where
 	// incidents come from (sources.go), the page's alone.
@@ -2336,11 +2351,11 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	if err != nil {
 		return settingsView{}, err
 	}
-	v := settingsView{LinkedOnly: o.LinkedOnly}
+	v := settingsView{LinkedOnly: o.LinkedOnly, MatchStrict: o.MatchStrict}
 	// Until the round that judges every firing again with it is done, the
 	// stones are those of the other value (jobs); not said of a replica
 	// whose flag another's newer change has passed (linkedAgain).
-	if _, v.LinkedOnlyJudging, err = s.linkedAgain(ctx, linkedText(o.LinkedOnly)); err != nil {
+	if _, v.LinkedOnlyJudging, err = s.linkedAgain(ctx, linkedText(o)); err != nil {
 		return settingsView{}, err
 	}
 	for _, st := range settable {
