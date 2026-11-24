@@ -19,7 +19,7 @@ lapilli demo
 이 페이지의 나머지가 내 알림에서 찾아 주는 것이 모두 들어 있습니다. 노이즈 룰과 그
 룰을 조용하게 만들 더 긴 `for`, 장애를 잡은 룰, 아무것도 잡지 못한 장애와 거의
 잡을 뻔한 룰, 사람이 자는 동안 울린 알림입니다. `--json`은 리포트 전체를 JSON으로
-주고, `--tz`는 샘플의 일주일을 놓을 시간대를 정합니다. Go는 있고 아무것도 설치하지
+주고, `--tz`는 샘플의 일주일을 놓을 시간대를 정합니다. Go만 있고 Lapilli는 설치하지
 않았다면 `go run lapilli.dev/cmd/lapilli@latest demo`로 같은 결과를 볼 수 있습니다
 ([docs/design/demo.md (영어)](../design/demo.md)).
 
@@ -28,8 +28,8 @@ lapilli demo --serve
 ```
 
 같은 일주일을 `lapilli serve`의 화면으로 보여 줍니다. 정탐·오탐은 serve의 매시간
-작업이 가립니다. 열어 볼 URL을 알려 주며, 이 머신에서만 열리고(`--listen`, 루프백
-주소, 기본은 빈 포트) 읽기 전용입니다. 이력 DB는 임시 디렉터리에 두었다가 Ctrl-C로
+작업이 가립니다. 열어 볼 URL을 알려 주며, 이 머신에서만 열리고(`--listen`, 기본은
+루프백 주소의 빈 포트) 읽기 전용입니다. 이력 DB는 임시 디렉터리에 두었다가 Ctrl-C로
 끝내면 지웁니다. 시계는 샘플 일주일의 끝에 맞춰져 있고, 그곳이 화면이 보여 주는
 마지막 온전한 일주일입니다.
 
@@ -141,8 +141,8 @@ RFC 3339로 준 `--from`부터 `--to`까지이며, 시각은 머신의 시간대
 ## 리포트 읽기
 
 지어낸 일주일을 `--from`, `--to`, `--tz UTC`로 주고, 위의 장애와 룰 세 개
-(`CheckoutErrors`, `NodeLoadHigh`, `QueueBacklog`), 그리고 Prometheus 대신
-응답하는 대역을 써서 위 명령을 돌리면 다음이 나옵니다. 세 부분은 뺐습니다.
+(`CheckoutErrors`, `NodeLoadHigh`, `QueueBacklog`), 그리고 Prometheus 역할을
+하는 시험용 서버로 위 명령을 돌리면 다음이 나옵니다. 세 부분은 뺐습니다.
 
 ```
 Lapilli  2026-11-09 00:00 → 2026-11-16 00:00 UTC
@@ -183,8 +183,8 @@ INC-103   QueueBacklog  7m from -5m  for 10m → 6m  +1m         0 → 1  0 → 
 - **장애**: 각 장애가 얼마나 이어졌는지(끝이 적혀 있지 않으면 `–`), 무엇이
   잡았는지, 시작 뒤 얼마 만에(`+3m`) 또는 시작 전 얼마에(`-9m`) 잡았는지.
   `(noisy)`는 노이즈 룰이 잡은 것이고, `✗ nothing fired`는 미탐입니다.
-- **거의 잡을 뻔한 룰**: 조건은 맞았지만 `for`를 채우지 못했거나, 값이 임계치의
-  5분의 1 안까지 다가온 룰입니다. 그 장애를 잡았을 변경과, 그러면 알림이 얼마나
+- **거의 잡을 뻔한 룰**: 조건은 맞았지만 `for`를 채우지 못했거나, 값이 임계치와의
+  차이가 5분의 1 안으로 들어온 룰입니다. 그 장애를 잡았을 변경과, 그러면 알림이 얼마나
   자주 울렸을지를 함께 보여 줍니다. `for`가 6m였다면 `QueueBacklog`는 INC-103이
   시작하고 1분 뒤에 울렸을 것이고, 그 주에 한 번이었을 것입니다.
 
@@ -223,7 +223,7 @@ lapilli preflight --rules alert-rules/ --prometheus http://prometheus:9090 \
 
 같은 플래그로 `lapilli serve`를 띄우면 처음 시작할 때 지난 28일을 백테스트하고
 (`--backfill`), 이력 DB는 `lapilli-ledger`에 두며, `127.0.0.1:8080`에서 받습니다.
-거기에 닿는 사람은 모두 admin입니다. Kubernetes에서는
+거기에 접속하는 사람은 누구나 admin입니다. Kubernetes에서는
 [차트](../../charts/lapilli/README.md)에 이만큼만 주면 됩니다.
 
 ```sh
@@ -235,5 +235,5 @@ kubectl -n monitoring port-forward svc/lapilli 8080
 
 `rules.configMaps`에는 릴리스의 네임스페이스에 있는 룰 ConfigMap 이름을 줍니다.
 `incidents`는 파일과 같은 목록을 받고, UI에서 사람이 직접 적어도 됩니다. 역할을
-정하지 않으면 파드에 닿는 사람은 누구나 보기만 할 수 있습니다
+정하지 않으면 파드에 접속하는 사람은 누구나 보기만 할 수 있습니다
 ([사람을 구분하는 방법 (영어)](../../charts/lapilli/README.md#who-people-are)).
