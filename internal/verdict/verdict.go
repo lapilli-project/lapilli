@@ -762,10 +762,13 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 
 // MarkNotKnown sets NotKnown on each incident nothing caught, while a rule
 // couldn't be replayed: that rule may have caught it. A rule judged from
-// its history (ByHistory) was judged, and doesn't count. Judge does it; a
+// its history (ByHistory) was judged, and a rule that can't fire
+// (rules.CantFire) caught nothing: neither counts. Judge does it; a
 // caller that sets a rule's Source after Judge does it again.
 func (r *Report) MarkNotKnown() {
-	unsure := slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" && !rr.ByHistory() })
+	unsure := slices.ContainsFunc(r.Rules, func(rr RuleResult) bool {
+		return rr.Unsupported != "" && !rr.ByHistory() && !rules.CantFire(rr.Unsupported)
+	})
 	for i := range r.Incidents {
 		r.Incidents[i].NotKnown = len(r.Incidents[i].CaughtBy) == 0 && unsure
 	}

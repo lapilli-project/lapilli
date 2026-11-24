@@ -129,3 +129,34 @@ func TestHoursZoneLocal(t *testing.T) {
 		t.Errorf("got\n%s", b.String())
 	}
 }
+
+// TestNotKnownCantFire: a rule that fires nothing, replayed or not, doesn't
+// make an incident not known; a rule whose replay failed still does.
+func TestNotKnownCantFire(t *testing.T) {
+	incs := []incident.Incident{{ID: "INC-1", Start: m(100), End: m(130)}}
+	fine := rules.Rule{Name: "CheckoutSlow", Expr: "up == 0"}
+	for _, why := range []string{rules.Disabled, rules.Paused, rules.NoQuery} {
+		r := Judge([]rules.Rule{{Name: "Old", Unsupported: why}, fine}, nil, incs, opts())
+		if in := r.Incidents[0]; !in.Missed() || in.NotKnown {
+			t.Errorf("%s: %+v", why, in)
+		}
+		var b bytes.Buffer
+		if err := Text(&b, r, time.UTC); err != nil {
+			t.Fatal(err)
+		}
+		if out := b.String(); !strings.Contains(out, "✗ 1 of 1 incident had no alert.") || strings.Contains(out, "?") {
+			t.Errorf("%s:\n%s", why, out)
+		}
+	}
+	r := Judge([]rules.Rule{{Name: "Old", Unsupported: rules.Disabled}, {Name: "Broken", Unsupported: "uses Loki"}, fine}, nil, incs, opts())
+	if in := r.Incidents[0]; !in.NotKnown {
+		t.Errorf("a failed replay beside a disabled rule: %+v", in)
+	}
+	var b bytes.Buffer
+	if err := Text(&b, r, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if want := "the 1 that couldn't be replayed"; !strings.Contains(b.String(), want) {
+		t.Errorf("no %q in:\n%s", want, b.String())
+	}
+}

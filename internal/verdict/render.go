@@ -188,13 +188,19 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			if missed > 0 {
 				fmt.Fprintf(w, "✗ %d of %d %s had no alert.\n", missed, len(r.Incidents), of)
 			}
+			unsure := 0
+			for _, rr := range unsupported {
+				if !rules.CantFire(rr.Unsupported) {
+					unsure++
+				}
+			}
 			switch replayed := len(r.Rules) - len(unsupported); {
 			case notKnown == 0:
 			case replayed == 0:
 				fmt.Fprintf(w, "? %d of %d %s can't be judged: no rule was replayed.\n", notKnown, len(r.Incidents), of)
 			default:
 				fmt.Fprintf(w, "? %d of %d %s had no alert from the %s replayed: the %d that couldn't be replayed may have caught them.\n",
-					notKnown, len(r.Incidents), of, plural(replayed, "rule", "rules"), len(unsupported))
+					notKnown, len(r.Incidents), of, plural(replayed, "rule", "rules"), unsure)
 			}
 			if n := lateFor(r.Incidents); n > 0 {
 				fmt.Fprintf(w, "  %d of them had one only once they were over (\"after its end\" above).\n", n)

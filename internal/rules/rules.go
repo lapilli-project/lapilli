@@ -1212,7 +1212,7 @@ func azurePromQL(rule *Rule, props map[string]any) {
 		}
 	}
 	if rule.Expr == "" {
-		rule.Unsupported = "no query"
+		rule.Unsupported = NoQuery
 	}
 }
 
@@ -1282,6 +1282,16 @@ func ociAlarms(doc map[string]any) []Rule {
 // Disabled is the Unsupported of a rule turned off, which fires nothing.
 const Disabled = "disabled"
 
+// NoQuery is the Unsupported of a rule with no query to replay.
+const NoQuery = "no query"
+
+// CantFire reports whether unsupported, a rule's Unsupported, marks a rule
+// that fires nothing, replayed or not: it is disabled, paused or has no
+// query.
+func CantFire(unsupported string) bool {
+	return unsupported == Disabled || unsupported == Paused || unsupported == NoQuery
+}
+
 // cloudWatch reads Amazon CloudWatch alarms as the AWS CLI's
 // describe-alarms answers. A PromQL alarm is a rule like a Prometheus one:
 // its query, its pending period as "for", its recovery period as
@@ -1317,7 +1327,7 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 			}
 		}
 		if rule.Expr == "" {
-			rule.Unsupported = "no query"
+			rule.Unsupported = NoQuery
 		}
 		actionsOff(&rule, m)
 		out = append(out, rule)
@@ -1467,7 +1477,7 @@ func googlePolicy(doc map[string]any) []Rule {
 		}
 		switch {
 		case rule.Expr == "":
-			rule.Unsupported = "no query"
+			rule.Unsupported = NoQuery
 		case doc["enabled"] == false:
 			rule.Unsupported = Disabled
 		}
