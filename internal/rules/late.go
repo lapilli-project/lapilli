@@ -134,16 +134,17 @@ func (p Replaying) place(r *Rule, l *Listing) {
 	if l == nil || r.Phase != 0 || r.Unsupported != "" {
 		return
 	}
-	if r.Interval <= 0 {
-		p.Unplaced.add(r.Group, "its file gives the group no interval")
-		return
-	}
-	d, why := l.Place(r.Group, r.Interval)
+	d, every, why := l.Place(r.Group, r.Interval)
 	if why != "" {
 		p.Unplaced.add(r.Group, why)
 		return
 	}
 	r.Phase = d
+	if r.Interval <= 0 {
+		// The file gives no interval: the server's own, for placing and
+		// for replaying the group as often as it runs, and no more.
+		r.Placed = every
+	}
 	p.Unplaced.add(r.Group, "")
 }
 

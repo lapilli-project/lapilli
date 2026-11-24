@@ -87,3 +87,61 @@ func TestPlacedStartOfTheReplay(t *testing.T) {
 		t.Errorf("placed, no for: from %s", lo)
 	}
 }
+
+// Every replay of a placed group starts where Run's does: a longer "for"
+// tried, the condition's stretches, and the firings of a rule with another
+// number all see a firing on when the period starts that ends before the
+// group's first evaluation in it. A longer "for" quiets it only when the
+// evaluations before the period say it would not have fired by then.
+func TestPlacedReplaysAgreeAtTheStart(t *testing.T) {
+	from := t0
+	at := func(m, s int) time.Time { return from.Add(time.Duration(m)*time.Minute + time.Duration(s)*time.Second) }
+	// Held at the evaluations from 23:42:30 to 23:57:30, then not: on at
+	// the period's start for 3m, and until 00:02:30.
+	h := stepped{"x > 0": func(t time.Time) (float64, bool) { return 1, !t.Before(at(-18, 0)) && t.Before(at(-2, 0)) }}
+	r := rules.Rule{Name: "X", Expr: "x > 0", Interval: 5 * time.Minute, Phase: 2*time.Minute + 30*time.Second, For: 3 * time.Minute}
+	to := from.Add(15 * time.Minute)
+	ctx := context.Background()
+	_, run := Run(ctx, h, one([]rules.Rule{r}), from, to, time.Minute, 1)
+	if len(run) != 1 || !run[0].Start.Equal(from) || !run[0].End.Equal(at(2, 30)) {
+		t.Fatalf("Run: %+v", run)
+	}
+	alts, err := WithFor(ctx, h, r, []time.Duration{10 * time.Minute, 30 * time.Minute}, from, to, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10m is met by 23:52:30, before the last evaluation: not quieted. 30m
+	// isn't met by it (held since 23:42:30): quieted, for real.
+	if f := alts[10*time.Minute]; len(f) != 1 || !f[0].Start.Equal(from) || !f[0].End.Equal(at(2, 30)) {
+		t.Errorf("a for of 10m: %+v, want the firing Run has", f)
+	}
+	if f := alts[30*time.Minute]; len(f) != 0 {
+		t.Errorf("a for of 30m: %+v, want none", f)
+	}
+	all, _, err := Fired(ctx, h, r, from, to, time.Minute)
+	if err != nil || len(all) != 1 || !all[0].Start.Equal(from) {
+		t.Errorf("Fired: %+v %v", all, err)
+	}
+	held, err := Held(ctx, h, r, from, to, time.Minute)
+	if err != nil || len(held) != 1 || !held[0].Start.Equal(from) || !held[0].End.Equal(at(2, 30)) {
+		t.Errorf("Held: %+v %v", held, err)
+	}
+}
+
+// A group whose file gives no interval, placed at the one the rules API
+// says (Placed), is replayed as one with that interval is, though the
+// rule's own Interval stays zero.
+func TestPlacedAtTheAPIsInterval(t *testing.T) {
+	h := stepped{"x > 0": func(t time.Time) (float64, bool) {
+		return 1, !t.Before(t0.Add(-3*time.Minute)) && t.Before(t0.Add(-time.Minute))
+	}}
+	r := rules.Rule{Name: "X", Expr: "x > 0", Phase: 2*time.Minute + 30*time.Second, Placed: 5 * time.Minute}
+	_, fs := Run(context.Background(), h, one([]rules.Rule{r}), t0, t0.Add(15*time.Minute), time.Minute, 1)
+	if len(fs) != 1 || !fs[0].Start.Equal(t0) || !fs[0].End.Equal(t0.Add(2*time.Minute+30*time.Second)) {
+		t.Errorf("%+v", fs)
+	}
+	r.Placed = 0
+	if _, fs = Run(context.Background(), h, one([]rules.Rule{r}), t0, t0.Add(15*time.Minute), time.Minute, 1); len(fs) != 0 {
+		t.Errorf("without it, on the grid: %+v", fs)
+	}
+}

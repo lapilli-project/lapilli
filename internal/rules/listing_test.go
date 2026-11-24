@@ -44,19 +44,19 @@ func TestListingOfARealPrometheus(t *testing.T) {
 			continue
 		}
 		seen[r.Group] = true
-		d, why := l.Place(r.Group, r.Interval)
+		d, _, why := l.Place(r.Group, r.Interval)
 		if why != "" || d != r.Phase {
 			t.Errorf("%s: placed %s (%q), its last evaluation says %s", r.Group, d, why, r.Phase)
 		}
 	}
 	// The same group at another interval, as a file may have it: the
 	// hash's modulo, not the one it runs at.
-	d, why := l.Place("phase-a", 5*time.Minute)
+	d, _, why := l.Place("phase-a", 5*time.Minute)
 	want := offset(hashStrings, "phase-a", "/etc/prometheus/rules.yml", 5*time.Minute)
 	if why != "" || d != want {
 		t.Errorf("at 5m: %s %q, want %s", d, why, want)
 	}
-	if _, why := l.Place("nothing", time.Minute); !strings.Contains(why, "no group") {
+	if _, _, why := l.Place("nothing", time.Minute); !strings.Contains(why, "no group") {
 		t.Errorf("not listed: %q", why)
 	}
 }
@@ -76,14 +76,14 @@ func TestListingPlace(t *testing.T) {
 			t.Fatalf("%s: layout %d %v", name, l.layout, err)
 		}
 		// A file of another interval is placed by the same hash.
-		d, why := l.Place("a", 5*min)
+		d, _, why := l.Place("a", 5*min)
 		if why != "" || d != offset(layout, "a", "/rules/a.yml", 5*min) {
 			t.Errorf("%s: %s %q", name, d, why)
 		}
 	}
 	// A name listed twice, in two files: not placed.
 	l, _ := ReadListing(listAPI([4]any{"g", "/a.yml", 60, "2026-11-11T12:30:07Z"}, [4]any{"g", "/b.yml", 60, "2026-11-11T12:30:09Z"}))
-	if d, why := l.Place("g", min); d != 0 || !strings.Contains(why, "2 groups") {
+	if d, _, why := l.Place("g", min); d != 0 || !strings.Contains(why, "2 groups") {
 		t.Errorf("twice: %s %q", d, why)
 	}
 	// A server that places groups by a hash of its own: where the group of
@@ -92,15 +92,15 @@ func TestListingPlace(t *testing.T) {
 	if l.layout != -1 {
 		t.Fatalf("layout %d for groups no hash places", l.layout)
 	}
-	if d, why := l.Place("g", min); d != 7*time.Second || why != "" {
+	if d, _, why := l.Place("g", min); d != 7*time.Second || why != "" {
 		t.Errorf("by its last evaluation: %s %q", d, why)
 	}
-	if d, why := l.Place("g", 5*min); d != 0 || why == "" {
+	if d, _, why := l.Place("g", 5*min); d != 0 || why == "" {
 		t.Errorf("at another interval: %s %q", d, why)
 	}
 	// One that hasn't run.
 	l, _ = ReadListing(listAPI([4]any{"g", "/a.yml", 60, "0001-01-01T00:00:00Z"}))
-	if d, why := l.Place("g", min); d != 0 || !strings.Contains(why, "hasn't run") {
+	if d, _, why := l.Place("g", min); d != 0 || !strings.Contains(why, "hasn't run") {
 		t.Errorf("not run: %s %q", d, why)
 	}
 	// Not an answer.
@@ -108,7 +108,7 @@ func TestListingPlace(t *testing.T) {
 		t.Error("an error answer was read")
 	}
 	var none *Listing
-	if _, why := none.Place("g", min); why == "" || none.Tag() != "" {
+	if _, _, why := none.Place("g", min); why == "" || none.Tag() != "" {
 		t.Error("a listing not read places nothing")
 	}
 }
@@ -133,6 +133,7 @@ func TestReplayingPlacesRuleFiles(t *testing.T) {
 		return Rule{Name: group + "Down", Group: group, Expr: "up == 0", Interval: interval, Prometheus: true, Source: "/rules/x.yml"}
 	}
 	rs := []Rule{mk("web", min), mk("twice", min), mk("absent", min), mk("db", 0), mk("cache", 5*min)}
+	rs = append(rs, mk("none", 0))
 	api := mk("web", min)
 	api.Source, api.Phase = "api", 0
 	rs = append(rs, api)
@@ -144,13 +145,18 @@ func TestReplayingPlacesRuleFiles(t *testing.T) {
 	if rs[4].Phase != offset(hashStrings, "cache", "/etc/rules/cache.yml", 5*min) {
 		t.Errorf("cache at 5m: %s", rs[4].Phase)
 	}
-	for _, i := range []int{1, 2, 3, 5} {
+	// db's file gives no interval: placed at the API's, kept out of the
+	// rule's own, and so out of its key.
+	if rs[3].Phase != offset(hashStrings, "db", "/etc/rules/db.yml", min) || rs[3].Placed != min || rs[3].Interval != 0 || rs[3].Key() != mk("db", 0).Key() {
+		t.Errorf("db: phase %s, placed %s, interval %s", rs[3].Phase, rs[3].Placed, rs[3].Interval)
+	}
+	for _, i := range []int{1, 2, 5} {
 		if rs[i].Phase != 0 {
 			t.Errorf("%s placed at %s", rs[i].Group, rs[i].Phase)
 		}
 	}
 	said := strings.Join(u.Said("Prometheus"), "\n")
-	for _, want := range []string{"2 groups placed as Prometheus places them", `"twice"`, `"absent"`, `"db"`, "no group of that name", "2 groups of that name", "gives the group no interval"} {
+	for _, want := range []string{"3 groups placed as Prometheus places them", `"twice"`, `"absent"`, `"none"`, "no group of that name", "2 groups of that name"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("said %q, want %q", said, want)
 		}

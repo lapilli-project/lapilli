@@ -320,9 +320,12 @@ Where no layout agrees (Thanos Ruler, Mimir, and the managed services may
 place groups their own way, vmalert at random), it takes where the group of
 that name last ran, if the file's interval is the one it runs at. A group
 isn't placed, and is replayed on the steps' grid as before, when the API
-lists its name twice (two files), or not at all, when it hasn't run, when
-its file gives no interval, or when no layout agrees and the interval
-differs; the run says which, and why (`lapilli verdict` on stderr,
+lists its name twice (two files), or not at all, when it hasn't run, or
+when no layout agrees and the interval differs. A group whose file gives no
+interval runs at the server's global `evaluation_interval`, which the API
+says for the group: it is placed at that, and replayed as often as the
+server runs it, by `Rule.Placed`, which is not the rule's `Interval` and
+is in neither its key nor its comparison with another version of it; the run says which, and why (`lapilli verdict` on stderr,
 `lapilli serve` in its log), and an API that isn't served, or can't be
 read, is said and doesn't fail the run. A Loki ruler's hash can't be checked
 (the `file` its API gives is the namespace), so its groups of rule files are
@@ -352,7 +355,13 @@ an interval before the evaluation that, so the alert pending or held on
 there is seen as it was. A firing from there that is on when the period
 starts is reported from the period's start, as one that held on into it
 is, and `--check-replay` sets both sides' so (its clamp); one that ended
-before the period isn't reported. What is reported in the period, and the
+before the period isn't reported. Every replay of a firing starts so: `Run`,
+a longer or shorter `for` tried (`WithFor`, `Fired`), the stretches a
+condition held (`Held`), and the near misses and numbers that ask them; a
+firing on at the start that a `for` tried would still have fired is seen by
+it too, and one it would have quieted is quieted by the evaluations before
+the period, not by where the period starts. `Values` and `NoData` are of the evaluations in
+the period alone, and start at its start. What is reported in the period, and the
 period's bounds, are as before. The cost is a request for the interval
 before the period, and a `for` and a `keep_firing_for` more. A group on
 the steps' grid has no evaluation before the period that isn't the

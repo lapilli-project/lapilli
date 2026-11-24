@@ -159,9 +159,9 @@ func (l *Listing) hashLayout() int {
 // placing the group, when it doesn't: no group of that name, more than one,
 // one that hasn't run, or placed in a way Lapilli can't tell at another
 // interval.
-func (l *Listing) Place(name string, interval time.Duration) (phase time.Duration, why string) {
+func (l *Listing) Place(name string, interval time.Duration) (phase, every time.Duration, why string) {
 	if l == nil {
-		return 0, "the rules API wasn't read"
+		return 0, 0, "the rules API wasn't read"
 	}
 	var of []listed
 	for _, g := range l.groups {
@@ -171,23 +171,29 @@ func (l *Listing) Place(name string, interval time.Duration) (phase time.Duratio
 	}
 	switch {
 	case len(of) == 0:
-		return 0, "the rules API lists no group of that name"
+		return 0, 0, "the rules API lists no group of that name"
 	case len(of) > 1:
-		return 0, fmt.Sprintf("the rules API lists %d groups of that name", len(of))
-	case interval < time.Second:
-		return 0, "its interval isn't given"
+		return 0, 0, fmt.Sprintf("the rules API lists %d groups of that name", len(of))
 	}
 	g := of[0]
+	if interval <= 0 {
+		// The file gives none: the group runs at the server's own, which
+		// the API says.
+		interval = g.interval
+	}
+	if interval < time.Second {
+		return 0, 0, "its interval isn't known"
+	}
 	if l.layout >= 0 && !g.vmalert {
-		return offset(l.layout, g.name, g.file, interval), ""
+		return offset(l.layout, g.name, g.file, interval), interval, ""
 	}
 	switch {
 	case !g.ran:
-		return 0, "the group hasn't run yet"
+		return 0, 0, "the group hasn't run yet"
 	case g.interval != interval:
-		return 0, "the server places a group in a way Lapilli can't work out for another interval than the one it runs it at"
+		return 0, 0, "the server places a group in a way Lapilli can't work out for another interval than the one it runs it at"
 	}
-	return g.phase, ""
+	return g.phase, interval, ""
 }
 
 // Unplaced collects the groups that Replaying.Apply couldn't place from a

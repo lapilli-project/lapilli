@@ -56,6 +56,12 @@ type Rule struct {
 	// Interval is how often the rule's group is evaluated; zero when the
 	// file doesn't say.
 	Interval time.Duration
+	// Placed is how often the rule's group runs when its file gives no
+	// interval, as the history's rules API says (the global
+	// evaluation_interval), for placing the group (Replaying.PlaceFiles)
+	// and replaying it as often as the server runs it. Not the rule's own:
+	// neither Key nor Whole has it. Zero otherwise.
+	Placed time.Duration
 	// QueryOffset is how long before each evaluation a Prometheus rule's
 	// query is asked at: its group's query_offset.
 	QueryOffset time.Duration
@@ -149,6 +155,16 @@ type Rule struct {
 	// written, to read again once its data sources' types are known
 	// (Replaying.Kinds): a SQL query has no expr to read.
 	unread map[string]any
+}
+
+// GroupEvery is how often the rule's group runs, as far as is known: its
+// Interval, or, where the file gives none, what the rules API said when the
+// group was placed (Placed). Zero when neither.
+func (r Rule) GroupEvery() time.Duration {
+	if r.Interval > 0 {
+		return r.Interval
+	}
+	return r.Placed
 }
 
 // GrafanaUIDs are the data sources a Grafana rule's queries name, by uid,

@@ -108,7 +108,7 @@ func TestVerdictPlacesRuleFilesByTheRulesAPI(t *testing.T) {
 	if got := firings(out); got["WebDown"] != 1 || got["TwiceDown"] != 0 || got["UngivenDown"] != 0 {
 		t.Errorf("firings %v: want WebDown's from before the period, and none of the groups not placed", got)
 	}
-	for _, want := range []string{"1 group placed", `"twice"`, "lists 2 groups of that name", `"ungiven"`, "gives the group no interval"} {
+	for _, want := range []string{"1 group placed", `"twice"`, "lists 2 groups of that name", `"ungiven"`, "no group of that name"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, said)
 		}

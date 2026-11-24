@@ -34,8 +34,9 @@
   doesn't say. `--loaded-rules` knows where. For a group read from a file,
   Lapilli asks the history's rules API (and `--loki`'s, for a Loki ruler's
   file) once for the group of that name, and places it as the server does,
-  by the path the API gives; a name the API lists twice or not at all, a
-  group with no `interval` in its file, and an API that isn't served leave
+  by the path the API gives, at the interval the API says where the file
+  gives none; a name the API lists twice or not at all, and an API that
+  isn't served leave
   the group on the steps' grid, which the run says, with why: a firing
   from such a group can start up to an interval sooner or later than it
   did. A group placed within its interval is replayed from its last
