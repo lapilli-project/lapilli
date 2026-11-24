@@ -48,6 +48,15 @@ var (
 	maxRangeLabels = 256 << 20
 )
 
+// answerHeld, when set, is called with what an answer's read holds: after
+// each series is read, with how many are kept, and as the answer is found
+// too big, its series, labels or a value past what it may hold (big),
+// what it read of them still held. The tests
+// weigh the heap there (hostile_test.go, answerlabels_test.go): the live
+// heap after a collection, which a runner's load doesn't move as it moves
+// a sampled peak.
+var answerHeld func(series int, big bool)
+
 // labelCost is what a series' labels take in memory, near enough, as
 // measured: a map's entry and the strings decoded into it, the map grown
 // to hold them, some 96 bytes a label beyond its text.
@@ -118,6 +127,9 @@ func readAnswer(r io.Reader, start, end time.Time, step time.Duration) (*answer,
 	})
 	if errors.Is(err, errLong) {
 		a.bad = &unreadable{msg: fmt.Sprintf("the answer holds a value longer than is read of it (%d KiB)", rd.longest>>10)}
+		if answerHeld != nil {
+			answerHeld(len(a.series), true)
+		}
 		return a, nil
 	}
 	if err != nil {
@@ -247,6 +259,9 @@ func (rd *reading) result() error {
 		}
 		if len(rd.a.series) == maxAnswerSeries {
 			rd.a.big = fmt.Sprintf("the answer holds more than %d series", maxAnswerSeries)
+			if answerHeld != nil {
+				answerHeld(len(rd.a.series), true)
+			}
 			continue
 		}
 		s := Series{Samples: []Sample{}}
@@ -262,10 +277,16 @@ func (rd *reading) result() error {
 			// Not too big for a shorter range, which holds the same
 			// series: too many, or too wide, to read.
 			rd.a.bad = &unreadable{msg: fmt.Sprintf("the answer's %d series hold more than %d MiB of labels: too many, or too wide, series to read, over any range", len(rd.a.series)+1, maxAnswerLabels>>20)}
+			if answerHeld != nil {
+				answerHeld(len(rd.a.series), true)
+			}
 		}
 		if rd.a.bad == nil && rd.a.big == "" {
 			s.Labels = one.Metric
 			rd.a.series = append(rd.a.series, s)
+			if answerHeld != nil {
+				answerHeld(len(rd.a.series), false)
+			}
 		}
 	}
 	_, err = rd.token() // ]

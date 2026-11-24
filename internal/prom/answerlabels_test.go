@@ -49,19 +49,30 @@ func TestAnswerLabelsBounded(t *testing.T) {
 	srv, wire := hostile(t, body)
 	t0 := time.Date(2025, 10, 1, 0, 0, 0, 0, time.UTC)
 	c := New(srv.URL, "t")
+	// What the read holds as it finds the labels too many (answerHeld): the
+	// live heap after a collection, not a sampled peak, which is logged.
+	before := heapAfterGC()
+	var held uint64
+	big := 0
+	answerHeld = func(_ int, past bool) {
+		if past {
+			big, held = big+1, max(held, grown(before))
+		}
+	}
+	defer func() { answerHeld = nil }()
 	var got []Series
 	var err error
-	rose := leastPeak(func() {
+	sampled := peakDuring(func() {
 		wire.Store(0)
 		got, err = c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
 	})
 	runtime.KeepAlive(got)
-	ratio := float64(rose) / float64(len(body))
-	t.Logf("wire %d KiB, decoded %d MiB, %d series kept, heap peak +%d MiB (%.1fx decoded, the least of three runs), err %v",
-		wire.Load()>>10, len(body)>>20, len(got), rose>>20, ratio, err)
-	if ratio > 4 {
-		t.Errorf("%d KiB on the wire, %d MiB decoded, took the heap up %d MiB (%.1fx): labels of a series aren't bounded as its samples are",
-			wire.Load()>>10, len(body)>>20, rose>>20, ratio)
+	ratio := float64(held) / float64(len(body))
+	t.Logf("wire %d KiB, decoded %d MiB, %d series kept, held +%d MiB (%.1fx decoded) when found too big, heap peak sampled +%d MiB, err %v",
+		wire.Load()>>10, len(body)>>20, len(got), held>>20, ratio, (max(sampled, before)-before)>>20, err)
+	if big == 0 || ratio > 4 {
+		t.Errorf("%d KiB on the wire, %d MiB decoded, held the heap up %d MiB (%.1fx), found too big %d times: labels of a series aren't bounded as its samples are",
+			wire.Load()>>10, len(body)>>20, held>>20, ratio, big)
 	}
 	if err == nil || !strings.Contains(err.Error(), "too many, or too wide, series to read") || wire.Load() > int64(len(gzipped(t, body)))+1 {
 		t.Errorf("asked %d bytes: %v", wire.Load(), err)
