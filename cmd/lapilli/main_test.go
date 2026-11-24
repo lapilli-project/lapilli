@@ -217,7 +217,7 @@ func TestRun(t *testing.T) {
 		{args: "nope", code: 2, stderr: `unknown command "nope"`},
 		{args: "verdict", code: 2, stderr: "one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings"},
 		{args: "verdict --alerts --firings x", code: 2, stderr: "--alerts and --firings both say where the firings come from: give one of them"},
-		{args: "verdict --rules rules/ --loaded-rules --firings f.json", code: 2, stderr: "--rules, --loaded-rules and --firings all say where the firings come from"},
+		{args: "verdict --rules rules/ --loaded-rules --alerts --firings f.json", code: 2, stderr: "--rules, --loaded-rules, --alerts and --firings all say where the firings come from"},
 		{args: "verdict --rule rules/", code: 2, stderr: "say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules; --rule picks rules by name: for a file or a directory, --rules"},
 		{args: "verdict --alerts --incidents x", code: 2, stderr: "add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID"},
 		{args: "verdict --firings x", code: 2, stderr: "say what went wrong"},

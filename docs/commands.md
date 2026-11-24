@@ -57,7 +57,7 @@ took to catch.
 Usage:
   lapilli verdict [flags]
 
-Where the firings come from (pick one):
+Where the firings come from (pick one; --firings may go beside any but --alerts):
   --rules FILE        replay these alert rules against history (repeatable):
                       Prometheus rule files, PrometheusRule resources, Grafana
                       alerting provisioning files, Terraform's JSON of
@@ -140,7 +140,19 @@ Where the firings come from (pick one):
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."};
-                      recipes/firings writes each cloud's alarm history so
+                      recipes/firings writes each cloud's alarm history in that form.
+                      Alone it says where the firings come from; beside one
+                      of the above (not --alerts or --compare) they are
+                      judged with the firings replayed, over the same period,
+                      against the same incidents, as rules of the report,
+                      marked as recorded: no longer "for", near misses or
+                      backtests for them. A name both have is refused (exit
+                      2): a rule's firings come from one place
+  --firings-prefix STR
+                      put STR before the name of each rule --firings records
+                      (default none), to keep it apart from a replayed rule
+                      of the name; only beside rules replayed, as --firings
+                      alone has no name to clash with
 
 Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
@@ -478,7 +490,10 @@ Output:
                       history couldn't be read, as lapilli exits 1 then, the
                       report judging nothing; a run in which some rule was
                       replayed exits 0 either way, unless --fail-unreplayed.
-                      Not with --compare
+                      Rules recorded with --firings aren't replayed and are
+                      not counted: a run whose replays all failed exits 1
+                      though the recorded firings were judged, the report
+                      judging only those. Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history

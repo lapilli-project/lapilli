@@ -64,7 +64,7 @@ func unreplayed(r *Report, side string) []Unreplayed {
 	}
 	var out []Unreplayed
 	for _, rr := range r.Rules {
-		if rr.Unsupported != "" {
+		if rr.Unsupported != "" && !rr.Recorded() {
 			out = append(out, Unreplayed{Rule: rr.Rule, Side: side, Reason: rr.Unsupported, Failed: rules.ReplayFailed(rr.Unsupported)})
 		}
 	}
