@@ -169,12 +169,17 @@ func TestRecordedFiringsRefused(t *testing.T) {
 }
 
 // Recorded rules aren't counted among those replayed: a run whose replays
-// all failed, with recorded firings judged, still judges something (exit 0),
-// and --fail-unreplayed counts only the rules replayed.
+// all failed exits 1 though recorded firings were judged (0 with
+// --fail-nothing-replayed=false), and --fail-unreplayed counts only the
+// rules replayed.
 func TestRecordedFiringsAndFailedReplays(t *testing.T) {
 	_, args := recordedWorld(t)
 	h := signalHistory{} // nothing answers: the replay fails
-	code, out, errs := runRecorded(t, h, append(args, "--json")...)
+	code, _, errs := runRecorded(t, h, args...)
+	if code != 1 || !strings.Contains(errs, "no rule was replayed: the replays of 1 rules failed") || !strings.Contains(errs, "judges only what was recorded") {
+		t.Fatalf("exit %d\n%s", code, errs)
+	}
+	code, out, errs := runRecorded(t, h, append(args, "--json", "--fail-nothing-replayed=false")...)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, errs)
 	}
@@ -185,7 +190,7 @@ func TestRecordedFiringsAndFailedReplays(t *testing.T) {
 	if len(rep.Unreplayed) != 1 || rep.Unreplayed[0].Rule != "ProbeDown" || !rep.Unreplayed[0].Failed {
 		t.Fatalf("unreplayed: %+v", rep.Unreplayed)
 	}
-	code, _, errs = runRecorded(t, h, append(args, "--fail-unreplayed")...)
+	code, _, errs = runRecorded(t, h, append(args, "--fail-nothing-replayed=false", "--fail-unreplayed")...)
 	if code != 1 || !strings.Contains(errs, "1 of 1 rules couldn't be replayed") {
 		t.Errorf("--fail-unreplayed: exit %d\n%s", code, errs)
 	}

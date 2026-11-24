@@ -146,6 +146,10 @@ nothing and the run exits 1, saying so, unless
 lapilli verdict: no rule was replayed: the replays of N rules failed, as the history couldn't be read or their labels on their series were too many, so the report judges nothing (--fail-nothing-replayed=false to exit 0)
 ```
 
+With `--firings` rules recorded were judged, and the report says so
+(`judges only what was recorded` in place of `judges nothing`): they are not
+rules replayed, so the run exits 1 all the same.
+
 With `--fail-unreplayed`:
 
 ```

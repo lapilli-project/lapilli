@@ -478,9 +478,9 @@ Output:
                       report judging nothing; a run in which some rule was
                       replayed exits 0 either way, unless --fail-unreplayed.
                       Rules recorded with --firings aren't replayed and are
-                      not counted: a run whose replays all failed, but whose
-                      recorded firings were judged, judges something, and
-                      exits 0. Not with --compare
+                      not counted: a run whose replays all failed exits 1
+                      though the recorded firings were judged, the report
+                      judging only those. Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
@@ -2119,16 +2119,25 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if !f.noFailNothingReplayed && cmp == nil && len(dropped) > 0 {
-		judged := false
+		// Only a rule replayed, or judged from a Grafana's history, counts:
+		// a rule recorded with --firings is neither.
+		judged, recorded := false, false
 		for _, rep := range reports {
 			for _, r := range rep.Rules {
-				if r.Unsupported == "" || r.ByHistory() {
+				if r.Unsupported == "" || (r.ByHistory() && !r.Recorded()) {
 					judged = true
+				}
+				if r.Recorded() {
+					recorded = true
 				}
 			}
 		}
 		if !judged {
-			fmt.Fprintf(stderr, "lapilli verdict: no rule was replayed: the replays of %d rules failed, as the history couldn't be read or their labels on their series were too many, so the report judges nothing (--fail-nothing-replayed=false to exit 0)\n", len(dropped))
+			what := "nothing"
+			if recorded {
+				what = "only what was recorded"
+			}
+			fmt.Fprintf(stderr, "lapilli verdict: no rule was replayed: the replays of %d rules failed, as the history couldn't be read or their labels on their series were too many, so the report judges %s (--fail-nothing-replayed=false to exit 0)\n", len(dropped), what)
 			return 1
 		}
 	}

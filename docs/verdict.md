@@ -205,7 +205,8 @@ Grafana rule judged from its history isn't: no longer `for`, near misses or
 `--compare` for it, and the report says so under its table; `--json` gives it
 `source` `firings`. It is no rule that couldn't be replayed, so
 `--fail-unreplayed` and `--fail-nothing-replayed` count only the rules
-replayed. A rule's firings come from one place: a name both a rule replayed
+replayed: a run in which every replay failed exits 1 though the recorded
+firings were judged, the report then judging only what was recorded. A rule's firings come from one place: a name both a rule replayed
 and the file have is refused, exit 2, listing up to five of them.
 `--firings-prefix STR` puts `STR` before every recorded name, to keep the
 two apart on purpose. `--firings` doesn't go with `--alerts` or `--compare`.

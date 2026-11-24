@@ -490,9 +490,9 @@ Output:
                       report judging nothing; a run in which some rule was
                       replayed exits 0 either way, unless --fail-unreplayed.
                       Rules recorded with --firings aren't replayed and are
-                      not counted: a run whose replays all failed, but whose
-                      recorded firings were judged, judges something, and
-                      exits 0. Not with --compare
+                      not counted: a run whose replays all failed exits 1
+                      though the recorded firings were judged, the report
+                      judging only those. Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
