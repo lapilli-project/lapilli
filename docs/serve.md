@@ -532,6 +532,12 @@ is the process memory above, and `resources.limits.memory` that and what
 `256Mi`, a limit of `1Gi`) are above the process memory of every row here,
 without a run's replay.
 
+The table is SQLite's, up to 100,000 firings a week. The Postgres rows
+(the same test, a ledger in a schema of its own, its size the schema's
+tables with their indexes) and the 1,000,000-a-week rows come from
+`.github/workflows/sizing.yml`, run by hand, and are to be filled in
+from its first run.
+
 Reproduce it, on your machine (about nine to eleven minutes, and the ledgers under
 `TMPDIR`, deleted as each is measured, the largest 161 MB):
 
