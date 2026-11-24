@@ -105,7 +105,7 @@ DBPrimaryCPU        1          1      1
 ReadReplicaLag      1          1      1
 A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
-38 rules never fired.
+38 rules never fired: CertificateExpiring, DiskWillFillIn4h, EtcdNoLeader, KafkaUnderReplicated, NodeClockSkew, PodCrashLooping, PVCAlmostFull, RedisDown, TargetDown, WatchdogMissing and 28 more, all in --json.
 
 INCIDENT                         START             LASTED  CAUGHT BY
 INC-41 Checkout errors           2026-10-28 12:01  38m     DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)

@@ -268,6 +268,21 @@ func (p *run) replayable(rs []rules.Rule, picked rules.Picked) {
 		it.Fix = "serve records no firing of a rule it can't replay"
 	}
 	p.add(it)
+	p.sources(rs)
+}
+
+// sources says when Grafana's rules name more than one data source for
+// their PromQL: each is replayed against one history, --prometheus, and
+// whether the data sources are one Prometheus isn't known here. Nothing is
+// said of one or none.
+func (p *run) sources(rs []rules.Rule) {
+	uids := rules.HistoryUIDs(rs)
+	if len(uids) < 2 {
+		return
+	}
+	p.add(Item{ID: "rules.sources", State: Unknown,
+		What: fmt.Sprintf("Grafana's rules query %d data sources: %s", len(uids), names(uids, 5)),
+		Why:  "each is replayed against one history, --prometheus; whether they are one Prometheus isn't known"})
 }
 
 // rulesHistory says what --rules-history holds.

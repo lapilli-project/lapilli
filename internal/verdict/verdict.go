@@ -209,6 +209,11 @@ type RuleResult struct {
 	Unsupported string `json:"unsupported,omitempty"`
 	// Unseen is what its replay can't see, as rules.Rule.Unseen says.
 	Unseen []string `json:"unseen,omitempty"`
+	// NoData is, of a rule that never fired, the values its condition
+	// compares that had no series at all in the period, so it couldn't
+	// have fired. It is set only when looked for, a step after the replays
+	// (--extras).
+	NoData []string `json:"no_data,omitempty"`
 	// Outlasts, when not nil, says its "for" is as long as the range its
 	// condition counts events over, or longer: one event alone can never
 	// fire it (rules.Rule.ForOutlasts). Of a rule replayed.
@@ -348,6 +353,10 @@ type IncidentResult struct {
 	// over, their condition having held in it (Judged.After), each by its
 	// first such firing: Delay from its start, as CaughtBy's.
 	FiredAfter []Catch `json:"fired_after,omitempty"`
+	// NotKnown says no rule replayed caught it, while a rule judged
+	// couldn't be replayed (its Unsupported set, and not ByHistory), which
+	// may have caught it. It is still counted by Missed.
+	NotKnown bool `json:"not_known,omitempty"`
 }
 
 // ImpactShort is of the rules judged, those that fire only once their
@@ -371,6 +380,14 @@ type ImpactShort struct {
 
 // Missed reports whether no rule caught the incident.
 func (i IncidentResult) Missed() bool { return len(i.CaughtBy) == 0 }
+
+// knownMissed reports whether nothing caught the incident and that is
+// known: it isn't NotKnown.
+func (i IncidentResult) knownMissed() bool { return i.Missed() && !i.NotKnown }
+
+// unknown reports whether nothing caught the incident and whether one did
+// isn't known (NotKnown).
+func (i IncidentResult) unknown() bool { return i.Missed() && i.NotKnown }
 
 // OnlyNoisy reports whether only noisy rules caught the incident, which is
 // little better than missing it.
@@ -416,6 +433,10 @@ type Report struct {
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
 	// SomeRules says the report is of some of the rules: see Options.
 	SomeRules bool `json:"some_rules,omitempty"`
+	// NotKnownMetric makes Prometheus write lapilli_incidents_not_known:
+	// lapilli verdict --metrics sets it, as only a run that replays rules
+	// can fail to; serve's /metrics never does.
+	NotKnownMetric bool `json:"-"`
 	// Hours are the hours firings were counted out of hours by.
 	Hours *HoursUsed `json:"hours,omitempty"`
 	// NearMisses are rules that nearly caught an incident nothing caught, or
@@ -745,9 +766,24 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		return x.Rule < y.Rule
 	})
+	rep.MarkNotKnown()
 	rep.countEpisodes(o, at)
 	rep.Credit(nil)
 	return rep
+}
+
+// MarkNotKnown sets NotKnown on each incident nothing caught, while a rule
+// couldn't be replayed: that rule may have caught it. A rule judged from
+// its history (ByHistory) was judged, and a rule that can't fire
+// (rules.CantFire) caught nothing: neither counts. Judge does it; a
+// caller that sets a rule's Source after Judge does it again.
+func (r *Report) MarkNotKnown() {
+	unsure := slices.ContainsFunc(r.Rules, func(rr RuleResult) bool {
+		return rr.Unsupported != "" && !rr.ByHistory() && !rules.CantFire(rr.Unsupported)
+	})
+	for i := range r.Incidents {
+		r.Incidents[i].NotKnown = len(r.Incidents[i].CaughtBy) == 0 && unsure
+	}
 }
 
 // sortCatches puts catches in order of their delay, then of their rule.

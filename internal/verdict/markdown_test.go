@@ -68,12 +68,12 @@ func TestCompareMarkdown(t *testing.T) {
 		"Rules compared: **2 changed, 1 added, 1 taken away**, 40 the same.\n\n" +
 			"**1 of the rules that differ couldn't be replayed**, and are left out of what follows: the list below says why.\n\n| |",
 		"| | Before | After |\n|---|--:|--:|\n| Firings | 4 | 2 |\n| no severity | 0 | 1 |\n| Severity `page` | 1 | 1 |\n" +
-			"| Severity `ticket` | 3 | 0 |\n| Incidents with no alert, of 2 | 1 | 0 |\n",
+			"| Severity `ticket` | 3 | 0 |\n| Incidents with no alert, of 2 | 0 | 0 |\n| Incidents not known: no alert from the rules replayed, a rule couldn't be replayed | 1 | 0 |\n",
 		"#### Rules that differ\n\n| Rule | Severity | Fired | ○ Caught | ● Nothing | Precision | Refired |\n| --- | --- | --: | --: | --: | --: | --: |\n",
 		"| `Flappy` | `ticket` → – | 3 → – | 0 → – | 3 → – | 0% → – | 1 → – |\n",
 		"| `SearchLatency` | – → – | – → 1 | – → 1 | – → 0 | – → 100% | – → 0 |\n",
 		"| `Typo` | – | ? → 0 | ? → 0 | ? → 0 | ? → – | ? → 0 |\n",
-		"#### Could not replay 1 rules\n\n- `Typo`, before: `query failed: bad_data`\n",
+		"#### Could not replay 1 rule\n\n- `Typo`, before: `query failed: bad_data`\n",
 		"<details><summary>1 changed rules keep the same stones</summary>\n\n- `CheckoutErrors`\n\n</details>\n",
 		"#### Incidents caught differently\n\n| Incident | Start | Before | After |\n| --- | --- | --- | --- |\n" +
 			"| `INC-1` `Checkout errors` | 2026-10-26 10:40 | `CheckoutErrors` +2m | `CheckoutErrors` +20m |\n" +

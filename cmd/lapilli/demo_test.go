@@ -51,7 +51,7 @@ func TestDemo(t *testing.T) {
 		"INC-43 Orders stuck     2026-11-14 03:05  25m     ✗ nothing fired",
 		"✗ 1 of 3 incidents had no alert.",
 		"INC-43    OrdersQueueBacklog  9m from +2m  for 15m → 8m  +10m        0 → 1  0 → 0",
-		"3 rules never fired.",
+		"3 rules never fired:",
 		"\nOn your own: lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --incidents incidents.yaml\n",
 		"lapilli impact suggest --prometheus http://prometheus:9090",
 	} {

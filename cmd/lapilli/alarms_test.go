@@ -45,7 +45,7 @@ func TestAlarmsRules(t *testing.T) {
 	args := []string{"verdict", "--rules", rules, "--alarms", "cloudwatch-prod=https://monitoring.eu-west-1.amazonaws.com",
 		"--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}
 	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "CheckoutErrors [cloudwatch-prod] +5m") ||
-		!strings.Contains(stdout.String(), "1 rules never fired.") || !strings.Contains(stdout.String(), "cpu-high: a CloudWatch metric alarm isn't PromQL") {
+		!strings.Contains(stdout.String(), "1 rule never fired:") || !strings.Contains(stdout.String(), "cpu-high: a CloudWatch metric alarm isn't PromQL") {
 		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
 	}
 	for _, e := range cw.Errs {

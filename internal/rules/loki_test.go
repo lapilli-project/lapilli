@@ -493,3 +493,48 @@ func TestGrafanaLokiEval(t *testing.T) {
 		}
 	}
 }
+
+// TestHistoryUIDs: the data sources whose queries are asked of the
+// Prometheus history: each once, over all the rules; not a Loki's, nor a
+// rule that isn't Grafana's.
+func TestHistoryUIDs(t *testing.T) {
+	prom := func(rule, uid string) string {
+		return `      - uid: ` + rule + `
+        title: ` + rule + `
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: ` + uid + `
+            model: {expr: up, instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`
+	}
+	file := func(body string) string {
+		return "apiVersion: 1\ngroups:\n  - orgId: 1\n    name: g\n    folder: F\n    interval: 1m\n    rules:\n" + body
+	}
+	read := func(src string) []Rule {
+		rs, err := Parse([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		Replaying{Kinds: map[string]string{"lk": KindLoki}}.Apply(rs)
+		return rs
+	}
+	for name, c := range map[string]struct {
+		file string
+		want string
+	}{
+		"two data sources":    {file(prom("one", "prom-a") + prom("two", "prom-b")), "prom-a,prom-b"},
+		"one, in two rules":   {file(prom("one", "prom-a") + prom("two", "prom-a")), "prom-a"},
+		"a Loki's isn't":      {lokiGrafana, ""},
+		"a Loki's, and a not": {file(prom("one", "prom-a")) + strings.SplitN(lokiGrafana, "rules:\n", 2)[1], "prom-a"},
+		"a rule file's":       {"groups:\n  - name: g\n    rules:\n      - alert: Up\n        expr: up == 0\n", ""},
+	} {
+		if got := strings.Join(HistoryUIDs(read(c.file)), ","); got != c.want {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+	}
+}

@@ -100,7 +100,7 @@ func TestCheckReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"Replay beside ALERTS", "7 firings alike, 2 only in the replay, 4 only in what really fired: 54% alike.",
-		"5 rules fired alike, 4 differ, 2 fired neither way.", "ONLY REPLAYED", "Could not replay 1 rules", "NotReplayed: uses Loki",
+		"5 rules fired alike, 4 differ, 2 fired neither way.", "ONLY REPLAYED", "Could not replay 1 rule", "NotReplayed: uses Loki",
 		"Really fired, but no rule given has the name: Watchdog."} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("no %q in:\n%s", want, b.String())

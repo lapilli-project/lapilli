@@ -410,8 +410,16 @@ linked to it, a rule it lists is looked at whatever `--match` says, a
 stretch or a value of it nearly catching it where its labels agree with the
 alert's, and with `--linked-only` only the rules it lists are.
 
+**Rules that never fired** are named under the tables, ten at most (the rest
+are in `--json`). Of those, a rule whose condition compares a value that had
+no series at all in the period (a typo'd metric, a recording rule that isn't
+in the history) is said apart, with the expression: it couldn't have fired
+(`"no_data"` in `--json`). That is looked at after the replays, one question
+to the history for each value, so `--extras 0` skips it.
+
 **The steps after the replays**, a longer `for` for the noisy rules, near
-misses, and what fired with no record, ask the history again, and can take as
+misses, what fired with no record, and whether the rules that never fired
+read anything, ask the history again, and can take as
 long as the replays did. The progress line says which step a run is at and
 how far it is (`then looking for rules that nearly caught the incidents
 nothing caught, 120 of at most 2000 questions`). `--extras DUR` lets them take

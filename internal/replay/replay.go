@@ -592,6 +592,39 @@ func Values(ctx context.Context, h History, r rules.Rule, b rules.Bound, from, t
 	return out, nil
 }
 
+// NoData is, of a Prometheus rule whose condition compares values with
+// numbers, the distinct expressions it compares (rules.Rule.Operand) that
+// returned no series with a sample at all over [from, to]: a rule that
+// reads them could not have fired. Each is asked as count((expr)), which
+// returns one series at most, so the history sends back one sample a step
+// and not every series of a wide metric. A Grafana rule, a rule of logs and
+// one that can't be replayed are none: nil. A question that fails returns
+// its error.
+func NoData(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration) ([]string, error) {
+	if r.Graph != nil || r.Logs != "" || r.Unsupported != "" {
+		return nil, nil
+	}
+	var out []string
+	for _, b := range r.Bounds() {
+		expr, ok := r.Operand(b)
+		if !ok || slices.Contains(out, expr) {
+			continue
+		}
+		ask := r
+		ask.Expr = "count((" + expr + "))"
+		series, err := condition(ctx, h, ask, from, to, step, true, false)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(series, func(s prom.Series) bool {
+			return slices.ContainsFunc(s.Samples, func(x prom.Sample) bool { return !math.IsNaN(x.V) })
+		}) {
+			out = append(out, expr)
+		}
+	}
+	return out, nil
+}
+
 // Fired is when a rule fired over [from, to], with its "for" and
 // keep_firing_for, as a replay of it alone over that time fires it: all of
 // its firings, a label set that held at from pending from then; and those

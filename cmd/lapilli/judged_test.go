@@ -191,7 +191,7 @@ func TestVerdictGrafanaJudged(t *testing.T) {
 	if code := run(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	for _, want := range []string{"Orders slow  ", "Judged from what their history says they fired, not replayed, 1 rules",
+	for _, want := range []string{"Orders slow  ", "Judged from what their history says they fired, not replayed, 1 rule",
 		"Orders slow, from Grafana's alert state history: its condition reads a mysql data source"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("no %q in:\n%s", want, stdout.String())
@@ -219,7 +219,7 @@ func TestVerdictGrafanaJudged(t *testing.T) {
 		if code := run(append(args, c.more...), &stdout, &stderr); code != 0 {
 			t.Fatalf("%s: exit %d: %s", c.name, code, stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "Could not replay 1 rules:\n  Orders slow: its condition reads a mysql data source") {
+		if !strings.Contains(stdout.String(), "Could not replay 1 rule:\n  Orders slow: its condition reads a mysql data source") {
 			t.Errorf("%s: not listed:\n%s", c.name, stdout.String())
 		}
 		if c.said != "" && !strings.Contains(stderr.String(), c.said) {
@@ -252,7 +252,7 @@ func TestVerdictGrafanaJudgedUnlisted(t *testing.T) {
 	if code := run([]string{"verdict", "--grafana", srv.URL, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Could not replay 1 rules:\n  Orders slow: its condition reads a mysql data source") ||
+	if !strings.Contains(stdout.String(), "Could not replay 1 rule:\n  Orders slow: its condition reads a mysql data source") ||
 		!strings.Contains(stderr.String(), "1 Grafana rules aren't judged from its alert state history, as Grafana's list of its rules gives them no id") ||
 		strings.Contains(stderr.String(), "passed over changes") {
 		t.Errorf("not said apart:\n%s\n%s", stdout.String(), stderr.String())
@@ -282,7 +282,7 @@ func TestVerdictGrafanaJudgedShared(t *testing.T) {
 	if code := run([]string{"verdict", "--grafana", srv.URL, "--prometheus", "http://p", "--incidents", incidents, "--rule", "^Orders: slow$", "--tz", "UTC"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Could not replay 1 rules:\n  Orders: slow: its condition reads a mysql data source") ||
+	if !strings.Contains(stdout.String(), "Could not replay 1 rule:\n  Orders: slow: its condition reads a mysql data source") ||
 		!strings.Contains(stderr.String(), "1 Grafana rules aren't judged from its alert state history, which gives their name to another of Grafana's rules too") {
 		t.Errorf("judged by another rule's history:\n%s\n%s", stdout.String(), stderr.String())
 	}

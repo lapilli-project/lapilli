@@ -32,6 +32,13 @@ metrics that keep their names. `--metrics` gives `lapilli_rule_firings`, `lapill
 [episodes](numbers.md#episodes), and those caught), `lapilli_incidents`
 (by `state` and `source`) and `lapilli_incident_detection_delay_seconds`.
 
+Grafana's rules, from files or from `--grafana`, are all replayed against
+one history, `--prometheus`, whatever PromQL data source they name (only
+Loki's are asked of their own). With rules on several, `verdict` warns, and
+[`preflight`](design/preflight.md)'s `rules.sources` says so: replay each
+data source's rules in a run of their own, against its Prometheus (`--rule`
+picks them by name).
+
 ## How it asks the history
 
 A replay asks for each query a day at a time, once for every rule that needs
@@ -212,6 +219,12 @@ identity, the cloud's CLI):
 `--aws-region` names the region to sign for when the URL doesn't (a VPC
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
 `--auth google`. Lapilli only reads from these.
+
+Of these, the Google path has been run against a real project. The Amazon
+and Azure paths are tested against SigV4 and token checks written apart from
+the SDKs, not yet against a real workspace; the reading of CloudWatch's
+PromQL alarms and Google Cloud's PromQL policies, and their firing recipes,
+against their documentation's answers, not yet a real account.
 
 CloudWatch answers PromQL over the metrics sent to its OpenTelemetry
 endpoint, and over AWS's own metrics once their OpenTelemetry enrichment is

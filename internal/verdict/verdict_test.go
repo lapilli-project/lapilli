@@ -110,14 +110,14 @@ func TestText(t *testing.T) {
 	}
 	out := b.String()
 	for _, want := range []string{
-		"6 firings, 1 incidents written down, 1 more found by --impact",
+		"6 firings, 1 incident written down, 1 more found by --impact",
 		"RULE",
-		"1 rules never fired.",
+		"1 rule never fired: Silent.",
 		"Broken: classic_conditions expressions",
 		"INC-1 Checkout errors",
 		"CheckoutErrors +2m",
-		"✗ nothing fired",
-		"✗ 1 of 2 incidents had no alert.",
+		"? not known",
+		"? 1 of 2 incidents had no alert from the 4 rules replayed: the 1 that couldn't be replayed may have caught it.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text lacks %q:\n%s", want, out)
@@ -259,5 +259,56 @@ func TestLabelValue(t *testing.T) {
 		if got := LabelValue(in); got != want {
 			t.Errorf("%q: %s, want %s", in, got, want)
 		}
+	}
+}
+
+func TestNeverFiredNamed(t *testing.T) {
+	rep := scenario()
+	var b bytes.Buffer
+	if err := Text(&b, rep, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "1 rule never fired: Silent.") {
+		t.Errorf("the one rule that never fired isn't named:\n%s", b.String())
+	}
+	if strings.Contains(b.String(), "couldn't have fired") {
+		t.Errorf("a warning with nothing looked at:\n%s", b.String())
+	}
+	var many []RuleResult
+	for _, n := range "ABCDEFGHIJKL" {
+		many = append(many, RuleResult{Rule: "Rule" + string(n)})
+	}
+	got := neverFired(many)
+	want := "12 rules never fired: RuleA, RuleB, RuleC, RuleD, RuleE, RuleF, RuleG, RuleH, RuleI, RuleJ and 2 more, all in --json"
+	if got != want {
+		t.Errorf("neverFired:\n%s\nwant\n%s", got, want)
+	}
+	if got := neverFired(many[:3]); got != "3 rules never fired: RuleA, RuleB, RuleC." {
+		t.Errorf("neverFired of three: %s", got)
+	}
+}
+
+func TestNeverFiredNoData(t *testing.T) {
+	rep := scenario()
+	for i := range rep.Rules {
+		if rep.Rules[i].Rule == "Silent" {
+			rep.Rules[i].NoData = []string{"queue_dept", strings.Repeat("m", 200)}
+		}
+	}
+	var b bytes.Buffer
+	if err := Text(&b, rep, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	want := "! 1 of them read what had no series at all in the period, so it couldn't have fired: Silent (queue_dept, " + strings.Repeat("m", 77) + "…)."
+	if !strings.Contains(b.String(), want) {
+		t.Errorf("text lacks %q:\n%s", want, b.String())
+	}
+	var silent []RuleResult
+	for _, n := range "ABCDEFG" {
+		silent = append(silent, RuleResult{Rule: string(n), NoData: []string{"m_" + string(n)}})
+	}
+	got := noData(silent)
+	if !strings.HasPrefix(got, "! 7 of them read what had no series at all in the period, so they couldn't have fired: A (m_A), B (m_B), C (m_C), D (m_D), E (m_E) and 2 more") {
+		t.Errorf("noData of seven: %s", got)
 	}
 }

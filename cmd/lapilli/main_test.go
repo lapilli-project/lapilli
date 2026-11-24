@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -214,8 +215,10 @@ func TestRun(t *testing.T) {
 		{args: "verdict -h", code: 0, stdout: "--impact PROMQL"},
 		{args: "nope", code: 2, stderr: `unknown command "nope"`},
 		{args: "verdict", code: 2, stderr: "one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings"},
-		{args: "verdict --alerts --firings x", code: 2, stderr: "one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings"},
-		{args: "verdict --alerts --incidents x", code: 2, stderr: "add --prometheus URL or --gcp-project ID"},
+		{args: "verdict --alerts --firings x", code: 2, stderr: "--alerts and --firings both say where the firings come from: give one of them"},
+		{args: "verdict --rules rules/ --loaded-rules --firings f.json", code: 2, stderr: "--rules, --loaded-rules and --firings all say where the firings come from"},
+		{args: "verdict --rule rules/", code: 2, stderr: "say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules; --rule picks rules by name: for a file or a directory, --rules"},
+		{args: "verdict --alerts --incidents x", code: 2, stderr: "add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID"},
 		{args: "verdict --firings x", code: 2, stderr: "say what went wrong"},
 		{args: "verdict --firings x --incidents y --json --metrics", code: 2, stderr: "don't go together"},
 		{args: "verdict --firings x --incidents y --since soon", code: 2, stderr: "want a duration"},
@@ -247,9 +250,9 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Typo: query failed: HTTP 400: bad_data: parse error"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --impact impact",
-			code: 0, stdout: "✗ 1 of 2 incidents had no alert."},
+			code: 0, stdout: "? 1 of 2 incidents had no alert from the 2 rules replayed: the 1 that couldn't be replayed may have caught it."},
 		{args: "verdict --rules " + rulesFile + " --rule ^Quiet$ --prometheus http://p --incidents " + incidents,
-			code: 0, stdout: "1 rules never fired."},
+			code: 0, stdout: "1 rule never fired:"},
 		{args: "verdict --rules " + slowRules + " --prometheus http://p --incidents " + incidents + " --timeout 1s --tz UTC",
 			code: 1, stdout: "CheckoutErrors +5m", stderr: "1 of 2 rules didn't finish within --timeout 1s"},
 		{args: "verdict --rules " + rulesFile + " --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents + " --tz UTC",
@@ -317,7 +320,7 @@ func TestRun(t *testing.T) {
 				"No incidents were given: the firings are counted, not judged.\n\n| | Before | After |\n|---|--:|--:|\n| Firings of the changed rules | 1 | 0 |\n\n" +
 				"#### Rules that differ\n\n| Rule | Fired | Refired |\n| --- | --: | --: |\n| `CheckoutErrors` | 1 → 0 | 0 → 0 |\n"},
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --markdown --incidents " + incidents,
-			code: 0, stdout: "| Incidents with no alert, of 1 | 0 | 1 |\n"},
+			code: 0, stdout: "| Incidents with no alert, of 1 | 0 | 0 |\n| Incidents not known: no alert from the rules replayed, a rule couldn't be replayed | 0 | 1 |\n"},
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
 			code: 0, stdout: `"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":3,`},
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
@@ -551,7 +554,7 @@ func TestCheckReplay(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{`Replay beside ALERTS{alertstate="firing"}`, "1 firings alike, 0 only in the replay, 0 only in what really fired: 100% alike.",
-		"1 rules fired alike, 0 differ, 1 fired neither way.", "Typo", "Really fired, but no rule given has the name: Watchdog."} {
+		"1 rule fired alike, 0 differ, 1 fired neither way.", "Typo", "Really fired, but no rule given has the name: Watchdog."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}
@@ -896,5 +899,24 @@ func TestCompareAzureRecording(t *testing.T) {
 	code := run([]string{"verdict", "--rules", is, "--compare", was, "--prometheus", "http://p", "--json", "--changed-only"}, &out, &errs)
 	if code != 0 || !strings.Contains(out.String(), `"nothing_changed": false`) || !strings.Contains(out.String(), `"record": "shop:errors"`) {
 		t.Errorf("exit %d\n%s\n%s", code, out.String(), errs.String())
+	}
+}
+
+// --rule is a regexp of rule names: given what looks like a path where
+// --rules was meant, and no source, the refusal says so; given a name, it
+// doesn't.
+func TestRuleIsAName(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		val  string
+		want bool
+	}{{"rules/", true}, {dir, true}, {"CheckoutErrors", false}, {"^Node.*", false}} {
+		f := &verdictFlags{ruleRE: regexp.MustCompile(c.val)}
+		if got := ruleIsAName(f) != ""; got != c.want {
+			t.Errorf("--rule %s: %q", c.val, ruleIsAName(f))
+		}
+	}
+	if ruleIsAName(&verdictFlags{}) != "" {
+		t.Error("said it of no --rule")
 	}
 }

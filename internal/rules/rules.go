@@ -153,6 +153,28 @@ func (r Rule) GrafanaUIDs() []string {
 	return nil
 }
 
+// HistoryUIDs are the data sources, by uid and sorted, that the queries of
+// the Grafana rules in rs name and the replay asks of the Prometheus
+// history: not an expression's, not a query of a rule written in LogQL,
+// nor one the replay doesn't ask (a rule that isn't replayed, or a query on
+// a data source its condition doesn't read). More than one means rules
+// judged by one history that Grafana runs against several.
+func HistoryUIDs(rs []Rule) []string {
+	var out []string
+	for _, r := range rs {
+		if r.Graph == nil || r.Unsupported != "" || r.Graph.Logs != "" {
+			continue
+		}
+		for _, d := range r.Graph.Data {
+			if d.UID != "" && d.UID != "__expr__" && !slices.Contains(out, d.UID) {
+				out = append(out, d.UID)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // LokiRuler is the Logs of a rule a Loki ruler runs, read from its rule
 // files or its API: its queries are asked of --loki. It is also the Logs of
 // a document read from a Loki ruler's API; LokiFile, of one read from its
@@ -1190,7 +1212,7 @@ func azurePromQL(rule *Rule, props map[string]any) {
 		}
 	}
 	if rule.Expr == "" {
-		rule.Unsupported = "no query"
+		rule.Unsupported = NoQuery
 	}
 }
 
@@ -1260,6 +1282,16 @@ func ociAlarms(doc map[string]any) []Rule {
 // Disabled is the Unsupported of a rule turned off, which fires nothing.
 const Disabled = "disabled"
 
+// NoQuery is the Unsupported of a rule with no query to replay.
+const NoQuery = "no query"
+
+// CantFire reports whether unsupported, a rule's Unsupported, marks a rule
+// that fires nothing, replayed or not: it is disabled, paused or has no
+// query.
+func CantFire(unsupported string) bool {
+	return unsupported == Disabled || unsupported == Paused || unsupported == NoQuery
+}
+
 // cloudWatch reads Amazon CloudWatch alarms as the AWS CLI's
 // describe-alarms answers. A PromQL alarm is a rule like a Prometheus one:
 // its query, its pending period as "for", its recovery period as
@@ -1295,7 +1327,7 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 			}
 		}
 		if rule.Expr == "" {
-			rule.Unsupported = "no query"
+			rule.Unsupported = NoQuery
 		}
 		actionsOff(&rule, m)
 		out = append(out, rule)
@@ -1445,7 +1477,7 @@ func googlePolicy(doc map[string]any) []Rule {
 		}
 		switch {
 		case rule.Expr == "":
-			rule.Unsupported = "no query"
+			rule.Unsupported = NoQuery
 		case doc["enabled"] == false:
 			rule.Unsupported = Disabled
 		}
