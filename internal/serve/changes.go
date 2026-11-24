@@ -2213,11 +2213,12 @@ type proposeIn struct {
 	Unset      bool   `json:"unset,omitempty" jsonschema:"take the annotation out instead: kind says"`
 	Check      string `json:"check,omitempty" jsonschema:"the content check's finding it answers, as the rule tool gives it, such as no_runbook: kind says"`
 	// A new rule: kind add.
-	Added        string            `json:"added,omitempty" jsonschema:"kind add: the new rule, one Prometheus alerting rule in YAML (alert, expr, for, keep_firing_for, labels, annotations): its alert is its name, apart from every rule's, and rule names it too"`
-	Path         string            `json:"path,omitempty" jsonschema:"kind add: where it goes, as places gives one: git, grafana, ruler or alarm"`
+	Added        string            `json:"added,omitempty" jsonschema:"kind add: the new rule, one Prometheus alerting rule in YAML (alert, expr, for, keep_firing_for, labels, annotations), its expr LogQL for a Loki place: its alert is its name, apart from every rule's, and rule names it too"`
+	Path         string            `json:"path,omitempty" jsonschema:"kind add: where it goes, as places gives one: git, grafana, ruler, loki or alarm"`
 	File         string            `json:"file,omitempty" jsonschema:"kind add, git: the rule file, as places names it"`
+	Loki         bool              `json:"loki,omitempty" jsonschema:"kind add, git: the file is a Loki ruler's rule file, as places says; the rule is LogQL, here and for path loki"`
 	Folder       string            `json:"folder,omitempty" jsonschema:"kind add, grafana: the folder's title"`
-	Namespace    string            `json:"namespace,omitempty" jsonschema:"kind add, ruler: the namespace"`
+	Namespace    string            `json:"namespace,omitempty" jsonschema:"kind add, ruler and loki: the namespace"`
 	Alarms       string            `json:"alarms,omitempty" jsonschema:"kind add, alarm: the --alarms source"`
 	Group        string            `json:"group,omitempty" jsonschema:"kind add: the group, as places gives it, or a new group's name with new_group"`
 	NewGroup     bool              `json:"new_group,omitempty" jsonschema:"kind add: a new group of that name, where places offers one"`
@@ -2230,7 +2231,7 @@ type proposeIn struct {
 
 type proposeOut struct {
 	ID   int64  `json:"id"`
-	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
+	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; loki, a Loki ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
 	// Outlasts warns of a for proposed that one event can't outlast.
 	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for as long as the range the rule's condition counts events over, or longer: one event alone could never fire it, only events that keep coming for all of it. Proposed all the same, and said on its page"`

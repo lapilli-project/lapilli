@@ -53,6 +53,11 @@ type addPlace struct {
 	Group    string        `json:"group,omitempty"`
 	NewGroup bool          `json:"new_group,omitempty"`
 	Interval time.Duration `json:"interval_ns,omitempty"`
+	// Loki says, of the git path, that the file is a Loki ruler's rule
+	// file (--loki-rules), whose rules are LogQL, not a Prometheus rule
+	// file read under --rules, though both may be one path. Of a Loki
+	// ruler's API (path loki), Namespace and Group are its own.
+	Loki bool `json:"loki,omitempty"`
 	// DataSource is, of Grafana, the data source its query reads; Tells,
 	// of Grafana and a cloud's alarm, whom it tells: a contact point, an
 	// action, a notification channel, each one the rules in that place
@@ -72,10 +77,13 @@ func (p addPlace) where() string {
 	}
 	switch p.Path {
 	case ledger.PathGit:
+		if p.Loki {
+			return p.File + " (Loki), " + g
+		}
 		return p.File + ", " + g
 	case ledger.PathGrafana:
 		return p.Folder + ", " + g
-	case ledger.PathRuler:
+	case ledger.PathRuler, ledger.PathLoki:
 		return p.Namespace + ", " + g
 	}
 	return p.Alarms
@@ -100,7 +108,11 @@ type placeOffer struct {
 
 // placeKey is what a place is named by in a form: a hash of where it is.
 func placeKey(p addPlace) string {
-	b, _ := json.Marshal([]any{p.Path, p.File, p.Folder, p.Namespace, p.Alarms, p.Group, p.NewGroup})
+	key := []any{p.Path, p.File, p.Folder, p.Namespace, p.Alarms, p.Group, p.NewGroup}
+	if p.Loki {
+		key = append(key, "loki") // the keys of every other place are as they were
+	}
+	b, _ := json.Marshal(key)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
 }
@@ -263,6 +275,21 @@ func (s *Server) rulePlaces(all []rules.Rule, docs []rules.Doc) []placeOffer {
 		case s.rulerPlace(r, d):
 			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, Group: r.Group}, kind: s.ruler.Kind})
 			add(placeOffer{addPlace: addPlace{Path: ledger.PathRuler, Namespace: r.Namespace, NewGroup: true}, kind: s.ruler.Kind})
+		case s.lokiRulerPlace(r, d):
+			add(placeOffer{addPlace: addPlace{Path: ledger.PathLoki, Namespace: r.Namespace, Group: r.Group}, kind: source.RulerConfig})
+			add(placeOffer{addPlace: addPlace{Path: ledger.PathLoki, Namespace: r.Namespace, NewGroup: true}, kind: source.RulerConfig})
+		case s.lokiFilePlace(r, d):
+			// A Loki ruler's rule file, as a Prometheus one is a place.
+			file := s.docName(d.Source)
+			add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, Group: r.Group, Loki: true}})
+			ok, known := fits[d.Source+"\x00loki"]
+			if !known {
+				ok = rules.NewGroupFits(d.Data)
+				fits[d.Source+"\x00loki"] = ok
+			}
+			if ok {
+				add(placeOffer{addPlace: addPlace{Path: ledger.PathGit, File: file, NewGroup: true, Loki: true}})
+			}
 		}
 	}
 	for i := range out {
@@ -311,6 +338,34 @@ func (s *Server) gitPlace(r rules.Rule, d rules.Doc) bool {
 	}
 	rel, err := filepath.Rel(s.cfg.RulesPath, d.Source)
 	return err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) && !ciPath(rel)
+}
+
+// lokiFilePlace reports whether a rule's file is a Loki ruler's rule file a
+// rule may be added to by the git path, as gitPlace says of a Prometheus
+// one: read under --loki-rules, not Loki's API, in a group, under a path
+// no CI system runs. A new file isn't a place, for the reason it isn't a
+// Prometheus rule file's: no recipe finds it, not being a document Lapilli
+// read (docs/design/expectations.md).
+func (s *Server) lokiFilePlace(r rules.Rule, d rules.Doc) bool {
+	if s.cfg.LokiRules == "" || s.cfg.LokiLoaded || d.Logs != rules.LokiFile || d.API || len(d.Data) == 0 || d.Namespace != "" ||
+		r.Cloud != "" || r.UID != "" || r.Graph != nil || r.Logs != rules.LokiRuler || r.Group == "" {
+		return false
+	}
+	if d.Source == s.cfg.LokiRules {
+		return !ciPath(filepath.Base(d.Source)) // --loki-rules names the file itself
+	}
+	rel, err := filepath.Rel(s.cfg.LokiRules, d.Source)
+	return err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) && !ciPath(rel)
+}
+
+// lokiRulerPlace reports whether a rule is a Loki ruler's, read from its
+// API with --loki-loaded-rules, in a namespace and group --changes-in
+// names as loki:NAMESPACE.
+func (s *Server) lokiRulerPlace(r rules.Rule, d rules.Doc) bool {
+	if s.loki == nil || r.Cloud != "" || d.Logs != rules.LokiRuler || d.Namespace == "" || r.Namespace != d.Namespace || r.Logs != rules.LokiRuler {
+		return false
+	}
+	return rulerTarget{s: s, loki: true}.allowed("", rules.Edit{Namespace: r.Namespace, Group: r.Group}) == ""
 }
 
 // grafanaPlace reports whether a rule is a Grafana rule read from Grafana's
@@ -550,12 +605,20 @@ func (s *Server) buildAdd(ctx context.Context, a rules.Added, p addPlace, o plac
 	if err := addedTemplates(a, p.Path); err != nil {
 		return nil, err
 	}
+	// Loki 3.7.9 drops a rule file's keep_firing_for when it reads it
+	// (docs/design/loki.md): a rule added to one with it would be replayed
+	// without it, as Loki runs it, and say otherwise in the file.
+	if p.Path == ledger.PathGit && p.Loki && a.KeepFiringFor != 0 {
+		return nil, bad("Loki doesn't run a keep_firing_for written in a rule file: leave it out, or add the rule to Loki's ruler, through its API")
+	}
 	b := &addBuilt{place: p, offer: o, added: a, edit: rules.Edit{Name: a.Alert, Group: p.Group}}
 	switch p.Path {
 	case ledger.PathGit:
 		return b, s.buildGit(ctx, b)
 	case ledger.PathRuler:
-		return b, s.buildRuler(ctx, b)
+		return b, s.buildRuler(ctx, b, rulerTarget{s: s})
+	case ledger.PathLoki:
+		return b, s.buildRuler(ctx, b, rulerTarget{s: s, loki: true})
 	case ledger.PathGrafana:
 		return b, s.buildGrafana(ctx, b)
 	case ledger.PathAlarm:
@@ -685,7 +748,12 @@ func (s *Server) buildGit(ctx context.Context, b *addBuilt) error {
 	var d rules.Doc
 	n := 0
 	for _, x := range docs {
-		if s.docName(x.Source) == b.place.File && !x.API && x.Logs == "" && x.Namespace == "" {
+		// A Loki ruler's rule file and a Prometheus one may be one path.
+		logs := ""
+		if b.place.Loki {
+			logs = rules.LokiFile
+		}
+		if s.docName(x.Source) == b.place.File && !x.API && x.Logs == logs && x.Namespace == "" {
 			d = x
 			n++
 		}
@@ -732,9 +800,10 @@ func scenarioGroupOf(rs []rules.Rule, r rules.Rule) ([]byte, error) {
 	return scenario.Group(alerts, nil)
 }
 
-func (s *Server) buildRuler(ctx context.Context, b *addBuilt) error {
-	tg := rulerTarget{s: s}
-	if s.ruler == nil || s.ruler.Kind == source.RulerAzure {
+// buildRuler writes the rule into a ruler's group: --ruler's, or, with
+// loki, --loki's, read with --loki-loaded-rules, whose queries are LogQL.
+func (s *Server) buildRuler(ctx context.Context, b *addBuilt, tg rulerTarget) error {
+	if tg.r() == nil || tg.r().Kind == source.RulerAzure {
 		return errNoPlace
 	}
 	b.edit.Namespace = b.place.Namespace
@@ -754,7 +823,7 @@ func (s *Server) buildRuler(ctx context.Context, b *addBuilt) error {
 	}
 	var out []byte
 	switch {
-	case s.ruler.Kind == source.RulerConfig && b.place.NewGroup:
+	case tg.r().Kind == source.RulerConfig && b.place.NewGroup:
 		// The unit is the group: one gone is made, holding the rule alone.
 		if !u.Gone {
 			return bad("a group of that name is in the namespace: pick it, or name the new one apart")

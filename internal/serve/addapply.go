@@ -169,10 +169,11 @@ func (s *Server) apiAdd(ctx context.Context, tg target, p ledger.Proposal, step 
 	if u.Hash != p.DocHash {
 		// The unit changed since: the rule added afresh in it as it is now.
 		var out []byte
+		config := tg.path() == ledger.PathLoki || s.ruler.Kind == source.RulerConfig // Loki's ruler is Cortex's
 		switch {
-		case s.ruler.Kind == source.RulerConfig && place.NewGroup && !u.Gone:
+		case config && place.NewGroup && !u.Gone:
 			return refusal{"a group of its name is in the namespace now: propose it again"}
-		case s.ruler.Kind == source.RulerConfig && place.NewGroup:
+		case config && place.NewGroup:
 			out, err = newGroupFile(place.Group, place.Interval, a)
 		case u.Gone:
 			return refusal{tg.gone()}
@@ -265,7 +266,11 @@ func addReadBack(tg target, u apiUnit, p ledger.Proposal) (rules.Rule, bool) {
 	if err != nil {
 		return rules.Rule{}, false
 	}
-	want, err := rules.FromDocs([]rules.Doc{{Source: p.Source, Namespace: u.ns, Data: []byte(p.Document)}})
+	d := rules.Doc{Source: p.Source, Namespace: u.ns, Data: []byte(p.Document)}
+	if tg.path() == ledger.PathLoki {
+		d.Logs = rules.LokiRuler // as it is read back from Loki's ruler
+	}
+	want, err := rules.FromDocs([]rules.Doc{d})
 	if err != nil {
 		return rules.Rule{}, false
 	}
