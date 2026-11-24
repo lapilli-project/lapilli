@@ -117,7 +117,7 @@ func TestText(t *testing.T) {
 		"INC-1 Checkout errors",
 		"CheckoutErrors +2m",
 		"? not known",
-		"? 1 of 2 incidents had no alert from the 4 rules replayed: the 1 that couldn't be replayed may have caught them.",
+		"? 1 of 2 incidents had no alert from the 4 rules replayed: the 1 that couldn't be replayed may have caught it.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text lacks %q:\n%s", want, out)

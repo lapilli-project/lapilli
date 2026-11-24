@@ -187,6 +187,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			of := noun(len(r.Incidents), "incident", "incidents")
 			if missed > 0 {
 				fmt.Fprintf(w, "✗ %d of %d %s had no alert.\n", missed, len(r.Incidents), of)
+				if n := lateFor(r.Incidents); n > 0 {
+					fmt.Fprintf(w, "  %d of them had one only once they were over (\"after its end\" above).\n", n)
+				}
 			}
 			unsure := 0
 			for _, rr := range unsupported {
@@ -199,11 +202,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			case replayed == 0:
 				fmt.Fprintf(w, "? %d of %d %s can't be judged: no rule was replayed.\n", notKnown, len(r.Incidents), of)
 			default:
-				fmt.Fprintf(w, "? %d of %d %s had no alert from the %s replayed: the %d that couldn't be replayed may have caught them.\n",
-					notKnown, len(r.Incidents), of, plural(replayed, "rule", "rules"), unsure)
-			}
-			if n := lateFor(r.Incidents); n > 0 {
-				fmt.Fprintf(w, "  %d of them had one only once they were over (\"after its end\" above).\n", n)
+				them := "them"
+				if notKnown == 1 {
+					them = "it"
+				}
+				fmt.Fprintf(w, "? %d of %d %s had no alert from the %s replayed: the %d that couldn't be replayed may have caught %s.\n",
+					notKnown, len(r.Incidents), of, plural(replayed, "rule", "rules"), unsure, them)
 			}
 			spans(w, r.Incidents, loc)
 		}
@@ -798,12 +802,12 @@ func (c Catch) marks() string {
 // the text names, of the incident and of the rules' black firings.
 const lateEach = 3
 
-// lateFor is how many of the incidents nothing caught had an alert once
-// they were over.
+// lateFor is how many of the incidents nothing caught, and known missed,
+// had an alert once they were over.
 func lateFor(ins []IncidentResult) int {
 	n := 0
 	for _, in := range ins {
-		if in.Missed() && len(in.FiredAfter) > 0 {
+		if in.Missed() && !in.NotKnown && len(in.FiredAfter) > 0 {
 			n++
 		}
 	}

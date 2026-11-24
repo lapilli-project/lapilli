@@ -63,7 +63,7 @@ func TestNotKnownText(t *testing.T) {
 	}
 	out = text(&Report{From: t0, To: t0.Add(time.Hour), Rules: []RuleResult{broken, {Rule: "CheckoutSlow", Replayed: true}},
 		Incidents: []IncidentResult{inc("INC-1", true)}})
-	want := "? 1 of 1 incident had no alert from the 1 rule replayed: the 1 that couldn't be replayed may have caught them.\n"
+	want := "? 1 of 1 incident had no alert from the 1 rule replayed: the 1 that couldn't be replayed may have caught it.\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("no %q in:\n%s", want, out)
 	}
@@ -158,5 +158,42 @@ func TestNotKnownCantFire(t *testing.T) {
 	}
 	if want := "the 1 that couldn't be replayed"; !strings.Contains(b.String(), want) {
 		t.Errorf("no %q in:\n%s", want, b.String())
+	}
+}
+
+// TestNotKnownGrammar: the "?" line says "it" for one incident and "them"
+// for more, and the late line follows the "✗" line, counting known misses.
+func TestNotKnownGrammar(t *testing.T) {
+	end := t0.Add(time.Hour)
+	inc := func(id string, known bool, late bool) IncidentResult {
+		in := IncidentResult{Incident: incident.Incident{ID: id, Start: t0, End: end}, NotKnown: known}
+		if late {
+			in.FiredAfter = []Catch{{Rule: "CheckoutSlow", Delay: 2 * time.Hour}}
+		}
+		return in
+	}
+	text := func(ins ...IncidentResult) string {
+		t.Helper()
+		r := &Report{From: t0, To: end, Rules: []RuleResult{{Rule: "HighErrors", Unsupported: "uses Loki"}, {Rule: "CheckoutSlow", Replayed: true}, {Rule: "Cart", Replayed: true}}, Incidents: ins}
+		var b bytes.Buffer
+		if err := Text(&b, r, time.UTC); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	out := text(inc("INC-1", true, true), inc("INC-2", true, false))
+	if want := "from the 2 rules replayed: the 1 that couldn't be replayed may have caught them.\n"; !strings.Contains(out, want) {
+		t.Errorf("no %q in:\n%s", want, out)
+	}
+	if strings.Contains(out, "only once they were over") {
+		t.Errorf("a late line for incidents not known:\n%s", out)
+	}
+	out = text(inc("INC-1", false, true), inc("INC-2", true, true))
+	i, j := strings.Index(out, "✗ 1 of 2 incidents had no alert.\n  1 of them had one only once"), strings.Index(out, "? 1 of 2")
+	if i < 0 || j < i {
+		t.Errorf("the late line isn't right after the ✗ line, before the ?:\n%s", out)
+	}
+	if strings.Count(out, "only once they were over") != 1 {
+		t.Errorf("late line count:\n%s", out)
 	}
 }
