@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,51 @@ func TestTerraformTooDeep(t *testing.T) {
 	}
 	if _, err := Parse([]byte(nest(terraformDepth + 1))); err == nil || !strings.Contains(err.Error(), "modules nested more than 64 deep") {
 		t.Errorf("past the depth: %v", err)
+	}
+}
+
+// TerraformRulesOnly keeps the rule groups of a plan's or a state's JSON and
+// nothing else, so that what is read of it is read as before; a document
+// that isn't Terraform's comes back as it is.
+func TestTerraformRulesOnly(t *testing.T) {
+	for _, f := range append([]string{"testdata/terraform-plan-real.json"}, terraformFiles...) {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A resource that isn't a rule group, with a secret, in a module and
+		// among the roots.
+		doc := strings.Replace(string(raw), `"resources"`, `"x":{"secret":"s3cr3t"},"resources"`, 1)
+		kept, err := TerraformRulesOnly([]byte(doc))
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if strings.Contains(string(kept), "s3cr3t") || strings.Contains(string(kept), "resource_changes") || strings.Contains(string(kept), "configuration") {
+			t.Errorf("%s: more than the rule groups kept: %s", f, kept)
+		}
+		var want, got []Rule
+		if want, _ = readAs(t, f); len(want) == 0 {
+			t.Fatalf("%s: no rules", f)
+		}
+		tmp := filepath.Join(t.TempDir(), "kept.json")
+		os.WriteFile(tmp, kept, 0o600)
+		got, _ = readAs(t, tmp)
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d rules kept of %d", f, len(got), len(want))
+		}
+		for i := range got {
+			if got[i].Name != want[i].Name || got[i].Address != want[i].Address || got[i].Digest != want[i].Digest {
+				t.Errorf("%s: rule %d read differently: %+v, was %+v", f, i, got[i], want[i])
+			}
+		}
+	}
+	for _, in := range []string{"groups:\n  - name: g\n", `{"a":1}`, `[1]`, `{"format_version":"1","values":{}}`} {
+		if out, err := TerraformRulesOnly([]byte(in)); err != nil || string(out) != in {
+			t.Errorf("%q: %q, %v", in, out, err)
+		}
+	}
+	if _, err := TerraformRulesOnly([]byte(`{"format_version":"1","values":{"root_module":{}}} {}`)); err == nil {
+		t.Errorf("a second document was let through")
 	}
 }
 

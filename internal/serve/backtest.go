@@ -665,6 +665,30 @@ func readBacktestBody(w http.ResponseWriter, r *http.Request) ([]byte, backtestR
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, req, http.StatusBadRequest, "the body is one JSON object, and nothing after it"
 	}
+	// A file that is Terraform's JSON of a plan or a state holds every
+	// resource's values, the sensitive ones among them: only its rule groups
+	// are kept, in the request as it is queued and kept in the ledger.
+	trimmed := false
+	for _, files := range [][]backtestFile{req.Before, req.After} {
+		for i := range files {
+			if !strings.HasPrefix(strings.TrimSpace(files[i].Content), "{") {
+				continue
+			}
+			kept, err := rules.TerraformRulesOnly([]byte(files[i].Content))
+			if err != nil {
+				return nil, req, http.StatusBadRequest, fmt.Sprintf("%s: %s", clip(verdict.Clean(files[i].Path), 200), clip(verdict.Clean(err.Error()), 300))
+			}
+			if string(kept) != files[i].Content {
+				files[i].Content, trimmed = string(kept), true
+			}
+		}
+	}
+	if trimmed {
+		var err error
+		if b, err = json.Marshal(req); err != nil {
+			return nil, req, http.StatusBadRequest, "the body couldn't be read"
+		}
+	}
 	return b, req, 0, ""
 }
 

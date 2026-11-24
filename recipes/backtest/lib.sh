@@ -1579,6 +1579,36 @@ render() {
     return 1
   fi
   logged "$tmp/render.log"
+  rule_groups_only "$tmp/rules/$1/rules.yaml" "$2"
+}
+
+# rule_groups_only FILE WHERE: FILE, when it is the JSON `terraform show
+# -json` writes of a plan or a state, as the same document holding only what
+# Lapilli reads of it: its format_version and, under planned_values and
+# values, a root_module of the managed grafana_rule_group resources (each as
+# its address, mode, type, name, index and values) and the child modules
+# with theirs, each with its address. A plan holds every resource's values,
+# the sensitive ones among them, which nothing is told of beyond the job:
+# not the ledger, not the log. Any other file is left as it is.
+rule_groups_only() {
+  jq -e 'type == "object" and has("format_version")
+    and (((.planned_values.root_module? // .values.root_module?) | type) == "object")' "$1" >/dev/null 2>&1 || return 0
+  if ! jq -c '
+    def rule_groups: [(.resources // [])[] | select(.mode == "managed" and .type == "grafana_rule_group")
+      | {address, mode, type, name} + (if has("index") then {index} else {} end) + {values}];
+    def keep: {resources: rule_groups}
+      + (if has("address") then {address} else {} end)
+      + (if (.child_modules | type) == "array" then {child_modules: [.child_modules[] | keep]} else {} end);
+    {format_version}
+      + (if (.planned_values.root_module | type) == "object" then {planned_values: {root_module: (.planned_values.root_module | keep)}} else {} end)
+      + (if (.values.root_module | type) == "object" then {values: {root_module: (.values.root_module | keep)}} else {} end)
+  ' "$1" >"$1.kept" 2>/dev/null; then
+    rm -f "$1.kept"
+    # jq's error is not shown: it can quote the values it was reading.
+    trouble "the Terraform JSON RENDER wrote in $2 couldn't be cut to its rule groups"
+    return 1
+  fi
+  mv "$1.kept" "$1"
 }
 
 # hidden ARG...: of lapilli's arguments, what says where the history and

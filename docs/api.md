@@ -478,6 +478,12 @@ while it waits or runs, 200 with the comment and its JSON once done.
 Host names aren't checked here, and a request with an `Origin` is
 refused.
 
+A file whose content is the JSON `terraform show -json` writes of a plan or
+a state is kept in the ledger, until the backtest ends, as only its
+`grafana_rule_group` resources: a plan holds every resource's values, the
+sensitive ones among them, and serve keeps nothing else of it, whatever the
+job sent.
+
 ## Health, metrics and the rest
 
 | Route | What it is |

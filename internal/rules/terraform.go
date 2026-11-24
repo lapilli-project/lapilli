@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -33,6 +35,79 @@ func isTerraform(doc map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// TerraformRulesOnly gives doc back as it is unless it is the JSON
+// `terraform show -json` writes of a plan or a state, in which case it gives
+// the same document holding only what is read of it: the format_version
+// and, under planned_values and values, a root_module whose resources are
+// the managed grafana_rule_group ones (each as its address, mode, type,
+// name, index and values) and whose child modules, each with its address,
+// are kept the same way. Terraform writes every resource's values, the
+// sensitive ones among them, which nothing else of the plan is kept for.
+func TerraformRulesOnly(doc []byte) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(doc))
+	dec.UseNumber()
+	var top map[string]any
+	if err := dec.Decode(&top); err != nil || !isTerraform(top) {
+		return doc, nil
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, errors.New("Terraform's JSON is one document, and nothing after it")
+	}
+	out := map[string]any{"format_version": top["format_version"]}
+	for _, k := range []string{"planned_values", "values"} {
+		v, _ := top[k].(map[string]any)
+		root, ok := v["root_module"].(map[string]any)
+		if !ok {
+			continue
+		}
+		kept, err := terraformKeep(root, 0)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = map[string]any{"root_module": kept}
+	}
+	return json.Marshal(out)
+}
+
+// terraformKeep is a module as TerraformRulesOnly keeps it.
+func terraformKeep(m map[string]any, depth int) (map[string]any, error) {
+	res := []any{}
+	for _, r := range list(m["resources"]) {
+		rm, _ := r.(map[string]any)
+		if str(rm["mode"]) != "managed" || str(rm["type"]) != terraformType {
+			continue
+		}
+		k := map[string]any{"values": rm["values"]}
+		for _, f := range []string{"address", "mode", "type", "name", "index"} {
+			if v, ok := rm[f]; ok {
+				k[f] = v
+			}
+		}
+		res = append(res, k)
+	}
+	out := map[string]any{"resources": res}
+	if a, ok := m["address"]; ok {
+		out["address"] = a
+	}
+	kids := list(m["child_modules"])
+	if depth >= terraformDepth && len(kids) > 0 {
+		return nil, fmt.Errorf("Terraform's JSON: modules nested more than %d deep", terraformDepth)
+	}
+	if kids != nil {
+		keptKids := []any{}
+		for _, c := range kids {
+			cm, _ := c.(map[string]any)
+			k, err := terraformKeep(cm, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			keptKids = append(keptKids, k)
+		}
+		out["child_modules"] = keptKids
+	}
+	return out, nil
 }
 
 // terraformRules reads the grafana_rule_group resources of Terraform's JSON

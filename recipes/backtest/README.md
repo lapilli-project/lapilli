@@ -522,6 +522,28 @@ checked: give the job what your configuration needs to plan. Only the
 `grafana_rule_group` resources are read, from the root module and its child
 modules; the rest of the plan is passed over.
 
+A plan's JSON holds every resource's values, the sensitive ones among them
+(a data source's credentials, a password), and a plan of a real
+configuration is large. So the recipe keeps only the `grafana_rule_group`
+resources of what `RENDER` writes, with `jq`, before anything leaves the
+job: nothing else of the plan is sent to `lapilli serve`, kept in a
+ledger or passed to `lapilli verdict`. Anything else that posts a plan's
+JSON to serve's port should send only those, as this does:
+
+```sh
+terraform show -json tfplan | jq -c '
+  def rule_groups: [(.resources // [])[] | select(.mode == "managed" and .type == "grafana_rule_group")
+    | {address, mode, type, name} + (if has("index") then {index} else {} end) + {values}];
+  def keep: {resources: rule_groups}
+    + (if has("address") then {address} else {} end)
+    + (if (.child_modules | type) == "array" then {child_modules: [.child_modules[] | keep]} else {} end);
+  {format_version}
+    + (if (.planned_values.root_module | type) == "object" then {planned_values: {root_module: (.planned_values.root_module | keep)}} else {} end)
+    + (if (.values.root_module | type) == "object" then {values: {root_module: (.values.root_module | keep)}} else {} end)'
+```
+
+serve keeps only the rule groups of a Terraform JSON it is sent, as well.
+
 ## Judged by user impact
 
 Without incidents, the comment counts firings: what fired before the
