@@ -456,6 +456,7 @@ func slicesBefore(fs []firing.Firing, t time.Time) []firing.Firing {
 // until it is stopped, for test/screenshots/shots.sh, which waits for
 // /demo-ready: only the demo answers it, with demoReady.
 func TestDemoServe(t *testing.T) {
+	parallel(t)
 	addr := serveAddr(t, "LAPILLI_DEMO_SERVE")
 	s := demoServer(t)
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
@@ -474,6 +475,7 @@ const demoReady = "lapilli demo ledger, ready"
 // approve. Every team, rule, label value and person in it is one the demo
 // declares; and what people kept is dated in its own weeks.
 func TestDemoLedger(t *testing.T) {
+	parallel(t)
 	if testing.Short() {
 		t.Skip("short")
 	}

@@ -111,6 +111,7 @@ func kept(t *testing.T, s *Server) []ledger.Notification {
 
 // Each path takes what proves itself its own way, and nothing else.
 func TestNotifyPortChecks(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	am := notifyFixture(t, "alertmanager.json")
@@ -177,6 +178,7 @@ func TestNotifyPortChecks(t *testing.T) {
 }
 
 func TestNotifyAlertmanager(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	am := notifyFixture(t, "alertmanager.json")
@@ -217,6 +219,7 @@ func TestNotifyAlertmanager(t *testing.T) {
 // Grafana's webhook, with the token, or signed: with a timestamp, or
 // without one; not with a stale timestamp or a wrong signature.
 func TestNotifyGrafana(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	body := notifyFixture(t, "grafana.json")
@@ -260,6 +263,7 @@ func TestNotifyGrafana(t *testing.T) {
 // Azure's action group webhook, the token as the URL's password; Google
 // Cloud's, which sends without it until asked.
 func TestNotifyAzureGoogle(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
 	auth := basicAuth("lapilli", notifyToken)
@@ -365,6 +369,7 @@ func (g *snsSigner) sign(t *testing.T, m snsMessage) []byte {
 }
 
 func TestNotifySNS(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	g := newSNSSigner(t)
 	s.port.sns.get = g.get
@@ -572,6 +577,7 @@ func TestNotificationsShown(t *testing.T) {
 
 // Without notifications, nothing of them shows, and the tile counts firings.
 func TestNoNotificationsShown(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
 	h := s.Handler()
 	for _, p := range []string{"/rules", "/rules/Errors", "/firings?day=2026-11-01"} {

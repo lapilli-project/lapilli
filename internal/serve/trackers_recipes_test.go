@@ -1119,6 +1119,7 @@ func marked(id int64) (string, []string) {
 // with CLOSE_ISSUES, and nothing written to Lapilli when the tracker fails
 // or answers with a link that isn't its own.
 func TestTrackerRecipes(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -1288,6 +1289,7 @@ func TestTrackerRecipes(t *testing.T) {
 // link or image in the tracker; a backtick or a line break in one can't
 // end it.
 func TestTrackerIssueTextNamesAsCode(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("no jq")
 	}
@@ -1317,6 +1319,7 @@ func TestTrackerIssueTextNamesAsCode(t *testing.T) {
 }
 
 func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -1404,6 +1407,7 @@ func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 // an issue the tracker won't close. A title on two lines, and a team's name
 // longer than GitHub's labels, are made to fit.
 func TestTrackerRecipesCarryOn(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -1481,6 +1485,7 @@ func TestTrackerRecipesCarryOn(t *testing.T) {
 // its task isn't closed, though they edited the task again; and an issue
 // closed after its task was opened closes it, though the task was edited.
 func TestTrackerRecipesWhoClosedIt(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -1589,6 +1594,7 @@ func TestTrackerRecipeClosedLately(t *testing.T) {
 
 // The tracker's settings are checked before they reach a request.
 func TestTrackerRecipeSettings(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	lapilli := []string{"LAPILLI_URL=http://127.0.0.1:1", "LAPILLI_TOKEN_FILE=" + tokenFile(t, trTasksTok)}
 	secret := tokenFile(t, "a-secret")
@@ -1619,6 +1625,7 @@ func TestTrackerRecipeSettings(t *testing.T) {
 // id that isn't a number, a page that doesn't move on, more pages than
 // MAX_PAGES. The tracker isn't asked anything.
 func TestTrackerRecipeDistrustsLapilli(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	trk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the tracker was asked: %s %s", r.Method, r.URL)
@@ -1657,6 +1664,7 @@ func TestTrackerRecipeDistrustsLapilli(t *testing.T) {
 
 // The chart runs the recipes from its own copies: they must be the same.
 func TestTrackerRecipesInChart(t *testing.T) {
+	parallel(t)
 	for _, name := range []string{"lib.sh", "github.sh", "github.jq", "gitlab.sh", "gitlab.jq", "jira.sh", "jira.jq", "linear.sh", "linear.jq",
 		"azure-boards.sh", "azure-boards.jq", "shortcut.sh", "shortcut.jq", "youtrack.sh", "youtrack.jq", "jira-dc.sh", "jira-dc.jq"} {
 		a, err := os.ReadFile(trackerRecipes + name)
@@ -1675,6 +1683,7 @@ func TestTrackerRecipesInChart(t *testing.T) {
 // job made are searched for as the App's (author:app/NAME). Without it the
 // run stops, and says to set it; a login of another shape is refused.
 func TestTrackerRecipeGitHubApp(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	f, api := g.f, g.api
@@ -1714,6 +1723,7 @@ func TestTrackerRecipeGitHubApp(t *testing.T) {
 // label, as lapilli-team-NAME, and an issue is a task's only with that
 // task's one marker label.
 func TestTrackerRecipesMarkerInText(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -1777,6 +1787,7 @@ func TestTrackerRecipesMarkerInText(t *testing.T) {
 // isn't taken as a quick action (/move, /assign) carried out as the job's
 // account; the issue is still found again by its marker.
 func TestTrackerRecipeGitLabQuickActions(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "gitlab")
 	f := g.f
@@ -1799,6 +1810,7 @@ func TestTrackerRecipeGitLabQuickActions(t *testing.T) {
 // project or team gone from the token's sight is a failure, not every
 // issue in it deleted.
 func TestTrackerRecipesIssueGone(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -1838,6 +1850,7 @@ func TestTrackerRecipesIssueGone(t *testing.T) {
 // an issue before (-/issues/N): the recipe takes either as its own, links
 // the task, and follows the issue.
 func TestTrackerRecipeGitLabLinks(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, old := range []bool{false, true} {
 		t.Run(map[bool]string{false: "work items", true: "issues"}[old], func(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 // Monday, an hour apart, and catch nothing: twelve off hours, two asleep
 // that Sunday night and six more after midnight.
 func TestHours(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
 	raw := ""
@@ -90,6 +91,7 @@ func TestHours(t *testing.T) {
 // Late waits half an hour. The digest works out that ten minutes would have
 // caught it, and what that would have cost.
 func TestNearMisses(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, nil)
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
@@ -166,6 +168,7 @@ func TestNearMisses(t *testing.T) {
 // An incident written down after the week's digest, or in the week under
 // way, gets its near misses then, not at the next digest.
 func TestNearMissesLater(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, nil)
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
@@ -314,6 +317,7 @@ func TestNearMissesLater(t *testing.T) {
 // A digest whose questions fail keeps what was kept for the week, and the
 // week is worked out again once the history answers.
 func TestNearMissesDigestFails(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, nil)
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
@@ -381,6 +385,7 @@ func (h *refusing) QueryRange(ctx context.Context, expr string, start, end time.
 }
 
 func TestNearByValueText(t *testing.T) {
+	parallel(t)
 	nm := verdict.NearMiss{Incident: "INC-1", Rule: "Latency", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
 		Value: &verdict.ByValue{Op: ">", Bound: 0.9, Reached: new(0.88), New: 0.87}, After: &verdict.RuleResult{Firings: 2, Black: 1}}
 	if l := nearText("en", nm); l.Text != "its value came to 0.88, short of its threshold of > 0.9: with > 0.87 it would have fired at +5m" ||

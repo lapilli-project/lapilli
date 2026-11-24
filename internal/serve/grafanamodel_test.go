@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -566,6 +567,7 @@ func modelRun(t *testing.T, seed int64, loud bool) string {
 // hold beside the model, round by round, over schedules of fixed seeds: 48
 // and those of modelShort, or modelShort alone with -short.
 func TestServeGrafanaJudgedModel(t *testing.T) {
+	parallel(t)
 	if s := os.Getenv("LAPILLI_MODEL_SEED"); s != "" {
 		seed, _ := strconv.ParseInt(s, 10, 64)
 		if bad := modelRun(t, seed, true); bad != "" {
@@ -591,14 +593,26 @@ func TestServeGrafanaJudgedModel(t *testing.T) {
 			}
 		}
 	}
+	// Each schedule with a server of its own, beside the others; the first
+	// three that differ said in full.
+	var mu sync.Mutex
 	fails := 0
-	for _, seed := range seeds {
-		if bad := modelRun(t, seed, false); bad != "" {
-			if fails++; fails <= 3 {
-				t.Error(bad)
-			}
+	t.Run("schedules", func(t *testing.T) {
+		for _, seed := range seeds {
+			t.Run(fmt.Sprint(seed), func(t *testing.T) {
+				parallel(t)
+				if bad := modelRun(t, seed, false); bad != "" {
+					mu.Lock()
+					fails++
+					n := fails
+					mu.Unlock()
+					if n <= 3 {
+						t.Error(bad)
+					}
+				}
+			})
 		}
-	}
+	})
 	if fails > 0 {
 		t.Errorf("%d of %d schedules differ from the model", fails, len(seeds))
 	}

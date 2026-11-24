@@ -21,6 +21,7 @@ import (
 // kept as it was, and why is kept in the ledger without how often it was
 // asked, which differs from one run to the next.
 func TestTurnedAwayKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rules := server(t, func(c *Config) { c.Backfill = 3 * time.Hour })
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(ruleFile+"      - alert: Turned\n        expr: turned\n"), 0o644)
@@ -52,6 +53,7 @@ func TestTurnedAwayKept(t *testing.T) {
 // groups, each minute, by the Limiter its queries are asked by (--max-rate,
 // and its push back).
 func TestLokiRulerShares(t *testing.T) {
+	parallel(t)
 	var ruler atomic.Int64
 	lokiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/prometheus/api/v1/rules" {

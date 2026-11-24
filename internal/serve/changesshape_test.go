@@ -19,6 +19,7 @@ import (
 // grows what it is given, can stall Prometheus or Grafana, taking the
 // alerts down. Such a text is refused, whoever proposes it.
 func TestSaysTemplateCantGrow(t *testing.T) {
+	parallel(t)
 	bomb := strings.Repeat("{{range $labels}}", 22) + "x" + strings.Repeat("{{end}}", 22)
 	for text, want := range map[string]string{
 		bomb:                                     "repeats",
@@ -74,6 +75,7 @@ func TestSaysTemplateCantGrow(t *testing.T) {
 // rules are read again and the backtest runs: refused again and again, it
 // asks Prometheus nothing.
 func TestProposalRefusedBeforeBacktest(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
@@ -112,6 +114,7 @@ func TestProposalRefusedBeforeBacktest(t *testing.T) {
 // the sign-in proxy in any case, as the ledger folds names: a person named
 // "Lapilli" isn't taken for Lapilli, past the hour's proposals.
 func TestReservedNamesFolded(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	for _, who := range []string{"Lapilli", "LAPILLI", "Tasks-Token", "Changes-Token", ledger.Proposer} {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)

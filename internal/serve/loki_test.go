@@ -50,6 +50,7 @@ func (l *lokiLogs) QueryRange(_ context.Context, expr string, start, end time.Ti
 // rules, are recorded in a version as a Loki's, replayed against Loki, and
 // judged as any rule: the errors in the checkout's logs caught INC-1.
 func TestServeLokiRules(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "loki")
 	os.MkdirAll(dir, 0o755)
@@ -128,6 +129,7 @@ func TestServeLokiRules(t *testing.T) {
 // Mimir rule's identity, which names in an existing ledger hang on, is as
 // it was.
 func TestLokiIdentity(t *testing.T) {
+	parallel(t)
 	mimir := rules.Rule{Name: "HighErrors", Group: "api", Namespace: "prod", Labels: map[string]string{"severity": "page"}}
 	loki := mimir
 	loki.Logs = rules.LokiRuler
@@ -196,6 +198,7 @@ func TestLokiProposalForAPerson(t *testing.T) {
 // only rules (and --prometheus, for what really fired) reads them and
 // replays them; replaying() didn't count them, so they were never read.
 func TestServeLokiRulesAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "loki")
 	os.MkdirAll(dir, 0o755)
@@ -227,6 +230,7 @@ func TestServeLokiRulesAlone(t *testing.T) {
 // namespace, its LogQL asked of Loki, not of Prometheus, and, from a rule
 // file, run without the keep_firing_for Loki doesn't run.
 func TestCompareKeepsLoki(t *testing.T) {
+	parallel(t)
 	expr := `sum(count_over_time({app="shop"} |= "error" [1m])) > 10`
 	current := []rules.Rule{{Name: "ShopLogErrors", Group: "shop", Expr: expr, Logs: rules.LokiRuler, Source: "loki/fake", Namespace: "fake", LokiFile: true}}
 	given, err := rules.Parse([]byte("groups:\n  - name: shop\n    rules:\n      - alert: ShopLogErrors\n        expr: sum(count_over_time({app=\"shop\"} |= \"error\" [1m])) > 5\n        keep_firing_for: 5m\n"))
@@ -306,6 +310,7 @@ func TestLokiLoadedProposal(t *testing.T) {
 // proposal was then left for a person only because its git change didn't
 // read back. It takes the Loki ruler's document, and says why.
 func TestLokiProposalSharedSource(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	var lokiDir string
 	s, _ := changesServer(t, func(c *Config) {
@@ -360,6 +365,7 @@ func TestLokiProposalSharedSource(t *testing.T) {
 // proposed rule, so the backtest sets a rule with keep_firing_for beside
 // one without, and counts the difference as the agent's change.
 func TestCompareKeepsAPIKeepFiringFor(t *testing.T) {
+	parallel(t)
 	expr := `sum(count_over_time({app="shop"} |= "error" [1m])) > 10`
 	current := []rules.Rule{{Name: "ShopLogErrors", Group: "shop", Expr: expr, Logs: rules.LokiRuler, Source: "loki/fake", Namespace: "fake",
 		KeepFiringFor: 5 * time.Minute}}

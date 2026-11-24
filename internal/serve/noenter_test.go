@@ -57,6 +57,7 @@ func defaultButton(t *testing.T, body, action string) *html.Node {
 // hidden from sight and from screen readers; each action is a button
 // pressed.
 func TestBulkNoEnter(t *testing.T) {
+	parallel(t)
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
 	l := labelServer(t, nil)

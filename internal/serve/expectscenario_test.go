@@ -177,6 +177,7 @@ func TestExpectationScenarios(t *testing.T) {
 // Without --promtool, a scenario is not known, never met, and nothing is
 // run.
 func TestExpectationScenariosNoPromtool(t *testing.T) {
+	parallel(t)
 	s, _, _, count := scenarioServer(t, "expectations:\n  - rule: Errors\n    scenarios: [tests/errors.yaml]\n",
 		map[string]string{"tests/errors.yaml": scenariotest.Test("pass")}, false)
 	checkAgain(t, s)
@@ -190,6 +191,7 @@ func TestExpectationScenariosNoPromtool(t *testing.T) {
 // and whatever files beside its own --expect the paths name: each is said
 // as not run through lapilli serve, counted as nothing unrun.
 func TestBacktestScenariosNotRun(t *testing.T) {
+	parallel(t)
 	link := scenariotest.Install(t)
 	count := scenariotest.Counted(t, link)
 	dir := t.TempDir()

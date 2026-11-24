@@ -10,6 +10,7 @@ import (
 // One alert in two groups is named apart in the ledger, and is still one
 // alert: not the same condition as another rule.
 func TestContentOneAlertTwoGroups(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := server(t, func(c *Config) { c.CheckContent = true })
 	rule := `      - alert: HighErrors

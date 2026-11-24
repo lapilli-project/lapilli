@@ -14,6 +14,7 @@ import (
 // some firings judged and some not, it says both; with every one judged,
 // "for nothing" as before.
 func TestWokenNoRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
 	raw := ""
@@ -88,6 +89,7 @@ func TestWokenNoRecord(t *testing.T) {
 // The digest's notifications line doesn't call those for firings with no
 // record "for nothing".
 func TestSentLineNoRecord(t *testing.T) {
+	parallel(t)
 	x := &sentLine{Notifications: 9, Rules: 2, Repeats: 1, Asleep: 4, ForNothing: 7, Most: []sentFor{{"Errors", 5}, {"Slow", 2}}}
 	if got := x.text("en"); got != "Notifications sent, as the alert managers sent them: 9, for 2 rules; 1 repeats, 4 while people slept, 7 for firings that caught nothing. The most for nothing: Errors (5), Slow (2)." {
 		t.Errorf("with a record: %q", got)
@@ -107,6 +109,7 @@ func TestSentLineNoRecord(t *testing.T) {
 // firings to make it a week with no record; with none kept, its
 // notifications still aren't known to be for nothing.
 func TestWokenTileNotifiedAlone(t *testing.T) {
+	parallel(t)
 	woken := func(last *weekView) tile {
 		t.Helper()
 		ws := []*weekView{{Asleep: 3, Kept: true}, last, {}} // the week before, the last, the one going on

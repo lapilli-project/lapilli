@@ -73,6 +73,7 @@ func labelServer(t *testing.T, change func(*Config)) *Server {
 // day's firings with one more; a picked label's chip takes it away; and a
 // label that isn't one is left out, not said back.
 func TestFiringLabels(t *testing.T) {
+	parallel(t)
 	s := labelServer(t, nil)
 	h := s.Handler()
 	all := firingsOf(t, s, "day=2026-11-02")
@@ -275,6 +276,7 @@ func TestHourStrip(t *testing.T) {
 // an editor may, at most 100, from this site; whoever may not sees the
 // buttons disabled, with why.
 func TestBulkReal(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	const ed = "ed@example.com"
 	twin := func() (*Server, []string) {

@@ -97,6 +97,7 @@ func trackerIDs(t *testing.T, body string) ([]int64, trackerPageOut) {
 // The tasks token reads tasks a page at a time, linked or not, at the
 // statuses asked for.
 func TestTrackerTasks(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, nil)
 	port := s.IncidentsHandler()
 	for _, c := range []struct {
@@ -172,6 +173,7 @@ func jsonOf(v any) string { b, _ := json.Marshal(v); return string(b) }
 // The tasks token sets a task's link, once, and its status, and nothing
 // else; what it does is noted as the job, and isn't people's use.
 func TestTrackerPatch(t *testing.T) {
+	parallel(t)
 	hook := tokenFile(t, "https://hooks.example.com/lapilli")
 	s := trackerServer(t, func(c *Config) { c.NotifyWebhook = hook })
 	s.now = time.Now
@@ -273,6 +275,7 @@ func TestTrackerPatch(t *testing.T) {
 // alone; the others aren't taken on its paths; each has its own rate and
 // turn; and a token held in two files isn't taken.
 func TestTrackerToken(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, nil)
 	port, ui := s.IncidentsHandler(), s.Handler()
 	week := "?from=2026-11-02T00:00:00Z&to=2026-11-09T00:00:00Z"
@@ -351,6 +354,7 @@ func TestTrackerToken(t *testing.T) {
 // The tasks token's rate is its own: used up, the incidents token is still
 // taken.
 func TestTrackerRate(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, nil)
 	s.tasksRate = &limiter{rate: 0.001, burst: 2}
 	port := s.IncidentsHandler()
@@ -368,6 +372,7 @@ func TestTrackerRate(t *testing.T) {
 // same isn't taken, and the notifications token holding the tasks token's
 // isn't either.
 func TestTrackerTokenNotTheNotifyToken(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, func(c *Config) {
 		c.NotifyListen, c.NotifyToken = "127.0.0.1:0", tokenFile(t, trTasksTok)
 	})
@@ -386,6 +391,7 @@ func TestTrackerTokenNotTheNotifyToken(t *testing.T) {
 
 // Without the tasks token, the incidents port has no tasks paths.
 func TestTrackerPathsOff(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, func(c *Config) { c.TasksToken = "" })
 	if code, _ := tracker(t, s.IncidentsHandler(), "GET", "/api/v1/tasks", trTasksTok, ""); code != http.StatusNotFound {
 		t.Errorf("tasks paths without the token: %d", code)

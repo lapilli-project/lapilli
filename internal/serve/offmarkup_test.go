@@ -17,6 +17,7 @@ import (
 // team's editor, the overview's suggestions, the firings' buttons, the
 // rules list's bar and a rule's header among them.
 func TestDisabledOneWay(t *testing.T) {
+	parallel(t)
 	s, paths := a11yServer(t)
 	h := s.Handler()
 	s.cfg.Admins, s.cfg.Editors, s.cfg.UserHeader = []string{"boss"}, []string{"ed"}, "X-Forwarded-Email"
@@ -80,6 +81,7 @@ func inClass(n *html.Node, class string) bool {
 // task", a firing's "This was real", a rule's header) until a rule for it
 // disabled came after its own.
 func TestDisabledLooksDisabled(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)

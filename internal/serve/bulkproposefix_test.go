@@ -24,6 +24,7 @@ import (
 // past them, the single form answers 429 and a bulk proposal counts every
 // rule left so, reading none. Lapilli's own aren't counted.
 func TestProposeTries(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	h := s.Handler()
 	same := url.Values{"rule": {"BulkB"}, "kind": {"for"}, "for": {"15m"}}
@@ -56,6 +57,7 @@ func TestProposeTries(t *testing.T) {
 // twenty, are refused 429 whichever check finds it, MayPropose or the
 // ledger's write: never 400.
 func TestProposeLimitRace(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	ctx := context.Background()
 	var b strings.Builder
@@ -106,6 +108,7 @@ func TestProposeLimitRace(t *testing.T) {
 // list showed. Errors2 caught both of the last week's incidents with
 // Errors, and alone one six weeks back: spare over four weeks, not twelve.
 func TestBulkProposeSpareOverWeeks(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	mk := func() *Server {
 		// As changesServer, with the second rule there before the first
@@ -163,6 +166,7 @@ func TestBulkProposeSpareOverWeeks(t *testing.T) {
 // deleted where it can't, as propose finds the rule after checking the
 // person it acts for may propose.
 func TestAgentRetires(t *testing.T) {
+	parallel(t)
 	g := grafanaServer(t, &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}})
 	g.cfg.MCPPropose = "editors"
 	f, _ := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
@@ -187,6 +191,7 @@ func TestAgentRetires(t *testing.T) {
 // TestBulkProposeNothingPicked: nothing picked says so first, reading
 // nothing, whatever else the form says.
 func TestBulkProposeNothingPicked(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	code, _, hd := postAs(t, s.Handler(), "/rules/bulk", url.Values{"do": {"propose"}, "propose": {"bogus"}, "back": {"/rules"}}, bo, "same-origin")
 	if res := bulkOf(mustQuery(t, hd.Get("Location"))); code != http.StatusSeeOther || res == nil || !res.None {
@@ -197,6 +202,7 @@ func TestBulkProposeNothingPicked(t *testing.T) {
 // TestProposalsPickedNone: the proposals list asked for proposals by id
 // that aren't there says so, with a way out, not that there are none.
 func TestProposalsPickedNone(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	_, body := getAs(t, s.Handler(), "/proposals?state=all&id=999999", bo)
 	if !strings.Contains(body, "None of the proposals picked is here.") || !strings.Contains(body, `>Clear filters</a>`) || strings.Contains(body, "No proposals yet.") {
@@ -208,6 +214,7 @@ func TestProposalsPickedNone(t *testing.T) {
 // whole, as the stylesheet says: 한국어 wasn't, broken between its
 // syllables where the sidebar is narrow.
 func TestLanguagesWhole(t *testing.T) {
+	parallel(t)
 	css, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +235,7 @@ func TestLanguagesWhole(t *testing.T) {
 // "anonymous", and an agent's refusals would otherwise lock every person
 // out of proposing for an hour, with nothing in the ledger to show for it.
 func TestTriesApart(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	ctx := context.Background()
 	same := ask{Rule: "BulkB", Kind: ledger.KindFor, For: 15 * time.Minute, From: "agent"}
@@ -248,6 +256,7 @@ func TestTriesApart(t *testing.T) {
 // a proposal refused before (a rule not in effect, one waiting already)
 // costs none.
 func TestTriesAtTheRead(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	h := s.Handler()
 	for i := range triesAnHour + 5 {
@@ -300,6 +309,7 @@ func TestRefusedWithoutWaiting(t *testing.T) {
 // proposal's and MCP's; a rule's page's form names its kind, and one
 // sending "retire" is refused, nothing made.
 func TestRetireNotAFormKind(t *testing.T) {
+	parallel(t)
 	s := proposeServer(t, nil)
 	before := len(proposalsKept(t, s))
 	if code, _, _ := postAs(t, s.Handler(), "/proposals", url.Values{"rule": {"BulkD"}, "kind": {"retire"}}, bo, "same-origin"); code != http.StatusBadRequest {

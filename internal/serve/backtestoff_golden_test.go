@@ -55,6 +55,7 @@ func backtestOffNormal(s string) string {
 // one with something on every page (pagesServer); in English and in
 // another language; as anyone and as an admin.
 func TestBacktestOffGolden(t *testing.T) {
+	parallel(t)
 	// The goldens are main's on SQLite; on Postgres, /metrics has the
 	// replicas' series beside them too, which main has as well, left out
 	// of both (replicaSeries).

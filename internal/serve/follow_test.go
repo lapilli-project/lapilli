@@ -32,6 +32,7 @@ func addVersion(t *testing.T, hist string, at time.Time, forDur string) {
 // then, already replayed, are replayed again with it. One from after now
 // waits for its time; one from before the last followed is passed over.
 func TestFollow(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	tuned := now.Add(-40 * time.Hour)
@@ -117,6 +118,7 @@ func TestFollow(t *testing.T) {
 // --backfill's start at most; a history with nothing in it yet leaves the
 // rules unread, and runs wait.
 func TestFollowBounds(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	sel, _ := rules.ParseSelector("grafana_alert=1")
@@ -145,6 +147,7 @@ func TestFollowBounds(t *testing.T) {
 // A ledger that read --rules, then follows a history: what the history
 // holds from before the runs began isn't taken, only what came after.
 func TestFollowAfterRules(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	addVersion(t, hist, now.Add(-100*time.Hour), "15m")

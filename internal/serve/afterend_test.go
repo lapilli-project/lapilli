@@ -159,6 +159,7 @@ func TestServeAfterEnd(t *testing.T) {
 // the firing came after INC-L, and neither the incident's page nor the
 // list says it did, as lapilli verdict asks every version of a period.
 func TestServeAfterEndEveryVersion(t *testing.T) {
+	parallel(t)
 	s := lateServer(t)
 	ctx := context.Background()
 	noFor := strings.Replace(ruleFile, "for: 2m", "for: 0s", 1)

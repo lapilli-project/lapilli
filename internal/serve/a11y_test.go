@@ -149,6 +149,7 @@ func longNamed(t *testing.T, s *Server) {
 // TestA11yServe serves the pages at LAPILLI_A11Y_SERVE until it is
 // stopped, for test/a11y/axe.sh; /a11y-paths lists them.
 func TestA11yServe(t *testing.T) {
+	parallel(t)
 	addr := serveAddr(t, "LAPILLI_A11Y_SERVE")
 	s, mux, paths := a11yServed(t)
 	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
@@ -357,6 +358,7 @@ func TestBacktestsAccessible(t *testing.T) {
 // What test/a11y/axe.sh checks has the Run history's pull request
 // backtests, a backtest of each state on it.
 func TestA11yServedBacktests(t *testing.T) {
+	parallel(t)
 	_, mux, paths := a11yServed(t)
 	if !slices.Contains(paths, a11yBacktests+"/runs") {
 		t.Fatalf("TestA11yServe doesn't list %s/runs: %q", a11yBacktests, paths)
@@ -377,6 +379,7 @@ func TestA11yServedBacktests(t *testing.T) {
 // Every page, in every language, has its parts where assistive technology
 // looks for them, and names every control, link, image and chart.
 func TestPagesAccessible(t *testing.T) {
+	parallel(t)
 	s, paths := a11yServer(t)
 	h := s.Handler()
 	for _, n := range names {
@@ -404,6 +407,7 @@ func TestPagesAccessible(t *testing.T) {
 // a column for each measure they draw, and a row for each week they draw
 // something for.
 func TestChartsInTables(t *testing.T) {
+	parallel(t)
 	s, _ := a11yServer(t)
 	h := s.Handler()
 	date := regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
@@ -530,6 +534,7 @@ var (
 // focus, then shown; tabs not chosen underlined, as links are; and no
 // motion, so nothing for prefers-reduced-motion to stop.
 func TestCSSAccessible(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -818,6 +823,7 @@ func squashed(s string) string { return strings.Join(strings.Fields(s), " ") }
 // wash, 3:1 on the card, the background and its wash; and the incidents
 // chart's fills of the kinds, 3:1 on the card.
 func TestContrast(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -975,6 +981,7 @@ func pageA11y(t *testing.T, h http.Handler, who string, paths ...string) {
 // read-only, nothing judged yet, and a proposal with changes on, as an
 // approver and as an admin sees it.
 func TestPagesAccessibleInMoreStates(t *testing.T) {
+	parallel(t)
 	t.Run("task with a tracker link", func(t *testing.T) {
 		s, _ := a11yServer(t)
 		pageA11y(t, s.Handler(), "", "/tasks/2")
@@ -1018,6 +1025,7 @@ func TestPagesAccessibleInMoreStates(t *testing.T) {
 // own, before its words, which the rule asks; test/a11y/axe.mjs measures
 // it in a browser (checkbox-line).
 func TestCheckboxOnItsLine(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -1069,6 +1077,7 @@ func nodeTextBefore(n *html.Node) string {
 // computed style in a browser (disabled-look), which a more specific rule
 // can't pass by.
 func TestDisabledFieldsLookIt(t *testing.T) {
+	parallel(t)
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)

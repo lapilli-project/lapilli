@@ -67,6 +67,7 @@ func missedOf(t *testing.T, rep map[string]any) (map[string]any, []string) {
 // and the comment, which says the run fails. Not held, it says nothing of
 // it, as before.
 func TestBacktestFailMissed(t *testing.T) {
+	parallel(t)
 	b := btServing(t, rulesOf(errorsRule))
 	held := map[string]any{"days": 3, "fail_missed": true}
 	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule), rulesOf(errorsLate), held))
@@ -101,6 +102,7 @@ func TestBacktestFailMissed(t *testing.T) {
 // of serve's the pull request doesn't hold at all. Nothing of them is
 // asked of the history.
 func TestBacktestFailMissedLeftAlone(t *testing.T) {
+	parallel(t)
 	b := btServing(t, rulesOf(errorsRule, moreErrorsRule))
 	held := map[string]any{"days": 3, "fail_missed": true}
 	for name, sides := range map[string][2]string{
@@ -127,6 +129,7 @@ func TestBacktestFailMissedLeftAlone(t *testing.T) {
 // change that couldn't be replayed, a rule the pull request leaves alone
 // that serve doesn't run, or one serve couldn't replay.
 func TestBacktestFailMissedNotKnown(t *testing.T) {
+	parallel(t)
 	held := map[string]any{"days": 3, "fail_missed": true}
 	for _, c := range []struct {
 		name, serving, before, after string
@@ -158,6 +161,7 @@ func TestBacktestFailMissedNotKnown(t *testing.T) {
 // is not known, never caught. So too of a rule serve runs that the pull
 // request doesn't hold.
 func TestBacktestFailMissedAnotherText(t *testing.T) {
+	parallel(t)
 	moreLate := strings.Replace(moreErrorsRule, "for: 5m", "for: 2h", 1)
 	held := map[string]any{"days": 3, "fail_missed": true}
 	for name, sides := range map[string][2]string{
@@ -197,6 +201,7 @@ func TestBacktestFailMissedAnotherText(t *testing.T) {
 // needs the runs to cover the incident's time, and to be in effect as the
 // pull request has it, and replayed, over it.
 func TestLeftAloneCatches(t *testing.T) {
+	parallel(t)
 	t0 := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
 	in := incident.Incident{ID: "INC-1", Start: t0, End: t0.Add(30 * time.Minute)}
 	at := caughtAt{in.ID, in.Start.Unix()}

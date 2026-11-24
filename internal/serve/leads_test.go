@@ -88,6 +88,7 @@ func caught(stones []string) []string {
 // its window, --lead not one 40 minutes before errors'; the entry's 1h
 // both. The summary, /settings.yaml and the page say each lead.
 func TestLeadsServe(t *testing.T) {
+	parallel(t)
 	s := leadsServer(t)
 	got, want := leadsReport(t, s)
 	if !slices.Equal(got, want) {
@@ -129,6 +130,7 @@ func TestLeadsServe(t *testing.T) {
 // A lead on the Settings page is from 0 to a day; empty follows the lead
 // above, and is kept as nothing.
 func TestLeadsSetInUI(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	post := func(lead string) (int, string) {
 		v := signalPost("probe", "probe", "probe_success == 0", "2m", "service", true)
@@ -175,6 +177,7 @@ func sameLeadOf(a, b *time.Duration) bool {
 // an impact signal, an hour and 20 minutes; with written incidents alone,
 // --lead and --settle.
 func TestWholeAfter(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	o := verdict.Options{Lead: 15 * time.Minute}
 	if got := s.wholeAfter(o, nil); got != time.Hour+15*time.Minute {
@@ -196,6 +199,7 @@ func TestWholeAfter(t *testing.T) {
 // it waits for (wholeAfter), though the summary holds the week whole:
 // goal.missed, the goals' tasks and their /metrics follow its results.
 func TestGoalsWaitForTheReach(t *testing.T) {
+	parallel(t)
 	s := goalServer(t, nil)
 	declare(t, s, theGoals)
 	// The runs are 35 hours past the week of 10-26's end: past the wait

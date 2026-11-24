@@ -81,6 +81,7 @@ func TestRoutesShown(t *testing.T) {
 // on the page and in /metrics, beside each routed place's sent and failed
 // at 0 from the start.
 func TestRoutesBrokenShown(t *testing.T) {
+	parallel(t)
 	s, _, _ := routedServer(t, "notify:\n  routes:\n    - {kinds: [task.nope], to: [ops]}\n  default: [slack]\n", func(c *Config) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{ana}, []string{"*"}
 	})

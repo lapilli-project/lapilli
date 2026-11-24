@@ -22,6 +22,7 @@ import (
 // Prometheus refuses a whole file for one it hasn't, a misspelt humanize as
 // much as one that doesn't exist; Grafana's has its own beside them.
 func TestSaysOnlyItsFunctions(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
@@ -87,6 +88,7 @@ func openThenMerge(t *testing.T, port http.Handler, id int64, merge bool) {
 // proposed: it no longer waits for ever, holding up its rule. Told before
 // Lapilli read the file, or after, and for what a rule says too.
 func TestMergedChangedInReview(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	s.l.TellTo([]string{"webhook"})
@@ -155,6 +157,7 @@ func proposeThreshold(t *testing.T, h http.Handler) (int64, int, string) {
 // request open or merged and never read back. No one else does, and not
 // without a reason.
 func TestAdminCloses(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	for _, merge := range []bool{false, true} {
 		s, _ := changesServer(t, nil)
@@ -204,6 +207,7 @@ func TestAdminCloses(t *testing.T) {
 // once it is read back again and still can't be, and the admin says it
 // didn't reach Grafana: failed. Read back, it is whatever Grafana says.
 func TestAdminClosesApplying(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	f := &grafanaFlaky{g: &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}}
 	f.unreadable.Store(true)
@@ -248,6 +252,7 @@ func TestAdminClosesApplying(t *testing.T) {
 // gives the task none of its links: the task gets a tracker's issue, and
 // shows the pull request through the proposal.
 func TestTaskOfOpenedProposal(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -278,6 +283,7 @@ func TestTaskOfOpenedProposal(t *testing.T) {
 // out; it waits for a second approval. An undo, approved by the approver
 // who asks for it, goes on.
 func TestApprovalsRaised(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	stop := filepath.Join(t.TempDir(), "paused")
 	s, dir := changesServer(t, func(c *Config) { c.ChangesPaused = stop })

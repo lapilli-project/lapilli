@@ -15,6 +15,7 @@ import (
 // rule isn't marked for its query errors, as nearly every one fires on
 // them.
 func TestRuleReplayedInPart(t *testing.T) {
+	parallel(t)
 	page := func(file, body, rule string) map[string]string {
 		t.Helper()
 		s, rules := server(t, nil)

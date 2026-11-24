@@ -14,6 +14,7 @@ import (
 // label: picks it by it; its page says so. The rule's own label, where it
 // sets one, is the one taken.
 func TestOwnedByGroupLabels(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := labelledServer(t, `groups:
   - name: payments

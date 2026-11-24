@@ -40,6 +40,7 @@ func TestShownDur(t *testing.T) {
 // with firings, of the rule asked, and says so once; asked for a day, that
 // day, said nothing of; with none in the twelve weeks, today, said so.
 func TestFiringsLastDay(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	raw := ""

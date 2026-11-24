@@ -131,6 +131,7 @@ func githubStandIn(t *testing.T) (*prHost, string) {
 // still; or wrote a CI system's file over a rule file. A push runs those
 // with the repository's secrets before anyone reviews them.
 func TestChangeRecipeWritesOnlyRuleFiles(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -217,6 +218,7 @@ func TestChangeRecipeWritesOnlyRuleFiles(t *testing.T) {
 // pushed, lapilli/proposal-ID, is taken when it holds this change, and
 // left as it is when not.
 func TestChangeRecipeNeverPushesOver(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -283,6 +285,7 @@ func TestChangeRecipeNeverPushesOver(t *testing.T) {
 // branches and open fifty pull requests, each push setting off the
 // repository's CI. The rest wait for the next run, and the run says so.
 func TestChangeRecipeMaxChanges(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -331,6 +334,7 @@ func TestChangeRecipeMaxChanges(t *testing.T) {
 // like the recipe's own) were written to the terminal or CI log as they
 // came.
 func TestChangeRecipeShowsNoEscapes(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -374,6 +378,7 @@ func TestChangeRecipeShowsNoEscapes(t *testing.T) {
 // it went on git's command line, which ps shows, and into the clone's
 // .git/config. An ssh URL's user is no secret.
 func TestChangeRecipeNoTokenInClone(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	bin := t.TempDir()
 	argv := filepath.Join(bin, "argv")
@@ -407,6 +412,7 @@ func TestChangeRecipeNoTokenInClone(t *testing.T) {
 // The ledger's name, in the recipes' branches, is made once, at random,
 // and kept: a restart doesn't move a change to another branch.
 func TestLedgerIDKept(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	if len(s.ledgerID) != 12 || strings.Trim(s.ledgerID, "0123456789abcdef") != "" {
 		t.Fatalf("ledger id %q", s.ledgerID)

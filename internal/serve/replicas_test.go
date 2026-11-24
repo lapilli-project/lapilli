@@ -519,6 +519,7 @@ func TestReplicasNoJobsOnceTheLeaseEnded(t *testing.T) {
 // request reads what the others wrote first, so a page kept for an older
 // generation isn't served.
 func TestReplicasPagesShowOthersWrites(t *testing.T) {
+	parallel(t)
 	f := sharedLedger(t)
 	rc := newSink(t)
 	a, b := replica(t, f, rc, nil), replica(t, f, rc, nil)
@@ -547,6 +548,7 @@ func TestReplicasPagesShowOthersWrites(t *testing.T) {
 // admin's pause, a change to the settings (judged again), the forms shown,
 // the sign-in's state used, the rate limits.
 func TestReplicasShareWhatPeopleDo(t *testing.T) {
+	parallel(t)
 	f := sharedLedger(t)
 	rc := newSink(t)
 	a, b := replica(t, f, rc, nil), replica(t, f, rc, nil)

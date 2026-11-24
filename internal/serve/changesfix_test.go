@@ -76,6 +76,7 @@ func locID(hd http.Header) int64 {
 // applying, with the rule as it was, and counted against the limits; it is
 // read back later, and never sent again.
 func TestGrafanaReadBackFails(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	f := &grafanaFlaky{g: g}
@@ -121,6 +122,7 @@ func TestGrafanaReadBackFails(t *testing.T) {
 // Grafana deletes a rule and answers 504: the deletion is applied, the
 // rule as it was kept, and it can be undone.
 func TestGrafanaDeleteAnswersBadly(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	f := &grafanaFlaky{g: g}
@@ -156,6 +158,7 @@ func TestGrafanaDeleteAnswersBadly(t *testing.T) {
 // Paused while a change is checked again: nothing is sent to Grafana, or
 // handed to a recipe; it waits, approved.
 func TestPausedWhileChecked(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	t.Run("grafana", func(t *testing.T) {
 		stop := filepath.Join(t.TempDir(), "paused")
@@ -219,6 +222,7 @@ func (h *pausingHistory) QueryRange(ctx context.Context, expr string, start, end
 // The limits count a change once, when it is handed out or sent, never
 // again when it takes effect; and a change a person made never.
 func TestLimitsCountOnce(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -263,6 +267,7 @@ func TestLimitsCountOnce(t *testing.T) {
 // beside a new for would leave neither as it expects the rule once both
 // were merged, and neither would be seen applied.
 func TestOneProposalPerRule(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
 	id := proposeFor(t, h, "15m")
@@ -284,6 +289,7 @@ func TestOneProposalPerRule(t *testing.T) {
 // A person proposes twenty an hour at most, with their agents: one agent
 // can't make a hundred proposals, and a hundred notices, at once.
 func TestProposalRate(t *testing.T) {
+	parallel(t)
 	s, dir := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	var b strings.Builder
 	b.WriteString("groups:\n  - name: shop\n    rules:\n")
@@ -326,6 +332,7 @@ func TestProposalRate(t *testing.T) {
 
 // One person approves once, in any letter case, Unicode's too.
 func TestApprovedOnceInAnyCase(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) {
 		c.Approvals = 2
 		c.GroupsHeader = "X-Forwarded-Groups"
@@ -370,6 +377,7 @@ func TestApprovedOnceInAnyCase(t *testing.T) {
 
 // --approvals lowered from 2 to 1: a proposal one person approved moves on.
 func TestApprovalsLowered(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
@@ -389,6 +397,7 @@ func TestApprovalsLowered(t *testing.T) {
 // A change ready for a recipe that no recipe takes can be dropped, by an
 // approver or an admin, not an editor: it would hold up its rule.
 func TestDropReady(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, func(c *Config) { c.Editors = []string{bo} })
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -421,6 +430,7 @@ func TestDropReady(t *testing.T) {
 // The incident a proposal is made for is one the ledger has, by its ID,
 // and goes into a pull request as code: an editor's text never does.
 func TestIncidentNamed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -451,6 +461,7 @@ func TestIncidentNamed(t *testing.T) {
 // A proposal's task linked to its tracker's issue keeps that link when the
 // pull request opens: the tracker job keeps the task in step by it.
 func TestTaskLinkKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	const tasksTok = "tasks-token-0123456789abc"
 	s, _ := changesServer(t, func(c *Config) { c.TasksToken = tokenFile(t, tasksTok) })
@@ -474,6 +485,7 @@ func TestTaskLinkKept(t *testing.T) {
 // language, calling no query: Prometheus refuses a whole file for one that
 // doesn't parse, and query runs PromQL each time the alert fires.
 func TestSaysTemplates(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
@@ -555,6 +567,7 @@ groups:
 // request: its digest, which covers what it says, isn't what it is checked
 // by.
 func TestSaysInGrafanaFile(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	file := filepath.Join(dir, "grafana.yaml")
@@ -589,6 +602,7 @@ func TestSaysInGrafanaFile(t *testing.T) {
 // A deletion merged after Lapilli read the merged file, while its pull
 // request was open, is still seen applied.
 func TestDeletionMergedLate(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -626,6 +640,7 @@ func TestDeletionMergedLate(t *testing.T) {
 // A Grafana rule is deleted only after it was turned off and stayed off:
 // never outright, and never once turned on again by hand.
 func TestGrafanaRetirement(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	s := grafanaServer(t, g)
@@ -698,6 +713,7 @@ func TestGrafanaRetirement(t *testing.T) {
 // A Grafana rule turned off by hand, not by a proposal, isn't deleted from
 // here, and the refusal says where it is.
 func TestGrafanaOffByHand(t *testing.T) {
+	parallel(t)
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	g.rules["def"]["isPaused"] = true
 	s := grafanaServer(t, g)

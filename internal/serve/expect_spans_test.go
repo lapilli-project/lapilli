@@ -16,6 +16,7 @@ import (
 // and so is a catch of an incident there; one in the gap isn't
 // (TestExpectCopiedOutsideSpan).
 func TestExpectCopiedEarlierSpan(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.RulesPath, c.Impact = "", "" })
 	early := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)

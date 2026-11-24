@@ -66,6 +66,7 @@ func labelsHTML(t *testing.T, lang string, l incident.Labels) string {
 // with several as how many and the first labelsShown, sorted and each
 // once; every name=value, the first labelsListed, behind a name cut.
 func TestLabelSum(t *testing.T) {
+	parallel(t)
 	for _, x := range []struct {
 		name   string
 		labels incident.Labels
@@ -112,6 +113,7 @@ func equalSum(a, b labelSum) bool {
 // several as how many and the first few, and all of them behind a details
 // once any is cut; none as –; the values escaped, each set apart.
 func TestLabelSumShown(t *testing.T) {
+	parallel(t)
 	if got := labelsHTML(t, "en", nil); got != "–" {
 		t.Errorf("none: %q", got)
 	}
@@ -161,6 +163,7 @@ func TestLabelSumShown(t *testing.T) {
 // them behind a details: not one name=value for each series in a row. On
 // the incident's page the details follows the sentence it can't be in.
 func TestManyLabelsSummedUp(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	s.jobs(context.Background(), true) // INC-1, from the incidents file
 	page := manyLabelled(t, s)
@@ -203,6 +206,7 @@ func TestManyLabelsSummedUp(t *testing.T) {
 // whole on its line unless it is wider than the cell, a value with the
 // comma after it, and what the details lists as narrow.
 func TestLabelSumNarrow(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +222,7 @@ func TestLabelSumNarrow(t *testing.T) {
 // A name or a value that would turn the text around it (U+202E) is shown
 // with the turn taken out, inline and listed, as a rule's labels are.
 func TestLabelSumTurnsShown(t *testing.T) {
+	parallel(t)
 	turned := "evil\u202Eexe.txt"
 	for _, l := range []incident.Labels{
 		{"instance": {turned}},

@@ -29,6 +29,7 @@ func windowState(t *testing.T, s *Server, key string) string {
 // does: an editor's, not a viewer's nor a team's editor's, not from
 // another site, nor with --read-only; what the ledger refuses is refused.
 func TestAPIDecide(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	path := "/api/v1/incidents/" + impactWindow + "/decide"
@@ -90,6 +91,7 @@ func TestAPIDecide(t *testing.T) {
 // gives is its title; the form's sent back as the window's own, or none,
 // leaves it as it was.
 func TestDecideAgainThroughTheAPIAndTheForm(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	ctx := context.Background()
@@ -171,6 +173,7 @@ func TestDecideAgainThroughTheAPIAndTheForm(t *testing.T) {
 // firings, an admin's of any; once, then nothing more; not a viewer's
 // nor a team's editor's.
 func TestAPIReal(t *testing.T) {
+	parallel(t)
 	s := verdictServer(t, nil)
 	h := s.Handler()
 	f := searchFiring(t, s)

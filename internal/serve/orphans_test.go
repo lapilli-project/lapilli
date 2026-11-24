@@ -22,6 +22,7 @@ import (
 // effect, or deletes it, each noted; a viewer sees the actions off, with
 // why. A name in effect isn't moved, nor to a name none has.
 func TestOrphans(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := rolesServer(t, nil)
 	// What people kept of Errors and of Gone, while they were in effect.

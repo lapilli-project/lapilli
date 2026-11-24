@@ -79,6 +79,7 @@ func runDraftRecipe(t *testing.T, s *Server, host *prHost, bare string, env []st
 // request, and tells Lapilli; merged, it says so. Without EXPECT_FILE it
 // waits.
 func TestChangeRecipeDraft(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -131,6 +132,7 @@ func TestChangeRecipeDraft(t *testing.T) {
 // a document that isn't an expectations file. Each is told failed, and
 // nothing is pushed.
 func TestChangeRecipeDraftRefuses(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -183,6 +185,7 @@ func TestChangeRecipeDraftRefuses(t *testing.T) {
 // |- block takes the last one off): the recipe takes the file in git as
 // the one serve read, a newline at its end aside, and nothing else.
 func TestChangeRecipeDraftTrailingNewline(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")

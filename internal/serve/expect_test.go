@@ -117,6 +117,7 @@ func expectNotices(t *testing.T, s *Server) []expectNotice {
 // part of. A catch is judged against the incident written down, and not
 // known when it isn't.
 func TestExpectationsChecked(t *testing.T) {
+	parallel(t)
 	s := expectServer(t, theExpectations, false)
 	checkAgain(t, s)
 	paged := checksOf(t, s, "Paged")
@@ -181,6 +182,7 @@ func TestExpectationsChecked(t *testing.T) {
 // for the rule's team: once a rule, an expectation and a week, none while
 // one is open; without it, none.
 func TestExpectationTasks(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := expectServer(t, theExpectations, false)
 	checkAgain(t, s)
@@ -217,6 +219,7 @@ func TestExpectationTasks(t *testing.T) {
 // destinations but no routes, as before routes: to the webhook and Slack,
 // and with neither, nowhere, nothing marked told.
 func TestExpectationBrokenRouted(t *testing.T) {
+	parallel(t)
 	routed := func(t *testing.T, config string, hooks bool) *Server {
 		t.Helper()
 		dir := t.TempDir()
@@ -279,6 +282,7 @@ func TestExpectationBrokenRouted(t *testing.T) {
 // budget given in both is refused, and what was held stays. A rule's
 // annotation holds it too, but where the file gives the same budget.
 func TestExpectationSources(t *testing.T) {
+	parallel(t)
 	s := expectServer(t, theExpectations, false)
 	cfg, err := ParseConfig([]byte("expectations:\n  - rule: Noise\n    catches: [{incident: INC-B}]\n"), time.UTC)
 	if err != nil {
@@ -325,6 +329,7 @@ func TestExpectationSources(t *testing.T) {
 // --expect is kept to once read the same twice in a row, configEvery
 // apart; one that can't be read changes nothing, and is said.
 func TestExpectFileReadTwice(t *testing.T) {
+	parallel(t)
 	s := expectServer(t, theExpectations, false)
 	at := time.Now()
 	s.wall = func() time.Time { return at }
@@ -373,6 +378,7 @@ func intPtr(n int) *int { return &n }
 // series reaches no longer catches INC-1, which the version before did.
 // labels: holds the rules whose labels its selector matches.
 func TestExpectationCatchJudgedAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	file := filepath.Join(t.TempDir(), "expect.yaml")
 	os.WriteFile(file, []byte("expectations:\n  - rule: Errors\n    catches: [{incident: INC-1, within: 10m}]\n  - labels: severity=page\n    budget: {week: 100}\n"), 0o600)
@@ -418,6 +424,7 @@ func TestExpectationCatchJudgedAgain(t *testing.T) {
 // rules list picks the rules held to none, and those broken; the API, MCP
 // and /metrics give the checks; the digest counts the week's.
 func TestExpectationPages(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := expectServer(t, "expectations:\n  - rule: Paged\n    budget: {week: 4}\n    catches: [{incident: INC-A, within: 5m}]\n", false)
 	checkAgain(t, s)
@@ -542,6 +549,7 @@ func TestExpectationPagesInEachLanguage(t *testing.T) {
 // budget checked as a file's is, from where it is declared; one that can't
 // be read is said on its tab as not known, without what it holds.
 func TestExpectationAnnotations(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, rulesDir := server(t, keepRecord)
 	os.WriteFile(filepath.Join(rulesDir, "shop.yaml"), []byte(`groups:

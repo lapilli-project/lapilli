@@ -74,6 +74,7 @@ func signalRow(t *testing.T, s *Server, name string) (ledger.SignalRow, bool) {
 // shared), who set each and when, every change noted with its before and
 // after; settings.yaml gives them as the chart's impact.
 func TestSignalsSetInUI(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, func(c *Config) { c.Editors = []string{"bo@example.com"} })
@@ -188,6 +189,7 @@ func TestSignalsSetInUI(t *testing.T) {
 // What the Settings page takes of a signal and of the rule entries is
 // bounded as the design says, and nothing refused is saved.
 func TestSignalBounds(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	long := strings.Repeat("a", 4097)
 	many := strings.TrimSuffix(strings.Repeat("l,", 17), ",")
@@ -277,6 +279,7 @@ func TestSignalBounds(t *testing.T) {
 // and back to the start gives the start's back; each change judges every
 // firing again, as the command line's does.
 func TestSignalEntriesInUI(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), func(c *Config) {
 		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Nothing$", Signals: []string{"errors"}}}
@@ -319,6 +322,7 @@ func TestSignalEntriesInUI(t *testing.T) {
 // windows are its new name's, keys, decisions, tasks and comments with
 // them, and the rule entries that name it name it by its new name.
 func TestSignalRenamedInUI(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := signalWindowsHistory()
 	s := signalServer(t, h, func(c *Config) {
@@ -398,6 +402,7 @@ func TestSignalRenamedInUI(t *testing.T) {
 // their keys kept, its record as it was; the command line's --impact
 // stands aside, and back to the start of both gives it back.
 func TestFirstNamedSignalNamesUnnamed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := criteriaServer(t, false, func(c *Config) { c.Editors = nil })
 	ws, err := s.l.ImpactWindows(ctx, now.Add(-30*24*time.Hour), now)
@@ -494,6 +499,7 @@ func TestFirstNamedSignalNamesUnnamed(t *testing.T) {
 // one with no name), makes that one a named one as the first named one
 // added does: named signals and one with no name never go together.
 func TestStartedSignalGivenBackNamesUnnamed(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	for _, name := range []string{"errors", "probe"} {
 		if code, body := adminPost(t, s, "/settings/signals", url.Values{"was": {name}, "remove": {"1"}}, "ana@example.com"); code != http.StatusSeeOther {
@@ -521,6 +527,7 @@ func TestStartedSignalGivenBackNamesUnnamed(t *testing.T) {
 // Saving the rule entries judges every firing again: among the reads and
 // saves an admin may ask for in an hour.
 func TestSignalEntriesSavesCounted(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	for i := 0; i < impactTriesAnHour; i++ {
 		text := "- {rules: ^Errors" + strings.Repeat("x", i) + "$, signals: [probe]}\n"
@@ -558,6 +565,7 @@ func TestSignalsTryHeldToWhatIsKept(t *testing.T) {
 // windows apart, and the verdict in effect and with it; it saves nothing.
 // A try of the entries reads nothing. It is an admin's, from this site.
 func TestSignalsTry(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := signalWindowsHistory()
 	at := time.Date(2026, 11, 3, 6, 0, 0, 0, time.UTC)
@@ -638,6 +646,7 @@ func TestSignalsTry(t *testing.T) {
 // for in an hour, noted in the activity log; its windows in place of its
 // own from then on.
 func TestSignalReadAgainInUI(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	h := signalWindowsHistory()
 	s := signalServer(t, h, func(c *Config) { c.Editors = []string{"bo@example.com"} })
@@ -676,6 +685,7 @@ func TestSignalReadAgainInUI(t *testing.T) {
 // windows in four weeks, failing with Prometheus's error, where the data
 // of each selector begins, and from when it keeps the record.
 func TestSignalSources(t *testing.T) {
+	parallel(t)
 	h := signalWindowsHistory()
 	s := signalServer(t, h, nil)
 	h.mu.Lock()
@@ -698,6 +708,7 @@ func TestSignalSources(t *testing.T) {
 // A waiting proposal is held when a signal's match changes on the Settings
 // page, as when the command line changes it (staleImpact).
 func TestSignalChangeHoldsProposals(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, signalWindowsHistory(), nil)
 	key, err := s.impactHeld(ctx)
@@ -719,6 +730,7 @@ func TestSignalChangeHoldsProposals(t *testing.T) {
 // A deployment with no named signal: the Settings page's form for the one
 // with no name is as it was, and settings.yaml says nothing of signals.
 func TestUnnamedSettingsUnchanged(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, false, nil)
 	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
 	if !strings.Contains(body, `<form method="post" action="/settings/impact" class="criteria">`) || strings.Contains(body, `id="impact-signals"`) {
@@ -735,6 +747,7 @@ func TestUnnamedSettingsUnchanged(t *testing.T) {
 // never reaches a query (source.SeenFrom), on the Settings page as in the
 // runs.
 func TestSignalsTryMatchNeverInPromQL(t *testing.T) {
+	parallel(t)
 	h := shopHistory()
 	s := signalServer(t, h, nil)
 	inj := "a)\t(up)\tor\tvector(1)\tor\tcount\tby\t(b"
@@ -764,6 +777,7 @@ func TestSignalsTryMatchNeverInPromQL(t *testing.T) {
 // setting --lead and the others are: reading the settings in effect takes
 // none of them for one that doesn't parse.
 func TestSignalSettingsNotJudgingSettings(t *testing.T) {
+	parallel(t)
 	s := signalServer(t, shopHistory(), nil)
 	if code, body := adminPost(t, s, "/settings/impact-rules", url.Values{"rules": {"- {rules: ^Errors$, signals: [probe]}\n"}}, "ana@example.com"); code != http.StatusSeeOther {
 		t.Fatalf("%d %s", code, body)
@@ -786,6 +800,7 @@ func TestSignalSettingsNotJudgingSettings(t *testing.T) {
 // days), is no change, and a change of --impact-for alone is saved; an
 // expression an admin changed is checked.
 func TestImpactStartedExprNotChecked(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	started := "max_over_time(impact[3d]) > 1"
 	s := criteriaServer(t, false, func(c *Config) { c.Impact = started })
@@ -804,6 +819,7 @@ func TestImpactStartedExprNotChecked(t *testing.T) {
 // The same of a named signal's form: its expression as serve was started
 // with it, posted back unchanged, isn't refused; changed, it is checked.
 func TestSignalStartedExprNotChecked(t *testing.T) {
+	parallel(t)
 	started := "max_over_time(probe_success[3d]) == 0"
 	s := signalServer(t, shopHistory(), func(c *Config) { c.Signals[1].Expr = started })
 	if code, body := adminPost(t, s, "/settings/signals", signalPost("probe", "probe", started, "3m", "service", true), "ana@example.com"); code != http.StatusSeeOther {

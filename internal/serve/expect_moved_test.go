@@ -32,6 +32,7 @@ func openTasks(t *testing.T, s *Server) []ledger.Task {
 // once, and made a task once, the task kept on its row (the tab's link),
 // not a second made while the first is open.
 func TestScenarioMovedWeekKeepsItsTask(t *testing.T) {
+	parallel(t)
 	expect := "expectations:\n  - rule: Errors\n    scenarios: [tests/errors.yaml]\n"
 	s, _, dir, count := scenarioServer(t, expect, map[string]string{"tests/errors.yaml": scenariotest.Test("fail")}, true)
 	s.cfg.ExpectTasks = true
@@ -71,6 +72,7 @@ func TestScenarioMovedWeekKeepsItsTask(t *testing.T) {
 // Guard: a catch broken, its incident's start written down otherwise, in
 // another week, is of that week now: told once, a task made once.
 func TestCatchMovedWeekToldOnce(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := expectServer(t, "expectations:\n  - rule: Paged\n    catches: [{incident: INC-C}]\n", true)
 	checkAgain(t, s)

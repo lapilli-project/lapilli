@@ -26,6 +26,7 @@ import (
 // key, a key it doesn't know, or a team that isn't there, is refused, and
 // the ledger keeps what it had.
 func TestMarkedFile(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "marked.yaml")
 	write := func(text string) { os.WriteFile(path, []byte(text), 0o644) }
@@ -101,6 +102,7 @@ func TestMarkedFile(t *testing.T) {
 // reads them; the marked file's are the file's; the window's occurrences
 // in the period come with it; a team's editor keeps the team's alone.
 func TestMarkedAPI(t *testing.T) {
+	parallel(t)
 	s, pay, search := rolesServer(t, nil)
 	h := s.Handler()
 	const ed, boss, pat, vi = "ed@example.com", "boss@example.com", "pat@example.com", "vi@example.com"
@@ -175,6 +177,7 @@ func TestMarkedAPI(t *testing.T) {
 
 // --read-only refuses every write of a marked window.
 func TestMarkedReadOnly(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.ReadOnly = true })
 	h := s.Handler()
 	if code, _ := api(t, h, "POST", "/api/v1/marked", `{"kind": "sale", "title": "x", "start": "2026-11-02T00:00:00Z", "end": "2026-11-02T06:00:00Z"}`); code != http.StatusForbidden {
@@ -190,6 +193,7 @@ func TestMarkedReadOnly(t *testing.T) {
 // the form keeps one, and what people wrote is shown escaped and set
 // apart in <bdi>.
 func TestMarkedPages(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	code, body, _ := get(t, h, "/marked")
@@ -235,6 +239,7 @@ func TestMarkedPages(t *testing.T) {
 // last, none merged across series; no labels unless --mark-match keeps
 // them.
 func TestFromMarks(t *testing.T) {
+	parallel(t)
 	step := time.Minute
 	at := now.Add(-time.Hour)
 	series := func(labels map[string]string, mins ...int) prom.Series {
@@ -270,6 +275,7 @@ func TestFromMarks(t *testing.T) {
 // --mark and --mark-match as given: KIND=PROMQL, each kind once, eight at
 // most, a --mark-match of a kind given.
 func TestParseMarks(t *testing.T) {
+	parallel(t)
 	ms, err := ParseMarks([]string{"sale=shop_sale_active == 1", " launch = flag_on{name=\"ranking\"} "}, []string{"sale=region, country"})
 	if err != nil || len(ms) != 2 || ms[0].Kind != "sale" || ms[0].Expr != "shop_sale_active == 1" || !slices.Equal(ms[0].Match, []string{"country", "region"}) ||
 		ms[1].Kind != "launch" || ms[1].Expr != `flag_on{name="ranking"}` || ms[1].Match != nil {
@@ -305,6 +311,7 @@ func TestParseMarks(t *testing.T) {
 // series' region, which these, without one, don't. A new key reads it again
 // over the four weeks before, in place of what it found.
 func TestMarkExpression(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.Marks = []Mark{{Kind: "sale", Expr: "sale_active == 1"}}
 	})
@@ -362,6 +369,7 @@ func TestMarkExpression(t *testing.T) {
 // kept declared, read-only in the UI, and exported in /config.yaml as the
 // file would declare it; what it can't say is refused.
 func TestMarkedConfig(t *testing.T) {
+	parallel(t)
 	body := configFile + `marked:
   - kind: sale
     title: Autumn sale
@@ -417,6 +425,7 @@ func TestMarkedConfig(t *testing.T) {
 // over the weeks picked; outside=sale the rest; during:deploy, the rules
 // with firings during deploys. A kind it can't be is said.
 func TestRulesDuringKind(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	code, _, hd := get(t, h, "/rules?q=during%3Asale")
@@ -467,6 +476,7 @@ func TestRulesDuringKind(t *testing.T) {
 // inside beside outside; digest.ready carries the numbers. A span with
 // none says so.
 func TestMarkedDigest(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	ctx := context.Background()
 	from := s.l.Midnight(ledger.Week(s.l.Day(now)) - 7)
@@ -517,6 +527,7 @@ func TestMarkedDigest(t *testing.T) {
 // lines inside each kind beside outside, its latest firings, the
 // overview's card of the latest occurrence, and MCP's firings.
 func TestMarkedShown(t *testing.T) {
+	parallel(t)
 	s := pagesServer(t)
 	h := s.Handler()
 	for path, want := range map[string]string{
@@ -544,6 +555,7 @@ func TestMarkedShown(t *testing.T) {
 // A marked window kept in the UI is told, marked.kept: to the webhook as
 // JSON, with the window and a link to its page, and to Slack as a line.
 func TestMarkedKeptTold(t *testing.T) {
+	parallel(t)
 	var mu sync.Mutex
 	got := map[string][]string{}
 	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -585,6 +597,7 @@ func TestMarkedKeptTold(t *testing.T) {
 // weeks fails: its windows and key are kept as they were, the runs' reads
 // of it wait, and the next round reads it again, keeping the new key.
 func TestMarkExpressionChangedWaits(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.Marks = []Mark{{Kind: "sale", Expr: "sale_active == 1"}} })
 	ctx := context.Background()
 	raw := ""
@@ -619,6 +632,7 @@ func TestMarkExpressionChangedWaits(t *testing.T) {
 // With every --mark taken away, the keys of the expressions are let go
 // all the same: their windows stay as found.
 func TestMarksForgottenWithoutAny(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.Marks = []Mark{{Kind: "sale", Expr: "sale_active == 1"}} })
 	ctx := context.Background()
 	raw := ""
@@ -641,6 +655,7 @@ func TestMarksForgottenWithoutAny(t *testing.T) {
 // during a team's window only when the team owns it, during everyone's
 // when it agrees.
 func TestMarkedSummaryWindowsAndTeams(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	ctx := context.Background()
 	search, ok := func() (ledger.Team, bool) { o, _ := s.owners(ctx); return o.team("search") }()
@@ -672,6 +687,7 @@ func TestMarkedSummaryWindowsAndTeams(t *testing.T) {
 // The CSV's marked: the kinds each firing came during, a JSON array, []
 // for none.
 func TestMarkedCSV(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	_, body, _ := get(t, s.Handler(), "/api/v1/report?format=csv&from="+nocBase.Add(-24*time.Hour).UTC().Format(time.RFC3339)+"&to="+nocBase.Add(24*time.Hour).UTC().Format(time.RFC3339))
 	rows, err := csv.NewReader(strings.NewReader(body)).ReadAll()
@@ -692,6 +708,7 @@ func TestMarkedCSV(t *testing.T) {
 // pages, served before a window was kept and after it was kept and
 // deleted, are the same, byte for byte; and with one kept, they differ.
 func TestMarkedNothingChangesServed(t *testing.T) {
+	parallel(t)
 	s := nocServerOf(t, false)
 	ctx := context.Background()
 	h := s.Handler()
@@ -760,6 +777,7 @@ func TestMarkedNothingChangesServed(t *testing.T) {
 // The digest beside the marked windows: a goal that can't be read fails
 // it, as before, to be tried again, rather than going out without goals.
 func TestDigestGoalsFailStill(t *testing.T) {
+	parallel(t)
 	s := nocServer(t)
 	ctx := context.Background()
 	// A goal kept, its severities not read back.
@@ -779,6 +797,7 @@ func TestDigestGoalsFailStill(t *testing.T) {
 // and no more: the marked file, which names the rest of the kinds and one
 // of the editor's, is kept whole.
 func TestMarkedUIKindsLeaveTheFiles(t *testing.T) {
+	parallel(t)
 	path := filepath.Join(t.TempDir(), "marked.yaml")
 	os.WriteFile(path, []byte("marked: []\n"), 0o644)
 	s, _, _ := rolesServer(t, func(c *Config) { c.Marked = path })
@@ -823,6 +842,7 @@ func TestMarkedUIKindsLeaveTheFiles(t *testing.T) {
 // week and no more: the marked file's windows of that kind in that week,
 // the rest of the week's, are kept, with its others.
 func TestMarkedUIKindWeekLeavesTheFiles(t *testing.T) {
+	parallel(t)
 	path := filepath.Join(t.TempDir(), "marked.yaml")
 	os.WriteFile(path, []byte("marked: []\n"), 0o644)
 	s, _, _ := rolesServer(t, func(c *Config) { c.Marked = path })

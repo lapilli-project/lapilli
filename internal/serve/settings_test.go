@@ -16,6 +16,7 @@ import (
 // editor's is refused, and an admin's from another site, before anything
 // is judged; the page offers it to an admin alone.
 func TestSettingsTryAdminsFromHere(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, true, nil)
 	h := s.Handler()
 	try := func(refire, who, site string) (int, string) {
@@ -56,6 +57,7 @@ func TestSettingsTryAdminsFromHere(t *testing.T) {
 // refused for a value that doesn't read, past which they are refused: and
 // the tries of the incident criteria, which read Prometheus, are their own.
 func TestSettingsTriesCounted(t *testing.T) {
+	parallel(t)
 	s := criteriaServer(t, true, nil)
 	h := s.Handler()
 	for i := range settingsTriesAnHour + 1 {
@@ -78,6 +80,7 @@ func TestSettingsTriesCounted(t *testing.T) {
 // the others: a hundred and more notes an editor writes after an admin
 // changed a setting don't push that change off the page.
 func TestSettingsChangesTheirOwn(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	ctx := context.Background()
 	if err := s.l.SetSettings(ctx, map[string]string{"lead": "20m"}, "ana@example.com"); err != nil {

@@ -373,6 +373,7 @@ func TestEventsRecipeKafka(t *testing.T) {
 // An event alone over a request's 1 MB, and a line that isn't an event,
 // are passed over, and said; those around them are sent.
 func TestEventsRecipeOversize(t *testing.T) {
+	parallel(t)
 	needEventTools(t)
 	s := notifyServer(t, nil)
 	s.now = func() time.Time { return time.Date(2026, 11, 11, 16, 0, 0, 0, time.UTC) }

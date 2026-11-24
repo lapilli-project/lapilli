@@ -27,6 +27,7 @@ func api(t *testing.T, h http.Handler, method, path, body string) (int, string) 
 // Teams, notes, quiet windows, tasks and comments, through the pages and
 // the API: made, shown, changed and taken away.
 func TestWork(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
 	raw := ""
@@ -143,6 +144,7 @@ func TestWork(t *testing.T) {
 // a team's name untrimmed, with no time and no author (updated
 // 0001-01-01), where a quiet window or a task was answered as kept.
 func TestWrittenAsKept(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
 	raw := ""
 	if err := s.look(context.Background(), &raw); err != nil {
@@ -180,6 +182,7 @@ func jsonInt(n int64) string { b, _ := json.Marshal(n); return string(b) }
 
 // What an independent review found, held to.
 func TestWorkReview(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
 	raw := ""

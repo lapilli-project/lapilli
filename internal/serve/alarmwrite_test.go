@@ -559,6 +559,7 @@ func ruleEdit(src string) rules.Edit { return rules.Edit{Namespace: src} }
 // data): an upgrade of the model that adds a field fails here, until the
 // lists know it.
 func TestCloudWatchModel(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile(filepath.Join("testdata", "cloudwatch-2010-08-01-alarms.json"))
 	if err != nil {
 		t.Fatal(err)

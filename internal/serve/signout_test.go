@@ -291,6 +291,7 @@ func TestSignOutRecordFull(t *testing.T) {
 // a change to it: the record is up to 10,000 people, and every request of
 // anyone signed in asks it.
 func TestSignedOutReadOnChange(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	s.now = func() time.Time { return now.Add(-time.Minute) }
@@ -366,6 +367,7 @@ func TestLoginCookiesPruned(t *testing.T) {
 // is kept in the ledger for people a role lets in, and for no one else.
 // With --oidc-issuer only those a role names come in at all.
 func TestSignOutReadOnly(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, func(c *Config) { c.ReadOnly = true; c.Editors = nil; c.Admins = nil })
 	h := s.Handler()
 	b := newBrowser(t, h)
@@ -404,6 +406,7 @@ func TestSignOutReadOnly(t *testing.T) {
 // show (a zero-width space, a direction mark) is dropped, from a token and
 // from --groups-header, and gives no role (docs/design/signin.md).
 func TestGroupsThatDontShow(t *testing.T) {
+	parallel(t)
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
 	for _, g := range []string{"ops​", "o​ps", "‎ops", "ops­"} {
@@ -445,6 +448,7 @@ func TestGroupsThatDontShow(t *testing.T) {
 // Unicode's folding takes the Kelvin sign (U+212A) for a k and a long s
 // (U+017F) for an s.
 func TestDomainFoldsASCIIOnly(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader, c.Viewers, c.Editors = "X-Forwarded-Email", []string{"*@kiosk.example"}, []string{"ed@other.example"}
 	})

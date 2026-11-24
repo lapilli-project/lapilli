@@ -18,6 +18,7 @@ import (
 // nearly caught it, or was on around it, those first: twenty rules at
 // most, fifty firings of each; and the same as a table.
 func TestIncidentTimeline(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
 	o := s.cfg.Options
@@ -190,6 +191,7 @@ func TestTimelineRead(t *testing.T) {
 // TestTimelineShort: a span of no length draws, with no NaN; a span that
 // crosses midnight says the date with each time.
 func TestTimelineShort(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Lead = 0 })
 	o := s.cfg.Options

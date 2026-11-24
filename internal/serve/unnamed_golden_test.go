@@ -54,6 +54,7 @@ func unnamedNormal(s string) string {
 // the report, /metrics, the pages and MCP say, the same byte for byte as
 // the release before.
 func TestUnnamedSignalUnchanged(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"bo@example.com"}

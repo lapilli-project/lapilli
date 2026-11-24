@@ -174,6 +174,7 @@ func state(t *testing.T, s *Server, id int64) ledger.Proposal {
 // again and handed to a recipe, opened, merged, read back as applied; then
 // undone the same way.
 func TestChangeByPullRequest(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	s.l.TellTo([]string{"webhook"})
@@ -275,6 +276,7 @@ func TestChangeByPullRequest(t *testing.T) {
 // Two approvals, when asked for: by two people, neither the one who
 // proposed it.
 func TestTwoApprovals(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
 	id := proposeFor(t, h, "15m")
@@ -299,6 +301,7 @@ func TestTwoApprovals(t *testing.T) {
 // Approving is a person's, on the page, in a browser: what an attacker
 // would try instead is refused.
 func TestApprovalOnlyByAPerson(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
 	id := proposeFor(t, h, "15m")
@@ -393,6 +396,7 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 // Without --changes nothing is carried out or handed out, and no one
 // approves; proposals are still kept.
 func TestChangesOff(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, func(c *Config) { c.Changes = false })
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -420,6 +424,7 @@ func TestChangesOff(t *testing.T) {
 // The stop: an admin's switch, or the file, stops what is carried out and
 // handed out at once, and every page says so.
 func TestPause(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	stop := filepath.Join(t.TempDir(), "paused")
 	s, _ := changesServer(t, func(c *Config) { c.ChangesPaused = stop })
@@ -465,6 +470,7 @@ func TestPause(t *testing.T) {
 
 // The limits: a change past them waits.
 func TestLimits(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, func(c *Config) { c.ChangesLimits = Limits{Deletions: 0, Changes: 1} })
 	h := s.Handler()
@@ -540,6 +546,7 @@ func TestLimits(t *testing.T) {
 // as stale; one whose file changed elsewhere gets the change made afresh;
 // a backtest that got worse is refused.
 func TestCheckedAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	t.Run("stale", func(t *testing.T) {
 		s, dir := changesServer(t, nil)
@@ -613,6 +620,7 @@ func (h *shortHistory) QueryRange(ctx context.Context, expr string, start, end t
 // The changes token reads changes and says what became of them, and
 // nothing else; no other token, or none, reaches it.
 func TestChangesToken(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) {
 		c.IncidentsToken = tokenFile(t, "incidents-token-0123456789")
 		c.FiringsToken = tokenFile(t, "firings-token-0123456789")
@@ -659,6 +667,7 @@ func TestChangesToken(t *testing.T) {
 
 // A proposal made into a task, which takes the pull request's link.
 func TestProposalTask(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -689,6 +698,7 @@ func TestProposalTask(t *testing.T) {
 // the proposal's, by its id: asked for again, it is the one given, and no
 // second task is made.
 func TestProposalTaskTitle(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
@@ -718,6 +728,7 @@ func TestProposalTaskTitle(t *testing.T) {
 // What Lapilli proposes of itself, after the week's digest: only with
 // --changes, once a week, and not again what people turned down.
 func TestProposeFound(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, keepRecord) // the digest's week judged: its noisy rule gets a longer for
 	if err := s.proposeWeekly(ctx); err != nil {
@@ -899,6 +910,7 @@ func grafanaServer(t *testing.T, g *grafanaStandIn) *Server {
 // A rule kept only in Grafana: applied through its API, with the rule as
 // it was kept, and undone by writing that back.
 func TestChangeInGrafana(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	s := grafanaServer(t, g)
@@ -941,6 +953,7 @@ func TestChangeInGrafana(t *testing.T) {
 // What Grafana's API isn't asked to do: change a rule another tool keeps,
 // one changed since, or follow a redirect.
 func TestGrafanaRefuses(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	// Where a redirect would send a write: nothing must reach it.
 	var reached atomic.Int32
@@ -983,6 +996,7 @@ func TestGrafanaRefuses(t *testing.T) {
 // later, approved again, and only if nothing it would have caught was
 // missed meanwhile.
 func TestRetireInGrafana(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	s := grafanaServer(t, g)
@@ -1048,6 +1062,7 @@ func TestRetireInGrafana(t *testing.T) {
 // An agent proposes, behind --mcp-propose, and never approves or applies:
 // the person it acts for can't approve what it proposed.
 func TestAgentProposes(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -1110,6 +1125,7 @@ func TestAgentProposes(t *testing.T) {
 // of bounds, a threshold that isn't a number, an off for a rule file, or a
 // second of a kind while one waits.
 func TestProposalRefusals(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
 	proposeFor(t, h, "15m")
@@ -1160,6 +1176,7 @@ func proposeSays(t *testing.T, h http.Handler, form url.Values) (int64, int, str
 // rule's page for what the content check found, written as one annotation
 // with every other byte as it was, approved, read back as applied, undone.
 func TestSaysByPullRequest(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, func(c *Config) { c.CheckContent = true })
 	h := s.Handler()
@@ -1223,6 +1240,7 @@ func TestSaysByPullRequest(t *testing.T) {
 // What a rule says changed since it was proposed: refused, though it
 // fires as it did.
 func TestSaysStale(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	h := s.Handler()
@@ -1240,6 +1258,7 @@ func TestSaysStale(t *testing.T) {
 
 // What isn't taken as what a rule says.
 func TestSaysRefusals(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) { c.CheckContent = true })
 	h := s.Handler()
 	for name, c := range map[string]struct {
@@ -1277,6 +1296,7 @@ func TestSaysRefusals(t *testing.T) {
 // What a rule kept in Grafana says, changed through its API: the one
 // annotation, Grafana's own and everything else as they were; undone.
 func TestSaysInGrafana(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	g.rules["abc"]["annotations"] = map[string]any{"__dashboardUid__": "d1", "__panelId__": "4", "summary": "errors"}
@@ -1344,6 +1364,7 @@ func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 // An agent proposes what a rule says; a person approves.
 func TestAgentProposesSays(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -1367,6 +1388,7 @@ func TestAgentProposesSays(t *testing.T) {
 // taken, and leaves the rule running: read back, the change failed, and
 // says why.
 func TestRetireInGrafanaNotAdmin(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}, keepsPause: true}
 	s := grafanaServer(t, g)
@@ -1388,6 +1410,7 @@ func TestRetireInGrafanaNotAdmin(t *testing.T) {
 // PromQL) has no firings of its own: it isn't listed as never firing, and
 // Lapilli doesn't propose retiring it, twelve weeks on.
 func TestSilentLeavesOutUnreplayed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	os.WriteFile(filepath.Join(dir, "cloudwatch.json"), []byte(`{"MetricAlarms": [{"AlarmName": "cpu-high", "Namespace": "AWS/EC2",
@@ -1427,6 +1450,7 @@ func TestSilentLeavesOutUnreplayed(t *testing.T) {
 // $$: read as Grafana reads it, and what it says changed through the API
 // as given, its labels written back as they were.
 func TestSaysInGrafanaDollars(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	g.rules["abc"]["labels"] = map[string]any{"severity": "page", "team": "{{ $labels.team }}", "budget": "$5"}
@@ -1461,6 +1485,7 @@ func TestSaysInGrafanaDollars(t *testing.T) {
 // closing keyword with no reference after it, Lapilli's own words among
 // them, as it is.
 func TestTitlesLinkNothing(t *testing.T) {
+	parallel(t)
 	name := "Fixes #12, closes GH-3, Resolved o/r#4, fixes https://github.com/o/r/issues/5, see !6, Fixes ABC-12, OPS-1 #close: fixture closer 7"
 	ref := regexp.MustCompile(`(?i)(#|!|\bGH-|/issues/)[0-9]|#[A-Za-z]`)
 	keyword := regexp.MustCompile(`(?i)\b(fixes|closes|resolved)[\s:]+\S`)

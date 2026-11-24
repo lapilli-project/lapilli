@@ -70,6 +70,7 @@ func TestScenarioRunKeptAsBegun(t *testing.T) {
 // row kept as begun, of a later week than the one it was to replace, is
 // the one read.
 func TestScenarioDiedNotRunAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	expect := "expectations:\n  - rule: Errors\n    scenarios: [tests/errors.yaml]\n"
 	s, rulesDir, dir, count := scenarioServer(t, expect, map[string]string{"tests/errors.yaml": scenariotest.Test("pass")}, true)
@@ -178,6 +179,7 @@ func TestExpectAnnotationsBounded(t *testing.T) {
 // firing copied isn't none fired), whatever the runs' cursor says; nor is
 // a catch of an incident they don't reach, not caught in them.
 func TestExpectCopiedCoverage(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.RulesPath, c.Impact = "", "" })
 	from := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC) // two Mondays, copied
@@ -217,6 +219,7 @@ func TestExpectCopiedCoverage(t *testing.T) {
 // --promtool-memory caps each run serve makes, a round's and a check's an
 // agent asked for: promtool's RLIMIT_DATA, where one can be set (Linux).
 func TestScenarioRunsCapped(t *testing.T) {
+	parallel(t)
 	if !scenario.CanCap {
 		t.Skip("no memory cap on " + runtime.GOOS)
 	}
@@ -292,6 +295,7 @@ func TestScenarioStoppedRunAgain(t *testing.T) {
 // without a gap, the latest span: a week in a gap, or before the copies
 // began, isn't a week none fired, and an incident there isn't missed.
 func TestExpectCopiedOutsideSpan(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.RulesPath, c.Impact = "", "" })
 	// Another source's firing, so that the ledger's history starts early.

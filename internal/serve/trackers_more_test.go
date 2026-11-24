@@ -401,6 +401,7 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 // isn't taken for the job's; GitLab's own notes aren't copied; a line
 // starting / reaches GitLab escaped.
 func TestTrackerRecipesComments(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -500,6 +501,7 @@ func TestTrackerRecipesComments(t *testing.T) {
 // nothing told to the notice webhook; a person's comment can't be written
 // through it.
 func TestTrackerComments(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, func(c *Config) { c.NotifyWebhook = tokenFile(t, "https://hooks.example.com/lapilli") })
 	h := s.IncidentsHandler()
 	ctx := context.Background()
@@ -616,6 +618,7 @@ func TestTrackerComments(t *testing.T) {
 // is; an emoji with a zero-width joiner, and a soft hyphen in a text, are
 // people's writing, and kept as they are.
 func TestTrackerRecipesCommentsShown(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -665,6 +668,7 @@ func TestTrackerRecipesCommentsShown(t *testing.T) {
 // copied, however many come first: they are kept, under their ids, and not
 // sent again; MAX_COMMENTS counts what is still to copy.
 func TestTrackerRecipesCommentsNotStarved(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -693,6 +697,7 @@ func TestTrackerRecipesCommentsNotStarved(t *testing.T) {
 // is another account's and the post is no longer the job's, isn't copied
 // back, nor does it hold up the comments after it.
 func TestTrackerRecipesCommentsPostedNotCopiedBack(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -716,6 +721,7 @@ func TestTrackerRecipesCommentsPostedNotCopiedBack(t *testing.T) {
 // Once a task keeps as many comments copied in as a task does, the job
 // stops sending them for it, and counts only those kept.
 func TestTrackerRecipesCommentsAtTheBound(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -743,6 +749,7 @@ func TestTrackerRecipesCommentsAtTheBound(t *testing.T) {
 // comments on the issue than are read, nothing is posted to it. Who wrote a
 // comment in Lapilli (often an email) is said only with COMMENT_NAMES.
 func TestTrackerRecipesCommentsPosted(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -795,6 +802,7 @@ func TestTrackerRecipesCommentsPosted(t *testing.T) {
 // GitLab's internal notes) aren't copied to Lapilli, where everyone who
 // reads the task would read them.
 func TestTrackerRecipesCommentsRestricted(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, name := range []string{"jira", "gitlab", "jira-dc", "youtrack"} {
 		t.Run(name, func(t *testing.T) {
@@ -819,6 +827,7 @@ func TestTrackerRecipesCommentsRestricted(t *testing.T) {
 // issue done and one dropped, where the tracker tells them apart:
 // Shortcut's archived story by when its history says it was archived).
 func TestTrackerRecipesCommentDoesntReclose(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for name, api := range trackerAPIs {
 		for _, state := range []string{"done", "dropped"} {
@@ -836,6 +845,7 @@ func TestTrackerRecipesCommentDoesntReclose(t *testing.T) {
 // A Jira that doesn't give statuscategorychangedate: by resolutiondate,
 // when it was resolved, which a comment doesn't change either.
 func TestTrackerRecipeJiraNoStatusDate(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	for _, state := range []string{"done", "dropped"} {
 		t.Run(state, func(t *testing.T) {
@@ -877,6 +887,7 @@ func testCommentDoesntReclose(t *testing.T, name, state string, change ...func(*
 // Azure Boards' Basic process has no Removed state: with
 // AZURE_BOARDS_REMOVED=Done, a work item done is done, not dropped.
 func TestTrackerRecipeAzureBoardsBasic(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "azure-boards")
 	g.mustRun(t, "AZURE_BOARDS_REMOVED=Done")
@@ -891,6 +902,7 @@ func TestTrackerRecipeAzureBoardsBasic(t *testing.T) {
 // code, an image. Each is read as text, never as markup: the mention as
 // its name, the image as "(attachment)".
 func TestTrackerRecipeJiraCommentText(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "jira")
 	g.mustRun(t)
@@ -915,6 +927,7 @@ func TestTrackerRecipeJiraCommentText(t *testing.T) {
 // tracker's id for it; not one copied in from the tracker, not another
 // task's, not with a ref of another shape, not a second time as another.
 func TestTrackerCommentPosted(t *testing.T) {
+	parallel(t)
 	s := trackerServer(t, nil)
 	h := s.IncidentsHandler()
 	ctx := context.Background()
@@ -979,6 +992,7 @@ func TestTrackerCommentPosted(t *testing.T) {
 // has an id of its own, never the deleted one's, so it is posted, not taken
 // for the post of the one deleted (whose post stays on the issue).
 func TestTrackerRecipesCommentIDNotReused(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
@@ -1013,6 +1027,7 @@ func TestTrackerRecipesCommentIDNotReused(t *testing.T) {
 // marked by the token. Team scope is people's: the token, which is the
 // tracker job's and no one's, copies and marks on every team's tasks.
 func TestTrackerCommentsUnderRoles(t *testing.T) {
+	parallel(t)
 	s, pay, search := rolesServer(t, func(c *Config) {
 		c.IncidentsListen, c.TasksToken = "127.0.0.1:0", tokenFile(t, trTasksTok)
 	})
@@ -1067,6 +1082,7 @@ func TestTrackerCommentsUnderRoles(t *testing.T) {
 // is still not the tracker job: the name is kept for the job, and its
 // comments aren't theirs to change.
 func TestTrackerCommentsReservedName(t *testing.T) {
+	parallel(t)
 	s, _, _ := rolesServer(t, func(c *Config) {
 		c.Editors = []string{"*"}
 		c.IncidentsListen, c.TasksToken = "127.0.0.1:0", tokenFile(t, trTasksTok)

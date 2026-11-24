@@ -84,6 +84,7 @@ func (p signedPost) event() string {
 // key that turns short posts nothing until it is put right. Neither the key
 // nor a signature is in the log.
 func TestNotifyWebhookSigned(t *testing.T) {
+	parallel(t)
 	sh := newSignedHook(t)
 	sh.fail = 1
 	key := "a-key-of-thirty-two-bytes-012345"
@@ -184,6 +185,7 @@ func TestNotifyWebhookSigned(t *testing.T) {
 
 // Without the flag, a post carries no signature, as before.
 func TestNotifyWebhookUnsigned(t *testing.T) {
+	parallel(t)
 	sh := newSignedHook(t)
 	s, _ := server(t, func(c *Config) { c.UserHeader, c.NotifyWebhook = "X-Forwarded-Email", sh.file })
 	if code, body := api(t, s.Handler(), "POST", "/api/v1/tasks", `{"title": "tune Errors", "rule": "Errors"}`); code != http.StatusCreated {

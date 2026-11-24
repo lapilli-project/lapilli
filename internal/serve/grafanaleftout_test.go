@@ -332,6 +332,7 @@ func ordersAndStock() *shopGrafana {
 // as they are, and read as copied. Judged again, an alert of it that began
 // meanwhile and is still on is written from there, in every round after.
 func TestServeGrafanaJudgedShared(t *testing.T) {
+	parallel(t)
 	for _, paused := range []bool{false, true} {
 		ctx := context.Background()
 		g := ordersAndStock()
@@ -442,6 +443,7 @@ func TestServeGrafanaJudgedShared(t *testing.T) {
 // under the title; nor does the round after, read from where the copies
 // got to, a first day.
 func TestServeGrafanaJudgedSharedAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &shopGrafana{}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false})
@@ -476,6 +478,7 @@ func TestServeGrafanaJudgedSharedAlone(t *testing.T) {
 // name for, here) is left out alone, while a read holds the change; the
 // other rule's days are written. Past it, the rule is judged again.
 func TestServeGrafanaJudgedUnsureAlone(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	sh := shopServer(t, g)
 	sh.round(0)
@@ -503,6 +506,7 @@ func TestServeGrafanaJudgedUnsureAlone(t *testing.T) {
 // in Grafana and changing state in none of that day, stays on, as it is
 // within a week of where the rule was left out.
 func TestServeGrafanaJudgedUnsureKeepsOn(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	g.fired("Stock low", "shelf", -4*time.Hour, 0)
 	sh := shopServer(t, g)
@@ -521,6 +525,7 @@ func TestServeGrafanaJudgedUnsureKeepsOn(t *testing.T) {
 // so is one whose name the ledger keeps no rule by, a zero-width space in
 // it: that one with no period kept, as it never has a record.
 func TestServeGrafanaJudgedUnheldAlone(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := ordersAndStock()
 	const hidden = "Cart\u200bslow"
@@ -546,6 +551,7 @@ func TestServeGrafanaJudgedUnheldAlone(t *testing.T) {
 // where the rule was left out, holds it ended before what it writes, and
 // judges the rule again.
 func TestServeGrafanaJudgedUnheldOnce(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	sh := shopServer(t, g)
 	sh.round(0)
@@ -571,6 +577,7 @@ func TestServeGrafanaJudgedUnheldOnce(t *testing.T) {
 // long as a round writes from when a version of the rules held the other
 // rule: to six hours on.
 func TestServeGrafanaJudgedLeftOutOn(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	g.fired("Orders slow", "search", -4*time.Hour, 0)
 	sh := shopServer(t, g)
@@ -602,6 +609,7 @@ func TestServeGrafanaJudgedLeftOutOn(t *testing.T) {
 // where the history says once the rule is judged again, read from before
 // either: the history has it from its start, the ledger from later.
 func TestServeGrafanaJudgedLeftOutTwice(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	sh := shopServer(t, g)
 	sh.round(0)
@@ -640,6 +648,7 @@ func TestServeGrafanaJudgedLeftOutTwice(t *testing.T) {
 // began; and one written from a gap's end that ends in a later gap is
 // ended where the history says, read from before either.
 func TestServeGrafanaJudgedGapAlerts(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{}
 	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}}
 	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
@@ -685,6 +694,7 @@ func TestServeGrafanaJudgedGapAlerts(t *testing.T) {
 // copies in, once it is a rule only copied in (renamed in Grafana, here):
 // a week no firing was copied in for it isn't a week it didn't fire.
 func TestServeGrafanaJudgedLeftOutExpect(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := ordersAndStock()
 	sh := shopServer(t, g)
@@ -734,6 +744,7 @@ func TestServeGrafanaJudgedLeftOutExpect(t *testing.T) {
 // by its title, as Grafana names its alerts: not taken for a rule that
 // never fired.
 func TestServeGrafanaJudgedNamedApart(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &shopGrafana{}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false})
@@ -779,6 +790,7 @@ func TestServeGrafanaJudgedNamedApart(t *testing.T) {
 // left on, nor written a second time where the copies cover again, and
 // the span stays let go.
 func TestServeGrafanaJudgedEndedInSpanLetGo(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &shopGrafana{}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false})
@@ -822,6 +834,7 @@ func TestServeGrafanaJudgedEndedInSpanLetGo(t *testing.T) {
 // and as lapilli serve runs unless told otherwise, a round an hour, the
 // hour before read again.
 func TestServeGrafanaJudgedLeftOutEndedSoon(t *testing.T) {
+	parallel(t)
 	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}, {stockUID, "Stock low", "Ops", false}}
 	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
 	for _, began := range []time.Duration{30 * time.Minute, 3*time.Hour + 30*time.Minute} {
@@ -865,6 +878,7 @@ func TestServeGrafanaJudgedLeftOutEndedSoon(t *testing.T) {
 // an alert on at the gap's end that ended before the first round after it
 // read.
 func TestServeGrafanaJudgedGapEndedSoon(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{}
 	one := []shopRule{{ordersUID, "Orders slow", "Ops", false}}
 	two := append(slices.Clone(one), shopRule{"elsewhere", "Orders slow", "Elsewhere", true})
@@ -893,6 +907,7 @@ func TestServeGrafanaJudgedGapEndedSoon(t *testing.T) {
 // the judged rule isn't left out. Nor does an alert of it with the labels
 // of one the judged rule has on end that one.
 func TestServeGrafanaJudgedSharedBetweenRounds(t *testing.T) {
+	parallel(t)
 	for _, seen := range []bool{false, true} {
 		g := ordersAndStock()
 		g.ids = true
@@ -928,6 +943,7 @@ func TestServeGrafanaJudgedSharedBetweenRounds(t *testing.T) {
 // Two rules of one title in two folders, both judged, of a history that
 // says each change's rule: each has what it fired, and neither is left out.
 func TestServeGrafanaJudgedSharedTold(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := ordersAndStock()
 	g.ids = true
@@ -959,6 +975,7 @@ func TestServeGrafanaJudgedSharedTold(t *testing.T) {
 // end that one. The judged rule's id is the one Grafana lists its uid
 // with, not one the read alone holds of its title.
 func TestServeGrafanaJudgedHiddenFolder(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
 	g.hidden = []shopRule{{"teamb", "Orders slow", "Team B", false}}
@@ -1010,6 +1027,7 @@ func (d oneTagName) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // one name), leaves the judged rule be: what it fired is written, and its
 // copies cover the round, as each change says its rule.
 func TestServeGrafanaJudgedHiddenFolderPassedOver(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
 	g.hidden = []shopRule{{"teamb", "Orders slow", "Team B", false}}
@@ -1034,6 +1052,7 @@ func TestServeGrafanaJudgedHiddenFolderPassedOver(t *testing.T) {
 // (--watch) saw it, and the rule is left out of what is written across the
 // version that held it.
 func TestServeGrafanaJudgedSharedBetweenRoundsUntold(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	sh := shopServer(t, g)
 	sh.round(0)
@@ -1063,6 +1082,7 @@ func TestServeGrafanaJudgedSharedBetweenRoundsUntold(t *testing.T) {
 // leaves out, of a change passed over then (Stock low's, a state Grafana
 // has no name for), which a read from a day before judges.
 func TestServeGrafanaJudgedLeftOutLong(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	sh := shopServer(t, g)
 	sh.round(0)
@@ -1130,6 +1150,7 @@ func TestServeGrafanaJudgedReadBackTooMuch(t *testing.T) {
 // of the day once more, and the other rules' day is written, not left a
 // gap.
 func TestServeGrafanaJudgedReadBackRefused(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
 	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
@@ -1153,6 +1174,7 @@ func TestServeGrafanaJudgedReadBackRefused(t *testing.T) {
 // same, is left out of the day, and the log says so, not that the history
 // passed over its changes.
 func TestServeGrafanaJudgedUnlistedWhy(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
 	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
@@ -1177,6 +1199,7 @@ func TestServeGrafanaJudgedUnlistedWhy(t *testing.T) {
 // A day copied lists Grafana's rules once, though its read and the read
 // back from where a rule was left out both need their ids.
 func TestServeGrafanaJudgedListedOnce(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
 	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
@@ -1204,6 +1227,7 @@ func TestServeGrafanaJudgedListedOnce(t *testing.T) {
 // the day once more, not the day a gap, and the log names it; the round
 // after judges it again.
 func TestServeGrafanaJudgedReadNearUnusable(t *testing.T) {
+	parallel(t)
 	g := &shopGrafana{ids: true}
 	g.hold(shopRule{ordersUID, "Orders slow", "Ops", false}, shopRule{stockUID, "Stock low", "Ops", false})
 	g.fired("Orders slow", "orders", -5*time.Hour, -4*time.Hour)
@@ -1240,6 +1264,7 @@ func TestServeGrafanaJudgedReadNearUnusable(t *testing.T) {
 // alert of it on since before, that the read says nothing of, is ended
 // where the rule was left out, not left on.
 func TestServeGrafanaJudgedLeftOutPastAWeek(t *testing.T) {
+	parallel(t)
 	g := ordersAndStock()
 	sh := shopServer(t, g)
 	sh.round(0)

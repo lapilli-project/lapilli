@@ -14,6 +14,7 @@ import (
 // tracker recipes alike, and curl is given http alone. A user before @ is
 // refused still, and PLAIN_HTTP is true or false.
 func TestRecipesTakePlainHTTPWhenTold(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	path, args := recordingCurl(t)
 	const plain = "http://tool.monitoring.svc:8080"

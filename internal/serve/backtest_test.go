@@ -225,6 +225,7 @@ func (b *btSet) done(t *testing.T, token string, body []byte) (string, map[strin
 // ledger's, not the job's), and the comment lapilli verdict --compare
 // --changed-only --markdown writes, saying so, with its summary line.
 func TestBacktestThreeCIs(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	for name, token := range map[string]string{
 		"github":  b.github(nil),
@@ -264,6 +265,7 @@ func TestBacktestThreeCIs(t *testing.T) {
 // no entry names asks nothing of anyone. The body of a request refused is
 // never read.
 func TestBacktestTokensRefused(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	// A token of an issuer no entry names asks nothing of anyone: before
 	// any token, each issuer still unasked.
@@ -379,6 +381,7 @@ func signedAs(ci *idptest.CI, iss string) string {
 // is the same backtest, answered 200 without its key, which was given
 // once; another body is 409. A plain token's each start one.
 func TestBacktestTokenOnce(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	tok := b.github(nil)
 	body := btBody(ruleFile, changedRules, nil)
@@ -406,6 +409,7 @@ func TestBacktestTokenOnce(t *testing.T) {
 // send its token again and again, each a signature checked and the
 // ledger read, past the entry's hourly.
 func TestBacktestUsedTokenKeepsHour(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	gh := b.s.trustNamed("alerts")
 	gh.hourly, gh.Hourly = &limiter{rate: 2.0 / 3600, burst: 2}, 2
@@ -430,6 +434,7 @@ func TestBacktestUsedTokenKeepsHour(t *testing.T) {
 // most; each selector one metric's, by its name. Each is a 400 with what
 // is wrong, the request's own words; none is queued.
 func TestBacktestRequestsRefused(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	many := "groups:\n  - name: many\n    rules:\n"
 	for i := range 51 {
@@ -495,6 +500,7 @@ func TestBacktestRequestsRefused(t *testing.T) {
 // \r is refused itself. A rule's own comment is taken, and reads what the
 // rule names.
 func TestBacktestCommentsHideNothing(t *testing.T) {
+	parallel(t)
 	h := &history{}
 	b := btServer(t, h, "", nil)
 	hidden := map[string]string{
@@ -553,6 +559,7 @@ func TestBacktestCommentsHideNothing(t *testing.T) {
 // of it. Rules as alerting rules are written are taken, each through the
 // port's checks.
 func TestBacktestMetricsQLRefused(t *testing.T) {
+	parallel(t)
 	h := &history{}
 	b := btServer(t, h, "", nil)
 	h.Lock()
@@ -609,6 +616,7 @@ func TestBacktestMetricsQLRefused(t *testing.T) {
 // rate is refused before it is queued, saying how many requests it needs
 // and how many days would fit.
 func TestBacktestPlanRefused(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", func(c *Config) { c.BacktestTimeout = time.Minute })
 	b.s.btPort.rate = 0.05 // 3 requests a minute
 	code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btBody(ruleFile, changedRules, map[string]any{"days": 7}))
@@ -627,6 +635,7 @@ func TestBacktestPlanRefused(t *testing.T) {
 // request (a newer commit's supersedes the one waiting), each answered
 // 429 with Retry-After past them; an entry's hourly, from its bucket.
 func TestBacktestQueueBounds(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", func(c *Config) { c.BacktestQueue = 5 })
 	post := func(token string, pr int) (int, map[string]any, http.Header) {
 		return btAsk(t, b.h, "POST", "/v1/backtests", token, btBody(ruleFile, changedRules, map[string]any{"pull_request": pr}))
@@ -835,6 +844,7 @@ func TestBacktestRefusedBeforeBody(t *testing.T) {
 // by the runs' pace too; the runs' Limiter as it was. Without --max-rate,
 // a quarter of --parallel at once, one at least.
 func TestBacktestLaneShare(t *testing.T) {
+	parallel(t)
 	runs := prom.NewLimiter(2)
 	c := prom.New("http://127.0.0.1:1", "test", prom.WithLimiter(runs))
 	b := btServer(t, c, "", func(cfg *Config) { cfg.BacktestShare = 0.25 })
@@ -884,6 +894,7 @@ func (h *leakyHistory) QueryRange(ctx context.Context, expr string, start, end t
 // its severity among them), no word the history said, nothing of where it
 // is; nor a token, a key, or a rule's name outside the comment.
 func TestBacktestNoLeaks(t *testing.T) {
+	parallel(t)
 	b := btServer(t, &leakyHistory{}, "", nil)
 	after := ruleFile + `      - alert: LeakyRule
         expr: leaky_metric > 0
@@ -963,6 +974,7 @@ func TestBacktestNoLeaks(t *testing.T) {
 // A plain token another token file of serve's comes to hold, after start,
 // is taken no longer, until each has its own again.
 func TestBacktestPlainTokenShared(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	incidents := filepath.Join(dir, "incidents-token")
 	os.WriteFile(incidents, []byte(strings.Repeat("i", 32)), 0o600)
@@ -1039,6 +1051,7 @@ func (h *blockingHistory) QueryRange(ctx context.Context, expr string, start, en
 // /metrics counts the backtests by entry and how they ended, and those
 // waiting; the Run history lists each, counts and the repository.
 func TestBacktestShown(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	b.done(t, b.github(nil), btBody(ruleFile, changedRules, nil))
 	btAsk(t, b.h, "POST", "/v1/backtests", b.github(map[string]any{"jti": "2"}), btBody(ruleFile, changedRules, map[string]any{"days": 15}))
@@ -1064,6 +1077,7 @@ func TestBacktestShown(t *testing.T) {
 // history, no series in /metrics, no lane; with it and nothing asked, the
 // Run history is the page without it, but for its section.
 func TestBacktestOffUnchanged(t *testing.T) {
+	parallel(t)
 	off, _ := server(t, nil)
 	if off.btPort != nil {
 		t.Fatal("a backtest port without --backtest-listen")
@@ -1114,6 +1128,7 @@ func TestBacktestOffUnchanged(t *testing.T) {
 // A backtest of a large rule set, rules named in Korean and Cyrillic,
 // as teams write them, goes through and is said as written.
 func TestBacktestOrdinary(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	var same strings.Builder
 	same.WriteString("groups:\n  - name: 결제\n    rules:\n")
@@ -1141,6 +1156,7 @@ func TestBacktestOrdinary(t *testing.T) {
 // the one asked, or another, on its first poll, and an entry's hourly
 // counts what every replica took.
 func TestBacktestReplicas(t *testing.T) {
+	parallel(t)
 	shared := sharedLedger(t)
 	a := btServer(t, nil, "", func(c *Config) { c.LedgerURLFile = shared })
 	b := btServer(t, nil, "", func(c *Config) { c.LedgerURLFile = shared })
@@ -1174,6 +1190,7 @@ func TestBacktestReplicas(t *testing.T) {
 // expectations sent beside it, is answered as lapilli verdict answers it:
 // nothing changed, nothing asked of the history.
 func TestBacktestNothingChanged(t *testing.T) {
+	parallel(t)
 	h := &history{}
 	b := btServer(t, h, "", nil)
 	same := strings.Replace(ruleFile, "labels: {severity: page}", "labels: {severity: page}\n        annotations: {summary: still the same}", 1)
@@ -1195,6 +1212,7 @@ func TestBacktestNothingChanged(t *testing.T) {
 // An expectations file of no bytes is given, as --expect takes one: held
 // to it, the summary says it was.
 func TestBacktestEmptyExpect(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	_, rep := b.done(t, b.plain, btBody(ruleFile, changedRules, map[string]any{"expect": ""}))
 	if sum := rep["summary"].(map[string]any); sum["expected"] != true {
@@ -1209,6 +1227,7 @@ func TestBacktestEmptyExpect(t *testing.T) {
 // An entry that asks for the incidents' titles (incident_titles) gets them
 // in its comments; others, ids alone.
 func TestBacktestIncidentTitles(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	b.s.trustNamed("plain").IncidentTitles = true
 	md, rep := b.done(t, b.plain, btBody(ruleFile, changedRules, nil))
@@ -1240,6 +1259,7 @@ func TestBacktestPanicFails(t *testing.T) {
 
 // The leader's rounds let go of backtests ended a day ago, the port off.
 func TestBacktestPrunedPortOff(t *testing.T) {
+	parallel(t)
 	s, _ := server(t, nil)
 	ctx := context.Background()
 	if _, _, _, err := s.l.AskBacktest(ctx, ledger.BacktestAsk{Backtest: ledger.Backtest{ID: strings.Repeat("a", 32), Trust: "gone", KeyHash: "k"},
@@ -1262,6 +1282,7 @@ func TestBacktestPrunedPortOff(t *testing.T) {
 // job's own reads, and its DELETE, are charged to nothing but the
 // backtest's reads, which are limited by its id.
 func TestBacktestReadsNotStarved(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	b.s.btPort.keys.every = 0 // a listing for each guess that waits
 	const proxy = "192.0.2.5" // the ingress controller's
@@ -1327,6 +1348,7 @@ func TestBacktestReadsNotStarved(t *testing.T) {
 // an id no backtest has, are each a 404 after the listing; a backtest let
 // go of since is a 404 too, and known no longer.
 func TestBacktestQueuedElsewhereFound(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	ctx := context.Background()
 	id, key := strings.Repeat("e", 32), "a-key-the-other-replica-gave"
@@ -1456,6 +1478,7 @@ func TestBacktestGuessesListOnce(t *testing.T) {
 // What the lane asks of the history is in lapilli_serve_history_*'s totals,
 // beside the runs' and people's.
 func TestBacktestLaneInHistoryMetrics(t *testing.T) {
+	parallel(t)
 	var asked atomic.Int64
 	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		asked.Add(1)
@@ -1494,6 +1517,7 @@ func variant(raw string) string {
 // written: the same token with a bit flipped past its signature's last
 // byte, and another body, is 409.
 func TestBacktestTokenWithoutJTI(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	claims := idptest.Forgejo(9007199254)
 	claims["jti"] = nil
@@ -1569,6 +1593,7 @@ func TestBacktestSlowBody(t *testing.T) {
 // mistyped makes it, is refused, as lapilli verdict refuses it; one side
 // kept, the other empty, is a backtest.
 func TestBacktestNoneSelected(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	doc := func(team string) string {
 		return "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata: {name: r, labels: {team: " + team + "}}\nspec:\n  groups:\n  - name: g\n    rules:\n    - {alert: A, expr: errors > 5}\n"
@@ -1598,6 +1623,7 @@ func TestBacktestNoneSelected(t *testing.T) {
 // A rule whose expression doesn't read as PromQL is refused as written,
 // alone, as lapilli verdict says it, the rest backtested; asked nothing.
 func TestBacktestSyntaxError(t *testing.T) {
+	parallel(t)
 	h := &history{}
 	b := btServer(t, h, "", nil)
 	after := changedRules + "      - alert: Broken\n        expr: sum(x\n"
@@ -1645,6 +1671,7 @@ func TestPerKeyFullFailsClosed(t *testing.T) {
 // pins, each named so and both kept as "", never each other's: one's pull
 // request 42 isn't the other's.
 func TestBacktestSupersedeUnnamed(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	long := "example/" + strings.Repeat("a", 210)
 	for i, c := range []struct {
@@ -1675,6 +1702,7 @@ func TestBacktestSupersedeUnnamed(t *testing.T) {
 // the entry's that has its old name since doesn't: before ids were kept,
 // the name alone said which repository a backtest was of.
 func TestBacktestSupersedeRenamed(t *testing.T) {
+	parallel(t)
 	b := btServer(t, nil, "", nil)
 	ask := func(jti, id, name string) (int, map[string]any) {
 		t.Helper()

@@ -53,6 +53,7 @@ func searchFirings(t *testing.T, s *Server) []ledger.Firing {
 // that day's rules: a rule's "for" was raised 40 hours ago, and the firings
 // before then are judged with the "for" it had.
 func TestRulesHistory(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	tuned := now.Add(-40 * time.Hour)
 	hist := historyDir(t, map[string]string{
@@ -126,6 +127,7 @@ func TestRulesHistory(t *testing.T) {
 // restarted keep stopping on it. Followed, not even a directory that
 // isn't a history stops it: the watcher says so until it is put right.
 func TestRulesHistoryRefused(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	bad := historyDir(t, map[string]string{"last-week": "2m"})
 	s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = bad })
@@ -181,6 +183,7 @@ func TestRulesHistoryRefused(t *testing.T) {
 // later start reads nothing at all, so an unreadable directory can't stop
 // it either.
 func TestRulesHistoryPassedOver(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	dir := historyDir(t, map[string]string{now.Add(-100 * time.Hour).Format(time.RFC3339): "2m", now.Add(time.Hour).Format(time.RFC3339): "15m"})
 	s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = dir })
@@ -243,6 +246,7 @@ data:
 // --rules-select keeps: the ledger keeps neither the Secret nor the rules
 // it left out, and judges each day with that day's.
 func TestRulesHistoryRendered(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	tuned := now.Add(-40 * time.Hour)
 	hist := t.TempDir()

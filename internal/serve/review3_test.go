@@ -20,6 +20,7 @@ import (
 // changes nothing: what it replays is judged by the weeks the ledger's
 // report is, though the seven days are of two weeks, one with no record.
 func TestTryComparesLikeWithLike(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	o, err := s.options(ctx)
@@ -43,6 +44,7 @@ func TestTryComparesLikeWithLike(t *testing.T) {
 // report of it says, rule by rule: by the same weeks, given the incidents
 // that keep them.
 func TestReplayJudgedAsKept(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	o, _ := s.options(ctx)
@@ -84,6 +86,7 @@ func TestReplayJudgedAsKept(t *testing.T) {
 // rules list's sum, MCP's rule, the deploys line, a rule's span before its
 // period and the outcomes' then and now are of the firings judged alone.
 func TestPrecisionOfJudged(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	v := rulesFor(t, s, "weeks=4")
@@ -139,6 +142,7 @@ func TestPrecisionOfJudged(t *testing.T) {
 // are judged by everyone's record, which INC-0 keeps (TestTeamRecord has a
 // team with labels, judged by what it owns).
 func TestTeamWithNoLabels(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, keepRecord)
 	team := ledger.Team{Name: "payments", Rules: "^Errors$"}
@@ -175,6 +179,7 @@ func TestTeamWithNoLabels(t *testing.T) {
 // TestHeatPicksJudged: where the noise is shows the rules with the most
 // black stones judged, though others had more, with no record.
 func TestHeatPicksJudged(t *testing.T) {
+	parallel(t)
 	s := noSource(t, nil)
 	w1, w2 := int64(20387), int64(20394)
 	tl := &tallies{weeks: []int64{w1, w2}, kept: map[int64]bool{w1: false, w2: true}, rules: map[int64]ledger.RuleRow{},
@@ -263,6 +268,7 @@ func TestTooManyToTell(t *testing.T) {
 // of the firings judged: those in weeks with no record aren't, and with
 // none judged there is none.
 func TestReportCountsJudged(t *testing.T) {
+	parallel(t)
 	rep := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Firings: 20, White: 2, Unjudged: 14}, {Rule: "B", Firings: 4, White: 1}}}
 	c := count(rep)
 	if c.Firings != 24 || c.Caught != 3 || c.Nothing != 21 || c.Precision == nil || *c.Precision != 0.3 {
@@ -278,6 +284,7 @@ func TestReportCountsJudged(t *testing.T) {
 // its precision is of those three weeks' firings, as the period's is of
 // the three an incident six weeks ago keeps, each week by its own record.
 func TestSpanBeforeByWeek(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Backfill, c.Impact = 2*24*time.Hour, "" })
 	raw := ""

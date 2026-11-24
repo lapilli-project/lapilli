@@ -29,6 +29,7 @@ func waiting(t *testing.T, s *Server, rule string) int64 {
 // rule is free for another; one approved, or made since, is left. Its page
 // says when it would.
 func TestProposalsExpire(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := rolesServer(t, nil)
 	old := waiting(t, s, "Errors")
@@ -89,6 +90,7 @@ func TestProposalsExpire(t *testing.T) {
 // out approves. Nor is one being backtested again here, until it is done.
 // Its page says when it would expire only while no one approved it.
 func TestProposalsExpireLeaves(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _, _ := rolesServer(t, func(c *Config) { c.ProposalsExpire = 30 * 24 * time.Hour; c.Approvals = 2 })
 	approved := waiting(t, s, "Errors")
@@ -121,6 +123,7 @@ func TestProposalsExpireLeaves(t *testing.T) {
 // approvals withdrawn, it would wait anew, and close once more had passed
 // than anyone meant. Before it is past, it does.
 func TestBacktestStaleLeavesPastExpiry(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, ids := staleServer(t, 1, func(c *Config) { c.Approvals = 2; c.ProposalsExpire = 30 * 24 * time.Hour })
 	if _, err := s.l.Approve(ctx, ids[0], ana, 2, time.Time{}); err != nil {

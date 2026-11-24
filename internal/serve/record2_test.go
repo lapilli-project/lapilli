@@ -42,6 +42,7 @@ func noSource(t *testing.T, change func(*Config)) *Server {
 // shown nowhere: not on the rules list, the rule's page, its form, a
 // report, or the digest worked out again.
 func TestStoredSuggestionsFollowTheRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
@@ -86,6 +87,7 @@ func TestStoredSuggestionsFollowTheRecord(t *testing.T) {
 // incident of payments', so its rule Errors is counted, not judged, there;
 // payments' digest says so, and suggests nothing.
 func TestTeamRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, keepRecord)
 	// It owns by labels what no incident has: none keeps its record.
@@ -146,6 +148,7 @@ func TestTeamRecord(t *testing.T) {
 // none, are counted and not judged; its precision is of this week's 7, as
 // the overview's row of this week has it.
 func TestWeeksAgree(t *testing.T) {
+	parallel(t)
 	s := noSource(t, nil)
 	v := rulesFor(t, s, "weeks=4")
 	var e ruleRow
@@ -181,6 +184,7 @@ func TestWeeksAgree(t *testing.T) {
 // TestImpactKeepsServeRecord: with --impact read by the runs from before a
 // week, that week's record is kept, found or not.
 func TestImpactKeepsServeRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour })
 	raw := ""
@@ -202,6 +206,7 @@ func TestImpactKeepsServeRecord(t *testing.T) {
 // TestNewlyNoisyNeedsARecord: a rule with no record the span before isn't
 // newly noisy: it wasn't known not to be.
 func TestNewlyNoisyNeedsARecord(t *testing.T) {
+	parallel(t)
 	s := noSource(t, nil)
 	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	to := from.Add(7 * 24 * time.Hour)
@@ -225,6 +230,7 @@ func TestNewlyNoisyNeedsARecord(t *testing.T) {
 // TestHeatLeavesNoRecordOut: where the noise is counts the weeks with a
 // record alone, and says once that the others are left out.
 func TestHeatLeavesNoRecordOut(t *testing.T) {
+	parallel(t)
 	s := noSource(t, nil)
 	d, err := s.overview(httptest.NewRequest(http.MethodGet, "/", nil))
 	if err != nil {
@@ -248,6 +254,7 @@ func TestHeatLeavesNoRecordOut(t *testing.T) {
 // its firings out of hours had no incident to judge them by, not that they
 // caught nothing.
 func TestHoursWithNoRecord(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) {
 		c.Options.Hours, c.Impact, c.Backfill = verdict.DefaultHours(time.UTC), "", 10*24*time.Hour
@@ -293,6 +300,7 @@ func TestContentCheckBounded(t *testing.T) {
 // TestTeamDigestKeepsItsOwn: another team's rule in a team's digest keeps
 // the alerts on what the team owns alone: no third team's labels.
 func TestTeamDigestKeepsItsOwn(t *testing.T) {
+	parallel(t)
 	own := &owners{rule: map[string]int64{"Errors": 1}, byID: map[int64]ledger.Team{1: {ID: 1, Name: "payments"}}}
 	rep := &verdict.Report{Unrecorded: []verdict.Unrecorded{{Rule: "Errors", Firings: 30, Alerts: 3, Top: []verdict.AlertCount{
 		{Labels: map[string]string{"service": "search"}, Firings: 20, Team: "web"},
@@ -314,6 +322,7 @@ func TestTeamDigestKeepsItsOwn(t *testing.T) {
 // TestKeptResultsMalformed: a stored result that doesn't decode is logged,
 // and taken as none: the pages and MCP answer as without it.
 func TestKeptResultsMalformed(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
@@ -351,6 +360,7 @@ func TestKeptResultsMalformed(t *testing.T) {
 // TestUnrecordedProseInMCP: MCP's text of what a rule's firings were says
 // it in Lapilli's words alone; the alerts' labels are in top, as data.
 func TestUnrecordedProseInMCP(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	s.h = pastBound{s.h}
@@ -372,6 +382,7 @@ func TestUnrecordedProseInMCP(t *testing.T) {
 // TestNoneWellPastWording: none past its bound for its whole for reads so
 // in each language, a share past it in Korean said as "20%" past it.
 func TestNoneWellPastWording(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s := noSource(t, nil)
 	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)

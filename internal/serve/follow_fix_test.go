@@ -45,6 +45,7 @@ func (s *Server) start(ctx context.Context) error {
 // rules don't parse is passed over, said once, and the version before
 // stays in effect; the versions after it are recorded as they come.
 func TestFollowPassesUnreadable(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	addVersion(t, hist, now.Add(-90*time.Hour), "2m")
@@ -88,6 +89,7 @@ func TestFollowPassesUnreadable(t *testing.T) {
 // A version that reads and one that doesn't, found in one look: the one
 // that reads is recorded and its hours replayed again.
 func TestFollowGoodThenBad(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	addVersion(t, hist, now.Add(-90*time.Hour), "15m")
@@ -167,6 +169,7 @@ func TestFollowAddedDuringALook(t *testing.T) {
 // where it looks from, is marked followed from there: a version added
 // between a look's reads waits for the next look there too.
 func TestFollowMarksWhereItLooked(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	addVersion(t, hist, now.Add(-100*time.Hour), "15m")
@@ -251,6 +254,7 @@ func checkoutFirings(t *testing.T, s *Server) []ledger.Firing {
 // forget it, and the next run replays those hours with it, as if no run
 // had been under way.
 func TestFollowDuringRun(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	v := func(forDur string) string { return strings.Replace(ruleFile, "for: 2m", "for: "+forDur, 1) }
@@ -292,6 +296,7 @@ func TestFollowDuringRun(t *testing.T) {
 // check finds then: a miss isn't kept twice, and a rule the version
 // dropped keeps no check of the days it no longer has firings on.
 func TestFollowChecksAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hist := t.TempDir()
 	two := ruleFile + "      - alert: Busy\n        expr: busy > 1\n        labels: {severity: page}\n"
@@ -333,6 +338,7 @@ func TestFollowChecksAgain(t *testing.T) {
 // Loki's rules beside it, as the rules read now are: a commit from five
 // hours ago takes effect from then, not when it is seen.
 func TestFollowBesideLoki(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	lokiDir := filepath.Join(t.TempDir(), "loki")
 	os.MkdirAll(lokiDir, 0o755)

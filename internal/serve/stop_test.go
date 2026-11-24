@@ -154,6 +154,7 @@ func TestRunStopsAtOnce(t *testing.T) {
 // answered 503, to be asked again: an answer of nothing was a 200, and a
 // write that wasn't done read as done, a notification as kept.
 func TestCanceledIsNotDone(t *testing.T) {
+	parallel(t)
 	s := notifyServer(t, nil)
 	for _, p := range []string{"/api/v1/tasks", "/tasks"} {
 		w := httptest.NewRecorder()

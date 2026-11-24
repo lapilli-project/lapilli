@@ -6,6 +6,7 @@ import "testing"
 // a rule's name from an API, holding what acts on a terminal or turns text
 // around, is said as the pages say it.
 func TestMetricsLabelValueShows(t *testing.T) {
+	parallel(t)
 	for in, want := range map[string]string{
 		"Errors":                "Errors",
 		`a "b" \c` + "\nd":      `a \"b\" \\c\\u{a}d`,

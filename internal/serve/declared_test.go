@@ -100,6 +100,7 @@ func clockOn(s *Server, d time.Duration) {
 // each refused, with the line; what it declares is read as the forms take
 // it.
 func TestParseConfig(t *testing.T) {
+	parallel(t)
 	d, err := ParseConfig([]byte(configFile), time.UTC)
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +203,7 @@ func teamOf(t *testing.T, s *Server, name string) ledger.Team {
 // pages say what, and why to an admin; put back, the last good file shows
 // nothing wrong again.
 func TestConfigReloaded(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	if pay := teamOf(t, s, "payments"); !pay.Declared || pay.TZ != "Asia/Seoul" {
@@ -286,6 +288,7 @@ func TestConfigReloaded(t *testing.T) {
 // A file that can't be read, then the one the ledger is kept to put back
 // as it was: nothing is shown wrong any more.
 func TestConfigPutBack(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, "teams: [\n")
@@ -308,6 +311,7 @@ func TestConfigPutBack(t *testing.T) {
 // name who holds a role or where a report goes; to anyone else, its line
 // and kind alone, on the pages and in the API.
 func TestConfigProblemsForAdmins(t *testing.T) {
+	parallel(t)
 	body := configFile + "  - user: mallory@example.com\n    team: nobody\n"
 	s, _ := configServer(t, body, func(c *Config) { c.Viewers = []string{"*"} })
 	h := s.Handler()
@@ -329,6 +333,7 @@ func TestConfigProblemsForAdmins(t *testing.T) {
 // A bad file at start, as a pod restarted on it reads it: serve starts on
 // the ledger as it is, and says why on its first read.
 func TestConfigBadAtStart(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeConfig(t, path, "teams:\n  - name: payments\n    colour: red\n")
@@ -346,6 +351,7 @@ func TestConfigBadAtStart(t *testing.T) {
 // any file, it is read twice first: kept to at the term's first read
 // again, configEvery after it begins.
 func TestConfigNewTerm(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := configServer(t, configFile, nil)
 	o, _ := s.options(ctx)
@@ -376,6 +382,7 @@ func htmlText(s string) string {
 // that the UI hasn't made yet) is tried again once the ledger changed, not
 // before a while: from configEvery, then twice as long each time.
 func TestConfigTriedAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	body := "windows:\n  - {title: freeze, team: platform, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"
 	s, _ := configServer(t, body, nil)
@@ -406,6 +413,7 @@ func TestConfigTriedAgain(t *testing.T) {
 // the API, an admin's included; and MCP has no tool that writes it. The
 // pages show it declared, its actions off, why beside them.
 func TestDeclaredRefusedEveryPath(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := configServer(t, configFile, nil)
 	h := s.Handler()
@@ -509,6 +517,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 // read the same twice in a row: an empty file deletes nothing, nor a
 // half-written one read once.
 func TestConfigTakenAway(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	s.cfg.Config = ""
@@ -578,6 +587,7 @@ func TestConfigTakenAway(t *testing.T) {
 // changes and deletes nothing, takes over what the UI made, and gives the
 // same file again; read once more, it writes nothing at all.
 func TestConfigExportRoundTrip(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, func(c *Config) { c.Loc, _ = time.LoadLocation("Asia/Seoul") })
 	if s.cfg.Loc == nil {
@@ -661,6 +671,7 @@ func TestConfigExportRoundTrip(t *testing.T) {
 
 // A team's name is unique in any letter case, from the forms and the API.
 func TestTeamNameAnyCase(t *testing.T) {
+	parallel(t)
 	s, _, _ := rolesServer(t, nil)
 	h := s.Handler()
 	code, body := callAs(t, h, "POST", "/api/v1/teams", "boss@example.com", "", `{"name":"PAYMENTS","rules":"^P"}`, "same-origin")
@@ -680,6 +691,7 @@ func TestTeamNameAnyCase(t *testing.T) {
 // as --config declares no role. In the body, YAML quotes it; read back, it
 // is skipped, as the ledger refuses such a title now.
 func TestExportHostileNames(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	hostile := "x\ngrants:\n- {user: mallory@example.com}\n#"
 	start := time.Date(2026, 11, 2, 2, 0, 0, 0, time.UTC)
@@ -729,6 +741,7 @@ func TestExportHostileNames(t *testing.T) {
 // forms or the API: the file would name a team that isn't there. Changed
 // but for its name, it is.
 func TestRenameNamedTeam(t *testing.T) {
+	parallel(t)
 	body := "windows:\n  - {title: freeze, team: search, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"
 	s, _ := configServer(t, body, nil)
 	if e := s.configShown().ErrText("en"); e != "" {
@@ -761,6 +774,7 @@ func TestRenameNamedTeam(t *testing.T) {
 // one the UI made and the file took over among them, once the file is
 // read the same twice in a row, configEvery apart.
 func TestConfigGrantRevoked(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
@@ -792,6 +806,7 @@ func TestConfigGrantRevoked(t *testing.T) {
 // first again, hasn't been read twice in a row: nothing is deleted until
 // it is read once more.
 func TestConfigPruneReadTwiceInARow(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, func(c *Config) { c.ConfigPrune = true })
 	short := configFile[:strings.Index(configFile, "reports:")]
@@ -823,6 +838,7 @@ func TestConfigPruneReadTwiceInARow(t *testing.T) {
 // A new file is tried again from configEvery, however long the last waited;
 // an error reading the settings is tried again after a while too.
 func TestConfigBackoff(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	bad := "windows:\n  - {title: freeze, team: platform, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"
 	s, path := configServer(t, bad, nil)
@@ -864,6 +880,7 @@ func TestConfigBackoff(t *testing.T) {
 // read the same twice, when it would delete what it no longer names, or
 // put back after one that couldn't be read.
 func TestConfigErrorBacksOff(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, func(c *Config) { c.ConfigPrune = true })
 	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
@@ -894,6 +911,7 @@ func TestConfigErrorBacksOff(t *testing.T) {
 // before --config takes no one's role away. Settings says how many, and
 // to an admin which.
 func TestConfigNoFileGivesBack(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := configServer(t, configFile, func(c *Config) { c.Viewers = []string{"*"} })
 	s.cfg.Config = ""
@@ -964,6 +982,7 @@ func TestConfigKeptOnlyReadTwice(t *testing.T) {
 // to, then the first again, takes no role away; the other is kept to only
 // once it is read twice in a row again.
 func TestConfigErrorBetweenReads(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	ana := func() bool {
@@ -1001,6 +1020,7 @@ func TestConfigErrorBetweenReads(t *testing.T) {
 // write, is made after what names it was read: that is tried again, not
 // left until the ledger changes for another reason.
 func TestConfigDeferredTeamTriedAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, "teams: []\n", nil)
 	for i := range ledger.MaxTeams - 2 { // payments and search are the UI's
@@ -1038,6 +1058,7 @@ func TestConfigDeferredTeamTriedAgain(t *testing.T) {
 // then --config again: the role is taken away once the file is read twice,
 // not left the UI's for good.
 func TestConfigRolledBackAndForward(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
@@ -1111,6 +1132,7 @@ func TestConfigBackoffBreaksTheRow(t *testing.T) {
 // A file the ledger couldn't be kept to is shown so, with when it is tried
 // again, not as one read once; kept to after, it is said no more.
 func TestConfigWriteFailureShown(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
@@ -1144,6 +1166,7 @@ func TestConfigWriteFailureShown(t *testing.T) {
 // when, it is logged once, and the one applied read twice in a row ends
 // it.
 func TestConfigStuckShown(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	var logged bytes.Buffer
@@ -1185,6 +1208,7 @@ func TestConfigStuckShown(t *testing.T) {
 // Terms too short to read a file twice keep the ledger from it: that is
 // shown since the first of them, and logged.
 func TestConfigShortTermsShown(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	var logged bytes.Buffer
@@ -1212,6 +1236,7 @@ func TestConfigShortTermsShown(t *testing.T) {
 // from Settings, which says how, a role's too; no one else's, nor a page
 // elsewhere's.
 func TestKeepGivenBackOnSettings(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := configServer(t, configFile, func(c *Config) { c.Viewers = []string{"*"} })
 	s.cfg.Config = ""
@@ -1296,6 +1321,7 @@ func TestConfigFailingNotStuck(t *testing.T) {
 // it, that the ledger fails to keep to again, is said so: not as a new
 // file read twice.
 func TestConfigRetryFailureShown(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	body := "windows:\n  - {title: freeze, team: platform, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"
 	s, _ := configServer(t, body, nil)
@@ -1321,6 +1347,7 @@ func TestConfigRetryFailureShown(t *testing.T) {
 // an admin's to read: on the Settings page and in its API, a reader who
 // isn't one is told of --config by its flag.
 func TestConfigFileAnAdminsAlone(t *testing.T) {
+	parallel(t)
 	s, path := configServer(t, configFile, nil)
 	h := s.Handler()
 	for _, who := range []string{"ed@example.com", "viewer@example.com"} {

@@ -67,6 +67,7 @@ func proposeAdding(t *testing.T, h http.Handler, who string, form url.Values) (i
 // read back as applied; its expectations then kept as a draft accepted by
 // its approver; undone by the file put back as it was.
 func TestAddByPullRequest(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, dir := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -145,6 +146,7 @@ func TestAddByPullRequest(t *testing.T) {
 // it. A contact point no rule there tells is refused, before anything is
 // read again or replayed.
 func TestAddInGrafana(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
 	g.rules["def"]["notification_settings"] = map[string]any{"receiver": "oncall"}
@@ -323,6 +325,7 @@ func TestAddCloudAlarm(t *testing.T) {
 // namespace or alarms serve doesn't read: none is a place, through the
 // form or MCP. Tells on a rule file are refused: it names no one.
 func TestAddPlaceRefused(t *testing.T) {
+	parallel(t)
 	s, dir := changesServer(t, nil)
 	os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".github", "workflows", "ci.yml"), []byte("on: push\njobs: {}\n"), 0o644)
@@ -364,6 +367,7 @@ func TestAddPlaceRefused(t *testing.T) {
 // mapping and its keys in another order is written in Lapilli's own form,
 // nothing of the text as given.
 func TestAddRuleWrittenByLapilli(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
 	key := placeKeyOf(t, s, addPlace{Path: ledger.PathGit, File: "shop.yaml", Group: "shop"})
@@ -393,6 +397,7 @@ func TestAddRuleWrittenByLapilli(t *testing.T) {
 // to nothing, or to another rule, is refused, and the ledger refuses one
 // carrying none.
 func TestAddHeldToSome(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, nil)
 	h := s.Handler()
 	key := placeKeyOf(t, s, addPlace{Path: ledger.PathGit, File: "shop.yaml", Group: "shop"})
@@ -413,6 +418,7 @@ func TestAddHeldToSome(t *testing.T) {
 // doesn't approve it; nor does the person an agent proposed it for, whose
 // hourly proposals it counts toward.
 func TestAddApproval(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	h := s.Handler()
@@ -493,6 +499,7 @@ func mustHeld(t *testing.T, s *Server) []int64 {
 // Who may propose one: an editor, through the form; a viewer neither sees
 // the form nor posts it.
 func TestAddByEditorsOnly(t *testing.T) {
+	parallel(t)
 	s, _ := changesServer(t, func(c *Config) { c.Editors = []string{bo} })
 	h := s.Handler()
 	const vi = "vi@example.com"
@@ -587,6 +594,7 @@ func TestAddPagesInEachLanguage(t *testing.T) {
 // is refused; an expression the history refuses isn't replayed, and so
 // isn't approved. A file under a CI system's directory is never a place.
 func TestAddWhatItSays(t *testing.T) {
+	parallel(t)
 	s, dir := changesServer(t, nil)
 	h := s.Handler()
 	key := placeKeyOf(t, s, addPlace{Path: ledger.PathGit, File: "shop.yaml", Group: "shop"})
@@ -641,6 +649,7 @@ func TestAddWhatItSays(t *testing.T) {
 // Grafana, one whose group another tool keeps since is refused, nothing
 // written.
 func TestAddCheckedAgain(t *testing.T) {
+	parallel(t)
 	ctx := context.Background()
 	s, _ := changesServer(t, nil)
 	h, port := s.Handler(), s.IncidentsHandler()
@@ -675,6 +684,7 @@ func TestAddCheckedAgain(t *testing.T) {
 // recipe's own guards holding each (only the rules of a rule file under
 // RULES_PATHS changed).
 func TestChangeRecipeAdds(t *testing.T) {
+	parallel(t)
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
