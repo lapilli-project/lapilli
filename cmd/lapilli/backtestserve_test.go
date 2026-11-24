@@ -13,6 +13,7 @@ import (
 // them against; writes taken. Each wrong is refused before serve starts,
 // saying why.
 func TestServeBacktestFlags(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	token := write(t, "token", strings.Repeat("t", 40))
 	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: "+token+"}\n")
@@ -69,6 +70,7 @@ func TestServeBacktestFlags(t *testing.T) {
 
 // The flags as serve takes them.
 func TestServeBacktestFlagsRead(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	token := write(t, "token", strings.Repeat("t", 40))
 	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: "+token+", hourly: 5}\n")

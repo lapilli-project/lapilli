@@ -13,6 +13,7 @@ import (
 // has, or one no destination may have; and with the URL's key as its
 // signing key.
 func TestChartWebhookDests(t *testing.T) {
+	parallel(t)
 	routed := append(slices.Clone(serveValues), "--set", "serve.config=notify: {default: [payments-hook]}")
 	dest := []string{"--set", "serve.notify.webhookDests[0].name=payments-hook", "--set", "serve.notify.webhookDests[0].secretName=lapilli-payments-hook"}
 	out, err := helmTemplate(t, slices.Concat(routed, dest, []string{"--set", "serve.notify.webhookDests[0].signingKey=key"})...)

@@ -371,6 +371,7 @@ func TestRun(t *testing.T) {
 }
 
 func TestParseDuration(t *testing.T) {
+	parallel(t)
 	for in, want := range map[string]time.Duration{"7d": 7 * 24 * time.Hour, "1d12h": 36 * time.Hour, "15m": 15 * time.Minute} {
 		if got, err := parseDuration(in); err != nil || got != want {
 			t.Errorf("parseDuration(%q) = %s, %v", in, got, err)
@@ -382,6 +383,7 @@ func TestParseDuration(t *testing.T) {
 }
 
 func TestSend(t *testing.T) {
+	parallel(t)
 	type got struct{ method, path, ctype, body string }
 	var push, slack got
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +513,7 @@ groups:
 // lapilli serve refuses roles without a sign-in, and telling Slack without
 // a Slack, before it starts.
 func TestServeFlags(t *testing.T) {
+	parallel(t)
 	hook := write(t, "hook", "https://hooks.example/x")
 	for _, args := range [][]string{
 		{"--editors", "ana@example.com"},
@@ -616,6 +619,7 @@ func TestCheckReplay(t *testing.T) {
 }
 
 func TestServeNewFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	short := write(t, "short", "too short")
 	good := write(t, "good", "a-token-long-enough")
@@ -647,6 +651,7 @@ func TestServeNewFlags(t *testing.T) {
 // --firings-token-file takes firings copied in on --incidents-listen, with
 // a token of its own; with it, rules and history are optional.
 func TestServeFiringsFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	good := write(t, "good", "a-token-long-enough")
 	other := write(t, "other", "another-token-long-enough")
@@ -691,6 +696,7 @@ func TestServeFiringsFlags(t *testing.T) {
 // --tasks-token-file lets a job keep tasks in step with a tracker, on
 // --incidents-listen, with a token no other file holds.
 func TestServeTasksFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	good := write(t, "good", "a-token-long-enough")
 	same := write(t, "same", "a-token-long-enough\n")
@@ -718,6 +724,7 @@ func TestServeTasksFlags(t *testing.T) {
 
 // serve sets the replay beside what really fired unless told not to.
 func TestServeCheckReplayOn(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	takes := func(name, val string) (bool, error) { return false, nil }
 	for args, want := range map[string]bool{"": true, "--check-replay": true, "--check-replay=true": true, "--check-replay=false": false} {
@@ -742,6 +749,7 @@ func TestServeCheckReplayOn(t *testing.T) {
 // but not the URLs, user names, hosts (whole words only: a host "prom"
 // isn't taken out of "prometheus"), addresses, tenants or project given.
 func TestForComment(t *testing.T) {
+	parallel(t)
 	f := &verdictFlags{promURL: "https://ci-reader:pw@prom.internal.example:9090/prom", gcpProj: "shop-prod-123456", loki: "http://prom:3100",
 		rulerTenant: "team-a7"}
 	unreached := rules.HistoryUnread + `Post "https://ci-reader:pw@prom.internal.example:9090/prom/api/v1/query_range": dial tcp 10.1.2.3:9090: connect: connection refused`
@@ -911,6 +919,7 @@ func TestCompareAzureRecording(t *testing.T) {
 // --rules was meant, and no source, the refusal says so; given a name, it
 // doesn't.
 func TestRuleIsAName(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	for _, c := range []struct {
 		val  string

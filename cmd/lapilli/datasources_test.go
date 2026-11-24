@@ -39,6 +39,7 @@ groups:
 // in as Grafana does: 30s makes $__rate_interval 2m. One that can't be
 // read is said, and taken as --scrape-interval says, or as Grafana's 15s.
 func TestGrafanaDataSourceScrape(t *testing.T) {
+	parallel(t)
 	refuse := false
 	var asked int
 	var auth string

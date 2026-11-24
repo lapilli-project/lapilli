@@ -8,6 +8,7 @@ import (
 // TestServeQuotaFlags: the flags that keep Lapilli off the alerts' quota
 // are lapilli serve's, said in its -h, and refused when given wrong.
 func TestServeQuotaFlags(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	for _, c := range []struct {
 		args []string

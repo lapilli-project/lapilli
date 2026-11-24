@@ -12,6 +12,7 @@ import (
 // duration of an hour or more, or 0, 0s, 0d; neither goes with
 // --read-only, which writes nothing.
 func TestServeConfigFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
 	good := write(t, "good.yaml", "teams:\n  - {name: payments, rules: ^A}\n")
 	base := []string{"serve", "--rules", rulesFile, "--prometheus", "http://x"}
@@ -56,6 +57,7 @@ func TestServeConfigFlags(t *testing.T) {
 // serve starts, on the ledger as it is, and says why on its pages, so that
 // a pod restarted on it serves rather than loop. One it can't read is.
 func TestConfigAtStart(t *testing.T) {
+	parallel(t)
 	bad := write(t, "config.yaml", "teams:\n  - name: payments\n    colour: red\n")
 	empty := write(t, "empty.yaml", "")
 	for _, f := range []string{bad, empty} {

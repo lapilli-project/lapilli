@@ -19,6 +19,7 @@ import (
 // lapilli serve takes the flags the chart gives it, and reads the files
 // where the chart mounts them.
 func TestChartAlertmanager(t *testing.T) {
+	parallel(t)
 	file := append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.secret.name=alertmanager-main",
 		"--set", "serve.checkContent.alertmanager.templateConfigMaps={am-templates,am-more}")
 	m, _ := render(t, file...)

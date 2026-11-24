@@ -390,6 +390,7 @@ func TestDemoServeListen(t *testing.T) {
 // how it judges and runs, and that it is read-only. A field added to serve
 // with a default fails this until it is looked at here.
 func TestDemoServeSendsNothing(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	st, err := readServe(demoServeArgs(dir, demoListen, "UTC", time.UTC), false)
 	if err != nil {

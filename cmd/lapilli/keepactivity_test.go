@@ -15,6 +15,7 @@ import (
 // passes it as serve.keepActivity says, 0 too, and nothing for a release
 // from before it.
 func TestServeKeepActivity(t *testing.T) {
+	parallel(t)
 	rules := filepath.Join(t.TempDir(), "rules.yaml")
 	os.WriteFile(rules, []byte("groups: []\n"), 0o644)
 	base := []string{"--rules", rules, "--prometheus", "http://127.0.0.1:1", "--ledger", t.TempDir()}

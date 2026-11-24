@@ -17,6 +17,7 @@ import (
 // written or a map; serve.expectTasks is --expect-tasks. Left out,
 // nothing of them is rendered.
 func TestChartExpectations(t *testing.T) {
+	parallel(t)
 	plain, err := helmTemplate(t, serveValues...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, plain)
@@ -72,6 +73,7 @@ func TestChartExpectations(t *testing.T) {
 // with no expectations, scenarios with no expectations file, and a file's
 // name a ConfigMap can't hold, are refused.
 func TestChartScenarios(t *testing.T) {
+	parallel(t)
 	plain, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "serve.expectations=expectations: []")...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, plain)

@@ -125,6 +125,7 @@ func TestDemoFlags(t *testing.T) {
 // each rule but those meant never to fire compares one: the sample has no
 // series left over from a rule since changed.
 func TestDemoSample(t *testing.T) {
+	parallel(t)
 	s, err := readDemoSample()
 	if err != nil {
 		t.Fatal(err)

@@ -30,6 +30,7 @@ func chartDocs(t *testing.T, out string) map[string][]map[string]any {
 // time, keeps a PodDisruptionBudget, and signs people in with one key.
 // One replica is as it was: Recreate, and no budget.
 func TestChartReplicas(t *testing.T) {
+	parallel(t)
 	pg := append(serveValues, "--set", "serve.ledger.postgres.secret.name=ledger-db")
 	for _, c := range []struct {
 		values []string
@@ -119,6 +120,7 @@ func TestChartReplicas(t *testing.T) {
 // a delay of 0, stops at once, with Kubernetes's own grace; a delay that
 // isn't seconds, or over ten minutes, is refused.
 func TestChartReplicasDrain(t *testing.T) {
+	parallel(t)
 	pg := append(serveValues, "--set", "serve.ledger.postgres.secret.name=ledger-db")
 	pod := func(values ...string) (args []any, grace any) {
 		t.Helper()

@@ -122,6 +122,7 @@ func TestCheckReplayGrafanaHistory(t *testing.T) {
 }
 
 func TestCheckGrafanaFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "grafana.yaml", gErrorsRule)
 	token := write(t, "token", "glsa_viewer")
 	base := []string{"--rules", rulesFile, "--prometheus", "http://x"}

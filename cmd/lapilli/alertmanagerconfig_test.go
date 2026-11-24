@@ -47,6 +47,7 @@ receivers:
 // rules are sent with checked beside them, from a file and the template
 // files beside it, or from Mimir's API with the ruler's tenant and token.
 func TestCheckContentAlertmanager(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "rules.yaml", amRules)
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "alertmanager.yml")
@@ -108,6 +109,7 @@ func TestCheckContentAlertmanager(t *testing.T) {
 // on another, with --ruler and its token, is refused; on the same, or
 // without --ruler, taken.
 func TestAlertmanagerConfigRulerHost(t *testing.T) {
+	parallel(t)
 	tok := write(t, "token", "tok\n")
 	base := []string{"verdict", "--check-content", "--ruler", "http://mimir:8080/prometheus/config/v1/rules", "--ruler-token-file", tok}
 	if _, err := parseVerdictFlags(append(slices.Clone(base[1:]), "--alertmanager-config", "http://alertmanager:9093/api/v1/alerts")); err == nil ||

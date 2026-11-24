@@ -715,10 +715,12 @@ func (rr *recipeRun) run(settings []string, args ...string) (string, error) {
 // later run edits in place; a comment of someone else's with the same
 // first line is left alone, and one of another job's (KEY) too.
 func TestBacktestRecipes(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	for _, h := range backtestHosts {
 		t.Run(h.kind, func(t *testing.T) {
+			parallel(t) // each host's repository and stand-in its own
 			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "README.md": "rules\n"})
 			repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 			rr := newRecipeRun(t, h, repo)
@@ -792,6 +794,7 @@ func TestBacktestRecipes(t *testing.T) {
 // Nothing that decides when a rule fires changed: no comment, unless there
 // is one already, which then says so.
 func TestBacktestRecipeNothingChanged(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -817,6 +820,7 @@ func TestBacktestRecipeNothingChanged(t *testing.T) {
 // Rules a command renders, from a chart say: rendered in each commit, what
 // isn't rules passed over, --rules-select given through.
 func TestBacktestRecipeRender(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	chart := func(forDur string) string {
@@ -875,6 +879,7 @@ func failure(t *testing.T, body, why string) string {
 // What fails is said in the comment, in a block nothing in it can end, the
 // URLs given taken out; the job succeeds unless FAIL_ON_ERROR=true.
 func TestBacktestRecipeFails(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1022,6 +1027,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 
 // Settings that are wrong fail the job at once, before anything runs.
 func TestBacktestRecipeSettings(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1096,6 +1102,7 @@ func TestBacktestRecipeSettings(t *testing.T) {
 // given, say: an archive that isn't is never unpacked or run, nor one
 // redirected to plain http.
 func TestBacktestRecipeInstall(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("releases are for Linux and macOS")
@@ -1277,6 +1284,7 @@ func runAction(t *testing.T, rr *recipeRun, inputs map[string]string, env ...str
 // its text; args are split at spaces and never expanded; the token is in a
 // file only while the step runs.
 func TestBacktestAction(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	step := readBacktestAction(t).Runs.Steps[0]
 	if strings.Contains(step.Run, "${{") {
@@ -1322,6 +1330,7 @@ func must[T any](v T, err error) T {
 // on pull request backtests names each of its fields, and the form of a
 // comparison with nothing changed.
 func TestSummaryDocumented(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile("../../docs/pr-backtests.md")
 	if err != nil {
 		t.Fatal(err)
@@ -1349,6 +1358,7 @@ func TestSummaryDocumented(t *testing.T) {
 // A pull request that changes only what an alert reads (a recording rule),
 // or caps a group (limit), changes when alerts fire: it gets its comment.
 func TestBacktestRecipeRecordingAndLimit(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	base := `groups:
@@ -1378,6 +1388,7 @@ func TestBacktestRecipeRecordingAndLimit(t *testing.T) {
 // Where the history is stays out of the comment: the user in its URL, the
 // address its host resolved to, its port.
 func TestBacktestRecipeHidesWhere(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1399,6 +1410,7 @@ func TestBacktestRecipeHidesWhere(t *testing.T) {
 // goes into: one that takes out the incident its change misses is judged
 // by it still.
 func TestBacktestRecipeIncidents(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	now := time.Now()
@@ -1433,6 +1445,7 @@ func TestBacktestRecipeIncidents(t *testing.T) {
 // pull request didn't touch, isn't said changed in it, through lapilli
 // serve too.
 func TestBacktestRecipeIncidentsFromTarget(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	loose := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 50}\n"
 	tight := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 5}\n"
@@ -1494,6 +1507,7 @@ func argsLapilli(t *testing.T) (string, func() (string, string, string)) {
 // target branch's commit. A branch's name it doesn't take leaves the merge
 // base, saying so.
 func TestBacktestRecipeGitLabTarget(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
 	old := repo.git("rev-parse", "HEAD")
@@ -1542,6 +1556,7 @@ func TestBacktestRecipeGitLabTarget(t *testing.T) {
 // from the target branch, fetched by its name, INCIDENTS the branch's as
 // it is, and the status on that head, in the job's pipeline.
 func TestBacktestRecipeGitLabMergedResults(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
 	old := repo.git("rev-parse", "HEAD")
@@ -1639,6 +1654,7 @@ func TestBacktestRecipeGitLabMergedResults(t *testing.T) {
 // the job's log and not the comment; through lapilli serve too, nothing
 // sent. A directory named in two cases, each of its own files, is read.
 func TestBacktestRecipeCaseFolded(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	page := "groups:\n  - name: sneaky\n    rules:\n      - alert: PageEveryone\n        expr: vector(1)\n        labels: {severity: page}\n"
@@ -1723,6 +1739,7 @@ func TestBacktestRecipeCaseFolded(t *testing.T) {
 // \u00e9.yaml, quoted by ls-tree), where the file system folds case. Alone,
 // on any file system, such a file is read.
 func TestBacktestRecipeCaseFoldNewline(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -1756,6 +1773,7 @@ func TestBacktestRecipeCaseFoldNewline(t *testing.T) {
 // RENDER runs in each commit's files, the base's first, each with a HOME
 // of its own, and without the variables CIs keep tokens in.
 func TestBacktestRecipeRenderAlone(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"chart/out.yaml": shopRules("5m")})
@@ -1790,6 +1808,7 @@ func (rr *recipeRun) home() string { return rr.repo.home }
 // Rules a pull request asks git to leave out of an archive are read all
 // the same: the commit's own .gitattributes don't count.
 func TestBacktestRecipeGitattributes(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -1806,6 +1825,7 @@ func TestBacktestRecipeGitattributes(t *testing.T) {
 // from the merge request's; Azure DevOps' target branch fetched, and its
 // thread closed.
 func TestBacktestRecipeHosts(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -1850,6 +1870,7 @@ func TestBacktestRecipeHosts(t *testing.T) {
 // A comment holds a report as long as Lapilli writes one and what went
 // wrong, under the 65,536 characters GitHub takes.
 func TestBacktestRecipeLongComment(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1870,6 +1891,7 @@ func TestBacktestRecipeLongComment(t *testing.T) {
 // and where it reads from: the reason is in the job's log, never the
 // comment, whether the job is asked to fail or lapilli doesn't finish.
 func TestBacktestRecipeRefusedReason(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	reason := `{"status":"error","errorType":"forbidden","error":"User: arn:aws:sts::123456789012:assumed-role/ci-metrics-reader/i-0abc is not authorized; via internal-gw.corp.example.net"}`
 	prom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1909,6 +1931,7 @@ func TestBacktestRecipeRefusedReason(t *testing.T) {
 // a "| ", so a long backtest's progress lines show the job isn't hung;
 // none of them reaches the comment, though what else lapilli said does.
 func TestBacktestRecipeProgress(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -1955,6 +1978,7 @@ func TestBacktestRecipeProgress(t *testing.T) {
 // checkout fetched it, as a full clone does: a fetch needs credentials the
 // checkout may have dropped. When the clone hasn't it, it is fetched.
 func TestBacktestRecipeTargetInClone(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -1979,6 +2003,7 @@ func TestBacktestRecipeTargetInClone(t *testing.T) {
 // A file in the checkout is the pull request's, whichever of its
 // directories REPO is, or the job runs from.
 func TestBacktestRecipeCheckoutFromBelow(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"monitoring/alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
 	repo.pullRequest(map[string]string{"monitoring/alerts/shop.yaml": shopRules("2h")})
@@ -2006,6 +2031,7 @@ func TestBacktestRecipeCheckoutFromBelow(t *testing.T) {
 // What is said in the comment is taken out first, then cut to its last
 // characters: a host the cut would split is hidden whole.
 func TestBacktestRecipeScrubThenCut(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	host := "prometheus.internal.example.com"
 	// One line whose last 4,000 bytes start ten bytes into the host.
@@ -2028,6 +2054,7 @@ func TestBacktestRecipeScrubThenCut(t *testing.T) {
 
 // INCIDENTS is read up to 8 MiB.
 func TestBacktestRecipeIncidentsCap(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	big := "incidents: []\n#" + strings.Repeat("x", 8<<20) + "\n"
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": big})
@@ -2040,6 +2067,7 @@ func TestBacktestRecipeIncidentsCap(t *testing.T) {
 // What the recipe says in the job's log of the pull request's, a link's
 // path, is no CI's command: Azure's ##vso[ is read anywhere in a line.
 func TestBacktestRecipeSaysNoCommand(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
@@ -2070,6 +2098,7 @@ func streamed(w http.ResponseWriter, n int64, sent *atomic.Int64) {
 // doesn't is cut at the cap all the same, the host's and a release's, and
 // read no further than it.
 func TestBacktestRecipeCapsAnswers(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("releases are for Linux and macOS")
@@ -2138,6 +2167,7 @@ exec '`+real+`' "$@"
 // place; the comment says what the change broke, and FAIL_ON_EXPECTATIONS
 // fails the job for it, once the comment is posted.
 func TestBacktestRecipeExpectations(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	// The rule in place, held 2h, never fires; the pull request's, 5m, once.
@@ -2286,6 +2316,7 @@ func checkImpactArgs(t *testing.T, args []string, impact string) {
 // agree on, on every host: the expression reaches lapilli as one argument,
 // as it is, whatever it holds, and the history as it is written.
 func TestBacktestRecipeImpact(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	pwned := filepath.Join(t.TempDir(), "pwned")
 	impact := hostileImpact(pwned)
@@ -2373,6 +2404,7 @@ func TestBacktestRecipeImpact(t *testing.T) {
 // would refuse fails at once. Sub-second units and a sign are refused,
 // though lapilli takes 1500ms and +5m.
 func TestBacktestRecipeImpactFor(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promAnswering(t, map[string]string{"errors > 5": "checkout", "search_errors > 0": "search"})
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
@@ -2405,6 +2437,7 @@ func TestBacktestRecipeImpactFor(t *testing.T) {
 // IMPACT_FOR and MATCH do: the expression one argument, as it is, which
 // args, split at spaces, couldn't give.
 func TestBacktestActionImpact(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	pwned := filepath.Join(t.TempDir(), "pwned")
 	impact := hostileImpact(pwned)
@@ -2432,6 +2465,7 @@ func TestBacktestActionImpact(t *testing.T) {
 // line moves the binary. A sha256 pinned is one release's: once the uses
 // line moves on, nothing is installed, and the comment says so.
 func TestBacktestActionVersion(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("releases are for Linux and macOS")
@@ -2566,6 +2600,7 @@ func TestBacktestActionVersion(t *testing.T) {
 // The release workflow refuses a version CHANGELOG.md doesn't name first:
 // the action installs the release it is at as CHANGELOG.md says.
 func TestReleaseChangelogFirst(t *testing.T) {
+	parallel(t)
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("no bash")
 	}

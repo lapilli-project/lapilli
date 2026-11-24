@@ -145,6 +145,7 @@ rules:
 // A lead is from 0 to a day, a named signal's alone, given once; with
 // --impact-file, in the file. require: is held as match is.
 func TestLeadsRefused(t *testing.T) {
+	parallel(t)
 	file := func(body string) string { return write(t, "impact.yaml", body) }
 	base := []string{"verdict", "--firings", write(t, "f.jsonl", ""), "--prometheus", "http://p"}
 	for _, c := range []struct {

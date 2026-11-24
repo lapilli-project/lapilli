@@ -11,6 +11,7 @@ import (
 // verdict, impact suggest, serve and preflight alike: --json=false was
 // --json, and --linked-only=false judged by the link alone.
 func TestOnOffFlags(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	read := map[string]func(f *verdictFlags) bool{
 		"--alerts":                func(f *verdictFlags) bool { return f.alerts },
 		"--json":                  func(f *verdictFlags) bool { return f.json },

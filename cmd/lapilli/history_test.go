@@ -32,6 +32,7 @@ func historyOf(t *testing.T, versions map[string]string) string {
 // For verdict, --rules-history DIR is each of its versions given as --rules
 // DIR@TIME.
 func TestVerdictRulesHistory(t *testing.T) {
+	parallel(t)
 	hist := historyOf(t, map[string]string{"2026-10-01T10:00:00Z": "2m", "20261020T083000Z": "15m"})
 	inc := write(t, "incidents.yaml", "incidents: []\n")
 	common := []string{"--prometheus", "http://x", "--incidents", inc}
@@ -70,6 +71,7 @@ func TestVerdictRulesHistory(t *testing.T) {
 }
 
 func TestRulesHistoryRefused(t *testing.T) {
+	parallel(t)
 	hist := historyOf(t, map[string]string{"2026-10-01T10:00:00Z": "2m"})
 	bad := historyOf(t, map[string]string{"last-week": "2m"})
 	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a > 1}\n")
@@ -109,6 +111,7 @@ func TestRulesHistoryRefused(t *testing.T) {
 // version, after the directory's newest, as serve takes them; not the
 // oldest, which only the period's start would keep.
 func TestVerdictRulesNowAndHistory(t *testing.T) {
+	parallel(t)
 	hist := historyOf(t, map[string]string{"2026-10-01T10:00:00Z": "2m", "20261020T083000Z": "15m"})
 	now := filepath.Join(historyOf(t, map[string]string{"x": "30m"}), "x")
 	inc := write(t, "incidents.yaml", "incidents: []\n")
@@ -158,6 +161,7 @@ data:
 // ones, in --rules and in each version of --rules-history alike; what was
 // passed over is said, once.
 func TestRulesSelect(t *testing.T) {
+	parallel(t)
 	hist := t.TempDir()
 	for name, forDur := range map[string]string{"20261001T100000Z": "2m", "20261020T083000Z": "15m"} {
 		os.MkdirAll(filepath.Join(hist, name), 0o755)
@@ -234,6 +238,7 @@ func TestCompareSaysWhichSide(t *testing.T) {
 // --changes writes a change to where the rules are kept: a followed
 // history alone has no file to write to, and is refused at start.
 func TestChangesFollowedRefused(t *testing.T) {
+	parallel(t)
 	hist := historyOf(t, map[string]string{"2026-10-01T10:00:00Z": "2m"})
 	var errs strings.Builder
 	args := []string{"serve", "--rules-history", hist, "--prometheus", "http://x", "--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com",

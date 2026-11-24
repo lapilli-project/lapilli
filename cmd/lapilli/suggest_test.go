@@ -29,6 +29,7 @@ import (
 // --impact; each stack's metrics the metrics its --impact reads, and the
 // selector counted of each one that its others narrow.
 func TestImpactStacksDocumented(t *testing.T) {
+	parallel(t)
 	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "impact.md"))
 	if err != nil {
 		t.Fatal(err)

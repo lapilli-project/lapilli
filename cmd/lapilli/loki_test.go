@@ -72,6 +72,7 @@ func TestVerdictLokiRules(t *testing.T) {
 }
 
 func TestLokiFlags(t *testing.T) {
+	parallel(t)
 	rulesFile := write(t, "loki.yaml", "groups: []\n")
 	for _, c := range []struct {
 		args []string
@@ -130,6 +131,7 @@ func TestLokiPlainHTTP(t *testing.T) {
 // reads and replays (TestServeLokiRulesAlone in internal/serve); without
 // --prometheus it is refused, as what really fired is read there.
 func TestServeLokiAloneParses(t *testing.T) {
+	parallel(t)
 	dir := t.TempDir()
 	f, err := parseFlags([]string{"--prometheus", "http://p:9090", "--loki", "http://l:3100", "--loki-rules", dir},
 		func(string, string) (bool, error) { return false, nil })

@@ -24,6 +24,7 @@ import (
 // Prometheus answers a few KB on the wire, gzipped, for MiBs of YAML: past
 // 2 MiB, it isn't parsed.
 func TestStatusConfigYAMLBlowUp(t *testing.T) {
+	// Alone, not parallel: it reads the heap, which every test adds to.
 	const n = 2 << 20 // flow sequence items: 4 MiB of YAML
 	var y strings.Builder
 	y.WriteString("global:\n  scrape_interval: 1m\nscrape_configs: []\npadding: [")

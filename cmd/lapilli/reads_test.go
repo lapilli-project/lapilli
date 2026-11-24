@@ -204,6 +204,7 @@ func TestProgress(t *testing.T) {
 }
 
 func TestReadFlags(t *testing.T) {
+	parallel(t)
 	asServe := func(name, val string) (bool, error) { return false, nil }
 	f, err := parseFlags([]string{"--rules", "r", "--prometheus", "http://p", "--max-rate", "0.5", "--loki", "http://l", "--loki-rules", "x"}, asServe)
 	if err != nil || f.prometheus().MaxRate != 0.5 || f.lokiSource().MaxRate != 0.5 {
@@ -239,6 +240,7 @@ func TestReadFlags(t *testing.T) {
 // asked by a Limiter of its own, as Grafana passes on what each answers, so
 // one that pushes back doesn't hold another; --max-rate is of them all.
 func TestGrafanaDataSourcesApart(t *testing.T) {
+	parallel(t)
 	var noisy atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/datasources/proxy/uid/noisy/") {
@@ -371,6 +373,7 @@ func TestStderrShared(t *testing.T) {
 // TestProgressLine: a comparison counts replays, as a rule changed is
 // replayed before and after.
 func TestProgressLine(t *testing.T) {
+	parallel(t)
 	var p replay.Progress
 	var c prom.Counts
 	p.Total.Store(32)
@@ -387,6 +390,7 @@ func TestProgressLine(t *testing.T) {
 // TestProgressStep: once the rules are replayed, the line says the step
 // after them it is at, and how far it is.
 func TestProgressStep(t *testing.T) {
+	parallel(t)
 	var p replay.Progress
 	var c prom.Counts
 	p.Total.Store(3)
@@ -586,6 +590,7 @@ func TestWaitPastTimeout(t *testing.T) {
 // Limiter of its own, are asked --parallel at once in all, not --parallel
 // each, as a replay's pools of each would: one Grafana answers them all.
 func TestGrafanaCap(t *testing.T) {
+	parallel(t)
 	var cur, peak atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := cur.Add(1)
@@ -624,6 +629,7 @@ func TestGrafanaCap(t *testing.T) {
 // TestLokiShared: --loki's queries, and its ruler, which lapilli serve
 // reads each minute, are asked by one Limiter.
 func TestLokiShared(t *testing.T) {
+	parallel(t)
 	f := &verdictFlags{loki: "http://loki:3100"}
 	var cfg serve.Config
 	f.lokiInto(&cfg)
@@ -636,6 +642,7 @@ func TestLokiShared(t *testing.T) {
 // --impact-for, of those that could be judged, and the most common of how
 // long they need, the shortest when two are as common.
 func TestImpactShort(t *testing.T) {
+	parallel(t)
 	rs := []rules.Rule{
 		{Name: "Errors", For: 5 * time.Minute, Interval: time.Minute},
 		{Name: "Slow", For: 10 * time.Minute, Interval: time.Minute},
@@ -662,6 +669,7 @@ func TestImpactShort(t *testing.T) {
 // longer: "for" 3m, evaluated every minute, 3m late, needs 7m, longer
 // than impact of 6m.
 func TestImpactShortLate(t *testing.T) {
+	parallel(t)
 	rs := []rules.Rule{
 		{Name: "LB5xx", For: 3 * time.Minute, Interval: time.Minute, Late: 3 * time.Minute},
 		{Name: "Offset", For: 3 * time.Minute, Interval: time.Minute, QueryOffset: 2 * time.Minute},

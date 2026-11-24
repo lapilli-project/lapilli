@@ -9,6 +9,7 @@ import (
 // --shutdown-delay is how long serve, told to stop, answers on first: a
 // duration from 0 to 10m, said in -h, and refused otherwise.
 func TestServeShutdownDelayFlag(t *testing.T) {
+	parallel(t)
 	rules := write(t, "rules.yaml", "groups: []\n")
 	st, err := readServe([]string{"--prometheus", "http://127.0.0.1:1", "--rules", rules, "--shutdown-delay", "5s"}, true)
 	if err != nil || st.cfg.ShutdownDelay != 5*time.Second {

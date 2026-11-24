@@ -453,6 +453,7 @@ func TestNamedSignalsFlags(t *testing.T) {
 
 // What the flags and the file are refused for.
 func TestSignalFlagsRefused(t *testing.T) {
+	parallel(t)
 	big := write(t, "big.yaml", "signals:\n  - {name: a, expr: x}\n#"+strings.Repeat("x", 1<<20)+"\n")
 	file := func(body string) string { return write(t, "impact.yaml", body) }
 	nine := "signals:\n"
@@ -718,6 +719,7 @@ rules:
 // A rule's entry by labels is found by the newest version of the rules
 // that has it; a rule with none, by the labels all its firings have.
 func TestIndexSignals(t *testing.T) {
+	parallel(t)
 	sig := verdict.NewSignals([]verdict.Signal{{Name: "latency", Record: true}},
 		[]verdict.RuleEntry{{Labels: incident.Labels{"kind": {"latency"}}, Signals: []string{"latency"}}})
 	versions := []replay.Version{
@@ -848,6 +850,7 @@ func TestNamedSignalsSeenFromReads(t *testing.T) {
 // dots is no label PromQL names, and a named signal never puts it in a
 // query (source.SeenFrom takes it to have seen every value).
 func TestMatchTakesAnyName(t *testing.T) {
+	parallel(t)
 	for _, v := range []string{"service.name", "9lives"} {
 		f, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
 		if err != nil || !slices.Equal(f.opts.Match, []string{v}) {

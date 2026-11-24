@@ -15,6 +15,7 @@ var writeDocs = flag.Bool("write-docs", false, "write docs/commands.md from the 
 // fails here. go test ./cmd/lapilli -run TestCommandsDocumented -write-docs
 // writes it again.
 func TestCommandsDocumented(t *testing.T) {
+	// Alone, not parallel: -write-docs writes docs/commands.md.
 	path := filepath.Join("..", "..", "docs", "commands.md")
 	want := commandsPage()
 	if *writeDocs {

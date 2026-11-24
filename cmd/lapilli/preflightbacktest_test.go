@@ -189,6 +189,7 @@ func TestPreflightBacktests(t *testing.T) {
 // words; serve takes it exactly when preflight says so. And the port's flags that serve.New refuses beside
 // the file (rules to replay) are said alike.
 func TestPreflightTrustAsServe(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	dir := t.TempDir()
 	put := func(name, body string) string {
 		p := filepath.Join(dir, name)
@@ -303,6 +304,7 @@ func TestPreflightTrustAsServe(t *testing.T) {
 // --offline with rules read from an API (--ruler, --grafana): the rules
 // aren't read, so what a backtest of them asks is unknown, never ok.
 func TestPreflightBacktestsRulesUnread(t *testing.T) {
+	// Alone, not parallel: lapilli preflight, run here, sets the process's egress guard.
 	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: /etc/lapilli/backtest/token}\n")
 	for _, src := range [][]string{{"--ruler", "http://mimir.example.com/prometheus/config/v1/rules"},
 		{"--grafana", "https://grafana.example.com", "--grafana-token-file", "/etc/lapilli/grafana-token"}} {

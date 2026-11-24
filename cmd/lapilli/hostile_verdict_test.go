@@ -108,6 +108,7 @@ func TestMetricsEscapes(t *testing.T) {
 // would hold every place, and a healthy data source's queries wait for its
 // answers: the last place is kept for another (prom's fair).
 func TestSlowDataSourceDoesntStarveTheRest(t *testing.T) {
+	parallel(t)
 	const hold = 2 * time.Second
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/uid/slow/") {

@@ -82,6 +82,7 @@ func TestCompareScenarioTestEdited(t *testing.T) {
 // FAIL_ON_EXPECTATIONS fails the job. One that edits neither a rule nor a
 // test file posts nothing, as before.
 func TestBacktestRecipeScenarioTestEdited(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	promtool := scenariotest.Install(t)

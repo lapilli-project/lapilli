@@ -4,6 +4,7 @@ import "testing"
 
 // --linked-only is read into what judges, and the report says so.
 func TestLinkedOnlyFlag(t *testing.T) {
+	parallel(t)
 	f, err := parseVerdictFlags([]string{"--linked-only", "--rules", "x.yaml", "--prometheus", "http://prometheus:9090", "--incidents", "i.yaml"})
 	if err != nil {
 		t.Fatal(err)

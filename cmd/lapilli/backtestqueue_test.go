@@ -68,6 +68,7 @@ func queueRepo(t *testing.T) (repo *prRepo, first, second, bad, aside string) {
 // the branch as a pull request's is; no comment is posted, the report
 // going to the job's log. FAIL_MISSED holds it as a pull request's run.
 func TestBacktestRecipeMergeGroup(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, first, second, bad, _ := queueRepo(t)
@@ -135,6 +136,7 @@ func TestBacktestRecipeMergeGroup(t *testing.T) {
 // HEAD^1, which is none given; the merge group's head is judged against
 // its base, and the status goes on it.
 func TestBacktestActionMergeGroup(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, _, second, bad, _ := queueRepo(t)
@@ -163,6 +165,7 @@ func TestBacktestActionMergeGroup(t *testing.T) {
 // STATUS the one status is a failure on the head, with no pending before
 // it, so that no earlier run's success stands there.
 func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	prom := promStandIn(t)
 	repo, _, second, bad, aside := queueRepo(t)
@@ -284,6 +287,7 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 // report where a pull request's would be commented; the status goes on
 // the head.
 func TestBacktestServeRecipeMergeGroup(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo, _, second, bad, _ := queueRepo(t)
 	main := repo.git("rev-parse", "main")
@@ -325,6 +329,7 @@ func TestBacktestServeRecipeMergeGroup(t *testing.T) {
 // checkout of another commit, or a train's commit that isn't such a
 // merge, is refused, gates or not: its base is a commit GitLab doesn't say.
 func TestBacktestRecipeGitLabMergeTrain(t *testing.T) {
+	parallel(t)
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
 	old := repo.git("rev-parse", "HEAD")

@@ -24,6 +24,7 @@ var backtestValues = []string{"--set", "serve.backtest.enabled=true", "--set", "
 // letting in serve.backtest.from to it alone. Off, nothing of it is
 // rendered.
 func TestChartBacktest(t *testing.T) {
+	parallel(t)
 	for _, args := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}} {
 		if out, err := helmTemplate(t, args...); err != nil || strings.Contains(out, "backtest") {
 			t.Errorf("by default (%v): %v\n%s", args, err, out)
@@ -237,6 +238,7 @@ var chartBacktestOff = []struct {
 // may lay the same out otherwise, document by document as data, or the
 // same reason refused.
 func TestChartBacktestOffGolden(t *testing.T) {
+	// Alone, not parallel: -update-chart-backtest-off writes its golden files.
 	dir := filepath.Join("testdata", "chartbacktest")
 	version := helmVersion(t)
 	if *updateChartBacktestOff {
