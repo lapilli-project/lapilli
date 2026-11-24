@@ -60,7 +60,7 @@ check() { # what, text, pattern
 }
 report=$(kubectl -n "$ns" logs job/lapilli-now)
 check "report: LateStart caught the incident" "$report" 'INC-E2E late start .* LateStart [+-]'
-check "report: Never never fired" "$report" '1 rules never fired'
+check "report: Never never fired" "$report" '1 rule never fired: Never'
 if grep -q e2e-secret <<<"$report"; then echo "FAILED: the webhook URL is in the log"; fail=1; fi
 metrics=$(kubectl -n "$ns" exec deploy/pushgateway -- wget -qO- http://localhost:9091/metrics)
 check "pushgateway: LateStart's white stone, in this release's group" "$metrics" 'lapilli_rule_caught\{instance="e2e-lapilli",job="lapilli",rule="LateStart"\} 1'
@@ -95,7 +95,7 @@ loaded=$(dist/lapilli verdict --loaded-rules --prometheus http://localhost:19090
   --incidents dist/incidents.yaml) || fail=1
 kill "$forward" || true
 check "loaded rules: LateStart caught the incident" "$loaded" 'INC-E2E late start .* LateStart [+-]'
-check "loaded rules: Never never fired" "$loaded" '1 rules never fired'
+check "loaded rules: Never never fired" "$loaded" '1 rule never fired: Never'
 
 # The same chart in serve mode: a ledger on a volume, a UI and an API. Only
 # this test reaches the cluster, so no NetworkPolicy keeps the rest out.
