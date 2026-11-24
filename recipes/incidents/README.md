@@ -202,9 +202,18 @@ alerts a run, which the script says. It answers 20,000 alerts of a search
 at most: a longer history is refused, so set `SINCE`.
 
 These four were written from each tool's API reference: Compass's
-operations API, Grafana IRM's incident API (`IncidentsService.QueryIncidents`,
-a service account token), Rootly's `GET /v1/incidents` and FireHydrant's
-`GET /v1/incidents` (a bot token). Where a reference shows a shape two ways,
+operations API, Grafana IRM's incident API
+(`IncidentsService.QueryIncidentPreviews`, a service account token),
+Rootly's `GET /v1/incidents` and FireHydrant's `GET /v1/incidents` (a bot
+token). Grafana IRM's reference marks `QueryIncidents`, which the recipe
+read before, deprecated, "use QueryIncidentPreviews instead": a preview
+has every field the recipe reads (its id, title, labels, drill, status,
+created, closed, start and end times), and its query no date to start
+from, so the recipe asks for the incidents newest first (`orderField`
+`createdTime`, `DESC`, 100 a page), keeps those created on or after
+`SINCE`, and stops at the first page that reaches before it; with `SINCE`,
+a page that isn't newest first writes nothing, as an incident after it
+might be left out. `MAX_PAGES` bounds the pages as before. Where a reference shows a shape two ways,
 both are read. Rootly takes five requests a minute, and FireHydrant 50 an
 account every 10 seconds: a 429 is waited out as its `Retry-After` says (or
 else a minute for Rootly, and 5 seconds, then twice as long each time, for

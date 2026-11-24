@@ -36,7 +36,7 @@ func tokenRecipes() []tokenRecipe {
 		{"incident-io.sh", "INCIDENT_IO_API", "INCIDENT_IO_TOKEN_FILE", nil, `{"incidents": [], "pagination_meta": {}}`, bearer},
 		{"rootly.sh", "ROOTLY_API", "ROOTLY_TOKEN_FILE", nil, `{"data": [], "meta": {}}`, bearer},
 		{"firehydrant.sh", "FIREHYDRANT_API", "FIREHYDRANT_TOKEN_FILE", nil, `{"data": [], "pagination": {}}`, bearer},
-		{"grafana-irm.sh", "GRAFANA_URL", "GRAFANA_IRM_TOKEN_FILE", nil, `{"incidents": [], "cursor": {"hasMore": false}}`, bearer},
+		{"grafana-irm.sh", "GRAFANA_URL", "GRAFANA_IRM_TOKEN_FILE", nil, `{"incidentPreviews": [], "cursor": {"hasMore": false}}`, bearer},
 		{"jira.sh", "JIRA_URL", "JIRA_TOKEN_FILE", []string{"JIRA_EMAIL=ana@example.com", "JIRA_JQL=project = OPS"},
 			`{"issues": [], "isLast": true}`, basic},
 		{"compass.sh", "COMPASS_API", "COMPASS_TOKEN_FILE", []string{"COMPASS_CLOUD_ID=35273b54", "COMPASS_EMAIL=ana@example.com"},

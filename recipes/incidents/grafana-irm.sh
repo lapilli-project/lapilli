@@ -9,6 +9,14 @@
 #                           such as 2026-10-01, or an RFC 3339 time
 #   MAX_PAGES               of 100 incidents, at most (default 1000)
 #
+# It reads IncidentsService.QueryIncidentPreviews, which Grafana IRM's API
+# reference gives in place of QueryIncidents, deprecated there. A preview
+# has every field read here; its query has no date to start from, so the
+# incidents are asked for newest first (orderField createdTime, DESC) and
+# the pages stop at the first that reaches before SINCE. A page that isn't
+# newest first, with SINCE, writes nothing, as an incident after it might
+# be left out.
+#
 # It writes no incident's alerts: Grafana IRM's incident API lists none,
 # and its OnCall API's alert groups name no incident
 # (docs/design/links.md, "Grafana IRM").
@@ -60,7 +68,16 @@ if [ -z "$proto" ]; then
   printf 'grafana-irm.sh: GRAFANA_URL is not https (PLAIN_HTTP=true takes plain http, to any host)\n' >&2
   exit 1
 fi
-url="${GRAFANA_URL%/}/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidents"
+url="${GRAFANA_URL%/}/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidentPreviews"
+# epoch: an RFC 3339 time, or Grafana's own "2026-10-31 03:10:20.574137"
+# (UTC), as seconds since 1970; null for anything else, Go's zero time
+# among them.
+epoch='def epoch: if type == "string" and (startswith("0001-") | not) then
+  (capture("\\A(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2})[T ](?<t>[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})?\\z")
+    | ((.d + "T" + .t + "Z") | fromdateiso8601) + (("0" + (.f // "")) | tonumber)
+      - (if .z == null or .z == "Z" then 0
+         else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end))
+  // null else null end;'
 # secret NAME FILE: what FILE holds, one line of the characters a token
 # is written in (a Bearer token's, RFC 6750), as it goes in a header.
 # Neither the token nor what else the file holds is said.
@@ -121,14 +138,17 @@ case $max in
 esac
 next=
 pages=0
+# oldest is when the last incident read was created, in seconds, to check
+# the next page goes on from it.
+oldest=
 while :; do
   pages=$((pages + 1))
   if [ "$pages" -gt "$max" ]; then
     printf 'grafana-irm.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or set SINCE later)\n' "$max" >&2
     exit 1
   fi
-  body=$(jq -nc --arg from "$since" --arg next "$next" \
-    '{query: ({limit: 100, orderDirection: "ASC"} + (if $from == "" then {} else {dateFrom: $from} end))}
+  body=$(jq -nc --arg next "$next" \
+    '{query: {limit: 100, orderField: "createdTime", orderDirection: "DESC"}}
       + (if $next == "" then {} else {cursor: {nextValue: $next, hasMore: true}} end)')
   page=$(printf 'Authorization: Bearer %s\n' "$token" |
     held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Content-Type: application/json; charset=utf-8' --data-binary "$body" "$url")
@@ -138,7 +158,33 @@ while :; do
     printf 'grafana-irm.sh: Grafana IRM says %s; writing nothing\n' "$(printf '%s' "$err" | jq -Rsc .)" >&2
     exit 1
   fi
-  printf '%s' "$page" | jq -c '(.incidents // [])[]' >>"$all"
+  # Those created before SINCE are left out; one whose time doesn't read
+  # is kept. With SINCE, the page says whether to go on: "go" or "stop"
+  # (it reaches before SINCE), or "bad" (not newest first), and when its
+  # last incident was created.
+  printf '%s' "$page" | jq -c --arg since "$since" "$epoch"'
+    ($since | epoch) as $s
+    | (.incidentPreviews // [])[]
+    | select($s == null or ((.createdTime | epoch) as $c | $c == null or $c >= $s))' >>"$all"
+  if [ -n "$since" ]; then
+    said=$(printf '%s' "$page" | jq -r --arg since "$since" --arg oldest "$oldest" "$epoch"'
+      ($since | epoch) as $s
+      | [(.incidentPreviews // [])[] | .createdTime | epoch | select(. != null)] as $c
+      | ((if $oldest == "" then [] else [$oldest | tonumber] end) + $c) as $all
+      | if any(range(1; $all | length); $all[.] > $all[. - 1]) then "bad"
+        elif ($c | length) == 0 then "go \($oldest)"
+        elif $c[-1] < $s then "stop"
+        else "go \($c[-1])" end')
+    case $said in
+      bad)
+        printf 'grafana-irm.sh: Grafana IRM gave incidents that are not newest first, as asked; writing nothing (unset SINCE to read them all)\n' >&2
+        exit 1
+        ;;
+      stop) break ;;
+    esac
+    oldest=${said#go}
+    oldest=${oldest# }
+  fi
   was=$next
   next=$(printf '%s' "$page" | jq -r 'if .cursor.hasMore then .cursor.nextValue // empty else empty end')
   [ -n "$next" ] || break
