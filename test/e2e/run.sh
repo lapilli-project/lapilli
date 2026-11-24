@@ -2,8 +2,11 @@
 # Runs the chart's CronJob on a kind cluster against a real Prometheus, and
 # checks the report, the Pushgateway and the Slack post. Needs Docker, Go,
 # kubectl and helm; deletes the cluster afterwards unless KEEP is set.
+# PROMETHEUS_IMAGE runs another Prometheus image than the pinned one.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# shellcheck source=test/e2e/images.sh
+. test/e2e/images.sh
 cluster=lapilli-e2e
 ns=e2e
 arch=$(go env GOARCH)
@@ -19,7 +22,8 @@ trap '[ -n "${KEEP:-}" ] || "$kind" delete cluster --name "$cluster"' EXIT
 kubectl config use-context "kind-$cluster"
 
 kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$ns" apply -f test/e2e/stack.yaml
+images_check
+manifest test/e2e/stack.yaml | kubectl -n "$ns" apply -f -
 kubectl -n "$ns" rollout status deploy/prometheus deploy/pushgateway deploy/fakeslack --timeout=3m
 
 # The incident starts when LateStart's condition does; wait until it has
