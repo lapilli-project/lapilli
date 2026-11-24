@@ -403,12 +403,20 @@ func TestEstimateMemory(t *testing.T) {
 		it.State != Unknown || !strings.Contains(it.Why, "under the caps' bound") || !strings.Contains(it.Why, "2 reads at once") || it.Fix == "" {
 		t.Errorf("the caps' bound over the limit: %+v %+v", m, it)
 	}
+	// The bound is said to be the most a run can take, with no request or
+	// limit advised from it; what fired advises both.
+	if it := p.r.Items[0]; !strings.Contains(it.What, "no firing read: at most ") || strings.Contains(it.What, "a request of") || p.r.Estimates.Memory.RequestBytes == 0 {
+		t.Errorf("the caps' bound's text: %q", it.What)
+	}
 	// What fired, over the same limit, is a problem still.
 	p = &run{c: c, r: &Report{}, alerts: map[string]float64{"Errors0": 100, "Errors1": 300, "Errors2": 5000}}
 	p.memory(rs)
 	if m, it := p.r.Estimates.Memory, p.r.Items[0]; m.From != "alerts" || m.PeakBytes <= 1000000 || it.State != Problem ||
 		!strings.Contains(it.Why, "under the estimate") || !strings.Contains(it.Why, "Errors2") {
 		t.Errorf("the estimate over the limit: %+v %+v", m, it)
+	}
+	if it := p.r.Items[0]; !strings.Contains(it.What, "a request of") {
+		t.Errorf("what fired advises a request: %q", it.What)
 	}
 	// Over the limit, the caps' bound and the estimate are ok.
 	os.WriteFile(c.CgroupMemory, []byte("1000000000\n"), 0o600)

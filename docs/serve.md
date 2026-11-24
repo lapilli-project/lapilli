@@ -758,8 +758,10 @@ ok       backfill            12,040 requests over 28d, 28 pieces of a day at mos
                              why: each day's in 14m at most, within --timeout 50m
 ok       nights              2 nights at least, in 01:00-06:00 at 0.5 a second, 9,000 of the
                              backfill's requests a night
-ok       memory              no firing read: the caps' bound, 5.2 GB (8 x 10,000,000 x 64 bytes,
-                             beside 64 MB of caches): a request of 5.2 GB, a limit of 10.5 GB
+ok       memory              no firing read: at most 5.2 GB, the caps' bound (8 x 10,000,000 x 64
+                             bytes, beside 64 MB of caches), which --parallel and --max-samples
+                             set; asked of the history, without --offline, preflight says what
+                             the rules' alerts take
 ```
 
 It writes nothing and replays nothing, held by the code: every request it

@@ -666,14 +666,19 @@ func (p *run) memory(rs []rules.Rule) {
 	} else {
 		m.From = "caps"
 		m.PeakBytes = int64(s.Parallel)*int64(most)*prom.SampleBytes + cacheBytes
-		it.What = fmt.Sprintf("no firing read: the caps' bound, %s (%d x %s x %d bytes, beside 64 MB of caches)", bytesOf(uint64(m.PeakBytes)), s.Parallel, num(most), prom.SampleBytes)
+		// A bound, not an estimate: no request or limit is advised from it,
+		// as it is the most a run can take, not what one takes.
+		it.What = fmt.Sprintf("no firing read: at most %s, the caps' bound (%d x %s x %d bytes, beside 64 MB of caches), which --parallel and --max-samples set; asked of the history, without --offline, preflight says what the rules' alerts take",
+			bytesOf(uint64(m.PeakBytes)), s.Parallel, num(most), prom.SampleBytes)
 	}
 	const mib = 64 << 20
 	m.RequestBytes = (m.PeakBytes + mib - 1) / mib * mib
 	// Go's collector lets the heap grow to about twice what is live before
 	// it collects (GOGC=100).
 	m.LimitBytes = 2 * m.RequestBytes
-	it.What += fmt.Sprintf(": a request of %s, a limit of %s", bytesOf(uint64(m.RequestBytes)), bytesOf(uint64(m.LimitBytes)))
+	if m.From == "alerts" {
+		it.What += fmt.Sprintf(": a request of %s, a limit of %s", bytesOf(uint64(m.RequestBytes)), bytesOf(uint64(m.LimitBytes)))
+	}
 	if len(over) > 0 {
 		it.Why = fmt.Sprintf("a day of %s would pass --max-samples %s: serve won't replay it, and says why", names(over, 5), num(most))
 	}
@@ -699,7 +704,7 @@ func (p *run) memory(rs []rules.Rule) {
 			// problem, as history.alerts is.
 			it.State = Unknown
 			it.Why = fmt.Sprintf("this process runs under a memory limit of %s, under the caps' bound: with no firing read, what a run holds can't be told, and the bound is reached only when %d reads at once each hold --max-samples", bytesOf(uint64(limit)), s.Parallel)
-			it.Fix = "to be held under the limit whatever a run reads, give the pod the request and the limit above, or lower --parallel or --max-samples"
+			it.Fix = fmt.Sprintf("to be held under the limit whatever a run reads, give the pod a request of %s and a limit of %s, or lower --parallel or --max-samples", bytesOf(uint64(m.RequestBytes)), bytesOf(uint64(m.LimitBytes)))
 		default:
 			it.State = Problem
 			it.Why = strings.TrimPrefix(it.Why+fmt.Sprintf("; this process runs under a memory limit of %s, under the estimate", bytesOf(uint64(limit))), "; ")

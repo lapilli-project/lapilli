@@ -37,8 +37,10 @@ ok       nights              1 night at least, in 01:00-06:00 at 0.5 a second, 9
                                   meanwhile, so the pages show the ledger days behind until it is
                                   done
 ok       beside              3 requests a day beside the runs: the replay check 3
-ok       memory              no firing read: the caps' bound, 80 MB (2 x 100,000 x 64 bytes, beside
-                             64 MB of caches): a request of 134 MB, a limit of 268 MB
+ok       memory              no firing read: at most 80 MB, the caps' bound (2 x 100,000 x 64 bytes,
+                             beside 64 MB of caches), which --parallel and --max-samples set; asked
+                             of the history, without --offline, preflight says what the rules'
+                             alerts take
 Left out of the estimates: change reviews, a week of each new version of the rules; the weekly
                            digest's backtests; what people and agents ask for (a proposal's
                            backtest, MCP's compare, the settings tried)
