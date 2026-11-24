@@ -36,7 +36,9 @@
 # branch it goes into that its CI says, TARGET, with ci_base: no pull
 # request is commented on, the report going to the job's log; HEAD must
 # be ci_head, gates or not; and TARGET must be an ancestor of it, the
-# base compared against. And ci_wrong, a setting of the job's the script
+# base compared against. And ci_summary=github, that the CI shows a
+# step's summary, GitHub Actions' GITHUB_STEP_SUMMARY, which the report
+# is added to (job_summary). And ci_wrong, a setting of the job's the script
 # found wrong, said once the status can be set: the job fails, its status
 # a failure on ci_head. And ci_merge_only, that the base is said of the
 # CI's merge alone (GitLab's merge trains): HEAD must be ci_merge, its
@@ -2267,7 +2269,12 @@ through_serve() {
             ;;
           200/superseded)
             bt_live=
-            trouble "a newer commit's backtest took this one's place in lapilli serve's queue"
+            if [ -n "${ci_queue:-}" ]; then
+              # serve read the group's pull request from the token's ref.
+              trouble "the merge queue built this pull request's group again: the newer group's backtest took this one's place in lapilli serve's queue"
+            else
+              trouble "a newer commit's backtest took this one's place in lapilli serve's queue"
+            fi
             return 1
             ;;
           200/cancelled)
@@ -2521,8 +2528,10 @@ comment() {
 
 # post: the comment on the pull request, in place of the one posted
 # before, if there is one. Of a merge queue's run, which has no pull
-# request, the comment as it would be, in the job's log.
+# request, the comment as it would be, in the job's log. And, either way,
+# in the step's summary (job_summary).
 post() {
+  job_summary
   if [ -n "${ci_queue:-}" ]; then
     say "a merge queue's run, of no pull request to comment on: the report, as a comment would have it"
     sed 1d "$tmp/comment.md" >"$tmp/queue.md"
@@ -2548,6 +2557,53 @@ post() {
   else
     post_comment "$tmp/comment.md" || return 1
     say "commented on pull request $PR"
+  fi
+}
+
+# job_summary: where the CI shows a step's summary (ci_summary=github,
+# GitHub Actions' GITHUB_STEP_SUMMARY, when the job has one), the comment
+# compose made, but its hidden first line, added to it: GitHub shows it on
+# the run's page, to whoever can read the repository, a merge queue's run's
+# where no comment is posted, a pull request's beside the comment, and one
+# whose comment wasn't posted (nothing changed, or the host refused it)
+# all the same. It is the comment's own Markdown, as made safe for the
+# comment (what comes from the rules in code spans, what went wrong in a
+# fenced block, serve's report its lines lapilli writes), and nothing
+# else, so that it does no more there than the comment does. GitHub takes
+# 1 MiB of a step's summary at most, and shows none of a step past it:
+# with what the step wrote there already, the report is added within it,
+# or not at all, the job's log saying so. A summary that isn't a file the
+# job can read gets none. Never fails: the comment, or the job's log, has
+# the report.
+job_summary() {
+  [ "${ci_summary:-}" = github ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  had=0
+  if [ -e "$GITHUB_STEP_SUMMARY" ]; then
+    had=
+    # Never read but as a file: a FIFO would hold the job.
+    [ ! -f "$GITHUB_STEP_SUMMARY" ] || [ ! -r "$GITHUB_STEP_SUMMARY" ] || had=$(wc -c <"$GITHUB_STEP_SUMMARY" | tr -d ' ')
+    case $had in
+      '' | *[!0-9]*)
+        say "GITHUB_STEP_SUMMARY isn't a file the job can read: the report isn't added to the step's summary"
+        return 0
+        ;;
+    esac
+  fi
+  {
+    # After what the step wrote there, a block of its own: a blank line
+    # first, as the summary line, a link reference definition, would else
+    # be read on in a paragraph left open, and shown.
+    [ "$had" -eq 0 ] || printf '\n\n'
+    sed 1d "$tmp/comment.md"
+  } >"$tmp/summary.md"
+  if [ $((had + $(wc -c <"$tmp/summary.md" | tr -d ' '))) -gt 1048576 ]; then
+    say "the report isn't added to the step's summary: with the $had bytes the step wrote there, it would pass the 1 MiB GitHub takes of one"
+    return 0
+  fi
+  if cat "$tmp/summary.md" 2>/dev/null >>"$GITHUB_STEP_SUMMARY"; then
+    say "the report added to the step's summary (GITHUB_STEP_SUMMARY), as the comment has it"
+  else
+    say "the report couldn't be added to the step's summary (GITHUB_STEP_SUMMARY)"
   fi
 }
 
