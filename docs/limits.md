@@ -105,8 +105,11 @@
   the change is read back, and fails.
 - Pull request backtests are checked end to end against a real Gitea; the
   recipes for GitHub, GitLab, Bitbucket and Azure DevOps against stand-ins
-  for their APIs, as they document them. A backtest is a comment, not a
-  check that can stop a merge.
+  for their APIs, as they document them. A backtest's comment stops no
+  merge by itself: a job stops one when it fails (`FAIL_MISSED`, an
+  expectation broken) and sets a commit status (`STATUS`) a branch rule
+  requires; never a GitHub check run, and not GitHub's merge queue
+  (`merge_group`) yet ([pr-backtests.md](pr-backtests.md)).
 - A pull request is opened only for a file in the repository that is the
   document Lapilli read. A rule file mounted from a ConfigMap whose manifest
   is what git holds, rules rendered from a chart, and rules read back from a
