@@ -1950,6 +1950,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	case f.csv:
 		err = verdict.CSV(stdout, shown, nil, nil)
 	case f.metrics:
+		shown.NotKnownMetric = true
 		err = verdict.Prometheus(stdout, shown, now())
 	default:
 		err = text(stdout)

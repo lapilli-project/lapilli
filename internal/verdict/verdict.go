@@ -433,6 +433,10 @@ type Report struct {
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
 	// SomeRules says the report is of some of the rules: see Options.
 	SomeRules bool `json:"some_rules,omitempty"`
+	// NotKnownMetric makes Prometheus write lapilli_incidents_not_known:
+	// lapilli verdict --metrics sets it, as only a run that replays rules
+	// can fail to; serve's /metrics never does.
+	NotKnownMetric bool `json:"-"`
 	// Hours are the hours firings were counted out of hours by.
 	Hours *HoursUsed `json:"hours,omitempty"`
 	// NearMisses are rules that nearly caught an incident nothing caught, or

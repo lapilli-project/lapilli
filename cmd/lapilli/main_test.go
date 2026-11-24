@@ -250,7 +250,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Typo: query failed: HTTP 400: bad_data: parse error"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --impact impact",
-			code: 0, stdout: "? 1 of 2 incidents had no alert from the 2 rules replayed: the 1 that couldn't be replayed may have caught them."},
+			code: 0, stdout: "? 1 of 2 incidents had no alert from the 2 rules replayed: the 1 that couldn't be replayed may have caught it."},
 		{args: "verdict --rules " + rulesFile + " --rule ^Quiet$ --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "1 rule never fired:"},
 		{args: "verdict --rules " + slowRules + " --prometheus http://p --incidents " + incidents + " --timeout 1s --tz UTC",
@@ -320,7 +320,7 @@ func TestRun(t *testing.T) {
 				"No incidents were given: the firings are counted, not judged.\n\n| | Before | After |\n|---|--:|--:|\n| Firings of the changed rules | 1 | 0 |\n\n" +
 				"#### Rules that differ\n\n| Rule | Fired | Refired |\n| --- | --: | --: |\n| `CheckoutErrors` | 1 → 0 | 0 → 0 |\n"},
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --markdown --incidents " + incidents,
-			code: 0, stdout: "| Incidents with no alert, of 1 | 0 | 1 |\n"},
+			code: 0, stdout: "| Incidents with no alert, of 1 | 0 | 0 |\n| Incidents not known: no alert from the rules replayed, a rule couldn't be replayed | 0 | 1 |\n"},
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
 			code: 0, stdout: `"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":3,`},
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",

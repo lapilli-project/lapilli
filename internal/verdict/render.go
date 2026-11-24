@@ -981,17 +981,19 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		}
 	}
 	family("lapilli_incidents", "Incidents in the period: caught, caught only by noisy rules, or missed.", incs)
-	var notKnownLines []string
-	for _, src := range []string{"written", "impact"} {
-		n := 0
-		for _, in := range r.Incidents {
-			if in.Missed() && in.NotKnown && (in.Candidate) == (src == "impact") {
-				n++
+	if r.NotKnownMetric {
+		var notKnownLines []string
+		for _, src := range []string{"written", "impact"} {
+			n := 0
+			for _, in := range r.Incidents {
+				if in.Missed() && in.NotKnown && (in.Candidate) == (src == "impact") {
+					n++
+				}
 			}
+			notKnownLines = append(notKnownLines, fmt.Sprintf(`lapilli_incidents_not_known{source="%s"} %d`, src, n))
 		}
-		notKnownLines = append(notKnownLines, fmt.Sprintf(`lapilli_incidents_not_known{source="%s"} %d`, src, n))
+		family("lapilli_incidents_not_known", "Of the missed incidents, those no rule replayed caught while a rule couldn't be replayed, which may have: missed isn't known.", notKnownLines)
 	}
-	family("lapilli_incidents_not_known", "Of the missed incidents, those no rule replayed caught while a rule couldn't be replayed, which may have: missed isn't known.", notKnownLines)
 	family("lapilli_incident_detection_delay_seconds", "From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.", delays)
 	// Named impact signals: each one's windows, by state, and from when it
 	// keeps the record.

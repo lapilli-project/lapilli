@@ -83,6 +83,14 @@ func TestNotKnownMetric(t *testing.T) {
 	if err := Prometheus(&b, r, t0); err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(b.String(), "lapilli_incidents_not_known") {
+		t.Errorf("the gauge is written without NotKnownMetric:\n%s", b.String())
+	}
+	b.Reset()
+	r.NotKnownMetric = true
+	if err := Prometheus(&b, r, t0); err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{`lapilli_incidents{state="missed",source="written"} 2`, `lapilli_incidents_not_known{source="written"} 1`, `lapilli_incidents_not_known{source="impact"} 0`} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("no %q in:\n%s", want, b.String())
