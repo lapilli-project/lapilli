@@ -199,6 +199,17 @@ func (a *allowlist) promQuery(expr string) func(url.Values) bool {
 	}
 }
 
+// lokiInstant is a Loki range query of exactly expr, over the last ten
+// minutes, by the keys prom's client sends it with.
+func (a *allowlist) lokiInstant(expr string) func(url.Values) bool {
+	return func(q url.Values) bool {
+		if len(q) != 4 || len(q["query"]) != 1 || q.Get("query") != expr || len(q["step"]) != 1 || q.Get("step") == "" {
+			return false
+		}
+		return len(q["start"]) == 1 && len(q["end"]) == 1 && a.recent(q.Get("start"), false) && a.recent(q.Get("end"), false)
+	}
+}
+
 // lokiRecent is a query of the last ten minutes by Loki's keys alone.
 func (a *allowlist) lokiRecent(q url.Values) bool {
 	return len(q) == 2 && len(q["start"]) == 1 && len(q["end"]) == 1 && a.recent(q.Get("start"), true) && a.recent(q.Get("end"), true)

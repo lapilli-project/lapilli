@@ -596,7 +596,7 @@ func TestOffline(t *testing.T) {
 
 // IDs are every item's id a preflight gives.
 var IDs = []string{"rules.read", "rules.replayable", "rules.sources", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
-	"history.alerts", "history.intervals", "grafana.notifications", "grafana.alertmanagers", "content.alertmanager", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
+	"history.alerts", "history.intervals", "queries.history", "queries.loki", "queries.grafana", "grafana.notifications", "grafana.alertmanagers", "content.alertmanager", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
 	"changes.google", "changes.oci", "changes.ruler", "changes.loki", "inputs.files",
 	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "backtest.trust", "backtest.issuers", "access", "estimate.hourly",
 	"estimate.backfill", "estimate.nights", "estimate.beside", "estimate.backtests", "estimate.memory"}
@@ -605,7 +605,7 @@ var IDs = []string{"rules.read", "rules.replayable", "rules.sources", "rules.his
 // (docs/numbers.md, "lapilli preflight's report"): each the code gives is
 // listed there, and each listed is in the JSON.
 func TestPreflightStable(t *testing.T) {
-	full := &Report{Version: 1, Lapilli: "v0", Items: []Item{{ID: "access", State: OK, What: "x", Why: "y", Fix: "z"}}, LeftOut: []string{"x"},
+	full := &Report{Version: 1, Lapilli: "v0", Items: []Item{{ID: "access", State: OK, What: "x", Why: "y", Fix: "z", Failed: []Failed{{Rule: "r", Reason: "parse error", Why: "w"}}}}, LeftOut: []string{"x"},
 		Asked: Asked{Requests: 1, By: map[string]int{"prometheus": 1}, Refused: 0},
 		Estimates: Estimates{Hourly: &Hourly{Runs: 1, Seconds: 1, Share: 1, WhileBacktest: &WhileBacktest{Share: 1}}, Backfill: &Backfill{Rate: 1, Seconds: 1, PieceHours: 1},
 			Nights: &Nights{Hours: "x"}, Beside: &Beside{}, Backtests: &Backtests{Rate: 1, Fit: 1, WeekRules: 1, DayRules: 1}, Memory: &Memory{From: "caps", CgroupBytes: 1, BacktestBytes: 1}}}
@@ -637,7 +637,8 @@ func TestPreflightStable(t *testing.T) {
 	section = strings.Join(strings.Fields(section), " ")
 	fields := map[string][]string{
 		"":                                {"version", "lapilli", "items", "estimates", "left_out", "asked"},
-		"items[]":                         {"id", "state", "what", "why", "fix"},
+		"items[]":                         {"id", "state", "what", "why", "fix", "failed"},
+		"items[].failed[]":                {"rule", "reason", "why"},
 		"asked":                           {"requests", "by", "refused"},
 		"estimates":                       {"hourly", "backfill", "nights", "beside", "backtests", "memory"},
 		"estimates.hourly":                {"runs", "requests", "most", "day", "by", "guard", "impact", "seconds", "share", "while_backtest"},

@@ -979,7 +979,8 @@ out when it is zero or empty, as in the report.
 | Where | Fields |
 |---|---|
 | the report | `version`, `lapilli`, `items`, `estimates`, `left_out`, `asked` |
-| `items[]` | `id`, `state` (`ok`, `problem`, `unknown`), `what`, `why`†, `fix`† |
+| `items[]` | `id`, `state` (`ok`, `problem`, `unknown`), `what`, `why`†, `fix`†, `failed`† (of a `queries.*` item, with `--queries`) |
+| `items[].failed[]` | `rule`, `reason` (`parse error`, `unknown function`, `too many samples`, `timeout`, `not let in`, `failed`), `why`†: a rule whose query the history, Loki or Grafana refused or couldn't answer |
 | `asked` | `requests`, `by`, `refused` |
 | `estimates` | `hourly`†, `backfill`†, `nights`†, `beside`†, `backtests`†, `memory`† |
 | `estimates.hourly` | `runs`, `requests`, `most`, `day`, `by`, `guard`, `impact`, `seconds`†, `share`†, `while_backtest`† |
@@ -992,7 +993,7 @@ out when it is zero or empty, as in the report.
 
 The ids: `rules.read`, `rules.replayable`, `rules.sources`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
-`history.intervals`, `grafana.notifications`, `grafana.alertmanagers`, `content.alertmanager`,
+`history.intervals`, `queries.history`, `queries.loki`, `queries.grafana`, `grafana.notifications`, `grafana.alertmanagers`, `content.alertmanager`,
 `grafana.write`, `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
 `changes.oci`, `changes.ruler`, `changes.loki`, `inputs.files`, `secrets.files`,
 `ledger.sqlite`, `ledger.postgres`, `signin`, `backtest.trust`,
