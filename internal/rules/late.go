@@ -114,6 +114,11 @@ func (p Replaying) Apply(rs []Rule) {
 				rs[i].Graph, rs[i].Logs = g, g.Logs
 			}
 		}
+		if r := &rs[i]; r.Graph != nil && r.Unsupported == "" && p.NoGrafanaLoki && len(r.Graph.Aside) > 0 {
+			// No way to the Loki its query beside the condition is on: it
+			// is a query on another data source, which isn't asked.
+			r.Graph = r.Graph.AsOther()
+		}
 		switch r := &rs[i]; {
 		case r.Unsupported != "" || r.Logs == "":
 		case r.Graph == nil && p.NoLoki:

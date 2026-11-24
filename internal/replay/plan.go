@@ -51,6 +51,16 @@ func PlanEach(h History, sets [][]Version, from, to time.Time, step time.Duratio
 		if _, err := historyFor(h, last); err != nil {
 			continue
 		}
+		unasked := false
+		for _, uid := range last.Graph.AsideUIDs() {
+			// A rule's Loki queries beside its condition need their Loki.
+			if _, err := asideFor(h, last, uid); err != nil {
+				unasked = true
+			}
+		}
+		if unasked {
+			continue
+		}
 		name := ""
 		if last.Logs != "" {
 			name = rules.LokiRuler
@@ -77,17 +87,27 @@ func PlanEach(h History, sets [][]Version, from, to time.Time, step time.Duratio
 				// A Loki's range is asked in the pieces its client makes
 				// of it: more than one when it is asked at a finer step.
 				n := 1
-				if loki {
+				if loki || a.side != "" {
 					n = len(prom.Pieces(a.start, a.end, a.step, true))
 				}
+				by, from := name, src
+				if a.side != "" {
+					// The rule's history in two places: a query beside its
+					// condition is asked of a Loki through Grafana.
+					by = "grafana/" + a.side
+					if from, ok = names[by]; !ok {
+						from = len(names)
+						names[by] = from
+					}
+				}
 				if !a.reduce {
-					r := request{src: src, expr: a.expr, start: a.start.Unix(), end: a.end.Unix()}
+					r := request{src: from, expr: a.expr, start: a.start.Unix(), end: a.end.Unix()}
 					if seen[r] {
 						continue
 					}
 					seen[r] = true
 				}
-				p.By[name] += n
+				p.By[by] += n
 				p.Requests += n
 			}
 		}

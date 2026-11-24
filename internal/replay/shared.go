@@ -90,6 +90,9 @@ type asker struct {
 	src  int
 	mu   sync.Mutex
 	left map[request]int // expected and not yet asked for
+	// sides are the askers of the Lokis the run's rule has queries on
+	// beside its condition, by their data sources' uids.
+	sides map[string]*asker
 }
 
 func (a *asker) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
@@ -121,6 +124,9 @@ func (a *asker) done() {
 		}
 	}
 	a.left = nil
+	for _, side := range a.sides {
+		side.done()
+	}
 }
 
 // drop counts off one ask; the last lets the answer go. s.mu is held.

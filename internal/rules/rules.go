@@ -1880,6 +1880,15 @@ type Graph struct {
 	// is the condition's data source's; Grafana takes one that returns
 	// nothing as no data, which the replay can't see (UnseenOther).
 	Other map[string]string
+	// Aside are the refs of Queries and Asks that are asked of a Loki the
+	// condition's history isn't: a Loki query beside a condition that reads
+	// Prometheus, by the uid of its Loki data source, asked through
+	// Grafana's data source proxy as a rule on Loki is. Such a query isn't
+	// read by the condition; it is asked to know when it returned nothing,
+	// which Grafana takes as the rule's no data (docs/design/loki.md). Both
+	// the query's ref (in Queries) and, for a range query, the ref of what
+	// says it has a point in its window (in Asks) are here.
+	Aside map[string]string
 	// reads are, by ref of Queries, what each data query, PromQL or
 	// LogQL, and each reduce folded into one reads, as read: what tells
 	// whether the condition counts events (EventWindow).
@@ -2314,6 +2323,13 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 		}
 		uid := str(dm["datasourceUid"])
 		if !replayed[uid] {
+			if kindOf(dm, kinds) == KindLoki && g.asideLoki(ref, uid, dm, model) {
+				if g.kinds == nil {
+					g.kinds = map[string]string{}
+				}
+				g.kinds[uid] = KindLoki
+				continue
+			}
 			if g.Other == nil {
 				g.Other = map[string]string{}
 			}
@@ -2527,6 +2543,102 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 		walk(st.Reduce.Input)
 	}
 	return g, nil
+}
+
+// asideLoki reads a query on a Loki data source the condition doesn't
+// read, as a Loki query beside it (Aside), asked as Grafana's Loki data
+// source asks it; false when it can't be, and it is left as a query on
+// another data source (Other): a log query, which returns lines; one Grafana
+// can't run; a reduce's step finer than a replay asks.
+func (g *Graph) asideLoki(ref, uid string, dm, model map[string]any) bool {
+	expr := strings.TrimSpace(str(model["expr"]))
+	if expr == "" || !validUID(uid) {
+		return false
+	}
+	var from, to float64
+	if rt, ok := dm["relativeTimeRange"].(map[string]any); ok {
+		from, _ = toFloat(rt["from"])
+		to, _ = toFloat(rt["to"])
+		if from < 0 || to < 0 || from > 1e9 || to > from {
+			return false
+		}
+	}
+	q, err := lokiQuery(ref, dataQuery{expr: expr, to: time.Duration(to) * time.Second}, dm, model, time.Duration(from-to)*time.Second)
+	if err != nil {
+		return false
+	}
+	if q.window > 0 && q.res < LokiLeastStep {
+		return false
+	}
+	if g.Aside == nil {
+		g.Aside = map[string]string{}
+	}
+	g.Queries[ref] = q.expr
+	g.Shift[ref] = q.to
+	g.Aside[ref] = uid
+	g.Data[ref] = Source{Present: ref, UID: uid}
+	if q.window > 0 {
+		// It returned something when it has a point in its window.
+		in := ref + "\x00aside"
+		g.Asks[in] = Ask{Fn: ClassicPresent, Expr: q.expr, Window: q.window, Res: q.res, Logs: true, Classic: true}
+		g.Shift[in] = q.to
+		g.Aside[in] = uid
+		g.Data[ref] = Source{Present: in, UID: uid}
+	}
+	return true
+}
+
+// validUID reports whether a data source's uid is one Grafana makes, as it
+// goes into the data source proxy's path.
+func validUID(uid string) bool {
+	if uid == "" || len(uid) > 40 {
+		return false
+	}
+	return strings.Trim(uid, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") == ""
+}
+
+// AsideUIDs are the Loki data sources the rule's queries beside its
+// condition are asked of, by uid.
+func (g *Graph) AsideUIDs() []string {
+	if g == nil {
+		return nil
+	}
+	return slices.Compact(slices.Sorted(maps.Values(g.Aside)))
+}
+
+// LokiUID reports whether the data source uid is a Loki one of the rule's
+// queries are asked of: the condition's, or one a query beside it is on.
+func (g *Graph) LokiUID(uid string) bool {
+	if g == nil {
+		return false
+	}
+	return g.Logs != "" && uid == g.Logs || slices.Contains(g.AsideUIDs(), uid)
+}
+
+// AsOther is g with its Loki queries beside the condition (Aside) left as
+// queries on another data source (Other), which aren't asked: for a rule
+// with no way to the Loki they are on.
+func (g *Graph) AsOther() *Graph {
+	if g == nil || len(g.Aside) == 0 {
+		return g
+	}
+	c := *g
+	c.Queries, c.Asks, c.Shift, c.Data = maps.Clone(g.Queries), maps.Clone(g.Asks), maps.Clone(g.Shift), maps.Clone(g.Data)
+	c.Other = maps.Clone(g.Other)
+	if c.Other == nil {
+		c.Other = map[string]string{}
+	}
+	for ref, uid := range g.Aside {
+		delete(c.Queries, ref)
+		delete(c.Asks, ref)
+		delete(c.Shift, ref)
+		if _, isData := g.Data[ref]; isData {
+			delete(c.Data, ref)
+			c.Other[ref] = uid
+		}
+	}
+	c.Aside = nil
+	return &c
 }
 
 func promDuration(d time.Duration) string {
