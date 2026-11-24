@@ -23,6 +23,9 @@
 # docs/README.md lists, as NAME.md when translated and ../NAME.md when not.
 # Without docs/ko/ nothing of this happens.
 set -eu
+# Bytes, not characters, in every awk and sed below, as CI's mawk reads
+# them: a UTF-8 awk (macOS's) cuts Korean at the wrong place otherwise.
+export LC_ALL=C
 base=${1-}
 cd "$(dirname "$0")/.."
 blob=https://github.com/lapilli-project/lapilli/blob/main
