@@ -165,6 +165,11 @@ while :; do
     printf 'grafana-irm.sh: Grafana IRM says %s; writing nothing\n' "$(printf '%s' "$err" | jq -Rsc .)" >&2
     exit 1
   fi
+  # An answer with no list of incidents is not an empty one.
+  if ! printf '%s' "$page" | jq -e '.incidentPreviews | type == "array"' >/dev/null 2>&1; then
+    printf 'grafana-irm.sh: Grafana IRM answered with no list of incidents; writing nothing\n' >&2
+    exit 1
+  fi
   # Those created before SINCE are left out; one whose time doesn't read
   # is kept. With SINCE, the page says whether to go on: "go" or "stop"
   # (it reaches before SINCE), or "bad" (not newest first), and when its
@@ -193,7 +198,12 @@ while :; do
     oldest=${oldest# }
   fi
   was=$next
-  next=$(printf '%s' "$page" | jq -r 'if .cursor.hasMore then .cursor.nextValue // empty else empty end')
+  more=$(printf '%s' "$page" | jq -r 'if .cursor.hasMore == true then "yes" else "no" end')
+  next=$(printf '%s' "$page" | jq -r 'if .cursor.hasMore == true then .cursor.nextValue // empty else empty end')
+  if [ "$more" = yes ] && [ -z "$next" ]; then
+    printf 'grafana-irm.sh: Grafana IRM says there is more but not where; writing nothing\n' >&2
+    exit 1
+  fi
   [ -n "$next" ] || break
   if [ "$next" = "$was" ]; then
     printf 'grafana-irm.sh: the API gave the same page again; stopping, writing nothing\n' >&2

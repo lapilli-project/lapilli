@@ -1467,6 +1467,30 @@ func TestGrafanaIRMRecipe(t *testing.T) {
 	}
 }
 
+// An answer that says there is more but not where, or that has no list of
+// incidents, writes nothing: the incidents not read would be left out
+// with the job saying nothing of it.
+func TestGrafanaIRMRecipeUnclearPage(t *testing.T) {
+	parallel(t)
+	needTools(t)
+	for name, answer := range map[string]string{
+		"more, but not where":  `{"incidentPreviews": [{"incidentID": "IRM-1", "title": "x", "createdTime": "2026-10-28T03:01:00Z"}], "cursor": {"hasMore": true}}`,
+		"more, an empty where": `{"incidentPreviews": [], "cursor": {"hasMore": true, "nextValue": ""}}`,
+		"no list":              `{"cursor": {"hasMore": false}}`,
+		"a list that isn't":    `{"incidentPreviews": {"incidentID": "IRM-1"}, "cursor": {"hasMore": false}}`,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(answer)) }))
+		cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+		cmd.Env = append(os.Environ(), "GRAFANA_URL="+srv.URL+"/", "GRAFANA_IRM_TOKEN_FILE="+tokenFile(t, "glsa_secret"))
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "writing nothing") {
+			t.Errorf("%s: %v, wrote %q, said %q", name, err, stdout.String(), stderr.String())
+		}
+		srv.Close()
+	}
+}
+
 func TestRootlyRecipe(t *testing.T) {
 	parallel(t)
 	needTools(t)
