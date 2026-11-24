@@ -78,7 +78,7 @@ func TestUnreplayedShown(t *testing.T) {
 	const turned = rules.HistoryUnread + "HTTP 429: slow down (asked 7 times over 3m2s)"
 
 	code, out, _ := verdictOf("--rules", rs)
-	top := "! 1 of 4 rules couldn't be replayed, and are left out of what follows:\n  Turned: " + turned + "\n"
+	top := "! 1 of 4 rules couldn't be replayed, and is left out of what follows:\n  Turned: " + turned + "\n"
 	if code != 0 || !strings.Contains(out, top) || strings.Index(out, top) > strings.Index(out, "RULE") || strings.Contains(out[:strings.Index(out, "RULE")], "Typo") {
 		t.Errorf("exit %d: want the rule named before the table:\n%s", code, out)
 	}

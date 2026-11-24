@@ -118,10 +118,14 @@ func partial(w io.Writer, us []Unreplayed, of int, below bool) {
 	if len(failed) == 0 {
 		return
 	}
+	are := "are"
+	if len(names) == 1 {
+		are = "is"
+	}
 	if of > 0 {
-		fmt.Fprintf(w, "! %d of %s couldn't be replayed, and are left out of what follows:\n", len(names), plural(of, "rule", "rules"))
+		fmt.Fprintf(w, "! %d of %s couldn't be replayed, and %s left out of what follows:\n", len(names), plural(of, "rule", "rules"), are)
 	} else {
-		fmt.Fprintf(w, "! %s couldn't be replayed, and are left out of what follows:\n", plural(len(names), "rule", "rules"))
+		fmt.Fprintf(w, "! %s couldn't be replayed, and %s left out of what follows:\n", plural(len(names), "rule", "rules"), are)
 	}
 	shown := shownAtTop(us)
 	// Rules whose reason reads alike share a line, in the order the first
