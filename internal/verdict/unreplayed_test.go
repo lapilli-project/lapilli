@@ -41,6 +41,26 @@ func TestPartialTop(t *testing.T) {
 	}
 }
 
+// One rule is left out, not "are left out", with a count of rules or without.
+func TestPartialOne(t *testing.T) {
+	one := []Unreplayed{{Rule: "Zed", Reason: "query failed: the history couldn't be read: HTTP 503: down", Failed: true}}
+	for of, want := range map[int]string{
+		1: "! 1 of 1 rule couldn't be replayed, and is left out of what follows:\n",
+		0: "! 1 rule couldn't be replayed, and is left out of what follows:\n",
+	} {
+		var b strings.Builder
+		partial(&b, one, of, false)
+		if !strings.HasPrefix(b.String(), want) {
+			t.Errorf("of %d: %s", of, b.String())
+		}
+	}
+	var b strings.Builder
+	partial(&b, append(one, Unreplayed{Rule: "Yak", Reason: "query failed: the history couldn't be read: HTTP 503: down", Failed: true}), 0, false)
+	if !strings.HasPrefix(b.String(), "! 2 rules couldn't be replayed, and are left out of what follows:\n") {
+		t.Errorf("two: %s", b.String())
+	}
+}
+
 // TestFailedFirst: the rules whose replay failed come first, whatever
 // their names.
 func TestFailedFirst(t *testing.T) {

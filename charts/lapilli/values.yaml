@@ -1092,6 +1092,18 @@ timeoutMinutes: 50
 # is 40,320 samples a series firing all through it; with --parallel rules
 # at once, give resources.limits.memory room for as many.
 maxSamples: 0
+# What makes a cronjob run exit 1 (mode: cronjob only; lapilli serve has no
+# exit status). The defaults are the CLI's.
+# failUnreplayed: exit 1 when any rule's replay failed because the history
+# couldn't be read (--fail-unreplayed), not only when every one did.
+failUnreplayed: false
+# failNothingReplayed: exit 1 when every rule's replay failed, so the report
+# judges nothing; false exits 0 then (--fail-nothing-replayed=false).
+failNothingReplayed: true
+# checkNoData: after the replays, ask the history whether each rule that
+# never fired read any series at all; false skips that step alone, and its
+# requests (--check-no-data=false).
+checkNoData: true
 resources:
   requests:
     cpu: 100m

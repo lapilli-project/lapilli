@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,9 @@ import (
 	"strconv"
 	"time"
 
+	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -90,10 +94,14 @@ func demoServe(s *demoSample, loc *time.Location, tz, listen string, stdout, std
 	if err != nil {
 		return fail(err)
 	}
+	if err := demoSeedTeams(filepath.Join(dir, "ledger"), loc); err != nil {
+		return fail(fmt.Errorf("seeding its teams: %w", err))
+	}
 	at := demoServeAt(loc)
 	code := serveOn(demoServeArgs(dir, listen, tz, loc), &serveWith{
 		history:   s.history(loc),
 		clock:     func() time.Time { return at },
+		seed:      func(ctx context.Context, s *serve.Server) bool { return demoSeedProposal(ctx, s, stderr) },
 		listening: func(a net.Addr) { fmt.Fprintf(stdout, demoServing, "http://"+a.String()+"/") },
 	}, stdout, stderr)
 	if err := os.RemoveAll(dir); err != nil {
@@ -122,4 +130,51 @@ func demoServeArgs(dir, listen, tz string, loc *time.Location) []string {
 		args = append(args, "--tz", tz)
 	}
 	return args
+}
+
+// demoBy is who the demo's teams and proposal are kept by.
+const demoBy = "lapilli demo"
+
+// demoTeams are the teams lapilli demo --serve keeps: each owns the sample's
+// rules by their names, and its incidents and firings by their service,
+// the label serve's --match gives. Orders and the nodes' rules are the
+// platform's.
+var demoTeams = []ledger.Team{
+	{Name: "checkout", Rules: "^(Checkout|Payments)", Labels: incident.Labels{"service": {"checkout", "payments"}}, Note: "The shop's checkout and its payments."},
+	{Name: "search", Rules: "^Search", Labels: incident.Labels{"service": {"search"}}, Note: "Search and its timeouts."},
+	{Name: "platform", Rules: "^(Orders|Node|Certificate)", Labels: incident.Labels{"service": {"orders"}}, Note: "The queues, nodes and certificates under the rest."},
+}
+
+// demoSeedTeams keeps demoTeams in the ledger at path, by the ledger's own
+// API, before serve opens it: serve is read-only, and no request writes
+// them.
+func demoSeedTeams(path string, loc *time.Location) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	l, err := ledger.Open(ctx, filepath.Join(path, "ledger.db"), loc)
+	if err != nil {
+		return err
+	}
+	for _, t := range demoTeams {
+		if _, err := l.PutTeam(ctx, t, demoBy); err != nil {
+			l.Close()
+			return err
+		}
+	}
+	return l.Close()
+}
+
+// demoSeedProposal keeps the proposal lapilli demo --serve shows waiting
+// for approval: the longer "for" its report suggests, backtested by serve
+// as one proposed from the rule's page. It is serve's Config.Seed, called by
+// its own round once the digest is worked out, which the backtest needs a run
+// for; true once it is kept.
+func demoSeedProposal(ctx context.Context, s *serve.Server, stderr io.Writer) bool {
+	_, ok, err := s.ProposeSuggested(ctx, demoBy)
+	if err != nil {
+		fmt.Fprintf(stderr, "lapilli demo: its proposal: %s\n", verdict.Clean(err.Error()))
+	}
+	return ok
 }

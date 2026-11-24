@@ -40,6 +40,15 @@ spec:
                 - {{ printf "--since=%s" .Values.since | quote }}
                 - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
                 {{- include "lapilli.args" . | trim | nindent 16 }}
+                {{- if .Values.failUnreplayed }}
+                - "--fail-unreplayed"
+                {{- end }}
+                {{- if not .Values.failNothingReplayed }}
+                - "--fail-nothing-replayed=false"
+                {{- end }}
+                {{- if not .Values.checkNoData }}
+                - "--check-no-data=false"
+                {{- end }}
                 {{- with .Values.report.pushgateway }}
                 - {{ printf "--push=%s/metrics/job/lapilli/instance/%s-%s" (trimSuffix "/" .) $.Release.Namespace $.Release.Name | quote }}
                 {{- end }}

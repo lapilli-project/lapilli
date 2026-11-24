@@ -159,8 +159,10 @@ refused as written). `--json` lists both in `unreplayed`, each with `failed`
 true when its replay failed for the run and another run may replay it; in a
 comparison, each with its side, `before` or `after`, but a rule alike in
 both, replayed once for both, which has none. The exit stays 0, since what
-was replayed holds; `--fail-unreplayed` exits 1 instead, for a check that a
-run that couldn't read the history shouldn't pass; so too for a rule whose
+was replayed holds, unless no rule was: a run in which every replay failed
+exits 1, as it judges nothing (`--fail-nothing-replayed=false` exits 0
+instead, and `--compare` is left as it was); `--fail-unreplayed` exits 1 for a
+single rule that failed, for a check that a run that couldn't read the history shouldn't pass; so too for a rule whose
 labels on each of its series are more than `--max-samples` lets a replay
 hold (`too many labels on its series to replay`), which a rule's writer
 could do to keep it out of a backtest unseen. It doesn't count a query
@@ -189,6 +191,29 @@ nothing from before the period, or doesn't tell the rule apart (passed
 over changes of it, or gives its title to another rule too), it is listed
 as before, and stderr says why. `--grafana-history=false` lists them all
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
+
+## Rules kept in Terraform
+
+Grafana alerting managed with the Grafana provider's `grafana_rule_group`
+is read from the JSON Terraform writes once its values are resolved
+(variables, modules and functions included), not from the HCL: `--rules`
+takes it as it takes any rules, by what it holds. Of a saved plan:
+
+```sh
+terraform plan -refresh=false -out=tfplan && terraform show -json tfplan > rules.json
+lapilli verdict --rules rules.json --prometheus http://prometheus:9090 --incidents incidents.yaml
+```
+
+or of the state, `terraform show -json > rules.json`. Every
+`grafana_rule_group` in the root module and in its child modules is read,
+as the Grafana provisioning file it describes: a rule is replayed, a
+paused one is listed as paused, a recording rule is read as recorded. A
+plan has the values the resources will have, so a group the plan destroys
+isn't in it. A value Terraform can't know before it applies, such as a
+`folder_uid` taken from a folder made in the same plan or a rule's `uid`,
+is empty. `lapilli preflight` counts such rules as Grafana, from Terraform.
+A pull request's backtest can render it: see
+[recipes/backtest](../recipes/backtest/README.md#rules-rendered-from-terraform).
 
 ## Any Prometheus-compatible API
 

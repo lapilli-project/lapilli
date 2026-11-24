@@ -458,6 +458,87 @@ never one a firing.
 `LAPILLI_SCALE=10 go test ./internal/ledger ./internal/serve -run Scale -v`
 measures it with two million, on your own machine.
 
+### Sizing
+
+How much disk the ledger takes and how much memory serve needs, measured
+with SQLite, by how many rules there are, how many firings a week and how
+many weeks are kept. The ledger was written as hourly runs write it, a week
+at a time, and measured after weeks 1, 4 and 12 of the same ledger; serve
+was then started on it, in a process of its own, and asked for what a
+visit asks for: the overview, the rules over twelve weeks, a rule's page
+over twelve weeks and a week's report, each worked out afresh.
+
+| Rules | Firings a week | Weeks kept | Firings kept | Ledger on disk | Bytes a firing | Heap at rest | Heap at most while reading | Process memory at most |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 10,000 | 1 | 10,000 | 3 MB | 255 | 9 MB | 19 MB | 90 MB |
+| 100 | 10,000 | 4 | 40,000 | 7 MB | 179 | 9 MB | 22 MB | 94 MB |
+| 100 | 10,000 | 12 | 120,000 | 16 MB | 134 | 8 MB | 25 MB | 98 MB |
+| 100 | 100,000 | 1 | 100,000 | 14 MB | 136 | 9 MB | 25 MB | 98 MB |
+| 100 | 100,000 | 4 | 400,000 | 42 MB | 104 | 9 MB | 28 MB | 100 MB |
+| 100 | 100,000 | 12 | 1,200,000 | 117 MB | 97 | 8 MB | 27 MB | 99 MB |
+| 1,000 | 10,000 | 1 | 10,000 | 3 MB | 304 | 8 MB | 43 MB | 121 MB |
+| 1,000 | 10,000 | 4 | 40,000 | 10 MB | 256 | 8 MB | 44 MB | 118 MB |
+| 1,000 | 10,000 | 12 | 120,000 | 28 MB | 237 | 9 MB | 51 MB | 130 MB |
+| 1,000 | 100,000 | 1 | 100,000 | 22 MB | 216 | 9 MB | 46 MB | 121 MB |
+| 1,000 | 100,000 | 4 | 400,000 | 70 MB | 175 | 9 MB | 58 MB | 129 MB |
+| 1,000 | 100,000 | 12 | 1,200,000 | 161 MB | 134 | 8 MB | 53 MB | 131 MB |
+
+Measured on an Apple M4 Pro, 24 GB, macOS, Go 1.26.11, at commit
+`792f5394` (two runs; the heap moved by a few MB between them). The ledger is
+the SQLite file with its WAL, after the checkpoint, and was not vacuumed
+(serve doesn't vacuum it either).
+Heap is Go's heap in use, after a garbage collection at rest, and the most
+sampled while the pages were read, above the 27 MB the test binary held
+before serve opened the ledger; it counts garbage not yet collected, so a
+`GOMEMLIMIT` holds it lower. Process memory is the process's peak resident
+set, which holds that binary and SQLite's page cache: a pod's
+`resources.limits.memory` counts it, not the heap alone. The firings are
+spread evenly over the rules, each with a `service` of six, a `pod` of 50
+and a `severity`, and 40 incidents a week: a ledger of more labels, or
+longer ones, takes more a firing.
+
+What grows the ledger is the firings kept: the bytes a firing fall from
+about 250 to 100 as the weeks pile up, since a rule's rows for each day
+and week are spread over more firings. A thousand rules cost more a firing
+than a hundred: at 12 weeks, 37 bytes more at 100,000 firings a week (134
+against 97) and 103 more at 10,000 (237 against 134). Incidents (40 a week here)
+are in the sizes above; tasks, comments and teams were not written, and are
+rows of people's own, not of each firing. The heap at the most grows
+little with the weeks kept: at a thousand rules and 10,000 firings a week it
+was 44 MB at 4 weeks and 51 at 12, at 100,000 a week 58 and 53, and at a
+hundred rules 22 and 25, 28 and 27. It grows with the rules: about 25 MB
+more at a thousand than at a hundred.
+
+How long it keeps: `--keep` (default 400 days) drops firings older than
+that, and `--keep-activity` (default 800 days, never less than `--keep`)
+the activity log's; `--keep 0` keeps everything. The grid stops at 12
+weeks; past that, the default's 400 days (57 weeks) included, the disk is
+computed from the bytes a firing at 12 weeks, not measured: at 100,000 firings a week the 400 days (57 weeks)
+hold about 5.7 million firings, some 0.6 to 0.8 GB at 100 to 135 bytes. A
+million firings a week was left out: writing a week of 100,000 took about
+25 seconds here, so four weeks of a million would take over fifteen
+minutes, and a ledger of about 1 GB at four weeks (computed the same way).
+Postgres was not measured.
+
+The replay's own memory is on top of this, and is what `lapilli preflight`
+estimates ([above](#before-it-is-deployed)): what it says a run takes is
+not in the numbers here. To set the chart, from the nearest row:
+`serve.ledger.size` is the weeks kept times a week's firings times the
+bytes a firing, and half as much again for growth (the default `2Gi` holds
+about 10 million firings at 135 bytes with the half to spare, computed); `resources.requests.memory`
+is the process memory above, and `resources.limits.memory` that and what
+`lapilli preflight` says a run takes. The chart's defaults (a request of
+`256Mi`, a limit of `1Gi`) are above the process memory of every row here,
+without a run's replay.
+
+Reproduce it, on your machine (about nine to eleven minutes, and the ledgers under
+`TMPDIR`, deleted as each is measured, the largest 161 MB):
+
+```sh
+LAPILLI_SIZING=1 LAPILLI_SIZING_OUT=sizing.md \
+  go test ./internal/serve -run '^TestSizing$' -v -timeout 60m
+```
+
 ## Teams, quiet windows and tasks
 
 It isn't only to look at. Teams own rules (by a note, a name pattern, or

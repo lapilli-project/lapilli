@@ -32,7 +32,10 @@ job: it says the URL to open, on this machine alone (`--listen`, a
 loopback address, a free port by default), and is read-only. Its ledger
 is kept in a temporary directory, removed when Ctrl-C ends it; its clock
 stands at the end of the sample's week, the last whole week its pages
-show.
+show. It has three teams, to pick on the overview and look at the Teams
+page, and one proposal waiting for approval, the longer `for` the report
+suggests, with its backtest, which read-only leaves for you to read and
+not to approve.
 
 ## Install
 
@@ -121,7 +124,9 @@ lapilli verdict --rules alert-rules/ --prometheus http://prometheus:9090 \
 
 `--rules` replays the rules against the history at `--prometheus`:
 Prometheus rule files, `PrometheusRule` resources, Grafana alerting
-provisioning files, ConfigMaps holding them, or a directory of them. The
+provisioning files, Terraform's JSON of `grafana_rule_group`
+([docs/verdict.md](verdict.md#rules-kept-in-terraform)), ConfigMaps holding
+them, or a directory of them. The
 period is the last 7 days (`--since 7d`), or `--from` to `--to` in RFC
 3339, its times shown in the machine's zone or in `--tz`. `--match service`
 keeps an alert about one service from catching an incident in another

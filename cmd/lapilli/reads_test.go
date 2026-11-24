@@ -78,7 +78,7 @@ func TestUnreplayedShown(t *testing.T) {
 	const turned = rules.HistoryUnread + "HTTP 429: slow down (asked 7 times over 3m2s)"
 
 	code, out, _ := verdictOf("--rules", rs)
-	top := "! 1 of 4 rules couldn't be replayed, and are left out of what follows:\n  Turned: " + turned + "\n"
+	top := "! 1 of 4 rules couldn't be replayed, and is left out of what follows:\n  Turned: " + turned + "\n"
 	if code != 0 || !strings.Contains(out, top) || strings.Index(out, top) > strings.Index(out, "RULE") || strings.Contains(out[:strings.Index(out, "RULE")], "Typo") {
 		t.Errorf("exit %d: want the rule named before the table:\n%s", code, out)
 	}
@@ -529,7 +529,7 @@ func TestHistoryUnread(t *testing.T) {
 		{"refused as written", answer(400, "", `{"status":"error","errorType":"bad_data","error":"parse error"}`), nil, false},
 		{"not done", answer(501, "", `{"status":"error","error":"not implemented"}`), nil, false},
 	} {
-		code, out, errs := unreadRun(t, c.answer, append(c.args, "--fail-unreplayed")...)
+		code, out, errs := unreadRun(t, c.answer, append(c.args, "--fail-nothing-replayed=false", "--fail-unreplayed")...)
 		top := strings.Contains(out, "! 2 of 2 rules couldn't be replayed, and are left out of what follows:\n  A, B: "+rules.HistoryUnread)
 		if c.unread && (code != 1 || !top || !strings.Contains(errs, "2 of 2 rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)")) {
 			t.Errorf("%s: exit %d\n%s\n%s", c.name, code, errs, out)

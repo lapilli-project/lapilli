@@ -10,6 +10,7 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
 - `--rules FILE`: replay alert rules against history, so it works on rules you
   just wrote and on history from before you had Lapilli. It reads Prometheus
   rule files, `PrometheusRule` resources, Grafana alerting provisioning files,
+  Terraform's JSON of `grafana_rule_group`,
   each cloud's managed rule groups and its alarms written in PromQL (see
   below), ConfigMaps holding any of them, and directories of them, below them too; below the top, files that
   don't parse, such as a Helm chart's templates, are passed over. Grafana rules are evaluated the way
@@ -425,7 +426,8 @@ are in `--json`). Of those, a rule whose condition compares a value that had
 no series at all in the period (a typo'd metric, a recording rule that isn't
 in the history) is said apart, with the expression: it couldn't have fired
 (`"no_data"` in `--json`). That is looked at after the replays, one question
-to the history for each value, so `--extras 0` skips it.
+to the history for each value, so `--extras 0` skips it, and
+`--check-no-data=false` skips it alone, the other steps still running.
 
 **The steps after the replays**, a longer `for` for the noisy rules, near
 misses, what fired with no record, and whether the rules that never fired

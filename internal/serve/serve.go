@@ -364,6 +364,11 @@ type Config struct {
 	// Listening is told where the UI's listener was bound, once, before it
 	// serves; nil for no one: lapilli demo --serve says the URL to open.
 	Listening func(net.Addr)
+	// Seed, when given, is called by the leader after each round's digest,
+	// until it returns true: lapilli demo --serve keeps its one proposal by
+	// it, which needs a run to backtest against (docs/design/demo.md). No
+	// request reaches it.
+	Seed func(ctx context.Context, s *Server) bool
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -569,6 +574,8 @@ type Server struct {
 	// saidRules are the rules as last read, for what they say.
 	saidRules saidRules
 	ready     atomic.Bool
+	// seeded says cfg.Seed has done its work.
+	seeded atomic.Bool
 	// stopping is set as serve, told to stop, waits out --shutdown-delay:
 	// it is no longer ready.
 	stopping atomic.Bool

@@ -537,6 +537,48 @@ the job does next. Helm's `template` runs no code of the chart's; a
 Kustomize plugin, or a `RENDER` that runs the repository's scripts, does.
 That is one reason forks are kept out.
 
+## Rules rendered from Terraform
+
+Rules kept with the Grafana provider's `grafana_rule_group` are read from
+the JSON Terraform writes of a plan, where every value is resolved:
+
+```yaml
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          render-prepare: terraform init -input=false >&2
+          render: terraform plan -refresh=false -out=tfplan >/dev/null && terraform show -json tfplan
+          prometheus-url: ${{ vars.PROMETHEUS_URL }}
+```
+
+The job needs Terraform, and `terraform init` (in `RENDER_PREPARE`) so that
+the provider is there. Whether the plan also needs the provider's own
+settings (the Grafana's URL and credentials) isn't something Lapilli has
+checked: give the job what your configuration needs to plan. Only the
+`grafana_rule_group` resources are read, from the root module and its child
+modules; the rest of the plan is passed over.
+
+A plan's JSON holds every resource's values, the sensitive ones among them
+(a data source's credentials, a password), and a plan of a real
+configuration is large. So the recipe keeps only the `grafana_rule_group`
+resources of what `RENDER` writes, with `jq`, before anything leaves the
+job: nothing else of the plan is sent to `lapilli serve`, kept in a
+ledger or passed to `lapilli verdict`. Anything else that posts a plan's
+JSON to serve's port should send only those, as this does:
+
+```sh
+terraform show -json tfplan | jq -c '
+  def rule_groups: [(.resources // [])[] | select(.mode == "managed" and .type == "grafana_rule_group")
+    | {address, mode, type, name} + (if has("index") then {index} else {} end) + {values}];
+  def keep: {resources: rule_groups}
+    + (if has("address") then {address} else {} end)
+    + (if (.child_modules | type) == "array" then {child_modules: [.child_modules[] | keep]} else {} end);
+  {format_version}
+    + (if (.planned_values.root_module | type) == "object" then {planned_values: {root_module: (.planned_values.root_module | keep)}} else {} end)
+    + (if (.values.root_module | type) == "object" then {values: {root_module: (.values.root_module | keep)}} else {} end)'
+```
+
+serve keeps only the rule groups of a Terraform JSON it is sent, as well.
+
 ## Judged by user impact
 
 Without incidents, the comment counts firings: what fired before the
