@@ -221,7 +221,10 @@ What the columns of each table say:
 In CAUGHT BY, `✗ nothing fired` says no rule fired for the incident at all.
 `✗ nothing in time; after its end` says none fired in time, but some did
 once it was over, its condition having held in it, each with how long after
-its end; those firings are black stones all the same.
+its end; those firings are black stones all the same. `? not known` says no
+rule replayed fired for it while some rule couldn't be replayed, which may
+have: the line under the table counts those apart (`? N of M incidents ...`),
+and `--json` gives each `"not_known": true`.
 
 Left out above: the firings that caught nothing by when they came in
 `--tz` (while people slept, off hours, at work); what each rule adds (the
