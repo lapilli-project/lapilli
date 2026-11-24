@@ -455,10 +455,10 @@ func TestBacktestFailMissedReprinted(t *testing.T) {
 // evaluation_interval, which its rules API says of the group (60) and the
 // file doesn't: a pull request leaving MoreErrors alone in such a file is
 // taken at it where serve read the configuration (once a day, with the
-// scrape intervals): as a real Prometheus 3.5.0 writes it, 1m; or as one
-// that leaves it out, Prometheus's own 1m. INC-1 stays caught. Where the
-// configuration can't be read, or says another interval, MoreErrors in
-// the file is another rule than serve's record is of: not known. So too
+// scrape intervals): as a real Prometheus 3.5.0 writes it, 1m. INC-1 stays
+// caught. Where the configuration can't be read, says another interval,
+// or says none, as no Prometheus's does, MoreErrors in the file is another
+// rule than serve's record is of: not known. So too
 // where vmalert answers (its groups say their concurrency), whose groups
 // run at its own -evaluationInterval, whatever a configuration says.
 func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
@@ -472,7 +472,7 @@ func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 		scrape         time.Duration
 	}{
 		{"Prometheus 3.5.0's", prometheus350Config(t), nil, false, true, 0},
-		{"none said", "global:\n  scrape_interval: 15s\n", nil, false, true, 0},
+		{"none said", "global:\n  scrape_interval: 15s\n", nil, false, false, 0},
 		{"not served", "", errors.New("HTTP 404"), false, false, 0},
 		{"another", "global:\n  evaluation_interval: 30s\n", nil, false, false, 0},
 		{"vmalert's", "global:\n  evaluation_interval: 1m\n", nil, true, false, 0},

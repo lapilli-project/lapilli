@@ -684,9 +684,10 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   API says of the group (`"interval": 60`) and the file doesn't. With
   `--loaded-rules`, serve reads Prometheus's configuration
   (`/api/v1/status/config`, once a day with the scrape intervals, 2 MiB at
-  most, `--scrape-interval` or not) for its `evaluation_interval`, 1m
-  where a configuration read doesn't say it (Prometheus 3.5.0 writes every
-  default, so says it). A rule of the pull request's left alone, in a
+  most, `--scrape-interval` or not) for its `evaluation_interval`, which
+  Prometheus writes even as its default (3.5.0 writes every default): a
+  configuration that doesn't say it isn't a Prometheus's, and gives none.
+  A rule of the pull request's left alone, in a
   group with no interval, is taken at it when every rule of its name in
   serve's latest version was read from that Prometheus's rules API and
   runs at it: there it runs, after the merge as before. Serve reads the

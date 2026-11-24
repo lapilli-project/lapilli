@@ -440,9 +440,9 @@ func (s *Server) notifications() (*content.Notifications, string) {
 }
 
 // evaluationInterval is the evaluation_interval of the Prometheus whose
-// rules API serve reads (--loaded-rules), as its configuration says, 1m
-// where it says none; 0 when serve doesn't read its rules so, or the
-// configuration wasn't read.
+// rules API serve reads (--loaded-rules), as its configuration says; 0
+// when serve doesn't read its rules so, or the configuration wasn't read
+// or doesn't say it.
 func (s *Server) evaluationInterval() time.Duration {
 	if !s.cfg.Loaded {
 		return 0

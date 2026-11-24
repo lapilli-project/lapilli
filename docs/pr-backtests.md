@@ -368,8 +368,8 @@ one a rule caught whose expression Lapilli compares only by its text (a
 Grafana rule, a Loki ruler's, what MetricsQL reads otherwise than
 Prometheus). A rule file's group with no `interval` runs at Prometheus's
 `evaluation_interval`, which serve reads from `/api/v1/status/config`
-with `--loaded-rules` (1m where the configuration doesn't say it): where
-that isn't served (most managed services don't serve it), or the rule is
+with `--loaded-rules`: where that isn't served (most managed services
+don't serve it), or doesn't say it, or the rule is
 vmalert's, the group is another than the one the rules API says, and its
 rules' catches are not known: give the group its `interval`.
 `status` works as without it. Serve runs no scenario a pull request's expectations name
