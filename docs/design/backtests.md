@@ -476,9 +476,9 @@ credential in CI, and the job's log says where it is in the queue.
   name for a plain token) and, since 0.69.2, by its id as the token says
   it (`repository_id`, schema 031), the pull request's number from GitHub's `ref`
   claim or as the job sent it, of a merge queue's run the branch the
-  queue's ref names (`queue_branch`, schema 032; `''` for any other run's),
+  queue's ref names (`queue_branch`, schema 033; `''` for any other run's),
   of a GitHub Actions job's its workflow's file and its run's number
-  (`workflow`, `run_number`, schema 032, from the token's `workflow_ref`
+  (`workflow`, `run_number`, schema 033, from the token's `workflow_ref`
   and `run_number`),
   the commit sent, its state, when it was
   asked, started and ended, the requests it made, a hash of its key, the
@@ -1153,7 +1153,7 @@ Where step 1 does otherwise than the sections above say, or says more:
   show: "") superseded none, as two repositories named so would be one. A
   row with no id, asked before 0.69.2, is still matched by its name. A
   merge queue's run's number is its `ref`'s too, the queue's
-  (`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`): until schema 032 it
+  (`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`): until schema 033 it
   was the job's, and superseded none, so that a group the queue built
   again left the one it replaced waiting, its turn and its share of the
   entry's three. Now a group takes the place of the one waiting of the
@@ -1164,7 +1164,7 @@ Where step 1 does otherwise than the sections above say, or says more:
   rather than taken without superseding, as the number would then be the
   job's word for a run of the repository's own context, and GitHub's queue
   makes no such run (the recipe refuses one whose `GITHUB_REF` isn't the
-  queue's ref too). And since schema 032, a pull request's backtest or a
+  queue's ref too). And since schema 033, a pull request's backtest or a
   group's takes the place only of one of another commit (as the job sends
   it): two jobs of one run, a `KEY` each, sent the same commit through one
   entry, and the second took the first's place, failing it under its gate,
@@ -1177,7 +1177,7 @@ Where step 1 does otherwise than the sections above say, or says more:
   runner while the queue built the group again, or the earlier run run
   again, takes no newer group's place, nor a pull request's run of an
   earlier commit a newer commit's; a run of another workflow takes no
-  place of this one's. A row with no workflow, asked before 032, is taken
+  place of this one's. A row with no workflow, asked before 033, is taken
   the place of as before; Forgejo's backtests, whose run isn't read, by
   the commit alone; a GitHub token whose run can't be read plainly (a
   `workflow_ref` with no `@ref`, a `run_number` that isn't a decimal)
