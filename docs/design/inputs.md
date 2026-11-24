@@ -311,6 +311,22 @@ people:
   `RDATE`s each, offsets within 18 hours, 16 changes a year; a zone is
   worked out a year at a time for the years asked, so Outlook's rules
   from 1601 cost a few steps.
+- **As built, for the next release: `RDATE`.** An event's `RDATE`s add
+  occurrences, with an `RRULE` or without one, as RFC 5545 (3.8.5.2) has
+  the set: `DTSTART`, the rule's and the dates added, each start once,
+  less what `EXDATE` leaves out, `DTSTART` among them; an occurrence
+  added is replaced by `RECURRENCE-ID` as a rule's is. A date is a
+  `DATE-TIME`, its `TZID` read as `DTSTART`'s (an IANA name, the feed's
+  own `VTIMEZONE`, a Windows name), or a `DATE`; a `VALUE=PERIOD` is a
+  time and its end, or its length as a `DURATION`, and gives that turn
+  its own end (one the rule gives too takes the period's). Refused, the
+  event passed over and said: days beside a `DTSTART` of a time (which
+  don't say when in the day) and times or periods beside one of a day; a
+  period of days, of more than a year, or that doesn't end after it
+  starts. The bounds are a rule's: each date a step of the feed's
+  2,000,000 and of its event's 200,000 (the event passed over past it);
+  only those that may meet the span read are kept, and they are turns, so
+  a feed whose dates kept pass 50,000 is refused.
 
 ### Attacker's look
 

@@ -319,9 +319,17 @@ expanded on the clock they are written on, so a weekly 09:00 turn stays
 at 09:00 when the clocks change: with `INTERVAL`, `COUNT`, `UNTIL`,
 `BYDAY` (numbered for monthly and yearly, as `1MO` or `-1FR`),
 `BYMONTHDAY`, `BYMONTH`, `BYSETPOS` and `WKST`, a day a month doesn't have
-skipped, with `EXDATE` and occurrences replaced by `RECURRENCE-ID`. What
-can't be read (`BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, a repeat more often than
-daily, a zone none of these is) is passed over and said. A feed's URL holds its secret, so it is
+skipped, with `EXDATE` and occurrences replaced by `RECURRENCE-ID`. The
+dates `RDATE` adds are occurrences too, with or without an `RRULE`, as RFC
+5545 has them: times (in UTC, floating, or with a `TZID`, read as
+`DTSTART`'s), days, or periods (`VALUE=PERIOD`) of a time and its end or
+its length, which give that occurrence its own end; each start once, and
+`EXDATE` leaves any of them out, `DTSTART` too. What can't be read
+(`BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, a repeat more often than daily, a zone
+none of these is; an `RDATE` of days beside a `DTSTART` of a time, which
+doesn't say when in the day, or the other way round; a period of days, of
+more than a year, or that doesn't end after it starts) is passed over and
+said. A feed's URL holds its secret, so it is
 read from its file, never shown or logged, fetched over https only, with
 no redirect followed, 8 MB and 30 seconds at most. `lapilli serve` reads
 each feed every `every` (30 minutes by default) and keeps the turns in its ledger past what the feed

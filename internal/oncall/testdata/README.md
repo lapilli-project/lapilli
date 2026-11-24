@@ -17,3 +17,4 @@ file doesn't name; 2025 and 2026), lines ending CRLF and folded as RFC
 | `outlook-no-vtimezone.ics` | as above | the same events with no `VTIMEZONE`: the Windows names alone |
 | `pagerduty-monthly.ics` | PagerDuty's feed, as above | its layout, with a monthly and a yearly `RRULE` (PagerDuty itself writes each turn as an event) |
 | `opsgenie-yearly.ics` | Opsgenie's export, as above | its layout, with a monthly `RRULE` on the last day of the month and a yearly one |
+| `google-rdate.ics` | Google Calendar, as above | its layout, with `RDATE` lines, which its Calendar API keeps in an event's `recurrence` as RFC 5545 writes them (its own editor writes none): dates added to a weekly repeat with `TZID=`, one the repeat has already and one left out by `EXDATE`; days added to an all-day event with no `RRULE`; `VALUE=PERIOD` by an end and by a length; and a Windows zone's name |
