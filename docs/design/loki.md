@@ -32,8 +32,8 @@ Neither was replayed. How each was read in v0.26.0:
   PromQL: `count_over_time({app="shop"}[5m])` is a range selector to
   Prometheus, matching no series, so such a rule was replayed as never
   firing, wrongly and without a word. A rule whose condition reads
-  Prometheus, with a Loki query beside it, is replayed in part, as states.md
-  says (F6); that stays.
+  Prometheus, with a Loki query beside it, was replayed in part, as states.md
+  says (F6); it is replayed whole now (section 2).
 - A Loki ruler's rule file given to `--rules` reads as a Prometheus rule
   file, and its LogQL went to Prometheus the same way. There was no way to
   say a file was Loki's.
@@ -221,11 +221,50 @@ secret). Measured: a Viewer's token may ask it, by GET. Without
 `--grafana`, a Grafana rule on Loki is asked of `--loki`, and is listed
 without either.
 
-**One kind a rule.** A rule whose condition reads both a Prometheus and a
-Loki data source is listed ("its condition reads Prometheus and Loki
-together"): each rule's history is one place. One whose condition reads
-Prometheus, with a Loki query beside it, stays as states.md has it:
-replayed, in part.
+**One kind a rule, and a query beside it.** A rule whose condition reads
+both a Prometheus and a Loki data source is listed ("its condition reads
+Prometheus and Loki together"): the condition is evaluated over one history.
+A rule whose condition reads Prometheus, with a Loki query beside it (one
+the condition doesn't read, whose values an annotation shows), is replayed
+whole: the Loki query is asked too, to know when it returned nothing, which
+Grafana takes as the rule's no data (states.md, F6), and the rule's history
+is in two places (below).
+
+**A rule's history in two places.** The condition is replayed against the
+rule's own history, `--prometheus`. A query beside it, on a Loki data
+source, is asked through that data source's proxy, as a rule on Loki is, with
+a history of its own. A rule has one history of its own (`Rule.Logs`, the
+Loki a condition reads, or none) and, for the queries beside the condition,
+`Graph.Aside`: a ref of its queries to the uid of the Loki it is on. What it
+needed:
+
+- **The queries.** Read as Grafana's Loki data source asks them (below):
+  an instant query as a value at each evaluation; a range query as an ask
+  of whether a point is in its window (`Ask` with `Logs`, `Classic`, and the
+  reducer `present`), as the condition of a rule on Loki asks it. A query
+  that can't be asked (a log query, which returns lines; one Grafana can't
+  run; a step finer than a replay asks) is left as a query on another data
+  source, as before: the rule is replayed in part and says so.
+- **An asker of its own for each Loki**, beside the rule's. The requests of
+  a rule are planned before they are asked, so that rules share them
+  (`shared`); the queries beside the condition are planned against the
+  Loki's own asker, numbered as a Grafana Loki data source is, so a rule on
+  that Loki and one beside it share an answer. Run, Plan and the
+  backtest port's pace count them by the Loki they go to (`By`:
+  `grafana/UID`).
+- **The history of each ask.** Each query is asked of the history it is on:
+  the rule's for the condition's, the Loki's for a query beside it. The day
+  before (no data or no history, below) is looked through in the history of
+  the query, in LogQL where it is a Loki's.
+- **What no data and failures mean for it.** A query beside the condition
+  that returns nothing is NoData as any query is, once it has returned
+  something. One that fails is not known, as a query outside the condition
+  of a rule on Prometheus is, and the rule says so (`Failed`). One a Loki
+  refuses as written (400) is not taken as no data: for a Prometheus query
+  that was seen, and Grafana's answer for a Loki one hasn't been measured,
+  so it is not known too. The rule isn't replayed when there is no Loki to
+  ask; without `--grafana` or `--loki` its Loki queries are left as queries
+  on another data source, and the rule is replayed in part.
 
 **Queries, as Grafana's Loki data source asks them**, measured through
 `/api/v1/eval` and Loki's own log of what it was asked:
@@ -293,11 +332,56 @@ instant query an evaluation, a point a series a step on Lapilli's side
 however wide its range selector; what that costs Loki is what the ruler
 costs it, an evaluation at a time.
 
-**Classic conditions over Loki** are listed: their reducers are worked out
-by Prometheus's subqueries (states.md, section 2), and doing them in Go too
-would be a second copy of all eleven. Grafana's editor has written reduce
-and threshold expressions since Grafana 9; a classic condition is left from
-before, and over Loki rarer still.
+**Classic conditions over Loki.** Over Prometheus their reducers are worked
+out by subqueries (states.md, section 2). LogQL has none, so for a classic
+condition on a Loki range query the replay reads the points of the range
+query Grafana's evaluation reads (as for a reduce, above) and works each
+window's reducer out in Go: `rules.ClassicReduce`. Two copies of the twelve
+reducers, then: the Prometheus path is kept as measured against a real
+Grafana, and a test (`TestClassicLokiAgreesWithPrometheus`) runs the same
+points through both, over a Prometheus stand-in that answers the subqueries as
+PromQL defines them, and wants the same states for every reducer, every
+evaluator and each operator joining conditions. Each choice follows Grafana
+13.3.1 (`pkg/expr/classic`), and `TestClassicReduceAsGrafana` holds the
+reducers to Grafana's own tests of them (`reduce_test.go`) and to what its
+code does where those say nothing:
+
+- **Reducers** (`reduce.go`, `reducer.Reduce`, with `nilOrNaN` and
+  `calculateDiff`): a series with no point reduces to none. `avg`, `sum`,
+  `median` and `count_non_null` leave NaN out, and are none when no point is
+  a number (`count_non_null` when none is counted). `count` counts every
+  point, NaN too, and is never none. `min` and `max` start from
+  `math.MaxFloat64` and `-math.MaxFloat64`, so a series of `+Inf` alone has
+  a `min` of `MaxFloat64`: kept as Grafana has it. `last` is the newest
+  number. `median` is the middle of the sorted numbers, the mean of the two
+  in the middle when there is an even count. `diff`, `diff_abs`,
+  `percent_diff` and `percent_diff_abs` (`calculateDiff`) take the newest
+  number and, when it isn't the series' first point, the oldest number; a
+  newest number that is the first point alone is 0, whatever it is; with
+  NaN before it, the oldest number can be itself, whose percent diff is NaN
+  when it is 0. The Prometheus path says 0 there (it knows a window holds
+  one number, not where): one difference left, for a window whose only
+  number is a 0 that isn't its first point.
+- **Evaluators** (`evaluator.go`, `thresholdEvaluator.Eval`,
+  `rangedEvaluator.Eval`, `noValueEvaluator.Eval`): none meets every
+  comparison but `no_value`; NaN is a value, meeting `ne` and no ordering;
+  the ranges, either way round. (`rules.ClassicCond.Pass`, shared with the
+  Prometheus path.)
+- **Conditions and operators** (`classic.go`, `ConditionsCmd.Execute`,
+  `executeCond`, `compareWithOperator`): a condition holds when any of its
+  series passes; it is no data when every series reduces to none; the
+  results fold left to right with each condition's own operator, `and`, `or`
+  or `logic-or`, with no precedence, no data folded as firing is; `logic-or`
+  leaves the rest out once those before it hold; no data is decided before
+  firing. (`rules.Classic.Eval`, shared.)
+- **No data** (`executeCond`). A condition with no series at all holds for
+  `no_value`, and is otherwise no data. A data source query that returned
+  nothing makes the whole evaluation NoData before, as for any query
+  (states.md, section 1). `no_value` holds for a series that reduces to
+  none. An instant query's value is compared as it is.
+- **Asks.** A condition's reducer and which series have a point in the
+  window are two reads of one range, answered from one request (`logSame`).
+  A step finer than a second isn't replayed, as for a reduce.
 
 **No data or no history** (states.md, section 1): a query is taken to have
 returned nothing only once it has returned something, in the replay or in
@@ -322,10 +406,11 @@ Grafana gives, so a rule that isn't replayed says why.
 
 ## Not done, and why
 
-- **A Grafana rule reading Prometheus with a Loki query beside it** could
-  have the Loki query asked, to know when it returned nothing: it would be
-  replayed whole, not in part. It needs a rule's history to be in two
-  places at once; left for after this.
+- **A condition reading Prometheus and Loki together**, and, by the same
+  token, a Prometheus query beside a condition that reads Loki: each
+  needs a condition evaluated over histories in two places. Only the queries
+  beside the condition are asked of a second history (section 2); a
+  condition's own are all of one.
 - **Sub-second phases.** Loki's ruler, like Prometheus's, runs a group at a
   fraction of a second past a second; the replay evaluates on the second
   (states.md, section 5). Prometheus's samples are scraped seconds apart,
@@ -368,8 +453,9 @@ Taken while building; each is open to the review.
   of the types known to speak PromQL. A data source of a PromQL type not on
   the list says so, rather than being replayed as before: such a type
   should be added.
-- **Reduces in Go only for Loki.** PromQL's stay subqueries, which
-  Prometheus works out near its data.
+- **Reduces in Go only for Loki**, Grafana's reduce expressions and its
+  classic conditions' reducers alike. PromQL's stay subqueries, which
+  Prometheus works out near its data, and measured against Grafana.
 - **Every request to Loki is a GET**, for the proxy, which a long query could
   take past a URL's length; none of those measured came near.
 - **`query_range`, not an instant query an evaluation**, for every replay:
@@ -418,8 +504,8 @@ Grafana rules on Loki: instant queries with NoData, OK and KeepLast; range
 queries reduced by `last`, `max`, `mean`, `sum`, `count` and `min`, at 1s,
 3s and a query's own 10s with `$__auto`; a math expression over two
 queries; a `for`; series by level that come and go; and a classic
-condition, a condition on Prometheus and Loki together and one on MySQL,
-which are listed.
+condition (listed then), a condition on Prometheus and Loki together and one
+on MySQL, which are listed.
 
 `lapilli verdict --check-replay` over forty minutes, 19:35 to 20:15:
 
@@ -427,6 +513,16 @@ which are listed.
 |---|---|---|
 | Loki's ruler (v0.26.0: its files, as Prometheus rules) | 23% (13 alike, 4 only replayed, 39 only real; 5 rules not replayed) | 100% (88 of 88) |
 | Grafana on Loki | 20% (31 alike, 4 only replayed, 122 only real; 4 rules not replayed) | 100% (166 of 166) |
+
+Built after, for the same Grafana: classic conditions over Loki, and a Loki
+query beside a condition that reads Prometheus. They are tested with
+stand-ins (`lokiclassic_test.go`, `lokiaside_test.go`), and the rules of
+both shapes are kept with the recording (`rules.yaml`: each classic reducer
+over Loki, a range, `no_value`, conditions joined by each operator, and a
+condition on Prometheus with a Loki query beside it, instant and range),
+for the next recording to measure: the answers they ask for aren't recorded
+yet, so `TestRealLokiGrafana` says those rules' requests are not recorded
+until it is.
 
 Each firing starts and ends at the same evaluation as Loki's or Grafana's,
 but for one on when the period starts, which the replay has from its

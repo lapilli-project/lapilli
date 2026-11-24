@@ -43,13 +43,22 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   worked out by Lapilli as LogQL has no subqueries. Read from provisioning
   files, a query whose model says `datasource.type: loki` is asked of
   `--loki`.
+- **Classic conditions over Loki** are replayed: Lapilli reads the points
+  of the range query Grafana reads and works each reducer out as Grafana's
+  classic conditions do (NaN, no data, each evaluator and operator).
+- **A Loki query beside a condition that reads Prometheus** (one the
+  condition doesn't read, whose values an annotation shows) is asked too,
+  through Grafana's data source proxy, so a rule that has no data because
+  that query returned nothing is replayed as Grafana sent it. A log query
+  beside it, or one Grafana can't run, is left as a query on another data
+  source, and the rule is marked "replayed in part".
 - **Not replayed, and listed with why:** log queries, which return lines,
-  not numbers; a reduce asking Loki finer than a point a second (86,400 a
-  series a day); a query Grafana can't run (over Loki's 11,000 points a
-  window, or a step or `queryType` Grafana can't read); classic conditions
-  over Loki; a condition reading
-  Prometheus and Loki together; and every data source that is neither
-  PromQL nor LogQL, SQL ones among them, by the type Grafana gives.
+  not numbers; a reduce or classic condition asking Loki finer than a point
+  a second (86,400 a series a day); a query Grafana can't run (over Loki's
+  11,000 points a window, or a step or `queryType` Grafana can't read); a
+  condition reading Prometheus and Loki together; and every data source that
+  is neither PromQL nor LogQL, SQL ones among them, by the type Grafana
+  gives.
 - **Late lines.** A log shipper sends a line a second or two after it was
   written; Loki's ruler saw what had arrived. `--late 2s` replays as if
   each line arrived that late. A range Loki refuses for its series
