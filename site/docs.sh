@@ -88,6 +88,37 @@ for n in $pages; do
   page "docs/$n.md" "$n" "/docs/$n/"
 done
 
+# The search's index, /docs/search.json: each page's title, URL and
+# description, and its ## and ### headings with the ids kramdown's GFM
+# parser gives them (lowercase; letters, digits, _ and - kept; spaces to -),
+# so a result can go to the section. A heading whose id kramdown makes
+# otherwise, one with a letter outside ASCII or a second of the same words
+# on a page, is caught by test/a11y/site.mjs, which follows every result.
+{
+  printf '['
+  sep=
+  for n in index $pages; do
+    if [ "$n" = index ]; then src=docs/README.md url=/docs/; else src=docs/$n.md url=/docs/$n/; fi
+    printf '%s\n' "$sep"
+    sep=,
+    awk -F '\t' -v n="$n" -v url="$base$url" '
+      function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
+      function plain(s) { gsub(/`/, "", s); while (match(s, /\[[^]]*\]\([^)]*\)/)) { t = substr(s, RSTART + 1); sub(/\].*/, "", t); s = substr(s, 1, RSTART - 1) t substr(s, RSTART + RLENGTH) } return s }
+      FNR == NR { if ($1 == n) desc = $2; next }
+      /^(```|~~~)/ { fence = !fence; next }
+      fence { next }
+      /^# / && title == "" { title = plain(substr($0, 3)); next }
+      /^###? / {
+        text = $0; sub(/^#+ +/, "", text); sub(/ +\{#[^}]*\} *$/, "", text)
+        id = tolower(text); gsub(/[^a-z0-9_ \t-]/, "", id); gsub(/[ \t]/, "-", id)
+        heads = heads (heads == "" ? "" : ",") "[" q(id) "," q(plain(text)) "]"
+      }
+      END { printf "{\"title\":%s,\"url\":%s,\"description\":%s,\"headings\":[%s]}", q(title), q(url), q(desc), heads }
+    ' "$tmp/descriptions" "$src"
+  done
+  printf '\n]\n'
+} >"$out/search.json"
+
 # The sidebar: a group for each ## heading of docs/README.md, and its pages.
 awk -v base="$base" '
   function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }

@@ -1,7 +1,8 @@
 // Checks lapilli.dev, the front page and the docs, with axe-core against
 // WCAG 2.2 AA, in light and in dark, and that no page scrolls sideways at
 // 320 CSS px (WCAG 1.4.10): every page its sitemap.xml lists, which
-// jekyll-sitemap writes from every page there is. Run by
+// jekyll-sitemap writes from every page there is. And that every result of
+// the docs' search goes to a section there is. Run by
 // .github/workflows/pages.yml over the site it builds, or by hand:
 //
 //   cd test/a11y && npm ci && BASE=https://lapilli.dev node site.mjs
@@ -71,6 +72,23 @@ for (const path of paths) {
   await page.goto(base + path, { waitUntil: 'networkidle' });
   const w = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
   if (w[0] > w[1]) found.push({ scheme: '320px', path, id: 'reflow', help: `scrolls sideways at 320 CSS px: ${w[0]} > ${w[1]}` });
+}
+// The docs' search (site/docs.sh writes its index): every result goes to a
+// page there is, and to a section of it there is, by the id kramdown gave
+// the heading.
+const index = await (await fetch(`${base}/docs/search.json`)).json();
+if (index.length < 10) found.push({ scheme: 'search', path: '/docs/search.json', id: 'search-index', help: `lists ${index.length} pages: too few to be the docs'` });
+for (const entry of index) {
+  const path = new URL(entry.url, base).pathname;
+  const r = await page.goto(base + path, { waitUntil: 'domcontentloaded' });
+  if (!r || !r.ok()) {
+    found.push({ scheme: 'search', path, id: 'search-page', help: 'the search lists a page that is not there' });
+    continue;
+  }
+  const ids = new Set(await page.evaluate(() => [...document.querySelectorAll('article.doc [id]')].map((e) => e.id)));
+  for (const [id, text] of entry.headings) {
+    if (!ids.has(id)) found.push({ scheme: 'search', path, id: 'search-anchor', help: `the search goes to #${id} ("${text}"), which the page does not have` });
+  }
 }
 await browser.close();
 server?.close();

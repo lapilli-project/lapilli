@@ -17,6 +17,8 @@ QueueDepth    9         10    9      0              1          1m0s
 Really fired, but no rule given has the name: Watchdog.
 ```
 
+## When two firings are alike
+
 Two firings are alike when they are of the same alert, agree on the labels both
 have, and start within two evaluations of each other, since Prometheus places a
 group anywhere in its interval. Labels a store adds to the series are passed
@@ -24,6 +26,8 @@ over, and so is a rule's label with a template in it. A firing with no match too
 near the end of the period to tell isn't counted. A group's `interval` is taken
 from the rules; a rule file that leaves it to the global `evaluation_interval`
 doesn't say, so give that as `--step` if it isn't 1m.
+
+## What it is checked against
 
 What really fired comes from a series, or from Grafana's own history:
 
@@ -36,6 +40,8 @@ What really fired comes from a series, or from Grafana's own history:
 | vmalert, writing to VictoriaMetrics (`-remoteWrite.url`) | `ALERTS{alertstate="firing"}` | [documented](https://docs.victoriametrics.com/victoriametrics/vmalert/); checked in CI (`e2e-compat`) |
 | Thanos, over a Prometheus's sidecar | that Prometheus's `ALERTS{alertstate="firing"}` | checked in CI (`e2e-compat`) |
 | Mimir, Azure Monitor, Google Cloud | ask for `ALERTS` and see | their docs don't say; `--check-series` names another series |
+
+## Grafana's alert state history
 
 Grafana keeps its alert state history in annotations unless told
 otherwise, and writes `GRAFANA_ALERTS` only when told to, so most
@@ -68,10 +74,14 @@ with `GRAFANA_ALERTS`, starting and ending at the same evaluation
 `--grafana` holds that can't be replayed at all
 ([docs/verdict.md](verdict.md)).
 
+## When nothing could be checked
+
 When the series hold nothing for the period, or no rule could be replayed, it
 says so and exits 1, since nothing was checked. If a rule replays differently from how it
 really fired, please [report it](../CONTRIBUTING.md): it is the most useful report
 there is.
+
+## In `lapilli serve`
 
 `lapilli serve` does this itself, as it goes
 ([docs/design/fidelity.md](design/fidelity.md)). Each day the runs

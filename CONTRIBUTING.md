@@ -251,7 +251,9 @@ front page is in English, Spanish, Japanese and Korean (`site/index.md`,
 `site/_data/i18n.yml`; the docs are in English only. A new page in `docs/`
 gets a line in `docs/README.md`: the site's sidebar and each page's
 description come from it, and the site's build fails on a page it doesn't
-list (`site/docs.sh`). A change to the English
+list (`site/docs.sh`). A page's `##` and `###` headings are its "On this
+page" list on the site and what the docs' search finds in it, so a page
+longer than a screen or two has them, no two alike. A change to the English
 front page changes the other three with it, or says in the pull request
 which it left. Their sections keep the English page's ids, which the header
 links to, and the build fails when they don't.

@@ -46,6 +46,8 @@ has each CI's job, and what to keep from pull requests from forks: their
 rules become queries sent with your credentials, and a render command runs
 what they hold.
 
+## The report
+
 `--markdown` writes the report for a pull request or a merge request, at
 most 64,000 bytes, under the 65,536 characters GitHub takes, cut short
 with a note when longer:
@@ -82,6 +84,8 @@ how many, as `unreplayed` counts them, since the numbers leave them out;
 they are listed, with why, under the table. Those that differ but fire as
 they did are folded in `<details>`.
 
+## What counts as a change
+
 A recording rule that differs is a change too, listed apart: a replay reads
 what a recording rule recorded, from the history, so the alerts that read
 one are replayed against what it recorded, not what the change would
@@ -106,6 +110,8 @@ Amazon ruler may keep them without applying them, depending on its
 version. Where they aren't applied, the replay's alerts carry labels the
 real ones don't.
 
+## Names and errors in the comment
+
 Rule
 names, labels, incidents and the reasons a rule couldn't be replayed come
 from whoever wrote the rules, and a pull request's author may be anyone:
@@ -122,6 +128,8 @@ refused, has where the history and the rules are read from taken out: the
 `--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, the user names
 in them and their hosts, each as a whole word, any IP address and port,
 the tenants and a `--gcp-project`.
+
+## Stable output for tools
 
 What a tool reads is stable:
 
@@ -217,6 +225,8 @@ the branch's rules:
   status: a status the host refuses is said in the job's log, and fails
   the job only with `FAIL_ON_ERROR=true`.
 
+### Where the status goes
+
 The status goes on the commit the CI names as the pull request's head
 (`STATUS_SHA` to give another), and only when that is the commit the
 backtest read, or a parent of the merge the CI made of it; with neither,
@@ -291,6 +301,8 @@ and the event names no pull request. `github.sh` says so and fails,
 setting no status, so a branch whose rules require the job or
 `lapilli/backtest` can't merge through a queue yet: leave `merge_group`
 out of the workflow's `on:`, and the queue off for that branch.
+
+### Each host's status and token
 
 Each host sets it through its own API, and the token needs more than the
 comment does:

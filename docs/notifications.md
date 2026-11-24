@@ -8,6 +8,8 @@ the notifications as they were sent, beside the firings, and say how many
 each rule sent, how many were repeats, how many came while people slept, and
 how many were for firings that caught nothing.
 
+## Sending notifications to Lapilli
+
 With `--notify-listen ADDR` it opens a port that takes notifications, and
 nothing else, each source on a path of its own:
 
@@ -73,6 +75,8 @@ receivers:
             credentials_file: /etc/alertmanager/lapilli-token
 ```
 
+## How notifications are counted
+
 A notification's alert is tied to its rule's firing whose labels are all
 among the alert's (which carries external labels the replay doesn't), and
 which started within two evaluations of it; one that ties to none is kept and
@@ -100,6 +104,8 @@ and, once mutes are kept, how many firings paged no one and why
 ([below](#why-a-firing-paged-no-one)); a team's digest, for its rules.
 Notifications can't be replayed for history, so each number counts from
 the first that came. In the chart: `serve.notificationsAPI`.
+
+## What the port takes
 
 The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's
 `max_alerts` keeps it under), 20 a second from each source, one write at a
@@ -202,6 +208,8 @@ be read as the recorder's (a silence with no ID, a mute of an alert with no
 `lapilli_serve_notifications_refused_total`. Someone with the token can
 post mutes that never were: they claim only that a firing was muted, and
 change no stone or count ([design/mutes.md](design/mutes.md)).
+
+## What isn't kept, and the tests
 
 Annotations aren't kept. Who was on call, and whether they acknowledged, is
 for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
