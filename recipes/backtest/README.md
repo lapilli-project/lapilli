@@ -563,7 +563,9 @@ comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS`, `EXPECT_REQUIRED` and
 serve's incidents and impact windows, with no `INCIDENTS` or `IMPACT`: the
 rules that differ are judged by the backtest, and the rules left alone by
 serve's record, which rules caught each incident, not replayed: a catch
-counts only where the rule was written then as it is after the change. A
+counts only where the rule was then, as parsed, the rule it is after the
+change (one serve reads from Prometheus's rules API, which prints its
+expression again, is the rule its file writes). A
 rule left alone that serve doesn't run as the pull request has it, or
 whose record doesn't hold an incident's time (serve's runs began after
 it, or couldn't replay the rule), may have caught it unrecorded: that

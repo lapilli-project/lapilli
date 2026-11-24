@@ -355,12 +355,19 @@ The rules are read from git, and `render` run, in the job as before;
 reads Lapilli's. `fail-missed` holds the change to serve's incidents: the
 rules that differ are judged by the backtest, the rules left alone by
 serve's record of them, which rules caught each incident, not replayed: a
-catch counts only where the rule was written then as it is after the
-change. An incident a rule left alone may have caught with no record of
-it (serve doesn't run the rule as the pull request has it, or its runs
-don't cover the incident's time), or that a rule written otherwise then
-caught, is not known, which fails the step as a gate that can't judge
-([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
+catch counts only where the rule was then the rule it is after the change,
+as parsed: a rule serve reads from Prometheus's rules API, which prints
+its expression again (`sum by (a) (x)` for `sum(x) by (a)`, `5m` for
+`300s`, its `for` in seconds), is the rule its file writes. An incident
+a rule left alone may have caught with no record of it (serve doesn't run
+the rule as the pull request has it, or its runs don't cover the
+incident's time), or that a rule written otherwise then caught, is not
+known, which fails the step as a gate that can't judge
+([backtests.md](design/backtests.md#held-to-the-incidents-step-4)); so is
+one a rule caught whose file gives no group `interval` while serve reads
+it from an API, which says the interval it runs at, or whose expression
+Lapilli compares only by its text (a Grafana rule, a Loki ruler's, what
+MetricsQL reads otherwise than Prometheus).
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through
 lapilli serve, and `promtool` is refused with `serve-url`; run `promtool
