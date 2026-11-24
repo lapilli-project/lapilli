@@ -1284,7 +1284,10 @@ func TestBacktestPrunedPortOff(t *testing.T) {
 func TestBacktestReadsNotStarved(t *testing.T) {
 	parallel(t)
 	b := btServer(t, nil, "", nil)
-	b.s.btPort.keys.every = 0 // a listing for each guess that waits
+	// A listing for each guess that waits, waited for as long as it takes:
+	// what is counted below is how many waited, by the server's clock,
+	// which btServer stops, not how soon a listing ended.
+	b.s.btPort.keys.every, b.s.btPort.keys.within = 0, time.Minute
 	const proxy = "192.0.2.5" // the ingress controller's
 	ask := func(method, addr, path, key string) int {
 		r := httptest.NewRequest(method, path, nil)
@@ -1310,16 +1313,18 @@ func TestBacktestReadsNotStarved(t *testing.T) {
 		t.Fatalf("the job's first poll: %d", c)
 	}
 	// Someone else, with no token, through the same proxy: 150 guesses,
-	// the bucket's 20 of them a 404 after a listing, the rest a 503 at
-	// once; one more a second comes back to the bucket, so a slow run may
-	// have a 404 or two more, never most.
+	// the bucket's 20 of them a 404 after a listing they wait for, the rest
+	// answered at once, none waiting: a 503, or a 404 when a listing begun
+	// after it came, another's, has ended by then. The bucket's clock is
+	// the server's, which doesn't move here: none comes back to it.
 	codes := map[int]int{}
+	waited := b.s.btPort.keys.waited.Load()
 	for i := range 150 {
 		codes[ask("GET", proxy, fmt.Sprintf("/v1/backtests/%032x", i), "nothing")]++
 	}
 	codes[ask("GET", proxy, "/v1/backtests/"+id, "a wrong key")]++
-	if codes[404] < 20 || codes[503] < 100 || codes[404]+codes[503] != 151 {
-		t.Errorf("151 guesses: %v", codes)
+	if n := b.s.btPort.keys.waited.Load() - waited; n != 20 || codes[404] < 20 || codes[404]+codes[503] != 151 {
+		t.Errorf("151 guesses: %v, %d waited for a listing, want the bucket's 20", codes, n)
 	}
 	if c := ask("GET", proxy, "/v1/backtests/"+id, key); c != 202 {
 		t.Errorf("the job's poll, its key right, after the guesses from its address: %d", c)

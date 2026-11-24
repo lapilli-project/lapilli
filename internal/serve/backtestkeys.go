@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,6 +44,9 @@ type btKeys struct {
 	err                  error // the latest listing's
 	// changed is closed when a listing ends, and made anew.
 	changed chan struct{}
+	// waited counts the pairs that waited for a listing (await): the tests
+	// hold the guesses past an address's bucket to none.
+	waited atomic.Int64
 }
 
 func newBTKeys(life context.Context, list func(context.Context) (map[string]string, error)) *btKeys {
@@ -109,6 +113,7 @@ func (k *btKeys) kick() {
 // await waits, within k.within and ctx, for a listing begun after it was
 // called to end: false when none did, and the listing's error.
 func (k *btKeys) await(ctx context.Context) (bool, error) {
+	k.waited.Add(1)
 	k.mu.Lock()
 	need := k.want()
 	k.mu.Unlock()
