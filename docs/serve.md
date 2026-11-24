@@ -499,19 +499,21 @@ longer ones, takes more a firing.
 
 What grows the ledger is the firings kept: the bytes a firing fall from
 about 250 to 100 as the weeks pile up, since a rule's rows for each day
-and week are spread over more firings, and a thousand rules cost 30 to 40
-more bytes a firing than a hundred at 12 weeks. Incidents (40 a week here)
+and week are spread over more firings. A thousand rules cost more a firing
+than a hundred: at 12 weeks, 37 bytes more at 100,000 firings a week (134
+against 97) and 103 more at 10,000 (237 against 134). Incidents (40 a week here)
 are in the sizes above; tasks, comments and teams were not written, and are
-rows of people's own, not of each firing. The heap at the most does not
-grow with the weeks kept (a thousand rules at 12 weeks took no more than at
-4) and does with the rules: about 25 MB more at a thousand than at a
-hundred.
+rows of people's own, not of each firing. The heap at the most grows
+little with the weeks kept: at a thousand rules and 10,000 firings a week it
+was 44 MB at 4 weeks and 51 at 12, at 100,000 a week 58 and 53, and at a
+hundred rules 22 and 25, 28 and 27. It grows with the rules: about 25 MB
+more at a thousand than at a hundred.
 
 How long it keeps: `--keep` (default 400 days) drops firings older than
 that, and `--keep-activity` (default 800 days, never less than `--keep`)
 the activity log's; `--keep 0` keeps everything. The grid stops at 12
-weeks; past that the disk is computed from the bytes a firing at 12
-weeks, not measured: at 100,000 firings a week the 400 days (57 weeks)
+weeks; past that, the default's 400 days (57 weeks) included, the disk is
+computed from the bytes a firing at 12 weeks, not measured: at 100,000 firings a week the 400 days (57 weeks)
 hold about 5.7 million firings, some 0.6 to 0.8 GB at 100 to 135 bytes. A
 million firings a week was left out: writing a week of 100,000 took about
 25 seconds here, so four weeks of a million would take over fifteen
