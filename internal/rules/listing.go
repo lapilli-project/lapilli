@@ -211,7 +211,11 @@ func (u *Unplaced) Said(by string) []string {
 	}
 	var out []string
 	if n := len(u.placed); n > 0 {
-		out = append(out, fmt.Sprintf("%d groups placed as %s places them", n, by))
+		groups := "groups"
+		if n == 1 {
+			groups = "group"
+		}
+		out = append(out, fmt.Sprintf("%d %s placed as %s places them", n, groups, by))
 	}
 	for _, why := range slices.Sorted(maps.Keys(u.why)) {
 		names := slices.Sorted(maps.Keys(u.why[why]))

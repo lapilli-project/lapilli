@@ -150,7 +150,7 @@ func TestReplayingPlacesRuleFiles(t *testing.T) {
 		}
 	}
 	said := strings.Join(u.Said("Prometheus"), "\n")
-	for _, want := range []string{"2 groups placed", `"twice"`, `"absent"`, `"db"`, "no group of that name", "2 groups of that name", "gives the group no interval"} {
+	for _, want := range []string{"2 groups placed as Prometheus places them", `"twice"`, `"absent"`, `"db"`, "no group of that name", "2 groups of that name", "gives the group no interval"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("said %q, want %q", said, want)
 		}
