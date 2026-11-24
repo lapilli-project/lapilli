@@ -1,0 +1,209 @@
+#!/bin/sh
+# Writes Compass's alerts to stdout, as Lapilli's incidents file takes them:
+# for teams whose Opsgenie alerting moved to Compass. Compass keeps alerts,
+# not incidents; Opsgenie's incidents move to Jira Service Management, which
+# jira.sh reads. Which alerts count as incidents is in compass.jq.
+#
+#   COMPASS_CLOUD_ID    the site's cloud id (not the organisation's id)
+#   COMPASS_EMAIL       the account's email
+#   COMPASS_TOKEN_FILE  a file holding its API token
+#   SINCE               only alerts created on or after this: a date such as
+#                       2026-10-01, or an RFC 3339 time; all of them when not given
+#   COMPASS_QUERY       optional, Compass's alert search, such as tag: incident
+#   MAX_PAGES           of 100 alerts, at most (default 1000); Compass gives
+#                       20,000 at most
+#   MAX_LOGS            closed alerts whose logs are read for when they
+#                       closed, at most (default 500); the rest end at their
+#                       last update
+#
+# Compass's alerts don't say when they closed; their logs do. For each closed
+# alert that counts (compass.jq), its log is read, five pages at most, and
+# the latest entry saying it was closed (compass-closed.jq) is its end.
+set -eu
+here=$(dirname "$0")
+: "${COMPASS_CLOUD_ID:?the cloud id of the site}"
+: "${COMPASS_EMAIL:?the email of the account}"
+: "${COMPASS_TOKEN_FILE:?a file holding its API token}"
+case $COMPASS_CLOUD_ID in
+  '' | *[!0-9a-fA-F-]*)
+    printf 'compass.sh: COMPASS_CLOUD_ID is a cloud id: hex digits and dashes\n' >&2
+    exit 1
+    ;;
+esac
+# SINCE checked before it reaches a query, and as seconds for Compass's from.
+from=0
+[ -z "${SINCE:-}" ] || from=$(printf '%s' "$SINCE" | jq -sRr '
+  if test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}\\z") then . + "T00:00:00Z" else . end
+  | capture("\\A(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})\\z")
+  // error("SINCE is a date such as 2026-10-01, or an RFC 3339 time")
+  | (.d + "Z" | fromdateiso8601) - (if .z == "Z" then 0 else ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) * (if .z[0:1] == "-" then -1 else 1 end) end)') || {
+  printf 'compass.sh: SINCE is a date such as 2026-10-01, or an RFC 3339 time\n' >&2
+  exit 1
+}
+api=${COMPASS_API:-https://api.atlassian.com/compass/cloud/$COMPASS_CLOUD_ID/ops/v1}
+# The token goes where api points: over https, or to this machine, for
+# tests, and curl speaks no other scheme (proto). Neither is said: a user
+# and password before @ would be in the log.
+# The scheme may be in capitals, as curl takes it. This machine is
+# 127.0.0.1, [::1] or localhost, with a port or not, and no name that only
+# starts with one, such as localhost.example.com.
+# PLAIN_HTTP=true takes an address over plain http, to any host, for a
+# self-managed tool reached inside a cluster: the token is read by
+# whatever is on the way there. Off by default.
+case ${PLAIN_HTTP:-false} in
+  true | false) ;;
+  *)
+    printf '%s: PLAIN_HTTP is true or false\n' "compass.sh" >&2
+    exit 1
+    ;;
+esac
+proto=
+case $api in
+  *@*)
+    printf 'compass.sh: COMPASS_API holds a user or token before @, refused\n' >&2
+    exit 1
+    ;;
+  [Hh][Tt][Tt][Pp][Ss]://*) proto='=https' ;;
+  [Hh][Tt][Tt][Pp]://*)
+    case ${api#*://} in
+      127.0.0.1 | '[::1]' | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]) proto='=http' ;;
+      127.0.0.1[/:]* | '[::1]'[/:]* | [Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt][/:]*) proto='=http' ;;
+    esac
+    [ "${PLAIN_HTTP:-false}" = false ] || proto='=http'
+    ;;
+esac
+if [ -z "$proto" ]; then
+  printf 'compass.sh: COMPASS_API is not https (PLAIN_HTTP=true takes plain http, to any host)\n' >&2
+  exit 1
+fi
+# secret NAME FILE: what FILE holds, one line with no space. Atlassian
+# says nothing of what its tokens are written in, and this one goes
+# base64'd, with the email. Neither the token nor what else the file holds
+# is said.
+secret() {
+  s=$(cat "$2")
+  # Spaces, tabs and a carriage return after it, as an editor may leave
+  # them, are dropped.
+  while :; do
+    case $s in
+      *[[:space:]]) s=${s%?} ;;
+      *) break ;;
+    esac
+  done
+  case $s in
+    '' | *[[:space:][:cntrl:]]*)
+      printf '%s\n' "compass.sh: $1 doesn't hold a token: one line, with no space" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$s"
+}
+token=$(secret COMPASS_TOKEN_FILE "$COMPASS_TOKEN_FILE")
+auth=$(printf '%s:%s' "$COMPASS_EMAIL" "$token" | base64 | tr -d '\n')
+all=$(mktemp)
+closes=$(mktemp)
+got=$(mktemp)
+heads=$(mktemp)
+failed=$(mktemp)
+trap 'rm -f "$all" "$closes" "$closes.json" "$got" "$heads" "$failed"' EXIT
+trap 'exit 1' INT TERM HUP
+# held CURL-ARGUMENTS: curl's answer on stdout, of a 2xx alone, and 16
+# MiB of it at most whatever curl's version (before 8.4.0, --max-filesize
+# caps only an answer that says its length first). Past it, with curl
+# failing, or of any other answer, a redirect among them, which curl
+# doesn't follow, it fails, saying so. curl's stdin is its own, and it
+# reads no .curlrc (-q).
+held() {
+  : >"$failed"
+  { curl -q "$@" -D "$heads" -o - || echo x >"$failed"; } | head -c 16777217 >"$got"
+  if [ "$(wc -c <"$got")" -gt 16777216 ]; then
+    printf 'compass.sh: an answer is more than 16 MiB; writing nothing\n' >&2
+    return 1
+  fi
+  [ ! -s "$failed" ] || return 1
+  h_code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$heads" | tail -n 1)
+  case $h_code in
+    2??) cat "$got" ;;
+    *)
+      printf 'compass.sh: the API answered %s; writing nothing\n' "${h_code:-nothing}" >&2
+      return 1
+      ;;
+  esac
+}
+max=${MAX_PAGES:-1000}
+case $max in
+  '' | *[!0-9]*)
+    printf '%s: MAX_PAGES is a number of pages, not %s\n' "compass.sh" "$max" >&2
+    exit 1
+    ;;
+esac
+maxlogs=${MAX_LOGS:-500}
+case $maxlogs in
+  '' | *[!0-9]*)
+    printf 'compass.sh: MAX_LOGS is a number of alerts, not %s\n' "$maxlogs" >&2
+    exit 1
+    ;;
+esac
+offset=0
+pages=0
+while :; do
+  pages=$((pages + 1))
+  if [ "$pages" -gt "$max" ]; then
+    printf 'compass.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or set SINCE later)\n' "$max" >&2
+    exit 1
+  fi
+  # Compass answers the first 20,000 alerts of a search and no more: a page
+  # reaching the 20,000th is refused.
+  if [ $((offset + 100)) -ge 20000 ]; then
+    printf 'compass.sh: more than 20,000 alerts, as many as Compass gives; stopping, writing nothing (set SINCE later, or narrow COMPASS_QUERY)\n' >&2
+    exit 1
+  fi
+  url="$api/alerts?size=100&offset=$offset&sort=createdAt&order=asc"
+  [ "$from" = 0 ] || url="$url&from=$from"
+  [ -z "${COMPASS_QUERY:-}" ] || url="$url&query=$(printf '%s' "$COMPASS_QUERY" | jq -sRr @uri)"
+  page=$(printf 'Authorization: Basic %s\n' "$auth" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
+  printf '%s' "$page" | jq -c '.values[]' >>"$all"
+  # The next page is the next offset: a link the API gives isn't followed.
+  [ -n "$(printf '%s' "$page" | jq -r '.links.next // empty')" ] || break
+  offset=$((offset + 100))
+done
+# The closed alerts that count, then each one's log: the next page is built
+# from the address, the alert's id and the cursor, each checked, never
+# followed as Compass gives it.
+printf 'null' >"$closes.json"
+read=0
+over=0
+for id in $(jq -s -r --arg from "$from" --slurpfile closes "$closes.json" -f "$here/compass.jq" "$all"); do
+  case $id in
+    *[!0-9A-Za-z-]* | '')
+      printf 'compass.sh: an alert id %s that isn'"'"'t one; stopping, writing nothing\n' "$id" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$read" -ge "$maxlogs" ]; then
+    over=$((over + 1))
+    continue
+  fi
+  read=$((read + 1))
+  after=
+  closed=
+  pages=0
+  while [ "$pages" -lt 5 ]; do
+    pages=$((pages + 1))
+    url="$api/alerts/$id/logs?size=100"
+    [ -z "$after" ] || url="$url&after=$after"
+    page=$(printf 'Authorization: Basic %s\n' "$auth" | held -fsS --proto "$proto" --max-time 30 --max-filesize 16777216 -H @- -H 'Accept: application/json' "$url")
+    closed=$(printf '%s' "$page" | jq -r --arg since "$closed" -f "$here/compass-closed.jq")
+    next=$(printf '%s' "$page" | jq -r '.links.next // empty')
+    [ -n "$next" ] || break
+    after=$(printf '%s' "$next" | jq -Rr 'capture("[?&]after=(?<a>[0-9_]+)(&|$)").a // empty')
+    if [ -z "$after" ]; then
+      printf 'compass.sh: the log of alert %s gives a next page without a cursor; its first pages are taken\n' "$id" >&2
+      break
+    fi
+  done
+  [ -z "$closed" ] || printf '%s\t%s\n' "$id" "$closed" >>"$closes"
+done
+[ "$over" -eq 0 ] || printf 'compass.sh: %s closed alerts past MAX_LOGS (%s) end at their last update\n' "$over" "$maxlogs" >&2
+jq -R -s 'split("\n") | map(select(. != "") | split("\t") | {key: .[0], value: (.[1] | tonumber)}) | from_entries' "$closes" >"$closes.json"
+jq -s --arg from "$from" --slurpfile closes "$closes.json" -f "$here/compass.jq" "$all"
