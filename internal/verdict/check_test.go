@@ -223,3 +223,19 @@ func TestCheckErrorsSaid(t *testing.T) {
 		t.Errorf("want %q in\n%s", want, b.String())
 	}
 }
+
+// A firing on when the period starts, that ends before the group's first
+// evaluation in it, is alike on both sides: the replay reports it from the
+// period's start (replay.Run replays a placed group from its last evaluation
+// before the period), what really fired from before it, and both are cut to
+// the period's start.
+func TestCheckFiringOnAtTheStart(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	end := from.Add(2*time.Minute + 30*time.Second)
+	replayed := []firing.Firing{{Rule: "R", Start: from, End: end}}
+	real := []firing.Firing{{Rule: "R", Start: from.Add(-150 * time.Second), End: end}}
+	c := CheckReplay(context.Background(), []rules.Rule{{Name: "R", Interval: 5 * time.Minute}}, replayed, real, from, from.Add(time.Hour), time.Minute)
+	if r := c.Rules[0]; r.Alike != 1 || r.Real != 1 || r.Replayed != 1 {
+		t.Errorf("%+v", r)
+	}
+}
