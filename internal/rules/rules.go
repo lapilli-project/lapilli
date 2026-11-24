@@ -1599,28 +1599,7 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 		// Where the group falls in its interval, from when it last ran: an
 		// evaluation starts just after its time, so this is to the second
 		// below. Before its first evaluation, Prometheus says year 1.
-		var phase time.Duration
-		iv := int64(secs(g.Interval) / time.Second)
-		switch {
-		case iv < 1:
-		case g.Concurrency != nil:
-			// vmalert starts a group a while into its interval, and its
-			// lastEvaluation says when; but it asks each rule, and stamps
-			// what fires, at a time of its own (app/vmalert/rule/group.go,
-			// v1.156.0): eval_offset past a multiple of the interval, or else
-			// the time less eval_delay truncated to one (eval_alignment, on
-			// unless the group's file turns it off, which the API doesn't
-			// say). Go's Truncate counts the multiples from the zero time, in
-			// the year 1, not from 1970.
-			off := int64(0)
-			if !math.IsNaN(g.EvalOffset) && math.Abs(g.EvalOffset) < float64(iv) {
-				off = int64(math.Floor(g.EvalOffset))
-			}
-			phase = time.Duration(((time.Time{}.Unix()%iv+off)%iv+iv)%iv) * time.Second
-		case g.LastEvaluation.Year() > 1970:
-			// In whole seconds: nanoseconds since 1970 overflow past 2262.
-			phase = time.Duration((g.LastEvaluation.Unix()%iv+iv)%iv) * time.Second
-		}
+		phase := phaseOf(secs(g.Interval), g.LastEvaluation, g.Concurrency != nil, g.EvalOffset)
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
 				continue
@@ -1649,6 +1628,35 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 		}
 	}
 	return shownRules(out), nil
+}
+
+// phaseOf is where a group of the given interval is placed within it, from
+// when it last ran (the year 1 before its first evaluation), to the second:
+// 0 when that isn't known. vmalert's groups, which say their concurrency
+// (vm), are placed by their eval_offset and alignment instead.
+func phaseOf(interval time.Duration, last time.Time, vm bool, evalOffset float64) time.Duration {
+	iv := int64(interval / time.Second)
+	switch {
+	case iv < 1:
+	case vm:
+		// vmalert starts a group a while into its interval, and its
+		// lastEvaluation says when; but it asks each rule, and stamps
+		// what fires, at a time of its own (app/vmalert/rule/group.go,
+		// v1.156.0): eval_offset past a multiple of the interval, or else
+		// the time less eval_delay truncated to one (eval_alignment, on
+		// unless the group's file turns it off, which the API doesn't
+		// say). Go's Truncate counts the multiples from the zero time, in
+		// the year 1, not from 1970.
+		off := int64(0)
+		if !math.IsNaN(evalOffset) && math.Abs(evalOffset) < float64(iv) {
+			off = int64(math.Floor(evalOffset))
+		}
+		return time.Duration(((time.Time{}.Unix()%iv+off)%iv+iv)%iv) * time.Second
+	case last.Year() > 1970:
+		// In whole seconds: nanoseconds since 1970 overflow past 2262.
+		return time.Duration((last.Unix()%iv+iv)%iv) * time.Second
+	}
+	return 0
 }
 
 func hasGrafanaRules(doc map[string]any) bool {
