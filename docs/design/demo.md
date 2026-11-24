@@ -83,6 +83,24 @@ the report, only the history is another; and the clock.
   the week's Monday to the clock, `--settle 0s` and `--digest mon@00:00`;
   and the demo's `--tz`. No flag names anything else to read, or anywhere
   to send to.
+- **Teams and a proposal**: to show what serve does with teams and with a
+  change waiting for approval, which read-only would otherwise leave empty,
+  the demo keeps some of its own. Before serve opens the ledger it opens it
+  itself and keeps three teams by the ledger's API, as "lapilli demo":
+  `checkout` (the rules named `Checkout…` and `Payments…`, and the incidents
+  of those services), `search` and `platform` (`Orders…`, `Node…`,
+  `Certificate…`), each by a pattern on the rule's name and by the `service`
+  the sample's alerts and incidents carry (`--match`), so the pages' team
+  picker shows each team's own numbers. The proposal is the longer `for`
+  the report itself suggests, for `CheckoutLatencyP99` (1m to 5m), made by
+  serve's own code as a person's from the rule's page is, backtested, and
+  kept as "lapilli demo". The backtest needs a run to replay against, so
+  it is made by `serve.Config.Seed`, which serve's leader calls after
+  each round's digest until the proposal is kept, in the first round that
+  has a suggestion. Read-only still refuses every request's write:
+  approving it, or dropping it, is 403, and the proposal stays waiting.
+  Proposals expire by `--proposals-expire`, which the demo doesn't give,
+  so it never shows as expired.
 - **The incidents** are the week's alone. serve judges a week's firings by
   the incidents of that week and the two before it (`Options.RecordWeek`),
   and the week's keep its record. The week before's, which the report
@@ -136,7 +154,9 @@ machine, and by every page a browser there opens.
   again, a proposal is backtested), anyone on the machine could make them,
   and what people write is stamped by the wall clock, a week and more
   after the week the pages show. A demo is to be looked at: read-only
-  leaves nothing to start but reading.
+  leaves nothing to start but reading. The teams and the proposal are
+  seeded by the demo's own code (above), once, and nothing a request
+  reaches: no route makes a team or a proposal here.
 - **Another site's page, by a name (DNS rebinding).** Over loopback,
   serve answers an address, `localhost` and a name under `.localhost`
   alone (`hostOK`): a name of the attacker's pointed at 127.0.0.1 is

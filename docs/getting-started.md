@@ -32,7 +32,10 @@ job: it says the URL to open, on this machine alone (`--listen`, a
 loopback address, a free port by default), and is read-only. Its ledger
 is kept in a temporary directory, removed when Ctrl-C ends it; its clock
 stands at the end of the sample's week, the last whole week its pages
-show.
+show. It has three teams, to pick on the overview and look at the Teams
+page, and one proposal waiting for approval, the longer `for` the report
+suggests, with its backtest, which read-only leaves for you to read and
+not to approve.
 
 ## Install
 
