@@ -364,6 +364,7 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 	ref := queueRef("main", "7", bad)
 	event := queueEvent(t, second, main, "main", ref, "main")
 	repo.git("checkout", "--quiet", "--detach", second)
+	long := "release/" + strings.Repeat("x", 248)
 
 	// GitHub's own says no merge group of the queue's: refused at once.
 	write := func(body string) string {
@@ -407,6 +408,9 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 		{"a ref of no head", queueRun(queueEvent(t, second, main, "main", "refs/heads/gh-readonly-queue/main/pr-7", "main"),
 			"refs/heads/gh-readonly-queue/main/pr-7", second), "isn't the queue's ref for main"},
 		{"GITHUB_SHA another", queueRun(event, ref, bad), "isn't the merge group's head"},
+		// 255 at most, as lapilli serve takes a branch from the queue's ref.
+		{"a branch of 256", queueRun(queueEvent(t, second, main, long, queueRef(long, "7", bad), "main"), queueRef(long, "7", bad), second),
+			"255 at most"},
 	} {
 		if c.says == "" {
 			// A base_ref of a tag, written into the event.
@@ -426,6 +430,14 @@ func TestBacktestRecipeMergeGroupRefused(t *testing.T) {
 				t.Errorf("%s, %v: %v, %d statuses, %d posted\n%s", c.name, settings, err, len(rr.host.statuses), rr.host.posts, lastLines(out, 3))
 			}
 		}
+	}
+
+	// A branch of 255 is taken.
+	taken := newRecipeRun(t, backtestHosts[0], repo)
+	long = long[:255]
+	taken.env = append(taken.env, queueRun(queueEvent(t, second, main, long, queueRef(long, "7", bad), "main"), queueRef(long, "7", bad), second)...)
+	if out, err := taken.run([]string{"PATHS=alerts", "PR="}, args...); err != nil || strings.Contains(out, "refused") {
+		t.Errorf("a branch of 255: %v\n%s", err, lastLines(out, 3))
 	}
 
 	// Of a merge group: the job fails, and its status is the one failure,
