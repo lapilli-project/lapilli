@@ -195,6 +195,34 @@ From the top:
   then have fired. With a `for` of 6m, `QueueBacklog` would have fired a
   minute into INC-103, once in the week.
 
+What the columns of each table say:
+
+| Table | Column | It says |
+|---|---|---|
+| Rules that fired | RULE | The rule's name |
+| | SEVERITY | The rule's `severity` label; several, when versions or rules of the name differ, joined by `/`. The column is left out when no rule has one |
+| | FIRED | Its firings in the period |
+| | ○ CAUGHT | Those that caught an incident |
+| | ● NOTHING | Those that caught nothing: those that came after an incident was over and those with no record to judge them by are among them |
+| | PRECISION | The share of its judged firings that caught something; `–` when none was judged |
+| | REFIRED | Firings that came within `--refire` (1h by default) of the same alert last resolving |
+| Longer "for" | FOR | The rule's `for` now, and the shortest longer one that keeps every incident it caught |
+| | FIRED | Its firings with the one, and with the other |
+| | INCIDENTS | How many incidents it caught, and still would |
+| | CAUGHT LATER BY | The most any of them would have been caught later; `–` with no incident |
+| What each rule adds | INCIDENTS | The incidents it caught |
+| | FIRST | Those it caught before any other rule did |
+| | ALONE | Those no other rule caught |
+| Incidents | INCIDENT | The incident's id and title |
+| | START | When it started, in `--tz` |
+| | LASTED | From its start to its end; `–` with no end written down |
+| | CAUGHT BY | The rules that caught it, each with how long after its start (`+3m`) or before (`-9m`) its first firing came; `(noisy)` and `(linked)` mark a catch by a noisy rule and by an alert the incident lists |
+
+In CAUGHT BY, `✗ nothing fired` says no rule fired for the incident at all.
+`✗ nothing in time; after its end` says none fired in time, but some did
+once it was over, its condition having held in it, each with how long after
+its end; those firings are black stones all the same.
+
 Left out above: the firings that caught nothing by when they came in
 `--tz` (while people slept, off hours, at work); what each rule adds (the
 incidents each caught, first and alone, and the rules that are spare); and
