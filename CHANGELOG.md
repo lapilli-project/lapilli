@@ -4,6 +4,16 @@
 
 ### Added
 
+- `lapilli verdict --firings FILE` goes beside rules replayed (`--rules`,
+  `--loaded-rules`, `--grafana`, `--ruler`, `--alarms`, `--loki-rules`,
+  `--rules-history`): what a cloud's own alarms fired, as recipes/firings
+  records it, is judged with the replayed rules in one report, so an
+  incident only an alarm caught is no longer missed in the rules' report.
+  Its rules are said as recorded, not replayed: no longer "for", near
+  misses or no-data check for them. A name both replayed and recorded is
+  refused; `--firings-prefix STR` puts STR before the recorded ones' names.
+  `--fail-nothing-replayed` and `--fail-unreplayed` count only rules
+  replayed. Not with `--alerts` or `--compare`.
 - Rules from Terraform: the JSON `terraform show -json` writes of a plan
   or a state is read wherever rules files are (`--rules`, serve's rules,
   preflight, a pull request's backtest), each `grafana_rule_group` as the
