@@ -1,0 +1,302 @@
+{{- include "lapilli.defaults" . }}
+{{- /* Jobs that run recipes beside serve: incidents copied from where they
+are kept (serve.incidentsAPI.copy, recipes/incidents) and pull requests
+opened for approved changes (serve.changes.pullRequests, recipes/changes).
+The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
+{{- $s := .Values.serve }}
+{{- $full := include "lapilli.fullname" . }}
+{{- $cp := $s.incidentsAPI.copy }}
+{{- if and (eq .Values.mode "serve") $cp.enabled }}
+{{- if not $cp.image }}
+{{- fail "serve.incidentsAPI.copy.image is required: an image with sh, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
+{{- end }}
+{{- if not $s.incidentsAPI.tokenSecret.name }}
+{{- fail "serve.incidentsAPI.copy needs serve.incidentsAPI.tokenSecret, the token the jobs write incidents with" }}
+{{- end }}
+{{- if not $cp.jobs }}
+{{- fail "serve.incidentsAPI.copy.jobs: name at least one job, each with a name, a recipe and the tool's token" }}
+{{- end }}
+{{- $recipes := list }}
+{{- range $path, $_ := .Files.Glob "files/recipes/incidents/*.sh" }}
+{{- $n := base $path | trimSuffix ".sh" }}
+{{- if ne $n "put" }}{{ $recipes = append $recipes $n }}{{ end }}
+{{- end }}
+{{- $seen := dict }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-recipes-incidents
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  # recipes/incidents, as the jobs run them.
+  {{- range $path, $_ := .Files.Glob "files/recipes/incidents/*" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | trimSuffix "\n" | nindent 4 }}
+  {{- end }}
+{{- range $j := $cp.jobs }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString $j.name)) }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: name %q: lowercase letters, digits and -" (toString $j.name)) }}
+{{- end }}
+{{- if hasKey $seen $j.name }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: two jobs are named %s" $j.name) }}
+{{- end }}
+{{- $_ := set $seen $j.name true }}
+{{- $cname := printf "%s-incidents-%s" $full $j.name }}
+{{- if gt (len $cname) 52 }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: the CronJob's name %s is over 52 characters: a shorter name" $j.name $cname) }}
+{{- end }}
+{{- if not (has $j.recipe $recipes) }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: recipe %q is not one of %s" $j.name (toString $j.recipe) (join ", " $recipes)) }}
+{{- end }}
+{{- range $k, $v := ($j.env | default dict) }}
+{{- if or (hasPrefix "LAPILLI_" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "TMPDIR") }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: env %s is set by the chart (the tokens' files go in tokenFiles)" $j.name $k) }}
+{{- end }}
+{{- end }}
+{{- range $k, $v := ($j.tokenFiles | default dict) }}
+{{- if or (not (regexMatch "^[A-Z][A-Z0-9_]*_TOKEN_FILE$" $k)) (hasPrefix "LAPILLI_" $k) (not $v.name) }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: tokenFiles %s: name the recipe's own variable (PAGERDUTY_TOKEN_FILE), with the Secret's name and key" $j.name $k) }}
+{{- end }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $cname }}
+  labels:
+    {{- include "lapilli.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: incidents-copy
+spec:
+  schedule: {{ $j.schedule | default "*/15 * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  # A run that hangs shouldn't keep every later one from starting.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Each run copies again from the tool: a failed one is tried at the next.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ int $cp.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "lapilli.labels" $ | nindent 12 }}
+            app.kubernetes.io/component: incidents-copy
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- include "lapilli.podSecurity" $ | nindent 12 }}
+          containers:
+            - name: copy
+              image: {{ $cp.image | quote }}
+              imagePullPolicy: IfNotPresent
+              # A file, not a pipe: a shell doesn't see the first command fail
+              # in one (recipes/incidents/README.md).
+              command:
+                - sh
+                - -c
+                - {{ printf "f=$(mktemp) && sh /recipes/incidents/%s.sh > \"$f\" && sh /recipes/incidents/put.sh \"$LAPILLI_URL\" < \"$f\"" $j.recipe | quote }}
+              env:
+                - name: LAPILLI_URL
+                  value: {{ $cp.url | default (printf "http://%s:%d" $full (int $s.incidentsAPI.port)) | quote }}
+                - name: LAPILLI_TOKEN_FILE
+                  value: {{ printf "/var/run/lapilli/incidents-token/%s" $s.incidentsAPI.tokenSecret.key | quote }}
+                - name: TMPDIR
+                  value: /tmp
+                {{- range $k, $v := ($j.tokenFiles | default dict) }}
+                - name: {{ $k }}
+                  value: {{ printf "/var/run/lapilli/tool-token/%s/%s" ($k | lower) ($v.key | default "token") | quote }}
+                {{- end }}
+                {{- range $k, $v := ($j.env | default dict) }}
+                - name: {{ $k }}
+                  value: {{ $v | toString | quote }}
+                {{- end }}
+              securityContext:
+                {{- include "lapilli.containerSecurity" $ | nindent 16 }}
+              {{- with $cp.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: recipes
+                  mountPath: /recipes/incidents
+                  readOnly: true
+                - name: incidents-token
+                  mountPath: /var/run/lapilli/incidents-token
+                  readOnly: true
+                {{- range $k, $v := ($j.tokenFiles | default dict) }}
+                - name: tool-token-{{ $k | lower | replace "_" "-" }}
+                  mountPath: {{ printf "/var/run/lapilli/tool-token/%s" ($k | lower) }}
+                  readOnly: true
+                {{- end }}
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: recipes
+              configMap:
+                name: {{ $full }}-recipes-incidents
+            - name: incidents-token
+              secret:
+                secretName: {{ $s.incidentsAPI.tokenSecret.name }}
+            {{- range $k, $v := ($j.tokenFiles | default dict) }}
+            - name: tool-token-{{ $k | lower | replace "_" "-" }}
+              secret:
+                secretName: {{ $v.name }}
+            {{- end }}
+            - name: tmp
+              emptyDir: {}
+          {{- include "lapilli.placement" $ | nindent 10 }}
+{{- end }}
+{{- end }}
+{{- $pr := $s.changes.pullRequests }}
+{{- if and (eq .Values.mode "serve") $pr.enabled }}
+{{- if not $pr.image }}
+{{- fail "serve.changes.pullRequests.image is required: an image with sh, git, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
+{{- end }}
+{{- if not (and $s.changes.enabled $s.changes.tokenSecret.name) }}
+{{- fail "serve.changes.pullRequests needs serve.changes.enabled and serve.changes.tokenSecret, the token the job reads approved changes with" }}
+{{- end }}
+{{- $hosts := dict "github" "GITHUB" "gitlab" "GITLAB" "bitbucket" "BITBUCKET" "gitea" "GITEA" "azure-devops" "AZURE_DEVOPS" }}
+{{- if not (hasKey $hosts $pr.host) }}
+{{- fail (printf "serve.changes.pullRequests.host: %q is not one of %s" (toString $pr.host) (keys $hosts | sortAlpha | join ", ")) }}
+{{- end }}
+{{- if not (.Files.Glob (printf "files/recipes/changes/%s.sh" $pr.host)) }}
+{{- fail (printf "serve.changes.pullRequests.host: the chart has no recipe %s.sh" $pr.host) }}
+{{- end }}
+{{- if not $pr.tokenSecret.name }}
+{{- fail "serve.changes.pullRequests.tokenSecret: the Secret holding the host's token, which opens the pull requests" }}
+{{- end }}
+{{- range $k := list "CLONE" "RULES_PATHS" }}
+{{- if not (get ($pr.env | default dict) $k) }}
+{{- fail (printf "serve.changes.pullRequests.env.%s is required (recipes/changes/README.md)" $k) }}
+{{- end }}
+{{- end }}
+{{- range $k, $v := ($pr.env | default dict) }}
+{{- if or (hasPrefix "LAPILLI_" $k) (hasPrefix "GIT_CONFIG" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "TMPDIR") (eq $k "HOME") }}
+{{- fail (printf "serve.changes.pullRequests.env: %s is set by the chart" $k) }}
+{{- end }}
+{{- end }}
+{{- $cname := printf "%s-changes-pr" $full }}
+{{- if gt (len $cname) 52 }}
+{{- fail (printf "serve.changes.pullRequests: the CronJob's name %s is over 52 characters: a shorter release name" $cname) }}
+{{- end }}
+{{- $git := $pr.gitCredentialsSecret }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-recipes-changes
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  # recipes/changes, as the job runs them.
+  {{- range $path, $_ := .Files.Glob "files/recipes/changes/*" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | trimSuffix "\n" | nindent 4 }}
+  {{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $cname }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: changes-pr
+spec:
+  schedule: {{ $pr.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Each run asks Lapilli what is approved and what is open: a failed one
+      # is tried at the next.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ int $pr.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "lapilli.labels" . | nindent 12 }}
+            app.kubernetes.io/component: changes-pr
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- include "lapilli.podSecurity" . | nindent 12 }}
+          containers:
+            - name: pull-requests
+              image: {{ $pr.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: [sh, {{ printf "/recipes/changes/%s.sh" $pr.host | quote }}]
+              env:
+                - name: LAPILLI_URL
+                  value: {{ $pr.url | default (printf "http://%s:%d" $full (int $s.incidentsAPI.port)) | quote }}
+                - name: LAPILLI_TOKEN_FILE
+                  value: {{ printf "/var/run/lapilli/changes-token/%s" $s.changes.tokenSecret.key | quote }}
+                - name: {{ printf "%s_TOKEN_FILE" (get $hosts $pr.host) }}
+                  value: {{ printf "/var/run/lapilli/host-token/%s" $pr.tokenSecret.key | quote }}
+                - name: TMPDIR
+                  value: /tmp
+                # git writes its own files (~/.gitconfig lookups) here.
+                - name: HOME
+                  value: /tmp
+                {{- if $git.name }}
+                # git pushes with the credentials in that Secret's file, a
+                # git-credentials line (https://USER:TOKEN@host).
+                - name: GIT_CONFIG_COUNT
+                  value: "1"
+                - name: GIT_CONFIG_KEY_0
+                  value: credential.helper
+                - name: GIT_CONFIG_VALUE_0
+                  value: {{ printf "store --file=/var/run/lapilli/git-credentials/%s" $git.key | quote }}
+                {{- end }}
+                {{- range $k, $v := ($pr.env | default dict) }}
+                - name: {{ $k }}
+                  value: {{ $v | toString | quote }}
+                {{- end }}
+              securityContext:
+                {{- include "lapilli.containerSecurity" . | nindent 16 }}
+              {{- with $pr.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: recipes
+                  mountPath: /recipes/changes
+                  readOnly: true
+                - name: changes-token
+                  mountPath: /var/run/lapilli/changes-token
+                  readOnly: true
+                - name: host-token
+                  mountPath: /var/run/lapilli/host-token
+                  readOnly: true
+                {{- if $git.name }}
+                - name: git-credentials
+                  mountPath: /var/run/lapilli/git-credentials
+                  readOnly: true
+                {{- end }}
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: recipes
+              configMap:
+                name: {{ $full }}-recipes-changes
+            - name: changes-token
+              secret:
+                secretName: {{ $s.changes.tokenSecret.name }}
+            - name: host-token
+              secret:
+                secretName: {{ $pr.tokenSecret.name }}
+            {{- if $git.name }}
+            - name: git-credentials
+              secret:
+                secretName: {{ $git.name }}
+            {{- end }}
+            - name: tmp
+              emptyDir: {}
+          {{- include "lapilli.placement" . | nindent 10 }}
+{{- end }}

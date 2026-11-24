@@ -630,6 +630,32 @@ serve:
       key: token
     port: 8082
     from: []
+    # Incidents copied in on a schedule from where they are kept
+    # (recipes/incidents/README.md): a CronJob a job in jobs, each running
+    # one recipe and writing what it gives with put.sh, by the incidents'
+    # ids, so a run again changes nothing. The jobs write with this
+    # tokenSecret, and the NetworkPolicy lets them reach this port alone.
+    # Off by default. Lapilli's own image has no shell: image is one with sh,
+    # curl and jq (docs/serve.md has a Dockerfile for it), required. What a
+    # job reaches outside the cluster, its tool's API, the chart doesn't
+    # limit: serve.networkPolicy.egress is serve's own.
+    #   jobs:
+    #     - name: pagerduty
+    #       schedule: "*/15 * * * *"        # that is the default
+    #       recipe: pagerduty               # a script in recipes/incidents
+    #       env: {SINCE: "2026-10-01"}      # as the README's table lists
+    #       tokenFiles:                     # the recipe's own variable: its Secret
+    #         PAGERDUTY_TOKEN_FILE: {name: pagerduty-read, key: token}
+    # Each run asks the tool again and keeps nothing between runs; a recipe
+    # with no SINCE asks for what the tool answers by default. The github
+    # recipe needs gh, signed in, in the image.
+    copy:
+      enabled: false
+      image: ""            # such as example.com/tools/recipes:1.0@sha256:...
+      url: ""              # serve's incidents port, this release's Service when empty
+      activeDeadlineSeconds: 1200
+      resources: {}
+      jobs: []
   # Firings recorded elsewhere, such as a cloud's own alarm history, taken on
   # the incidentsAPI port from a job holding the token in this Secret, its
   # own: one that runs a script in recipes/firings and sends what it writes
@@ -978,6 +1004,50 @@ serve:
       keyKey: key.pem
     # Deletions a day and changes an hour, at most: 5,20 when empty.
     limits: ""
+    # Pull requests for approved changes to rules kept in git
+    # (recipes/changes/README.md): one CronJob running the recipe of host
+    # (github, gitlab, bitbucket, gitea or azure-devops), which clones the
+    # repository, writes the change on a branch of Lapilli's and opens the
+    # pull request. Needs enabled and tokenSecret above, the token it reads
+    # the approved changes with, and the NetworkPolicy lets it reach the
+    # incidents port alone. Off by default. image has sh, git, curl and jq
+    # (docs/serve.md has a Dockerfile), required. What it reaches outside
+    # the cluster, the host and the repository, the chart doesn't limit.
+    #   pullRequests:
+    #     enabled: true
+    #     host: github
+    #     image: example.com/tools/recipes:1.0@sha256:...
+    #     tokenSecret: {name: github-pr-token, key: token}
+    #     gitCredentialsSecret: {name: github-git, key: credentials}
+    #     env:
+    #       CLONE: https://github.com/example/monitoring.git
+    #       RULES_PATHS: alerts
+    #       GITHUB_REPO: example/monitoring
+    pullRequests:
+      enabled: false
+      host: ""
+      schedule: "*/5 * * * *"
+      image: ""
+      url: ""              # serve's incidents port, this release's Service when empty
+      activeDeadlineSeconds: 900
+      resources: {}
+      # The recipe's settings, as its README lists them: CLONE and
+      # RULES_PATHS are required, then the host's repository (GITHUB_REPO,
+      # GITLAB_PROJECT, ...), API and login, BASE, EXPECT_FILE. The tokens'
+      # files, LAPILLI_URL and git's own settings are the chart's.
+      env: {}
+      # A Secret holding the host's token, which opens the pull requests.
+      tokenSecret:
+        name: ""
+        key: token
+      # What git pushes with: a Secret holding a git-credentials file (one
+      # line, https://USER:TOKEN@host), read by git's store helper. The
+      # clone URL itself has no credentials (the recipe refuses one).
+      # Without it, git has none, and a clone of a public repository can't
+      # be pushed to.
+      gitCredentialsSecret:
+        name: ""
+        key: credentials
   # The headers name people only if nothing but the proxy can reach the
   # pod: with userHeader, a NetworkPolicy that lets in only those in from
   # (the proxy), as NetworkPolicy peers, and Prometheus, in metricsFrom, to

@@ -351,7 +351,7 @@ must stay. */}}
 {{- end }}
 {{- /* The chart's own trackers job is let in by the NetworkPolicy; a job of
 your own needs from. */ -}}
-{{- $others := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.tokenSecret.name) }}
+{{- $others := or (and $s.incidentsAPI.tokenSecret.name (not $s.incidentsAPI.copy.enabled)) $s.firings.tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.tokenSecret.name (not $s.changes.pullRequests.enabled)) }}
 {{- if and (eq .Values.mode "serve") $others $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
 {{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, firings, tasks and changes, the jobs that copy them and the change recipes; with serve.networkPolicy, no one else can" }}
 {{- end }}
