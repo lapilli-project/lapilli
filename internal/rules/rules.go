@@ -153,6 +153,28 @@ func (r Rule) GrafanaUIDs() []string {
 	return nil
 }
 
+// HistoryUIDs are the data sources, by uid and sorted, that the queries of
+// the Grafana rules in rs name and the replay asks of the Prometheus
+// history: not an expression's, not a query of a rule written in LogQL,
+// nor one the replay doesn't ask (a rule that isn't replayed, or a query on
+// a data source its condition doesn't read). More than one means rules
+// judged by one history that Grafana runs against several.
+func HistoryUIDs(rs []Rule) []string {
+	var out []string
+	for _, r := range rs {
+		if r.Graph == nil || r.Unsupported != "" || r.Graph.Logs != "" {
+			continue
+		}
+		for _, d := range r.Graph.Data {
+			if d.UID != "" && d.UID != "__expr__" && !slices.Contains(out, d.UID) {
+				out = append(out, d.UID)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // LokiRuler is the Logs of a rule a Loki ruler runs, read from its rule
 // files or its API: its queries are asked of --loki. It is also the Logs of
 // a document read from a Loki ruler's API; LokiFile, of one read from its
