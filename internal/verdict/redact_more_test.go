@@ -82,6 +82,7 @@ func TestRedactEveryField(t *testing.T) {
 		"Settings.Match":           true, // labels' names, which stay
 		"Signal.Match":             true,
 		"RuleEntry.Match":          true,
+		"Catch.Lacked":             true, // labels' names, as Match's
 		"Incident.Match":           true,
 		"RuleResult.Unseen":        true, // Lapilli's codes
 		"HoursUsed.Work":           true, // hours, as given
