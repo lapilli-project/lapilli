@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.70.1] - 2026-11-24
+
+Eight modules a patch or a minor release on, `go-jose` among them, which
+checks the tokens `--proxy-jwt` and `--oidc-issuer` take; and two places
+where the docs said less than the code does. No schema change: the ledger
+stays at 031.
+
+### Changed
+
+- `github.com/go-jose/go-jose/v4` 4.1.7 → 4.1.9,
+  `github.com/Azure/azure-sdk-for-go/sdk/azcore` 1.23.3 → 1.24.0,
+  `github.com/aws/aws-sdk-go-v2` 1.47.5 → 1.47.8 (its `config`,
+  `credentials` and `service/sts` with it),
+  `github.com/oracle/oci-go-sdk/v65` 65.128.0 → 65.129.0 and
+  `golang.org/x/oauth2` 0.37.0 → 0.38.0. govulncheck finds nothing the
+  code calls, before or after.
+
 ### Fixed
 
 - `lapilli serve -h` said `--changes` needs `--user-header` and
