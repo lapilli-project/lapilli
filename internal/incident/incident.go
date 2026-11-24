@@ -294,7 +294,12 @@ func Load(path string) ([]Incident, error) {
 		Incidents yaml.Node `yaml:"incidents"`
 	}
 	if err := yaml.Unmarshal(b, &raw); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		var top yaml.Node
+		if yaml.Unmarshal(b, &top) == nil && top.Kind == yaml.DocumentNode && len(top.Content) == 1 && top.Content[0].Kind == yaml.SequenceNode {
+			// A bare list is not taken: the file says what it is.
+			return nil, fmt.Errorf("%s: want \"incidents:\" at the top, the list under it (lapilli.dev/docs/how-it-judges)", path)
+		}
+		return nil, fmt.Errorf("%s: %w", path, oneLine(err))
 	}
 	// An empty file isn't taken for no incidents: a job that failed leaves
 	// one behind, and in lapilli serve the file owns what it holds.
@@ -303,7 +308,10 @@ func Load(path string) ([]Incident, error) {
 	}
 	var doc struct{ Incidents []Incident }
 	if err := raw.Incidents.Decode(&doc.Incidents); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		if bad := badTime(path, raw.Incidents); bad != nil {
+			return nil, bad
+		}
+		return nil, fmt.Errorf("%s: %w", path, oneLine(err))
 	}
 	seen := map[string]bool{}
 	for i, in := range doc.Incidents {
@@ -325,6 +333,44 @@ func Load(path string) ([]Incident, error) {
 		seen[in.ID] = true
 	}
 	return doc.Incidents, nil
+}
+
+// oneLine is a YAML type error on one line, not the parser's own list
+// of lines under a heading.
+func oneLine(err error) error {
+	var te *yaml.TypeError
+	if errors.As(err, &te) {
+		return errors.New(strings.Join(te.Errors, "; "))
+	}
+	return err
+}
+
+// badTime finds, in the list of incidents, a start or end that is not a
+// time, and says which, as a person would write one: not as the Go layout
+// the parser quotes. It is nil when there is none.
+func badTime(path string, list yaml.Node) error {
+	for i, item := range list.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		id := fmt.Sprintf("%d", i+1)
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			if item.Content[j].Value == "id" {
+				id = item.Content[j+1].Value
+			}
+		}
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			field := item.Content[j].Value
+			if field != "start" && field != "end" {
+				continue
+			}
+			var t time.Time
+			if err := item.Content[j+1].Decode(&t); err != nil {
+				return fmt.Errorf("%s: incident %s: %s: want a time such as 2026-11-24T09:00:00Z (RFC 3339)", path, id, field)
+			}
+		}
+	}
+	return nil
 }
 
 // MaxWindowValues is how many values of a label a window found in an
