@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +17,14 @@ import (
 func TestMain(m *testing.M) {
 	// Run as promtool, through scenariotest.Install's link: a stand-in.
 	scenariotest.Fake()
-	os.Exit(m.Run())
+	done, err := freshLedgers()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "the fresh ledger:", err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	done()
+	os.Exit(code)
 }
 
 // scenarioServer is serve with its rules read and run once, held to an

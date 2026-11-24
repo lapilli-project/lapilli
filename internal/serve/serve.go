@@ -826,12 +826,26 @@ func openLedger(ctx context.Context, cfg Config, log *slog.Logger) (*ledger.Ledg
 	if err := os.MkdirAll(cfg.Ledger, 0o750); err != nil {
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
-	l, err := ledger.Open(ctx, filepath.Join(cfg.Ledger, "ledger.db"), cfg.Loc)
+	path := filepath.Join(cfg.Ledger, "ledger.db")
+	if freshLedger != nil {
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			if err := freshLedger(path); err != nil {
+				return nil, fmt.Errorf("--ledger: %w", err)
+			}
+		}
+	}
+	l, err := ledger.Open(ctx, path, cfg.Loc)
 	if err != nil {
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	return l, nil
 }
+
+// freshLedger, when set, writes a new SQLite ledger at path before it is
+// opened: the tests' copy of one every schema file has already run on,
+// as ledger.Open made it, which each of them would otherwise run again
+// (a tenth of a second a test). Never set outside them.
+var freshLedger func(path string) error
 
 // ledgerID is the ledger's name, twelve hex digits made at random the first
 // time it is asked for, and kept.
