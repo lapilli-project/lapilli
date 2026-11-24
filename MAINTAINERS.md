@@ -1,8 +1,8 @@
 # Maintainers
 
-| Maintainer | Areas |
-|---|---|
-| [@JMcunst](https://github.com/JMcunst) | all |
+| Name | GitHub ID | Company/Organization | Areas |
+|---|---|---|---|
+| jmcunst | [@JMcunst](https://github.com/JMcunst) | Independent | all |
 
 Lapilli has one maintainer today. It needs more, and from more than one
 organisation. A tool that judges everyone's alerts shouldn't depend on one
@@ -11,7 +11,7 @@ person's time, or on one company's view of what an alert is.
 ## Why you might
 
 - **A readable codebase, with its reasons written down.** It is Go with no
-  cgo: some 150,000 lines, and as many again of tests. Most packages' tests
+  cgo: some 160,000 lines, and more again of tests. Most packages' tests
   take seconds; `go test ./...` takes ten to fifteen minutes, most of it
   serve's. The design notes in `docs/design/` say why things are as they
   are.

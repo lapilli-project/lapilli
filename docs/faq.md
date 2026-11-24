@@ -129,6 +129,24 @@ give the Prometheus you run. The four clouds' own alarms are read with
 from their history once it is copied in
 ([A cloud's own alarms](cloud-alarms.md)).
 
+### How is it different from promtool, pint, vmalert's replay or Grafana's backtesting?
+
+| Tool | What it does | What it doesn't |
+|---|---|---|
+| `promtool test rules` | Unit tests: the series are written by hand in the test file, with the alerts expected at given times. | No history, no incidents. |
+| pint | Lints rules, in CI too. With a live Prometheus it checks, for one, whether the series exist, and its `alerts/count` check estimates how many times a rule would have fired over a range. | It counts firings; it doesn't say whether one caught something. |
+| vmalert `-replay` | Evaluates rules again over a past period against the history, and writes what they produced back as series. | Firings again, not a verdict. |
+| Grafana alert rule backtesting | Behind the `alertingBacktesting` feature toggle, experimental and off by default: evaluates one rule over a past range inside Grafana. | The rule's states again, not a verdict. |
+| Lapilli | Replays the rules over the history (the history's own engine evaluates the PromQL through `query_range`) and sets each firing beside the incidents: it caught something, or nothing. | It needs a record of incidents, or an `--impact` expression, to judge a firing; without one, a firing isn't judged. |
+
+Lapilli says, for each firing, whether it caught an incident, and an
+incident no firing caught is a miss. `--check-replay` checks the replay
+against what really fired; a pull request backtest does the same for a rule
+change before it is merged ([Pull request backtests](pr-backtests.md)).
+
+They go together: pint and promtool while a rule is written, Lapilli once it
+has fired for a while, and on the pull request that changes it.
+
 ### Grafana-managed alerts?
 
 Yes. `--grafana URL` reads the rules a Grafana holds, made in its UI or
@@ -186,7 +204,9 @@ Open Font License 1.1.
 In the README's words: early, with one maintainer and room for more
 ([MAINTAINERS.md](../MAINTAINERS.md)). It has been checked against one
 production Grafana, where all 71 of its alert rules replay
-([README](../README.md)). [ROADMAP.md](../ROADMAP.md) lists what it
+([README](../README.md)), and its replay is checked against a real Prometheus,
+Thanos and VictoriaMetrics with vmalert, in CI and weekly on their latest
+releases ([Check the replay](check-replay.md)). [ROADMAP.md](../ROADMAP.md) lists what it
 doesn't do yet, area by area, and [What it doesn't do yet](limits.md) the
 limits of what it does.
 

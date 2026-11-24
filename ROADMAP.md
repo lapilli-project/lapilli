@@ -15,6 +15,17 @@ be built anyway is built, not put off for being large. And where Lapilli
 doesn't do something by default that someone may need, it is an option: a
 flag that turns it on or off, or a value they can set.
 
+The areas sort into a core and what is built on it. The core is the replay
+and the verdict on it: [A first look](#a-first-look),
+[Replay fidelity](#replay-fidelity), [What really fired](#what-really-fired),
+[What to change](#what-to-change),
+[Where rules and alarms come from](#where-rules-and-alarms-come-from),
+[Clouds, checked for real](#clouds-checked-for-real),
+[Pull request backtests](#pull-request-backtests) and
+[Incidents in](#incidents-in). What is built on it is
+[lapilli serve](#lapilli-serve) and [Changing rules](#changing-rules).
+[Packaging and trust](#packaging-and-trust) covers both.
+
 Some areas need what the current maintainer doesn't have: an AWS or Azure
 account with a managed Prometheus, Loki alerts in real use, an incident
 tool. If you do, you are the person this needs.
