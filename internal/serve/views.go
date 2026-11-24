@@ -515,7 +515,7 @@ func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verd
 		return nil, err
 	}
 	s.creds.Lock()
-	if s.creds.gen != gen {
+	if s.creds.gen != gen || s.creds.by == nil {
 		s.creds.gen, s.creds.by = gen, map[[2]int64]map[string]verdict.RuleResult{}
 	}
 	s.creds.by[key] = out

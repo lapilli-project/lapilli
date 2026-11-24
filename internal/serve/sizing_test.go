@@ -238,10 +238,8 @@ func TestSizingVisit(t *testing.T) {
 			s.outs.Lock()
 			s.outs.v = nil
 			s.outs.Unlock()
-			// A server that has seen no write has the ledger's generation 0,
-			// as this fresh one does, and its credit cache is nil until then.
 			s.creds.Lock()
-			s.creds.gen, s.creds.by = -1, nil
+			s.creds.by = nil // worked out afresh
 			s.creds.Unlock()
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
