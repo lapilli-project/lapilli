@@ -141,10 +141,18 @@ spec:
             - name: incidents-token
               secret:
                 secretName: {{ $s.incidentsAPI.tokenSecret.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $s.incidentsAPI.tokenSecret.key | quote }}
+                    path: {{ $s.incidentsAPI.tokenSecret.key | quote }}
             {{- range $k, $v := ($j.tokenFiles | default dict) }}
             - name: tool-token-{{ $k | lower | replace "_" "-" }}
               secret:
                 secretName: {{ $v.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ ($v.key | default "token") | quote }}
+                    path: {{ ($v.key | default "token") | quote }}
             {{- end }}
             - name: tmp
               emptyDir: {}
@@ -294,13 +302,25 @@ spec:
             - name: changes-token
               secret:
                 secretName: {{ $s.changes.tokenSecret.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $s.changes.tokenSecret.key | quote }}
+                    path: {{ $s.changes.tokenSecret.key | quote }}
             - name: host-token
               secret:
                 secretName: {{ $pr.tokenSecret.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $pr.tokenSecret.key | quote }}
+                    path: {{ $pr.tokenSecret.key | quote }}
             {{- if $git.name }}
             - name: git-credentials
               secret:
                 secretName: {{ $git.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $git.key | quote }}
+                    path: {{ $git.key | quote }}
             {{- end }}
             - name: tmp
               emptyDir: {}

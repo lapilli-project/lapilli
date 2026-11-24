@@ -181,3 +181,40 @@ func TestChartRecipeJobs(t *testing.T) {
 		}
 	}
 }
+
+// A job's Secret volumes project the one key the job reads, so a pod that
+// holds one token can't read the others kept in the same Secret, and the
+// files are group-readable (the pod's fsGroup) and no wider.
+func TestChartJobSecretsProjectOneKey(t *testing.T) {
+	copyVals := slices.Concat(recipesCopyValues, []string{"--set", "serve.incidentsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.key=pd"})
+	m, _ := render(t, slices.Concat(serveValues, copyVals, recipesPRValues, trackersValues,
+		[]string{"--set", "serve.incidentsAPI.tokenSecret.key=incidents", "--set", "serve.changes.tokenSecret.key=changes"})...)
+	check := func(job string, want map[string]string) {
+		t.Helper()
+		vols, _ := dig(m[job], "spec", "jobTemplate", "spec", "template", "spec", "volumes").([]any)
+		got := map[string]string{}
+		for _, v := range vols {
+			s, ok := dig(v, "secret").(map[string]any)
+			if !ok {
+				continue
+			}
+			items, _ := s["items"].([]any)
+			if len(items) != 1 || dig(items[0], "key") != dig(items[0], "path") || s["defaultMode"] != 288 {
+				t.Errorf("%s: %v: want one item and mode 0440: %v", job, dig(v, "name"), s)
+				continue
+			}
+			got[s["secretName"].(string)] = dig(items[0], "key").(string)
+		}
+		for name, key := range want {
+			if got[name] != key {
+				t.Errorf("%s: Secret %s projects %q, want %q (all: %v)", job, name, got[name], key, got)
+			}
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s: secrets %v, want %v", job, got, want)
+		}
+	}
+	check("CronJob/ops-lapilli-incidents-pagerduty", map[string]string{"lapilli-incidents": "incidents", "pagerduty-read": "pd"})
+	check("CronJob/ops-lapilli-changes-pr", map[string]string{"lapilli-changes": "changes", "github-pr": "token", "github-git": "credentials"})
+	check("CronJob/ops-lapilli-trackers", map[string]string{"tasks": "token", "gh": "token"})
+}

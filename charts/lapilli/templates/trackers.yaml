@@ -112,9 +112,17 @@ spec:
             - name: tasks-token
               secret:
                 secretName: {{ $t.tokenSecret.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $t.tokenSecret.key | quote }}
+                    path: {{ $t.tokenSecret.key | quote }}
             - name: tracker-token
               secret:
                 secretName: {{ $t.trackerTokenSecret.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $t.trackerTokenSecret.key | quote }}
+                    path: {{ $t.trackerTokenSecret.key | quote }}
             - name: tmp
               emptyDir: {}
           {{- include "lapilli.placement" . | nindent 10 }}
