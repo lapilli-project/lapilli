@@ -117,7 +117,8 @@ the report, only the history is another; and the clock.
   before, which is empty: the ledger began with it. `/api/v1/report`'s
   last seven days, from 00:15 to 00:15, hold the same firings. The wall
   clock, which proposals expire by and the outbox keeps, stays the
-  machine's: read-only, nothing is made by it.
+  machine's: the proposal the demo makes is stamped by it, and nothing
+  else is made.
 - **Where it listens**: `--listen`, a loopback address written as one and
   a port, `127.0.0.1:0` by default, a free port. A name (`localhost`
   among them, which the resolver could make another address), an address
