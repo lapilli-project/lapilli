@@ -20,6 +20,18 @@ lapilli verdict --firings firings.jsonl --since 28d --incidents incidents.yaml -
 | Google Cloud | `google-cloud.sh` (`projects.alerts.list`) | 13 months, closed alerts |
 | Oracle Cloud | `oci.sh` (`get-alarm-history`) | 90 days |
 
+To judge them with rules that are replayed, give the file beside the rules:
+
+```sh
+lapilli verdict --rules rules/ --prometheus http://prometheus:9090 \
+  --firings firings.jsonl --since 28d --incidents incidents.yaml --match service
+```
+
+One report: an incident only a cloud's alarm caught is caught, and its alarms
+are marked as recorded, not replayed. A name a rule and an alarm both have is
+refused, `--firings: CheckoutErrors is also a rule replayed`; `--firings-prefix
+cloud/` keeps them apart. See [Use `lapilli verdict`](verdict.md).
+
 Such a verdict has the stones, precision, what each rule adds and when the
 firings came; not what needs a rule's condition: longer `for`s, near misses,
 `--compare`. CloudWatch and OCI keep the history of an alarm as a whole, so

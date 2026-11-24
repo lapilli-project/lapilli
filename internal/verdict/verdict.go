@@ -287,12 +287,25 @@ type MarkedCount struct {
 // may write to (docs/design/grafanajudged.md).
 const GrafanaSource = "grafana"
 
+// FiringsSource is the Source of a rule whose firings were recorded
+// elsewhere and read with --firings beside the rules replayed: a cloud's own
+// alarm, which Lapilli doesn't replay.
+const FiringsSource = "firings"
+
+// RecordedReason is the Unsupported of such a rule: why it wasn't replayed.
+const RecordedReason = "recorded elsewhere, not replayed"
+
 // ByHistory reports whether the rule isn't replayed and its firings come
 // from its history (Source): a Grafana rule judged from Grafana's own, a
 // cloud's alarm tied to the history copied in for it. It is judged as a
 // replayed rule is, but for what needs its condition: a longer "for", near
 // misses, a backtest.
 func (r RuleResult) ByHistory() bool { return r.Unsupported != "" && r.Source != "" }
+
+// Recorded reports whether the rule is one of --firings beside the rules
+// replayed: ByHistory, its firings read from a file, not asked of a history.
+// It is no rule that couldn't be replayed, as it was never to be.
+func (r RuleResult) Recorded() bool { return r.ByHistory() && r.Unsupported == RecordedReason }
 
 // Judged is how many of its firings were judged: those with a record at
 // their time.

@@ -192,6 +192,25 @@ over changes of it, or gives its title to another rule too), it is listed
 as before, and stderr says why. `--grafana-history=false` lists them all
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
 
+## Rules replayed and firings recorded in one report
+
+A team whose alerts are partly rules and partly a cloud's own alarms that
+can't be replayed can have one report. Give `--firings FILE`
+([a cloud's own alarms](cloud-alarms.md)) beside `--rules`, `--loaded-rules`,
+`--grafana`, `--ruler`, `--alarms` or `--loki-rules`: the recorded firings are
+judged with the replayed ones, over the same period, against the same
+incidents, and each recorded alarm is a rule of the report. An incident only
+an alarm caught is caught, not missed. Such a rule is not replayed, as a
+Grafana rule judged from its history isn't: no longer `for`, near misses or
+`--compare` for it, and the report says so under its table; `--json` gives it
+`source` `firings`. It is no rule that couldn't be replayed, so
+`--fail-unreplayed` and `--fail-nothing-replayed` count only the rules
+replayed: a run in which every replay failed exits 1 though the recorded
+firings were judged, the report then judging only what was recorded. A rule's firings come from one place: a name both a rule replayed
+and the file have is refused, exit 2, listing up to five of them.
+`--firings-prefix STR` puts `STR` before every recorded name, to keep the
+two apart on purpose (an incident's `alerts` then name a recorded rule as the report does, with the prefix: `cloud/X`, as the firings keep no name but that one, and with `--linked-only` an alert `X` links to no recorded rule); alone, with `--firings` and no rules replayed, it is refused, exit 2. `--firings` doesn't go with `--alerts` or `--compare`.
+
 ## Rules kept in Terraform
 
 Grafana alerting managed with the Grafana provider's `grafana_rule_group`

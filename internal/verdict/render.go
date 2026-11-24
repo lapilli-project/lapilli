@@ -59,7 +59,14 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
 	}
-	partial(w, r.Unreplayed, len(r.Rules), true)
+	// The rules there were to replay: those recorded with --firings aren't.
+	toReplay := 0
+	for _, rr := range r.Rules {
+		if !rr.Recorded() {
+			toReplay++
+		}
+	}
+	partial(w, r.Unreplayed, toReplay, true)
 	switch {
 	case r.NoRecord && firings > 0:
 		fmt.Fprintln(w, NoRecordTextFor(r.Settings != nil && r.Settings.ImpactNoData))
@@ -69,9 +76,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
 
-	var fired, silent, unsupported, byHistory []RuleResult
+	var fired, silent, unsupported, byHistory, recorded []RuleResult
 	for _, rr := range r.Rules {
-		if rr.ByHistory() {
+		switch {
+		case rr.Recorded():
+			recorded = append(recorded, rr)
+		case rr.ByHistory():
 			byHistory = append(byHistory, rr)
 		}
 		switch {
@@ -164,6 +174,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintf(w, "  %s, from %s: %s\n", Clean(rr.Rule), historyOf(rr.Source), Clean(rr.Unsupported))
 		}
 	}
+	if len(recorded) > 0 {
+		fmt.Fprintf(w, "\nJudged from what was recorded, not replayed, %s: no longer \"for\", near misses or backtests for them.\n", plural(len(recorded), "rule", "rules"))
+		for _, rr := range recorded {
+			fmt.Fprintf(w, "  %s\n", Clean(rr.Rule))
+		}
+	}
 	unseen(w, r.Rules)
 
 	if len(r.Incidents) > 0 {
@@ -197,7 +213,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 					unsure++
 				}
 			}
-			switch replayed := len(r.Rules) - len(unsupported); {
+			switch replayed := toReplay - len(unsupported); {
 			case notKnown == 0:
 			case replayed == 0:
 				fmt.Fprintf(w, "? %d of %d %s can't be judged: no rule was replayed.\n", notKnown, len(r.Incidents), of)
