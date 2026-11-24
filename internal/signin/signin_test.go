@@ -503,6 +503,51 @@ func TestKeysRSAOf2048BitsAtLeast(t *testing.T) {
 	}
 }
 
+// A token is read as go-oidc reads it before its signature is checked
+// here: compact, the spaces in it left out, or in the JSON serialization;
+// signed once, with an algorithm taken.
+func TestKeysReadAsGoOIDCReads(t *testing.T) {
+	ctx := context.Background()
+	key, other := mustRSA(t).(*rsa.PrivateKey), mustRSA(t).(*rsa.PrivateKey)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k", Algorithm: "RS256", Use: "sig"},
+			{Key: &other.PublicKey, KeyID: "o", Algorithm: "RS256", Use: "sig"}}})
+	}))
+	t.Cleanup(srv.Close)
+	k := NewKeys(srv.URL, Client(nil), []string{"RS256"}, time.Now)
+	claims := map[string]any{"sub": "x"}
+	tok := idptest.Sign(key, "k", jose.RS256, claims)
+	jws, err := jose.ParseSignedCompact(tok, []jose.SignatureAlgorithm{jose.RS256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	both, err := jose.NewMultiSigner([]jose.SigningKey{{Algorithm: jose.RS256, Key: key}, {Algorithm: jose.RS256, Key: other}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	twice, err := both.Sign([]byte(`{"sub":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, raw string
+		ok        bool
+	}{
+		{"compact", tok, true},
+		{"compact, spaces in it", " " + tok[:20] + "\n\t" + tok[20:] + " ", true},
+		{"the JSON serialization", jws.FullSerialize(), true},
+		{"the JSON serialization, spaces before it", "\n " + jws.FullSerialize(), true},
+		{"signed twice", twice.FullSerialize(), false},
+		{"an algorithm not taken", idptest.Sign(key, "k", jose.RS384, claims), false},
+		{"nothing", "", false},
+	} {
+		p, err := k.VerifySignature(ctx, c.raw)
+		if (err == nil) != c.ok || c.ok && string(p) != `{"sub":"x"}` {
+			t.Errorf("%s: %q, %v", c.name, p, err)
+		}
+	}
+}
+
 // Any sign-in in front whose JWT the keys at a URL verify: oauth2-proxy's
 // ID token as a bearer token, here.
 
