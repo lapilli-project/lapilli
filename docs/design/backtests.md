@@ -670,7 +670,8 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   Those are what MetricsQL or Prometheus 2 reads otherwise than
   Prometheus 3 (Prometheus 3's durations as numbers, `x > 5m`, and
   numbers as durations, `rate(x[300])`; `1d-1y`; a backtick's string
-  ending in `\`; a name in quotes with a `\` in it; MetricsQL's own
+  ending in `\`; a name in quotes with a `\` in it; a `\r` in a comment,
+  which ends it for Prometheus and not for MetricsQL; MetricsQL's own
   words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
   a comma after a call's last argument), an expression past 16 KiB or 32
   levels of brackets; a Grafana rule; a Loki ruler's, whose API prints

@@ -63,7 +63,8 @@ func (r Rule) Parsed() (string, bool) {
 // Prometheus 3.5.0 reads and prints it (promql/parser), and VictoriaMetrics'
 // MetricsQL reads it alike: so what MetricsQL reads otherwise (a
 // backtick's string ending in \, a label's name in quotes with a \ in it, a
-// duration outside brackets and offsets, 1d-1y) isn't read at all.
+// \r in a comment, a duration outside brackets and offsets, 1d-1y) isn't
+// read at all.
 //
 // It is held as Lapilli reads every expression (ReadExpr): 16 KiB, 32
 // levels of brackets at most.
@@ -160,14 +161,20 @@ func (p *pq) peek() byte {
 }
 
 // space reads past spaces, and comments where they may be: not in a
-// range's brackets, which Prometheus refuses one in.
+// range's brackets, which Prometheus refuses one in. A comment ends at a
+// newline. Prometheus ends one at a \r too, and MetricsQL (v0.87.6) goes
+// on past it: a \r in a comment but before a newline isn't read, as what
+// follows it is read by one and not by the other.
 func (p *pq) space(comments bool) {
 	for p.i < len(p.s) {
 		switch c := p.s[p.i]; {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			p.i++
 		case c == '#' && comments:
-			for p.i < len(p.s) && p.s[p.i] != '\n' && p.s[p.i] != '\r' {
+			for p.i < len(p.s) && p.s[p.i] != '\n' {
+				if p.s[p.i] == '\r' && (p.i+1 == len(p.s) || p.s[p.i+1] != '\n') {
+					p.bad = true
+				}
 				p.i++
 			}
 		default:

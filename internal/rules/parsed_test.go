@@ -122,6 +122,7 @@ func TestParsedExprAlike(t *testing.T) {
 		{`max(x) by (le) `, `max by (le) (x)`},
 		{`x{a!~"b", c!="d"}`, `x{a!~"b",c!="d"}`},
 		{"histogram_quantile(0.99,\n  sum by (le) (rate(x_bucket[5m]))\n)", `histogram_quantile(0.99, sum by (le) (rate(x_bucket[5m])))`},
+		{"errors > 5 # five\r\n", `errors > 5`},
 		// The same, written otherwise.
 		{`sum without (b, a) (x)`, `sum without (a, b) (x)`},
 		{`x and on(b, a) y`, `x and on (a, b) y`},
@@ -279,6 +280,10 @@ func TestParsedExprRefused(t *testing.T) {
 		`métrique > 1`,
 		`x[1h:0m5m:]`,
 		`x[5m # c` + "\n]",
+		// Prometheus ends a comment at \r, MetricsQL doesn't: vmalert runs
+		// this as errors > 5, Prometheus as errors > 5 or latency > 1.
+		"errors > 5 #\ror latency > 1",
+		"errors > 5 # five\r",
 		strings.Repeat("(", 33) + "x" + strings.Repeat(")", 33),
 		strings.Repeat("abs(", 32) + "x" + strings.Repeat(")", 32),
 		"x > " + strings.Repeat("1 + ", 4<<10) + "1",
