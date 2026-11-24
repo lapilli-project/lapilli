@@ -656,6 +656,19 @@ func TestBacktestLateRun(t *testing.T) {
 	if x, _, _ := b.s.l.Backtest(context.Background(), ids["run 12"]); x.Workflow != "example/alerts/.github/workflows/backtest.yml" || x.RunNumber != 12 {
 		t.Errorf("kept workflow %q, run %d", x.Workflow, x.RunNumber)
 	}
+	// A token whose run can't be read plainly supersedes none: its place
+	// among its workflow's runs isn't known.
+	for name, change := range map[string]map[string]any{
+		"an empty run_number":      {"run_number": ""},
+		"a run_number of a zero":   {"run_number": "0"},
+		"a workflow_ref of no ref": {"workflow_ref": "example/alerts/.github/workflows/backtest.yml"},
+		"a workflow of a control":  {"workflow_ref": "example/alerts/.github/workflows/back\u202etest.yml@refs/heads/gh-readonly-queue/main/pr-5-" + commitN(9)},
+	} {
+		ask(name, group("13", "1", change), 13, http.StatusAccepted, 0)
+		if ok, err := b.s.l.CancelBacktest(context.Background(), ids[name], b.s.now()); err != nil || !ok {
+			t.Fatalf("cancelling %s: %t %v", name, ok, err)
+		}
+	}
 
 	// A pull request: its newer commit's run 21, then run 20 of the commit
 	// before, late.

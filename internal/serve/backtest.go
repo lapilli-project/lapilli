@@ -1262,8 +1262,10 @@ var runNumber = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
 // begins at 1 for a workflow's first run and increments with each new
 // run, and doesn't change when a run is run again: what tells an earlier
 // run from a later one, as run_id, said only to be unique, doesn't. "", 0
-// for any other CI's, and for a token that doesn't say both plainly: its
-// backtest supersedes by the commit alone, as before.
+// for any other CI's, whose backtest supersedes by the commit alone, as
+// before; and for a GitHub token that doesn't say both plainly, whose
+// backtest supersedes none, as its run's place among its workflow's isn't
+// known.
 func (a asker) run() (string, int64) {
 	if a.claims == nil || a.t.CI != "github" {
 		return "", 0
@@ -1519,7 +1521,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), RepositoryID: a.repositoryID(), QueueBranch: a.queue(), Workflow: workflow, RunNumber: run, PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
-		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes()}
+		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken && a.supersedes() && (a.t.CI != "github" || workflow != "")}
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):
