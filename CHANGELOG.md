@@ -2,8 +2,72 @@
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-11-24
+
+Backtests in a merge queue: GitHub's `merge_group`, and GitLab's merge
+trains judged against the commit they are a merge of. `FAIL_MISSED`
+through serve compares a rule the pull request leaves alone as parsed
+PromQL, so a serve reading its rules from Prometheus's API keeps its
+catches. The tests take less than half the time, and none is bounded by
+how long something took. `--alertmanager-config` in the chart and in
+`lapilli preflight`, `RDATE` in on-call feeds, `--prometheus-tenant`, and
+Grafana IRM's incidents read by `QueryIncidentPreviews`. And what merged
+since 0.70.1: the Korean docs, `docs/data.md`, incidents not known apart
+from those missed, staticcheck in CI. No schema change: the ledger stays
+at 031.
+
+Before upgrading:
+- **A GitHub workflow that adds `merge_group`**: the fork-skipping `if:`
+  (`github.event.pull_request.head.repo.full_name == github.repository`)
+  skips a group's run too; write `github.event_name == 'merge_group' ||
+  ...`. A group behind another needs `fetch-depth: 0`.
+- **A required backtest in GitHub's merge queue** needs the queue's "Only
+  merge non-failing pull requests" on, GitHub's default: GitHub doesn't
+  say whether a group's base behind another group is the branch's commit
+  or the head of the group ahead, and with it off, a pull request whose
+  group failed merges once a group behind it passes.
+- **A GitLab job in merge train pipelines** whose checkout isn't the
+  pipeline's commit, or on a train whose commit isn't a merge of the
+  source branch's head (a squash), now fails, gates or not: check out the
+  pipeline's commit, or leave the job out of `merge_train` pipelines.
+- **A trust entry for a merge queue's ID token** names `event_name:
+  merge_group` in an entry of its own; one naming `pull_request` refuses
+  it.
+
 ### Added
 
+- **Backtests in GitHub's merge queue** (`merge_group`): the merge
+  group's head (`merge_group.head_sha`) is backtested against the base the
+  event names (`merge_group.base_sha`), `INCIDENTS` and the expectations in
+  place read from the base; no comment, the report going to the job's log;
+  with `STATUS`, `lapilli/backtest` (`(into BRANCH)` for another branch)
+  on the head, pending then success or failure. `FAIL_MISSED` and
+  expectations hold it as they hold a pull request. An event with no
+  `merge_group`, a `GITHUB_REF` that isn't the queue's ref for the branch,
+  or a `GITHUB_SHA` that isn't the head is refused with no status; a
+  checkout that isn't the head, a base that isn't its ancestor, or a
+  `TARGET`, `TARGET_BRANCH`, `STATUS_SHA` or `PR` naming another fails the
+  job, its status a failure on the head. A field of the event is read
+  whole or refused.
+- **lapilli serve takes a merge queue's ID token** only of a GitHub entry
+  that pins `event_name: merge_group`; one pinning `pull_request` refuses
+  it.
+- **`serve.checkContent.alertmanager` in the chart**
+  (`--alertmanager-config`): Alertmanager's configuration from a Secret or
+  a ConfigMap, mounted whole at `/etc/lapilli/alertmanager/` with
+  `templateConfigMaps` beside it, or a Mimir's or a Cortex's `url`, read
+  with `rules.ruler.tenant` and `rules.ruler.tokenSecret`.
+- **`lapilli preflight`'s `content.alertmanager`**: `--alertmanager-config`
+  read once as serve reads it, with how many receivers, template files and
+  templates it found; a problem when it can't be read, or when serve would
+  pass something over.
+- **`RDATE` in on-call feeds' events**: dates, days and periods added to
+  an event, with an `RRULE` or without one, each once, `EXDATE` applied,
+  `TZID` as `DTSTART`'s; bounded as a repeat is.
+- **`--prometheus-tenant ID`**, the history's own tenant, sent to
+  `--prometheus` alone in place of `--ruler-tenant`, in verdict, serve,
+  preflight and `lapilli impact suggest`, taken out of a backtest's
+  comment as the other tenants are; the chart's `prometheus.tenant`.
 - lapilli.dev's docs pages list their own sections beside them, with a
   search over every page's title, description and sections, the pages
   before and after at the end, and a button for the dark theme. Nine long
@@ -36,6 +100,27 @@
 
 ### Changed
 
+- **The tests take less than half the time.** serve's tests that keep to
+  their own ledger and server run in parallel, each ledger a copy of one
+  migrated once, and CI runs them eight at once. No test is bounded by how
+  long something took: the budgets count statements, rows, allocations,
+  waits begun and the work a reader does, so a slow runner fails none. A
+  token's writes are let through by the server's wall clock, which tests
+  can stop.
+- **Grafana IRM's recipe reads `IncidentsService.QueryIncidentPreviews`**,
+  as its reference deprecates `QueryIncidents`: newest first, stopping at
+  `SINCE`; a page out of order with `SINCE`, an answer with no list of
+  incidents, or one that says there is more but not where, writes nothing;
+  a `SINCE` that isn't a date is refused.
+- With `FAIL_MISSED` through serve, a group with no `interval` is still
+  another rule where serve can't read Prometheus's configuration, the
+  configuration doesn't state `evaluation_interval`, serve's latest rule
+  runs at another interval, or the rules come from vmalert. A known limit:
+  Prometheus's rules API doesn't report a group's `query_offset`, so a file
+  group without one is the same rule as serve's, whatever offset the
+  running group had; a file group with one is another, its catches not
+  known. Grafana rules, Loki ruler rules and cloud alarms are still
+  compared by their text.
 - Releases are gathered: at most two minor releases a week, each with
   what merged since the last; a fix for a vulnerability or for what a
   release broke is still a patch as soon as it is ready (GOVERNANCE.md).
@@ -61,6 +146,25 @@
 
 ### Fixed
 
+- **`FAIL_MISSED` through serve compared a rule the pull request leaves
+  alone by its text** (0.70.0). A rule serve reads from Prometheus's rules
+  API (`--loaded-rules`), Mimir's or Thanos', which print the expression
+  again (`sum(x) by (a)` as `sum by (a) (x)`, `300s` as `5m`, `for` in
+  seconds), had every incident that hung on it "not known", so the job
+  failed whatever the change. It is compared now as parsed PromQL, equal
+  only where Prometheus and MetricsQL both read the two alike; and a rule
+  file's group with no `interval` is the group Prometheus's rules API
+  reports, where serve read its `evaluation_interval` from Prometheus's
+  `/api/v1/status/config` (once a day) and serve's latest rules of that
+  name run at it. A `\r` in a comment, a zero offset where Prometheus takes
+  no offset, a second `offset` or `@`, and what the two dialects read
+  apart, are compared by their text.
+- **A GitLab merge train's pipeline was compared with
+  `CI_MERGE_REQUEST_TARGET_BRANCH_SHA`**, which GitLab documents for merged
+  results pipelines alone: what the merge requests ahead in the train
+  changed was judged as this one's, and `INCIDENTS` read from the target's
+  head. It is compared now with the first parent of the train's merge
+  (`CI_COMMIT_SHA`), `INCIDENTS` that commit's.
 - docs/serve.md's sidebar lacked Marked windows and Goals; the chart's
   values said serve takes one rules ConfigMap, where it mounts them all as
   one directory; docs/verdict.md says which cloud paths were run against
