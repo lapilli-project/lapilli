@@ -217,8 +217,13 @@ question 6, decided). Every other pinned claim is one value.
   merge group's ref): taken only of an entry of its own that pins it,
   never of one that pins `pull_request`, as a group holds what someone
   who may write to the repository queued, a fork's pull request among
-  them, run in the repository's own context. Its number isn't read from
-  that ref: the job's is kept as it says it, and supersedes nothing.
+  them, run in the repository's own context. Its pull request's number N
+  and the queue's branch are read from that ref alone, its last part
+  the queue's own (a branch's name may hold `/pr-M-SHA` before it); a
+  body that says another number is refused, and a `merge_group` token
+  whose `ref` isn't a queue's names no pull request, and is refused as a
+  token. A group the queue builds again takes the place of the one
+  waiting ("Queueing and limits").
   `workflow_ref` names the workflow file at the pull request's own ref,
   which the pull request can change, so pinning it keeps out no one who
   can push a branch.
@@ -413,7 +418,11 @@ they need:
 - **A queue.** 20 waiting at most (`--backtest-queue`), 3 of one entry, and
   one of a pull request: a newer commit's takes the place of the one
   waiting, which is answered as superseded (as built, the one of the same
-  entry, repository id and pull request: "As built (step 1)"). Past them,
+  entry, repository id and pull request: "As built (step 1)"). And one of
+  a merge queue's group of a pull request: a group the queue built again
+  (it does when a group ahead fails, or a pull request leaves the queue)
+  takes the place of the one of the same entry, repository, queue's
+  branch and pull request, never of a pull request's own. Past them,
   429 with `Retry-After`.
 - **An hour.** An entry's `hourly`, 30 unless given, from a bucket every
   replica shares (`ledger.Take`, as the token ports' rates are shared,
@@ -442,6 +451,10 @@ credential in CI, and the job's log says where it is in the queue.
 - **On the pull request**, as today: the comment the job posts, whose
   heading says it was judged by serve's record ("How it relates to
   `--expect`").
+- **In the step's summary**, in GitHub Actions: the same Markdown, but
+  the comment's hidden first line, on the run's page; of a merge queue's
+  run, which posts no comment, there and in the job's log
+  ([pr-backtests.md](../pr-backtests.md#the-report-in-the-steps-summary)).
 - **In the job's log**: where the backtest is in the queue, and, while it
   runs, its requests asked of those counted, every 30 seconds, as
   `--progress` says a run's.
@@ -458,7 +471,9 @@ credential in CI, and the job's log says where it is in the queue.
   trust entry, the repository as the token's claim names it (the entry's
   name for a plain token) and, since 0.69.2, by its id as the token says
   it (`repository_id`, schema 031), the pull request's number from GitHub's `ref`
-  claim or as the job sent it, the commit sent, its state, when it was
+  claim or as the job sent it, of a merge queue's run the branch the
+  queue's ref names (`queue_branch`, schema 032; `''` for any other run's),
+  the commit sent, its state, when it was
   asked, started and ended, the requests it made, a hash of its key, the
   files and expectations sent (gzipped, 4 MiB at most) until it ends, and
   the result (the Markdown and the JSON, gzipped, 1 MiB at most). A row is
@@ -846,7 +861,12 @@ a file's path:
 A token's claims are the issuer's, not the pull request's; the repository
 named is kept as a name a proxy gives is ([signin.md](signin.md): over 200
 bytes, or with what doesn't show, it is no one's). A branch name
-(`head_ref`) is the pusher's choice, and isn't kept.
+(`head_ref`) is the pusher's choice, and isn't kept. The branch a merge
+queue merges into, as the queue's `ref` names it, is kept on the row
+(`queue_branch`) to tell one queue's groups from another's, and shown
+nowhere: a queue is a ruleset's, a repository admin's to set, and its
+branch is held to what the recipes take as one (letters, digits and
+`. _ / -`, 255 at most), or the token is refused.
 
 The paths for the review: the port's handler (`backtestHandler`), the
 token's check (`internal/signin`, `Keys`, the claims' pins), the body's
@@ -1120,9 +1140,21 @@ Where step 1 does otherwise than the sections above say, or says more:
   both with no name kept. Before, it was matched by the repository's name,
   and from 0.63.2 a name not kept (past 200 bytes, or with what doesn't
   show: "") superseded none, as two repositories named so would be one. A
-  row with no id, asked before 0.69.2, is still matched by its name. The
-  leader takes the oldest of the entry that started one least lately. One
-  started twice whose leader stopped each time
+  row with no id, asked before 0.69.2, is still matched by its name. A
+  merge queue's run's number is its `ref`'s too, the queue's
+  (`refs/heads/gh-readonly-queue/BRANCH/pr-N-SHA`): until schema 032 it
+  was the job's, and superseded none, so that a group the queue built
+  again left the one it replaced waiting, its turn and its share of the
+  entry's three. Now a group takes the place of the one waiting of the
+  same entry, repository, pull request and branch (`queue_branch`); a pull
+  request's backtest, whose `queue_branch` is `''`, never takes a group's
+  place, nor a group a pull request's. The token of a run that says
+  `merge_group` with a `ref` that isn't a queue's is refused: refused
+  rather than taken without superseding, as the number would then be the
+  job's word for a run of the repository's own context, and GitHub's queue
+  makes no such run (the recipe refuses one whose `GITHUB_REF` isn't the
+  queue's ref too). The leader takes the oldest of the entry that started
+  one least lately. One started twice whose leader stopped each time
   (`attempts`, in 023) fails, saying so; one that panics fails. What ended
   a day ago goes at each of the leader's rounds, the port on or not.
 - **Reads by the key.** Each process keeps the backtests' key hashes by
