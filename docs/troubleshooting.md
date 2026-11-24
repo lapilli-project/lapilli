@@ -50,8 +50,20 @@ says it without `--firings`, and adds `--firings-token-file`, for firings
 copied in ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)).
 `--rule` is a regexp of rule names, not where the rules are: given a path, the
 message adds that `--rules` is for a file or a directory. Two of the flags
-together say `--rules and --firings both say where the firings come from: give
-one of them`.
+together say `--rules and --alerts both say where the firings come from: give
+one of them`; `--firings` goes beside the rules, and not `--alerts`.
+
+### `--firings: NAME is also a rule replayed`
+
+```
+lapilli verdict: --firings: CheckoutErrors is also a rule replayed: a rule's firings come from one place (--firings-prefix STR puts STR before the names it records, to keep them apart)
+```
+
+`--firings` was given beside rules to replay, and a rule of the file has the
+name of one replayed (exit 2; up to five names, then `and N more`). Its
+firings would come from two places, so none is judged. If the alarm is another
+rule that has the name, give `--firings-prefix cloud/`; if it is the same
+rule, leave it out of the file or of the rules.
 
 ### `read history: add --prometheus URL`
 
