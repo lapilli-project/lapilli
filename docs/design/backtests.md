@@ -1468,10 +1468,12 @@ step 3 does otherwise than the sections above say, or says more:
 - **What the port counts.** `fits` counts a backtest's requests of every
   API by the same planner, at the lane's rate. What only a Grafana rule's
   answers can say (whether a query that returned nothing returned anything
-  the day before, the first numbers of a classic condition's window, a
-  reduce over LogQL asked a batch of evaluations at a time) isn't counted,
-  as the hourly runs' estimate doesn't count it (`replay.Planned.Unsure`):
-  `--backtest-timeout` ends one that asks more.
+  the day before, the first numbers of a classic condition's window) isn't
+  counted, as the hourly runs' estimate doesn't count it
+  (`replay.Planned.Unsure`): `--backtest-timeout` ends one that asks more.
+  A reduce over LogQL is counted, a batch of evaluations at a time and each
+  range in the pieces a Loki's client asks it in, from the code that asks
+  them.
 - **What shows.** The comment, the JSON, the Run history and `/metrics` say
   a Grafana rule and a Loki ruler's as they say a Prometheus rule: by its
   name (a Grafana rule's title), its labels and its counts.

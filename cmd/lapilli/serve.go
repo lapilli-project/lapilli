@@ -103,6 +103,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       the rule's page links to it
   --lead, --match, --refire, --noisy-firings, --noisy-precision
                       the defaults; the UI can change them
+  --match-strict      a firing that lacks a --match label the incident has
+                      doesn't catch it; changed at a start, every firing is
+                      judged again with it
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone; changed at a start,
                       every firing is judged again with it

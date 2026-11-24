@@ -154,7 +154,13 @@ the incident and its end, and agrees with it on any `--match` labels both
 carry: `--match service` keeps an alert about one service from catching an
 incident in another just because they came at the same time. An incident that
 lists several values agrees with any of them, and an alert without the label
-(a database or a node) is not held to it. An alert that was already firing before that caught nothing: it was on
+(a database or a node) is not held to it. That catch is marked `(no service)`,
+for `--match service` (`loose` in `--json`), and the report says after the
+incidents table how many catches were so and by which rules, for such a rule
+catches every service's incident and its precision shows it. With
+`--match-strict` a firing that lacks a `--match` label the incident has doesn't
+catch it; a rule that also fired with the label caught it as any other.
+An alert that was already firing before that caught nothing: it was on
 anyway. A firing that comes within `--refire` (1h) of the same alert resolving
 is counted as refired.
 
@@ -181,7 +187,11 @@ an incident that is likely chance. Its catches are shown marked `(noisy)`, not
 dropped, since a noisy rule can also fire for the right reason. An incident
 caught only by noisy rules is reported as such, and its detection delay is
 taken from the first rule that isn't noisy. `--noisy-firings` and
-`--noisy-precision` move the line.
+`--noisy-precision` move the line (the chart's `noisyFirings` and
+`noisyPrecision`; in `lapilli serve` the Settings page too). A rule with
+fewer firings than that, none of them caught anything, isn't noisy yet, and
+`lapilli serve` badges it "Caught nothing", not "OK"; a rule's page says the
+bar in effect beside its badge.
 
 ## No record, no verdict
 

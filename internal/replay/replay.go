@@ -749,26 +749,55 @@ func warmup(g *rules.Graph, step time.Duration) time.Duration {
 // request.
 func queries(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []request {
 	var out []request
-	add := func(expr string, from time.Time, lag time.Duration) {
-		for _, c := range chunks(from, to, step) {
-			out = append(out, request{expr: expr, start: c[0].Add(-lag).Unix(), end: c[1].Add(-lag).Unix()})
+	for _, a := range ranges(r, from, to, step, warm) {
+		if !a.reduce {
+			out = append(out, request{expr: a.expr, start: a.start.Unix(), end: a.end.Unix()})
 		}
 	}
+	return out
+}
+
+// askedRange is one range of a query Condition asks the history for: expr
+// over [start, end] at step. A LogQL reduce's (reduce) is asked at Grafana's
+// step, by itself (logReduce), and shares nothing with the other rules.
+type askedRange struct {
+	expr       string
+	start, end time.Time
+	step       time.Duration
+	reduce     bool
+}
+
+// ranges lists what Condition asks for over [from, to], range by range:
+// the ranges a history is asked for, each as the Prometheus API or Loki's
+// client may split them (prom.Pieces), which Plan counts.
+func ranges(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []askedRange {
+	var out []askedRange
 	if r.Graph == nil {
 		for _, c := range chunks(from, to, step) {
 			if a, b, ok := evaluations(r, c, step, to); ok {
-				out = append(out, request{expr: r.Expr, start: a.Add(-r.Lag()).Unix(), end: b.Add(-r.Lag()).Unix()})
+				out = append(out, askedRange{expr: r.Expr, start: a.Add(-r.Lag()), end: b.Add(-r.Lag()), step: step})
 			}
 		}
 		return out
 	}
 	start := grafanaStart(r, from, step, warm)
 	for _, ref := range asked(r.Graph, false) {
-		if r.Graph.Asks[ref].Logs {
-			continue // asked at Grafana's step, by itself (logReduce)
+		lag := max(r.Graph.Shift[ref], r.Late)
+		if a := r.Graph.Asks[ref]; a.Logs {
+			// By evaluation chunk, each a batch at a time, as Condition
+			// asks.
+			res, _, _ := logGrid(a)
+			for _, c := range chunks(start, to, step) {
+				for _, b := range logBatches(a, c[0], c[1], step, lag) {
+					out = append(out, askedRange{expr: a.Expr, start: b.lo, end: b.hi, step: res, reduce: true})
+				}
+			}
+			continue
 		}
 		expr, _ := r.Graph.Expr(ref, r.AskStep(ref))
-		add(expr, start, max(r.Graph.Shift[ref], r.Late))
+		for _, c := range chunks(start, to, step) {
+			out = append(out, askedRange{expr: expr, start: c[0].Add(-lag), end: c[1].Add(-lag), step: step})
+		}
 	}
 	return out
 }
@@ -813,37 +842,16 @@ func shifted(ctx context.Context, h History, expr string, start, end time.Time, 
 // stretch, asked for once and reduced here: LogQL has no subqueries.
 // A series with no point in a window has no value there.
 func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, step, lag time.Duration) ([]prom.Series, error) {
-	res := a.Res
-	if res <= 0 {
-		res = time.Second
-	}
-	down := func(t time.Time) time.Time {
-		return time.UnixMilli(floorDiv(t.UnixMilli(), res.Milliseconds()) * res.Milliseconds())
-	}
-	up := func(t time.Time) time.Time {
-		d := down(t)
-		if d.Before(t) {
-			d = d.Add(res)
-		}
-		return d
-	}
-	// Evaluations a batch at a time, each batch's points asked for and
-	// reduced before the next: what is held is a batch's points and a
-	// window's, not a day's.
-	every := max(int64(step/res), 1)
-	batch := max(reducePoints/every, 1)
+	res, down, up := logGrid(a)
 	type kept struct {
 		labels  map[string]string
 		samples []prom.Sample
 	}
 	byKey := map[string]*kept{}
 	var keys []string
-	for first := from; !first.After(to); first = first.Add(time.Duration(batch) * step) {
-		last := first.Add(time.Duration(batch-1) * step)
-		if last.After(to) {
-			last = to
-		}
-		got, err := h.QueryRange(ctx, a.Expr, down(first.Add(-lag-a.Window)), up(last.Add(-lag)), res)
+	for _, b := range logBatches(a, from, to, step, lag) {
+		first, last := b.first, b.last
+		got, err := h.QueryRange(ctx, a.Expr, b.lo, b.hi, res)
 		if err != nil {
 			return nil, err
 		}
@@ -873,6 +881,52 @@ func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, 
 		out = append(out, prom.Series{Labels: byKey[k].labels, Samples: byKey[k].samples})
 	}
 	return out, nil
+}
+
+// logGrid is the step a LogQL reduce's range is asked at, and the times on
+// its grid since the epoch at or before a time, and at or after it.
+func logGrid(a rules.Ask) (res time.Duration, down, up func(time.Time) time.Time) {
+	res = a.Res
+	if res <= 0 {
+		res = time.Second
+	}
+	down = func(t time.Time) time.Time {
+		return time.UnixMilli(floorDiv(t.UnixMilli(), res.Milliseconds()) * res.Milliseconds())
+	}
+	up = func(t time.Time) time.Time {
+		d := down(t)
+		if d.Before(t) {
+			d = d.Add(res)
+		}
+		return d
+	}
+	return res, down, up
+}
+
+// logBatch is the evaluations of a LogQL reduce read from one range of its
+// query's points: those from first to last, the range from lo to hi.
+type logBatch struct {
+	first, last, lo, hi time.Time
+}
+
+// logBatches are the ranges logReduce asks for to reduce the evaluations
+// from from to to, lag before them: the evaluations a batch at a time,
+// each batch's points asked for and reduced before the next, so that what
+// is held is a batch's points and a window's, not a day's. The requests
+// of a replay are counted from them (Plan).
+func logBatches(a rules.Ask, from, to time.Time, step, lag time.Duration) []logBatch {
+	res, down, up := logGrid(a)
+	every := max(int64(step/res), 1)
+	batch := max(reducePoints/every, 1)
+	var out []logBatch
+	for first := from; !first.After(to); first = first.Add(time.Duration(batch) * step) {
+		last := first.Add(time.Duration(batch-1) * step)
+		if last.After(to) {
+			last = to
+		}
+		out = append(out, logBatch{first, last, down(first.Add(-lag - a.Window)), up(last.Add(-lag))})
+	}
+	return out
 }
 
 // reducePoints is how many of a LogQL query's points, beyond a window's,

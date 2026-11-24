@@ -3,6 +3,7 @@ package replay
 import (
 	"time"
 
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 )
 
@@ -18,9 +19,10 @@ type Planned struct {
 	Requests int
 	// Unsure are the Grafana rules replayed, which may ask more than these
 	// as what is answered needs: whether a query that returned nothing
-	// returned anything in the day before (once a query a replay), the
-	// first numbers of a classic condition's window, and a LogQL query a
-	// reduce reads, which is asked a batch of evaluations at a time.
+	// returned anything in the day before (once a query a replay), and the
+	// first numbers of a classic condition's window. A LogQL query a
+	// reduce reads is counted, a batch of evaluations at a time as
+	// logReduce asks it.
 	Unsure int
 }
 
@@ -62,20 +64,31 @@ func PlanEach(h History, sets [][]Version, from, to time.Time, step time.Duratio
 			names[name] = src
 		}
 		asks := false
+		// The history is a Loki's, or Grafana's data source proxy to one,
+		// where a rule in LogQL is replayed from.
+		loki := last.Logs != ""
 		for j, st := range run {
 			if st.Unsupported != "" {
 				break
 			}
 			lo, hi := st.span(step)
-			for _, r := range queries(st.Rule, lo, hi, step, st.warm(j)) {
+			for _, a := range ranges(st.Rule, lo, hi, step, st.warm(j)) {
 				asks = true
-				r.src = src
-				if seen[r] {
-					continue
+				// A Loki's range is asked in the pieces its client makes
+				// of it: more than one when it is asked at a finer step.
+				n := 1
+				if loki {
+					n = len(prom.Pieces(a.start, a.end, a.step, true))
 				}
-				seen[r] = true
-				p.By[name]++
-				p.Requests++
+				if !a.reduce {
+					r := request{src: src, expr: a.expr, start: a.start.Unix(), end: a.end.Unix()}
+					if seen[r] {
+						continue
+					}
+					seen[r] = true
+				}
+				p.By[name] += n
+				p.Requests += n
 			}
 		}
 		if asks && last.Graph != nil {

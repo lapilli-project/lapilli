@@ -91,7 +91,7 @@ menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
 one it finds. The rules list gives each rule a badge on three axes (Noisy,
-No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
+Caught nothing, No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
 name and `is:noisy`, `noisy:episodes`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
@@ -397,7 +397,8 @@ proposal is (`--changes` on). With `--expect` and `--changes-token-file`,
 an accepted draft with no scenario goes the git path: the expectations
 file with it taken in is handed to the change recipes, which open a pull
 request to `EXPECT_FILE`, the file in git `--expect` is made from
-([recipes/changes](../recipes/changes/README.md)). Otherwise accepting
+([recipes/changes](../recipes/changes/README.md), which the chart
+runs with `serve.changes.pullRequests`). Otherwise accepting
 keeps the decision, and the tab gives the YAML to put where the
 expectations are declared: Lapilli doesn't write a ConfigMap or `--config`.
 Drafts count with proposals toward a person's 20 an hour; ten wait for a
@@ -530,6 +531,12 @@ is the process memory above, and `resources.limits.memory` that and what
 `lapilli preflight` says a run takes. The chart's defaults (a request of
 `256Mi`, a limit of `1Gi`) are above the process memory of every row here,
 without a run's replay.
+
+The table is SQLite's, up to 100,000 firings a week. The Postgres rows
+(the same test, a ledger in a schema of its own, its size the schema's
+tables with their indexes) and the 1,000,000-a-week rows come from
+`.github/workflows/sizing.yml`, run by hand, and are to be filled in
+from its first run.
 
 Reproduce it, on your machine (about nine to eleven minutes, and the ledgers under
 `TMPDIR`, deleted as each is measured, the largest 161 MB):
@@ -1342,6 +1349,37 @@ retitle a task, read anything else, or hold the same value as another token.
 What it writes is noted as `tasks-token` and isn't counted as anyone's use.
 In the chart, `serve.trackers` names its Secret and, with `tracker`, runs the
 script as a CronJob.
+
+## Copying incidents and opening pull requests from the chart
+
+The recipes that feed and act for `lapilli serve` are shell scripts, and
+Lapilli's own image has no shell, so the chart runs them from an image you
+give it: one with `sh`, `curl` and `jq`, and `git` for pull requests. The
+scripts themselves come with the chart (`charts/lapilli/files/recipes`, a copy
+a test keeps the same as `recipes/`), mounted read-only; the tokens are
+Secrets you name, mounted as files.
+
+- `serve.incidentsAPI.copy`: one CronJob a job, each running a script of
+  [recipes/incidents](../recipes/incidents/README.md) every 15 minutes and
+  writing what it gives with `put.sh`, with the token in
+  `serve.incidentsAPI.tokenSecret`.
+- `serve.changes.pullRequests`: one CronJob running the script of
+  [recipes/changes](../recipes/changes/README.md) for your git host every
+  5 minutes, with `serve.changes.tokenSecret` to read the approved changes.
+
+Both are off, and each is refused without `image`. With `serve.networkPolicy`
+the chart lets these pods reach the incidents port, and that port alone; what
+they reach outside the cluster, a tool's API or a git host, the chart doesn't
+limit. The README's values show each.
+
+An image for them, as an example to build yourself and pin by digest, not
+one Lapilli publishes:
+
+```dockerfile
+FROM alpine@sha256:<the digest of the alpine you chose>
+RUN apk add --no-cache curl jq git ca-certificates
+USER 65532:65532
+```
 
 ## Who is told what
 

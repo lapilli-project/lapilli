@@ -62,7 +62,12 @@ with it, on purpose.
   its path.
 - Send anything: no flag of verdict's that sends (`--push`, `--slack-webhook-file`)
   is taken.
-- Write anywhere but its temporary directory, which it removes.
+- Write anywhere but its temporary directory, which it removes, except
+  for `--write DIR`: it writes `rules.yaml`, `incidents.yaml` (the
+  incidents it judges by, the week's and the week before's) and a
+  `README.txt` into DIR, made if missing, replays nothing and listens on
+  nothing, and refuses to overwrite any of the three. It does not go with
+  `--serve` or `--json`.
 - Read a file of the user's: its flags name none.
 
 With `--serve` it listens, on loopback alone, read-only; the rest holds

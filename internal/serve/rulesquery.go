@@ -22,7 +22,7 @@ var queryKeys = []string{"team", "severity", "is", "noisy", "status", "has", "la
 // The facets' values: performance (judged), trust (the backtest), the
 // rule's disposition (its note), and what is under way.
 var (
-	perfValues   = []string{"noisy", "noisy-episodes", "unrecorded", "ok", "silent", "spare"}
+	perfValues   = []string{"noisy", "noisy-episodes", "nothing", "unrecorded", "ok", "silent", "spare"}
 	trustValues  = []string{"differs", "unreplayed", "recorded"}
 	statusValues = []string{"keep", "tune", "retire", "none"}
 	hasValues    = []string{"proposal", "facts"}
@@ -33,7 +33,7 @@ var (
 
 // isValues are what is: takes, and the facet and value each is.
 var isValues = map[string][2]string{
-	"noisy": {"perf", "noisy"}, "unrecorded": {"perf", "unrecorded"}, "ok": {"perf", "ok"}, "silent": {"perf", "silent"}, "spare": {"perf", "spare"},
+	"noisy": {"perf", "noisy"}, "nothing": {"perf", "nothing"}, "unrecorded": {"perf", "unrecorded"}, "ok": {"perf", "ok"}, "silent": {"perf", "silent"}, "spare": {"perf", "spare"},
 	"differs": {"trust", "differs"}, "unreplayed": {"trust", "unreplayed"}, "recorded": {"trust", "recorded"},
 	"proposed": {"has", "proposal"}, "facts": {"has", "facts"},
 	"expected": {"expect", "held"}, "unexpected": {"expect", "none"},
