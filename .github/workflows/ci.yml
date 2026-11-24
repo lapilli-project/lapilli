@@ -418,6 +418,22 @@ jobs:
           check-latest: true
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
+  staticcheck:
+    # What go vet doesn't look for: a value never used, code nothing
+    # reaches, a call of something deprecated. staticcheck.conf says which
+    # checks are left out, and why.
+    name: staticcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
+
   fuzz:
     # The parsers of what comes from outside (rule files and APIs, what an
     # agent sends over MCP, Grafana expressions, incidents and firings
