@@ -610,9 +610,11 @@ estimate is set beside the process's memory limit, where it has one.
 
 ### A rule has no stones
 
-In `lapilli verdict`'s report, a rule that didn't fire is counted in `N
-rules never fired.`, and one that couldn't be replayed is under `Could not
-replay N rules:` with its reason: the history (above), `paused`, `its
+In `lapilli verdict`'s report, a rule that didn't fire is named in `N
+rules never fired: …`, with a line after it for those whose condition read
+no series at all in the period, and one that couldn't be replayed is under
+`Could not replay N rules:`, or at the top when its replay failed, with its
+reason: the history (above), `paused`, `its
 condition reads a TYPE data source: only PromQL and LogQL are replayed`,
 or a cloud's alarm in its own terms (`a CloudWatch metric alarm isn't
 PromQL`). [What it doesn't do yet](limits.md) lists what can't be
