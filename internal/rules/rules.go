@@ -2448,9 +2448,6 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 			}
 			g.Steps[ref] = Step{Math: e}
 		case "classic_conditions":
-			if g.Logs != "" {
-				return nil, errors.New("classic conditions over a Loki query aren't replayed: their reducers are worked out with PromQL's subqueries, which LogQL hasn't")
-			}
 			c, err := classic(ref, m, queries, g)
 			if err != nil {
 				return nil, err

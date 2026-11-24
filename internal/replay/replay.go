@@ -781,11 +781,17 @@ func ranges(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []a
 		return out
 	}
 	start := grafanaStart(r, from, step, warm)
+	done := map[string]bool{}
 	for _, ref := range asked(r.Graph, false) {
 		lag := max(r.Graph.Shift[ref], r.Late)
 		if a := r.Graph.Asks[ref]; a.Logs {
 			// By evaluation chunk, each a batch at a time, as Condition
-			// asks.
+			// asks; reduces of one query's points, one range.
+			if k := logSame(a, lag); done[k] {
+				continue
+			} else {
+				done[k] = true
+			}
 			res, _, _ := logGrid(a)
 			for _, c := range chunks(start, to, step) {
 				for _, b := range logBatches(a, c[0], c[1], step, lag) {
@@ -842,16 +848,32 @@ func shifted(ctx context.Context, h History, expr string, start, end time.Time, 
 // stretch, asked for once and reduced here: LogQL has no subqueries.
 // A series with no point in a window has no value there.
 func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, step, lag time.Duration) ([]prom.Series, error) {
-	res, down, up := logGrid(a)
+	got, err := logReduceMany(ctx, h, []rules.Ask{a}, from, to, step, lag)
+	if err != nil {
+		return nil, err
+	}
+	return got[0], nil
+}
+
+// logReduceMany is logReduce for several reduces of one query's points,
+// which share its requests: as asks must be of the same expression, window
+// and step (logSame), each is answered from the one range asked for. A
+// classic condition's reducer and its series' presence are two of them.
+func logReduceMany(ctx context.Context, h History, as []rules.Ask, from, to time.Time, step, lag time.Duration) ([][]prom.Series, error) {
+	a0 := as[0]
+	res, down, up := logGrid(a0)
 	type kept struct {
 		labels  map[string]string
 		samples []prom.Sample
 	}
-	byKey := map[string]*kept{}
-	var keys []string
-	for _, b := range logBatches(a, from, to, step, lag) {
+	byKey := make([]map[string]*kept, len(as))
+	keys := make([][]string, len(as))
+	for i := range as {
+		byKey[i] = map[string]*kept{}
+	}
+	for _, b := range logBatches(a0, from, to, step, lag) {
 		first, last := b.first, b.last
-		got, err := h.QueryRange(ctx, a.Expr, b.lo, b.hi, res)
+		got, err := h.QueryRange(ctx, a0.Expr, b.lo, b.hi, res)
 		if err != nil {
 			return nil, err
 		}
@@ -859,7 +881,7 @@ func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, 
 			smp := s.Samples
 			k := key(s.Labels)
 			for at := first; !at.After(last); at = at.Add(step) {
-				lo, hi := down(at.Add(-lag-a.Window)), up(at.Add(-lag))
+				lo, hi := down(at.Add(-lag-a0.Window)), up(at.Add(-lag))
 				i := sort.Search(len(smp), func(i int) bool { return !smp[i].T.Before(lo) })
 				var vs []float64
 				for ; i < len(smp) && !smp[i].T.After(hi); i++ {
@@ -868,19 +890,45 @@ func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, 
 				if len(vs) == 0 {
 					continue
 				}
-				if byKey[k] == nil {
-					byKey[k] = &kept{labels: s.Labels}
-					keys = append(keys, k)
+				for n, a := range as {
+					v, ok := logReduced(a, vs)
+					if !ok {
+						continue
+					}
+					if byKey[n][k] == nil {
+						byKey[n][k] = &kept{labels: s.Labels}
+						keys[n] = append(keys[n], k)
+					}
+					byKey[n][k].samples = append(byKey[n][k].samples, prom.Sample{T: at, V: v})
 				}
-				byKey[k].samples = append(byKey[k].samples, prom.Sample{T: at, V: reduce(a.Fn, vs)})
 			}
 		}
 	}
-	out := make([]prom.Series, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, prom.Series{Labels: byKey[k].labels, Samples: byKey[k].samples})
+	out := make([][]prom.Series, len(as))
+	for n := range as {
+		out[n] = make([]prom.Series, 0, len(keys[n]))
+		for _, k := range keys[n] {
+			out[n] = append(out[n], prom.Series{Labels: byKey[n][k].labels, Samples: byKey[n][k].samples})
+		}
 	}
 	return out, nil
+}
+
+// logReduced is a window's points reduced as a: by Grafana's reduce
+// expression, or, for a classic condition's ask, by its reducer
+// (rules.ClassicReduce), which finds none in a series of NaN alone.
+func logReduced(a rules.Ask, vs []float64) (float64, bool) {
+	if a.Classic {
+		return rules.ClassicReduce(a.Fn, vs)
+	}
+	return reduce(a.Fn, vs), true
+}
+
+// logSame is the key of the LogQL asks that read the same points of one
+// query: its expression, window and step, and how long before the
+// evaluation the window ends.
+func logSame(a rules.Ask, lag time.Duration) string {
+	return fmt.Sprintf("%s\x00%d\x00%d\x00%d", a.Expr, a.Window, a.Res, lag)
 }
 
 // logGrid is the step a LogQL reduce's range is asked at, and the times on
@@ -1034,12 +1082,37 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 		answers := make([][]prom.Series, len(refs))
 		errs := make([]error, len(refs))
 		var wg sync.WaitGroup
+		// LogQL reduces of one query's points are answered from one range:
+		// the first of each such group asks for all.
+		sameLogs := map[string][]int{}
+		for i, ref := range refs {
+			if a := g.Asks[ref]; a.Logs {
+				k := logSame(a, max(g.Shift[ref], r.Late))
+				sameLogs[k] = append(sameLogs[k], i)
+			}
+		}
 		for i, ref := range refs {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				if a := g.Asks[ref]; a.Logs {
-					answers[i], errs[i] = logReduce(ctx, h, a, c[0], c[1], step, max(g.Shift[ref], r.Late))
+					lag := max(g.Shift[ref], r.Late)
+					group := sameLogs[logSame(a, lag)]
+					if group[0] != i {
+						return
+					}
+					as := make([]rules.Ask, len(group))
+					for n, j := range group {
+						as[n] = g.Asks[refs[j]]
+					}
+					got, err := logReduceMany(ctx, h, as, c[0], c[1], step, lag)
+					for n, j := range group {
+						if err != nil {
+							errs[j] = err
+						} else {
+							answers[j] = got[n]
+						}
+					}
 					return
 				}
 				expr, _ := g.Expr(ref, r.AskStep(ref))

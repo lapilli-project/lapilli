@@ -44,7 +44,17 @@ type Ask struct {
 	// Grafana's reducer (last, mean, min, max, sum, count), and Res how far
 	// apart Grafana's Loki data source asks for the points.
 	Logs bool
+	// Classic, with Logs, says Fn is a classic condition's reducer (avg,
+	// sum, min, max, count, last, median, diff, diff_abs, percent_diff,
+	// percent_diff_abs, count_non_null; ClassicReduce), or ClassicPresent,
+	// which says a series has a point in the window.
+	Classic bool
 }
+
+// ClassicPresent is the Fn of a classic condition's Ask that says, of each
+// series with a point in the window, how many points it has: the series
+// its query returned, which Grafana reduces one by one.
+const ClassicPresent = "present"
 
 // PromQL is the ask as PromQL, for history scraped every scrape (0 when not
 // known). A reduce that counts points is asked at Grafana's resolution.
@@ -266,6 +276,11 @@ type ClassicCond struct {
 	// its start, for the diff reducers.
 	Expr        string
 	Window, Res time.Duration
+	// Reduced says Value is already the reducer's result, worked out from
+	// the series' points as Grafana's classic reducers do (ClassicReduce):
+	// over a LogQL range query, whose points the replay reads itself. The
+	// diff reducers then need no Oldest or Points.
+	Reduced bool
 }
 
 // classicEvaluators are how many numbers each evaluator takes.
@@ -281,6 +296,9 @@ var classicReducers = []string{"avg", "sum", "min", "max", "count", "last", "med
 // Diff reports whether the reducer compares a window's newest number with
 // its oldest.
 func (c ClassicCond) Diff() bool {
+	if c.Reduced {
+		return false
+	}
 	switch c.Reducer {
 	case "diff", "diff_abs", "percent_diff", "percent_diff_abs":
 		return true
@@ -348,6 +366,22 @@ func classic(ref string, m map[string]any, queries map[string]dataQuery, g *Grap
 			c.Conds = append(c.Conds, cd)
 			continue
 		}
+		if g.Logs != "" {
+			// LogQL has no subqueries: the replay reduces the points of
+			// the range query Grafana's evaluation reads, as Grafana's
+			// classic reducers do, in Go (ClassicReduce).
+			if q.res < LokiLeastStep {
+				return nil, fmt.Errorf("query %s asks Loki for a point every %s: a replay asks no finer than every %s (86,400 points a series a day), so it isn't replayed", cd.Query, q.res, LokiLeastStep)
+			}
+			cd.Reduced = true
+			cd.Value = ask("value", Ask{Fn: cd.Reducer, Logs: true, Classic: true})
+			cd.Present = ask("present", Ask{Fn: ClassicPresent, Logs: true, Classic: true})
+			if cd.Reducer == "count" {
+				cd.Present = cd.Value
+			}
+			c.Conds = append(c.Conds, cd)
+			continue
+		}
 		switch cd.Reducer {
 		case "count":
 			cd.Value = ask("count", Ask{Fn: "count_over_time", Counts: true})
@@ -407,6 +441,9 @@ type Reduced struct {
 // that the window holds one number only, which differs from itself by
 // nothing, as Grafana's calculateDiff has it, though it is 0.
 func (c ClassicCond) Reduce(value, oldest Reduced, alone bool) Reduced {
+	if c.Reduced {
+		return value
+	}
 	if !c.Diff() || c.Instant || !value.OK {
 		return value
 	}
@@ -570,4 +607,161 @@ func (c *Classic) ValueOf(at int, series func(i int) []Reduced) float64 {
 		return best
 	}
 	return math.NaN()
+}
+
+// ClassicReduce is a series' value after a classic condition's reducer,
+// worked out from its points, vs, as Grafana's does: pkg/expr/classic,
+// reducer.Reduce in reduce.go (Grafana 13.3.1), with NaN where Grafana has a
+// nil or NaN point. ok is false for none, which Grafana's nil is: a series
+// with no point, or whose reducer found no number (avg, sum, min, max,
+// last, median and the diffs over points that are all NaN; count_non_null
+// when none is a number). count counts every point, NaN too, and is never
+// none for a series with a point. The same rules in each, from Grafana's
+// code:
+//
+//   - avg, sum, median: NaN left out; avg's mean is of the rest.
+//   - min starts from math.MaxFloat64 and max from -math.MaxFloat64, so a
+//     series of +Inf alone has min MaxFloat64, and one of -Inf alone has
+//     max -MaxFloat64: kept as Grafana has them.
+//   - last: the newest point that is a number.
+//   - median: the middle of the sorted numbers, the mean of the two in the
+//     middle when there is an even number of them.
+//   - the diffs (calculateDiff): the newest number, and, only when it isn't
+//     the series' first point, the oldest number; one that is the first
+//     point alone is 0, whatever it is. When it isn't, the oldest number
+//     may be the newest itself (earlier points all NaN), and then the diff
+//     of a number with itself, which for the percent diffs of 0 is NaN.
+//
+// ClassicPresent says only how many points there are.
+func ClassicReduce(fn string, vs []float64) (value float64, ok bool) {
+	if len(vs) == 0 {
+		return 0, false
+	}
+	allNull := true
+	switch fn {
+	case ClassicPresent:
+		return float64(len(vs)), true
+	case "avg":
+		n := 0
+		for _, f := range vs {
+			if math.IsNaN(f) {
+				continue
+			}
+			value += f
+			n++
+			allNull = false
+		}
+		if n > 0 {
+			value /= float64(n)
+		}
+	case "sum":
+		for _, f := range vs {
+			if math.IsNaN(f) {
+				continue
+			}
+			value += f
+			allNull = false
+		}
+	case "min":
+		value = math.MaxFloat64
+		for _, f := range vs {
+			if math.IsNaN(f) {
+				continue
+			}
+			allNull = false
+			if value > f {
+				value = f
+			}
+		}
+		if allNull {
+			value = 0
+		}
+	case "max":
+		value = -math.MaxFloat64
+		for _, f := range vs {
+			if math.IsNaN(f) {
+				continue
+			}
+			allNull = false
+			if value < f {
+				value = f
+			}
+		}
+		if allNull {
+			value = 0
+		}
+	case "count":
+		return float64(len(vs)), true
+	case "last":
+		for i := len(vs) - 1; i >= 0; i-- {
+			if !math.IsNaN(vs[i]) {
+				return vs[i], true
+			}
+		}
+	case "median":
+		var nums []float64
+		for _, f := range vs {
+			if !math.IsNaN(f) {
+				nums = append(nums, f)
+			}
+		}
+		if len(nums) == 0 {
+			return 0, false
+		}
+		slices.Sort(nums)
+		n := len(nums)
+		if n%2 == 1 {
+			return nums[(n-1)/2], true
+		}
+		return (nums[n/2-1] + nums[n/2]) / 2, true
+	case "diff", "diff_abs", "percent_diff", "percent_diff_abs":
+		return classicDiff(fn, vs)
+	case "count_non_null":
+		for _, f := range vs {
+			if !math.IsNaN(f) {
+				value++
+			}
+		}
+		allNull = value == 0
+	default:
+		return 0, false
+	}
+	if allNull {
+		return 0, false
+	}
+	return value, true
+}
+
+// classicDiff is calculateDiff of Grafana's classic reducers
+// (pkg/expr/classic/reduce.go), as ClassicReduce says.
+func classicDiff(fn string, vs []float64) (float64, bool) {
+	var newest float64
+	i := len(vs) - 1
+	for ; i >= 0; i-- {
+		if !math.IsNaN(vs[i]) {
+			newest = vs[i]
+			break
+		}
+	}
+	if i < 0 {
+		return 0, false
+	}
+	if i < 1 {
+		return 0, true
+	}
+	for _, f := range vs {
+		if math.IsNaN(f) {
+			continue
+		}
+		switch fn {
+		case "diff":
+			return newest - f, true
+		case "diff_abs":
+			return math.Abs(newest - f), true
+		case "percent_diff":
+			return (newest - f) / math.Abs(f) * 100, true
+		}
+		return math.Abs((newest - f) / f * 100), true
+	}
+	return 0, true
 }
