@@ -268,14 +268,15 @@ func TestPruneNotifications(t *testing.T) {
 }
 
 // TestNotificationsScale holds reading twelve weeks of notifications, tied
-// to their firings, to a budget: 400 rules, about 100,000 firings, 20,000
-// notifications, a third of them repeats.
+// to their firings, to a budget of statements (work), not of time, so that
+// a slow runner fails none: 400 rules, about 100,000 firings, 20,000
+// notifications, a third of them repeats. The time is logged.
 func TestNotificationsScale(t *testing.T) {
 	if testing.Short() || race {
 		t.Skip("short, or under the race detector")
 	}
 	ctx := context.Background()
-	l := open(t, time.UTC)
+	l, where := openWatched(t)
 	start := t0.Add(-12 * 7 * 24 * time.Hour)
 	var fs []firing.Firing
 	for h := 0; h < 12*7*24; h++ {
@@ -323,16 +324,23 @@ func TestNotificationsScale(t *testing.T) {
 	}
 	t.Logf("20,000 notifications kept in %v", time.Since(began))
 	began = time.Now()
-	was := sent.Load()
-	ps, err := l.Pages(ctx, start, t0, twoMinutes)
+	var ps []Page
+	var err error
+	w := doing(t, l, where, func() { ps, err = l.Pages(ctx, start, t0, twoMinutes) })
 	if err != nil {
 		t.Fatal(err)
 	}
 	took := time.Since(began)
 	// In Postgres, a round trip each is what a slower runner pays for:
 	// some 13,000 spans of firings are read a few thousand a statement.
-	if n := sent.Load() - was; l.d == postgres && n > 50 {
-		t.Errorf("twelve weeks of notifications read in %d statements, want 50 at most", n)
+	// SQLite, in the process, reads each span with a statement or two:
+	// two for each page at most, never one for each firing.
+	most := int64(2 * len(ps))
+	if l.d == postgres {
+		most = 50
+	}
+	if w.statements > most {
+		t.Errorf("twelve weeks of notifications read in %d statements, want %d at most", w.statements, most)
 	}
 	untied := 0
 	for _, p := range ps {
@@ -340,12 +348,9 @@ func TestNotificationsScale(t *testing.T) {
 			untied++
 		}
 	}
-	t.Logf("%d pages over twelve weeks, %d untied, read in %v", len(ps), untied, took)
+	t.Logf("%d pages over twelve weeks, %d untied, read in %d statements, in %v", len(ps), untied, w.statements, took)
 	if len(ps) != 20000 || untied != 0 {
 		t.Errorf("%d pages, %d untied: want 20,000, none untied", len(ps), untied)
-	}
-	if budget := time.Duration(float64(3*time.Second) * slow); took > budget {
-		t.Errorf("twelve weeks of notifications read in %v; budget %v", took, budget)
 	}
 }
 

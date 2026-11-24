@@ -339,6 +339,17 @@ type FiringQuery struct {
 
 // Firings are the firings a query picks.
 func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
+	sq, args := firingsQuery(q)
+	rows, err := l.r.QueryContext(ctx, sq, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return l.readFirings(ctx, rows)
+}
+
+// firingsQuery is the statement Firings sends for q, and its arguments.
+func firingsQuery(q FiringQuery) (string, []any) {
 	sq := `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked, s.signals, f.episode, f.person, f.unrelated
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at < ?`
@@ -372,11 +383,11 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 		sq += " LIMIT ?"
 		args = append(args, q.Limit)
 	}
-	rows, err := l.r.QueryContext(ctx, sq, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+	return sq, args
+}
+
+// readFirings reads the rows firingsQuery's statement gives.
+func (l *Ledger) readFirings(ctx context.Context, rows *sql.Rows) ([]Firing, error) {
 	var out []Firing
 	var bits []int64
 	marked := false
@@ -389,6 +400,7 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 			return nil, err
 		}
 		f.Series, f.Unrelated = sid, unrelatedKeys(unrelated)
+		var err error
 		if f.Labels, err = l.labels(sid, labels); err != nil {
 			return nil, err
 		}

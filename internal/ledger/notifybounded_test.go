@@ -11,10 +11,11 @@ import (
 // A notification whose alerts don't say when they started reads their
 // starts with one query, bounded, through the group's index and then the
 // notification's: not one for each alert, through every notification of
-// its rule. It runs while the ledger is written.
+// its rule. It runs while the ledger is written. Counted (work) and
+// planned, not timed, so that a slow runner fails none.
 func TestNotifyStartsBounded(t *testing.T) {
 	ctx := context.Background()
-	l := open(t, time.UTC)
+	l, where := openWatched(t)
 	// A noisy rule's year: 100,000 alerts told of, in other groups.
 	err := l.write(ctx, func(tx *txn) error {
 		for i := range 2000 {
@@ -40,11 +41,21 @@ func TestNotifyStartsBounded(t *testing.T) {
 		alerts = append(alerts, Alert{Rule: "R", Labels: map[string]string{"i": fmt.Sprint(j)}, Resolved: true})
 	}
 	began := time.Now()
-	if _, err := l.Notify(ctx, Notification{At: t0, Source: "sns", Receiver: "r", Group: "g-0", Alerts: alerts}); err != nil {
-		t.Fatal(err)
+	w := doing(t, l, where, func() {
+		if _, err := l.Notify(ctx, Notification{At: t0, Source: "sns", Receiver: "r", Group: "g-0", Alerts: alerts}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Logf("a notification of %d alerts with no start: %d statements, %d rows written, in %s", MaxAlerts, w.statements, w.rows, time.Since(began))
+	// A few statements for the notification, its starts read in one: one
+	// for each alert is past it. On SQLite its alerts are written by one
+	// statement prepared once; Postgres counts each time it is run.
+	most := int64(MaxAlerts / 10)
+	if l.d == postgres {
+		most += MaxAlerts
 	}
-	if took := time.Since(began); took > 2*time.Second*time.Duration(slow) {
-		t.Errorf("a notification of %d alerts with no start took %s", MaxAlerts, took)
+	if w.statements > most {
+		t.Errorf("a notification of %d alerts with no start: %d statements, over %d", MaxAlerts, w.statements, most)
 	}
 	// The plan: the group's index, then the notification's alerts.
 	if p := plan(t, l, qStarts(l.d), "sns", "r", "g-0", 1, "", 50); !strings.Contains(p, "notifications_group") || !strings.Contains(p, "notified_of") || strings.Contains(p, "notified_rule") {

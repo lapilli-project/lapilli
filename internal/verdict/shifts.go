@@ -178,6 +178,11 @@ func turnLength(s string) (time.Duration, int, error) {
 func (s *Shifts) String() string { return s.text }
 
 // turn is the turn t comes in: which, and when it starts and ends.
+// turnStepped, when set, is told of each turn turn steps over from the one
+// it works out: the tests count them (TestShiftsFar), a few at most however
+// far the time is from the first turn.
+var turnStepped func()
+
 func (s *Shifts) turn(t time.Time) (int, time.Time, time.Time) {
 	// In seconds, which don't run out as a Duration does: exactly, for turns
 	// of hours; within a turn, for turns of days, the clocks changing.
@@ -191,9 +196,15 @@ func (s *Shifts) turn(t time.Time) (int, time.Time, time.Time) {
 		}
 	}
 	for i := 0; i < 4 && at(k).After(t); i++ {
+		if turnStepped != nil {
+			turnStepped()
+		}
 		k--
 	}
 	for i := 0; i < 4 && !at(k+1).After(t); i++ {
+		if turnStepped != nil {
+			turnStepped()
+		}
 		k++
 	}
 	n := int64(len(s.Turns))

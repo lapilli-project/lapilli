@@ -191,20 +191,24 @@ func TestShiftsUsed(t *testing.T) {
 	}
 }
 
-// Turns far from the first one come round as near ones do, at once; and a
-// first turn written at a time the clocks skip keeps that time on other
-// days.
+// Turns far from the first one come round as near ones do, at once: worked
+// out, not stepped to, a few turns stepped over at most (turnStepped,
+// counted, not timed); and a first turn written at a time the clocks skip
+// keeps that time on other days.
 func TestShiftsFar(t *testing.T) {
 	h := DefaultHours(time.UTC)
 	sh, err := ParseShifts("every=1h from=2200-12-31T23:00; tz=Asia/Tokyo; tz=Europe/Berlin; tz=America/New_York", h)
 	if err != nil {
 		t.Fatal(err)
 	}
+	stepped := 0
+	turnStepped = func() { stepped++ }
+	defer func() { turnStepped = nil }()
 	for _, when := range []time.Time{time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(1970, 1, 1, 0, 30, 0, 0, time.UTC), time.Date(9999, 12, 31, 23, 0, 0, 0, time.UTC)} {
-		began := time.Now()
+		stepped = 0
 		i, from, to := sh.turn(when)
-		if time.Since(began) > 10*time.Millisecond || from.After(when) || !to.After(when) || to.Sub(from) != time.Hour || i < 0 || i > 2 {
-			t.Errorf("%s: turn %d from %s to %s", when, i, from, to)
+		if stepped > 8 || from.After(when) || !to.After(when) || to.Sub(from) != time.Hour || i < 0 || i > 2 {
+			t.Errorf("%s: turn %d from %s to %s, %d turns stepped over", when, i, from, to, stepped)
 		}
 	}
 	berlin, _ := time.LoadLocation("Europe/Berlin")

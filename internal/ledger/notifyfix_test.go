@@ -8,8 +8,10 @@ import (
 )
 
 // Tying a busy rule's alerts to its firings looks only at the firings near
-// each alert: forty thousand of each in well under a second, not the
-// square of it.
+// each alert: forty thousand of each, a few firings looked at for each
+// alert (those within two minutes of it, a minute apart), not the square
+// of it. Counted (tieLooked), not timed, so that a slow runner fails none;
+// the time is logged.
 func TestTieOneBusyRule(t *testing.T) {
 	tr := &tier{within: func(string) time.Duration { return 2 * time.Minute }, ids: map[string][]int64{"A": {1}},
 		near: map[string][]tied{}, memo: map[string]*tied{}}
@@ -17,6 +19,9 @@ func TestTieOneBusyRule(t *testing.T) {
 	for i := range n {
 		tr.near["A"] = append(tr.near["A"], tied{id: int64(i), start: int64(i * 60), labels: map[string]string{"pod": fmt.Sprint(i)}})
 	}
+	looked := 0
+	tieLooked = func() { looked++ }
+	defer func() { tieLooked = nil }()
 	began := time.Now()
 	for i := range n {
 		f, err := tr.tie(Alert{Rule: "A", Labels: map[string]string{"pod": fmt.Sprint(i), "cluster": "x"}, Start: time.Unix(int64(i*60+30), 0)})
@@ -24,8 +29,9 @@ func TestTieOneBusyRule(t *testing.T) {
 			t.Fatalf("alert %d tied to %+v, %v", i, f, err)
 		}
 	}
-	if took := time.Since(began); took > time.Duration(float64(time.Second)*slow) {
-		t.Errorf("%d alerts took %s", n, took)
+	t.Logf("%d alerts: %d firings looked at, in %s", n, looked, time.Since(began))
+	if looked > 5*n {
+		t.Errorf("%d alerts looked at %d firings, over five each", n, looked)
 	}
 }
 
