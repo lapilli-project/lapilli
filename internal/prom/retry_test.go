@@ -72,6 +72,41 @@ func fakeTime(t *testing.T) *fakeClock {
 	return f
 }
 
+// waited is what the package sleeps (sleep), each slept as it would be:
+// what a test says was answered at once is what it waited, counted, not
+// how long it took, so that a slow runner fails none.
+type waited struct {
+	mu sync.Mutex
+	d  []time.Duration
+}
+
+// recordWaits has the package's sleeps kept, for a test, and slept.
+func recordWaits(t *testing.T) *waited {
+	t.Helper()
+	w := &waited{}
+	was := sleep
+	sleep = func(ctx context.Context, d time.Duration) error {
+		w.mu.Lock()
+		w.d = append(w.d, d)
+		w.mu.Unlock()
+		return was(ctx, d)
+	}
+	t.Cleanup(func() { sleep = was })
+	return w
+}
+
+// longest is the longest wait begun since the last, and forgets them.
+func (w *waited) longest() time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var most time.Duration
+	for _, d := range w.d {
+		most = max(most, d)
+	}
+	w.d = nil
+	return most
+}
+
 // answers is a server that answers with each of its handlers in turn, the
 // last one from then on, and counts the requests.
 func answers(t *testing.T, hs ...http.HandlerFunc) (*httptest.Server, *atomic.Int64) {
@@ -312,6 +347,7 @@ func TestDroppedAskedAgain(t *testing.T) {
 // put on the client's other requests ends with their context.
 func TestWaitsWithinContext(t *testing.T) {
 	quick(t, 0)
+	w := recordWaits(t)
 	srv, n := answers(t, refuse(429, "100"))
 	c := New(srv.URL, "test")
 	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
@@ -320,9 +356,9 @@ func TestWaitsWithinContext(t *testing.T) {
 	start := time.Now()
 	_, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute)
 	var ae *APIError
-	if !errors.As(err, &ae) || ae.Status != 429 || time.Since(start) > 10*time.Second || n.Load() != 1 ||
+	if d := w.longest(); !errors.As(err, &ae) || ae.Status != 429 || d >= time.Second || n.Load() != 1 ||
 		!errors.Is(err, ErrPastDeadline) || !strings.HasPrefix(err.Error(), "the API said to wait past the deadline, after HTTP 429: ") {
-		t.Fatalf("%v after %s and %d requests: want the 429 at once, past the deadline", err, time.Since(start), n.Load())
+		t.Fatalf("%v after %s, waiting %s, and %d requests: want the 429 at once, past the deadline", err, time.Since(start), d, n.Load())
 	}
 	// The client's wait ends past the deadline: given up at once, asking
 	// nothing.
@@ -330,8 +366,8 @@ func TestWaitsWithinContext(t *testing.T) {
 	defer cancel2()
 	start = time.Now()
 	_, err = c.QueryRange(ctx2, "up", t0, t0.Add(time.Hour), time.Minute)
-	if !errors.Is(err, ErrPastDeadline) || Refused(err) || time.Since(start) > 10*time.Second || n.Load() != 1 {
-		t.Errorf("%v after %s and %d requests: want the client's wait not waited, asking nothing", err, time.Since(start), n.Load())
+	if d := w.longest(); !errors.Is(err, ErrPastDeadline) || Refused(err) || d >= time.Second || n.Load() != 1 {
+		t.Errorf("%v after %s, waiting %s, and %d requests: want the client's wait not waited, asking nothing", err, time.Since(start), d, n.Load())
 	}
 	// Without a deadline, it ends with the context.
 	ctx3, cancel3 := context.WithCancel(context.Background())
@@ -404,6 +440,7 @@ func TestWaitedCountsAll(t *testing.T) {
 // turn within its five minutes fails with the answer that turned it away.
 func TestNoTurnGivesTheLastAnswer(t *testing.T) {
 	quick(t, 0)
+	w := recordWaits(t)
 	maxWaited = 300 * time.Millisecond
 	l := NewLimiter(0)
 	l.limit, l.changed = 1, time.Now()
@@ -425,8 +462,8 @@ func TestNoTurnGivesTheLastAnswer(t *testing.T) {
 	<-held
 	var ae *APIError
 	// Asked once: the turn it didn't get isn't counted as an ask.
-	if !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second || strings.Contains(err.Error(), "asked") {
-		t.Errorf("%v after %d requests and %s: want the 502", err, n.Load(), time.Since(start))
+	if d := w.longest(); !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || d >= time.Second || strings.Contains(err.Error(), "asked") {
+		t.Errorf("%v after %d requests and %s, waiting %s: want the 502", err, n.Load(), time.Since(start), d)
 	}
 	l.done(200, 0)
 	if _, in, q := l.state(); in != 0 || q != 0 {
@@ -439,6 +476,7 @@ func TestNoTurnGivesTheLastAnswer(t *testing.T) {
 // fails then, past the deadline, with the answer that turned it away.
 func TestPastDeadlineGivesTheLastAnswer(t *testing.T) {
 	quick(t, 0)
+	w := recordWaits(t)
 	l := NewLimiter(0)
 	srv, n := answers(t, func(w http.ResponseWriter, r *http.Request) {
 		// Another's answer, meanwhile, says to wait an hour.
@@ -454,9 +492,9 @@ func TestPastDeadlineGivesTheLastAnswer(t *testing.T) {
 	start := time.Now()
 	_, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute)
 	var ae *APIError
-	if !errors.Is(err, ErrPastDeadline) || !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second ||
+	if d := w.longest(); !errors.Is(err, ErrPastDeadline) || !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || d >= time.Second ||
 		err.Error() != `the API said to wait past the deadline, after HTTP 502: not a Prometheus API response: an HTML page, "502 Bad Gateway"` {
-		t.Errorf("%v after %d requests and %s: want the 502, past the deadline", err, n.Load(), time.Since(start))
+		t.Errorf("%v after %d requests and %s, waiting %s: want the 502, past the deadline", err, n.Load(), time.Since(start), d)
 	}
 }
 
@@ -516,6 +554,7 @@ func TestWaitAtLeastASecond(t *testing.T) {
 // API is asked: a 503 halves nothing, a Retry-After holds nothing.
 func TestBestEffortReads(t *testing.T) {
 	quick(t, 0)
+	w := recordWaits(t)
 	for _, a := range []http.HandlerFunc{refuse(503, ""), refuse(429, "30"), refuse(502, "")} {
 		srv, n := answers(t, a)
 		c := New(srv.URL, "test")
@@ -529,8 +568,8 @@ func TestBestEffortReads(t *testing.T) {
 			t.Error("want an error")
 		}
 		limit, in, _ := c.limit.state()
-		if n.Load() != 2 || limit != 64 || in != 0 || !c.limit.until.IsZero() || time.Since(start) > 10*time.Second {
-			t.Errorf("asked %d times in %s; then limit %d, %d in flight, waiting until %s", n.Load(), time.Since(start), limit, in, c.limit.until)
+		if d := w.longest(); n.Load() != 2 || limit != 64 || in != 0 || !c.limit.until.IsZero() || d >= time.Second {
+			t.Errorf("asked %d times in %s, waiting %s; then limit %d, %d in flight, waiting until %s", n.Load(), time.Since(start), d, limit, in, c.limit.until)
 		}
 		// Nor is a 429 counted as one the run asked fewer at once after.
 		if counts.Requests.Load() != 2 || counts.TooMany.Load() != 0 {
@@ -726,8 +765,9 @@ func TestBestEffortGivesUp(t *testing.T) {
 	c.limit.mu.Lock()
 	c.limit.until = time.Now().Add(time.Hour)
 	c.limit.mu.Unlock()
+	w := recordWaits(t)
 	start = time.Now()
-	if _, err := c.Targets(context.Background()); !errors.Is(err, errPaused) || n.Load() != 1 || time.Since(start) > 5*time.Second {
+	if _, err := c.Targets(context.Background()); !errors.Is(err, errPaused) || n.Load() != 1 || w.longest() != 0 {
 		t.Errorf("%v after %s and %d requests: want not asked, at once", err, time.Since(start), n.Load())
 	}
 	if _, err := c.RulesOnce(context.Background()); !errors.Is(err, errPaused) || n.Load() != 1 {
