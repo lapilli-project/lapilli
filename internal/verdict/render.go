@@ -21,7 +21,7 @@ import (
 // Text writes the verdict for a person, times in loc.
 func Text(w io.Writer, r *Report, loc *time.Location) error {
 	const stamp = "2006-01-02 15:04"
-	written, found, missed, noisy, firings := 0, 0, 0, 0, 0
+	written, found, missed, notKnown, noisy, firings := 0, 0, 0, 0, 0, 0
 	for _, rr := range r.Rules {
 		firings += rr.Firings
 	}
@@ -31,7 +31,10 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		} else {
 			written++
 		}
-		if in.Missed() {
+		switch {
+		case in.Missed() && in.NotKnown:
+			notKnown++
+		case in.Missed():
 			missed++
 		}
 		if in.OnlyNoisy() {
@@ -39,7 +42,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), Zone(loc, r.From, r.To))
-	fmt.Fprintf(w, "%d firings, %d incidents written down", firings, written)
+	fmt.Fprintf(w, "%d firings, %s written down", firings, plural(written, "incident", "incidents"))
 	if found > 0 {
 		fmt.Fprintf(w, ", %d more found by --impact", found)
 		if by := bySignal(r); by != "" {
@@ -132,16 +135,31 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	if len(silent) > 0 {
-		fmt.Fprintf(w, "\n%d rules never fired.\n", len(silent))
+		fmt.Fprintf(w, "\n%s\n", neverFired(silent))
+		if s := noData(silent); s != "" {
+			fmt.Fprintln(w, s)
+		}
 	}
-	if len(unsupported) > 0 {
-		fmt.Fprintf(w, "\nCould not replay %d rules:\n", len(unsupported))
-		for _, rr := range unsupported {
+	// What the top of the report named isn't listed again.
+	top := shownAtTop(r.Unreplayed)
+	var rest []RuleResult
+	for _, rr := range unsupported {
+		if !slices.Contains(top, rr.Rule) {
+			rest = append(rest, rr)
+		}
+	}
+	if len(rest) > 0 {
+		more := ""
+		if len(rest) < len(unsupported) {
+			more = " more"
+		}
+		fmt.Fprintf(w, "\nCould not replay %d%s %s:\n", len(rest), more, noun(len(rest), "rule", "rules"))
+		for _, rr := range rest {
 			fmt.Fprintf(w, "  %s: %s\n", Clean(rr.Rule), Clean(rr.Unsupported))
 		}
 	}
 	if len(byHistory) > 0 {
-		fmt.Fprintf(w, "\nJudged from what their history says they fired, not replayed, %d rules: no longer \"for\", near misses or backtests for them.\n", len(byHistory))
+		fmt.Fprintf(w, "\nJudged from what their history says they fired, not replayed, %s: no longer \"for\", near misses or backtests for them.\n", plural(len(byHistory), "rule", "rules"))
 		for _, rr := range byHistory {
 			fmt.Fprintf(w, "  %s, from %s: %s\n", Clean(rr.Rule), historyOf(rr.Source), Clean(rr.Unsupported))
 		}
@@ -162,13 +180,34 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 		short := r.ImpactShort != nil && found > 0
-		if missed > 0 || noisy > 0 || short {
+		if missed > 0 || notKnown > 0 || noisy > 0 || short {
 			fmt.Fprintln(w)
 		}
-		if missed > 0 {
-			fmt.Fprintf(w, "✗ %d of %d incidents had no alert.\n", missed, len(r.Incidents))
-			if n := lateFor(r.Incidents); n > 0 {
-				fmt.Fprintf(w, "  %d of them had one only once they were over (\"after its end\" above).\n", n)
+		if missed > 0 || notKnown > 0 {
+			of := noun(len(r.Incidents), "incident", "incidents")
+			if missed > 0 {
+				fmt.Fprintf(w, "✗ %d of %d %s had no alert.\n", missed, len(r.Incidents), of)
+				if n := lateFor(r.Incidents); n > 0 {
+					fmt.Fprintf(w, "  %d of them had one only once they were over (\"after its end\" above).\n", n)
+				}
+			}
+			unsure := 0
+			for _, rr := range unsupported {
+				if !rules.CantFire(rr.Unsupported) {
+					unsure++
+				}
+			}
+			switch replayed := len(r.Rules) - len(unsupported); {
+			case notKnown == 0:
+			case replayed == 0:
+				fmt.Fprintf(w, "? %d of %d %s can't be judged: no rule was replayed.\n", notKnown, len(r.Incidents), of)
+			default:
+				them := "them"
+				if notKnown == 1 {
+					them = "it"
+				}
+				fmt.Fprintf(w, "? %d of %d %s had no alert from the %s replayed: the %d that couldn't be replayed may have caught %s.\n",
+					notKnown, len(r.Incidents), of, plural(replayed, "rule", "rules"), unsure, them)
 			}
 			spans(w, r.Incidents, loc)
 		}
@@ -202,11 +241,68 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	}
 	switch r.Extras {
 	case "skipped":
-		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record weren't looked for (--extras 0).")
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything weren't looked for (--extras 0).")
 	case "cut":
-		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record are in part: the steps after the replays ran out of time (--extras, or --timeout).")
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything are in part: the steps after the replays ran out of time (--extras, or --timeout).")
 	}
 	return nil
+}
+
+// neverNamed is how many of the rules that never fired are named in the
+// text; --json has all.
+const neverNamed = 10
+
+// neverFired is the line that names the rules that never fired, ten at
+// most.
+func neverFired(silent []RuleResult) string {
+	names := make([]string, 0, min(len(silent), neverNamed))
+	for _, rr := range silent[:min(len(silent), neverNamed)] {
+		names = append(names, Clean(rr.Rule))
+	}
+	s := fmt.Sprintf("%d rules never fired: %s", len(silent), strings.Join(names, ", "))
+	if len(silent) == 1 {
+		s = "1 rule never fired: " + names[0]
+	}
+	if more := len(silent) - len(names); more > 0 {
+		return fmt.Sprintf("%s and %d more, all in --json", s, more)
+	}
+	return s + "."
+}
+
+// noDataNamed is how many rules the warning of noData names.
+const noDataNamed = 5
+
+// noData is the warning for the rules that never fired whose condition
+// compared values with no series at all in the period (RuleResult.NoData),
+// "" when there are none.
+func noData(silent []RuleResult) string {
+	var parts []string
+	n := 0
+	for _, rr := range silent {
+		if len(rr.NoData) == 0 {
+			continue
+		}
+		n++
+		if n > noDataNamed {
+			continue
+		}
+		exprs := make([]string, len(rr.NoData))
+		for i, e := range rr.NoData {
+			exprs[i] = cut(Clean(e), 80)
+		}
+		parts = append(parts, Clean(rr.Rule)+" ("+strings.Join(exprs, ", ")+")")
+	}
+	if n == 0 {
+		return ""
+	}
+	s := strings.Join(parts, ", ")
+	if n > noDataNamed {
+		s += fmt.Sprintf(" and %d more", n-noDataNamed)
+	}
+	if n == 1 {
+		return "! 1 of them read what had no series at all in the period, so it couldn't have fired: " + s + "."
+	}
+	return fmt.Sprintf("! %d of them read what had no series at all in the period, so they couldn't have fired: %s.", n, s)
 }
 
 // signals are the named impact signals a report was judged by, none for an
@@ -320,6 +416,15 @@ func outlasting(w io.Writer, rs []RuleResult) {
 	}
 }
 
+// hoursZone is the zone of hours as the report says it: Go's name for the
+// machine's own zone, Local, named as the header names it (Zone).
+func hoursZone(zone string, r *Report) string {
+	if zone == "Local" || zone == "" {
+		return Zone(time.Local, r.From, r.To)
+	}
+	return zone
+}
+
 // outOfHours writes when the firings that caught nothing came: those that
 // woke people first.
 func outOfHours(w io.Writer, r *Report) error {
@@ -350,19 +455,19 @@ func outOfHours(w io.Writer, r *Report) error {
 	switch {
 	case r.Hours.Shifts != "":
 		fmt.Fprintf(w, "\nOut of hours, in shifts (%s; where a turn doesn't say, at work %s, asleep %s, in %s):\n",
-			Clean(r.Hours.Shifts), HoursText(r.Hours.Work), HoursText(r.Hours.Sleep), r.Hours.Zone)
+			Clean(r.Hours.Shifts), HoursText(r.Hours.Work), HoursText(r.Hours.Sleep), hoursZone(r.Hours.Zone, r))
 	case r.Hours.Zone != "":
-		fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep))
+		fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n", hoursZone(r.Hours.Zone, r), HoursText(r.Hours.Work), HoursText(r.Hours.Sleep))
 	default: // only teams' own
 		fmt.Fprintf(w, "\nOut of hours:\n")
 	}
 	for _, t := range r.Hours.Teams {
 		if t.Shifts != "" {
 			fmt.Fprintf(w, "%s's rules by its own shifts (%s; where a turn doesn't say, at work %s, asleep %s, in %s);\n",
-				Clean(t.Team), Clean(t.Shifts), HoursText(t.Work), HoursText(t.Sleep), t.Zone)
+				Clean(t.Team), Clean(t.Shifts), HoursText(t.Work), HoursText(t.Sleep), hoursZone(t.Zone, r))
 			continue
 		}
-		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
+		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), hoursZone(t.Zone, r), HoursText(t.Work), HoursText(t.Sleep))
 	}
 	// With no record, what caught nothing may have caught something nobody
 	// wrote down.
@@ -475,7 +580,7 @@ func adds(w io.Writer, rs []RuleResult, unreplayed int) error {
 		fmt.Fprintf(w, "Another rule caught every incident these caught, as soon, at the same severity or above: %s.\n", strings.Join(spare, ", "))
 	}
 	if unreplayed > 0 {
-		fmt.Fprintf(w, "%d rules couldn't be replayed, so what they would have caught isn't counted here.\n", unreplayed)
+		fmt.Fprintf(w, "%s couldn't be replayed, so what %s would have caught isn't counted here.\n", plural(unreplayed, "rule", "rules"), noun(unreplayed, "it", "they"))
 	}
 	return nil
 }
@@ -664,6 +769,9 @@ func caughtBy(in IncidentResult, unknownLen time.Duration) string {
 		}
 		return "✗ nothing in time; after its end: " + strings.Join(parts, ", ")
 	}
+	if len(in.CaughtBy) == 0 && in.NotKnown {
+		return "? not known"
+	}
 	if len(in.CaughtBy) == 0 {
 		return "✗ nothing fired"
 	}
@@ -694,12 +802,12 @@ func (c Catch) marks() string {
 // the text names, of the incident and of the rules' black firings.
 const lateEach = 3
 
-// lateFor is how many of the incidents nothing caught had an alert once
-// they were over.
+// lateFor is how many of the incidents nothing caught, and known missed,
+// had an alert once they were over.
 func lateFor(ins []IncidentResult) int {
 	n := 0
 	for _, in := range ins {
-		if in.Missed() && len(in.FiredAfter) > 0 {
+		if in.Missed() && !in.NotKnown && len(in.FiredAfter) > 0 {
 			n++
 		}
 	}
@@ -873,6 +981,19 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		}
 	}
 	family("lapilli_incidents", "Incidents in the period: caught, caught only by noisy rules, or missed.", incs)
+	if r.NotKnownMetric {
+		var notKnownLines []string
+		for _, src := range []string{"written", "impact"} {
+			n := 0
+			for _, in := range r.Incidents {
+				if in.Missed() && in.NotKnown && (in.Candidate) == (src == "impact") {
+					n++
+				}
+			}
+			notKnownLines = append(notKnownLines, fmt.Sprintf(`lapilli_incidents_not_known{source="%s"} %d`, src, n))
+		}
+		family("lapilli_incidents_not_known", "Of the missed incidents, those no rule replayed caught while a rule couldn't be replayed, which may have: missed isn't known.", notKnownLines)
+	}
 	family("lapilli_incident_detection_delay_seconds", "From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.", delays)
 	// Named impact signals: each one's windows, by state, and from when it
 	// keeps the record.

@@ -16,7 +16,9 @@ import (
 // every link in them, to a page, a heading or a file of the repository,
 // goes somewhere. The recipes' and the chart's READMEs link into the docs,
 // so their links are held too, and so is every lapilli.dev/docs/NAME the
-// code, the help and the site name.
+// code, the help and the site name. The translations, docs/ko/*.md, are held
+// to the same, and each starts with its marker, is listed in docs/ko/README.md
+// as NAME.md, and that lists every page docs/README.md does.
 func TestDocsLinks(t *testing.T) {
 	root := filepath.Join("..", "..")
 	pages, err := filepath.Glob(filepath.Join(root, "docs", "*.md"))
@@ -27,6 +29,12 @@ func TestDocsLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The translations, if there are any (site/docs.sh publishes them too).
+	translated, err := filepath.Glob(filepath.Join(root, "docs", "ko", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages = append(pages, translated...)
 	files := append([]string{
 		filepath.Join(root, "README.md"),
 		filepath.Join(root, "charts", "lapilli", "README.md"),
@@ -63,7 +71,7 @@ func TestDocsLinks(t *testing.T) {
 	home := readDoc(t, filepath.Join(root, "docs", "README.md"))
 	for _, p := range pages {
 		n := filepath.Base(p)
-		if n == "README.md" {
+		if n == "README.md" || filepath.Base(filepath.Dir(p)) == "ko" {
 			continue
 		}
 		if !strings.Contains(list, "](docs/"+n+")") {
@@ -75,6 +83,10 @@ func TestDocsLinks(t *testing.T) {
 		}
 	}
 
+	if len(translated) > 0 {
+		checkTranslations(t, root, home, translated)
+	}
+
 	// The pages' addresses on lapilli.dev, as the help and the site give them.
 	site := regexp.MustCompile(`lapilli\.dev/docs/([a-z0-9-]+)|'/docs/([a-z0-9-]+)/'`)
 	for _, dir := range []string{"cmd", "internal", "site"} {
@@ -84,7 +96,7 @@ func TestDocsLinks(t *testing.T) {
 			}
 			name, _ := filepath.Rel(root, path)
 			if d.IsDir() {
-				if name == filepath.Join("site", "docs") { // site/docs.sh's copies
+				if name == filepath.Join("site", "docs") || name == filepath.Join("site", "ko", "docs") { // site/docs.sh's copies
 					return filepath.SkipDir
 				}
 				return nil
@@ -189,4 +201,66 @@ func headingAnchors(doc string) map[string]bool {
 		anchors[a] = true
 	}
 	return anchors
+}
+
+var (
+	// An item of a README's list whose first link is to a page: NAME.md, or
+	// ../NAME.md in docs/ko/README.md for a page not translated.
+	docItem    = regexp.MustCompile(`(?m)^- \[[^\]\n]*\]\((\.\./)?([a-z0-9-]+)\.md\)`)
+	docMarker  = regexp.MustCompile(`^<!-- translated from docs/([A-Za-z0-9-]+)\.md at blob [0-9a-f]{40} -->$`)
+	koListItem = `(?m)^- \[[^\]\n]*\]\(%s\.md\)`
+)
+
+// checkTranslations holds what site/docs.sh needs of docs/ko/: each page
+// starts with a marker naming the English page it is of; docs/ko/README.md
+// is there, lists each page as NAME.md and each page of docs/README.md,
+// as ../NAME.md where it isn't translated.
+func checkTranslations(t *testing.T, root, home string, translated []string) {
+	t.Helper()
+	have := map[string]bool{}
+	for _, p := range translated {
+		n := strings.TrimSuffix(filepath.Base(p), ".md")
+		have[n] = true
+		first, _, _ := strings.Cut(readDoc(t, p), "\n")
+		m := docMarker.FindStringSubmatch(first)
+		switch {
+		case m == nil:
+			t.Errorf("docs/ko/%s.md: line 1 isn't <!-- translated from docs/%s.md at blob HASH -->, HASH 40 hex digits", n, n)
+		case m[1] != n:
+			t.Errorf("docs/ko/%s.md: its marker is of docs/%s.md", n, m[1])
+		default:
+			if _, err := os.Stat(filepath.Join(root, "docs", m[1]+".md")); err != nil {
+				t.Errorf("docs/ko/%s.md: its marker names docs/%s.md, which isn't there", n, m[1])
+			}
+		}
+	}
+	if !have["README"] {
+		t.Error("docs/ko/ has pages but no README.md")
+		return
+	}
+	list := readDoc(t, filepath.Join(root, "docs", "ko", "README.md"))
+	for n := range have {
+		if n != "README" && !regexp.MustCompile(fmt.Sprintf(koListItem, regexp.QuoteMeta(n))).MatchString(list) {
+			t.Errorf("docs/ko/README.md doesn't list %s.md as an item of its own", n)
+		}
+	}
+	listed := map[string]bool{}
+	for _, m := range docItem.FindAllStringSubmatch(list, -1) {
+		n, outside := m[2], m[1] != ""
+		if n == "README" {
+			continue
+		}
+		listed[n] = true
+		if outside && have[n] {
+			t.Errorf("docs/ko/README.md lists ../%s.md, but docs/ko/%s.md is there", n, n)
+		}
+		if !outside && !have[n] {
+			t.Errorf("docs/ko/README.md lists %s.md, which isn't in docs/ko/", n)
+		}
+	}
+	for _, m := range docItem.FindAllStringSubmatch(home, -1) {
+		if n := m[2]; n != "README" && !listed[n] {
+			t.Errorf("docs/ko/README.md leaves out %s, which docs/README.md lists", n)
+		}
+	}
 }

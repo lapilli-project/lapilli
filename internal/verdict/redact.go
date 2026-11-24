@@ -365,6 +365,10 @@ func (x *Redactor) ruleResult(rr RuleResult) RuleResult {
 	rr.Source = x.alias("source", rr.Source)
 	rr.Unsupported = reason(rr.Unsupported)
 	rr.Unseen = slices.Clone(rr.Unseen)
+	if rr.NoData != nil {
+		// Expressions: metrics' and labels' names.
+		rr.NoData = slices.Repeat([]string{Redacted}, len(rr.NoData))
+	}
 	if rr.Marked != nil {
 		m := make(map[string]MarkedCount, len(rr.Marked))
 		for k, c := range rr.Marked {
@@ -508,7 +512,7 @@ func (x *Redactor) report(r *Report) *Report {
 	sortRules(out.Rules)
 	out.Incidents = make([]IncidentResult, len(r.Incidents))
 	for i, in := range r.Incidents {
-		out.Incidents[i] = IncidentResult{Incident: x.incident(in.Incident), CaughtBy: x.catches(in.CaughtBy), FiredAfter: x.catches(in.FiredAfter)}
+		out.Incidents[i] = IncidentResult{Incident: x.incident(in.Incident), CaughtBy: x.catches(in.CaughtBy), FiredAfter: x.catches(in.FiredAfter), NotKnown: in.NotKnown}
 	}
 	slices.SortStableFunc(out.Incidents, func(a, b IncidentResult) int { return byStart(a.Incident, b.Incident) })
 	place := map[string]int{} // an incident's place in the list

@@ -2,6 +2,70 @@
 
 ## [Unreleased]
 
+### Added
+
+- lapilli.dev's docs pages list their own sections beside them, with a
+  search over every page's title, description and sections, the pages
+  before and after at the end, and a button for the dark theme. Nine long
+  pages have the headings to go with it.
+- The docs in Korean, at lapilli.dev/ko/docs: Getting started, Words and
+  Questions so far, from `docs/ko/`; a page not yet translated is listed
+  with its Korean title and opens in English, and a translation older
+  than its English page says so.
+- `docs/data.md`: what each command reads, what `lapilli serve` keeps and
+  for how long, who can reach it, what it sends where, and what it can
+  change, on one page.
+- `lapilli verdict` says an incident is not known, rather than missed,
+  when no rule replayed caught it while a rule couldn't be replayed, which
+  may have: `? not known` in the table, `? N of M incidents can't be
+  judged: no rule was replayed.` (or `had no alert from the K rules
+  replayed`) under it, `"not_known": true` in `--json`, and
+  `lapilli_incidents_not_known` in `--metrics`. `missed`, its metric and
+  the exit status are as they were; `--fail-unreplayed` still fails such a
+  run.
+- The rules that never fired are named, ten at most, and a step after
+  the replays (skipped with `--extras 0`) says which of them compare a
+  value that had no series at all in the period, so couldn't have fired:
+  a metric's name mistyped, a recording rule the history doesn't keep
+  (`no_data` in `--json`).
+- `lapilli verdict` warns, and `lapilli preflight` says `rules.sources`
+  (unknown), when Grafana's rules query more than one PromQL data source:
+  every one is replayed against `--prometheus`, read from files or with
+  `--grafana`.
+- docs/getting-started.md says what each column of the report says.
+
+### Changed
+
+- Releases are gathered: at most two minor releases a week, each with
+  what merged since the last; a fix for a vulnerability or for what a
+  release broke is still a patch as soon as it is ready (GOVERNANCE.md).
+  The README says where to read what stays the same across releases
+  (docs/numbers.md, docs/upgrading.md), ROADMAP.md what comes first, and
+  docs/design/README.md lists the design notes by area.
+- CI runs staticcheck (`staticcheck.conf`), and what it found is gone:
+  values assigned and never read, code nothing called, loops an `append`
+  does, and go-jose's deprecated `ParseSigned`. Nothing a user sees
+  changes.
+- The rules whose replay failed are listed once, at the top, those that
+  failed for the same reason on one line; counts of one say "1 rule"; the
+  hours a report counts out of hours by name the zone as its first line
+  does, not `Local`.
+- `lapilli preflight`'s memory, with no firing read, says the caps' bound
+  is the most a run can take, and no longer gives it as a request and a
+  limit.
+- Plainer errors: a file of incidents that is a list, a time that isn't
+  RFC 3339, and YAML's own errors on one line; `--rule` given a path
+  points to `--rules`; two sources given are named; where the history is
+  wanted, a managed Prometheus's URL with `--auth` is said beside
+  `--gcp-project`.
+
+### Fixed
+
+- docs/serve.md's sidebar lacked Marked windows and Goals; the chart's
+  values said serve takes one rules ConfigMap, where it mounts them all as
+  one directory; docs/verdict.md says which cloud paths were run against
+  real accounts.
+
 ## [0.70.1] - 2026-11-24
 
 Eight modules a patch or a minor release on, `go-jose` among them, which

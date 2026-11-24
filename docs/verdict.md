@@ -15,6 +15,8 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
   --metrics > lapilli.prom.tmp && mv lapilli.prom.tmp lapilli.prom
 ```
 
+## Reports as JSON, CSV and metrics
+
 `--json` gives the whole report, every firing and its stone included;
 `--csv` the firings alone, a row each (rule, severity, labels, start, end,
 stone, the incidents it caught, re-fired), for a spreadsheet, a cell that
@@ -29,6 +31,15 @@ metrics that keep their names. `--metrics` gives `lapilli_rule_firings`, `lapill
 `lapilli_rule_episodes_caught` (each rule's firings counted as
 [episodes](numbers.md#episodes), and those caught), `lapilli_incidents`
 (by `state` and `source`) and `lapilli_incident_detection_delay_seconds`.
+
+Grafana's rules, from files or from `--grafana`, are all replayed against
+one history, `--prometheus`, whatever PromQL data source they name (only
+Loki's are asked of their own). With rules on several, `verdict` warns, and
+[`preflight`](design/preflight.md)'s `rules.sources` says so: replay each
+data source's rules in a run of their own, against its Prometheus (`--rule`
+picks them by name).
+
+## How it asks the history
 
 A replay asks for each query a day at a time, once for every rule that needs
 it, and runs `--parallel` (8) rules at once against each API it reads:
@@ -88,6 +99,8 @@ the rest is asked (the configuration 2 MiB at most, the targets 32, as
 each is parsed whole); `lapilli serve` keeps where the groups run as last read
 when it can't be read.
 
+## Keeping off the alerts' quota
+
 `lapilli serve` pointed at the history the alerts are evaluated against can
 keep off their quota ([docs/design/quota.md](design/quota.md)). Its
 `/metrics` counts what each process asks of each API (`prometheus`, `loki`,
@@ -109,6 +122,8 @@ or can't be read; one refused as written fails the run. `--catch-up-hours
 at `--catch-up-rate N` if given. A run that waits is kept in the run history
 as held, with why, and `lapilli_serve_runs_held{reason}` says it.
 
+## Progress while it runs
+
 A run that takes longer than 15 seconds says on stderr, every 30 seconds,
 how it is going; `--progress=false` keeps it quiet. A run the history
 answered HTTP 429 says so at its end either way. stdout has the report
@@ -119,6 +134,8 @@ replays: a rule changed is replayed before and after.
 ```
 lapilli verdict: after 2m30s, 23 of 61 rules replayed, 412 requests to the history, 37 asked again after a wait, 35 answered HTTP 429
 ```
+
+## When a query fails
 
 A query fails one of two ways, and its rule's reason says which:
 
@@ -155,6 +172,8 @@ show, and without the token, the signature or the password lapilli sent,
 should the API echo it back; `lapilli serve` keeps a reason without how often
 its request was asked.
 
+## Grafana rules judged from their history
+
 A rule `--grafana` holds that can't be replayed, its condition on MySQL,
 Elasticsearch, InfluxDB, a cloud's monitoring or TestData, is judged from
 what Grafana's own alert state history says it fired, read as
@@ -170,6 +189,8 @@ nothing from before the period, or doesn't tell the rule apart (passed
 over changes of it, or gives its title to another rule too), it is listed
 as before, and stderr says why. `--grafana-history=false` lists them all
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
+
+## Any Prometheus-compatible API
 
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
 Mimir, VictoriaMetrics, or a cloud's managed Prometheus. The CI job
@@ -199,6 +220,12 @@ identity, the cloud's CLI):
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
 `--auth google`. Lapilli only reads from these.
 
+Of these, the Google path has been run against a real project. The Amazon
+and Azure paths are tested against SigV4 and token checks written apart from
+the SDKs, not yet against a real workspace; the reading of CloudWatch's
+PromQL alarms and Google Cloud's PromQL policies, and their firing recipes,
+against their documentation's answers, not yet a real account.
+
 CloudWatch answers PromQL over the metrics sent to its OpenTelemetry
 endpoint, and over AWS's own metrics once their OpenTelemetry enrichment is
 turned on. It answers at most 500 series a query and says so only in a
@@ -213,6 +240,8 @@ back than that is coarser there.
 Oracle Cloud has no managed Prometheus to query: OCI Monitoring is queried in
 its own language, MQL. On OKE, give `--prometheus` the Prometheus you run
 there; it needs no `--auth`.
+
+## Each cloud's own rules
 
 Each cloud keeps the alert rules of its managed Prometheus, and its own
 alarms written in PromQL, in a form of its own, and `--rules` reads each:

@@ -673,6 +673,10 @@ func TestGoalsPeriodDigestAndReports(t *testing.T) {
 		!strings.Contains(line, "Goals: the span holds no whole week to hold them to.") {
 		t.Errorf("the section: %q %v", line, err)
 	}
+	b, _ = json.Marshal(nums)
+	if !strings.Contains(string(b), `"name":"sale-none-missed","each":"sale","met":2,"of":2,"weeks":[],"occurrences":[`) {
+		t.Errorf("its numbers: %s", b)
+	}
 	line, nums, err = s.goalsSection(ctx, dayAt("2026-10-19", 0), dayAt("2026-11-02", 0), nil, time.UTC)
 	if err != nil || !strings.Contains(line, "Goal sale-none-missed (incidents missed, at most 0), each sale: met in 2 of 3 occurrences known that ended in the span, of 3. Missed during sale Autumn sale, 2026-10-27 00:00 → 2026-10-29 00:00.") ||
 		!strings.Contains(line, "Goal none-missed (incidents missed, at most 0): met in 1 of 2 whole weeks known, of 2.") {

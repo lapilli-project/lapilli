@@ -12,7 +12,6 @@ package preflight
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -372,9 +371,6 @@ func plural(n int, noun string) string {
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
 }
-
-// errOffline is what a read with --offline would have been.
-var errOffline = errors.New("--offline: nothing is asked")
 
 // replayable are the rules a run replays: those with no reason they
 // can't be.

@@ -26,6 +26,8 @@ machine alone ([Getting started](getting-started.md#see-it-first-on-sample-data)
   <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks, most beside the week before, and a link to the list that makes it; under them, what to look at: rules to quiet or look at, each with a button to make it a task" src="../assets/serve-dashboard.png" width="820">
 </picture>
 
+## The web UI
+
 A web UI opens on a dashboard of the last twelve weeks: last week's
 precision, firings, incidents missed, time to catch, noisy rules and the
 firings that woke people for nothing beside the week before; firings, precision and incidents by week; where the noise
@@ -78,10 +80,13 @@ them), and takes incidents
 so Prometheus scrapes it instead of a Pushgateway, and the chart has a
 Grafana dashboard of them.
 
+## The sidebar, search and filters
+
 The pages are in a sidebar of four groups, named as a console names them
-(Monitoring: Overview, Rules, Incidents, Alert history; Improve: Tasks,
-Proposals, Quiet windows; Reporting: Reports, Outcomes;
-Administration: Teams, Roles, Settings, Sources, Run history, Cleanup), a
+(Monitoring: Overview, Rules, Incidents, Marked windows, Alert history;
+Improve: Tasks, Proposals, Quiet windows; Reporting: Reports, Outcomes,
+Goals; Administration: Teams, Roles, for an admin only, Settings, Sources,
+Run history, Cleanup), a
 menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
@@ -93,6 +98,8 @@ name and `is:noisy`, `noisy:episodes`, `is:unrecorded`, `severity:critical`, `st
 chip that takes it away, and the URL keeps them all; each rule's own labels
 are chips too, each picking the rules with it
 ([docs/design/ui.md](design/ui.md)).
+
+## Sources and the activity log
 
 The Sources page (`/sources`) lists every source `serve` reads, as Argo
 CD lists its applications: the rules where they are kept and what is read
@@ -117,6 +124,8 @@ read, as on Run history. It is kept for `--keep-activity` (800 days
 unless given, or `--keep` when longer; never less than `--keep`; 0 keeps
 it all, as `--keep 0` does), past the firings it is about.
 
+## Episodes
+
 Beside its firings, each rule's are counted as **episodes**, one problem
 however many alerts it is: its firings with the same values of the match
 labels, overlapping or re-firing within `--refire`, parted at midnight in
@@ -134,6 +143,8 @@ counts its episodes again a week at a time, the newest first, in the
 leader's round: until it has, those weeks say their episodes aren't
 counted yet. Goals take `episodes.total` and `episodes.precision`
 ([docs/design/goals.md](design/goals.md)).
+
+## What people say of a firing
 
 A person may say what Lapilli can't see (docs/design/judging.md, item 3).
 On Alert history, a rule's latest firings and, through a link from each
@@ -162,6 +173,8 @@ Settings page's tries and the digest's suggestions, carries them on both
 sides, so a change can't look better on the firings people called
 coincidences.
 
+## Rules judged by nothing
+
 A rule entry may say `judged: false` in place of signals, in
 `--impact-file` or on the Settings page: a watchdog, a capacity forecast,
 a reminder. Its rules' firings are counted, never white nor black, in no
@@ -180,6 +193,8 @@ what to look at. Teams own rules, and their firings are counted by the
 team whose labels they have: a rule most of whose firings came from what
 another team owns says so on its page, on that team's rules list and in
 its digest.
+
+## Rules and proposals
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-rules-dark.png">
@@ -223,6 +238,8 @@ last four weeks it would have excused, when it falls next); `/manage`,
 Administration, gathers the pages that set Lapilli up; and an action a
 reader may not take
 is shown disabled, with why.
+
+## Measures and goals
 
 What an operations team measures its alerts by is there too, week by week
 and team by team (docs/design/noc.md): the share of critical firings that
@@ -270,6 +287,8 @@ goals:
   - {name: sale-none-missed, each: sale, measure: incidents.missed, at_most: 0}
 ```
 
+## Rules held to expectations
+
 A rule can be held to what is expected of it after it is deployed, as a
 pull request's backtest holds it before (docs/design/expectations.md):
 `--expect FILE` takes the expectations file `lapilli verdict --expect`
@@ -296,6 +315,8 @@ expectations:
   - labels: severity=page
     budget: {refires: 3}
 ```
+
+### How expectations are checked
 
 After each run the leader checks each rule over the week so far and the
 twelve whole weeks before, by the ledger's weeks (Monday, in `--tz`): a
@@ -350,6 +371,8 @@ or when what it found was found), and one that moves to another week,
 still broken, isn't told again, nor made a second task, its task kept on
 its tab.
 
+### Drafted expectations
+
 Nobody writes expectations for rules that already page them, so serve
 drafts them (docs/design/expectations.md, step 3). **From the history**: a
 rule's Expectations tab shows what it is held to as it is now, the most it
@@ -381,6 +404,8 @@ Drafts count with proposals toward a person's 20 an hour; ten wait for a
 rule at most, and 1,000 are kept, the oldest decided let go first, never
 one whose pull request is waiting for a recipe or open.
 
+### Proposing a new rule
+
 A rule not yet written can be proposed too, held to what it is to do
 before anyone approves it (docs/design/expectations.md, step 5). **Propose
 a new rule** on the proposals page (`/proposals/new`, an editor's), or an
@@ -409,6 +434,8 @@ goes the way a change goes there (a pull request, Grafana's API, the
 ruler's, the cloud's), checked again first; undone, the rule is deleted.
 Once it is added, what it is held to goes where an accepted draft goes.
 
+## Marked windows
+
 Some weeks aren't like the others: a sale, a launch, a campaign. Marked
 windows (docs/design/marked.md) name them, each of a kind a team chooses,
 from a file (`--marked`), `--config`'s `marked:`, the Marked windows page,
@@ -419,6 +446,8 @@ read inside the kind and outside it: precision during sales beside the
 four weeks before, the rules noisiest during them (`during:sale` on the
 rules), and the incidents missed in each.
 
+## What the ledger keeps
+
 The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
 (`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what
@@ -428,6 +457,8 @@ hourly run within two seconds, and each page to a few statements a rule,
 never one a firing.
 `LAPILLI_SCALE=10 go test ./internal/ledger ./internal/serve -run Scale -v`
 measures it with two million, on your own machine.
+
+## Teams, quiet windows and tasks
 
 It isn't only to look at. Teams own rules (by a note, a name pattern, or
 labels, in that order: a team that owns by labels can't take a rule another
@@ -456,6 +487,8 @@ firings that caught nothing are counted asleep and off hours by those, every
 other rule's by `--work-hours`, `--sleep-hours`, `--tz` and `--shifts`. All of it is in the same ledger,
 through the UI or the API; see [docs/design/work.md](design/work.md).
 
+## Where the weekly digest goes
+
 The weekly digest can go where each team reads it. `--team-digest TEAM=FILE`
 posts a team its own rules and incidents, to the Slack-style incoming webhook
 whose URL is in the file, and a team nothing happened to hears nothing.
@@ -473,6 +506,8 @@ mention (`@channel`, `@all`, `@here`) or a Markdown link (text in
 brackets, a URL after it in parentheses) in a rule's name or an
 incident's title as one, notifying a channel or linking elsewhere. Post there through something that escapes it for that chat.
 Over twelve weeks, the digest also names the rules that are spare.
+
+## Reports on a schedule
 
 Reports go on schedules people set themselves, on the Reports page or with
 `/api/v1/reports`: `daily@09:00`, `weekly mon@09:00`, `monthly 1@09:00` (or
@@ -529,6 +564,8 @@ the flags", gives it back to the flags; see
 [docs/design/reports.md](design/reports.md) and
 [docs/design/serveops.md](design/serveops.md).
 
+## Notices to a webhook and Slack
+
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,
 with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
@@ -542,6 +579,8 @@ tracker's script in [recipes/trackers](../recipes/trackers) every few minutes
 with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
+
+## Whether Lapilli earns its keep
 
 Whether Lapilli itself earns its keep is on the Outcomes page (`/outcomes`),
 worked out
@@ -562,6 +601,8 @@ a line of it, `/api/v1/outcomes` has it as JSON, and `/metrics` has
 so an alert can say when the record goes quiet. Nothing is sent anywhere,
 and reading a page isn't counted.
 
+## Accessibility and languages
+
 The UI is checked against WCAG 2.2 AA (axe-core over every page, and tests
 for each page's structure, contrast and charts, whose numbers are in tables
 too), and works at 320px and 200% zoom, with no script.
@@ -573,6 +614,8 @@ one file of translations, `internal/serve/i18n/LANG.json`; a test fails if a
 text has none, so a new language can't be left half done. The Spanish and
 Japanese were written with a machine's help, in the plain words SREs use, and
 want a native speaker's review: corrections are welcome as pull requests.
+
+## Signing people in
 
 It listens on `127.0.0.1:8080`. To serve it at a URL people open, sign them
 in, one way of three ([docs/design/signin.md](design/signin.md)):
@@ -609,6 +652,8 @@ for the process; with an http `--external-url` (this machine only), give
 it a name of its own under `.localhost`, as cookies aren't kept to a
 port.
 
+## Who may change what
+
 With no roles, who may change what depends on where it listens. On
 loopback alone (`127.0.0.1`, `localhost`, the default), everyone who
 reaches it is an admin: that is this machine's users. Beyond it (`:8080`,
@@ -635,6 +680,8 @@ taken away there alone.
 `--proposals-expire 30d` closes a proposal nobody approved within thirty
 days as expired, so its rule can have another; off by default.
 
+## Behind a proxy
+
 With `--user-header`, the proxy must be the only way in. The chart's
 `serve.networkPolicy` lets in only the proxy (or the ingress controller,
 the Gateway, the load balancer in front), and Prometheus only to
@@ -659,6 +706,8 @@ of its own at it (DNS rebinding):
 - what `--allowed-hosts` adds, such as the name a proxy passes on.
 
 Others get 421.
+
+## Installing and upgrading
 
 In the chart, `mode: serve` runs it as one replica with the ledger on a
 PersistentVolumeClaim, behind a ClusterIP Service:
@@ -710,9 +759,18 @@ ok       backfill            12,040 requests over 28d, 28 pieces of a day at mos
                              why: each day's in 14m at most, within --timeout 50m
 ok       nights              2 nights at least, in 01:00-06:00 at 0.5 a second, 9,000 of the
                              backfill's requests a night
-ok       memory              no firing read: the caps' bound, 5.2 GB (8 x 10,000,000 x 64 bytes,
-                             beside 64 MB of caches): a request of 5.2 GB, a limit of 10.5 GB
+ok       memory              no firing read: at most 5.2 GB, the caps' bound (8 x 10,000,000 x 64
+                             bytes, beside 64 MB of caches), which --parallel and --max-samples
+                             set: the most a run can take, not what one takes, which is worked
+                             out from a day of the history's alerts when it has any
 ```
+
+Memory is the item to read twice. `lapilli preflight --offline` reads no
+firing, so it gives the caps' bound: `--parallel` times `--max-samples`
+times 64 bytes, beside the caches. That is the most a run can take, not an
+estimate of what it will. Run `lapilli preflight` against the history for
+what the rules take, and set the chart's `resources` from it (its defaults
+are a request of 256Mi and a limit of 1Gi, under the bound at the default caps).
 
 It writes nothing and replays nothing, held by the code: every request it
 sends goes through an allowlist that refuses any other before it is sent
@@ -837,6 +895,8 @@ lapilli serve --rules rules/ --prometheus http://prometheus:9090 --max-rate 2 \
   --backtest-listen :8084 --backtest-trust /etc/lapilli/backtest/trust.yaml
 ```
 
+### The port and who may ask
+
 The port takes `POST /v1/backtests`, and `GET` and `DELETE
 /v1/backtests/{id}`, and nothing else (the API is in
 [docs/design/backtests.md](design/backtests.md), "Flags and API").
@@ -955,6 +1015,8 @@ trust:
   another token serve takes. It is a long-lived secret: whoever holds it
   backtests as that entry until it is rotated.
 
+### The queue and its share of the rate
+
 The replica that leads runs the queue, one backtest at a time, beside the
 runs and not in them, the oldest of the entry that started one least
 lately first. While it runs one, its share of `--max-rate`
@@ -997,6 +1059,8 @@ go at once). One that
 guesses reads no backtest's row, and the ledger is listed a second apart
 at least, however many guess. With replicas, the queue and each entry's
 hour are the ledger's: any replica takes a backtest and answers for it.
+
+### What a pull request's rules may read
 
 What the pull request's PromQL can do: it runs as range queries, with
 serve's access, so it can read whatever that access reads, a count at a
@@ -1057,6 +1121,8 @@ quarter of `--parallel` at once: with a high `--max-rate` and a history
 that answers slowly, it asks fewer a second than its share, and a
 backtest the port counted as fitting in `--backtest-timeout` can run out
 of it, which the comment says.
+
+### What the comment holds
 
 The comment's heading says lapilli serve's record judged it. It holds the
 rules' names and labels as the pull request wrote them, the counts, and

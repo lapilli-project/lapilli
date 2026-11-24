@@ -3,6 +3,8 @@
 Each number below is defined as the code counts it, with how to count it
 again yourself from the report, in [docs/numbers.md](numbers.md).
 
+## Where firings come from
+
 **Firings** come from one of three places:
 
 - `--rules FILE`: replay alert rules against history, so it works on rules you
@@ -70,6 +72,8 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
   [A cloud's own alarms](cloud-alarms.md)), or a
   report's own `firings`, judged again: their `held_from` says when their
   condition held (see "An alert after the incident").
+
+## Where incidents come from
 
 **Incidents** come from a file, from a signal of user impact, or both:
 
@@ -142,6 +146,8 @@ Grafana query's time range), the
 report says how many, and what `--impact-for` they can catch
 (`impact_short` in `--json`); the incidents are judged as any others.
 
+## When a firing catches an incident
+
 **A firing catches an incident** when it starts between `--lead` (15m) before
 the incident and its end, and agrees with it on any `--match` labels both
 carry: `--match service` keeps an alert about one service from catching an
@@ -175,6 +181,8 @@ dropped, since a noisy rule can also fire for the right reason. An incident
 caught only by noisy rules is reported as such, and its detection delay is
 taken from the first rule that isn't noisy. `--noisy-firings` and
 `--noisy-precision` move the line.
+
+## No record, no verdict
 
 **No record, no verdict.** A firing that caught nothing caught nothing
 written down. It is judged only when the record was kept at its time: an
@@ -213,6 +221,8 @@ firing by its week instead: a week whose record is kept, an incident on in
 it or in the two weeks before it, or `--impact` read over all of it, and,
 with a team picked, by the incidents the team owns.
 
+## What to change about a noisy rule
+
 **What to change.** Each noisy rule replayed from `--rules` is replayed again
 with a longer `for` (5m, 10m, 15m, 30m, 1h, 2h). The shortest that would have
 caught every incident the rule caught, firing at most half as often, is
@@ -246,6 +256,8 @@ restarts that keep coming for an hour. The report says so of a rule whose
 condition counts over, or longer: one event alone can never fire it; only
 events that keep coming for 1h will."
 
+## What a rule adds
+
 **What a rule adds.** Precision doesn't say whether anyone would miss a rule:
 one that is right every time, but always after another, adds nothing. Each
 rule gets the incidents it caught, those it caught before any other rule, and
@@ -259,6 +271,8 @@ incident would still be caught as soon. This is a question to ask, not a verdict
 it says only what happened in the period, and only among the rules that could be
 replayed. With `--rule` or `--changed-only`, which judge some of the rules, only
 how many incidents each caught is given.
+
+## When firings came
 
 **When they came.** A firing that caught nothing at three in the morning cost
 more than one at three in the afternoon. The firings that caught nothing are
@@ -274,6 +288,8 @@ those it leaves out as above (`every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
 tz=Europe/Berlin sleep=23:00-07:00`, the pager changing hands on Mondays at
 09:00). Turns of days or weeks change at the same time on the clock, the
 clocks changing or not. The rules that woke people for nothing come first.
+
+### Shifts from on-call schedules
 
 **Shifts from on-call schedules.** Real rotas swap, override and skip.
 PagerDuty, Opsgenie, Jira Service Management, Grafana OnCall and IRM, and a
@@ -341,6 +357,8 @@ file
 doesn't. A person's hours changed in the file count for every turn they
 had.
 
+## An alert after the incident
+
 **An alert after the incident.** A black firing can be an incident's own
 alert, come too late: its condition held in the incident, but its `for`
 and how late its metrics arrive (`--late`, `query_offset`) ran past the
@@ -364,6 +382,8 @@ it sends (`fired_after` of a missed incident), the Incidents page and an
 incident's own, a rule's page (how many of its firings that caught nothing
 came after one) and MCP (`fired_after`, `late`), its rules as they stood
 over what is shown.
+
+## Near misses
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
 did, each rule replayed from `--rules`, as it stood then, is looked at about
@@ -400,8 +420,16 @@ linked to it, a rule it lists is looked at whatever `--match` says, a
 stretch or a value of it nearly catching it where its labels agree with the
 alert's, and with `--linked-only` only the rules it lists are.
 
+**Rules that never fired** are named under the tables, ten at most (the rest
+are in `--json`). Of those, a rule whose condition compares a value that had
+no series at all in the period (a typo'd metric, a recording rule that isn't
+in the history) is said apart, with the expression: it couldn't have fired
+(`"no_data"` in `--json`). That is looked at after the replays, one question
+to the history for each value, so `--extras 0` skips it.
+
 **The steps after the replays**, a longer `for` for the noisy rules, near
-misses, and what fired with no record, ask the history again, and can take as
+misses, what fired with no record, and whether the rules that never fired
+read anything, ask the history again, and can take as
 long as the replays did. The progress line says which step a run is at and
 how far it is (`then looking for rules that nearly caught the incidents
 nothing caught, 120 of at most 2000 questions`). `--extras DUR` lets them take
@@ -412,6 +440,8 @@ change further than that would do is for `--compare`.
 **Rules that share a name**, in different groups or with different labels
 (a warning and a critical one, say), are told apart:
 `HighErrorRate [severity=critical]`, `DiskFull [node-alerts]`.
+
+## Rules that changed
 
 **Rules that changed.** Rules change: one is added after an incident, a
 threshold is raised. Today's rules, replayed over last month, judge a month
@@ -431,6 +461,8 @@ over the way they would have: Prometheus keeps a rule's alerts through a
 reload when its group, name and labels stay the same, pending or firing, and
 applies the new `for`; Grafana keeps them when the rule (same uid) is
 unchanged, and resolves them and starts afresh when it was edited or paused.
+
+### Versions from git and deploys
 
 Rules kept in git give their versions. `recipes/versions/git.sh` writes them
 as a directory that `--rules-history DIR` reads, one subdirectory a version,

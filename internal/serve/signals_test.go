@@ -1895,7 +1895,6 @@ func TestSignalPagesSayIt(t *testing.T) {
 	if !strings.Contains(body, "No alert yet: which of them") || strings.Contains(body, "None of them keeps the record") {
 		t.Errorf("a rule with no alert: %s", between(body, "Judged against", "</p>"))
 	}
-	_, body = askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")
 	others := func() string {
 		t.Helper()
 		_, body := askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")

@@ -1,5 +1,7 @@
 # What it doesn't do yet
 
+## Replaying and judging
+
 - Queries to data sources that are neither PromQL nor LogQL (SQL,
   Elasticsearch, InfluxDB, a cloud's own logs) can't be replayed. Read with
   `--grafana`, such a rule is judged from what Grafana's own alert state
@@ -34,6 +36,12 @@
   to one that divides the rule's interval and the window too, so a sample
   is seen at the first evaluation after it, as Grafana sees it (a rule
   every 10s on series scraped every 15s is asked every 5s).
+- Grafana's rules are all replayed against one history, `--prometheus`,
+  whatever PromQL data source their queries name, from files and with
+  `--grafana` alike: with several, `verdict` warns and `preflight` says so
+  (`rules.sources`), and a rule on another Prometheus than that one is
+  judged by the wrong history. Replay each data source's rules in a run of
+  their own, against its Prometheus (`--rule` picks them by name).
 - A Grafana rule's query on another data source than its condition's (a
   Loki query whose values an annotation shows) isn't replayed: when it
   returns nothing, Grafana takes the rule as having no data, which the
@@ -52,6 +60,9 @@
   doesn't carry is passed over, so one that told the firings of a rule
   apart only by it (two Prometheus replicas' external labels) links them
   both.
+
+## In lapilli serve
+
 - `lapilli serve` runs as one replica on a ledger file, or as several on
   one Postgres database, one of them leading (docs/design/replicas.md).
   Who is who comes
@@ -76,6 +87,9 @@
   firing routed nowhere still can't say so, and 0.33 and 0.34 name the
   alerts a notification says were muted by a hash alone, so only their own
   mute events say which.
+
+## Cloud alarms and other tools
+
 - Alarms kept in a cloud's own monitoring are replayed only where they are
   written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from
@@ -90,6 +104,9 @@
   of what they fired: their replay is checked against their history only
   where it is copied in (or given with `--check-firings`), and CloudWatch's
   only as the alarm as a whole.
+
+## Changes and pull requests
+
 - Changes are carried out on four paths: a pull request where the rule is
   kept in git, Grafana's API, a managed Prometheus ruler's API (Mimir,
   Cortex, Amazon's, Azure's), and a cloud's own alarms' API (CloudWatch,

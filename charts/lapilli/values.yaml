@@ -181,8 +181,10 @@ report:
 extraArgs: []
 
 # lapilli serve, with mode: serve. In serve mode incidents and impact may
-# both be left out: incidents can be written down in the UI. rules takes one
-# ConfigMap, read again every minute: each change is a new version.
+# both be left out: incidents can be written down in the UI. rules takes
+# ConfigMaps (rules.configMaps, mounted as one directory, a projected volume
+# when there are several, so their keys must not share a name), read again
+# every minute: each change is a new version.
 serve:
   # How many replicas serve: more than one shares a ledger in Postgres
   # alone (ledger.postgres), and is refused without it. One leads, and runs

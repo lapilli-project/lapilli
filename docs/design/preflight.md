@@ -121,6 +121,7 @@ doesn't apply to the flags given isn't listed.
 |---|---|---|
 | `rules.read` | once, as serve's watcher does: the files (`rules.ReadPicked`), or one `GET /api/v1/rules` (`source.Loaded`), one Grafana export (`source.Grafana`), one read of the ruler, of each `--alarms`, of `--loki-rules` | how many alert and recording rules, of each kind (Prometheus, Grafana, Loki, a cloud's alarms); a source that can't be read is a problem, with what it answered |
 | `rules.replayable` | nothing more | the rules that can't be replayed, and why (`Unsupported`), as the rules list would say; the names told apart (`source.TellApart`); documents `--rules-select` passed over |
+| `rules.sources` | nothing more | only when Grafana's rules name more than one data source for their PromQL (`rules.HistoryUIDs`): unknown, as each is replayed against the one `--prometheus`, and whether they are one Prometheus isn't known here; verdict warns of the same |
 | `rules.history` | `--rules-history`'s directory | its versions, and whether one is from before the backfill starts (serve warns of it at its first start) |
 | `expressions` | nothing: read, never sent | `--impact` and `--guard`, and the expressions proposed beside this (`--mark`, #90; impact signals, #88) when they are built, read as Lapilli reads an expression (brackets, strings and comparisons, 16 KiB and 32 levels at most, as near misses read them). Lapilli has no PromQL parser of its own, so whether the history takes one as written is unknown here; the first run says |
 

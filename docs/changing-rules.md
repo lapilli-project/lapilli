@@ -14,6 +14,8 @@ and marked on the rules list; one can be made into a task. A rule has one
 proposal waiting at a time, and a person, with their agents, makes twenty
 an hour at most.
 
+## Fixing what a rule says
+
 A fix to what a rule says, one annotation (`summary`, `description`,
 `runbook_url` or `runbook`) set or taken out, is proposed the same way, with
 the text written by a person or an agent: Lapilli writes none itself. The
@@ -30,6 +32,8 @@ value isn't URL-encoded unless the text says so (`urlquery`), so one with
 a `/`, a `?` or a `#` in it changes where the link goes. Lapilli checks
 that the template parses, not what it makes of a link; the content check
 shows the runbook as a link only with nothing a template fills in.
+
+## Proposing a new rule
 
 A new rule is proposed too, from the proposals page's **Propose a new
 rule** or an agent's `propose` (kind `add`), held to what it is to do
@@ -57,6 +61,8 @@ isn't known now, or its group's labels give it another team than as it
 was proposed. It goes the way a change goes there; undone,
 the rule is deleted; once added, its expectations go where an accepted
 draft of them goes ([Keep judging](serve.md)).
+
+## Approving a proposal
 
 Nothing is changed until a person approves it, on its page, in a browser:
 
@@ -87,6 +93,8 @@ Nothing is changed until a person approves it, on its page, in a browser:
   from its page, with this lapilli, over the twelve weeks to now, the old
   backtest kept in its history and the approvals given to it withdrawn and
   told (`proposal.backtested`). `/proposals?stale=1` lists the stale ones.
+
+## Carrying out a change
 
 `--changes` turns carrying them out on; without it Lapilli only proposes.
 With it, each approved change is checked again first: the rule is read
@@ -181,6 +189,8 @@ would now be missed), and the rule as it was is kept for undo. Then:
   edit: the proposal's page has the diff and a pull request's description,
   for a person to make it where the rule is written.
 
+## Retiring a rule
+
 Retiring a Grafana rule, an Azure one or a cloud's PromQL alarm turns it
 off first; four weeks later Lapilli proposes deleting it, approved again,
 and only if it is still off and nothing it would have caught was missed
@@ -195,6 +205,8 @@ fires: CloudWatch's `ALARM`, an Azure alert of it whose monitor condition
 is `Fired`, an open Google alert of the policy, OCI's `FIRING`. Every applied change can be
 undone from its page by an approver, the same way it was made; in a ruler
 or a cloud, undo puts back the rule as it was kept, the rest as it is now.
+
+## Limits and pausing
 
 At most five deletions a day and twenty changes an hour are carried out
 (`--changes-limits`), each counted once, when it is handed out or sent; a
@@ -211,6 +223,8 @@ Every step is kept in the ledger's changes, and told as `proposal.made`,
 `proposal.approved`, `proposal.backtested`, `change.opened`,
 `change.applied`, `change.amended`, `change.refused`, `change.failed` and
 `change.undone` to the webhook and Slack.
+
+## What it is tested against
 
 The git path, Grafana's and Mimir's run against real servers in
 `test/e2e/changes.sh` (Gitea 28.3, Prometheus 3.5, Grafana 13.3, Mimir

@@ -325,10 +325,6 @@ func (t *turn) take(ctx context.Context) error {
 // renderWait.
 func (s *Server) renderTurn(ctx context.Context) (*turn, error) { return takeTurn(ctx, s.renders) }
 
-// exportTurn takes a turn to write out an export of the activity log
-// (activityExports), waiting for one up to renderWait.
-func (s *Server) exportTurn(ctx context.Context) (*turn, error) { return takeTurn(ctx, s.exports) }
-
 // takeTurn takes one of the turns of, waiting for one up to renderWait; nil
 // is no turns, and one needn't be taken.
 func takeTurn(ctx context.Context, of chan struct{}) (*turn, error) {

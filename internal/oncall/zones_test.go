@@ -23,14 +23,12 @@ func TestFeedZoneCacheFull(t *testing.T) {
 	for i := 0; i <= 14; i++ {
 		zones = append(zones, fmt.Sprintf("Etc/GMT-%d", i))
 	}
-	for _, z := range []string{"Asia/Seoul", "Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "Asia/Kolkata", "Asia/Dubai",
+	zones = append(zones, "Asia/Seoul", "Asia/Tokyo", "Asia/Shanghai", "Asia/Singapore", "Asia/Kolkata", "Asia/Dubai",
 		"Asia/Jakarta", "Asia/Manila", "Asia/Bangkok", "Asia/Taipei", "Asia/Hong_Kong", "Asia/Karachi", "Europe/London",
 		"Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Stockholm",
 		"Europe/Warsaw", "Europe/Kyiv", "Europe/Istanbul", "Europe/Lisbon", "Europe/Dublin", "America/Chicago",
 		"America/Denver", "America/Los_Angeles", "America/Toronto", "America/Sao_Paulo", "America/Mexico_City",
-		"America/Bogota", "America/Lima", "Australia/Sydney", "Australia/Perth", "Pacific/Auckland", "Africa/Cairo"} {
-		zones = append(zones, z)
-	}
+		"America/Bogota", "America/Lima", "Australia/Sydney", "Australia/Perth", "Pacific/Auckland", "Africa/Cairo")
 	// The cache made as small as the zones here can fill it.
 	was := maxZones
 	t.Cleanup(func() { maxZones = was })

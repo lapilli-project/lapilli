@@ -91,15 +91,6 @@ func errs(t *testing.T, c *alarmtest.Common) {
 	}
 }
 
-func docMap(t *testing.T, d rules.Doc) map[string]any {
-	t.Helper()
-	var m map[string]any
-	if err := json.Unmarshal(d.Data, &m); err != nil {
-		t.Fatal(err)
-	}
-	return m
-}
-
 // CloudWatch: metric and composite alarms, one document each under its
 // ARN, its state left out; the namespace is the source; an alarm and a
 // rule of one name are told apart by it.

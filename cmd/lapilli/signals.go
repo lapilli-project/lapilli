@@ -151,14 +151,14 @@ func (f *verdictFlags) impactFlag(name, val string) (ok bool, err error) {
 			f.signals = append(f.signals, impactSignal{name: n, expr: expr, record: true})
 		}
 	case "--impact-for":
-		n, d, named := strings.Cut(val, "=")
-		if !named {
+		if !strings.Contains(val, "=") {
 			if f.impactFor, err = parseDuration(val); err != nil || f.impactFor < time.Second {
 				return true, fmt.Errorf("--impact-for %s: want a duration like 5m, or NAME=DUR for one signal", val)
 			}
 			return true, nil
 		}
-		if n, _, err = signalFlag(name, val); err != nil {
+		n, d, err := signalFlag(name, val)
+		if err != nil {
 			return true, err
 		}
 		s := f.impactBy(n)

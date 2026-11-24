@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,17 +20,25 @@ import (
 const eventsRecipe = "../../recipes/events/alertmanager.sh"
 
 // eventsPort is serve's notifications port, counting the requests that
-// reach it and their events, and answering 500 to the next fail of them.
+// reach it and the most events one of them held, and answering 500 to the
+// next fail of them.
 type eventsPort struct {
-	mu       sync.Mutex
-	posts    int
-	most     int
-	fail     int
-	h        http.Handler
-	bodySize int
+	mu    sync.Mutex
+	posts int
+	most  int
+	fail  int
+	h     http.Handler
 }
 
 func (p *eventsPort) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var events []json.RawMessage
+	json.Unmarshal(body, &events)
 	p.mu.Lock()
 	if p.fail > 0 {
 		p.fail--
@@ -38,6 +47,7 @@ func (p *eventsPort) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.posts++
+	p.most = max(p.most, len(events))
 	p.mu.Unlock()
 	p.h.ServeHTTP(w, r)
 }
@@ -157,8 +167,11 @@ func TestEventsRecipeFile(t *testing.T) {
 			t.Fatalf("exit %d: %s", code, out)
 		}
 		kept(lines[:20])
-		if port.count() != 3 {
-			t.Errorf("%d requests for 20 events, 7 a request", port.count())
+		port.mu.Lock()
+		most := port.most
+		port.mu.Unlock()
+		if port.count() != 3 || most != 7 {
+			t.Errorf("%d requests for 20 events, %d the most in one; want 3, 7 a request", port.count(), most)
 		}
 		off, _ := os.ReadFile(events + ".offset")
 		var size int

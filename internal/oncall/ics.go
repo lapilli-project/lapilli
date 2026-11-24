@@ -956,12 +956,6 @@ func (e *event) addRdates(starts []time.Time) ([]time.Time, map[int64]time.Time)
 	return starts, ends
 }
 
-func sameDate(a, b time.Time) bool {
-	y1, m1, d1 := a.Date()
-	y2, m2, d2 := b.Date()
-	return y1 == y2 && m1 == m2 && d1 == d2
-}
-
 // Flatten makes turns that overlap into turns that don't: at each time, the
 // turn that started last holds; when it ends, the one under it resumes.
 // Turns of one person that meet are one.

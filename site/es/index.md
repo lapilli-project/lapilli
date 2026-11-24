@@ -55,6 +55,16 @@ de producción: el backtest reproduce sus 71 reglas de alerta, y uno de cuatro
 semanas, con las reglas tal como estaban entonces, encontró 177 disparos de la
 regla más ruidosa: el número de notificaciones que su equipo había contado a mano.
 
+## La alerta saltó. ¿Y después? {#the-alert-fired-then-what}
+
+Una alerta dice que algo cruzó un umbral. No dice si avisar a alguien fue lo correcto. Quedan tres preguntas:
+
+<div class="grid">
+  <div><h3>¿Pasaba algo de verdad?</h3><p>Un aviso a las tres de la madrugada, y nada que arreglar. ¿Fue una vez, o es lo que hace esta regla? Lapilli cuenta, regla por regla, los disparos que detectaron un incidente y los que no detectaron nada.</p></div>
+  <div><h3>¿Lo detectó alguna alerta?</h3><p>Un cliente encontró el incidente antes que ninguna alerta. Lapilli muestra los incidentes que ninguna regla detectó, y las reglas que casi lo hicieron: la condición se cumplió, pero no el tiempo suficiente, o se quedó justo por debajo del umbral.</p></div>
+  <div><h3>¿Qué hará este cambio?</h3><p>Un <code>for</code> más largo, un umbral nuevo, una regla retirada: se fusiona a ojo y se juzga en el próximo incidente. Lapilli hace un backtest del cambio sobre las semanas pasadas, antes de fusionarlo.</p></div>
+</div>
+
 ## Una vez: `lapilli verdict` {#once-lapilli-verdict}
 
 Haz un backtest de una semana, de un mes o de un cambio que estás a punto de
@@ -96,7 +106,7 @@ DBPrimaryCPU        1          1      1
 ReadReplicaLag      1          1      1
 A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
-38 rules never fired.
+38 rules never fired: CertificateExpiring, DiskWillFillIn4h, EtcdNoLeader, KafkaUnderReplicated, NodeClockSkew, PodCrashLooping, PVCAlmostFull, RedisDown, TargetDown, WatchdogMissing and 28 more, all in --json.
 
 INCIDENT                         START             LASTED  CAUGHT BY
 INC-41 Checkout errors           2026-10-28 12:01  38m     DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
@@ -142,6 +152,23 @@ piedras en una UI web donde los equipos actúan sobre ellas. Antes de desplegarl
 las que puede hacer backtest, el historial y el inicio de sesión en él, el
 registro, y las peticiones y la memoria que necesitarán sus ejecuciones. Solo
 lee; no escribe nada.
+
+<div class="tour">
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rules-dark.png' | relative_url }}">
+  <img alt="La lista de reglas de lapilli serve, filtrada a las reglas ruidosas de cuatro semanas: cada regla con sus insignias, sus etiquetas, su equipo y sus cifras" src="{{ '/serve-rules.png' | relative_url }}" class="end" width="1240" height="1600" loading="lazy">
+</picture>
+<figcaption><h3>Encuentra las reglas que más cuestan</h3><p>La lista de reglas, filtrada a las ruidosas: cada una con sus piedras, el <code>for</code> que la calmaría y los disparos que llegaron mientras la gente dormía.</p><p class="go"><a href="{{ '/docs/serve/#rules-and-proposals' | relative_url }}">La lista de reglas, en la documentación (en inglés)</a></p></figcaption>
+</figure>
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rule-dark.png' | relative_url }}">
+  <img alt="La página de una regla ruidosa en lapilli serve: sus insignias y acciones, cinco cifras junto a las cuatro semanas anteriores y sus últimos 84 días como una tira de celdas" src="{{ '/serve-rule.png' | relative_url }}" width="1240" height="980" loading="lazy">
+</picture>
+<figcaption><h3>Lee una regla, semana a semana</h3><p>La página de una regla: su precisión y sus disparos junto al periodo anterior, sus últimos 84 días, una celda por día, cada versión y qué hacer primero. Un cambio se propone con su backtest y lo aprueba una persona.</p><p class="go"><a href="{{ '/docs/changing-rules/' | relative_url }}">Cambiar reglas, en la documentación (en inglés)</a></p></figcaption>
+</figure>
+</div>
 
 <div class="grid">
   <div><h3>Un dashboard</h3><p>La precisión de la semana pasada, los disparos, los incidentes sin detectar, las reglas ruidosas y los disparos que despertaron a alguien en vano, junto a la semana anterior; doce semanas, semana a semana; dónde está el ruido, por regla y semana; qué revisar primero.</p></div>
@@ -210,6 +237,19 @@ Monitoring, OCI Monitoring) se juzgan a partir de su historial, con un pequeño
 script para cada nube, y `lapilli serve` conserva ese historial más allá de lo que
 lo conserva la nube. Las integraciones son genéricas: un webhook, no un tracker
 concreto.
+
+## Empieza con lo que ya tienes {#start-from-what-you-have}
+
+No hay que mover ni reescribir nada antes. Cada cosa de aquí es un script de <a href="{{ site.repo }}/tree/main/recipes">recipes</a>, en el repositorio, o unos pocos flags.
+
+<div class="grid">
+  <div><h3>Reglas en un repositorio</h3><p>Un pull request que cambia reglas de alerta recibe su backtest como comentario, y un estado que puede impedir la fusión. Para GitHub, GitLab, Bitbucket, Azure DevOps y Gitea.</p><p class="go"><a href="{{ '/docs/pr-backtests/' | relative_url }}">Pull request backtests (en inglés)</a> · <a href="{{ site.repo }}/tree/main/recipes/backtest"><code>recipes/backtest</code></a></p></div>
+  <div><h3>Incidentes en una herramienta</h3><p>PagerDuty, incident.io, FireHydrant, Rootly, Grafana IRM, Compass, Jira o issues de GitHub: un script los copia, con las alertas que la herramienta enlazó a cada uno.</p><p class="go"><a href="{{ '/docs/incidents/' | relative_url }}">Incidents kept elsewhere (en inglés)</a> · <a href="{{ site.repo }}/tree/main/recipes/incidents"><code>recipes/incidents</code></a></p></div>
+  <div><h3>El historial de alarmas de una nube</h3><p>Las alarmas de CloudWatch, Azure Monitor, Cloud Monitoring y OCI, los monitores de Datadog y las condiciones de alerta de New Relic, juzgados por lo que dispararon.</p><p class="go"><a href="{{ '/docs/cloud-alarms/' | relative_url }}">A cloud's own alarms (en inglés)</a> · <a href="{{ site.repo }}/tree/main/recipes/firings"><code>recipes/firings</code></a></p></div>
+  <div><h3>Las reglas como eran</h3><p>Versiones anteriores de las reglas desde git, Argo CD o Flux, para que cada semana tenga su backtest con las reglas que tenía.</p><p class="go"><a href="{{ '/docs/how-it-judges/#rules-that-changed' | relative_url }}">Rules that changed (en inglés)</a> · <a href="{{ site.repo }}/tree/main/recipes/versions"><code>recipes/versions</code></a></p></div>
+  <div><h3>Cambios como pull requests</h3><p>Un cambio aprobado se abre como pull request donde se guarda la regla.</p><p class="go"><a href="{{ '/docs/changing-rules/#carrying-out-a-change' | relative_url }}">Changing rules (en inglés)</a> · <a href="{{ site.repo }}/tree/main/recipes/changes"><code>recipes/changes</code></a></p></div>
+  <div><h3>Tareas en tu tracker</h3><p>Jira, Linear, GitHub, GitLab, Azure Boards, Shortcut y YouTrack, al día con las tareas de Lapilli.</p><p class="go"><a href="{{ '/docs/serve/#tasks-kept-in-step-with-a-tracker' | relative_url }}">Tasks kept in step with a tracker (en inglés)</a> · <a href="{{ site.repo }}/tree/main/recipes/trackers"><code>recipes/trackers</code></a></p></div>
+</div>
 
 ## Hecho para que puedas fiarte {#built-to-be-trusted}
 

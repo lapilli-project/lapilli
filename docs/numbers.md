@@ -580,7 +580,11 @@ with `delay_ns`, from the incident's start to the rule's first firing that
 caught it (negative when the alert came first), the earliest first, and
 `linked`† when a firing of the rule that caught it is one of the alerts the
 incident's tool linked to it (the incident's `alerts`†,
-[How it judges](how-it-judges.md)).
+[How it judges](how-it-judges.md)). A missed incident has `not_known`†
+when a rule couldn't be replayed (its `unsupported`, not judged from its
+history): that rule may have caught it, so the report says the incident
+"can't be judged", not that it had no alert. It is still missed here, and
+in `lapilli_incidents_not_known`.
 
 ```jq
 # missed: as the report has it
@@ -841,7 +845,7 @@ and when one does:
 A field, a column (at the end), a metric or a label may be added in a
 minor release, said in the changelog. A patch release changes none of
 them. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
-`unreplayed`, `hours`, `impact_short`, a rule's `unseen`, `for_outlasts`
+`unreplayed`, `hours`, `impact_short`, a rule's `unseen`, `no_data`, `for_outlasts`
 and `late`, an incident's `fired_after`, a firing's `after` and
 `held_from`, the report's `late_cut`, and the
 metrics of `lapilli serve` about itself that aren't below) may change in a
@@ -866,7 +870,7 @@ holds them, and this list.
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
-| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`† |
+| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |
 | `incidents[].alerts[]` | `rule`, `labels`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`† |
 | `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`† |
@@ -890,6 +894,7 @@ it, which only `lapilli serve` says.
 | `lapilli_rule_incidents_alone` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_nothing_by_hours` | `rule`, [`severity`], [`team`], `hours` (`asleep`, `off_hours`, `at_work`) |
 | `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`), `source` (`written`, `impact`) |
+| `lapilli_incidents_not_known` | `source` (`written`, `impact`) |
 | `lapilli_incident_detection_delay_seconds` | `incident` |
 | `lapilli_last_run_timestamp_seconds` | |
 | `lapilli_rule_episodes` | `rule`, [`severity`], [`team`] |
@@ -985,7 +990,7 @@ out when it is zero or empty, as in the report.
 | `estimates.backtests` | `share`, `rate`†, `parallel`, `timeout_seconds`, `fit`†, `rules`, `days`, `changed`, `shared`, `changed_days`, `shared_days` (`0`: not a day fits), `week_rules`†, `day_rules`† (how many of the rules changed fit 7 days, and a day, when all of them don't) |
 | `estimates.memory` | `from` (`alerts`, `caps`), `peak_bytes`, `request_bytes`, `limit_bytes`, `cgroup_bytes`†, `backtest_bytes`† |
 
-The ids: `rules.read`, `rules.replayable`, `rules.history`, `expressions`,
+The ids: `rules.read`, `rules.replayable`, `rules.sources`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
 `history.intervals`, `grafana.notifications`, `content.alertmanager`,
 `grafana.write`, `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,

@@ -430,8 +430,9 @@ Output:
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
   --extras DUR        let the steps after the replays take this long at most:
-                      a longer "for" for the noisy rules, near misses and
-                      what fired with no record, each a replay or questions
+                      a longer "for" for the noisy rules, near misses,
+                      what fired with no record and whether the rules that
+                      never fired read anything, each a replay or questions
                       of the history again, as long again as the replays at
                       times; 0 skips them (default: what --timeout leaves)
   --parallel N        replay up to N rules at once against each history
@@ -1105,9 +1106,18 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	// is the rules.
 	following := serve != nil && f.rulesHistory != "" && len(f.rules) == 0
 	sources := 0
-	for _, on := range []bool{len(f.rules) > 0 || following, f.loadedRules, f.grafana != "", f.ruler != "", f.alerts, f.firings != ""} {
-		if on {
+	var given []string // the flags that say where the firings come from, as given
+	rulesFlag := "--rules"
+	if following {
+		rulesFlag = "--rules-history"
+	}
+	for _, src := range []struct {
+		on   bool
+		flag string
+	}{{len(f.rules) > 0 || following, rulesFlag}, {f.loadedRules, "--loaded-rules"}, {f.grafana != "", "--grafana"}, {f.ruler != "", "--ruler"}, {f.alerts, "--alerts"}, {f.firings != "", "--firings"}} {
+		if src.on {
 			sources++
+			given = append(given, src.flag)
 		}
 	}
 	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.anyImpact() ||
@@ -1140,8 +1150,10 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			}
 		}
 		switch {
-		case sources > 1 || sources == 0 && !f.firingsToken && len(f.alarms) == 0 && !lokiToo:
-			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --alarms or --loki-rules; or take them copied in, with --firings-token-file")
+		case sources > 1:
+			return nil, tooManySources(given)
+		case sources == 0 && !f.firingsToken && len(f.alarms) == 0 && !lokiToo:
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --alarms or --loki-rules; or take them copied in, with --firings-token-file" + ruleIsAName(f))
 		case f.alerts && lokiToo:
 			return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts")
 		case f.alerts && len(f.alarms) > 0:
@@ -1163,9 +1175,9 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		case validRuler(f) != nil:
 			return nil, validRuler(f)
 		case f.promURL == "" && f.gcpProj == "" && rulesToo:
-			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
+			return nil, errors.New("say where the history is: " + historyAt)
 		case f.promURL == "" && f.gcpProj == "" && f.anyImpact():
-			return nil, errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
+			return nil, errors.New("--impact reads history: add " + historyAt)
 		}
 		return f, validHistory(f)
 	}
@@ -1177,8 +1189,10 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		return nil, errors.New("--severities goes with --check-content")
 	case f.amConfig != "":
 		return nil, errors.New("--alertmanager-config goes with --check-content")
-	case sources > 1 || sources == 0 && len(f.alarms) == 0 && !lokiToo:
-		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules")
+	case sources > 1:
+		return nil, tooManySources(given)
+	case sources == 0 && len(f.alarms) == 0 && !lokiToo:
+		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules" + ruleIsAName(f))
 	case lokiToo && (f.alerts || f.firings != ""):
 		return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts or --firings")
 	case lokiToo && len(f.compare) > 0:
@@ -1242,7 +1256,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	case validHistory(f) != nil:
 		return nil, validHistory(f)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
-		return nil, errors.New("replays, --alerts, --impact and --check-replay read history: add --prometheus URL or --gcp-project ID")
+		return nil, errors.New("replays, --alerts, --impact and --check-replay read history: add " + historyAt)
 	case f.from.IsZero() != f.to.IsZero():
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
@@ -1293,6 +1307,35 @@ func validLoki(f *verdictFlags, serve bool) error {
 }
 
 // validContent checks the flags of lapilli verdict --check-content.
+// historyAt is what the messages that want a history to read say to give:
+// a cloud's managed Prometheus takes --prometheus with --auth (see
+// cloud.Kinds), Google's also --gcp-project.
+const historyAt = "--prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID"
+
+// tooManySources is the refusal of two flags that each say where the
+// firings come from.
+func tooManySources(given []string) error {
+	names, all := given[0]+" and "+given[1], "both"
+	if len(given) > 2 {
+		names, all = strings.Join(given[:len(given)-1], ", ")+" and "+given[len(given)-1], "all"
+	}
+	return fmt.Errorf("%s %s say where the firings come from: give one of them", names, all)
+}
+
+// ruleIsAName is, when no source was given, what to add if --rule holds
+// what looks like a path, as it does when --rules was meant: --rule is a
+// regexp of rule names.
+func ruleIsAName(f *verdictFlags) string {
+	if f.ruleRE == nil {
+		return ""
+	}
+	v := f.ruleRE.String()
+	if _, err := os.Stat(v); err == nil || strings.Contains(v, "/") {
+		return "; --rule picks rules by name: for a file or a directory, --rules"
+	}
+	return ""
+}
+
 func validContent(f *verdictFlags, sources int) error {
 	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
 	switch {
@@ -1315,9 +1358,9 @@ func validContent(f *verdictFlags, sources int) error {
 	case validRuler(f) != nil:
 		return validRuler(f)
 	case f.loadedRules && f.promURL == "" && f.gcpProj == "":
-		return errors.New("--loaded-rules reads the rules from the API: add --prometheus URL or --gcp-project ID")
+		return errors.New("--loaded-rules reads the rules from the API: add " + historyAt)
 	case f.anyImpact() && f.promURL == "" && f.gcpProj == "":
-		return errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
+		return errors.New("--impact reads history: add " + historyAt)
 	case f.from.IsZero() != f.to.IsZero():
 		return errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
@@ -1660,6 +1703,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			source.TellApart(v.Rules)
 		}
 	}
+	warnHistories(stderr, versions)
 
 	// Impact first: a query, and one a selector for where its data
 	// begins, and a replay that runs out of time should still be judged
@@ -1805,6 +1849,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 				rep.Rules[i].Source = verdict.GrafanaSource
 			}
 		}
+		rep.MarkNotKnown()
 		for _, v := range versions {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)
@@ -1878,10 +1923,18 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %s\n", verdict.Clean(err.Error()))
 			}
 		}
+		// Of the rules that never fired, those that read no series at all.
+		if !brief && len(versions) > 0 {
+			err := source.NoData(ectx, h, versions, rep, rep.From, rep.To, f.step)
+			cut = cut || err != nil && ectx.Err() != nil
+			if err != nil && ectx.Err() == nil {
+				fmt.Fprintf(stderr, "lapilli verdict: looking at the rules that never fired: %s\n", verdict.Clean(err.Error()))
+			}
+		}
 		if cut {
 			rep.Extras = "cut"
 			if ctx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses and what fired with no record are in part\n", f.extras)
+				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses, what fired with no record and whether the rules that never fired read anything are in part\n", f.extras)
 			}
 		}
 		cancelExtras()
@@ -1928,6 +1981,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	case f.csv:
 		err = verdict.CSV(stdout, shown, nil, nil)
 	case f.metrics:
+		shown.NotKnownMetric = true
 		err = verdict.Prometheus(stdout, shown, now())
 	default:
 		err = text(stdout)
@@ -2406,6 +2460,32 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	}
 	f.replaying().Apply(kept)
 	return kept, nil
+}
+
+// warnHistories says when Grafana's rules, from files or from --grafana,
+// name more than one data source for their PromQL: every one is replayed
+// against the one history, --prometheus, so the rules of the others are
+// judged by the wrong one. It is a warning, as the run can still be what
+// is wanted when they are all one Prometheus.
+func warnHistories(stderr io.Writer, versions []replay.Version) {
+	var all []rules.Rule
+	for _, v := range versions {
+		all = append(all, v.Rules...)
+	}
+	uids := rules.HistoryUIDs(all)
+	if len(uids) < 2 {
+		return
+	}
+	shown := make([]string, 0, 5)
+	for _, u := range uids[:min(len(uids), 5)] {
+		shown = append(shown, verdict.Clean(u))
+	}
+	more := ""
+	if n := len(uids) - len(shown); n > 0 {
+		more = fmt.Sprintf(" and %d more", n)
+	}
+	fmt.Fprintf(stderr, "lapilli verdict: Grafana's rules query %d data sources (%s%s), and every one is replayed against one history, --prometheus: replay each data source's rules in a run of their own against its Prometheus (--rule picks them by name), or the others' are judged by the wrong history\n",
+		len(uids), strings.Join(shown, ", "), more)
 }
 
 // appendMatching adds to rs the rules of more whose names match re.

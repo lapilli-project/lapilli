@@ -43,7 +43,7 @@ payments:
 	args := []string{"verdict", "--ruler", srv.URL + "/prometheus/config/v1/rules", "--ruler-token-file", token, "--ruler-tenant", "team-a",
 		"--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}
 	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "CheckoutErrors [shop/shop] +5m") ||
-		!strings.Contains(stdout.String(), "1 rules never fired.") {
+		!strings.Contains(stdout.String(), "1 rule never fired:") {
 		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
 	}
 }
@@ -68,7 +68,7 @@ func TestRulerFlags(t *testing.T) {
 		"a token, no ruler":     {[]string{"--rules", incidents, "--ruler-token-file", tok}, "go with --ruler"},
 		"a tenant, no ruler":    {[]string{"--rules", incidents, "--ruler-tenant", "a"}, "go with --ruler"},
 		"a tenant with a slash": {[]string{"--ruler", "http://mimir/rules", "--ruler-tenant", "a/b"}, "a tenant's ID"},
-		"two places":            {[]string{"--ruler", "http://mimir/rules", "--rules", incidents}, "one of --rules"},
+		"two places":            {[]string{"--ruler", "http://mimir/rules", "--rules", incidents}, "both say where the firings come from"},
 		"history":               {[]string{"--ruler", "http://mimir/rules", "--rules-history", t.TempDir()}, "--rules-history"},
 	} {
 		var out, errs strings.Builder

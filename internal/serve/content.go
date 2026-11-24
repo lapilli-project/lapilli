@@ -479,7 +479,7 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 	if !s.cfg.CheckContent {
 		return none, nil
 	}
-	key, rs, st, err := s.contentCached(ctx)
+	_, rs, st, err := s.contentCached(ctx)
 	if err != nil || st != nil {
 		return st, err
 	}
@@ -488,7 +488,8 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 	}
 	s.saidRules.work.Lock()
 	defer s.saidRules.work.Unlock()
-	if key, rs, st, err = s.contentCached(ctx); err != nil || st != nil {
+	key, rs, st, err := s.contentCached(ctx)
+	if err != nil || st != nil {
 		return st, err
 	}
 	if len(rs) == 0 {

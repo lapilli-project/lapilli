@@ -119,11 +119,18 @@ func partial(w io.Writer, us []Unreplayed, of int, below bool) {
 		return
 	}
 	if of > 0 {
-		fmt.Fprintf(w, "! %d of %d rules couldn't be replayed, and are left out of what follows:\n", len(names), of)
+		fmt.Fprintf(w, "! %d of %s couldn't be replayed, and are left out of what follows:\n", len(names), plural(of, "rule", "rules"))
 	} else {
-		fmt.Fprintf(w, "! %d rules couldn't be replayed, and are left out of what follows:\n", len(names))
+		fmt.Fprintf(w, "! %s couldn't be replayed, and are left out of what follows:\n", plural(len(names), "rule", "rules"))
 	}
-	shown := names[:min(len(names), shownFirst)]
+	shown := shownAtTop(us)
+	// Rules whose reason reads alike share a line, in the order the first
+	// of them came.
+	type group struct {
+		names  []string
+		reason string
+	}
+	var groups []group
 	for _, u := range failed {
 		if !slices.Contains(shown, u.Rule) {
 			continue
@@ -134,13 +141,48 @@ func partial(w io.Writer, us []Unreplayed, of int, below bool) {
 		}
 		// Cut once what doesn't show is shown, as \u{...}: so is the line
 		// as long as it is written.
-		fmt.Fprintf(w, "  %s: %s\n", name, cut(Clean(u.Reason), maxReason))
+		reason := cut(Clean(u.Reason), maxReason)
+		i := slices.IndexFunc(groups, func(g group) bool { return g.reason == reason })
+		if i < 0 {
+			groups = append(groups, group{reason: reason})
+			i = len(groups) - 1
+		}
+		groups[i].names = append(groups[i].names, name)
+	}
+	for _, g := range groups {
+		fmt.Fprintf(w, "  %s: %s\n", strings.Join(g.names, ", "), g.reason)
 	}
 	if more := len(names) - len(shown); more > 0 && below {
 		fmt.Fprintf(w, "  and %d more, listed below\n", more)
 	} else if more > 0 {
 		fmt.Fprintf(w, "  and %d more, all in --json\n", more)
 	}
+}
+
+// shownAtTop are the names of the rules partial names at the top, of the
+// unreplayed us: those whose replay failed, ten of them at most (shownFirst),
+// in the order they come.
+func shownAtTop(us []Unreplayed) []string {
+	var names []string
+	for _, u := range us {
+		if u.Failed && !slices.Contains(names, u.Rule) {
+			names = append(names, u.Rule)
+		}
+	}
+	return names[:min(len(names), shownFirst)]
+}
+
+// plural is n and its noun, one when n is 1, as "1 rule" or "2 rules".
+func plural(n int, one, many string) string {
+	return fmt.Sprintf("%d %s", n, noun(n, one, many))
+}
+
+// noun is one when n is 1, and many else: the word of a count said before it.
+func noun(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // cut is s cut to n bytes at most, "…" included, at the start of a rune,

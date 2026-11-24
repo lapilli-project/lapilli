@@ -184,7 +184,7 @@ func TestCreditSaysWhatItCantKnow(t *testing.T) {
 	if err := Text(&b, rep, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "1 rules couldn't be replayed, so what they would have caught isn't counted here.") {
+	if !strings.Contains(b.String(), "1 rule couldn't be replayed, so what it would have caught isn't counted here.") {
 		t.Errorf("no caveat in:\n%s", b.String())
 	}
 }

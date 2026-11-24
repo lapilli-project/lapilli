@@ -50,7 +50,7 @@ DBPrimaryCPU        1          1      1
 ReadReplicaLag      1          1      1
 A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
-38 rules never fired.
+38 rules never fired: CertificateExpiring, DiskWillFillIn4h, EtcdNoLeader, KafkaUnderReplicated, NodeClockSkew, PodCrashLooping, PVCAlmostFull, RedisDown, TargetDown, WatchdogMissing and 28 more, all in --json.
 
 INCIDENT                         START             LASTED  CAUGHT BY
 INC-41 Checkout errors           2026-10-28 12:01  38m     DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
@@ -118,7 +118,8 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
 [wiki](https://github.com/lapilli-project/lapilli/wiki):
 
 - Start here: [Getting started](docs/getting-started.md),
-  [Words](docs/glossary.md), [Questions](docs/faq.md)
+  [Words](docs/glossary.md), [Questions](docs/faq.md),
+  [What it reads, keeps and sends](docs/data.md)
 - Judging a period: [How it judges](docs/how-it-judges.md),
   [Use `lapilli verdict`](docs/verdict.md), [The numbers](docs/numbers.md),
   [A cloud's own alarms](docs/cloud-alarms.md),
@@ -137,6 +138,10 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
   [Ask it from an agent](docs/mcp.md)
 - Reference: [Commands](docs/commands.md), [The HTTP API](docs/api.md),
   [Metrics](docs/metrics.md), [Upgrading](docs/upgrading.md)
+- Across releases: [what stays the same](docs/numbers.md#what-stays-the-same)
+  (the report's fields, the metrics, the CSV's columns),
+  [the ledger's schema, and going back](docs/upgrading.md), and
+  [when releases come and how they are numbered](GOVERNANCE.md#releases)
 - [When something goes wrong](docs/troubleshooting.md),
   [What it doesn't do yet](docs/limits.md)
 - The Helm chart: [charts/lapilli](charts/lapilli/README.md); scripts for

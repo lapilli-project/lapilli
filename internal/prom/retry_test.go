@@ -731,8 +731,9 @@ func TestEveryPath(t *testing.T) {
 		r.Header.Set("X-Signed", fmt.Sprint(signed.Add(1)))
 		return nil
 	})
-	if _, err := New(srv.URL, "test", sign).QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err != nil || signed.Load() != 2 || answered.Load() != "2" {
-		t.Errorf("signed: %v, %d signatures, answered the one signed %v", err, signed.Load(), answered.Load())
+	if _, err := New(srv.URL, "test", sign).QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err != nil || n.Load() != 2 || signed.Load() != 2 ||
+		answered.Load() != "2" {
+		t.Errorf("signed: %v after %d requests, %d signatures, answered the one signed %v", err, n.Load(), signed.Load(), answered.Load())
 	}
 
 	srv, n = answers(t, refuse(429, "1"), func(w http.ResponseWriter, r *http.Request) {

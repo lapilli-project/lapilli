@@ -127,11 +127,7 @@ func nameCut(s string) string {
 
 // splitLabels reads labels written comma- or space-separated.
 func splitLabels(v string) []string {
-	out := []string{}
-	for _, l := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
-		out = append(out, l)
-	}
-	return out
+	return append([]string{}, strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' })...)
 }
 
 // signalForm is a named signal as the Settings page's form gives it: Was,

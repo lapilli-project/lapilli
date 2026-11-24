@@ -442,8 +442,9 @@ Output:
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
   --extras DUR        let the steps after the replays take this long at most:
-                      a longer "for" for the noisy rules, near misses and
-                      what fired with no record, each a replay or questions
+                      a longer "for" for the noisy rules, near misses,
+                      what fired with no record and whether the rules that
+                      never fired read anything, each a replay or questions
                       of the history again, as long again as the replays at
                       times; 0 skips them (default: what --timeout leaves)
   --parallel N        replay up to N rules at once against each history

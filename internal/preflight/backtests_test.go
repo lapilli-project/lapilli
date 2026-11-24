@@ -371,6 +371,11 @@ func TestBacktestIssuersAtOnce(t *testing.T) {
 	if most != 4 || it.State != OK || strings.Count(it.What, "1 key for RS256") != 8 {
 		t.Errorf("%d at once: %+v", most, it)
 	}
+	for i, x := range all {
+		if x.count() != 2 {
+			t.Errorf("e%d asked %v", i, x.asked)
+		}
+	}
 }
 
 // The keys a set holds are read a hundred at most, as a token's check

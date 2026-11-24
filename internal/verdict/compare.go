@@ -586,7 +586,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 			}
 			return m
 		}
-		fmt.Fprintf(w, "Of %d incidents: with no alert %d → %d", n, count(c.Before, IncidentResult.Missed), count(c.After, IncidentResult.Missed))
+		fmt.Fprintf(w, "Of %s: with no alert %d → %d", plural(n, "incident", "incidents"), count(c.Before, IncidentResult.Missed), count(c.After, IncidentResult.Missed))
 		if b, a := count(c.Before, IncidentResult.OnlyNoisy), count(c.After, IncidentResult.OnlyNoisy); b+a > 0 {
 			fmt.Fprintf(w, ", caught only by noisy rules %d → %d", b, a)
 		}
@@ -618,7 +618,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 	}
 	if len(broken) > 0 {
-		fmt.Fprintf(w, "\nCould not replay %d rules:\n", len(broken))
+		fmt.Fprintf(w, "\nCould not replay %s:\n", plural(len(broken), "rule", "rules"))
 		for _, rc := range broken {
 			for _, side := range []struct {
 				name string

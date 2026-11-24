@@ -53,6 +53,16 @@ production Grafana: all 71 of its alert rules replay, and a four-week
 replay of the rules as they stood then found 177 firings of the noisiest
 rule, the number of notifications its team had counted by hand.
 
+## The alert fired. Then what? {#the-alert-fired-then-what}
+
+An alert says something crossed a line. It doesn't say whether paging someone was right. Three questions are left:
+
+<div class="grid">
+  <div><h3>Was anything wrong?</h3><p>A page at three in the morning, and nothing to fix. Once, or is that what this rule does? Lapilli counts each rule's firings: those that caught an incident, and those that caught nothing.</p></div>
+  <div><h3>Did anything catch it?</h3><p>A customer found the incident before any alert did. Lapilli shows the incidents no rule caught, and the rules that nearly did: the condition held, but not for long enough, or stopped just under the threshold.</p></div>
+  <div><h3>What will this change do?</h3><p>A longer <code>for</code>, a new threshold, a rule retired: merged on a guess, and judged at the next incident. Lapilli replays the change over the weeks behind you, before it is merged.</p></div>
+</div>
+
 ## Once: `lapilli verdict` {#once-lapilli-verdict}
 
 Replay a week, a month, or a change you are about to merge, and get the
@@ -94,7 +104,7 @@ DBPrimaryCPU        1          1      1
 ReadReplicaLag      1          1      1
 A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
-38 rules never fired.
+38 rules never fired: CertificateExpiring, DiskWillFillIn4h, EtcdNoLeader, KafkaUnderReplicated, NodeClockSkew, PodCrashLooping, PVCAlmostFull, RedisDown, TargetDown, WatchdogMissing and 28 more, all in --json.
 
 INCIDENT                         START             LASTED  CAUGHT BY
 INC-41 Checkout errors           2026-10-28 12:01  38m     DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
@@ -138,6 +148,23 @@ a web UI where teams act on them. Before it is deployed, `lapilli preflight`
 takes its flags and says what it will meet: the rules it can replay, the
 history and the sign-in to it, the ledger, and the requests and memory its
 runs will take. It reads, and writes nothing.
+
+<div class="tour">
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rules-dark.png' | relative_url }}">
+  <img alt="The rules list of lapilli serve, filtered to the noisy rules over four weeks: each rule with its badges, its labels, its team and its numbers" src="{{ '/serve-rules.png' | relative_url }}" class="end" width="1240" height="1600" loading="lazy">
+</picture>
+<figcaption><h3>Find the rules that cost the most</h3><p>The rules list, filtered to the noisy ones: each with its stones, the <code>for</code> that would quiet it, and the firings that came while people slept.</p><p class="go"><a href="{{ '/docs/serve/#rules-and-proposals' | relative_url }}">The rules list, in the docs</a></p></figcaption>
+</figure>
+<figure>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-rule-dark.png' | relative_url }}">
+  <img alt="A noisy rule's page in lapilli serve: its badges and actions, five numbers beside the four weeks before, and its last 84 days as a strip of cells" src="{{ '/serve-rule.png' | relative_url }}" width="1240" height="980" loading="lazy">
+</picture>
+<figcaption><h3>Read one rule, week by week</h3><p>A rule's page: its precision and firings beside the weeks before, its last 84 days a cell a day, each version of it, and what to do first. A change is proposed with its backtest, and a person approves it.</p><p class="go"><a href="{{ '/docs/changing-rules/' | relative_url }}">Changing rules, in the docs</a></p></figcaption>
+</figure>
+</div>
 
 <div class="grid">
   <div><h3>A dashboard</h3><p>Last week's precision, firings, incidents missed, noisy rules and the firings that woke people for nothing beside the week before; twelve weeks by week; where the noise is, rule by week; what to look at first.</p></div>
@@ -204,6 +231,19 @@ Alarms in a cloud's own terms (CloudWatch, Azure Monitor, Cloud Monitoring,
 OCI Monitoring) are judged from their history, with a small script for each
 cloud, and `lapilli serve` keeps that history past what the cloud keeps.
 Integrations are generic: a webhook, not a particular tracker.
+
+## Start from what you have {#start-from-what-you-have}
+
+Nothing has to be moved or rewritten first. Each of these is a script in the repository's <a href="{{ site.repo }}/tree/main/recipes">recipes</a>, or a few flags.
+
+<div class="grid">
+  <div><h3>Rules in a repository</h3><p>A pull request that changes alert rules gets its backtest as a comment, and a status that can stop the merge. For GitHub, GitLab, Bitbucket, Azure DevOps and Gitea.</p><p class="go"><a href="{{ '/docs/pr-backtests/' | relative_url }}">Pull request backtests</a> · <a href="{{ site.repo }}/tree/main/recipes/backtest"><code>recipes/backtest</code></a></p></div>
+  <div><h3>Incidents in a tool</h3><p>PagerDuty, incident.io, FireHydrant, Rootly, Grafana IRM, Compass, Jira or GitHub issues: a script copies them in, with the alerts the tool linked to each.</p><p class="go"><a href="{{ '/docs/incidents/' | relative_url }}">Incidents kept elsewhere</a> · <a href="{{ site.repo }}/tree/main/recipes/incidents"><code>recipes/incidents</code></a></p></div>
+  <div><h3>A cloud's alarm history</h3><p>CloudWatch, Azure Monitor, Cloud Monitoring and OCI alarms, Datadog's monitors and New Relic's alert conditions, judged from what they fired.</p><p class="go"><a href="{{ '/docs/cloud-alarms/' | relative_url }}">A cloud's own alarms</a> · <a href="{{ site.repo }}/tree/main/recipes/firings"><code>recipes/firings</code></a></p></div>
+  <div><h3>The rules as they were</h3><p>Earlier versions of the rules from git, Argo CD or Flux, so each week is replayed with the rules it had.</p><p class="go"><a href="{{ '/docs/how-it-judges/#rules-that-changed' | relative_url }}">Rules that changed</a> · <a href="{{ site.repo }}/tree/main/recipes/versions"><code>recipes/versions</code></a></p></div>
+  <div><h3>Changes as pull requests</h3><p>An approved change is opened as a pull request where the rule is kept.</p><p class="go"><a href="{{ '/docs/changing-rules/#carrying-out-a-change' | relative_url }}">Changing rules</a> · <a href="{{ site.repo }}/tree/main/recipes/changes"><code>recipes/changes</code></a></p></div>
+  <div><h3>Tasks in your tracker</h3><p>Jira, Linear, GitHub, GitLab, Azure Boards, Shortcut and YouTrack, kept in step with Lapilli's tasks.</p><p class="go"><a href="{{ '/docs/serve/#tasks-kept-in-step-with-a-tracker' | relative_url }}">Tasks kept in step with a tracker</a> · <a href="{{ site.repo }}/tree/main/recipes/trackers"><code>recipes/trackers</code></a></p></div>
+</div>
 
 ## Built to be trusted {#built-to-be-trusted}
 

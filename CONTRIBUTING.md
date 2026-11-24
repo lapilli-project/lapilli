@@ -100,6 +100,7 @@ firing fails on any machine.
 - **CI runs:**
   - the tests on Linux, macOS and the latest Go, and govulncheck: the
     checks a pull request must pass to merge
+  - staticcheck, with the checks `staticcheck.conf` names
   - the tests on Postgres 15 and 18, in two shards each
   - the chart end to end on kind, and served at a URL there
   - the whole service on kind: a scenario of user impact, a re-fire and a
@@ -134,6 +135,12 @@ firing fails on any machine.
   anything a user would notice.
 
 ## Where things live
+
+To read your way in: [docs/how-it-judges.md](docs/how-it-judges.md) for
+what a verdict is, then `internal/replay` and `internal/verdict`, which
+are small; [docs/design/README.md](docs/design/README.md) lists the design
+notes by area, so the one for the part you are changing is the only one to
+read.
 
 - `cmd/lapilli`: the commands and their flags: `verdict`, `serve`,
   `preflight`, `ledger copy`, `impact suggest` and `demo`, whose made-up
@@ -241,10 +248,25 @@ gh workflow run release.yml --ref main -f version=vX.Y.Z
 `lapilli.dev` is built from `site/` by `.github/workflows/pages.yml`. Its
 front page is in English, Spanish, Japanese and Korean (`site/index.md`,
 `site/es/`, `site/ja/`, `site/ko/`), with the header's and footer's words in
-`site/_data/i18n.yml`; the docs are in English only. A new page in `docs/`
+`site/_data/i18n.yml`; the docs are in English, and some pages in Korean
+too (below). A new page in `docs/`
 gets a line in `docs/README.md`: the site's sidebar and each page's
 description come from it, and the site's build fails on a page it doesn't
-list (`site/docs.sh`). A change to the English
+list (`site/docs.sh`). A page's `##` and `###` headings are its "On this
+page" list on the site and what the docs' search finds in it, so a page
+longer than a screen or two has them, no two alike. A change to the English
 front page changes the other three with it, or says in the pull request
 which it left. Their sections keep the English page's ids, which the header
 links to, and the build fails when they don't.
+
+Translations of docs pages live in `docs/ko/` (Korean so far), each starting
+with the line `<!-- translated from docs/NAME.md at blob HASH -->`, and are
+put on the site at `/ko/docs/NAME/`. In one, `NAME.md` links to the Korean
+page, `../NAME.md` to the English one, `../../assets/NAME.png` is an image,
+`../../PATH` is a file of the repository and `../PATH` one of `docs/`.
+`docs/ko/README.md` lists every page of `docs/`, as `NAME.md` where it is
+translated and `../NAME.md` where it isn't, so a new page of `docs/` gets a
+line there too, in English if you don't write Korean; the build and
+`TestDocsLinks` fail when a page is missing from it. A translation can lag
+the English page, and the site then says so on it; to refresh one, update it
+and put `git hash-object docs/NAME.md` in its marker as HASH.

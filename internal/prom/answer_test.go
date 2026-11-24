@@ -162,7 +162,7 @@ func FuzzRangeAnswer(f *testing.F) {
 	f.Add([]byte(`{"data":{"resultType":"matrix","result":[{"values":null},{"values":[["1","1"]]}]},"status":"success"}`))
 	start, end := time.Unix(1600000000, 0).UTC(), time.Unix(1750000000, 0).UTC()
 	f.Fuzz(func(t *testing.T, body []byte) {
-		a, err := readAnswer(bytes.NewReader(body), start, end, time.Second)
+		readAnswer(bytes.NewReader(body), start, end, time.Second) // any body: no panic
 		status, typ, old, oldErr := oldAnswer(body)
 		if oldErr != nil || typ != "matrix" {
 			return
@@ -170,7 +170,8 @@ func FuzzRangeAnswer(f *testing.F) {
 		// Read again from the answer as json.Unmarshal took it, a key given
 		// twice once.
 		canon, _ := json.Marshal(map[string]any{"status": status, "data": map[string]any{"resultType": typ, "result": encodeSeries(old)}})
-		if a, err = readAnswer(bytes.NewReader(canon), start, end, time.Second); err != nil || a.bad != nil || a.big != "" {
+		a, err := readAnswer(bytes.NewReader(canon), start, end, time.Second)
+		if err != nil || a.bad != nil || a.big != "" {
 			t.Fatalf("%s: %v %v %q", canon, err, a.bad, a.big)
 		}
 		for i := range old {

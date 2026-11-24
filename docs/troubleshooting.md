@@ -48,12 +48,16 @@ Give the rules to replay, or where firings were recorded;
 [How it judges](how-it-judges.md) says what each reads. `lapilli serve`
 says it without `--firings`, and adds `--firings-token-file`, for firings
 copied in ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)).
+`--rule` is a regexp of rule names, not where the rules are: given a path, the
+message adds that `--rules` is for a file or a directory. Two of the flags
+together say `--rules and --firings both say where the firings come from: give
+one of them`.
 
 ### `read history: add --prometheus URL`
 
 ```
-lapilli verdict: replays, --alerts, --impact and --check-replay read history: add --prometheus URL or --gcp-project ID
-lapilli serve: say where the history is: --prometheus URL or --gcp-project ID
+lapilli verdict: replays, --alerts, --impact and --check-replay read history: add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID
+lapilli serve: say where the history is: --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID
 ```
 
 A replay asks a PromQL API for the history the rules are evaluated
@@ -611,9 +615,11 @@ estimate is set beside the process's memory limit, where it has one.
 
 ### A rule has no stones
 
-In `lapilli verdict`'s report, a rule that didn't fire is counted in `N
-rules never fired.`, and one that couldn't be replayed is under `Could not
-replay N rules:` with its reason: the history (above), `paused`, `its
+In `lapilli verdict`'s report, a rule that didn't fire is named in `N
+rules never fired: …`, with a line after it for those whose condition read
+no series at all in the period, and one that couldn't be replayed is under
+`Could not replay N rules:`, or at the top when its replay failed, with its
+reason: the history (above), `paused`, `its
 condition reads a TYPE data source: only PromQL and LogQL are replayed`,
 or a cloud's alarm in its own terms (`a CloudWatch metric alarm isn't
 PromQL`). [What it doesn't do yet](limits.md) lists what can't be

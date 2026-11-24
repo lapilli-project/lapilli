@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/prom"
+
+	"go.yaml.in/yaml/v3"
 )
 
 var t0 = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -140,6 +142,35 @@ func TestMerge(t *testing.T) {
 
 // A file that says nothing isn't taken for no incidents: a job that failed
 // leaves one, and lapilli serve would take every incident away.
+// What a person sees of a file gone wrong is in their words: no Go type, no
+// layout, and one line.
+func TestLoadErrorsInPlainWords(t *testing.T) {
+	for body, want := range map[string][]string{
+		"- id: X\n  start: 2026-10-31T01:00:00Z\n":                                    {`want "incidents:" at the top, the list under it`, "how-it-judges"},
+		"incidents:\n  - id: INC-9\n    start: yesterday\n":                           {"incident INC-9: start: want a time such as 2026-11-24T09:00:00Z (RFC 3339)"},
+		"incidents:\n  - id: INC-9\n    start: 2026-10-31T01:00:00Z\n    end: soon\n": {"incident INC-9: end: want a time such as"},
+		"incidents: 4\n": {"cannot unmarshal !!int"},
+	} {
+		file := filepath.Join(t.TempDir(), "incidents.yaml")
+		os.WriteFile(file, []byte(body), 0o600)
+		_, err := Load(file)
+		if err == nil {
+			t.Errorf("%q: no error", body)
+			continue
+		}
+		for _, w := range want {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("%q: %v, want %q", body, err, w)
+			}
+		}
+		for _, bad := range []string{"\n", "2006-01-02", "struct {", "yaml.Node", "unmarshal errors"} {
+			if strings.Contains(err.Error(), bad) {
+				t.Errorf("%q: %q in %v", body, bad, err)
+			}
+		}
+	}
+}
+
 func TestLoadRefusesNothing(t *testing.T) {
 	for body, ok := range map[string]bool{
 		"":                 false,
@@ -348,5 +379,22 @@ func TestAlerts(t *testing.T) {
 	}
 	if err := CheckAlerts(SortAlerts(same)); err != nil {
 		t.Errorf("one alert %d times: %v", len(same), err)
+	}
+}
+
+// TestOneLineCut: a YAML type error of many errors is five of them and a
+// count of the rest, on one line.
+func TestOneLineCut(t *testing.T) {
+	var errs []string
+	for i := 1; i <= 8; i++ {
+		errs = append(errs, fmt.Sprintf("line %d: cannot unmarshal !!str into int", i))
+	}
+	got := oneLine(&yaml.TypeError{Errors: errs}).Error()
+	want := strings.Join(errs[:5], "; ") + "; and 3 more"
+	if got != want || strings.Contains(got, "\n") {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got := oneLine(&yaml.TypeError{Errors: errs[:5]}).Error(); got != strings.Join(errs[:5], "; ") {
+		t.Errorf("five errors: %q", got)
 	}
 }

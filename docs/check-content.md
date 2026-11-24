@@ -23,6 +23,8 @@ ExportJob5xx  a range shorter than two scrapes       rate[1m] < 2 × 1m  the scr
 TargetGone    absent() with no for: a restart pages                     a series gone for a moment may be what it is there for
 ```
 
+## What it checks
+
 | Check | Kind |
 |---|---|
 | No summary or description; no runbook, or one that isn't a link: an http or https URL, or a path in a repository | fact |
@@ -36,6 +38,8 @@ TargetGone    absent() with no for: a restart pages                     a series
 | A severity fewer than two rules use, among ten or more, without `--severities` | heuristic |
 | `rate`, `increase`, `irate` or `delta` over less than two scrapes | heuristic |
 | `absent()` with no `for` | heuristic |
+
+## How each source is read
 
 What each source says is read from its own fields: Prometheus's
 annotations, as the managed services that run its rules keep them,
@@ -63,6 +67,8 @@ one. The finding says whose: `rate[3m] < 2 × 2m (job "batch")`. With `--grafana
 notification templates each Grafana rule is sent with are checked too
 (below). `--json` writes it all, what each rule says included.
 
+## Grafana's notification templates
+
 A Grafana rule's notification says what its contact point's templates say.
 With `--grafana`, Lapilli reads Grafana's notification templates, contact
 points and notification policies through the provisioning API, with the
@@ -79,6 +85,8 @@ measured, or that the expression can't give, as a guess. Under an `if` or a
 `with` naming it, nothing is faulted. A rule whose routing would take
 more than its share of the check's work or time isn't checked against
 templates, and its page says why. Nothing is written to Grafana.
+
+## Alertmanager's templates
 
 The other rules, written in Prometheus's templates, are sent by
 Alertmanager, whose receivers' fields are templates too. With
@@ -120,6 +128,8 @@ stderr, and in `serve`'s log: Alertmanager won't load the configuration. In
 `lapilli verdict` a configuration that can't be read is an error; in
 `serve` it is read once an hour, and one that can't be read leaves the check
 as it was, the log saying why once. Nothing is written to Alertmanager.
+
+## In `lapilli serve`
 
 `lapilli serve` checks the rules as it read them last, each `--watch`, so a
 new summary shows at once without making a new version. Each rule's page has

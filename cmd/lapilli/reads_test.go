@@ -82,7 +82,7 @@ func TestUnreplayedShown(t *testing.T) {
 	if code != 0 || !strings.Contains(out, top) || strings.Index(out, top) > strings.Index(out, "RULE") || strings.Contains(out[:strings.Index(out, "RULE")], "Typo") {
 		t.Errorf("exit %d: want the rule named before the table:\n%s", code, out)
 	}
-	if !strings.Contains(out, "Could not replay 2 rules:\n  Turned: "+turned+"\n  Typo: query failed: HTTP 400: bad_data: parse error\n") {
+	if !strings.Contains(out, "Could not replay 1 more rule:\n  Typo: query failed: HTTP 400: bad_data: parse error\n") {
 		t.Errorf("the list at the foot is gone:\n%s", out)
 	}
 
@@ -118,7 +118,7 @@ func TestUnreplayedShown(t *testing.T) {
 
 	// Compared: a rule alike in both once; a changed rule by its side.
 	code, out, _ = verdictOf("--rules", later, "--compare", rs)
-	want := "! 2 rules couldn't be replayed, and are left out of what follows:\n  CheckoutErrors (after): " + turned + "\n  Turned: " + turned + "\n"
+	want := "! 2 rules couldn't be replayed, and are left out of what follows:\n  CheckoutErrors (after), Turned: " + turned + "\n"
 	if code != 0 || !strings.Contains(out, want) {
 		t.Errorf("exit %d, want\n%s\nin\n%s", code, want, out)
 	}
@@ -530,7 +530,7 @@ func TestHistoryUnread(t *testing.T) {
 		{"not done", answer(501, "", `{"status":"error","error":"not implemented"}`), nil, false},
 	} {
 		code, out, errs := unreadRun(t, c.answer, append(c.args, "--fail-unreplayed")...)
-		top := strings.Contains(out, "! 2 of 2 rules couldn't be replayed, and are left out of what follows:\n  A: "+rules.HistoryUnread)
+		top := strings.Contains(out, "! 2 of 2 rules couldn't be replayed, and are left out of what follows:\n  A, B: "+rules.HistoryUnread)
 		if c.unread && (code != 1 || !top || !strings.Contains(errs, "2 of 2 rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)")) {
 			t.Errorf("%s: exit %d\n%s\n%s", c.name, code, errs, out)
 		}
@@ -564,7 +564,7 @@ func TestWaitPastTimeout(t *testing.T) {
 		fmt.Fprint(w, `{"status":"error","error":"slow down"}`)
 	}, "--timeout", "3s")
 	if code != 1 || !strings.Contains(errs, "2 of 2 rules didn't finish within --timeout 3s; raise it") ||
-		!strings.Contains(out, "  A: "+replay.Unfinished+"\n") || time.Since(start) > 2500*time.Millisecond {
+		!strings.Contains(out, "  A, B: "+replay.Unfinished+"\n") || time.Since(start) > 2500*time.Millisecond {
 		t.Errorf("told to wait a minute: exit %d after %s and %d requests\n%s\n%s", code, time.Since(start), asked.Load(), errs, out)
 	}
 	code, out, errs = unreadRun(t, func(w http.ResponseWriter, r *http.Request) {

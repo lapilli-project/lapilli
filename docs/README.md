@@ -17,6 +17,9 @@ Lapilli is, and how to install it.
   rest of the words these pages use
 - [Questions](faq.md): what it needs, what it writes, and what it sends
   anywhere
+- [What it reads, keeps and sends](data.md): what each command reads, what
+  `serve` keeps and for how long, who can reach it, what it sends where, and
+  what it can change
 
 ## Judging a period
 

@@ -7,6 +7,14 @@ it doesn't do yet, area by area, with where it lives in the code. Each area
 is a piece someone can take on and come to own; see
 [MAINTAINERS.md](MAINTAINERS.md) for how owning an area works.
 
+What comes first: the replay and `lapilli verdict`, with the pull request
+backtests built on them. Everyone starts there, and a verdict wrong there
+is wrong in every page after it, so a replay that differs from what really
+fired is fixed before anything is added. `lapilli serve` is the larger
+part of the code already; its pages, roles and integrations grow where
+someone running it asks for them, in an issue or a discussion, not ahead
+of that.
+
 Some areas need what the current maintainer doesn't have: an AWS or Azure
 account with a managed Prometheus, Loki alerts in real use, an incident
 tool. If you do, you are the person this needs.
@@ -36,6 +44,13 @@ reducer, `query_offset`, a Grafana window ending before now, `--late`, and
 groups placed where Prometheus places them, for rules read from its API.
 Still to do:
 
+- Newer Grafana, Prometheus and Loki. What is measured is measured against
+  the versions `test/e2e` pins, and what Grafana's expressions mean is
+  written again here (`internal/sse`), not read from Grafana: nothing runs
+  the measurements against a newer release until someone moves a pin. A
+  job that runs them weekly against each one's latest image, and says what
+  came out differently, would find a change before a user's
+  `--check-replay` does.
 - Query errors. History can't say when a query failed, so a rule's error
   states aren't replayed: Grafana's error alerts are left out of what really
   fired, and `--check-replay` says how many; `serve` keeps no count of them.
