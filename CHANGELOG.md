@@ -60,6 +60,12 @@
   serve's memory on SQLite and Postgres (docs/serve.md, Sizing).
 - docs/design/rendered-changes.md proposes writing an approved change to
   a rule rendered from a chart into the values file it comes from.
+- Documentation: MAINTAINERS.md's table gives each maintainer's GitHub ID
+  and organisation; the README and the FAQ say how the replay is checked
+  against real servers and which part is the core and which is
+  `lapilli serve`; the FAQ compares Lapilli with promtool, pint, vmalert's
+  replay and Grafana's backtesting; the ROADMAP sorts its areas into the
+  two.
 
 ### Changed
 

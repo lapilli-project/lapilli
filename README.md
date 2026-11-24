@@ -16,6 +16,12 @@ changes it proposes, each once a person has approved it: as a pull request
 to where the rule is kept, or, for a rule kept nowhere else, through the API
 that holds it ([Changing rules](docs/changing-rules.md)).
 
+The core is the replay and the verdict on it: `lapilli verdict`,
+`--check-replay`, and the pull request backtests built on them.
+`lapilli serve` runs that same core every hour and keeps what it finds. What
+it adds (the ledger, the pages, sign-in, making approved changes) is
+optional: the core needs none of it.
+
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
     --incidents incidents.yaml --impact 'sum(rate(http_5xx[5m])) / sum(rate(http_total[5m])) > 0.01'
@@ -70,7 +76,12 @@ impact-1 user impact (--impact)  2026-11-01 21:27  24m     ✗ nothing fired
 > they stood then found 177 firings of the noisiest rule, the number of
 > notifications its team had counted by hand in their alert channels. Weekly
 > counts of critical alerts came within 10% of theirs in three of the four
-> weeks.
+> weeks. The replay is also checked against real servers, by anyone who runs
+> it: CI's `e2e-compat` job ([test/e2e/compat.sh](test/e2e/compat.sh)) runs
+> `lapilli verdict --check-replay` against a real Prometheus, Thanos and
+> VictoriaMetrics with vmalert, and every firing must be alike, and the weekly
+> `upstream` workflow runs it again on each server's latest release
+> ([Check the replay](docs/check-replay.md)).
 
 ## Try it
 
