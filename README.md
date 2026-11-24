@@ -82,6 +82,9 @@ impact-1 user impact (--impact)  2026-11-01 21:27  24m     ✗ nothing fired
 > VictoriaMetrics with vmalert, and every firing must be alike, and the weekly
 > `upstream` workflow runs it again on each server's latest release
 > ([Check the replay](docs/check-replay.md)).
+> `e2e-kubernetes` ([test/e2e/kubernetes-rules.sh](test/e2e/kubernetes-rules.sh))
+> does the same on a real rule set: kube-prometheus-stack's default alert
+> rules, as shipped, on a kind cluster with failures made on purpose.
 
 ## Try it
 

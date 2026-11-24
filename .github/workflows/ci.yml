@@ -150,6 +150,7 @@ jobs:
       e2e-dashboard: ${{ steps.reached.outputs.e2e-dashboard }}
       e2e-ratelimit: ${{ steps.reached.outputs.e2e-ratelimit }}
       e2e-compat: ${{ steps.reached.outputs.e2e-compat }}
+      e2e-kubernetes: ${{ steps.reached.outputs.e2e-kubernetes }}
     steps:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -419,6 +420,28 @@ jobs:
         with:
           go-version-file: go.mod
       - run: test/e2e/compat.sh
+
+  e2e-kubernetes:
+    # The replay checked against what a real Prometheus fired, on a real
+    # rule set: the default alert rules of kube-prometheus-stack on a kind
+    # cluster, with failures made on purpose so that some fire and resolve,
+    # and `lapilli verdict --check-replay --loaded-rules` over the period
+    # (test/e2e/kubernetes-rules.sh). Every firing must be alike. Not a
+    # required check: it pulls images, starts a cluster, and waits out the
+    # rules' for of 15 minutes (about 40 minutes in all).
+    name: Kubernetes's default rules replay as Prometheus fired them
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-kubernetes == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/kubernetes-rules.sh
 
   vulnerabilities:
     name: govulncheck

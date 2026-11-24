@@ -66,6 +66,12 @@
   `lapilli serve`; the FAQ compares Lapilli with promtool, pint, vmalert's
   replay and Grafana's backtesting; the ROADMAP sorts its areas into the
   two.
+- `test/e2e/kubernetes-rules.sh`, a CI job and weekly in `upstream.yml`:
+  the replay checked against what a real Prometheus fired, on a real rule
+  set. kube-prometheus-stack's default alert rules, as shipped, run on a
+  kind cluster with failures made on purpose; `--check-replay
+  --loaded-rules` must find every firing alike, among at least five alerts
+  that fired, and the run's page in GitHub Actions says how many.
 
 ### Changed
 

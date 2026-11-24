@@ -41,6 +41,7 @@ test/e2e/dashboard.sh    # the chart's Grafana dashboard on a real Grafana and P
 test/e2e/service.sh      # the whole service on kind: Grafana's alerts, Lapilli at a LoadBalancer, Dex, a browser; Linux
 test/e2e/ratelimit.sh    # runs at once against a real Prometheus behind nginx's rate limit (429); needs Docker
 test/e2e/compat.sh       # verdict and --check-replay against a real Thanos, and VictoriaMetrics with vmalert; needs Docker, jq
+test/e2e/kubernetes-rules.sh # --check-replay of kube-prometheus-stack's default rules beside what Prometheus fired, on kind; about 40 minutes; needs Docker, kubectl, helm, jq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Go and Docker
 ```
 
@@ -107,6 +108,8 @@ firing fails on any machine.
     deploy, Grafana's alerts and notifications, the dashboard, a browser
   - the sign-in against a real identity provider
   - three replicas on one Postgres ledger, on kind
+  - the replay checked against what a real Prometheus fired, on the default
+    rules of kube-prometheus-stack, on kind (about 40 minutes)
   - the other end-to-end jobs, against real servers in Docker
   - CodeQL
   - on a pull request that changes `site/`, `assets/`, `docs/` or
@@ -115,7 +118,7 @@ firing fails on any machine.
   - every day, govulncheck on the latest release (`latest-release.yml`);
     weekly, OpenSSF Scorecard
   - weekly, the end-to-end jobs that use real servers, in Docker and on
-    kind (the chart's CronJob, the whole service), against each server's
+    kind (the chart's CronJob, the whole service, Kubernetes's default rules), against each server's
     latest image instead of the pinned one (`upstream.yml`).
     By hand, one script against another image:
     `GRAFANA_IMAGE=grafana/grafana:latest test/e2e/loki.sh`
@@ -126,7 +129,9 @@ firing fails on any machine.
   the script reads (`test/e2e/reached.sh` says which). Of lapilli,
   `e2e-compat` is reached only by what reads the history and replays it
   (`internal/prom`, `internal/replay`, `internal/rules`,
-  `internal/source`), and `go.mod` and `go.sum`. A change to the
+  `internal/source`), and `go.mod` and `go.sum`; `e2e-kubernetes` by
+  those and by what sets the replay beside what really fired
+  (`internal/verdict`, `internal/firing`, the verdict command). A change to the
   docs alone runs none of them. A new push to a pull request cancels the
   run in progress. On each push to main every job runs, and weekly the
   fuzzing too. The five checks above must pass to merge; everything that
