@@ -117,8 +117,8 @@ datasources:
   - {name: Orders, type: mysql, uid: orders, url: "mysql:3306", access: proxy}
 YAML
 # Grafana's rules, as its editor writes them: instant and range queries,
-# reduces Grafana works out, no data states, a classic condition and a
-# MySQL query, which aren't replayed.
+# reduces Grafana works out, no data states, a classic condition, which
+# the replay reduces itself, and a MySQL query, which isn't replayed.
 query() { # refId, LogQL, queryType, window in seconds
   jq -nc --arg r "$1" --arg e "$2" --arg q "$3" --argjson f "$4" '{refId: $r, queryType: $q, relativeTimeRange: {from: $f, to: 0},
     datasourceUid: "loki", model: {expr: $e, queryType: $q, refId: $r, intervalMs: 1000, maxDataPoints: 43200}}'
@@ -228,7 +228,7 @@ out=$("$work/lapilli" verdict --check-replay --json --grafana "$gf" --grafana-to
 check "Grafana on Loki" "$out"
 listed=$("$work/lapilli" verdict --check-replay --grafana "$gf" --grafana-token-file "$work/viewer" --prometheus "$pu" \
   --from "$from" --to "$to" --step 10s 2>/dev/null)
-for want in "LkClassic: classic conditions over a Loki query" "LkSQL: its condition reads a mysql data source"; do
+for want in "LkSQL: its condition reads a mysql data source"; do
   if grep -qF "$want" <<<"$listed"; then echo "ok: listed: $want"; else echo "FAILED: not listed: $want"; fail=1; fi
 done
 
