@@ -123,7 +123,7 @@ func TestLinkedAlertsServe(t *testing.T) {
 	s.jobs(ctx, false)
 	judging(false)
 	s.jobs(ctx, false)
-	if v, err := s.l.Meta(ctx, linkedMeta); n != 1 || v != "1" || err != nil {
+	if v, err := s.l.Meta(ctx, linkedMeta); n != 1 || v != judgedBy+"1" || err != nil {
 		t.Errorf("--linked-only given: judged all %d times, the ledger says %q (%v); want once", n, v, err)
 	}
 	ten, err := s.l.IncidentByID(ctx, "INC-10")
@@ -181,7 +181,7 @@ func TestLinkedOnlyReplicasDiffer(t *testing.T) {
 		t.Error("the Settings page doesn't say every firing is to be judged again")
 	}
 	s.jobs(ctx, false)
-	if v, _ := s.l.Meta(ctx, linkedMeta); n != 1 || v != "1" || judging() {
+	if v, _ := s.l.Meta(ctx, linkedMeta); n != 1 || v != judgedBy+"1" || judging() {
 		t.Fatalf("A leading: judged all %d times, the ledger says %q", n, v)
 	}
 
@@ -209,7 +209,7 @@ func TestLinkedOnlyReplicasDiffer(t *testing.T) {
 	started()
 	s.jobs(ctx, false)
 	s.jobs(ctx, false)
-	if v, _ := s.l.Meta(ctx, linkedMeta); n != 2 || v != "1" {
+	if v, _ := s.l.Meta(ctx, linkedMeta); n != 2 || v != judgedBy+"1" {
 		t.Errorf("A started again: judged all %d times, the ledger says %q; want twice in all", n, v)
 	}
 	// Agreeing, it says nothing.

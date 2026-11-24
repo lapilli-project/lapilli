@@ -390,7 +390,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -401,7 +401,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -610,7 +610,7 @@ func TestMigrate031(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031), "UPDATE schema_version SET version = 30") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031), "UPDATE schema_version SET version = 30") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -621,7 +621,7 @@ func TestMigrate031(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo032, undo031), "PRAGMA user_version = 30") {
+		for _, q := range append(slices.Concat(undo033, undo032, undo031), "PRAGMA user_version = 30") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -737,7 +737,7 @@ func askRun(id, branch string, pr int64, workflow string, run int64) BacktestAsk
 // built its group again, or a newer commit was pushed), or an earlier run
 // run again, keeping its number, takes no newer run's place, a merge
 // group's as a pull request's; nor does a run of another workflow. One
-// kept with no workflow (asked before 032) is taken the place of as
+// kept with no workflow (asked before 033) is taken the place of as
 // before, and so are those of a CI whose tokens say no run.
 func TestBacktestSupersedeLaterRun(t *testing.T) {
 	ctx := context.Background()
@@ -774,7 +774,7 @@ func TestBacktestSupersedeLaterRun(t *testing.T) {
 			t.Errorf("kept %q, run %d", b.Workflow, b.RunNumber)
 		}
 	}
-	// Kept with no workflow, as before 032: taken the place of by a run.
+	// Kept with no workflow, as before 033: taken the place of by a run.
 	asked(askQueue("before", "main", 7), 0, "one kept with no workflow")
 	asked(askRun("run", "main", 7, wf, 1), 1, "a run's, after it")
 	// A CI whose tokens say no run: by the commit alone, as before.
@@ -782,11 +782,11 @@ func TestBacktestSupersedeLaterRun(t *testing.T) {
 	asked(askQueue("no-run-newer", "main", 8), 1, "of no run, another commit")
 }
 
-// A ledger at 031 with a backtest waiting, in SQLite or, with
-// LAPILLI_TEST_POSTGRES, in Postgres, migrates to 032 with it as it was,
+// A ledger at 032 with a backtest waiting, in SQLite or, with
+// LAPILLI_TEST_POSTGRES, in Postgres, migrates to 033 with it as it was,
 // of no merge queue: a pull request's newer commit takes its place, and a
 // merge group of the same number doesn't.
-func TestMigrate032(t *testing.T) {
+func TestMigrate033(t *testing.T) {
 	ctx := context.Background()
 	where := place(t)
 	l, err := openAt(ctx, where, time.UTC)
@@ -802,13 +802,13 @@ func TestMigrate032(t *testing.T) {
 	}
 	l.Close()
 
-	// Back to 031.
+	// Back to 032.
 	if strings.HasPrefix(where, "postgres") {
 		c, err := pgx.Connect(ctx, where)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Clone(undo032), "UPDATE schema_version SET version = 31") {
+		for _, q := range append(slices.Clone(undo033), "UPDATE schema_version SET version = 32") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -819,7 +819,7 @@ func TestMigrate032(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Clone(undo032), "PRAGMA user_version = 31") {
+		for _, q := range append(slices.Clone(undo033), "PRAGMA user_version = 32") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -829,7 +829,7 @@ func TestMigrate032(t *testing.T) {
 
 	l2, err := openAt(ctx, where, time.UTC)
 	if err != nil {
-		t.Fatalf("migrating to 032: %v", err)
+		t.Fatalf("migrating to 033: %v", err)
 	}
 	defer l2.Close()
 	if b, _, err := l2.Backtest(ctx, "old"); err != nil || b != was || b.QueueBranch != "" || b.State != BacktestWaiting {

@@ -111,3 +111,6 @@ UI can't change it, and the token can't change what people wrote. It isn't
 counted as anyone's use of Lapilli, and isn't told to the notice webhook, since the
 tool has told people already. The port takes one write at a time, 20 a second,
 and the ledger keeps 20,000 copied incidents at most.
+
+In the chart, `serve.incidentsAPI.copy` runs these scripts as CronJobs
+([Copying incidents and opening pull requests from the chart](serve.md#copying-incidents-and-opening-pull-requests-from-the-chart)).

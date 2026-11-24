@@ -57,7 +57,7 @@ took to catch.
 Usage:
   lapilli verdict [flags]
 
-Where the firings come from (pick one):
+Where the firings come from (pick one; --firings may go beside any but --alerts):
   --rules FILE        replay these alert rules against history (repeatable):
                       Prometheus rule files, PrometheusRule resources, Grafana
                       alerting provisioning files, Terraform's JSON of
@@ -140,7 +140,19 @@ Where the firings come from (pick one):
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."};
-                      recipes/firings writes each cloud's alarm history so
+                      recipes/firings writes each cloud's alarm history in that form.
+                      Alone it says where the firings come from; beside one
+                      of the above (not --alerts or --compare) they are
+                      judged with the firings replayed, over the same period,
+                      against the same incidents, as rules of the report,
+                      marked as recorded: no longer "for", near misses or
+                      backtests for them. A name both have is refused (exit
+                      2): a rule's firings come from one place
+  --firings-prefix STR
+                      put STR before the name of each rule --firings records
+                      (default none), to keep it apart from a replayed rule
+                      of the name; only beside rules replayed, as --firings
+                      alone has no name to clash with
 
 Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
@@ -377,6 +389,9 @@ Judging:
                       incident can list several values. A firing of an
                       alert the incident's tool linked to it (alerts: in
                       the incidents file) catches it whatever they say
+  --match-strict      a firing that lacks a --match label the incident has
+                      doesn't catch it; by default it does, and the report
+                      says how many catches were by such rules
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone, not by any other firing
                       at the time; one that lists none is caught as ever
@@ -478,7 +493,10 @@ Output:
                       history couldn't be read, as lapilli exits 1 then, the
                       report judging nothing; a run in which some rule was
                       replayed exits 0 either way, unless --fail-unreplayed.
-                      Not with --compare
+                      Rules recorded with --firings aren't replayed and are
+                      not counted: a run whose replays all failed exits 1
+                      though the recorded firings were judged, the report
+                      judging only those. Not with --compare
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
@@ -613,6 +631,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       the rule's page links to it
   --lead, --match, --refire, --noisy-firings, --noisy-precision
                       the defaults; the UI can change them
+  --match-strict      a firing that lacks a --match label the incident has
+                      doesn't catch it; changed at a start, every firing is
+                      judged again with it
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone; changed at a start,
                       every firing is judged again with it
@@ -1386,6 +1407,7 @@ and sends nothing anywhere (docs/design/demo.md).
 Usage:
   lapilli demo [--json] [--tz ZONE]
   lapilli demo --serve [--listen ADDR] [--tz ZONE]
+  lapilli demo --write DIR [--tz ZONE]
 
   --json              the whole report, every firing included, as lapilli
                       verdict --json gives it
@@ -1404,6 +1426,13 @@ Usage:
   --listen ADDR       with --serve, where to listen: a loopback address and
                       a port, 127.0.0.1:PORT or [::1]:PORT, and no other
                       (default 127.0.0.1:0, a free port)
+  --write DIR         write the sample's rules and incidents into DIR, as
+                      rules.yaml and incidents.yaml, with a README.txt, to
+                      see the format of both and to run them with lapilli
+                      verdict. DIR is made if it is missing, and none of
+                      the three is overwritten: one that exists is refused.
+                      It replays nothing and listens on nothing, and does
+                      not go with --serve or --json
 
 The same on your own rules, and incidents written down:
   lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \

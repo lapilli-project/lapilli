@@ -195,19 +195,8 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	ctx = c.asking(ctx)
 	byKey := map[string]*Series{}
 	t := &tally{keys: map[string]bool{}, maxSamples: c.maxSamples}
-	chunk := step * maxPoints
-	if c.loki {
-		// Asked at a finer step (lokiStep), a request stays within Loki's
-		// 11,000 points.
-		if n := int64(lokiPoints * lokiStep(start, step) / step); n >= 1 && n < maxPoints {
-			chunk = step * time.Duration(n)
-		}
-	}
-	for from := start; !from.After(end); from = from.Add(chunk + step) {
-		to := from.Add(chunk)
-		if to.After(end) {
-			to = end
-		}
+	for _, r := range Pieces(start, end, step, c.loki) {
+		from, to := r[0], r[1]
 		part, err := c.fetch(ctx, expr, from, to, step, t)
 		if err != nil {
 			return nil, err
@@ -226,6 +215,31 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 		out = append(out, *byKey[k])
 	}
 	return out, nil
+}
+
+// Pieces are the ranges QueryRange asks the API for, each a request, to
+// cover [start, end] at step: a day at a time (maxPoints), and, of a Loki
+// (loki), as many as keep a request within its 11,000 points when it is
+// asked at a finer step (lokiStep). A count of the requests of a replay is
+// worked out from them.
+func Pieces(start, end time.Time, step time.Duration, loki bool) [][2]time.Time {
+	chunk := step * maxPoints
+	if loki {
+		// Asked at a finer step (lokiStep), a request stays within Loki's
+		// 11,000 points.
+		if n := int64(lokiPoints * lokiStep(start, step) / step); n >= 1 && n < maxPoints {
+			chunk = step * time.Duration(n)
+		}
+	}
+	var out [][2]time.Time
+	for from := start; !from.After(end); from = from.Add(chunk + step) {
+		to := from.Add(chunk)
+		if to.After(end) {
+			to = end
+		}
+		out = append(out, [2]time.Time{from, to})
+	}
+	return out
 }
 
 // lokiText reports whether an answer is Loki's own plain text, as it says

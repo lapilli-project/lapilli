@@ -631,7 +631,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		return err
 	}
 	defer del.Close()
-	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked) VALUES (?, ?, ?, ?)")
+	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked, loose) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -643,7 +643,9 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			return err
 		}
 		first := map[int64]int64{}
-		linked := map[int64]bool{} // the rules a firing it lists caught it with
+		linked := map[int64]bool{}     // the rules a firing it lists caught it with
+		proper := map[int64]bool{}     // the rules a firing that isn't loose caught it with
+		lacked := map[int64][]string{} // the labels the loose firings of a rule lacked
 		for rows.Next() {
 			var rule, sid, start int64
 			var text, name, unrelated string
@@ -663,11 +665,16 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			}
 			// With its rule, whose entry may keep it from a signal's
 			// windows (docs/design/signals.md, "Judged by its own match").
-			caught, link := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			caught, link, lack := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
 			if !caught {
 				continue
 			}
 			linked[rule] = linked[rule] || link
+			if len(lack) == 0 {
+				proper[rule] = true
+			} else {
+				lacked[rule] = verdict.MergeLacked(lacked[rule], lack)
+			}
 			d := start - in.Start.Unix()
 			if have, ok := first[rule]; !ok || d < have {
 				first[rule] = d
@@ -681,7 +688,11 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			return err
 		}
 		for _, rule := range slices.Sorted(maps.Keys(first)) {
-			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule]); err != nil {
+			loose := ""
+			if !proper[rule] {
+				loose = strings.Join(lacked[rule], ",")
+			}
+			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule], loose); err != nil {
 				return err
 			}
 		}

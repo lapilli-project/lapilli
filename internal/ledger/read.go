@@ -239,7 +239,7 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		index[id] = i
 	}
 	idsJSON, _ := json.Marshal(ids)
-	rows, err = l.r.QueryContext(ctx, `SELECT c.incident_id, r.name, c.delay, c.linked FROM catches c JOIN rules r ON r.id = c.rule_id
+	rows, err = l.r.QueryContext(ctx, `SELECT c.incident_id, r.name, c.delay, c.linked, c.loose FROM catches c JOIN rules r ON r.id = c.rule_id
 		WHERE c.incident_id IN (`+l.d.ints("?")+`)`, string(idsJSON))
 	if err != nil {
 		return nil, err
@@ -249,11 +249,16 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		var id, delay int64
 		var name string
 		var linked bool
-		if err := rows.Scan(&id, &name, &delay, &linked); err != nil {
+		var loose string
+		if err := rows.Scan(&id, &name, &delay, &linked, &loose); err != nil {
 			return nil, err
 		}
 		in := &out[index[id]]
-		in.CaughtBy = append(in.CaughtBy, verdict.Catch{Rule: name, Delay: time.Duration(delay) * time.Second, Linked: linked})
+		c := verdict.Catch{Rule: name, Delay: time.Duration(delay) * time.Second, Linked: linked}
+		if loose != "" {
+			c.Loose, c.Lacked = true, strings.Split(loose, ",")
+		}
+		in.CaughtBy = append(in.CaughtBy, c)
 	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)

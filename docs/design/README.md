@@ -38,6 +38,8 @@ here.
 ## Changing rules, and checking a change
 
 - [changes.md](changes.md): changing rules, with a person's approval
+- [rendered-changes.md](rendered-changes.md): changing rules rendered from a
+  chart's template and values (proposed)
 - [rulers.md](rulers.md): a managed Prometheus ruler's rules
 - [alarms.md](alarms.md): a cloud's own alarms
 - [backtests.md](backtests.md): pull request backtests through serve

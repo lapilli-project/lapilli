@@ -43,7 +43,8 @@ says. One with no record to judge it by is counted among the black stones
 
 A firing catches an incident when it starts from `--lead` (15m) before the
 incident to its end, and agrees with it on each `--match` label both have.
-A firing already on before that caught nothing: it was on anyway. See
+One that lacks a label the incident has catches it, marked `(no service)`,
+unless `--match-strict`. A firing already on before that caught nothing: it was on anyway. See
 [The numbers](numbers.md#a-white-or-a-black-stone).
 
 ### Caught only by noisy rules

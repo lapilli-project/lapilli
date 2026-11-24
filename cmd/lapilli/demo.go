@@ -28,6 +28,7 @@ and sends nothing anywhere (docs/design/demo.md).
 Usage:
   lapilli demo [--json] [--tz ZONE]
   lapilli demo --serve [--listen ADDR] [--tz ZONE]
+  lapilli demo --write DIR [--tz ZONE]
 
   --json              the whole report, every firing included, as lapilli
                       verdict --json gives it
@@ -46,6 +47,13 @@ Usage:
   --listen ADDR       with --serve, where to listen: a loopback address and
                       a port, 127.0.0.1:PORT or [::1]:PORT, and no other
                       (default 127.0.0.1:0, a free port)
+  --write DIR         write the sample's rules and incidents into DIR, as
+                      rules.yaml and incidents.yaml, with a README.txt, to
+                      see the format of both and to run them with lapilli
+                      verdict. DIR is made if it is missing, and none of
+                      the three is overwritten: one that exists is refused.
+                      It replays nothing and listens on nothing, and does
+                      not go with --serve or --json
 
 The same on your own rules, and incidents written down:
   lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -67,7 +75,7 @@ const demoPrometheus = "lapilli-demo-sample"
 
 func runDemo(args []string, stdout, stderr io.Writer) int {
 	asJSON, serving := false, false
-	var tz, listen string
+	var tz, listen, write string
 	listenSet := false
 	for i := 0; i < len(args); i++ {
 		name, val, hasVal := strings.Cut(args[i], "=")
@@ -85,10 +93,13 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 			} else {
 				serving = on
 			}
-		case name == "--tz" || name == "--listen":
+		case name == "--tz" || name == "--listen" || name == "--write":
 			what := "a zone"
-			if name == "--listen" {
+			switch name {
+			case "--listen":
 				what = "an address"
+			case "--write":
+				what = "a directory"
 			}
 			if !hasVal {
 				if i+1 == len(args) {
@@ -102,9 +113,12 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 			if val == "" {
 				return demoBad(stderr, name+" needs "+what)
 			}
-			if name == "--tz" {
+			switch name {
+			case "--tz":
 				tz = val
-			} else {
+			case "--write":
+				write = filepath.Clean(val)
+			default:
 				listen, listenSet = val, true
 			}
 		default:
@@ -112,6 +126,10 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	switch {
+	case write != "" && serving:
+		return demoBad(stderr, "--write writes files and listens on nothing: it does not go with --serve")
+	case write != "" && asJSON:
+		return demoBad(stderr, "--write writes files and replays nothing: it does not go with --json")
 	case serving && asJSON:
 		return demoBad(stderr, "--json is the report's: with --serve, /api/v1/report gives it")
 	case listenSet && !serving:
@@ -139,6 +157,16 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	if write != "" {
+		paths, err := writeDemo(write, s, loc)
+		if err != nil {
+			return fail(err)
+		}
+		for _, p := range paths {
+			fmt.Fprintln(stdout, p)
+		}
+		return 0
+	}
 	if serving {
 		return demoServe(s, loc, tz, listen, stdout, stderr)
 	}
@@ -150,19 +178,17 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 	}
 	defer os.RemoveAll(dir)
 	rulesFile, incidentsFile := filepath.Join(dir, "rules.yaml"), filepath.Join(dir, "incidents.yaml")
-	rules, err := demoFiles.ReadFile("demo/rules.yaml")
+	rules, incidents, err := s.files(loc)
 	if err == nil {
 		err = os.WriteFile(rulesFile, rules, 0o600)
 	}
-	week := demoWeek(loc)
 	if err == nil {
-		// This week's incidents and the week before's, which keep the record
-		// of its first days.
-		err = os.WriteFile(incidentsFile, s.incidents(week.AddDate(0, 0, -7), week.AddDate(0, 0, 7), loc), 0o600)
+		err = os.WriteFile(incidentsFile, incidents, 0o600)
 	}
 	if err != nil {
 		return fail(err)
 	}
+	week := demoWeek(loc)
 	vargs := []string{"--rules", rulesFile, "--incidents", incidentsFile, "--match", "service", "--prometheus", demoPrometheus,
 		"--from", week.Format(time.RFC3339), "--to", week.AddDate(0, 0, 7).Format(time.RFC3339), "--progress=false"}
 	if tz != "" {
@@ -190,6 +216,79 @@ That was lapilli verdict over a sample: made-up rules, history and incidents, no
 On your own: lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --incidents incidents.yaml
 With no incidents written down, lapilli impact suggest --prometheus http://prometheus:9090 says which --impact to give instead.
 `
+
+// files are the rules and the incidents the demo replays, as files: the
+// rules as embedded, and the incidents of the sample's week and the week
+// before's, which keep the record of its first days, laid in loc.
+func (s *demoSample) files(loc *time.Location) (rules, incidents []byte, err error) {
+	rules, err = demoFiles.ReadFile("demo/rules.yaml")
+	if err != nil {
+		return nil, nil, err
+	}
+	week := demoWeek(loc)
+	return rules, s.incidents(week.AddDate(0, 0, -7), week.AddDate(0, 0, 7), loc), nil
+}
+
+// demoReadme is the README.txt that lapilli demo --write writes; %[1]s is
+// the rules file and %[2]s the incidents file, as the command names them.
+const demoReadme = `These are the sample lapilli demo replays, written out to show the
+format of the two files lapilli verdict reads.
+
+rules.yaml       seven alert rules of a made-up shop, as a Prometheus rule
+                 file has them. Your own rule file works the same way.
+incidents.yaml   the incidents of the sample's two weeks (INC-38 to INC-43),
+                 as lapilli verdict --incidents reads them: an id, a title,
+                 when each started and ended, and the labels that say where
+                 it went wrong (here, the service). The times are in the
+                 zone they were written in.
+
+The history these are replayed against is built into lapilli demo, and is
+not written here: it is a made-up week of each rule's expression. Against
+your own Prometheus, the same files give your own history's verdict:
+
+  lapilli verdict --rules %[1]s --incidents %[2]s --prometheus URL --match service
+
+Change the files, or write your own, in the same form.
+`
+
+// writeDemo writes the sample's rules.yaml, incidents.yaml and a README.txt
+// into dir, made if it is missing, and returns their paths. It writes none
+// of them if one exists, and never over a file.
+func writeDemo(dir string, s *demoSample, loc *time.Location) ([]string, error) {
+	rules, incidents, err := s.files(loc)
+	if err != nil {
+		return nil, err
+	}
+	rulesFile, incidentsFile, readme := filepath.Join(dir, "rules.yaml"), filepath.Join(dir, "incidents.yaml"), filepath.Join(dir, "README.txt")
+	body := fmt.Sprintf(demoReadme, rulesFile, incidentsFile)
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		return nil, fmt.Errorf("--write %s: is a file, not a directory", dir)
+	}
+	paths := []string{rulesFile, incidentsFile, readme}
+	for _, p := range paths {
+		if _, err := os.Lstat(p); err == nil {
+			return nil, fmt.Errorf("--write: %s already exists: lapilli demo does not overwrite it", p)
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	for i, content := range [][]byte{rules, incidents, []byte(body)} {
+		// O_EXCL: a file made since the check above is not written over.
+		f, err := os.OpenFile(paths[i], os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		_, err = f.Write(content)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return paths, nil
+}
 
 func demoBad(stderr io.Writer, why string) int {
 	fmt.Fprintf(stderr, "lapilli demo: %s\nRun \"lapilli demo -h\" for the options.\n", why)

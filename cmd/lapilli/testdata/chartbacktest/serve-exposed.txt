@@ -1462,8 +1462,16 @@ spec:
             - name: tasks-token
               secret:
                 secretName: tasks
+                defaultMode: 0440
+                items:
+                  - key: "token"
+                    path: "token"
             - name: tracker-token
               secret:
                 secretName: gh
+                defaultMode: 0440
+                items:
+                  - key: "token"
+                    path: "token"
             - name: tmp
               emptyDir: {}

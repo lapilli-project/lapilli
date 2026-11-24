@@ -4,6 +4,16 @@
 
 ### Added
 
+- `lapilli verdict --firings FILE` goes beside rules replayed (`--rules`,
+  `--loaded-rules`, `--grafana`, `--ruler`, `--alarms`, `--loki-rules`,
+  `--rules-history`): what a cloud's own alarms fired, as recipes/firings
+  records it, is judged with the replayed rules in one report, so an
+  incident only an alarm caught is no longer missed in the rules' report.
+  Its rules are said as recorded, not replayed: no longer "for", near
+  misses or no-data check for them. A name both replayed and recorded is
+  refused; `--firings-prefix STR` puts STR before the recorded ones' names.
+  `--fail-nothing-replayed` and `--fail-unreplayed` count only rules
+  replayed. Not with `--alerts` or `--compare`.
 - Rules from Terraform: the JSON `terraform show -json` writes of a plan
   or a state is read wherever rules files are (`--rules`, serve's rules,
   preflight, a pull request's backtest), each `grafana_rule_group` as the
@@ -21,6 +31,27 @@
   one that asks whether the rules that never fired read anything. The
   chart's CronJob takes `failUnreplayed`, `failNothingReplayed` and
   `checkNoData`.
+- The chart runs the recipes for `lapilli serve`, each off until turned
+  on: `serve.incidentsAPI.copy` copies incidents from a tool (PagerDuty,
+  incident.io, Jira and the rest of recipes/incidents) on a schedule, and
+  `serve.changes.pullRequests` opens the pull requests for the changes
+  people approved (recipes/changes). The recipes ship in the chart; the
+  jobs take an image of yours with sh, curl and jq (and git), each
+  Secret's one key they read, and `/tmp` held to `tmpSizeLimit`.
+- `--match-strict` (verdict, serve, the chart's `matchStrict`): a firing
+  that lacks a `--match` label the incident has doesn't catch it. Without
+  it, as before, such a catch counts, and is now said: `(no service)` in
+  the incidents table, a line naming the rules, `lacked` in `--json`, and
+  the same mark in serve's pages.
+- serve badges a rule whose judged firings caught nothing `Caught
+  nothing`, not OK, and says the noisy bar beside a rule's badge; the
+  chart takes `noisyFirings` and `noisyPrecision`.
+- `lapilli demo --write DIR` writes the sample's rules and incidents, and
+  a README with the command to run them against your own Prometheus.
+- `.github/workflows/sizing.yml`, run by hand, measures the ledger and
+  serve's memory on SQLite and Postgres (docs/serve.md, Sizing).
+- docs/design/rendered-changes.md proposes writing an approved change to
+  a rule rendered from a chart into the values file it comes from.
 
 ### Changed
 
@@ -34,6 +65,10 @@
   series): the report judges nothing. `--fail-nothing-replayed=false`
   exits 0 as before; a run that replayed some rules, and `--compare`, are
   as they were.
+- Schema 032: a catch keeps the labels its firings lacked. serve's first
+  start after the upgrade judges every firing again once, as a
+  `--linked-only` change does. A release before it can't open the ledger
+  after: keep a copy first (docs/upgrading.md).
 
 ### Fixed
 
@@ -41,6 +76,9 @@
   overview's first view, before anything was written again.
 - One rule left out of a report is said to be ("is left out"), in the
   text and in a pull request's comment.
+- `lapilli preflight` counted none of the Loki requests of a Grafana rule
+  that reduces a LogQL query (its estimate was 0 where the replay asked
+  about 2,000 over 28 days); it counts them as the replay asks them.
 
 ## [0.71.0] - 2026-11-24
 

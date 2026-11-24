@@ -205,3 +205,24 @@ func TestNotKnownGrammar(t *testing.T) {
 		t.Errorf("late line count:\n%s", out)
 	}
 }
+
+// TestRecordedNotCounted: a rule recorded with --firings is no rule there
+// was to replay: it is in neither the count of rules that couldn't be, nor
+// those replayed.
+func TestRecordedNotCounted(t *testing.T) {
+	fail := rules.HistoryUnread + "connection refused"
+	r := &Report{From: t0, To: t0.Add(time.Hour),
+		Rules: []RuleResult{{Rule: "A", Unsupported: fail}, {Rule: "B", Unsupported: fail},
+			{Rule: "cloud/C", Unsupported: RecordedReason, Source: "firings", Firings: 1}},
+		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Start: t0, End: t0.Add(time.Hour)}, NotKnown: true}}}
+	r.Unreplayed = r.UnreplayedRules()
+	var b bytes.Buffer
+	if err := Text(&b, r, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"! 2 of 2 rules couldn't be replayed", "? 1 of 1 incident can't be judged: no rule was replayed.\n"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("no %q in:\n%s", want, b.String())
+		}
+	}
+}

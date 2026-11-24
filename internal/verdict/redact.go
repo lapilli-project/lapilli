@@ -163,7 +163,7 @@ func (x *Redactor) incidentLabels(l incident.Labels) incident.Labels {
 // --fail-unreplayed and the exit status count it, is kept.
 func reason(s string) string {
 	switch {
-	case s == "", s == rules.Unfinished, s == rules.Disabled:
+	case s == "", s == rules.Unfinished, s == rules.Disabled, s == RecordedReason:
 		return s
 	case strings.HasPrefix(s, rules.HistoryUnread):
 		return rules.HistoryUnread + Redacted

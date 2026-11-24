@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
@@ -99,4 +101,65 @@ func (f *verdictFlags) judgeFromHistory(ctx context.Context, known []rules.Rule,
 	// What was over by the period's start isn't in it.
 	fs := slices.DeleteFunc(j.Firings, func(x firing.Firing) bool { return !x.End.IsZero() && !x.End.After(f.opts.From) })
 	return fs, judged
+}
+
+// replaysRules reports whether the run replays rules, from files or an API:
+// --firings then adds firings recorded elsewhere to theirs, and without
+// them is where the firings come from.
+func (f *verdictFlags) replaysRules() bool {
+	return len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || len(f.lokiRules) > 0 || f.lokiLoaded
+}
+
+// recordedFirings reads --firings FILE, to be judged beside the rules
+// versions replay, as one set of rules: the names --firings-prefix puts
+// before, those --rule picks. It returns the firings, the names of their
+// rules, and those of them a rule replayed has too, whose firings would come
+// from two places.
+func (f *verdictFlags) recordedFirings(versions []replay.Version) ([]firing.Firing, map[string]bool, []string, error) {
+	file, err := os.Open(f.firings)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fs, err := firing.ReadJSONL(file)
+	file.Close()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%s: %w", f.firings, err)
+	}
+	replayed := map[string]bool{}
+	for _, v := range versions {
+		for _, r := range v.Rules {
+			replayed[r.Name] = true
+		}
+	}
+	names := map[string]bool{}
+	var clash []string
+	kept := fs[:0]
+	for _, x := range fs {
+		x.Rule = f.firingsPrefix + x.Rule
+		if f.ruleRE != nil && !f.ruleRE.MatchString(x.Rule) {
+			continue
+		}
+		kept = append(kept, x)
+		if !names[x.Rule] && replayed[x.Rule] {
+			clash = append(clash, x.Rule)
+		}
+		names[x.Rule] = true
+	}
+	slices.Sort(clash)
+	return kept, names, clash, nil
+}
+
+// clashSaid is the refusal of firings recorded for rules a replay has too:
+// the first five by name, then how many more.
+func clashSaid(clash []string) string {
+	shown := clash[:min(len(clash), 5)]
+	list := strings.Join(shown, ", ")
+	if n := len(clash) - len(shown); n > 0 {
+		list += fmt.Sprintf(" and %d more", n)
+	}
+	is := "is also a rule"
+	if len(clash) > 1 {
+		is = "are also rules"
+	}
+	return fmt.Sprintf("--firings: %s %s replayed: a rule's firings come from one place (--firings-prefix STR puts STR before the names it records, to keep them apart)", list, is)
 }

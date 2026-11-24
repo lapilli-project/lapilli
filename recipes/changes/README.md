@@ -67,6 +67,36 @@ GITHUB_REPO=example/monitoring GITHUB_TOKEN_FILE=/run/secrets/github \
   ./github.sh
 ```
 
+In the chart, `serve.changes.pullRequests` runs the script as a CronJob, with
+the scripts mounted from the chart's own copy. It needs an image with `sh`,
+`git`, `curl` and `jq`
+([an example Dockerfile](../../docs/serve.md#copying-incidents-and-opening-pull-requests-from-the-chart)),
+`serve.changes.enabled` and `serve.changes.tokenSecret` (the token the job reads
+with), and the host's token in a Secret. `git` pushes with a git-credentials
+file in a Secret, which the chart gives it as its credential helper; the
+`CLONE` URL holds none.
+
+```yaml
+serve:
+  networkPolicy: {enabled: true}   # lets the job reach the incidents port, no one else
+  changes:
+    enabled: true
+    tokenSecret: {name: lapilli-changes, key: token}
+    pullRequests:
+      enabled: true
+      host: github                 # github, gitlab, bitbucket, gitea or azure-devops
+      image: registry.example.com/tools/recipes:1.0@sha256:...
+      tokenSecret: {name: github-pr-token, key: token}
+      gitCredentialsSecret: {name: github-git, key: credentials}  # https://USER:TOKEN@github.com
+      env:
+        CLONE: https://github.com/example/monitoring.git
+        RULES_PATHS: alerts
+        GITHUB_REPO: example/monitoring
+```
+
+Each run clones the repository again into a temporary directory and keeps
+nothing for the next.
+
 What each run does:
 
 1. Asks Lapilli for its changes. Those ready get a pull request; those with

@@ -20,11 +20,18 @@ type tallied struct {
 	name string
 	by   map[string]int
 	asks map[request]int
+	// loki says it stands for a Loki's client, which sends a range in
+	// the pieces prom.Pieces makes of it: each a request.
+	loki bool
 }
 
 func (c *tallied) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	c.mu.Lock()
-	c.by[c.name]++
+	n := 1
+	if c.loki {
+		n = len(prom.Pieces(start, end, step, true))
+	}
+	c.by[c.name] += n
 	c.asks[request{expr: expr, start: start.Unix(), end: end.Unix()}]++
 	c.mu.Unlock()
 	s := prom.Series{Labels: map[string]string{"job": "a"}}
@@ -98,7 +105,7 @@ func TestPlanIsRun(t *testing.T) {
 		}
 		mu := &sync.Mutex{}
 		prometheus := &tallied{mu: mu, name: "", by: map[string]int{}, asks: map[request]int{}}
-		loki := &tallied{mu: mu, name: rules.LokiRuler, by: prometheus.by, asks: map[request]int{}}
+		loki := &tallied{mu: mu, name: rules.LokiRuler, by: prometheus.by, asks: map[request]int{}, loki: true}
 		h := WithLogs(prometheus, func(rules.Rule) (History, error) { return loki, nil })
 		if c%5 == 0 {
 			h = prometheus // no Loki: the rules of LogQL ask nothing
@@ -172,5 +179,72 @@ func TestPlanEachIsRunEach(t *testing.T) {
 		if plan.Requests > one+two {
 			t.Fatalf("case %d: PlanEach counts %d, more than each side alone (%d + %d)", c, plan.Requests, one, two)
 		}
+	}
+}
+
+// A Grafana rule that reduces a LogQL query's points is counted, a batch of
+// evaluations at a time, each range in the pieces a Loki's client asks it
+// in: as many as Run sends, by windows and periods.
+func TestPlanLogReduce(t *testing.T) {
+	for _, window := range []int{60, 300, 3600} {
+		r := lokiReduceRule(t, window, "", "max", 10)
+		for _, days := range []int{1, 3} {
+			to := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+			from := to.Add(-time.Duration(days) * 24 * time.Hour)
+			mu := &sync.Mutex{}
+			loki := &tallied{mu: mu, name: "grafana/" + r.Logs, by: map[string]int{}, asks: map[request]int{}, loki: true}
+			h := WithLogs(noPrometheus{}, func(rules.Rule) (History, error) { return loki, nil })
+			vs := []Version{{Rules: []rules.Rule{r}}}
+			plan := Plan(h, vs, from, to, time.Minute)
+			Run(context.Background(), h, vs, from, to, time.Minute, 1)
+			if sent := loki.by[loki.name]; sent == 0 || plan.Requests != sent || plan.By[loki.name] != sent {
+				t.Errorf("window %ds over %d days: Plan counts %d (%v), Run sent %d", window, days, plan.Requests, plan.By, sent)
+			}
+		}
+	}
+}
+
+// A Grafana rule on a Loki that asks a query with no reduce over it is
+// asked of that Loki as the others are, in pieces, and Plan counts them so:
+// a rule that reads Prometheus and Loki together isn't replayed, so every
+// ask of a rule goes to the one history Plan counts by.
+func TestPlanGrafanaLokiPlainAsk(t *testing.T) {
+	doc := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: logs
+    folder: Logs
+    interval: 1m
+    rules:
+      - uid: r1
+        title: R1
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: lk
+            model: {datasource: {type: loki, uid: lk}, expr: 'sum(count_over_time({app="shop"}[1m]))', queryType: range, intervalMs: 1000, maxDataPoints: 43200}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [1]}}]}
+`
+	rs, err := rules.Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules.Replaying{Kinds: map[string]string{"lk": rules.KindLoki}}.Apply(rs)
+	r := rs[0]
+	if r.Unsupported != "" || r.Logs != "lk" || len(r.Graph.Asks) != 0 {
+		t.Fatalf("%q %q %v: want a Loki rule with no reduce", r.Unsupported, r.Logs, r.Graph.Asks)
+	}
+	to := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	from := to.Add(-3 * 24 * time.Hour)
+	loki := &tallied{mu: &sync.Mutex{}, name: "grafana/lk", by: map[string]int{}, asks: map[request]int{}, loki: true}
+	h := WithLogs(noPrometheus{}, func(rules.Rule) (History, error) { return loki, nil })
+	vs := []Version{{Rules: []rules.Rule{r}}}
+	plan := Plan(h, vs, from, to, time.Minute)
+	Run(context.Background(), h, vs, from, to, time.Minute, 1)
+	if sent := loki.by[loki.name]; sent == 0 || plan.Requests != sent {
+		t.Errorf("Plan counts %d (%v), Run sent %d", plan.Requests, plan.By, sent)
 	}
 }

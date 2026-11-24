@@ -59,7 +59,14 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
 	}
-	partial(w, r.Unreplayed, len(r.Rules), true)
+	// The rules there were to replay: those recorded with --firings aren't.
+	toReplay := 0
+	for _, rr := range r.Rules {
+		if !rr.Recorded() {
+			toReplay++
+		}
+	}
+	partial(w, r.Unreplayed, toReplay, true)
 	switch {
 	case r.NoRecord && firings > 0:
 		fmt.Fprintln(w, NoRecordTextFor(r.Settings != nil && r.Settings.ImpactNoData))
@@ -69,9 +76,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
 
-	var fired, silent, unsupported, byHistory []RuleResult
+	var fired, silent, unsupported, byHistory, recorded []RuleResult
 	for _, rr := range r.Rules {
-		if rr.ByHistory() {
+		switch {
+		case rr.Recorded():
+			recorded = append(recorded, rr)
+		case rr.ByHistory():
 			byHistory = append(byHistory, rr)
 		}
 		switch {
@@ -164,6 +174,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintf(w, "  %s, from %s: %s\n", Clean(rr.Rule), historyOf(rr.Source), Clean(rr.Unsupported))
 		}
 	}
+	if len(recorded) > 0 {
+		fmt.Fprintf(w, "\nJudged from what was recorded, not replayed, %s: no longer \"for\", near misses or backtests for them.\n", plural(len(recorded), "rule", "rules"))
+		for _, rr := range recorded {
+			fmt.Fprintf(w, "  %s\n", Clean(rr.Rule))
+		}
+	}
 	unseen(w, r.Rules)
 
 	if len(r.Incidents) > 0 {
@@ -174,13 +190,14 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			unknownLen = r.Settings.UnknownLength
 		}
 		for _, in := range r.Incidents {
-			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), lasted(in.Incident), caughtBy(in, unknownLen)})
+			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), lasted(in.Incident), caughtBy(in, unknownLen, matchOf(r.Settings))})
 		}
 		if err := table(w, rows); err != nil {
 			return err
 		}
 		short := r.ImpactShort != nil && found > 0
-		if missed > 0 || notKnown > 0 || noisy > 0 || short {
+		looseNote := LooseNote(r)
+		if missed > 0 || notKnown > 0 || noisy > 0 || short || looseNote != "" {
 			fmt.Fprintln(w)
 		}
 		if missed > 0 || notKnown > 0 {
@@ -197,7 +214,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 					unsure++
 				}
 			}
-			switch replayed := len(r.Rules) - len(unsupported); {
+			switch replayed := toReplay - len(unsupported); {
 			case notKnown == 0:
 			case replayed == 0:
 				fmt.Fprintf(w, "? %d of %d %s can't be judged: no rule was replayed.\n", notKnown, len(r.Incidents), of)
@@ -231,6 +248,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
 				"  (%d or more firings, under %.0f%% of them catching anything).\n",
 				noisy, len(r.Incidents), r.NoisyAt.Firings, 100*r.NoisyAt.Precision)
+		}
+		if looseNote != "" {
+			fmt.Fprint(w, looseNote)
 		}
 		if err := nearMisses(w, r.NearMisses); err != nil {
 			return err
@@ -755,7 +775,7 @@ func incidentName(in incident.Incident) string {
 // caughtBy is what caught an incident, or, when nothing did, what fired
 // once it was over, by how long after its end: with none written, after
 // unknownLen, as it was judged.
-func caughtBy(in IncidentResult, unknownLen time.Duration) string {
+func caughtBy(in IncidentResult, unknownLen time.Duration, match []string) string {
 	if len(in.CaughtBy) == 0 && len(in.FiredAfter) > 0 {
 		// Missed, but not for want of an alert: one came once it was over.
 		end := in.EndOr(unknownLen).Sub(in.Start)
@@ -777,20 +797,25 @@ func caughtBy(in IncidentResult, unknownLen time.Duration) string {
 	}
 	var parts []string
 	for _, c := range in.CaughtBy {
-		parts = append(parts, fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))+c.marks())
+		parts = append(parts, fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))+c.marks(match))
 	}
 	return strings.Join(parts, ", ")
 }
 
 // marks are what a catch is said with: by an alert the incident lists
-// (linked), by a noisy rule (noisy), or both.
-func (c Catch) marks() string {
+// (linked), by a noisy rule (noisy), by a rule with no label of match
+// (no service, Loose; the labels it lacked, or match for one that kept
+// none), or more.
+func (c Catch) marks(match []string) string {
 	var m []string
 	if c.Linked {
 		m = append(m, "linked")
 	}
 	if c.Noisy {
 		m = append(m, "noisy")
+	}
+	if c.Loose {
+		m = append(m, NoLabelMark(c.LackedOr(match)))
 	}
 	if len(m) == 0 {
 		return ""
@@ -1092,4 +1117,77 @@ func unseen(w io.Writer, rs []RuleResult) {
 		}
 		fmt.Fprintf(w, "\n"+f+"\n", len(names), list)
 	}
+}
+
+// NoLabelMark is what a loose catch (Catch.Loose) is marked with: no
+// service, for a firing that lacks service; with several, their names
+// after the one no: no service, team.
+func NoLabelMark(lacked []string) string {
+	if len(lacked) == 0 {
+		return "no label"
+	}
+	return "no " + strings.Join(lacked, ", ")
+}
+
+// LackedOr is the labels the catch lacked, or, for a catch kept with none
+// named (a report written before Lacked), those of the match.
+func (c Catch) LackedOr(match []string) []string {
+	if len(c.Lacked) > 0 {
+		return c.Lacked
+	}
+	return match
+}
+
+// matchOf is the labels a report was matched on.
+func matchOf(s *Settings) []string {
+	if s == nil {
+		return nil
+	}
+	return s.Match
+}
+
+// looseNamed is how many rules LooseNote names.
+const looseNamed = 5
+
+// LooseNote says, without --match-strict, how many catches were loose
+// (Catch.Loose) and by which rules, as the line that follows the incidents
+// table, naming the labels they lacked; "" when none were, or when
+// --match-strict is given, or there is no --match.
+func LooseNote(r *Report) string {
+	if r.Settings == nil || r.Settings.MatchStrict || len(r.Settings.Match) == 0 {
+		return ""
+	}
+	n := 0
+	seen := map[string]bool{}
+	var names, lacked []string
+	for _, in := range r.Incidents {
+		for _, c := range in.CaughtBy {
+			if !c.Loose {
+				continue
+			}
+			lacked = MergeLacked(lacked, c.LackedOr(r.Settings.Match))
+			n++
+			if !seen[c.Rule] {
+				seen[c.Rule] = true
+				names = append(names, Clean(c.Rule))
+			}
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	slices.Sort(names)
+	label := strings.Join(lacked, ", ")
+	rest := ""
+	if more := len(names) - looseNamed; more > 0 {
+		names, rest = names[:looseNamed], fmt.Sprintf(" and %d more", more)
+	}
+	list := strings.Join(names, ", ") + rest
+	if n == 1 {
+		return fmt.Sprintf("! 1 catch was by a rule with no %s label, which agrees with any incident's: %s (--match-strict counts it as not caught).\n", label, list)
+	}
+	if len(seen) == 1 {
+		return fmt.Sprintf("! %d catches were by a rule with no %s label, which agrees with any incident's: %s (--match-strict counts them as not caught).\n", n, label, list)
+	}
+	return fmt.Sprintf("! %d catches were by rules with no %s label, which agree with any incident's: %s (--match-strict counts them as not caught).\n", n, label, list)
 }
