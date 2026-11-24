@@ -17,9 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -32,6 +35,14 @@ import (
 // are measured, so the most on disk is the largest ledger (and its copy
 // in WAL before the checkpoint).
 //
+// With LAPILLI_TEST_POSTGRES set (internal/ledger/ledgertest) the ledgers
+// are Postgres's instead, each in a schema of its own, dropped when its
+// rows are measured; "on disk" is then pg_total_relation_size (tables,
+// indexes and TOAST) summed over the schema's tables, as the ledger and
+// the database's autovacuum have left them: serve runs no VACUUM of its
+// own. The server's own files (its WAL, other schemas, the catalogs) are
+// not in it. The table says which in its Ledger column.
+//
 // Nothing here is held to a bound: the test measures. A ledger is written
 // as hourly runs write it (ledger.Record, one run an hour), weeks of it
 // one after the other, and measured after weeks 1, 4 and 12 of the one
@@ -41,9 +52,14 @@ import (
 
 const sizingVisitEnv = "LAPILLI_SIZING_VISIT"
 
+// sizingPGFileEnv is the file holding the Postgres ledger's connection
+// string that the child, which measures serve's memory, opens.
+const sizingPGFileEnv = "LAPILLI_SIZING_PGFILE"
+
 var sizingStart = time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC) // a Monday
 
 type sizingRow struct {
+	Ledger                         string // "sqlite" or "postgres"
 	Rules, PerWeek, Weeks, Firings int
 	Disk, WAL                      int64 // after the checkpoint; the WAL before it
 	Base, Rest, Peak, After, RSS   uint64
@@ -65,49 +81,72 @@ func TestSizing(t *testing.T) {
 		perWeeks = append(perWeeks, 1_000_000)
 	}
 	var rows []sizingRow
+	kind := "sqlite"
+	if ledgertest.On() {
+		kind = "postgres"
+	}
 	for _, rules := range []int{100, 1000} {
 		for _, perWeek := range perWeeks {
 			maxWeeks := 12
 			if perWeek >= 1_000_000 {
 				maxWeeks = 4
 			}
-			dir := t.TempDir()
-			path := filepath.Join(dir, "ledger.db")
-			r := rand.New(rand.NewPCG(uint64(rules), uint64(perWeek)))
-			services := []string{"checkout", "search", "cart", "auth", "billing", "media"}
-			var firings int
-			for week := 0; week < maxWeeks; {
-				l, err := ledger.Open(ctx, path, time.UTC)
-				if err != nil {
-					t.Fatal(err)
+			t.Run(fmt.Sprintf("rules=%d/perweek=%d", rules, perWeek), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "ledger.db")
+				pg := ledgertest.URL(t) // a schema of this cell's, dropped after it; "" for SQLite
+				r := rand.New(rand.NewPCG(uint64(rules), uint64(perWeek)))
+				services := []string{"checkout", "search", "cart", "auth", "billing", "media"}
+				var firings int
+				for week := 0; week < maxWeeks; {
+					var l *ledger.Ledger
+					var err error
+					if pg != "" {
+						l, err = ledger.OpenPostgres(ctx, pg, time.UTC)
+					} else {
+						l, err = ledger.Open(ctx, path, time.UTC)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					// The weeks up to the next one measured: 1, 4, 12.
+					upTo := map[int]int{0: 1, 1: 4, 4: 12, 12: 12}[week]
+					for ; week < min(upTo, maxWeeks); week++ {
+						began := time.Now()
+						firings += sizingWeek(t, ctx, l, r, week, rules, perWeek, services)
+						t.Logf("rules %d, %d a week: week %d written, %d firings, in %s", rules, perWeek, week+1, firings, time.Since(began).Round(time.Second))
+					}
+					row := sizingRow{Ledger: kind, Rules: rules, PerWeek: perWeek, Weeks: week, Firings: firings}
+					if pg != "" {
+						if err := l.Close(); err != nil {
+							t.Fatal(err)
+						}
+						row.Disk = sizingSchemaBytes(t, ctx, pg)
+					} else {
+						row.WAL = sizingBytes(path + "-wal")
+						if err := l.Close(); err != nil { // the last connection's close checkpoints the WAL
+							t.Fatal(err)
+						}
+						row.Disk = sizingBytes(path) + sizingBytes(path+"-wal") + sizingBytes(path+"-shm")
+					}
+					sizingVisit(t, dir, pg, sizingStart.Add(time.Duration(week)*7*24*time.Hour), &row)
+					t.Logf("rules %d, %d a week, %d weeks: %.1f MB, %d bytes a firing, heap +%.1f MB at rest, +%.1f MB at most", rules, perWeek, week,
+						float64(row.Disk)/1e6, row.Disk/int64(firings), float64(row.Rest-row.Base)/1e6, float64(row.Peak-row.Base)/1e6)
+					rows = append(rows, row)
 				}
-				// The weeks up to the next one measured: 1, 4, 12.
-				upTo := map[int]int{0: 1, 1: 4, 4: 12, 12: 12}[week]
-				for ; week < min(upTo, maxWeeks); week++ {
-					began := time.Now()
-					firings += sizingWeek(t, ctx, l, r, week, rules, perWeek, services)
-					t.Logf("rules %d, %d a week: week %d written, %d firings, in %s", rules, perWeek, week+1, firings, time.Since(began).Round(time.Second))
-				}
-				row := sizingRow{Rules: rules, PerWeek: perWeek, Weeks: week, Firings: firings}
-				row.WAL = sizingBytes(path + "-wal")
-				if err := l.Close(); err != nil { // the last connection's close checkpoints the WAL
-					t.Fatal(err)
-				}
-				row.Disk = sizingBytes(path) + sizingBytes(path+"-wal") + sizingBytes(path+"-shm")
-				sizingVisit(t, dir, sizingStart.Add(time.Duration(week)*7*24*time.Hour), &row)
-				t.Logf("rules %d, %d a week, %d weeks: %.1f MB, %d bytes a firing, heap +%.1f MB at rest, +%.1f MB at most", rules, perWeek, week,
-					float64(row.Disk)/1e6, row.Disk/int64(firings), float64(row.Rest-row.Base)/1e6, float64(row.Peak-row.Base)/1e6)
-				rows = append(rows, row)
-			}
-			os.RemoveAll(dir)
+				os.RemoveAll(dir)
+			})
 		}
 	}
 	var b strings.Builder
-	b.WriteString("| Rules | Firings a week | Weeks kept | Firings kept | Ledger on disk | Bytes a firing | Heap at rest | Heap at most while reading | Heap kept after | Process memory at most |\n")
-	b.WriteString("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	if len(rows) == 0 {
+		t.Fatal("nothing measured")
+	}
+	b.WriteString("| Ledger | Rules | Firings a week | Weeks kept | Firings kept | Ledger on disk | Bytes a firing | Heap at rest | Heap at most while reading | Heap kept after | Process memory at most |\n")
+	b.WriteString("|:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	mb := func(n uint64) string { return fmt.Sprintf("%.0f MB", float64(n)/1e6) }
 	for _, r := range rows {
-		fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %d | %s | %s | %s | %s |\n", sizingInt(r.Rules), sizingInt(r.PerWeek), r.Weeks, sizingInt(r.Firings),
+		fmt.Fprintf(&b, "| %s | %s | %s | %d | %s | %s | %d | %s | %s | %s | %s |\n", r.Ledger, sizingInt(r.Rules), sizingInt(r.PerWeek), r.Weeks, sizingInt(r.Firings),
 			mb(uint64(r.Disk)), r.Disk/int64(r.Firings), mb(r.Rest-r.Base), mb(r.Peak-r.Base), mb(r.After-r.Base), mb(r.RSS))
 	}
 	fmt.Fprintf(&b, "\nHeap is Go's HeapInuse above the %s the test binary held before serve opened the ledger; process memory is the peak resident set, the binary among it.\n", mb(rows[0].Base))
@@ -125,6 +164,23 @@ func sizingInt(n int) string {
 		s = s[:i] + "," + s[i:]
 	}
 	return s
+}
+
+// sizingSchemaBytes is what the Postgres ledger in the schema a connection
+// string's search_path names takes: every table with its indexes and TOAST.
+func sizingSchemaBytes(t *testing.T, ctx context.Context, conn string) int64 {
+	t.Helper()
+	c, err := pgx.Connect(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(ctx)
+	var n int64
+	if err := c.QueryRow(ctx, `SELECT coalesce(sum(pg_total_relation_size(c.oid)), 0)::bigint FROM pg_class c
+		WHERE c.relnamespace = current_schema()::regnamespace AND c.relkind IN ('r', 'p')`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func sizingBytes(path string) int64 {
@@ -178,10 +234,17 @@ func sizingWeek(t *testing.T, ctx context.Context, l *ledger.Ledger, r *rand.Ran
 
 // sizingVisit runs this binary's TestSizingVisit on the ledger in dir and
 // reads the row's memory from what it prints.
-func sizingVisit(t *testing.T, dir string, end time.Time, row *sizingRow) {
+func sizingVisit(t *testing.T, dir, pg string, end time.Time, row *sizingRow) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestSizingVisit$", "-test.v")
 	cmd.Env = append(os.Environ(), sizingVisitEnv+"="+dir, "LAPILLI_SIZING_END="+end.Format(time.RFC3339))
+	if pg != "" { // the child opens the same schema, from a file as serve takes it
+		f := filepath.Join(dir, "ledger-url")
+		if err := os.WriteFile(f, []byte(pg+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd.Env = append(cmd.Env, sizingPGFileEnv+"="+f)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("visit: %v\n%s", err, out)
@@ -226,6 +289,9 @@ func TestSizingVisit(t *testing.T) {
 	m.Base = heap() // the test binary's own, before serve opens anything
 	s, _ := server(t, func(c *Config) {
 		c.Ledger = dir
+		if f := os.Getenv(sizingPGFileEnv); f != "" {
+			c.LedgerURLFile = f // the parent's schema, not the empty one server made
+		}
 		c.Options.Hours = verdict.DefaultHours(time.UTC)
 	})
 	s.now = func() time.Time { return end }
