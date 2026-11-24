@@ -59,7 +59,14 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
 	}
-	partial(w, r.Unreplayed, len(r.Rules), true)
+	// The rules there were to replay: those recorded with --firings aren't.
+	toReplay := 0
+	for _, rr := range r.Rules {
+		if !rr.Recorded() {
+			toReplay++
+		}
+	}
+	partial(w, r.Unreplayed, toReplay, true)
 	switch {
 	case r.NoRecord && firings > 0:
 		fmt.Fprintln(w, NoRecordTextFor(r.Settings != nil && r.Settings.ImpactNoData))
@@ -206,7 +213,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 					unsure++
 				}
 			}
-			switch replayed := len(r.Rules) - len(unsupported); {
+			switch replayed := toReplay - len(unsupported); {
 			case notKnown == 0:
 			case replayed == 0:
 				fmt.Fprintf(w, "? %d of %d %s can't be judged: no rule was replayed.\n", notKnown, len(r.Incidents), of)
