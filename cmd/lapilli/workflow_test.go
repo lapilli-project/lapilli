@@ -146,7 +146,7 @@ func TestWorkflowReached(t *testing.T) {
 	}{
 		{nil, nil},
 		{[]string{"docs/serve.md", "CHANGELOG.md", "site/index.html", "assets/og.png", "charts/lapilli/README.md", "recipes/backtest/README.md"}, nil},
-		{[]string{".github/workflows/release.yml", "internal/serve/web_test.go", "internal/serve/testdata/notify/a.json", "recipes/trackers/jira.sh", "test/shard.sh"}, nil},
+		{[]string{".github/workflows/release.yml", ".github/workflows/upstream.yml", "internal/serve/web_test.go", "internal/serve/testdata/notify/a.json", "recipes/trackers/jira.sh", "test/shard.sh"}, nil},
 		{[]string{"internal/replay/replay_test.go", "internal/source/testdata/a.json"}, nil},
 		{[]string{"internal/serve/web.go"}, lapilli},
 		{[]string{"internal/serve/templates/rules.html"}, lapilli},
