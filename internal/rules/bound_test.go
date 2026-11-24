@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"lapilli.dev/internal/sse"
 )
@@ -246,26 +245,20 @@ func TestBoundsEdges(t *testing.T) {
 	if got := r.WithBound(bs[1], 4).Expr; got != "errors > 0.9 and 4 < delta" {
 		t.Errorf("and+5 at 4: %q", got)
 	}
-	// Deep, or long: read so far, and at once.
+	// Deep, or long: read so far, and at once: a few passes over the text
+	// at each level of brackets, to maxDepth, and nothing of one past
+	// maxExpr (exprRead, counted, not timed).
 	deep := strings.Repeat("(", 20000) + "latency > 0.95" + strings.Repeat(")", 20000)
-	began := time.Now()
-	if bs := (Rule{Name: "R", Expr: deep}).Bounds(); len(bs) != 0 {
-		t.Errorf("deep: %+v", bs)
-	}
-	if took := time.Since(began); took > 200*time.Millisecond {
-		t.Errorf("deep took %s", took)
+	if bs, n := boundsRead(Rule{Name: "R", Expr: deep}); len(bs) != 0 || n != 0 {
+		t.Errorf("deep: %+v, %d bytes read", bs, n)
 	}
 	nested := strings.Repeat("(", 30) + "latency > 0.95" + strings.Repeat(")", 30)
-	if bs := (Rule{Name: "R", Expr: nested}).Bounds(); len(bs) != 1 {
-		t.Errorf("thirty deep: %+v", bs)
+	if bs, n := boundsRead(Rule{Name: "R", Expr: nested}); len(bs) != 1 || n > readMost(nested, maxDepth) {
+		t.Errorf("thirty deep: %+v, %d bytes read", bs, n)
 	}
 	many := strings.Repeat("up > 1 and ", 1400) + "up > 1"
-	began = time.Now()
-	if bs := (Rule{Name: "R", Expr: many}).Bounds(); len(bs) != 1401 {
-		t.Errorf("many: %d", len(bs))
-	}
-	if took := time.Since(began); took > 200*time.Millisecond {
-		t.Errorf("many took %s", took)
+	if bs, n := boundsRead(Rule{Name: "R", Expr: many}); len(bs) != 1401 || n > readMost(many, maxDepth) {
+		t.Errorf("many: %d, %d bytes read, over %d", len(bs), n, readMost(many, maxDepth))
 	}
 	if bs := (Rule{Name: "R", Expr: strings.Repeat("up > 1 and ", 2000) + "up > 1"}).Bounds(); len(bs) != 0 {
 		t.Errorf("past 16 KiB: %d", len(bs))
@@ -479,3 +472,17 @@ func TestCompares(t *testing.T) {
 		t.Errorf("not the rule's: %q", got)
 	}
 }
+
+// boundsRead is r's Bounds, and how many bytes of its expression reading
+// them read (exprRead).
+func boundsRead(r Rule) ([]Bound, int) {
+	n := 0
+	exprRead = func(k int) { n += k }
+	defer func() { exprRead = nil }()
+	bs := r.Bounds()
+	return bs, n
+}
+
+// readMost is the most reading expr may read: a few passes over the text at
+// each level of brackets, to depth levels.
+func readMost(expr string, depth int) int { return 4 * (depth + 1) * len(expr) }

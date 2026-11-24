@@ -3,7 +3,6 @@ package rules
 import (
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -416,18 +415,11 @@ func TestAddsOne(t *testing.T) {
 	}
 }
 
-// slow stretches the time budgets under the race detector (race_test.go)
-// and on CI runners.
-var slow = 1.0
-
-func init() {
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
-		slow = max(slow, 2)
-	}
-}
-
 // A deletion put back in a group of thousands of rules that went since is
-// worked out at once, not once a rule: a unit of up to 4 MB is read once.
+// worked out at once, not once a rule: a unit of up to 4 MB is read once,
+// a few bytes allocated for each of its bytes (allocated, counted, not
+// timed, so that a slow runner fails none; the time is logged), not the
+// unit again for each rule.
 func TestPutBackOneRuleOfMany(t *testing.T) {
 	for _, c := range []struct {
 		n   int
@@ -443,15 +435,16 @@ func TestPutBackOneRuleOfMany(t *testing.T) {
 		}
 		b.WriteString("      - alert: Target\n        expr: up == 0\n")
 		now := "groups:\n  - name: other\n    rules:\n      - alert: O\n        expr: up == 1\n"
-		start := time.Now()
-		out, err := PutBack([]byte(now), []byte(b.String()), Edit{Name: "Target", Group: "g"})
-		took := time.Since(start)
+		var out []byte
+		var err error
+		bytes, took := allocated(func() { out, err = PutBack([]byte(now), []byte(b.String()), Edit{Name: "Target", Group: "g"}) })
 		want := "groups:\n  - name: g\n    rules:\n      - alert: Target\n        expr: up == 0\n  - name: other\n    rules:\n      - alert: O\n        expr: up == 1\n"
 		if err != nil || string(out) != want {
 			t.Fatalf("%d rules: %v\n%.300s", c.n, err, out)
 		}
-		if budget := time.Duration(float64(3*time.Second) * slow); took > budget {
-			t.Errorf("%d rules, %d KB: put back in %v; budget %v", c.n, b.Len()>>10, took, budget)
+		t.Logf("%d rules, %d KB: put back with %d MB allocated, in %v", c.n, b.Len()>>10, bytes>>20, took)
+		if most := 400 * uint64(b.Len()); bytes > most {
+			t.Errorf("%d rules, %d KB: put back with %d MB allocated, over %d MB: the unit read again for each rule?", c.n, b.Len()>>10, bytes>>20, most>>20)
 		}
 	}
 }
