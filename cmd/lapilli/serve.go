@@ -107,8 +107,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       doesn't catch it; changed at a start, every firing is
                       judged again with it
   --linked-only       an incident that lists the alerts its tool linked to
-                      it is caught by those alone; changed at a start,
-                      every firing is judged again with it
+                      it is caught by those alone; the default, as the
+                      others are: an admin can change it on the Settings
+                      page, and every firing is judged again with it, once
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)

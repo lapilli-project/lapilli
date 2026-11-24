@@ -66,7 +66,9 @@ repository): a firing of one catches it whatever `match` says. With
 caught by those alone, not by any other firing at the time; one that lists
 none is caught by the time and `match` as ever. In serve mode, a change to
 it judges every firing again, once, and the Settings page says which is in
-effect.
+effect. The value stands until an admin changes it on the Settings page (or
+through `POST /settings`); `/settings.yaml` there gives it back as
+`linkedOnly`, to commit.
 
 With `mode: serve` it runs `lapilli serve` instead: every hour into a ledger
 on a PersistentVolumeClaim, or in Postgres (below), with a web UI, an API and `/metrics`, behind a

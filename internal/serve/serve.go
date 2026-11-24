@@ -1252,6 +1252,7 @@ var waitDrain = time.After
 var settable = []struct{ key, flag string }{
 	{"lead", "--lead"}, {"match", "--match"}, {"refire", "--refire"},
 	{"noisy-firings", "--noisy-firings"}, {"noisy-precision", "--noisy-precision"},
+	{"linked-only", "--linked-only"},
 }
 
 // options are the judging settings in effect: the command line's, with
@@ -1334,6 +1335,17 @@ func apply(o *verdict.Options, key, v string) error {
 			err = errors.New("want a share like 20% or 0.2")
 		}
 		o.NoisyPrecision = p
+	case "linked-only":
+		// On or off, as the flag's is: the flag defines it until an admin
+		// changes it (docs/design/links.md).
+		switch strings.ToLower(v) {
+		case "on", "true", "yes", "1":
+			o.LinkedOnly = true
+		case "off", "false", "no", "0":
+			o.LinkedOnly = false
+		default:
+			err = errors.New("want on or off")
+		}
 	default:
 		err = errors.New("not a setting")
 	}
@@ -1364,6 +1376,8 @@ func show(o verdict.Options, key string) string {
 			p = verdict.NoisyPrecision
 		}
 		return percentOf(p)
+	case "linked-only":
+		return onOff(o.LinkedOnly)
 	}
 	return ""
 }

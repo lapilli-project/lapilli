@@ -117,12 +117,25 @@ again, as any change to an incident does.
 
 ### In lapilli serve
 
-`--linked-only` is a flag, not a setting the UI changes; the Settings
-page says whether it is in effect, beside the settings that are, and
-`GET /api/v1/settings` as `linked_only`. The ledger keeps
-what its stones were last all given by (`x.linked-only` in `meta`); a
-start with it given or taken away judges every firing again, once, as a
-changed lead does. Until that is done, the Settings page says so beside
+`--linked-only` is a setting an admin changes on the Settings page and
+through the API (`POST /settings`, `linked-only` as `on` or `off`), and
+the flag defines it until then, as it does `--lead` and the rest of
+`settable`: a value in the `settings` table (no schema change) stands over
+the flag, and putting it back (`reset-linked-only`) gives it to the flag
+again. A form that holds one setting leaves the others as they are.
+`/settings.yaml` gives it as the chart's `linkedOnly`. The activity log
+records who changed it (`setting linked-only`, its before and after). It is
+not in `--config`, which declares teams, windows, reports and roles and
+holds no judging setting. The Settings page says whether it is in effect,
+beside the settings that are, and `GET /api/v1/settings` as `linked_only`.
+The ledger keeps what its stones were last all given by (`x.linked-only` in
+`meta`); a change, in the UI or at a start with the flag given or taken
+away, judges every firing again, once, as a changed lead does: the UI's
+change asks for the round (`askRejudge`, through the ledger when the
+replica isn't the leader), and the leader finds the value changed against
+`meta` as it does after a start. Replicas read the value from the ledger,
+so they agree on it; the paragraph below is about those started with
+different flags while the ledger holds none. Until that is done, the Settings page says so beside
 it, and `GET /api/v1/settings` as `linked_only_judging`: the pages show
 what was judged before. Replicas started with different values, as in a
 rolling update that changes it, judge every firing again once for each
