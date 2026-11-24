@@ -675,10 +675,22 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
   a comma after a call's last argument), an expression past 16 KiB or 32
   levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
-  LogQL again too; and a cloud's alarm. And a rule is another, its catch
-  not known, where its file leaves out what the API says or the other way
-  round: a group's `query_offset`, which Prometheus 3.5.0's API leaves
-  out. Not a group's interval, where serve knows it:
+  LogQL again too; and a cloud's alarm.
+- **A known limit: a group's `query_offset`.** Prometheus's rules API
+  doesn't say it (3.5.0's `RuleGroup` has no such field), so a rule serve
+  reads from it has none, and serve's record is of the rule replayed
+  without one. A pull request's group that gives one is another than that
+  rule: its catches are not known, as the recorded Prometheus 3.5.0
+  group with `query_offset: 1m` is. A group that gives none is the same
+  rule, whether or not the group Prometheus ran had one: the gate can't
+  tell, as nothing it reads says. What it judges then is the rule as
+  replayed, which is the one the pull request's file runs after the
+  merge; how Prometheus ran the group before it, its query read back by
+  the offset, the record never held. Holding such a rule as not known
+  instead would hold every rule read from the API so, as the API never
+  says a `query_offset`: so it isn't. A rule's group with `query_offset`
+  is held to the incidents through serve only where serve reads it from
+  its files (`--rules`) or a ruler that says it.
 - **A group with no interval.** A rule file's group that gives no
   `interval` runs at Prometheus's `evaluation_interval`, which its rules
   API says of the group (`"interval": 60`) and the file doesn't. With
