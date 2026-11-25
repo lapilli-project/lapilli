@@ -46,7 +46,7 @@ responses:
 - A file holds 100,000 pages at most.
 
 A script for each paging tool, which writes this file, is in
-[recipes/responses](https://github.com/lapilli-project/lapilli/tree/main/recipes/responses).
+[recipes/responses](../recipes/responses).
 
 A page belongs to a firing when it lists the firing's rule, its labels
 agreeing with the alert's on those both carry, and it was sent between the
