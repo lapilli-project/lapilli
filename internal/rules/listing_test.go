@@ -44,8 +44,11 @@ func TestListingOfARealPrometheus(t *testing.T) {
 			continue
 		}
 		seen[r.Group] = true
+		// The last evaluation started a moment after where the group is
+		// placed, which may be in the next second (phase-c's, placed 20.92s
+		// into the minute, started 21.006s in).
 		d, _, why := l.Place(r.Group, r.Interval)
-		if why != "" || d != r.Phase {
+		if why != "" || (r.Phase-d+r.Interval)%r.Interval > time.Second {
 			t.Errorf("%s: placed %s (%q), its last evaluation says %s", r.Group, d, why, r.Phase)
 		}
 	}
