@@ -121,6 +121,11 @@ type Rule struct {
 	// (notification_settings), "" when the notification policies route it
 	// (docs/design/serveops.md). Neither decides when it fires.
 	Folder, Receiver string
+	// Notify is what else a Grafana rule that names its contact point says
+	// of how it is notified (notification_settings): grouping, timings and
+	// time intervals, which replace the notification policies' for it. Nil
+	// when Receiver is "".
+	Notify *NotifySettings
 	// Logs says the rule's queries are LogQL, and which Loki they are
 	// asked of (docs/design/loki.md): LokiRuler for a Loki ruler's rule,
 	// asked of --loki; for a Grafana rule, the uid of the Loki data source
@@ -1712,7 +1717,7 @@ func grafana(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule,
 			ns, _ := rm["notification_settings"].(map[string]any)
 			rule := Rule{
 				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
-				Says: annotated(rm["annotations"], TemplateGrafana), Folder: folder, Receiver: str(ns["receiver"]),
+				Says: annotated(rm["annotations"], TemplateGrafana), Folder: folder, Receiver: str(ns["receiver"]), Notify: notifySettings(ns),
 				// fmt prints maps in key order, so this is the same for the same rule.
 				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(written)))),
 			}
@@ -2597,6 +2602,42 @@ func duration(v any) (time.Duration, error) {
 		return 0, fmt.Errorf("unreadable duration %q", x)
 	}
 	return 0, fmt.Errorf("unreadable duration %v", v)
+}
+
+// NotifySettings are the notification settings of a Grafana rule that names
+// its own contact point, other than the contact point (Rule.Receiver). A
+// timing or list left out is zero or empty.
+type NotifySettings struct {
+	GroupBy                                  []string
+	GroupWait, GroupInterval, RepeatInterval time.Duration
+	MuteTimeIntervals, ActiveTimeIntervals   []string
+}
+
+// notifySettings reads a rule's notification_settings; nil when it names no
+// contact point. A timing that can't be read is left out, as Grafana
+// refuses such a rule and the policies' timings are the nearest.
+func notifySettings(ns map[string]any) *NotifySettings {
+	if str(ns["receiver"]) == "" {
+		return nil
+	}
+	names := func(v any) []string {
+		var out []string
+		for _, x := range list(v) {
+			if s := str(x); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	d := func(v any) time.Duration {
+		out, err := duration(v)
+		if err != nil {
+			return 0
+		}
+		return out
+	}
+	return &NotifySettings{GroupBy: names(ns["group_by"]), GroupWait: d(ns["group_wait"]), GroupInterval: d(ns["group_interval"]),
+		RepeatInterval: d(ns["repeat_interval"]), MuteTimeIntervals: names(ns["mute_time_intervals"]), ActiveTimeIntervals: names(ns["active_time_intervals"])}
 }
 
 func list(v any) []any {

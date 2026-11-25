@@ -123,11 +123,14 @@ type NotificationOptions struct {
 // carries (a rule told apart from another of its name carries its own) and
 // the folder.
 func NotificationAlerts(fs []Judged, rs []rules.Rule) []routing.Alert {
-	type known struct{ name, folder string }
+	type known struct {
+		name, folder string
+		own          *routing.OwnRoute
+	}
 	by := map[string]known{}
 	for _, r := range rs {
 		if _, ok := by[r.Name]; !ok {
-			by[r.Name] = known{r.AlertName(), r.Folder}
+			by[r.Name] = known{r.AlertName(), r.Folder, OwnRoute(r)}
 		}
 	}
 	out := make([]routing.Alert, len(fs))
@@ -146,9 +149,21 @@ func NotificationAlerts(fs []Judged, rs []rules.Rule) []routing.Alert {
 		if _, has := l["grafana_folder"]; !has && k.folder != "" {
 			l["grafana_folder"] = k.folder
 		}
-		out[i] = routing.Alert{Labels: l, Start: j.Start, End: j.End}
+		out[i] = routing.Alert{Labels: l, Start: j.Start, End: j.End, Own: k.own}
 	}
 	return out
+}
+
+// OwnRoute is the route of a Grafana rule that names its contact point
+// itself: it goes to that contact point, with its own grouping and timings,
+// and the notification policies aren't consulted. Nil for any other rule.
+func OwnRoute(r rules.Rule) *routing.OwnRoute {
+	if r.Receiver == "" || r.Notify == nil {
+		return nil
+	}
+	n := r.Notify
+	return &routing.OwnRoute{Receiver: r.Receiver, GroupBy: n.GroupBy, GroupWait: n.GroupWait, GroupInterval: n.GroupInterval,
+		RepeatInterval: n.RepeatInterval, MuteTimeIntervals: n.MuteTimeIntervals, ActiveTimeIntervals: n.ActiveTimeIntervals}
 }
 
 // WorkOutNotifications works out who the report's firings reached, from the
