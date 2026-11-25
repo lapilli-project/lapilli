@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,12 +60,24 @@ func TestPutResponsesBounds(t *testing.T) {
 	}
 	_, err = l.PutResponses(ctx, "pd", at.Add(time.Hour), at.Add(2*time.Hour), []response.Page{pageFor("q", "R", at.Add(time.Hour))}, o)
 	refused("a source's page over what it keeps", "3 pages at most", err)
-	// Another source's pages in the same week: two more are 5, the third 6.
-	if _, err := l.PutResponses(ctx, "ops", at, at.Add(time.Hour), []response.Page{pageFor("a", "R", at), pageFor("b", "R", at)}, o); err != nil {
-		t.Fatal(err)
+	// The week's cap is each source's own: pd holds 3 of the week, three more
+	// of its own are 6, but another source writes 5 of the same week.
+	maxSourcePages = 100
+	_, err = l.PutResponses(ctx, "pd", at, at.Add(time.Hour), append(slices.Clone(pages[:3]), pageFor("w1", "R", at), pageFor("w2", "R", at), pageFor("w3", "R", at)), o)
+	refused("a source's sixth page of a week", "a source keeps 5 a week", err)
+	var five []response.Page
+	for i := 0; i < 5; i++ {
+		five = append(five, pageFor(fmt.Sprint("o", i), "R", at))
 	}
-	_, err = l.PutResponses(ctx, "other", at, at.Add(time.Hour), []response.Page{pageFor("c", "R", at)}, o)
-	refused("a week's sixth page", "a week keeps 5", err)
+	if _, err := l.PutResponses(ctx, "ops", at, at.Add(time.Hour), five, o); err != nil {
+		t.Errorf("another source's five pages of a week pd holds 3 of: %v", err)
+	}
+	if _, err := l.SyncResponses(ctx, ResponsesFile, "", five[:2], o); err != nil {
+		t.Errorf("the file's pages beside two sources' week: %v", err)
+	}
+	_, err = l.PutResponses(ctx, "other", at, at.Add(time.Hour), append(slices.Clone(five), pageFor("c", "R", at)), o)
+	refused("a source's sixth page", "a source keeps 5 a week", err)
+	maxSourcePages = 3
 	// Taken back, the write left nothing of its own: not its source either.
 	var n int
 	if err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM response_sources WHERE source = 'other'").Scan(&n); err != nil || n != 0 {

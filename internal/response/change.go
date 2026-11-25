@@ -382,6 +382,10 @@ func (cs *ChangeSet) Known(labels map[string]string, match []string, from, to ti
 	return false
 }
 
+// Carries reports whether labels hold every label of want, with its value:
+// how a deploy is tied to a firing (Matching) and its target known (Known).
+func Carries(labels, want map[string]string) bool { return carries(labels, want) }
+
 // carries reports whether labels hold every label of want, with its value.
 func carries(labels, want map[string]string) bool {
 	for k, v := range want {

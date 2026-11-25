@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"lapilli.dev/internal/deploys"
 	"lapilli.dev/internal/response"
 	"lapilli.dev/internal/verdict"
 )
@@ -44,8 +44,11 @@ var (
 	// maxSourcePages is how many pages one source keeps (the firings'
 	// maxSourceSeries): 500 000, a page of an incident a minute for a year.
 	maxSourcePages = 500_000
-	// maxWeekPages is how many pages sent in one ledger week all sources
-	// keep: 200 000, 20 000 a day for each of 10 busy sources.
+	// maxWeekPages is how many pages sent in one ledger week one source
+	// keeps: 200 000, 20 000 a day for each of 10 busy sources' worth. It is
+	// held for each source apart, so that one token can't stop the writes of
+	// another source (the file's among them): the pages of a week are
+	// MaxSources x this at most.
 	maxWeekPages = 200_000
 )
 
@@ -292,8 +295,8 @@ func (l *Ledger) putResponses(ctx context.Context, source, sum string, span *[2]
 }
 
 // boundResponses holds what a write left to the bounds: the sources there are
-// (a new one counts), the pages of the source, and the pages sent in each
-// week the write put a page in. The write is rolled back if it is over.
+// (a new one counts), the pages of the source, and the pages of the source
+// sent in each week the write put a page in. The write is rolled back if it is over.
 func (l *Ledger) boundResponses(t *txn, source string, weeks []int64) error {
 	var known bool
 	if err := t.QueryRowContext(t.ctx, "SELECT EXISTS (SELECT 1 FROM response_sources WHERE source = ?)", source).Scan(&known); err != nil {
@@ -319,11 +322,11 @@ func (l *Ledger) boundResponses(t *txn, source string, weeks []int64) error {
 		return invalid("a source keeps %d pages at most", maxSourcePages)
 	}
 	for _, w := range weeks {
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM responses WHERE sent_at >= ? AND sent_at < ?", l.midnight(w), l.midnight(w+7)).Scan(&n); err != nil {
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM responses WHERE source = ? AND sent_at >= ? AND sent_at < ?", source, l.midnight(w), l.midnight(w+7)).Scan(&n); err != nil {
 			return err
 		}
 		if n > maxWeekPages {
-			return invalid("%d pages or more were sent in one week: a week keeps %d at most", n, maxWeekPages)
+			return invalid("%d pages or more of this source were sent in one week: a source keeps %d a week at most", n, maxWeekPages)
 		}
 	}
 	return nil
@@ -378,32 +381,106 @@ func scanPages(rows *sql.Rows) ([]response.Page, error) {
 	return out, rows.Err()
 }
 
-// pagesOfRules are the pages that name one of the rules and were sent in
-// [lo, hi], in order of their sent time then source and id: what judging
-// firings of those rules reads, in place of every page sent in the span.
-func (l *Ledger) pagesOfRules(ctx context.Context, q queryer, rules []string, lo, hi int64) ([]response.Page, error) {
-	var out []response.Page
-	seen := map[[2]string]bool{}
-	for len(rules) > 0 {
-		part := rules[:min(len(rules), pgRows)]
-		rules = rules[len(part):]
-		b, _ := json.Marshal(part)
-		rows, err := q.QueryContext(ctx, `SELECT DISTINCT p.source, p.id, p.sent_at, p.acknowledged_at, p.resolved_at, p.resolved_by, p.alerts
-			FROM response_rules x JOIN responses p ON p.source = x.source AND p.id = x.id
-			WHERE x.rule IN (`+l.d.texts("?")+`) AND x.sent_at >= ? AND x.sent_at <= ?`, string(b), lo, hi)
+// pageWindow is where the pages a firing may have been sent as are: those
+// that name rule, sent in [from, to].
+type pageWindow struct {
+	rule     string
+	from, to int64
+}
+
+// pagesNear are the pages judging firings reads: for each window, the first
+// response.MaxFindScan pages that name its rule and were sent in it (those
+// Index.Find looks at, which looks at no more), in order of their sent time
+// then source and id (ties at the cut may fall otherwise than Find's order
+// of sent time, id and source). The windows of a rule that meet are asked
+// together, and again one by one only when more than MaxFindScan pages are in
+// them. The pages' alerts (16 KB each at most) are read for those only, so a
+// judgement reads, for a rule, at most MaxFindScan pages for each window of
+// its firings, and no more than the rule has in them: not every page of the
+// rule over the days the firings span, whoever wrote them. Returned in order
+// of their sent time, then id and source.
+func (l *Ledger) pagesNear(ctx context.Context, q queryer, ws []pageWindow) ([]response.Page, error) {
+	byRule := map[string][][2]int64{}
+	for _, w := range ws {
+		byRule[w.rule] = append(byRule[w.rule], [2]int64{w.from, w.to})
+	}
+	type key struct{ source, id string }
+	seen := map[key]bool{}
+	bySource := map[string][]string{}
+	keys := func(rule string, from, to int64, n int) ([]key, error) {
+		rows, err := q.QueryContext(ctx, `SELECT source, id FROM response_rules WHERE rule = ? AND sent_at >= ? AND sent_at <= ?
+			ORDER BY sent_at, source, id LIMIT ?`, rule, from, to, n)
 		if err != nil {
 			return nil, err
 		}
-		got, err := scanPages(rows)
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range got {
-			if k := [2]string{p.Source, p.ID}; !seen[k] {
-				seen[k] = true
-				out = append(out, p)
+		defer rows.Close()
+		var got []key
+		for rows.Next() {
+			var k key
+			if err := rows.Scan(&k.source, &k.id); err != nil {
+				return nil, err
 			}
+			got = append(got, k)
+		}
+		return got, rows.Err()
+	}
+	add := func(ks []key) {
+		for _, k := range ks {
+			if !seen[k] {
+				seen[k] = true
+				bySource[k.source] = append(bySource[k.source], k.id)
+			}
+		}
+	}
+	for _, rule := range slices.Sorted(maps.Keys(byRule)) {
+		wins := byRule[rule]
+		slices.SortFunc(wins, func(a, b [2]int64) int { return cmp.Or(cmp.Compare(a[0], b[0]), cmp.Compare(a[1], b[1])) })
+		wins = slices.Compact(wins)
+		for i := 0; i < len(wins); {
+			j, hi := i+1, wins[i][1]
+			for j < len(wins) && wins[j][0] <= hi {
+				hi = max(hi, wins[j][1])
+				j++
+			}
+			// Every page of the windows together, unless there are more
+			// than one window's scan reads.
+			ks, err := keys(rule, wins[i][0], hi, response.MaxFindScan+1)
+			if err != nil {
+				return nil, err
+			}
+			if len(ks) <= response.MaxFindScan {
+				add(ks)
+			} else {
+				for _, w := range wins[i:j] {
+					ks, err := keys(rule, w[0], w[1], response.MaxFindScan)
+					if err != nil {
+						return nil, err
+					}
+					add(ks)
+				}
+			}
+			i = j
+		}
+	}
+	var out []response.Page
+	for _, source := range slices.Sorted(maps.Keys(bySource)) {
+		ids := bySource[source]
+		for len(ids) > 0 {
+			part := ids[:min(len(ids), pgRows)]
+			ids = ids[len(part):]
+			b, _ := json.Marshal(part)
+			rows, err := q.QueryContext(ctx, `SELECT source, id, sent_at, acknowledged_at, resolved_at, resolved_by, alerts FROM responses
+				WHERE source = ? AND id IN (`+l.d.texts("?")+")", source, string(b))
+			if err != nil {
+				return nil, err
+			}
+			got, err := scanPages(rows)
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			l.pagesRead.Add(int64(len(got)))
+			out = append(out, got...)
 		}
 	}
 	slices.SortFunc(out, func(a, b response.Page) int {
@@ -491,7 +568,7 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 			return err
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			fresh = append(fresh, changeTarget{at: c.At.Unix(), namespace: c.Namespace})
+			fresh = append(fresh, changeTarget{at: c.At.Unix(), namespace: c.Namespace, workloadKind: c.WorkloadKind, workload: c.Workload})
 		}
 	}
 	// A workload's spans are kept apart and whole: one that overlaps or
@@ -544,6 +621,10 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 			if len(olds) == 1 && olds[0][0] <= from && olds[0][1] >= to {
 				continue
 			}
+			// Known over more than it was: the firings that were on in it
+			// are judged again, though no change was found (a read made
+			// again, or a run that found none).
+			fresh = append(fresh, changeTarget{cover: true, namespace: w.Namespace, workloadKind: w.Kind, workload: w.Name, from: from, to: to})
 			for _, o := range olds {
 				from, to = min(from, o[0]), max(to, o[1])
 				if _, err := drop.ExecContext(t.ctx, w.Namespace, w.Kind, w.Name, o[0]); err != nil {
@@ -583,39 +664,100 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 }
 
 // changeTarget is a change that is new to the ledger and what it was made to:
-// a rollout's namespace, or a deploy's labels, which a firing it is about
-// agrees with (deploys.TiedLabels).
+// a rollout's workload, or a deploy's labels, which a firing it is about
+// carries every one of (response.Carries, as Matching ties it). Or, when
+// cover is set, a workload whose changes became known over [from, to], which
+// the firings that were on in it are judged again for.
 type changeTarget struct {
-	at        int64
-	namespace string
-	labels    map[string]string
-	deploy    bool
+	at                     int64
+	namespace              string
+	workloadKind, workload string
+	labels                 map[string]string
+	deploy                 bool
+	cover                  bool
+	from, to               int64
 }
 
-func (c changeTarget) matches(labels map[string]string) bool {
-	if !c.deploy {
-		return labels["namespace"] == c.namespace
+// podOwners finds, and keeps, the workload a pod belongs to, as the runs saw.
+type podOwners struct {
+	t  *txn
+	by map[response.Pod]*response.Workload
+}
+
+func (o *podOwners) of(ns, pod string) (*response.Workload, error) {
+	k := response.Pod{Namespace: ns, Name: pod}
+	if w, ok := o.by[k]; ok {
+		return w, nil
 	}
-	return deploys.TiedLabels(c.labels, labels)
+	var w response.Workload
+	err := o.t.QueryRowContext(o.t.ctx, "SELECT workload_kind, workload FROM rollout_owners WHERE namespace = ? AND pod = ?", ns, pod).Scan(&w.Kind, &w.Name)
+	if err == sql.ErrNoRows {
+		o.by[k] = nil
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	w.Namespace = ns
+	o.by[k] = &w
+	return &w, nil
+}
+
+// matches reports whether a firing with labels may be of the change's
+// target. A workload's firing carries its namespace and names it by a label
+// of its kind, by a pod it owns, or by any label's value (--rollout-match,
+// which isn't known here, names one): too many are put back, never too few.
+func (c changeTarget) matches(labels map[string]string, own *podOwners) (bool, error) {
+	if c.deploy {
+		return response.Carries(labels, c.labels), nil
+	}
+	if labels["namespace"] != c.namespace {
+		return false, nil
+	}
+	for _, v := range labels {
+		if v == c.workload {
+			return true, nil
+		}
+	}
+	if pod := labels["pod"]; pod != "" {
+		w, err := own.of(c.namespace, pod)
+		if err != nil || w == nil {
+			return false, err
+		}
+		return w.Kind == c.workloadKind && w.Name == c.workload, nil
+	}
+	return false, nil
 }
 
 // pendTargets puts firings back to be judged for changes new to the ledger
-// (or taken from it): the firings of what each was made to that started in
-// the ledger week it was made in, whose routine counts it changes (counted
-// by the week a firing started in), and those that started up to
-// ResponseReach before it and were on when it was made, which it answers.
-// Only firings that started no later than hi: later ones are judged by the
-// run that brought the changes.
+// (or taken from it) and for coverage that grew: the firings of what each
+// change was made to (its workload, the pods it owns, or the deploy's
+// labels) that started in the ledger week it was made in, whose routine
+// counts it changes (counted by the week a firing started in), and those that
+// started up to ResponseReach before it and were on when it was made, which
+// it answers; and the firings of a workload that were on while its changes
+// became known. Each firing is put back by itself (spans of its start,
+// joined to others within 6 hours, so at most 28 a week of firings a change
+// concerns), not the week from the first of a target's to its last. Only
+// firings that started no later than hi: later ones are judged by the run
+// that brought the changes.
 func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 	if len(ts) == 0 {
 		return nil
 	}
+	own := &podOwners{t: t, by: map[response.Pod]*response.Workload{}}
 	byWeek := map[int64][]changeTarget{}
+	var covers []changeTarget
 	for _, c := range ts {
+		if c.cover {
+			covers = append(covers, c)
+			continue
+		}
 		w := Week(l.day(c.at))
 		byWeek[w] = append(byWeek[w], c)
 	}
 	var spans [][2]int64
+	reach := int64(ResponseReach / time.Second)
 	for _, w := range slices.Sorted(maps.Keys(byWeek)) {
 		cs := byWeek[w]
 		first := cs[0].at
@@ -624,36 +766,125 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 		}
 		monday, next := l.midnight(w), l.midnight(w+7)
 		// The week's firings, and those before it that were on at the
-		// first change of the week; the series each has, with when its
-		// firings in the range started first and last.
-		rows, err := t.QueryContext(t.ctx, `SELECT s.labels, min(f.start_at), max(f.start_at) FROM firings f JOIN series s ON s.id = f.series_id
-			WHERE f.start_at <= ? AND ((f.start_at >= ? AND f.start_at < ?) OR (f.start_at >= ? AND f.start_at < ? AND (f.end_at IS NULL OR f.end_at >= ?)))
-			GROUP BY s.id, s.labels`, hi, monday, next, first-int64(ResponseReach/time.Second), monday, first)
+		// first change of the week: which series they are of, then the
+		// firings of those that the changes are made to.
+		where := `f.start_at <= ? AND ((f.start_at >= ? AND f.start_at < ?) OR (f.start_at >= ? AND f.start_at < ? AND (f.end_at IS NULL OR f.end_at >= ?)))`
+		args := []any{hi, monday, next, first - reach, monday, first}
+		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.labels FROM firings f JOIN series s ON s.id = f.series_id WHERE `+where+` GROUP BY s.id, s.labels`, args...)
 		if err != nil {
 			return err
 		}
+		type seriesRow struct {
+			id     int64
+			labels map[string]string
+		}
+		var found []seriesRow
 		for rows.Next() {
+			var x seriesRow
 			var text string
-			var lo, top int64
-			if err := rows.Scan(&text, &lo, &top); err != nil {
+			if err := rows.Scan(&x.id, &text); err != nil {
 				rows.Close()
 				return err
 			}
-			var m map[string]string
-			if err := json.Unmarshal([]byte(text), &m); err != nil {
+			if err := json.Unmarshal([]byte(text), &x.labels); err != nil {
 				rows.Close()
 				return err
 			}
-			for _, c := range cs {
-				if c.matches(m) {
-					spans = append(spans, [2]int64{lo, top})
-					break
-				}
-			}
+			found = append(found, x)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
+		}
+		// (The owners are asked once the rows are read: a transaction on
+		// Postgres has one statement open at a time.)
+		var ids []int64
+		for _, x := range found {
+			for _, c := range cs {
+				ok, err := c.matches(x.labels, own)
+				if err != nil {
+					return err
+				}
+				if ok {
+					ids = append(ids, x.id)
+					break
+				}
+			}
+		}
+		for _, id := range ids {
+			starts, err := t.QueryContext(t.ctx, `SELECT f.start_at FROM firings f WHERE f.series_id = ? AND `+where, append([]any{id}, args...)...)
+			if err != nil {
+				return err
+			}
+			for starts.Next() {
+				var at int64
+				if err := starts.Scan(&at); err != nil {
+					starts.Close()
+					return err
+				}
+				spans = append(spans, [2]int64{at, at})
+			}
+			starts.Close()
+			if err := starts.Err(); err != nil {
+				return err
+			}
+		}
+	}
+	if len(covers) > 0 {
+		lo, top := covers[0].from, covers[0].to
+		byNS := map[string][]changeTarget{}
+		for _, c := range covers {
+			lo, top = min(lo, c.from), max(top, c.to)
+			byNS[c.namespace] = append(byNS[c.namespace], c)
+		}
+		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.labels, f.start_at, f.end_at FROM firings f JOIN series s ON s.id = f.series_id
+			WHERE f.start_at <= ? AND f.start_at >= ? AND (f.end_at IS NULL OR f.end_at >= ?) ORDER BY s.id`, min(hi, top), lo-reach, lo)
+		if err != nil {
+			return err
+		}
+		type firingRow struct {
+			series, start int64
+			end           sql.NullInt64
+			labels        string
+		}
+		var onRows []firingRow
+		for rows.Next() {
+			var x firingRow
+			if err := rows.Scan(&x.series, &x.labels, &x.start, &x.end); err != nil {
+				rows.Close()
+				return err
+			}
+			onRows = append(onRows, x)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		var series int64 = -1
+		var mine []changeTarget
+		for _, x := range onRows {
+			if x.series != series {
+				series, mine = x.series, nil
+				var m map[string]string
+				if err := json.Unmarshal([]byte(x.labels), &m); err != nil {
+					return err
+				}
+				for _, c := range byNS[m["namespace"]] {
+					ok, err := c.matches(m, own)
+					if err != nil {
+						return err
+					}
+					if ok {
+						mine = append(mine, c)
+					}
+				}
+			}
+			for _, c := range mine {
+				if x.start <= c.to && (!x.end.Valid || x.end.Int64 >= c.from) {
+					spans = append(spans, [2]int64{x.start, x.start})
+					break
+				}
+			}
 		}
 	}
 	return pend(t, near(spans))
@@ -780,25 +1011,17 @@ func (l *Ledger) newResponder(ctx context.Context, q queryer, rx interface {
 	if len(fs) == 0 || !r.in.Any() {
 		return r, nil
 	}
-	lo, hi := fs[0].Start, time.Time{}
-	var maxWithin time.Duration
+	var windows []pageWindow
 	pods := map[string]bool{}
-	names := map[string]bool{}
 	for _, f := range fs {
-		for _, n := range response.RuleNames(f.Rule) {
-			names[n] = true
-		}
-		if f.Start.Before(lo) {
-			lo = f.Start
-		}
 		end := f.End
 		if end.IsZero() {
 			end = now
 		}
-		if end.After(hi) {
-			hi = end
+		// Where the page of a firing may have been sent: Evidence.Respond's.
+		for _, n := range response.RuleNames(f.Rule) {
+			windows = append(windows, pageWindow{n, f.Start.Unix(), end.Add(r.within(f.Rule)).Unix()})
 		}
-		maxWithin = max(maxWithin, r.within(f.Rule))
 		w := Week(l.day(f.Start.Unix()))
 		if end.After(r.last[w]) {
 			r.last[w] = end
@@ -808,7 +1031,7 @@ func (l *Ledger) newResponder(ctx context.Context, q queryer, rx interface {
 		}
 	}
 	if r.in.Pages {
-		pages, err := l.pagesOfRules(ctx, q, slices.Sorted(maps.Keys(names)), lo.Unix(), hi.Add(maxWithin).Unix())
+		pages, err := l.pagesNear(ctx, q, windows)
 		if err != nil {
 			return nil, err
 		}
@@ -1053,19 +1276,20 @@ func (l *Ledger) respond(t *txn, lo, hi int64, o verdict.Options) error {
 // show a firing or list them. now is when a firing still on is taken to
 // end.
 func (l *Ledger) ResponsesOf(ctx context.Context, fs []Firing, o verdict.Options, now time.Time) (map[int64]response.Response, error) {
+	// A firing a quiet window excused has none, and asks for none of the
+	// pages or changes the others do.
 	in := make([]respFiring, 0, len(fs))
 	for _, f := range fs {
-		in = append(in, respFiring{ID: f.ID, Rule: f.Rule, Labels: f.Labels, Start: f.Start, End: f.End, White: f.White, Person: f.Person, Excused: f.Excused})
+		if !f.Excused {
+			in = append(in, respFiring{ID: f.ID, Rule: f.Rule, Labels: f.Labels, Start: f.Start, End: f.End, White: f.White, Person: f.Person})
+		}
 	}
 	r, err := l.newResponder(ctx, l.r, l.r, o, in, now)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[int64]response.Response, len(fs))
+	out := make(map[int64]response.Response, len(in))
 	for _, f := range in {
-		if f.Excused {
-			continue
-		}
 		rs, _, err := r.respond(f)
 		if err != nil {
 			return nil, err

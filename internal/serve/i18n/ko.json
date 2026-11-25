@@ -1209,7 +1209,7 @@
  "page %s was sent %s: a page is sent from 1970 until an hour from now": "페이지 %s의 발송 시각이 %s예요. 발송 시각은 1970년부터 지금부터 한 시간 뒤까지만 받아요",
  "the ledger keeps pages of %d sources at most": "페이지는 출처 %d개까지만 둘 수 있어요",
  "a source keeps %d pages at most": "소스 하나는 페이지를 %d개까지만 보관해요",
- "%d pages or more were sent in one week: a week keeps %d at most": "한 주에 페이지 %d개 이상이 발송됐어요. 한 주에는 %d개까지만 보관해요",
+ "%d pages or more of this source were sent in one week: a source keeps %d a week at most": "이 출처의 페이지 %d개 이상이 한 주에 발송됐어요. 출처 하나는 한 주에 %d개까지만 보관해요",
  "say which period the firings are of: from and to, as RFC 3339 times": "발화의 기간을 from과 to에 RFC 3339 시각으로 적어 주세요",
  "the ledger keeps %d sources at most": "출처는 %d개까지 둘 수 있어요",
  "a source's firings are of %d rules at most": "한 출처의 발화는 규칙 %d개까지예요",

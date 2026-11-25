@@ -1412,10 +1412,19 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 		return err
 	}
 	plain := make([]firing.Firing, 0, len(fs))
+	live := make([]ledger.Firing, 0, len(fs))
 	for _, f := range fs {
 		if !f.Excused {
 			plain = append(plain, f.Firing)
+			live = append(live, f)
 		}
+	}
+	// With rules noisy by what was done about their firings, the preview
+	// asks the same test as every surface, so it is given the responses.
+	if rsp, err := s.previewResponses(ctx, live, o); err != nil {
+		return err
+	} else if rsp != nil {
+		o.Responder, with.Responder = rsp, rsp
 	}
 	// People's verdicts, on both sides (docs/design/judging.md, item 3).
 	said, err := s.l.ReplayVerdicts(ctx, from, to)

@@ -1209,7 +1209,7 @@
  "page %s was sent %s: a page is sent from 1970 until an hour from now": "la página %s se envió el %s: una página se envía desde 1970 hasta una hora a partir de ahora",
  "the ledger keeps pages of %d sources at most": "el libro guarda páginas de %d fuentes como máximo",
  "a source keeps %d pages at most": "una fuente guarda %d páginas como máximo",
- "%d pages or more were sent in one week: a week keeps %d at most": "se enviaron %d páginas o más en una semana: una semana guarda %d como máximo",
+ "%d pages or more of this source were sent in one week: a source keeps %d a week at most": "se enviaron %d páginas o más de esta fuente en una semana: una fuente guarda %d por semana como máximo",
  "say which period the firings are of: from and to, as RFC 3339 times": "indica de qué periodo son los disparos: from y to, como horas RFC 3339",
  "the ledger keeps %d sources at most": "el registro guarda %d fuentes como máximo",
  "a source's firings are of %d rules at most": "los disparos de una fuente son de %d reglas como máximo",

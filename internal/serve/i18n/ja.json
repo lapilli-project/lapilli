@@ -1209,7 +1209,7 @@
  "page %s was sent %s: a page is sent from 1970 until an hour from now": "ページ %s の送信時刻が %s です。送信時刻は 1970 年から今から 1 時間後までです",
  "the ledger keeps pages of %d sources at most": "台帳が保持するページのソースは最大 %d 個です",
  "a source keeps %d pages at most": "1 つのソースが保持するページは最大 %d 件です",
- "%d pages or more were sent in one week: a week keeps %d at most": "1 週間に %d 件以上のページが送信されました。1 週間に保持するのは最大 %d 件です",
+ "%d pages or more of this source were sent in one week: a source keeps %d a week at most": "この出どころの %d 件以上のページが 1 週間に送信されました。1 つの出どころが 1 週間に保持するのは最大 %d 件です",
  "say which period the firings are of: from and to, as RFC 3339 times": "発火の期間を from と to に RFC 3339 形式の時刻で指定してください",
  "the ledger keeps %d sources at most": "台帳に保存できるソースは最大 %d 件です",
  "a source's firings are of %d rules at most": "1 つのソースの発火は最大 %d ルール分です",
