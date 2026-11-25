@@ -40,7 +40,7 @@
 # so no period starts before BEFORE minutes (65) after the rules came in;
 # MINUTES (60) is the longest a period is, each its own length up to that
 # (the first recordings': 46, 40, 17, 6). A run is two hours or so. A smaller
-# BEFORE or MINUTES is a dry run, whose recordings the tests may not accept. PREFIX (lapilli-r73) names the containers and network;
+# BEFORE or MINUTES is a dry run, whose recordings the tests may not accept. PREFIX (lapilli-measure) names the containers and network;
 # PROM_PORT, GRAFANA_PORT and LOKI_PORT (28391 to 28393, on 127.0.0.1) say
 # where they listen; STATE is where it keeps its files; MIN_FREE_GB (30) is
 # the free disk below which it stops.
@@ -58,7 +58,7 @@ cd "$(dirname "$0")/../.."
 prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
 grafana=${GRAFANA_IMAGE:-grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf}
 loki=${LOKI_IMAGE:-grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28}
-p=${PREFIX:-lapilli-r73}
+p=${PREFIX:-lapilli-measure}
 minutes=${MINUTES:-60}
 before=${BEFORE:-65}
 pport=${PROM_PORT:-28391}

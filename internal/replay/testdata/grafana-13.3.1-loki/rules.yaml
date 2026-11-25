@@ -1494,6 +1494,7 @@ groups:
               model:
                 editorMode: code
                 expr: vector(1)
+                instant: true
                 intervalMs: 1000
                 maxDataPoints: 43200
                 queryType: instant
@@ -1544,6 +1545,7 @@ groups:
               model:
                 editorMode: code
                 expr: vector(1)
+                instant: true
                 intervalMs: 1000
                 maxDataPoints: 43200
                 queryType: instant
@@ -1594,6 +1596,7 @@ groups:
               model:
                 editorMode: code
                 expr: vector(1)
+                instant: true
                 intervalMs: 1000
                 maxDataPoints: 43200
                 queryType: instant
