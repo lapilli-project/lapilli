@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/deploys"
 )
 
 // Kind is what a change did to its target.
@@ -148,26 +148,30 @@ func (cs *ChangeSet) AddRollouts(r *Rollouts) {
 // AddDeploys adds the deploys of the deploys file, each a change at its
 // start. A target the file lists has its changes known from its earliest
 // deploy listed on.
-func (cs *ChangeSet) AddDeploys(ds []ledger.Deploy) {
+func (cs *ChangeSet) AddDeploys(ds []deploys.Deploy) {
 	for _, d := range ds {
 		c := Change{Kind: Deploy, At: d.Start, Labels: d.Labels, Revision: d.Revision}
 		cs.deploys = append(cs.deploys, c)
 		cs.count(c)
-		found := false
-		for i := range cs.deployCover {
-			if sameLabels(cs.deployCover[i].labels, d.Labels) {
-				found = true
-				if d.Start.Before(cs.deployCover[i].from) {
-					cs.deployCover[i].from = d.Start
-				}
-				break
-			}
-		}
-		if !found {
-			cs.deployCover = append(cs.deployCover, deployCover{d.Labels, d.Start})
-		}
+		cs.AddDeployCoverage(d.Labels, d.Start)
 	}
 	slices.SortStableFunc(cs.deploys, func(a, b Change) int { return a.At.Compare(b.At) })
+}
+
+// AddDeployCoverage says the changes of the target the deploys with labels
+// name are known from from on: a deploy listed for it at from, or earlier.
+// A ledger that keeps only the deploys of a period adds where each target's
+// begin, beside them.
+func (cs *ChangeSet) AddDeployCoverage(labels map[string]string, from time.Time) {
+	for i := range cs.deployCover {
+		if sameLabels(cs.deployCover[i].labels, labels) {
+			if from.Before(cs.deployCover[i].from) {
+				cs.deployCover[i].from = from
+			}
+			return
+		}
+	}
+	cs.deployCover = append(cs.deployCover, deployCover{labels, from})
 }
 
 func sameLabels(a, b map[string]string) bool {
@@ -254,9 +258,9 @@ func (cs *ChangeSet) Matching(labels map[string]string, match []string, from, to
 	for _, w := range cs.workloads(labels, match) {
 		out = append(out, within(cs.byWorkload[w], from, to, nil)...)
 	}
-	// A deploy is tied as ledger.Deploy.During ties one, by its labels.
+	// A deploy is tied as deploys.Deploy.During ties one, by its labels.
 	out = append(out, within(cs.deploys, from, to, func(c Change) bool {
-		return ledger.Deploy{Labels: c.Labels}.Tied(labels)
+		return deploys.Deploy{Labels: c.Labels}.Tied(labels)
 	})...)
 	slices.SortStableFunc(out, func(a, b Change) int { return a.At.Compare(b.At) })
 	return out
@@ -291,7 +295,7 @@ func (cs *ChangeSet) Known(labels map[string]string, match []string, at time.Tim
 		}
 	}
 	for _, d := range cs.deployCover {
-		if !at.Before(d.from) && (ledger.Deploy{Labels: d.labels}).Tied(labels) {
+		if !at.Before(d.from) && (deploys.Deploy{Labels: d.labels}).Tied(labels) {
 			return true
 		}
 	}

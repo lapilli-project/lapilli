@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
-
-	"lapilli.dev/internal/ledger"
 )
 
 // What was deployed, and when (docs/design/noc.md): --deploys names a file
@@ -129,11 +127,11 @@ func Read(path string) (*File, error) {
 }
 
 // Deploys are what the file holds, each history's lines read.
-func (f *File) Deploys() ([]ledger.Deploy, error) {
-	var out []ledger.Deploy
+func (f *File) Deploys() ([]Deploy, error) {
+	var out []Deploy
 	for i, e := range f.entries {
 		if e.History == "" {
-			out = append(out, ledger.Deploy{Start: e.Start, End: e.End, Labels: e.Labels, Revision: e.Revision})
+			out = append(out, Deploy{Start: e.Start, End: e.End, Labels: e.Labels, Revision: e.Revision})
 			continue
 		}
 		// Every line of a history deploys what its entry names: they share
@@ -143,8 +141,8 @@ func (f *File) Deploys() ([]ledger.Deploy, error) {
 			return nil, fmt.Errorf("%s: deploy %d: %w", f.path, i+1, err)
 		}
 		out = append(out, ds...)
-		if len(out) > ledger.MaxDeploys {
-			return nil, fmt.Errorf("%s: over %d deploys: keep fewer in each history (DEPLOYS_KEEP), or fewer histories", f.path, ledger.MaxDeploys)
+		if len(out) > MaxDeploys {
+			return nil, fmt.Errorf("%s: over %d deploys: keep fewer in each history (DEPLOYS_KEEP), or fewer histories", f.path, MaxDeploys)
 		}
 	}
 	return out, nil
@@ -152,7 +150,7 @@ func (f *File) Deploys() ([]ledger.Deploy, error) {
 
 // Load reads a deploys file (Read), and each history's
 // lines; sum is a digest of the file and its histories.
-func Load(path string) (ds []ledger.Deploy, sum string, err error) {
+func Load(path string) (ds []Deploy, sum string, err error) {
 	f, err := Read(path)
 	if err != nil {
 		return nil, "", err
@@ -163,8 +161,8 @@ func Load(path string) (ds []ledger.Deploy, sum string, err error) {
 
 // readHistory reads the deploys a recipe wrote, each a deploy of what the
 // labels name, at an instant.
-func readHistory(b []byte, name string, labels map[string]string) ([]ledger.Deploy, error) {
-	var out []ledger.Deploy
+func readHistory(b []byte, name string, labels map[string]string) ([]Deploy, error) {
+	var out []Deploy
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	for n := 1; sc.Scan(); n++ {
 		line := bytes.TrimSpace(sc.Bytes())
@@ -179,8 +177,8 @@ func readHistory(b []byte, name string, labels map[string]string) ([]ledger.Depl
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", name, n, err)
 		}
-		out = append(out, ledger.Deploy{Start: at, End: at, Labels: labels, Revision: string(m[1]), Source: filepath.Base(name)})
-		if len(out) > ledger.MaxDeploys {
+		out = append(out, Deploy{Start: at, End: at, Labels: labels, Revision: string(m[1]), Source: filepath.Base(name)})
+		if len(out) > MaxDeploys {
 			break
 		}
 	}

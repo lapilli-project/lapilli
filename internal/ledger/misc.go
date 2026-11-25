@@ -285,6 +285,12 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 		"DELETE FROM verdicts WHERE id IN (SELECT id FROM verdicts WHERE start_at < ? LIMIT 5000)",
 		"DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? LIMIT 5000)",
 		"DELETE FROM incidents WHERE id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? AND id NOT IN (SELECT incident_id FROM catches) LIMIT 5000)",
+		// What people did, as firings are: the pages, the changes read and the
+		// workloads their pods belonged to, once past it.
+		"DELETE FROM responses WHERE sent_at < ?",
+		"DELETE FROM rollouts WHERE at < ?",
+		"DELETE FROM rollout_spans WHERE to_at < ?",
+		"DELETE FROM rollout_owners WHERE seen_at < ?",
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
 		"DELETE FROM results WHERE id IN (SELECT id FROM results WHERE at < ? LIMIT 5000)",
 		pruneChanges,

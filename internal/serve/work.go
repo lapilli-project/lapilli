@@ -70,7 +70,7 @@ const linkedMeta = "linked-only"
 // (schema 032's loose catches) raises it, and a ledger last judged under
 // the one before judges every firing again once at its first start, as a
 // change of a flag does.
-const judgedBy = "j2"
+const judgedBy = "j3"
 
 // linkedText is judgedBy, then --linked-only as "1" and --match-strict as
 // "m", in that order, as meta keeps them: a ledger before they were judged

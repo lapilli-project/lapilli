@@ -350,7 +350,7 @@ func TestEpisodesUpgradedOnce(t *testing.T) {
 	}
 	daysBefore, _ := l.DaysBy(ctx, 0, 1<<30)
 	// Taken back to 024, as the release before left it.
-	undo, version := slices.Concat(ledgertest.Undo033, ledgertest.Undo032, ledgertest.Undo031, ledgertest.Undo030, ledgertest.Undo029, ledgertest.Undo028, ledgertest.Undo027, ledgertest.Undo026, ledgertest.Undo025), "PRAGMA user_version = 24"
+	undo, version := slices.Concat(ledgertest.Undo034, ledgertest.Undo033, ledgertest.Undo032, ledgertest.Undo031, ledgertest.Undo030, ledgertest.Undo029, ledgertest.Undo028, ledgertest.Undo027, ledgertest.Undo026, ledgertest.Undo025), "PRAGMA user_version = 24"
 	if l.d == postgres {
 		version = "UPDATE schema_version SET version = 24"
 	}
@@ -413,7 +413,7 @@ func TestEpisodesUpgradedOnce(t *testing.T) {
 	if err != nil || got.EpisodesNotCounted || !reflect.DeepEqual(got.Rules, want.Rules) || !reflect.DeepEqual(got.Firings, want.Firings) {
 		t.Errorf("walked, the report isn't as before the upgrade: %v", err)
 	}
-	if days, _ := a.DaysBy(ctx, 0, 1<<30); !reflect.DeepEqual(days, daysBefore) {
+	if days, _ := a.DaysBy(ctx, 0, 1<<30); !reflect.DeepEqual(sansResponses(days), sansResponses(daysBefore)) {
 		t.Errorf("walked, the days' tallies aren't as before the upgrade")
 	}
 }

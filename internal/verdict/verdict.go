@@ -120,6 +120,13 @@ type Options struct {
 	// --routine a Responder was made with, which a report says.
 	NoisyBy string  `json:"-"`
 	Routine float64 `json:"-"`
+	// RolloutMatch are the labels --rollout-match names, which tie a
+	// firing to the workload whose name their value is; Within is how far
+	// from its firing a page may have been sent, by rule (two evaluations
+	// of it), where a ledger judges the firings it keeps by what was done
+	// about them: lapilli serve.
+	RolloutMatch []string                        `json:"-"`
+	Within       func(rule string) time.Duration `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
