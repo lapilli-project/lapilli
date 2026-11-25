@@ -58,7 +58,9 @@ func TestRefsAndErrors(t *testing.T) {
 		// (lexSymbol) and refuses one it hasn't: these are errors there.
 		"$A>-1", "$A>=-1", "$A--$B", "$A*-1", "$A+-1", "$A&&!$B", "$A>!$B", "!-$A", "$A=>1", "$A=1", "$A & $B", "$A | $B",
 		// ^ is no character of its lexer; its power is **.
-		"2 ^ 3", "$A ^ 2", "$A ** 2"} {
+		"2 ^ 3", "$A ^ 2", "$A ** 2",
+		// Grafana 13.3 has no exp (nor sqrt, sin, ...): it errors on one.
+		"exp($A)", "sqrt($A)"} {
 		if _, err := ParseMath(bad); err == nil {
 			t.Errorf("ParseMath(%q) took it", bad)
 		}

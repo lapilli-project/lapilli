@@ -253,7 +253,7 @@ func (p *parser) unary() (Expr, error) {
 }
 
 var funcs = map[string]func(float64) float64{
-	"abs": math.Abs, "ceil": math.Ceil, "floor": math.Floor, "round": math.Round, "log": math.Log, "exp": math.Exp,
+	"abs": math.Abs, "ceil": math.Ceil, "floor": math.Floor, "round": math.Round, "log": math.Log,
 	"is_nan": func(v float64) float64 { return b2f(math.IsNaN(v)) },
 	// Grafana's: 1 for a real number, 0 for NaN or an infinity. Its own
 	// conversion of a Prometheus rule fires on is_number($A) || is_nan($A)
