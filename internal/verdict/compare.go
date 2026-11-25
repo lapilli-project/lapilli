@@ -62,6 +62,14 @@ type Comparison struct {
 	// rule catches after it, as HoldMissed found them (--fail-missed): nil
 	// when it didn't look.
 	Missed []IncidentChange `json:"missed,omitempty"`
+	// MissedByDependency are the incidents a rule caught before the change
+	// that only a catch by the service graph holds after it: they are in
+	// Missed too (the graph's catch isn't counted, as whoever can write the
+	// series that says who calls whom could make such a catch), and this
+	// says why, unless --depends-count-missed counts catches by dependency
+	// as caught. Absent when there is none, and when it didn't look
+	// (--fail-missed).
+	MissedByDependency []IncidentChange `json:"missed_by_dependency,omitempty"`
 	// JudgedBy names whose record judged the firings, when it isn't the
 	// incidents the comparison was given: lapilli serve's, for a pull
 	// request backtested through it (JudgedByServe). CompareMarkdown's
@@ -229,16 +237,17 @@ func (c *Comparison) Lost() bool {
 // such an incident is counted as not known (MissedNotKnown), not missed.
 func (c *Comparison) HoldMissed(alike *Report) {
 	broken := anyUnreplayed(alike)
+	count := c.countsDependency()
 	c.holdMissed(func(i int, in incident.Incident) (bool, bool) {
 		if alike == nil {
 			return false, true
 		}
 		same := func(x IncidentResult) bool { return x.ID == in.ID && x.Start.Equal(in.Start) }
 		if i < len(alike.Incidents) && same(alike.Incidents[i]) {
-			return len(alike.Incidents[i].CaughtBy) > 0, !broken
+			return counted(alike.Incidents[i].CaughtBy, count), !broken
 		}
 		for _, x := range alike.Incidents {
-			if same(x) && len(x.CaughtBy) > 0 {
+			if same(x) && counted(x.CaughtBy, count) {
 				return true, true
 			}
 		}
@@ -268,6 +277,24 @@ func (c *Comparison) HoldMissedBy(leftAlone LeftAlone) {
 	})
 }
 
+// counted reports whether the catches hold one that counts toward an
+// incident being caught: one by a rule's labels or a link, or, when
+// dependency says so, one by the service graph too.
+func counted(cs []Catch, dependency bool) bool {
+	return slices.ContainsFunc(cs, func(c Catch) bool { return dependency || len(c.Dependency) == 0 })
+}
+
+// countsDependency reports whether the run counted a catch made only by the
+// service graph as a catch (--depends-count-missed).
+func (c *Comparison) countsDependency() bool {
+	for _, r := range []*Report{c.After, c.Before} {
+		if r != nil && r.Settings != nil && r.Settings.Depends != nil {
+			return r.Settings.Depends.CountCatches
+		}
+	}
+	return false
+}
+
 // AfterUnreplayed reports whether a rule replayed after the change couldn't
 // be replayed: an incident none of them catches is then not known, whatever
 // the rules left alone say.
@@ -280,7 +307,8 @@ func (c *Comparison) LostIncidents() []incident.Incident {
 	var out []incident.Incident
 	if c.Before != nil && c.After != nil && len(c.Before.Incidents) == len(c.After.Incidents) {
 		for i, b := range c.Before.Incidents {
-			if len(b.CaughtBy) > 0 && len(c.After.Incidents[i].CaughtBy) == 0 {
+			dep := c.countsDependency()
+			if counted(b.CaughtBy, dep) && !counted(c.After.Incidents[i].CaughtBy, dep) {
 				out = append(out, b.Incident)
 			}
 		}
@@ -298,7 +326,9 @@ func anyUnreplayed(r *Report) bool {
 // known.
 func (c *Comparison) holdMissed(leftAlone func(i int, in incident.Incident) (caught, known bool)) {
 	c.Missed = []IncidentChange{}
+	c.MissedByDependency = nil
 	notKnown := 0
+	count := c.countsDependency()
 	// After the change: the rules replayed after it, and the rules left
 	// alone, as leftAlone says them.
 	unsure := anyUnreplayed(c.After)
@@ -306,7 +336,7 @@ func (c *Comparison) holdMissed(leftAlone func(i int, in incident.Incident) (cau
 	// same order.
 	if c.Before != nil && c.After != nil && len(c.Before.Incidents) == len(c.After.Incidents) {
 		for i, b := range c.Before.Incidents {
-			if len(b.CaughtBy) == 0 || len(c.After.Incidents[i].CaughtBy) > 0 {
+			if !counted(b.CaughtBy, count) || counted(c.After.Incidents[i].CaughtBy, count) {
 				continue
 			}
 			caught, known := leftAlone(i, b.Incident)
@@ -315,6 +345,13 @@ func (c *Comparison) holdMissed(leftAlone func(i int, in incident.Incident) (cau
 			}
 			if unsure || !known {
 				notKnown++
+				continue
+			}
+			if len(c.After.Incidents[i].CaughtBy) > 0 {
+				// Caught after only by the service graph, which doesn't count:
+				// the incident is missed, and this says why.
+				c.MissedByDependency = append(c.MissedByDependency, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: c.After.Incidents[i].CaughtBy})
+				c.Missed = append(c.Missed, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: c.After.Incidents[i].CaughtBy})
 				continue
 			}
 			c.Missed = append(c.Missed, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: []Catch{}})
@@ -345,6 +382,17 @@ func (c *Comparison) MissedNotKnownText() string {
 		"whether they are missed isn't known, and they fail nothing (--fail-unreplayed fails a run whose history couldn't be read).", c.Summary.MissedNotKnown)
 }
 
+// MissedByDependencyText says how many incidents a rule caught before the
+// change are caught after it only by the service graph, which isn't counted
+// as caught, or nothing.
+func (c *Comparison) MissedByDependencyText() string {
+	if c.Summary == nil || len(c.MissedByDependency) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d incidents a rule caught before the change are caught after it only by dependency (the service graph): that is not counted as caught, so they are missed and fail --fail-missed. "+
+		"--depends-count-missed counts them as caught.", len(c.MissedByDependency))
+}
+
 // MissedText writes, for a person, what HoldMissed found (--fail-missed),
 // times in loc: nothing when it didn't look, or nothing changed.
 func MissedText(w io.Writer, c *Comparison, loc *time.Location) error {
@@ -352,6 +400,9 @@ func MissedText(w io.Writer, c *Comparison, loc *time.Location) error {
 		return nil
 	}
 	if s := c.MissedNotKnownText(); s != "" {
+		fmt.Fprintf(w, "\n%s\n", s)
+	}
+	if s := c.MissedByDependencyText(); s != "" {
 		fmt.Fprintf(w, "\n%s\n", s)
 	}
 	if len(c.Missed) == 0 {
@@ -395,6 +446,17 @@ func (c *Comparison) judged() bool {
 // the firings are counted, not judged, as without them.
 func (c *Comparison) noRecord() bool {
 	return (c.Summary == nil || c.Summary.IncidentsGiven) && c.Before != nil && c.Before.NoRecord
+}
+
+// dependsTooMany says, when the service graph (--depends) kept none on
+// either side, that no catch was by dependency and why; "" else.
+func (c *Comparison) dependsTooMany() string {
+	for _, r := range []*Report{c.Before, c.After} {
+		if r != nil && r.Settings != nil && r.Settings.Depends != nil && r.Settings.Depends.TooMany {
+			return fmt.Sprintf("--depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency. (It keeps at most %d edges and %d services an hour.)", DependsMaxEdges, DependsMaxEdges, DependsMaxNodes)
+		}
+	}
+	return ""
 }
 
 // noRecordText is NoRecordCompared, and why when --impact had no data.
@@ -567,7 +629,7 @@ func Compare(before, after *Report, changed []string, same int) *Comparison {
 	for i, b := range before.Incidents {
 		a := after.Incidents[i]
 		if !slices.EqualFunc(b.CaughtBy, a.CaughtBy, func(x, y Catch) bool {
-			return x.Rule == y.Rule && x.Delay == y.Delay && x.Noisy == y.Noisy && x.Linked == y.Linked && x.Loose == y.Loose && slices.Equal(x.Lacked, y.Lacked)
+			return x.Rule == y.Rule && x.Delay == y.Delay && x.Noisy == y.Noisy && x.Linked == y.Linked && x.Loose == y.Loose && slices.Equal(x.Lacked, y.Lacked) && slices.Equal(x.Dependency, y.Dependency)
 		}) {
 			c.Incidents = append(c.Incidents, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: a.CaughtBy})
 		}
@@ -603,6 +665,9 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	}
 	if c.noRecord() {
 		fmt.Fprintln(w, c.noRecordText())
+	}
+	if s := c.dependsTooMany(); s != "" {
+		fmt.Fprintln(w, "! "+s)
 	}
 	if c.ChangedOnly {
 		fmt.Fprintf(w, "Firings of the changed rules %d → %d\n", len(c.Before.Firings), len(c.After.Firings))

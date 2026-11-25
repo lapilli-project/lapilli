@@ -43,6 +43,10 @@ type NearMiss struct {
 	// Value, when set, is how the rule nearly caught it by its value; NewFor
 	// is then its own "for", and From when the value passed Value.New.
 	Value *ByValue `json:"value,omitempty"`
+	// Dependency is, of a rule whose firing is about the incident only by
+	// the service graph (Options.Depends), the way from the caller to the
+	// callee, as Catch.Dependency has it.
+	Dependency []string `json:"dependency,omitempty"`
 }
 
 // ByValue is how a rule nearly caught an incident by its value: its
@@ -107,7 +111,11 @@ func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Dura
 	// The longest "for" short of the rule's own, in whole evaluations.
 	longest := (ruleFor - 1) / every * every
 	for _, f := range held {
-		if f.End.IsZero() || !o.About(f.Rule, f.Labels, in) {
+		if f.End.IsZero() {
+			continue
+		}
+		about, via := o.AboutBy(f.Rule, f.Labels, in)
+		if !about {
 			continue
 		}
 		// From the rule's own lead for the incident.
@@ -128,7 +136,7 @@ func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Dura
 		if found && (d < best.NewFor || d == best.NewFor && delay >= best.Delay) {
 			continue
 		}
-		best = NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Sub(in.Start), For: ruleFor, NewFor: d, Delay: delay}
+		best = NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Sub(in.Start), For: ruleFor, NewFor: d, Delay: delay, Dependency: via}
 		if fires := (ruleFor + every - 1) / every * every; length-every >= fires {
 			// It held long enough: it fired, once its "for" was up, too late.
 			best.Late = true
@@ -165,7 +173,8 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 		maps.Copy(l, r.AlertLabels())
 		// A value that isn't a number doesn't hold: it breaks a stretch.
 		smp := slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return math.IsNaN(x.V) })
-		if len(smp) == 0 || !o.About(r.Name, l, in) {
+		about, via := o.AboutBy(r.Name, l, in)
+		if len(smp) == 0 || !about {
 			continue
 		}
 		// For a range, a value its other end alone decides is as near holding,
@@ -232,7 +241,7 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 				continue
 			}
 			nm := NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Add(-wait).Sub(in.Start), For: r.For, NewFor: r.For,
-				Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Reached: &reached, New: nb.Value}}
+				Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Reached: &reached, New: nb.Value}, Dependency: via}
 			if !found || nm.Kept() > best.Kept() || nm.Kept() == best.Kept() && nm.Delay < best.Delay {
 				best, found = nm, true
 			}
@@ -253,7 +262,8 @@ func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules
 	}
 	wait := (r.For + every - 1) / every * every
 	return NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Add(-wait).Sub(in.Start), For: r.For, NewFor: r.For,
-		Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Unless: b.Unless, New: n}}, true
+		Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Unless: b.Unless, New: n},
+		Dependency: CatchesBy(f, in, o).Dependency}, true
 }
 
 // FiringDuring reports whether, of fired, one about the incident (About:

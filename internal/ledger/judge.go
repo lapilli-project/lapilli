@@ -347,6 +347,21 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	if err != nil {
 		return err
 	}
+	// The service graph of the incidents' hours, when judging by one.
+	plain := make([]incident.Incident, len(incs))
+	for i, c := range incs {
+		plain[i] = c.Incident
+	}
+	graphed := o.Depends != nil && o.Depends.Graph == nil
+	o, over, err := l.graphFor(t.ctx, t, o, plain)
+	if err != nil {
+		return err
+	}
+	if graphed && len(plain) > 0 {
+		if err := l.noteOver(t, lo, hi, over); err != nil {
+			return err
+		}
+	}
 	if err := l.stones(t, lo, hi, incs, o); err != nil {
 		return err
 	}
@@ -459,7 +474,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 	if err != nil {
 		return err
 	}
-	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked, s.labels, f.person, f.unrelated
+	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked, s.labels, f.person, f.unrelated, f.white_depends
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at <= ? ORDER BY f.series_id, f.start_at, f.id`, lo, hi)
 	if err != nil {
@@ -469,6 +484,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		id, series                    int64
 		f                             firing.Firing
 		white, again, excused, deploy bool
+		viaGraph                      bool
 		marked, person                int64
 		unrelated                     string
 	}
@@ -478,7 +494,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		var start int64
 		var end sql.NullInt64
 		var text string
-		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &r.marked, &text, &r.person, &r.unrelated); err != nil {
+		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &r.marked, &text, &r.person, &r.unrelated, &r.viaGraph); err != nil {
 			rows.Close()
 			return err
 		}
@@ -512,7 +528,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			return err
 		}
 	}
-	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy", "marked", "person"})
+	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy", "marked", "person", "white_depends"})
 	if err != nil {
 		return err
 	}
@@ -530,9 +546,11 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			last = fromNull(end)
 		}
 		var caught []counted
+		var byGraph []bool // of each, whether it caught by the service graph alone
 		for _, in := range incs {
-			if verdict.Catches(r.f, in.Incident, o) {
+			if by := verdict.CatchesBy(r.f, in.Incident, o); by.Caught {
 				caught = append(caught, in)
+				byGraph = append(byGraph, by.Dependency != nil)
 			}
 		}
 		// People's word on it: an incident it was said to be unrelated to
@@ -540,6 +558,15 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		k := [2]int64{r.series, r.f.Start.Unix()}
 		v := said.at[k]
 		white, person, unrelated, why := personOf(caught, v, said.held[k])
+		// White only by the service graph: of the incidents it catches that
+		// a person didn't say it is unrelated to, none by its labels or a
+		// link, as verdict.Judged.ByDependency is.
+		viaGraph := white
+		for i, in := range caught {
+			if !byGraph[i] && !slices.Contains(unrelated, in.ID) {
+				viaGraph = false
+			}
+		}
 		if why != "" && v.ID != 0 && v.Moved == "" {
 			moved[v.ID] = why
 		}
@@ -565,10 +592,10 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			marked = marks(r.f)
 		}
 		last = r.f.End
-		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy && marked == r.marked && person == r.person {
+		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy && marked == r.marked && person == r.person && viaGraph == r.viaGraph {
 			continue
 		}
-		if err := up.add(white, again, excused, deploy, marked, person, r.id); err != nil {
+		if err := up.add(white, again, excused, deploy, marked, person, viaGraph, r.id); err != nil {
 			return err
 		}
 	}
@@ -637,7 +664,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		return err
 	}
 	defer del.Close()
-	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked, loose) VALUES (?, ?, ?, ?, ?)")
+	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked, loose, dependency) VALUES (?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -652,6 +679,13 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		linked := map[int64]bool{}     // the rules a firing it lists caught it with
 		proper := map[int64]bool{}     // the rules a firing that isn't loose caught it with
 		lacked := map[int64][]string{} // the labels the loose firings of a rule lacked
+		direct := map[int64]bool{}     // the rules a firing linked or agreeing on labels caught it with
+		via := map[int64]viaAt{}       // else, the way the earliest firing reached it by the service graph
+		// The same of the direct firings alone: a rule that has any has its
+		// delay and looseness from them, as verdict.Judge has it.
+		dfirst := map[int64]int64{}
+		dproper := map[int64]bool{}
+		dlacked := map[int64][]string{}
 		for rows.Next() {
 			var rule, sid, start int64
 			var text, name, unrelated string
@@ -671,9 +705,24 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			}
 			// With its rule, whose entry may keep it from a signal's
 			// windows (docs/design/signals.md, "Judged by its own match").
-			caught, link, lack := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			by := verdict.CatchesBy(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			caught, link, lack := by.Caught, by.Linked, by.Lacked
 			if !caught {
 				continue
+			}
+			d := start - in.Start.Unix()
+			if by.Dependency == nil {
+				direct[rule] = true
+				if have, ok := dfirst[rule]; !ok || d < have {
+					dfirst[rule] = d
+				}
+				if len(lack) == 0 {
+					dproper[rule] = true
+				} else {
+					dlacked[rule] = verdict.MergeLacked(dlacked[rule], lack)
+				}
+			} else if have, ok := via[rule]; !ok || start < have.at {
+				via[rule] = viaAt{start, by.Dependency}
 			}
 			linked[rule] = linked[rule] || link
 			if len(lack) == 0 {
@@ -681,7 +730,6 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			} else {
 				lacked[rule] = verdict.MergeLacked(lacked[rule], lack)
 			}
-			d := start - in.Start.Unix()
 			if have, ok := first[rule]; !ok || d < have {
 				first[rule] = d
 			}
@@ -698,12 +746,29 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			if !proper[rule] {
 				loose = strings.Join(lacked[rule], ",")
 			}
-			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule], loose); err != nil {
+			dep, delay := "", first[rule]
+			if direct[rule] {
+				delay = dfirst[rule]
+				loose = ""
+				if !dproper[rule] {
+					loose = strings.Join(dlacked[rule], ",")
+				}
+			} else if v, ok := via[rule]; ok {
+				dep = dependencyText(v.path)
+			}
+			if _, err := ins.ExecContext(t.ctx, in.id, rule, delay, linked[rule], loose, dep); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// viaAt is the way a firing reached an incident through the service graph,
+// and when it started.
+type viaAt struct {
+	at   int64
+	path []string
 }
 
 // personSums are, of the firings a tally counts, the people's bits
@@ -736,9 +801,9 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	// judged by them apart (docs/design/signals.md, "In the ledger").
 	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white,
 			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white,
-			resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful)
+			resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful, white_depends)
 		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white),
-			`+firstFirings+`, sum(f.episode_white), `+personSums+`, `+responseSums+`
+			`+firstFirings+`, sum(f.episode_white), `+personSums+`, `+responseSums+`, sum(f.white_depends)
 		FROM firings f JOIN series s ON s.id = f.series_id
 		WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.day, f.rule_id, s.signals`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
@@ -756,10 +821,10 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	}
 	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white,
 			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white,
-			resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful)
+			resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful, white_depends)
 		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), sum(episodes), sum(episodes_white),
 			sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white),
-			sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful) FROM days
+			sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful), sum(white_depends) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY 1, 2, 3`, w1, w2+6); err != nil {
 		return err
 	}

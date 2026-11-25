@@ -145,7 +145,8 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
 - Before a change: [Before a change is merged](docs/compare.md),
   [Pull request backtests in CI](docs/pr-backtests.md)
 - Incidents: [Incidents kept elsewhere](docs/incidents.md),
-  [Incidents nobody wrote down](docs/impact.md)
+  [Incidents nobody wrote down](docs/impact.md),
+  [An alert on a dependency](docs/dependencies.md)
 - Reports: [Every week](docs/every-week.md),
   [Showing a report outside](docs/redact.md)
 - Every hour, `lapilli serve`: [Keep judging](docs/serve.md),

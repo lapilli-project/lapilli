@@ -246,21 +246,22 @@ func share(n, of int) *float64 {
 // What the tools return. Lists are never null.
 
 type weekOut struct {
-	Week         time.Time `json:"week" jsonschema:"the Monday the week starts on"`
-	SoFar        bool      `json:"so_far,omitempty" jsonschema:"the week isn't over"`
-	Firings      int       `json:"firings" jsonschema:"firings judged; those quiet windows excused aren't among them"`
-	White        int       `json:"white" jsonschema:"firings that caught an incident"`
-	Black        int       `json:"black" jsonschema:"firings that caught nothing"`
-	Excused      int       `json:"excused"`
-	Precision    *float64  `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
-	NoRecord     bool      `json:"no_record,omitempty" jsonschema:"it had firings, and none was judged: no incident was on in the day of any of them or in the two weeks before it (the week's, with --record-by-week): a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and no rule was noisy"`
-	NoisyRules   int       `json:"noisy_rules"`
-	Incidents    int       `json:"incidents"`
-	Caught       int       `json:"caught"`
-	NoisyOnly    int       `json:"caught_only_by_noisy_rules"`
-	Missed       int       `json:"missed"`
-	TimeToCatch  *float64  `json:"median_seconds_to_catch,omitempty" jsonschema:"to the first catch by a rule that isn't noisy; negative when the alert came first"`
-	RulesChanged bool      `json:"rules_changed,omitempty"`
+	Week              time.Time `json:"week" jsonschema:"the Monday the week starts on"`
+	SoFar             bool      `json:"so_far,omitempty" jsonschema:"the week isn't over"`
+	Firings           int       `json:"firings" jsonschema:"firings judged; those quiet windows excused aren't among them"`
+	White             int       `json:"white" jsonschema:"firings that caught an incident"`
+	Black             int       `json:"black" jsonschema:"firings that caught nothing"`
+	Excused           int       `json:"excused"`
+	WhiteByDependency int       `json:"white_by_dependency,omitempty" jsonschema:"of the white firings, those white only by the service graph (--depends): no labels or link caught anything, so precision is wider by them"`
+	Precision         *float64  `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
+	NoRecord          bool      `json:"no_record,omitempty" jsonschema:"it had firings, and none was judged: no incident was on in the day of any of them or in the two weeks before it (the week's, with --record-by-week): a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and no rule was noisy"`
+	NoisyRules        int       `json:"noisy_rules"`
+	Incidents         int       `json:"incidents"`
+	Caught            int       `json:"caught"`
+	NoisyOnly         int       `json:"caught_only_by_noisy_rules"`
+	Missed            int       `json:"missed"`
+	TimeToCatch       *float64  `json:"median_seconds_to_catch,omitempty" jsonschema:"to the first catch by a rule that isn't noisy; negative when the alert came first"`
+	RulesChanged      bool      `json:"rules_changed,omitempty"`
 }
 
 type lookAtOut struct {
@@ -324,7 +325,7 @@ func (s *Server) toolOverview(ctx context.Context, _ *mcp.CallToolRequest, in ov
 	d := v.(dashboard)
 	out.Empty, out.Cursor, out.Behind = d.Empty, d.Cursor, d.Backlog
 	for _, w := range d.Weeks {
-		x := weekOut{Week: w.Start, SoFar: w.Current, Firings: w.Firings, White: w.White, Black: w.Black, Excused: w.Excused,
+		x := weekOut{Week: w.Start, SoFar: w.Current, Firings: w.Firings, White: w.White, Black: w.Black, Excused: w.Excused, WhiteByDependency: w.WhiteDepends,
 			NoRecord: w.NoRecord, NoisyRules: w.Noisy, Incidents: w.Incidents, Caught: w.Caught, NoisyOnly: w.NoisyOnly,
 			Missed: w.Missed, RulesChanged: w.Changed}
 		if p, ok := w.precision(); ok {
@@ -358,21 +359,22 @@ type rulesIn struct {
 }
 
 type ruleOut struct {
-	Name       string   `json:"name"`
-	Group      string   `json:"group,omitempty"`
-	Severity   string   `json:"severity,omitempty"`
-	Team       string   `json:"team,omitempty"`
-	Status     string   `json:"status,omitempty" jsonschema:"what people mean to do with it: keep, tune or retire"`
-	Firings    int      `json:"firings"`
-	White      int      `json:"white"`
-	Black      int      `json:"black"`
-	Refired    int      `json:"refired" jsonschema:"firings soon after the same alert resolved"`
-	Excused    int      `json:"excused"`
-	Precision  *float64 `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
-	Noisy      bool     `json:"noisy"`
-	NoRecord   bool     `json:"no_record,omitempty" jsonschema:"it fired over days with no incident written down on them or in the two weeks before them (weeks, with --record-by-week): a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and it isn't called noisy"`
-	NoisyWeeks int      `json:"noisy_weeks_running,omitempty"`
-	Suggestion string   `json:"suggestion,omitempty" jsonschema:"a longer for that would quiet it, from the last weekly digest"`
+	Name              string   `json:"name"`
+	Group             string   `json:"group,omitempty"`
+	Severity          string   `json:"severity,omitempty"`
+	Team              string   `json:"team,omitempty"`
+	Status            string   `json:"status,omitempty" jsonschema:"what people mean to do with it: keep, tune or retire"`
+	Firings           int      `json:"firings"`
+	White             int      `json:"white"`
+	Black             int      `json:"black"`
+	Refired           int      `json:"refired" jsonschema:"firings soon after the same alert resolved"`
+	Excused           int      `json:"excused"`
+	WhiteByDependency int      `json:"white_by_dependency,omitempty" jsonschema:"of the white firings, those white only by the service graph (--depends): no labels or link caught anything"`
+	Precision         *float64 `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
+	Noisy             bool     `json:"noisy"`
+	NoRecord          bool     `json:"no_record,omitempty" jsonschema:"it fired over days with no incident written down on them or in the two weeks before them (weeks, with --record-by-week): a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and it isn't called noisy"`
+	NoisyWeeks        int      `json:"noisy_weeks_running,omitempty"`
+	Suggestion        string   `json:"suggestion,omitempty" jsonschema:"a longer for that would quiet it, from the last weekly digest"`
 	// What its firings were, of a week with no record.
 	FiredOn     *firedOnOut    `json:"fired_on,omitempty" jsonschema:"from the last weekly digest, when most of its firings, more than half, came from what another team owns, by the teams' labels, than the one its alerts go to"`
 	Unrecorded  *unrecordedOut `json:"unrecorded,omitempty" jsonschema:"from the last weekly digest, when its week had no incident written down to judge firings by and the rule fired as often as a noisy rule: what its firings were instead. Not given once an incident is written down for that week"`
@@ -485,7 +487,7 @@ func ruleOutOf(l ruleLine) ruleOut {
 	if l.NoRecord {
 		precision = nil
 	}
-	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
+	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White, WhiteByDependency: l.WhiteDepends,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: precision, Noisy: l.Noisy, NoRecord: l.NoRecord, NoisyWeeks: l.Streak,
 		Suggestion: l.Suggestion, Unrecorded: unrecordedOutOf(l.Unrecord), FiredOn: firedOnOutOf(l.FiredOn), NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
 		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), Pages: pagesOutOf(l.pagesLine), ReplayDiffers: l.Differs,
@@ -683,6 +685,8 @@ type catchOut struct {
 	Linked bool `json:"linked,omitempty" jsonschema:"caught by one of the alerts the incident's tool linked to it"`
 	// Loose, by firings that lack a label of --match the incident has.
 	Loose bool `json:"loose,omitempty" jsonschema:"caught while its firings lacked a --match label the incident has: it agrees with any incident's"`
+	// Dependency, by the service graph alone.
+	Dependency []string `json:"dependency,omitempty" jsonschema:"caught only through the service graph (--depends): the services from the caller to the callee, the incident's service and the firing's at its ends"`
 }
 
 type incidentOut struct {
@@ -736,7 +740,7 @@ func incidentOutOf(l incidentLine) incidentOut {
 	x := incidentOut{ID: l.ID, Title: l.Title, Start: l.Start, End: l.End, Labels: l.Labels, Origin: l.Origin, Status: l.Status,
 		ToDecide: l.Origin == "impact" && l.State == "" && l.Counts, Signal: l.Signal, CaughtBy: []catchOut{}}
 	for _, c := range l.CaughtBy {
-		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Linked: c.Linked, Loose: c.Loose})
+		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Linked: c.Linked, Loose: c.Loose, Dependency: c.Dependency})
 	}
 	for _, c := range l.FiredAfter {
 		x.FiredAfter = append(x.FiredAfter, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds()})
@@ -1412,7 +1416,7 @@ func (s *Server) toolCompare(ctx context.Context, _ *mcp.CallToolRequest, in com
 	catches := func(cs []verdict.Catch) []catchOut {
 		out := []catchOut{}
 		for _, c := range cs {
-			out = append(out, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy})
+			out = append(out, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Dependency: c.Dependency})
 		}
 		return out
 	}

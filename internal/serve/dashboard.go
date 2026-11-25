@@ -19,8 +19,11 @@ import (
 
 // weekView is one week: its stones, and its incidents by what caught them.
 type weekView struct {
-	Start                                time.Time
-	Firings, White, Black, Noisy         int
+	Start                        time.Time
+	Firings, White, Black, Noisy int
+	// WhiteDepends are of its White firings those white only by the service
+	// graph (--depends).
+	WhiteDepends                         int
 	Excused                              int
 	Incidents, Caught, NoisyOnly, Missed int
 	// Unreplayed are incidents that started before the first replayed time:
@@ -395,6 +398,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		for id, x := range t.by[w] {
 			wv.Firings += x.Firings
 			wv.White += x.White
+			wv.WhiteDepends += x.WhiteDepends
 			wv.Excused += x.Excused
 			wv.Refired += x.Refired
 			wv.Deploys += x.Deploy
@@ -735,6 +739,9 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	if last.NoRecord {
 		caught = tr(l, "not known: no record")
 		unjudged = caught
+	}
+	if last.WhiteDepends > 0 && !last.NoRecord {
+		caught = tr(l, "of firings caught something, %d of them only by the service graph", last.WhiteDepends)
 	}
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
 		func(a, b float64) string { return ptChange(a, b) }, +1, caught)

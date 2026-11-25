@@ -197,6 +197,29 @@ fewer firings than that, none of them caught anything, isn't noisy yet, and
 `lapilli serve` badges it "Caught nothing", not "OK"; a rule's page says the
 bar in effect beside its badge.
 
+### A catch by dependency
+
+`--match service` also keeps the alerts that matter most from catching
+anything: a database's, a queue's, a cache's. With `--depends`, a graph of
+who calls whom ([An alert on a dependency](dependencies.md)), a firing that
+doesn't catch an incident by its labels, because its value of the label
+(`payments-db`) isn't the incident's (`checkout`), catches it by dependency
+when it starts as any firing must (between `--lead` before the incident and
+its end, and not already on before that); the incident's service called the
+firing's, or called one that did, up to `--depends-depth` calls (1 by
+default, 3 at most), over the edges that held from an hour before the
+incident started to its end; and it agrees with the incident on every other
+`--match` label both carry. That is a cause catching what it caused;
+`--depends-direction both` also lets a firing on a caller catch an incident
+in one it calls. The order holds: linked, then labels, then dependency. A
+catch by dependency is a catch, marked `(via checkout → payments-db)` and
+`dependency` in `--json`: it counts toward precision as any other, the noisy
+test is as before, and near misses and "after its end" are looked for by it
+too. The graph keeps no record: which firings are judged is as before, and
+it never takes a catch away. The report says after the incidents table how
+many catches were by dependency, by which rules, and how many edges the
+graph had.
+
 ## No record, no verdict
 
 **No record, no verdict.** A firing that caught nothing caught nothing

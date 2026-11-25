@@ -47,7 +47,7 @@
 {{end}}
 <h2>{{t "Caught by"}}</h2>{{if .LateCut}}
 <p class="quiet">{{t "More firings came near the ends of incidents than one read looks at: past them, a firing that came after an incident isn't named, so an incident may read as nothing fired."}}</p>{{end}}
-{{if .Catches}}<ul class="plain">{{range .Catches}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}{{if .Linked}} <span class="quiet">({{t "linked in the incident tool"}})</span>{{end}}{{if .Noisy}} <span class="quiet">({{t "noisy that week"}})</span>{{end}}{{if .Loose}} <span class="quiet">({{t "no %s label" .NoLabel}})</span>{{end}}</li>{{end}}</ul>
+{{if .Catches}}<ul class="plain">{{range .Catches}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}{{if .Linked}} <span class="quiet">({{t "linked in the incident tool"}})</span>{{end}}{{if .Noisy}} <span class="quiet">({{t "noisy that week"}})</span>{{end}}{{if .Loose}} <span class="quiet">({{t "no %s label" .NoLabel}})</span>{{end}}{{if .Via}} <span class="quiet">{{tbdi "(by dependency, via %s)" (hops .Dependency)}}</span>{{end}}</li>{{end}}</ul>
 {{else if .Afters}}<p class="{{status "incident" "missed"}}"><span aria-hidden="true">✗</span> {{t "Nothing in time."}}</p>
 <p>{{t "After its end, rules whose condition held in it, but whose for and how late their metrics arrive ran past its end: its alert, too late, black all the same."}}</p>
 <ul class="plain">{{range .Afters}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{tbdi "%s after its end" .After}}</li>{{end}}</ul>

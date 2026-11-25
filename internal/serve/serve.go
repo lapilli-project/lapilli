@@ -81,6 +81,10 @@ type Config struct {
 	Incidents string // the incidents file, read again each run
 	Impact    string
 	ImpactFor time.Duration
+	// Depends is the service graph a firing is judged by when its labels
+	// don't agree with an incident's (--depends, and what goes with it),
+	// as serve was started with it: the Settings page changes it.
+	Depends DependsConfig
 	// Signals are the named impact signals (docs/design/signals.md), from
 	// --impact NAME=PROMQL or --impact-file, each "for" given: with them,
 	// Impact is "", and no impact signal has no name. ImpactRules are the
@@ -450,6 +454,17 @@ type Server struct {
 	// aloneRequests, when set, is the most requests a backtest's replay of
 	// the rules left alone may plan (aloneBudget): tests set it.
 	aloneRequests int
+
+	// depends is the service graph the last options were read with (dependsFor):
+	// what the runs read the graph by, and its key.
+	depends struct {
+		sync.Mutex
+		round dependsConf
+		key   string
+		// over says the last judgement of the runs' hours was made with no
+		// graph (noteGraphOver).
+		over bool
+	}
 
 	// linkedKnown is what this replica knew the ledger was last judged by,
 	// by --linked-only: as found at start, or as it last agreed with its
@@ -1357,12 +1372,17 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	}
 	o.Zone = s.l.Location()
 	for k, v := range set {
-		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) {
+		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) || dependsSetting(k) {
 			continue // the incident criteria's, above and below
 		}
 		if err := apply(&o, k, v.Value); err != nil {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)
 		}
+	}
+	// The service graph a firing is judged by when its labels don't agree
+	// with an incident's, by the match in effect (docs/design/dependencies.md).
+	if o.Depends, err = s.dependsFor(ctx, set, o.Match); err != nil {
+		return o, err
 	}
 	// The rule entries are read with no named signal in effect too: they
 	// keep their rules from the windows of a signal not in effect

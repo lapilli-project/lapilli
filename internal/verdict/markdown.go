@@ -255,6 +255,9 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 			text("Rules left alone weren't replayed (`--changed-only`): incidents show the changed rules' catches alone.\n")
 		}
 	}
+	if s := c.dependsTooMany(); s != "" {
+		text("\n" + strings.Replace(s, "--depends:", "`--depends`:", 1) + "\n")
+	}
 	if said := passedOver(c.PassedOver); said != "" {
 		text("\nPassed over, reading the rules: " + said + ".\n")
 	}
@@ -266,9 +269,20 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 func mdCatches(cs []Catch, match []string) string {
 	var out []string
 	for _, k := range cs {
-		out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marks(match))
+		out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marksWith(match, dependencyMarkMD))
 	}
 	return strings.Join(out, ", ")
+}
+
+// dependencyMarkMD is DependencyMark for a Markdown cell: each service on
+// the path as a code span, escaped as a rule's name is, as a service's name
+// is whatever a label's value was.
+func dependencyMarkMD(path []string) string {
+	parts := make([]string, len(path))
+	for i, v := range path {
+		parts[i] = md(v, 200, true)
+	}
+	return "via " + strings.Join(parts, " → ")
 }
 
 // missedPart says what HoldMissed found (--fail-missed): the incidents a
@@ -278,6 +292,9 @@ func missedPart(c *Comparison, loc *time.Location) mdPart {
 	notKnown := ""
 	if s := c.MissedNotKnownText(); s != "" {
 		notKnown = strings.Replace(s, "(--fail-unreplayed ", "(`--fail-unreplayed` ", 1) + "\n\n"
+	}
+	if s := c.MissedByDependencyText(); s != "" {
+		notKnown += strings.Replace(s, "--depends-count-missed counts", "`--depends-count-missed` counts", 1) + "\n\n"
 	}
 	if len(c.Missed) == 0 {
 		if notKnown != "" {

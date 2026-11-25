@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob 0e16095ae0cb6c9bd4da2085ca51a1d1a27666ff -->
+<!-- translated from docs/README.md at blob 1a0c50f7d170dd3451b3b562d9d5f01b3cb7974d -->
 
 # Lapilli ドキュメント
 
@@ -41,6 +41,7 @@ docs/ を変更のたびに書き直して作る写しです。Lapilli とは何
 
 - [ほかの場所に記録されたインシデント](../incidents.md)：記録先からコピーしたインシデントの記録と、ツールが各インシデントに関連付けたアラート
 - [誰も記録しなかったインシデント](../impact.md)：`--impact`、ユーザー影響の指標から見つけたインシデントと、履歴にどの指標があるかを示す `lapilli impact suggest`
+- [依存先のアラート](../dependencies.md)：`--depends`、どのサービスがどのサービスを呼ぶかのグラフ。DB のアラートが、その DB を呼ぶサービスのインシデントを捉えたものとして数えられます
 
 ## レポート
 

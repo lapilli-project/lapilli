@@ -4,6 +4,81 @@
 
 ### Added
 
+- **An alert on a dependency catches its dependents' incidents**
+  ([docs/dependencies.md](docs/dependencies.md),
+  [docs/design/dependencies.md](docs/design/dependencies.md)). `--depends PROMQL`, with
+  `--depends-labels FROM,TO`, reads who calls whom (a service mesh's or an OpenTelemetry
+  service graph's calls by caller and callee, counted over the hour, `[1h]`) once, at
+  `--depends-step` (1h, 10m to 1h; a sample is stored as the hour it covers), and a firing whose `--match` label isn't the incident's catches it by dependency
+  when the incident's service calls the firing's, or one that does, up to `--depends-depth`
+  calls (1, at most 3) over the edges of the hours from an hour before the incident to its
+  end, and it agrees on every other `--match` label both carry; `--depends-direction both`
+  also lets a caller's alert catch what it calls, and `--depends-match` names the label whose
+  values are the services (the first `--match` label by default). Linked, then labels, then
+  dependency: a catch by dependency is a catch, marked `(via checkout → payments-db)`
+  (`dependency` on `caught_by[]` in `--json`, in `--compare`'s text and Markdown, where each service is a code span as a rule's name is, aliased by
+  `--redact`), near misses (with the path, `dependency`) and "after its end" follow it, and the report says after the
+  incidents table how many catches were so, by which rules, and how many edges the graph had
+  (`settings.depends`), with how many firings it made white that nothing else caught
+  (`white_by_dependency` on a rule, `by_dependency` on a firing); a rule with a direct firing
+  has its delay and looseness from the direct ones alone. The graph keeps no record and never takes a catch away; an hour with
+  more than 20,000 edges leaves it with none, which the report says, and `--compare` too. `lapilli impact suggest`
+  says which of Istio, Linkerd and an OpenTelemetry or Tempo service graph have their calls
+  in the history, and the `--depends` and `--depends-labels` to give. With no `--depends`
+  every report is as it was.
+- **A catch by dependency, held to what anyone could write.** The graph says who calls whom, and
+  whoever can write that series can make a call, so: a catch made only by dependency no longer
+  counts as a catch for `--fail-missed` (a change that removes an incident's only alert by its labels
+  is missed and fails the run, though another rule caught it by the graph; `missed_by_dependency` in
+  `--compare --json`, a subset of `missed`, and a line in its text and Markdown say how many and why) nor covers another rule for "spare" or takes its `FIRST` and
+  `ALONE`; `--depends-count-missed` counts them as any catch (`settings.depends.count_catches`). The
+  walk is made once for an incident, to every service it reaches, and each firing is a lookup
+  (`graph.Reach`; the cost is the incidents, not the firings times the incidents; `Depends` is a
+  lookup in it). A service name that isn't printable, holds a format or bidirectional-control
+  character, a space or an arrow of any kind, or `,`, or is longer than 317 bytes (a Kubernetes `namespace/name`; was 256) is refused and counted
+  (`settings.depends.refused`), so a path's text can't be forged, and an hour that names more than
+  5,000 services leaves the graph with none, as 20,000 edges do; `verdict.DependsHops` writes a path
+  as separate escaped hops, each in its own `<bdi>`, for a page. An hour of the ledger's rows that
+  is too many (the union of overlapping reads) drops that hour alone and says so, not the whole
+  judgement's graph; the walk's cache is bounded (about 100 MiB with a judgement's edges), and the
+  adjacency of a window is kept, so incidents sharing one don't build it again. `lapilli impact suggest`'s Istio
+  and Linkerd expressions name a service `namespace/workload` (labels `caller,callee`), so
+  same-named workloads of two namespaces don't merge and another namespace's can't be named as the
+  one a service calls: the firings' and incidents' `--match` label must carry that form
+  ([docs/dependencies.md](docs/dependencies.md) shows how, and lists the plain form as an option);
+  an OpenTelemetry service graph is named by its senders, and the docs say so.
+- **An alert on a dependency, in `lapilli serve`**
+  ([docs/dependencies.md](docs/dependencies.md#in-lapilli-serve),
+  [docs/design/dependencies.md](docs/design/dependencies.md)). `lapilli serve` takes
+  `--depends` and the flags that go with it (`--depends-labels`, `--depends-match`,
+  `--depends-depth`, `--depends-direction`, `--depends-step`; the chart's `depends`,
+  `dependsLabels`, `dependsMatch`, `dependsDepth`, `dependsDirection` and `dependsStep`, in
+  both modes). Each run reads the graph for the hours it judges and the lead before them,
+  once, and keeps its edges by the hour (schema 036: `edges`, `edge_spans`, `edge_retries`,
+  `catches.dependency`) for as long as the firings; a read that fails is read once more by
+  the next run, as the changes `--rollouts` reads are. Judging, the first time and again, asks
+  the history nothing: it loads the ledger's edges for the hours of the incidents it judges
+  against, 1,000,000 at most in one judgement (past it that judgement is made with no graph).
+  Turning `--depends` on, off, or changing its expression, labels, step, label, depth or
+  direction judges every firing again, once. The Settings page's Incident criteria has a
+  **Service graph** with the same four settings, tried on the last four weeks first like
+  `--impact` (the catches it would add, by rule, and how the verdict moves), by an admin, from
+  the site, counted with the impact tries; saved, the graph is read over those weeks and every
+  firing judged again. The incident's page shows a catch by dependency with its path, a rule's
+  page lists its catches by dependency apart, and MCP and `/api/v1/incidents` carry
+  `dependency` (and `/api/v1/report` its `settings.depends`). Without `--depends` nothing is
+  read, kept or shown, and the stones are as they were. The ledger judges as `lapilli
+  verdict` does: a rule with a direct firing has its delay and looseness from the direct ones
+  alone, and the firings white only by the graph are counted (`white_by_dependency` on the
+  report's rules, the digest's note, the rule page, a mark beside the overview's precision, MCP);
+  a judgement loads each incident's window apart, not the hours between them, and one whose
+  windows pass 1,000,000 edges is made with no graph and says so (`too_many`, the Settings and
+  rule pages, the log). A round reads and keeps only its own graph; a new expression is read
+  over the last four weeks a week at a time, within 90 seconds each, tried again an hour later,
+  then two, up to a day when none reads, with the weeks that read kept and the others read once
+  more, then shown as gaps, and why it failed kept in the ledger for every replica; the key
+  is the expression as Lapilli reads PromQL, so spaces don't discard the edges. The ledger keeps
+  200,000 edges a day and 5,000,000 in all, past which the hours are not read, with a status.
 - **A pull request backtest through serve replays the rules left alone that
   its record can't settle** ([docs/design/backtests.md](docs/design/backtests.md#held-to-the-incidents-step-4)).
   With `fail_missed`, an incident the rules that differ lost that serve's

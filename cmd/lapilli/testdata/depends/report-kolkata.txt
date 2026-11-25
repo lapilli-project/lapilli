@@ -1,0 +1,22 @@
+Lapilli  2026-10-05 05:30 → 2026-10-12 05:30 Asia/Kolkata (+05:30)
+6 firings, 2 incidents written down
+
+RULE                   SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+CheckoutErrors         page      2      1         1          50%        0
+LedgerDBDisk           ticket    1      0         1          0%         0
+SearchDown             ticket    1      0         1          0%         0
+LedgerLag              ticket    1      1         0          100%       0
+PaymentsDBConnections  page      1      1         0          100%       0
+
+What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
+RULE                   INCIDENTS  FIRST  ALONE
+CheckoutErrors         1          1      1
+LedgerLag              1          0      0
+PaymentsDBConnections  1          0      0
+
+INCIDENT                      START             LASTED  CAUGHT BY
+INC-1 Checkout errors         2026-10-06 15:30  30m     PaymentsDBConnections -5m (via checkout → payments-db), CheckoutErrors +2m, LedgerLag +3m (via checkout → ledger)
+INC-2 Payments database down  2026-10-08 17:30  30m     ✗ nothing fired
+
+✗ 1 of 2 incidents had no alert.
+! 2 catches were by dependency, rules on a service an incident's depends on (the service graph had 4 edges): LedgerLag, PaymentsDBConnections. It made 2 firings white that no labels or link caught.

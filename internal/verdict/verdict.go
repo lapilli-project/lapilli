@@ -34,6 +34,9 @@ type Options struct {
 	// incident has doesn't catch it (--match-strict), where it would by
 	// default: the label isn't there to disagree.
 	MatchStrict bool
+	// Depends is the service graph a firing is judged by when its labels
+	// don't agree with an incident's (--depends): nil for none.
+	Depends *Dependencies
 	// LinkedOnly says an incident that lists the alerts its tool linked to
 	// it (incident.Incident.Alerts) is caught by those alone
 	// (--linked-only, docs/design/links.md); one that lists none is
@@ -173,6 +176,9 @@ type Judged struct {
 	White     bool     `json:"white"`
 	Incidents []string `json:"incidents,omitempty"`
 	NoRecord  bool     `json:"no_record,omitempty"`
+	// ByDependency says it is white only by the service graph
+	// (Options.Depends): none of its catches was by its labels or a link.
+	ByDependency bool `json:"by_dependency,omitempty"`
 	// Refired says it came within Options.RefireWithin of the same alert
 	// last resolving: one of its rule's Refired.
 	Refired bool `json:"refired,omitempty"`
@@ -233,7 +239,11 @@ type RuleResult struct {
 	Firings  int    `json:"firings"`
 	White    int    `json:"white"`
 	Black    int    `json:"black"`
-	Refired  int    `json:"refired"` // firings that came within RefireWithin of the last one resolving
+	// WhiteByDependency are of its white firings those white only by the
+	// service graph (Options.Depends): no firing's own labels or link
+	// caught anything. How much the graph widened its precision.
+	WhiteByDependency int `json:"white_by_dependency,omitempty"`
+	Refired           int `json:"refired"` // firings that came within RefireWithin of the last one resolving
 	// Late are of its black firings (its unjudged among them, as Black
 	// counts them) those that came after an incident was over, its
 	// condition having held in it (Judged.After): black all the same, as
@@ -403,6 +413,13 @@ func RuleNoisy(o Options, at NoisyAt, judged, white int, c *RuleResponses) bool 
 	return IsNoisy(judged, white, at)
 }
 
+// viaPath is the way a firing reached an incident through the service
+// graph, and when it started.
+type viaPath struct {
+	at   time.Time
+	path []string
+}
+
 // Catch is one rule catching an incident.
 type Catch struct {
 	Rule string `json:"rule"`
@@ -424,6 +441,12 @@ type Catch struct {
 	// incident's own, a rule entry's, or --match); Loose is true when it
 	// has any.
 	Lacked []string `json:"lacked,omitempty"`
+	// Dependency says the rule caught it only through the service graph
+	// (Options.Depends): its firing's service on the path's last, the
+	// incident's on the first, or the other way with both directions, the
+	// services in call order. No firing of the rule agreed on its labels or
+	// was linked.
+	Dependency []string `json:"dependency,omitempty"`
 }
 
 func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White, at) }
@@ -614,6 +637,9 @@ type Settings struct {
 	// selector it reads had no data: it keeps no record, and ImpactFrom
 	// is missing.
 	ImpactNoData bool `json:"impact_no_data,omitempty"`
+	// Depends is the service graph that judged by dependency, when one was
+	// given (--depends).
+	Depends *DependsSettings `json:"depends,omitempty"`
 	// ByWeek says a firing's record is its week's (lapilli serve with
 	// --record-by-week), not its own time's. RecordBy says by what unit a
 	// firing's record is kept: "day" or "week" (lapilli serve), missing for
@@ -655,7 +681,7 @@ func (o Options) Settings() *Settings {
 	}
 	s := &Settings{Lead: o.Lead, Match: match, MatchStrict: o.MatchStrict, LinkedOnly: o.LinkedOnly, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
 		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordUnit != nil && !o.RecordDay,
-		Zone: o.zone().String()}
+		Zone: o.zone().String(), Depends: o.Depends.settings()}
 	switch {
 	case o.RecordUnit == nil:
 	case o.RecordDay:
@@ -759,9 +785,22 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	// and the labels the loose ones lacked (Catch.Lacked).
 	proper := make([]map[string]bool, len(inPeriod))
 	lacks := make([]map[string][]string, len(inPeriod))
+	// The rules a firing agreeing on labels or linked caught it with, and,
+	// of the others, the way the earliest firing reached it through the
+	// service graph (Catch.Dependency).
+	direct := make([]map[string]bool, len(inPeriod))
+	via := make([]map[string]viaPath, len(inPeriod))
+	// The same of the firings that caught it directly alone: when a rule
+	// has any, its delay and looseness are theirs, and the graph adds
+	// nothing to them; it only makes a catch where there was none.
+	dcatches := make([]map[string]time.Duration, len(inPeriod))
+	dproper := make([]map[string]bool, len(inPeriod))
+	dlacks := make([]map[string][]string, len(inPeriod))
 	for i := range catches {
+		dcatches[i], dproper[i], dlacks[i] = map[string]time.Duration{}, map[string]bool{}, map[string][]string{}
 		catches[i], after[i], linked[i], proper[i] = map[string]time.Duration{}, map[string]time.Duration{}, map[string]bool{}, map[string]bool{}
 		lacks[i] = map[string][]string{}
+		direct[i], via[i] = map[string]bool{}, map[string]viaPath{}
 	}
 
 	last := map[string]time.Time{} // rule and labels to when it last resolved
@@ -795,12 +834,14 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			notJudged[f.Rule] = nj
 		}
 		j.NotJudged = nj
-		lapilli := false // white as Lapilli judged it: caught an incident "This was real" didn't write
+		anyDirect := false // a catch that wasn't by the service graph
+		lapilli := false   // white as Lapilli judged it: caught an incident "This was real" didn't write
 		for i, in := range inPeriod {
 			if nj {
 				continue
 			}
-			caught, link, lacked := CatchesLinked(f, in, o)
+			by := CatchesBy(f, in, o)
+			caught, link, lacked := by.Caught, by.Linked, by.Lacked
 			if !caught {
 				continue
 			}
@@ -815,6 +856,20 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if link {
 				linked[i][f.Rule] = true
 			}
+			if by.Dependency == nil {
+				direct[i][f.Rule] = true
+				anyDirect = true
+				if len(lacked) == 0 {
+					dproper[i][f.Rule] = true
+				} else {
+					dlacks[i][f.Rule] = MergeLacked(dlacks[i][f.Rule], lacked)
+				}
+				if have, ok := dcatches[i][f.Rule]; !ok || f.Start.Sub(in.Start) < have {
+					dcatches[i][f.Rule] = f.Start.Sub(in.Start)
+				}
+			} else if have, ok := via[i][f.Rule]; !ok || f.Start.Before(have.at) {
+				via[i][f.Rule] = viaPath{f.Start, by.Dependency}
+			}
 			if len(lacked) == 0 {
 				proper[i][f.Rule] = true
 			} else {
@@ -825,6 +880,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 				catches[i][f.Rule] = d
 			}
 		}
+		j.ByDependency = j.White && !anyDirect
 		j.Held = HeldFrom(f, held)
 		if !j.White && !nj {
 			j.After = cameAfter(f, j.Held, inPeriod, catches, after, o)
@@ -842,6 +898,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		if j.White {
 			r.White++
+			if j.ByDependency {
+				r.WhiteByDependency++
+			}
 		} else {
 			r.Black++
 			if len(j.After) > 0 {
@@ -901,8 +960,19 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
 			c := Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule]}
-			if !proper[i][rule] {
-				c.Loose, c.Lacked = true, lacks[i][rule]
+			if direct[i][rule] {
+				// Direct firings alone give the numbers.
+				c.Delay = dcatches[i][rule]
+				if !dproper[i][rule] {
+					c.Loose, c.Lacked = true, dlacks[i][rule]
+				}
+			} else {
+				if !proper[i][rule] {
+					c.Loose, c.Lacked = true, lacks[i][rule]
+				}
+				if v, ok := via[i][rule]; ok {
+					c.Dependency = v.path
+				}
 			}
 			ir.CaughtBy = append(ir.CaughtBy, c)
 		}
@@ -1032,29 +1102,11 @@ func Catches(f firing.Firing, in incident.Incident, o Options) bool {
 // on the labels matched on (docs/design/links.md). And whether it caught it
 // loose: it lacks a label of the match in effect that the incident has,
 // where --match-strict would have it not catch it (Catch.Loose): lacked
-// names those labels.
+// names those labels. A firing that catches by the service graph
+// (Options.Depends) catches here too, and CatchesBy says how.
 func CatchesLinked(f firing.Firing, in incident.Incident, o Options) (caught, linked bool, lacked []string) {
-	to := in.EndOr(o.UnknownLen)
-	// A rule judged by nothing catches nothing, written incidents
-	// included (docs/design/judging.md, "Rules judged by nothing").
-	if o.Signals.NotJudgedRules() && o.NotJudged(f.Rule) {
-		return false, false, nil
-	}
-	if f.Start.After(to) || f.Start.Before(in.Start.Add(-o.MaxLead())) {
-		return false, false, nil
-	}
-	j := o.judgingOf(f.Rule, in)
-	if f.Start.Before(in.Start.Add(-o.leadOf(j, in))) {
-		return false, false, nil
-	}
-	if in.Links(f.Rule, f.Labels) {
-		return true, true, nil
-	}
-	if o.LinkedOnly && len(in.Alerts) > 0 {
-		return false, false, nil
-	}
-	caught, lacked = o.agreesLoose(j, f.Labels, in)
-	return caught, false, lacked
+	c := CatchesBy(f, in, o)
+	return c.Caught, c.Linked, c.Lacked
 }
 
 // MergeLacked is the names of both, sorted, each once.
@@ -1067,17 +1119,31 @@ func MergeLacked(a, b []string) []string {
 // one that lists none or without --linked-only, one whose labels agree
 // with it; never of a rule judged by nothing. Near misses are looked for
 // by it, so a rule the incident lists is looked at whatever --match says.
+// With a service graph (Options.Depends), one that reaches it through the
+// graph is about it too.
 func (o Options) About(rule string, labels map[string]string, in incident.Incident) bool {
+	about, _ := o.AboutBy(rule, labels, in)
+	return about
+}
+
+// AboutBy is About, and, of a firing that is about the incident only by the
+// service graph, the way from the caller to the callee (NearMiss.Dependency).
+func (o Options) AboutBy(rule string, labels map[string]string, in incident.Incident) (about bool, path []string) {
 	if o.Signals.NotJudgedRules() && o.NotJudged(rule) {
-		return false
+		return false, nil
 	}
 	if in.Links(rule, labels) {
-		return true
+		return true, nil
 	}
 	if o.LinkedOnly && len(in.Alerts) > 0 {
-		return false
+		return false, nil
 	}
-	return o.Agrees(rule, labels, in)
+	j := o.judgingOf(rule, in)
+	if o.agrees(j, labels, in) {
+		return true, nil
+	}
+	path, _, ok := o.dependsOn(j, labels, in)
+	return ok, path
 }
 
 // Refired reports whether a firing that started at start came within

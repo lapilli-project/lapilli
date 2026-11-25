@@ -148,7 +148,56 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 {{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}} {{tbdi "To get past it: raise --timeout or --max-samples where lapilli serve is started, or narrow the expression so that four weeks of it read within them. Turned off until a run has gone by, then on again, it keeps a record from that run on, the weeks before still to be read again."}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
 {{with .Tried}}{{template "impacttried" (on $p .)}}{{end}}
 {{if $edit}}{{template "addsignal" (on $p .)}}{{end}}{{with .SignalsTried}}{{template "signalstried" (on $p .)}}{{end}}
-{{end}}{{end}}{{end}}
+{{end}}{{with .Depends}}{{template "dependscriteria" (on $p .)}}{{end}}{{end}}{{end}}
+
+{{/* The service graph (dependsweb.go): which service calls which, so that an
+alert on a service an incident's service calls catches it; an admin's to
+change and to try on the last four weeks first; everyone else reads it. */}}
+{{define "dependscriteria"}}{{$p := .P}}{{$loc := .P.Loc}}{{$edit := and .P.Status.Admin (not .V.NoHistory)}}{{with .V}}
+<h3 id="service-graph">{{t "Service graph"}}</h3>
+<p>{{tbdi "An alert on a service an incident's service calls catches the incident, though their match labels differ: the calls are read from a service mesh's or a service graph's metrics (--depends), by the hour, and kept. It only widens which firings catch an incident; which firings are judged is as before."}}</p>
+{{if $edit}}<form method="post" action="/settings/depends" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
+{{range .Settings}}<div class="field">
+{{if $edit}}<label for="depends-{{.Key}}">{{else}}<p class="field-name">{{end}}<code>{{.Flag}}</code> {{if eq .Key "depends"}}{{t "Calls between services (PromQL)"}}{{else if eq .Key "depends-labels"}}{{t "Labels that name the caller and the callee"}}{{else if eq .Key "depends-depth"}}{{t "How many calls away"}}{{else}}{{t "Which way"}}{{end}}{{if $edit}}</label>{{else}}</p>{{end}}
+{{if eq .Key "depends"}}{{if $edit}}<textarea id="depends-depends" name="depends" rows="3" maxlength="4096" spellcheck="false">{{$.V.Expr}}</textarea>{{else}}<p>{{if eq .Value "off"}}{{t "off"}}{{else}}<code><bdi>{{shown .Value}}</bdi></code>{{end}}</p>{{end}}
+{{else if eq .Key "depends-labels"}}{{if $edit}}<input id="depends-depends-labels" name="depends-labels" value="{{$.V.Labels}}" size="30" maxlength="260" placeholder="caller,callee">{{else}}<p>{{if .Value}}<code><bdi>{{.Value}}</bdi></code>{{else}}–{{end}}</p>{{end}}
+{{else if eq .Key "depends-depth"}}{{if $edit}}<select id="depends-depends-depth" name="depends-depth">{{range $d := (list "1" "2" "3")}}<option value="{{$d}}"{{if eq $d $.V.Depth}} selected{{end}}>{{$d}}</option>{{end}}</select>{{else}}<p>{{.Value}}</p>{{end}}
+{{else}}{{if $edit}}<select id="depends-depends-direction" name="depends-direction">{{range $d := (list "down" "both")}}<option value="{{$d}}"{{if eq $d $.V.Direction}} selected{{end}}>{{if eq $d "down"}}{{t "down: the services the incident's service calls"}}{{else}}{{t "both: and those that call it"}}{{end}}</option>{{end}}</select>{{else}}<p>{{if eq .Value "both"}}{{t "both: and those that call it"}}{{else}}{{t "down: the services the incident's service calls"}}{{end}}</p>{{end}}{{end}}
+<p class="quiet">{{t "Started with"}}: {{if eq .CommandLine "off"}}{{t "off"}}{{else if .CommandLine}}<code><bdi>{{shown .CommandLine}}</bdi></code>{{else}}–{{end}}{{if .Changed}}. {{t "changed by %s, %s" (who .By) (at $loc .Updated)}}{{end}}</p>
+{{if and .Changed $edit}}<label class="check"><input type="checkbox" name="reset-{{.Key}}" value="1"> {{t "back to the start"}}</label>{{end}}
+</div>{{end}}
+<p class="quiet">{{tbdi "Empty, or off, turns it off. Its series each name a caller and a callee by the labels above, with the names firings and incidents carry in the label of the match: label_replace gives them where they differ. At most 20,000 edges an hour; past it nothing of it is kept."}}</p>
+{{if $edit}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#depends-tried" name="depends-try" value="1" class="quiet-button">{{t "Try it on the last four weeks"}}</button></p>
+</form>{{else}}</div><p>{{if .NoHistory}}{{template "off" (offWhy "Save, and judge again" "depends-why" "Needs --prometheus")}}{{else}}{{template "off" (offOf $p "Save, and judge again" "admin" "depends-why")}}{{end}}</p>{{end}}
+<p class="quiet">{{t "Saving a new one reads it over the last four weeks, and judges every firing again. Changing how far or which way only judges again."}}</p>
+{{if .On}}{{if .Label}}<p>{{tbdi "The services are values of the label %s." (code .Label)}} {{if .Edges}}{{t "%d edges kept, read over %s → %s." .Edges (at $loc .Since) (at $loc .Until)}}{{end}}</p>
+{{else}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The match in effect has no label to name the services by: no firing is judged by the graph."}}</p>{{end}}
+{{if .Waiting}}<p class="notice status-info"><span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read over the last four weeks, at the next round of the replica that leads."}}</p>{{end}}
+{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{flagsAsCode .}}{{if not $.V.Next.IsZero}} {{t "Tried %d times; tried again at %s." $.V.Tries (at $loc $.V.Next)}}{{end}}</p>{{end}}
+{{if .Over}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The last judgement of these hours was made with no graph: its incidents' windows have more edges than a judgement loads, so no catch in it is by dependency. Narrow the expression to the calls between services."}}</p>{{end}}
+{{if or .Holes .Failed .Gaps}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "Hours the graph wasn't read for: no firing in them is judged by it."}}</p><ul class="plain">
+{{range .Holes}}<li>{{at $loc (index . 0)}} → {{at $loc (index . 1)}}: {{t "not read"}}</li>{{end}}{{range .Failed}}<li>{{at $loc (index . 0)}} → {{at $loc (index . 1)}}: {{t "failed to be read, read once more by the next run"}}</li>{{end}}{{range .Gaps}}<li>{{at $loc (index . 0)}} → {{at $loc (index . 1)}}: {{t "failed twice, and isn't read again"}}</li>{{end}}</ul>{{if .More}}<p class="quiet">{{t "and %d more" .More}}</p>{{end}}</div>{{end}}{{end}}
+{{with .Tried}}{{template "dependstried" (on $p .)}}{{end}}
+{{end}}{{end}}
+
+{{/* A try of the service graph: the catches it would add, by rule, and the
+verdict in effect and with it. */}}
+{{define "dependstried"}}{{$loc := .P.Loc}}{{with .V}}<section class="card wide" id="depends-tried" aria-labelledby="depends-tried-h">
+<h3 id="depends-tried-h">{{if .From.IsZero}}{{t "Tried"}}{{else}}{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}{{end}}</h3>
+{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{flagsAsCode .}}</p>{{else}}
+<p>{{if .Off}}{{t "Turned off, no firing is judged by the service graph."}}{{else}}{{t "%d pairs of services call each other in it; %d catches by dependency would be added." .Edges .Added}}{{end}}{{if .Same}} {{t "It is the graph in effect, read already: nothing would change."}}{{end}}</p>
+{{if .Rules}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Catches it would add"}}"><table>
+<caption>{{t "Catches it would add"}}</caption>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "By way of"}}</th></tr></thead>
+<tbody>{{range .Rules}}<tr><th scope="row"><bdi>{{.Rule}}</bdi></th><td class="n">{{.Incidents}}</td><td>{{hops .Hops}}</td></tr>{{end}}</tbody>
+</table></div>{{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}{{end}}
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "The verdict, in effect and with it"}}"><table>
+<caption>{{t "The verdict, in effect and with it"}}</caption>
+<thead><tr><th scope="col">{{t "Measure"}}</th><th scope="col">{{t "In effect"}}</th><th scope="col">{{t "With it"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row">{{t .Label}}</th><td>{{.Now}}</td><td>{{if .Changed}}<strong>{{.With}}</strong>{{else}}{{.With}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+<p class="quiet">{{t "Nothing was saved."}}</p>
+{{end}}</section>{{end}}{{end}}
 
 {{/* The named impact signals (signalsweb.go): a row each, what serve was
 started with and who changed it here; an admin's to add, change, rename,

@@ -61,6 +61,14 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 		}
 		s[0].Samples[0].V, s[0].Labels = 400, nil
 		return s, nil
+	case expr == `count(istio_requests_total{reporter="source"})`:
+		// Its calls between services, for --depends: 120 series.
+		s := run(7*24*time.Hour, 0)
+		for i := range s[0].Samples {
+			s[0].Samples[i].V = 120
+		}
+		s[0].Labels = nil
+		return s, nil
 	case strings.Contains(expr, "rate(istio_requests_total"):
 		// Its 5xx share above 1%: checkout's from 6h ago for 20m, cart's
 		// from 2h ago for 10m, and a 3m blip, shorter than --impact-for.

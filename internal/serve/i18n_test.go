@@ -74,6 +74,8 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	// The incident criteria tried: another expression, off, and one that
 	// doesn't read.
 	"/settings?impact-try=1&impact=impact+%3E+1&impact-for=10m", "/settings?impact-try=1&impact=off", "/settings?impact-try=1&impact=sum%28",
+	// The service graph tried: one that reads, off, and labels that don't.
+	"/settings?depends-try=1&depends=calls&depends-labels=caller%2Ccallee", "/settings?depends-try=1&depends=off", "/settings?depends-try=1&depends=calls&depends-labels=caller",
 	"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
 	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3",
 	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written", "/incidents?weeks=1", "/rules/Flapping",

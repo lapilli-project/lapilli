@@ -330,6 +330,31 @@ What went wrong (with --compare, if you have them):
   --impact-file FILE  the named signals in a file, and which rules are judged
                       against which (see below), in place of the flags above
 
+Which service depends on which (docs/dependencies.md):
+  --depends PROMQL    an expression whose series each name a caller and a
+                      callee, such as a service mesh's request rate by
+                      source and destination: an alert on a service an
+                      incident's service calls then catches it, though their
+                      --match labels differ. Read at an hour's step over the
+                      period; needs --depends-labels and a --match label
+  --depends-labels FROM,TO
+                      the labels of its series that name the caller and the
+                      callee
+  --depends-match LABEL
+                      the label of --match whose values the services are
+                      (default: the first --match)
+  --depends-depth N   how many calls away still count: 1 (default) to 3
+  --depends-direction down|both
+                      down (default): an alert on a service the incident's
+                      service calls catches it; both: an alert on a caller of
+                      it does too
+  --depends-step DUR  the step it is read at (default 1h; 10m to 1h)
+  --depends-count-missed
+                      count an incident caught only by dependency as caught
+                      for --fail-missed and for spare rules (by default it
+                      isn't: whoever can write the series can make the
+                      catch; the run says how many it left out)
+
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
                       VictoriaMetrics, or a cloud's managed Prometheus
@@ -693,8 +718,10 @@ type verdictFlags struct {
 	// impact is --impact with no name; signals, each --impact NAME=PROMQL,
 	// or --impact-file's (docs/design/signals.md), and impactSets what the
 	// flags said of each by name, until all are read.
-	impact           string
-	impactFor        time.Duration
+	impact    string
+	impactFor time.Duration
+	// dependsFlags are --depends and what goes with it (docs/design/dependencies.md).
+	dependsFlags
 	signals          []impactSignal
 	impactSets       map[string]*impactSet
 	impactFile       string
@@ -821,7 +848,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 	onOffs := map[string]*bool{
 		"--alerts": &f.alerts, "--json": &f.json, "--csv": &f.csv, "--markdown": &f.markdown, "--metrics": &f.metrics,
 		"--changed-only": &f.changedOnly, "--fail-expectations": &f.failExpect, "--expect-required": &f.expectRequired,
-		"--fail-missed": &f.failMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
+		"--fail-missed": &f.failMissed, "--depends-count-missed": &f.dependsCountMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
 		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly, "--match-strict": &f.opts.MatchStrict,
 	}
 	onOffs["--rollouts"] = &f.rollouts
@@ -1061,6 +1088,8 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.incidents = val
 		case "--impact", "--impact-for", "--impact-match", "--impact-record", "--impact-lead", "--impact-file":
 			_, err = f.impactFlag(name, val)
+		case "--depends", "--depends-labels", "--depends-match", "--depends-depth", "--depends-direction", "--depends-step":
+			err = f.dependsFlag(name, val)
 		case "--prometheus":
 			f.promURL = val
 		case "--gcp-project":
@@ -1237,6 +1266,9 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	if err := f.signalsRead(); err != nil {
 		return nil, err
 	}
+	if err := f.validDepends(); err != nil {
+		return nil, err
+	}
 	// The hours are read once the zone is known, wherever --tz came; and
 	// the days episodes are parted by.
 	f.opts.Hours = verdict.DefaultHours(f.loc)
@@ -1311,7 +1343,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			given = append(given, src.flag)
 		}
 	}
-	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.anyImpact() ||
+	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.anyImpact() || f.depends != "" ||
 		f.checkReplay && f.checkReplaySet
 	rulesToo := sources > 0 || len(f.alarms) > 0 || lokiToo
 	if err := validLoki(f, serve != nil); err != nil {
@@ -1329,6 +1361,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			flag string
 		}{{f.firings != "", "--firings"}, {f.firingsPrefix != "", "--firings-prefix"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
 			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired || f.failMissed, "--expect, --expect-before, --fail-expectations, --expect-required or --fail-missed: they hold a change to the rules, which --compare backtests"},
+			{f.dependsCountMissed, "--depends-count-missed: it goes with --fail-missed, which --compare backtests"},
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
@@ -1900,7 +1933,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	}
 
 	var h history
-	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.anyImpact() || f.rollouts {
+	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.anyImpact() || f.rollouts || f.depends != "" {
 		if f.promURL != "" || f.gcpProj != "" {
 			if sample != nil {
 				h = sample
@@ -1956,6 +1989,10 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		if incs, err = f.readImpact(ctx, h, incs); err != nil {
 			return fail(err)
 		}
+	}
+
+	if err := f.readDepends(ctx, h); err != nil {
+		return fail(err)
 	}
 
 	var known []rules.Rule

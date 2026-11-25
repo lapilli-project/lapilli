@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob 0e16095ae0cb6c9bd4da2085ca51a1d1a27666ff -->
+<!-- translated from docs/README.md at blob 1a0c50f7d170dd3451b3b562d9d5f01b3cb7974d -->
 
 # Lapilli 문서
 
@@ -61,6 +61,9 @@ docs/를 변경할 때마다 다시 써서 만든 사본입니다. Lapilli가 �
   복사해 오기, 그리고 그 도구가 장애마다 연결해 둔 알림
 - [기록되지 않은 장애](../impact.md): `--impact`, 사용자 영향 신호에서 찾은 장애.
   `lapilli impact suggest`는 내 이력에 어떤 신호가 있는지 알려 줍니다
+- [의존하는 서비스의 알림](../dependencies.md): `--depends`, 어느 서비스가 어느
+  서비스를 호출하는지 담은 그래프. DB 알림이 그 DB를 호출하는 서비스의 장애를
+  잡은 것으로 칩니다
 
 ## 리포트
 

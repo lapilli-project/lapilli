@@ -60,6 +60,9 @@ Lapilli is, and how to install it.
 - [Incidents nobody wrote down](impact.md): `--impact`, incidents found in a
   signal of user impact, and `lapilli impact suggest`, which says which
   signal your history has
+- [An alert on a dependency](dependencies.md): `--depends`, a graph of who
+  calls whom, so an alert on a database catches the incident of the service
+  that calls it
 
 ## Reports
 

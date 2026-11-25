@@ -150,7 +150,7 @@ func TestMigrate035(t *testing.T) {
 	}
 	recordRouted(t, l)
 	l.Close()
-	back := slices.Clone(ledgertest.Undo035)
+	back := slices.Concat(ledgertest.Undo036, ledgertest.Undo035)
 	if strings.HasPrefix(where, "postgres") {
 		c, err := pgx.Connect(ctx, where)
 		if err != nil {
