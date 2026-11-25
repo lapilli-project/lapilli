@@ -745,18 +745,15 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 	for _, rr := range byName {
 		rr.Late = late.Rules[rr.Rule]
 		rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
-		rr.Noisy = verdict.IsNoisy(rr.Judged(), rr.White, at)
 		if c := rr.Responses; c != nil {
 			if n := c.Useful + c.NotUseful; n > 0 {
 				p := float64(c.Useful) / float64(n)
 				c.Actionable = &p
 			}
-			// By what was done about its firings: a rule with no record can be
-			// noisy so, from its responses alone.
-			if o.NoisyBy == verdict.NoisyByUseful {
-				rr.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
-			}
 		}
+		// By what was done about its firings, a rule with no record can be
+		// noisy too, from its responses alone.
+		rr.Noisy = verdict.RuleNoisy(o, at, rr.Judged(), rr.White, rr.Responses)
 		rr.ImpactRule = o.Signals.EntryNumber(rr.Rule)
 		if counted {
 			rr.Episodes.Noisy = verdict.IsNoisy(rr.Episodes.Judged(), rr.Episodes.White, at)

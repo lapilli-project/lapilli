@@ -1085,7 +1085,7 @@ func ResponseOfJudged(resp response.Response, white, judged bool, answer string)
 func (l *Ledger) respondJudged(ctx context.Context, js []verdict.Judged, o verdict.Options, now time.Time) error {
 	in := make([]respFiring, len(js))
 	for i, j := range js {
-		in[i] = respFiring{ID: int64(i), Rule: j.Rule, Labels: j.Labels, Start: j.Start, End: j.End, White: j.White}
+		in[i] = respFiring{ID: int64(i), Rule: j.Rule, Labels: j.Labels, Start: j.Start, End: j.End, White: j.White, Excused: j.Excused}
 		switch j.Action {
 		case verdict.ActionYes:
 			in[i].Person = personYes
@@ -1093,11 +1093,22 @@ func (l *Ledger) respondJudged(ctx context.Context, js []verdict.Judged, o verdi
 			in[i].Person = personNo
 		}
 	}
-	r, err := l.newResponder(ctx, l.r, l.r, o, in, now)
+	live := make([]respFiring, 0, len(in))
+	for _, f := range in {
+		if !f.Excused {
+			live = append(live, f)
+		}
+	}
+	r, err := l.newResponder(ctx, l.r, l.r, o, live, now)
 	if err != nil {
 		return err
 	}
 	for i, f := range in {
+		// A firing a quiet window excused has none, here as in the ledger's
+		// firings and tallies, and as ResponsesOf gives it.
+		if f.Excused {
+			continue
+		}
 		resp, _, err := r.respond(f)
 		if err != nil {
 			return err

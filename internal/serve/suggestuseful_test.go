@@ -17,7 +17,12 @@ import (
 func TestDigestSuggestsKeepingUsefulFirings(t *testing.T) {
 	ctx := context.Background()
 	suggested := func(useful bool) []verdict.Suggestion {
-		s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour; c.Impact = ""; keepRecord(c); c.Options.NoisyBy = verdict.NoisyByUseful })
+		s, _ := server(t, func(c *Config) {
+			c.Backfill = 10 * 24 * time.Hour
+			c.Impact = ""
+			keepRecord(c)
+			c.Options.NoisyBy = verdict.NoisyByUseful
+		})
 		raw := ""
 		if err := s.look(ctx, &raw); err != nil {
 			t.Fatal(err)

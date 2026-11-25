@@ -369,6 +369,21 @@ func IsNoisy(judged, white int, at NoisyAt) bool {
 	return judged > 0 && judged >= at.Firings && float64(white)/float64(judged) < at.Precision
 }
 
+// RuleNoisy is whether a rule is noisy, by one test wherever it is asked: by
+// what its firings caught (judged, white) or, with o.NoisyBy useful, by what
+// was done about them (c, the counts of its firings' responses; none counted
+// is none useful). Every surface that says a rule is noisy asks this, so that
+// they agree on which are.
+func RuleNoisy(o Options, at NoisyAt, judged, white int, c *RuleResponses) bool {
+	if o.NoisyBy == NoisyByUseful {
+		if c == nil {
+			c = &RuleResponses{}
+		}
+		return IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
+	}
+	return IsNoisy(judged, white, at)
+}
+
 // Catch is one rule catching an incident.
 type Catch struct {
 	Rule string `json:"rule"`
@@ -829,8 +844,8 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		r.finishResponses()
 		// By what was done about its firings: a rule with no record can be
 		// noisy so, from its responses alone.
-		if o.Responder != nil && o.NoisyBy == NoisyByUseful {
-			r.Noisy = r.Responses != nil && IsNoisy(r.Responses.Useful+r.Responses.NotUseful, r.Responses.Useful, at)
+		if o.Responder != nil {
+			r.Noisy = RuleNoisy(o, at, r.Judged(), r.White, r.Responses)
 		}
 		slices.Sort(severities[name])
 		r.Severity = strings.Join(severities[name], "/")

@@ -11,6 +11,7 @@ import (
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/response"
+	"lapilli.dev/internal/verdict"
 )
 
 func pageFor(id, rule string, sent time.Time) response.Page {
@@ -242,5 +243,39 @@ func TestRespondDeployAfterFiringStart(t *testing.T) {
 	}
 	if k := respKeptOf(t, l)["slow"]; k.response != int(response.None) {
 		t.Errorf("the deploy taken away: %+v", k)
+	}
+}
+
+// A firing a quiet window excused has no response, in the ledger's firings,
+// its tallies, ResponsesOf and the report's judged firings alike.
+func TestExcusedFiringsHaveNoResponse(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	o := opts
+	at := t0.Add(24 * time.Hour)
+	if err := l.Record(ctx, Found{From: t0, To: t0.Add(7 * 24 * time.Hour), Firings: []firing.Firing{firingOf("a", "shop", nil, at, 20)},
+		Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(7 * 24 * time.Hour)}}, o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.SyncResponses(ctx, ResponsesFile, "", []response.Page{page("P", "R", "a", at.Add(time.Minute), time.Time{}, at.Add(2*time.Minute), response.ByAlert)}, o); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(7 * 24 * time.Hour)})
+	if err != nil || len(fs) != 1 {
+		t.Fatal(len(fs), err)
+	}
+	js := []verdict.Judged{{Firing: fs[0].Firing}, {Firing: fs[0].Firing, Excused: true}}
+	if err := l.respondJudged(ctx, js, o, t0.Add(7*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if js[0].Response == nil || js[0].Response.Kind != verdict.ResponseUnanswered {
+		t.Errorf("a firing's response: %+v", js[0].Response)
+	}
+	if js[1].Response != nil {
+		t.Errorf("an excused firing has a response: %+v", js[1].Response)
+	}
+	fs[0].Excused = true
+	if got, err := l.ResponsesOf(ctx, fs, o, at.Add(time.Hour)); err != nil || len(got) != 0 {
+		t.Errorf("ResponsesOf gave an excused firing's: %+v %v", got, err)
 	}
 }

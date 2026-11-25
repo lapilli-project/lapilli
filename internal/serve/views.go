@@ -210,6 +210,23 @@ func (t *tallies) noisy(week, rule int64) bool {
 	return noisy(x.Firings, x.White, t.o)
 }
 
+// noisyOver reports whether a rule was noisy over weeks together, by the test
+// every surface asks (verdict.RuleNoisy): of the firings judged and those
+// that caught something, summed over them, or, by what was done about them,
+// the useful and not useful.
+func (t *tallies) noisyOver(weeks []int64, id int64, judged, white int) bool {
+	var c *verdict.RuleResponses
+	if t.o.NoisyBy == verdict.NoisyByUseful {
+		c = &verdict.RuleResponses{}
+		for _, w := range weeks {
+			u := t.ub[w][id]
+			c.Useful += u.Useful
+			c.NotUseful += u.NotUseful
+		}
+	}
+	return verdict.RuleNoisy(t.o, noisyAt(t.o), judged, white, c)
+}
+
 // noisyAll reports whether a rule was noisy in a week, as everyone's rules
 // were tallied, before only kept one team's: one of another team's, which
 // the tallies of a team's alone don't have, too.
@@ -599,11 +616,8 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 	noisyRule := make(map[string]bool, len(sums))
 	at := noisyAt(t.o)
 	for _, r := range sums {
-		r.Noisy = verdict.IsNoisy(r.Firings-r.Unjudged, r.White, at)
-		if c := r.Responses; c != nil && t.o.NoisyBy == verdict.NoisyByUseful {
-			r.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
-			r.Responses = nil // only what noisy needed
-		}
+		r.Noisy = verdict.RuleNoisy(t.o, at, r.Firings-r.Unjudged, r.White, r.Responses)
+		r.Responses = nil // only what noisy needed
 		noisyRule[r.Rule] = r.Noisy
 		rs = append(rs, *r)
 	}
@@ -753,18 +767,15 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Late, l.LateCut = late.Rules[l.Name], late.Cut
 		l.Black = l.Firings - l.White
 		judged := l.Firings - l.Unjudged
-		l.Noisy = verdict.IsNoisy(judged, l.White, at)
 		if c := l.Responses; c != nil {
 			if n := c.Useful + c.NotUseful; n > 0 {
 				p := float64(c.Useful) / float64(n)
 				c.Actionable = &p
 			}
-			// By what was done about its firings, a rule with no record may be
-			// noisy too.
-			if t.o.NoisyBy == verdict.NoisyByUseful {
-				l.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
-			}
 		}
+		// By what was done about its firings, a rule with no record may be
+		// noisy too.
+		l.Noisy = verdict.RuleNoisy(t.o, at, judged, l.White, l.Responses)
 		l.NoisyFirings, l.NoisyShare = at.Firings, percentOf(at.Precision)
 		l.NoRecord = l.Firings > 0 && judged == 0
 		l.Unrecorded = !l.Noisy && l.Unjudged >= at.Firings

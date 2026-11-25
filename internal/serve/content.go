@@ -109,6 +109,7 @@ type contentKey struct {
 	am                     string // what Alertmanager's configuration was read from
 	noisyN                 int
 	noisyP                 float64
+	noisyBy                string
 	hour                   int64
 }
 
@@ -519,7 +520,7 @@ func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *
 	}
 	_, notified := s.notifications()
 	_, am := s.alertmanager()
-	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, am: am, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
+	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, am: am, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision, noisyBy: o.NoisyBy,
 		hour: s.now().Unix() / 3600}
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
@@ -558,9 +559,8 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 		}
 	}
 	noisyRule := map[string]bool{}
-	at := noisyAt(t.o)
 	for id, c := range sums {
-		if row, ok := t.rules[id]; ok && row.Source == "" && verdict.IsNoisy(c[0], c[1], at) {
+		if row, ok := t.rules[id]; ok && row.Source == "" && t.noisyOver(t.weeks, id, c[0], c[1]) {
 			noisyRule[row.Name] = true
 		}
 	}

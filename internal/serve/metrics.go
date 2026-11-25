@@ -106,16 +106,13 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		total := 0
 		for _, rr := range sum {
 			rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
-			rr.Noisy = verdict.IsNoisy(rr.Firings-rr.Unjudged, rr.White, at)
 			if c := rr.Responses; c != nil {
 				if n := c.Useful + c.NotUseful; n > 0 {
 					p := float64(c.Useful) / float64(n)
 					c.Actionable = &p
 				}
-				if o.NoisyBy == verdict.NoisyByUseful {
-					rr.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
-				}
 			}
+			rr.Noisy = verdict.RuleNoisy(o, at, rr.Firings-rr.Unjudged, rr.White, rr.Responses)
 			rep.Unjudged += rr.Unjudged
 			rep.Rules = append(rep.Rules, *rr)
 			total += rr.Firings
