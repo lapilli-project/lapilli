@@ -86,7 +86,7 @@ func linkedText(o verdict.Options) string {
 	if o.MatchStrict {
 		v += "m"
 	}
-	return v + responsesKey(o)
+	return v + responsesKey(o) + dependsKey(o)
 }
 
 // responsesKey is what --routine and --rollout-match, which decide what was
@@ -119,6 +119,7 @@ func strictSaid(v string) string {
 // of responses that follows them.
 func responsesless(v string) string {
 	before, _, _ := strings.Cut(v, "R")
+	before, _, _ = strings.Cut(before, "~")
 	return before
 }
 
@@ -177,6 +178,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// The service graph, when it was changed since the edges the ledger
+	// holds were read: read again, before the options are (dependsAgain).
+	s.dependsAgain(ctx)
 	// Pull request backtests ended a day ago go, the port on or not.
 	if err := s.l.PruneBacktests(ctx, s.now()); err != nil && ctx.Err() == nil {
 		s.log.Warn("letting go of the pull request backtests kept", "err", err)
@@ -670,6 +674,13 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			s.retryRollouts(asking, o)
 			found.Rollouts = s.readRollouts(asking, from, to, found.Firings)
 		}
+		// And the service graph, over them and the lead before them
+		// (--depends), as the changes are: a failed read is read once more
+		// by the next run.
+		if o.Depends != nil {
+			s.retryEdges(asking, o)
+			found.Edges = s.readEdges(asking, o, from, to)
+		}
 		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed}
 		if err := s.l.Record(ctx, found, o); err != nil {
 			s.count(kind, "failed")
@@ -684,7 +695,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.status.took = s.now().Sub(began)
 		// What is wrong with the incidents or deploys file is for reading
 		// it to clear.
-		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" && s.status.errWhat != "responses" && s.status.errWhat != "rollouts" && s.status.errWhat != "marked windows" {
+		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" && s.status.errWhat != "responses" && s.status.errWhat != "rollouts" && s.status.errWhat != "depends" && s.status.errWhat != "marked windows" {
 			s.status.err, s.status.errWhat = "", ""
 		}
 		s.status.Unlock()

@@ -118,6 +118,10 @@ as a file; the jobs of `serve.incidentsAPI.copy` run the `responses/` recipes
 (`recipe: responses/pagerduty`, with `source`); `rollouts`, `rolloutMatch`,
 `routine` and `noisyBy` are what `lapilli verdict` takes too (see
 `recipes/responses` and `docs/responses.md`).
+`depends`, `dependsLabels`, `dependsMatch`, `dependsDepth`, `dependsDirection`
+and `dependsStep` are `--depends` and what goes with it, in both modes (see
+`docs/dependencies.md`); in serve mode they are the start's values, which the
+Settings page can change.
 `serve.trackers.tokenSecret` lets it read tasks and set their link and status,
 with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
 `jira`, `linear`, `azure-boards`, `shortcut`, `youtrack` or `jira-dc`), `image` (one with `sh`, `curl` and `jq`, by its digest,

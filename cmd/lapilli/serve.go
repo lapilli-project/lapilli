@@ -79,6 +79,25 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       writes no other source's. Once for each source; the
                       --responses file's pages outrank an API source's;
                       recipes/responses/put.sh
+  --depends PROMQL    an expression whose series each name a caller and a
+                      callee (a service mesh's request rate by source and
+                      destination): an alert on a service an incident's
+                      service calls then catches it, though their --match
+                      labels differ. Each run reads it for its hours and
+                      keeps it in the ledger; the Settings page changes it
+                      and tries it on the last four weeks first
+                      (docs/dependencies.md)
+  --depends-labels FROM,TO
+                      the labels of its series that name the caller and the
+                      callee (goes with --depends)
+  --depends-match LABEL
+                      the label of --match whose values the services are
+                      (default: the first)
+  --depends-depth N   how many calls away still count: 1 (default) to 3
+  --depends-direction down|both
+                      down (default): an alert on a service the incident's
+                      service calls catches it; both: one on a caller too
+  --depends-step DUR  the step it is read at (default 1h, 10m at the finest)
   --rollouts          also read, from the history at --prometheus, the
                       rollouts, rollbacks and scales kube-state-metrics
                       shows for the namespaces the firings are in, each run
@@ -1564,6 +1583,15 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		cfg.Alarms = append(cfg.Alarms, serve.AlarmsAt{Source: a.source, URL: a.url})
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
+	// The service graph a catch by dependency is judged by
+	// (docs/design/dependencies.md): what serve starts with; the Settings
+	// page changes it. The label of the graph's services is the match's
+	// first at the time, unless --depends-match says one.
+	cfg.Depends = serve.DependsConfig{Expr: f.depends, From: f.dependsFrom, To: f.dependsTo, Depth: f.dependsDepth,
+		Direction: f.dependsDirection, Step: f.dependsStep}
+	if slices.Contains(f.dependsGiven, "--depends-match") {
+		cfg.Depends.Match = f.dependsMatch
+	}
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
 	// What people did when a rule fired (docs/design/responses.md): the pages,
 	// the changes read from the history, and the deploys; the Settings page

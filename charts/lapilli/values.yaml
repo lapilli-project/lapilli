@@ -171,6 +171,24 @@ rollouts: false
 rolloutMatch: []
 routine: null
 noisyBy: ""
+# Which service depends on which (docs/dependencies.md), in both modes, each
+# passed only when set. depends is --depends: a PromQL expression whose series
+# each name a caller and a callee (a service mesh's request rate by source and
+# destination), so that an alert on a service an incident's service calls
+# catches it, though their match labels differ. dependsLabels is
+# --depends-labels, "FROM,TO": the labels of its series that name them, and
+# goes with it; dependsMatch is --depends-match, the label of match whose
+# values the services are (the first when unset); dependsDepth is
+# --depends-depth (1 to 3, 1 when unset), dependsDirection --depends-direction
+# (down, or both), dependsStep --depends-step (1h when unset). Needs
+# prometheus.url or gcpProject, and match. In serve mode they are the start's
+# values, which the Settings page can change.
+depends: ""
+dependsLabels: ""
+dependsMatch: ""
+dependsDepth: null
+dependsDirection: ""
+dependsStep: ""
 # true passes --match-strict, in both modes: a firing that lacks a label of
 # match that the incident has doesn't catch it. By default it does, as it
 # has nothing to disagree with, and the report says how many catches were
