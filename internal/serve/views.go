@@ -2306,10 +2306,12 @@ type settingView struct {
 
 type settingsView struct {
 	Settings []settingView
-	// LinkedOnly is --linked-only, a flag where serve is started, not a
-	// setting the UI changes (docs/design/links.md).
+	// LinkedOnly is --linked-only as in effect: the flag's, until an admin
+	// changes it on the Settings page or through POST /settings
+	// (docs/design/links.md).
 	LinkedOnly bool `json:"linked_only"`
-	// MatchStrict is --match-strict, a flag as --linked-only is.
+	// MatchStrict is --match-strict, a flag where serve is started, not a
+	// setting the UI changes.
 	MatchStrict bool `json:"match_strict"`
 	// LinkedOnlyJudging says every firing is still to be judged again with
 	// --linked-only and --match-strict: the ledger's stones were last all

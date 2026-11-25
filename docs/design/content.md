@@ -404,8 +404,13 @@ rules are checked as before, said on stderr (`verdict`), once in serve's log,
 and as a problem item in preflight.
 
 What it can't tell: which Alertmanager the one given is. Lapilli takes it
-for the one Grafana sends to; a Grafana that sends to another than the one
-that sends the Prometheus rules is checked against the wrong templates.
+for the one Grafana sends to. When Grafana sends to more than one (more than
+one active Alertmanager, or more than one data source set to receive
+Grafana's alerts), the check says so, naming the data sources, on stderr
+(`verdict`), in serve's log once, and in preflight's `grafana.alertmanagers`
+item, so that a wrong match shows: a Grafana that sends to another than the
+one that sends the Prometheus rules is checked against the wrong templates.
+The data sources are read for these names, and not reading them is no error.
 
 ### Not done
 

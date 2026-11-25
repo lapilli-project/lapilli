@@ -2576,7 +2576,7 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 // can't run; a reduce's step finer than a replay asks.
 func (g *Graph) asideLoki(ref, uid string, dm, model map[string]any) bool {
 	expr := strings.TrimSpace(str(model["expr"]))
-	if expr == "" || !validUID(uid) {
+	if expr == "" || !ValidUID(uid) {
 		return false
 	}
 	var from, to float64
@@ -2612,9 +2612,9 @@ func (g *Graph) asideLoki(ref, uid string, dm, model map[string]any) bool {
 	return true
 }
 
-// validUID reports whether a data source's uid is one Grafana makes, as it
+// ValidUID reports whether a data source's uid is one Grafana makes, as it
 // goes into the data source proxy's path.
-func validUID(uid string) bool {
+func ValidUID(uid string) bool {
 	if uid == "" || len(uid) > 40 {
 		return false
 	}

@@ -444,6 +444,7 @@ func (s *Server) askSends(ctx context.Context) {
 		g, told = source.GrafanaSends{}, err.Error()
 	} else if g.External() {
 		sum = fmt.Sprintf("%s/%d", g.Choice, g.Active)
+		told = g.Several()
 	}
 	s.saidRules.Lock()
 	warn := told != s.saidRules.sendsWarned
@@ -453,6 +454,9 @@ func (s *Server) askSends(ctx context.Context) {
 	}
 	s.saidRules.sends, s.saidRules.sendsAt, s.saidRules.sendsSum = g, s.now(), sum
 	s.saidRules.Unlock()
+	if warn && err == nil && told != "" {
+		s.log.Warn(told)
+	}
 	if warn && err != nil {
 		s.log.Warn("where Grafana sends its alerts can't be read: its rules are checked against its own notification templates only", "err", err)
 	}

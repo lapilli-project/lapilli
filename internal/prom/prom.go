@@ -496,6 +496,14 @@ type unreadable struct {
 
 func (e *unreadable) Error() string { return e.msg }
 
+// OverBound reports whether err is the client's own bound on an answer
+// (--max-samples, and the series and labels a range is read with), which
+// the answers to a range came to more than: not an answer it couldn't read.
+func OverBound(err error) bool {
+	var u *unreadable
+	return errors.As(err, &u) && u.sample == [2]string{} && strings.Contains(u.msg, "hold more than")
+}
+
 // Refused reports whether err is the API's answer to the query as written,
 // which another run is given too, whatever its access: the query refused,
 // HTTP 400 or 422 (bad_data, an execution error), in the API's own words,

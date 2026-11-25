@@ -150,6 +150,9 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 				fmt.Fprintf(stderr, "lapilli verdict: where Grafana sends its alerts wasn't read, so its rules are checked against its own notification templates only: %s\n", verdict.Clean(err.Error()))
 			} else if sends.External() {
 				o.GrafanaExternal = true
+				if n := sends.Several(); n != "" {
+					fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(n))
+				}
 				if !sends.Internal() {
 					o.Notify = nil
 				}

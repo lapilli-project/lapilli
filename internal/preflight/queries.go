@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -78,18 +79,23 @@ func (p *run) queryGroups(rd *read) (hist, loki, graf *queryGroup, noLoki, noHis
 		if r.Cloud != "" {
 			continue
 		}
-		for _, expr := range replay.Queries(r) {
+		for _, q := range replay.Queries(r) {
 			switch {
-			case r.Logs == "":
+			case q.Logs == "":
 				if p.historyBase() == "" {
 					noHistory++
 					continue
 				}
-				hist.add(r.Name, expr, "")
+				hist.add(r.Name, q.Expr, "")
 			case r.Graph != nil && s.Grafana != "":
-				graf.add(r.Name, expr, r.Logs)
+				// Through Grafana's data source proxy, as the replay asks it
+				// (source.Logs.For), by a uid Grafana makes; one that isn't
+				// is not asked.
+				if source.ValidUID(q.Logs) {
+					graf.add(r.Name, q.Expr, q.Logs)
+				}
 			case s.Loki != "":
-				loki.add(r.Name, expr, "")
+				loki.add(r.Name, q.Expr, "")
 			default:
 				noLoki++
 			}
@@ -246,7 +252,7 @@ func (p *run) asker(ctx context.Context, g *queryGroup) (func(context.Context, *
 		mu.Lock()
 		h := hs[a.uid]
 		if h == nil {
-			h = source.GrafanaLoki(s.Grafana, s.GrafanaToken, p.agent(), a.uid, prom.NewLimiterPaced(pace).Within(most))
+			h = source.GrafanaLoki(s.Grafana, s.GrafanaToken, p.agent(), a.uid, prom.NewLimiterPaced(pace).Within(most), prom.WithMaxSamples(p.c.MaxSamples))
 			hs[a.uid] = h
 		}
 		mu.Unlock()
@@ -274,24 +280,36 @@ func (p *run) allowQuery(g *queryGroup, a *queryAsk) {
 	}
 }
 
-// queryReason says why a query failed, as a kind: what a server says of an
-// expression it reads (Prometheus's, Mimir's and Loki's words), what the
-// client's own bound says, a time, a token not let in.
+// queryReason says why a query failed, as a kind, by the error's type first:
+// a time that ran out, the client's own bound, a status that says not let in
+// or timed out; then, of what the server said of the expression, its words
+// (Prometheus's, Mimir's and Loki's). A transport's error is none of those.
 func queryReason(err error) string {
 	var ae *prom.APIError
-	m := strings.ToLower(err.Error())
+	var ne net.Error
 	switch {
-	case errors.Is(err, context.DeadlineExceeded), strings.Contains(m, "timeout"), strings.Contains(m, "timed out"), strings.Contains(m, "deadline exceeded"):
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return reasonTimeout
+	case prom.OverBound(err):
+		return reasonSamples
+	case !errors.As(err, &ae):
+		return reasonOther
+	}
+	m := strings.ToLower(ae.Msg)
+	switch {
+	case ae.Status == http.StatusUnauthorized || ae.Status == http.StatusForbidden:
+		return reasonLetIn
+	case ae.Status == http.StatusRequestTimeout || ae.Status == http.StatusGatewayTimeout:
 		return reasonTimeout
 	case strings.Contains(m, "unknown function"), strings.Contains(m, "unknown fn"):
 		return reasonFunction
-	case strings.Contains(m, "too many samples"), strings.Contains(m, "samples in all"), strings.Contains(m, "series in all"), strings.Contains(m, "labels in all"),
-		strings.Contains(m, "exceeds maximum allowed size"), strings.Contains(m, "maximum number of series"), strings.Contains(m, "response too large"):
+	case strings.Contains(m, "too many samples"), strings.Contains(m, "exceeds maximum allowed size"), strings.Contains(m, "maximum number of series"),
+		strings.Contains(m, "response too large"), strings.Contains(m, "exceeded maximum resolution"):
 		return reasonSamples
-	case strings.Contains(m, "parse error"), strings.Contains(m, "syntax error"), strings.Contains(m, "bad_data"), strings.Contains(m, "unexpected "):
+	case strings.Contains(m, "parse error"), strings.Contains(m, "syntax error"), strings.Contains(m, "bad_data"):
 		return reasonParse
-	case errors.As(err, &ae) && (ae.Status == http.StatusUnauthorized || ae.Status == http.StatusForbidden):
-		return reasonLetIn
+	case strings.Contains(m, "timed out"), strings.Contains(m, "timeout"), strings.Contains(m, "deadline exceeded"):
+		return reasonTimeout
 	}
 	return reasonOther
 }

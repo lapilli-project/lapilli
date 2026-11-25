@@ -1788,12 +1788,20 @@ func asked(g *rules.Graph, values bool) []string {
 	return refs
 }
 
-// Queries are the expressions a rule's condition asks the history for,
-// each once: a Prometheus or Loki rule's own, a Grafana rule's queries its
-// condition reads, as Condition asks them (PromQL as the history takes it,
-// LogQL as written). None for a rule that can't be replayed. Which history
-// takes them is the rule's: LogQL, when it has Logs.
-func Queries(r rules.Rule) []string {
+// A Query is an expression a rule's condition asks for, and where: the
+// history that takes PromQL when Logs is "", else the Loki it is asked of,
+// by its Grafana data source's uid, or, for a rule written in LogQL that is
+// not Grafana's, the mark of its Logs.
+type Query struct {
+	Expr, Logs string
+}
+
+// Queries are the expressions a rule's condition asks for, each once, as
+// Condition asks them (PromQL as the history takes it, LogQL as written), and
+// of which history: a Grafana rule's Loki query beside a Prometheus
+// condition (Graph.Aside) goes to its Loki, as asideFor routes it. None for
+// a rule that can't be replayed.
+func Queries(r rules.Rule) []Query {
 	if r.Unsupported != "" {
 		return nil
 	}
@@ -1801,12 +1809,20 @@ func Queries(r rules.Rule) []string {
 		if r.Expr == "" {
 			return nil
 		}
-		return []string{r.Expr}
+		return []Query{{Expr: r.Expr, Logs: r.Logs}}
 	}
-	var out []string
+	var out []Query
 	for _, ref := range asked(r.Graph, false) {
-		if expr, ok := r.Graph.Expr(ref, r.AskStep(ref)); ok && expr != "" && !slices.Contains(out, expr) {
-			out = append(out, expr)
+		expr, ok := r.Graph.Expr(ref, r.AskStep(ref))
+		if !ok || expr == "" {
+			continue
+		}
+		q := Query{Expr: expr, Logs: r.Logs}
+		if uid := r.Graph.Aside[ref]; uid != "" {
+			q.Logs = uid
+		}
+		if !slices.Contains(out, q) {
+			out = append(out, q)
 		}
 	}
 	return out
