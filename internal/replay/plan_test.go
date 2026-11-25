@@ -223,7 +223,7 @@ groups:
           - refId: A
             relativeTimeRange: {from: 300, to: 0}
             datasourceUid: lk
-            model: {datasource: {type: loki, uid: lk}, expr: 'sum(count_over_time({app="shop"}[1m]))', queryType: range, intervalMs: 1000, maxDataPoints: 43200}
+            model: {datasource: {type: loki, uid: lk}, expr: 'sum(count_over_time({app="shop"}[1m]))', queryType: instant, intervalMs: 1000, maxDataPoints: 43200}
           - refId: C
             datasourceUid: __expr__
             model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [1]}}]}

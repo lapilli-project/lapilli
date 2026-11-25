@@ -66,6 +66,12 @@
   asked, through Grafana's data source proxy) isn't replayed: when it
   returns nothing, Grafana takes the rule as having no data, which the
   replay can't see, and the rule is marked "replayed in part".
+- A Grafana rule whose condition comes to a time series (a threshold or math
+  straight on a range query, Prometheus's or Loki's) isn't replayed: Grafana's
+  evaluation errors ("looks like time series data, only reduced data can be
+  alerted on") whenever its queries return something, and errors can't be
+  replayed. A reduce or a classic condition over the query, or an instant
+  query, is replayed.
 - Replays see the history as it is now. `--late DUR` replays as if metrics
   arrived DUR after their time, but a delay that varies can't be read from
   history: a rule that resolved and fired again while the latest points

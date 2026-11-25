@@ -214,3 +214,29 @@ func TestPlanAside(t *testing.T) {
 		}
 	}
 }
+
+// TestAsideLokiOK: as Grafana 13.3.1 did running test/e2e/loki.sh's
+// LkBesideOK (a Prometheus condition that always holds, with a Loki query
+// beside it, noDataState OK): its alert fires only while the Loki query
+// returns something, and no NoData alert is ever written; with NoData
+// (LkBeside) the NoData alert, labelled with the Loki data source and the
+// query's ref, fires where the other alert doesn't.
+func TestAsideLokiOK(t *testing.T) {
+	promH := history{"x": {warm(at(nil, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), 1)}}
+	lokiH := &points{name: "loki", v: func(t time.Time) (float64, bool) {
+		m := int(t.Sub(t0) / time.Minute)
+		return 3, m != 3 && m != 4 && m != 5
+	}}
+	run := func(doc string) string {
+		_, fs := Run(context.Background(), logsAt(t, promH, lokiH), one([]rules.Rule{asideRules(t, doc)}), t0, t0.Add(8*time.Minute), time.Minute, 1)
+		return spans(fs)
+	}
+	ok := run(strings.Replace(mixed, "noDataState: NoData", "noDataState: OK", 1))
+	if strings.Contains(ok, "nodata") || !strings.HasPrefix(ok, "0-") || !strings.Contains(ok, "6-on[]") {
+		t.Errorf("noDataState OK: %s", ok)
+	}
+	nd := run(mixed)
+	if !strings.Contains(nd, "3-6[datasource_uid=loki ref_id=L grafana_alertstate=nodata]") || !strings.Contains(nd, "6-on[]") {
+		t.Errorf("noDataState NoData: %s", nd)
+	}
+}
