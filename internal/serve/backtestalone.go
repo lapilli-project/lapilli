@@ -103,9 +103,14 @@ func (s *Server) holdPrepared(ctx context.Context, cmp *verdict.Comparison, pr *
 	}
 	var open []aloneCase
 	for _, in := range lost {
-		if caught, known, need := rec.judge(in); !caught && !known {
+		caught, known, need := rec.judge(in)
+		if !caught && !known {
 			open = append(open, aloneCase{in: in, need: need})
+			continue
 		}
+		// What the record settled stays so: widen reads again, and may fail
+		// or find more versions than it keeps, which must not unsettle it.
+		held.answers[caughtAt{in.ID, in.Start.Unix()}] = aloneAnswer{caught: caught, known: known}
 	}
 	if len(open) == 0 {
 		return held, nil
@@ -148,7 +153,7 @@ func (a *leftAlone) vet(pr *prepared) {
 	for i := range a.alone {
 		r := &a.alone[i]
 		rule := r.rule
-		why := taken(rule, pr.eff)
+		why := takenAs(rule, pr.eff, true)
 		if why == "" {
 			why = check.checkRule(&rule)
 		}
@@ -176,11 +181,13 @@ func (a *leftAlone) vet(pr *prepared) {
 //     else left it unsettled (a catch by a rule whose firings are copied in,
 //     a name told apart): missed, as the incident is not known no longer;
 //   - one that couldn't be replayed, or that the port's checks of a rule
-//     that differs refuse (vet), or that fires on at the replay's first
-//     evaluation, so that where it began isn't known: not known.
+//     that differs refuse (vet), or a Grafana rule that fires on at the
+//     replay's first evaluation, so that where it began isn't known: not
+//     known.
 //
-// It is bounded by what the backtest is: at most leftAloneRules rules, past
-// which nothing is replayed; the requests it plans, with an allowance for
+// It is bounded by what the backtest is: at most leftAloneRules rules
+// that are replayed (not those the record holds), past which nothing is;
+// the requests it plans, with an allowance for
 // the Grafana rules' extra reads (unsure), may not pass what the lane's
 // share of the rate asks within left, what is left of --backtest-timeout
 // (leftAloneRequests with no rate), with none left nothing is planned; it
@@ -201,7 +208,7 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 		}
 	}
 	budget := s.aloneBudget(left)
-	if budget <= 0 || len(rec.alone)+len(rec.serve) > leftAloneRules {
+	if budget <= 0 || rec.replayCount(open) > leftAloneRules {
 		limit(open)
 		return nil
 	}
@@ -215,6 +222,10 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 			return nil
 		}
 		return err
+	}
+	if rec.replayCount(open) > leftAloneRules {
+		limit(open)
+		return nil
 	}
 	rec.vet(pr)
 	// The Lokis the replay asks keep the lane's share while it runs, as the
@@ -320,9 +331,10 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 	}
 	buckets := bucketsOf(byRule(fit))
 	// Each bucket's rules replayed together; the buckets a few at a time,
-	// each within the lane's cap. A firing already on at a bucket's first
-	// evaluation, where it began unknown, is kept apart (cold): it never
-	// catches an incident, and one it could have caught is not known.
+	// each within the lane's cap. A firing of a Grafana rule already on at a
+	// bucket's first evaluation, where it began unknown, is kept apart
+	// (cold): it never catches an incident, and one it could have caught is
+	// not known.
 	var (
 		mu   sync.Mutex
 		fs   []firing.Firing
@@ -339,19 +351,10 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 			got, fired := replay.RunEach(rctx, p.lane, [][]replay.Version{{{Rules: rs}}}, b.from, b.to, step, p.parallel)
 			// The cases each rule is asked for, by name.
 			cases := map[string][][]int{}
-			before := map[string]time.Duration{}
 			for i, r := range rs {
 				cases[r.Name] = append(cases[r.Name], b.cases[i])
-				before[r.Name] = max(before[r.Name], r.For+r.KeepFiringFor)
 			}
-			var kept, first []firing.Firing
-			for _, f := range fired[0] {
-				if !f.Start.After(b.from.Add(-before[f.Rule])) {
-					first = append(first, f)
-				} else {
-					kept = append(kept, f)
-				}
-			}
+			kept, first := splitCold(fired[0], rs, b.from, step)
 			mu.Lock()
 			defer mu.Unlock()
 			ran = append(ran, got[0]...)
@@ -537,6 +540,52 @@ func (a *leftAlone) runsCover(in incident.Incident) bool {
 		return false
 	}
 	return !a.failedIn(a.failed, in)
+}
+
+// splitCold sets apart, of the firings a replay of rs from from gave, those
+// already on at its first evaluation, where they began isn't known (cold).
+// Only a Grafana rule's can be: its replay reports a firing on from the
+// start at the first evaluation on its group's grid, which is later than
+// the first step when its interval is longer than the step; a Prometheus
+// rule's state from the start is exact, so one on the whole time began at
+// the start, as lapilli verdict has it.
+func splitCold(fired []firing.Firing, rs []rules.Rule, from time.Time, step time.Duration) (kept, cold []firing.Firing) {
+	until := map[string]time.Duration{}
+	for _, r := range rs {
+		if r.Graph != nil {
+			until[r.Name] = max(until[r.Name], replay.Every(r, step))
+		}
+	}
+	for _, f := range fired {
+		if f.Start.Before(from.Add(until[f.Rule])) {
+			cold = append(cold, f)
+		} else {
+			kept = append(kept, f)
+		}
+	}
+	return kept, cold
+}
+
+// replayCount is how many rules a replay for open would ask: those the
+// pull request leaves alike and, until widen has taken them in, those of
+// serve's own, but for the ones the record holds for every incident open
+// (asks).
+func (a *leftAlone) replayCount(open []aloneCase) int {
+	n := 0
+	count := func(r aloneRule) {
+		if slices.ContainsFunc(open, func(c aloneCase) bool { return a.asks(r, c) }) {
+			n++
+		}
+	}
+	for _, r := range a.alone {
+		count(r)
+	}
+	if !a.widened {
+		for _, r := range a.serve {
+			count(aloneRule{rule: r})
+		}
+	}
+	return n
 }
 
 // replayed are the rules a replay of the rules left alone asks.

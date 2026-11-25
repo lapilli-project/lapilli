@@ -345,16 +345,19 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 // rule's reach before them, to now, as each rule a catch may be counted by
 // is in it (want, a.same).
 func (s *Server) readVersions(ctx context.Context, a *leftAlone) error {
-	a.versions, a.read = nil, false
+	// What was read before stays unless this read is done: widen reads again
+	// with a longer reach, and a read that fails must not take away what the
+	// first one gave.
 	first := a.from.Add(-a.o.MaxLead() - min(a.reach, leftAloneReach))
 	vs, err := s.l.Versions(ctx, first, s.now(), false)
 	if err != nil {
 		return err
 	}
 	if len(vs) == 0 || len(vs) > leftAloneVersions {
+		a.versions, a.read = nil, false
 		return nil
 	}
-	a.read = true
+	var out []aloneVersion
 	for i, v := range vs {
 		rs, err := s.parse(ctx, v)
 		if err != nil {
@@ -382,8 +385,9 @@ func (s *Server) readVersions(ctx context.Context, a *leftAlone) error {
 				vt.texts[name] = t
 			}
 		}
-		a.versions = append(a.versions, vt)
+		out = append(out, vt)
 	}
+	a.versions, a.read = out, true
 	return nil
 }
 

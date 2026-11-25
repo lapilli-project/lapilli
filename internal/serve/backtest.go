@@ -1139,16 +1139,35 @@ var dataSourceUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 // serve's says which: a data source refused is one no rule in effect
 // reads, whatever the reason.
 func taken(r rules.Rule, eff inEffectReads) string {
+	return takenAs(r, eff, false)
+}
+
+// takenAs is taken, with own set for a rule serve itself runs (the rules a
+// backtest leaves alone): its data sources are held to what the rules in
+// effect read, as readsInEffect records them, the uids Grafana's own or
+// unusual among them, which a rule in effect already asks. Of a Grafana rule
+// that is replayed, only the data sources the replay asks are compared, not
+// those of queries its condition doesn't read; a pull request's rule is held
+// to every data source it names.
+func takenAs(r rules.Rule, eff inEffectReads, own bool) string {
 	name := verdict.Clean(r.Name)
-	uids := r.GrafanaUIDs()
-	if r.Graph != nil || len(uids) > 0 {
+	if r.Graph != nil || len(r.GrafanaUIDs()) > 0 {
 		refused := name + " reads a data source no rule in effect reads: here a Grafana rule reads only the data sources the rules lapilli serve runs read already"
+		g := r.Graph
+		replayed := g != nil && r.Unsupported == ""
+		uids := r.GrafanaUIDs()
+		if own && replayed {
+			uids = nil
+			for _, d := range g.Data {
+				uids = append(uids, d.UID)
+			}
+		}
 		for _, u := range uids {
-			if builtIn[u] || !dataSourceUID.MatchString(u) || !eff.promql[u] && !eff.logql[u] {
+			if !eff.promql[u] && !eff.logql[u] || !own && (builtIn[u] || !dataSourceUID.MatchString(u)) {
 				return refused
 			}
 		}
-		if g := r.Graph; g != nil && r.Unsupported == "" {
+		if replayed {
 			for _, d := range g.Data {
 				if g.LokiUID(d.UID) && !eff.logql[d.UID] || !g.LokiUID(d.UID) && !eff.promql[d.UID] {
 					return refused

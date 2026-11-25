@@ -922,10 +922,16 @@ A request with `fail_missed: true` is held so:
   job held to it fails. A rule that couldn't be replayed (not supported, a
   request failed, a range past `--max-samples`) leaves it not known. A
   rule disabled, paused or with no query fires nothing, and is no rule that
-  couldn't be replayed. A firing already on at the replay's first
-  evaluation (where it began isn't known) never makes an incident missed:
-  it catches nothing, and an incident none of the others catch that it was
-  about is not known. So does a catch in the record that no replay can
+  couldn't be replayed. A Grafana rule's firing already on at the replay's
+  first evaluation (where it began isn't known: it is reported at the
+  first evaluation on its group's interval, which is later than the
+  replay's first step when the interval is longer than the step, so a firing
+  that starts before the first step plus the rule's interval counts) never
+  makes an incident missed: it catches nothing, and an incident none of
+  the others catch that it was about is not known. A Prometheus rule's
+  state from the start is exact, so a rule on the whole time (`for: 0`,
+  `Watchdog`) is no such firing, and the incident it can't catch is missed,
+  as `lapilli verdict` says. So does a catch in the record that no replay can
   stand for (a rule whose firings are copied in, a name told apart, one
   name changed and left alone): such an incident can be found caught,
   never missed. A rule after the change that couldn't be replayed keeps
@@ -1725,6 +1731,10 @@ step 3 does otherwise than the sections above say, or says more:
   the day before, the first numbers of a classic condition's window) isn't
   counted, as the hourly runs' estimate doesn't count it
   (`replay.Planned.Unsure`): `--backtest-timeout` ends one that asks more.
+  The plan's allowance for those reads is an estimate, not a bound (a
+  classic condition asks again for the first values of its window whenever
+  a new series appears): what bounds the requests is the lane's rate and
+  the time left.
   A reduce over LogQL is counted, a batch of evaluations at a time and each
   range in the pieces a Loki's client asks it in, from the code that asks
   them.
