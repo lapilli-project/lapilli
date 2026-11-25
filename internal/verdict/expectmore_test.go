@@ -11,11 +11,11 @@ import (
 // read, is refused; re-fires are a budget of their own.
 func TestReadExpectationsLabelsAndRefires(t *testing.T) {
 	for want, s := range map[string]string{
-		"give rule, group or labels, one of them":           "expectations:\n  - rule: A\n    labels: severity=page\n    budget: {week: 3}\n",
-		"labels: \"=page\": \"\" isn't a label's name":      "expectations:\n  - labels: \"=page\"\n    budget: {week: 3}\n",
-		"it selects every rule":                             "expectations:\n  - labels: \" \"\n    budget: {week: 3}\n",
-		"a budget below nothing":                            "expectations:\n  - labels: severity=page\n    budget: {refires: -1}\n",
-		"a budget of nothing: give week, asleep or refires": "expectations:\n  - labels: severity=page\n    budget: {}\n",
+		"give rule, group or labels, one of them":                  "expectations:\n  - rule: A\n    labels: severity=page\n    budget: {week: 3}\n",
+		"labels: \"=page\": \"\" isn't a label's name":             "expectations:\n  - labels: \"=page\"\n    budget: {week: 3}\n",
+		"it selects every rule":                                    "expectations:\n  - labels: \" \"\n    budget: {week: 3}\n",
+		"a budget below nothing":                                   "expectations:\n  - labels: severity=page\n    budget: {refires: -1}\n",
+		"a budget of nothing: give week, asleep, refires or pages": "expectations:\n  - labels: severity=page\n    budget: {}\n",
 		"labels severity=page: a budget of re-fires given twice": "expectations:\n  - labels: severity=page\n    budget: {refires: 1}\n" +
 			"  - labels: \"severity=page\"\n    budget: {refires: 2}\n",
 	} {

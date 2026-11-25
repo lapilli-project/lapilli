@@ -248,7 +248,9 @@ What the rules say:
                       --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
-                      Only read: no field that holds a secret is parsed
+                      Only read: no field that holds a secret is parsed. In a
+                      run that judges firings it also says who each firing
+                      reached (see "Who a firing reached", below)
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -454,6 +456,29 @@ What people did when a rule fired (docs/responses.md):
                       its target changed so often that one falling in a
                       span as long as the firing is at least this likely
                       anyway (default 0.5, from above 0 to 1)
+
+Who a firing reached (docs/notifications-worked-out.md): the alert manager's
+routing worked out over the firings, as Alertmanager's dispatcher would
+have: which receivers each reached, in which notifications, which of them
+page someone, and what muted it. Worked out from the configuration, not
+recorded; it is on when --alertmanager-config is given, or --grafana, whose
+notification policies and contact points are read:
+  --notifications=false
+                      leave it out: the report is as it was without it
+  --external-labels NAME=VALUE
+                      a label Prometheus adds to each alert as it sends it
+                      (global.external_labels), which routes often match
+                      on, such as cluster=prod (repeatable)
+  --silences FILE     the silences Alertmanager held, as it lists them
+                      (GET /api/v2/silences, or amtool silence query -o
+                      json), expired ones too: its matchers and times are
+                      read, not its comments
+  --paging-receivers REGEX
+                      every notification to a receiver whose name matches
+                      is a page, whatever it sends with (a webhook to a
+                      paging tool); by default pagerduty, opsgenie,
+                      victorops and pushover pages, and Grafana's oncall,
+                      and everything else is a message. Not anchored
 
 Output:
   --json              the whole report, every firing included

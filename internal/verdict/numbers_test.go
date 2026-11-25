@@ -18,23 +18,28 @@ import (
 // stableFields are the report's fields docs/numbers.md promises keep their
 // names, by where they are: renaming one fails here first.
 var stableFields = map[string][]string{
-	"":                          {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings", "responses"},
-	"noisy_at":                  {"firings", "precision"},
-	"settings":                  {"lead_ns", "match", "linked_only", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by_week", "impact_signals", "impact_rules", "zone", "noisy_by", "routine"},
-	"settings.impact_signals[]": {"name", "for_ns", "match", "record", "start", "lead_ns"},
-	"settings.impact_rules[]":   {"rules", "labels", "signals", "match", "lead_ns", "require", "judged"},
-	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged", "responses"},
-	"rules[].responses":         {"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"},
-	"rules[].marked.*":          {"firings", "caught", "refired", "unjudged"},
-	"rules[].episodes":          {"total", "white", "unjudged", "noisy"},
-	"incidents[]":               {"id", "title", "start", "end", "labels", "alerts", "candidate", "caught_by", "signal", "real", "not_known"},
-	"incidents[].alerts[]":      {"rule", "labels"},
-	"incidents[].caught_by[]":   {"rule", "delay_ns", "noisy", "linked"},
-	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals", "marked", "episode", "day", "unrelated", "action", "not_judged", "response"},
-	"responses":                 {"pages", "pages_unmatched", "changes", "autoscalers_known"},
-	"firings[].response":        {"kind", "useful", "change", "page"},
-	"firings[].response.change": {"kind", "at", "labels", "routine"},
-	"firings[].response.page":   {"id", "sent", "acknowledged", "resolved", "resolved_by"},
+	"":                                {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings", "responses", "notifications"},
+	"noisy_at":                        {"firings", "precision"},
+	"settings":                        {"lead_ns", "match", "linked_only", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by_week", "impact_signals", "impact_rules", "zone", "noisy_by", "routine"},
+	"settings.impact_signals[]":       {"name", "for_ns", "match", "record", "start", "lead_ns"},
+	"settings.impact_rules[]":         {"rules", "labels", "signals", "match", "lead_ns", "require", "judged"},
+	"rules[]":                         {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged", "responses", "notifications"},
+	"rules[].notifications":           {"notified", "paged", "paged_asleep", "paged_off_hours", "paged_for_nothing", "paged_for_nothing_asleep", "paged_for_nothing_off_hours", "inhibited", "inhibited_by", "grouped"},
+	"rules[].responses":               {"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"},
+	"rules[].marked.*":                {"firings", "caught", "refired", "unjudged"},
+	"rules[].episodes":                {"total", "white", "unjudged", "noisy"},
+	"incidents[]":                     {"id", "title", "start", "end", "labels", "alerts", "candidate", "caught_by", "signal", "real", "not_known"},
+	"incidents[].alerts[]":            {"rule", "labels"},
+	"incidents[].caught_by[]":         {"rule", "delay_ns", "noisy", "linked"},
+	"firings[]":                       {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals", "marked", "episode", "day", "unrelated", "action", "not_judged", "response", "notifications"},
+	"notifications":                   {"worked_out", "notified", "paged", "groups", "receivers", "stopped"},
+	"notifications.receivers[]":       {"name", "kinds", "paging", "why"},
+	"firings[].notifications":         {"notified", "paged", "first_page", "receivers", "no_integrations", "muted"},
+	"firings[].notifications.muted[]": {"kind", "by", "source_rule"},
+	"responses":                       {"pages", "pages_unmatched", "changes", "autoscalers_known"},
+	"firings[].response":              {"kind", "useful", "change", "page"},
+	"firings[].response.change":       {"kind", "at", "labels", "routine"},
+	"firings[].response.page":         {"id", "sent", "acknowledged", "resolved", "resolved_by"},
 }
 
 // A report with every field docs/numbers.md promises set, none left out as
@@ -54,7 +59,8 @@ func fullReport() *Report {
 			Excused: 1, DuringDeploys: 1, DeploysCaught: 1, DeploysUnjudged: 1, ImpactRule: 1,
 			Marked:   map[string]MarkedCount{"sale": {Firings: 1, Caught: 1, Refired: 1, Unjudged: 1}},
 			Episodes: EpisodeCount{Total: 2, White: 1, Unjudged: 1, Noisy: true}, Unrelated: 1, ActionYes: 1, ActionNo: 1, NotJudged: 1,
-			Responses: &RuleResponses{Changed: 1, Routine: 1, Acknowledged: 1, Unanswered: 1, None: 1, Useful: 1, NotUseful: 2, Actionable: &third}}},
+			Responses:     &RuleResponses{Changed: 1, Routine: 1, Acknowledged: 1, Unanswered: 1, None: 1, Useful: 1, NotUseful: 2, Actionable: &third},
+			Notifications: &RuleNotifications{Notified: 2, Paged: 1, PagedAsleep: 1, PagedOffHours: 1, PagedForNothing: 1, PagedForNothingAsleep: 1, PagedForNothingOffHours: 1, Inhibited: 1, InhibitedBy: "Down", Grouped: 1}}},
 		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Title: "Errors", Start: t0, End: t0.Add(time.Hour),
 			Labels: incident.Labels{"service": {"api"}}, Alerts: []incident.Alert{{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}}},
 			Candidate: true, Signal: "probe"}, Real: true, NotKnown: true, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true, Linked: true}}}},
@@ -62,8 +68,12 @@ func fullReport() *Report {
 			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true, Signals: []string{"probe"}, Marked: []string{"sale"},
 			Episode: 1, Day: "2026-11-02", Unrelated: []string{"INC-2"}, Action: ActionYes, NotJudged: true,
 			Response: &FiringResponse{Kind: ResponseChanged, Useful: &yes, Change: &ResponseChange{Kind: "rollout", At: t0, Labels: map[string]string{"namespace": "shop"}, Routine: true},
-				Page: &ResponsePage{ID: "PD-1", Sent: t0, Acknowledged: t0, Resolved: t0, ResolvedBy: "alert"}}}},
+				Page: &ResponsePage{ID: "PD-1", Sent: t0, Acknowledged: t0, Resolved: t0, ResolvedBy: "alert"}},
+			Notifications: &FiringNotifications{Notified: 2, Paged: 1, FirstPage: t0, Receivers: []string{"oncall"}, NoIntegrations: []string{"nobody"},
+				Muted: []NotificationMute{{Kind: "inhibition", By: "rule-1", SourceRule: "Down"}}}}},
 		Responses: &ResponseTotals{Pages: 1, PagesUnmatched: 1, Changes: 1, AutoscalersKnown: true},
+		Notifications: &ReportNotifications{WorkedOut: true, Notified: 2, Paged: 1, Groups: 1, Stopped: "x",
+			Receivers: []NotificationReceiver{{Name: "oncall", Kinds: []string{"pagerduty"}, Paging: true, Why: "pages by its pagerduty"}}},
 	}
 }
 
@@ -170,6 +180,18 @@ func TestCSVColumns(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(strings.Fields(section), " "), strings.Join(quoted, ", ")) {
 		t.Errorf("docs/numbers.md doesn't list the columns with responses in order: %s", strings.Join(quoted, ", "))
+	}
+	// With the notifications worked out, five more after them.
+	worked := []string{"worked_out_notified", "worked_out_paged", "worked_out_first_page", "worked_out_receivers", "worked_out_muted"}
+	if !slices.Equal(NotificationCSVColumns, worked) {
+		t.Errorf("notification columns %q, want %q", NotificationCSVColumns, worked)
+	}
+	quoted = nil
+	for _, c := range worked {
+		quoted = append(quoted, "`"+c+"`")
+	}
+	if !strings.Contains(strings.Join(strings.Fields(section), " "), strings.Join(quoted, ", ")) {
+		t.Errorf("docs/numbers.md doesn't list the columns with notifications in order: %s", strings.Join(quoted, ", "))
 	}
 }
 

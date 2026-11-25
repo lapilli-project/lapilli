@@ -352,7 +352,7 @@ func DraftFromReport(rep *Report, hoursOf func(rule string) *Hours) []DraftRule 
 		if r.Unsupported != "" {
 			continue
 		}
-		most, asleep, refired := k.most(counts, r.Rule)
+		most, asleep, refired, _ := k.most(counts, r.Rule)
 		h := hoursOf(r.Rule)
 		out = append(out, DraftRule{Rule: r.Rule, Weeks: k.Weeks, Scaled: k.Scaled, Most: most, Asleep: asleep, Refires: refired,
 			Sleeps: h != nil && h.Sleeps(), Caught: caught[r.Rule]})

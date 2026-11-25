@@ -122,6 +122,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	if err := responsesText(w, r); err != nil {
 		return err
 	}
+	if err := notificationsText(w, r); err != nil {
+		return err
+	}
 	if len(r.Unrecorded) > 0 {
 		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")
 		for _, u := range r.Unrecorded {
@@ -459,12 +462,33 @@ func outOfHours(w io.Writer, r *Report) error {
 	if r.Hours == nil {
 		return nil
 	}
+	// With the notifications worked out, what is counted is the pages that
+	// went for nothing, not the firings that caught nothing.
+	pages := r.hasNotifications()
+	asleepOf := func(rr RuleResult) int {
+		if pages {
+			return rr.Notifications.forNothingAsleep()
+		}
+		return rr.AsleepBlack
+	}
+	offOf := func(rr RuleResult) int {
+		if pages {
+			return rr.Notifications.forNothingOff()
+		}
+		return rr.OffHoursBlack
+	}
+	atWorkOf := func(rr RuleResult) int {
+		if pages {
+			return max(0, rr.Notifications.forNothing()-asleepOf(rr)-offOf(rr))
+		}
+		return atWork(rr)
+	}
 	var rows []RuleResult
 	asleep, off := 0, 0
 	for _, rr := range r.Rules {
-		asleep += rr.AsleepBlack
-		off += rr.OffHoursBlack
-		if rr.AsleepBlack+rr.OffHoursBlack > 0 {
+		asleep += asleepOf(rr)
+		off += offOf(rr)
+		if asleepOf(rr)+offOf(rr) > 0 {
 			rows = append(rows, rr)
 		}
 	}
@@ -472,11 +496,11 @@ func outOfHours(w io.Writer, r *Report) error {
 		return nil
 	}
 	slices.SortStableFunc(rows, func(a, b RuleResult) int {
-		if a.AsleepBlack != b.AsleepBlack {
-			return b.AsleepBlack - a.AsleepBlack
+		if asleepOf(a) != asleepOf(b) {
+			return asleepOf(b) - asleepOf(a)
 		}
-		if a.OffHoursBlack != b.OffHoursBlack {
-			return b.OffHoursBlack - a.OffHoursBlack
+		if offOf(a) != offOf(b) {
+			return offOf(b) - offOf(a)
 		}
 		return strings.Compare(a.Rule, b.Rule)
 	})
@@ -500,6 +524,14 @@ func outOfHours(w io.Writer, r *Report) error {
 	// With no record, what caught nothing may have caught something nobody
 	// wrote down.
 	switch {
+	case pages && r.Responses != nil:
+		fmt.Fprintf(w, "of the pages of firings that weren't useful (worked out, not recorded), %d went while people slept, and %d more off hours.\n", asleep, off)
+	case pages && r.NoRecord:
+		fmt.Fprintf(w, "of the pages of firings, with no incident written down to judge them by (worked out, not recorded), %d went while people slept, and %d more off hours.\n", asleep, off)
+	case pages && r.Unjudged > 0:
+		fmt.Fprintf(w, "of the pages of firings that caught nothing, or had no incident written down to judge them by (worked out, not recorded), %d went while people slept, and %d more off hours.\n", asleep, off)
+	case pages:
+		fmt.Fprintf(w, "of the pages of firings that caught nothing (worked out, not recorded), %d went while people slept, and %d more off hours.\n", asleep, off)
 	case r.NoRecord:
 		fmt.Fprintf(w, "of the firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours.\n", asleep, off)
 	case r.Unjudged > 0:
@@ -508,14 +540,18 @@ func outOfHours(w io.Writer, r *Report) error {
 		fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
 	}
 	sev := slices.ContainsFunc(rows, func(rr RuleResult) bool { return rr.Severity != "" })
-	table := [][]string{withSeverity(sev, "RULE", "SEVERITY", "● ASLEEP", "● OFF HOURS", "● AT WORK")}
+	head := []string{"● ASLEEP", "● OFF HOURS", "● AT WORK"}
+	if pages {
+		head = []string{"PAGES ASLEEP", "PAGES OFF HOURS", "PAGES AT WORK"}
+	}
+	table := [][]string{withSeverity(sev, "RULE", "SEVERITY", head...)}
 	const most = 10
 	for i, rr := range rows {
 		if i == most {
 			break
 		}
-		table = append(table, withSeverity(sev, Clean(rr.Rule), orDash(Clean(rr.Severity)), fmt.Sprint(rr.AsleepBlack),
-			fmt.Sprint(rr.OffHoursBlack), fmt.Sprint(atWork(rr))))
+		table = append(table, withSeverity(sev, Clean(rr.Rule), orDash(Clean(rr.Severity)), fmt.Sprint(asleepOf(rr)),
+			fmt.Sprint(offOf(rr)), fmt.Sprint(atWorkOf(rr))))
 	}
 	if err := writeTable(w, table); err != nil {
 		return err
@@ -926,7 +962,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			b.WriteString(l + "\n")
 		}
 	}
-	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught, action, responses, actionable []string
+	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught, action, responses, actionable, notified, paged []string
 	for _, rr := range r.Rules {
 		if rr.Unsupported != "" && !rr.ByHistory() {
 			continue
@@ -965,6 +1001,10 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 				actionable = append(actionable, a)
 			}
 		}
+		if r.hasNotifications() {
+			n, p := notificationMetrics(l, rr)
+			notified, paged = append(notified, n), append(paged, p)
+		}
 		if r.Hours != nil {
 			for _, x := range []struct {
 				name string
@@ -987,6 +1027,10 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	if r.hasResponses() {
 		family("lapilli_rule_responses", "Firings by what was done about them: changed (a change on the alert's target), routine, acknowledged, unanswered, or none.", responses)
 		family("lapilli_rule_actionable", "Share of the firings known to be useful or not that were useful: a change followed them, or they caught an incident.", actionable)
+	}
+	if r.hasNotifications() {
+		family("lapilli_rule_notifications_worked_out", "Notifications the alert manager is worked out to have sent for the rule's firings, from its configuration: not recorded.", notified)
+		family("lapilli_rule_pages_worked_out", "Of those notifications, the pages (an integration of a paging kind, or a receiver --paging-receivers matched), worked out: not recorded.", paged)
 	}
 	if r.Hours != nil {
 		family("lapilli_rule_nothing_by_hours", "Firings with no incident, by when they came: asleep, off hours or at work.", hours)

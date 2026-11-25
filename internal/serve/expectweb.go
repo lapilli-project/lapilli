@@ -27,6 +27,7 @@ import (
 // expectWhyText says why a check is not known, or so far.
 var expectWhyText = map[string]string{
 	whyNoHours:        "no one's hours say when people sleep",
+	whyPagesNotYet:    "pages are worked out by lapilli verdict, not yet by lapilli serve",
 	whyNotWhole:       "a week the ledger holds part of",
 	whyNotHeld:        "a week before the ledger's first firing",
 	whySoFar:          "so far",

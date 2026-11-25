@@ -45,12 +45,14 @@ type Expectation struct {
 
 // Budget is how often a rule may fire in each whole week of a period, and
 // of those, how often while people slept, by the hours it is counted by,
-// and how often a firing came again within --refire of the same alert
-// resolving.
+// how often a firing came again within --refire of the same alert
+// resolving, and how many pages its firings may send, as the alert
+// manager's routing is worked out to send them (docs/design/routing.md).
 type Budget struct {
 	Week    *int `yaml:"week,omitempty" json:"week,omitempty"`
 	Asleep  *int `yaml:"asleep,omitempty" json:"asleep,omitempty"`
 	Refires *int `yaml:"refires,omitempty" json:"refires,omitempty"`
+	Pages   *int `yaml:"pages,omitempty" json:"pages,omitempty"`
 }
 
 // ExpectCatch is an incident a rule must keep catching, within a delay of
@@ -185,9 +187,9 @@ func NewExpectations(list []Expectation) (*Expectations, error) {
 			return nil, fmt.Errorf("%s: give rule, group or labels, one of them", at)
 		case b == nil && len(x.Catches) == 0 && len(x.Scenarios) == 0:
 			return nil, fmt.Errorf("%s: nothing to hold %s to: give a budget, catches or scenarios", at, x.name())
-		case b != nil && b.Week == nil && b.Asleep == nil && b.Refires == nil:
-			return nil, fmt.Errorf("%s: a budget of nothing: give week, asleep or refires", at)
-		case b != nil && (below(b.Week) || below(b.Asleep) || below(b.Refires)):
+		case b != nil && b.Week == nil && b.Asleep == nil && b.Refires == nil && b.Pages == nil:
+			return nil, fmt.Errorf("%s: a budget of nothing: give week, asleep, refires or pages", at)
+		case b != nil && (below(b.Week) || below(b.Asleep) || below(b.Refires) || below(b.Pages)):
 			return nil, fmt.Errorf("%s: a budget below nothing", at)
 		}
 		if x.Labels != "" {
@@ -273,6 +275,12 @@ func (e *Expectations) merged() (*Expectations, error) {
 					return nil, fmt.Errorf("%s: a budget of re-fires given twice", x.name())
 				}
 				y.Budget.Refires = x.Budget.Refires
+			}
+			if x.Budget.Pages != nil {
+				if y.Budget.Pages != nil {
+					return nil, fmt.Errorf("%s: a budget of pages given twice", x.name())
+				}
+				y.Budget.Pages = x.Budget.Pages
 			}
 		}
 		for _, c := range x.Catches {
@@ -436,6 +444,7 @@ type item struct {
 	catch          *ExpectCatch // a catch's
 	scenario       string       // a scenario's path
 	asleep, refire bool
+	pages          bool
 	fromBefore     bool
 }
 
@@ -453,6 +462,9 @@ func (x *Expectation) items() []item {
 		}
 		if b.Refires != nil {
 			out = append(out, item{what: "budget refires", limit: b.Refires, refire: true})
+		}
+		if b.Pages != nil {
+			out = append(out, item{what: "budget pages", limit: b.Pages, pages: true})
 		}
 	}
 	for i := range x.Catches {
@@ -498,6 +510,9 @@ type ExpectItem struct {
 func (it ExpectItem) Asleep() bool  { return it.What == "budget asleep" }
 func (it ExpectItem) Refires() bool { return it.What == "budget refires" }
 
+// Pages says it counts pages, worked out from the alert manager's routing.
+func (it ExpectItem) Pages() bool { return it.What == "budget pages" }
+
 // Items are what it holds a rule to, its budget's first.
 func (x *Expectation) Items() []ExpectItem {
 	var out []ExpectItem
@@ -528,7 +543,7 @@ func (it item) limitText() string {
 
 // weekCounts are, of one side's firings, by rule, each whole week's, how
 // many came while people slept and how many re-fired, counted once.
-type weekCounts map[string][]struct{ all, asleep, refired int }
+type weekCounts map[string][]struct{ all, asleep, refired, pages int }
 
 // ScenarioRunner runs the scenarios expectations hold rules to: a promtool
 // test file against a rule's group, on one side of a change.
@@ -620,18 +635,23 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 				}
 				return r
 			}
-			wb, sb, rb := out.most(countsB, rc.Rule)
-			wa, sa, ra := out.most(countsA, rc.Rule)
+			wb, sb, rb, pb := out.most(countsB, rc.Rule)
+			wa, sa, ra, pa := out.most(countsA, rc.Rule)
 			nb, na := wb, wa
 			switch {
 			case it.asleep:
 				nb, na = sb, sa
 			case it.refire:
 				nb, na = rb, ra
+			case it.pages:
+				nb, na = pb, pa
 			}
 			counted := !it.asleep || sleeps
-			r.Before, r.BeforeState = budgetState(b, nb, beforeLimit.limit, counted)
-			r.After, r.AfterState = budgetState(a, na, it.limit, counted)
+			// Pages are counted only where the notifications were worked
+			// out: with no configuration, whether a rule pages isn't known.
+			countedB, countedA := counted && (!it.pages || c.Before.hasNotifications()), counted && (!it.pages || c.After.hasNotifications())
+			r.Before, r.BeforeState = budgetState(b, nb, beforeLimit.limit, countedB)
+			r.After, r.AfterState = budgetState(a, na, it.limit, countedA)
 			return r
 		}
 		for i := range after.Expectations {
@@ -892,7 +912,7 @@ func (k *Checked) count(r *Report, from, to time.Time, hoursOf func(string) *Hou
 		}
 		ws := out[f.Rule]
 		if ws == nil {
-			ws = make([]struct{ all, asleep, refired int }, n)
+			ws = make([]struct{ all, asleep, refired, pages int }, n)
 			out[f.Rule] = ws
 		}
 		ws[i].all++
@@ -902,22 +922,23 @@ func (k *Checked) count(r *Report, from, to time.Time, hoursOf func(string) *Hou
 		if f.Refired {
 			ws[i].refired++
 		}
+		ws[i].pages += pagesOfFiring(f)
 	}
 	return out
 }
 
 // most is the most a rule fired in a week, while people slept, and
 // re-fired; with no whole week, the period's, scaled to a week.
-func (k *Checked) most(counts weekCounts, rule string) (int, int, int) {
-	most, asleep, refired := 0, 0, 0
+func (k *Checked) most(counts weekCounts, rule string) (int, int, int, int) {
+	most, asleep, refired, pages := 0, 0, 0, 0
 	for _, w := range counts[rule] {
-		most, asleep, refired = max(most, w.all), max(asleep, w.asleep), max(refired, w.refired)
+		most, asleep, refired, pages = max(most, w.all), max(asleep, w.asleep), max(refired, w.refired), max(pages, w.pages)
 	}
 	if k.Weeks == 0 {
 		scale := 7 / max(k.Scaled, 1.0/24)
-		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5), int(float64(refired)*scale + 0.5)
+		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5), int(float64(refired)*scale + 0.5), int(float64(pages)*scale + 0.5)
 	}
-	return most, asleep, refired
+	return most, asleep, refired, pages
 }
 
 func budgetState(r *RuleResult, n int, limit *int, counted bool) (string, string) {
@@ -978,6 +999,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s = "at most " + r.Limit + " a week while people slept"
 	case r.What == "budget refires":
 		s = "at most " + r.Limit + " re-fires a week"
+	case r.What == "budget pages":
+		s = "at most " + r.Limit + " pages a week (worked out from the alert manager's configuration)"
 	case strings.HasPrefix(r.What, "catches "):
 		s = "catches " + name(strings.TrimPrefix(r.What, "catches ")) + ", " + r.Limit
 	case strings.HasPrefix(r.What, ScenarioWhat):
@@ -1166,7 +1189,8 @@ func expectationsPart(k *Checked) mdPart {
 const maxSaidLines = 8
 
 // BudgetAnnotation is the annotation a rule may carry its budget in, for
-// teams that keep everything in the rule: "10/week, 2 asleep, 3 refires".
+// teams that keep everything in the rule: "10/week, 2 asleep, 3 refires,
+// 1 pages".
 const BudgetAnnotation = "lapilli.dev/budget"
 
 // maxBudgetText is the longest an annotation's budget is read, in bytes;
@@ -1179,18 +1203,18 @@ const (
 // errBudgetText is what ParseBudget says of a budget it can't read. A
 // rule's annotation is its author's: what is wrong is said without its
 // text.
-var errBudgetText = errors.New(`want a budget such as "10/week, 2 asleep, 3 refires": a whole number and what it counts, each once`)
+var errBudgetText = errors.New(`want a budget such as "10/week, 2 asleep, 3 refires, 1 pages": a whole number and what it counts, each once`)
 
 // ParseBudget reads a budget as an annotation writes it: parts separated
 // by commas, each a whole number and what it counts, N/week, N asleep and
-// N refires (or re-fires), each once, one at least.
+// N refires (or re-fires) and N pages, each once, one at least.
 func ParseBudget(s string) (*Budget, error) {
 	if len(s) > maxBudgetText {
 		return nil, fmt.Errorf("more than %d bytes: %w", maxBudgetText, errBudgetText)
 	}
 	b := &Budget{}
 	parts := strings.Split(s, ",")
-	if len(parts) > 3 {
+	if len(parts) > 4 {
 		return nil, errBudgetText
 	}
 	for _, p := range parts {
@@ -1214,6 +1238,8 @@ func ParseBudget(s string) (*Budget, error) {
 			at = &b.Asleep
 		case "refires", "re-fires":
 			at = &b.Refires
+		case "pages":
+			at = &b.Pages
 		default:
 			return nil, errBudgetText
 		}

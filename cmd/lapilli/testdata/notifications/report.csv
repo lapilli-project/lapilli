@@ -1,0 +1,9 @@
+rule,severity,team,labels,start,end,stone,no_record,incidents,refired,during_deploy,excused,marked,episode,unrelated,action,worked_out_notified,worked_out_paged,worked_out_first_page,worked_out_receivers,worked_out_muted
+ApiErrors,critical,,"{""deployment"":""web"",""namespace"":""shop"",""severity"":""critical""}",2026-10-06T10:00:00Z,2026-10-06T10:20:00Z,white,false,"[""INC-1""]",false,false,false,[],1,[],,2,1,2026-10-06T10:00:30Z,"[""oncall""]",[]
+DiskFull,,,"{""namespace"":""shop"",""pod"":""web-7d4-abc""}",2026-10-06T10:05:00Z,2026-10-06T10:30:00Z,white,false,"[""INC-1""]",false,false,false,[],2,[],,1,0,,"[""slack-default""]","[""inhibition: api-errors-hide-disk""]"
+ApiErrors,critical,,"{""deployment"":""web"",""namespace"":""shop"",""severity"":""critical""}",2026-10-07T09:00:00Z,2026-10-07T09:03:00Z,black,false,[],false,false,false,[],3,[],,2,1,2026-10-07T09:00:30Z,"[""oncall""]",[]
+DiskFull,,,"{""namespace"":""shop"",""pod"":""web-7d4-abc""}",2026-10-08T12:00:00Z,2026-10-08T12:30:00Z,black,false,[],false,false,false,[],4,[],,1,0,,"[""slack-default""]",[]
+QueueDepth,,,"{""service"":""cart""}",2026-10-09T05:00:00Z,2026-10-09T05:30:00Z,black,false,[],false,false,false,[],5,[],,0,0,,"[""cart-team""]","[""silence: b1c2""]"
+QueueDepth,,,"{""service"":""cart""}",2026-10-09T08:00:00Z,2026-10-09T08:40:00Z,black,false,[],false,false,false,[],6,[],,1,0,,"[""cart-team""]",[]
+Latency,,,"{""service"":""other""}",2026-10-10T02:00:00Z,2026-10-10T02:10:00Z,black,false,[],false,false,false,[],7,[],,0,0,,"[""nobody""]",[]
+ApiErrors,critical,,"{""deployment"":""web"",""namespace"":""shop"",""severity"":""critical""}",2026-10-11T03:00:00Z,2026-10-11T03:50:00Z,black,false,[],false,false,false,[],8,[],,2,1,2026-10-11T03:00:30Z,"[""oncall""]",[]

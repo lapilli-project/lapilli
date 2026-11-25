@@ -236,7 +236,9 @@ What the rules say:
                       --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
-                      Only read: no field that holds a secret is parsed
+                      Only read: no field that holds a secret is parsed. In a
+                      run that judges firings it also says who each firing
+                      reached (see "Who a firing reached", below)
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -443,6 +445,29 @@ What people did when a rule fired (docs/responses.md):
                       span as long as the firing is at least this likely
                       anyway (default 0.5, from above 0 to 1)
 
+Who a firing reached (docs/notifications-worked-out.md): the alert manager's
+routing worked out over the firings, as Alertmanager's dispatcher would
+have: which receivers each reached, in which notifications, which of them
+page someone, and what muted it. Worked out from the configuration, not
+recorded; it is on when --alertmanager-config is given, or --grafana, whose
+notification policies and contact points are read:
+  --notifications=false
+                      leave it out: the report is as it was without it
+  --external-labels NAME=VALUE
+                      a label Prometheus adds to each alert as it sends it
+                      (global.external_labels), which routes often match
+                      on, such as cluster=prod (repeatable)
+  --silences FILE     the silences Alertmanager held, as it lists them
+                      (GET /api/v2/silences, or amtool silence query -o
+                      json), expired ones too: its matchers and times are
+                      read, not its comments
+  --paging-receivers REGEX
+                      every notification to a receiver whose name matches
+                      is a page, whatever it sends with (a webhook to a
+                      paging tool); by default pagerduty, opsgenie,
+                      victorops and pushover pages, and Grafana's oncall,
+                      and everything else is a message. Not anchored
+
 Output:
   --json              the whole report, every firing included
   --csv               the report's firings, a row each, as CSV: rule,
@@ -628,12 +653,19 @@ type verdictFlags struct {
 	// amConfig is --alertmanager-config: Alertmanager's configuration, a
 	// file or Mimir's or Cortex's API, whose templates the rules are sent
 	// with.
-	amConfig           string
-	severities         []string
-	runbooks           []string
-	scrapeInterval     time.Duration
-	alerts             bool
-	firings, incidents string
+	amConfig string
+	// noNotifications is --notifications=false, notificationsSet --notifications
+	// given; externalLabels are each --external-labels, silences is
+	// --silences, pagingReceivers --paging-receivers (docs/design/routing.md).
+	noNotifications, notificationsSet bool
+	externalLabels                    map[string]string
+	silences                          string
+	pagingReceivers                   *regexp.Regexp
+	severities                        []string
+	runbooks                          []string
+	scrapeInterval                    time.Duration
+	alerts                            bool
+	firings, incidents                string
 	// firingsPrefix is --firings-prefix: put before the name of each rule
 	// --firings records, when it is read beside rules replayed.
 	firingsPrefix string
@@ -796,7 +828,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		}
 		switch name {
-		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed", "--check-no-data":
+		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed", "--check-no-data", "--notifications":
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
 				return nil, err
@@ -812,6 +844,8 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 				f.noGrafanaHistory, f.grafanaHistorySet = !on, true
 			case "--check-no-data":
 				f.noCheckNoData, f.checkNoDataSet = !on, true
+			case "--notifications":
+				f.noNotifications, f.notificationsSet = !on, true
 			case "--fail-nothing-replayed":
 				f.noFailNothingReplayed, f.failNothingSet = !on, true
 			default:
@@ -936,6 +970,29 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 				return nil, errors.New("--alertmanager-config: want Alertmanager's configuration file, or Mimir's or Cortex's configuration API")
 			}
 			f.amConfig = val
+		case "--external-labels":
+			k, v, ok := strings.Cut(val, "=")
+			if !ok || !annotationName.MatchString(k) || len(v) > 4096 || !utf8.ValidString(v) {
+				return nil, fmt.Errorf("--external-labels %q: want NAME=VALUE, like cluster=prod", val)
+			}
+			if f.externalLabels == nil {
+				f.externalLabels = map[string]string{}
+			}
+			if _, dup := f.externalLabels[k]; dup {
+				return nil, fmt.Errorf("--external-labels: %s is given twice", k)
+			}
+			f.externalLabels[k] = v
+		case "--silences":
+			if val == "" {
+				return nil, errors.New("--silences: want a file of the silences Alertmanager lists (GET /api/v2/silences, or amtool silence query -o json)")
+			}
+			f.silences = val
+		case "--paging-receivers":
+			re, rerr := regexp.Compile(val)
+			if rerr != nil || val == "" {
+				return nil, fmt.Errorf("--paging-receivers %q: want a regular expression that matches the names of the receivers that page, such as ^oncall", val)
+			}
+			f.pagingReceivers = re
 		case "--loki":
 			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 				return nil, fmt.Errorf("--loki %s: want Loki's URL, like http://loki:3100", val)
@@ -1259,6 +1316,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
+			{f.notificationsSet || len(f.externalLabels) > 0 || f.silences != "" || f.pagingReceivers != nil, "--notifications, --external-labels, --silences or --paging-receivers: it doesn't work out the notifications yet, lapilli verdict does"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
 			{f.failNothingSet, "--fail-nothing-replayed"}, {f.checkNoDataSet, "--check-no-data"},
 			{f.draft != "", "--draft-expectations: ask GET /api/v1/expectations/draft"},
@@ -1302,14 +1360,15 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	if err := f.validResponses(); err != nil {
 		return nil, err
 	}
+	if err := f.validNotifications(); err != nil {
+		return nil, err
+	}
 	if f.checkContent {
 		return f, validContent(f, sources)
 	}
 	switch {
 	case len(f.severities) > 0:
 		return nil, errors.New("--severities goes with --check-content")
-	case f.amConfig != "":
-		return nil, errors.New("--alertmanager-config goes with --check-content")
 	case sources > 1:
 		return nil, tooManySources(given)
 	case sources == 0 && len(f.alarms) == 0 && !lokiToo:
@@ -1702,6 +1761,12 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			verdict.OnCallNamed(sc.Name).Set(verdict.NewRota(feed.Turns, f.onCall.HoursOf()))
 		}
 	}
+	// The alert manager's configuration, for who each firing reached: read
+	// once, before anything is replayed, as it can fail the run.
+	notes, err := f.routingOf(ctx, stderr)
+	if err != nil {
+		return fail(err)
+	}
 	if f.checkReplay {
 		return runCheck(ctx, f, versions, stdout, stderr)
 	}
@@ -1904,6 +1969,8 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, ob),
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, oa),
 			changed, len(was)-len(before))
+		notes.workOut(cmp.Before, slices.Concat(ran[0], ran[1]), f.opts.Hours, stderr)
+		notes.workOut(cmp.After, slices.Concat(ran[0], ran[2]), f.opts.Hours, stderr)
 		cmp.ChangedOnly = f.changedOnly
 		cmp.LabelRules(before, after)
 		cmp.Recording = recordingChanges(f.recorded, recordedIs)
@@ -2015,6 +2082,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			}
 		}
 		rep.MarkNotKnown()
+		notes.workOut(rep, known, f.opts.Hours, stderr)
 		for _, v := range versions {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)

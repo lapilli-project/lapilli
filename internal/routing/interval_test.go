@@ -6,15 +6,6 @@ import (
 	"time"
 )
 
-func loc(t testing.TB, name string) *time.Location {
-	t.Helper()
-	l, err := time.LoadLocation(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return l
-}
-
 func parse(t testing.TB, v any) TimeInterval {
 	t.Helper()
 	ti, err := ParseTimeInterval(v)

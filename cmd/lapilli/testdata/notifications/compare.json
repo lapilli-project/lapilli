@@ -1,0 +1,348 @@
+{
+  "from": "2026-10-05T00:00:00Z",
+  "to": "2026-10-12T00:00:00Z",
+  "same": 1,
+  "rules": [
+    {
+      "rule": "NightJob",
+      "before": null,
+      "after": {
+        "rule": "NightJob",
+        "group": "g",
+        "severity": "critical",
+        "firings": 1,
+        "white": 0,
+        "black": 1,
+        "refired": 0,
+        "replayed": true,
+        "noisy": false,
+        "unjudged": 1,
+        "no_record": true,
+        "incidents": 0,
+        "first": 0,
+        "alone": 0,
+        "spare": false,
+        "off_hours": 0,
+        "off_hours_black": 0,
+        "asleep": 1,
+        "asleep_black": 1,
+        "episodes": {
+          "total": 1,
+          "white": 0,
+          "unjudged": 1,
+          "noisy": false
+        },
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "paged_asleep": 1,
+          "paged_off_hours": 0,
+          "paged_for_nothing": 1,
+          "paged_for_nothing_asleep": 1,
+          "paged_for_nothing_off_hours": 0,
+          "inhibited": 0,
+          "grouped": 0
+        }
+      }
+    }
+  ],
+  "incidents": [],
+  "before": {
+    "from": "2026-10-05T00:00:00Z",
+    "to": "2026-10-12T00:00:00Z",
+    "noisy_at": {
+      "firings": 10,
+      "precision": 0.2
+    },
+    "no_record": true,
+    "unjudged": 1,
+    "rules": [
+      {
+        "rule": "ApiErrors",
+        "group": "g",
+        "severity": "critical",
+        "firings": 1,
+        "white": 0,
+        "black": 1,
+        "refired": 0,
+        "replayed": true,
+        "noisy": false,
+        "unjudged": 1,
+        "no_record": true,
+        "incidents": 0,
+        "first": 0,
+        "alone": 0,
+        "spare": false,
+        "off_hours": 0,
+        "off_hours_black": 0,
+        "asleep": 0,
+        "asleep_black": 0,
+        "episodes": {
+          "total": 1,
+          "white": 0,
+          "unjudged": 1,
+          "noisy": false
+        },
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "paged_asleep": 0,
+          "paged_off_hours": 0,
+          "paged_for_nothing": 1,
+          "paged_for_nothing_asleep": 0,
+          "paged_for_nothing_off_hours": 0,
+          "inhibited": 0,
+          "grouped": 0
+        }
+      }
+    ],
+    "incidents": [],
+    "firings": [
+      {
+        "rule": "ApiErrors",
+        "labels": {
+          "namespace": "shop",
+          "severity": "critical"
+        },
+        "start": "2026-10-06T19:00:00+09:00",
+        "end": "2026-10-06T19:21:00+09:00",
+        "white": false,
+        "no_record": true,
+        "episode": 1,
+        "day": "2026-10-06",
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "first_page": "2026-10-06T19:00:30+09:00",
+          "receivers": [
+            "oncall"
+          ]
+        }
+      }
+    ],
+    "hours": {
+      "zone": "UTC",
+      "work": "mon-fri@08:00-18:00",
+      "sleep": "22:00-08:00"
+    },
+    "settings": {
+      "lead_ns": 900000000000,
+      "match": [],
+      "refire_ns": 3600000000000,
+      "unknown_length_ns": 3600000000000,
+      "record_lookback_ns": 1209600000000000,
+      "zone": "UTC"
+    },
+    "notifications": {
+      "worked_out": true,
+      "notified": 2,
+      "paged": 1,
+      "groups": 1,
+      "receivers": [
+        {
+          "name": "oncall",
+          "kinds": [
+            "pagerduty",
+            "slack"
+          ],
+          "paging": true,
+          "why": "pages by its pagerduty"
+        }
+      ]
+    }
+  },
+  "after": {
+    "from": "2026-10-05T00:00:00Z",
+    "to": "2026-10-12T00:00:00Z",
+    "noisy_at": {
+      "firings": 10,
+      "precision": 0.2
+    },
+    "no_record": true,
+    "unjudged": 2,
+    "rules": [
+      {
+        "rule": "ApiErrors",
+        "group": "g",
+        "severity": "critical",
+        "firings": 1,
+        "white": 0,
+        "black": 1,
+        "refired": 0,
+        "replayed": true,
+        "noisy": false,
+        "unjudged": 1,
+        "no_record": true,
+        "incidents": 0,
+        "first": 0,
+        "alone": 0,
+        "spare": false,
+        "off_hours": 0,
+        "off_hours_black": 0,
+        "asleep": 0,
+        "asleep_black": 0,
+        "episodes": {
+          "total": 1,
+          "white": 0,
+          "unjudged": 1,
+          "noisy": false
+        },
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "paged_asleep": 0,
+          "paged_off_hours": 0,
+          "paged_for_nothing": 1,
+          "paged_for_nothing_asleep": 0,
+          "paged_for_nothing_off_hours": 0,
+          "inhibited": 0,
+          "grouped": 0
+        }
+      },
+      {
+        "rule": "NightJob",
+        "group": "g",
+        "severity": "critical",
+        "firings": 1,
+        "white": 0,
+        "black": 1,
+        "refired": 0,
+        "replayed": true,
+        "noisy": false,
+        "unjudged": 1,
+        "no_record": true,
+        "incidents": 0,
+        "first": 0,
+        "alone": 0,
+        "spare": false,
+        "off_hours": 0,
+        "off_hours_black": 0,
+        "asleep": 1,
+        "asleep_black": 1,
+        "episodes": {
+          "total": 1,
+          "white": 0,
+          "unjudged": 1,
+          "noisy": false
+        },
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "paged_asleep": 1,
+          "paged_off_hours": 0,
+          "paged_for_nothing": 1,
+          "paged_for_nothing_asleep": 1,
+          "paged_for_nothing_off_hours": 0,
+          "inhibited": 0,
+          "grouped": 0
+        }
+      }
+    ],
+    "incidents": [],
+    "firings": [
+      {
+        "rule": "ApiErrors",
+        "labels": {
+          "namespace": "shop",
+          "severity": "critical"
+        },
+        "start": "2026-10-06T19:00:00+09:00",
+        "end": "2026-10-06T19:21:00+09:00",
+        "white": false,
+        "no_record": true,
+        "episode": 1,
+        "day": "2026-10-06",
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "first_page": "2026-10-06T19:00:30+09:00",
+          "receivers": [
+            "oncall"
+          ]
+        }
+      },
+      {
+        "rule": "NightJob",
+        "labels": {
+          "namespace": "shop",
+          "severity": "critical"
+        },
+        "start": "2026-10-11T12:00:00+09:00",
+        "end": "2026-10-11T12:31:00+09:00",
+        "white": false,
+        "no_record": true,
+        "episode": 2,
+        "day": "2026-10-11",
+        "notifications": {
+          "notified": 2,
+          "paged": 1,
+          "first_page": "2026-10-11T12:00:30+09:00",
+          "receivers": [
+            "oncall"
+          ]
+        }
+      }
+    ],
+    "hours": {
+      "zone": "UTC",
+      "work": "mon-fri@08:00-18:00",
+      "sleep": "22:00-08:00"
+    },
+    "settings": {
+      "lead_ns": 900000000000,
+      "match": [],
+      "refire_ns": 3600000000000,
+      "unknown_length_ns": 3600000000000,
+      "record_lookback_ns": 1209600000000000,
+      "zone": "UTC"
+    },
+    "notifications": {
+      "worked_out": true,
+      "notified": 4,
+      "paged": 2,
+      "groups": 2,
+      "receivers": [
+        {
+          "name": "oncall",
+          "kinds": [
+            "pagerduty",
+            "slack"
+          ],
+          "paging": true,
+          "why": "pages by its pagerduty"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "nothing_changed": false,
+    "changed": 0,
+    "added": 1,
+    "removed": 0,
+    "same": 1,
+    "alike": 0,
+    "unreplayed": 0,
+    "recording_changed": 0,
+    "notifications": {
+      "worked_out": true,
+      "paged_before": 1,
+      "paged_after": 2,
+      "notified_before": 2,
+      "notified_after": 4
+    },
+    "firings_before": 1,
+    "firings_after": 2,
+    "incidents_given": false,
+    "incidents": 0,
+    "incidents_changed": 0,
+    "no_record": false,
+    "expected": false,
+    "expectations_broken": 0,
+    "expectations_already_broken": 0,
+    "unexpected": 0,
+    "scenarios_unrun": 0,
+    "missed_checked": false,
+    "incidents_missed": 0,
+    "missed_not_known": 0
+  }
+}

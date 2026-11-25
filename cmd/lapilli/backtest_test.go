@@ -1339,7 +1339,11 @@ func TestSummaryDocumented(t *testing.T) {
 	ty := reflect.TypeOf(verdict.Summary{})
 	for i := range ty.NumField() {
 		tag := strings.Split(ty.Field(i).Tag.Get("json"), ",")
-		if len(tag) != 1 || tag[0] == "" {
+		// The notifications worked out are the one field that is left out
+		// when there are none: a summary without them is what it was.
+		if ty.Field(i).Name == "Notifications" && len(tag) == 2 && tag[1] == "omitempty" {
+			tag = tag[:1]
+		} else if len(tag) != 1 || tag[0] == "" {
 			t.Errorf("%s: %q, want a name and nothing else (no omitempty: every field is always there)", ty.Field(i).Name, tag)
 			continue
 		}

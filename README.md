@@ -137,6 +137,7 @@ Each subject has a page in [docs/](docs/README.md), the same pages as
 - Judging a period: [How it judges](docs/how-it-judges.md),
   [Use `lapilli verdict`](docs/verdict.md), [The numbers](docs/numbers.md),
   [What people did when a rule fired](docs/responses.md),
+  [Who a firing reached, worked out](docs/notifications-worked-out.md),
   [A cloud's own alarms](docs/cloud-alarms.md),
   [Rules on logs: Loki](docs/loki.md),
   [Is the replay right?](docs/check-replay.md),

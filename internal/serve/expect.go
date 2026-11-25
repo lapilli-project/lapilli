@@ -59,6 +59,9 @@ const annotationSelector = "annotation " + verdict.BudgetAnnotation
 // Why a check is not known, or open.
 const (
 	whyNoHours = "no_hours" // a budget while people slept, by hours with no sleep
+	// whyPagesNotYet is a budget of pages, which lapilli serve doesn't work
+	// out yet: only lapilli verdict does (docs/design/routing.md).
+	whyPagesNotYet = "pages_not_yet"
 	// whyNotHeld is a budget's week before the ledger's first firing: no
 	// firing held isn't none fired, so it has no number (bundle 67).
 	whyNotHeld       = "not_held"
@@ -1006,6 +1009,8 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			switch {
 			case r.unreplayed:
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyUnreplayed, nil, "–"
+			case it.Pages():
+				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyPagesNotYet, nil, "–"
 			case it.Asleep() && (h == nil || !h.Sleeps()):
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyNoHours, nil, "–"
 			case n > *it.Limit:
