@@ -58,10 +58,10 @@ LAPILLI_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:55432/postgres?sslmode=d
   go test ./internal/ledger ./internal/serve ./cmd/lapilli
 ```
 
-CI runs them in two shards on each of Postgres 15 and 18, as
-`test/shard.sh 1` and `test/shard.sh 2` do: the second every other of
-serve's tests, the first the rest, with the ledger's and the command's.
-Each checks first that every test is in one shard, and one only.
+CI runs them in three shards on each of Postgres 15 and 18, as
+`test/shard.sh 1`, `2` and `3` do: the first the ledger's and the
+command's, the second every other of serve's tests, the third the rest of
+serve's. Each checks first that every test is in one shard, and one only.
 
 A statement that Postgres takes otherwise than SQLite is given for both
 (`internal/ledger/dialect.go`); `TestDialectSeam` says where one isn't. A
