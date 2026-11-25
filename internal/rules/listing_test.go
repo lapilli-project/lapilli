@@ -124,7 +124,10 @@ func TestReplayingPlacesRuleFiles(t *testing.T) {
 		o := offset(hashStrings, g, "/etc/rules/"+g+".yml", min)
 		gs = append(gs, [4]any{g, "/etc/rules/" + g + ".yml", 60, time.Date(2026, 11, 11, 12, 30, 0, 0, time.UTC).Add(o).Format(time.RFC3339Nano)})
 	}
-	gs = append(gs, [4]any{"twice", "/a.yml", 60, "2026-11-11T12:30:07Z"}, [4]any{"twice", "/b.yml", 60, "2026-11-11T12:30:09Z"})
+	for _, f := range []string{"/a.yml", "/b.yml"} {
+		o := offset(hashStrings, "twice", f, min)
+		gs = append(gs, [4]any{"twice", f, 60, time.Date(2026, 11, 11, 12, 30, 0, 0, time.UTC).Add(o).Format(time.RFC3339Nano)})
+	}
 	l, err := ReadListing(listAPI(gs...))
 	if err != nil {
 		t.Fatal(err)
@@ -169,5 +172,90 @@ func TestReplayingPlacesRuleFiles(t *testing.T) {
 	Replaying{Unplaced: u}.Apply(rs)
 	if rs[0].Phase != 0 {
 		t.Errorf("without a listing: %s", rs[0].Phase)
+	}
+}
+
+// Prometheus 3 writes a string's length as one byte below 255, else 0xFF and
+// three bytes; Prometheus 2's stringlabels build, a uvarint: they agree
+// below 128 bytes only. The answers are of labels.New(...).Hash() of
+// Prometheus v0.305.0, with the rule path padded to the length.
+func TestHashOfLongPaths(t *testing.T) {
+	for _, c := range []struct {
+		n    int
+		want time.Duration // placed in a minute, by Prometheus 3
+	}{{127, 0}, {128, 42 * time.Second}, {178, 46 * time.Second}} {
+		file := "/etc/prometheus/rules/" + strings.Repeat("x", c.n-len("/etc/prometheus/rules/"))
+		if c.want != 0 {
+			if got := offset(hashStrings, "g", file, time.Minute); got != c.want {
+				t.Errorf("%d bytes: placed at %s, Prometheus 3 places it at %s", c.n, got, c.want)
+			}
+		}
+	}
+	// The two encodings differ from 128 bytes, and from 255 differ again.
+	for _, n := range []int{128, 178, 255, 300} {
+		file := strings.Repeat("x", n)
+		if hash(hashStrings, "g", file) == hash(hashUvarint, "g", file) {
+			t.Errorf("%d bytes: the encodings agree", n)
+		}
+	}
+	file := strings.Repeat("x", 127)
+	if hash(hashStrings, "g", file) != hash(hashUvarint, "g", file) {
+		t.Error("below 128 bytes the encodings agree")
+	}
+	// A listing of long paths is read in the layout that places them, and
+	// a group whose last evaluation the hash doesn't give is refused.
+	var gs [][4]any
+	for i, n := range []int{130, 160, 200, 260} {
+		file := "/etc/prometheus/rules/" + strings.Repeat("y", n-22)
+		g := string(rune('a' + i))
+		o := offset(hashStrings, g, file, time.Minute)
+		gs = append(gs, [4]any{g, file, 60, time.Date(2026, 11, 11, 12, 30, 0, 0, time.UTC).Add(o).Format(time.RFC3339Nano)})
+	}
+	l, _ := ReadListing(listAPI(gs...))
+	if l.layout != hashStrings {
+		t.Fatalf("layout %d", l.layout)
+	}
+	if d, _, why := l.Place("d", time.Minute); why != "" || d != offset(hashStrings, "d", gs[3][1].(string), time.Minute) {
+		t.Errorf("%s %q", d, why)
+	}
+	// Another build's hash: the group's own last evaluation disagrees.
+	gs[3][3] = time.Date(2026, 11, 11, 12, 30, 0, 0, time.UTC).Add(offset(hashUvarint, "d", gs[3][1].(string), time.Minute) + 17*time.Second).Format(time.RFC3339Nano)
+	l, _ = ReadListing(listAPI(gs...))
+	if l.layout != -1 {
+		t.Errorf("a layout %d accepted with a group disagreeing", l.layout)
+	}
+}
+
+// Fewer than three groups that have run fit a layout by chance; Loki's
+// listing is of namespaces, not the paths its hash takes, and is never
+// checked against one.
+func TestListingLayoutNeedsEvidence(t *testing.T) {
+	var gs [][4]any
+	for _, g := range []string{"a", "b", "c"} {
+		o := offset(hashStrings, g, "/r/"+g, time.Minute)
+		gs = append(gs, [4]any{g, "/r/" + g, 60, time.Date(2026, 11, 11, 12, 30, 0, 0, time.UTC).Add(o).Format(time.RFC3339Nano)})
+	}
+	if l, _ := ReadListing(listAPI(gs...)); l.layout != hashStrings {
+		t.Errorf("three groups: layout %d", l.layout)
+	}
+	if l, _ := ReadListing(listAPI(gs[:2]...)); l.layout != -1 {
+		t.Errorf("two groups: layout %d", l.layout)
+	}
+	if l, _ := ReadLokiListing(listAPI(gs...)); l.layout != -1 {
+		t.Errorf("Loki's: layout %d", l.layout)
+	}
+}
+
+// What a listing is tagged by is where its groups are placed: the answer
+// changes at each evaluation, the tag doesn't.
+func TestListingTagIsOfPlaces(t *testing.T) {
+	a := listAPI([4]any{"g", "/f", 60, "2026-11-11T12:30:07Z"})
+	b := listAPI([4]any{"g", "/f", 60, "2026-11-11T12:41:07.5Z"})
+	c := listAPI([4]any{"g", "/f", 60, "2026-11-11T12:30:08Z"})
+	la, _ := ReadListing(a)
+	lb, _ := ReadListing(b)
+	lc, _ := ReadListing(c)
+	if la.Tag() != lb.Tag() || la.Tag() == lc.Tag() {
+		t.Errorf("tags %s %s %s", la.Tag(), lb.Tag(), lc.Tag())
 	}
 }

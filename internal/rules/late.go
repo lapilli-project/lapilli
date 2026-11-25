@@ -116,7 +116,7 @@ func (r Rule) FromFile() (ok, loki bool) {
 // PlaceFiles sets the Phase of each of rs read from a rule file (FromFile)
 // from the listing of the rules API that runs its group, as Listing and
 // LokiListing have them, when it can be; one whose group's interval the file
-// doesn't give is left on the steps' grid. Without a listing, nothing is
+// doesn't give is placed at the one the API says (Placed). Without a listing, nothing is
 // said of the rule.
 func (p Replaying) PlaceFiles(rs []Rule) {
 	for i := range rs {

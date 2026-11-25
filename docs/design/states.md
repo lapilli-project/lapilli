@@ -311,13 +311,20 @@ places it: one request of the API for a run (`lapilli serve` asks it with
 each read of the rules, as a read it can do without, and keeps what it last
 read), not one a rule. Prometheus's hash is xxhash of the group's `file`
 and `name` labels, modulo the interval in nanoseconds, and which bytes of
-the label set it hashes depends on the build (Prometheus 3.5.0's, measured
-here, hashes the string labels' layout; the slice labels' is the other).
-Lapilli takes the layout that most of the listed groups' last evaluations
-agree with, to the second, and places the file's group by it, at the
-interval the file gives: so a group changed in a pull request is placed too.
-Where no layout agrees (Thanos Ruler, Mimir, and the managed services may
-place groups their own way, vmalert at random), it takes where the group of
+the label set it hashes depends on the build: Prometheus 3's default (string
+labels) writes each string's length as one byte below 255, else 0xFF and
+three bytes, little endian (measured on 3.5.0); Prometheus 2's string labels
+build writes a uvarint, the same below 128 bytes and not from there, which
+is where an Operator's rule paths (130 to 180 bytes) fall; the slice labels'
+is a third. Lapilli takes the layout that the last evaluations of every
+listed group that has run agree with, to the second, and at least three of
+them (one or two fit a layout by chance, about two in the interval), and
+places the file's group by it, at the interval the file gives, so a group
+changed in a pull request is placed too. A group that ran at the same
+interval is checked against its own last evaluation, and refused, with
+why, where the hash doesn't give it. Where no layout agrees (Thanos Ruler,
+Mimir, and the managed services may place groups their own way, vmalert
+at random), or there are too few groups to tell, it takes where the group of
 that name last ran, if the file's interval is the one it runs at. A group
 isn't placed, and is replayed on the steps' grid as before, when the API
 lists its name twice (two files), or not at all, when it hasn't run, or
@@ -328,8 +335,8 @@ server runs it, by `Rule.Placed`, which is not the rule's `Interval` and
 is in neither its key nor its comparison with another version of it; the run says which, and why (`lapilli verdict` on stderr,
 `lapilli serve` in its log), and an API that isn't served, or can't be
 read, is said and doesn't fail the run. A Loki ruler's hash can't be checked
-(the `file` its API gives is the namespace), so its groups of rule files are
-placed by their last evaluation. There is no `--offset`: it would ask a
+(the `file` its API gives is the namespace), so no layout is taken from its
+listing, and its groups of rule files are placed by their last evaluation. There is no `--offset`: it would ask a
 person for a number per group that the API gives.
 
 vmalert is the exception, told apart by the `concurrency` only its groups
@@ -352,7 +359,8 @@ from the first, it would be left out, though it was on, and a real
 from the rules API, Loki's too) is replayed from that evaluation, whole
 steps before the period's start; with a `for` or a `keep_firing_for`, from
 an interval before the evaluation that, so the alert pending or held on
-there is seen as it was. A firing from there that is on when the period
+there is seen as it was. A rule that took effect after that evaluation (a version's `From`) has no
+firing from it. A firing from there that is on when the period
 starts is reported from the period's start, as one that held on into it
 is, and `--check-replay` sets both sides' so (its clamp); one that ended
 before the period isn't reported. Every replay of a firing starts so: `Run`,

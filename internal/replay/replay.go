@@ -365,6 +365,9 @@ type stint struct {
 	rules.Rule
 	lo, hi time.Time
 	before bool // in effect before the period, so pending from before it too
+	// since is when the version took effect, zero from before the period:
+	// a rule new in the version has no evaluation before it.
+	since time.Time
 }
 
 // warm reports whether a stint, the jth of its run, carries alerts in from
@@ -419,7 +422,11 @@ func (st stint) early(step time.Duration) (time.Time, bool) {
 	if g == 0 {
 		return time.Time{}, false
 	}
-	return st.lo.Add(g - st.GroupEvery()), true
+	e := st.lo.Add(g - st.GroupEvery())
+	if !st.since.IsZero() && st.since.After(e) {
+		return time.Time{}, false // the rule wasn't there to evaluate
+	}
+	return e, true
 }
 
 // back is how many whole steps before lo a placed rule's replay starts, to
@@ -504,7 +511,7 @@ func lineUp(versions []Version, from, to time.Time, step time.Duration) [][]stin
 			case !ok || runs[j][len(runs[j])-1].Fingerprint != r.Fingerprint:
 				// new, or a Grafana rule changed in what Grafana starts its
 				// alerts afresh on
-				runs = append(runs, []stint{{Rule: r, lo: lo, hi: hi, before: v.From.Before(from)}})
+				runs = append(runs, []stint{{Rule: r, lo: lo, hi: hi, before: v.From.Before(from), since: v.From}})
 				j = len(runs) - 1
 			case same(runs[j][len(runs[j])-1].Rule, r):
 				runs[j][len(runs[j])-1].hi = hi
@@ -781,9 +788,15 @@ func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, ste
 			return floor
 		}
 		seen = st.trim(fire(r, series, step, at, to), step)
-		for i := range series {
-			series[i].Samples = slices.DeleteFunc(slices.Clone(series[i].Samples), func(x prom.Sample) bool { return x.T.Before(from) })
+		var inPeriod []prom.Series
+		for _, s := range series {
+			// A series that held only before the period is no series of it:
+			// evaluated reads the grid from the first.
+			if kept := slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return x.T.Before(from) }); len(kept) > 0 {
+				inPeriod = append(inPeriod, prom.Series{Labels: s.Labels, Samples: kept})
+			}
 		}
+		series = inPeriod
 	}
 	thin, _ := evaluated(r, series, step, every)
 	if !early {

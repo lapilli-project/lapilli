@@ -159,7 +159,7 @@ is replayed, by namespace and group (`Replaying.Places`). A group the API
 doesn't name is replayed on the grid. Rules read from files (`--loki-rules`)
 are placed by the ruler's API too, by the group's name alone, as a file
 has no namespace: where the one group of that name last ran, when the
-file gives the same interval (`rules.Listing`, states.md, section 5); a
+file gives the same interval (`rules.Listing`, states.md, section 5); no hash layout is taken from Loki's listing, whose `file` is the namespace, not the path Loki hashes; a
 name in two namespaces, or none, is replayed on the grid, and the run says
 so. A placed group of Loki's, read from files or its API, is replayed from
 its last evaluation before the period, so a firing on when the period

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 )
 
@@ -143,5 +144,65 @@ func TestPlacedAtTheAPIsInterval(t *testing.T) {
 	r.Placed = 0
 	if _, fs = Run(context.Background(), h, one([]rules.Rule{r}), t0, t0.Add(15*time.Minute), time.Minute, 1); len(fs) != 0 {
 		t.Errorf("without it, on the grid: %+v", fs)
+	}
+}
+
+// two series, a and b, each holding where its function says.
+type twoSeries struct{ a, b func(time.Time) bool }
+
+func (h twoSeries) QueryRange(_ context.Context, _ string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	sa := prom.Series{Labels: map[string]string{"s": "a"}}
+	sb := prom.Series{Labels: map[string]string{"s": "b"}}
+	for t := start; !t.After(end); t = t.Add(step) {
+		if h.a(t) {
+			sa.Samples = append(sa.Samples, prom.Sample{T: t, V: 1})
+		}
+		if h.b(t) {
+			sb.Samples = append(sb.Samples, prom.Sample{T: t, V: 1})
+		}
+	}
+	var out []prom.Series
+	for _, s := range []prom.Series{sa, sb} {
+		if len(s.Samples) > 0 {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// A series that held only before the period doesn't change what is known to
+// have started in it: the firing of another, that began after the period's
+// start, is known with or without it.
+func TestFiredKnownIgnoresASeriesOfBefore(t *testing.T) {
+	at := func(m, s int) time.Time { return t0.Add(time.Duration(m)*time.Minute + time.Duration(s)*time.Second) }
+	in := func(a, b time.Time) func(time.Time) bool {
+		return func(t time.Time) bool { return !t.Before(a) && t.Before(b) }
+	}
+	b := func(t time.Time) bool { return in(at(0, 0), at(2, 0))(t) || in(at(3, 0), at(14, 0))(t) }
+	r := rules.Rule{Name: "X", Expr: "x", Interval: 5 * time.Minute, Phase: 2*time.Minute + 30*time.Second}
+	ctx := context.Background()
+	_, with, err := Fired(ctx, twoSeries{in(at(-3, 0), at(-2, 0)), b}, r, t0, t0.Add(20*time.Minute), time.Minute)
+	_, without, err2 := Fired(ctx, twoSeries{func(time.Time) bool { return false }, b}, r, t0, t0.Add(20*time.Minute), time.Minute)
+	if err != nil || err2 != nil || len(without) == 0 || len(with) != len(without) {
+		t.Errorf("known with a series of before: %+v, without: %+v (%v %v)", with, without, err, err2)
+	}
+}
+
+// A rule that took effect after the evaluation before the period has no
+// firing from it: it wasn't there to evaluate.
+func TestPlacedRuleNewJustBeforeThePeriod(t *testing.T) {
+	h := stepped{"x > 0": func(t time.Time) (float64, bool) {
+		return 1, !t.Before(t0.Add(-3*time.Minute)) && t.Before(t0.Add(-time.Minute))
+	}}
+	r := rules.Rule{Name: "X", Expr: "x > 0", Interval: 5 * time.Minute, Phase: 2*time.Minute + 30*time.Second}
+	ctx := context.Background()
+	_, fs := Run(ctx, h, []Version{{From: t0.Add(-time.Minute), Rules: []rules.Rule{r}}}, t0, t0.Add(15*time.Minute), time.Minute, 1)
+	if len(fs) != 0 {
+		t.Errorf("a rule added at 23:59 fired from an evaluation at 23:57:30: %+v", fs)
+	}
+	// In effect from 23:55, it was there to run it.
+	_, fs = Run(ctx, h, []Version{{From: t0.Add(-5 * time.Minute), Rules: []rules.Rule{r}}}, t0, t0.Add(15*time.Minute), time.Minute, 1)
+	if len(fs) != 1 || !fs[0].Start.Equal(t0) {
+		t.Errorf("in effect before it: %+v", fs)
 	}
 }

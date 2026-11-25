@@ -40,8 +40,16 @@ type listed struct {
 	ran   bool
 }
 
-// ReadListing reads the groups a rules API answers with.
-func ReadListing(b []byte) (*Listing, error) {
+// ReadListing reads the groups a Prometheus-compatible rules API answers
+// with.
+func ReadListing(b []byte) (*Listing, error) { return readListing(b, true) }
+
+// ReadLokiListing reads the groups a Loki ruler's rules API answers with:
+// the file it gives is the namespace, not the path the ruler hashes, so no
+// hash is checked against them, and a group is placed by where it last ran.
+func ReadLokiListing(b []byte) (*Listing, error) { return readListing(b, false) }
+
+func readListing(b []byte, hashed bool) (*Listing, error) {
 	var r struct {
 		Status string `json:"status"`
 		Data   struct {
@@ -72,13 +80,21 @@ func ReadListing(b []byte) (*Listing, error) {
 		x.ran = iv > 0 && (x.vmalert || g.LastEvaluation.Year() > 1970)
 		l.groups = append(l.groups, x)
 	}
-	l.layout = l.hashLayout()
-	sum := sha256.Sum256(b)
-	l.tag = hex.EncodeToString(sum[:8])
+	if hashed {
+		l.layout = l.hashLayout()
+	}
+	// What a group is placed by, not what it last did: the answer changes
+	// at every evaluation, and what is kept under the tag with it.
+	h := sha256.New()
+	fmt.Fprintf(h, "%d", l.layout)
+	for _, g := range l.groups {
+		fmt.Fprintf(h, "\x00%q\x00%q\x00%d\x00%d\x00%t\x00%t", g.name, g.file, g.interval, g.phase, g.ran, g.vmalert)
+	}
+	l.tag = hex.EncodeToString(h.Sum(nil)[:8])
 	return l, nil
 }
 
-// Tag tells one listing from another, "" for none: what rules placed by it
+// Tag tells one listing from another, by where its groups are placed, "" for none: what rules placed by it
 // are kept under.
 func (l *Listing) Tag() string {
 	if l == nil {
@@ -90,7 +106,8 @@ func (l *Listing) Tag() string {
 // The hashes of a label set of a group's file and name (name and file, in
 // order of the labels' names), as a Prometheus build gives them.
 const (
-	hashStrings = iota // stringlabels, Prometheus 3's: each as a length and the bytes
+	hashStrings = iota // Prometheus 3's default build (stringlabels): each as a length and the bytes
+	hashUvarint        // Prometheus 2's stringlabels build: the same, the length a uvarint
 	hashSlice          // the slice of labels': each name and value, then 0xff
 	hashLayouts
 )
@@ -99,14 +116,21 @@ const (
 // with layout takes it.
 func hash(layout int, name, file string) uint64 {
 	var b []byte
-	switch layout {
-	case hashStrings:
-		for _, s := range []string{"file", file, "name", name} {
+	for _, s := range []string{"file", file, "name", name} {
+		switch layout {
+		case hashStrings:
+			// One byte below 255, else 0xFF and three bytes, little endian
+			// (model/labels, encodeSize): the same as a uvarint below 128.
+			if n := len(s); n < 255 {
+				b = append(b, byte(n))
+			} else {
+				b = append(b, 0xff, byte(n), byte(n>>8), byte(n>>16))
+			}
+			b = append(b, s...)
+		case hashUvarint:
 			b = binary.AppendUvarint(b, uint64(len(s)))
 			b = append(b, s...)
-		}
-	default:
-		for _, s := range []string{"file", file, "name", name} {
+		default:
 			b = append(b, s...)
 			b = append(b, 0xff)
 		}
@@ -123,8 +147,10 @@ func offset(layout int, name, file string, interval time.Duration) time.Duration
 }
 
 // hashLayout is the layout whose hashes the groups' last evaluations
-// agree with, for most of those that have run: a server that places its
-// groups by a hash of its own, or at random, agrees with none.
+// agree with, for every group that has run, and at least three of them: a
+// server that places its groups by a hash of its own, or at random, agrees
+// with none, and one or two groups fit a layout by chance (about two in
+// the interval, for each).
 func (l *Listing) hashLayout() int {
 	ran := 0
 	var fits [hashLayouts]int
@@ -134,21 +160,24 @@ func (l *Listing) hashLayout() int {
 		}
 		ran++
 		for k := range fits {
-			// The last evaluation is when it started, a moment after
-			// the time it was placed at, which may be in the next second.
-			d := (g.phase - offset(k, g.name, g.file, g.interval) + g.interval) % g.interval
-			if d <= time.Second {
+			if g.agrees(offset(k, g.name, g.file, g.interval)) {
 				fits[k]++
 			}
 		}
 	}
-	best := -1
 	for k, n := range fits {
-		if n > 0 && n*2 > ran && (best < 0 || n > fits[best]) {
-			best = k
+		if n >= 3 && n == ran {
+			return k
 		}
 	}
-	return best
+	return -1
+}
+
+// agrees reports whether where a hash places the group is where it last
+// ran, to the second: the last evaluation is when it started, a moment after
+// the time it was placed at, which may be in the next second.
+func (g listed) agrees(placed time.Duration) bool {
+	return (g.phase-placed+g.interval)%g.interval <= time.Second
 }
 
 // Place is where the group of the name, as a file gives it with the
@@ -185,7 +214,11 @@ func (l *Listing) Place(name string, interval time.Duration) (phase, every time.
 		return 0, 0, "its interval isn't known"
 	}
 	if l.layout >= 0 && !g.vmalert {
-		return offset(l.layout, g.name, g.file, interval), interval, ""
+		d := offset(l.layout, g.name, g.file, interval)
+		if g.ran && g.interval == interval && !g.agrees(d) {
+			return 0, 0, "the hash of its name and file doesn't place it where the rules API says it last ran"
+		}
+		return d, interval, ""
 	}
 	switch {
 	case !g.ran:

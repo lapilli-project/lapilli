@@ -2593,7 +2593,7 @@ func (f *verdictFlags) placeFromAPI(ctx context.Context, h history, stderr io.Wr
 	var fromProm, loki bool
 	for _, rs := range all {
 		for _, r := range rs {
-			if ok, isLoki := r.FromFile(); ok && r.Phase == 0 && r.Interval > 0 && r.Unsupported == "" {
+			if ok, isLoki := r.FromFile(); ok && r.Phase == 0 && r.Unsupported == "" {
 				fromProm, loki = fromProm || !isLoki, loki || isLoki
 			}
 		}

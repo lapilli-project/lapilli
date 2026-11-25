@@ -122,3 +122,26 @@ func TestVerdictPlacesRuleFilesByTheRulesAPI(t *testing.T) {
 		t.Errorf("without the API:\n%s\n%s", out, said)
 	}
 }
+
+// Where every group of the rule files gives no interval, the rules API is
+// asked all the same: it says each group's interval, and where it runs.
+func TestVerdictPlacesGroupsWithNoInterval(t *testing.T) {
+	alone(t)
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	var asked []string
+	newHistory = func(context.Context, *verdictFlags) (history, error) {
+		return placedHistory{from: from, asked: &asked}, nil
+	}
+	now = func() time.Time { return from.Add(time.Hour) }
+	files := write(t, "rules.yaml", "groups:\n  - name: web\n    rules:\n      - alert: WebDown\n        expr: down\n")
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Web down, start: 2026-11-01T23:00:00Z, end: 2026-11-02T01:00:00Z}\n")
+	var stdout, stderr bytes.Buffer
+	args := []string{"verdict", "--rules", files, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC", "--json",
+		"--from", "2026-11-02T00:00:00Z", "--to", "2026-11-02T01:00:00Z"}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	if len(asked) != 1 || !strings.Contains(stderr.String(), "1 group placed") {
+		t.Errorf("asked %v\n%s", asked, stderr.String())
+	}
+}

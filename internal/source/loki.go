@@ -245,7 +245,7 @@ func LokiListed(ctx context.Context, l Loki, agent string, once bool) (*rules.Li
 	if err != nil {
 		return nil, fmt.Errorf("--loki's rules API couldn't be read: %w", err)
 	}
-	li, err := rules.ReadListing(b)
+	li, err := rules.ReadLokiListing(b)
 	if err != nil {
 		return nil, fmt.Errorf("--loki's rules API: %w", err)
 	}
