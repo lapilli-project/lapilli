@@ -190,16 +190,43 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   read over, apart and whole), `edge_retries` (the spans a run couldn't read,
   read once more by the next run, as `rollout_retries` are) and
   `catches.dependency` (the path as a JSON list of the services in call order,
-  `''` for any other catch). Edges, spans and retries go with the firings'
-  retention.
+  `''` for any other catch), and `white_depends` on `firings`, `days` and `weeks`
+  (the firings white only by the graph). Edges, spans and retries go with the
+  firings' retention.
 - Each run reads the graph over its hours and the lead before them
-  (`From − max(lead, 1h)`) and keeps it with the run (`Found.Edges`). Judging
-  loads the ledger's edges for the incidents it judges against (the hours from
-  one before the earliest start to the latest end of the incidents meeting
-  the span judged), at most `ledger.MaxJudgeEdges`, 1,000,000, in one judgement;
-  past it that judgement is made with no graph. What loads is the ledger's, so
-  judging again asks the history nothing, and a read that failed leaves its
-  hours judged with what the ledger holds until the run after reads them again.
+  (`From − max(lead, 1h)`) and keeps it with the run (`Found.Edges`), under the
+  key of the round's graph (`EdgesRead.Key`, read from `Dependencies.Key` and
+  the conf `dependsFor` kept): `keepEdges` keeps it only while `edges-key` is
+  that key, so a save mid-run never keeps another expression's edges. Edges are
+  inserted many to a statement (1,000), and a span is kept to the whole hour:
+  one ending mid-hour ends where that hour starts, the next run reading it.
+  Judging loads the ledger's edges for each incident's window apart (an hour
+  before its start to its end; windows that overlap or touch are one), at most
+  `ledger.MaxJudgeEdges`, 1,000,000, in all in one judgement; past it that
+  judgement is made with no graph, and `meta` `edges-over` keeps the span judged
+  (`Ledger.EdgesOver`), which a judgement covering it with the graph loaded
+  takes away: serve's report sets `settings.depends.too_many` from it. What
+  loads is the ledger's, so judging again asks the history nothing, and a read
+  that failed leaves its hours judged with what the ledger holds until the run
+  after reads them again.
+- A catch's delay and looseness in the ledger are, as `verdict.Judge`'s, those
+  of the rule's direct firings when it has any. A firing white only by the graph
+  is kept (`firings.white_depends`, and `days.white_depends` and
+  `weeks.white_depends` summed from it), so that `white_by_dependency` on a
+  rule, the digest's note, the rule page, the overview's precision tile and MCP
+  count them; `TestEdgesKeptAndJudgedAgain` holds the ledger's rules and
+  incidents equal to `verdict.Judge`'s.
+- Bounds in the ledger: 200,000 edges a day and 5,000,000 in all
+  (`MaxEdgesPerDay`, `MaxEdgesKept`, checked by `EdgesFit` before a read is
+  kept, and before one is made for the total); `edges` are pruned 5,000 at a
+  time and a span begins where the edges kept do. `EdgesIn` is counted once for
+  a generation of the ledger and period.
+- How reading went is kept in `meta` `edges-status` (`EdgesStatus`: the key,
+  the last error and when, the tries and when a read over the last four weeks is
+  tried again), seen on any replica and cleared by a read that goes well.
+  `edge_retries.gap` is 1 for a span that failed to be read again: a known gap,
+  not read again, which a read over it takes away. The key is the step, the
+  labels and a digest of the expression as `rules.Rule.Parsed` writes it.
 - What the edges were read with (the step, the labels and the expression) is
   kept apart (`meta` `edges-key`). A change of it drops the edges and reads the
   last four weeks (the leader's round, before the options are read), and the

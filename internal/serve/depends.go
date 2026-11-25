@@ -246,6 +246,11 @@ func (s *Server) edgesWell(ctx context.Context, key string) {
 	if st, err := s.l.EdgesStatus(ctx); err == nil && st.Key != "" && st.Key != key {
 		return
 	}
+	s.status.Lock()
+	if s.status.errWhat == "depends" {
+		s.status.err, s.status.errWhat = "", ""
+	}
+	s.status.Unlock()
 	if err := s.l.SetEdgesStatus(context.WithoutCancel(ctx), ledger.EdgesStatus{}); err != nil {
 		s.log.Warn("the service graph was read, and what was kept of a failed read stays", "err", err)
 	}

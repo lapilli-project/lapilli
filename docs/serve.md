@@ -56,7 +56,9 @@ data. The service graph (`--depends`, `--depends-labels`, `--depends-depth` and
 `--depends-direction`, which let an alert on a service an incident's service
 calls catch it: [dependencies.md](dependencies.md#in-lapilli-serve)) is set
 there too, by an admin, and tried on the last four weeks first: the catches it
-would add, by rule, and how the verdict would change. A named signal may give a lead of its own there, as
+would add, by rule, and how the verdict would change. The page lists the hours
+it wasn't read for, why the last read failed and when a read over the last
+four weeks is tried again. A named signal may give a lead of its own there, as
 `--impact-lead NAME=DUR` and `lead:` in `--impact-file` do, and a rule
 entry one for its rules, with `require:`, labels its rules' firings and
 its signals' windows must both carry: a cause that fires an hour before

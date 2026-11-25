@@ -153,13 +153,24 @@ and asked for from the Settings page on the site.
 
 - Each run reads the graph for the hours it judges and the lead before them,
   once, and keeps its edges by the hour in the ledger (`edges`), with the spans
-  it was read over. A read that fails is kept as a span the next run reads once
-  more; until then the incidents there are judged by what the ledger holds.
+  it was read over: whole hours, so a run that ends in the middle of one leaves
+  it to the next run, which reads from an hour before its own start. A run reads
+  and keeps the graph its round judges by: a save made meanwhile is read by the
+  next round, never kept as the edges of the one before. A read that fails is
+  kept as a span the next run reads once more, until then the incidents there
+  are judged by what the ledger holds; one that fails again is a known gap, not
+  read again. The Settings page lists the stretches not read, the spans to be
+  read once more and the gaps, and why the last read failed, kept in the
+  ledger, so any replica's page says it, until a read goes well.
 - Judging, the first time and again, asks the history nothing. It loads the
-  ledger's edges for the hours of the incidents it judges against (from an hour
-  before the earliest start to the latest end), at most 1,000,000 edges in one
-  judgement; past that, that judgement is made with no graph, as one with too
-  many edges in an hour is.
+  ledger's edges for each incident's window apart, the hours from one before
+  its start to the one its end is in, not the hours between them: at most
+  1,000,000 edges in all in one judgement, which a graph of 5,950 pairs an hour,
+  the most seen, fills with 168 hours of windows. Past that, that judgement is
+  made with no graph, as one with too many edges in an hour is, and says so:
+  `settings.depends.too_many` of a report over those hours, a note on the rule's
+  page and the Settings page, and a warning in the log. A judgement that covers
+  them again, with the edges loaded, takes it away.
 - A catch writes its path (`catches.dependency`), which the Incidents page
   shows after the rule (`by dependency, via checkout → payments-db`), a rule's
   page lists apart ("Caught by dependency"), and MCP and `/api/v1/incidents`
@@ -172,13 +183,34 @@ and asked for from the Settings page on the site.
   in place of the ones before; one that can't be read is tried again at the
   next round, and meanwhile the ledger is judged with no graph. Changing the
   depth or direction reads nothing.
-- Edges are kept as long as the firings are. Turned off, they are dropped.
+- A new expression, labels or step is a new key: what the ledger holds is
+  discarded, not kept beside it, and the graph is read back over the last four
+  weeks, or to where the runs began if that is later, a week at a time, each
+  within 90 seconds, whatever `--timeout` says, so that a history that fails
+  holds the leader's jobs for little. The weeks that read are kept, and those
+  that didn't are read once more by the next run, then are known gaps. A read
+  that reaches none leaves the ledger as it was and is tried again an hour
+  later, then two, up to a day ("Tried 3 times; tried again at ..." on the
+  Settings page). The expression is compared as Lapilli reads PromQL, so
+  spaces, comments and the order of matchers don't make a new key. An
+  expression with no `--depends-labels` is refused.
+- Edges are kept as long as the firings are, pruned five thousand rows at a
+  time with the spans they were read over. Turned off, they are dropped.
 
 ## What bounds it
 
 - An hour of the graph keeps 20,000 edges at most. Past that the read stops,
-  the graph keeps none, and the report says so ("it kept none, and no catch
-  was by dependency"), rather than judge by part of a graph.
+  the graph keeps none, and no catch is by dependency, rather than judge by
+  part of a graph: `lapilli verdict`'s report says so ("it kept none, and no
+  catch was by dependency"), and `lapilli serve` says it on the Settings page
+  and in its log, with the hours a gap in the spans read.
+- `lapilli serve` keeps 200,000 edges a day and 5,000,000 in all (counting each
+  for every hour it held; four weeks of the most seen, 5,950 pairs an hour, is
+  4 million). A read with a day past the first is not kept, and while the
+  ledger holds the second the hours are not read: the Settings page says so
+  until what is past `--keep` goes, or the expression is narrowed to the calls
+  between services (`sum by` the two labels). Edges are written many to a
+  statement.
 - A catch looks at most `--depends-depth` calls from the incident's service,
   over the edges of its hours: a breadth-first walk bounded by the edges
   kept.
