@@ -55,6 +55,7 @@ grafana=${GRAFANA_IMAGE:-grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46
 loki=${LOKI_IMAGE:-grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28}
 p=${PREFIX:-lapilli-r73}
 minutes=${MINUTES:-60}
+before=${BEFORE:-65}
 pport=${PROM_PORT:-28391}
 gport=${GRAFANA_PORT:-28392}
 lport=${LOKI_PORT:-28393}
@@ -102,12 +103,8 @@ source_of() { # server, suffix: its newest recording, which must be there
 # --- what the servers are given -------------------------------------------
 
 config() {
-  local gm pm gl gx gs lm ns f
-  gm=$(source_of grafana "")
+  local pm lm ns
   pm=$(source_of prometheus "")
-  gl=$(source_of grafana loki)
-  gx=$(source_of grafana export)
-  gs=$(source_of grafana scraped)
   lm=$(source_of loki "")
   mkdir -p "$state/loki-rules/fake" "$state/prov/datasources" "$state/prov/alerting"
   chmod -R u+rwX,go+rX "$state"
@@ -161,6 +158,18 @@ datasources:
   - {name: Loki, type: loki, uid: loki, url: "http://$p-loki:3100", access: proxy}
   - {name: Orders, type: mysql, uid: orders, url: "mysql:3306", access: proxy}
 YAML
+  provision
+}
+
+# provision writes Grafana's rules, those kept in each recording's
+# directory, as files for it to provision.
+provision() {
+  local gm gl gx gs f
+  gm=$(source_of grafana "")
+  gl=$(source_of grafana loki)
+  gx=$(source_of grafana export)
+  gs=$(source_of grafana scraped)
+  mkdir -p "$state/prov/alerting"
   rm -f "$state"/prov/alerting/*
   cp "$gm/rules.json" "$state/prov/alerting/fidelity.json"
   cp "$gl/rules.yaml" "$state/prov/alerting/logs.yaml"
@@ -222,21 +231,41 @@ stop_containers() {
 
 # --- up --------------------------------------------------------------------
 
-# window LEN: seconds a recording of LEN minutes covers: its measured length,
-# or what a shorter run leaves after six minutes of warming up.
-window() { echo $((($1 < minutes - 6 ? $1 : minutes - 6) * 60)); }
-# latest CAP COND: the latest whole minute at or before CAP where the
+# window LEN: seconds a recording of LEN minutes covers: its measured
+# length, or MINUTES if that is shorter.
+window() { echo $((($1 < minutes ? $1 : minutes) * 60)); }
+# earliest FLOOR COND: the earliest whole minute at or after FLOOR where the
 # arithmetic condition on f holds.
-latest() {
-  local f=$(($1 / 60 * 60))
-  until (($2)); do f=$((f - 60)); done
+earliest() {
+  local f=$((($1 + 59) / 60 * 60))
+  until (($2)); do f=$((f + 60)); done
   echo "$f"
+}
+# epoch of a rules API's time: 2026-11-25T10:09:00.789906+09:00, or with Z.
+EPOCH='def epoch: sub("\\.[0-9]+"; "") as $s | ($s[:19] + "Z" | fromdateiso8601) as $t | $s[19:] as $z
+  | if $z == "Z" then $t else (($z[1:3] | tonumber) * 3600 + ($z[4:6] | tonumber) * 60) as $o | if $z[0:1] == "+" then $t - $o else $t + $o end end;'
+# phases lists the groups Prometheus and Loki run, each an interval and the
+# second of it a group's last evaluation fell on.
+phases() {
+  local u
+  for u in "$pu/api/v1/rules" "$lu/prometheus/api/v1/rules"; do
+    curl -sf "$u" | jq -r "$EPOCH"' .data.groups[] | select(.interval > 0) | "\(.interval | floor) \(.lastEvaluation | epoch)"'
+  done
+}
+# before_the_end TO: TO, or the nearest 10s before it that no group of
+# Prometheus's or Loki's evaluates on. A placed group evaluates a fraction of
+# a second past a whole second, so one on the period's end writes past it,
+# and a group placed on second 0 is taken for one not placed at all.
+before_the_end() {
+  local to=$1 ph
+  ph=$(phases)
+  while awk -v to="$to" '{ if (to % $1 == $2 % $1) found = 1 } END { exit !found }' <<<"$ph"; do to=$((to - 10)); done
+  echo "$to"
 }
 
 up() {
-  local gc folder want r e cfrom
+  local want
   [ ! -e "$state/env" ] || die "already up (state in $state): down first"
-  [ "$minutes" -ge 20 ] || die "MINUTES is $minutes: at least 20"
   if [ -z "$external" ]; then
     command -v docker >/dev/null || die "needs Docker"
     docker info >/dev/null 2>&1 || die "Docker isn't running"
@@ -269,53 +298,92 @@ up() {
   id=$(gcurl -X POST "$gu/api/serviceaccounts" -d '{"name":"lapilli","role":"Viewer"}' | jq -r .id)
   gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d '{"name":"viewer"}' | jq -j .key >"$state/viewer"
 
-  # The group the change is made to, through the API.
-  gc=$(source_of grafana change)
+  # A Viewer's token, for Loki through Grafana's data source proxy and for
+  # Grafana's rules.
+  id=$(gcurl -X POST "$gu/api/serviceaccounts" -d '{"name":"lapilli","role":"Viewer"}' | jq -r .id)
+  gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d '{"name":"viewer"}' | jq -j .key >"$state/viewer"
+  start_periods
+}
+
+# start_periods: the rules are in, the group the change is made to is made
+# through the API, the periods are planned from now, and the change is made.
+start_periods() {
+  local folder
   folder=$(gcurl "$gu/api/folders?query=fid2" | jq -r '.[] | select(.title == "fid2") | .uid')
   [ -n "$folder" ] || die "Grafana has no folder fid2"
   r=$(date +%s)
-  put_group "$folder" "$gc/rules-before.yaml"
+  put_group "$folder" "$(source_of grafana change)/rules-before.yaml"
+  plan
+  change "$folder"
+  echo "up: $(iso "$r"); the periods end by $(iso "$e"); Prometheus $pu, Grafana $gu, Loki $lu"
+}
 
-  # The periods, each ending by e, a whole 10s after the run's minutes, and
-  # starting where nothing is about to end: a firing on when a period starts
-  # and over before its group's first evaluation in it was decided before it,
-  # and the replay doesn't see it (docs/design/loki.md). So the periods of
-  # Prometheus's groups and Grafana's rules start on a minute where the 40s
-  # windows of its groups are over (a multiple of 360s, and 120 more);
-  # Loki's, a minute when the shop's errors are quiet two minutes into their
-  # three and the cart's firing doesn't end; the scraped metrics', ten
-  # minutes into the 15 of fv_gappy; the export's, on a minute, where its
-  # groups evaluate. The change is made seven minutes and five seconds into
-  # its period, which starts a minute and a half or more after the group.
-  e=$(((r + minutes * 60) / 10 * 10))
-  mf=$(latest $((e - $(window 46))) 'f % 360 == 120')
-  xf=$(((e - $(window 6)) / 60 * 60))
-  sf=$(latest $((e - $(window 40))) 'f % 1800 == 1500')
-  [ "$sf" -ge $((r + 300)) ] || sf=$(latest $((e - $(window 40))) 'f % 900 == 600')
-  lf=$(latest $((e - $(window 40))) 'f % 180 == 120 && f % 300 != 120')
-  cfrom=$(((r + 90) / 120 * 120 + 120))
-  for f in "$mf" "$xf" "$sf" "$lf"; do
-    [ "$f" -ge $((r + 300)) ] || die "MINUTES=$minutes leaves no start for a period: give it more"
-  done
+# plan: the periods, from r, when the rules came in. Grafana's alerts are
+# worked out from an hour before a period (docs/design/states.md), so none
+# starts before BEFORE minutes (65: the hour and a warm-up) after r. Each
+# starts where nothing is about to end: a firing on when a period starts and
+# over before its group's first evaluation in it was decided before it.
+# Prometheus's groups' and Grafana's rules' start on a minute where the 40s
+# windows of the groups are over (a multiple of 360s, and 120 more); Loki's,
+# a minute when the shop's errors are quiet two minutes into their three and
+# the cart's firing doesn't end; the scraped metrics', ten minutes into the
+# 15 of fv_gappy and a minute in 2 of fv_spiky's (1500 past a multiple of
+# 1800s); the export's, on a minute, where its groups evaluate; the change's,
+# on one, with the change seven minutes and five seconds into it. None ends
+# on an evaluation of a Prometheus or Loki group.
+plan() {
+  local m0 mf xf sf lf cfrom
+  m0=$((r + before * 60))
+  mf=$(earliest "$m0" 'f % 360 == 120')
+  xf=$(earliest "$m0" 'f > 0')
+  sf=$(earliest "$m0" 'f % 1800 == 1500')
+  lf=$(earliest "$m0" 'f % 180 == 120 && f % 300 != 120')
+  cfrom=$(earliest "$m0" 'f % 120 == 0')
+  main_from=$mf
+  main_to=$(before_the_end $((mf + $(window 46))))
+  export_from=$xf
+  export_to=$((xf + $(window 6)))
+  scraped_from=$sf
+  scraped_to=$((sf + $(window 40)))
+  loki_from=$lf
+  loki_to=$(before_the_end $((lf + $(window 40))))
+  change_from=$cfrom
+  change_to=$((cfrom + $(window 17)))
+  e=$(printf '%s\n' "$main_to" "$export_to" "$scraped_to" "$loki_to" "$change_to" | sort -n | tail -1)
   {
     printf 'r=%q\ne=%q\n' "$r" "$e"
-    printf 'main_from=%q\nmain_to=%q\n' "$mf" "$((mf + $(window 46)))"
-    printf 'export_from=%q\nexport_to=%q\n' "$xf" "$((xf + $(window 6)))"
-    printf 'scraped_from=%q\nscraped_to=%q\n' "$sf" "$((sf + $(window 40)))"
-    printf 'loki_from=%q\nloki_to=%q\n' "$lf" "$((lf + $(window 40)))"
-    printf 'change_from=%q\nchange_to=%q\n' "$cfrom" "$((cfrom + 17 * 60))"
+    for k in main export scraped loki change; do
+      printf '%s_from=%q\n%s_to=%q\n' "$k" "$(eval echo "\$${k}_from")" "$k" "$(eval echo "\$${k}_to")"
+    done
   } >"$state/env"
+}
 
-  # The change, at a second a little past a rule evaluation's, between two.
-  sleep_until $((cfrom + 7 * 60 + 5))
+# change FOLDER: the change, at a second a little past a rule evaluation's,
+# between two, seven minutes and five seconds into its period.
+change() {
+  local gc
+  gc=$(source_of grafana change)
+  sleep_until $((change_from + 7 * 60 + 5))
   gcurl "$gu/api/v1/provisioning/alert-rules/export?format=yaml" |
     yq -I4 '.groups |= map(select(.folder == "fid2"))' >"$state/rules-before.yaml"
-  put_group "$folder" "$gc/rules-after.yaml"
+  put_group "$1" "$gc/rules-after.yaml"
   changed=$(date +%s)
   gcurl "$gu/api/v1/provisioning/alert-rules/export?format=yaml" |
     yq -I4 '.groups |= map(select(.folder == "fid2"))' >"$state/rules-after.yaml"
   printf 'changed=%q\n' "$changed" >>"$state/env"
-  echo "up: $(iso "$r"); the periods end $(iso "$e"); Prometheus $pu, Grafana $gu, Loki $lu"
+}
+
+# reprovision: the rules of the recordings' directories read again into a
+# Grafana that is up (a rule added to one), and the periods planned from now.
+reprovision() {
+  [ -e "$state/env" ] || die "not up"
+  provision
+  gcurl -X POST "$gu/api/admin/provisioning/alerting/reload" >/dev/null
+  local want
+  want=$(($(rule_ids | wc -l | tr -d ' ') + 3))
+  until_true 180 sh -c "[ \"\$(curl -sf -u 'admin:$pass' '$gu/api/v1/provisioning/alert-rules' | jq length)\" = $want ]" ||
+    die "Grafana has not loaded the $want rules it was given"
+  start_periods
 }
 
 # put_group FOLDER FILE: the group fid2api of an export, made or replaced
@@ -427,6 +495,7 @@ status() {
 
 case ${1:-all} in
   up) up ;;
+  reprovision) reprovision ;;
   record) record ;;
   down) down ;;
   status) status ;;
