@@ -183,13 +183,9 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 		fail("lapilli serve couldn't read its record: try again")
 		return
 	}
-	for _, rc := range cmp.Rules {
-		for _, r := range []*verdict.RuleResult{rc.Before, rc.After} {
-			if r != nil && r.Unsupported == rules.Unfinished {
-				fail(fmt.Sprintf("it didn't finish within --backtest-timeout %s: give fewer days, or fewer rules", verdict.Duration(s.backtestTimeout())))
-				return
-			}
-		}
+	if unfinishedCompared(cmp) {
+		fail(fmt.Sprintf("it didn't finish within --backtest-timeout %s: give fewer days, or fewer rules", verdict.Duration(s.backtestTimeout())))
+		return
 	}
 	result, why := s.backtestResult(ctx, cmp, pr, held, o, t.IncidentTitles)
 	switch {

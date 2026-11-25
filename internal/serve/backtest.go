@@ -46,7 +46,9 @@ import (
 
 const (
 	// backtestDays are the most days a backtest replays, 7 when not
-	// given; backtestRules the most rules that differ, on either side.
+	// given; backtestRules the most rules that differ, on either side;
+	// leftAloneRules (backtestalone.go) the most rules left alone a replay
+	// of them takes.
 	backtestDays, backtestDefaultDays = 14, 7
 	backtestRules                     = 50
 	// backtestsOfEntry are how many of an entry's may wait at once;
@@ -733,6 +735,9 @@ type prepared struct {
 	reasons map[string]bool
 	// failMissed is the request's fail_missed.
 	failMissed bool
+	// eff is what the rules in effect read, by which the rules that differ
+	// were taken, and the rules left alone are before a replay of them.
+	eff inEffectReads
 }
 
 // prepare reads and checks a backtest's request, as the port does before
@@ -740,7 +745,7 @@ type prepared struct {
 // Loki rules held to what the rules in effect read (eff): 400's reason
 // when it can't be, in Lapilli's words and the request's own.
 func (s *Server) prepare(req backtestRequest, t Trust, eff inEffectReads) (*prepared, string) {
-	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}, failMissed: req.FailMissed}
+	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}, failMissed: req.FailMissed, eff: eff}
 	if p.days == 0 {
 		p.days = backtestDefaultDays
 	}

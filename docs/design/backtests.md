@@ -862,37 +862,76 @@ A request with `fail_missed: true` is held so:
   - every rule serve runs now that the pull request doesn't hold,
 
   each only over the incident's catch window (the longest lead before its
-  start, to its end) and the rule's reach before it (its `for` and its
-  group's interval, and its `query_offset`), where a rule's windows that
-  overlap are one, so that nothing is asked twice. A rule whose record is
-  held over that window (the rule it is after the change, in every version
-  of serve's rules over it; of a rule the pull request leaves alone, with
-  the runs covering the time and none failing there) isn't replayed: its
-  record answers for it. The incident is judged as `lapilli verdict`
-  judges one, by the replayed firings: caught by any of them, it is
-  caught; every rule the pull request leaves alone replayed, and every
-  rule of serve's that caught it in the record, and none catching it, it is
-  **missed**, and the job held to it fails. A rule that couldn't be
-  replayed (not supported, a request failed, a range past `--max-samples`)
-  leaves it not known. So does a catch in the record that no replay can
+  start, to its end) and the rule's reach before it (its `for`, its
+  `keep_firing_for`, its group's interval, and its `query_offset`), where a
+  rule's windows that overlap are one, so that nothing is asked twice. A
+  Grafana rule's alerts are worked out from before that by the replay
+  itself, which warms its window up as it does a rule in effect before the
+  period (`docs/design/states.md`). A rule whose record is held over that
+  window (the rule it is after the change, in every version of serve's
+  rules over it, with the runs covering the time, none failing there to
+  replay it, and it replayable the last time: of the pull request's rules
+  left alone and of serve's own alike) isn't replayed: its record answers
+  for it.
+
+  A rule left alone is held to every check a rule that differs passes
+  before it is replayed: the same functions, `taken` (a Grafana data source
+  or a Loki ruler no rule in effect reads is refused) and `checkRule` (the
+  maxima on `for`, `keep_firing_for`, the interval and `query_offset`; one
+  metric's selector by its name, no `{__name__=~".+"}`; a read back of 400
+  days at most, a subquery of its points; Grafana's and LogQL's own
+  bounds). One that fails isn't replayed, and the request isn't refused for
+  it: it isn't the change. An incident that needs it stays not known.
+
+  The incident is judged as `lapilli verdict` judges one, by the replayed
+  firings, with the catch rule alone (`verdict.Catches`, a rule judged by
+  nothing and a firing a person said unrelated to it left out), each
+  incident looking until its first catch, and nothing of the rules'
+  credit worked out: caught by any of them, it is caught; every rule the
+  pull request leaves alone replayed, and every rule of serve's that
+  caught it in the record, and none catching it, it is **missed**, and the
+  job held to it fails. A rule that couldn't be replayed (not supported, a
+  request failed, a range past `--max-samples`) leaves it not known. A
+  rule disabled, paused or with no query fires nothing, and is no rule that
+  couldn't be replayed. A firing already on at the replay's first
+  evaluation (where it began isn't known) never makes an incident missed:
+  it catches nothing, and an incident none of the others catch that it was
+  about is not known. So does a catch in the record that no replay can
   stand for (a rule whose firings are copied in, a name told apart, one
   name changed and left alone): such an incident can be found caught,
   never missed. A rule after the change that couldn't be replayed keeps
   every incident not known, as in `lapilli verdict`; nothing is replayed
-  for it. A paused rule is replayed as one that fires nothing. When the
-  record settles every incident, nothing is replayed.
-- **The replay's bound.** It is held to what the backtest is. Before it
-  asks, the requests it plans (the windows of every rule, rules and
-  incidents sharing their reads as a replay does) may not pass what the
-  lane's share of `--max-rate` asks within what is left of
-  `--backtest-timeout` once the backtest's own replay is done (with no
-  rate, 20,000); it runs within that time, never another
-  `--backtest-timeout`, a few ranges at a time within the lane's cap,
-  and `--max-samples` holds each answer. Incidents are taken earliest
-  first, as many as the plan allows: those past it are not known, as are
-  those a rule didn't finish. The summary says how many were left so,
-  `missed_limited` (0 when none were), and the comment says it is the limit
-  lapilli serve puts on the replay: fewer rules or days settle them.
+  for it, nor when the backtest's own replay didn't finish (it fails). When
+  the record settles every incident, nothing is replayed, and nothing of
+  the record beyond the rules that caught an incident the change loses is
+  hashed.
+- **The replay's bound.** It is held to what the backtest is:
+  - **The rules.** 500 rules left alone at most (`leftAloneRules`, beside
+    the 50 rules that differ, `backtestRules`): the pull request's rules
+    it leaves alike and serve's own it doesn't hold, in all. Past it
+    nothing is replayed, and every incident the record leaves open is not
+    known, counted in `missed_limited`: a replay plans identical queries
+    once, but every rule is read, kept and judged.
+  - **The requests.** Before it asks, the requests it plans (the windows
+    of every rule, rules and incidents sharing their reads as a replay
+    does, and, of each Grafana rule replayed, an allowance of twice the
+    queries a Grafana rule has at most, for the reads the plan can't
+    count: a query that returns nothing is asked again, a classic
+    condition's window) may not pass what the lane's share of `--max-rate`
+    asks within what is left of `--backtest-timeout` once the backtest's
+    own replay is done (with no rate, 20,000). With no time left nothing is
+    planned. Incidents are taken earliest first, as many as the plan
+    allows: those past it are not known, as are those a rule didn't
+    finish.
+  - **The time.** It plans and runs within what is left, never another
+    `--backtest-timeout`, a few ranges at a time within the lane's cap,
+    and stops when the job cancels it; judging does too. `--max-samples`
+    holds each answer. Past its time, the incidents not settled are not
+    known.
+
+  The summary says how many were left so, `missed_limited` (0 when none
+  were), and the comment says it is the limit lapilli serve puts on the
+  replay: fewer rules or days settle them.
 - **What it reads.** The ledger, once a backtest: the incidents of the
   period and their catches, the rules and the latest version of them, where
   the runs began and have got to, the versions of the rules over the

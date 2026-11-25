@@ -552,12 +552,14 @@ request has it, its runs don't cover the incident's time, or a rule
 written otherwise then caught it), serve replays the rules left alone
 over that incident, with the lane's share of the rate and within its
 limit: the incident is then caught, or missed (the job fails), or, where a
-rule couldn't be replayed or the limit was reached
-(`missed_limited`), not known, which fails the step as a gate that can't
-judge ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)); so
-is one a rule caught whose expression Lapilli compares only by its text (a
-Grafana rule, a Loki ruler's, what MetricsQL reads otherwise than
-Prometheus). A rule file's group with no `interval` runs at Prometheus's
+rule couldn't be replayed, a rule left alone fails the checks a rule that
+differs passes (it isn't replayed, and the request isn't refused for it),
+or the limit was reached (`missed_limited`: 500 rules left alone at most,
+the requests it plans, the time), not known, which fails the step as a
+gate that can't judge
+([backtests.md](design/backtests.md#held-to-the-incidents-step-4)). An
+incident a Grafana rule or a Loki ruler's rule caught, left alone, is
+replayed where the record can't settle it, as any other. A rule file's group with no `interval` runs at Prometheus's
 `evaluation_interval`, which serve reads from `/api/v1/status/config`
 with `--loaded-rules`: where that isn't served (most managed services
 don't serve it), or doesn't say it, or the rule is

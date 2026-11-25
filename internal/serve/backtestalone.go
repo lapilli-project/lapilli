@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,14 @@ import (
 // lane's share of it asks within --backtest-timeout, as a backtest itself
 // is held to (fits).
 const leftAloneRequests = 20000
+
+// leftAloneRules is the most rules left alone a replay of them takes: the
+// pull request's rules it leaves alike and serve's own it doesn't hold, in
+// all. A replay plans a request once however many rules ask it, but each
+// rule is read, kept and judged, so that past this many it replays none:
+// every incident the record leaves open is not known, counted in
+// missed_limited. It is beside backtestRules, the most rules that differ.
+const leftAloneRules = 500
 
 // leftAloneHeld is what holding a backtest to the incidents found: serve's
 // record of the rules left alone (rec), and, of an incident the record left
@@ -42,26 +51,50 @@ type aloneAnswer struct {
 // catches is verdict.LeftAlone: the replay's answer where it settled an
 // incident, else the record's.
 func (h *leftAloneHeld) catches(in incident.Incident) (caught, known bool) {
+	if h.rec == nil {
+		return false, false
+	}
 	if a, ok := h.answers[caughtAt{in.ID, in.Start.Unix()}]; ok {
 		return a.caught, a.known
 	}
 	return h.rec.catches(in)
 }
 
+// unfinishedCompared says a rule a backtest's own replay judged was not
+// finished before the timeout: the backtest fails, and nothing more is
+// replayed for it.
+func unfinishedCompared(cmp *verdict.Comparison) bool {
+	for _, rc := range cmp.Rules {
+		for _, r := range []*verdict.RuleResult{rc.Before, rc.After} {
+			if r != nil && r.Unsupported == rules.Unfinished {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // holdPrepared reads the record of the rules a backtest's change leaves
 // alone, and, where it can't settle an incident the rules that differ lost,
 // replays them (replayLeftAlone), within left, what is left of the
 // backtest's --backtest-timeout. nil when nothing was replayed after the
-// change: no incident caught before is missed.
+// change, or the backtest's own replay didn't finish (it fails then): no
+// incident caught before is missed. With no incident lost, nothing of the
+// record is read.
 func (s *Server) holdPrepared(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options, left time.Duration) (*leftAloneHeld, error) {
-	if cmp.Before == nil || cmp.After == nil {
+	if cmp.Before == nil || cmp.After == nil || unfinishedCompared(cmp) {
 		return nil, nil
 	}
-	rec, err := s.leftAloneRecord(ctx, pr, from, to, o)
+	lost := cmp.LostIncidents()
+	held := &leftAloneHeld{answers: map[caughtAt]aloneAnswer{}}
+	if len(lost) == 0 {
+		return held, nil
+	}
+	rec, err := s.leftAloneRecord(ctx, pr, from, to, o, lost)
 	if err != nil {
 		return nil, err
 	}
-	held := &leftAloneHeld{rec: rec, answers: map[caughtAt]aloneAnswer{}}
+	held.rec = rec
 	// A rule after the change that couldn't be replayed leaves what no rule
 	// catches not known, whatever the rules left alone say: nothing is
 	// replayed for it.
@@ -69,7 +102,7 @@ func (s *Server) holdPrepared(ctx context.Context, cmp *verdict.Comparison, pr *
 		return held, nil
 	}
 	var open []aloneCase
-	for _, in := range cmp.LostIncidents() {
+	for _, in := range lost {
 		if caught, known, need := rec.judge(in); !caught && !known {
 			open = append(open, aloneCase{in: in, need: need})
 		}
@@ -97,11 +130,36 @@ type aloneWindow struct {
 }
 
 // aloneBucket is the rules replayed over one span, which RunEach replays
-// together, sharing their reads.
+// together, sharing their reads: by their place in the rules left alone
+// (leftAlone.alone), not copies of them.
 type aloneBucket struct {
 	from, to time.Time
-	rules    []rules.Rule
+	rules    []int
 	cases    [][]int // of each rule, the cases it is asked for
+}
+
+// vet holds each rule left alone to what the port holds a rule that
+// differs: taken (what the rules in effect read) and checkRule, the same
+// functions with the same maxima. One that fails is refused, never
+// replayed: an incident that needs it stays not known. A rule that is
+// unsupported as read stays as it is, and fails when it is replayed.
+func (a *leftAlone) vet(pr *prepared) {
+	check := &prepared{reasons: map[string]bool{}}
+	for i := range a.alone {
+		r := &a.alone[i]
+		rule := r.rule
+		why := taken(rule, pr.eff)
+		if why == "" {
+			why = check.checkRule(&rule)
+		}
+		if why != "" {
+			r.refused = true
+			continue
+		}
+		if rule.Unsupported != r.rule.Unsupported {
+			r.rule.Unsupported = rule.Unsupported
+		}
+	}
 }
 
 // replayLeftAlone settles the incidents open by replaying the rules left
@@ -117,31 +175,86 @@ type aloneBucket struct {
 //     serve's that caught it in the record, none catching it, and nothing
 //     else left it unsettled (a catch by a rule whose firings are copied in,
 //     a name told apart): missed, as the incident is not known no longer;
-//   - one that couldn't be replayed: not known.
+//   - one that couldn't be replayed, or that the port's checks of a rule
+//     that differs refuse (vet), or that fires on at the replay's first
+//     evaluation, so that where it began isn't known: not known.
 //
-// It is bounded by what the backtest is: the requests it plans may not pass
-// what the lane's share of the rate asks within left, what is left of
-// --backtest-timeout (leftAloneRequests with no rate), it runs within that
-// time, and a rule
-// whose answers pass --max-samples can't be replayed. The incidents past
-// the plan stay not known, said so (held.limited), as do those a rule
+// It is bounded by what the backtest is: at most leftAloneRules rules, past
+// which nothing is replayed; the requests it plans, with an allowance for
+// the Grafana rules' extra reads (unsure), may not pass what the lane's
+// share of the rate asks within left, what is left of --backtest-timeout
+// (leftAloneRequests with no rate), with none left nothing is planned; it
+// plans and runs within that time and stops when the job cancels it; and a
+// rule whose answers pass --max-samples can't be replayed. The incidents
+// past the bound stay not known, said so (held.limited), as do those a rule
 // couldn't finish.
 func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *prepared, open []aloneCase, from, to time.Time, o verdict.Options, left time.Duration) error {
 	rec, p := held.rec, s.btPort
 	slices.SortStableFunc(open, func(a, b aloneCase) int { return a.in.Start.Compare(b.in.Start) })
 	step := s.cfg.Step
+	limit := func(cs []aloneCase) {
+		for _, c := range cs {
+			held.answers[caughtAt{c.in.ID, c.in.Start.Unix()}] = aloneAnswer{}
+			if !c.need.hard {
+				held.limited++
+			}
+		}
+	}
+	budget := s.aloneBudget(left)
+	if budget <= 0 || len(rec.alone)+len(rec.serve) > leftAloneRules {
+		limit(open)
+		return nil
+	}
+	rctx, cancel := context.WithTimeout(s.askedFor(ctx), left)
+	defer cancel()
+	// Past its time, or cancelled: not known, as past any other bound.
+	stopped := func() bool { return rctx.Err() != nil }
+	if err := s.widen(rctx, rec); err != nil {
+		if stopped() {
+			limit(open)
+			return nil
+		}
+		return err
+	}
+	rec.vet(pr)
 	// The Lokis the replay asks keep the lane's share while it runs, as the
 	// backtest's own do.
 	asking := p.pacesOf(pr.gone, pr.came, rec.replayed())
 	p.asking.Store(&asking)
-	// What each case asks, by rule: the windows to replay.
+	// What each case asks, by rule, once: the rules the record doesn't
+	// answer for over its time. Of a rule refused, only that it must
+	// answer: the case is not known, never missed.
+	type unsettled struct{ unfinished, failed bool }
+	var (
+		bad   = make([]unsettled, len(open))
+		named = func(c aloneCase, name string) bool { return c.need.names[name] || rec.same[name] }
+		asks  = make([][]int, len(open))
+		wins  = make([]map[int][2]time.Time, len(open))
+	)
+	for i, c := range open {
+		if stopped() {
+			limit(open)
+			return nil
+		}
+		wins[i] = map[int][2]time.Time{}
+		for j, r := range rec.alone {
+			from, to, ok := s.aloneSpan(rec, r, c.in, step)
+			if !ok || !rec.asks(r, c) {
+				continue
+			}
+			if r.refused {
+				bad[i].failed = bad[i].failed || named(c, r.rule.Name)
+				continue
+			}
+			asks[i] = append(asks[i], j)
+			wins[i][j] = [2]time.Time{from, to}
+		}
+	}
 	byRule := func(n int) map[int][]aloneWindow {
 		ws := map[int][]aloneWindow{}
-		for i, c := range open[:n] {
-			for j, r := range rec.alone {
-				if from, to, ok := s.aloneSpan(rec, r, c.in, step); ok && rec.asks(r, c) {
-					ws[j] = append(ws[j], aloneWindow{from: from, to: to, cases: []int{i}})
-				}
+		for i := range open[:n] {
+			for _, j := range asks[i] {
+				ws[j] = append(ws[j], aloneWindow{from: wins[i][j][0], to: wins[i][j][1], cases: []int{i}})
 			}
 		}
 		for j, w := range ws {
@@ -162,21 +275,35 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 					at[k] = i
 					out = append(out, aloneBucket{from: w.from, to: w.to})
 				}
-				out[i].rules = append(out[i].rules, rec.alone[j].rule)
+				out[i].rules = append(out[i].rules, j)
 				out[i].cases = append(out[i].cases, w.cases)
 			}
+		}
+		return out
+	}
+	rulesOf := func(b aloneBucket) []rules.Rule {
+		out := make([]rules.Rule, len(b.rules))
+		for i, j := range b.rules {
+			out[i] = rec.alone[j].rule
 		}
 		return out
 	}
 	planned := func(n int) int {
 		total := 0
 		for _, b := range bucketsOf(byRule(n)) {
-			total += replay.Plan(p.lane, []replay.Version{{Rules: b.rules}}, b.from, b.to, step).Requests
+			if stopped() {
+				return math.MaxInt
+			}
+			pl := replay.Plan(p.lane, []replay.Version{{Rules: rulesOf(b)}}, b.from, b.to, step)
+			// A Grafana rule may ask more than Plan counts (replay.Planned
+			// says Unsure): an allowance of twice the queries a rule of its
+			// kind has at most, which a query of data returning nothing and
+			// a classic condition's window each add one to.
+			total += pl.Requests + pl.Unsure*2*backtestGrafanaQueries
 		}
 		return total
 	}
 	// The most incidents, the earliest first, whose replay fits.
-	budget := s.aloneBudget(left)
 	lo, hi := 0, len(open)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
@@ -187,48 +314,57 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 		}
 	}
 	fit := lo
-	for _, c := range open[fit:] {
-		held.answers[caughtAt{c.in.ID, c.in.Start.Unix()}] = aloneAnswer{}
-		if !c.need.hard {
-			held.limited++
-		}
-	}
+	limit(open[fit:])
 	if fit == 0 {
 		return nil
 	}
 	buckets := bucketsOf(byRule(fit))
-	rctx, cancel := context.WithTimeout(s.askedFor(ctx), left)
-	defer cancel()
 	// Each bucket's rules replayed together; the buckets a few at a time,
-	// each within the lane's cap.
-	type unsettled struct{ unfinished, failed bool }
+	// each within the lane's cap. A firing already on at a bucket's first
+	// evaluation, where it began unknown, is kept apart (cold): it never
+	// catches an incident, and one it could have caught is not known.
 	var (
-		mu    sync.Mutex
-		fs    []firing.Firing
-		ran   []rules.Rule
-		bad   = make([]unsettled, fit)
-		wg    sync.WaitGroup
-		sem   = make(chan struct{}, max(p.parallel, 1))
-		named = func(c aloneCase, name string) bool { return c.need.names[name] || rec.same[name] }
+		mu   sync.Mutex
+		fs   []firing.Firing
+		cold []firing.Firing
+		ran  []rules.Rule
+		wg   sync.WaitGroup
+		sem  = make(chan struct{}, max(p.parallel, 1))
 	)
 	for _, b := range buckets {
 		sem <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-sem }()
-			got, fired := replay.RunEach(rctx, p.lane, [][]replay.Version{{{Rules: b.rules}}}, b.from, b.to, step, p.parallel)
+			rs := rulesOf(b)
+			got, fired := replay.RunEach(rctx, p.lane, [][]replay.Version{{{Rules: rs}}}, b.from, b.to, step, p.parallel)
+			// The cases each rule is asked for, by name.
+			cases := map[string][][]int{}
+			before := map[string]time.Duration{}
+			for i, r := range rs {
+				cases[r.Name] = append(cases[r.Name], b.cases[i])
+				before[r.Name] = max(before[r.Name], r.For+r.KeepFiringFor)
+			}
+			var kept, first []firing.Firing
+			for _, f := range fired[0] {
+				if !f.Start.After(b.from.Add(-before[f.Rule])) {
+					first = append(first, f)
+				} else {
+					kept = append(kept, f)
+				}
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			ran = append(ran, got[0]...)
-			fs = append(fs, fired[0]...)
+			fs = append(fs, kept...)
+			cold = append(cold, first...)
 			for _, r := range got[0] {
-				if r.Unsupported == "" || r.Unsupported == rules.Paused {
+				// A rule that fires nothing (paused, disabled, no query)
+				// settles nothing against an incident, as it catches nothing.
+				if r.Unsupported == "" || rules.CantFire(r.Unsupported) {
 					continue
 				}
-				for i, cases := range b.cases {
-					if b.rules[i].Name != r.Name {
-						continue
-					}
-					for _, ci := range cases {
+				for _, cs := range cases[r.Name] {
+					for _, ci := range cs {
 						if named(open[ci], r.Name) {
 							bad[ci].failed = true
 							bad[ci].unfinished = bad[ci].unfinished || r.Unsupported == rules.Unfinished || strings.HasPrefix(r.Unsupported, rules.TooWide)
@@ -241,28 +377,32 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 	wg.Wait()
 	// Judged as lapilli verdict judges the rules left alone: the same catch
 	// rules, the incidents' labels, the settings in effect.
-	var incs []incident.Incident
-	for _, c := range open[:fit] {
-		incs = append(incs, c.in)
-	}
 	o.From, o.To, o.SomeRules = from, to, true
 	var err error
 	if o.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
 		return err
 	}
-	rep := verdict.Judge(ran, fs, incs, o)
-	caught := map[caughtAt]bool{}
-	for _, x := range rep.Incidents {
-		if len(x.CaughtBy) > 0 {
-			caught[caughtAt{x.ID, x.Start.Unix()}] = true
+	incs := make([]incident.Incident, fit)
+	for i, c := range open[:fit] {
+		incs[i] = c.in
+	}
+	caught, unclear, err := judgeAlone(rctx, ran, fs, cold, incs, o)
+	if err != nil {
+		if !stopped() {
+			return err
 		}
+		// Past its time while judging: nothing of the replay settled.
+		for i := range open[:fit] {
+			bad[i].failed, bad[i].unfinished = true, true
+		}
+		caught, unclear = make([]bool, fit), make([]bool, fit)
 	}
 	for i, c := range open[:fit] {
 		k := caughtAt{c.in.ID, c.in.Start.Unix()}
 		switch {
-		case caught[k]:
+		case caught[i]:
 			held.answers[k] = aloneAnswer{caught: true, known: true}
-		case c.need.hard || bad[i].failed:
+		case c.need.hard || bad[i].failed || unclear[i]:
 			held.answers[k] = aloneAnswer{}
 			if !c.need.hard && bad[i].unfinished {
 				held.limited++
@@ -272,6 +412,64 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 		}
 	}
 	return nil
+}
+
+// judgeAlone says of each incident whether a firing of the replay catches it
+// (caught), as lapilli verdict judges one, with the catch rule alone:
+// verdict.Catches of a firing the period holds and the rule isn't judged by
+// nothing, one a person said unrelated to it left out; each incident looks
+// until the first catch, and nothing else is worked out of the rules, as
+// verdict.Judge does (Report.Credit's work grows with the square of the
+// rules that caught an incident). unclear is of an incident none caught
+// that a firing on at the replay's first evaluation (cold) was about, as
+// it may have been the catch were its start known. It stops when ctx does.
+func judgeAlone(ctx context.Context, ran []rules.Rule, fs, cold []firing.Firing, incs []incident.Incident, o verdict.Options) (caught, unclear []bool, err error) {
+	forOf := map[string]time.Duration{}
+	for _, r := range ran {
+		forOf[r.Name] = max(forOf[r.Name], r.For)
+	}
+	firing.Sort(fs)
+	_, people := verdict.Place(o.Verdicts, fs, o.Match, o.VerdictReach(func(rule string) time.Duration { return forOf[rule] }))
+	judged := map[string]bool{}
+	var cands []int
+	for i, f := range fs {
+		if !f.Active(o.From, o.To) {
+			continue
+		}
+		nj, ok := judged[f.Rule]
+		if !ok {
+			nj = o.NotJudged(f.Rule)
+			judged[f.Rule] = nj
+		}
+		if !nj {
+			cands = append(cands, i)
+		}
+	}
+	caught, unclear = make([]bool, len(incs)), make([]bool, len(incs))
+	for i, in := range incs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		for _, fi := range cands {
+			if !verdict.Catches(fs[fi], in, o) {
+				continue
+			}
+			if said := people[fi]; said != nil && slices.Contains(said.Unrelated, in.ID) {
+				continue
+			}
+			caught[i] = true
+			break
+		}
+		if !caught[i] {
+			for _, f := range cold {
+				if !o.NotJudged(f.Rule) && verdict.FiringDuring(in, []firing.Firing{f}, o) {
+					unclear[i] = true
+					break
+				}
+			}
+		}
+	}
+	return caught, unclear, nil
 }
 
 // aloneBudget is the most requests a replay of the rules left alone may
@@ -291,8 +489,10 @@ func (s *Server) aloneBudget(left time.Duration) int {
 
 // aloneSpan is the span r is replayed over for c: the incident's catch
 // window, its lead before its start to its end, and the rule's reach
-// before it (its for, its group's interval, and how late its queries read),
-// on the step, and no later than the replay's period ends.
+// before it (its for and keep_firing_for, its group's interval, and how late
+// its queries read; a Grafana rule's alerts are worked out from before that
+// by the replay itself, which warms its stint up as it does a rule in
+// effect before the period), on the step, and no later than the replay's period ends.
 func (s *Server) aloneSpan(a *leftAlone, r aloneRule, in incident.Incident, step time.Duration) (from, to time.Time, ok bool) {
 	from = in.Start.Add(-a.o.MaxLead() - r.reach - r.rule.Lag()).Truncate(step)
 	to = in.EndOr(a.o.UnknownLen)
@@ -306,13 +506,27 @@ func (s *Server) aloneSpan(a *leftAlone, r aloneRule, in incident.Incident, step
 }
 
 // asks says whether r is replayed for c: not where its record answers for
-// it over c's time (held), and, of a rule the pull request leaves alone,
-// the record covers it (the runs, none failed, replayable then).
+// it over c's time (held), and the record covers it: the runs covered the
+// time, none failed there to replay it, and it wasn't one serve couldn't
+// replay the last time, as of a rule serve runs itself as of the pull
+// request's rules left alone.
 func (a *leftAlone) asks(r aloneRule, c aloneCase) bool {
-	if a.held(r.rule.Name, c.in) && (!r.pr || a.runsCover(c.in) && !a.bad[r.rule.Name]) {
-		return false
+	if !a.held(r.rule.Name, c.in) {
+		return true
 	}
-	return true
+	if !a.runsCover(c.in) || a.bad[r.rule.Name] {
+		return true
+	}
+	if !r.pr && a.failedIn(a.failedServe, c.in) {
+		return true
+	}
+	return false
+}
+
+// failedIn says one of spans meets in's catch window.
+func (a *leftAlone) failedIn(spans [][2]time.Time, in incident.Incident) bool {
+	from, to := in.Start.Add(-a.o.MaxLead()), in.EndOr(a.o.UnknownLen)
+	return slices.ContainsFunc(spans, func(span [2]time.Time) bool { return !span[0].After(to) && span[1].After(from) })
 }
 
 // runsCover says serve's runs covered in's catch window and none that met
@@ -322,8 +536,7 @@ func (a *leftAlone) runsCover(in incident.Incident) bool {
 	if a.runsFrom.IsZero() || a.runsFrom.After(from) || a.cursor.Before(to) {
 		return false
 	}
-	meets := func(span [2]time.Time) bool { return !span[0].After(to) && span[1].After(from) }
-	return !slices.ContainsFunc(a.failed, meets)
+	return !a.failedIn(a.failed, in)
 }
 
 // replayed are the rules a replay of the rules left alone asks.
