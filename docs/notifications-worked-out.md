@@ -302,15 +302,26 @@ of the hours the run judged:
   stretch not worked out keeps nothing of its hours, and the catch-up, at each round
   and a piece of a day at a time, up to 14 days, works out again whatever isn't
   covered back to `--backfill` (a piece that didn't come out is tried again after an
-  hour). Every page counts pages only over hours covered, so a week that touches a
-  stretch not worked out, or stopped, is **not known**, never none.
+  hour; one the round's 2 minutes cut off is tried at the next round). Every page
+  counts pages by the hours they went in, over hours covered, so a week that touches a
+  stretch not worked out, or stopped, is **not known**, never none, and only that
+  week: a firing on for weeks keeps its pages in the other weeks, whatever hour of it
+  wasn't worked out.
+- **A number of pages is shown only where every hour it counts is known**: worked
+  out (covered), or, for a receiver, recorded. This is decided for each receiver and
+  hour: where a receiver has recorded notifications in the hour, as recorded; otherwise
+  as worked out when the hour is covered; otherwise, for a receiver that pages, the hour
+  is not known, and so is the number, whatever another receiver (a Watchdog's)
+  recorded there.
 - **Silences** are `--silences` (read again each run) and the mutes the
   event recorder told of ([Notifications as they were sent](notifications.md)):
   an alert a silence muted is a silence of its labels from ten seconds before
   the first mute of an hour to ten seconds after the last, which is how long it
   is known to have held. Inhibition is worked out, not taken from the mutes.
-- **Kept for each firing**: the notifications that told of it and the pages
-  among them, when the first page went and when each did and to which receiver, the
+- **Kept for each firing**: the notifications that told of it, one for each
+  notification and hour worked out (the pages among them, when the first went and each
+  did and to which receiver are counted from those when they are read, so that no hour
+  that wasn't worked out reads as none; a page list on a firing is the first 200, to show), the
   receivers and integration kinds it reached and which of them send nothing, and
   what muted it. Each notification is kept too, once for each integration. A
   firing the ledger forgets takes its numbers with it.

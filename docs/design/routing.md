@@ -326,8 +326,22 @@ What was decided building the second part, in `lapilli serve`
   is counted from all the notifications kept for it (`firing_routed_sent`, one row for
   each firing and notification, replaced for the hours a run works out and no others), never
   from one run's view: a firing on for a month, worked out by hourly runs, has what one run
-  over the month works out (`TestRoutedFiringForAMonth`). A firing some of whose life is in
-  hours not worked out has no row (not known). The repeats are those of the kept
+  over the month works out (`TestRoutedFiringForAMonth`). Nothing is counted when it is
+  written: `firing_routed` keeps only what a run says besides (grouped, the receivers that send
+  nothing, the mutes), and the counts are made when read, from the rows of the hours worked
+  out (`RoutedOf`; pages by hour, `RoutedPages`), so no missing row reads as none. A firing
+  some of whose life is in hours tried and not worked out has no totals (not known), but its
+  pages in the hours that were worked out count where they went: one hour not worked out makes
+  that hour's week not known and no other (`TestUnknownHourKeepsLaterWeeksOfALongFiring`,
+  `TestHourlyRunsWithOneFailedHour`): the repeats after a hole stay on their schedule because
+  a run that finds hours of its look-back not worked out looks back as far before the first of
+  them, and takes a group as having repeated on its route's `repeat_interval` plus `group_interval`
+  through them (`notifiedBefore`), with a caveat on the hours it works out; without it the phase
+  of a group's repeats moved at the first run after the hole, and went on moving for good.
+  `KeepRouted` reads no notification kept before: only the
+  `firing_routed` rows of the firings it is given, 400 to a query. A clamped firing, one that
+  began more than `routedClamp` before the lead-in, is the only one `Carried`: one that began
+  within the hour before it is first notified when its group first flushes. The repeats are those of the kept
   notifications' times: they drift by seconds from the real ones where the flush grid of
   the lead-in's start isn't the group's own. At most 300,000 firings go in at once.
 - **Bounds and the cover (a review's fixes).** A run is given `routedDeadline` (2 minutes)
@@ -343,12 +357,17 @@ What was decided building the second part, in `lapilli serve`
   out what isn't covered, up to 14 days a round and 2 minutes in all (`routedCatchUpDeadline`,
   across the pieces: a configuration that holds the model up holds the run loop that long
   and no longer); a piece that didn't come out is tried again after an hour, then two, four,
-  doubling to a day (`routedTry`).
+  doubling to a day (`routedTry`); a piece that the shared 2 minutes cut off isn't one that
+  didn't come out, and is tried again at the next round.
   `KeepRouted` replaces `at` between `from` and `to` only. Every page asks the cover:
   `paged.known(from, to)` is true when the hours from where counting starts to where the
-  ledger's firings are all are covered or recorded: the hours before the first one tried
-  are what was recorded (the recording is what was sent), and an hour after it that wasn't worked out
-  and has a notification recorded in it, for any receiver, is known as recorded; one with none is not; a week that isn't is "not known"
+  ledger's firings are all are known for each receiver that pages (`pagingReceivers`): the hours
+  before the first one tried are what was recorded (the recording is what was sent); in an hour
+  after it, a receiver that has notifications recorded in that hour is known as recorded; otherwise
+  it is known as worked out if the hour is covered; otherwise, for a receiver that pages, the hour is
+  not known, whatever another receiver recorded in it (a Watchdog's receiver recorded every hour
+  makes no hour known for the receivers that page for firings; `TestRecordedByAnotherReceiverDoesNotMakeAnHourKnown`);
+  where the configuration isn't read, which receivers page isn't known, so such an hour isn't; a week that isn't is "not known"
   (`paged.unknown`, `PagedUnknown`, expectations' `pages_not_covered`), and the first,
   counted from part-way, is partial (`counted_from`). The configuration is read from the
   pages when none is kept (`routingForView`), cached by the hash of its text, so replicas
@@ -367,13 +386,17 @@ What was decided building the second part, in `lapilli serve`
   (`RecordedOnly`).
 - **Schema 035.** `routed`: one row for each notification the model worked out, on each
   integration (`at`, `receiver`, `kind`, `page`, `reason`, `grp`, `firings`: how many
-  firings it told of, 0 for one that told of resolves alone); `firing_routed`: one
-  row for each firing worked out, `ON DELETE CASCADE` with its firing (`notified`,
-  `paged`, `first_page`, `grouped`, `page_ats`: a JSON list of [time, receiver], at most
-  200; `receivers`: a JSON list of {receiver, kind, notified, paged} and {receiver, empty};
-  `muted`: {kind, by, source_rule}). `routed_cover` (`from_at`, `to_at`, `ok`, `why`): the
-  stretches tried, none overlapping, adjacent alike ones joined. A firing with no row wasn't worked out, which a page says as "not
-  known", never as none.
+  firings it told of, 0 for one that told of resolves alone); `firing_routed_sent`: one
+  row for each firing and notification that told of it (`firing_id`, `at`, `receiver`, `kind`,
+  `page`), replaced for the hours a run works out, from which every count of a firing's
+  notifications and pages is made when read (`PageAts` of `RoutedOf` is the first 200
+  page times, to show, and no number is counted from it); `firing_routed`: one
+  row for each firing a run saw, `ON DELETE CASCADE` with its firing (`grouped`;
+  `receivers`: a JSON list of {receiver, empty} for those that send nothing;
+  `muted`: {kind, by, source_rule}), kept when hours of its life aren't worked out. `routed_cover` (`from_at`, `to_at`, `ok`, `why`): the
+  stretches tried, none overlapping, adjacent alike ones joined. A firing some of whose hours were tried and not worked out has no totals,
+  which a page says as "not known", never as none; the pages budget is not known for a week in
+  which such a firing started (`RoutedPagesByWeek`).
 - **Silences from mutes.** A mute the event recorder told of, of kind `silence` (an
   inhibition is worked out, not read), is a silence of the alert's labels from ten
   seconds before the first of an hour's mutes to ten seconds after the last: the model's
