@@ -38,11 +38,13 @@ them, and each day's firings. People
 write incidents down there, confirm or dismiss the windows `--impact` found,
 or say a black stone was real; the stones are given again at once, for the
 whole ledger, without asking Prometheus. The settings that only judge the
-ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds) can be
-changed there and tried on the last week first (`--linked-only`, which
-has an incident that lists the alerts its tool linked to it caught by
-those alone, is a flag the Settings page says is on or off: given or
-taken away at a start, every firing is judged again with it); so can the impact signal,
+ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds,
+`--linked-only`, which has an incident that lists the alerts its tool
+linked to it caught by those alone) can be changed there and tried on the
+last week first; a change of `--linked-only` judges every firing again,
+once. `--match-strict` is a flag the Settings page says is on or off: given
+or taken away at a start, every firing is judged again with it. So can the
+impact signal,
 `--impact` and `--impact-for`, by an admin, under Incident criteria, tried
 on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,

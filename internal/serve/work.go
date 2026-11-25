@@ -128,7 +128,11 @@ func (s *Server) linkedAgain(ctx context.Context, own string) (was string, again
 // this replica's --linked-only isn't what the ledger was last judged by:
 // both values, and whether it judges every firing again (linkedAgain).
 func (s *Server) logLinked(ctx context.Context) {
-	own := linkedText(s.cfg.Options)
+	o, err := s.options(ctx)
+	if err != nil {
+		return
+	}
+	own := linkedText(o)
 	was, again, err := s.linkedAgain(ctx, own)
 	switch {
 	case err != nil || was == own:
@@ -1140,6 +1144,7 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	s.askScrape(ctx)
 	s.askNotify(ctx)
 	s.askAlertmanager(ctx)
+	s.askSends(ctx)
 	s.askJobs(ctx, s.matching(rs))
 	sum := docsSum(docs)
 	if sum == *raw {

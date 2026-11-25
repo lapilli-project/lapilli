@@ -1788,6 +1788,30 @@ func asked(g *rules.Graph, values bool) []string {
 	return refs
 }
 
+// Queries are the expressions a rule's condition asks the history for,
+// each once: a Prometheus or Loki rule's own, a Grafana rule's queries its
+// condition reads, as Condition asks them (PromQL as the history takes it,
+// LogQL as written). None for a rule that can't be replayed. Which history
+// takes them is the rule's: LogQL, when it has Logs.
+func Queries(r rules.Rule) []string {
+	if r.Unsupported != "" {
+		return nil
+	}
+	if r.Graph == nil {
+		if r.Expr == "" {
+			return nil
+		}
+		return []string{r.Expr}
+	}
+	var out []string
+	for _, ref := range asked(r.Graph, false) {
+		if expr, ok := r.Graph.Expr(ref, r.AskStep(ref)); ok && expr != "" && !slices.Contains(out, expr) {
+			out = append(out, expr)
+		}
+	}
+	return out
+}
+
 // queriesUnder lists the queries a node depends on.
 func queriesUnder(g *rules.Graph, ref string) []string {
 	seen := map[string]bool{}

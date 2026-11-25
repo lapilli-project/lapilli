@@ -480,10 +480,13 @@ func (n *Notifications) For(r rules.Rule) []NotifyUse {
 // A notifyRun is what one check routes, together: one budget for all its
 // rules, a time to finish by, and the rules routed alike, kept.
 type notifyRun struct {
-	n     *Notifications
-	steps int
-	by    time.Time
-	kept  map[string]notified
+	n *Notifications
+	// grafana says Grafana's rules are sent through these (Alertmanager's)
+	// too: Grafana sends to an external Alertmanager.
+	grafana bool
+	steps   int
+	by      time.Time
+	kept    map[string]notified
 }
 
 type notified struct {
@@ -499,7 +502,7 @@ func (n *Notifications) run(by time.Time) *notifyRun {
 // rule's routing wasn't told, "" when it was.
 func (x *notifyRun) For(r rules.Rule) ([]NotifyUse, string) {
 	n := x.n
-	if n == nil || !n.takes(r) {
+	if n == nil || !x.takes(r) {
 		return nil, ""
 	}
 	var ways [][]string
@@ -510,7 +513,8 @@ func (x *notifyRun) For(r rules.Rule) ([]NotifyUse, string) {
 			return nil, ""
 		}
 		known := map[string]string{"alertname": r.AlertName()}
-		if r.Folder != "" && !n.alertmanager {
+		if r.Folder != "" && (!n.alertmanager || r.Says.Template == rules.TemplateGrafana) {
+			// Grafana gives its alerts its folder, to an external Alertmanager too.
 			known["grafana_folder"] = r.Folder
 		}
 		for k, v := range r.AlertLabels() {
@@ -561,10 +565,10 @@ func (x *notifyRun) For(r rules.Rule) ([]NotifyUse, string) {
 // takes reports whether a rule's notifications are written with these
 // templates: Grafana's are of Grafana's rules; Alertmanager's of those
 // written in Prometheus's templates, not a cloud's alarms, which a cloud
-// sends.
-func (n *Notifications) takes(r rules.Rule) bool {
-	if n.alertmanager {
-		return r.Says.Template == rules.TemplatePrometheus && r.Cloud == ""
+// sends, and of Grafana's too when Grafana sends to it.
+func (x *notifyRun) takes(r rules.Rule) bool {
+	if x.n.alertmanager {
+		return r.Says.Template == rules.TemplatePrometheus && r.Cloud == "" || x.grafana && r.Says.Template == rules.TemplateGrafana
 	}
 	return r.Says.Template == rules.TemplateGrafana
 }
@@ -866,10 +870,20 @@ var annotated = map[string]func(rules.Says) string{
 // doesn't parse. A label the rule sets, and those Grafana gives every
 // alert, are never faulted.
 func notifyChecks(r rules.Rule, o Options, seen map[string]bool, fired bool, add func(check, detail string)) {
-	run := o.notify
-	if r.Says.Template != rules.TemplateGrafana {
-		run = o.am
+	if r.Says.Template == rules.TemplateGrafana {
+		// Grafana's own routing, and, when it sends to an external
+		// Alertmanager, that one's: both, when it sends to both.
+		notifyRule(o.notify, r, o, seen, fired, add)
+		if o.am != nil && o.am.grafana {
+			notifyRule(o.am, r, o, seen, fired, add)
+		}
+		return
 	}
+	notifyRule(o.am, r, o, seen, fired, add)
+}
+
+// notifyRule is notifyChecks of one run's templates.
+func notifyRule(run *notifyRun, r rules.Rule, o Options, seen map[string]bool, fired bool, add func(check, detail string)) {
 	if run == nil {
 		return
 	}

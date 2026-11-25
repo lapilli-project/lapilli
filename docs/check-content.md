@@ -129,6 +129,22 @@ stderr, and in `serve`'s log: Alertmanager won't load the configuration. In
 `serve` it is read once an hour, and one that can't be read leaves the check
 as it was, the log saying why once. Nothing is written to Alertmanager.
 
+### Grafana's rules sent to an external Alertmanager
+
+With `--grafana` and `--alertmanager-config` together, Lapilli asks Grafana
+where it sends its alerts: its own Alertmanager, external ones, or both
+(Grafana's "Send alerts to" choice). When they go to an external
+Alertmanager, Grafana's rules are checked against the configuration given,
+as a ruler's rules are: its routes (Grafana gives its alerts a
+`grafana_folder` label too, which a route may match) and its templates. A
+Grafana that sends to both is checked against both, and one that sends to
+an external Alertmanager alone, against that one only. Lapilli takes
+`--alertmanager-config` for the Alertmanager Grafana sends to; it can't tell
+two apart. A Grafana that answers otherwise (an older one that has no such
+API, a token that may not read it) is checked as before, and `lapilli
+verdict` says so on stderr, `serve` in its log once, and `lapilli preflight`
+in its `grafana.alertmanagers` item.
+
 ## In `lapilli serve`
 
 `lapilli serve` checks the rules as it read them last, each `--watch`, so a

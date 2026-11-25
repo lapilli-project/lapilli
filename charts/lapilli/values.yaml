@@ -165,7 +165,8 @@ matchStrict: false
 # alerts its tool linked to it (alerts:, which the PagerDuty, incident.io,
 # Rootly, FireHydrant and Jira Service Management recipes write) is caught by those alone, not by any other
 # firing at the time; one that lists none is caught by the time and match
-# as ever. In serve mode a change judges every firing again, once.
+# as ever. In serve mode a change judges every firing again, once, and an
+# admin can change it on the Settings page: the value here stands until then.
 linkedOnly: false
 # When people are at work, and asleep, in timeZone: the firings that caught
 # nothing are counted by when they came, those that woke people first. Like

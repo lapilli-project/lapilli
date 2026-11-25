@@ -248,6 +248,9 @@ What the rules say:
                       --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
+                      With --grafana, a Grafana that sends its alerts to an
+                      external Alertmanager has its rules checked against it
+                      too (Lapilli takes this configuration for the one)
                       Only read: no field that holds a secret is parsed
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
@@ -635,8 +638,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       doesn't catch it; changed at a start, every firing is
                       judged again with it
   --linked-only       an incident that lists the alerts its tool linked to
-                      it is caught by those alone; changed at a start,
-                      every firing is judged again with it
+                      it is caught by those alone; the default, as the
+                      others are: an admin can change it on the Settings
+                      page, and every firing is judged again with it, once
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)
@@ -760,7 +764,10 @@ each history API (lapilli_serve_history_*). Off by default:
                       configuration, read once an hour, and its templates
                       checked beside each rule it is sent; a file that
                       can't be read, or an API that refuses, leaves the
-                      check as it was, and the log says why once
+                      check as it was, and the log says why once. With
+                      --grafana, where Grafana sends its alerts is asked
+                      once an hour: to an external Alertmanager, its rules
+                      are checked against this configuration too
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
@@ -1262,7 +1269,7 @@ service's POST among them), and the processes AWS's credential_process and
 Google's executable credentials start.
 
 Usage:
-  lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline]
+  lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline] [--queries]
 
 Every flag of lapilli serve (lapilli serve -h), read as serve reads it: one
 serve refuses, it refuses, and exits 2. Its own:
@@ -1274,6 +1281,17 @@ serve refuses, it refuses, and exits 2. Its own:
                       and the estimates of requests and time are worked out.
                       The files of secrets and --ledger-url-file aren't
                       read. For CI, against what a pull request changes
+  --queries           ask each rule's expression once, an instant query at
+                      now, of where it is replayed: --prometheus (or
+                      --gcp-project, the clouds' PromQL, and the queries of
+                      Grafana's rules), --loki and Grafana's Loki data
+                      sources. Off by default: it is the one place a
+                      preflight sends an expression a person wrote. Each
+                      rule whose query fails is said with why (parse error,
+                      unknown function, too many samples, timeout), by where
+                      it was asked. It writes nothing, and keeps to
+                      --max-rate, --max-samples and --parallel, and to
+                      --preflight-timeout
   --preflight-timeout DUR
                       the whole of it (default 2m); --timeout stays serve's,
                       a run's, read for the estimates

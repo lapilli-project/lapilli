@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -57,6 +59,14 @@ func (r *Report) Text(w io.Writer) error {
 		}
 		if it.Fix != "" {
 			line(strings.Repeat(" ", 29), "fix: ", it.Fix)
+		}
+		// The rules whose query failed, by why.
+		by := map[string][]string{}
+		for _, f := range it.Failed {
+			by[f.Reason] = append(by[f.Reason], f.Rule)
+		}
+		for _, reason := range slices.Sorted(maps.Keys(by)) {
+			line(strings.Repeat(" ", 29), reason+": ", listed(by[reason], 20))
 		}
 	}
 	var estimates []Item

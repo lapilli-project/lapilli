@@ -141,6 +141,20 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		if o.Alertmanager, err = f.alertmanagerTemplates(ctx, stderr); err != nil {
 			return fail(err)
 		}
+		// A Grafana that sends its alerts to an external Alertmanager has
+		// its rules checked against the one given (docs/design/content.md);
+		// one that can't be asked is checked as before.
+		if f.grafana != "" {
+			sends, err := source.GrafanaAlertmanagers(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion())
+			if err != nil {
+				fmt.Fprintf(stderr, "lapilli verdict: where Grafana sends its alerts wasn't read, so its rules are checked against its own notification templates only: %s\n", verdict.Clean(err.Error()))
+			} else if sends.External() {
+				o.GrafanaExternal = true
+				if !sends.Internal() {
+					o.Notify = nil
+				}
+			}
+		}
 	}
 	rep := contentReport{Rules: []contentRule{}}
 	cut := false

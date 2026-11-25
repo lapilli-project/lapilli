@@ -107,8 +107,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       doesn't catch it; changed at a start, every firing is
                       judged again with it
   --linked-only       an incident that lists the alerts its tool linked to
-                      it is caught by those alone; changed at a start,
-                      every firing is judged again with it
+                      it is caught by those alone; the default, as the
+                      others are: an admin can change it on the Settings
+                      page, and every firing is judged again with it, once
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)
@@ -232,7 +233,10 @@ each history API (lapilli_serve_history_*). Off by default:
                       configuration, read once an hour, and its templates
                       checked beside each rule it is sent; a file that
                       can't be read, or an API that refuses, leaves the
-                      check as it was, and the log says why once
+                      check as it was, and the log says why once. With
+                      --grafana, where Grafana sends its alerts is asked
+                      once an hour: to an external Alertmanager, its rules
+                      are checked against this configuration too
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
