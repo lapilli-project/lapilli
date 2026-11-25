@@ -196,7 +196,8 @@ func (routeHistory) QueryRange(_ context.Context, expr string, start, end time.T
 	s := prom.Series{Labels: map[string]string{"namespace": "shop"}}
 	for t := start; !t.After(end); t = t.Add(step) {
 		if !t.Before(from) && !t.After(to) {
-			s.Samples = append(s.Samples, prom.Sample{T: t, V: 1})
+			// In UTC, as the Prometheus client reads a sample's time.
+			s.Samples = append(s.Samples, prom.Sample{T: t.UTC(), V: 1})
 		}
 	}
 	return []prom.Series{s}, nil

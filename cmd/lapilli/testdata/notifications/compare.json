@@ -108,8 +108,8 @@
           "namespace": "shop",
           "severity": "critical"
         },
-        "start": "2026-10-06T19:00:00+09:00",
-        "end": "2026-10-06T19:21:00+09:00",
+        "start": "2026-10-06T10:00:00Z",
+        "end": "2026-10-06T10:21:00Z",
         "white": false,
         "no_record": true,
         "episode": 1,
@@ -118,10 +118,10 @@
           "notified": 2,
           "paged": 1,
           "on_paging": 1,
-          "first_page": "2026-10-06T19:00:30+09:00",
+          "first_page": "2026-10-06T10:00:30Z",
           "sent": [
             {
-              "at": "2026-10-06T19:00:30+09:00",
+              "at": "2026-10-06T10:00:30Z",
               "receiver": "oncall",
               "kind": "pagerduty",
               "index": 0,
@@ -130,7 +130,7 @@
               "reason": "first"
             },
             {
-              "at": "2026-10-06T19:00:30+09:00",
+              "at": "2026-10-06T10:00:30Z",
               "receiver": "oncall",
               "kind": "slack",
               "index": 0,
@@ -277,8 +277,8 @@
           "namespace": "shop",
           "severity": "critical"
         },
-        "start": "2026-10-06T19:00:00+09:00",
-        "end": "2026-10-06T19:21:00+09:00",
+        "start": "2026-10-06T10:00:00Z",
+        "end": "2026-10-06T10:21:00Z",
         "white": false,
         "no_record": true,
         "episode": 1,
@@ -287,10 +287,10 @@
           "notified": 2,
           "paged": 1,
           "on_paging": 1,
-          "first_page": "2026-10-06T19:00:30+09:00",
+          "first_page": "2026-10-06T10:00:30Z",
           "sent": [
             {
-              "at": "2026-10-06T19:00:30+09:00",
+              "at": "2026-10-06T10:00:30Z",
               "receiver": "oncall",
               "kind": "pagerduty",
               "index": 0,
@@ -299,7 +299,7 @@
               "reason": "first"
             },
             {
-              "at": "2026-10-06T19:00:30+09:00",
+              "at": "2026-10-06T10:00:30Z",
               "receiver": "oncall",
               "kind": "slack",
               "index": 0,
@@ -319,8 +319,8 @@
           "namespace": "shop",
           "severity": "critical"
         },
-        "start": "2026-10-11T12:00:00+09:00",
-        "end": "2026-10-11T12:31:00+09:00",
+        "start": "2026-10-11T03:00:00Z",
+        "end": "2026-10-11T03:31:00Z",
         "white": false,
         "no_record": true,
         "episode": 2,
@@ -329,10 +329,10 @@
           "notified": 2,
           "paged": 1,
           "on_paging": 1,
-          "first_page": "2026-10-11T12:00:30+09:00",
+          "first_page": "2026-10-11T03:00:30Z",
           "sent": [
             {
-              "at": "2026-10-11T12:00:30+09:00",
+              "at": "2026-10-11T03:00:30Z",
               "receiver": "oncall",
               "kind": "pagerduty",
               "index": 0,
@@ -341,7 +341,7 @@
               "reason": "first"
             },
             {
-              "at": "2026-10-11T12:00:30+09:00",
+              "at": "2026-10-11T03:00:30Z",
               "receiver": "oncall",
               "kind": "slack",
               "index": 0,

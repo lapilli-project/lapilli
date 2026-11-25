@@ -118,7 +118,9 @@ func (c *Config) RunContext(ctx context.Context, alerts []Alert, o Options) (*Re
 		if i%1024 == 0 && !r.alive() {
 			break
 		}
-		labels := make(map[string]string, len(a.Labels)+len(o.ExternalLabels))
+		// Sized by the alert's own labels: the external ones are few, and a
+		// sum of two lengths isn't put in an allocation.
+		labels := make(map[string]string, len(a.Labels))
 		maps.Copy(labels, o.ExternalLabels)
 		maps.Copy(labels, a.Labels)
 		x := inst{labels: labels, start: a.Start, end: never, carried: a.Carried}
