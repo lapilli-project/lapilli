@@ -163,6 +163,13 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 		}
 	}()
 	cmp, err := s.backtestCompared(rctx, pr, from, to, o)
+	// Held to the incidents, the record of the rules left alone read, and
+	// those it can't settle replayed, while the job can still cancel it.
+	var held *leftAloneHeld
+	if err == nil && pr.failMissed {
+		// Within what is left of --backtest-timeout, not another of it.
+		held, err = s.holdPrepared(rctx, cmp, pr, from, to, o, s.backtestTimeout()-s.now().Sub(start))
+	}
 	cancel()
 	<-watching
 	switch {
@@ -176,15 +183,11 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 		fail("lapilli serve couldn't read its record: try again")
 		return
 	}
-	for _, rc := range cmp.Rules {
-		for _, r := range []*verdict.RuleResult{rc.Before, rc.After} {
-			if r != nil && r.Unsupported == rules.Unfinished {
-				fail(fmt.Sprintf("it didn't finish within --backtest-timeout %s: give fewer days, or fewer rules", verdict.Duration(s.backtestTimeout())))
-				return
-			}
-		}
+	if unfinishedCompared(cmp) {
+		fail(fmt.Sprintf("it didn't finish within --backtest-timeout %s: give fewer days, or fewer rules", verdict.Duration(s.backtestTimeout())))
+		return
 	}
-	result, why := s.backtestResult(ctx, cmp, pr, from, to, o, t.IncidentTitles)
+	result, why := s.backtestResult(ctx, cmp, pr, held, o, t.IncidentTitles)
 	switch {
 	case why != "" && ctx.Err() != nil:
 		return // no longer leading: the next leader runs it again
@@ -250,8 +253,9 @@ func scrubFor(own map[string]bool) func(string) string {
 // serve's access reads; no reason of the history's; nothing of serve's
 // settings. Held to the incidents (fail_missed), it says which incidents
 // the change leaves caught by no rule, as lapilli verdict --fail-missed
-// does, the rules left alone judged by serve's record (holdMissed).
-func (s *Server) backtestResult(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options, titles bool) ([]byte, string) {
+// does, the rules left alone judged by serve's record, and replayed where it
+// can't settle them (holdPrepared, holdMissed).
+func (s *Server) backtestResult(ctx context.Context, cmp *verdict.Comparison, pr *prepared, held *leftAloneHeld, o verdict.Options, titles bool) ([]byte, string) {
 	cmp.Recording, cmp.JudgedBy, cmp.ChangedOnly = pr.recording, verdict.JudgedByServe, true
 	if len(pr.passedOver) > 0 {
 		cmp.PassedOver = pr.passedOver
@@ -276,12 +280,7 @@ func (s *Server) backtestResult(ctx context.Context, cmp *verdict.Comparison, pr
 		}
 	}
 	if pr.failMissed {
-		if err := s.holdMissed(ctx, cmp, pr, from, to, o); err != nil {
-			if ctx.Err() == nil {
-				s.log.Error("backtest lane: reading the record of the rules left alone", "err", err)
-			}
-			return nil, "lapilli serve couldn't read its record: try again"
-		}
+		s.holdMissed(cmp, held)
 	}
 	verdict.ForComment(cmp, unreadByServe, scrubFor(pr.reasons), nil)
 	cmp.Unreplayed = cmp.UnreplayedRules()

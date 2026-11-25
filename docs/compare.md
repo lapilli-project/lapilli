@@ -72,7 +72,8 @@ as not known (`missed_not_known`), said in the report, and fails nothing;
 A pull request backtested through `lapilli serve` (the recipes'
 `FAIL_MISSED` with `LAPILLI_SERVE`) is held the same way, by serve's
 incidents, the rules left alone judged by serve's record of them rather
-than replayed ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
+than replayed, and replayed over the incidents the record can't settle
+([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
 
 ## What a rule is expected to do
 

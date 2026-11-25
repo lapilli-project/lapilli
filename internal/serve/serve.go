@@ -447,6 +447,9 @@ type Server struct {
 	l   *ledger.Ledger
 	log *slog.Logger
 	now func() time.Time
+	// aloneRequests, when set, is the most requests a backtest's replay of
+	// the rules left alone may plan (aloneBudget): tests set it.
+	aloneRequests int
 
 	// linkedKnown is what this replica knew the ledger was last judged by,
 	// by --linked-only: as found at start, or as it last agreed with its

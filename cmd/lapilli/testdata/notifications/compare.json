@@ -419,6 +419,7 @@
     "scenarios_unrun": 0,
     "missed_checked": false,
     "incidents_missed": 0,
-    "missed_not_known": 0
+    "missed_not_known": 0,
+    "missed_limited": 0
   }
 }

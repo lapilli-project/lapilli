@@ -363,12 +363,12 @@ func TestRuleParsed(t *testing.T) {
 		t.Errorf("a=b=c: Key %t, Parsed %t", eq.Key() == in.Key(), one(eq) == one(in))
 	}
 	for name, r := range map[string]Rule{
-		"a Grafana rule":   {Name: "G", Graph: &Graph{}},
-		"a Loki rule":      {Name: "L", Expr: `sum(count_over_time({app="a"}[1m])) > 1`, Logs: LokiRuler},
-		"a cloud's alarm":  {Name: "C", Expr: "errors > 5", Cloud: "cloudwatch"},
-		"not read":         {Name: "N", Expr: "x > 1_000"},
-		"no expression":    {Name: "E"},
-		"MetricsQL's WITH": {Name: "W", Expr: "WITH (y = x) y > 1"},
+		"a Grafana rule":                     {Name: "G", Graph: &Graph{}},
+		"a Loki rule's PromQL":               {Name: "L", Expr: `up > 1`, Logs: LokiRuler},
+		"a cloud's alarm with no expression": {Name: "C", Cloud: "cloudwatch", Unsupported: "a CloudWatch metric alarm isn't PromQL"},
+		"not read":                           {Name: "N", Expr: "x > 1_000"},
+		"no expression":                      {Name: "E"},
+		"MetricsQL's WITH":                   {Name: "W", Expr: "WITH (y = x) y > 1"},
 	} {
 		if s, ok := r.Parsed(); ok {
 			t.Errorf("%s: %s", name, s)

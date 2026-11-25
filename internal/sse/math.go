@@ -79,7 +79,12 @@ type parser struct {
 	pos  int
 }
 
-var twoChar = []string{">=", "<=", "==", "!=", "&&", "||"}
+// symbols are the characters Grafana's lexer runs an operator together of,
+// and operators the runs it takes (** too, which isn't read).
+const symbols = "!<>=&|+-*/%"
+
+var operators = map[string]bool{"!": true, "&&": true, "||": true, ">": true, "<": true, ">=": true, "<=": true,
+	"==": true, "!=": true, "+": true, "-": true, "*": true, "/": true, "%": true}
 
 func (p *parser) lex(s string) error {
 	for i := 0; i < len(s); {
@@ -129,17 +134,20 @@ func (p *parser) lex(s string) error {
 			p.toks = append(p.toks, tok{kind: 'f', s: s[i:j]})
 			i = j
 		default:
-			op := string(c)
-			for _, t := range twoChar {
-				if strings.HasPrefix(s[i:], t) {
-					op = t
-				}
+			// Grafana's lexer (pkg/expr/mathexp/parse, lexSymbol) takes the
+			// whole run of !<>=&|+-*/% as one operator, and refuses a run
+			// that isn't one of its own: $A>-1, $A--$B and $A*-1 are
+			// errors there, and ^ is no character of its at all. The
+			// power operator of Grafana is **, which is not read here.
+			j := i
+			for j < len(s) && strings.IndexByte(symbols, s[j]) >= 0 {
+				j++
 			}
-			if !strings.Contains("+-*/%^><!", op[:1]) && len(op) == 1 {
-				return fmt.Errorf("unexpected %q", op)
+			if j == i || !operators[s[i:j]] {
+				return fmt.Errorf("unexpected %q", s[i:max(j, i+1)])
 			}
-			p.toks = append(p.toks, tok{kind: 'o', s: op})
-			i += len(op)
+			p.toks = append(p.toks, tok{kind: 'o', s: s[i:j]})
+			i = j
 		}
 	}
 	return nil
@@ -153,7 +161,6 @@ var prec = map[string]int{
 	"==": 3, "!=": 3, "<": 3, "<=": 3, ">": 3, ">=": 3,
 	"+": 4, "-": 4,
 	"*": 5, "/": 5, "%": 5,
-	"^": 6,
 }
 
 func (p *parser) peek() *tok {
@@ -183,11 +190,7 @@ func (p *parser) expr(minPrec int) (Expr, error) {
 			return left, nil
 		}
 		p.pos++
-		next := bp + 1
-		if t.s == "^" {
-			next = bp // right-associative
-		}
-		right, err := p.expr(next)
+		right, err := p.expr(bp + 1)
 		if err != nil {
 			return nil, err
 		}
@@ -250,7 +253,7 @@ func (p *parser) unary() (Expr, error) {
 }
 
 var funcs = map[string]func(float64) float64{
-	"abs": math.Abs, "ceil": math.Ceil, "floor": math.Floor, "round": math.Round, "log": math.Log, "exp": math.Exp,
+	"abs": math.Abs, "ceil": math.Ceil, "floor": math.Floor, "round": math.Round, "log": math.Log,
 	"is_nan": func(v float64) float64 { return b2f(math.IsNaN(v)) },
 	// Grafana's: 1 for a real number, 0 for NaN or an infinity. Its own
 	// conversion of a Prometheus rule fires on is_number($A) || is_nan($A)
@@ -338,8 +341,6 @@ func apply(op string, x, y float64) float64 {
 		return x / y
 	case "%":
 		return math.Mod(x, y)
-	case "^":
-		return math.Pow(x, y)
 	case ">":
 		return b2f(x > y)
 	case ">=":
