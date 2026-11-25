@@ -55,8 +55,9 @@ func forgedFirings() (fs []firing.Firing, ins []incident.Incident) {
 }
 
 // A change that deletes an incident's only real alert leaves another
-// rule's catch by dependency: that doesn't hold --fail-missed unless
-// counted; it is said apart.
+// rule's catch by dependency: that isn't counted as caught, so the incident
+// is missed (and fails --fail-missed), with the reason said, unless
+// --depends-count-missed counts it.
 func TestHoldMissedDependencyOnly(t *testing.T) {
 	g := graphAt(t, []int{0}, "checkout>payments-db")
 	for _, count := range []bool{false, true} {
@@ -69,8 +70,8 @@ func TestHoldMissedDependencyOnly(t *testing.T) {
 		c.Summarize(true)
 		c.HoldMissed(nil)
 		switch {
-		case !count && (len(c.Missed) != 0 || len(c.MissedByDependency) != 1):
-			t.Errorf("not counted: missed %d, by dependency only %d: want 0 and 1", len(c.Missed), len(c.MissedByDependency))
+		case !count && (len(c.Missed) != 1 || len(c.MissedByDependency) != 1 || c.Summary.IncidentsMissed != 1):
+			t.Errorf("not counted: missed %d, by dependency only %d, summary %d: want 1, 1 and 1", len(c.Missed), len(c.MissedByDependency), c.Summary.IncidentsMissed)
 		case count && (len(c.Missed) != 0 || len(c.MissedByDependency) != 0):
 			t.Errorf("counted: missed %d, by dependency only %d: want none", len(c.Missed), len(c.MissedByDependency))
 		}
@@ -78,7 +79,7 @@ func TestHoldMissedDependencyOnly(t *testing.T) {
 		if err := MissedText(&b, c, time.UTC); err != nil {
 			t.Fatal(err)
 		}
-		if said := strings.Contains(b.String(), "only by dependency"); said == count {
+		if said := strings.Contains(b.String(), "only by dependency"); said == count || strings.Contains(b.String(), "The run fails") == count {
 			t.Errorf("count %v, said %v: %q", count, said, b.String())
 		}
 	}
@@ -135,5 +136,19 @@ func TestDependsHops(t *testing.T) {
 	}
 	if strings.Contains(got, "<b>") {
 		t.Error("a name wrote a tag")
+	}
+}
+
+// An incident a rule left alone catches directly isn't missed nor said to
+// be caught only by dependency, whatever the changed rule's catch was.
+func TestHoldMissedLeftAloneBeforeDependency(t *testing.T) {
+	g := graphAt(t, []int{0}, "checkout>payments-db")
+	fs, ins := forgedFirings()
+	o := withGraph(opts(), g, 1, "")
+	c := Compare(Judge(nil, slices.Clone(fs), ins, o), Judge(nil, []firing.Firing{fs[1]}, ins, o), []string{"CheckoutErrors"}, 0)
+	c.Summarize(true)
+	c.HoldMissedBy(func(incident.Incident) (bool, bool) { return true, true })
+	if len(c.Missed) != 0 || len(c.MissedByDependency) != 0 {
+		t.Errorf("missed %d, by dependency %d: a rule left alone catches it, want none", len(c.Missed), len(c.MissedByDependency))
 	}
 }

@@ -63,11 +63,12 @@ type Comparison struct {
 	// when it didn't look.
 	Missed []IncidentChange `json:"missed,omitempty"`
 	// MissedByDependency are the incidents a rule caught before the change
-	// that only a catch by the service graph holds after it: not counted as
-	// caught, nor as missed, unless --depends-count-missed counts catches by
-	// dependency, as whoever can write the series that says who calls whom
-	// could make such a catch. Absent when there is none, and when it
-	// didn't look (--fail-missed).
+	// that only a catch by the service graph holds after it: they are in
+	// Missed too (the graph's catch isn't counted, as whoever can write the
+	// series that says who calls whom could make such a catch), and this
+	// says why, unless --depends-count-missed counts catches by dependency
+	// as caught. Absent when there is none, and when it didn't look
+	// (--fail-missed).
 	MissedByDependency []IncidentChange `json:"missed_by_dependency,omitempty"`
 	// JudgedBy names whose record judged the firings, when it isn't the
 	// incidents the comparison was given: lapilli serve's, for a pull
@@ -338,17 +339,19 @@ func (c *Comparison) holdMissed(leftAlone func(i int, in incident.Incident) (cau
 			if !counted(b.CaughtBy, count) || counted(c.After.Incidents[i].CaughtBy, count) {
 				continue
 			}
-			if len(c.After.Incidents[i].CaughtBy) > 0 {
-				// Caught after only by the service graph, which doesn't count.
-				c.MissedByDependency = append(c.MissedByDependency, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: c.After.Incidents[i].CaughtBy})
-				continue
-			}
 			caught, known := leftAlone(i, b.Incident)
 			if caught {
 				continue
 			}
 			if unsure || !known {
 				notKnown++
+				continue
+			}
+			if len(c.After.Incidents[i].CaughtBy) > 0 {
+				// Caught after only by the service graph, which doesn't count:
+				// the incident is missed, and this says why.
+				c.MissedByDependency = append(c.MissedByDependency, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: c.After.Incidents[i].CaughtBy})
+				c.Missed = append(c.Missed, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: c.After.Incidents[i].CaughtBy})
 				continue
 			}
 			c.Missed = append(c.Missed, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: []Catch{}})
@@ -386,8 +389,8 @@ func (c *Comparison) MissedByDependencyText() string {
 	if c.Summary == nil || len(c.MissedByDependency) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d incidents a rule caught before the change are caught after it only by dependency (the service graph): they are not counted as caught, nor as missed. "+
-		"--depends-count-missed counts them.", len(c.MissedByDependency))
+	return fmt.Sprintf("%d incidents a rule caught before the change are caught after it only by dependency (the service graph): that is not counted as caught, so they are missed and fail --fail-missed. "+
+		"--depends-count-missed counts them as caught.", len(c.MissedByDependency))
 }
 
 // MissedText writes, for a person, what HoldMissed found (--fail-missed),

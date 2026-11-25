@@ -178,9 +178,11 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   its firings white by the graph alone (`Judged.ByDependency`), and the note
   says their total. A catch made only by dependency doesn't count where a
   change is held to the incidents or a rule is called spare, as anyone who can
-  write the graph's series could make it: `HoldMissed` leaves such an
-  incident out of `--fail-missed` and says how many (`Comparison.
-  MissedByDependency`), `Credit` lets such a catch neither cover another
+  write the graph's series could make it: `HoldMissed` counts such an
+  incident as missed, so `--fail-missed` fails, once the rules left alone are
+  asked (an incident one of them catches directly is caught), and says which
+  of the missed were that (`Comparison.MissedByDependency`, a subset of
+  `Missed`), `Credit` lets such a catch neither cover another
   rule's nor take its `First` and `Alone`; `--depends-count-missed`
   (`Dependencies.CountCatches`, `settings.depends.count_catches`) counts them
   as any catch (`CreditCounting`). A firing by dependency

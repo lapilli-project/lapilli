@@ -28,9 +28,9 @@
   every report is as it was.
 - **A catch by dependency, held to what anyone could write.** The graph says who calls whom, and
   whoever can write that series can make a call, so: a catch made only by dependency no longer
-  counts toward `--fail-missed` (a change that removes an incident's only alert by its labels fails,
-  though another rule caught it by the graph; `missed_by_dependency` in `--compare --json` and a line
-  in its text and Markdown say how many) nor covers another rule for "spare" or takes its `FIRST` and
+  counts as a catch for `--fail-missed` (a change that removes an incident's only alert by its labels
+  is missed and fails the run, though another rule caught it by the graph; `missed_by_dependency` in
+  `--compare --json`, a subset of `missed`, and a line in its text and Markdown say how many and why) nor covers another rule for "spare" or takes its `FIRST` and
   `ALONE`; `--depends-count-missed` counts them as any catch (`settings.depends.count_catches`). The
   walk is made once for an incident, to every service it reaches, and each firing is a lookup
   (`graph.Reach`; the cost is the incidents, not the firings times the incidents; `Depends` is a
