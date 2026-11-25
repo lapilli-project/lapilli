@@ -423,6 +423,13 @@ Grafana gives, so a rule that isn't replayed says why.
   in that fraction of a second is counted one evaluation later by the
   replay than by Loki. Measured below, with log lines written so that they
   don't fall in it, and said in Questions for review.
+- **A ruler that started within an interval of the period.** A placed
+  group is replayed from its evaluation before the period, as one that ran;
+  a Loki ruler restarted just before the period (or a rule file loaded
+  then) hadn't run it: measured, a restarted Loki ran its 1m group first
+  two and a half minutes on, and the replay had a firing from an evaluation
+  that never happened, which `ALERTS` doesn't have. Lapilli can't know when
+  the ruler began; `test/e2e/loki.sh` waits for the groups to have run.
 - **Recording rules** in Loki's ruler, as in Prometheus's, aren't alerts,
   and aren't read.
 - **Changing Loki's rules** (changes.md). Loki's configuration API is
@@ -544,8 +551,9 @@ by `TestRealLoki` and `TestRealLokiGrafana` on every change.
 first runs found that a SQL rule said "no PromQL expr", as a rule that
 couldn't be read never had its data sources' types asked (fixed: it is read
 again once they are), and the firing on at a period's start (its check
-starts on a minute no firing ends near, which the replay from the evaluation
-before the period no longer needs).
+once started on a minute no firing ends near, which the replay from the
+evaluation before the period no longer needs: it starts on any minute, two
+minutes after the ruler's groups have all run).
 
 ## A `for` one line can't outlast (0.70)
 
