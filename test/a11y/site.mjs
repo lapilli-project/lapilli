@@ -74,10 +74,10 @@ for (const path of paths) {
   if (w[0] > w[1]) found.push({ scheme: '320px', path, id: 'reflow', help: `scrolls sideways at 320 CSS px: ${w[0]} > ${w[1]}` });
 }
 // The docs' search (site/docs.sh writes its indexes, /docs/search.json and,
-// where there are translations, /ko/docs/search.json): every result goes to
+// where there are translations, /LANG/docs/search.json): every result goes to
 // a page there is, and to a section of it there is, by the id kramdown gave
 // the heading.
-for (const where of ['/docs/search.json', '/ko/docs/search.json']) {
+for (const where of ['/docs/search.json', '/ko/docs/search.json', '/ja/docs/search.json']) {
   const res = await fetch(base + where);
   if (where !== '/docs/search.json' && res.status === 404) continue;
   const index = await res.json();

@@ -136,6 +136,12 @@
   kind cluster with failures made on purpose; `--check-replay
   --loaded-rules` must find every firing alike, among at least five alerts
   that fired, and the run's page in GitHub Actions says how many.
+- The docs in Japanese, at lapilli.dev/ja/docs, from `docs/ja/`: the docs'
+  home, Getting started, the glossary and the FAQ, the pages in Korean; a
+  page not translated is listed with its Japanese title and opens in
+  English, and the Japanese front page links to them. The Korean Getting
+  started, glossary and FAQ are of the English as it is now; they had said
+  the English had changed since.
 
 ### Changed
 
@@ -169,6 +175,11 @@
   start after the upgrade judges every firing again once, as a
   `--linked-only` change does. A release before it can't open the ledger
   after: keep a copy first (docs/upgrading.md).
+- **lapilli.dev's text at 16px**, as most docs sites have it, from 17px,
+  with its headings a step further apart. A docs page's sections sit right
+  after its text, with no empty band between, and the pages' list lines up
+  with the header's mark. The front page is 72rem wide, its screenshots,
+  cards and commands across it, its text still at a reading width.
 
 ### Fixed
 

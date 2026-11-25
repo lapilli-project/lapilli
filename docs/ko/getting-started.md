@@ -1,4 +1,4 @@
-<!-- translated from docs/getting-started.md at blob 513356fc6823a2e1460219fc705b164d3173335b -->
+<!-- translated from docs/getting-started.md at blob bdc3b1ddc9c9f475ab5f547062ef287c85375ed0 -->
 
 # 시작하기
 
@@ -22,6 +22,9 @@ lapilli demo
 주고, `--tz`는 샘플의 일주일을 놓을 시간대를 정합니다. Go만 있고 Lapilli는 설치하지
 않았다면 `go run lapilli.dev/cmd/lapilli@latest demo`로 같은 결과를 볼 수 있습니다
 ([docs/design/demo.md (영어)](../design/demo.md)).
+`lapilli demo --write sample/`은 샘플의 룰과 장애를 `rules.yaml`과
+`incidents.yaml`로 그 디렉터리에 써 줍니다. 두 형식을 보고 내 것에 맞게 베껴 쓸 수
+있습니다.
 
 ```sh
 lapilli demo --serve
@@ -31,7 +34,9 @@ lapilli demo --serve
 작업이 가립니다. 열어 볼 URL을 알려 주며, 이 머신에서만 열리고(`--listen`, 기본은
 루프백 주소의 빈 포트) 읽기 전용입니다. 이력 DB는 임시 디렉터리에 두었다가 Ctrl-C로
 끝내면 지웁니다. 시계는 샘플 일주일의 끝에 맞춰져 있고, 그곳이 화면이 보여 주는
-마지막 온전한 일주일입니다.
+마지막 온전한 일주일입니다. 팀이 셋 있어서 개요에서 고른 뒤 팀 화면을 볼 수 있고,
+승인을 기다리는 변경 제안이 하나 있습니다. 리포트가 제안하는 더 긴 `for`와 그
+백테스트이며, 읽기 전용이라 승인하지 않고 읽어 보기만 할 수 있습니다.
 
 ## 설치
 
@@ -117,8 +122,9 @@ lapilli verdict --rules alert-rules/ --prometheus http://prometheus:9090 \
 ```
 
 `--rules`의 룰을 `--prometheus`의 이력에 백테스트합니다. Prometheus 룰 파일,
-`PrometheusRule` 리소스, Grafana 알림 프로비저닝 파일, 이것들을 담은 ConfigMap,
-또는 이것들이 든 디렉터리를 줄 수 있습니다. 기간은 지난 7일(`--since 7d`)이거나,
+`PrometheusRule` 리소스, Grafana 알림 프로비저닝 파일, `grafana_rule_group`의 Terraform JSON
+([docs/verdict.md (영어)](../verdict.md#rules-kept-in-terraform)), 이것들을 담은
+ConfigMap, 또는 이것들이 든 디렉터리를 줄 수 있습니다. 기간은 지난 7일(`--since 7d`)이거나,
 RFC 3339로 준 `--from`부터 `--to`까지이며, 시각은 머신의 시간대나 `--tz`로
 보여 줍니다. `--match service`는 한 서비스의 알림이 같은 시간에 났다는 이유만으로
 다른 서비스의 장애를 잡은 것으로 치지 않게 합니다. 이 옵션이 없으면 시간만 맞는
