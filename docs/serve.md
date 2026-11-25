@@ -173,6 +173,50 @@ Settings page's tries and the digest's suggestions, carries them on both
 sides, so a change can't look better on the firings people called
 coincidences.
 
+## What was done about a firing
+
+What people did when a rule fired ([docs/responses.md](responses.md), the
+design in [docs/design/responses.md](design/responses.md)) shows once
+`lapilli serve` has something to say of it: it keeps pages (`--responses
+FILE`, read again each run, or `PUT /api/v1/responses/SOURCE?from=&to=` on
+the incidents port with `--responses-token-file`, which replaces that
+source's pages sent in the period) or changes read from the history
+(`--rollouts`), or rules are found noisy by what was done about their firings
+(`--noisy-by useful`, where a person's "needed action" is one of the
+answers). The deploys file alone shows none while rules are noisy by what
+their firings caught: serve took `--deploys` before it took responses.
+
+- **Alert history** has a Response column: "Rolled out 12:04", "Rolled back
+  12:04", "Scaled 12:04" or "Deployed 12:04" with the change's labels, "Acknowledged",
+  "Nobody acknowledged; resolved by its alert manager", "Routine change" (said
+  to be chance, which isn't counted), and the page's id; nothing for a firing with
+  no response. `?response=changed`, `acknowledged`, `unanswered`, `routine`
+  or `none`, or the form's Response choice, picks by it; with no `day`, it
+  opens on the last day with such a firing.
+- **A rule's page** has Actionable beside Precision, in the same number
+  format and `–` when no firing is known to be useful or not, with the
+  counts of its firings by response; its latest firings are picked by
+  response from the firings tab (`?tab=firings&response=unanswered`), each
+  choice a link with its count.
+- **The rules list** has an Actionable column and total, and can be put in
+  order of it, the least actionable first.
+- **The overview** has a tile, "Pages nobody answered": last week's count
+  beside the week before's, fewer being better, linking to Alert history
+  picked by `unanswered`.
+- **Settings** has `noisy_by`, `caught` or `useful`. An admin tries it on
+  the last week first, as the noisy thresholds are tried, which lists the
+  rules whose state would change with their actionable share, and saves
+  it the same way, kept with who changed it. By default it is `useful` once
+  `--responses` or `--rollouts` is given, and `caught` otherwise.
+- The summary, goals, `/metrics`, the digest and MCP say it too
+  ([docs/api.md](api.md), [docs/metrics.md](metrics.md)).
+
+Firings written through `PUT /api/v1/firings/SOURCE` ([Firings recorded
+elsewhere](#firings-recorded-elsewhere)) get no changes read from the
+history, since a run, which reads them, didn't find those firings; the pages
+and the deploys the ledger keeps are tied to them as to any firing. All of
+it is in English, Korean, Japanese and Spanish.
+
 ## Rules judged by nothing
 
 A rule entry may say `judged: false` in place of signals, in

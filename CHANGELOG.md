@@ -14,7 +14,9 @@
   acknowledged, unanswered, routine or none) and says whether it was useful,
   and each rule an actionable share beside its precision. `--routine P`
   (0.5) sets when a change is chance. `--noisy-by caught|useful` says what a
-  rule is found noisy by, `useful` once any of the three is given, so a rule
+  rule is found noisy by, `useful` once `--responses` or `--rollouts` is given
+  (`--deploys` alone leaves it `caught`, as serve, which took `--deploys`
+  before, must not change which rules are noisy on an upgrade), so a rule
   whose pages nobody answered is noisy though no incident was written down;
   the longer `for` suggested then keeps every useful firing. The text has a
   RESPONSES table; `--json` has `response` on each firing, `responses` on each
@@ -32,7 +34,7 @@
   `--deploys` does for deploys, so that judging the ledger again asks the
   history nothing; `--rollout-match`, `--routine` and `--noisy-by` are as in
   `lapilli verdict`, and the Settings page keeps `noisy-by` (`useful` by
-  default once `--responses`, `--rollouts` or `--deploys` is given). Each
+  default once `--responses` or `--rollouts` is given). Each
   firing's response and usefulness are worked out as its stones are, a
   person's answer first, and counted by day and week; the report, the
   summary rows (`responses`, `actionable`), the goals (`actionable.share`),
@@ -41,6 +43,22 @@
   judges every firing again (`judgedBy` j3). The chart has `rollouts`,
   `rolloutMatch`, `routine`, `noisyBy`, `serve.responses` (the token and the
   file) and runs the `responses/` recipes beside `recipes/incidents`.
+- **The web UI says what was done about a firing**
+  ([docs/serve.md](docs/serve.md#what-was-done-about-a-firing)), once serve
+  keeps pages or changes read from the history, or rules are found noisy by
+  `useful`: a Response column on Alert history and on a rule's latest firings
+  ("Rolled out 12:04", "Acknowledged", "Nobody acknowledged; resolved by its
+  alert manager"), picked by `?response=changed|acknowledged|unanswered|
+  routine|none`; Actionable beside Precision on a rule's page, as a column
+  and an order on the rules list; "Pages nobody answered" on the overview,
+  last week beside the week before; and `noisy_by` on the Settings page as a
+  choice, tried on the last week first as the noisy thresholds are. In
+  English, Korean, Japanese and Spanish. Nothing changes where responses
+  don't show.
+- **`--noisy-by` is `useful` by default only with `--responses` or
+  `--rollouts`**, in both commands: `--deploys` alone leaves `caught`, since
+  `lapilli serve` took `--deploys` before it took responses and an upgrade
+  must not change which rules are noisy. `--noisy-by` given always wins.
 - **The backtest's report in the step's summary**: in GitHub Actions the
   recipe adds it to `GITHUB_STEP_SUMMARY`, shown on the run's page, the
   comment's Markdown without its hidden first line. A merge queue's run,
