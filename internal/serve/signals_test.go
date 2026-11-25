@@ -949,7 +949,8 @@ func TestSignalsJudgedHoldsWhite(t *testing.T) {
 	part := ledger.Tally{At: w, Rule: 1, Firings: 5, White: 2, Signals: 1}
 	tl.parts = []ledger.Tally{part}
 	tl.by[w][1] = part
-	tl.keep(nil)
+	tl.record(nil)
+	tl.judge()
 	if j, u := tl.judged(w, 1), tl.unjudged(w, 1); j.Firings != 2 || j.White != 2 || u.Firings != 3 || u.White != 0 {
 		t.Errorf("judged %+v, unjudged %+v; want the 2 white judged, the 3 black not", j, u)
 	}

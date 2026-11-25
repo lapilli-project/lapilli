@@ -224,7 +224,13 @@ func (l *Ledger) IncidentByID(ctx context.Context, key string) (Incident, error)
 }
 
 // incidentCols are the columns of incidents l.incidents reads, in order.
-const incidentCols = "i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by, i.signal, i.match_labels, i.real_of, i.alerts"
+// beforeReplays is a column of incidentCols: whether the incident started
+// before the earliest time a run replayed the rules from (Incident.Unreplayed
+// once nothing is found to have caught it). One subquery, read once a
+// statement.
+const beforeReplays = "i.start_at < coalesce((SELECT min(r.period_from) FROM runs r WHERE r.kind IN ('backfill', 'hourly') AND r.error = '' AND r.period_from > 0), 0)"
+
+const incidentCols = "i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by, i.signal, i.match_labels, i.real_of, i.alerts, " + beforeReplays
 
 func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incident, error) {
 	rows, err := l.r.QueryContext(ctx, q, args...)
@@ -239,7 +245,7 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		var end sql.NullInt64
 		var labels, alerts string
 		var match sql.NullString
-		if err := rows.Scan(&id, &in.ID, &in.Origin, &in.Title, &start, &end, &labels, &in.State, &in.Counts, &updated, &in.By, &in.Signal, &match, &in.RealOf, &alerts); err != nil {
+		if err := rows.Scan(&id, &in.ID, &in.Origin, &in.Title, &start, &end, &labels, &in.State, &in.Counts, &updated, &in.By, &in.Signal, &match, &in.RealOf, &alerts, &in.Unreplayed); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -293,6 +299,7 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)
+		out[i].Unreplayed = out[i].Unreplayed && len(out[i].CaughtBy) == 0
 	}
 	return out, rows.Err()
 }
@@ -496,7 +503,7 @@ func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 // incidents that did, each firing's stones given against every incident the
 // ledger has. With firings false, the firings themselves are left out.
 //
-// A firing is judged by day (or by week, with --record-by week): those of a day whose record is kept
+// A firing is judged by day (or by week, with --record-by-week): those of a day whose record is kept
 // (UnitKept), and any that caught something; the rest are counted, not
 // judged (verdict.RuleResult.Unjudged).
 func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Options, firings bool) (*verdict.Report, error) {
@@ -732,7 +739,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return nil, err
 	}
 	for _, in := range incs {
-		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID]}
+		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID], NotKnown: in.Unreplayed, Unreplayed: in.Unreplayed}
 		for i, c := range ir.CaughtBy {
 			if rr, ok := byName[c.Rule]; ok {
 				ir.CaughtBy[i].Noisy = rr.Noisy
@@ -1127,7 +1134,7 @@ func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.O
 // FiringJudged reports whether a firing of rule that started at start, its
 // alert tied to signals (as the ledger keeps them, Firing.Signals), is
 // judged by rec should it catch nothing: by its day's record (its week's,
-// with --record-by week), or, with named signals, by the signals tied to it
+// with --record-by-week), or, with named signals, by the signals tied to it
 // (docs/design/signals.md). One that caught something is judged whatever
 // (verdict.RuleResult.Judged). Report says each firing so, and a page that
 // lists or draws firings asks the same, so that none of them calls black
@@ -1278,6 +1285,17 @@ func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, tab
 // and each rule, when its firings came, excused ones aside.
 func (l *Ledger) ByHours(ctx context.Context, from, to int64, h *verdict.Hours) (map[int64]map[int64]HourTally, error) {
 	return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, func(at int64) int64 { return Week(l.day(at)) })
+}
+
+// ByHoursDays is ByHours by day, from the day from up to the day to, each
+// day by its first day: of every rule when ids is nil, else of the rules ids
+// only.
+func (l *Ledger) ByHoursDays(ctx context.Context, from, to int64, h *verdict.Hours, ids []int64) (map[int64]map[int64]HourTally, error) {
+	day := func(at int64) int64 { return l.day(at) }
+	if ids == nil {
+		return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, day)
+	}
+	return l.hoursOf(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, ids, false, day)
 }
 
 // ByHoursOf is ByHours for the rules ids only, reading their firings: for a

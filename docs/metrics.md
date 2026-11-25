@@ -80,7 +80,7 @@ problem ([What an alert says](check-content.md)).
 
 | Metric | Labels | What it counts |
 |---|---|---|
-| `lapilli_incidents` | `state`, `source` | Incidents in the seven days, by `state`: `caught`, `noisy_only` (caught only by noisy rules) or `missed`; and `source`: `written` (written down) or `impact` (a window `--impact` found). All six series, 0 among them |
+| `lapilli_incidents` | `state`, `source` | Incidents in the seven days, by `state`: `caught`, `noisy_only` (caught only by noisy rules) or `missed`; and `source`: `written` (written down) or `impact` (a window `--impact` found). All six series, 0 among them. `lapilli serve` leaves out an incident that started before its ledger's first replayed time: no rule could have fired for it, so it is none of the three |
 | `lapilli_incidents_not_known` | `source` | Of the `missed` incidents, those no rule replayed caught while a rule couldn't be replayed, which may have caught them: they are counted as missed, but whether they were isn't known. Both series, 0 among them. Written by `lapilli verdict --metrics` only, not by `lapilli serve`'s `/metrics` (which never has a replay to fail) |
 | `lapilli_incident_detection_delay_seconds` | `incident` | From each caught incident's start to the first alert of a rule that isn't noisy; negative when the alert came first. None for an incident missed or caught only by noisy rules |
 | `lapilli_incident_state` | `incident`, `source`, `signal`, `state` | 1 for each incident of the seven days, in its state, by the rules' stones in its week. `signal` is on a named signal's windows |

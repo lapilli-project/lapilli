@@ -222,7 +222,7 @@ Bounds:
 
 | Route | Role | Takes | Gives |
 |---|---|---|---|
-| `GET /api/v1/incidents` | viewer | `from`, `to` | the incidents that started in the period, the earliest first, impact windows among them (`origin` `impact`, `state`, `counts`), each with `caught_by` (`linked` of a catch by an alert it lists) |
+| `GET /api/v1/incidents` | viewer | `from`, `to` | the incidents that started in the period, the earliest first, impact windows among them (`origin` `impact`, `state`, `counts`), each with `caught_by` (`linked` of a catch by an alert it lists), and `unreplayed` when nothing caught it and it started before the ledger's first replayed time, so no rule could have fired for it: it is not missed |
 | `POST /api/v1/incidents` | editor | `id` (the next `L-n` when left out), `title`, `start`, `end`, `labels` (`{"service": ["checkout"]}`), `alerts`, those its tool linked to it (`[{"rule": "CheckoutErrors", "labels": {"service": "checkout"}}]`, 100 at most, docs/design/links.md) | 201, the incident |
 | `PUT /api/v1/incidents/{id}` | editor | as `POST` | the incident with that id, made or replaced |
 | `DELETE /api/v1/incidents/{id}` | editor | | 204 |

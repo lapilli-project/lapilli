@@ -544,8 +544,8 @@ func (s *Server) missedSection(ctx context.Context, rep *verdict.Report, from, t
 		if in.OnlyNoisy() {
 			onlyNoisy++
 		}
-		if !in.Missed() {
-			continue
+		if !in.Missed() || in.Unreplayed {
+			continue // not missed, or before what was replayed
 		}
 		m := missedIncident{ID: in.ID, Title: in.Title, Start: in.Start.UTC(), Nearly: []string{}}
 		for _, nm := range near {

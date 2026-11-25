@@ -23,14 +23,22 @@ type weekView struct {
 	Firings, White, Black, Noisy         int
 	Excused                              int
 	Incidents, Caught, NoisyOnly, Missed int
-	Delays                               []time.Duration // to the first catch by a rule that isn't noisy
-	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
-	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
-	Changed, Current                     bool
+	// Unreplayed are incidents that started before the first replayed time:
+	// in Incidents, and not missed.
+	Unreplayed       int
+	Delays           []time.Duration // to the first catch by a rule that isn't noisy
+	Asleep           int             // firings that caught nothing while people slept; notifications for them, once there are any
+	Uncounted        bool            // Asleep isn't counted: a week before the first notification
+	Changed, Current bool
 	// NoRecord says it had firings and no record to judge them by: no
 	// incident on in it, or in the two weeks before it. Its
 	// precision isn't known, and no rule was noisy in it.
 	NoRecord bool
+	// NoDay says it had firings and no day of it, nor the two weeks before
+	// the day, had an incident: what the notices say of a week with no
+	// record. A week with some days kept and firings of others not judged
+	// says it per firing.
+	NoDay bool
 	// Kept says an incident written down in it or the two weeks before
 	// keeps its record: what caught nothing in it was for nothing.
 	Kept bool
@@ -283,7 +291,11 @@ type dashboard struct {
 	// judge them by: the page says so once, above its tiles, and the
 	// tiles it leaves unknown say only that.
 	NoRecord bool
-	Tiles    []tile
+	// SomeUnjudged and OfFirings say, of a last whole week with some days
+	// kept, how many of its firings came on days with no record: counted,
+	// not judged.
+	SomeUnjudged, OfFirings int
+	Tiles                   []tile
 	// ByNothing says some rule entry judges its rules by nothing: the
 	// stones' legend says those not judged may be so for that.
 	ByNothing bool
@@ -394,11 +406,13 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		wv.Black = wv.Firings - wv.White
 		wv.Kept = t.kept[w]
 		wv.NoRecord = wv.Firings > 0 && (!wv.Kept || wv.Unjudged == wv.Firings)
+		wv.NoDay = wv.Firings > 0 && !wv.Kept
 		if t.o.Signals.Named() {
 			// Judged by the signals tied to each firing: no record only
 			// when none of them was judged.
 			wv.Kept = t.keptAny(w)
 			wv.NoRecord = wv.Firings > 0 && wv.Unjudged == wv.Firings
+			wv.NoDay = wv.NoRecord
 		}
 		byWeek[w] = wv
 		ws = append(ws, wv)
@@ -453,6 +467,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			}
 		case "noisy":
 			wv.NoisyOnly++
+		case "unreplayed":
+			wv.Unreplayed++
 		default:
 			wv.Missed++
 			if w >= recent {
@@ -478,7 +494,10 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
 	}
-	v.NoRecord = last.NoRecord
+	v.NoRecord = last.NoDay
+	if !last.NoDay && last.Unjudged > 0 {
+		v.SomeUnjudged, v.OfFirings = last.Unjudged, last.Firings
+	}
 	v.Tiles = s.tiles(l, ws, last, before, asleep, sleeps, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
 	})

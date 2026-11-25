@@ -2302,7 +2302,7 @@
  "No incident written down for these weeks or the two weeks before: precision isn't known, and no rule is called noisy.": "No hay incidentes anotados en estas semanas ni en las dos anteriores: la precisión no se conoce y ninguna regla se considera ruidosa.",
  "%d of the %d weeks shown had no incident written down for them or the two weeks before: their firings are counted, not judged.": "%d de las %d semanas mostradas no tienen incidentes anotados ni en ellas ni en las dos anteriores: sus disparos se cuentan, no se juzgan.",
  "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy.": "No hay incidentes anotados en las semanas en que disparó ni en las dos anteriores: su precisión no se conoce y no se considera ruidosa.",
- "A firing is judged by the incidents written down on its day or in the two weeks before it. With none, a firing that caught nothing can't be told from one nobody wrote down.": "Un disparo se juzga por los incidentes anotados en su día o en las dos semanas anteriores. Sin ninguno, un disparo que no detectó nada no se distingue de uno que nadie anotó.",
+ "A firing is judged by the incidents written down around it: those of the day or week it fell in, and of the two weeks before. With none, a firing that caught nothing can't be told from one nobody wrote down.": "Un disparo se juzga por los incidentes anotados a su alrededor: los del día o la semana en que ocurrió y los de las dos semanas anteriores. Sin ninguno, un disparo que no detectó nada no se distingue de uno que nadie anotó.",
  "The week of %s.": "La semana del %s.",
  "None open.": "Ninguna abierta.",
  "caught nothing: %d asleep, %d off hours": "sin detectar nada: %d en horas de sueño, %d fuera de horario",
@@ -2839,8 +2839,15 @@
  "Off: a firing that lacks a --match label the incident has catches it, marked with the label it lacks.": "Desactivado: una alerta sin una etiqueta de --match que el incidente tiene lo captura, y se marca con la etiqueta que le falta.",
  "Caught nothing": "No detectó nada",
  "noisy at %d firings or more with under %s caught": "ruidosa con %d alertas o más y menos de %s detectadas",
- "On: a firing that caught nothing is judged by the record of its week.": "Activado: un disparo que no atrapó nada se juzga por el registro de su semana.",
- "Off: a firing that caught nothing is judged by the record of its day.": "Desactivado: un disparo que no atrapó nada se juzga por el registro de su día.",
+ "On: a firing that caught nothing is judged by the record of its week.": "Activado: una alerta que no detectó nada se juzga por el registro de su semana.",
+ "Off: a firing that caught nothing is judged by the record of its day.": "Desactivado: una alerta que no detectó nada se juzga por el registro de su día.",
  "Days with a record": "Días con registro",
- "Days before them with a record": "Días anteriores con registro"
+ "Days before them with a record": "Días anteriores con registro",
+ "? before what was replayed": "? antes de lo reproducido",
+ "before what was replayed": "antes de lo reproducido",
+ "%d started before what was replayed, so nothing could have fired for them: they are not counted as missed.": "%d empezaron antes de lo reproducido, así que ninguna alerta pudo dispararse por ellos: no se cuentan como sin detectar.",
+ "It started before what was replayed: no rule could have fired for it, so it isn't counted as missed.": "Empezó antes de lo reproducido: ninguna regla pudo dispararse por él, así que no se cuenta como sin detectar.",
+ "%d of the %d firings of the week of %s came with no incident written down on their day or in the two weeks before it: they are counted, not judged.": "%[1]d de los %[2]d disparos de la semana del %[3]s llegaron sin incidente anotado en su día ni en las dos semanas anteriores: se cuentan, no se juzgan.",
+ "%d of the %d firings of the weeks shown came with no incident written down on their day or in the two weeks before it: they are counted, not judged.": "%[1]d de los %[2]d disparos de las semanas mostradas llegaron sin incidente anotado en su día ni en las dos semanas anteriores: se cuentan, no se juzgan.",
+ "Given where lapilli serve is started, not here; no stone depends on it, so nothing is judged again.": "Se da donde se inicia lapilli serve, no aquí; ninguna piedra depende de él, así que no se juzga de nuevo."
 }

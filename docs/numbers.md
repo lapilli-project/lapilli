@@ -596,7 +596,11 @@ incident's tool linked to it (the incident's `alerts`†,
 when a rule couldn't be replayed (its `unsupported`, not judged from its
 history): that rule may have caught it, so the report says the incident
 "can't be judged", not that it had no alert. It is still missed here, and
-in `lapilli_incidents_not_known`.
+in `lapilli_incidents_not_known`. In `lapilli serve`, an incident that
+started before the ledger's first replayed time, which no rule could have
+fired for, has `not_known`† too, and is none of missed, caught or caught
+only by noisy rules: the summary says it in `unreplayed`, apart from
+`missed`, and the incidents page lists it as "before what was replayed".
 
 ```jq
 # missed: as the report has it

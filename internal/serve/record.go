@@ -172,18 +172,6 @@ func (t *tallies) classOf(day int64) string {
 	return c
 }
 
-// keep judges t's weeks by the incidents keeps says keep their record,
-// every one when nil: each week, and, of each rule's firings in it, those
-// judged (jby). With named signals (docs/design/signals.md), a week's
-// firings are judged by the signals tied to them, so part of a rule's
-// week may be judged and part not: kept says only that an incident
-// written down keeps the record of one of the week's units, its days, or
-// the week.
-func (t *tallies) keep(keeps func(ledger.Incident) bool) {
-	t.record(keeps)
-	t.judge()
-}
-
 // units are the units, by their first day, week w's firings are judged by:
 // its seven days, or the week.
 func (t *tallies) units(w int64) []int64 {

@@ -980,6 +980,9 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	counts := map[[2]string]int{}
 	var delays []string
 	for _, in := range r.Incidents {
+		if in.Unreplayed {
+			continue // before what was replayed: none of caught, noisy or missed
+		}
 		src := "written"
 		if in.Candidate {
 			src = "impact"

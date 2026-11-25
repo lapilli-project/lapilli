@@ -32,7 +32,7 @@ const demoLead = 15 * time.Minute
 
 // demoServeAt is the time lapilli demo --serve pins serve's clock to: the
 // end of the sample's week, and the lead after it. The first run replays
-// the week from its Monday, and the digest, due at the week's end, works
+// the week, and the one before, from its Monday, and the digest, due at the week's end, works
 // it out; the week is the last whole week the pages show.
 func demoServeAt(loc *time.Location) time.Time {
 	return demoWeek(loc).AddDate(0, 0, 7).Add(demoLead)
@@ -89,8 +89,10 @@ func demoServe(s *demoSample, loc *time.Location, tz, listen string, stdout, std
 		// The week's incidents and the week before's (INC-38 to INC-43, as
 		// lapilli demo judges by): serve judges a day by the incidents on in
 		// it or the two weeks before it, and the week before's keep the
-		// record of the week's first days. Nothing is replayed over them, so
-		// the week before shows them missed.
+		// record of the week's first days. The first run replays the week
+		// before too (--backfill), as the sample's history repeats by
+		// weekday: INC-38 and INC-39 are caught as INC-41 and INC-42 are,
+		// and INC-40 is missed like INC-43.
 		err = os.WriteFile(incidentsFile, s.incidents(week.AddDate(0, 0, -7), week.AddDate(0, 0, 7), loc), 0o600)
 	}
 	if err != nil {
@@ -117,7 +119,7 @@ func demoServe(s *demoSample, loc *time.Location, tz, listen string, stdout, std
 
 // demoServeArgs are the flags lapilli demo --serve runs lapilli serve with,
 // the files in dir: the rules and the incidents written there, the ledger
-// kept there. The first run replays from the week's Monday to the clock,
+// kept there. The first run replays from the Monday before the week's to the clock,
 // with nothing to settle, and the digest falls due as the week ends.
 // Read-only, nothing is written but by serve's own jobs; and the replay
 // isn't set beside ALERTS, which the sample hasn't. No flag names anything
@@ -127,7 +129,7 @@ func demoServeArgs(dir, listen, tz string, loc *time.Location) []string {
 	week := demoWeek(loc)
 	args := []string{"--rules", filepath.Join(dir, "rules.yaml"), "--incidents", filepath.Join(dir, "incidents.yaml"),
 		"--match", "service", "--prometheus", demoPrometheus, "--ledger", filepath.Join(dir, "ledger"), "--listen", listen,
-		"--read-only", "--check-replay=false", "--backfill", demoServeAt(loc).Sub(week).String(), "--settle", "0s", "--digest", "mon@00:00"}
+		"--read-only", "--check-replay=false", "--backfill", demoServeAt(loc).Sub(week.AddDate(0, 0, -7)).String(), "--settle", "0s", "--digest", "mon@00:00"}
 	if tz != "" {
 		args = append(args, "--tz", tz)
 	}

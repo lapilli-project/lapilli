@@ -1887,6 +1887,9 @@ type apiIncident struct {
 	Updated  time.Time        `json:"updated,omitzero"`
 	By       string           `json:"by,omitempty"`
 	CaughtBy []verdict.Catch  `json:"caught_by"`
+	// Unreplayed says nothing caught it and it started before the ledger's
+	// first replayed time: not missed.
+	Unreplayed bool `json:"unreplayed,omitempty"`
 }
 
 func (s *Server) apiIncidents(w http.ResponseWriter, r *http.Request) {
@@ -1902,7 +1905,7 @@ func (s *Server) apiIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []apiIncident{}
 	for _, in := range incs {
-		out = append(out, apiIncident{in.ID, in.Title, in.Start, in.End, in.Labels, in.Alerts, in.Origin, in.State, in.Counts, in.Updated, in.By, in.CaughtBy})
+		out = append(out, apiIncident{in.ID, in.Title, in.Start, in.End, in.Labels, in.Alerts, in.Origin, in.State, in.Counts, in.Updated, in.By, in.CaughtBy, in.Unreplayed})
 	}
 	writeJSON(w, out)
 }
@@ -1939,7 +1942,7 @@ func (s *Server) apiPutIncident(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "/api/v1/incidents/"+url.PathEscape(id))
 		w.WriteHeader(http.StatusCreated)
 	}
-	writeJSON(w, apiIncident{got.ID, got.Title, got.Start, got.End, got.Labels, got.Alerts, got.Origin, got.State, got.Counts, got.Updated, got.By, got.CaughtBy})
+	writeJSON(w, apiIncident{got.ID, got.Title, got.Start, got.End, got.Labels, got.Alerts, got.Origin, got.State, got.Counts, got.Updated, got.By, got.CaughtBy, got.Unreplayed})
 }
 
 func (s *Server) apiDeleteIncident(w http.ResponseWriter, r *http.Request) {

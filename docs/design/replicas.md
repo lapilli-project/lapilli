@@ -203,13 +203,11 @@ settings changed ask it to judge every firing again (`rejudge`, and
 ledger by the leader before each change it carries out.
 
 What a firing's record is kept by, its day or, with `--record-by-week`, its
-week, is a flag each replica is started with, as `--linked-only` is, and
-what the stones were last given by (`meta`'s `linked-only`) says it with a
-`w`: a start whose flag differs judges every firing again, once, by the
-leader, and a replica that finds another's newer value leaves it
-(`linkedAgain`). The unit isn't in the ledger, so replicas given different
-ones show different numbers from the same ledger: give them the same, as
-with the other two. "The record, by day" in [judging.md](judging.md).
+week, is a flag each replica is started with. It isn't in what the stones
+were last given by, as no stone depends on it, so a change of it judges
+nothing again; replicas given different ones show different numbers from
+the same ledger: give them the same. "The record, by day" in
+[judging.md](judging.md).
 
 ## The writers' turn
 

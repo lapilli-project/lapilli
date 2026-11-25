@@ -249,12 +249,10 @@ by week), and so does `GET /api/v1/settings`.
 
 To keep the numbers as they were, give `--record-by-week` (the chart's
 `serve.recordByWeek: true`) where serve is started, before the upgrade or
-with it. Taken away or given after the ledger was judged under the other,
-it judges every firing again, once, as a change of `--linked-only` does,
-and says so in the log; replicas are given the same. Given with the
-upgrade it judges every firing again once, though no stone differs: the
-stones don't depend on the record, and the one pass costs what a change of
-`--lead` does.
+with it. Nothing is judged again for it, now or when it is changed later:
+no stone depends on whether a firing's record is of its day or its week,
+which is read when a page or a report is asked. Replicas are given the
+same, or they show different numbers from the same ledger.
 
 `lapilli verdict` is unchanged: it judges by the record at the firing's own
 time.
