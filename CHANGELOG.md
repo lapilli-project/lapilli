@@ -22,8 +22,29 @@
   (`settings.depends`). The graph keeps no record and never takes a catch away; an hour with
   more than 20,000 edges leaves it with none, which the report says. `lapilli impact suggest`
   says which of Istio, Linkerd and an OpenTelemetry or Tempo service graph have their calls
-  in the history, and the `--depends` and `--depends-labels` to give. `lapilli serve` doesn't
-  take `--depends` yet. With no `--depends` every report is as it was.
+  in the history, and the `--depends` and `--depends-labels` to give. With no `--depends`
+  every report is as it was.
+- **An alert on a dependency, in `lapilli serve`**
+  ([docs/dependencies.md](docs/dependencies.md#in-lapilli-serve),
+  [docs/design/dependencies.md](docs/design/dependencies.md)). `lapilli serve` takes
+  `--depends` and the flags that go with it (`--depends-labels`, `--depends-match`,
+  `--depends-depth`, `--depends-direction`, `--depends-step`; the chart's `depends`,
+  `dependsLabels`, `dependsMatch`, `dependsDepth`, `dependsDirection` and `dependsStep`, in
+  both modes). Each run reads the graph for the hours it judges and the lead before them,
+  once, and keeps its edges by the hour (schema 036: `edges`, `edge_spans`, `edge_retries`,
+  `catches.dependency`) for as long as the firings; a read that fails is read once more by
+  the next run, as the changes `--rollouts` reads are. Judging, the first time and again, asks
+  the history nothing: it loads the ledger's edges for the hours of the incidents it judges
+  against, 1,000,000 at most in one judgement (past it that judgement is made with no graph).
+  Turning `--depends` on, off, or changing its expression, labels, step, label, depth or
+  direction judges every firing again, once. The Settings page's Incident criteria has a
+  **Service graph** with the same four settings, tried on the last four weeks first like
+  `--impact` (the catches it would add, by rule, and how the verdict moves), by an admin, from
+  the site, counted with the impact tries; saved, the graph is read over those weeks and every
+  firing judged again. The incident's page shows a catch by dependency with its path, a rule's
+  page lists its catches by dependency apart, and MCP and `/api/v1/incidents` carry
+  `dependency` (and `/api/v1/report` its `settings.depends`). Without `--depends` nothing is
+  read, kept or shown, and the stones are as they were.
 - **Who a firing reached, in `lapilli serve`**
   ([docs/notifications-worked-out.md](docs/notifications-worked-out.md#in-lapilli-serve),
   [docs/design/routing.md](docs/design/routing.md)). Given `--alertmanager-config` or

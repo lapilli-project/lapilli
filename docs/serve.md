@@ -52,7 +52,11 @@ on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,
 which are judged again, and keeps the record from then on, not of the
 weeks it wasn't read over, nor of those before every metric it reads had
-data. A named signal may give a lead of its own there, as
+data. The service graph (`--depends`, `--depends-labels`, `--depends-depth` and
+`--depends-direction`, which let an alert on a service an incident's service
+calls catch it: [dependencies.md](dependencies.md#in-lapilli-serve)) is set
+there too, by an admin, and tried on the last four weeks first: the catches it
+would add, by rule, and how the verdict would change. A named signal may give a lead of its own there, as
 `--impact-lead NAME=DUR` and `lead:` in `--impact-file` do, and a rule
 entry one for its rules, with `require:`, labels its rules' firings and
 its signals' windows must both carry: a cause that fires an hour before

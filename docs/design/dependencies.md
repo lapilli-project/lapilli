@@ -133,9 +133,7 @@ catches by dependency apart.
 
 ## As built
 
-The core and `lapilli verdict` are built; the ledger, the Settings and
-Incidents pages and MCP in `lapilli serve` come after, and `lapilli serve`
-refuses `--depends` until then.
+The core, `lapilli verdict` and `lapilli serve` are built.
 
 - `internal/graph` holds the graph: `Builder.Add(hour, from, to)` and
   `Builder.Graph()` (what `lapilli serve` builds from its `edges` rows),
@@ -171,6 +169,42 @@ refuses `--depends` until then.
   `reporter="source"`, Linkerd's `direction="outbound"`, the service graph's
   `traces_service_graph_request_total`), and `docs/dependencies.md`'s table is
   held equal to the code's list by a test.
+
+### In lapilli serve, as built
+
+- Schema 036: `edges` (`hour`, `from_svc`, `to_svc`: `from` and `to` are not
+  names both dialects take as columns), `edge_spans` (the spans the graph was
+  read over, apart and whole), `edge_retries` (the spans a run couldn't read,
+  read once more by the next run, as `rollout_retries` are) and
+  `catches.dependency` (the path as a JSON list of the services in call order,
+  `''` for any other catch). Edges, spans and retries go with the firings'
+  retention.
+- Each run reads the graph over its hours and the lead before them
+  (`From − max(lead, 1h)`) and keeps it with the run (`Found.Edges`). Judging
+  loads the ledger's edges for the incidents it judges against (the hours from
+  one before the earliest start to the latest end of the incidents meeting
+  the span judged), at most `ledger.MaxJudgeEdges`, 1,000,000, in one judgement;
+  past it that judgement is made with no graph. What loads is the ledger's, so
+  judging again asks the history nothing, and a read that failed leaves its
+  hours judged with what the ledger holds until the run after reads them again.
+- What the edges were read with (the step, the labels and the expression) is
+  kept apart (`meta` `edges-key`). A change of it drops the edges and reads the
+  last four weeks (the leader's round, before the options are read), and the
+  graph is used only once the key kept is the key in effect, so no catch is
+  judged by edges read with another expression. What the stones are judged by
+  adds a digest of that key, the label, depth and direction (`~` and eight
+  capital letters, after `--linked-only`'s and the responses' keys): a change
+  of any judges every firing again, once.
+- The Settings page's settings are `depends`, `depends-labels`,
+  `depends-depth` and `depends-direction`, kept as the impact ones are, and
+  checked as an impact expression is (`checkImpact`, whose messages say "impact
+  expression"). The label whose values are the services is `--depends-match`,
+  else the first label of the match in effect; with none of the match's labels
+  it, the graph is not used and the page says so. The step is the command line's.
+- A try reads the graph typed, and judges the last four weeks' firings with
+  and without it, over the incidents in force (those that keep the record),
+  and says the pairs of services it found, the catches it would add by rule
+  with the path of each rule's first, and four measures.
 
 ## Questions for review
 
