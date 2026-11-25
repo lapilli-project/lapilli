@@ -452,7 +452,7 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 			if _, ok := kept[x]; ok || x.from >= x.to {
 				continue
 			}
-			kept[x] = slices.ContainsFunc(s.l.SpanWeeks(time.Unix(x.from, 0), time.Unix(x.to, 0)), func(w int64) bool { return s.l.WeekKept(rec, w) })
+			kept[x] = slices.ContainsFunc(s.l.SpanUnits(o, time.Unix(x.from, 0), time.Unix(x.to, 0)), func(u int64) bool { return s.l.UnitKept(rec, o, u) })
 		}
 	}
 	if err := s.outlastsNow(ctx, ls, evs, rd); err != nil {

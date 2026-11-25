@@ -1374,8 +1374,7 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 	}
 	// The incidents that keep the record of the period's weeks, and what
 	// was decided about the windows found before over it.
-	wf, _ := s.l.WeekOf(from)
-	_, wt := s.l.WeekOf(to.Add(-time.Nanosecond))
+	wf, wt := s.l.UnitsOf(o, from, to)
 	around, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
 	if err != nil {
 		return err
@@ -1434,9 +1433,9 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 	o.Verdicts, with.Verdicts = said, said
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
-	weeks := s.l.SpanWeeks(from, to)
-	a := triedSumOf(nowRep, verdict.RecordOf(nowIncs, o), weeks, s.l.Midnight, from, to)
-	b := triedSumOf(withRep, verdict.RecordOf(withIncs, with), weeks, s.l.Midnight, from, to)
+	units := s.l.SpanUnits(o, from, to)
+	a := triedSumOf(nowRep, verdict.RecordOf(nowIncs, o), o, units, s.l.Midnight, from, to)
+	b := triedSumOf(withRep, verdict.RecordOf(withIncs, with), with, units, s.l.Midnight, from, to)
 	row := func(label, x, y string) {
 		try.Rows = append(try.Rows, triedRow{Label: label, Now: x, With: y, Changed: x != y})
 	}
@@ -1445,10 +1444,10 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 	// keep by incidents alone: the record by the signal starts within the
 	// span.
 	if held := k.From(); !try.Same && !held.IsZero() {
-		fw, _ := s.l.WeekOf(from)
+		fw, _ := o.RecordUnit(from)
 		if held.Before(fw) {
-			bw := s.l.SpanWeeks(held, fw)
-			bf, _ := s.l.WeekOf(held)
+			bw := s.l.SpanUnits(o, held, fw)
+			bf, _ := o.RecordUnit(held)
 			earlier, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(bf, fw), fw, o.UnknownLen)
 			if err != nil {
 				return err
@@ -1459,14 +1458,15 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 			}
 			na, nb := 0, 0
 			ra, rb := verdict.RecordOf(plainE, o), verdict.RecordOf(plainE, with)
+			n := ledger.UnitDays(o)
 			for _, w := range bw {
-				na += btoi(ra.Kept(s.l.Midnight(w), s.l.Midnight(w+7)))
-				nb += btoi(rb.Kept(s.l.Midnight(w), s.l.Midnight(w+7)))
+				na += btoi(ra.Kept(s.l.Midnight(w), s.l.Midnight(w+n)))
+				nb += btoi(rb.Kept(s.l.Midnight(w), s.l.Midnight(w+n)))
 			}
-			row("Weeks before them with a record", of(na, len(bw)), of(nb, len(bw)))
+			row(unitLabel(o, "Days before them with a record", "Weeks before them with a record"), of(na, len(bw)), of(nb, len(bw)))
 		}
 	}
-	row("Weeks with a record", of(a.kept, len(weeks)), of(b.kept, len(weeks)))
+	row(unitLabel(o, "Days with a record", "Weeks with a record"), of(a.kept, len(units)), of(b.kept, len(units)))
 	row("Incidents judged against", fmt.Sprint(a.incidents), fmt.Sprint(b.incidents))
 	row("Of them, impact windows", fmt.Sprint(a.impact), fmt.Sprint(b.impact))
 	row("Firings judged", of(a.judged, a.firings), of(b.judged, b.firings))
@@ -1538,10 +1538,11 @@ type triedSum struct {
 	firings, judged, white, noisy   int
 }
 
-func triedSumOf(rep *verdict.Report, rec verdict.Record, weeks []int64, mid func(int64) time.Time, from, to time.Time) triedSum {
+func triedSumOf(rep *verdict.Report, rec verdict.Record, o verdict.Options, units []int64, mid func(int64) time.Time, from, to time.Time) triedSum {
 	var x triedSum
-	for _, w := range weeks {
-		if rec.Kept(mid(w), mid(w+7)) {
+	n := ledger.UnitDays(o)
+	for _, w := range units {
+		if rec.Kept(mid(w), mid(w+n)) {
 			x.kept++
 		}
 	}
@@ -1617,8 +1618,7 @@ func (s *Server) staleBy(ctx context.Context, key string, with verdict.Options, 
 	if len(hs) == 0 {
 		return 0, nil, 0, nil
 	}
-	wf, _ := s.l.WeekOf(lo)
-	_, wt := s.l.WeekOf(hi.Add(-time.Nanosecond))
+	wf, wt := s.l.UnitsOf(with, lo, hi)
 	around, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, with.UnknownLen)
 	if err != nil {
 		return 0, nil, 0, err
@@ -1629,7 +1629,7 @@ func (s *Server) staleBy(ctx context.Context, key string, with verdict.Options, 
 	var out []triedProposal
 	for _, h := range hs {
 		bt := h.ev.Backtest
-		kept := slices.ContainsFunc(s.l.SpanWeeks(bt.From, bt.To), func(w int64) bool { return s.l.WeekKept(rec, w) })
+		kept := slices.ContainsFunc(s.l.SpanUnits(with, bt.From, bt.To), func(u int64) bool { return s.l.UnitKept(rec, with, u) })
 		read := h.ev.Impact != "" && h.ev.Impact != key
 		if read || bt.NoRecord != nil && *bt.NoRecord == kept {
 			n++
@@ -1653,4 +1653,13 @@ func shareLabels(a, b incident.Labels) bool {
 		}
 	}
 	return true
+}
+
+// unitLabel is the day's label when o judges the record by day, the week's
+// when by week.
+func unitLabel(o verdict.Options, day, week string) string {
+	if o.RecordDay {
+		return day
+	}
+	return week
 }

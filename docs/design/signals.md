@@ -96,7 +96,7 @@ its own:
 | `expr` | PromQL that returns something while users are hurt | (required) |
 | `for` | how long a series returns something before it is a window | `--impact-for` |
 | `match` | the labels a firing must agree with its windows on | the match in effect |
-| `record` | whether reading it all of a week keeps that week's record | yes |
+| `record` | whether reading it all of a day keeps that day's record (of a week, with `--record-by-week`) | yes |
 
 **The match in effect** is the Settings page's, when an admin set one, else
 `--match`, as for every incident now. A signal's `match` not given (nil)
@@ -348,8 +348,8 @@ probe's record the next week, and moves no other signal's.
 
 A firing's week is kept by impact when **every signal that could have seen
 the incident it would catch was alive** then: each signal tied to the
-firing, among those that keep the record, had started by the week's start
-(judged by week, as `serve` judges). Which signals are tied to a firing:
+firing, among those that keep the record, had started by the day's start
+(judged by day, as `serve` judges; by week, with `--record-by-week`). Which signals are tied to a firing:
 
 1. **A rule entry**: its signals, and no others. One with none in effect
    that keeps the record ties none that it waits for, and the firing has

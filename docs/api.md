@@ -215,14 +215,14 @@ Bounds:
 | `GET /api/v1/runs` | viewer | | the last 100 runs, the latest first: `Kind`, `From`, `To`, `Firings`, `Error`, `Failed`; to anyone but an admin, without the paths of serve's files |
 | `GET /api/v1/sources` | viewer | `all` (`true` for every source) | the sources firings are copied in from: `name`, `written`, `by`, `from`, `to`, `firings`, `rules`; with `all=true`, `sources`, every source serve reads as the Sources page shows it: `id`, `kind`, `name`, `from` (its flag), `state` (`ok`, `failing`, `quiet`, `pending`), `down`, `last_ok`, `last_failed`, `last_error` (as `GET /api/v1/runs` says an error, and without a credential to anyone), `failures` (reads in a row, -1 where not counted), `rules`, `lag_seconds`, `took_seconds`, and, to an admin, `where`; never kept ([docs/design/serveops.md](design/serveops.md#sources)) |
 | `GET /api/v1/activity` | viewer | `who`, `kind` (`setting`, `incident`, `verdict`, `proposal`, `task`, `comment`, `note`, `window`, `marked`, `report`, `team`, `role`, `goal`, `firings`, `cleanup`, `other`), `team`, `since`, `until` (a day, `2026-11-02`, in `--tz`, `until` taking it whole, or an RFC 3339 time), `before` (where a page ended), `limit` (1 to 1,000; 1,000 unless given, and as many as 8 MiB of their text holds), `format` (`json`, `csv`) | `activity`, the changes kept, the latest first: `id`, `at`, `by`, `kind`, `what`, `before`, `after`; `next`, the `before` to go on from; `cut`, that it stopped looking. With `format=csv`, the same as CSV (`id,at,by,kind,what,before,after`), the next page in `Link`, no cell a formula. The roles given and taken to an admin alone, and to anyone else the paths of serve's files as their flags; never kept ([docs/design/serveops.md](design/serveops.md#the-activity-log)) |
-| `GET /api/v1/settings` | viewer | | the judging settings, each with its flag and value (`Settings`: `lead`, `match`, `refire`, `noisy-firings`, `noisy-precision` and `noisy-by`, `caught` or `useful`, what rules are found noisy by: [responses.md](responses.md)), whether `--linked-only` and `--match-strict` are given (`linked_only`, `match_strict`) and whether every firing is still being judged again with them after a start that gave them or took them away (`linked_only_judging`), the incident criteria (`criteria`), and what `--config` came to (`config`; to anyone but an admin, without the file's name) |
+| `GET /api/v1/settings` | viewer | | the judging settings, each with its flag and value (`Settings`: `lead`, `match`, `refire`, `noisy-firings`, `noisy-precision` and `noisy-by`, `caught` or `useful`, what rules are found noisy by: [responses.md](responses.md); `--linked-only` is one, its value `on` or `off`), whether `--linked-only` and `--match-strict` are in effect (`linked_only`, `match_strict`), what a firing's record is kept by, `"day"` or, with `--record-by-week`, `"week"` (`record_by`), and whether every firing is still being judged again with them after a start that gave them or took them away (`linked_only_judging`), the incident criteria (`criteria`), and what `--config` came to (`config`; to anyone but an admin, without the file's name) |
 | `GET /api/v1/me` | anyone let in | | `user`, `groups`, `role`, `teams` |
 
 ## Incidents
 
 | Route | Role | Takes | Gives |
 |---|---|---|---|
-| `GET /api/v1/incidents` | viewer | `from`, `to` | the incidents that started in the period, the earliest first, impact windows among them (`origin` `impact`, `state`, `counts`), each with `caught_by` (`linked` of a catch by an alert it lists) |
+| `GET /api/v1/incidents` | viewer | `from`, `to` | the incidents that started in the period, the earliest first, impact windows among them (`origin` `impact`, `state`, `counts`), each with `caught_by` (`linked` of a catch by an alert it lists), and `unreplayed` when nothing caught it and it started before the ledger's first replayed time, so no rule could have fired for it: it is not missed |
 | `POST /api/v1/incidents` | editor | `id` (the next `L-n` when left out), `title`, `start`, `end`, `labels` (`{"service": ["checkout"]}`), `alerts`, those its tool linked to it (`[{"rule": "CheckoutErrors", "labels": {"service": "checkout"}}]`, 100 at most, docs/design/links.md) | 201, the incident |
 | `PUT /api/v1/incidents/{id}` | editor | as `POST` | the incident with that id, made or replaced |
 | `DELETE /api/v1/incidents/{id}` | editor | | 204 |
@@ -537,7 +537,10 @@ and `/tasks/{id}`, `/proposals` and `/proposals/{id}`, `/windows` and
 `/manage` and `/search`. Their
 forms post to paths of their own (`POST /incidents`, `POST /rules/bulk`,
 `POST /settings`, ...), and need the roles the API's writes of the same
-things do. Some writes are there alone, with no route of the API:
+things do. `POST /settings` (an admin's) changes the judging settings it
+names (`lead`, `match`, `refire`, `noisy-firings`, `noisy-precision`,
+`linked-only` as `on` or `off`) and leaves the others as they are; an
+empty value, or `reset-KEY=1`, gives one back to the flag's. Some writes are there alone, with no route of the API:
 changing the settings, proposing a change (an agent proposes through MCP),
 approving one, making a task of a goal
 missed or an expectation broken (`POST /goals/task`, `POST

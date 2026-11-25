@@ -39,12 +39,14 @@ A new rule is proposed too, from the proposals page's **Propose a new
 rule** or an agent's `propose` (kind `add`), held to what it is to do
 before anyone approves it
 ([docs/design/expectations.md](design/expectations.md), step 5): one
-Prometheus alerting rule, named apart from every rule (one added and
+alerting rule in Prometheus's form (its `expr` LogQL for a Loki place), named apart from every rule (one added and
 applied through an API counts before the rules are read again), a place
 among those serve offers (a rule file's group or a new one, a Grafana
 folder's group, not of a folder whose title another folder has too, a
-ruler namespace's group or a new one, CloudWatch's or Google Cloud's
-alarms, with a `for` the cloud takes: whole seconds, in CloudWatch a day
+ruler namespace's group or a new one (Loki's namespaces as
+`loki:NAMESPACE`), a Loki rule file's group or a new one (its rule written
+in LogQL, and without a `keep_firing_for`, which Loki drops from a file),
+CloudWatch's or Google Cloud's alarms, with a `for` the cloud takes: whole seconds, in CloudWatch a day
 at most), whom it tells among whom the rules there already tell (in
 Grafana, one of their contact points where each of them names one, none
 where none does; in CloudWatch, an SNS topic, an OpsItem or a response
@@ -153,8 +155,12 @@ would now be missed), and the rule as it was is kept for undo. Then:
   proposed in alone. Loki takes writes only when its ruler
   keeps its rules in an object store (or on the filesystem through its
   object store client, `use_thanos_objstore`), not in local files
-  (`ruler.storage.type: local`). A rule read from a Loki's rule files
-  (`--loki-rules`) is for a person.
+  (`ruler.storage.type: local`).
+- **A rule kept in a Loki rule file**, read with `--loki-rules`, goes the
+  git path as any rule file's does: a longer `for`, a number, what it says
+  or its deletion is a pull request that changes that one rule in the file
+  and keeps every other line, backtested in LogQL. A rule file has no
+  "off", so a rule there is retired by deleting it.
 - **A cloud's own alarm**, read with `--alarms`, is changed through its
   cloud's API, and only where `--changes-in` names it as `SOURCE:NAME`:
   CloudWatch's alarm name, Azure's `RG/NAME` (in any letter case), Google

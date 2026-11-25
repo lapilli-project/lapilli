@@ -81,7 +81,7 @@
 {{with .Add}}<section class="card" id="held">
 <h2>{{t "What it is held to"}}</h2>
 <p>{{t "Where it goes:"}} {{template "proposalpath" .Place.Path}}, <bdi>{{.Place.Where}}</bdi>{{with .Place.DataSource}}; {{t "its query reads"}} <code>{{.}}</code>{{end}}{{with .Place.Tells}}; {{t "it tells"}}{{range $i, $x := .}}{{if $i}},{{end}} <code>{{$x}}</code>{{end}}{{end}}</p>
-{{if and (eq .Place.Path "grafana") (not .Place.Tells)}}<p class="quiet">{{t "It names no contact point, as rules of its group don't: Grafana's notification policies route it by its labels, to whichever contact point they match."}}</p>{{else if or (eq .Place.Path "git") (eq .Place.Path "ruler")}}<p class="quiet">{{t "It names no one: its labels route it through Alertmanager, as every rule there is routed."}}</p>{{end}}
+{{if and (eq .Place.Path "grafana") (not .Place.Tells)}}<p class="quiet">{{t "It names no contact point, as rules of its group don't: Grafana's notification policies route it by its labels, to whichever contact point they match."}}</p>{{else if or (eq .Place.Path "git") (eq .Place.Path "ruler") (eq .Place.Path "loki")}}<p class="quiet">{{t "It names no one: its labels route it through Alertmanager, as every rule there is routed."}}</p>{{end}}
 {{with .Held}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "No one approves it yet:"}} {{t .}}</p>{{end}}
 <p class="quiet">{{if eq .Weeks 1}}{{t "Replayed with nothing beside it, each budget held over the last whole week."}}{{else}}{{t "Replayed with nothing beside it, each budget held over the %d whole weeks to now, the most in one shown." .Weeks}}{{end}} {{t "Not known is never met."}}</p>
 <div class="scroll"><table>

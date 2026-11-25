@@ -190,36 +190,6 @@ func (o *owners) ownsIncident(t ledger.Team, in ledger.Incident) bool {
 	return false
 }
 
-// only keeps, of the tallies, the rules a team owns. What a rule adds is still
-// reckoned against everyone's: see credit.
-func (t *tallies) only(o *owners, team ledger.Team) {
-	t.everyone = make(map[int64]map[int64]ledger.Tally, len(t.by))
-	for w, rows := range t.by {
-		t.everyone[w] = maps.Clone(rows)
-	}
-	t.jeveryone = make(map[int64]map[int64]ledger.Tally, len(t.jby))
-	for w, rows := range t.jby {
-		t.jeveryone[w] = maps.Clone(rows)
-	}
-	t.ueveryone = make(map[int64]map[int64]ledger.Tally, len(t.ub))
-	for w, rows := range t.ub {
-		t.ueveryone[w] = maps.Clone(rows)
-	}
-	// Its weeks judged by the incidents it owns (teamKeeps); everyone's, by
-	// all.
-	t.keptAll, t.team = t.kept, &team
-	t.keep(teamKeeps(o, &team))
-	for _, w := range t.weeks {
-		for id := range t.by[w] {
-			if o.rule[t.rules[id].Name] != team.ID {
-				delete(t.by[w], id)
-				delete(t.jby[w], id)
-				delete(t.ub[w], id)
-			}
-		}
-	}
-}
-
 // teamFilter is the team a page is filtered by, from ?team=.
 type teamFilter struct {
 	Name  string

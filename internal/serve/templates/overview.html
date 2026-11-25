@@ -10,6 +10,7 @@
 {{if .Backlog}}<strong class="status-info"><span aria-hidden="true">↻</span> {{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
 
+{{if .SomeUnjudged}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "%d of the %d firings of the week of %s came with no incident written down on their day or in the two weeks before it: they are counted, not judged." .SomeUnjudged .OfFirings (day $loc .From)}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a></p>{{template "norecordwhy"}}</div>{{end}}
 {{if .NoRecord}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "No incident written down for the week of %s or the two weeks before: precision isn't known, and no rule is called noisy." (day $loc .From)}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a> · <a href="{{$.Link "/settings"}}#incident-sources">{{t "Where incidents come from, and whether each is alive"}}</a></p>{{template "norecordwhy"}}</div>{{end}}
 <section class="tiles tiles-{{len .Tiles}}" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">
@@ -114,7 +115,7 @@
   {{if .HeatLeft}}<p class="quiet">{{t "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known."}}</p>{{end}}
   <div class="scroll"><table class="heat">
     <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th><th scope="col" class="n">{{t "Episodes"}}</th></tr></thead>
-    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td><td class="n">{{if .Counted}}{{.Episodes}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" data-name="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td><td class="n">{{if .Counted}}{{.Episodes}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}

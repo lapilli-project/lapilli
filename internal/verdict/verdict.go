@@ -69,11 +69,21 @@ type Options struct {
 	// ImpactNoData says an impact signal with no name was read, and a
 	// selector it reads had no data: it keeps no record (ImpactFrom zero).
 	ImpactNoData bool
-	// RecordWeek, when not nil, is the week a time is in, [from, to), as
-	// lapilli serve aligns its weeks: a firing is judged when the record of
-	// its week is kept, as serve's stones are kept by week. Nil judges each
-	// firing by the record at its own time, as lapilli verdict does.
-	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
+	// RecordUnit, when not nil, is the day or week a time is in, [from,
+	// to), as lapilli serve aligns its days and weeks (RecordDay says
+	// which): a firing is judged when the record of its day, or its week,
+	// is kept. Nil judges each firing by the record at its own time, as
+	// lapilli verdict does.
+	RecordUnit func(t time.Time) (from, to time.Time) `json:"-"`
+	// RecordByWeek is --record-by-week, a flag of lapilli serve's: its
+	// firings are judged by the record of their week, not their day. Said
+	// here so that what the ledger was last judged by can be told
+	// (docs/design/replicas.md).
+	RecordByWeek bool `json:"-"`
+	// RecordDay says RecordUnit gives days, in lapilli serve's time zone:
+	// what serve does by default. False with a RecordUnit, weeks
+	// (--record-by-week).
+	RecordDay bool `json:"-"`
 	// Versions are, when the rules replayed stood as several versions over
 	// the period (a rules history), every one of them: from when a
 	// firing's condition held (Judged.After) is its start less the least
@@ -431,8 +441,14 @@ type IncidentResult struct {
 	FiredAfter []Catch `json:"fired_after,omitempty"`
 	// NotKnown says no rule replayed caught it, while a rule judged
 	// couldn't be replayed (its Unsupported set, and not ByHistory), which
-	// may have caught it. It is still counted by Missed.
+	// may have caught it; or, in lapilli serve, that it started before the
+	// ledger's first replayed time (ledger.Incident.Unreplayed), so no rule
+	// could have fired for it. It is still counted by Missed.
 	NotKnown bool `json:"not_known,omitempty"`
+	// Unreplayed says, in lapilli serve, it started before the ledger's
+	// first replayed time (ledger.Incident.Unreplayed): NotKnown too, and
+	// not counted among the missed in /metrics. Not in the JSON.
+	Unreplayed bool `json:"-"`
 }
 
 // ImpactShort is of the rules judged, those that fire only once their
@@ -509,6 +525,11 @@ type Report struct {
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
 	// SomeRules says the report is of some of the rules: see Options.
 	SomeRules bool `json:"some_rules,omitempty"`
+	// UnreplayedMetric makes Prometheus write the fourth state of
+	// lapilli_incidents and lapilli_impact_windows, unreplayed: lapilli
+	// serve's, whose incidents may start before its ledger's first replayed
+	// time. Without it the states are the three, as before.
+	UnreplayedMetric bool `json:"-"`
 	// NotKnownMetric makes Prometheus write lapilli_incidents_not_known:
 	// lapilli verdict --metrics sets it, as only a run that replays rules
 	// can fail to; serve's /metrics never does.
@@ -593,9 +614,12 @@ type Settings struct {
 	// selector it reads had no data: it keeps no record, and ImpactFrom
 	// is missing.
 	ImpactNoData bool `json:"impact_no_data,omitempty"`
-	// ByWeek says a firing's record is its week's (lapilli serve), not its
-	// own time's.
-	ByWeek bool `json:"record_by_week,omitempty"`
+	// ByWeek says a firing's record is its week's (lapilli serve with
+	// --record-by-week), not its own time's. RecordBy says by what unit a
+	// firing's record is kept: "day" or "week" (lapilli serve), missing for
+	// its own time's (lapilli verdict).
+	ByWeek   bool   `json:"record_by_week,omitempty"`
+	RecordBy string `json:"record_by,omitempty"`
 	// ImpactSignals are the named impact signals, each with its "for", its
 	// match (null for the match in effect), whether it keeps the record,
 	// and from when it does; ImpactRules the rule entries, in order. None
@@ -630,8 +654,15 @@ func (o Options) Settings() *Settings {
 		match = []string{}
 	}
 	s := &Settings{Lead: o.Lead, Match: match, MatchStrict: o.MatchStrict, LinkedOnly: o.LinkedOnly, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
-		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil,
+		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordUnit != nil && !o.RecordDay,
 		Zone: o.zone().String()}
+	switch {
+	case o.RecordUnit == nil:
+	case o.RecordDay:
+		s.RecordBy = "day"
+	default:
+		s.RecordBy = "week"
+	}
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
 	}

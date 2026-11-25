@@ -88,6 +88,7 @@ func TestNotJudgedAlike(t *testing.T) {
 	}{
 		{"no record, no named signal", func(t *testing.T) *Server {
 			s, _ := server(t, nil)
+			s.cfg.RecordByWeek = true
 			raw := ""
 			if err := s.look(ctx, &raw); err != nil {
 				t.Fatal(err)
@@ -217,6 +218,7 @@ func TestOverviewNoRecordSaidOnce(t *testing.T) {
 	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s.cfg.RecordByWeek = true
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)

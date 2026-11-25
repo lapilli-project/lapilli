@@ -23,6 +23,7 @@ func TestHours(t *testing.T) {
 	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s.cfg.RecordByWeek = true
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
@@ -78,6 +79,7 @@ func TestHours(t *testing.T) {
 
 	// Without hours, none of it.
 	s2, _ := server(t, nil)
+	s2.cfg.RecordByWeek = true
 	if err := s2.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}

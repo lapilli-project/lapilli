@@ -252,12 +252,25 @@ func (p *backtestPort) pacesOf(sides ...[]rules.Rule) map[*prom.Pace]bool {
 	out := map[*prom.Pace]bool{}
 	for _, rs := range sides {
 		for _, r := range rs {
-			if r.Logs == "" || r.Unsupported != "" || p.logs == nil {
+			if r.Unsupported != "" || p.logs == nil {
 				continue
 			}
-			h, err := p.logs(r)
-			if c, ok := h.(*prom.Client); err == nil && ok && c.Limiter().Pace() != nil {
-				out[c.Limiter().Pace()] = true
+			// The Lokis a rule is asked of: its own, and those its queries
+			// beside the condition are on.
+			asked := []rules.Rule{}
+			if r.Logs != "" {
+				asked = append(asked, r)
+			}
+			for _, uid := range r.Graph.AsideUIDs() {
+				side := r
+				side.Logs = uid
+				asked = append(asked, side)
+			}
+			for _, x := range asked {
+				h, err := p.logs(x)
+				if c, ok := h.(*prom.Client); err == nil && ok && c.Limiter().Pace() != nil {
+					out[c.Limiter().Pace()] = true
+				}
 			}
 		}
 	}
@@ -973,7 +986,7 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 		expr, _ := g.Expr(ref, r.AskStep(ref))
 		before := g.Shift[ref]
 		query := name + "'s query " + clip(verdict.Clean(ref), 100)
-		if g.Logs != "" {
+		if g.Logs != "" || g.Aside[ref] != "" {
 			if a, ok := g.Asks[ref]; ok && a.Logs {
 				before += a.Window
 			}
@@ -997,7 +1010,13 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 	// most, a second at least: replay.ProbeStep), held to backtestPoints
 	// as any subquery is: a group evaluated every second would have
 	// 86,400 points a series.
-	if step := replay.ProbeStep(*r); g.Logs == "" && len(g.Data) > 0 && int64(backtestNoData/step) > backtestPoints {
+	proms := 0 // data source queries asked of Prometheus, as subqueries
+	for ref := range g.Data {
+		if g.Logs == "" && g.Aside[ref] == "" {
+			proms++
+		}
+	}
+	if step := replay.ProbeStep(*r); proms > 0 && int64(backtestNoData/step) > backtestPoints {
 		least := time.Duration(math.Ceil(backtestNoData.Seconds()/backtestPoints)) * time.Second
 		return fmt.Sprintf("%s is evaluated every %s, and a query of it that returns nothing is looked through over the day before at that step, %d points a series: here a subquery has %d points at most, a Grafana rule's group an interval of %s or more",
 			name, verdict.Duration(r.Interval), int64(backtestNoData/step), backtestPoints, verdict.Duration(least))
@@ -1008,7 +1027,7 @@ func (p *prepared) checkGraph(r *rules.Rule) string {
 			continue
 		}
 		query := name + "'s query " + clip(verdict.Clean(ref), 100) + ", looked through a day further back when it returns nothing,"
-		if g.Logs != "" {
+		if g.Logs != "" || g.Aside[ref] != "" {
 			if why := checkLogQL(query, expr, g.Shift[ref]+backtestNoData, false); why != "" {
 				return why
 			}
@@ -1085,7 +1104,7 @@ func (s *Server) readsInEffect(ctx context.Context) (inEffectReads, error) {
 		case r.Unsupported != "":
 		case r.Graph != nil:
 			for _, d := range r.Graph.Data {
-				if d.UID == r.Graph.Logs {
+				if r.Graph.LokiUID(d.UID) {
 					e.logql[d.UID] = true
 				} else {
 					e.promql[d.UID] = true
@@ -1125,7 +1144,7 @@ func taken(r rules.Rule, eff inEffectReads) string {
 		}
 		if g := r.Graph; g != nil && r.Unsupported == "" {
 			for _, d := range g.Data {
-				if d.UID == g.Logs && !eff.logql[d.UID] || d.UID != g.Logs && !eff.promql[d.UID] {
+				if g.LokiUID(d.UID) && !eff.logql[d.UID] || !g.LokiUID(d.UID) && !eff.promql[d.UID] {
 					return refused
 				}
 			}

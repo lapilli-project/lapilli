@@ -339,6 +339,9 @@ type Config struct {
 	// Config is a YAML file declaring teams, quiet windows, reports and
 	// roles (docs/design/serveops.md), which the ledger is kept holding,
 	// read again as it changes; what it declares the UI doesn't change.
+	// RecordByWeek judges a firing by the record of its week, as before
+	// 0.72, not of its day (--record-by-week).
+	RecordByWeek bool
 	// ConfigPrune deletes what it no longer declares, which is otherwise
 	// the UI's again.
 	Config      string
@@ -645,6 +648,18 @@ type Server struct {
 		m       map[rules.Place]time.Duration
 		failing bool
 		notes   string
+	}
+	// listing is the groups the history's rules API, and --loki's, last
+	// listed, to place the groups read from rule files where they run
+	// (rules.Listing); each as last read when a read fails, failing for
+	// whether the last read of it did; unplaced collects what couldn't be
+	// placed by them, and said what of it was last logged.
+	listing struct {
+		sync.Mutex
+		prom, loki       *rules.Listing
+		promBad, lokiBad bool
+		unplaced         *rules.Unplaced
+		said             string
 	}
 	// picked is what reading the rule files last passed over, as said.
 	picked atomic.Value
@@ -1285,6 +1300,7 @@ var waitDrain = time.After
 var settable = []struct{ key, flag string }{
 	{"lead", "--lead"}, {"match", "--match"}, {"refire", "--refire"},
 	{"noisy-firings", "--noisy-firings"}, {"noisy-precision", "--noisy-precision"},
+	{"linked-only", "--linked-only"},
 	{"noisy-by", "--noisy-by"},
 }
 
@@ -1327,9 +1343,15 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	if o.ImpactFrom, err = s.impactFrom(ctx, s.criterionOf(set)); err != nil {
 		return o, err
 	}
-	// What it replays is judged by the weeks it keeps its stones by, and
-	// its episodes parted by the ledger's days.
-	o.RecordWeek = s.l.WeekOf
+	// What it replays is judged by the days in its time zone, or by the
+	// weeks with --record-by-week, and its episodes parted by the ledger's
+	// days.
+	o.RecordByWeek = s.cfg.RecordByWeek
+	if o.RecordByWeek {
+		o.RecordUnit = s.l.WeekOf
+	} else {
+		o.RecordUnit, o.RecordDay = s.l.DayOf, true
+	}
 	o.Zone = s.l.Location()
 	for k, v := range set {
 		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) {
@@ -1384,6 +1406,17 @@ func apply(o *verdict.Options, key, v string) error {
 			err = errors.New("want a share like 20% or 0.2")
 		}
 		o.NoisyPrecision = p
+	case "linked-only":
+		// On or off, as the flag's is: the flag defines it until an admin
+		// changes it (docs/design/links.md).
+		switch strings.ToLower(v) {
+		case "on", "true", "yes", "1":
+			o.LinkedOnly = true
+		case "off", "false", "no", "0":
+			o.LinkedOnly = false
+		default:
+			err = errors.New("want on or off")
+		}
 	case "noisy-by":
 		if v != verdict.NoisyByCaught && v != verdict.NoisyByUseful {
 			return errors.New("want caught or useful")
@@ -1419,6 +1452,8 @@ func show(o verdict.Options, key string) string {
 			p = verdict.NoisyPrecision
 		}
 		return percentOf(p)
+	case "linked-only":
+		return onOff(o.LinkedOnly)
 	case "noisy-by":
 		if o.NoisyBy == "" {
 			return verdict.NoisyByCaught

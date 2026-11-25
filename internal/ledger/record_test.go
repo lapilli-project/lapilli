@@ -169,7 +169,7 @@ func TestImpactSinceUpgraded(t *testing.T) {
 }
 
 // A report over part of a week judges it by the whole week's record, as
-// WeekKept does: an incident on October 20, two weeks and a bit before the
+// UnitKept does: an incident on October 20, two weeks and a bit before the
 // week of November 2, keeps that week's, so the firings Thursday to Sunday
 // are judged over [Nov 5, Nov 9) as over [Nov 2, Nov 9); and one on Nov 5
 // keeps [Nov 2, Nov 4)'s, of the same week.
@@ -201,8 +201,8 @@ func TestReportPartOfAWeek(t *testing.T) {
 		}
 	}
 	rec, err := l.RecordOf(ctx, mon.Add(3*day), mon.Add(7*day), opts, nil)
-	if err != nil || !l.WeekKept(rec, Week(l.day(mon.Unix()))) {
-		t.Errorf("WeekKept: %v", err)
+	if err != nil || !l.UnitKept(rec, opts, Week(l.day(mon.Unix()))) {
+		t.Errorf("UnitKept: %v", err)
 	}
 	// Taken away, one on Thursday keeps Monday to Wednesday's too.
 	if _, err := l.SyncFile(ctx, []incident.Incident{{ID: "INC-2", Start: mon.Add(3 * day), End: mon.Add(3*day + time.Hour), Labels: incident.Labels{"service": {"b"}}}}, opts); err != nil {

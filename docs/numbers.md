@@ -41,7 +41,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
+`impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
 and the zone days are counted in (`zone`†, which parts episodes, below):
 the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
@@ -241,27 +241,36 @@ the two weeks before it as `--argjson earlier '[{"start": "...", "end":
 "..."}]'`, from your incidents file or from `lapilli serve`'s
 `/api/v1/incidents?from=&to=`.
 
-`lapilli serve` (`record_by_week: true`) judges a firing by its week, from
-Monday in its `--tz`, as it keeps its stones: a week is judged when an
-incident was on at some time from two weeks before the week's Monday to
-the week's end, or the impact signal was read over all of the week. The
-firings of a week are judged by the signals tied to them: every firing of
-a week tied to the same signals, of a rule no entry names, or of the same
-rule entry, is judged, or none; with no named signal, every firing of the
-week. A window keeps the record of the firings tied to its signal alone;
+`lapilli serve` (`record_by: "day"`) judges a firing by its day, midnight to
+midnight in its `--tz`, as it keeps its tallies: a day is judged when an
+incident was on at some time from two weeks before the day's start to the
+day's end, or the impact signal was read over all of the day. With
+`--record-by-week` (`record_by: "week"`, and `record_by_week: true`) it
+judges by the week, from its Monday: the same, of the week, as serve did
+before 0.72. A firing is judged by the day it started in, one crossing
+midnight by its start. The firings of a day are judged by the signals tied
+to them: every firing of a day tied to the same signals, of a rule no entry
+names, or of the same rule entry, is judged, or none; with no named
+signal, every firing of the day. A window keeps the record of the firings
+tied to its signal alone;
 an incident written down, or written by confirming a window, keeps
 everyone's. A window of a signal not in effect (its `signal` none of the
 names in `settings.impact_signals`: taken away, dropped by a start, or set
 aside past eight; [design/judging.md](design/judging.md), item 5) keeps no
 rule's record, with named signals in effect or none, as no firing is
-tied to its signal: a rule's record in its weeks is what the signals in
+tied to its signal: a rule's record in its days is what the signals in
 effect and the incidents written down keep, as `lapilli verdict`, which
 never read that signal, judges it, and the block below leaves it out.
-Confirmed, it is written down, and keeps everyone's. With named signals,
-a signal's start is the first whole week
+Confirmed, it is written down, and keeps everyone's.
+With named signals, a signal's start is the first whole week
 after where its data begins (`settings.impact_signals[].start`), and a
 firing is read as judged when each of its `signals` that keeps the record
-had started by its week's Monday. Give the time zone's offset from UTC, in
+had started by its day's start (its week's Monday, by week). It differs
+from `lapilli verdict`, which judges a firing by the record at its own
+time, where an incident starts later in the firing's day, which keeps the
+day's, and where the two weeks end in its day, which are kept from the
+day's start ([design/judging.md](design/judging.md), "The record, by
+day"). Give the time zone's offset from UTC, in
 seconds, as `--argjson offset`, and the incidents of the two weeks before
 the period as `earlier` (above):
 
@@ -279,8 +288,11 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 | (($s.impact_signals // []) | map({key: .name, value: .}) | from_entries) as $sig
 | (.incidents + ($ARGS.named.earlier // [])) as $incs
 | ($ARGS.named.offset // 0) as $off
+| ($s.record_by == "week") as $weekly
+| (if $weekly then 7 else 1 end) as $unit
 | [.firings[] | (.start | epoch) as $at
-   | ((($at + $off) / 86400 | floor) as $d | ($d - ($d + 3) % 7) * 86400 - $off) as $w
+   | ((($at + $off) / 86400 | floor) as $d
+      | (if $weekly then $d - ($d + 3) % 7 else $d end) * 86400 - $off) as $w
    | (.signals // []) as $ties
    | [$ties[] | $sig[.] | select(.record)] as $waits
    | (.white | not)
@@ -288,7 +300,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
      and ($waits == [] or any($waits[]; .start == null or (.start | epoch) > $w))
      and (any($incs[];
             (.candidate != true or .signal == null or (.signal as $x | any($ties[]; . == $x)))
-            and (.start | epoch) < $w + 7 * 86400
+            and (.start | epoch) < $w + $unit * 86400
             and (if .end then .end | epoch else (.start | epoch) + $s.unknown_length_ns / 1e9 end)
                 >= $w - $s.record_lookback_ns / 1e9)
           | not)]
@@ -591,7 +603,11 @@ incident's tool linked to it (the incident's `alerts`†,
 when a rule couldn't be replayed (its `unsupported`, not judged from its
 history): that rule may have caught it, so the report says the incident
 "can't be judged", not that it had no alert. It is still missed here, and
-in `lapilli_incidents_not_known`.
+in `lapilli_incidents_not_known`. In `lapilli serve`, an incident that
+started before the ledger's first replayed time, which no rule could have
+fired for, has `not_known`† too, and is none of missed, caught or caught
+only by noisy rules: the summary says it in `unreplayed`, apart from
+`missed`, and the incidents page lists it as "before what was replayed".
 
 ```jq
 # missed: as the report has it
@@ -1004,7 +1020,11 @@ and when one does:
 
 A field, a column (at the end), a metric or a label may be added in a
 minor release, said in the changelog. A patch release changes none of
-them. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
+them. A value of a label may be added too: `lapilli serve`'s
+`lapilli_incidents` and `lapilli_impact_windows` have a fourth `state`,
+`unreplayed`, from 0.72, for an incident that started before its ledger's
+first replayed time; `caught`, `noisy_only` and `missed` keep their
+meaning, and the four add up to the incidents listed. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
 `unreplayed`, `hours`, `impact_short`, a rule's `unseen`, `no_data`, `for_outlasts`
 and `late`, an incident's `fired_after`, a firing's `after` and
 `held_from`, the report's `late_cut`, and the
@@ -1024,7 +1044,7 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`†, `notifications`† |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`†, `noisy_by`†, `routine`† |
+| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`†, `noisy_by`†, `routine`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |
@@ -1063,7 +1083,7 @@ it, which only `lapilli serve` says.
 | `lapilli_rule_incidents_first` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_incidents_alone` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_nothing_by_hours` | `rule`, [`severity`], [`team`], `hours` (`asleep`, `off_hours`, `at_work`) |
-| `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`), `source` (`written`, `impact`) |
+| `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`, and, in `lapilli serve`, `unreplayed`), `source` (`written`, `impact`) |
 | `lapilli_incidents_not_known` | `source` (`written`, `impact`) |
 | `lapilli_incident_detection_delay_seconds` | `incident` |
 | `lapilli_last_run_timestamp_seconds` | |
@@ -1074,7 +1094,7 @@ it, which only `lapilli serve` says.
 | `lapilli_rule_notifications_worked_out` | `rule`, [`severity`], [`team`]: `lapilli verdict` alone, worked out, not recorded |
 | `lapilli_rule_pages_worked_out` | `rule`, [`severity`], [`team`]: `lapilli verdict` alone, worked out, not recorded |
 | `lapilli_rule_action` | `rule`, [`severity`], [`team`], `answer` (`yes`, `no`): `lapilli serve` alone |
-| `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`) |
+| `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`, and, in `lapilli serve`, `unreplayed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
 | `lapilli_rule_firings_during_deploys` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_caught_during_deploys` | `rule`, [`severity`], [`team`] |
@@ -1163,7 +1183,8 @@ out when it is zero or empty, as in the report.
 | Where | Fields |
 |---|---|
 | the report | `version`, `lapilli`, `items`, `estimates`, `left_out`, `asked` |
-| `items[]` | `id`, `state` (`ok`, `problem`, `unknown`), `what`, `why`†, `fix`† |
+| `items[]` | `id`, `state` (`ok`, `problem`, `unknown`), `what`, `why`†, `fix`†, `failed`† (of a `queries.*` item, with `--queries`) |
+| `items[].failed[]` | `rule`, `reason` (`parse error`, `unknown function`, `too many samples`, `timeout`, `not let in`, `failed`), `why`†: a rule whose query the history, Loki or Grafana refused or couldn't answer |
 | `asked` | `requests`, `by`, `refused` |
 | `estimates` | `hourly`†, `backfill`†, `nights`†, `beside`†, `backtests`†, `memory`† |
 | `estimates.hourly` | `runs`, `requests`, `most`, `day`, `by`, `guard`, `impact`, `seconds`†, `share`†, `while_backtest`† |
@@ -1176,7 +1197,7 @@ out when it is zero or empty, as in the report.
 
 The ids: `rules.read`, `rules.replayable`, `rules.sources`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
-`history.intervals`, `grafana.notifications`, `content.alertmanager`,
+`history.intervals`, `queries.history`, `queries.loki`, `queries.grafana`, `grafana.notifications`, `grafana.alertmanagers`, `content.alertmanager`,
 `grafana.write`, `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
 `changes.oci`, `changes.ruler`, `changes.loki`, `inputs.files`, `secrets.files`,
 `ledger.sqlite`, `ledger.postgres`, `signin`, `backtest.trust`,
@@ -1188,5 +1209,5 @@ or a Cortex's `--alertmanager-config`), `alarms:SOURCE`, `signin`, `on-call`, `c
 issuers' discovery documents and keys), and what a cloud's identity may write
 is asked of, `iam:aws`, `iam:azure`, `iam:google`, `iam:oci`); of `estimates.beside.by`, what asks
 (`rules`, `loki_rules`, `alarms`, `check_replay`, `scrape_intervals`,
-`grafana_notifications`, `alertmanager_config`, `grafana_data_sources`,
+`grafana_notifications`, `grafana_alertmanagers`, `alertmanager_config`, `grafana_data_sources`,
 `on_call`). The texts of `what`, `why` and `fix` may change in any release.

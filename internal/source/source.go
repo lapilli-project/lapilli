@@ -100,6 +100,40 @@ func Loaded(ctx context.Context, h replay.History) ([]rules.Rule, rules.Doc, err
 	return rs, rules.Doc{Source: "api", API: true, Data: b}, nil
 }
 
+// ErrNoRulesAPI is what Listed answers for a history that has no rules API
+// to ask: a stand-in, or no Prometheus at all.
+var ErrNoRulesAPI = errors.New("this history has no rules API")
+
+// Listed asks the history's rules API once for the groups it lists, to place
+// a group read from a file where the history's server runs the group of
+// its name (rules.Listing). once asks as a read lapilli can do without
+// (prom's RulesOnce): not waited for, not heeding what the API said to
+// wait. An API that isn't there, or answers with an error, is an error to
+// say, and the groups are placed as without it.
+func Listed(ctx context.Context, h replay.History, once bool) (*rules.Listing, error) {
+	api, ok := replay.Base(h).(interface {
+		Rules(context.Context) ([]byte, error)
+	})
+	if !ok {
+		return nil, ErrNoRulesAPI
+	}
+	read := api.Rules
+	if o, ok := api.(interface {
+		RulesOnce(context.Context) ([]byte, error)
+	}); ok && once {
+		read = o.RulesOnce
+	}
+	b, err := read(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the history's rules API couldn't be read: %w", err)
+	}
+	l, err := rules.ReadListing(b)
+	if err != nil {
+		return nil, fmt.Errorf("the history's rules API: %w", err)
+	}
+	return l, nil
+}
+
 // client doesn't follow redirects, so a token goes nowhere it wasn't sent,
 // and gives up on a Grafana that doesn't answer: its headers within
 // grafanaHeaders, the whole within grafanaTimeout, whatever the context.
@@ -246,17 +280,21 @@ func grafanaInterval(s string) time.Duration {
 // them, with the token that reads its rules. Each answer is 8 MB at most;
 // redirects aren't followed. It only reads.
 func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (templates, contactPoints, policies []byte, err error) {
-	get, err := grafanaGet(ctx, base, tokenFile, agent)
+	get, err := grafanaGetter(ctx, base, tokenFile, agent)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if templates, _, err = get("/api/v1/provisioning/templates"); err != nil {
+	call := func(path string) ([]byte, error) {
+		body, _, err := get(path)
+		return body, err
+	}
+	if templates, err = call("/api/v1/provisioning/templates"); err != nil {
 		return nil, nil, nil, err
 	}
-	if contactPoints, _, err = get("/api/v1/provisioning/contact-points"); err != nil {
+	if contactPoints, err = call("/api/v1/provisioning/contact-points"); err != nil {
 		return nil, nil, nil, err
 	}
-	if policies, _, err = get("/api/v1/provisioning/policies"); err != nil {
+	if policies, err = call("/api/v1/provisioning/policies"); err != nil {
 		return nil, nil, nil, err
 	}
 	return templates, contactPoints, policies, nil
@@ -268,7 +306,7 @@ func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (t
 // the rest of what routing reads (docs/design/routing.md). A Grafana that
 // has no such endpoint (404) has none: the answer is empty, not an error.
 func GrafanaMuteTimings(ctx context.Context, base, tokenFile, agent string) ([]byte, error) {
-	get, err := grafanaGet(ctx, base, tokenFile, agent)
+	get, err := grafanaGetter(ctx, base, tokenFile, agent)
 	if err != nil {
 		return nil, err
 	}
@@ -279,10 +317,11 @@ func GrafanaMuteTimings(ctx context.Context, base, tokenFile, agent string) ([]b
 	return body, err
 }
 
-// grafanaGet is a read of Grafana's provisioning API with the token from its
-// file as a bearer token: the answer (8 MB at most, redirects not followed)
-// and its status; a status that isn't 2xx is an error that holds no token.
-func grafanaGet(ctx context.Context, base, tokenFile, agent string) (func(path string) ([]byte, int, error), error) {
+// grafanaGetter reads the token once and gives a read of a Grafana path:
+// the body and the HTTP status, with an error for any status but 2xx (the
+// status is still given). Each answer is 8 MB at most; no redirect is
+// followed.
+func grafanaGetter(ctx context.Context, base, tokenFile, agent string) (func(path string) ([]byte, int, error), error) {
 	var token string
 	if tokenFile != "" {
 		b, err := os.ReadFile(tokenFile)

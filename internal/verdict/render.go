@@ -418,10 +418,10 @@ func signalLeads(w io.Writer, r *Report) {
 // having no data, unless the period's no record says so below, as it does
 // when anything fired. Nothing
 // when it keeps the record of all of the period, nor in lapilli serve's
-// digest (ByWeek), whose record by it starts where its ledger says.
+// digest (RecordBy), whose record by it starts where its ledger says.
 func impactKept(w io.Writer, r *Report, loc *time.Location) {
 	switch s := r.Settings; {
-	case s == nil, s.ByWeek:
+	case s == nil, s.ByWeek, s.RecordBy != "":
 	case s.ImpactNoData:
 		if !r.NoRecord || !slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Firings > 0 }) {
 			fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")
@@ -1049,6 +1049,8 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		}
 		state := "caught"
 		switch first, ok := in.First(); {
+		case in.Unreplayed:
+			state = "unreplayed" // before what was replayed: none of caught, noisy or missed
 		case in.Missed():
 			state = "missed"
 		case !ok:
@@ -1063,7 +1065,11 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		}
 	}
 	var incs []string
-	for _, state := range []string{"caught", "noisy_only", "missed"} {
+	states := []string{"caught", "noisy_only", "missed"}
+	if r.UnreplayedMetric {
+		states = append(states, "unreplayed")
+	}
+	for _, state := range states {
 		for _, src := range []string{"written", "impact"} {
 			incs = append(incs, fmt.Sprintf(`lapilli_incidents{state="%s",source="%s"} %d`, state, src, counts[[2]string{state, src}]))
 		}
@@ -1088,7 +1094,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	if ss := signals(r); len(ss) > 0 {
 		var windows, starts []string
 		for _, sg := range ss {
-			for _, state := range []string{"caught", "noisy_only", "missed"} {
+			for _, state := range states {
 				windows = append(windows, fmt.Sprintf(`lapilli_impact_windows{signal="%s",state="%s"} %d`, escape(sg.Name), state, counts[[2]string{state, "signal " + sg.Name}]))
 			}
 			if !sg.Start.IsZero() && sg.Record {

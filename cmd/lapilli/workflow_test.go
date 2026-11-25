@@ -172,6 +172,7 @@ func TestWorkflowReached(t *testing.T) {
 		{[]string{"test/e2e/routing.sh", "test/e2e/routing/keeper/main.go", "test/e2e/routing/compare/main.go"}, []string{"e2e-routing"}},
 		{[]string{"test/e2e/compat.sh"}, []string{"e2e-compat"}},
 		{[]string{"test/e2e/kubernetes-rules.sh"}, []string{"e2e-kubernetes"}},
+		{[]string{"test/e2e/measure.sh", "test/e2e/measure-feed/main.go"}, nil},
 		{[]string{"go.sum"}, all},
 		{[]string{".github/workflows/ci.yml"}, all},
 		{[]string{"test/e2e/reached.sh"}, all},

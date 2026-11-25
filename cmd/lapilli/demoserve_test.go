@@ -261,7 +261,13 @@ func TestDemoServe(t *testing.T) {
 		"": {"The numbers are the week of 2026-11-09, beside the week before.", "Precision 13% of firings caught something",
 			"Firings 23", "Incidents missed 1 of 3", "Woken for nothing 8",
 			`Quiet CheckoutLatencyP99 "for" 1m → 5m: fired 14 → 2, still catching 1`, "No alert caught INC-43 Orders stuck 2026-11-14 03:05"},
-		"incidents": {"INC-43 Orders stuck 2026-11-14 03:05 2026-11-14 03:30 incidents file ✗ nothing fired nearly caught by OrdersQueueBacklog",
+		// The week before's are replayed too: INC-38 and INC-39 are caught as
+		// INC-41 and INC-42 are, INC-40 is missed like INC-43, and none is
+		// said missed that wasn't.
+		"incidents": {"✗ missed (2)", "Of the 6 judged against: 4 caught, 0 caught only by noisy rules, 2 missed.",
+			"INC-40 Orders stuck 2026-11-07 03:05 2026-11-07 03:30 incidents file ✗ nothing fired",
+			"INC-39 Search timeouts 2026-11-05 21:15 2026-11-05 21:50 incidents file ○ SearchErrors +3m",
+			"INC-38 Checkout errors 2026-11-03 12:01 2026-11-03 12:39 incidents file ○ CheckoutErrors +3m", "INC-43 Orders stuck 2026-11-14 03:05 2026-11-14 03:30 incidents file ✗ nothing fired nearly caught by OrdersQueueBacklog",
 			"INC-42 Search timeouts 2026-11-12 21:15 2026-11-12 21:50 incidents file ○ SearchErrors +3m",
 			"INC-41 Checkout errors 2026-11-10 12:01 2026-11-10 12:39 incidents file ○ CheckoutErrors +3m"},
 		"rules/CheckoutLatencyP99": {"CheckoutLatencyP99", "1m → 5m"},
@@ -351,7 +357,7 @@ func (d *demoRun) teamsAndProposal(en http.Header) {
 	}
 	says("proposals", "CheckoutLatencyP99 a new for a pull request ◷ awaiting approval 0 of 1 approvals", "lapilli demo", "a new for 1")
 	says("proposals/1", "CheckoutLatencyP99's for, 1m → 5m", "awaiting approval", "made by lapilli demo", "team checkout",
-		"Backtest Replayed from 2026-11-09 to 2026-11-16, as the rule is now and as proposed.", "Fired 14 2 −12", "Approval 0 of 1 approval")
+		"Backtest Replayed from 2026-11-02 to 2026-11-16, as the rule is now and as proposed.", "Fired 28 4 −24", "Approval 0 of 1 approval")
 	// Approving is refused, as every write is.
 	h := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}, "Sec-Fetch-Site": {"same-origin"}}
 	if code, body := d.do(http.MethodPost, "proposals/1/approve", h, strings.NewReader("x=1")); code != http.StatusForbidden {

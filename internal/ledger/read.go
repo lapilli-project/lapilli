@@ -66,6 +66,11 @@ func (l *Ledger) RuleTable(ctx context.Context) (map[int64]RuleRow, error) {
 type Tally struct {
 	At   int64 // the day, or the week's Monday
 	Rule int64
+	// Day, of a tally of a day kept as part of its week's (At the week's
+	// Monday), is that day: lapilli serve reads the days of a week whose
+	// days are judged apart (docs/design/judging.md, "The record, by
+	// day"). 0 for a tally as it was read.
+	Day int64
 	// Firings are those judged: not those a quiet window excused.
 	Firings int
 	White   int
@@ -98,6 +103,15 @@ type Tally struct {
 	// have no response, and an unknown usefulness, which a week's record
 	// turns not useful for a firing that caught nothing and is judged.
 	RespChanged, RespRoutine, RespAcknowledged, RespUnanswered, Useful, NotUseful int
+}
+
+// On is the day or week, by its first day, the tally is judged by: its Day
+// when it has one, else At.
+func (x Tally) On() int64 {
+	if x.Day != 0 {
+		return x.Day
+	}
+	return x.At
 }
 
 // Add is t with x's counts added.
@@ -161,22 +175,39 @@ func (l *Ledger) WeeksBy(ctx context.Context, from, to int64) ([]Tally, error) {
 const peopleCols = "unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white, resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful"
 
 func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally, error) {
+	var out []Tally
+	err := l.eachTally(ctx, q, from, to, func(t Tally) error { out = append(out, t); return nil })
+	return out, err
+}
+
+// eachTally calls f on each tally q reads, one at a time, as they are read.
+func (l *Ledger) eachTally(ctx context.Context, q string, from, to int64, f func(Tally) error) error {
 	rows, err := l.r.QueryContext(ctx, q, from, to)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []Tally
+	// One tally and its scan arguments for every row, not one of each.
+	var t Tally
+	dest := []any{&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
+		&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite,
+		&t.RespChanged, &t.RespRoutine, &t.RespAcknowledged, &t.RespUnanswered, &t.Useful, &t.NotUseful}
 	for rows.Next() {
-		var t Tally
-		if err := rows.Scan(&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
-			&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite,
-			&t.RespChanged, &t.RespRoutine, &t.RespAcknowledged, &t.RespUnanswered, &t.Useful, &t.NotUseful); err != nil {
-			return nil, err
+		if err := rows.Scan(dest...); err != nil {
+			return err
 		}
-		out = append(out, t)
+		if err := f(t); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
+}
+
+// EachDayBy calls f on each day's tally of DaysBy, from day to day, one at
+// a time: for a reader that puts them together as it goes, not all in
+// memory.
+func (l *Ledger) EachDayBy(ctx context.Context, from, to int64, f func(Tally) error) error {
+	return l.eachTally(ctx, "SELECT day, rule_id, firings, white, refired, excused, deploy, deploy_white, signals, episodes, episodes_white, "+peopleCols+" FROM days WHERE day >= ? AND day <= ? ORDER BY day, rule_id, signals", from, to, f)
 }
 
 // Incidents are the incidents that started in [from, to), the earliest
@@ -272,10 +303,39 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		}
 		in.CaughtBy = append(in.CaughtBy, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	from, err := l.ReplayedFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)
+		out[i].Unreplayed = !from.IsZero() && out[i].Start.Before(from) && len(out[i].CaughtBy) == 0
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// ReplayedFrom is the earliest time a run replayed the rules from, one that
+// didn't fail (the first backfill or hourly run's period); zero when none
+// did. An incident nothing caught that started before it is Unreplayed. It
+// changes only when a run's period starts earlier, so it is read once for
+// each generation of the ledger, not for each incident read.
+func (l *Ledger) ReplayedFrom(ctx context.Context) (time.Time, error) {
+	gen := l.Gen()
+	l.replayed.Lock()
+	defer l.replayed.Unlock()
+	if l.replayed.have && l.replayed.gen == gen {
+		return l.replayed.at, nil
+	}
+	var from sql.NullInt64
+	err := l.r.QueryRowContext(ctx, "SELECT min(period_from) FROM runs WHERE kind IN ('backfill', 'hourly') AND error = '' AND period_from > 0").Scan(&from)
+	if err != nil {
+		return time.Time{}, err
+	}
+	l.replayed.have, l.replayed.gen, l.replayed.at = true, gen, fromNull(from)
+	return l.replayed.at, nil
 }
 
 func sortCatches(cs []verdict.Catch) {
@@ -499,8 +559,8 @@ func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 // incidents that did, each firing's stones given against every incident the
 // ledger has. With firings false, the firings themselves are left out.
 //
-// A firing is judged by week: those of a week whose record is kept
-// (WeekKept), and any that caught something; the rest are counted, not
+// A firing is judged by day (or by week, with --record-by-week): those of a day whose record is kept
+// (UnitKept), and any that caught something; the rest are counted, not
 // judged (verdict.RuleResult.Unjudged).
 func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Options, firings bool) (*verdict.Report, error) {
 	return l.ReportFor(ctx, from, to, o, firings, nil)
@@ -554,7 +614,6 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 			rr.Replayed = r.Unsupported == ""
 		}
 	}
-	parts := l.parts(from.Unix(), to.Unix())
 	kinds, err := l.kinds(ctx, l.r)
 	if err != nil {
 		return nil, err
@@ -687,45 +746,36 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 	if err != nil {
 		return nil, err
 	}
-	// Each week judged by its own record: the span whole when every week of
-	// it is judged alike, or else a week at a time. With none kept, the span
-	// has no record.
-	weeks := l.spanWeeks(from, to)
-	kept := map[int64]bool{}
-	alike := true
+	// Each unit (a day, or a week) judged by its own record: the units next
+	// to one another judged alike counted together, one statement for the
+	// lot. With none kept, the span has no record.
+	runs := l.runs(rec, o, from, to)
 	rep.NoRecord = true
 	named := o.Signals.Named()
-	for _, w := range weeks {
-		kept[w] = l.weekKept(rec, w)
-		alike = alike && kept[w] == kept[weeks[0]]
-		rep.NoRecord = rep.NoRecord && !kept[w]
-	}
-	// With named signals, a week's firings are judged by the signals tied
+	// With named signals, a unit's firings are judged by the signals tied
 	// to them (docs/design/signals.md, "The record, signal by signal"):
-	// a week at a time, each rule's by its entry's, or else its alerts'.
-	judgedIn := func(w int64) func(string, int64) bool {
+	// each rule's by its entry's, or else its alerts'.
+	judgedIn := func(u int64) func(string, int64) bool {
 		if !named {
-			return func(rule string, _ int64) bool { return kept[w] && !o.NotJudged(rule) }
+			kept := l.UnitKept(rec, o, u)
+			return func(rule string, _ int64) bool { return kept && !o.NotJudged(rule) }
 		}
-		at := unix(l.midnight(w))
+		at := unix(l.midnight(u))
 		return func(rule string, signals int64) bool {
 			return !o.NotJudged(rule) && rec.JudgesTied(at, o.Signals.TiedOf(rule, signals))
 		}
 	}
-	if named {
-		rep.NoRecord = !rec.JudgesAny(unix(l.midnight(weeks[0])), unix(l.midnight(weeks[len(weeks)-1]+7)))
-	}
-	if alike && !named && !o.Signals.NotJudgedRules() {
-		if err := count(parts, judgedIn(weeks[0])); err != nil {
+	for _, r := range runs {
+		for _, u := range l.SpanUnits(o, unix(r.from), unix(r.to)) {
+			rep.NoRecord = rep.NoRecord && !l.UnitKept(rec, o, u)
+		}
+		if err := count(l.parts(r.from, r.to), judgedIn(r.first)); err != nil {
 			return nil, err
 		}
-	} else {
-		for _, w := range weeks {
-			a, b := max(from.Unix(), l.midnight(w)), min(to.Unix(), l.midnight(w+7))
-			if err := count(l.parts(a, b), judgedIn(w)); err != nil {
-				return nil, err
-			}
-		}
+	}
+	if named {
+		ua, ub := l.UnitsOf(o, from, to)
+		rep.NoRecord = !rec.JudgesAny(ua, ub)
 	}
 	// The episodes, once the ledger has counted every week of the span
 	// (EpisodesCounted): until then, none is given.
@@ -781,7 +831,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return nil, err
 	}
 	for _, in := range incs {
-		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID]}
+		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID], NotKnown: in.Unreplayed, Unreplayed: in.Unreplayed}
 		for i, c := range ir.CaughtBy {
 			if rr, ok := byName[c.Rule]; ok {
 				ir.CaughtBy[i].Noisy = rr.Noisy
@@ -1137,7 +1187,7 @@ func recordArgs(from, to time.Time, unknown time.Duration) []any {
 	return []any{from.Unix(), to.Unix(), from.Unix() - int64(max(unknown, 0)/time.Second)}
 }
 
-// RecordOf is what keeps the record of [from, to)'s weeks, and of any time
+// RecordOf is what keeps the record of [from, to)'s units, and of any time
 // in them: the incidents on from two weeks before the first to the end of
 // the last, of those keeps says keep it (all, when nil), and the impact
 // signal read from o.ImpactFrom.
@@ -1146,7 +1196,7 @@ func (l *Ledger) RecordOf(ctx context.Context, from, to time.Time, o verdict.Opt
 }
 
 func (l *Ledger) record(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(Incident) bool) (verdict.Record, error) {
-	wf, wt := l.weeksOf(from, to)
+	wf, wt := l.UnitsOf(o, from, to)
 	incs, err := l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
 	if err != nil {
 		return verdict.Record{}, err
@@ -1160,94 +1210,63 @@ func (l *Ledger) record(ctx context.Context, from, to time.Time, o verdict.Optio
 	return verdict.RecordOf(plain, o), nil
 }
 
-// weeksOf is from the Monday of the first week [from, to) has some of to
-// the end of the last.
-func (l *Ledger) weeksOf(from, to time.Time) (time.Time, time.Time) {
-	ws := l.spanWeeks(from, to)
-	return unix(l.midnight(ws[0])), unix(l.midnight(ws[len(ws)-1] + 7))
-}
-
 // WeekOf is the week t is in, from its Monday to the next, as the ledger
-// keeps weeks: what lapilli serve judges the record by
-// (verdict.Options.RecordWeek).
+// keeps weeks: what lapilli serve judges the record by with --record-by
+// week (verdict.Options.RecordUnit).
 func (l *Ledger) WeekOf(t time.Time) (time.Time, time.Time) {
 	w := Week(l.day(t.Unix()))
 	return unix(l.midnight(w)), unix(l.midnight(w + 7))
 }
 
-// RecordKept reports whether the record of one of [from, to)'s weeks is
-// kept (WeekKept): the impact signal read over all of one, or an incident
-// on from two weeks before the first to the end of the last, a window of
-// a signal not in effect none of them (verdict.Options.NotInEffect).
+// RecordKept reports whether the record of one of [from, to)'s units (days,
+// or weeks, as o has them) is kept (UnitKept): the impact signal read over
+// all of one, or an incident on from two weeks before the first to the end
+// of the last, a window of a signal not in effect none of them
+// (verdict.Options.NotInEffect).
 //
-// With named signals, a week's firings are judged by the signals tied to
-// them: one of the weeks is kept when any firing of it would be judged
+// With named signals, a unit's firings are judged by the signals tied to
+// them: one of the units is kept when any firing of it would be judged
 // (verdict.Record.JudgesAny), a window of a signal or a signal read by
-// its Monday among what keeps it.
+// its start among what keeps it.
 func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.Options) (bool, error) {
 	if o.Signals.Named() {
 		rec, err := l.record(ctx, from, to, o, nil)
 		if err != nil {
 			return false, err
 		}
-		return slices.ContainsFunc(l.spanWeeks(from, to), func(w int64) bool { return l.weekKept(rec, w) }), nil
+		return slices.ContainsFunc(l.SpanUnits(o, from, to), func(u int64) bool { return l.UnitKept(rec, o, u) }), nil
 	}
-	wf, wt := l.weeksOf(from, to)
-	if last, _ := l.WeekOf(wt.Add(-time.Second)); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
+	uf, ut := l.UnitsOf(o, from, to)
+	us := l.SpanUnits(o, from, to)
+	if last, _ := l.UnitBounds(o, us[len(us)-1]); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
 		return true, nil
 	}
 	// With no named signal in effect, a named signal's window is one of a
 	// signal not in effect: it keeps no record.
 	var n int
 	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE "+recordOn+" AND (i.origin <> 'impact' OR i.signal = '') LIMIT 1) x",
-		recordArgs(verdict.RecordFrom(wf, wt), wt, o.UnknownLen)...).Scan(&n)
+		recordArgs(verdict.RecordFrom(uf, ut), ut, o.UnknownLen)...).Scan(&n)
 	return n > 0, err
 }
 
 // FiringJudged reports whether a firing of rule that started at start, its
 // alert tied to signals (as the ledger keeps them, Firing.Signals), is
-// judged by rec should it catch nothing: by its week's record, or, with
-// named signals, by the signals tied to it (docs/design/signals.md). One
-// that caught something is judged whatever (verdict.RuleResult.Judged).
-// Report says each firing so, and a page that lists or draws firings asks
-// the same, so that none of them calls black what the report doesn't
-// judge.
+// judged by rec should it catch nothing: by its day's record (its week's,
+// with --record-by-week), or, with named signals, by the signals tied to it
+// (docs/design/signals.md). One that caught something is judged whatever
+// (verdict.RuleResult.Judged). Report says each firing so, and a page that
+// lists or draws firings asks the same, so that none of them calls black
+// what the report doesn't judge.
 func (l *Ledger) FiringJudged(rec verdict.Record, o verdict.Options, rule string, start time.Time, signals int64) bool {
 	// A rule an entry says is judged by nothing (judged: false).
 	if o.NotJudged(rule) {
 		return false
 	}
-	w := Week(l.day(start.Unix()))
+	u := unitOf(o, l.day(start.Unix()))
 	if o.Signals.Named() {
-		return rec.JudgesTied(unix(l.midnight(w)), o.Signals.TiedOf(rule, signals))
+		return rec.JudgesTied(unix(l.midnight(u)), o.Signals.TiedOf(rule, signals))
 	}
-	return l.weekKept(rec, w)
-}
-
-// WeekKept reports whether a week's record is kept, by rec: the granularity
-// lapilli serve judges firings by. w is its Monday.
-func (l *Ledger) WeekKept(rec verdict.Record, w int64) bool { return l.weekKept(rec, w) }
-
-func (l *Ledger) weekKept(rec verdict.Record, w int64) bool {
-	if rec.Named() {
-		return rec.JudgesAny(unix(l.midnight(w)), unix(l.midnight(w+7)))
-	}
-	return rec.Kept(unix(l.midnight(w)), unix(l.midnight(w+7)))
-}
-
-// SpanWeeks are the Mondays of the weeks [from, to) has some of: one at
-// least.
-func (l *Ledger) SpanWeeks(from, to time.Time) []int64 { return l.spanWeeks(from, to) }
-
-func (l *Ledger) spanWeeks(from, to time.Time) []int64 {
-	var out []int64
-	for w := Week(l.day(from.Unix())); l.midnight(w) < to.Unix(); w += 7 {
-		out = append(out, w)
-	}
-	if len(out) == 0 {
-		out = append(out, Week(l.day(from.Unix())))
-	}
-	return out
+	return l.UnitKept(rec, o, u)
 }
 
 // ImpactSince is from when the impact signal (--impact) was read, all of
@@ -1384,6 +1403,17 @@ func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, tab
 // and each rule, when its firings came, excused ones aside.
 func (l *Ledger) ByHours(ctx context.Context, from, to int64, h *verdict.Hours) (map[int64]map[int64]HourTally, error) {
 	return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, func(at int64) int64 { return Week(l.day(at)) })
+}
+
+// ByHoursDays is ByHours by day, from the day from up to the day to, each
+// day by its first day: of every rule when ids is nil, else of the rules ids
+// only.
+func (l *Ledger) ByHoursDays(ctx context.Context, from, to int64, h *verdict.Hours, ids []int64) (map[int64]map[int64]HourTally, error) {
+	day := func(at int64) int64 { return l.day(at) }
+	if ids == nil {
+		return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, day)
+	}
+	return l.hoursOf(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, ids, false, day)
 }
 
 // ByHoursOf is ByHours for the rules ids only, reading their firings: for a

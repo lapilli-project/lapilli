@@ -85,7 +85,7 @@ the report, only the history is another; and the clock.
   sample's week, written to a directory of `os.MkdirTemp`'s, and the
   ledger kept in the same directory; `--read-only`; `--check-replay=false`,
   as the sample has no `ALERTS` to set the replay beside; `--backfill` from
-  the week's Monday to the clock, `--settle 0s` and `--digest mon@00:00`;
+  the Monday before the week's to the clock, `--settle 0s` and `--digest mon@00:00`;
   and the demo's `--tz`. No flag names anything else to read, or anywhere
   to send to.
 - **Teams and a proposal**: to show what serve does with teams and with a
@@ -106,11 +106,14 @@ the report, only the history is another; and the clock.
   approving it, or dropping it, is 403, and the proposal stays waiting.
   Proposals expire by `--proposals-expire`, which the demo doesn't give,
   so it never shows as expired.
-- **The incidents** are the week's alone. serve judges a week's firings by
-  the incidents of that week and the two before it (`Options.RecordWeek`),
-  and the week's keep its record. The week before's, which the report
-  gives for its first days, would be shown as missed here: nothing is
-  replayed over them.
+- **The incidents** are the week's and the week before's, as the report
+  judges by (INC-38 to INC-43). serve judges a day's firings by the
+  incidents on in it or the two weeks before it (`Options.RecordUnit`), so
+  the week before's keep the record of the week's first days, as in the
+  report. The first run replays the week before too, so that it doesn't
+  show them missed: the sample's history repeats by weekday, so INC-38 and
+  INC-39 are caught as INC-41 and INC-42 are, and INC-40 is missed like
+  INC-43.
 - **The clock** (`serve.Config.Clock`) is pinned to Monday 16 November
   2026, 00:15, in the zone shown: the end of the week, and the 15 minutes
   (`--lead`) after it in which a firing of its last minutes could still

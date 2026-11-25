@@ -909,3 +909,58 @@ func TestPreflightWritesRedacted(t *testing.T) {
 		}
 	}
 }
+
+// --queries is a flag of lapilli preflight's: off, no rule's expression is
+// asked and there is no item of it; on, with --offline, the item says
+// nothing was asked, and a Prometheus that is asked is asked for each
+// expression once, a rule whose query it refuses said with why.
+func TestPreflightQueries(t *testing.T) {
+	alone(t)
+	var asked []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.PostFormValue("query")
+		mu.Lock()
+		asked = append(asked, q)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(q, "sum(") {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"status":"error","errorType":"bad_data","error":"1:5: parse error: unexpected end of input"}`)
+			return
+		}
+		io.WriteString(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+	}))
+	defer srv.Close()
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n      - alert: Broken\n        expr: sum(\n")
+	args := []string{"--rules", rules, "--prometheus", srv.URL}
+	rep, _, _ := pfReport(t, args...)
+	for id := range pfItems(rep) {
+		if strings.HasPrefix(id, "queries.") {
+			t.Errorf("--queries off: %s", id)
+		}
+	}
+	for _, q := range asked {
+		if q == "up == 0" {
+			t.Errorf("--queries off: %q asked", q)
+		}
+	}
+	rep, _, _ = pfReport(t, append(args, "--queries", "--offline")...)
+	if it := pfItems(rep)["queries.history"]; it == nil || it["state"] != "unknown" {
+		t.Errorf("--queries --offline: %v", it)
+	}
+	rep, code, out := pfReport(t, append(args, "--queries")...)
+	it := pfItems(rep)["queries.history"]
+	if it == nil || it["state"] != "problem" || code != 1 || !strings.Contains(out, `"reason": "parse error"`) {
+		t.Fatalf("--queries: exit %d, %v\n%s", code, it, out)
+	}
+	n := 0
+	for _, q := range asked {
+		if q == "up == 0" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("up == 0 asked %d times", n)
+	}
+}

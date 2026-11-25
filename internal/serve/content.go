@@ -85,6 +85,13 @@ type saidRules struct {
 	amAt     time.Time
 	amSum    string
 	amWarned string
+	// sends is where Grafana sends its alerts, asked with --grafana and
+	// --alertmanager-config once an hour (askSends); sendsAt when,
+	// sendsSum what it was, sendsWarned what was logged, so each is once.
+	sends       source.GrafanaSends
+	sendsAt     time.Time
+	sendsSum    string
+	sendsWarned string
 	// What was found, and what it was found from.
 	at    contentKey
 	found *contentState
@@ -107,6 +114,7 @@ type contentKey struct {
 	scrape                 string // content.Scrapes, as a line
 	notify                 string // what Grafana's notifications were read from
 	am                     string // what Alertmanager's configuration was read from
+	sends                  string // where Grafana sends its alerts
 	noisyN                 int
 	noisyP                 float64
 	noisyBy                string
@@ -411,6 +419,58 @@ func (s *Server) askAlertmanager(ctx context.Context) {
 	}
 }
 
+// grafanaAlertmanagers asks where Grafana sends its alerts; tests replace it.
+var grafanaAlertmanagers = source.GrafanaAlertmanagers
+
+// askSends asks, with --grafana and --alertmanager-config, once an hour,
+// where Grafana sends its alerts (docs/design/content.md): to an external
+// Alertmanager, its rules are checked against the configuration given. A
+// Grafana that answers otherwise leaves the check as it was, and the log
+// says why, once for each why.
+func (s *Server) askSends(ctx context.Context) {
+	if !s.cfg.CheckContent || s.cfg.Grafana == "" || s.cfg.AlertmanagerConfig == "" {
+		return
+	}
+	s.saidRules.Lock()
+	fresh := !s.saidRules.sendsAt.IsZero() && s.now().Sub(s.saidRules.sendsAt) < notifyEvery
+	s.saidRules.Unlock()
+	if fresh {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	g, err := grafanaAlertmanagers(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, "lapilli/"+s.cfg.Version)
+	sum, told := "", ""
+	if err != nil {
+		g, told = source.GrafanaSends{}, err.Error()
+	} else if g.External() {
+		sum = fmt.Sprintf("%s/%d", g.Choice, g.Active)
+		told = g.Several()
+	}
+	s.saidRules.Lock()
+	warn := told != s.saidRules.sendsWarned
+	s.saidRules.sendsWarned = told
+	if sum != s.saidRules.sendsSum {
+		s.saidRules.gen++ // what the pages show changes
+	}
+	s.saidRules.sends, s.saidRules.sendsAt, s.saidRules.sendsSum = g, s.now(), sum
+	s.saidRules.Unlock()
+	if warn && err == nil && told != "" {
+		s.log.Warn(told)
+	}
+	if warn && err != nil {
+		s.log.Warn("where Grafana sends its alerts can't be read: its rules are checked against its own notification templates only", "err", err)
+	}
+}
+
+// grafanaSends is where Grafana sends its alerts, as asked last, and a
+// line of what it was; the zero value, checked as before, when not known.
+func (s *Server) grafanaSends() (source.GrafanaSends, string) {
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	return s.saidRules.sends, s.saidRules.sendsSum
+}
+
 // templateFiles are template files as source reads them, as the content
 // check takes them.
 func templateFiles(fs []source.TemplateFile) []content.TemplateFile {
@@ -520,7 +580,8 @@ func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *
 	}
 	_, notified := s.notifications()
 	_, am := s.alertmanager()
-	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, am: am, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision, noisyBy: o.NoisyBy,
+	_, sends := s.grafanaSends()
+	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, am: am, sends: sends, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision, noisyBy: o.NoisyBy,
 		hour: s.now().Unix() / 3600}
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
@@ -566,9 +627,16 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 	}
 	notify, _ := s.notifications()
 	am, _ := s.alertmanager()
+	// Grafana sends to an external Alertmanager: its rules are checked
+	// against the one given; to it alone, not against its own.
+	sends, _ := s.grafanaSends()
+	external := am != nil && sends.External()
+	if external && !sends.Internal() {
+		notify = nil
+	}
 	unchecked := map[string]string{}
 	fs := content.Check(named, content.Options{Runbooks: s.cfg.RunbookAnnotations, Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
-		Alertmanager: am, JobsOf: s.jobsOf(),
+		Alertmanager: am, GrafanaExternal: external, JobsOf: s.jobsOf(),
 		// Routing the rules to Grafana's contact points has a budget of its
 		// own, and a time: the check holds what pages and /metrics wait on.
 		NotifyBy:  time.Now().Add(notifyTime),

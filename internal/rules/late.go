@@ -81,12 +81,71 @@ type Replaying struct {
 	// Places are where a Loki ruler runs each of its groups within its
 	// interval, as its rules API says, by Place.
 	Places map[Place]time.Duration
+	// Listing and LokiListing are the groups the history's rules API lists,
+	// and the Loki's: a group read from a rule file is placed where the one
+	// of its name runs (Listing.Place), and what couldn't be is collected
+	// in Unplaced, when it is not nil. Nil Listing: not read.
+	Listing, LokiListing *Listing
+	Unplaced             *Unplaced
 	// NoLoki says there is no Loki to ask a Loki ruler's rules of (no
 	// --loki): they are listed, not replayed.
 	NoLoki bool
 	// NoGrafanaLoki says there is no way to a Grafana rule's Loki: neither
 	// --grafana's data source proxy nor --loki.
 	NoGrafanaLoki bool
+}
+
+// FromFile reports whether a rule was read from a rule file, whose group's
+// place within its interval a rules API that runs the group may say, and
+// whether the rule is a Loki ruler's: a Prometheus rule file's, a
+// PrometheusRule's or a ConfigMap's, or a Loki ruler's rule file's. Not a
+// rule read from an API, a Grafana rule, a cloud's alarm, nor a ruler's
+// namespace's, which place themselves.
+func (r Rule) FromFile() (ok, loki bool) {
+	switch {
+	case r.Graph != nil || r.Cloud != "" || r.Namespace != "" || r.Vmalert:
+		return false, false
+	case r.Logs == "" && r.Prometheus && r.Source != "api":
+		return true, false
+	case r.Logs == LokiRuler && r.LokiFile:
+		return true, true
+	}
+	return false, false
+}
+
+// PlaceFiles sets the Phase of each of rs read from a rule file (FromFile)
+// from the listing of the rules API that runs its group, as Listing and
+// LokiListing have them, when it can be; one whose group's interval the file
+// doesn't give is placed at the one the API says (Placed). Without a listing, nothing is
+// said of the rule.
+func (p Replaying) PlaceFiles(rs []Rule) {
+	for i := range rs {
+		if ok, loki := rs[i].FromFile(); ok {
+			if loki {
+				p.place(&rs[i], p.LokiListing)
+			} else {
+				p.place(&rs[i], p.Listing)
+			}
+		}
+	}
+}
+
+func (p Replaying) place(r *Rule, l *Listing) {
+	if l == nil || r.Phase != 0 || r.Unsupported != "" {
+		return
+	}
+	d, every, why := l.Place(r.Group, r.Interval)
+	if why != "" {
+		p.Unplaced.add(r.Group, why)
+		return
+	}
+	r.Phase = d
+	if r.Interval <= 0 {
+		// The file gives no interval: the server's own, for placing and
+		// for replaying the group as often as it runs, and no more.
+		r.Placed = every
+	}
+	p.Unplaced.add(r.Group, "")
 }
 
 // Place is a Loki ruler's group: its namespace and its name.
@@ -114,6 +173,11 @@ func (p Replaying) Apply(rs []Rule) {
 				rs[i].Graph, rs[i].Logs = g, g.Logs
 			}
 		}
+		if r := &rs[i]; r.Graph != nil && r.Unsupported == "" && p.NoGrafanaLoki && len(r.Graph.Aside) > 0 {
+			// No way to the Loki its query beside the condition is on: it
+			// is a query on another data source, which isn't asked.
+			r.Graph = r.Graph.AsOther()
+		}
 		switch r := &rs[i]; {
 		case r.Unsupported != "" || r.Logs == "":
 		case r.Graph == nil && p.NoLoki:
@@ -125,6 +189,7 @@ func (p Replaying) Apply(rs []Rule) {
 				r.Phase = d
 			}
 		}
+		p.PlaceFiles(rs[i : i+1])
 		rs[i].Scrapes = nil
 		if p.Scrape > 0 || p.ScrapeOf == nil || rs[i].Graph == nil {
 			continue

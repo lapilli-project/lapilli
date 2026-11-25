@@ -521,6 +521,7 @@ func TestImpactTrySame(t *testing.T) {
 func TestImpactTryEarlierWeeks(t *testing.T) {
 	parallel(t)
 	s := criteriaServer(t, false, nil)
+	s.cfg.RecordByWeek = true
 	monday := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC) // three weeks before
 	ledgerExec(t, s, "UPDATE impact_signals SET since = ? WHERE name = ''", strconv.FormatInt(monday.Unix(), 10))
 	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact=impact+%3E+1", nil, "ana@example.com", "same-origin")

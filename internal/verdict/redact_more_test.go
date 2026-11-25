@@ -104,6 +104,7 @@ func TestRedactEveryField(t *testing.T) {
 		"ExpectResult.BeforeWhy":   true, // why a scenario wasn't run: Lapilli's own words
 		"ExpectResult.AfterWhy":    true,
 		"Judged.Day":               true, // a date, which parts episodes
+		"Settings.RecordBy":        true, // day or week
 		"Judged.Action":            true, // yes or no: Lapilli's words
 		"FiringResponse.Kind":      true, // changed, routine, acknowledged, unanswered, none
 		"ResponseChange.Kind":      true, // rollout, rollback, scale, deploy

@@ -58,6 +58,13 @@ the report marks the catch (`(no service)`) and says how many were so; with
 `matchStrict: true` (`--match-strict`, in both modes) it doesn't catch it. In
 serve mode a change judges every firing again, once.
 
+In serve mode a firing that caught nothing is judged by the record of its
+day, in `timeZone`: a day's firings are judged when an incident was on in
+it or in the two weeks before it, or the impact signal was read over all of
+it. `serve.recordByWeek: true` (`--record-by-week`) judges by the week's
+record instead, as before 0.72, for numbers that must stay as they were;
+changing it judges nothing again.
+
 An incident may list the alerts its tool linked to it (`alerts:`, which the
 PagerDuty, incident.io, Rootly, FireHydrant and Jira Service Management
 recipes write; `docs/incidents.md` in the
@@ -66,7 +73,9 @@ repository): a firing of one catches it whatever `match` says. With
 caught by those alone, not by any other firing at the time; one that lists
 none is caught by the time and `match` as ever. In serve mode, a change to
 it judges every firing again, once, and the Settings page says which is in
-effect.
+effect. The value stands until an admin changes it on the Settings page (or
+through `POST /settings`); `/settings.yaml` there gives it back as
+`linkedOnly`, to commit.
 
 With `mode: serve` it runs `lapilli serve` instead: every hour into a ledger
 on a PersistentVolumeClaim, or in Postgres (below), with a web UI, an API and `/metrics`, behind a
@@ -1067,6 +1076,9 @@ token Loki's writes carry, a token of their own, not `loki.tokenSecret`'s;
 its rules in an object store, or on the filesystem through its object
 store client (`storage_config.use_thanos_objstore`), not in local files
 (`ruler.storage.type: local`), which are read-only to its API.
+Rules from Loki's rule files (`rules.loki.configMaps`, `--loki-rules`) are
+changed by the git path, a pull request to where the files are kept, as
+any rule file's are.
 
 Without one, a Mimir's, a Cortex's or a Loki's writes are sent with no
 token, for a ruler reached only inside the cluster, and Amazon's and

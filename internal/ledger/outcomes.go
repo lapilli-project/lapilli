@@ -177,7 +177,7 @@ func (l *Ledger) Stones(ctx context.Context, from, to time.Time) (firings, white
 	return firings, white, nil
 }
 
-// StonesJudged are Stones, and, of them, unjudged: those in a week with no
+// StonesJudged are Stones, and, of them, unjudged: those in a day (or week) with no
 // record that caught nothing, as Report counts them, in no precision.
 func (l *Ledger) StonesJudged(ctx context.Context, from, to time.Time, o verdict.Options) (firings, white, unjudged int, err error) {
 	if firings, white, err = l.Stones(ctx, from, to); err != nil || firings == white {
@@ -187,11 +187,11 @@ func (l *Ledger) StonesJudged(ctx context.Context, from, to time.Time, o verdict
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	for _, w := range l.spanWeeks(from, to) {
-		if l.weekKept(rec, w) {
+	for _, r := range l.runs(rec, o, from, to) {
+		if l.UnitKept(rec, o, r.first) {
 			continue
 		}
-		n, wh, err := l.Stones(ctx, unix(max(from.Unix(), l.midnight(w))), unix(min(to.Unix(), l.midnight(w+7))))
+		n, wh, err := l.Stones(ctx, unix(r.from), unix(r.to))
 		if err != nil {
 			return 0, 0, 0, err
 		}

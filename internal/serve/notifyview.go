@@ -41,6 +41,9 @@ type paged struct {
 	// that came while people slept: worked out once (wokenBy).
 	wokenOnce sync.Once
 	woken     map[int64]map[string]int
+	// wokenDay are the same by day and rule, for a week whose days are
+	// judged apart (rulesweb.go, wokenOver).
+	wokenDay map[int64]map[string]int
 	// from is when the notifications read start, the twelve weeks shown;
 	// told, the firings they tell of, worked out once (toldOf).
 	from     time.Time
@@ -104,7 +107,7 @@ var wokenWalks atomic.Int64
 func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
 	p.wokenOnce.Do(func() {
 		wokenWalks.Add(1)
-		p.woken = map[int64]map[string]int{}
+		p.woken, p.wokenDay = map[int64]map[string]int{}, map[int64]map[string]int{}
 		if s.notifies() {
 			// Pages, recorded or worked out, not every notification
 			// (routedview.go).
@@ -115,11 +118,16 @@ func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
 				if h := sc.of(ev.Rule); h == nil || h.Of(ev.At) != verdict.Asleep {
 					continue
 				}
-				w := ledger.Week(s.l.Day(ev.At))
+				d := s.l.Day(ev.At)
+				w := ledger.Week(d)
 				if p.woken[w] == nil {
 					p.woken[w] = map[string]int{}
 				}
 				p.woken[w][ev.Rule]++
+				if p.wokenDay[d] == nil {
+					p.wokenDay[d] = map[string]int{}
+				}
+				p.wokenDay[d][ev.Rule]++
 			}
 			return
 		}
@@ -130,11 +138,22 @@ func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
 			if h := sc.of(pg.Rule); h == nil || h.Of(pg.At) != verdict.Asleep {
 				continue
 			}
-			w := ledger.Week(s.l.Day(pg.At))
+			// On the day of its firing's start, as that is judged, not the
+			// day it was sent.
+			at := pg.At
+			if !pg.Start.IsZero() {
+				at = pg.Start
+			}
+			d := s.l.Day(at)
+			w := ledger.Week(d)
 			if p.woken[w] == nil {
 				p.woken[w] = map[string]int{}
 			}
 			p.woken[w][pg.Rule]++
+			if p.wokenDay[d] == nil {
+				p.wokenDay[d] = map[string]int{}
+			}
+			p.wokenDay[d][pg.Rule]++
 		}
 	})
 	return p.woken
@@ -368,6 +387,16 @@ func (s *Server) woken(ctx context.Context, t *tallies, o *owners, team *ledger.
 		wv.Uncounted = !s.l.Midnight(w+7).After(from) || s.notifies() && !p.known(s.l.Midnight(w), s.l.Midnight(w+7))
 		for rule, n := range by[w] {
 			if team == nil || o.rule[rule] == team.ID {
+				if t.split[w] && !t.o.Signals.Named() {
+					// Of a week whose days are judged apart, those of the
+					// days judged: as the rules list counts them.
+					n = 0
+					for _, u := range t.units(w) {
+						if a, b := t.unit(u); t.rec.Kept(a, b) {
+							n += p.wokenDay[u][rule]
+						}
+					}
+				}
 				wv.Asleep += n
 			}
 		}

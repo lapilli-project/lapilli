@@ -180,7 +180,8 @@ matchStrict: false
 # alerts its tool linked to it (alerts:, which the PagerDuty, incident.io,
 # Rootly, FireHydrant and Jira Service Management recipes write) is caught by those alone, not by any other
 # firing at the time; one that lists none is caught by the time and match
-# as ever. In serve mode a change judges every firing again, once.
+# as ever. In serve mode a change judges every firing again, once, and an
+# admin can change it on the Settings page: the value here stands until then.
 linkedOnly: false
 # When people are at work, and asleep, in timeZone: the firings that caught
 # nothing are counted by when they came, those that woke people first. Like
@@ -563,6 +564,12 @@ serve:
   # file gave it. With it, rename a team with renamed_from: a team renamed
   # by its name alone is another, and the old one is deleted.
   configPrune: false
+  # true passes --record-by-week: a firing that caught nothing is judged by
+  # the record of its week, as before 0.72, not of its day (a day's firings
+  # are judged when an incident was on in it or in the two weeks before it,
+  # or the impact signal was read over all of it). For numbers that must
+  # stay as they were; changing it judges nothing again.
+  recordByWeek: false
   # Make a task, of kind decide, for each goal serve.config declares (goals:)
   # that a whole week missed, or an occurrence of a goal over a period
   # (each: KIND), 20 a run at most (--goal-tasks); an open one is commented

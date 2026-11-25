@@ -49,7 +49,8 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		// A catch by a rule noisy in the incident's week, as /incidents,
 		// the overview and the summary judge it: not by the seven days to
 		// now, so an incident is in the same state everywhere. Each day's
-		// firings are judged by its week's record, as the tallies have it.
+		// firings are judged by its day's record (its week's, with
+		// --record-by-week), as the tallies have it.
 		t, err := s.tallies(ctx, weeks)
 		if err != nil {
 			s.oops(w, r, err)
@@ -73,7 +74,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Episodes.White += d.EpisodesWhite
 			rr.ActionYes += d.ActionYes
 			rr.ActionNo += d.ActionNo
-			judgedDay := t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals)
+			judgedDay := t.judgedDay(d.At, d.Rule, d.Signals)
 			if !judgedDay {
 				rr.Unjudged += d.Firings - d.White
 				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
@@ -136,14 +137,14 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, in := range incs {
-			ir := verdict.IncidentResult{Incident: in.Incident, CaughtBy: slices.Clone(in.CaughtBy)}
+			ir := verdict.IncidentResult{Incident: in.Incident, CaughtBy: slices.Clone(in.CaughtBy), NotKnown: in.Unreplayed, Unreplayed: in.Unreplayed}
 			week := ledger.Week(s.l.Day(in.Start))
 			for i := range ir.CaughtBy {
 				ir.CaughtBy[i].Noisy = t.noisy(week, t.id(ir.CaughtBy[i].Rule))
 			}
 			rep.Incidents = append(rep.Incidents, ir)
 		}
-		rep.SomeRules = o.SomeRules
+		rep.SomeRules, rep.UnreplayedMetric = o.SomeRules, true
 		if t.shown() {
 			// lapilli_rule_responses and lapilli_rule_actionable.
 			rep.Responses = &verdict.ResponseTotals{}

@@ -207,6 +207,72 @@
   kind cluster with failures made on purpose; `--check-replay
   --loaded-rules` must find every firing alike, among at least five alerts
   that fired, and the run's page in GitHub Actions says how many.
+- **Classic conditions over Loki are replayed**: a Grafana rule whose
+  classic condition reads a Loki query is replayed, each reducer worked out
+  from the points of the range query Grafana reads, as Grafana's classic
+  conditions do it (NaN, null, no data, every reducer, evaluator and
+  operator), held to the Prometheus path by a test and checked against a
+  real Grafana and Loki in `test/e2e/loki.sh`.
+- **A Grafana rule on Prometheus with a Loki query beside its condition is
+  replayed whole**: the Loki query is asked too, through Grafana's data
+  source proxy, so its no data is seen; serve's backtest port takes such a
+  rule on the Loki data sources the rules in effect read. A Loki query there
+  that Loki refuses makes the rule replayed in part, not no data.
+- **Loki's rules are changed as every other rule is**: a proposal for a rule
+  of a Loki ruler's rule files (`--loki-rules`) is applied by the git path,
+  a pull request that edits the one rule and keeps every other line,
+  backtested in LogQL; a new rule can be added to a group, or a new group,
+  of a Loki ruler's namespace `--changes-in` names as `loki:NAMESPACE`,
+  through its API, or of a Loki rule file by the git path, held to its
+  expectations (`loki` in MCP's `places` and `propose`). A Loki rule file
+  isn't a place with `--loki-loaded-rules`, as Loki then runs what its API
+  holds; a `keep_firing_for` isn't added to a Loki rule file, which Loki
+  drops.
+- A group read from a rule file is placed where the history's rules API (or
+  a Loki ruler's) runs the group of its name, at the interval the API says
+  where the file gives none, in `lapilli verdict` and `lapilli serve`.
+  Prometheus's hash is checked against the groups' own last evaluations
+  (Prometheus 3's and 2's layouts, paths of any length, taken only when
+  three groups that ran agree and none disagrees); a name listed twice or
+  not at all, or a hash that disagrees, is replayed on the steps as before,
+  and the run says why. Against a VictoriaMetrics whose rules API is
+  vmalert's, a group is placed where vmalert runs it (on whole intervals,
+  or its `eval_offset`), so the same file's firings there are a few seconds
+  from those against Prometheus, as vmalert's own are. verdict asks the
+  rules API once a run, and says so on stderr when the history has none.
+- Grafana's rules are checked against the external Alertmanager Grafana
+  sends to, read from its alerting API (`admin_config`, `alertmanagers`), in
+  `lapilli verdict --check-content`, serve and `lapilli preflight`
+  (`grafana.alertmanagers`): with `--alertmanager-config`, its routes and
+  templates, as a ruler's rules are. When Grafana sends to more than one,
+  the data sources are named, as Lapilli takes the one given for all; a
+  Grafana that answers otherwise is checked as before and says so.
+- `lapilli preflight --queries` asks each rule's expression once, as an
+  instant query at now, where it is replayed (the history, the clouds'
+  PromQL, `--loki`, Grafana's Loki data sources, a Loki query beside a
+  condition through Grafana's proxy), within the replay's limits
+  (`--max-rate`, `--max-samples`, `--parallel`), and names each rule whose
+  query fails and why (parse error, unknown function, too many samples,
+  timeout): items `queries.history`, `queries.loki`, `queries.grafana`. Off
+  by default; writes nothing.
+- `--record-by-week` (chart `serve.recordByWeek`) keeps serve judging a
+  firing by its week's record, as before 0.72. It judges no firing again:
+  the stones don't depend on the record.
+- `test/e2e/measure.sh` and the `measure` workflow, run by hand, take the
+  replay's measurements kept as test data at any version of Prometheus,
+  Grafana and Loki into `internal/replay/testdata`, one server of each
+  running every recording's rules; `record` against servers kept up asks
+  them again in minutes. Each recording's period is in its `period.json`,
+  and the real-server tests replay every recording directory present. The
+  recordings are taken again at the pinned versions, with the rules of the
+  shapes above among them. `record` says how many evaluations each server
+  missed in the periods, as a host too busy to run them on time makes them
+  miss, and a recording whose test then fails says to record again on a
+  host less busy: what a server fired after a missed evaluation is unlike
+  any replay.
+- `lapilli_incidents` and `lapilli_impact_windows` in serve's `/metrics`
+  take a fourth state, `unreplayed` (below); the other three keep their
+  meaning.
 - The docs in Japanese, at lapilli.dev/ja/docs, from `docs/ja/`: the docs'
   home, Getting started, the glossary and the FAQ, the pages in Korean; a
   page not translated is listed with its Japanese title and opens in
@@ -246,6 +312,28 @@
   start after the upgrade judges every firing again once, as a
   `--linked-only` change does. A release before it can't open the ledger
   after: keep a copy first (docs/upgrading.md).
+- **lapilli serve judges a firing by its day's record, not its week's.** A
+  day's firings are judged when an incident was on in the day or in the two
+  weeks before it, or `--impact` was read over all of it, in `--tz`, as
+  `lapilli verdict` judges by the firing's own time; every page, report,
+  digest, backtest through serve, MCP tool and API number follows.
+  Upgrading, a firing on a day before an incident started in its week is no
+  longer judged, and one after an incident's two weeks ended in its week is
+  judged no more; nothing is judged again, as the stones don't depend on the
+  record. `record_by` (`"day"` or `"week"`) says which in `GET
+  /api/v1/settings` and a report's `settings`; `record_by_week` is true only
+  by week. `--record-by-week` keeps the old (docs/upgrading.md).
+- `--linked-only` is a setting an admin changes on the Settings page and
+  through `POST /settings`, the flag defining it until then; a change judges
+  every firing again once, across replicas, and the activity log says who.
+- `POST /settings` leaves a setting alone when its key isn't in the form,
+  where it went back to its flag; an empty value or `reset-KEY` still gives
+  it back.
+- "Woken for nothing" is counted by the firing's start day, the days not
+  judged left out, whether or not notifications are kept.
+- `lapilli demo --serve` replays the week before too, and judges by the day
+  as serve does: its incidents are the sample's, the week before's with
+  them.
 - **lapilli.dev's text at 16px**, as most docs sites have it, from 17px,
   with its headings a step further apart. A docs page's sections sit right
   after its text, with no empty band between, and the pages' list lines up
@@ -269,6 +357,28 @@
 - `lapilli preflight` counted none of the Loki requests of a Grafana rule
   that reduces a LogQL query (its estimate was 0 where the replay asked
   about 2,000 over 28 days); it counts them as the replay asks them.
+- **A firing on when the period starts**, that ends before its placed
+  group's first evaluation in the period, is no longer left out: a placed
+  group (Prometheus's with `--loaded-rules` or placed from the rules API,
+  Loki's) is replayed from its last evaluation before the period, in a
+  backtest, a longer or shorter `for` tried and near misses alike. A rule
+  new after that evaluation has no firing from it.
+- **A Grafana rule whose condition comes to a time series** (a threshold or
+  math straight on a range query, Prometheus's or Loki's) is listed as not
+  replayed, with why: Grafana errors at its every evaluation ("only reduced
+  data can be alerted on"), and the replay had it firing.
+- **An incident that started before what serve replayed** isn't counted
+  missed: a fresh serve given last month's incidents said every one was. It
+  is shown apart ("before what was replayed") on the overview, the incidents
+  page and chart, the summary API (`unreplayed`), goals, the digest,
+  reports, MCP and `/metrics`.
+- The heatmap's long rule names are whole for the keyboard, the pointer and
+  a screen reader, not only in a title.
+- A firing that ended where a period starts was counted in it: a report
+  judged it, and `--check-replay` counted a replayed one Prometheus's or
+  Grafana's history can't have (a rule with `for` or `keep_firing_for`
+  replayed from before the period). A firing's end is the first time it
+  was off, as `--check-replay`'s count of errors already had it.
 
 ## [0.71.0] - 2026-11-24
 

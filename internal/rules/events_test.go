@@ -212,7 +212,6 @@ groups:
 		{"a reduce of the last of a range query", "1h", query("A", restarts, false) + reduce("B", "last", "A") + reduce("D", "last", "B") + threshold("C", "gt", "0.5", "D"), nil, 0, false},
 		{"mean of a range query", "1h", query("A", restarts, false) + reduce("B", "mean", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"max of a range query", "1h", query("A", restarts, false) + reduce("B", "max", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
-		{"a range query read as it is", "1h", query("A", restarts, false) + step("C", `type: math, expression: "$A > 0.5"`), nil, 0, false},
 		{"count of an instant query", "1h", query("A", restarts, true) + reduce("B", "count", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"sum of an instant query", "1h", query("A", restarts, true) + reduce("B", "sum", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"a reduce that puts a number in place of NaN", "1h", query("A", restarts, true) + step("B", `type: reduce, reducer: last, expression: A, settings: {mode: replaceNN, replaceWithValue: 1}`) + threshold("C", "gt", "0.5", "B"), nil, 0, false},

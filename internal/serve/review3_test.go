@@ -24,7 +24,7 @@ func TestTryComparesLikeWithLike(t *testing.T) {
 	ctx := context.Background()
 	s := noSource(t, nil)
 	o, err := s.options(ctx)
-	if err != nil || o.RecordWeek == nil {
+	if err != nil || o.RecordUnit == nil {
 		t.Fatalf("judged by week: %v", err)
 	}
 	v, err := s.try(ctx, o, o)
@@ -287,6 +287,7 @@ func TestSpanBeforeByWeek(t *testing.T) {
 	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Backfill, c.Impact = 2*24*time.Hour, "" })
+	s.cfg.RecordByWeek = true
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)

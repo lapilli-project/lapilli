@@ -30,9 +30,19 @@
   global `evaluation_interval` isn't in rule files, nor is the global
   `rule_query_offset`. An interval that isn't a whole number of steps is
   evaluated every step. Prometheus places a group within its interval by a
-  hash of the path it loaded the file from, which a file doesn't say: read
-  from a file, a firing can start up to an interval sooner or later than it
-  did. `--loaded-rules` knows where.
+  hash of its name and the path it loaded the file from, which a file
+  doesn't say. `--loaded-rules` knows where. For a group read from a file,
+  Lapilli asks the history's rules API (and `--loki`'s, for a Loki ruler's
+  file) once for the group of that name, and places it as the server does,
+  by the path the API gives, at the interval the API says where the file
+  gives none; a name the API lists twice or not at all, and an API that
+  isn't served leave
+  the group on the steps' grid, which the run says, with why: a firing
+  from such a group can start up to an interval sooner or later than it
+  did. A group placed within its interval is replayed from its last
+  evaluation before the period, so a firing on when the period starts
+  that ends before the group's first evaluation in it is replayed too,
+  from the period's start.
 - Grafana reduces a query's points as far apart as its `intervalMs` (1s by
   default) or more over a long window; lapilli asks for them so for
   `count`, `count_non_null` and `sum`, and for the rest at
@@ -51,9 +61,17 @@
   judged by the wrong history. Replay each data source's rules in a run of
   their own, against its Prometheus (`--rule` picks them by name).
 - A Grafana rule's query on another data source than its condition's (a
-  Loki query whose values an annotation shows) isn't replayed: when it
+  SQL query whose values an annotation shows; a Loki query too when it is a
+  log query, or Lapilli has no way to that Loki: a Loki one is otherwise
+  asked, through Grafana's data source proxy) isn't replayed: when it
   returns nothing, Grafana takes the rule as having no data, which the
   replay can't see, and the rule is marked "replayed in part".
+- A Grafana rule whose condition comes to a time series (a threshold or math
+  straight on a range query, Prometheus's or Loki's) isn't replayed: Grafana's
+  evaluation errors ("looks like time series data, only reduced data can be
+  alerted on") whenever its queries return something, and errors can't be
+  replayed. A reduce or a classic condition over the query, or an instant
+  query, is replayed.
 - Replays see the history as it is now. `--late DUR` replays as if metrics
   arrived DUR after their time, but a delay that varies can't be read from
   history: a rule that resolved and fired again while the latest points

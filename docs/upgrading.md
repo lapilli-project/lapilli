@@ -222,6 +222,43 @@ confirmed window is an incident written down, which keeps everyone's
 record. A ledger that never kept a window of a signal no longer in effect
 judges as before.
 
+## A firing judged by its day
+
+From 0.72.0, `lapilli serve` judges a firing that caught nothing by the
+record of its day, in `--tz`, not of its week: a day's firings are judged
+when an incident was on in the day or in the two weeks before it, or
+`--impact` was read over all of it
+([design/judging.md](design/judging.md), "The record, by day"). There is no
+schema change, and no start judges every firing again: what the pages and
+the API show is read from the ledger as they are asked, so on the upgrade,
+once, the numbers move where a week had an incident part of the way
+through it or its two weeks ended part of the way through it:
+
+- firings of the days of a week before an incident started in it, which
+  were judged, and may have made a rule noisy, are now counted, not judged
+  (`? Not judged`), and the rule's precision, its noisy badge and what a goal
+  reads of them follow;
+- firings of the days after an incident's two weeks ended, in the week they
+  ended in, were judged and are not now;
+- every day the two weeks reach, the same as before.
+
+A week that an incident, or its two weeks, cover whole, and one with no
+incident in it or the two weeks before it, are judged as before. The
+week's own numbers (its record being "kept") are the same: a week has a
+record when any day of it does. A report's `settings` says which in
+`record_by` (`"day"`, or `"week"`; `record_by_week` stays and is true only
+by week), and so does `GET /api/v1/settings`.
+
+To keep the numbers as they were, give `--record-by-week` (the chart's
+`serve.recordByWeek: true`) where serve is started, before the upgrade or
+with it. Nothing is judged again for it, now or when it is changed later:
+no stone depends on whether a firing's record is of its day or its week,
+which is read when a page or a report is asked. Replicas are given the
+same, or they show different numbers from the same ledger.
+
+`lapilli verdict` is unchanged: it judges by the record at the firing's own
+time.
+
 ## The Helm chart
 
 A release's chart has the release's version without the `v` (`0.59.0` for

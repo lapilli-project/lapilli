@@ -202,6 +202,13 @@ settings changed ask it to judge every firing again (`rejudge`, and
 `rejudged` kept once it has). An admin's pause of changes is read from the
 ledger by the leader before each change it carries out.
 
+What a firing's record is kept by, its day or, with `--record-by-week`, its
+week, is a flag each replica is started with. It isn't in what the stones
+were last given by, as no stone depends on it, so a change of it judges
+nothing again; replicas given different ones show different numbers from
+the same ledger: give them the same. "The record, by day" in
+[judging.md](judging.md).
+
 ## The writers' turn
 
 Every write, on every replica, takes one lock first, in its transaction:

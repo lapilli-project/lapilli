@@ -154,6 +154,11 @@ type Options struct {
 	// budget of its own.
 	Alertmanager *Notifications
 	am           *notifyRun
+	// GrafanaExternal says Grafana sends its alerts to the Alertmanager
+	// that Alertmanager reads: a Grafana rule is checked against its
+	// routes and templates as a ruler's rule is. When Grafana sends to
+	// it alone, Notify is left nil by the caller.
+	GrafanaExternal bool
 	// scrapes are Scrape and Jobs, read once for every rule.
 	scrapes Scrapes
 }
@@ -188,6 +193,7 @@ func Check(rs []rules.Rule, o Options) [][]Finding {
 	}
 	if o.Alertmanager != nil {
 		o.am = o.Alertmanager.run(o.NotifyBy)
+		o.am.grafana = o.GrafanaExternal
 	}
 	o.scrapes.names = o.scrapes.sorted()
 	sevs := severityCounts(rs)

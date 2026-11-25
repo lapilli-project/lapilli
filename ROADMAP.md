@@ -30,6 +30,58 @@ Some areas need what the current maintainer doesn't have: an AWS or Azure
 account with a managed Prometheus, Loki alerts in real use, an incident
 tool. If you do, you are the person this needs.
 
+## Toward 1.0
+
+1.0 is when what Lapilli keeps stops changing in a minor release. While
+the version is 0.x, a minor release may change a flag or the API, its
+changelog entry saying how (GOVERNANCE.md); the numbers past 0.99 are
+0.100 and on, so 1.0 comes when what is below is done, not by counting.
+
+What 1.0 keeps, through every 1.x:
+
+- What [docs/numbers.md](docs/numbers.md#what-stays-the-same) lists (the
+  report's fields, the metrics and their labels, the CSV's columns, the
+  summary's and `--compare`'s schemas) changes only in a major release. A
+  minor release may add to it, as now, said in the changelog.
+- A command's flags, and serve's API ([docs/api.md](docs/api.md)), keep
+  their names and meaning. One renamed is still taken under its old name
+  until the next major release, a flag saying on stderr what it is now;
+  one taken away goes only in a major release.
+- The chart's values keep their names the same way.
+- A ledger a 1.x release wrote opens in every later 1.x, upgraded as it
+  opens. What it holds that was recorded (the firings, incidents,
+  notifications, notes, comments and what people set) is kept through each
+  schema step; what is worked out from it may be worked out again. Going
+  back to an earlier release after a schema step needs the copy kept
+  before it, as now ([docs/upgrading.md](docs/upgrading.md)).
+
+What comes before it, as it is what everyone starts from:
+
+- **Newer servers.** The replay checked against the latest Prometheus,
+  Grafana and Loki, not only the versions pinned here: their recordings
+  taken with the `measure` workflow and kept in `internal/replay/testdata`
+  beside the pinned ones, each real-server test passing on both
+  ([Replay fidelity](#replay-fidelity)).
+- **Pull request backtests through serve without a gap.** A rule serve
+  doesn't run backtested, not left out; and a Loki ruler's rules, Grafana's
+  rules and cloud alarms compared as parsed, not by their text, as
+  Prometheus's are ([Pull request backtests](#pull-request-backtests)).
+- **Several replicas held by CI.** The kind e2e of three replicas
+  (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)).
+- **The names looked at once more.** Every flag, API route, chart value
+  and report field read through as it will be kept; what 0.x left
+  misnamed, or doing two things, renamed or split in the last 0.x minor
+  releases, said in the changelog with what to do; and what takes a
+  renamed flag or route under its old name, which nothing does yet.
+
+Until then minor releases go on at most twice a week, each with what was
+merged since the last (GOVERNANCE.md); 1.0 is the release after the last
+of these is done. What needs an account or people the maintainer doesn't
+have (checking the clouds, the trackers, the incident tools and managed
+Postgres for real, a review by people who use a screen reader, the
+Homebrew tap) doesn't wait for 1.0 and doesn't hold it: each comes in a
+1.x minor release as someone brings it.
+
 ## A first look
 
 `cmd/lapilli`
@@ -48,12 +100,15 @@ week.
 A replay is only as useful as it is faithful: a rule that fired differently
 from how it really did is the worst kind of wrong.
 
-Built (0.25), measured against a real Grafana 13.3.1 and Prometheus 3.5.0
+Built (0.25), measured against a real Grafana 13.3.1 and Prometheus 3.5.0,
 and kept as test data ([docs/design/states.md](docs/design/states.md)):
 Grafana's no data states and missing series, classic conditions with every
 reducer, `query_offset`, a Grafana window ending before now, `--late`, and
-groups placed where Prometheus places them, for rules read from its API.
-Still to do:
+groups placed where Prometheus places them, for rules read from its API,
+and for rule files by the group of the same name the rules API lists, its
+hash checked against the groups' own evaluations (0.72); a placed group
+replayed from its last evaluation before the period, so a firing on at the
+period's start is replayed as it fired (0.72). Still to do:
 
 - Newer Grafana, Prometheus and Loki. What Grafana's expressions mean is
   written again here (`internal/sse`), not read from Grafana. Built: the
@@ -63,29 +118,35 @@ Still to do:
   (`run.sh`, `service.sh`) for the first two, and `upstream.yml` runs them
   weekly against each one's latest image, so a change in how a server
   evaluates is found by a failing run before a user's `--check-replay`
-  finds it. Still to do: the measurements kept as test data
-  (`internal/replay/testdata/grafana-13.3.1*`, `prometheus-3.5.0`,
-  `loki-3.7.9`) are taken by hand, and are of those versions; and nothing
-  opens the pull request that moves a pin, by choice so far (a workflow
-  that could would need to write to the repository).
+  finds it. The measurements kept as test data are taken again at any
+  version by `test/e2e/measure.sh` and the `measure` workflow (0.72), and
+  kept for the pinned versions. Still to do: the latest versions'; the workflow
+  is run by hand, a run being two hours and its recordings looked at
+  before they are kept; and nothing opens the pull request that moves a
+  pin, by choice so far (a workflow that could would need to write to the
+  repository).
 - Query errors. History can't say when a query failed, so a rule's error
   states aren't replayed: Grafana's error alerts are left out of what really
   fired, and `--check-replay` says how many; `serve` keeps no count of them.
+  A Grafana rule whose condition comes to a time series, which errors at
+  every evaluation, is listed as not replayed, with why (0.72).
 - A query's history before the day before a period: a query that has
   returned nothing for longer is taken to have no history, not no data.
 - Rules written in LogQL are built (0.28): a Loki ruler's, from its files
   or its API, and Grafana's on a Loki data source, through Grafana's data
   source proxy, measured against Loki 3.7.9 and Grafana 13.3.1
-  ([docs/design/loki.md](docs/design/loki.md)). Still to do: a Grafana rule
-  reading Prometheus with a Loki query beside its condition, which is
-  replayed in part (the Loki query could be asked); classic conditions over
-  Loki; a Loki group's fraction of a second, and instant queries an
-  evaluation for a short `--check-replay`, which would see exactly what the
-  ruler saw; and a Loki ruler's rule files changed by a pull request, and
-  a rule added to Loki's ruler (today both for a person). A Loki ruler's
-  rules read from its API are changed through it, as Mimir's are, and the
-  chart takes Loki's values, since 0.70
-  ([docs/design/rulers.md](docs/design/rulers.md)). SQL and the other data sources stay out: a
+  ([docs/design/loki.md](docs/design/loki.md)); classic conditions over
+  Loki, and a Grafana rule reading Prometheus with a Loki query beside its
+  condition, replayed whole (0.72), checked against a real Grafana and Loki
+  in `test/e2e/loki.sh` and in those measurements. Still to do: a condition reading Prometheus and
+  Loki together, and a Prometheus query beside a Loki condition, which need
+  a condition evaluated over two histories; a Loki group's fraction of a
+  second, and instant queries an evaluation for a short `--check-replay`,
+  which would see exactly what the ruler saw. A Loki ruler's rules are
+  changed as every other rule is: those read from its API through it, as
+  Mimir's are, and the chart takes Loki's values, since 0.70
+  ([docs/design/rulers.md](docs/design/rulers.md)), and those of its rule
+  files by the git path, a new rule to either, since 0.72. SQL and the other data sources stay out: a
   database keeps no history of what a query returned (the design says why).
   Their rules, read with `--grafana`, are judged from Grafana's own alert
   state history instead, with no backtest
@@ -99,13 +160,10 @@ Still to do:
   files.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
-- A firing on when a period starts, of a group placed within its interval
-  (`--loaded-rules`, Loki's), that ends before the group's first evaluation
-  in the period: it was decided at the evaluation before, which the replay
-  doesn't make.
-- Where Prometheus places a group read from a file: the hash takes the path
-  Prometheus loaded it from. `serve` could take it from the history's own
-  rules API, by the group's name.
+- A ruler started within an interval of a period's start: a placed group
+  is replayed from its last evaluation before the period (0.72), which a
+  ruler that had just started hadn't made yet. Lapilli doesn't know when a
+  ruler started.
 - How long before a period Grafana's alerts are worked out from: an hour, for
   `noDataState` other than `NoData`.
 
@@ -158,9 +216,12 @@ noisy: a rule that fires as often says what its firings were (0.41).
   `rate`, `bytes_over_time` and `bytes_rate` (0.70). Grafana's classic
   conditions, a Grafana rule's range queries, and LogQL's `unwrap` are
   still left unsaid.
-- lapilli serve judges a firing by its week's record; lapilli verdict by the
-  record at the firing's own time. Judging serve's by the day, from its
-  daily tallies, would bring the two closer.
+- lapilli serve judges a firing by its day's record (0.72; `--record-by-week`
+  keeps the week); lapilli verdict by the record at the firing's own time.
+  They still differ where an incident starts later in the firing's day, on
+  the day an incident's two weeks end, and where an impact signal starts
+  within a day ([docs/design/judging.md](docs/design/judging.md)). Taking
+  the impact signal's data floor by the day would bring them closer still.
 
 - Near misses by value for a Grafana math expression joining comparisons
   with `&&` or `||`, and for classic conditions, are built (0.25). A
@@ -306,8 +367,8 @@ is built in and none is favoured.
   misses are looked for by the link too (0.68). Grafana IRM's APIs don't
   say which alerts an incident came from (links.md, "Grafana IRM"): its
   linked alerts are read once they do; its incidents are read by
-  `QueryIncidentPreviews` since 0.71. Still to do: `--linked-only` as a
-  setting in the UI.
+  `QueryIncidentPreviews` since 0.71. `--linked-only` is a setting an admin
+  changes on the Settings page since 0.72.
 
 ## lapilli serve
 
@@ -346,8 +407,8 @@ is built in and none is favoured.
 - `lapilli preflight` (0.53; what each identity may write, 0.60; the
   backtest lane, 0.62) says what serve will meet before it is deployed,
   and writes nothing ([docs/design/preflight.md](docs/design/preflight.md)).
-  Still to do: each rule's expression asked once, behind `--queries`; the
-  same checks in serve, on the Settings page, once a day.
+  Each rule's expression asked once, behind `--queries` (0.72). Still to
+  do: the same checks in serve, on the Settings page, once a day.
 - Agents over MCP (0.13): they read what the pages show, backtest a change
   they propose, keep it as a proposal, and since 0.65 draft and test
   expectations ([docs/mcp.md](docs/mcp.md)); they never approve or apply.
@@ -367,14 +428,13 @@ is built in and none is favoured.
   which a ruler's rules are sent with, from its configuration or Mimir's
   and Cortex's, and a range over a selector that names no job by the jobs
   its metric comes from (0.70); `--alertmanager-config` in the chart and in
-  `lapilli preflight` (0.71). Still to do: Grafana's rules sent to an
-  outside Alertmanager.
+  `lapilli preflight` (0.71); Grafana's rules sent to an outside
+  Alertmanager, checked against its configuration (0.72).
 - An accessibility review of the UI and its charts, to WCAG 2.2 AA, is
   built (0.28): axe-core over every page in a browser, and tests that hold
   each page's structure, its contrast and its charts' numbers in tables
   ([docs/design/access.md](docs/design/access.md)). Still to do: a review
-  by people who use a screen reader day to day, and the heatmap's long
-  rule names, cut short.
+  by people who use a screen reader day to day.
 
 - The ledger in Postgres (0.34, [docs/design/postgres.md](docs/design/postgres.md)):
   `--ledger-url-file`, the same tables and statements as SQLite's, and
@@ -450,9 +510,10 @@ each:
    alarms.
 4. A new rule, proposed held to its expectations: built (0.65), with a
    team as the boundary of change, its approvers, where its rules are
-   written and its freezes, in `--config` (0.64). Not offered where the
-   design says why: Azure's rule groups and alert rules, OCI's alarms, a
-   new Grafana group, a new rule file.
+   written and its freezes, in `--config` (0.64); to Loki's ruler and its
+   rule files too (0.72). Not offered where the design says why: Azure's
+   rule groups and alert rules, OCI's alarms, a new Grafana group, a new
+   rule file.
 
 ## Not planned
 

@@ -38,7 +38,7 @@ func (s *Server) newRulePage(r *http.Request) (any, error) {
 	case !s.replaying():
 		v.Off = "this lapilli serve reads no rules of its own: there is nothing to add to"
 	case len(offers) == 0:
-		v.Off = "No place serve reads takes a rule added: a group of a rule file under --rules, a Grafana folder's group, a ruler's namespace --changes-in names, or CloudWatch's or Google Cloud's alarms read with --alarms."
+		v.Off = "No place serve reads takes a rule added: a group of a rule file under --rules or --loki-rules, a Grafana folder's group, a ruler's namespace --changes-in names (Loki's as loki:NAMESPACE), or CloudWatch's or Google Cloud's alarms read with --alarms."
 	}
 	return v, nil
 }
@@ -179,10 +179,11 @@ type placesOut struct {
 }
 
 type placeOut struct {
-	Path        string   `json:"path" jsonschema:"git, grafana, ruler or alarm: the way a change goes there"`
+	Path        string   `json:"path" jsonschema:"git, grafana, ruler, loki or alarm: the way a change goes there"`
 	File        string   `json:"file,omitempty" jsonschema:"git: the rule file, as the rules are named by it"`
+	Loki        bool     `json:"loki,omitempty" jsonschema:"git: the file is a Loki ruler's rule file (--loki-rules), whose rule is LogQL; loki, a Loki ruler's API: its rule is LogQL too"`
 	Folder      string   `json:"folder,omitempty" jsonschema:"grafana: the folder's title"`
-	Namespace   string   `json:"namespace,omitempty" jsonschema:"ruler: the namespace"`
+	Namespace   string   `json:"namespace,omitempty" jsonschema:"ruler and loki: the namespace"`
 	Alarms      string   `json:"alarms,omitempty" jsonschema:"alarm: the --alarms source"`
 	Group       string   `json:"group,omitempty" jsonschema:"the group; none for a new group, whose name you give"`
 	NewGroup    bool     `json:"new_group,omitempty" jsonschema:"a new group, made for the rule, in that file or namespace"`
@@ -200,7 +201,7 @@ func (s *Server) toolPlaces(ctx context.Context, _ *mcp.CallToolRequest, _ place
 		return nil, out, err
 	}
 	for _, o := range offers {
-		out.Places = append(out.Places, placeOut{Path: o.Path, File: o.File, Folder: o.Folder, Namespace: o.Namespace, Alarms: o.Alarms, Group: o.Group,
+		out.Places = append(out.Places, placeOut{Path: o.Path, File: o.File, Loki: o.Loki, Folder: o.Folder, Namespace: o.Namespace, Alarms: o.Alarms, Group: o.Group,
 			NewGroup: o.NewGroup, DataSources: o.DataSources, Tells: o.Tells, MustTell: grafanaRouted(o.addPlace, o.Tells, o.routed) != nil})
 	}
 	return nil, out, nil
@@ -209,7 +210,7 @@ func (s *Server) toolPlaces(ctx context.Context, _ *mcp.CallToolRequest, _ place
 // addOf is an agent's ask to add a rule: its place, as places gives one.
 func (in proposeIn) addOf(reason string) (addAsk, error) {
 	q := addAsk{Rule: in.Added, Expect: in.Expectations, Tests: in.Tests, From: "agent", Reason: reason,
-		Place: addPlace{Path: in.Path, File: in.File, Folder: in.Folder, Namespace: in.Namespace, Alarms: in.Alarms, Group: in.Group,
+		Place: addPlace{Path: in.Path, File: in.File, Loki: in.Loki, Folder: in.Folder, Namespace: in.Namespace, Alarms: in.Alarms, Group: in.Group,
 			NewGroup: in.NewGroup, DataSource: in.DataSource, Tells: in.Tells}}
 	d, err := durationOrZero(in.Interval)
 	if err != nil {

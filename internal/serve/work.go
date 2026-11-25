@@ -76,6 +76,8 @@ const judgedBy = "j3"
 // linkedText is judgedBy, then --linked-only as "1" and --match-strict as
 // "m", in that order, as meta keeps them: a ledger before they were judged
 // has "", and one judged before judgedBy has the flags alone.
+// --record-by-week isn't in it: no stone depends on whether a firing's
+// record is of its day or its week, which is read when a page is asked.
 func linkedText(o verdict.Options) string {
 	v := judgedBy
 	if o.LinkedOnly {
@@ -152,7 +154,11 @@ func (s *Server) linkedAgain(ctx context.Context, own string) (was string, again
 // this replica's --linked-only isn't what the ledger was last judged by:
 // both values, and whether it judges every firing again (linkedAgain).
 func (s *Server) logLinked(ctx context.Context) {
-	own := linkedText(s.cfg.Options)
+	o, err := s.options(ctx)
+	if err != nil {
+		return
+	}
+	own := linkedText(o)
 	was, again, err := s.linkedAgain(ctx, own)
 	switch {
 	case err != nil || was == own:
@@ -999,7 +1005,8 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 
 func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, error) {
 	as, scrapes := s.replayedAs(), s.scrapes()
-	k := fmt.Sprint(s.cfg.Ledger, "\x00", s.cfg.LedgerURLFile, "\x00", v.ID, "\x00", v.Digest, "\x00", as.DataSources, "\x00", scrapes.String(), "\x00", as.Kinds, "\x00", as.Places, as.NoLoki, as.NoGrafanaLoki)
+	k := fmt.Sprint(s.cfg.Ledger, "\x00", s.cfg.LedgerURLFile, "\x00", v.ID, "\x00", v.Digest, "\x00", as.DataSources, "\x00", scrapes.String(), "\x00", as.Kinds, "\x00", as.Places, as.NoLoki, as.NoGrafanaLoki,
+		"\x00", as.Listing.Tag(), "\x00", as.LokiListing.Tag())
 	parsed.Lock()
 	rs, ok := parsed.m[k]
 	parsed.Unlock()
@@ -1017,6 +1024,7 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 		}
 	}
 	as.Apply(rs)
+	s.sayUnplaced(as.Unplaced)
 	parsed.Lock()
 	if len(parsed.m) >= 128 {
 		for k := range parsed.m { // one out, any one: most are in use
@@ -1041,6 +1049,9 @@ func (s *Server) replayedAs() rules.Replaying {
 	s.places.Unlock()
 	p := rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval, DataSources: ds, Kinds: kinds, Places: places,
 		NoLoki: s.cfg.Loki == "", NoGrafanaLoki: s.cfg.Loki == "" && s.cfg.Grafana == ""}
+	s.listing.Lock()
+	p.Listing, p.LokiListing, p.Unplaced = s.listing.prom, s.listing.loki, s.listing.unplaced
+	s.listing.Unlock()
 	if sc := s.scrapes(); s.cfg.ScrapeInterval == 0 && sc.Global > 0 {
 		p.ScrapeOf = sc.Shortest
 	}
@@ -1189,6 +1200,7 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	s.askScrape(ctx)
 	s.askNotify(ctx)
 	s.askAlertmanager(ctx)
+	s.askSends(ctx)
 	s.askJobs(ctx, s.matching(rs))
 	sum := docsSum(docs)
 	if sum == *raw {
@@ -1508,6 +1520,7 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	if primary {
 		s.noteRead("rules", began, len(rs), err)
 	}
+	s.readListings(ctx)
 	// What is read beside them is read, and noted, whatever the rules'
 	// read came to: one left unread because another failed would age into
 	// quiet on the Sources page, and be told down.
@@ -1519,6 +1532,62 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		return nil, nil, err
 	}
 	return append(rs, r...), append(docs, d...), nil
+}
+
+// readListings asks the history's rules API, and --loki's, for the groups
+// they list, when rules are read from rule files, to place those groups
+// where the servers run the groups of their names (rules.Listing). Each is
+// asked once a read, as a read lapilli can do without (not waited for, nor
+// held to the API's pushing back): when it can't be read, the groups are
+// placed by what was last read, or on the steps' grid, and it is said once.
+func (s *Server) readListings(ctx context.Context) {
+	agent := "lapilli/" + s.cfg.Version
+	ownRules := !s.cfg.Loaded && s.cfg.Grafana == "" && s.ruler == nil && !s.following()
+	if ownRules && s.cfg.RulesPath != "" && s.h != nil {
+		l, err := source.Listed(ctx, s.h, true)
+		s.setListing(&s.listing.prom, &s.listing.promBad, "the history's rules API", l, err)
+	}
+	if s.cfg.LokiRules != "" && !s.cfg.LokiLoaded && s.cfg.Loki != "" {
+		l, err := source.LokiListed(ctx, source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant, Limit: s.cfg.LokiLimit}, agent, true)
+		s.setListing(&s.listing.loki, &s.listing.lokiBad, "--loki's rules API", l, err)
+	}
+}
+
+func (s *Server) setListing(at **rules.Listing, bad *bool, of string, l *rules.Listing, err error) {
+	s.listing.Lock()
+	defer s.listing.Unlock()
+	switch {
+	case errors.Is(err, source.ErrNoRulesAPI):
+	case err != nil:
+		if !*bad {
+			s.log.Warn(of+" couldn't be read: the groups read from rule files are placed as last read, or on the steps' grid", "err", err)
+		}
+		*bad = true
+	default:
+		*bad = false
+		if l.Tag() != (*at).Tag() {
+			// Another listing places differently: what was collected of
+			// the last is of its own.
+			s.listing.unplaced = &rules.Unplaced{}
+		}
+		*at = l
+	}
+	if s.listing.unplaced == nil {
+		s.listing.unplaced = &rules.Unplaced{}
+	}
+}
+
+// sayUnplaced logs, when it changes, which groups read from rule files
+// couldn't be placed by the rules API, and why.
+func (s *Server) sayUnplaced(u *rules.Unplaced) {
+	said := strings.Join(u.Said("the history's rules API"), "; ")
+	s.listing.Lock()
+	changed := said != s.listing.said
+	s.listing.said = said
+	s.listing.Unlock()
+	if changed && said != "" {
+		s.log.Info("groups read from rule files, placed by the rules API", "said", said)
+	}
 }
 
 // extras are the rules read beside the rules: a cloud's own alarms, and a
@@ -2624,7 +2693,7 @@ func digestAbout(rep *verdict.Report, text, team string, spare []string) map[str
 	}
 	missed, onlyNoisy := 0, 0
 	for _, in := range rep.Incidents {
-		if in.Missed() {
+		if in.Missed() && !in.Unreplayed {
 			missed++
 		}
 		if in.OnlyNoisy() {

@@ -28,7 +28,7 @@ service's POST among them), and the processes AWS's credential_process and
 Google's executable credentials start.
 
 Usage:
-  lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline]
+  lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline] [--queries]
 
 Every flag of lapilli serve (lapilli serve -h), read as serve reads it: one
 serve refuses, it refuses, and exits 2. Its own:
@@ -40,6 +40,17 @@ serve refuses, it refuses, and exits 2. Its own:
                       and the estimates of requests and time are worked out.
                       The files of secrets and --ledger-url-file aren't
                       read. For CI, against what a pull request changes
+  --queries           ask each rule's expression once, an instant query at
+                      now, of where it is replayed: --prometheus (or
+                      --gcp-project, the clouds' PromQL, and the queries of
+                      Grafana's rules), --loki and Grafana's Loki data
+                      sources. Off by default: it is the one place a
+                      preflight sends an expression a person wrote. Each
+                      rule whose query fails is said with why (parse error,
+                      unknown function, too many samples, timeout), by where
+                      it was asked. It writes nothing, and keeps to
+                      --max-rate, --max-samples and --parallel, and to
+                      --preflight-timeout
   --preflight-timeout DUR
                       the whole of it (default 2m); --timeout stays serve's,
                       a run's, read for the estimates
@@ -72,7 +83,7 @@ CI's or a jwks_url (said as the file's issuer N), never.
 `
 
 func runPreflight(args []string, stdout, stderr io.Writer) int {
-	asJSON, failUnknown, offline := false, false, false
+	asJSON, failUnknown, offline, queries := false, false, false, false
 	timeout := 2 * time.Minute
 	var rest []string
 	refuse := func(err error) int {
@@ -86,7 +97,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		case "-h", "--help":
 			fmt.Fprint(stdout, preflightUsage)
 			return 0
-		case "--json", "--fail-unknown", "--offline":
+		case "--json", "--fail-unknown", "--offline", "--queries":
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
 				return refuse(err)
@@ -96,6 +107,8 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 				asJSON = on
 			case "--fail-unknown":
 				failUnknown = on
+			case "--queries":
+				queries = on
 			default:
 				offline = on
 			}
@@ -122,7 +135,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 	f := st.f
-	c := preflight.Config{Serve: st.cfg, MaxRate: f.maxRate, MaxSamples: f.maxSamples, Offline: offline, Timeout: timeout,
+	c := preflight.Config{Serve: st.cfg, MaxRate: f.maxRate, MaxSamples: f.maxSamples, Offline: offline, Queries: queries, Timeout: timeout,
 		Version: buildVersion(), Now: now, TrustFile: st.trustFile, TrustErr: st.trustErr}
 	if f.promURL != "" || f.gcpProj != "" {
 		c.History = f.prometheus()

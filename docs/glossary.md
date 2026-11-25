@@ -116,7 +116,7 @@ A firing is judged when the record was kept at its time: an incident was
 on at some time in the two weeks before it, a signal of impact was read
 over its time, or it caught one. Any other is counted, not judged: it is in
 no precision and makes no rule noisy. The UI marks it "? Not judged".
-`lapilli serve` judges by week. See [The numbers](numbers.md#no-record).
+`lapilli serve` judges by day, in `--tz` (by week with `--record-by-week`). See [The numbers](numbers.md#no-record).
 
 ### Lead
 

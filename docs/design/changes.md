@@ -6,6 +6,8 @@ v0.23.0 ([rulers.md](rulers.md), and its "As built"); the third, a cloud's
 own alarms, for v0.24.0 ([alarms.md](alarms.md), and its "As built"),
 with turning a rule off or deleting it waiting while it fires, on every
 path.
+A Loki ruler's rule files, and a rule added to Loki, went the same ways
+after, for v0.72.0 ("As built").
 Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
 the ledger, so it was designed first, as a pull request (#40); it was merged
@@ -143,8 +145,8 @@ credentials already are (a CI job, a CronJob), and:
 by editing the YAML's tree (`yaml.v3` nodes), not by writing it out afresh,
 so comments, order and quoting stay as they were; the diff is of that.
 Rule files, PrometheusRule resources, ConfigMaps holding either, Grafana's
-provisioning files and the clouds' rule groups as their CLIs write them can
-be edited so. A document no file in the clone matches (rules rendered from
+provisioning files, the clouds' rule groups as their CLIs write them and a
+Loki ruler's rule files (`--loki-rules`, read as LogQL) can be edited so. A document no file in the clone matches (rules rendered from
 a Helm chart, Kustomize, Jsonnet, Terraform) gets no edit: the recipe opens
 a pull request, or an issue, with the diff of the rendered rule and the
 evidence, for a person to make the change where it is written.
@@ -173,7 +175,9 @@ target's own (below).
 
 Prometheus itself, Thanos's ruler and VictoriaMetrics's vmalert have no API
 to write a rule: their rules are files, and the git path is theirs. A rule
-read with `--loaded-rules` is one of those. A rule whose place is managed by
+read with `--loaded-rules` is one of those, and so is a Loki rule read with
+`--loki-rules`: a Loki that keeps its rules in files has no API to write
+them either, and its rules are changed in the repository they are kept in. A rule whose place is managed by
 a tool (git, Terraform, a GitOps controller) is refused through the API,
 with the reason, and offered the git path: a change made around such a
 tool is undone by it, or fights it. The operator can name the tags or
@@ -691,12 +695,40 @@ The first step, for v0.22.0, as above, except:
   rule's form, `/proposals/new`) or an agent (`propose`, kind `add`) gives,
   with a place among those serve offers (a rule file's group or a new one,
   a Grafana folder's group, a ruler namespace's group or a new one,
-  CloudWatch's or Google Cloud's alarms) and what it is held to. It goes
-  the four paths, each making the rule as undoing a deletion makes one
-  there, and undone by deleting it; it isn't approved while it breaks an
+  CloudWatch's or Google Cloud's alarms; and, for v0.72.0, the same in a
+  Loki ruler's rule file or namespace, its rule written in LogQL) and what
+  it is held to. It goes the four paths, each making the rule as undoing
+  a deletion makes one there, and undone by deleting it; it isn't approved while it breaks an
   expectation, or its backtest didn't replay it. Lapilli proposes none of
   itself. The kinds are now for, threshold, disable, delete, says and add,
   and undo.
+- **Loki's rules, every way the others go** (v0.72.0). A Loki rule read
+  from a rule file (`--loki-rules`) is changed by the git path: a longer
+  `for`, a number, what it says, its deletion, each a pull request that
+  edits the one rule in the file as Lapilli read it and leaves every other
+  line, backtested in LogQL. The file is the one read as Loki's: a
+  directory read with `--rules` and `--loki-rules` both holds one file as
+  two documents, and the change is made to, and read back as, the Loki
+  document of the rule. Turning a rule off isn't offered, as for any rule
+  file. A rule is added to Loki as it is to the others: to a group, or a
+  new group, of a Loki rule file the git path reads, or of a namespace
+  `--changes-in` names as `loki:NAMESPACE` through Loki's ruler's API
+  (path `loki`), its rule LogQL, backtested in Loki and held to its
+  expectations as any rule is. Each place says it is Loki's (`loki` on
+  `places`, `(Loki)` after a file's name), and a Loki file isn't the
+  Prometheus one of the same path. Two limits are Loki's own: a
+  `keep_firing_for` isn't added to a rule file, which Loki 3.7.9 drops
+  when it reads one, and Loki takes writes through its API only where its
+  ruler's store does ([rulers.md](rulers.md#lokis-ruler)). A new file
+  isn't offered for Loki either: the reason holds as it does for
+  Prometheus ([expectations.md](expectations.md)), a recipe finds the file
+  a change is made in by the hash of the document Lapilli read, and a file
+  not yet there is none. Approval, the pause, freezes, a team as the
+  boundary (its `changes_in` names a Loki namespace as `loki:NAMESPACE`;
+  a pull request, Loki's file or another's, is reviewed where the rule is
+  kept, as before), the activity log and MCP's `propose` and `places` are
+  the other rules' own: nothing there switches on whether a rule is
+  Loki's.
 - **Not yet:** proposals in the weekly digest's tasks line, and a
   proposal carried by a task made elsewhere (a proposal can be made into a
   task).

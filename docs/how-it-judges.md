@@ -28,7 +28,11 @@ again yourself from the report, in [docs/numbers.md](numbers.md).
   loaded, as `GET /api/v1/rules` lists them: Prometheus, Thanos, Mimir,
   vmalert, Amazon Managed Service for Prometheus. Each group is evaluated at
   the second of its interval it last ran at, as the API says, where
-  Prometheus placed it.
+  Prometheus placed it. Groups read from files are placed the same way when
+  the API lists a group of their name once ([limits](limits.md)); the
+  period starts from each placed group's last evaluation before it, so a
+  firing on at the start that ends before the group's first evaluation in
+  the period isn't left out.
 - `--grafana URL`: replay the alert rules a Grafana holds, made in its UI
   or not, read through its provisioning export API with the service account
   token in `--grafana-token-file`; and the scrape interval each data source
@@ -228,9 +232,13 @@ beside them under `or`, a bound of nothing, nor a range narrower than two
 fifths of its ends (docs/design/serve.md, "With no record: which
 conditions"); and the alerts that fired most. Those happened; whether they mattered is for a
 person to write down (`"unrecorded"` in `--json`). lapilli serve judges a
-firing by its week instead: a week whose record is kept, an incident on in
-it or in the two weeks before it, or `--impact` read over all of it, and,
-with a team picked, by the incidents the team owns.
+firing by its day instead (in `--tz`): a day whose record is kept, an
+incident on in it or in the two weeks before it, or `--impact` read over
+all of it, and, with a team picked, by the incidents the team owns. It
+differs from `lapilli verdict` where an incident starts later the same day
+as a firing, which keeps the day's record, and on the day an incident's two
+weeks end, which is kept from its midnight. `--record-by-week` judges by
+the week, as serve did before 0.72.
 
 ## What to change about a noisy rule
 

@@ -353,7 +353,7 @@ func historyErrors(ts []firing.Transition, lead, from, to time.Time, given []rul
 	}
 	fs, _ := firing.FromTransitions(errs, lead)
 	fs = slices.DeleteFunc(fs, func(x firing.Firing) bool {
-		return !x.Active(from, to) || !x.End.IsZero() && !x.End.After(from)
+		return !x.Active(from, to)
 	})
 	return errorsOf(fs, given)
 }
