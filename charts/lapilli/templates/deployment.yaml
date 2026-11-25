@@ -233,6 +233,12 @@ spec:
             - {{ printf "--source-quiet=%s" . | quote }}
             {{- end }}
             {{- end }}
+            {{- range $src, $rt := (($s.responses).tokenSecrets | default dict) }}
+            - {{ printf "--responses-token-file=%s=/var/run/lapilli/responses-token/%s/%s" $src $src ($rt.key | default "token") | quote }}
+            {{- end }}
+            {{- if ($s.responses).configMap.name }}
+            - {{ printf "--responses=/etc/lapilli/responses/%s" $s.responses.configMap.key | quote }}
+            {{- end }}
             {{- if $s.onCall.configMap.name }}
             - {{ printf "--on-call=/etc/lapilli/on-call/%s" $s.onCall.configMap.key | quote }}
             {{- end }}
@@ -483,6 +489,16 @@ spec:
               mountPath: /var/run/lapilli/firings-token
               readOnly: true
             {{- end }}
+            {{- range $src, $rt := (($s.responses).tokenSecrets | default dict) }}
+            - name: responses-token-{{ $src }}
+              mountPath: {{ printf "/var/run/lapilli/responses-token/%s" $src }}
+              readOnly: true
+            {{- end }}
+            {{- if ($s.responses).configMap.name }}
+            - name: responses
+              mountPath: /etc/lapilli/responses
+              readOnly: true
+            {{- end }}
             {{- if $s.trackers.tokenSecret.name }}
             - name: tasks-token
               mountPath: /var/run/lapilli/tasks-token
@@ -666,6 +682,20 @@ spec:
         - name: firings-token
           secret:
             secretName: {{ $s.firings.tokenSecret.name }}
+        {{- end }}
+        {{- range $src, $rt := (($s.responses).tokenSecrets | default dict) }}
+        - name: responses-token-{{ $src }}
+          secret:
+            secretName: {{ $rt.name }}
+            defaultMode: 0440
+            items:
+              - key: {{ ($rt.key | default "token") | quote }}
+                path: {{ ($rt.key | default "token") | quote }}
+        {{- end }}
+        {{- if ($s.responses).configMap.name }}
+        - name: responses
+          configMap:
+            name: {{ $s.responses.configMap.name }}
         {{- end }}
         {{- if $s.trackers.tokenSecret.name }}
         - name: tasks-token

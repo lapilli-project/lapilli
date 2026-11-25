@@ -1288,7 +1288,7 @@ func (s *Server) changesTokenRoutes(mux *http.ServeMux) {
 		return
 	}
 	tk := token{s.cfg.ChangesToken, ledger.ChangesCopier, "--changes-token-file",
-		[]string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken}, &s.changes.warned, 64 << 10, s.changes.rate, s.changes.busy}
+		append([]string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken}, s.cfg.ResponsesFiles()...), &s.changes.warned, 64 << 10, s.changes.rate, s.changes.busy}
 	mux.HandleFunc("GET /api/v1/changes", s.withToken(tk, s.apiChanges))
 	mux.HandleFunc("PATCH /api/v1/changes/{id}", s.withToken(tk, s.apiPatchChange))
 	// Drafts of expectations accepted by the git path, as changes to the

@@ -1,0 +1,6 @@
+rule,severity,team,labels,start,end,stone,no_record,incidents,refired,during_deploy,excused,marked,episode,unrelated,action,response,useful,rule_changed,rule_routine,rule_acknowledged,rule_unanswered,rule_none,rule_useful,rule_not_useful,rule_actionable
+ApiErrors,critical,,"{""deployment"":""web"",""namespace"":""shop"",""severity"":""critical""}",2026-10-06T10:00:00Z,2026-10-06T10:20:00Z,white,false,"[""INC-1""]",false,false,false,[],1,[],,changed,true,1,0,0,1,0,1,1,0.5
+ApiErrors,critical,,"{""deployment"":""web"",""namespace"":""shop"",""severity"":""critical""}",2026-10-07T09:00:00Z,2026-10-07T09:03:00Z,black,false,[],false,false,false,[],2,[],,unanswered,false,1,0,0,1,0,1,1,0.5
+DiskFull,,,"{""namespace"":""shop"",""pod"":""web-7d4-abc""}",2026-10-08T12:00:00Z,2026-10-08T12:30:00Z,black,false,[],false,false,false,[],3,[],,acknowledged,false,0,0,1,0,0,0,1,0
+QueueDepth,,,"{""service"":""cart""}",2026-10-09T05:00:00Z,2026-10-09T05:30:00Z,black,false,[],false,false,false,[],4,[],,changed,true,1,0,0,0,0,1,0,1
+Latency,,,"{""service"":""other""}",2026-10-10T02:00:00Z,2026-10-10T02:10:00Z,black,false,[],false,false,false,[],5,[],,none,false,0,0,0,0,1,0,1,0

@@ -54,6 +54,10 @@ type Ledger struct {
 	// gen counts writes, for whoever caches what it reads: in a ledger
 	// replicas share, the other replicas' too, as Refresh reads them.
 	gen atomic.Int64
+	// pagesRead counts the pages judging read (pagesNear), for tests.
+	pagesRead atomic.Int64
+	// pageCuts counts the statements asking for the pages near firings.
+	pageCuts atomic.Int64
 	// changed is, by week, the generation the firings in it last changed
 	// in, since the ledger was opened; all, the last in which every week's
 	// may have.

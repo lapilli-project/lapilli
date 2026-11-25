@@ -64,7 +64,7 @@ func (x *Redactor) mac(kind, name string) string {
 // a team label's value is never taken for a team's alias.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,39}$`)
 
-var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true, "kind": true}
+var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true, "kind": true, "page": true}
 
 func prefix(kind string) string {
 	if name, ok := strings.CutPrefix(kind, "label:"); ok {
@@ -183,7 +183,9 @@ type names struct {
 	// signals are the named impact signals' names.
 	signals map[string]bool
 	// kinds are the kinds of marked window, which a team names.
-	kinds     map[string]bool
+	kinds map[string]bool
+	// pages are the ids of the pages firings were sent as.
+	pages     map[string]bool
 	incidents []incident.Incident
 	records   map[string]bool
 	// expected are the incidents expectations name, numbered after those
@@ -270,6 +272,16 @@ func (n *names) report(r *Report) {
 		for _, k := range f.Marked {
 			n.kinds[k] = true
 		}
+		if f.Response != nil {
+			if f.Response.Page != nil {
+				n.pages[f.Response.Page.ID] = true
+			}
+			if f.Response.Change != nil {
+				for k, v := range f.Response.Change.Labels {
+					n.label(k, v)
+				}
+			}
+		}
 	}
 	for _, u := range r.Unrecorded {
 		n.teams[u.Team] = true
@@ -296,7 +308,7 @@ func (n *names) report(r *Report) {
 // prepare numbers every name in the reports and the comparison.
 func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	n := &names{rules: map[string]bool{}, groups: map[string]bool{}, teams: map[string]bool{}, sources: map[string]bool{},
-		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}, kinds: map[string]bool{}}
+		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}, kinds: map[string]bool{}, pages: map[string]bool{}}
 	for _, r := range reps {
 		n.report(r)
 	}
@@ -339,6 +351,8 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	delete(n.sources, "")
 	x.numberAnyhow("source", n.sources)
 	x.numberAnyhow("kind", n.kinds)
+	delete(n.pages, "")
+	x.numberAnyhow("page", n.pages)
 	x.numberAnyhow("record", n.records)
 	delete(n.signals, "")
 	x.numberAnyhow("signal", n.signals)
@@ -660,6 +674,7 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 		}
 		slices.Sort(kinds)
 		f.Marked = kinds
+		f.Response = x.response(f.Response)
 		out[i] = f
 	}
 	slices.SortStableFunc(out, func(a, b Judged) int {
@@ -782,5 +797,31 @@ func (x *Redactor) Comparison(c *Comparison) *Comparison {
 	// PassedOver is Lapilli's own words and counts: kept, a copy.
 	out.PassedOver = maps.Clone(c.PassedOver)
 	out.Unreplayed = x.unreplayed(c.Unreplayed)
+	return &out
+}
+
+// response is a firing's response with the page's id aliased, and the
+// labels of the change as labels are: no person is named in it.
+func (x *Redactor) response(fr *FiringResponse) *FiringResponse {
+	if fr == nil {
+		return nil
+	}
+	out := *fr
+	if fr.Page != nil {
+		p := *fr.Page
+		p.ID = x.alias("page", p.ID)
+		p.Sent, p.Acknowledged, p.Resolved = utc(p.Sent), utc(p.Acknowledged), utc(p.Resolved)
+		out.Page = &p
+	}
+	if fr.Change != nil {
+		c := *fr.Change
+		c.At = utc(c.At)
+		c.Labels = x.labels(c.Labels)
+		out.Change = &c
+	}
+	if fr.Useful != nil {
+		u := *fr.Useful
+		out.Useful = &u
+	}
 	return &out
 }

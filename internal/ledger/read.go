@@ -93,6 +93,11 @@ type Tally struct {
 	// ActionYesBlack are of ActionYes those that caught nothing,
 	// ActionNoWhite of ActionNo those that caught something.
 	ActionYesBlack, ActionNoWhite int
+	// What was done about the firings counted (docs/design/responses.md):
+	// those with each response, and those useful and not useful. The rest
+	// have no response, and an unknown usefulness, which a week's record
+	// turns not useful for a firing that caught nothing and is judged.
+	RespChanged, RespRoutine, RespAcknowledged, RespUnanswered, Useful, NotUseful int
 }
 
 // Add is t with x's counts added.
@@ -113,6 +118,12 @@ func (t Tally) Add(x Tally) Tally {
 	t.ActionNo += x.ActionNo
 	t.ActionYesBlack += x.ActionYesBlack
 	t.ActionNoWhite += x.ActionNoWhite
+	t.RespChanged += x.RespChanged
+	t.RespRoutine += x.RespRoutine
+	t.RespAcknowledged += x.RespAcknowledged
+	t.RespUnanswered += x.RespUnanswered
+	t.Useful += x.Useful
+	t.NotUseful += x.NotUseful
 	return t
 }
 
@@ -122,7 +133,7 @@ func (t Tally) Black() int { return t.Firings - t.White }
 // Days are each rule's stones by day, from day to day, whatever signals
 // its alerts are tied to.
 func (l *Ledger) Days(ctx context.Context, from, to int64) ([]Tally, error) {
-	return l.tallies(ctx, `SELECT day, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white) FROM days
+	return l.tallies(ctx, `SELECT day, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white), sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY day, rule_id ORDER BY day, rule_id`, from, to)
 }
 
@@ -130,7 +141,7 @@ func (l *Ledger) Days(ctx context.Context, from, to int64) ([]Tally, error) {
 // Monday to that starting on another, whatever signals its alerts are
 // tied to.
 func (l *Ledger) Weeks(ctx context.Context, from, to int64) ([]Tally, error) {
-	return l.tallies(ctx, `SELECT week, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white) FROM weeks
+	return l.tallies(ctx, `SELECT week, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white), sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful) FROM weeks
 		WHERE week >= ? AND week <= ? GROUP BY week, rule_id ORDER BY week, rule_id`, from, to)
 }
 
@@ -147,7 +158,7 @@ func (l *Ledger) WeeksBy(ctx context.Context, from, to int64) ([]Tally, error) {
 
 // peopleCols are the tallies' columns of people's verdicts, in Tally's
 // order.
-const peopleCols = "unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white"
+const peopleCols = "unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white, resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful"
 
 func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally, error) {
 	rows, err := l.r.QueryContext(ctx, q, from, to)
@@ -159,7 +170,8 @@ func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally
 	for rows.Next() {
 		var t Tally
 		if err := rows.Scan(&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
-			&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite); err != nil {
+			&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite,
+			&t.RespChanged, &t.RespRoutine, &t.RespAcknowledged, &t.RespUnanswered, &t.Useful, &t.NotUseful); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -337,10 +349,21 @@ type FiringQuery struct {
 	Deploy   bool // only those that came during a deploy
 	// Kind, when given, picks those marked with the kind of marked window
 	// of that name.
-	Kind   string
-	Before int64
-	Limit  int
+	Kind string
+	// Response, when given, picks those with that response, as the ledger
+	// worked it out (verdict.ResponseChanged and the others): none is those
+	// with no response and not excused.
+	Response string
+	Before   int64
+	Limit    int
 }
+
+// ResponseKinds are the responses a query can pick by, in the order a page
+// lists them.
+var ResponseKinds = []string{verdict.ResponseChanged, verdict.ResponseAcknowledged, verdict.ResponseUnanswered, verdict.ResponseRoutine, verdict.ResponseNone}
+
+// responseColumn is what firings.response holds for each kind.
+var responseColumn = map[string]int{verdict.ResponseNone: 0, verdict.ResponseChanged: 1, verdict.ResponseRoutine: 2, verdict.ResponseAcknowledged: 3, verdict.ResponseUnanswered: 4}
 
 // Firings are the firings a query picks.
 func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
@@ -379,6 +402,7 @@ func firingsQuery(q FiringQuery) (string, []any) {
 		sq += " AND f.marked != 0 AND (f.marked & (" + kindBit + ")) != 0"
 		args = append(args, q.Kind)
 	}
+	sq, args = byResponse(sq, args, q)
 	if q.Before > 0 {
 		sq += " AND (f.start_at, f.id) < (SELECT start_at, id FROM firings WHERE id = ?)"
 		args = append(args, q.Before)
@@ -387,6 +411,16 @@ func firingsQuery(q FiringQuery) (string, []any) {
 	if q.Limit > 0 {
 		sq += " LIMIT ?"
 		args = append(args, q.Limit)
+	}
+	return sq, args
+}
+
+// byResponse adds to a statement over firings f what picking by q.Response
+// takes.
+func byResponse(sq string, args []any, q FiringQuery) (string, []any) {
+	if c, ok := responseColumn[q.Response]; ok && q.Response != "" {
+		sq += " AND f.response = ? AND f.excused = 0"
+		args = append(args, c)
 	}
 	return sq, args
 }
@@ -526,6 +560,13 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return nil, err
 	}
 	marks := len(kinds) > 0
+	inputs, err := l.ResponseInputs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// With pages, changes or deploys, what was done about the firings is
+	// counted beside the stones (docs/design/responses.md).
+	withResponses := inputs.Shown(o)
 	// judgedOf says whether a rule's firings tied to signals (as the
 	// ledger keeps them) were judged; one week's, or the span's when
 	// every week of it was judged alike.
@@ -542,8 +583,10 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 				var id, signals int64
 				var n, white, again, excused, deploy, deployWhite, episodes, episodesWhite int
 				var unrelated, unrelatedExcused, realWhite, realExcused, yes, no, yesBlack, noWhite int
+				var respChanged, respRoutine, respAck, respUnanswered, useful, notUseful int
 				if err := rows.Scan(&id, &signals, &n, &white, &again, &excused, &deploy, &deployWhite, &episodes, &episodesWhite,
-					&unrelated, &unrelatedExcused, &realWhite, &realExcused, &yes, &no, &yesBlack, &noWhite); err != nil {
+					&unrelated, &unrelatedExcused, &realWhite, &realExcused, &yes, &no, &yesBlack, &noWhite,
+					&respChanged, &respRoutine, &respAck, &respUnanswered, &useful, &notUseful); err != nil {
 					rows.Close()
 					return err
 				}
@@ -557,6 +600,25 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 				rr.ActionNo += no
 				if o.NotJudged(rr.Rule) {
 					rr.NotJudged += n - white
+				}
+				if withResponses {
+					// What was done about them; those of unknown use, which
+					// are black, not useful once their record judges them.
+					c := rr.Responses
+					if c == nil {
+						c = &verdict.RuleResponses{}
+						rr.Responses = c
+					}
+					c.Changed += respChanged
+					c.Routine += respRoutine
+					c.Acknowledged += respAck
+					c.Unanswered += respUnanswered
+					c.None += n - respChanged - respRoutine - respAck - respUnanswered
+					c.Useful += useful
+					c.NotUseful += notUseful
+					if judged {
+						c.NotUseful += n - useful - notUseful
+					}
 				}
 				rr.Firings += n
 				rr.White += white
@@ -683,7 +745,15 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 	for _, rr := range byName {
 		rr.Late = late.Rules[rr.Rule]
 		rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
-		rr.Noisy = verdict.IsNoisy(rr.Judged(), rr.White, at)
+		if c := rr.Responses; c != nil {
+			if n := c.Useful + c.NotUseful; n > 0 {
+				p := float64(c.Useful) / float64(n)
+				c.Actionable = &p
+			}
+		}
+		// By what was done about its firings, a rule with no record can be
+		// noisy too, from its responses alone.
+		rr.Noisy = verdict.RuleNoisy(o, at, rr.Judged(), rr.White, rr.Responses)
 		rr.ImpactRule = o.Signals.EntryNumber(rr.Rule)
 		if counted {
 			rr.Episodes.Noisy = verdict.IsNoisy(rr.Episodes.Judged(), rr.Episodes.White, at)
@@ -734,6 +804,19 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		}
 	}
 	rep.Credit(inEffect)
+	if withResponses {
+		t := verdict.ResponseTotals{Rolled: inputs.Rollouts}
+		if t.Pages, err = l.CountPages(ctx, from, to); err != nil {
+			return nil, err
+		}
+		if t.Changes, err = l.CountChanges(ctx, from, to); err != nil {
+			return nil, err
+		}
+		if _, t.AutoscalersKnown, err = l.RolloutsKept(ctx); err != nil {
+			return nil, err
+		}
+		rep.Responses = &t
+	}
 	if !firings {
 		rep.Firings = nil
 		return rep, nil
@@ -760,6 +843,11 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 			continue // counted in the rule's Excused, not judged
 		}
 		rep.Firings = append(rep.Firings, jd.judge(f))
+	}
+	if withResponses {
+		if err := l.respondJudged(ctx, rep.Firings, o, to); err != nil {
+			return nil, err
+		}
 	}
 	return rep, nil
 }
@@ -967,6 +1055,13 @@ func (l *Ledger) ReportFirings(ctx context.Context, from, to time.Time, o verdic
 		}
 	}
 	rows.Close()
+	if inputs, err := l.ResponseInputs(ctx); err != nil {
+		return nil, 0, err
+	} else if inputs.Shown(o) {
+		if err := l.respondJudged(ctx, out, o, to); err != nil {
+			return nil, 0, err
+		}
+	}
 	if !more {
 		return out, len(out), nil
 	}
@@ -995,10 +1090,11 @@ type reportPart struct {
 const (
 	// By the signals the alerts are tied to, too.
 	countFirings = `SELECT f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white),
-		` + firstFirings + `, sum(f.episode_white), ` + personSums + `
+		` + firstFirings + `, sum(f.episode_white), ` + personSums + `, ` + responseSums + `
 		FROM firings f JOIN series s ON s.id = f.series_id WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.rule_id, s.signals`
 	countDays = `SELECT rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), sum(episodes), sum(episodes_white),
-		sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white)
+		sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white),
+		sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful)
 		FROM days WHERE day >= ? AND day < ? GROUP BY rule_id, signals`
 	// By kind of marked window, from the firings and from the days.
 	countMarkedFirings = `SELECT f.rule_id, k.name, s.signals, count(*), sum(f.white), sum(f.refired) FROM firings f JOIN marked_kinds k ON ` + markedOn + `

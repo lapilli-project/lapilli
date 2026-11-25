@@ -78,6 +78,8 @@ jobs:
             minutes: 45
           - script: kubernetes-rules
             minutes: 60
+          - script: rollouts
+            minutes: 60
     env:
       PROMETHEUS_IMAGE: ${{ inputs.prometheus || 'prom/prometheus:latest' }}
       GRAFANA_IMAGE: ${{ inputs.grafana || 'grafana/grafana:latest' }}

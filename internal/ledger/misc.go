@@ -285,6 +285,14 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 		"DELETE FROM verdicts WHERE id IN (SELECT id FROM verdicts WHERE start_at < ? LIMIT 5000)",
 		"DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? LIMIT 5000)",
 		"DELETE FROM incidents WHERE id IN (SELECT id FROM incidents WHERE origin = 'impact' AND end_at < ? AND id NOT IN (SELECT incident_id FROM catches) LIMIT 5000)",
+		// What people did, as firings are: the pages, the changes read and the
+		// workloads their pods belonged to, once past it.
+		"DELETE FROM response_rules WHERE sent_at < ?",
+		"DELETE FROM responses WHERE sent_at < ?",
+		"DELETE FROM rollouts WHERE at < ?",
+		"DELETE FROM rollout_spans WHERE to_at < ?",
+		"DELETE FROM rollout_retries WHERE to_at < ?",
+		"DELETE FROM rollout_owners WHERE seen_at < ?",
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
 		"DELETE FROM results WHERE id IN (SELECT id FROM results WHERE at < ? LIMIT 5000)",
 		pruneChanges,
@@ -347,6 +355,18 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week < ?", Week(l.day(at))); err != nil {
+			return err
+		}
+		// Pages dated past what a write may send (an hour ahead of this
+		// clock) are not kept either: they would be read by every judge and
+		// outlive --keep by as much as they are ahead.
+		ahead := time.Now().Add(skew).Unix()
+		for _, q := range []string{"DELETE FROM response_rules WHERE sent_at > ?", "DELETE FROM responses WHERE sent_at > ?"} {
+			if _, err := t.ExecContext(t.ctx, q, ahead); err != nil {
+				return err
+			}
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM response_sources WHERE NOT EXISTS (SELECT 1 FROM responses r WHERE r.source = response_sources.source)"); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM marked_days WHERE day < ?", l.day(at)); err != nil {

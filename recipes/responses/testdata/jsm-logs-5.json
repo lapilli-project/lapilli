@@ -1,0 +1,23 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T10:09:00Z",
+   "logType": "system",
+   "log": "Alert acknowledged via API by Alertmanager",
+   "owner": "System"
+  },
+  {
+   "logTime": "2026-11-20T10:07:00Z",
+   "logType": "system",
+   "log": "Alert acknowledged via web",
+   "owner": "Cy Park"
+  },
+  {
+   "logTime": "2026-11-20T10:00:00Z",
+   "logType": "system",
+   "log": "Alert created via Prometheus",
+   "owner": "System"
+  }
+ ],
+ "links": {}
+}

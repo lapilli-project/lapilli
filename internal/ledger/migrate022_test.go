@@ -30,6 +30,7 @@ var (
 	undo030   = ledgertest.Undo030
 	undo031   = ledgertest.Undo031
 	undo032   = ledgertest.Undo032
+	undo034   = ledgertest.Undo034
 	undo033   = ledgertest.Undo033
 )
 
@@ -110,7 +111,7 @@ func TestMigrate022(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022pg), "UPDATE schema_version SET version = 21") {
+		for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022pg), "UPDATE schema_version SET version = 21") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -121,7 +122,7 @@ func TestMigrate022(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022), "PRAGMA user_version = 21") {
+		for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022), "PRAGMA user_version = 21") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -150,7 +151,9 @@ func TestMigrate022(t *testing.T) {
 	if !reflect.DeepEqual(incs, incs2) {
 		t.Errorf("windows after migrating:\n%+v\nnot\n%+v", incs2, incs)
 	}
-	if !reflect.DeepEqual(days, days2) || !reflect.DeepEqual(weeks, weeks2) {
+	// What was done about the firings isn't counted by a ledger migrated: its
+	// first start judges every firing again (judgedBy).
+	if !reflect.DeepEqual(sansResponses(days), sansResponses(days2)) || !reflect.DeepEqual(sansResponses(weeks), sansResponses(weeks2)) {
 		t.Errorf("tallies after migrating: %+v %+v, not %+v %+v", days2, weeks2, days, weeks)
 	}
 	if !reflect.DeepEqual(rep, rep2) {
@@ -184,4 +187,16 @@ func TestMigrate022(t *testing.T) {
 type verdict0 struct {
 	rules, incidents, firings any
 	noRecord                  bool
+}
+
+// sansResponses are the tallies without the counts of what was done about
+// the firings, which a ledger migrated from before schema 034 has once its
+// firings are judged again.
+func sansResponses(ts []Tally) []Tally {
+	out := make([]Tally, len(ts))
+	for i, t := range ts {
+		t.RespChanged, t.RespRoutine, t.RespAcknowledged, t.RespUnanswered, t.Useful, t.NotUseful = 0, 0, 0, 0, 0, 0
+		out[i] = t
+	}
+	return out
 }

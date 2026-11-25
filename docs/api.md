@@ -205,7 +205,7 @@ Bounds:
 | Route | Role | Takes | Gives |
 |---|---|---|---|
 | `GET /api/v1/report` | viewer | `from`, `to`; `firings=false`; `format=csv`; `redact=true` | `lapilli verdict --json`'s report for the period ([fields](numbers.md#the-reports-fields)); with `format=csv`, its firings a row each ([columns](numbers.md#the-csvs-columns)), those quiet windows excused among them; with `redact=true`, every name an alias, as `--redact` gives ([redact.md](redact.md)) |
-| `GET /api/v1/summary` | viewer | `from`, `to` (a day, `2026-11-02`, or an RFC 3339 time; the last four whole weeks and this one by default), `team` (repeatable, or `*` alone for everyone and every team), `critical` (the severities counted as critical, comma-separated) | each week, for everyone or each team: precision, critical firings caught, re-fires, firings off hours and during deploys, incidents and impact windows caught and missed, the firings counted as `episodes` ([numbers.md](numbers.md#episodes); `null` until the ledger has counted the week's), `people`'s verdicts and `not_judged` ([numbers.md](numbers.md#a-persons-verdict-lapilli-serve)), and `goals` with goals declared; with `schema` 1 ([docs/design/noc.md](design/noc.md)) |
+| `GET /api/v1/summary` | viewer | `from`, `to` (a day, `2026-11-02`, or an RFC 3339 time; the last four whole weeks and this one by default), `team` (repeatable, or `*` alone for everyone and every team), `critical` (the severities counted as critical, comma-separated) | each week, for everyone or each team: precision, critical firings caught, re-fires, firings off hours and during deploys, incidents and impact windows caught and missed, the firings counted as `episodes` ([numbers.md](numbers.md#episodes); `null` until the ledger has counted the week's), `people`'s verdicts and `not_judged` ([numbers.md](numbers.md#a-persons-verdict-lapilli-serve)), `responses` (the firings counted by what was done about them: `changed`, `routine`, `acknowledged`, `unanswered`, `none`) and `actionable` (`useful`, `not_useful` and `share`, the useful over both, `null` with none known), both `null` until pages, changes or deploys are kept ([numbers.md](numbers.md#what-people-did)), and `goals` with goals declared; with `schema` 1 ([docs/design/noc.md](design/noc.md)) |
 | `GET /api/v1/outcomes` | viewer | | what the Outcomes page shows: `effect` (what the rule changes did, beside what their backtests said), `record` (whether incidents are being written down), `use` |
 | `GET /api/v1/expectations` | viewer | `rule` (one rule's; every rule's when left out) | `checks`, what checking the expectations held now found ([design/expectations.md](design/expectations.md)): each rule's budgets by week (`week_of`, the week's Monday) over the week so far and the twelve whole weeks before, its catches (`week_of` the week the incident began, `""` while it isn't written down), and its scenarios (`what` `scenario PATH`, `week_of` the week what it found was found in, `detail` what promtool said of it failing, or why it couldn't be run), each with `what`, `held`, `selector`, `source`, `result` (`met`, `broken`, `not known`, or `open`: the week under way, not over its budget yet), `why`, `n` and `value`, and `task`, the task made of it; `this_week` |
 | `GET /api/v1/expectations/draft` | viewer | `rule` (one rule's), or `team` (a team's rules'); every rule's when neither | the history's draft of what the rules are held to ([design/expectations.md](design/expectations.md), step 3): `yaml`, an expectations file, as `/expectations/draft.yaml` gives it, of the twelve whole weeks before this one (`from`, `to`), each rule's most in a week, while people slept and re-fired, rounded up, and the incidents it caught; `rules`, how many it holds; `left_out`, those it doesn't, each with `why` (`no_week`, `unreplayed`, `past_bound`); `team` |
@@ -215,7 +215,7 @@ Bounds:
 | `GET /api/v1/runs` | viewer | | the last 100 runs, the latest first: `Kind`, `From`, `To`, `Firings`, `Error`, `Failed`; to anyone but an admin, without the paths of serve's files |
 | `GET /api/v1/sources` | viewer | `all` (`true` for every source) | the sources firings are copied in from: `name`, `written`, `by`, `from`, `to`, `firings`, `rules`; with `all=true`, `sources`, every source serve reads as the Sources page shows it: `id`, `kind`, `name`, `from` (its flag), `state` (`ok`, `failing`, `quiet`, `pending`), `down`, `last_ok`, `last_failed`, `last_error` (as `GET /api/v1/runs` says an error, and without a credential to anyone), `failures` (reads in a row, -1 where not counted), `rules`, `lag_seconds`, `took_seconds`, and, to an admin, `where`; never kept ([docs/design/serveops.md](design/serveops.md#sources)) |
 | `GET /api/v1/activity` | viewer | `who`, `kind` (`setting`, `incident`, `verdict`, `proposal`, `task`, `comment`, `note`, `window`, `marked`, `report`, `team`, `role`, `goal`, `firings`, `cleanup`, `other`), `team`, `since`, `until` (a day, `2026-11-02`, in `--tz`, `until` taking it whole, or an RFC 3339 time), `before` (where a page ended), `limit` (1 to 1,000; 1,000 unless given, and as many as 8 MiB of their text holds), `format` (`json`, `csv`) | `activity`, the changes kept, the latest first: `id`, `at`, `by`, `kind`, `what`, `before`, `after`; `next`, the `before` to go on from; `cut`, that it stopped looking. With `format=csv`, the same as CSV (`id,at,by,kind,what,before,after`), the next page in `Link`, no cell a formula. The roles given and taken to an admin alone, and to anyone else the paths of serve's files as their flags; never kept ([docs/design/serveops.md](design/serveops.md#the-activity-log)) |
-| `GET /api/v1/settings` | viewer | | the judging settings, each with its flag and value (`Settings`), whether `--linked-only` and `--match-strict` are given (`linked_only`, `match_strict`) and whether every firing is still being judged again with them after a start that gave them or took them away (`linked_only_judging`), the incident criteria (`criteria`), and what `--config` came to (`config`; to anyone but an admin, without the file's name) |
+| `GET /api/v1/settings` | viewer | | the judging settings, each with its flag and value (`Settings`: `lead`, `match`, `refire`, `noisy-firings`, `noisy-precision` and `noisy-by`, `caught` or `useful`, what rules are found noisy by: [responses.md](responses.md)), whether `--linked-only` and `--match-strict` are given (`linked_only`, `match_strict`) and whether every firing is still being judged again with them after a start that gave them or took them away (`linked_only_judging`), the incident criteria (`criteria`), and what `--config` came to (`config`; to anyone but an admin, without the file's name) |
 | `GET /api/v1/me` | anyone let in | | `user`, `groups`, `role`, `teams` |
 
 ## Incidents
@@ -378,6 +378,7 @@ checked as on `--listen`.
 |---|---|---|---|
 | `--incidents-token-file` | `POST /api/v1/incidents`, `PUT /api/v1/incidents/{id}`, `DELETE /api/v1/incidents/{id}` | 20 a second, bursts of 40 | 1 MB |
 | `--firings-token-file` | `PUT /api/v1/firings/{source}` | 20 at once, then one each 5 seconds | 16 MB |
+| `--responses-token-file SOURCE=FILE` | `PUT /api/v1/responses/{source}`, for that source alone | 20 at once, then one each 5 seconds | 16 MB |
 | `--tasks-token-file` | `GET /api/v1/tasks`, `PATCH /api/v1/tasks/{id}`, `GET /api/v1/tasks/{id}/comments`, `POST /api/v1/tasks/{id}/comments`, `PATCH /api/v1/tasks/{id}/comments/{comment}` | 5 a second, bursts of 100 | 64 KB |
 | `--changes-token-file` | `GET /api/v1/changes`, `PATCH /api/v1/changes/{id}`, `PATCH /api/v1/changes/expectations/{id}` | 1 a second, bursts of 30 | 64 KB |
 
@@ -398,6 +399,28 @@ the one request at a time stays each replica's
   nor ending with a dash. It gives `source`,
   `from`, `to`, `firings`, `added`, `removed` and `changed`
   ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)).
+- **Responses.** `PUT /api/v1/responses/{source}?from=&to=` takes what a
+  paging tool says of the pages sent in `[from, to)`, `{"responses": [...]}`
+  as `--responses` reads it, JSON only (a YAML body is refused), in place of
+  the pages the ledger has from that source sent then; the pages it has from
+  other times stay. The body is 16 MB at most (413 past it), read a page at a
+  time, as a write of firings is. Each source has a token of its own
+  (`--responses-token-file SOURCE=FILE`), which writes that source's pages
+  and no other's: a request with another source's token, or for a source no
+  token is for, is 401. The source is named as a firings' is, and is not
+  `file`, which `--responses` owns, and whose pages outrank an API source's for
+  a firing. A page sent outside the period is refused (400), as is a period
+  over 31 days or one that starts, or a page sent, more than an hour ahead of
+  the clock, a 51st source, a source with 500,000 pages or a week with
+  200,000 (the write is refused whole), and a bound broken in the pages (an id
+  twice, a person named, a value that isn't text). It gives `source`, `from`, `to`, `pages`, `added`, `changed`,
+  `removed` and `changed_ledger`: sent again as it is, it changes nothing.
+  The firings the pages answer are judged again. The token writes its
+  source's pages alone, which can make a firing acknowledged or unanswered;
+  an acknowledged page can turn an unanswered firing, not useful, into one
+  of unknown use, which raises a rule's actionable share, within what its
+  source's token and the file's precedence allow ([Responses](responses.md),
+  [docs/design/responses.md](design/responses.md)).
 - **Tasks.** `GET /api/v1/tasks` takes `linked` (`false` unless given),
   `status` (`open,doing` unless given), `updated_after` (an RFC 3339
   time), `after` (a task's id) and `limit` (1 to 200, 200 unless given),

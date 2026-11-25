@@ -466,6 +466,13 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration,
 	parallel int, excuse func(firing.Firing) bool) (_ []verdict.Suggestion, done bool) {
 	o.SomeRules = true // each is judged alone
+	// With rules found noisy by what was done about them, the longer "for"
+	// must also keep every useful firing: each is looked for among the
+	// longer "for"'s firings, which are judged by stones alone. The useful
+	// ones are those of rep, as it judged them: by a Responder, or by a
+	// ledger that handed them judged (a caller with none).
+	byUseful := o.NoisyBy == verdict.NoisyByUseful
+	o.Responder = nil
 	// caughtBy is when the rule caught each incident it caught.
 	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {
 		at := map[string]time.Duration{}
@@ -584,6 +591,13 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 				now, ok := still[id]
 				kept = kept && ok
 				later = max(later, now-was)
+			}
+			if byUseful {
+				for _, j := range rep.Firings {
+					if j.Rule == t.rr.Rule && j.Response != nil && j.Response.Useful != nil && *j.Response.Useful {
+						kept = kept && keeps(j, alt.Firings, o.To)
+					}
+				}
 			}
 			if kept && 2*after.Firings <= t.rr.Firings {
 				out = append(out, verdict.Suggestion{Rule: t.rr.Rule, For: t.rule.For, NewFor: d, Before: t.rr, After: after,

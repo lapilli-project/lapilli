@@ -1,0 +1,17 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T05:30:00Z",
+   "logType": "close",
+   "log": "Closed by Ben Lee",
+   "owner": "Ben Lee"
+  },
+  {
+   "logTime": "2026-11-20T05:00:00Z",
+   "logType": "system",
+   "log": "Alert created via Prometheus",
+   "owner": "System"
+  }
+ ],
+ "links": {}
+}

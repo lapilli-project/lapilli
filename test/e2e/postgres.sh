@@ -107,7 +107,7 @@ check "the source has them" "$(sources "$port")" '^\[\{"name":"cloud-e2e","firin
 before=$(report "$port")
 check "and they are judged" "$before" '"rule":"DiskFull[^"]*","white":0'
 # Replicas don't count themselves among the processes that wrote it alone.
-check "the schema is the ledger's" "$(psql -c 'SELECT version, writers FROM schema_version' lapilli)" '^33\|0$'
+check "the schema is the ledger's" "$(psql -c 'SELECT version, writers FROM schema_version' lapilli)" '^34\|0$'
 check "every text compares as SQLite's" "$(psql -c "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'text' AND collation_name IS DISTINCT FROM 'C'" lapilli)" '^0$'
 
 # The connection string is on no command line, and in no log.

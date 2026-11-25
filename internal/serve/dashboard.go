@@ -47,6 +47,11 @@ type weekView struct {
 	// judged (docs/design/signals.md); deploysUnjudged, those of them
 	// during deploys. With none named, a week is judged whole, or not.
 	Unjudged, deploysUnjudged int
+	// Pages are its firings whose page was answered (acknowledged, or
+	// resolved by a person) or not, and Unanswered those nobody
+	// acknowledged before their alert manager resolved them: the overview's
+	// "Pages nobody answered", once responses show.
+	Pages, Unanswered int
 }
 
 // NotJudged are, of Black, those counted and not judged, with no record to
@@ -380,6 +385,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			wv.Refired += x.Refired
 			wv.Deploys += x.Deploy
 			wv.DeploysCaught += x.DeployWhite
+			wv.Pages += x.RespAcknowledged + x.RespUnanswered
+			wv.Unanswered += x.RespUnanswered
 			if t.noisy(w, id) {
 				wv.Noisy++
 			}
@@ -477,9 +484,14 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.NoRecord = last.NoRecord
+	var extra []extraTile
+	if t.shown() {
+		extra = append(extra, extraTile{label: "Pages nobody answered", of: tr(l, "of %d pages", last.Pages),
+			val: func(w *weekView) (float64, bool) { return float64(w.Unanswered), true }, href: "/firings?response=unanswered", more: "The firings nobody answered"})
+	}
 	v.Tiles = s.tiles(l, ws, last, before, asleep, sleeps, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
-	})
+	}, extra...)
 	if s.checking() {
 		// Only a week checked to its end: one checked in part says less than
 		// it seems to.
@@ -646,7 +658,15 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 // asleep is what the tile of firings while people slept counts, hours when
 // people sleep alone, which a tile that doesn't know whether they caught
 // anything says in place of it.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, hours, since string, deploys bool, refired func() (int, int)) []tile {
+// extraTile is a tile the overview has once something is kept: its label,
+// its number for a week, what it is of, and the list that makes it.
+type extraTile struct {
+	label, of  string
+	val        func(*weekView) (float64, bool)
+	href, more string
+}
+
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, hours, since string, deploys bool, refired func() (int, int), extra ...extraTile) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
@@ -751,6 +771,12 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	if deploys {
 		add("During deploys", func(w *weekView) (float64, bool) { return float64(w.Deploys), true }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, tr(l, "firings; precision %s without them", last.Without()))
+	}
+	// What was done about the firings: the pages nobody answered, fewer being
+	// better, linked to the alert history picked by it.
+	for _, e := range extra {
+		add(e.label, e.val, count, func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, e.of)
+		out[len(out)-1].Href, out[len(out)-1].More = e.href, e.more
 	}
 	return out
 }

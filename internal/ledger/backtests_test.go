@@ -390,7 +390,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
+		for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "UPDATE schema_version SET version = 22") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -401,7 +401,7 @@ func TestMigrate023(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
+		for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023), "PRAGMA user_version = 22") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -610,7 +610,7 @@ func TestMigrate031(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo033, undo032, undo031), "UPDATE schema_version SET version = 30") {
+		for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031), "UPDATE schema_version SET version = 30") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -621,7 +621,7 @@ func TestMigrate031(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Concat(undo033, undo032, undo031), "PRAGMA user_version = 30") {
+		for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031), "PRAGMA user_version = 30") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -808,7 +808,7 @@ func TestMigrate033(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Clone(undo033), "UPDATE schema_version SET version = 32") {
+		for _, q := range append(slices.Concat(undo034, undo033), "UPDATE schema_version SET version = 32") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -819,7 +819,7 @@ func TestMigrate033(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(slices.Clone(undo033), "PRAGMA user_version = 32") {
+		for _, q := range append(slices.Concat(undo034, undo033), "PRAGMA user_version = 32") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}

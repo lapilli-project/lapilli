@@ -146,6 +146,11 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 		return row.Precision
 	case "action.share":
 		return row.People.Action.Share
+	case "actionable.share":
+		if row.Actionable == nil {
+			return nil
+		}
+		return row.Actionable.Share
 	case "critical.firings":
 		return n(crit.Firings)
 	case "critical.share_caught":
@@ -490,6 +495,7 @@ var goalMeasureNames = map[string]string{
 	"episodes.total":                   "episodes",
 	"episodes.precision":               "precision by episodes",
 	"action.share":                     "the share that needed action",
+	"actionable.share":                 "the share of firings that were useful",
 }
 
 // episodesMeasure reports whether a measure is of the episodes, which the

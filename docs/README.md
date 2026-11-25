@@ -24,12 +24,15 @@ Lapilli is, and how to install it.
 ## Judging a period
 
 - [How it judges](how-it-judges.md): where firings and incidents come from,
-  when a firing catches an incident, noisy rules and what to change, what a
-  rule adds, when firings came, near misses, rules that changed
+  when a firing catches an incident, noisy rules and what to change, what people
+  did, what a rule adds, when firings came, near misses, rules that changed
 - [Use `lapilli verdict`](verdict.md): the commands, the reports it writes,
   the data sources it reads and how fast, and when it fails
 - [The numbers](numbers.md): what each number is, and how to count it again
   from the report, without Lapilli
+- [What people did when a rule fired](responses.md): `--responses`,
+  `--rollouts` and `--deploys`, each firing's response, and rules found noisy
+  by whether their firings were useful
 - [A cloud's own alarms](cloud-alarms.md): judging what CloudWatch, Azure
   Monitor, Google Cloud and OCI alarms fired, and Datadog's monitors and
   New Relic's alert conditions

@@ -25,6 +25,7 @@ import (
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
+	"lapilli.dev/internal/response"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/sse"
@@ -70,7 +71,7 @@ const linkedMeta = "linked-only"
 // (schema 032's loose catches) raises it, and a ledger last judged under
 // the one before judges every firing again once at its first start, as a
 // change of a flag does.
-const judgedBy = "j2"
+const judgedBy = "j3"
 
 // linkedText is judgedBy, then --linked-only as "1" and --match-strict as
 // "m", in that order, as meta keeps them: a ledger before they were judged
@@ -83,17 +84,40 @@ func linkedText(o verdict.Options) string {
 	if o.MatchStrict {
 		v += "m"
 	}
-	return v
+	return v + responsesKey(o)
+}
+
+// responsesKey is what --routine and --rollout-match, which decide what was
+// done about a firing, add to linkedText when they aren't the defaults:
+// "R", then a digest of them in capital letters, which neither "1" nor "m"
+// is among. A ledger judged with others judges every firing again.
+func responsesKey(o verdict.Options) string {
+	if (o.Routine == 0 || o.Routine == response.DefaultRoutine) && len(o.RolloutMatch) == 0 {
+		return ""
+	}
+	h := sha256.Sum256([]byte(fmt.Sprint(o.Routine, "\x00", strings.Join(o.RolloutMatch, "\x00"))))
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = 'A' + h[i]%16
+	}
+	return "R" + string(b)
 }
 
 // linkedSaid is linkedText's --linked-only as the log says it.
 func linkedSaid(v string) string {
-	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "1"))
+	return onOff(strings.Contains(responsesless(strings.TrimPrefix(v, judgedBy)), "1"))
 }
 
 // strictSaid is linkedText's --match-strict as the log says it.
 func strictSaid(v string) string {
-	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "m"))
+	return onOff(strings.Contains(responsesless(strings.TrimPrefix(v, judgedBy)), "m"))
+}
+
+// responsesless is linkedText's flags, without the key of the settings
+// of responses that follows them.
+func responsesless(v string) string {
+	before, _, _ := strings.Cut(v, "R")
+	return before
 }
 
 func onOff(on bool) string {
@@ -309,6 +333,22 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.status.Lock()
 		s.status.errWhat, s.status.err = "deploys", errDeploysUnread.Error()
 		s.status.Unlock()
+	}
+	// The responses file, as the incidents file: the pages a paging tool
+	// sent, read again each run (docs/design/responses.md).
+	if s.cfg.Responses != "" {
+		began := time.Now()
+		err := s.syncResponses(ctx, o)
+		s.noteRead("responses-file", began, -1, err)
+		if err != nil {
+			s.fail("responses", err)
+		} else {
+			s.status.Lock()
+			if s.status.errWhat == "responses" {
+				s.status.err, s.status.errWhat = "", ""
+			}
+			s.status.Unlock()
+		}
 	}
 	// The marked file, as the deploys file; the expressions (--mark) read
 	// again over the last four weeks once their key is new.
@@ -613,6 +653,14 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			s.l.AddRun(context.WithoutCancel(ctx), ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Error: err.Error()})
 			return
 		}
+		// The changes made to the workloads of the firings' namespaces over the
+		// hours judged, kept with the run (--rollouts); a failed read leaves
+		// the run without them: no change is known for those hours, and a
+		// firing in them is not called changed, nor not useful for want of one.
+		if s.cfg.Rollouts {
+			s.retryRollouts(asking, o)
+			found.Rollouts = s.readRollouts(asking, from, to, found.Firings)
+		}
 		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed}
 		if err := s.l.Record(ctx, found, o); err != nil {
 			s.count(kind, "failed")
@@ -624,7 +672,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.status.took = s.now().Sub(began)
 		// What is wrong with the incidents or deploys file is for reading
 		// it to clear.
-		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" && s.status.errWhat != "marked windows" {
+		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" && s.status.errWhat != "responses" && s.status.errWhat != "rollouts" && s.status.errWhat != "marked windows" {
 			s.status.err, s.status.errWhat = "", ""
 		}
 		s.status.Unlock()
@@ -1766,7 +1814,13 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 				return true, err
 			}
 			if len(in.versions) == 1 {
-				sugg, _ = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
+				// A longer "for" that keeps the useful firings needs them,
+				// judged: the digest's report holds none.
+				if byFirings, ok, err := s.suggestReport(ctx, rep, from, to, o); err != nil {
+					return true, err
+				} else if ok {
+					sugg, _ = source.Suggest(rctx, s.h, in.versions[0].Rules, byFirings, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
+				}
 			}
 			var done bool
 			near, done, err = source.NearMisses(rctx, s.h, in.versions, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
@@ -1886,6 +1940,43 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 	}
 	in.excuse = ledger.Excusing(quiet, from, to)
 	return in, nil
+}
+
+// maxSuggestFirings is how many firings of the noisy rules a longer "for" is
+// checked against the useful of: a week with more is given none (a longer
+// "for" that dropped a useful firing would be suggested for want of seeing it).
+const maxSuggestFirings = 200_000
+
+// suggestReport is rep as source.Suggest needs it: with rules found noisy by
+// what was done about their firings (o.NoisyBy useful), the judged firings of
+// the noisy rules, each with its response and whether it was useful, as the
+// ledger judges them, which a longer "for" must keep; with others, rep as
+// it is. ok is false when there are more firings than may be held: nothing
+// is suggested then.
+func (s *Server) suggestReport(ctx context.Context, rep *verdict.Report, from, to time.Time, o verdict.Options) (_ *verdict.Report, ok bool, err error) {
+	if o.NoisyBy != verdict.NoisyByUseful {
+		return rep, true, nil
+	}
+	noisy := map[string]bool{}
+	for _, r := range rep.Rules {
+		if r.Noisy && r.Replayed {
+			noisy[r.Rule] = true
+		}
+	}
+	if len(noisy) == 0 {
+		return rep, true, nil
+	}
+	fs, total, err := s.l.ReportFirings(ctx, from, to, o, nil, func(rule string) bool { return noisy[rule] }, maxSuggestFirings)
+	if err != nil {
+		return nil, false, err
+	}
+	if total > len(fs) {
+		s.log.Warn("no longer for is suggested: the noisy rules' firings are more than can be checked", "firings", total, "most", maxSuggestFirings)
+		return nil, false, nil
+	}
+	cp := *rep
+	cp.Firings = fs
+	return &cp, true, nil
 }
 
 // nearSeen is how far a week's near misses were worked out: with each of
@@ -2422,7 +2513,7 @@ func (s *Server) digestTextSent(ctx context.Context, rep *verdict.Report, spare 
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{goals, ed.text(s.cfg.Lang), onLine, episodesLine(s.cfg.Lang, rep), peopleLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, ed.text(s.cfg.Lang), onLine, episodesLine(s.cfg.Lang, rep), peopleLine(s.cfg.Lang, rep), responsesLine(s.cfg.Lang, rep), rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2492,6 +2583,24 @@ func peopleLine(l string, rep *verdict.Report) string {
 		return tr(l, "People said %d firings were unrelated to what they caught.", unrelated)
 	}
 	return tr(l, "People said %d firings were unrelated, and answered %d of %d firings: %d needed action.", unrelated, yes+no, firings, yes)
+}
+
+// responsesLine is what the digest says of the week's pages
+// (docs/design/responses.md): of those a person acknowledged or nobody did
+// before their alert manager resolved them, how many nobody answered. "" when
+// none of the firings had a page answered or not.
+func responsesLine(l string, rep *verdict.Report) string {
+	var answered, unanswered int
+	for _, r := range rep.Rules {
+		if r.Responses != nil {
+			answered += r.Responses.Acknowledged + r.Responses.Unanswered
+			unanswered += r.Responses.Unanswered
+		}
+	}
+	if answered == 0 || unanswered == 0 {
+		return ""
+	}
+	return tr(l, "%d of %d pages last week nobody answered.", unanswered, answered)
 }
 
 func digestAbout(rep *verdict.Report, text, team string, spare []string) map[string]any {

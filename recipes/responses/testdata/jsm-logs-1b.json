@@ -1,0 +1,17 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T03:12:01Z",
+   "logType": "system",
+   "log": "Assigning owner team [Dream] to alert because it is the only team on the alert and alert is not created via team integration.",
+   "owner": "System"
+  },
+  {
+   "logTime": "2026-11-20T03:12:00.958Z",
+   "logType": "system",
+   "log": "Alert created via Prometheus",
+   "owner": "System"
+  }
+ ],
+ "links": {}
+}

@@ -1,0 +1,249 @@
+{
+ "count": 6,
+ "next": null,
+ "previous": "https://oncall.example.com/oncall/api/v1/alert_groups/",
+ "results": [
+  {
+   "id": "I4AAAAAAAAAA4",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "firing",
+   "created_at": "2026-11-20T09:15:00Z",
+   "alert_group_number": 204,
+   "resolved_at": null,
+   "acknowledged_at": null,
+   "acknowledged_by": null,
+   "resolved_by": null,
+   "title": "SearchTimeouts",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I4AAAAAAAAAA4",
+    "created_at": "2026-11-20T09:15:00Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "SearchTimeouts"
+     },
+     "commonLabels": {
+      "namespace": "shop",
+      "service": "search",
+      "alertname": "SearchTimeouts"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "namespace": "shop",
+        "service": "search",
+        "alertname": "SearchTimeouts"
+       },
+       "annotations": {
+        "summary": "SearchTimeouts"
+       },
+       "startsAt": "2026-11-20T09:15:00Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI4AAAAAAAAAA4"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "I5AAAAAAAAAA5",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "acknowledged",
+   "created_at": "2026-11-20T10:00:00Z",
+   "alert_group_number": 205,
+   "resolved_at": null,
+   "acknowledged_at": "2026-11-20T10:01:00Z",
+   "acknowledged_by": null,
+   "resolved_by": null,
+   "title": "QueueBacklog",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I5AAAAAAAAAA5",
+    "created_at": "2026-11-20T10:00:00Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "QueueBacklog"
+     },
+     "commonLabels": {
+      "queue": "mail",
+      "alertname": "QueueBacklog"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "queue": "mail",
+        "alertname": "QueueBacklog"
+       },
+       "annotations": {
+        "summary": "QueueBacklog"
+       },
+       "startsAt": "2026-11-20T10:00:00Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI5AAAAAAAAAA5"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "I6AAAAAAAAAA6",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "resolved",
+   "created_at": "2026-11-20T11:00:00Z",
+   "alert_group_number": 206,
+   "resolved_at": "2026-11-20T11:40:00Z",
+   "acknowledged_at": "2026-11-20T11:02:00Z",
+   "acknowledged_by": "UCGEIXI1MR1NZ",
+   "resolved_by": "UCGEIXI1MR1NZ",
+   "title": "PaymentsDown",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I6AAAAAAAAAA6",
+    "created_at": "2026-11-20T11:00:00Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "PaymentsDown"
+     },
+     "commonLabels": {
+      "service": "payments",
+      "alertname": "PaymentsDown"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "service": "payments",
+        "alertname": "PaymentsDown"
+       },
+       "annotations": {
+        "summary": "PaymentsDown"
+       },
+       "startsAt": "2026-11-20T11:00:00Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI6AAAAAAAAAA6"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "I7AAAAAAAAAA7",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "firing",
+   "created_at": "2026-11-20T12:00:00Z",
+   "alert_group_number": 207,
+   "resolved_at": null,
+   "acknowledged_at": null,
+   "acknowledged_by": null,
+   "resolved_by": null,
+   "title": "Custom",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I7AAAAAAAAAA7",
+    "created_at": "2026-11-20T12:00:00Z",
+    "payload": null
+   }
+  },
+  {
+   "id": "I8AAAAAAAAAA8",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "firing",
+   "created_at": "2026-11-19T23:59:59Z",
+   "alert_group_number": 208,
+   "resolved_at": null,
+   "acknowledged_at": null,
+   "acknowledged_by": null,
+   "resolved_by": null,
+   "title": "Early",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I8AAAAAAAAAA8",
+    "created_at": "2026-11-19T23:59:59Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "Early"
+     },
+     "commonLabels": {
+      "alertname": "Early"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "alertname": "Early"
+       },
+       "annotations": {
+        "summary": "Early"
+       },
+       "startsAt": "2026-11-19T23:59:59Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI8AAAAAAAAAA8"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "current_page_number": 2,
+ "page_size": 50,
+ "total_pages": 2
+}

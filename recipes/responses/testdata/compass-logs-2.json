@@ -1,0 +1,17 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T04:05:00Z",
+   "logType": "system",
+   "log": "Alert closed via API by Alertmanager",
+   "owner": "System"
+  },
+  {
+   "logTime": "2026-11-20T04:00:00Z",
+   "logType": "system",
+   "log": "Alert created via Prometheus",
+   "owner": "System"
+  }
+ ],
+ "links": {}
+}

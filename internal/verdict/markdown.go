@@ -145,7 +145,16 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		sev := slices.ContainsFunc(p.shown, func(rc RuleChange) bool {
 			return rc.Before != nil && rc.Before.Severity != "" || rc.After != nil && rc.After.Severity != ""
 		})
-		head := judgedColumns(judged, withSeverity(sev, "Rule", "Severity", "Fired", "○ Caught", "● Nothing", "Precision", "Refired"))
+		// With responses, Actionable beside precision, before Refired, as
+		// Text has it.
+		resp := c.Before.hasResponses() || c.After.hasResponses()
+		withActionable := func(row []string, cell string) []string {
+			if !resp {
+				return row
+			}
+			return slices.Insert(row, len(row)-1, cell)
+		}
+		head := withActionable(judgedColumns(judged, withSeverity(sev, "Rule", "Severity", "Fired", "○ Caught", "● Nothing", "Precision", "Refired")), "Actionable")
 		align := []string{"---"}
 		if sev {
 			align = append(align, "---")
@@ -155,7 +164,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		rules := mdPart{head: "#### Rules that differ\n\n" + mdRow(head) + mdRow(align), foot: "\n", noun: "rules that differ"}
 		for _, rc := range p.shown {
-			rules.rows = append(rules.rows, mdRow(judgedColumns(judged, withSeverity(sev, md(rc.Rule, 200, true), mdSeverities(rc), stones(rc)...))))
+			rules.rows = append(rules.rows, mdRow(withActionable(judgedColumns(judged, withSeverity(sev, md(rc.Rule, 200, true), mdSeverities(rc), stones(rc)...)), actionables(rc))))
 		}
 		parts = append(parts, rules)
 	}

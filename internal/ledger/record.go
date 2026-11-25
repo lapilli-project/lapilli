@@ -14,6 +14,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/response"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -65,7 +66,12 @@ type Found struct {
 	// (docs/design/signals.md): with them, the unnamed signal isn't read,
 	// and the run turns it off.
 	Signals []SignalRead
-	Run     Run
+	// Rollouts are the changes made to the workloads of the namespaces the
+	// run's firings are in, read from kube-state-metrics' history over its
+	// period (--rollouts): kept, so that the firings are judged by them,
+	// and judged again without asking the history.
+	Rollouts *response.Rollouts
+	Run      Run
 }
 
 // SignalRead is a named impact signal as a run read it, with Criterion
@@ -381,6 +387,9 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				return err
 			}
 			lo = min(lo, ilo)
+		}
+		if err := l.keepRollouts(t, f.Rollouts, to, lo-int64(o.MaxLead()/time.Second)); err != nil {
+			return err
 		}
 		if err := l.judge(t, lo-int64(o.MaxLead()/time.Second), to, o); err != nil {
 			return err
