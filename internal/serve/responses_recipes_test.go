@@ -577,3 +577,42 @@ func TestPagerDutyResponsesEdges(t *testing.T) {
 		t.Errorf("said %q", said)
 	}
 }
+
+// A low-urgency incident pages no one: it is left out unless URGENCY=all,
+// and any other value is refused before a request is made.
+func TestPagerDutyResponsesUrgency(t *testing.T) {
+	parallel(t)
+	needTools(t)
+	incident := func(n int, urgency string) string {
+		return fmt.Sprintf(`{"id": "Q2URG000000%d", "incident_number": %d, "title": "x", "created_at": "2026-11-20T0%d:00:00Z", "status": "triggered", "urgency": %q}`, n, 400+n, n, urgency)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/incidents":
+			fmt.Fprintf(w, `{"incidents": [%s, %s], "more": false}`, incident(1, "high"), incident(2, "low"))
+		case strings.HasSuffix(r.URL.Path, "/alerts"):
+			w.Write(responseFixture(t, "pagerduty-alerts-1.json"))
+		case strings.HasSuffix(r.URL.Path, "/log_entries"):
+			fmt.Fprint(w, `{"log_entries": [], "more": false}`)
+		default:
+			t.Errorf("asked for %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	env := []string{"PAGERDUTY_API=" + srv.URL, "PAGERDUTY_TOKEN_FILE=" + tokenFile(t, "x"), "SINCE=" + responsesPeriod, "UNTIL=" + responsesUntil}
+	alerts := `[{"rule": "KubePodCrashLooping", "labels": {"namespace": "shop", "pod": "cart-7f9c"}}]`
+	page := func(n int) string {
+		return fmt.Sprintf(`{"id": "PD-%d", "alerts": %s, "sent": "2026-11-20T0%d:00:00Z"}`, 400+n, alerts, n)
+	}
+	out, _ := runResponses(t, "pagerduty.sh", env...)
+	wantResponses(t, out, `{"responses": [`+page(1)+`]}`)
+	out, _ = runResponses(t, "pagerduty.sh", append(env, "URGENCY=high")...)
+	wantResponses(t, out, `{"responses": [`+page(1)+`]}`)
+	out, _ = runResponses(t, "pagerduty.sh", append(env, "URGENCY=all")...)
+	wantResponses(t, out, `{"responses": [`+page(1)+`,`+page(2)+`]}`)
+	stdout, said, err := runResponsesErr("pagerduty.sh", append(env, "URGENCY=low")...)
+	if err == nil || stdout != "" || !strings.Contains(said, "URGENCY is high or all, not low") {
+		t.Errorf("URGENCY=low: wrote %q, said %q, err %v", stdout, said, err)
+	}
+}

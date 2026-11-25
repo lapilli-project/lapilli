@@ -8,7 +8,7 @@ period:
 
 | Script | Tool | Needs |
 |---|---|---|
-| `pagerduty.sh` | PagerDuty | `PAGERDUTY_TOKEN_FILE`; `SINCE`, `UNTIL`; `ALERT_LABELS`, `MAX_PAGES`, `MAX_REQUESTS` |
+| `pagerduty.sh` | PagerDuty | `PAGERDUTY_TOKEN_FILE`; `SINCE`, `UNTIL`; `ALERT_LABELS`, `URGENCY`, `MAX_PAGES`, `MAX_REQUESTS` |
 | `jsm.sh` | Jira Service Management alerts (Opsgenie's successor) | `JSM_CLOUD_ID`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`; `SINCE`, `UNTIL`; `JSM_QUERY`, `MAX_PAGES`, `MAX_LOGS` |
 | `compass.sh` | Compass alerts | `COMPASS_CLOUD_ID`, `COMPASS_EMAIL`, `COMPASS_TOKEN_FILE`; `SINCE`, `UNTIL`; `COMPASS_QUERY`, `MAX_PAGES`, `MAX_LOGS` |
 | `grafana-irm.sh` | Grafana IRM's OnCall alert groups | `GRAFANA_ONCALL_API`, `GRAFANA_URL`, `GRAFANA_IRM_TOKEN_FILE`; `SINCE`, `UNTIL`; `MAX_PAGES` |
@@ -49,7 +49,8 @@ email of a user is copied.
 ### PagerDuty
 
 Each high-urgency incident created in the period (low-urgency ones page no
-one), with its alerts as `../incidents/pagerduty.sh` reads them, and its log
+one, so that nobody answered one isn't a mark of a noisy rule; `URGENCY=all`
+keeps them too, and any other value is refused), with its alerts as `../incidents/pagerduty.sh` reads them, and its log
 entries.
 
 - Calls: `GET /incidents` (`since`, `until`, `limit=100`, `offset`, paged by
