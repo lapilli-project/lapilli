@@ -70,7 +70,7 @@ func workedServer(t *testing.T, change func(*Config)) (*Server, string) {
 func workedOf(t *testing.T, s *Server, rule string) map[time.Time]ledger.RoutedFiring {
 	t.Helper()
 	ctx := context.Background()
-	fs, _, err := s.l.FiringsOverlapping(ctx, now.Add(-4*24*time.Hour), now, 1000)
+	fs, _, err := s.l.FiringsOverlapping(ctx, now.Add(-4*24*time.Hour), now, now.Add(-4*24*time.Hour), 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestRoutedKept(t *testing.T) {
 	parallel(t)
 	s, _ := workedServer(t, nil)
 	ctx := context.Background()
-	from, to, ok, err := s.l.RoutedSpan(ctx)
+	from, to, ok, err := routedSpan(s.l, ctx)
 	if err != nil || !ok || !from.Before(to) {
 		t.Fatalf("span: %v %v %v %v", from, to, ok, err)
 	}
@@ -147,7 +147,7 @@ func TestRoutedAgain(t *testing.T) {
 	ctx := context.Background()
 	h := s.h.(*history)
 	asked := func() int { h.Lock(); defer h.Unlock(); return h.asked }
-	from, to, _, _ := s.l.RoutedSpan(ctx)
+	from, to, _, _ := routedSpan(s.l, ctx)
 	before := asked()
 	if err := os.WriteFile(am, []byte(strings.Replace(routedAM, "severity=\"page\"", "severity=\"nothing\"", 1)), 0o600); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestRoutedConfigUnreadable(t *testing.T) {
 	parallel(t)
 	s, am := workedServer(t, nil)
 	ctx := context.Background()
-	from, to, _, _ := s.l.RoutedSpan(ctx)
+	from, to, _, _ := routedSpan(s.l, ctx)
 	if err := os.WriteFile(am, []byte("route: {"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestRoutedOff(t *testing.T) {
 	if _, body, _ := get(t, h, "/metrics"); strings.Contains(body, "lapilli_notifications_agreement") || strings.Contains(body, "lapilli_rule_pages") {
 		t.Error("metrics of pages with none worked out")
 	}
-	if _, _, ok, err := s.l.RoutedSpan(context.Background()); ok || err != nil {
+	if _, _, ok, err := routedSpan(s.l, context.Background()); ok || err != nil {
 		t.Errorf("a span with none worked out: %v %v", ok, err)
 	}
 	code, body, _ := get(t, h, "/api/v1/report")
@@ -369,7 +369,7 @@ func TestRoutedFiringsReplaced(t *testing.T) {
 	parallel(t)
 	s, _ := workedServer(t, nil)
 	ctx := context.Background()
-	from, to, _, _ := s.l.RoutedSpan(ctx)
+	from, to, _, _ := routedSpan(s.l, ctx)
 	at := to.Add(-3 * time.Hour)
 	lo := to.Add(-4 * time.Hour)
 	if err := s.l.Record(ctx, ledger.Found{From: lo, To: to, Run: ledger.Run{Kind: "test", Started: at, Finished: at, From: lo, To: to},
@@ -385,7 +385,7 @@ func TestRoutedFiringsReplaced(t *testing.T) {
 	if r, ok := got[at]; !ok || r.Paged == 0 {
 		t.Errorf("not worked out after: %+v %v", r, ok)
 	}
-	if f2, to2, _, _ := s.l.RoutedSpan(ctx); !f2.Equal(from) || !to2.Equal(to) {
+	if f2, to2, _, _ := routedSpan(s.l, ctx); !f2.Equal(from) || !to2.Equal(to) {
 		t.Errorf("span: %v %v", f2, to2)
 	}
 }
@@ -396,7 +396,7 @@ func workedAndRecorded(t *testing.T) *Server {
 	t.Helper()
 	s, _ := workedServer(t, func(c *Config) { c.Options.Hours = nil })
 	ctx := context.Background()
-	fs, _, err := s.l.FiringsOverlapping(ctx, now.Add(-4*24*time.Hour), now, 1000)
+	fs, _, err := s.l.FiringsOverlapping(ctx, now.Add(-4*24*time.Hour), now, now.Add(-4*24*time.Hour), 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,4 +460,16 @@ func TestRoutedLanguages(t *testing.T) {
 		t.Errorf("%s has no translation for %q", lang, msg)
 	}
 	missing.Unlock()
+}
+
+// routedSpan is from where to where the ledger's hours were worked out, as
+// the cover says, and whether any was.
+func routedSpan(l *ledger.Ledger, ctx context.Context) (from, to time.Time, ok bool, err error) {
+	c, err := l.RoutedCover(ctx)
+	if err != nil {
+		return
+	}
+	from, ok = c.First()
+	to, _ = c.Last()
+	return
 }

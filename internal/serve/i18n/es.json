@@ -2937,5 +2937,13 @@
  "a week the notifications weren't worked out for all of": "una semana cuyas notificaciones no se calcularon por completo",
  "Pages are counted from %s.": "Las páginas se cuentan desde el %s.",
  "not known: no record; %d pages came while people slept that week (counted since %s)": "no se sabe: sin registro; %d páginas llegaron mientras la gente dormía esa semana (contadas desde %s)",
- "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)": "desconocido: ningún incidente registrado con el que juzgar sus disparos; %d páginas llegaron mientras la gente dormía esa semana (contadas desde %s)"
+ "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)": "desconocido: ningún incidente registrado con el que juzgar sus disparos; %d páginas llegaron mientras la gente dormía esa semana (contadas desde %s)",
+ "pages not known: some hours weren't worked out": "páginas no conocidas: hay horas que no se calcularon",
+ "Pages are not known over these weeks: some hours weren't worked out, or the work stopped or failed.": "No se conocen las páginas de estas semanas: hay horas que no se calcularon, o el cálculo se detuvo o falló.",
+ "Pages: not known, some of these hours weren't worked out.": "Páginas: no conocidas, algunas de estas horas no se calcularon.",
+ "Not known: %s": "No conocido: %s",
+ "%d more stretches are not known.": "%d tramos más no se conocen.",
+ "%d receivers have notifications recorded and none worked out: they aren't compared, and don't count in the agreement.": "%d receptores tienen notificaciones registradas y ninguna calculada: no se comparan ni cuentan en la coincidencia.",
+ "recorded by its name alone: compared with its webhooks": "registrado solo por su nombre: se compara con sus webhooks",
+ "recorded only": "solo registradas"
 }

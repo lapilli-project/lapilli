@@ -269,19 +269,34 @@ were sent. Given `--alertmanager-config` (a file, or Mimir's or Cortex's API) or
 `--grafana`, with the same `--external-labels`, `--silences` and
 `--paging-receivers` ([the chart's `notifications` values](../charts/lapilli/README.md)),
 it reads the routing configuration once an hour (a configuration that can't be
-read leaves the last one in use, and the log says why once) and, after each run
-records its firings, works out the notifications of the hours the run judged:
+read leaves the last one in use, and the log says why once; the pages read it
+too, when none is kept yet, so a replica that isn't the leader, and the leader
+before its first run, show the same numbers, the configuration cached by the hash
+of its text) and, after each run records its firings, works out the notifications
+of the hours the run judged:
 
 - **From what is in the ledger**, so judging an hour again works the same out
   again without asking Prometheus anything. All rules' firings go in together,
   as a group is of many rules, with a lead-in before the hours: the longest
   `repeat_interval` of the routes, at least an hour and at most a day, so that a
   group that began before them, and an alert that inhibits one in them, is
-  there. A firing still on is taken in whole, from its start, so a long firing's
-  repeats are counted in full; one that began before the lead-in and whose group
-  began with an alert that ended before it has the group's timer as if it began
-  with it. At most 300,000 firings go in at once; past that the Notifications page
-  says it stopped.
+  there. A firing that began before the lead-in is taken as beginning where the
+  lead-in does: its repeats before it are **not counted, not known**, what it
+  reached is what it reached since then, and the phase of its repeats is that of
+  the lead-in's start. At most 300,000 firings go in at once, those of the run's
+  own hours first and then the lead-in's, the earliest first: with more in the
+  hours themselves the hours are not worked out; with more only in the lead-in they
+  are, with the caveat kept. A run is also bounded in time and in flushes: it
+  stops after 2 minutes or 20,000,000 flushes of the groups, whichever comes first.
+- **Which hours are worked out** is kept as stretches of time (a cover): a stretch
+  worked out, one tried and **not** (the work stopped, failed or hit a limit above,
+  the routing configuration couldn't be read, its firings were recorded again, or
+  `--notifications` was off while they were), with why in full, and any not tried. A
+  stretch not worked out keeps nothing of its hours, and the catch-up, at each round
+  and a piece of a day at a time, up to 14 days, works out again whatever isn't
+  covered back to `--backfill` (a piece that didn't come out is tried again after an
+  hour). Every page counts pages only over hours covered, so a week that touches a
+  stretch not worked out, or stopped, is **not known**, never none.
 - **Silences** are `--silences` (read again each run) and the mutes the
   event recorder told of ([Notifications as they were sent](notifications.md)):
   an alert a silence muted is a silence of its labels from ten seconds before
@@ -298,9 +313,14 @@ recorded ones count, and the ones worked out are compared with them. A recorded
 page is a recorded notification to a receiver the configuration says pages: for an
 event the alert manager's recorder posts, it names the integration, so it is
 that kind's; for a webhook port, the receiver's, which pages when any of its
-integrations does or `--paging-receivers` matches. A page worked out is counted
-only where its receiver has no recorded notification from the hour of its page
-on. So a number of pages is recorded where there are records and worked out
+integrations does or `--paging-receivers` matches. Where the integration's kind is
+one whose tool dedups on the group key (PagerDuty, Opsgenie, VictorOps,
+incident.io), a recorded notification is a page only when it is a firing
+notification after none, or after all resolved, for that group and integration
+(its reason is first), as the model counts them; the others are notifications on
+paging integrations, not pages. A page worked out is counted only where its
+receiver has no recorded notification in the hour of its page: per receiver and
+hour, so pages after a receiver's recording stops are worked out again. So a number of pages is recorded where there are records and worked out
 where there are none, and every page and API that shows it says which:
 "recorded", "worked out" or "recorded and worked out". As in `lapilli verdict`, a
 rule's pages count a notification for each firing of it that the notification told of
@@ -310,8 +330,16 @@ each notification once.
 
 The Notifications page, in the sidebar when the notifications are worked out,
 shows for each receiver the notifications worked out and those recorded, over the
-hours that have both, counted from the hour a receiver's first was recorded,
-and for those with none recorded, what was worked out. `lapilli_notifications_agreement`
+hours worked out that have both, counted from the hour a receiver's first was
+recorded, and for those with none recorded, what was worked out, and the stretches
+not worked out with why (the latest five).
+A receiver recorded by its name alone (a webhook port tells of a notification once,
+whatever its integrations) is compared with its **webhook** integrations' worked-out
+notifications only; one recorded with its integration (`receiver/kind`, the alert
+manager's recorder) is compared on all of them. A receiver with notifications
+recorded and none worked out (a Watchdog's, whose alert isn't a firing in the
+ledger) isn't compared and doesn't count in the agreement: the page counts them
+apart and shows them as "recorded only". `lapilli_notifications_agreement`
 is, over the receivers that have both, the sum of the smaller of the two counts
 over the sum of the larger: 1 is the same number for every receiver. It is not
 a measure of timing, only of counts, and counts a notification on each of a
@@ -326,7 +354,7 @@ overview's "Woken for nothing" (pages for nothing while people slept, not every
 notification), `/api/v1/summary` (`paged` on each row), goals (`pages`,
 `pages.asleep`, `pages.nothing`), expectations (a budget of `N pages`, counted by
 the pages worked out of the firings that started in each week, and not known for a
-week the hours worked out don't cover), the weekly digest and the reports
+week the hours worked out don't cover, or whose work stopped or failed), the weekly digest and the reports
 that carry it, MCP's rule and firing tools (`pages`, `worked_out`), a firing's
 line ("worked out", never a bare number) and `/api/v1/report` in the fields
 `lapilli verdict` gives (`notifications` on the report, each rule and each
@@ -336,5 +364,13 @@ for nothing is one for a firing that caught nothing, or, with
 recorded is for nothing when its firing caught nothing.
 
 Past what a run covers (before `--backfill`, before the first start with the
-configuration, or for hours judged while the configuration couldn't be read),
-nothing is worked out and the pages say "not known", never none.
+configuration, or for hours judged while the configuration couldn't be read, or a
+work-out stopped or failed), nothing is worked out and the pages say "not known",
+never none; `/api/v1/summary`'s `paged` has `unknown: true` for such a week and a
+goal on it is not known. The first week, counted from part-way into it, is given
+with `counted_from` (the day) and a goal on it is not known either. A silence a mute
+told of is tied to the ledger's firing it is of and matches on that firing's labels
+and `alertname`, not on the recorded alert's, which hold the external labels; an
+inhibition's mute gets `source_rule`, the rule of the firing that inhibited it. Pruning
+(`--keep`) takes the notifications worked out with the firings, in batches of 5,000,
+and the cover with them.

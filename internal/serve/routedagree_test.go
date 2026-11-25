@@ -173,7 +173,7 @@ func TestRoutedAgreesWithRecordings(t *testing.T) {
 			}
 			// The silenced alert, told only by the recorded mutes.
 			muted := 0
-			fs, _, _ := s.l.FiringsOverlapping(ctx, from, to, 100)
+			fs, _, _ := s.l.FiringsOverlapping(ctx, from, to, from, 100)
 			ids := make([]int64, len(fs))
 			for i, f := range fs {
 				ids[i] = f.ID

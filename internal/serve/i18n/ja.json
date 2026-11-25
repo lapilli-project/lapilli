@@ -2937,5 +2937,13 @@
  "a week the notifications weren't worked out for all of": "通知をすべては計算していない週",
  "Pages are counted from %s.": "呼び出しは %s から集計します。",
  "not known: no record; %d pages came while people slept that week (counted since %s)": "不明: 記録なし。その週、人が寝ている時間に呼び出しが %d 件あった (%s から数えている)",
- "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)": "不明: 発火を判定するための記録済みインシデントがありません。その週の睡眠時間中の呼び出し %d 件 (呼び出しは %s から集計)"
+ "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)": "不明: 発火を判定するための記録済みインシデントがありません。その週の睡眠時間中の呼び出し %d 件 (呼び出しは %s から集計)",
+ "pages not known: some hours weren't worked out": "呼び出しは不明です: 計算できていない時間があります",
+ "Pages are not known over these weeks: some hours weren't worked out, or the work stopped or failed.": "これらの週の呼び出しは不明です。計算できていない時間があるか、計算が中断または失敗しました。",
+ "Pages: not known, some of these hours weren't worked out.": "呼び出し: 不明。この期間には計算できていない時間があります。",
+ "Not known: %s": "不明: %s",
+ "%d more stretches are not known.": "不明な区間がさらに %d 件あります。",
+ "%d receivers have notifications recorded and none worked out: they aren't compared, and don't count in the agreement.": "記録された通知だけで計算した通知がない受信先が %d 件あります。比較せず、一致率にも含めません。",
+ "recorded by its name alone: compared with its webhooks": "名前だけで記録: そのウェブフックと比較",
+ "recorded only": "記録のみ"
 }

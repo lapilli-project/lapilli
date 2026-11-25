@@ -314,20 +314,45 @@ What was decided building the second part, in `lapilli serve`
   costs no query.
 - **The hours and the lead-in.** The run's `from` to its `to`, with the firings that were
   on in the lead-in before `from` taken in as alerts: the longest `repeat_interval`
-  of the routes, clamped to 1 hour to 24 hours. The model has no lower bound of its
-  own (it starts each alert at its start), so a firing still on is worked out from its
-  start, its repeats counted in full; what the lead-in adds is the group's other alerts
-  and the alerts that inhibit it. The notifications from `from` on replace those kept
+  of the routes, clamped to 1 hour to 24 hours. A firing is started no earlier than
+  the lead-in's start (see "Bounds and the cover"), so its repeats before that aren't counted;
+  what the lead-in adds is the group's other alerts and the alerts that inhibit it. The notifications from `from` on replace those kept
   from there; each firing on at or after `from` has its row replaced. At most 300,000
   firings go in at once.
+- **Bounds and the cover (a review's fixes).** A run is given `routedDeadline` (2 minutes)
+  and `routedBudget` (`routing.DefaultBudget`, 20,000,000 flushes), through
+  `RunContext`. A firing is started no earlier than `max(its start, from - lead)`:
+  its repeats before that are not counted (not known), so a firing's counts are those
+  since the lead-in began. The firings of the run's own hours come first within the
+  300,000 (`FiringsOverlapping` takes `own`): more in the hours themselves is "not
+  worked out"; more only in the lead-in is worked out, with the caveat kept. A run that
+  stops, fails, can't read the configuration, or is over re-recorded firings (or
+  `--notifications` was off) records its hours as **not worked out** (`routed_cover`,
+  `ok` 0, why whole), dropping what was kept of them; the catch-up (`catchUpRouted`) works
+  out what isn't covered, up to 14 days a round, a failed piece after an hour.
+  `KeepRouted` replaces `at` between `from` and `to` only. Every page asks the cover:
+  `paged.known(from, to)` is true when the hours from where counting starts to where the
+  ledger's firings are all are covered; a week that isn't is "not known"
+  (`paged.unknown`, `PagedUnknown`, expectations' `pages_not_covered`), and the first,
+  counted from part-way, is partial (`counted_from`). The configuration is read from the
+  pages when none is kept (`routingForView`), cached by the hash of its text, so replicas
+  agree. `PruneKeeping` deletes `routed` in batches of 5,000 and trims the cover.
+- **Recorded pages.** Where the integration's kind `DedupsByGroup`, a recorded notification
+  is a page only when its reason is first; recorded or worked out is decided for each receiver
+  and hour (`RecordedHours`). A mute's silence is tied to the ledger firing it is of and matches
+  on its labels and `alertname`; an inhibition's mute keeps `source_rule`.
+- **Agreement.** Worked-out rows are for each integration; a receiver recorded by its bare
+  name (a webhook port) is compared with its webhook integrations only, one recorded as
+  `receiver/kind` with all; receivers with only recorded notifications are counted apart
+  (`RecordedOnly`).
 - **Schema 035.** `routed`: one row for each notification the model worked out, on each
   integration (`at`, `receiver`, `kind`, `page`, `reason`, `grp`, `firings`: how many
   firings it told of, 0 for one that told of resolves alone); `firing_routed`: one
   row for each firing worked out, `ON DELETE CASCADE` with its firing (`notified`,
   `paged`, `first_page`, `grouped`, `page_ats`: a JSON list of [time, receiver], at most
   200; `receivers`: a JSON list of {receiver, kind, notified, paged} and {receiver, empty};
-  `muted`: {kind, by, source_rule}). The span worked out is `routed_from` and
-  `routed_to` in `meta`. A firing with no row wasn't worked out, which a page says as "not
+  `muted`: {kind, by, source_rule}). `routed_cover` (`from_at`, `to_at`, `ok`, `why`): the
+  stretches tried, none overlapping, adjacent alike ones joined. A firing with no row wasn't worked out, which a page says as "not
   known", never as none.
 - **Silences from mutes.** A mute the event recorder told of, of kind `silence` (an
   inhibition is worked out, not read), is a silence of the alert's labels from ten

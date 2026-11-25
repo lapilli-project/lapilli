@@ -22,7 +22,7 @@ func recordRouted(t *testing.T, l *Ledger) []Firing {
 		{Rule: "DiskFull", Labels: map[string]string{"instance": "b"}, Start: at, End: at.Add(45 * time.Minute)},
 		{Rule: "Quiet", Labels: map[string]string{"instance": "c"}, Start: at.Add(time.Hour)},
 	})
-	fs, more, err := l.FiringsOverlapping(ctx, t0, t0.Add(6*time.Hour), 100)
+	fs, more, err := l.FiringsOverlapping(ctx, t0, t0.Add(6*time.Hour), t0, 100)
 	if err != nil || more || len(fs) != 3 {
 		t.Fatalf("firings: %d %v %v", len(fs), more, err)
 	}
@@ -40,8 +40,8 @@ func TestKeepRouted(t *testing.T) {
 	}
 	defer l.Close()
 	fs := recordRouted(t, l)
-	if _, _, ok, err := l.RoutedSpan(ctx); err != nil || ok {
-		t.Fatalf("span before: %v %v", ok, err)
+	if c, err := l.RoutedCover(ctx); err != nil || c.Any() {
+		t.Fatalf("cover before: %v %v", c, err)
 	}
 	at := t0.Add(2 * time.Hour)
 	ns := []RoutedNotification{
@@ -56,12 +56,12 @@ func TestKeepRouted(t *testing.T) {
 			Muted: []RoutedMute{{Kind: "inhibition", By: "down", SourceRule: "NodeDown"}}},
 		{FiringID: fs[2].ID},
 	}
-	if err := l.KeepRouted(ctx, t0, t0.Add(6*time.Hour), ns, routed); err != nil {
+	if err := l.KeepRouted(ctx, t0, t0.Add(6*time.Hour), "", ns, routed); err != nil {
 		t.Fatal(err)
 	}
-	from, to, ok, err := l.RoutedSpan(ctx)
-	if err != nil || !ok || !from.Equal(t0) || !to.Equal(t0.Add(6*time.Hour)) {
-		t.Fatalf("span: %v %v %v %v", from, to, ok, err)
+	cover, err := l.RoutedCover(ctx)
+	if from, ok := cover.First(); err != nil || !ok || !from.Equal(t0) || !cover.Covers(t0, t0.Add(6*time.Hour)) {
+		t.Fatalf("cover: %v %v", cover, err)
 	}
 	got, err := l.RoutedOf(ctx, []int64{fs[0].ID, fs[1].ID, fs[2].ID})
 	if err != nil || len(got) != 3 {
@@ -86,7 +86,7 @@ func TestKeepRouted(t *testing.T) {
 		t.Errorf("pages: %+v %v %v", pages, more, err)
 	}
 	// Worked out again from the same hours: replaced, not added to.
-	if err := l.KeepRouted(ctx, t0, t0.Add(8*time.Hour), ns[:1], routed[:1]); err != nil {
+	if err := l.KeepRouted(ctx, t0, t0.Add(8*time.Hour), "", ns[:1], routed[:1]); err != nil {
 		t.Fatal(err)
 	}
 	by, _ = l.RoutedByReceiver(ctx, t0, t0.Add(8*time.Hour))
@@ -96,8 +96,8 @@ func TestKeepRouted(t *testing.T) {
 	if got, _ := l.RoutedOf(ctx, []int64{fs[0].ID}); len(got[fs[0].ID].Receivers) != 2 {
 		t.Errorf("a firing worked out again has one row: %+v", got)
 	}
-	if _, to, _, _ := l.RoutedSpan(ctx); !to.Equal(t0.Add(8 * time.Hour)) {
-		t.Errorf("span grew to %v", to)
+	if cover, _ := l.RoutedCover(ctx); !cover.Covers(t0, t0.Add(8*time.Hour)) || len(cover) != 1 {
+		t.Errorf("cover grew to %v", cover)
 	}
 	// The firings replaced by a run that finds them again: their rows go.
 	record(t, l, t0, t0.Add(8*time.Hour), []firing.Firing{{Rule: "DiskFull", Labels: map[string]string{"instance": "a"}, Start: at, End: at.Add(30 * time.Minute)}})
@@ -107,8 +107,8 @@ func TestKeepRouted(t *testing.T) {
 	if err := l.ForgetRouted(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok, _ := l.RoutedSpan(ctx); ok {
-		t.Error("span after forgetting")
+	if cover, _ := l.RoutedCover(ctx); cover.Any() || len(cover) != 0 {
+		t.Error("cover after forgetting")
 	}
 }
 
@@ -179,17 +179,154 @@ func TestMigrate035(t *testing.T) {
 		t.Fatalf("migrating to 035: %v", err)
 	}
 	defer l2.Close()
-	fs, _, err := l2.FiringsOverlapping(ctx, t0, t0.Add(6*time.Hour), 100)
+	fs, _, err := l2.FiringsOverlapping(ctx, t0, t0.Add(6*time.Hour), t0, 100)
 	if err != nil || len(fs) != 3 {
 		t.Fatalf("firings after migrating: %d %v", len(fs), err)
 	}
 	if got, err := l2.RoutedOf(ctx, []int64{fs[0].ID}); err != nil || len(got) != 0 {
 		t.Errorf("worked out after migrating: %v %v", got, err)
 	}
-	if err := l2.KeepRouted(ctx, t0, t0.Add(6*time.Hour), nil, []RoutedFiring{{FiringID: fs[0].ID, Notified: 1}}); err != nil {
+	if err := l2.KeepRouted(ctx, t0, t0.Add(6*time.Hour), "", nil, []RoutedFiring{{FiringID: fs[0].ID, Notified: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := l2.RoutedOf(ctx, []int64{fs[0].ID}); got[fs[0].ID].Notified != 1 {
 		t.Errorf("kept after migrating: %v", got)
+	}
+}
+
+// A gap in what was worked out reads as a gap: the hours tried and not
+// worked out, and those not tried, are not covered, with why; a stretch
+// worked out over one that wasn't covers it again.
+func TestRoutedCover(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	for _, w := range [][2]int{{0, 2}, {2, 4}, {6, 8}} {
+		if err := l.KeepRouted(ctx, h(w[0]), h(w[1]), "", nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, err := l.RoutedCover(ctx)
+	if err != nil || len(c) != 2 || !c[0].To.Equal(h(4)) {
+		t.Fatalf("cover (adjacent stretches join): %+v %v", c, err)
+	}
+	if c.Covers(h(0), h(8)) || !c.Covers(h(1), h(4)) || !c.Covers(h(6), h(7)) {
+		t.Errorf("covers: %+v", c)
+	}
+	if g := c.Gaps(h(0), h(9)); len(g) != 2 || !g[0][0].Equal(h(4)) || !g[0][1].Equal(h(6)) || !g[1][0].Equal(h(8)) {
+		t.Errorf("gaps: %v", g)
+	}
+	// Tried and not worked out, over the middle of a stretch worked out.
+	why := "more than 300000 firings in the hours worked out: nothing of them is known, and this text is kept whole"
+	if err := l.MarkRoutedUnknown(ctx, h(1), h(3), why); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = l.RoutedCover(ctx)
+	if c.Covers(h(0), h(4)) || !c.Covers(h(0), h(1)) || !c.Covers(h(3), h(4)) || c.Covers(h(2), h(3)) {
+		t.Errorf("cover after unknown: %+v", c)
+	}
+	if got := c.Unknown(h(0), h(8)); got != why {
+		t.Errorf("why (kept whole): %q", got)
+	}
+	if got := c.Unknown(h(3), h(4)); got != "" {
+		t.Errorf("why over a stretch worked out: %q", got)
+	}
+	// Worked out again: it covers.
+	if err := l.KeepRouted(ctx, h(0), h(4), "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = l.RoutedCover(ctx); !c.Covers(h(0), h(4)) || c.Unknown(h(0), h(4)) != "" {
+		t.Errorf("cover worked out again: %+v", c)
+	}
+	// A caveat on a stretch worked out is kept with it.
+	if err := l.KeepRouted(ctx, h(4), h(6), "the lead-in kept the first firings", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = l.RoutedCover(ctx); !c.Covers(h(0), h(8)) || c.Unknown(h(5), h(6)) != "the lead-in kept the first firings" {
+		t.Errorf("caveat: %+v", c)
+	}
+}
+
+// KeepRouted replaces the notifications of its hours alone: those after them
+// stay.
+func TestKeepRoutedBounds(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	n := func(at time.Time) []RoutedNotification {
+		return []RoutedNotification{{At: at, Receiver: "r", Kind: "slack", Reason: "first", Group: "g", Firings: 1}}
+	}
+	if err := l.KeepRouted(ctx, h(0), h(2), "", n(h(1)), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.KeepRouted(ctx, h(4), h(6), "", n(h(5)), nil); err != nil {
+		t.Fatal(err)
+	}
+	// The first hours again: the notification in the later ones isn't theirs.
+	if err := l.KeepRouted(ctx, h(0), h(2), "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	by, _ := l.RoutedByReceiver(ctx, h(0), h(24))
+	if by["r"].Notifications != 1 {
+		t.Errorf("after the first hours again: %v", by)
+	}
+}
+
+// The firings the run's own hours reach come first when there are more than
+// the limit: the lead-in is what is left out.
+func TestFiringsOverlappingOwnFirst(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	record(t, l, t0, t0.Add(10*time.Hour), []firing.Firing{
+		{Rule: "Old", Labels: map[string]string{"i": "1"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)},
+		{Rule: "Old", Labels: map[string]string{"i": "2"}, Start: t0.Add(90 * time.Minute), End: t0.Add(2 * time.Hour)},
+		{Rule: "Own", Labels: map[string]string{"i": "3"}, Start: t0.Add(6 * time.Hour), End: t0.Add(7 * time.Hour)},
+		{Rule: "Own", Labels: map[string]string{"i": "4"}, Start: t0.Add(3 * time.Hour)},
+	})
+	fs, more, err := l.FiringsOverlapping(ctx, t0, t0.Add(8*time.Hour), t0.Add(5*time.Hour), 2)
+	if err != nil || !more || len(fs) != 2 || fs[0].Rule != "Own" || fs[1].Rule != "Own" {
+		t.Errorf("own first: %+v %v %v", fs, more, err)
+	}
+}
+
+// Pruning takes the notifications worked out before the time with the
+// firings, and the cover with them.
+func TestPruneRouted(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	var ns []RoutedNotification
+	for i := 0; i < 12; i++ {
+		ns = append(ns, RoutedNotification{At: h(i), Receiver: "r", Kind: "slack", Reason: "first", Group: "g", Firings: 1})
+	}
+	if err := l.KeepRouted(ctx, h(0), h(12), "", ns, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Prune(ctx, h(6)); err != nil {
+		t.Fatal(err)
+	}
+	by, _ := l.RoutedByReceiver(ctx, h(0), h(24))
+	if by["r"].Notifications != 6 {
+		t.Errorf("after pruning: %v", by)
+	}
+	c, _ := l.RoutedCover(ctx)
+	if len(c) != 1 || !c[0].From.Equal(h(6)) || !c[0].To.Equal(h(12)) {
+		t.Errorf("cover after pruning: %+v", c)
 	}
 }

@@ -2910,7 +2910,7 @@
  "an inhibition": "억제",
  "a silence": "침묵",
  "a time interval": "시간 구간",
- "The notifications the alert manager's configuration sends for the firings in the ledger, worked out each hour, beside those really recorded. Where none was recorded for a receiver, what is worked out is all there is, and every page that shows it says so.": "원장에 있는 발화에 대해 알림 매니저 설정이 보낼 알림을 매시간 계산하고, 실제로 기록된 알림과 나란히 보여 줘요. 수신처에 기록된 알림이 없으면 계산한 값이 전부이고, 이를 보여 주는 모든 화면에 그렇게 표시해요.",
+ "The notifications the alert manager's configuration sends for the firings in the ledger, worked out each hour, beside those really recorded. Where none was recorded for a receiver, what is worked out is all there is, and every page that shows it says so.": "저장된 발화에 대해 알림 매니저 설정이 보낼 알림을 매시간 계산하고, 실제로 기록된 알림과 나란히 보여 줘요. 수신처에 기록된 알림이 없으면 계산한 값이 전부이고, 이를 보여 주는 모든 화면에 그렇게 표시해요.",
  "The routing configuration can't be read now: the log says why. What was worked out before stays.": "라우팅 설정을 지금은 읽을 수 없어요. 이유는 로그에 있어요. 전에 계산한 값은 그대로 둬요.",
  "The last hours judged weren't worked out: the log says why.": "마지막으로 판정한 시간대의 알림을 계산하지 못했어요. 이유는 로그에 있어요.",
  "The work-out stopped short: %s": "계산이 중간에 멈췄어요: %s",
@@ -2937,5 +2937,13 @@
  "a week the notifications weren't worked out for all of": "알림을 전부 계산하지 못한 주",
  "Pages are counted from %s.": "%s부터 호출을 집계해요.",
  "not known: no record; %d pages came while people slept that week (counted since %s)": "알 수 없음: 기록 없음. 그 주에 자는 시간에 간 호출 %d건 (호출은 %s부터 셈)",
- "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)": "알 수 없음: 발화를 판정할 기록된 인시던트가 없어요. 그 주에 자는 시간에 간 호출 %d건 (호출은 %s부터 셈)"
+ "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)": "알 수 없음: 발화를 판정할 기록된 인시던트가 없어요. 그 주에 자는 시간에 간 호출 %d건 (호출은 %s부터 셈)",
+ "pages not known: some hours weren't worked out": "호출을 알 수 없어요: 계산하지 못한 시간이 있어요",
+ "Pages are not known over these weeks: some hours weren't worked out, or the work stopped or failed.": "이 주들의 호출을 알 수 없어요. 계산하지 못한 시간이 있거나 계산이 중단되거나 실패했어요.",
+ "Pages: not known, some of these hours weren't worked out.": "호출: 알 수 없음. 이 기간 중 계산하지 못한 시간이 있어요.",
+ "Not known: %s": "알 수 없음: %s",
+ "%d more stretches are not known.": "알 수 없는 구간이 %d개 더 있어요.",
+ "%d receivers have notifications recorded and none worked out: they aren't compared, and don't count in the agreement.": "기록된 알림만 있고 계산한 알림은 없는 수신처가 %d개 있어요. 비교하지 않고 일치율에도 넣지 않아요.",
+ "recorded by its name alone: compared with its webhooks": "이름만으로 기록됨. 웹훅 알림과 비교해요",
+ "recorded only": "기록만 있음"
 }

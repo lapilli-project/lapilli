@@ -621,6 +621,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x.PagedNothing += row.PagedNothing
 		x.PagedNothingAsleep += row.PagedNothingAsleep
 		x.PagedOn = x.PagedOn || row.PagedOn
+		x.PagedUnknown = x.PagedUnknown || row.PagedUnknown
 		if c := row.Responses; c != nil {
 			x.Useful += c.Useful
 			x.NotUseful += c.NotUseful
@@ -1045,7 +1046,8 @@ func (s *Server) wokenOver(ctx context.Context, d rulesData, v *rulesList) (woke
 	}
 	v.Sum.Notified = true
 	v.Sum.PagedOn = s.notifies()
-	v.Sum.Uncounted = !s.l.Midnight(d.t.weeks[len(d.t.weeks)-1] + 7).After(p.countedFrom())
+	v.Sum.Uncounted = !s.l.Midnight(d.t.weeks[len(d.t.weeks)-1]+7).After(p.countedFrom()) ||
+		s.notifies() && !p.known(s.l.Midnight(d.t.weeks[len(d.t.weeks)-d.Weeks]), s.l.Midnight(d.t.weeks[len(d.t.weeks)-1]+7))
 	by := s.wokenBy(p, d.own.schedules(d.t.o.Hours))
 	woken, unjudged = map[string]int{}, map[string]int{}
 	for _, w := range d.t.weeks[len(d.t.weeks)-d.Weeks:] {

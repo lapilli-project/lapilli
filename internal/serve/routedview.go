@@ -67,18 +67,29 @@ type pagesLine struct {
 	PagedNothing, PagedNothingAsleep     int
 	// PagedFrom is the day pages are counted from, the first notification
 	// recorded or the first hour worked out: before it, none is known.
-	PagedFrom string
+	// PagedUnknown says some of the hours aren't known (not worked out, or
+	// the work stopped or failed): no number is given for them.
+	PagedFrom    string
+	PagedUnknown bool
 }
 
 // PagedBasis says which the rule's pages are.
 func (l pagesLine) PagedBasis() string { return pagedBasis(l.PagedRecorded, l.PagedWorkedOut) }
 
-// pagingOfRecorded says whether a recorded notification's receiver pages,
-// by the configuration: an alert manager's recorder names the integration
-// too (receiver/kind, receiver/kind[1]); a webhook port names the receiver
-// alone, which pages when any of its integrations does.
-func pagingOfRecorded(cfg *routing.Config, re *regexp.Regexp, grafana bool) func(string) bool {
-	return func(name string) bool {
+// pagingOfRecorded says whether a recorded notification to a receiver is a
+// page, by the configuration: an alert manager's recorder names the
+// integration too (receiver/kind, receiver/kind[1]); a webhook port names
+// the receiver alone, which pages when any of its integrations does. Where
+// the integration's kind is one whose tool dedups on the group key
+// (routing.DedupsByGroup), a repeat or a "new alerts" notification isn't a
+// new page, and only a firing notification after none, or after all
+// resolved, is: the notification's reason is first. The notification of
+// resolved alerts alone is none.
+func pagingOfRecorded(cfg *routing.Config, re *regexp.Regexp, grafana bool) func(name, reason string, resolved bool) bool {
+	return func(name, reason string, resolved bool) bool {
+		if resolved {
+			return false
+		}
 		base, kind := name, ""
 		if _, ok := cfg.Receiver(name); !ok {
 			if i := strings.LastIndex(name, "/"); i > 0 {
@@ -92,13 +103,27 @@ func pagingOfRecorded(cfg *routing.Config, re *regexp.Regexp, grafana bool) func
 		if !ok || len(rc.Integrations) == 0 {
 			return false
 		}
-		if re != nil && re.MatchString(base) {
-			return true
-		}
+		matched := re != nil && re.MatchString(base)
+		first := reason == ledger.ReasonFirst
 		if kind != "" {
-			return routing.PagingKind(kind, grafana)
+			switch {
+			case routing.DedupsByGroup(kind) && routing.PagingKind(kind, grafana):
+				return first
+			}
+			return matched || routing.PagingKind(kind, grafana)
 		}
-		return slices.ContainsFunc(rc.Integrations, func(ig routing.Integration) bool { return routing.PagingKind(ig.Kind, grafana) })
+		// A name without an integration: it pages by any integration that
+		// does; those that dedup count a notification that is first alone.
+		dedup := false
+		for _, ig := range rc.Integrations {
+			switch {
+			case routing.DedupsByGroup(ig.Kind) && routing.PagingKind(ig.Kind, grafana):
+				dedup = true
+			case matched || routing.PagingKind(ig.Kind, grafana):
+				return true
+			}
+		}
+		return dedup && first
 	}
 }
 
@@ -118,26 +143,40 @@ func recordedBase(cfg *routing.Config, name string) string {
 
 // loadPageEvents works out the pages of the weeks shown: those really
 // recorded, to a receiver the configuration says pages, and, for what no
-// recorded notification covers, those worked out. A page worked out is
-// left out where its receiver has recorded notifications from before it:
-// the recorded ones count there.
+// recorded notification covers, those worked out, in the hours that were
+// worked out. A page worked out is left out where its receiver has recorded
+// notifications in its hour: the recorded ones count there, and a receiver's
+// pages after its recording stops are worked out again. The configuration is
+// read here when none is kept (routingForView), so that every replica counts
+// the same.
 func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Time) error {
 	if !s.notifies() {
 		return nil
 	}
-	cfg := s.routingKept()
-	span0, span1, ok, err := s.l.RoutedSpan(ctx)
+	cfg := s.routingForView(ctx)
+	cover, err := s.l.RoutedCover(ctx)
 	if err != nil {
 		return err
 	}
-	p.routed, p.routedFrom, p.routedTo = ok, span0, span1
-	if cfg == nil && !ok {
+	p.cover, p.routed = cover, len(cover) > 0
+	if len(cover) > 0 {
+		p.routedFrom = cover[0].From // where the work-out began, whether or not it came out
+	}
+	if p.upTo, err = s.firingsUpTo(ctx); err != nil {
+		return err
+	}
+	if p.upTo.IsZero() {
+		p.upTo = s.now()
+	}
+	if cfg == nil && !p.routed {
 		return nil
 	}
 	byUseful := s.cfg.Options.NoisyBy == verdict.NoisyByUseful
 	grafana := s.cfg.AlertmanagerConfig == ""
-	// Receivers that really sent notifications, and from when.
+	// Receivers that really sent notifications, and from when, and in which
+	// hours.
 	first := map[string]time.Time{}
+	hours := map[string]map[int64]bool{}
 	if cfg != nil {
 		recFirst, err := s.l.RecordedFirst(ctx)
 		if err != nil {
@@ -153,15 +192,28 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 				first[b] = at
 			}
 		}
+		rh, err := s.l.RecordedHours(ctx, from.Add(-time.Hour), to)
+		if err != nil {
+			return err
+		}
+		for name, hs := range rh {
+			b := recordedBase(cfg, name)
+			if hours[b] == nil {
+				hours[b] = map[int64]bool{}
+			}
+			for h := range hs {
+				hours[b][h] = true
+			}
+		}
 		pages := pagingOfRecorded(cfg, s.cfg.PagingReceivers, grafana)
 		for _, pg := range p.pages {
-			if pages(pg.Receiver) && !pg.Resolved {
+			if pages(pg.Receiver, pg.Reason, pg.Resolved) {
 				p.events = append(p.events, pageEvent{Rule: pg.Rule, At: pg.At, Nothing: pg.Stone == ledger.PageBlack, Recorded: true})
 			}
 		}
 	}
 	p.recordedFrom = first
-	if !ok {
+	if !p.routed {
 		return nil
 	}
 	rows, more, err := s.l.RoutedPages(ctx, from, to, 500_000)
@@ -178,13 +230,42 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 			if pa.At.Before(from) || !pa.At.Before(to) {
 				continue
 			}
-			if at, ok := first[pa.Receiver]; ok && !pa.At.Before(at) {
+			if !cover.Covers(pa.At, pa.At.Add(time.Second)) {
+				continue // not worked out for the hour it went in
+			}
+			if hours[pa.Receiver][pa.At.Truncate(time.Hour).Unix()] {
 				continue // recorded: those count
 			}
 			p.events = append(p.events, pageEvent{Rule: r.Rule, At: pa.At, Nothing: nothing})
 		}
 	}
 	return nil
+}
+
+// known reports whether the pages over [from, to) are known: counted from
+// when the first notification was recorded or the first hour worked out (the
+// part before that is counted from there, and shown as partial), and up to
+// where the ledger's firings are, every hour is worked out. An hour not
+// tried, or tried and not worked out (the work stopped or failed, the
+// configuration couldn't be read), makes the whole span not known, not none.
+// Where notifications are only recorded, pages are as recorded.
+func (p *paged) known(from, to time.Time) bool {
+	if !p.routed {
+		return true
+	}
+	lo, hi := maxTime(from, p.countedFrom()), minTime(to, p.upTo)
+	if !lo.Before(hi) {
+		return true
+	}
+	return p.cover.Covers(lo, hi)
+}
+
+// partialFrom reports whether the pages over [from, to) are counted from
+// part-way into it: the first notification recorded, or the first hour
+// worked out, came after from.
+func (p *paged) partialFrom(from, to time.Time) bool {
+	c := p.countedFrom()
+	return c.After(from) && c.Before(to)
 }
 
 // pageLines are, by rule, the pages that went in [from, to), counted while
@@ -326,6 +407,13 @@ type receiverRow struct {
 	// notification was recorded for it, the later.
 	Compared bool
 	From     time.Time
+	// RecordedOnly says the receiver has notifications recorded and none
+	// worked out (a receiver of an alert that isn't a firing in the ledger,
+	// as a Watchdog's): it isn't compared, and doesn't count in the
+	// agreement. Webhook says the receiver is recorded by its name alone (a
+	// webhook port tells of a notification once, whatever its integrations):
+	// its worked-out count is that of its webhook integrations.
+	RecordedOnly, Webhook bool
 }
 
 // Agreement is how much alike the two counts are: the smaller over the
@@ -354,35 +442,115 @@ type notificationsView struct {
 	// the pages among them; Stopped, why the last work-out stopped short.
 	Notified, Paged int
 	Stopped, Failed string
+	// Unknown are the stretches not worked out, or worked out with a caveat,
+	// each with why in full, the latest first, at most unknownShown of them;
+	// UnknownMore how many more there were.
+	Unknown     []string
+	UnknownMore int
+	// RecordedOnly is how many receivers have notifications recorded and
+	// none worked out: they are counted apart from the agreement.
+	RecordedOnly int
 	// Recorded says some notification was recorded at all.
 	Recorded bool
 	// ConfigErr says the routing configuration isn't read.
 	ConfigErr bool
 }
 
+// unknownShown is how many stretches not worked out the Notifications page
+// lists.
+const unknownShown = 5
+
+// countsOver are the notifications worked out, by receiver and the kind of
+// integration, and those recorded, by the receiver's name as recorded, that
+// went in the stretches of [from, to) that were worked out: a recorded
+// notification in an hour not worked out is no one's to compare.
+func (s *Server) countsOver(ctx context.Context, cover ledger.RoutedCover, from, to time.Time) (map[string]map[string]ledger.RoutedCount, map[string]ledger.RecordedCount, error) {
+	worked := map[string]map[string]ledger.RoutedCount{}
+	rec := map[string]ledger.RecordedCount{}
+	for _, iv := range cover {
+		if !iv.Worked {
+			continue
+		}
+		a, b := maxTime(iv.From, from), minTime(iv.To, to)
+		if !a.Before(b) {
+			continue
+		}
+		w, err := s.l.RoutedByReceiverKind(ctx, a, b)
+		if err != nil {
+			return nil, nil, err
+		}
+		for name, kinds := range w {
+			if worked[name] == nil {
+				worked[name] = map[string]ledger.RoutedCount{}
+			}
+			for k, c := range kinds {
+				x := worked[name][k]
+				x.Notifications += c.Notifications
+				x.Pages += c.Pages
+				worked[name][k] = x
+			}
+		}
+		r, err := s.l.RecordedByReceiver(ctx, a, b)
+		if err != nil {
+			return nil, nil, err
+		}
+		for name, c := range r {
+			x := rec[name]
+			x.Notifications += c.Notifications
+			if x.First.IsZero() || c.First.Before(x.First) {
+				x.First = c.First
+			}
+			rec[name] = x
+		}
+	}
+	return worked, rec, nil
+}
+
 // notificationsNow works the Notifications page out: for each receiver the
-// notifications worked out and recorded over the span worked out, and the
-// agreement between them (docs/design/routing.md).
+// notifications worked out and recorded over the hours worked out, and the
+// agreement between them (docs/design/routing.md). Worked-out rows are for
+// each integration, and the recorder of an alert manager names the integration
+// too, so those are compared as they are; a webhook port records a
+// notification once, under the receiver's name alone, and is compared with
+// that receiver's webhook integrations only. A receiver with notifications
+// recorded and none worked out is counted apart (RecordedOnly), not in the
+// agreement.
 func (s *Server) notificationsNow(ctx context.Context) (*notificationsView, error) {
 	v := &notificationsView{On: s.notifies()}
 	if !v.On {
 		return v, nil
 	}
-	cfg := s.routingKept()
+	cfg := s.routingForView(ctx)
 	s.routed.Lock()
 	v.Stopped, v.Failed = s.routed.stopped, s.routed.failed
 	v.ConfigErr = cfg == nil || s.routed.readFailed != ""
 	s.routed.Unlock()
-	from, to, ok, err := s.l.RoutedSpan(ctx)
-	if err != nil || !ok {
-		return v, err
-	}
-	v.From, v.To = from, to
-	worked, err := s.l.RoutedByReceiver(ctx, from, to)
+	cover, err := s.l.RoutedCover(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rec, err := s.l.RecordedByReceiver(ctx, from, to)
+	for i := len(cover) - 1; i >= 0; i-- {
+		if cover[i].Why == "" {
+			continue
+		}
+		if len(v.Unknown) == unknownShown {
+			v.UnknownMore++
+			continue
+		}
+		what := "not worked out"
+		if cover[i].Worked {
+			what = "worked out, with a caveat"
+		}
+		v.Unknown = append(v.Unknown, fmt.Sprintf("%s to %s, %s: %s", cover[i].From.In(s.cfg.Loc).Format("2006-01-02 15:04"),
+			cover[i].To.In(s.cfg.Loc).Format("2006-01-02 15:04"), what, cover[i].Why))
+	}
+	from, ok := cover.First()
+	to, _ := cover.Last()
+	if !ok {
+		return v, nil
+	}
+	v.From, v.To = from, to
+	worked, rec, err := s.countsOver(ctx, cover, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -396,17 +564,41 @@ func (s *Server) notificationsNow(ctx context.Context) (*notificationsView, erro
 		}
 		return recordedBase(cfg, name)
 	}
-	recorded, firstOf := map[string]int{}, map[string]time.Time{}
+	recorded, firstOf, bare := map[string]int{}, map[string]time.Time{}, map[string]bool{}
 	for name, c := range rec {
 		recorded[base(name)] += c.Notifications
+		if base(name) == name {
+			bare[name] = true
+		}
 	}
 	for name, at := range first {
 		b := base(name)
 		if was, ok := firstOf[b]; !ok || at.Before(was) {
 			firstOf[b] = at
 		}
+		if b == name {
+			bare[b] = true
+		}
 	}
 	v.Recorded = len(first) > 0
+	// A receiver's worked-out count, for the kinds that are compared.
+	of := func(w map[string]map[string]ledger.RoutedCount, name string) ledger.RoutedCount {
+		var c ledger.RoutedCount
+		for k, x := range w[name] {
+			if bare[name] && k != "webhook" {
+				continue
+			}
+			c.Notifications += x.Notifications
+			c.Pages += x.Pages
+		}
+		return c
+	}
+	all := func(w map[string]map[string]ledger.RoutedCount, name string) (n int) {
+		for _, x := range w[name] {
+			n += x.Notifications
+		}
+		return n
+	}
 	names := map[string]bool{}
 	for name := range worked {
 		names[name] = true
@@ -416,7 +608,7 @@ func (s *Server) notificationsNow(ctx context.Context) (*notificationsView, erro
 	}
 	var sumMin, sumMax int
 	for _, name := range slices.Sorted(maps.Keys(names)) {
-		row := receiverRow{Receiver: name, From: from}
+		row := receiverRow{Receiver: name, From: from, Webhook: bare[name]}
 		t, hasRecorded := firstOf[name]
 		if hasRecorded && !t.Before(to) {
 			hasRecorded = false
@@ -425,38 +617,38 @@ func (s *Server) notificationsNow(ctx context.Context) (*notificationsView, erro
 			// Counted from when its first came, to the hour.
 			row.From = t.Truncate(time.Hour)
 		}
-		w := worked[name]
-		row.WorkedOut, row.WorkedOutPages = w.Notifications, w.Pages
-		if hasRecorded {
-			row.Compared = true
-			if row.From.After(from) {
-				x, err := s.l.RoutedByReceiver(ctx, row.From, to)
-				if err != nil {
-					return nil, err
-				}
-				row.WorkedOut, row.WorkedOutPages = x[name].Notifications, x[name].Pages
+		w, r := worked, rec
+		if hasRecorded && row.From.After(from) {
+			if w, r, err = s.countsOver(ctx, cover, row.From, to); err != nil {
+				return nil, err
 			}
-			if row.From.After(from) {
-				x, err := s.l.RecordedByReceiver(ctx, row.From, to)
-				if err != nil {
-					return nil, err
+		}
+		c := of(w, name)
+		row.WorkedOut, row.WorkedOutPages = c.Notifications, c.Pages
+		if hasRecorded && all(w, name) == 0 && all(worked, name) == 0 {
+			// Nothing was worked out for it at all: it isn't compared.
+			row.RecordedOnly = true
+			for rn, x := range r {
+				if base(rn) == name {
+					row.Recorded += x.Notifications
 				}
-				n := 0
-				for rn, c := range x {
-					if base(rn) == name {
-						n += c.Notifications
-					}
+			}
+			v.RecordedOnly++
+		} else if hasRecorded {
+			row.Compared = true
+			for rn, x := range r {
+				if base(rn) == name {
+					row.Recorded += x.Notifications
 				}
-				row.Recorded = n
-			} else {
-				row.Recorded = recorded[name]
 			}
 			sumMin += min(row.WorkedOut, row.Recorded)
 			sumMax += max(row.WorkedOut, row.Recorded)
 			v.Compared++
 		}
-		v.Notified += w.Notifications
-		v.Paged += w.Pages
+		for _, x := range worked[name] {
+			v.Notified += x.Notifications
+			v.Paged += x.Pages
+		}
 		v.Rows = append(v.Rows, row)
 	}
 	if v.Compared > 0 {
@@ -534,9 +726,9 @@ func (s *Server) routedMetrics(ctx context.Context, b *bytes.Buffer, today int64
 // report still gives what was worked out: the recorded ones are the pages'
 // and the Notifications page's.
 func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdict.Options) error {
-	cfg := s.routingKept()
-	span0, span1, ok, err := s.l.RoutedSpan(ctx)
-	if err != nil || !ok || cfg == nil {
+	cfg := s.routingForView(ctx)
+	cover, err := s.l.RoutedCover(ctx)
+	if err != nil || !cover.Any() || cfg == nil {
 		return err
 	}
 	own, err := s.owners(ctx)
@@ -645,26 +837,33 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 		}
 		rep.Rules[i].Notifications = n
 	}
-	// The totals of the period, over the hours worked out.
-	from, to := rep.From, rep.To
-	if from.Before(span0) {
-		from = span0
-	}
-	if to.After(span1) {
-		to = span1
-	}
+	// The totals of the period, over the hours worked out: each stretch of
+	// them that is, and Stopped says why for those that aren't, or are with
+	// a caveat, in full, not only for the last run's.
 	tot := &verdict.ReportNotifications{WorkedOut: true, Receivers: []verdict.NotificationReceiver{}}
-	if from.Before(to) {
-		if tot.Notified, tot.Paged, tot.Groups, err = s.l.RoutedTotals(ctx, from, to); err != nil {
+	tot.Stopped = cover.Unknown(rep.From, rep.To)
+	if gaps := cover.Gaps(rep.From, rep.To); len(gaps) > 0 && tot.Stopped == "" {
+		tot.Stopped = "the notifications of some of these hours aren't worked out"
+	}
+	for _, iv := range cover {
+		if !iv.Worked {
+			continue
+		}
+		from, to := maxTime(rep.From, iv.From), minTime(rep.To, iv.To)
+		if !from.Before(to) {
+			continue
+		}
+		n, pg, gr, err := s.l.RoutedTotals(ctx, from, to)
+		if err != nil {
 			return err
 		}
-	}
-	s.routed.Lock()
-	tot.Stopped = s.routed.stopped
-	s.routed.Unlock()
-	if by, err := s.l.RoutedByReceiver(ctx, from, to); err == nil {
-		for name := range by {
-			reached[name] = true
+		tot.Notified += n
+		tot.Paged += pg
+		tot.Groups += gr
+		if by, err := s.l.RoutedByReceiver(ctx, from, to); err == nil {
+			for name := range by {
+				reached[name] = true
+			}
 		}
 	}
 	grafana := s.cfg.AlertmanagerConfig == ""

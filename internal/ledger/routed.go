@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -74,34 +73,213 @@ type RoutedFiring struct {
 	Muted     []RoutedMute
 }
 
-// RoutedSpan is from when to when the ledger's notifications have been
-// worked out: the earliest hour a run worked them out from, and where the
-// latest ended. ok is false for none.
-func (l *Ledger) RoutedSpan(ctx context.Context) (from, to time.Time, ok bool, err error) {
-	f, err := l.meta(ctx, l.r, "routed_from")
-	if err != nil || f == "" {
-		return time.Time{}, time.Time{}, false, err
+// RoutedInterval is a stretch of time a run tried to work the notifications
+// of out: Worked says it did. Why is, for one that wasn't (the work stopped,
+// failed, the configuration couldn't be read, or its firings were recorded
+// again), what went wrong, and for one worked out a caveat ("" for none),
+// kept whole.
+type RoutedInterval struct {
+	From, To time.Time
+	Worked   bool
+	Why      string
+}
+
+// RoutedCover is the stretches tried, the earliest first, none overlapping
+// another.
+type RoutedCover []RoutedInterval
+
+// RoutedCover reads which hours were worked out and which weren't.
+func (l *Ledger) RoutedCover(ctx context.Context) (RoutedCover, error) {
+	var out RoutedCover
+	err := l.eachRow(ctx, func(r scanner) error {
+		var from, to, ok int64
+		var x RoutedInterval
+		if err := r.Scan(&from, &to, &ok, &x.Why); err != nil {
+			return err
+		}
+		x.From, x.To, x.Worked = unix(from), unix(to), ok != 0
+		out = append(out, x)
+		return nil
+	}, "SELECT from_at, to_at, ok, why FROM routed_cover ORDER BY from_at")
+	return out, err
+}
+
+// Any reports whether some stretch was worked out.
+func (c RoutedCover) Any() bool {
+	return slices.ContainsFunc(c, func(x RoutedInterval) bool { return x.Worked })
+}
+
+// First is where the first stretch worked out starts, and Last where the
+// latest ends: ok is false when none was.
+func (c RoutedCover) First() (t time.Time, ok bool) {
+	for _, x := range c {
+		if x.Worked {
+			return x.From, true
+		}
 	}
-	t, err := l.meta(ctx, l.r, "routed_to")
+	return time.Time{}, false
+}
+
+// Last is where the latest stretch worked out ends.
+func (c RoutedCover) Last() (t time.Time, ok bool) {
+	for i := len(c) - 1; i >= 0; i-- {
+		if c[i].Worked {
+			return c[i].To, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// Covers reports whether every moment of [from, to) is in a stretch worked
+// out: an hour not tried, or one that was and wasn't worked out, is not.
+// An empty span is covered.
+func (c RoutedCover) Covers(from, to time.Time) bool {
+	return len(c.Gaps(from, to)) == 0
+}
+
+// Gaps are the parts of [from, to) no stretch worked out covers, in order.
+func (c RoutedCover) Gaps(from, to time.Time) [][2]time.Time {
+	var out [][2]time.Time
+	at := from
+	for _, x := range c {
+		if !x.Worked || !x.To.After(at) {
+			continue
+		}
+		if !x.From.Before(to) {
+			break
+		}
+		if x.From.After(at) {
+			out = append(out, [2]time.Time{at, x.From})
+		}
+		at = x.To
+		if !at.Before(to) {
+			return out
+		}
+	}
+	if at.Before(to) {
+		out = append(out, [2]time.Time{at, to})
+	}
+	return out
+}
+
+// Unknown is why the notifications of some of [from, to) are not known: the
+// text of the first stretch in it that was tried and wasn't worked out, or
+// one worked out with a caveat; "" for none.
+func (c RoutedCover) Unknown(from, to time.Time) string {
+	for _, x := range c {
+		if x.Why != "" && x.From.Before(to) && x.To.After(from) {
+			return x.Why
+		}
+	}
+	return ""
+}
+
+// setCover makes [from, to) one stretch, over what was there.
+func (l *Ledger) setCover(t *txn, from, to time.Time, worked bool, why string) error {
+	f, e := from.Unix(), to.Unix()
+	if e <= f {
+		return nil
+	}
+	type iv struct {
+		from, to int64
+		ok       int64
+		why      string
+	}
+	var over []iv
+	rows, err := t.QueryContext(t.ctx, "SELECT from_at, to_at, ok, why FROM routed_cover WHERE to_at >= ? AND from_at <= ? ORDER BY from_at", f, e)
 	if err != nil {
-		return time.Time{}, time.Time{}, false, err
+		return err
 	}
-	fi, err1 := strconv.ParseInt(f, 10, 64)
-	ti, err2 := strconv.ParseInt(t, 10, 64)
-	if err1 != nil || err2 != nil {
-		return time.Time{}, time.Time{}, false, nil
+	for rows.Next() {
+		var x iv
+		if err := rows.Scan(&x.from, &x.to, &x.ok, &x.why); err != nil {
+			rows.Close()
+			return err
+		}
+		over = append(over, x)
 	}
-	return unix(fi), unix(ti), true, nil
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	ok := int64(0)
+	if worked {
+		ok = 1
+	}
+	now := iv{f, e, ok, why}
+	var keep []iv
+	for _, x := range over {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM routed_cover WHERE from_at = ?", x.from); err != nil {
+			return err
+		}
+		switch {
+		case x.to == f || x.from == e:
+			// Touching: joined below when alike.
+			if x.ok == now.ok && x.why == now.why {
+				now.from, now.to = min(now.from, x.from), max(now.to, x.to)
+			} else {
+				keep = append(keep, x)
+			}
+		default:
+			if x.from < f {
+				keep = append(keep, iv{x.from, f, x.ok, x.why})
+			}
+			if x.to > e {
+				keep = append(keep, iv{e, x.to, x.ok, x.why})
+			}
+		}
+	}
+	for _, x := range append(keep, now) {
+		if _, err := t.ExecContext(t.ctx, "INSERT INTO routed_cover (from_at, to_at, ok, why) VALUES (?, ?, ?, ?)", x.from, x.to, x.ok, x.why); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// trimCover drops stretches of the cover before a time, cutting the
+// one that crosses it: with the rows they were for.
+func (l *Ledger) trimCover(t *txn, before int64) error {
+	if _, err := t.ExecContext(t.ctx, "DELETE FROM routed_cover WHERE to_at <= ?", before); err != nil {
+		return err
+	}
+	_, err := t.ExecContext(t.ctx, "UPDATE routed_cover SET from_at = ? WHERE from_at < ?", before, before)
+	return err
+}
+
+// MarkRoutedUnknown records that the notifications of [from, to) are not
+// known, and why: the work stopped or failed, the routing configuration
+// couldn't be read, or the firings were recorded again. What was kept of
+// those hours is dropped (the notifications there, and what the firings
+// that were on in them reached), so that no page reads it as none.
+func (l *Ledger) MarkRoutedUnknown(ctx context.Context, from, to time.Time, why string) error {
+	if why == "" {
+		why = "not worked out"
+	}
+	return l.write(ctx, func(t *txn) error {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM routed WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, `DELETE FROM firing_routed WHERE firing_id IN (SELECT id FROM firings WHERE start_at <= ? AND (end_at IS NULL OR end_at >= ?))`,
+			to.Unix(), from.Unix()); err != nil {
+			return err
+		}
+		return l.setCover(t, from, to, false, why)
+	})
 }
 
 // FiringsOverlapping are the firings that were on at some time in
 // [from, to]: started by to, and not ended before from, with their labels;
-// the earliest first, at most limit of them. more says there were more.
-func (l *Ledger) FiringsOverlapping(ctx context.Context, from, to time.Time, limit int) (out []Firing, more bool, err error) {
+// those on at some time in [own, to] first, the earliest first in each, at
+// most limit of them: when there are more, it is those that began before own
+// and ended before it that are left out, the earliest of them first.
+// more says there were more.
+func (l *Ledger) FiringsOverlapping(ctx context.Context, from, to, own time.Time, limit int) (out []Firing, more bool, err error) {
 	rows, err := l.r.QueryContext(ctx, `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at <= ? AND (f.end_at IS NULL OR f.end_at >= ?)
-		ORDER BY f.start_at, f.id LIMIT ?`, to.Unix(), from.Unix(), limit+1)
+		ORDER BY CASE WHEN f.end_at IS NULL OR f.end_at >= ? THEN 0 ELSE 1 END, f.start_at, f.id LIMIT ?`, to.Unix(), from.Unix(), own.Unix(), limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -131,12 +309,12 @@ func (l *Ledger) FiringsOverlapping(ctx context.Context, from, to time.Time, lim
 }
 
 // KeepRouted keeps what a run worked out of the hours from [from, to]:
-// the notifications, in place of those kept at from or after, and what
-// each of the firings reached, in place of what was kept for them. The
-// span worked out grows to take [from, to].
-func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, ns []RoutedNotification, fs []RoutedFiring) error {
+// the notifications, in place of those kept in them, and what each of the
+// firings reached, in place of what was kept for them. [from, to) is then
+// worked out, with a caveat when there is one (why: kept whole).
+func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, why string, ns []RoutedNotification, fs []RoutedFiring) error {
 	return l.write(ctx, func(t *txn) error {
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM routed WHERE at >= ?", from.Unix()); err != nil {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM routed WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
 			return err
 		}
 		ins, err := t.inserting("routed", []string{"at", "receiver", "kind", "page", "reason", "grp", "firings"}, []string{"BIGINT", "TEXT", "TEXT", "BIGINT", "TEXT", "TEXT", "BIGINT"})
@@ -195,21 +373,7 @@ func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, ns []Routed
 		if err := fin.close(); err != nil {
 			return err
 		}
-		if was, err := l.metaInt(t, "routed_from"); err != nil {
-			return err
-		} else if was == 0 || from.Unix() < was {
-			if err := setMeta(t.ctx, t, "routed_from", strconv.FormatInt(from.Unix(), 10)); err != nil {
-				return err
-			}
-		}
-		if was, err := l.metaInt(t, "routed_to"); err != nil {
-			return err
-		} else if to.Unix() > was {
-			if err := setMeta(t.ctx, t, "routed_to", strconv.FormatInt(to.Unix(), 10)); err != nil {
-				return err
-			}
-		}
-		return nil
+		return l.setCover(t, from, to, true, why)
 	})
 }
 
@@ -225,7 +389,7 @@ func nonNil[T any](s []T) []T {
 // and keeps it), or to be worked out again.
 func (l *Ledger) ForgetRouted(ctx context.Context) error {
 	return l.write(ctx, func(t *txn) error {
-		for _, q := range []string{"DELETE FROM firing_routed", "DELETE FROM routed", "DELETE FROM meta WHERE key IN ('routed_from', 'routed_to')"} {
+		for _, q := range []string{"DELETE FROM firing_routed", "DELETE FROM routed", "DELETE FROM routed_cover"} {
 			if _, err := t.ExecContext(t.ctx, q); err != nil {
 				return err
 			}
@@ -464,4 +628,43 @@ func (l *Ledger) RoutedTotals(ctx context.Context, from, to time.Time) (notified
 	err = l.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(page), 0), count(DISTINCT grp) FROM routed WHERE at >= ? AND at < ? AND firings > 0`,
 		from.Unix(), to.Unix()).Scan(&notified, &paged, &groups)
 	return
+}
+
+// RoutedByReceiverKind are the notifications worked out that went in
+// [from, to), counted by receiver and the kind of integration.
+func (l *Ledger) RoutedByReceiverKind(ctx context.Context, from, to time.Time) (map[string]map[string]RoutedCount, error) {
+	out := map[string]map[string]RoutedCount{}
+	err := l.eachRow(ctx, func(r scanner) error {
+		var name, kind string
+		var c RoutedCount
+		if err := r.Scan(&name, &kind, &c.Notifications, &c.Pages); err != nil {
+			return err
+		}
+		if out[name] == nil {
+			out[name] = map[string]RoutedCount{}
+		}
+		out[name][kind] = c
+		return nil
+	}, "SELECT receiver, kind, count(*), coalesce(sum(page), 0) FROM routed WHERE at >= ? AND at < ? GROUP BY receiver, kind", from.Unix(), to.Unix())
+	return out, err
+}
+
+// RecordedHours are the hours (Unix seconds of each start) in which a
+// notification was recorded in [from, to), by receiver as it is named in
+// the records.
+func (l *Ledger) RecordedHours(ctx context.Context, from, to time.Time) (map[string]map[int64]bool, error) {
+	out := map[string]map[int64]bool{}
+	err := l.eachRow(ctx, func(r scanner) error {
+		var name string
+		var h int64
+		if err := r.Scan(&name, &h); err != nil {
+			return err
+		}
+		if out[name] == nil {
+			out[name] = map[int64]bool{}
+		}
+		out[name][h*3600] = true
+		return nil
+	}, "SELECT DISTINCT receiver, at / 3600 FROM notifications WHERE at >= ? AND at < ?", from.Unix(), to.Unix())
+	return out, err
 }
