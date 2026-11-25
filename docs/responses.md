@@ -87,6 +87,14 @@ workload owns. Teams whose `service` label is their Deployment's name add
 `--rollout-match service`, as often as they need (the Helm chart's
 `rolloutMatch`).
 
+The reader is checked against a real kube-state-metrics, scraped by a real
+Prometheus on a kind cluster, where a Deployment is restarted, scaled and
+rolled back, a StatefulSet and a DaemonSet are changed, an autoscaled
+Deployment is scaled by hand, and one is scaled to 0 and back
+([test/e2e/rollouts.sh](../test/e2e/rollouts.sh), CI's `e2e-rollouts`): each
+change is found as what it was, at the time it was made, and none that
+shouldn't be.
+
 A workload's changes are known from where its series begin. Before that, and
 in a namespace not read, no change is known, which is not the same as no
 change.
