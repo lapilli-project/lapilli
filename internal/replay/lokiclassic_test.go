@@ -353,8 +353,8 @@ func TestClassicLokiNoData(t *testing.T) {
 	if got, want := run("OK", "avg", "gt 0"), "0-13[] 20-on[]"; got != want {
 		t.Errorf("avg, OK: %s, want %s", got, want)
 	}
-	// count counts NaN points: never none, and never fires gt 4 (four
-	// points a window).
+	// count counts NaN points: never none, and four points a window are
+	// more than 3, so gt 3 holds at every evaluation, the NaN minutes too.
 	if got := run("NoData", "count", "gt 3"); got != "0-on[]" {
 		t.Errorf("count: %s", got)
 	}
@@ -362,12 +362,25 @@ func TestClassicLokiNoData(t *testing.T) {
 	if got, want := run("OK", "avg", "no_value"), "13-20[]"; got != want {
 		t.Errorf("no_value: %s, want %s", got, want)
 	}
-	// ne holds for NaN as a number; last of NaNs is none: no data.
+	// last of NaNs alone is none, which no_value holds for.
 	if got, want := run("OK", "last", "no_value"), "13-20[]"; got != want {
 		t.Errorf("last, no_value: %s, want %s", got, want)
 	}
 	// diff of a window whose newest number is its first point alone is 0.
 	if got := run("OK", "diff", "gt 0"); got != "" {
 		t.Errorf("diff of 1s: %s", got)
+	}
+	// A NaN that is a value, not none (percent_diff_abs of 0 and 0 is
+	// 0/0): it meets ne and no ordering, and not no_value.
+	zeros := serverSeries(func(string, int) (float64, bool) { return 0, true }, "a")
+	of := func(evaluator string) string {
+		doc := strings.Replace(classicDoc("lk", [4]string{"percent_diff_abs", evaluator, "", ""}), "noDataState: OK", "noDataState: NoData", 1)
+		got, _ := classicRun(t, true, doc, zeros)
+		return got
+	}
+	for evaluator, want := range map[string]string{"ne 5": "0-on[]", "gt -1": "", "lt 1": "", "eq 0": "", "no_value": ""} {
+		if got := of(evaluator); got != want {
+			t.Errorf("NaN, %s: %q, want %q", evaluator, got, want)
+		}
 	}
 }
