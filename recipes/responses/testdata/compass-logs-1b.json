@@ -1,0 +1,11 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T03:12:00Z",
+   "logType": "system",
+   "log": "Alert created via Prometheus",
+   "owner": "System"
+  }
+ ],
+ "links": {}
+}

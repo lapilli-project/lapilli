@@ -1,0 +1,4 @@
+{"log_entries": [
+{"id": "R10", "type": "trigger_log_entry", "summary": "x", "created_at": "2026-11-20T05:00:00Z", "agent": {"id": "PAGENT10", "type": "service_reference", "summary": "an agent"}, "channel": {"type": "api"}, "incident": {"id": "Q2", "type": "incident_reference"}},
+{"id": "R11", "type": "notify_log_entry", "summary": "x", "created_at": "2026-11-20T05:00:05Z", "agent": {"id": "PAGENT11", "type": "service_reference", "summary": "an agent"}, "channel": {"type": "auto"}, "incident": {"id": "Q2", "type": "incident_reference"}},
+{"id": "R12", "type": "resolve_log_entry", "summary": "x", "created_at": "2026-11-20T05:30:00Z", "agent": {"id": "PAGENT12", "type": "user_reference", "summary": "an agent"}, "channel": {"type": "website"}, "incident": {"id": "Q2", "type": "incident_reference"}}], "limit": 100, "offset": 0, "more": false, "total": null}

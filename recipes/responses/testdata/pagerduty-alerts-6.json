@@ -1,0 +1,7 @@
+{"alerts": [
+  {"id": "PXR6", "type": "alert", "summary": "The server is on fire.", "created_at": "2026-11-20T11:00:00Z", "status": "resolved", "alert_key": "k6",
+   "service": {"id": "P1", "type": "service_reference", "summary": "checkout"},
+   "body": {"type": "alert_body", "contexts": [], "details": {"customKey": "Server is on fire!"}},
+   "incident": {"type": "incident_reference"}, "suppressed": false, "severity": "critical",
+   "integration": {"id": "PQ12346", "type": "generic_email_inbound_integration_reference", "summary": "Email"}}
+], "limit": 100, "offset": 0, "more": false, "total": null}
