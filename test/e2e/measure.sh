@@ -335,6 +335,14 @@ start_periods() {
   r=$(date +%s)
   put_group "$folder" "$(source_of grafana change)/rules-before.yaml"
   plan
+  # What the servers have missed when the first period starts (before the
+  # change, which is in one), for record to count the periods' from.
+  local first=$main_from t
+  for t in "$export_from" "$scraped_from" "$change_from" "$loki_from"; do
+    if [ "$t" -lt "$first" ]; then first=$t; fi
+  done
+  sleep_until "$first"
+  printf 'missed_from=%q\n' "$(missed)" >>"$state/env"
   change "$folder"
   echo "up: $(iso "$r"); the periods end by $(iso "$e"); Prometheus $pu, Grafana $gu, Loki $lu"
 }
@@ -445,16 +453,12 @@ record() {
   . "$state/env"
   [ -n "${changed:-}" ] || die "up has not finished: run it again after it has"
   echo "record: waiting for $(iso "$e") and a little more"
-  # What the servers missed in the periods, counted from the first one's
-  # start when this is waiting by then, and since each started if not.
-  local first=$main_from t since="since they started" i
+  # What the servers missed in the periods, counted from what up wrote at the
+  # first one's start (since each started, for an env from before it did).
+  local since="since they started" i
   local -a m0=(0 0 0) m1 d
-  for t in "$export_from" "$scraped_from" "$change_from" "$loki_from"; do
-    if [ "$t" -lt "$first" ]; then first=$t; fi
-  done
-  if [ "$(date +%s)" -lt "$first" ]; then
-    sleep_until "$first"
-    read -ra m0 <<<"$(missed)"
+  if [ -n "${missed_from:-}" ]; then
+    read -ra m0 <<<"$missed_from"
     since="in the periods"
   fi
   sleep_until $((e + 30))
