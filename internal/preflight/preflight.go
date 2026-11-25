@@ -43,6 +43,17 @@ type Item struct {
 	What  string `json:"what"`
 	Why   string `json:"why,omitempty"`
 	Fix   string `json:"fix,omitempty"`
+	// Failed are the rules whose query failed, of a queries.* item (--queries).
+	Failed []Failed `json:"failed,omitempty"`
+}
+
+// Failed is a rule whose query the history, Loki or Grafana refused or
+// couldn't answer: why, as a kind (parse error, unknown function, too
+// many samples, timeout, not let in, other), and what it said.
+type Failed struct {
+	Rule   string `json:"rule"`
+	Reason string `json:"reason"`
+	Why    string `json:"why,omitempty"`
 }
 
 // Report is what a preflight found.
@@ -78,6 +89,9 @@ type Config struct {
 	MaxSamples int
 	// Offline asks nothing: what needs a request is unknown.
 	Offline bool
+	// Queries is --queries: each rule's expression asked once, an instant
+	// query at now, of where it is replayed (queries.go).
+	Queries bool
 	// Timeout is the whole preflight's (--preflight-timeout).
 	Timeout time.Duration
 	// Version is lapilli's; Now the time it is.
@@ -127,6 +141,7 @@ func Run(ctx context.Context, c Config) *Report {
 	read := p.rules(ctx)
 	p.expressions()
 	p.history(ctx, read)
+	p.queries(ctx, read)
 	p.grafana(ctx)
 	p.alertmanager(ctx)
 	p.changes(ctx)
@@ -206,6 +221,9 @@ func (p *run) redact() {
 	for i := range p.r.Items {
 		it := &p.r.Items[i]
 		it.What, it.Why, it.Fix = done(it.What), done(it.Why), done(it.Fix)
+		for j := range it.Failed {
+			it.Failed[j].Rule, it.Failed[j].Why = done(it.Failed[j].Rule), done(it.Failed[j].Why)
+		}
 	}
 	for i := range p.r.LeftOut {
 		p.r.LeftOut[i] = done(p.r.LeftOut[i])

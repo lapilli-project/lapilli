@@ -301,6 +301,9 @@ type summaryIncidents struct {
 	Caught    int `json:"caught"`
 	NoisyOnly int `json:"noisy_only"`
 	Missed    int `json:"missed"`
+	// Unreplayed are those that started before the ledger's first replayed
+	// time: in Total, and neither caught nor missed.
+	Unreplayed int `json:"unreplayed"`
 	// MedianLead is how long before the incident's start the first alert
 	// of a rule that isn't noisy came, the median of those caught, in
 	// seconds: negative when it came after.
@@ -425,7 +428,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
-	marked, err := s.markedWeeks(ctx, w1, w2, own)
+	marked, err := s.markedWeeks(ctx, t, w1, w2, own)
 	if err != nil {
 		return nil, err
 	}
@@ -601,6 +604,8 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 						c.Caught++
 					case "noisy":
 						c.NoisyOnly++
+					case "unreplayed":
+						c.Unreplayed++
 					default:
 						c.Missed++
 					}

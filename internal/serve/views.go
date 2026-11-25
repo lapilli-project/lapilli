@@ -94,6 +94,13 @@ type tallies struct {
 	// judge the record as Lapilli would have (docs/design/judging.md,
 	// "How reports count them"); rec itself with none.
 	recL verdict.Record
+	// split are the weeks whose days are judged apart, as the record isn't
+	// the same on every day of them (splitDays): their parts are each
+	// day's, not the week's.
+	split map[int64]bool
+	// classes are what judges each day (classOf), worked out once for the
+	// record in effect.
+	classes map[int64]string
 }
 
 // shown reports whether what was done about the firings is counted and shown
@@ -245,6 +252,9 @@ func (t *tallies) noisyAll(week, rule int64) bool {
 // stateAll is state, judged against everyone's rules: as the incidents
 // page judges them, with a team picked or not.
 func (t *tallies) stateAll(in ledger.Incident, week int64) string {
+	if in.Unreplayed {
+		return "unreplayed"
+	}
 	if len(in.CaughtBy) == 0 {
 		return "missed"
 	}
@@ -257,8 +267,12 @@ func (t *tallies) stateAll(in ledger.Incident, week int64) string {
 }
 
 // state is whether an incident was caught, caught only by rules noisy that
-// week, or missed.
+// week, missed, or before what was replayed ("unreplayed": started before
+// the ledger's first replayed time, so not missed).
 func (t *tallies) state(in ledger.Incident, week int64) string {
+	if in.Unreplayed {
+		return "unreplayed"
+	}
 	if len(in.CaughtBy) == 0 {
 		return "missed"
 	}
@@ -425,11 +439,14 @@ type hoursAt struct {
 	week  int64
 	hours string
 	rules string // of these rules only, when not every rule's
+	days  bool   // counted by day (daysHours), not by week
 }
 
 type hoursWeek struct {
 	gen int64
 	by  map[int64]ledger.HourTally // by rule id
+	// byDay is the same by day, then rule id, of a week counted by day.
+	byDay map[int64]map[int64]ledger.HourTally
 }
 
 // byHours is when each rule's firings came in each of the weeks t has, by
@@ -473,10 +490,18 @@ func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]l
 		for k, ids := range fired {
 			var by map[int64]ledger.HourTally
 			var err error
-			if k == server {
-				by, err = s.weekHours(ctx, w, k, hours[k], nil)
-			} else {
+			if k != server {
 				slices.Sort(ids)
+			}
+			switch {
+			case t.split[w] && !t.o.Signals.Named():
+				// A week judged by day: the days judged only, as the
+				// firings that caught nothing on the others are counted,
+				// not judged, and woke no one for nothing.
+				by, err = s.judgedHours(ctx, t, w, k, hours[k], map[bool][]int64{true: nil, false: ids}[k == server])
+			case k == server:
+				by, err = s.weekHours(ctx, w, k, hours[k], nil)
+			default:
 				by, err = s.weekHours(ctx, w, k, hours[k], ids)
 			}
 			if err != nil {
@@ -498,6 +523,46 @@ func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]l
 	}
 	s.hours.Unlock()
 	return out, nil
+}
+
+// judgedHours is when each rule's firings came on the days of week w the
+// record is kept of, by hours h whose key is k: of every rule, or of the
+// rules ids only. The week's days are read once, as weekHours reads the
+// week, and the days judged summed.
+func (s *Server) judgedHours(ctx context.Context, t *tallies, w int64, k string, h *verdict.Hours, ids []int64) (map[int64]ledger.HourTally, error) {
+	at := hoursAt{week: w, hours: k, days: true}
+	if ids != nil {
+		at.rules = fmt.Sprint(ids)
+	}
+	s.hours.Lock()
+	c, ok := s.hours.by[at]
+	s.hours.Unlock()
+	if !ok || c.gen < s.l.Changed(w) {
+		gen := s.l.Gen()
+		by, err := s.l.ByHoursDays(ctx, w, w+7, h, ids)
+		if err != nil {
+			return nil, err
+		}
+		c = hoursWeek{gen: gen, byDay: by}
+		s.hours.Lock()
+		if s.hours.by == nil {
+			s.hours.by = map[hoursAt]hoursWeek{}
+		}
+		s.hours.by[at] = c
+		s.hours.Unlock()
+	}
+	sum := map[int64]ledger.HourTally{}
+	for d := w; d < w+7; d++ {
+		if a, b := t.unit(d); !t.rec.Kept(a, b) {
+			continue
+		}
+		for id, x := range c.byDay[d] {
+			y := sum[id]
+			y.OffHours, y.OffHoursBlack, y.Asleep, y.AsleepBlack = y.OffHours+x.OffHours, y.OffHoursBlack+x.OffHoursBlack, y.Asleep+x.Asleep, y.AsleepBlack+x.AsleepBlack
+			sum[id] = y
+		}
+	}
+	return sum, nil
 }
 
 // weekHours is when each rule's firings came in a week, by hours h whose key
@@ -534,7 +599,7 @@ func (s *Server) weekHours(ctx context.Context, w int64, k string, h *verdict.Ho
 			delete(s.hours.by, old) // the rules that fired that week, before more did
 		}
 	}
-	s.hours.by[at] = hoursWeek{gen, by[w]}
+	s.hours.by[at] = hoursWeek{gen: gen, by: by[w]}
 	s.hours.Unlock()
 	return by[w], nil
 }
@@ -813,7 +878,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		}
 		l.Spark = s.sparkOf(reader, t, id)
 		l.Suggestion = sugg[l.Name]
-		if u, ok := unrec[l.Name]; ok {
+		if u, ok := unrec[l.Name]; ok && l.Unjudged > 0 {
 			l.Unrecord = unrecordedViewOf(u, unrecWeek)
 		}
 		if x, ok := on[l.Name]; ok {
@@ -920,6 +985,10 @@ type rulesView struct {
 	// of the weeks shown had firings and no record, when some had one.
 	NoRecord bool `json:"no_record,omitempty"`
 	Unkept   int  `json:"weeks_no_record,omitempty"`
+	// PartUnjudged of PartOf are the firings of weeks with some days kept
+	// that came on days with none: counted, not judged.
+	PartUnjudged int `json:"part_not_judged,omitempty"`
+	PartOf       int `json:"part_of,omitempty"`
 }
 
 // actionableText is a rule's actionable share as precision is shown, "–" when
@@ -1017,7 +1086,9 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	}
 	f, team := s.teamFilter(o, r.URL.Query().Get("team"))
 	if team != nil {
-		t.only(o, *team)
+		if err := s.only(r.Context(), t, o, *team); err != nil {
+			return rulesData{}, err
+		}
 	}
 	// Inside a kind of marked window, or outside it: the rules' counts
 	// are the kind's, or the rest (docs/design/marked.md).
@@ -1065,11 +1136,25 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	}
 	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
 	for _, w := range t.weeks[len(t.weeks)-n:] {
-		if t.someUnjudged(w) {
-			v.Unkept++
+		if !t.someUnjudged(w) {
+			continue
+		}
+		if !t.keptAny(w) {
+			v.Unkept++ // no day of it kept
+			continue
+		}
+		// Some days kept: said per firing.
+		for id, x := range t.by[w] {
+			u := t.unjudged(w, id)
+			v.PartUnjudged += u.Firings - u.White
+			v.PartOf += x.Firings
 		}
 	}
-	v.NoRecord = slices.ContainsFunc(lines, func(l ruleLine) bool { return l.Firings > 0 }) &&
+	noneKept := true
+	for _, w := range t.weeks[len(t.weeks)-n:] {
+		noneKept = noneKept && !t.keptAny(w)
+	}
+	v.NoRecord = noneKept && slices.ContainsFunc(lines, func(l ruleLine) bool { return l.Firings > 0 }) &&
 		!slices.ContainsFunc(lines, func(l ruleLine) bool { return l.Firings > l.Unjudged })
 	if v.NoRecord {
 		v.Unkept = 0
@@ -1301,7 +1386,9 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		return ruleView{}, err
 	}
 	if team, ok := o.team(q.Get("team")); ok && o.rule[name] == team.ID {
-		t.only(o, team)
+		if err := s.only(ctx, t, o, team); err != nil {
+			return ruleView{}, err
+		}
 	}
 	lines, silent, err := s.ruleLines(ctx, lang(r), t, n)
 	if err != nil {
@@ -1951,7 +2038,8 @@ type incidentsView struct {
 	Judged summaryIncidents
 	Lead   string
 	// State is what those listed are, when asked (state=): caught, noisy
-	// (caught only by noisy rules) or missed. Week is the week shown, when
+	// (caught only by noisy rules), missed, or unreplayed (before what was
+	// replayed). Week is the week shown, when
 	// one is asked for (week=), its Monday.
 	State, Week string
 	// Signal is the named impact signal whose windows are listed, when
@@ -2018,7 +2106,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if week != 0 {
 		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
 	}
-	if st := q.Get("state"); st == "caught" || st == "noisy" || st == "missed" {
+	if st := q.Get("state"); st == "caught" || st == "noisy" || st == "missed" || st == "unreplayed" {
 		v.State = st
 	}
 	var team *ledger.Team
@@ -2066,6 +2154,8 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 				leads = append(leads, line.lead)
 			case "noisy":
 				v.Judged.NoisyOnly++
+			case "unreplayed":
+				v.Judged.Unreplayed++
 			default:
 				v.Judged.Missed++
 			}
@@ -2497,15 +2587,20 @@ type settingView struct {
 
 type settingsView struct {
 	Settings []settingView
-	// LinkedOnly is --linked-only, a flag where serve is started, not a
-	// setting the UI changes (docs/design/links.md).
+	// LinkedOnly is --linked-only as in effect: the flag's, until an admin
+	// changes it on the Settings page or through POST /settings
+	// (docs/design/links.md).
 	LinkedOnly bool `json:"linked_only"`
-	// MatchStrict is --match-strict, a flag as --linked-only is.
+	// MatchStrict is --match-strict, a flag where serve is started, not a
+	// setting the UI changes.
 	MatchStrict bool `json:"match_strict"`
 	// LinkedOnlyJudging says every firing is still to be judged again with
 	// --linked-only and --match-strict: the ledger's stones were last all
 	// given by other values.
 	LinkedOnlyJudging bool `json:"linked_only_judging"`
+	// RecordBy is what a firing's record is kept by, "day" or, with
+	// --record-by-week, "week", a flag as --linked-only is.
+	RecordBy string `json:"record_by"`
 	// Criteria are the incident criteria (criteria.go); Sources, where
 	// incidents come from (sources.go), the page's alone.
 	Criteria *criteriaView `json:"criteria,omitempty"`
@@ -2548,7 +2643,7 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	if err != nil {
 		return settingsView{}, err
 	}
-	v := settingsView{LinkedOnly: o.LinkedOnly, MatchStrict: o.MatchStrict}
+	v := settingsView{LinkedOnly: o.LinkedOnly, MatchStrict: o.MatchStrict, RecordBy: o.Settings().RecordBy}
 	// Until the round that judges every firing again with it is done, the
 	// stones are those of the other value (jobs); not said of a replica
 	// whose flag another's newer change has passed (linkedAgain).

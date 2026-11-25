@@ -236,6 +236,9 @@ What the rules say:
                       --ruler's host when --ruler is given with its token:
                         Mimir   http://mimir:8080/api/v1/alerts
                         Cortex  http://cortex:9009/api/v1/alerts
+                      With --grafana, a Grafana that sends its alerts to an
+                      external Alertmanager has its rules checked against it
+                      too (Lapilli takes this configuration for the one)
                       Only read: no field that holds a secret is parsed
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
@@ -820,7 +823,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin" || name == "--oidc-bearer" ||
-			name == "--config-prune" || name == "--goal-tasks" || name == "--expect-tasks" || name == "--yield-on-429") {
+			name == "--config-prune" || name == "--goal-tasks" || name == "--expect-tasks" || name == "--yield-on-429" || name == "--record-by-week") {
 			// On by itself; =false turns it off, as --check-content=false does.
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
@@ -1833,6 +1836,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		}
 	}
 	warnHistories(stderr, versions)
+	f.placeFromAPI(ctx, h, stderr, versions, was, same, before, after)
 
 	// With rules to replay, --firings is firings recorded elsewhere, to be
 	// judged with theirs: read now, as a name both have is refused before
@@ -2652,6 +2656,60 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	}
 	f.replaying().Apply(kept)
 	return kept, nil
+}
+
+// placeFromAPI places the groups of the rules read from rule files where the
+// history's rules API, and the Loki's, run the groups of their names, when
+// there are rules to place: one request of each, not one a rule. A rules
+// API that isn't there, or can't be read, is said, and the groups are
+// replayed on the steps' grid, as without it; so are the groups it can't
+// place, each with why (rules.Listing). Without --prometheus nor --loki,
+// nothing is asked.
+func (f *verdictFlags) placeFromAPI(ctx context.Context, h history, stderr io.Writer, versions []replay.Version, sets ...[]rules.Rule) {
+	all := slices.Clone(sets)
+	for _, v := range versions {
+		all = append(all, v.Rules)
+	}
+	var fromProm, loki bool
+	for _, rs := range all {
+		for _, r := range rs {
+			if ok, isLoki := r.FromFile(); ok && r.Phase == 0 && r.Unsupported == "" {
+				fromProm, loki = fromProm || !isLoki, loki || isLoki
+			}
+		}
+	}
+	if !fromProm && !loki {
+		return
+	}
+	p := f.replaying()
+	p.Unplaced = &rules.Unplaced{}
+	var failed []string
+	if fromProm && h != nil {
+		switch l, err := source.Listed(ctx, h, false); {
+		case errors.Is(err, source.ErrNoRulesAPI):
+		case err != nil:
+			failed = append(failed, err.Error())
+		default:
+			p.Listing = l
+		}
+	}
+	if loki && f.loki != "" {
+		if l, err := source.LokiListed(ctx, f.lokiSource(), "lapilli/"+buildVersion(), false); err != nil {
+			failed = append(failed, err.Error())
+		} else {
+			p.LokiListing = l
+		}
+	}
+	for _, rs := range all {
+		p.PlaceFiles(rs)
+	}
+	said := p.Unplaced.Said("the history's rules API")
+	for _, why := range failed {
+		said = append(said, why+": the groups read from files are replayed on the steps' grid")
+	}
+	if len(said) > 0 {
+		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(strings.Join(said, "; ")))
+	}
 }
 
 // warnHistories says when Grafana's rules, from files or from --grafana,

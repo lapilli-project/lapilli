@@ -359,11 +359,61 @@ it is read for this alone. `serve` reads it once an hour, as Grafana's
 templates; one that can't be read leaves the check as it was, and the log
 says why, once for each why. What is passed over is said the same way.
 
+### Grafana's rules sent to an external Alertmanager
+
+Status: built, for the next release. The templates a Grafana rule's alerts
+are sent with are those of where they are sent: Grafana's own routing, read
+with `--grafana`, or an external Alertmanager's, which is given with
+`--alertmanager-config`.
+
+Where Grafana sends is read from Grafana's alerting API, once for
+`lapilli verdict --check-content`, once an hour for `serve`, and once for
+`lapilli preflight` (its `grafana.alertmanagers` item), with the token that
+reads its rules, only when `--grafana` and `--alertmanager-config` are both
+given (`source.GrafanaAlertmanagers`):
+
+| Read | Gives | Reference |
+|---|---|---|
+| `GET /api/v1/ngalert/admin_config` | `alertmanagersChoice`: `internal`, `external` or `all`; a 404 is no configuration, which sends to Grafana's own; a choice not sent is `all`, as the API says | Grafana's alerting API, `RouteGetNGalertConfig` (`pkg/services/ngalert/api/tooling/post.json` in grafana/grafana; "Get the NGalert configuration of the user's organization, returns 404 if no configuration is present") |
+| `GET /api/v1/ngalert/alertmanagers` | `data.activeAlertManagers`: the external Alertmanagers Grafana is sending to now, and `droppedAlertManagers`; read only when the choice isn't `internal` | the same, `RouteGetAlertmanagers` ("Get the discovered and dropped Alertmanagers of the user's organization based on the specified configuration") |
+| `GET /api/datasources` | each data source's `type` and `jsonData`: an `alertmanager` with `handleGrafanaManagedAlerts` ("Receive Grafana alerts") is one that takes Grafana's alerts; its names are for the report, and not reading them isn't an error | Grafana's data source HTTP API, `GET /api/datasources` (a list that holds `jsonData`; `datasources:read`) |
+
+The data source setting alone sends nothing: Grafana also has it enabled
+in its alerting settings, which is what makes it active. So what decides is
+the active list.
+
+What is checked:
+
+- `internal`, or none active: as before, Grafana's own templates.
+- `external` with one active: the Grafana rules are checked against the
+  Alertmanager given, and not against Grafana's own (`content.Options.Notify`
+  is left unset).
+- `all` with one active: against both; a finding is each one's own, with
+  its template's name, as Alertmanager's are.
+- `external` with none active sends nowhere. It is said (a problem in
+  preflight), and the rules are checked as before.
+
+A Grafana rule is routed as a ruler's is, by `alertname`, its labels and its
+folder as `grafana_folder` (Grafana sends it to an external Alertmanager
+too); its `notification_settings` receiver belongs to Grafana's own
+Alertmanager and isn't followed. `content.Options.GrafanaExternal` says it.
+
+Grafana versions that answer otherwise or not at all (no such path, a 401
+or a 403, an answer that isn't the API's, a choice it doesn't name): the
+rules are checked as before, said on stderr (`verdict`), once in serve's log,
+and as a problem item in preflight.
+
+What it can't tell: which Alertmanager the one given is. Lapilli takes it
+for the one Grafana sends to. When Grafana sends to more than one (more than
+one active Alertmanager, or more than one data source set to receive
+Grafana's alerts), the check says so, naming the data sources, on stderr
+(`verdict`), in serve's log once, and in preflight's `grafana.alertmanagers`
+item, so that a wrong match shows: a Grafana that sends to another than the
+one that sends the Prometheus rules is checked against the wrong templates.
+The data sources are read for these names, and not reading them is no error.
+
 ### Not done
 
-- **Grafana rules sent to an external Alertmanager.** Grafana's own
-  routing is read with `--grafana`; a Grafana that sends to an
-  Alertmanager instead isn't followed there.
 - **A name no template defines.** `{{ template "x" . }}` with no `x` fails
   when Alertmanager sends, but Alertmanager's defaults, which differ by
   version, define many names this doesn't know: it isn't a check.

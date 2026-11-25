@@ -7,9 +7,12 @@
 # the series from the time alone; three alert rules fire and resolve on
 # them every four minutes: one a series each, one summed, one with a for.
 # After some minutes, over the same period:
-#   - `lapilli verdict --json` against Thanos and against VictoriaMetrics
-#     gives the same firings, each its rule, labels, start and end, as
-#     against Prometheus;
+#   - `lapilli verdict --json` against Thanos gives the same firings, each
+#     its rule, labels, start and end, as against Prometheus; against
+#     VictoriaMetrics, the same rules and labels, each rule's moved by one
+#     shift of less than its group's interval and on whole intervals: the
+#     rules API there is vmalert's, and a group is replayed where the server
+#     whose API it is runs it (Prometheus's by a hash of its name and file);
 #   - `--check-replay` finds every firing alike against each of the three:
 #     ALERTS is Prometheus's (through the sidecar, Thanos's too) and, in
 #     VictoriaMetrics, vmalert's;
@@ -232,6 +235,20 @@ verdict() { # name, URL
   jq -S '[.firings // [] | .[] | {rule, labels, start, end}] | sort_by(.rule, .start, (.labels | tostring))' \
     "$work/verdict-$1.json" >"$work/firings-$1.json"
 }
+# shifted A B SECONDS: B has A's firings, each rule and labels in the same
+# order, each rule's starts and ends moved by one shift of less than SECONDS,
+# and every start and end in B on a whole SECONDS.
+shifted() {
+  jq -e -n --slurpfile a "$1" --slurpfile b "$2" --argjson iv "$3" '
+    def t: fromdateiso8601;
+    $a[0] as $a | $b[0] as $b
+    | ($a | length) == ($b | length) and ($a | length) > 0
+      and ([range($a | length) as $i | $a[$i].rule == $b[$i].rule and $a[$i].labels == $b[$i].labels] | all)
+      and ([range($a | length) as $i
+            | {r: $a[$i].rule, s: (($b[$i].start | t) - ($a[$i].start | t)), e: (($b[$i].end | t) - ($a[$i].end | t))}]
+           | group_by(.r) | map([.[] | .s, .e] | unique) | all(length == 1 and .[0] > -$iv and .[0] < $iv))
+      and ($b | all(((.start | t) % $iv) == 0 and ((.end | t) % $iv) == 0))' >/dev/null
+}
 verdict prometheus "$pu"
 verdict thanos "$tu"
 verdict victoriametrics "$vu"
@@ -242,14 +259,20 @@ else
   failed "verdict against Prometheus: $n firings, want $want"
   jq -c '.[]' "$work/firings-prometheus.json"
 fi
-for s in thanos victoriametrics; do
-  if diff -u "$work/firings-prometheus.json" "$work/firings-$s.json" >"$work/diff-$s"; then
-    ok "verdict against $s: the same $n firings as against Prometheus"
-  else
-    failed "verdict against $s: firings differ from Prometheus's (- Prometheus, + $s)"
-    cat "$work/diff-$s"
-  fi
-done
+if diff -u "$work/firings-prometheus.json" "$work/firings-thanos.json" >"$work/diff-thanos"; then
+  ok "verdict against thanos: the same $n firings as against Prometheus"
+else
+  failed "verdict against thanos: firings differ from Prometheus's (- Prometheus, + thanos)"
+  cat "$work/diff-thanos"
+fi
+# vmalert runs a group on whole intervals (eval_alignment), and its rules
+# API, through VictoriaMetrics, says so; Prometheus, a few seconds into one.
+if shifted "$work/firings-prometheus.json" "$work/firings-victoriametrics.json" 10; then
+  ok "verdict against victoriametrics: the same $n firings as against Prometheus, each rule's moved by one shift onto vmalert's whole intervals"
+else
+  failed "verdict against victoriametrics: firings aren't Prometheus's moved onto vmalert's intervals (- Prometheus, + victoriametrics)"
+  diff -u "$work/firings-prometheus.json" "$work/firings-victoriametrics.json"
+fi
 
 # --check-replay against each: every firing alike, as loki.sh asks.
 alike() { # name, what, flags...

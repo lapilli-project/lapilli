@@ -1,16 +1,17 @@
 package replay
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -118,6 +119,38 @@ func (c logsCase) kept(t *testing.T, name, url string, header map[string]string)
 	return b
 }
 
+// keepFolder is a Grafana's export of its rules, as it wrote it, with only
+// the groups in the folder.
+func keepFolder(t *testing.T, export []byte, folder string) []byte {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal(export, &doc); err != nil || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		t.Fatalf("not an export: %v", err)
+	}
+	root := doc.Content[0]
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "groups" {
+			continue
+		}
+		groups := root.Content[i+1]
+		groups.Content = slices.DeleteFunc(groups.Content, func(g *yaml.Node) bool {
+			for j := 0; j+1 < len(g.Content); j += 2 {
+				if g.Content[j].Value == "folder" {
+					return g.Content[j+1].Value != folder
+				}
+			}
+			return true
+		})
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(4)
+	if err := enc.Encode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 // lokiRules reads a Loki ruler's configuration API's answer, a namespace
 // to its groups, as source.LokiLoaded reads it: a document a namespace.
 func lokiRules(t *testing.T, b []byte) []rules.Rule {
@@ -155,63 +188,52 @@ func lokiRules(t *testing.T, b []byte) []rules.Rule {
 // it holds, and doesn't honour. Each firing the replay has, Loki's ruler
 // had, within the 10s ALERTS is read every; and none other.
 func TestRealLoki(t *testing.T) {
-	c := logsCase{realCase{dir: "loki-3.7.9", series: `ALERTS{alertstate="firing"}`,
-		from: time.Date(2026, 11, 11, 19, 35, 0, 0, time.UTC), to: realTo(time.Date(2026, 11, 11, 20, 15, 0, 0, time.UTC)), step: 10 * time.Second}}
-	base := os.Getenv("LAPILLI_RECORD_LOKI")
-	rs := lokiRules(t, c.kept(t, "rules.yaml", base+"/loki/api/v1/rules", nil))
-	places, err := rules.Places(c.kept(t, "api.json", base+"/prometheus/api/v1/rules", nil))
-	if err != nil || len(places) == 0 {
-		t.Fatalf("places %v: %v", places, err)
-	}
-	rules.Replaying{Places: places}.Apply(rs)
-	rec, real := c.recorded(t)
-	logs := c.logs(t, prom.New(base, "lapilli-test", prom.Loki()))
-	h := WithLogs(rec, func(r rules.Rule) (History, error) { return logs, nil })
-	ran, fs := Run(context.Background(), h, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
-	c.save(t, rec)
-	c.saveLogs(t, logs)
-	for _, r := range ran {
-		if _, placed := places[rules.Place{Namespace: r.Namespace, Group: r.Group}]; r.Unsupported != "" || r.Logs != rules.LokiRuler || !placed {
-			t.Errorf("%s: %q, logs %q, placed %v", r.Name, r.Unsupported, r.Logs, placed)
+	recordings(t, "loki", "", promFired, func(t *testing.T, rc realCase) {
+		c := logsCase{rc}
+		base := os.Getenv("LAPILLI_RECORD_LOKI")
+		rs := lokiRules(t, c.kept(t, "rules.yaml", base+"/loki/api/v1/rules", nil))
+		places, err := rules.Places(c.kept(t, "api.json", base+"/prometheus/api/v1/rules", nil))
+		if err != nil || len(places) == 0 {
+			t.Fatalf("places %v: %v", places, err)
 		}
-		if r.KeepFiringFor != 0 || r.QueryOffset != 0 {
-			t.Errorf("%s: keep_firing_for %s, query_offset %s, which Loki doesn't hold", r.Name, r.KeepFiringFor, r.QueryOffset)
+		rules.Replaying{Places: places}.Apply(rs)
+		rec, real := c.recorded(t)
+		real = onlyRules(real, rs)
+		logs := c.logs(t, prom.New(base, "lapilli-test", prom.Loki()))
+		h := WithLogs(rec, func(r rules.Rule) (History, error) { return logs, nil })
+		ran, fs := Run(context.Background(), h, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
+		c.save(t, rec)
+		c.saveLogs(t, logs)
+		for _, r := range ran {
+			if _, placed := places[rules.Place{Namespace: r.Namespace, Group: r.Group}]; r.Unsupported != "" || r.Logs != rules.LokiRuler || !placed {
+				t.Errorf("%s: %q, logs %q, placed %v", r.Name, r.Unsupported, r.Logs, placed)
+			}
+			if r.KeepFiringFor != 0 || r.QueryOffset != 0 {
+				t.Errorf("%s: keep_firing_for %s, query_offset %s, which Loki doesn't hold", r.Name, r.KeepFiringFor, r.QueryOffset)
+			}
 		}
-	}
-	// A firing on when the period starts is, for the replay, on from the
-	// group's first evaluation in the period, up to its interval later.
-	first := map[string]time.Time{}
-	for _, r := range rs {
-		iv := int64(Every(r, c.step) / time.Second)
-		at := c.from.Unix() + ((int64(r.Phase/time.Second)-c.from.Unix())%iv+iv)%iv
-		first[r.Name] = time.Unix(at, 0).UTC()
-	}
-	for i := range real {
-		if !real[i].Start.After(c.from) {
-			real[i].Start = first[real[i].Rule]
+		// ALERTS is read every 10s from the epoch; a group placed past it
+		// fires up to a step before what is read says.
+		if diff := sameFirings(fs, real, c.from, c.step); len(diff) > 0 {
+			t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
 		}
-	}
-	// ALERTS is read every 10s from the epoch; a group placed past it
-	// fires up to a step before what is read says.
-	if diff := sameFirings(fs, real, c.from, c.step); len(diff) > 0 {
-		t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
-	}
-	if len(fs) < 40 {
-		t.Errorf("only %d firings: the recording is too short to say much", len(fs))
-	}
-	check := verdict.CheckReplay(context.Background(), ran, fs, real, c.from, c.to, c.step)
-	if check.Alike != check.Replayed || check.Alike != check.Real {
-		t.Errorf("check: %d replayed, %d real, %d alike", check.Replayed, check.Real, check.Alike)
-	}
-	// On the steps' grid, not where Loki runs each group, they don't.
-	plain := slices.Clone(rs)
-	for i := range plain {
-		plain[i].Phase = 0
-	}
-	_, unplaced := Run(context.Background(), h, []Version{{Rules: plain}}, c.from, c.to, c.step, 4)
-	if diff := sameFirings(unplaced, real, c.from, c.step); len(diff) == 0 {
-		t.Error("on the steps' grid, the firings of a group placed 11s into its minute should start later than Loki started them")
-	}
+		if len(fs) < 40 {
+			t.Errorf("only %d firings: the recording is too short to say much", len(fs))
+		}
+		check := verdict.CheckReplay(context.Background(), ran, fs, real, c.from, c.to, c.step)
+		if check.Alike != check.Replayed || check.Alike != check.Real {
+			t.Errorf("check: %d replayed, %d real, %d alike", check.Replayed, check.Real, check.Alike)
+		}
+		// On the steps' grid, not where Loki runs each group, they don't.
+		plain := slices.Clone(rs)
+		for i := range plain {
+			plain[i].Phase = 0
+		}
+		_, unplaced := Run(context.Background(), h, []Version{{Rules: plain}}, c.from, c.to, c.step, 4)
+		if diff := sameFirings(unplaced, real, c.from, c.step); len(diff) == 0 {
+			t.Error("on the steps' grid, the firings of a group placed 11s into its minute should start later than Loki started them")
+		}
+	})
 }
 
 // TestRealLokiGrafana: Grafana 13.3.1's rules on a Loki 3.7.9 data source,
@@ -219,82 +241,122 @@ func TestRealLoki(t *testing.T) {
 // instant query, with NoData, OK and KeepLast; range queries reduced by
 // last, max, mean, sum, count and min, at Grafana's step for each (1s,
 // 3s, a query's own 10s with $__auto); a math expression over two
-// queries; a for; series by level that come and go. A classic condition
-// over Loki, a condition reading Prometheus and Loki together and one
-// reading a MySQL data source are listed, not replayed. Each firing alike,
+// queries; a for; series by level that come and go; classic conditions over
+// Loki, each reducer of them, a range and no_value, and conditions joined by
+// and, or and logic-or; a condition on Prometheus with a Loki query beside
+// it, instant and range, asked through the proxy too. A condition reading
+// Prometheus and Loki together and one reading a MySQL data source are
+// listed, not replayed. Each firing alike,
 // starting and ending at the same evaluation.
 func TestRealLokiGrafana(t *testing.T) {
-	c := logsCase{realCase{dir: "grafana-13.3.1-loki", series: `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`,
-		from: time.Date(2026, 11, 11, 19, 35, 0, 0, time.UTC), to: realTo(time.Date(2026, 11, 11, 20, 15, 0, 0, time.UTC)), step: 10 * time.Second}}
-	gf := os.Getenv("LAPILLI_RECORD_GRAFANA")
-	auth := map[string]string{}
-	var token string
-	if f := os.Getenv("LAPILLI_RECORD_GRAFANA_TOKEN"); f != "" {
-		b, err := os.ReadFile(f)
+	recordings(t, "grafana", "loki", grafanaFired, func(t *testing.T, rc realCase) {
+		c := logsCase{rc}
+		gf := os.Getenv("LAPILLI_RECORD_GRAFANA")
+		auth := map[string]string{}
+		var token string
+		if f := os.Getenv("LAPILLI_RECORD_GRAFANA_TOKEN"); f != "" {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token = strings.TrimSpace(string(b))
+			auth["Authorization"] = "Bearer " + token
+		}
+		exported := c.kept(t, "rules.yaml", gf+"/api/v1/provisioning/alert-rules/export?format=yaml", auth)
+		if os.Getenv("LAPILLI_RECORD") != "" {
+			// Grafana holds the rules of every recording: these are the ones in
+			// the folder Logs.
+			exported = keepFolder(t, exported, "Logs")
+			if err := os.WriteFile(c.path("rules.yaml"), exported, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rs, err := rules.Parse(exported)
 		if err != nil {
 			t.Fatal(err)
 		}
-		token = strings.TrimSpace(string(b))
-		auth["Authorization"] = "Bearer " + token
-	}
-	rs, err := rules.Parse(c.kept(t, "rules.yaml", gf+"/api/v1/provisioning/alert-rules/export?format=yaml", auth))
+		// The types of the data sources, as Grafana said them.
+		kinds := map[string]string{}
+		if os.Getenv("LAPILLI_RECORD") != "" {
+			for _, uid := range []string{"loki", "prom", "orders"} {
+				var d struct{ Type string }
+				if err := json.Unmarshal(c.kept(t, "ds-"+uid+".json", gf+"/api/datasources/uid/"+uid, auth), &d); err != nil {
+					t.Fatal(err)
+				}
+				kinds[uid] = d.Type
+			}
+			b, _ := json.Marshal(kinds)
+			if err := os.WriteFile(c.path("datasources.json"), b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, uid := range []string{"loki", "prom", "orders"} {
+				os.Remove(c.path("ds-" + uid + ".json"))
+			}
+		} else if err := json.Unmarshal(c.kept(t, "datasources.json", "", nil), &kinds); err != nil {
+			t.Fatal(err)
+		}
+		rules.Replaying{Kinds: kinds}.Apply(rs)
+		rec, real := c.recorded(t)
+		real = onlyRules(real, rs)
+		var opts []prom.Option
+		if token != "" {
+			opts = append(opts, prom.WithToken(func(context.Context) (string, error) { return token, nil }))
+		}
+		logs := c.logs(t, prom.New(gf+"/api/datasources/proxy/uid/loki", "lapilli-test", append(opts, prom.Loki())...))
+		h := WithLogs(rec, func(r rules.Rule) (History, error) {
+			if r.Logs != "loki" {
+				t.Errorf("%s asks %q", r.Name, r.Logs)
+			}
+			return logs, nil
+		})
+		ran, fs := Run(context.Background(), h, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
+		c.save(t, rec)
+		c.saveLogs(t, logs)
+		listed := map[string]string{
+			"LkMixed": "Prometheus and Loki together", "LkSQL": "a mysql data source",
+		}
+		for _, r := range ran {
+			want := listed[r.Name]
+			// A condition on Prometheus with a Loki query beside it reads
+			// the history, its Loki query asked aside.
+			logs := r.Logs
+			if logs == "" && r.Graph != nil && slices.Contains(slices.Collect(maps.Values(r.Graph.Aside)), "loki") {
+				logs = "loki"
+			}
+			if want == "" && (r.Unsupported != "" || logs != "loki") || want != "" && !strings.Contains(r.Unsupported, want) {
+				t.Errorf("%s: %q, logs %q", r.Name, r.Unsupported, logs)
+			}
+		}
+		real = slices.DeleteFunc(real, func(f firing.Firing) bool { return listed[f.Rule] != "" })
+		if diff := sameFirings(fs, real, c.from, 0); len(diff) > 0 {
+			t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
+		}
+		if len(fs) < 80 {
+			t.Errorf("only %d firings: the recording is too short to say much", len(fs))
+		}
+		check := verdict.CheckReplay(context.Background(), ran, fs, real, c.from, c.to, c.step)
+		if check.Alike != check.Replayed || check.Alike != check.Real {
+			t.Errorf("check: %d replayed, %d real, %d alike", check.Replayed, check.Real, check.Alike)
+		}
+	})
+}
+
+// TestKeepFolder: what keepFolder leaves of an export is written as
+// Grafana wrote it, and the groups of other folders are gone.
+func TestKeepFolder(t *testing.T) {
+	b, err := os.ReadFile("testdata/grafana-13.3.1-loki/rules.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The types of the data sources, as Grafana said them.
-	kinds := map[string]string{}
-	if os.Getenv("LAPILLI_RECORD") != "" {
-		for _, uid := range []string{"loki", "prom", "orders"} {
-			var d struct{ Type string }
-			if err := json.Unmarshal(c.kept(t, "ds-"+uid+".json", gf+"/api/datasources/uid/"+uid, auth), &d); err != nil {
-				t.Fatal(err)
-			}
-			kinds[uid] = d.Type
-		}
-		b, _ := json.Marshal(kinds)
-		if err := os.WriteFile(c.path("datasources.json"), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		for _, uid := range []string{"loki", "prom", "orders"} {
-			os.Remove(c.path("ds-" + uid + ".json"))
-		}
-	} else if err := json.Unmarshal(c.kept(t, "datasources.json", "", nil), &kinds); err != nil {
+	if got := keepFolder(t, b, "Logs"); !bytes.Equal(got, b) {
+		t.Errorf("an export of one folder, kept, is not as it was written: %d bytes, then %d", len(b), len(got))
+	}
+	other, err := os.ReadFile("testdata/grafana-13.3.1-export/rules.yaml")
+	if err != nil {
 		t.Fatal(err)
 	}
-	rules.Replaying{Kinds: kinds}.Apply(rs)
-	rec, real := c.recorded(t)
-	var opts []prom.Option
-	if token != "" {
-		opts = append(opts, prom.WithToken(func(context.Context) (string, error) { return token, nil }))
-	}
-	logs := c.logs(t, prom.New(gf+"/api/datasources/proxy/uid/loki", "lapilli-test", append(opts, prom.Loki())...))
-	h := WithLogs(rec, func(r rules.Rule) (History, error) {
-		if r.Logs != "loki" {
-			t.Errorf("%s asks %q", r.Name, r.Logs)
-		}
-		return logs, nil
-	})
-	ran, fs := Run(context.Background(), h, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
-	c.save(t, rec)
-	c.saveLogs(t, logs)
-	listed := map[string]string{
-		"LkClassic": "classic conditions over a Loki query", "LkMixed": "Prometheus and Loki together", "LkSQL": "a mysql data source",
-	}
-	for _, r := range ran {
-		want := listed[r.Name]
-		if want == "" && (r.Unsupported != "" || r.Logs != "loki") || want != "" && !strings.Contains(r.Unsupported, want) {
-			t.Errorf("%s: %q, logs %q", r.Name, r.Unsupported, r.Logs)
-		}
-	}
-	real = slices.DeleteFunc(real, func(f firing.Firing) bool { return listed[f.Rule] != "" })
-	if diff := sameFirings(fs, real, c.from, 0); len(diff) > 0 {
-		t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
-	}
-	if len(fs) < 80 {
-		t.Errorf("only %d firings: the recording is too short to say much", len(fs))
-	}
-	check := verdict.CheckReplay(context.Background(), ran, fs, real, c.from, c.to, c.step)
-	if check.Alike != check.Replayed || check.Alike != check.Real {
-		t.Errorf("check: %d replayed, %d real, %d alike", check.Replayed, check.Real, check.Alike)
+	both := append(slices.Clone(b), bytes.TrimPrefix(other, []byte("apiVersion: 1\ngroups:\n"))...)
+	if got := keepFolder(t, both, "Logs"); !bytes.Equal(got, b) {
+		t.Errorf("with another folder's group beside, %d bytes, then %d", len(b), len(got))
 	}
 }

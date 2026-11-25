@@ -269,9 +269,19 @@ them is now written there as a Mimir's is. Before, it was for a person.
   `initRulerStorage`). `lapilli preflight` says it can't know whether
   writes are taken (`changes.loki`), as for a Mimir.
 
-Left out: a Loki ruler's rule files (`--loki-rules`) stay for a person, as
-the git path writes only the files `--rules` reads; and a rule added
-(`add`) isn't offered a place in Loki's ruler. Both are for after this.
+**A rule added** (v0.72.0) is offered the groups of a namespace
+`--changes-in` names as `loki:NAMESPACE`, and a new group in it, as a
+Mimir's are ([expectations.md](expectations.md), step 5): the place's path
+is `loki`, the rule is written as LogQL, backtested in Loki and held to its
+expectations, the group written as above (a group made only while it is
+still gone), read back and undone by deleting the rule. Its place and the
+Mimir's of the same name are two places.
+
+A Loki ruler's rule files (`--loki-rules`) aren't written through an API;
+their rules are changed by the git path, and a rule is added to them there,
+as a Prometheus rule file's are ([changes.md](changes.md)). Loki's `local`
+store takes no writes, so a Loki that keeps its rules in files is changed
+in the repository they are kept in.
 
 ## Google Cloud Managed Service for Prometheus: the git path
 
@@ -758,10 +768,11 @@ README gives the IAM policy and the Azure role as JSON.
   stand-in answering as Mimir did, at Cortex's paths.
 - **Loki** is the same API under `/loki/api/v1/rules`. It is tested
   against that stand-in at Loki's path, which takes nothing without the
-  tenant (`internal/serve/lokiwrite_test.go`), and in CI against a real
-  Loki 3.7.9 by `test/e2e/loki.sh`: a second Loki with its rules on the
-  filesystem through the object store client, a change applied, read back
-  and undone.
+  tenant (`internal/serve/lokiwrite_test.go`, and a rule added in
+  `lokiadds_test.go`), and in CI against a real Loki 3.7.9 by
+  `test/e2e/loki.sh`: a second Loki with its rules on the filesystem
+  through the object store client, a change applied, read back and undone,
+  and a rule added to its group and undone.
 - **Amazon and Azure** are tested against stand-ins answering as their
   documents show: Amazon's from botocore's `amp` model (paths, `202`s,
   `statusCode` values, base64 `data`, `nextToken`), Azure's from the REST

@@ -215,6 +215,10 @@ rule's replay ("query failed"), rather than reading as no data.
 An instant query's value is compared as it is; Grafana passes the reducer
 over.
 
+Over Loki, which has no subqueries, the reducers are worked out in Go from
+the points of the range query, as Grafana's are (`rules.ClassicReduce`):
+[loki.md](loki.md), section 2.
+
 What it costs: two or three subqueries for each condition, at Grafana's
 resolution only where points are counted (`count`, `count_non_null`, `sum`,
 and the percent diffs' count), as before; the rest at the scrape interval or
@@ -301,14 +305,43 @@ interval a whole number of `--step`s, is evaluated at its own times. The
 rules API of Prometheus, Thanos, Mimir and vmalert says `lastEvaluation`;
 where it doesn't, the group is evaluated on the steps' grid, as before.
 
-**Not for rule files, and no `--offset`.** The hash takes the path
-Prometheus loaded the file from, which a file on Lapilli's disk doesn't
-say (`/etc/prometheus/rules/prometheus-k8s-rulefiles-0/...` for the
-Prometheus Operator), and the hash is Prometheus's internal hash of a
-label set, which it doesn't promise to keep. A flag would ask a person for a
-number per group that the rules API already gives. Thanos Ruler, Mimir
-and the managed services may place groups their own way;
-`lastEvaluation` says where, whichever.
+**Rule files: from the rules API, by the group's name.** The hash takes
+the name and the path Prometheus loaded the file from, which a file on
+Lapilli's disk doesn't say (`/etc/prometheus/rules/prometheus-k8s-rulefiles-0/...`
+for the Prometheus Operator). The rules API does, for each group it runs.
+So, when rules are read from files and the history's server (or a Loki
+ruler) lists a group of the same name, the group is placed as the server
+places it: one request of the API for a run (`lapilli serve` asks it with
+each read of the rules, as a read it can do without, and keeps what it last
+read), not one a rule. Prometheus's hash is xxhash of the group's `file`
+and `name` labels, modulo the interval in nanoseconds, and which bytes of
+the label set it hashes depends on the build: Prometheus 3's default (string
+labels) writes each string's length as one byte below 255, else 0xFF and
+three bytes, little endian (measured on 3.5.0); Prometheus 2's string labels
+build writes a uvarint, the same below 128 bytes and not from there, which
+is where an Operator's rule paths (130 to 180 bytes) fall; the slice labels'
+is a third. Lapilli takes the layout that the last evaluations of every
+listed group that has run agree with, to the second, and at least three of
+them (one or two fit a layout by chance, about two in the interval), and
+places the file's group by it, at the interval the file gives, so a group
+changed in a pull request is placed too. A group that ran at the same
+interval is checked against its own last evaluation, and refused, with
+why, where the hash doesn't give it. Where no layout agrees (Thanos Ruler,
+Mimir, and the managed services may place groups their own way, vmalert
+at random), or there are too few groups to tell, it takes where the group of
+that name last ran, if the file's interval is the one it runs at. A group
+isn't placed, and is replayed on the steps' grid as before, when the API
+lists its name twice (two files), or not at all, when it hasn't run, or
+when no layout agrees and the interval differs. A group whose file gives no
+interval runs at the server's global `evaluation_interval`, which the API
+says for the group: it is placed at that, and replayed as often as the
+server runs it, by `Rule.Placed`, which is not the rule's `Interval` and
+is in neither its key nor its comparison with another version of it; the run says which, and why (`lapilli verdict` on stderr,
+`lapilli serve` in its log), and an API that isn't served, or can't be
+read, is said and doesn't fail the run. A Loki ruler's hash can't be checked
+(the `file` its API gives is the namespace), so no layout is taken from its
+listing, and its groups of rule files are placed by their last evaluation. There is no `--offset`: it would ask a
+person for a number per group that the API gives.
 
 vmalert is the exception, told apart by the `concurrency` only its groups
 say. It starts a group a while into its interval, at random by the group,
@@ -321,6 +354,30 @@ interval's own grid, whatever `lastEvaluation` says (Go's `Truncate`
 counts from the year 1: a seven-minute group falls six minutes past the
 Unix epoch's multiples). A group whose file turns `eval_alignment` off,
 which the API doesn't say, is taken as aligned.
+
+**A firing on when the period starts.** A placed group's last evaluation
+before the period decides the state the period starts in: a firing on then
+may end before the group's first evaluation in the period, and replayed
+from the first, it would be left out, though it was on, and a real
+`ALERTS` shows it. A placed group (read with `--loaded-rules` or placed
+from the rules API, Loki's too) is replayed from that evaluation, whole
+steps before the period's start; with a `for` or a `keep_firing_for`, from
+an interval before the evaluation that, so the alert pending or held on
+there is seen as it was. A rule that took effect after that evaluation (a version's `From`) has no
+firing from it. A firing from there that is on when the period
+starts is reported from the period's start, as one that held on into it
+is, and `--check-replay` sets both sides' so (its clamp); one that ended
+before the period isn't reported. Every replay of a firing starts so: `Run`,
+a longer or shorter `for` tried (`WithFor`, `Fired`), the stretches a
+condition held (`Held`), and the near misses and numbers that ask them; a
+firing on at the start that a `for` tried would still have fired is seen by
+it too, and one it would have quieted is quieted by the evaluations before
+the period, not by where the period starts. `Values` and `NoData` are of the evaluations in
+the period alone, and start at its start. What is reported in the period, and the
+period's bounds, are as before. The cost is a request for the interval
+before the period, and a `for` and a `keep_firing_for` more. A group on
+the steps' grid has no evaluation before the period that isn't the
+step before.
 
 Grafana places a rule on its interval's own grid, by default, which the
 replay already uses.
@@ -366,9 +423,11 @@ Taken while building; each is open to the review.
 
 ## Questions for review
 
-- Should a rule from a file be placed where the history's own rules API
-  says a group of the same name runs, when `serve` reads both? It would
-  place most Prometheus rules, but a group of that name may be another.
+- A rule from a file is placed where the history's rules API says a group
+  of the same name runs: built. It can place a group of that name that is
+  another one (a rule file Prometheus doesn't load, a group name reused in
+  two files, which is refused as listed twice, or a file that isn't the one
+  the server loaded); `--check-replay` says when a placement is wrong.
 - Should a Grafana rule whose `noDataState` is `NoData` and whose query
   filters (`x > 5`) be told, before anything is judged, that it pages
   whenever all is well? It is a fact about the rule, as the content check
@@ -549,6 +608,8 @@ again on Grafana 13.3.1 (`TestRealGrafanaScraped`, `TestRealGrafanaChange`):
   not known, which doesn't fail the rule and is said. A query on another
   data source isn't asked, nor an expression over it: the rule is replayed
   in part, as whenever that returns nothing Grafana takes it as no data.
+  A Loki one is asked since, through Grafana's data source proxy, and the
+  rule is replayed whole ([loki.md](loki.md), section 2).
 - **F7. Any edit started a rule's alerts afresh**, its annotations too:
   Grafana carried a firing alert across an edit to what the rule says,
   where the replay split it with a gap. Grafana starts afresh only on what
@@ -607,8 +668,19 @@ reset), which the replay ends at the reset.
 
 ## Running the measurement again
 
-Prometheus 3.5.0 with `--web.enable-remote-write-receiver`, and Grafana
-13.3.1 with
+`test/e2e/measure.sh` does it, at any version of the three servers:
+
+```
+test/e2e/measure.sh                       # up, record, down: about two hours
+PROMETHEUS_IMAGE=prom/prometheus:v3.6.0 GRAFANA_IMAGE=grafana/grafana:13.4.0 \
+  LOKI_IMAGE=grafana/loki:3.8.0 test/e2e/measure.sh
+test/e2e/measure.sh up                    # the servers, kept until `down`; returns once the change is made
+test/e2e/measure.sh record                # asks them again: minutes, not hours
+test/e2e/measure.sh reprovision           # the rules of the directories read into the running Grafana, the periods planned again
+test/e2e/measure.sh down
+```
+
+It runs Prometheus with `--web.enable-remote-write-receiver`, Grafana with
 
 ```
 GF_UNIFIED_ALERTING_STATE_HISTORY_ENABLED=true
@@ -618,34 +690,79 @@ GF_UNIFIED_ALERTING_STATE_HISTORY_PROMETHEUS_TARGET_DATASOURCE_UID=prom
 
 and its Prometheus data source provisioned with `uid: prom` and
 `jsonData.prometheusType: Prometheus` (Grafana writes to `/api/v1/push`
-otherwise, which Prometheus doesn't serve). The rules are in
-`internal/replay/testdata`: Grafana's as `rules.json`, provisioned as they
-are, and Prometheus's as `rules.yml` (the test reads them from its rules
-API, `api.json`, as `--loaded-rules` does). After an hour:
+otherwise, which Prometheus doesn't serve), and Loki with its ruler on
+(`loki.md`), all in Docker, on ports that aren't their defaults. The rules
+are those of the newest recording of each kind in `internal/replay/testdata`:
+Grafana's as `rules.json`, provisioned as they are, and Prometheus's as
+`rules.yml`. For about two hours it feeds them (`test/e2e/measure-feed`:
+the scraped metrics and the log lines below, all functions of the clock),
+then records each with the tests' own recording, `LAPILLI_RECORD` (the
+tests are told which directory with `LAPILLI_RECORD_DIR`), into a directory
+named for the version it finds running: `grafana-13.4.0`,
+`prometheus-3.6.0`, and the same with `-export`, `-scraped`, `-change` and
+`-loki`, and `loki-3.8.0`. In each is its `period.json`, read by the test:
+the period asked about, `from`, `to` and `step`, and for `-change` when the
+rule was changed. A recording of a new version is a new directory, and
+nothing else changes: `go test ./internal/replay` replays every one. The
+Prometheus of the recording keeps what it has been given until `down`, so a
+replay that asks other queries is recorded again in minutes.
 
-```
-LAPILLI_RECORD=http://127.0.0.1:9090 go test ./internal/replay -run TestReal
-```
+Grafana's alerts are worked out from an hour before a period (above), so no
+period starts less than an hour and a warm-up (`BEFORE`, 65 minutes) after
+the rules came in: a period that starts ten minutes after the servers came
+up has no hour to read, and the replay and Grafana part ways on the alerts
+that began before it. The periods are as long as the first recordings' were
+(`MINUTES`, 60, is the longest allowed), so a run is `BEFORE` plus a period
+plus up to half an hour for where each starts, about two hours. A rule added
+to a recording's directory is read into the running Grafana by
+`reprovision`, which counts the hour from then.
 
-with the periods in `real_test.go` set to what was recorded. The replay
-reads the recording with a scrape interval of 10s: the queries are
+A server on a host too busy to run its evaluations on time misses some
+(Prometheus's and Loki's `rule_group_iterations_missed_total`, Grafana's
+`alerting_schedule_rule_evaluations_missed_total`): a group whose evaluation
+before a firing ran ten seconds late skips the next, so the firing starts an
+evaluation later than any replay starts it. `record` says how many each
+missed in the periods, and a recording whose test fails with some missed is
+not one to keep: record it again on a host less busy, as the `measure`
+workflow's runner is.
+
+Each period starts where nothing is about to end: a firing on when a period
+starts and over before its group's first evaluation in it was decided
+before the period, and the replay now starts a placed group from its last
+evaluation before the period, so it sees it; but a start where nothing ends
+is still the cleanest. The script picks the earliest start after the hour
+from the clock: for Prometheus's groups and Grafana's, where the 40-second
+windows are over (360 seconds, and 120 more); for Loki's, as `loki.md`
+says; for the scraped metrics, ten minutes into the 15 of `fv_gappy` and a
+minute into two of `fv_spiky`'s (1500 past a multiple of 1800 seconds, as
+the first recording's was); for the export and the change, on a minute.
+None ends on the second a Prometheus or Loki group evaluates on: such a
+group evaluates a fraction of a second past the second, so what it writes
+on the period's end is past the period (the replay leaves that evaluation
+out of a placed group), and a group placed on second 0 of its interval is
+read as not placed, which the rules API's whole seconds can't tell.
+
+One Prometheus, Grafana and Loki run every recording's rules at once, so
+what really fired is taken for the rules of the recording alone (the
+tests choose by rule name; the export of Grafana's rules, by folder). The
+replay reads the recording with a scrape interval of 10s: the queries are
 functions of `time()`, whose numbers change every second, so a coarser
 resolution reads a different `median` than Grafana's 1s.
 
-The verification's recordings, `grafana-13.3.1-scraped` and
-`grafana-13.3.1-change`, are of real scrapes: Prometheus scraping, every
-15s, a target serving `fv_spiky`, 100 for the first 15s of every two
-minutes and 1 otherwise, `fv_dippy` the other way round, and `fv_gappy`,
-there for the first minute of every 15. Grafana has a second Prometheus
-data source, `uid: prom30`, with `jsonData.timeInterval: 30s`. The rules
-are Grafana's export (`rules.yaml`, which provisions as it is), the
-`fid2api` group made through its API and changed at 17:45:05
-(`rules-before.yaml`, `rules-after.yaml`); what Grafana said of its data
-sources, and Prometheus's configuration and targets, are kept beside
-them. Recorded with
+The verification's recordings, `-scraped` and `-change`, are of real
+scrapes: Prometheus scraping, every 15s, a target serving `fv_spiky`, 100
+for the first 15s of every two minutes and 1 otherwise, `fv_dippy` the other
+way round, and `fv_gappy`, there for the first minute of every 15. Grafana
+has a second Prometheus data source, `uid: prom30`, with
+`jsonData.timeInterval: 30s`. The rules are Grafana's export (`rules.yaml`,
+which provisions as it is), the `fid2api` group made through its API and
+changed seven minutes into the recording (`rules-before.yaml`,
+`rules-after.yaml`, which the script takes from Grafana's export just before
+and after, and `changed` in `period.json`); what Grafana said of its data
+sources, and Prometheus's configuration and targets, are kept beside them.
+The script makes the group and the change through Grafana's provisioning
+API, and takes the three the way it took them first.
 
-```
-LAPILLI_RECORD=http://127.0.0.1:9090 go test ./internal/replay -run 'TestRealGrafana(Scraped|Change)$'
-```
-
-which asks only for the periods of those two.
+Run by hand as the workflow `measure` (`.github/workflows/measure.yml`),
+with the images as inputs, it writes nothing to the repository: the
+recordings are the run's artifact, to unpack and commit.

@@ -34,7 +34,45 @@ func (p *run) grafana(ctx context.Context) {
 			}
 		}
 	}
+	p.grafanaSends(ctx)
 	p.grafanaWrite(ctx)
+}
+
+// grafanaSends asks, as serve does, where Grafana sends its alerts, with
+// --grafana and --alertmanager-config: to an external Alertmanager, its
+// rules are checked against the configuration given.
+func (p *run) grafanaSends(ctx context.Context) {
+	s := p.c.Serve
+	if !s.CheckContent || s.Grafana == "" || s.AlertmanagerConfig == "" {
+		return
+	}
+	if p.c.Offline {
+		p.offline("grafana.alertmanagers", "where Grafana sends its alerts not asked")
+		return
+	}
+	each, cancel := context.WithTimeout(ctx, eachTime)
+	g, err := source.GrafanaAlertmanagers(each, s.Grafana, s.GrafanaToken, p.agent())
+	cancel()
+	switch {
+	case err != nil:
+		fix := "check --grafana and its token; Grafana's alerting API gives this at /api/v1/ngalert/admin_config, which older versions don't have"
+		if strings.Contains(err.Error(), "HTTP 403") {
+			fix = "give the token a role that reads Grafana's alerting settings"
+		}
+		p.add(Item{ID: "grafana.alertmanagers", State: Problem, What: "where Grafana sends its alerts couldn't be read: its rules are checked against its own notification templates only",
+			Why: said(err), Fix: fix})
+	case g.Choice != "internal" && g.Active == 0:
+		p.add(Item{ID: "grafana.alertmanagers", State: Problem, What: fmt.Sprintf("Grafana sends to %s Alertmanagers, and has no external one active: its rules are checked against its own templates", g.Choice),
+			Fix: "turn on Receive Grafana Alerts on the Alertmanager data source, and enable it in Grafana's alerting settings"})
+	case g.External():
+		what := fmt.Sprintf("Grafana sends its alerts to %s: its rules are checked against --alertmanager-config", plural(g.Active, "external Alertmanager"))
+		if g.Internal() {
+			what += ", and against its own templates"
+		}
+		p.add(Item{ID: "grafana.alertmanagers", State: OK, What: what, Why: g.Several()})
+	default:
+		p.add(Item{ID: "grafana.alertmanagers", State: OK, What: "Grafana sends its alerts to its own Alertmanager: its rules are checked against its own templates"})
+	}
 }
 
 // changes takes each cloud identity serve writes as, with --changes: a

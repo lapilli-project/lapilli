@@ -128,3 +128,25 @@ func TestFromGrafanaAlerts(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 }
+
+// TestActive: End is the first time a firing was off, so one that ended
+// where the period starts was never on in it, and one on at its last
+// moment was.
+func TestActive(t *testing.T) {
+	from, to := t0, t0.Add(time.Hour)
+	for _, c := range []struct {
+		start, end time.Time
+		want       bool
+	}{
+		{t0.Add(-time.Minute), t0, false},
+		{t0.Add(-time.Minute), t0.Add(time.Second), true},
+		{t0.Add(-time.Minute), time.Time{}, true},
+		{to, time.Time{}, true},
+		{to.Add(time.Second), time.Time{}, false},
+		{t0.Add(-2 * time.Minute), t0.Add(-time.Minute), false},
+	} {
+		if got := (Firing{Start: c.start, End: c.end}).Active(from, to); got != c.want {
+			t.Errorf("%v to %v in [%v, %v]: %v, want %v", c.start, c.end, from, to, got, c.want)
+		}
+	}
+}

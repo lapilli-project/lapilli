@@ -229,7 +229,10 @@ func TestCompareSaysWhichSide(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, errs.String())
 	}
 	want := "lapilli verdict: the rule files --rules read held 1 document that holds no rules, and 1 document of rules the selector doesn't match: passed over\n" +
-		"lapilli verdict: the rule files --compare read held 2 documents that hold no rules, and 1 document of rules the selector doesn't match: passed over\n"
+		"lapilli verdict: the rule files --compare read held 2 documents that hold no rules, and 1 document of rules the selector doesn't match: passed over\n" +
+		// The group's file gives no interval: the rules API, which lists no group
+		// of its name, is asked all the same.
+		"lapilli verdict: not placed, the rules API lists no group of that name: \"g\"\n"
 	if errs.String() != want {
 		t.Errorf("said:\n%s\nwant:\n%s", errs.String(), want)
 	}

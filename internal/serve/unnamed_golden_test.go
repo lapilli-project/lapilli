@@ -60,6 +60,7 @@ func TestUnnamedSignalUnchanged(t *testing.T) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"bo@example.com"}
 		c.Impact = "impact > 1"
 	})
+	s.cfg.RecordByWeek = true
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
@@ -124,6 +125,7 @@ func TestUnnamedSignalUnchanged(t *testing.T) {
 		c.Impact = "impact > 1"
 		c.Ledger, c.LedgerURLFile = s.cfg.Ledger, s.cfg.LedgerURLFile
 	})
+	again.cfg.RecordByWeek = true
 	again.jobs(ctx, false)
 	again.ready.Store(true)
 	if k, err := again.l.ImpactKept(ctx); err != nil || k.From().IsZero() {

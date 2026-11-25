@@ -1039,6 +1039,19 @@ func (s *Server) wokenOver(ctx context.Context, d rulesData, v *rulesList) (woke
 	for _, w := range d.t.weeks[len(d.t.weeks)-d.Weeks:] {
 		for rule, n := range by[w] {
 			if d.team == nil || d.own.rule[rule] == d.team.ID {
+				// By day, with no named signal, each by its own day's
+				// record, those of a week whose days are judged apart.
+				if d.t.split[w] && !d.t.o.Signals.Named() {
+					for _, u := range d.t.units(w) {
+						a, b := d.t.unit(u)
+						into := woken
+						if !d.t.rec.Kept(a, b) {
+							into = unjudged
+						}
+						into[rule] += p.wokenDay[u][rule]
+					}
+					continue
+				}
 				// Notifications are a rule's, not an alert's: of a week
 				// some of whose firings had no record, as none had.
 				into := woken

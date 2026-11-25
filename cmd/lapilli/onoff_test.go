@@ -80,7 +80,7 @@ func TestOnOffFlags(t *testing.T) {
 	// serve's own, and preflight's.
 	got := map[string]string{}
 	asServe := func(name, val string) (bool, error) { got[name] = val; return true, nil }
-	for _, name := range []string{"--read-only", "--notify-slack", "--changes", "--everyone-admin", "--oidc-bearer", "--config-prune", "--goal-tasks", "--expect-tasks", "--yield-on-429"} {
+	for _, name := range []string{"--read-only", "--notify-slack", "--changes", "--everyone-admin", "--oidc-bearer", "--config-prune", "--goal-tasks", "--expect-tasks", "--yield-on-429", "--record-by-week"} {
 		for given, want := range map[string]string{name: "true", name + "=true": "true", name + "=false": "false"} {
 			if _, err := readFlags([]string{given}, asServe); err != nil || got[name] != want {
 				t.Errorf("serve %s: %v, %q", given, err, got[name])

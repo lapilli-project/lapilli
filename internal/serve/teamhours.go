@@ -114,9 +114,12 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	}
 	s.lateCut(rep.LateCut, from, to)
 	// What judged it, for a reader counting it again (docs/numbers.md): by
-	// the ledger's weeks.
+	// the ledger's days, or weeks.
 	rep.Settings = o.Settings()
-	rep.Settings.ByWeek = true
+	if rep.Settings.RecordBy == "" {
+		// Options with no unit are judged by the ledger's weeks.
+		rep.Settings.ByWeek, rep.Settings.RecordBy = true, "week"
+	}
 	// With responses kept, what rules are found noisy by is said, as it is
 	// when they are counted (docs/design/responses.md).
 	if rep.Responses != nil && rep.Settings.NoisyBy == "" {

@@ -917,7 +917,14 @@ Step 5, adding a rule, as built:
   nor a Grafana provisioning file, nor a file a CI system runs, by
   Lapilli's own copy of the change recipes' list, a first lock beside
   theirs, nor a new file, which isn't a document Lapilli read, and so not
-  one a recipe finds by its hash. Grafana: a group of a folder whose rules
+  one a recipe finds by its hash. That reason holds for a Loki rule file
+  as it does for a Prometheus one, so a new file isn't offered there
+  either. A Loki rule file read with `--loki-rules` is a place the same
+  way (its groups, and a new group, named with `loki` on the place, so
+  that it isn't the Prometheus file of the same path; its rule LogQL, and
+  no `keep_firing_for`, which Loki drops from a file; not with `--loki-loaded-rules`, which replaces the files as Loki's rules in effect, as `--grafana` and `--ruler` replace `--rules`, but beside `--grafana` and `--ruler`, which don't touch Loki's files), and so are the
+  groups of a Loki ruler's namespace `--changes-in` names as
+  `loki:NAMESPACE`, its path `loki` (v0.72.0). Grafana: a group of a folder whose rules
   Lapilli replays as PromQL, its query one of the data sources they read;
   not a new group, which Grafana would make with an interval of its own;
   not a folder whose title another folder has too (nested folders,

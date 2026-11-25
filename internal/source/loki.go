@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -110,14 +109,14 @@ type Logs struct {
 	proxy map[string]replay.History
 }
 
-// grafanaUID is a Grafana data source's uid, as Grafana makes and takes
-// one: what goes into the proxy's path is no more than that.
-var grafanaUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+// ValidUID is rules.ValidUID: a Grafana data source's uid, as Grafana makes
+// and takes one, which is all that goes into the proxy's path.
+func ValidUID(uid string) bool { return rules.ValidUID(uid) }
 
 // For is the history a rule written in LogQL is replayed against.
 func (l *Logs) For(r rules.Rule) (replay.History, error) {
 	if r.Graph != nil && l.Grafana != nil {
-		if !grafanaUID.MatchString(r.Logs) {
+		if !ValidUID(r.Logs) {
 			return nil, errors.New("its Loki data source's uid isn't one Grafana makes, so it isn't asked")
 		}
 		l.mu.Lock()
@@ -230,6 +229,26 @@ func Placed(rs []rules.Rule, places map[rules.Place]time.Duration) {
 			rs[i].Phase = d
 		}
 	}
+}
+
+// LokiListed asks a Loki's ruler's rules API once for the groups it lists
+// (rules.Listing), once as a read lapilli can do without when once is true
+// (LokiPlacesOnce).
+func LokiListed(ctx context.Context, l Loki, agent string, once bool) (*rules.Listing, error) {
+	c := l.History(agent)
+	read := c.Rules
+	if once {
+		read = c.RulesOnce
+	}
+	b, err := read(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("--loki's rules API couldn't be read: %w", err)
+	}
+	li, err := rules.ReadLokiListing(b)
+	if err != nil {
+		return nil, fmt.Errorf("--loki's rules API: %w", err)
+	}
+	return li, nil
 }
 
 // LokiPlaces asks a Loki's ruler where it runs each group within its

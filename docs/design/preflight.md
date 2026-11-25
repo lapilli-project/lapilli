@@ -46,7 +46,7 @@ reads them, and a few cheap reads.
 ## What it is
 
 ```
-lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline]
+lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline] [--queries]
 ```
 
 It takes the flags `lapilli serve` takes, read by serve's own reader (the
@@ -123,6 +123,7 @@ doesn't apply to the flags given isn't listed.
 | `rules.replayable` | nothing more | the rules that can't be replayed, and why (`Unsupported`), as the rules list would say; the names told apart (`source.TellApart`); documents `--rules-select` passed over |
 | `rules.sources` | nothing more | only when Grafana's rules name more than one data source for their PromQL (`rules.HistoryUIDs`): unknown, as each is replayed against the one `--prometheus`, and whether they are one Prometheus isn't known here; verdict warns of the same |
 | `rules.history` | `--rules-history`'s directory | its versions, and whether one is from before the backfill starts (serve warns of it at its first start) |
+| `queries.history`, `queries.loki`, `queries.grafana` | with `--queries`: each replayable rule's expression once, as an instant query at now (`replay.Queries`), of `--prometheus` or `--gcp-project` (the clouds' PromQL, and Grafana's rules' queries), `--loki`, and Grafana's Loki data sources through its proxy; not with `--offline` | ok when every query answered; a problem naming each rule whose query failed, by `parse error`, `unknown function`, `too many samples`, `timeout`, `not let in` or `failed`; unknown for what has no place to be asked, what `--offline` and `--preflight-timeout` left unasked. Off without `--queries` ("As built (step 4)") |
 | `expressions` | nothing: read, never sent | `--impact` and `--guard`, and the expressions proposed beside this (`--mark`, #90; impact signals, #88) when they are built, read as Lapilli reads an expression (brackets, strings and comparisons, 16 KiB and 32 levels at most, as near misses read them). Lapilli has no PromQL parser of its own, so whether the history takes one as written is unknown here; the first run says |
 
 ### The history
@@ -150,6 +151,7 @@ unknown here: that history isn't read for an estimate.
 | Id | Read | Says |
 |---|---|---|
 | `grafana.notifications` | the templates, contact points and policies (`source.GrafanaNotifications`), with `--check-content` | a 403 is a problem: the template part of the content check stays as it was |
+| `grafana.alertmanagers` | with `--check-content`, `--grafana` and `--alertmanager-config`: where Grafana sends its alerts (`source.GrafanaAlertmanagers`: `/api/v1/ngalert/admin_config`, `/api/v1/ngalert/alertmanagers`, `/api/datasources`), as serve asks it, once; not asked with `--offline` | ok, saying whether the rules are checked against the Alertmanager given (external, or both) or Grafana's own; a problem when Grafana can't be asked (an older one, a 403: checked as before) and when its choice is external with none active, where its alerts go nowhere |
 | `content.alertmanager` | with `--check-content` and `--alertmanager-config`, as serve reads it: a file and the template files its `templates:` globs name beside it (`source.AlertmanagerFiles`), or a Mimir's or a Cortex's `GET /api/v1/alerts` (`source.AlertmanagerAPI`), that URL alone, once, with `--ruler-token-file` and `--ruler-tenant`; then `content.ReadAlertmanager`. A file is read with `--offline` too; the API isn't | ok, with how many receivers it names, template files it holds and templates they define; a problem when it can't be read (a 404 is a tenant with none, a 401 or a 403 a token not let in), and when serve would pass something over and say so in its log (a glob that names no file beside the configuration, a template file that doesn't parse), naming five at most: the content check goes on without them. The URL is said as `[--alertmanager-config]` |
 | `grafana.write` | with `--changes-grafana-token-file`: `GET /api/access-control/user/permissions`, which lists the caller's own actions, each with its scopes; Grafana OSS serves it (12.4 and 13.3, "As built (step 2)") | ok when the actions include what serve's changes send through the provisioning API (a read of the rule and the export; a change, a deletion, a rule made again): `alert.provisioning:write` (an Admin's), or `alert.rules:write`, `:delete` and `:create` with `alert.provisioning.provenance:write` in every folder (`*`, `folders:*`; an empty scope covers none, as Grafana's evaluator has it); a problem naming what it lacks (a Viewer's lacks them all); unknown for a token that writes folder by folder (an Editor's: `folders:read` is the folders its role is given), as which folder each rule is in isn't read; a token Grafana doesn't take (401) is a problem; where the path isn't served (404), unknown |
 | `changes.cloud` | AWS (`--changes-aws-role`): STS's `AssumeRole`; Google Cloud (`--changes-google-service-account`): IAM Credentials' `generateAccessToken`; Azure (`--changes-azure-client-id`): a token for that identity from Microsoft Entra, as serve's credential chain gets one; OCI (`--changes-oci-config`): the config file and the API key it names, read | the identity can be taken, or the key read: a credential is made, nothing is written. What each may write is its own item, below |
@@ -403,12 +405,13 @@ Each is held by the code and a test, not only said:
 - **No heavy query, no replay.** No replay and no backfill; no rule's
   expression, `--impact`, `--guard`, nor anything else a person wrote is
   evaluated, over a range or at an instant (the `expressions` item reads
-  them). The only queries are `vector(1)` and the ALERTS count over a day:
-  the allowlist holds no other. Why not each rule's expression once, to see
-  that the history takes it? 400 rules are 400 queries, minutes under a
-  quota, and an expression's cost is known only once it has run. The first
-  run says which the history refuses as written (Run history, the rule's
-  page).
+  them), unless `--queries` is given. By default the only queries are
+  `vector(1)` and the ALERTS count over a day: the allowlist holds no
+  other. Why not each rule's expression once by default, to see that the
+  history takes it? 400 rules are 400 queries, minutes under a quota, and
+  an expression's cost is known only once it has run. Behind `--queries`
+  it is asked once ("As built (step 4)"); the first run says it too (Run
+  history, the rule's page).
 - **Nothing sent, nothing bound, nothing judged.** Not Slack, a webhook, a
   tracker, the outbox or a change recipe; no lease; no port bound. It counts
   requests, not firings: no rule's firings, budget or catches are worked
@@ -549,9 +552,13 @@ the rules in memory as serve's watcher does, and nothing else of size.
    judged here, a statement with a condition never counted as a grant
    ("As built (step 2)").
 
+**Decided and built, for the next release:**
+
+4. **Each rule's expression** asked once, behind `--queries` ("As built
+   (step 4)").
+
 **Open:**
 
-4. **Each rule's expression** asked once, behind `--queries`?
 5. **In serve**: the same items on the Settings page, worked out once a
    day, for a deployment that has drifted (a token rotated without its
    scope)?
@@ -983,6 +990,54 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   directory the test runs in, how long the history took to answer and
   the free space beside the ledger.
 
+## As built (step 4)
+
+`--queries`, a flag of `lapilli preflight`'s (`internal/preflight`,
+`queries.go`): each rule's expression asked once, behind a flag because it
+is the one place a preflight sends what a person wrote.
+
+- **What is asked.** Of each rule a run replays, the expressions its
+  condition reads (`replay.Queries`: a Prometheus or Loki rule's own, a
+  Grafana rule's queries its condition reads, as `Condition` asks them),
+  each once, whichever rule it is of: two rules of one expression are one
+  request. A cloud's alarms have no expression. It is an instant query at
+  now, as `vector(1)` is: a range of one step at `--step`, because the
+  client asks `query_range` alone.
+- **Where.** Where the replay asks it: the Prometheus-compatible history
+  (`--prometheus` or `--gcp-project`, with the clouds' signing, so a
+  Google, Amazon or Azure PromQL is asked as it is replayed; and the
+  queries of Grafana's rules that are PromQL), `--loki`, and Grafana's Loki
+  data sources through its proxy (a rule's `Logs` is the data source's uid,
+  as `source.Logs.For` takes it). Three items, one for each place:
+  `queries.history`, `queries.loki`, `queries.grafana`. A query with no
+  place to ask (LogQL with no `--loki`, PromQL with no history) is an
+  unknown item that says so; `--offline` asks nothing, and each is unknown.
+- **The limits are the replay's.** The clients are made as serve makes
+  them, so `--max-rate` spaces the requests, `--max-samples` bounds an
+  answer (a query that answers more is "too many samples"), Grafana's
+  Loki data sources are held to one pace and `--parallel` at once, and
+  `--parallel` is how many are asked at once. A query is waited for ten
+  seconds (`eachTime`), the whole by `--preflight-timeout`; the expressions
+  not asked when the time runs out are counted, and the item is unknown.
+- **The allowlist** holds it to exactly the expressions it was told of: each
+  is allowed, by its exact text, as the two PromQL queries are, before it is
+  asked; an expression it wasn't told of is refused (`TestQueriesAllowlist`).
+  Nothing is written: Prometheus's and Loki's query APIs only read.
+- **The report.** An item is a problem when some query failed, and names
+  each rule whose query did, in `failed` (`rule`, `reason`, `why`), in the
+  JSON and, grouped by reason, in the text: `parse error`, `unknown
+  function`, `too many samples`, `timeout`, `not let in` (401, 403),
+  `failed` for the rest. The reasons are read from what a server says of an
+  expression it reads (Prometheus's, Mimir's and Loki's words) and from the
+  client's own bound. A rule that fails in a preflight fails in a run the
+  same way: its `Unsupported` says so, and the rule's page. It isn't in the
+  estimates: it is asked once, and the item's requests are counted in
+  `asked`.
+- **Not done.** Grafana's rules on a data source that isn't PromQL or Loki
+  aren't replayed, and so not asked; a query's answer isn't read (how many
+  series, what value); an expression a replay would shift by a rule's lag
+  is asked unshifted.
+
 ## Steps
 
 1. The command: serve's flags, the rules, the history's probe and the
@@ -996,3 +1051,5 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
 3. The backtest lane ([backtests.md](backtests.md)): its trust file, its
    issuers' discovery and keys, its share in the estimates (built, "As
    built (step 3)").
+4. `--queries`: each rule's expression asked once (built, "As built (step
+   4)").

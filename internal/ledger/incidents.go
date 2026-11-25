@@ -30,6 +30,11 @@ type Incident struct {
 	By      string
 	// CaughtBy are the rules that caught it, the first first.
 	CaughtBy []verdict.Catch
+	// Unreplayed says nothing caught it and it started before the ledger's
+	// first replayed time (the earliest a run of the rules replayed from):
+	// no rule could have fired for it, so it isn't missed, and it isn't
+	// known whether one would have caught it.
+	Unreplayed bool
 	// RealOf is, of one "This was real" wrote, the alert and start of the
 	// firing it was written from, "" for any other (docs/design/judging.md,
 	// item 3).

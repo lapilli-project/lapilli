@@ -32,6 +32,7 @@ func TestTeamHours(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	s.cfg.RecordByWeek = true
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
   - name: shop
     rules:

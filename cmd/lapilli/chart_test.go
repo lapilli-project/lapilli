@@ -651,6 +651,26 @@ func TestChartMatchStrict(t *testing.T) {
 	}
 }
 
+// serve.recordByWeek is --record-by-week, in serve mode; none by default.
+func TestChartRecordByWeek(t *testing.T) {
+	parallel(t)
+	out, err := helmTemplate(t, serveValues...)
+	if err != nil || strings.Contains(out, "--record-by-week") {
+		t.Errorf("by default: %v\n%s", err, out)
+	}
+	out, err = helmTemplate(t, append(serveValues, "--set", "serve.recordByWeek=true")...)
+	if err != nil || strings.Count(out, "- --record-by-week\n") != 1 {
+		t.Errorf("recordByWeek: %v\n%s", err, out)
+	}
+	out, err = helmTemplate(t, append(serveValues, "--set-string", "serve.recordByWeek=false")...)
+	if err != nil || strings.Contains(out, "--record-by-week") {
+		t.Errorf(`recordByWeek: "false": %v\n%s`, err, out)
+	}
+	if out, err = helmTemplate(t, append(serveValues, "--set-string", "serve.recordByWeek=no")...); err == nil || !strings.Contains(out, `serve.recordByWeek: true or false, not "no"`) {
+		t.Errorf(`recordByWeek: "no": %v\n%s`, err, out)
+	}
+}
+
 // linkedOnly is --linked-only, in both modes; none by default.
 func TestChartLinkedOnly(t *testing.T) {
 	parallel(t)

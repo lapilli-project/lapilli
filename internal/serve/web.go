@@ -1610,6 +1610,8 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 		v := strings.TrimSpace(r.PostFormValue(st.key))
 		if r.PostFormValue("reset-"+st.key) != "" {
 			v = ""
+		} else if !r.PostForm.Has(st.key) {
+			continue // not in the form (the API's, of one setting): as it is
 		}
 		if v != "" {
 			var o verdict.Options
@@ -1639,7 +1641,8 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	// The noisy thresholds are read when stones are counted; the rest
 	// decide the stones themselves.
-	if before.Lead != after.Lead || before.RefireWithin != after.RefireWithin || strings.Join(before.Match, ",") != strings.Join(after.Match, ",") {
+	if before.Lead != after.Lead || before.RefireWithin != after.RefireWithin || strings.Join(before.Match, ",") != strings.Join(after.Match, ",") ||
+		before.LinkedOnly != after.LinkedOnly {
 		// Here, and through the ledger, wherever the leader runs.
 		s.askRejudge(r.Context())
 	}
@@ -1667,6 +1670,11 @@ func (s *Server) settingsYAML(w http.ResponseWriter, r *http.Request) {
 		}
 		if st.key == "match" {
 			fmt.Fprintf(&b, "match: %s\n", yamlList(o.Match))
+			continue
+		}
+		if st.key == "linked-only" {
+			// The chart's own value, which passes --linked-only in both modes.
+			fmt.Fprintf(&b, "linkedOnly: %t\n", o.LinkedOnly)
 			continue
 		}
 		args = append(args, fmt.Sprintf("%q", st.flag+"="+show(o, st.key)))
@@ -1912,6 +1920,9 @@ type apiIncident struct {
 	Updated  time.Time        `json:"updated,omitzero"`
 	By       string           `json:"by,omitempty"`
 	CaughtBy []verdict.Catch  `json:"caught_by"`
+	// Unreplayed says nothing caught it and it started before the ledger's
+	// first replayed time: not missed.
+	Unreplayed bool `json:"unreplayed,omitempty"`
 }
 
 func (s *Server) apiIncidents(w http.ResponseWriter, r *http.Request) {
@@ -1927,7 +1938,7 @@ func (s *Server) apiIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []apiIncident{}
 	for _, in := range incs {
-		out = append(out, apiIncident{in.ID, in.Title, in.Start, in.End, in.Labels, in.Alerts, in.Origin, in.State, in.Counts, in.Updated, in.By, in.CaughtBy})
+		out = append(out, apiIncident{in.ID, in.Title, in.Start, in.End, in.Labels, in.Alerts, in.Origin, in.State, in.Counts, in.Updated, in.By, in.CaughtBy, in.Unreplayed})
 	}
 	writeJSON(w, out)
 }
@@ -1964,7 +1975,7 @@ func (s *Server) apiPutIncident(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "/api/v1/incidents/"+url.PathEscape(id))
 		w.WriteHeader(http.StatusCreated)
 	}
-	writeJSON(w, apiIncident{got.ID, got.Title, got.Start, got.End, got.Labels, got.Alerts, got.Origin, got.State, got.Counts, got.Updated, got.By, got.CaughtBy})
+	writeJSON(w, apiIncident{got.ID, got.Title, got.Start, got.End, got.Labels, got.Alerts, got.Origin, got.State, got.Counts, got.Updated, got.By, got.CaughtBy, got.Unreplayed})
 }
 
 func (s *Server) apiDeleteIncident(w http.ResponseWriter, r *http.Request) {

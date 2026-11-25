@@ -757,8 +757,11 @@ type Page struct {
 	Rule, Source, Receiver, Reason string
 	// Resolved is set when it told only of the rule's alerts resolving.
 	Resolved bool
-	// Firings are the ledger's firings the rule's alerts in it tell of.
+	// Firings are the ledger's firings the rule's alerts in it tell of;
+	// Start is when the first of them started, zero for none: the day a
+	// notification for a firing is counted on.
 	Firings []int64
+	Start   time.Time
 	// Stone is one of the Page values.
 	Stone string
 }
@@ -1116,6 +1119,9 @@ func (l *Ledger) Pages(ctx context.Context, from, to time.Time, within Within) (
 				p.Stone = worse(p.Stone, PageBlack)
 			}
 			if f != nil && !slices.Contains(p.Firings, f.id) {
+				if len(p.Firings) == 0 {
+					p.Start = unix(f.start)
+				}
 				p.Firings = append(p.Firings, f.id)
 			}
 		}

@@ -19,7 +19,7 @@
 # tenant, --changes-in loki:shop. A longer for is applied (Loki's ruler
 # loads it) and undone byte for byte; a rule changed in Loki since it was
 # proposed is refused as stale; a namespace --changes-in doesn't name is
-# left for a person.
+# left for a person; a new rule is added to a group and undone.
 #
 # Needs Docker, Go, curl and jq. Takes 17 to 24 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
@@ -38,7 +38,7 @@ for o in PROMETHEUS_IMAGE GRAFANA_IMAGE LOKI_IMAGE; do
   docker pull -q "${!o}" >/dev/null 2>&1 || true
   echo "$o=${!o} ($(docker image inspect --format '{{index .RepoDigests 0}}' "${!o}" 2>/dev/null || true))"
 done
-p=lapilli-e2e-loki
+p=${PREFIX:-lapilli-e2e-loki} # containers and network: another PREFIX runs beside
 minutes=${MINUTES:-10}
 port=${PORT:-28190} # serve takes port
 
@@ -117,8 +117,8 @@ datasources:
   - {name: Orders, type: mysql, uid: orders, url: "mysql:3306", access: proxy}
 YAML
 # Grafana's rules, as its editor writes them: instant and range queries,
-# reduces Grafana works out, no data states, a classic condition and a
-# MySQL query, which aren't replayed.
+# reduces Grafana works out, no data states, a classic condition, which
+# the replay reduces itself, and a MySQL query, which isn't replayed.
 query() { # refId, LogQL, queryType, window in seconds
   jq -nc --arg r "$1" --arg e "$2" --arg q "$3" --argjson f "$4" '{refId: $r, queryType: $q, relativeTimeRange: {from: $f, to: 0},
     datasourceUid: "loki", model: {expr: $e, queryType: $q, refId: $r, intervalMs: 1000, maxDataPoints: 43200}}'
@@ -132,7 +132,19 @@ rule() { # uid, condition, noDataState, for, data...
   jq -nc --arg u "$uid" --arg c "$cond" --arg n "$nodata" --arg f "$for" --slurpfile d <(printf '%s\n' "$@") \
     '{uid: $u, title: $u, condition: $c, noDataState: $n, execErrState: "Error", for: $f, labels: {team: "logs"}, data: $d}'
 }
+promq() { # refId: vector(1) on Prometheus, instant
+  jq -nc --arg r "$1" '{refId: $r, queryType: "instant", relativeTimeRange: {from: 600, to: 0}, datasourceUid: "prom",
+    model: {expr: "vector(1)", instant: true, queryType: "instant", refId: $r, intervalMs: 1000, maxDataPoints: 43200}}'
+}
+cond() { # evaluator, params, operator, query, reducer: one classic condition
+  jq -nc --arg e "$1" --argjson p "$2" --arg o "$3" --arg q "$4" --arg r "$5" \
+    '{evaluator: {type: $e, params: $p}, operator: {type: $o}, query: {params: [$q]}, reducer: {type: $r}}'
+}
+classic() { # refId, conditions as JSON objects joined by commas
+  step "$1" "{\"type\":\"classic_conditions\",\"conditions\":[$2]}"
+}
 errors='sum(count_over_time({app="shop", level="error"}[30s]))'
+cart='sum(count_over_time({app="cart", level="error"}[30s]))'
 {
   rule LkInstant B OK 0s "$(query A "$errors" instant 600)" "$(threshold B A 20)"
   rule LkNoData B NoData 0s "$(query A 'sum by (app) (count_over_time({level="error"}[1m]))' instant 600)" "$(threshold B A 30)"
@@ -144,6 +156,32 @@ errors='sum(count_over_time({app="shop", level="error"}[30s]))'
     "$(step C '{"type":"math","expression":"$A / $B > 0.3"}')"
   rule LkClassic B OK 0s "$(query A "$errors" range 60)" \
     "$(step B '{"type":"classic_conditions","conditions":[{"evaluator":{"type":"gt","params":[10]},"operator":{"type":"and"},"query":{"params":["A"]},"reducer":{"type":"avg"}}]}')"
+  # Each classic reducer over Loki, a range, no_value, conditions joined by
+  # or and logic-or, one that is no data (the replay reduces them itself),
+  # and a condition on Prometheus with a Loki query beside it.
+  for r in "max gt 20" "min lt 10" "sum gt 400" "count gt 55" "last gt 30" "median gt 15" "diff gt 10" "diff_abs gt 25" \
+    "percent_diff gt 50" "percent_diff_abs gt 80" "count_non_null lt 30"; do
+    set -- $r
+    # Titled in camel case: percent_diff_abs is LkClassicPercentDiffAbs.
+    title=LkClassic$(awk -F_ '{for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2)}' <<<"$1")
+    rule "$title" B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond "$2" "[$3]" and A "$1")")"
+  done
+  rule LkClassicRange B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond within_range "[5,30]" and A avg)")"
+  # The shop's info lines are every second: 0/0 is NaN, which reduces to none.
+  rule LkClassicNoValue B OK 0s "$(query A 'sum(count_over_time({app="shop", level="info"}[30s]) * 0) / sum(count_over_time({app="shop", level="info"}[30s]) * 0)' range 60)" \
+    "$(classic B "$(cond no_value "[]" and A last)")"
+  rule LkClassicOr C OK 0s "$(query A "$errors" range 60)" "$(query B "$cart" range 60)" \
+    "$(classic C "$(cond gt "[30]" and A max),$(cond gt "[10]" or B max)")"
+  rule LkClassicLogicOr C NoData 0s "$(query A "$errors" range 60)" "$(query B "$cart" range 60)" \
+    "$(classic C "$(cond gt "[30]" and A max),$(cond gt "[10]" logic-or B max)")"
+  rule LkClassicNoData B NoData 0s "$(query A 'sum by (app) (count_over_time({level="error"}[1m]))' range 120)" \
+    "$(classic B "$(cond gt "[10]" and A avg)")"
+  rule LkBeside B NoData 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" instant 600)"
+  rule LkBesideRange B NoData 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" range 120)"
+  rule LkBesideOK B OK 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" instant 600)"
+  # A threshold on a range query: Grafana's evaluation errors ("only reduced
+  # data can be alerted on"), which isn't replayed: listed.
+  rule LkSeries B OK 0s "$(query A "$errors" range 60)" "$(threshold B A 10)"
   rule LkSQL B OK 0s '{"refId":"A","relativeTimeRange":{"from":600,"to":0},"datasourceUid":"orders","model":{"refId":"A","rawSql":"SELECT 1"}}' \
     "$(threshold B A 5)"
 } | jq -s '{apiVersion: 1, groups: [{orgId: 1, name: "logs", folder: "logs", interval: "10s", rules: .}]}' >"$work/prov/alerting/rules.json"
@@ -192,14 +230,16 @@ push &
 pusher=$!
 
 # Loki's ruler and Grafana start on their own; the check begins two
-# minutes in, once both have run every group, on a minute when no Loki
-# rule's firing is about to end: one on when a period starts, that ends
-# before its group's first evaluation in it, was decided before the period,
-# and the replay doesn't see it (docs/design/loki.md). The shop's errors
-# are quiet two minutes into their three, and the cart's firing ends a
-# minute and a half into its five; the check ends on a whole minute.
+# minutes after the ruler's groups have all run, so that the evaluation
+# before the period, which the replay takes to have run (a placed group is
+# replayed from it), was run by a ruler that had loaded them: one started
+# within an interval of the period's start hasn't (measured: a restarted
+# Loki ran its 1m group first two and a half minutes on). On any minute: a
+# firing on when the period starts that ends before its group's first
+# evaluation in it is replayed from the evaluation before, and must be
+# alike (docs/design/states.md, section 5).
+until_true 300 sh -c "curl -sf '$lu/prometheus/api/v1/rules' | jq -e '[.data.groups[].lastEvaluation] | length > 0 and all(. > \"2000\")'"
 from=$((($(date +%s) + 120) / 60 * 60 + 60))
-while [ $((from % 180)) -ne 120 ] || [ $((from % 300)) -eq 120 ]; do from=$((from + 60)); done
 until [ "$(date +%s)" -ge $((from + minutes * 60 + 10)) ]; do sleep 5; done
 to=$(($(date +%s) / 60 * 60 - 60))
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
@@ -228,8 +268,18 @@ out=$("$work/lapilli" verdict --check-replay --json --grafana "$gf" --grafana-to
 check "Grafana on Loki" "$out"
 listed=$("$work/lapilli" verdict --check-replay --grafana "$gf" --grafana-token-file "$work/viewer" --prometheus "$pu" \
   --from "$from" --to "$to" --step 10s 2>/dev/null)
-for want in "LkClassic: classic conditions over a Loki query" "LkSQL: its condition reads a mysql data source"; do
+for want in "LkSQL: its condition reads a mysql data source" "LkSeries: its condition B comes to query A's time series"; do
   if grep -qF "$want" <<<"$listed"; then echo "ok: listed: $want"; else echo "FAILED: not listed: $want"; fail=1; fi
+done
+# Grafana's own state for the rule the replay lists: an error, at each
+# evaluation, which --check-replay says it left out.
+if [ "$(jq '.errors_left_out.LkSeries // 0' <<<"$out")" -gt 0 ]; then echo "ok: LkSeries is in Grafana's error state"; else echo "FAILED: LkSeries isn't in Grafana's error state"; fail=1; fi
+# The classic conditions over Loki and the rules with a Loki query beside
+# their condition are replayed, none listed as not.
+if grep -E "^ *(LkClassic|LkBeside)[A-Za-z]*:" <<<"$listed"; then echo "FAILED: listed, not replayed"; fail=1; else echo "ok: classic and beside rules replayed"; fi
+for name in LkClassicMax LkClassicMin LkClassicNoValue LkClassicPercentDiff LkClassicNoData LkClassicLogicOr LkBeside LkBesideRange LkBesideOK; do
+  n=$(jq --arg n "$name" '[.rules[] | select(.rule == $n)] | length' <<<"$out")
+  if [ "$n" = 1 ]; then echo "ok: $name checked"; else echo "FAILED: $name not in the check"; fail=1; fi
 done
 
 # Loki's ruler, changed through its configuration API. Its local store,
@@ -355,6 +405,27 @@ id=$(propose bo@example.com rule=OtherErrors kind=for for=5m)
 check_line "a namespace --changes-in doesn't name is for a person, with why" \
   "$(proposal "$id" | jq -r '.path + ": " + (.evidence.no_path // "")')" \
   "^none: its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE$"
+
+# A new rule, in LogQL, held to its expectations (a budget, which a rule
+# that fires nowhere in the twelve weeks meets), written into Loki's group
+# through its API, loaded by Loki's ruler, and undone by deleting it.
+until_true 120 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sl/proposals/new' | grep -q ': shop, api</option>'"
+place=$(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sl/proposals/new" | sed -nE 's|.*<option value="([0-9a-f]+)">[^<]*: shop, api</option>.*|\1|p' | head -1)
+added=$'alert: LogErrorsAdded\nexpr: sum(count_over_time({app="shop", level="error"}[1m])) > 5\nfor: 1m\n'
+held=$'expectations:\n  - rule: LogErrorsAdded\n    budget:\n      week: 100000\n'
+id=$(propose bo@example.com kind=add "place=$place" "rule=$added" "expectations=$held")
+check_line "a rule added to Loki's ruler, on its own path" "$(proposal "$id" | jq -r '.path')" '^loki$'
+act ana@example.com "$id" approve
+until_true 90 is "$id" applied || true
+check_line "a rule added, applied in Loki" "$(state "$id")" '^applied$'
+check_line "the group holds it beside the others" "$(lns shop/api | grep -cE 'alert: (LogErrorsAdded|LogErrors|LogSlow)$')" '^3$'
+until_true 60 sh -c "curl -s -H 'X-Scope-OrgID: acme' '$lw/prometheus/api/v1/rules' | jq -e '.data.groups[] | select(.file == \"shop\") | .rules[] | select(.name == \"LogErrorsAdded\")'" || true
+check_line "Loki's ruler loaded it" "$(lloaded shop LogErrorsAdded | jq -r .name)" '^LogErrorsAdded$'
+act ana@example.com "$id" undo
+undo=$(newest)
+until_true 90 is "$undo" applied || true
+check_line "a rule added, undone in Loki" "$(state "$id")" '^undone$'
+check_line "the group without it" "$(lns shop/api | grep -c LogErrorsAdded)" '^0$'
 
 if [ "$fail" != 0 ]; then
   echo "--- serve (Loki's ruler)"; tail -30 "$work/serve.log"

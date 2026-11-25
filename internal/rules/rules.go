@@ -56,6 +56,12 @@ type Rule struct {
 	// Interval is how often the rule's group is evaluated; zero when the
 	// file doesn't say.
 	Interval time.Duration
+	// Placed is how often the rule's group runs when its file gives no
+	// interval, as the history's rules API says (the global
+	// evaluation_interval), for placing the group (Replaying.PlaceFiles)
+	// and replaying it as often as the server runs it. Not the rule's own:
+	// neither Key nor Whole has it. Zero otherwise.
+	Placed time.Duration
 	// QueryOffset is how long before each evaluation a Prometheus rule's
 	// query is asked at: its group's query_offset.
 	QueryOffset time.Duration
@@ -149,6 +155,16 @@ type Rule struct {
 	// written, to read again once its data sources' types are known
 	// (Replaying.Kinds): a SQL query has no expr to read.
 	unread map[string]any
+}
+
+// GroupEvery is how often the rule's group runs, as far as is known: its
+// Interval, or, where the file gives none, what the rules API said when the
+// group was placed (Placed). Zero when neither.
+func (r Rule) GroupEvery() time.Duration {
+	if r.Interval > 0 {
+		return r.Interval
+	}
+	return r.Placed
 }
 
 // GrafanaUIDs are the data sources a Grafana rule's queries name, by uid,
@@ -1599,28 +1615,7 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 		// Where the group falls in its interval, from when it last ran: an
 		// evaluation starts just after its time, so this is to the second
 		// below. Before its first evaluation, Prometheus says year 1.
-		var phase time.Duration
-		iv := int64(secs(g.Interval) / time.Second)
-		switch {
-		case iv < 1:
-		case g.Concurrency != nil:
-			// vmalert starts a group a while into its interval, and its
-			// lastEvaluation says when; but it asks each rule, and stamps
-			// what fires, at a time of its own (app/vmalert/rule/group.go,
-			// v1.156.0): eval_offset past a multiple of the interval, or else
-			// the time less eval_delay truncated to one (eval_alignment, on
-			// unless the group's file turns it off, which the API doesn't
-			// say). Go's Truncate counts the multiples from the zero time, in
-			// the year 1, not from 1970.
-			off := int64(0)
-			if !math.IsNaN(g.EvalOffset) && math.Abs(g.EvalOffset) < float64(iv) {
-				off = int64(math.Floor(g.EvalOffset))
-			}
-			phase = time.Duration(((time.Time{}.Unix()%iv+off)%iv+iv)%iv) * time.Second
-		case g.LastEvaluation.Year() > 1970:
-			// In whole seconds: nanoseconds since 1970 overflow past 2262.
-			phase = time.Duration((g.LastEvaluation.Unix()%iv+iv)%iv) * time.Second
-		}
+		phase := phaseOf(secs(g.Interval), g.LastEvaluation, g.Concurrency != nil, g.EvalOffset)
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
 				continue
@@ -1649,6 +1644,35 @@ func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
 		}
 	}
 	return shownRules(out), nil
+}
+
+// phaseOf is where a group of the given interval is placed within it, from
+// when it last ran (the year 1 before its first evaluation), to the second:
+// 0 when that isn't known. vmalert's groups, which say their concurrency
+// (vm), are placed by their eval_offset and alignment instead.
+func phaseOf(interval time.Duration, last time.Time, vm bool, evalOffset float64) time.Duration {
+	iv := int64(interval / time.Second)
+	switch {
+	case iv < 1:
+	case vm:
+		// vmalert starts a group a while into its interval, and its
+		// lastEvaluation says when; but it asks each rule, and stamps
+		// what fires, at a time of its own (app/vmalert/rule/group.go,
+		// v1.156.0): eval_offset past a multiple of the interval, or else
+		// the time less eval_delay truncated to one (eval_alignment, on
+		// unless the group's file turns it off, which the API doesn't
+		// say). Go's Truncate counts the multiples from the zero time, in
+		// the year 1, not from 1970.
+		off := int64(0)
+		if !math.IsNaN(evalOffset) && math.Abs(evalOffset) < float64(iv) {
+			off = int64(math.Floor(evalOffset))
+		}
+		return time.Duration(((time.Time{}.Unix()%iv+off)%iv+iv)%iv) * time.Second
+	case last.Year() > 1970:
+		// In whole seconds: nanoseconds since 1970 overflow past 2262.
+		return time.Duration((last.Unix()%iv+iv)%iv) * time.Second
+	}
+	return 0
 }
 
 func hasGrafanaRules(doc map[string]any) bool {
@@ -1880,6 +1904,15 @@ type Graph struct {
 	// is the condition's data source's; Grafana takes one that returns
 	// nothing as no data, which the replay can't see (UnseenOther).
 	Other map[string]string
+	// Aside are the refs of Queries and Asks that are asked of a Loki the
+	// condition's history isn't: a Loki query beside a condition that reads
+	// Prometheus, by the uid of its Loki data source, asked through
+	// Grafana's data source proxy as a rule on Loki is. Such a query isn't
+	// read by the condition; it is asked to know when it returned nothing,
+	// which Grafana takes as the rule's no data (docs/design/loki.md). Both
+	// the query's ref (in Queries) and, for a range query, the ref of what
+	// says it has a point in its window (in Asks) are here.
+	Aside map[string]string
 	// reads are, by ref of Queries, what each data query, PromQL or
 	// LogQL, and each reduce folded into one reads, as read: what tells
 	// whether the condition counts events (EventWindow).
@@ -2314,6 +2347,13 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 		}
 		uid := str(dm["datasourceUid"])
 		if !replayed[uid] {
+			if kindOf(dm, kinds) == KindLoki && g.asideLoki(ref, uid, dm, model) {
+				if g.kinds == nil {
+					g.kinds = map[string]string{}
+				}
+				g.kinds[uid] = KindLoki
+				continue
+			}
 			if g.Other == nil {
 				g.Other = map[string]string{}
 			}
@@ -2448,9 +2488,6 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 			}
 			g.Steps[ref] = Step{Math: e}
 		case "classic_conditions":
-			if g.Logs != "" {
-				return nil, errors.New("classic conditions over a Loki query aren't replayed: their reducers are worked out with PromQL's subqueries, which LogQL hasn't")
-			}
 			c, err := classic(ref, m, queries, g)
 			if err != nil {
 				return nil, err
@@ -2529,7 +2566,141 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 		}
 		walk(st.Reduce.Input)
 	}
+	// A condition that is still a time series isn't alertable: Grafana's
+	// evaluation errors.
+	if ref, ok := g.seriesCondition(queries); ok {
+		return nil, fmt.Errorf("its condition %s comes to query %s's time series, which Grafana can't alert on: its evaluation errors with \"looks like time series data, only reduced data can be alerted on\" whenever its queries return something (a reduce, or a classic condition, makes the series one number), and errors aren't replayed", g.Cond, ref)
+	}
 	return g, nil
+}
+
+// seriesCondition reports whether the rule's condition comes to a time
+// series, as Grafana's does (pkg/services/ngalert/eval, evaluateExecutionResult:
+// a condition frame with a time field is an error), and the ref of the range
+// query it comes from. A range query's result is a series (Prometheus's
+// instant queries are numbers, Loki's too, measured); a threshold or math
+// over one is a series still (pkg/expr, threshold.go and mathexp: each
+// point); a reduce or classic conditions give numbers, and so does a math
+// of numbers. A query with no window is an instant one.
+func (g *Graph) seriesCondition(queries map[string]dataQuery) (string, bool) {
+	seen := map[string]bool{}
+	var walk func(ref string) (string, bool)
+	walk = func(ref string) (string, bool) {
+		if seen[ref] {
+			return "", false
+		}
+		seen[ref] = true
+		if q, ok := queries[ref]; ok {
+			return ref, q.window > 0
+		}
+		st, ok := g.Steps[ref]
+		if !ok || st.Reduce != nil || st.Classic != nil {
+			return "", false
+		}
+		for _, u := range st.Uses() {
+			if from, series := walk(u); series {
+				return from, true
+			}
+		}
+		return "", false
+	}
+	return walk(g.Cond)
+}
+
+// asideLoki reads a query on a Loki data source the condition doesn't
+// read, as a Loki query beside it (Aside), asked as Grafana's Loki data
+// source asks it; false when it can't be, and it is left as a query on
+// another data source (Other): a log query, which returns lines; one Grafana
+// can't run; a reduce's step finer than a replay asks.
+func (g *Graph) asideLoki(ref, uid string, dm, model map[string]any) bool {
+	expr := strings.TrimSpace(str(model["expr"]))
+	if expr == "" || !ValidUID(uid) {
+		return false
+	}
+	var from, to float64
+	if rt, ok := dm["relativeTimeRange"].(map[string]any); ok {
+		from, _ = toFloat(rt["from"])
+		to, _ = toFloat(rt["to"])
+		if from < 0 || to < 0 || from > 1e9 || to > from {
+			return false
+		}
+	}
+	q, err := lokiQuery(ref, dataQuery{expr: expr, to: time.Duration(to) * time.Second}, dm, model, time.Duration(from-to)*time.Second)
+	if err != nil {
+		return false
+	}
+	if q.window > 0 && q.res < LokiLeastStep {
+		return false
+	}
+	if g.Aside == nil {
+		g.Aside = map[string]string{}
+	}
+	g.Queries[ref] = q.expr
+	g.Shift[ref] = q.to
+	g.Aside[ref] = uid
+	g.Data[ref] = Source{Present: ref, UID: uid}
+	if q.window > 0 {
+		// It returned something when it has a point in its window.
+		in := ref + "\x00aside"
+		g.Asks[in] = Ask{Fn: ClassicPresent, Expr: q.expr, Window: q.window, Res: q.res, Logs: true, Classic: true}
+		g.Shift[in] = q.to
+		g.Aside[in] = uid
+		g.Data[ref] = Source{Present: in, UID: uid}
+	}
+	return true
+}
+
+// ValidUID reports whether a data source's uid is one Grafana makes, as it
+// goes into the data source proxy's path.
+func ValidUID(uid string) bool {
+	if uid == "" || len(uid) > 40 {
+		return false
+	}
+	return strings.Trim(uid, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") == ""
+}
+
+// AsideUIDs are the Loki data sources the rule's queries beside its
+// condition are asked of, by uid.
+func (g *Graph) AsideUIDs() []string {
+	if g == nil {
+		return nil
+	}
+	return slices.Compact(slices.Sorted(maps.Values(g.Aside)))
+}
+
+// LokiUID reports whether the data source uid is a Loki one of the rule's
+// queries are asked of: the condition's, or one a query beside it is on.
+func (g *Graph) LokiUID(uid string) bool {
+	if g == nil {
+		return false
+	}
+	return g.Logs != "" && uid == g.Logs || slices.Contains(g.AsideUIDs(), uid)
+}
+
+// AsOther is g with its Loki queries beside the condition (Aside) left as
+// queries on another data source (Other), which aren't asked: for a rule
+// with no way to the Loki they are on.
+func (g *Graph) AsOther() *Graph {
+	if g == nil || len(g.Aside) == 0 {
+		return g
+	}
+	c := *g
+	c.Queries, c.Asks, c.Shift, c.Data = maps.Clone(g.Queries), maps.Clone(g.Asks), maps.Clone(g.Shift), maps.Clone(g.Data)
+	c.Other = maps.Clone(g.Other)
+	if c.Other == nil {
+		c.Other = map[string]string{}
+	}
+	for ref, uid := range g.Aside {
+		delete(c.Queries, ref)
+		delete(c.Asks, ref)
+		delete(c.Shift, ref)
+		if _, isData := g.Data[ref]; isData {
+			delete(c.Data, ref)
+			c.Other[ref] = uid
+		}
+	}
+	c.Aside = nil
+	return &c
 }
 
 func promDuration(d time.Duration) string {

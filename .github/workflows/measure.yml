@@ -1,0 +1,84 @@
+name: measure
+
+# The replay's measurements, taken again at the versions of Prometheus,
+# Grafana and Loki given (docs/design/states.md, "Running the measurement
+# again"): test/e2e/measure.sh starts the three in Docker, runs the rules
+# kept in internal/replay/testdata for about two hours (an hour and a
+# warm-up before the first period starts, as Grafana's alerts are worked out
+# from an hour before it), records what really fired
+# and what the replay asks, and writes it into directories named for the
+# versions it finds running. They are the run's artifact, as files to
+# commit: nothing is written to the repository. A recording whose test
+# finds the replay unlike what really fired fails the run, and is kept.
+#
+# An image is a reference (a tag, or a digest); left empty, it is the one
+# the script pins. Run by hand: two and a half hours of a runner at most.
+on:
+  workflow_dispatch:
+    inputs:
+      prometheus:
+        description: Prometheus image (default the one test/e2e/measure.sh pins)
+        type: string
+      grafana:
+        description: Grafana image (default the one test/e2e/measure.sh pins)
+        type: string
+      loki:
+        description: Loki image (default the one test/e2e/measure.sh pins)
+        type: string
+      before:
+        description: Minutes the rules run before any period starts (a shorter run is a dry run)
+        type: string
+        default: "65"
+      minutes:
+        description: The longest a period is, in minutes (the first recordings' are 46, 40 and 17)
+        type: string
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: the replay's measurements
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      PROMETHEUS_IMAGE: ${{ inputs.prometheus }}
+      GRAFANA_IMAGE: ${{ inputs.grafana }}
+      LOKI_IMAGE: ${{ inputs.loki }}
+      BEFORE: ${{ inputs.before }}
+      MINUTES: ${{ inputs.minutes }}
+      PREFIX: lapilli-measure
+      MIN_FREE_GB: "5"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/measure.sh
+      - name: The recordings, as files
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/recordings"
+          git ls-files -m -o --exclude-standard -z internal/replay/testdata |
+            xargs -0 -r -I{} cp --parents {} "$RUNNER_TEMP/recordings/"
+          {
+            echo "## Recordings"
+            echo
+            echo "Prometheus ${PROMETHEUS_IMAGE:-pinned}, Grafana ${GRAFANA_IMAGE:-pinned}, Loki ${LOKI_IMAGE:-pinned}, ${BEFORE:-65} minutes before the periods."
+            echo
+            echo '```'
+            (cd "$RUNNER_TEMP/recordings" && find . -type f | sort)
+            echo '```'
+            echo
+            echo "Unpack the artifact in the repository, and run \`go test ./internal/replay\`."
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: recordings
+          path: ${{ runner.temp }}/recordings
+          if-no-files-found: warn
