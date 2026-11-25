@@ -52,6 +52,9 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 			byRule[rr.Rule] = rr
 		}
 	}
+	if r.hasNotifications() {
+		header = slices.Concat(header, NotificationCSVColumns)
+	}
 	if err := cw.Write(header); err != nil {
 		return err
 	}
@@ -106,6 +109,9 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 			csvJSON(unrelated), j.Action}
 		if r.hasResponses() {
 			row = append(row, responseCells(j, byRule)...)
+		}
+		if r.hasNotifications() {
+			row = append(row, notificationCells(j)...)
 		}
 		if err := cw.Write(row); err != nil {
 			return err

@@ -1,4 +1,4 @@
-<!-- translated from docs/faq.md at blob b364a2ea1a264cb6c7fc159ec14053a9819bbd04 -->
+<!-- translated from docs/faq.md at blob d3a1aac6335b50bffce0caa8d382f537d2ab7496 -->
 
 # 자주 묻는 질문
 
@@ -151,13 +151,17 @@ condition과 쿼리가 아무것도 돌려주지 않을 때의 동작까지 Graf
 
 ### Alertmanager의 라우팅, 사일런스, 인히비션도 백테스트하나요?
 
-아니요. 룰이 울리는 대로 알림을 셀 뿐이고, Alertmanager의 라우팅, 그룹핑, 인히비션,
-사일런스와 Grafana의 알림 정책은 설정에서 읽지 않습니다
-([아직 안 되는 것 (영어)](../limits.md)). `lapilli serve`는 웹훅 리시버나,
-Alertmanager 0.33.0부터는 이벤트 레코더에서 실제로 보낸 알림 전송 기록을 알림 옆에 보관할 수
+`lapilli verdict`는 계산합니다. Alertmanager 설정(`--alertmanager-config`, 또는
+알림 정책을 읽는 `--grafana`)을 주면, 울린 알림을 라우팅, 그룹핑, 인히비션 룰, 주어진
+사일런스, 시간 간격에 차례로 통과시켜서 룰마다 알림 전송과 호출이 몇 번 갔을지, 몇
+번이 억제됐을지, 호출 가운데 아무 일도 아니었던 것이 몇 번인지 알려 줍니다. 이 숫자는
+설정으로 계산한 값이지 기록이 아닙니다
+([알림이 누구에게 갔는지, 계산한 값 (영어)](../notifications-worked-out.md)).
+`lapilli serve`는 아직 계산하지 않습니다. 웹훅 리시버나, Alertmanager 0.33.0부터는
+이벤트 레코더에서 실제로 보낸 알림 전송 기록을 알림 옆에 보관할 수
 있고([실제로 보낸 알림 (영어)](../notifications.md)), 사일런스나 인히비션이 알림을
-억제한 때도 알려 줍니다. 그래서 알림이 울렸는데도 아무도 호출받지 않은 이유를 알 수
-있습니다. `lapilli serve`의 메인터넌스 윈도우는 자체 기능으로, 그 안에서 장애를
+억제한 때도 알려 줍니다. 그래서 알림이 울렸는데도 아무도 호출받지 않은 이유를 알
+수 있습니다. `lapilli serve`의 메인터넌스 윈도우는 자체 기능으로, 그 안에서 장애를
 잡지 못한 알림을 면제합니다.
 
 ### Kubernetes가 필요한가요?

@@ -286,6 +286,13 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Fprintf(&b, "# HELP lapilli_serve_notifications_since_timestamp_seconds When the first notification kept came, in Unix seconds: notifications are counted from then.\n# TYPE lapilli_serve_notifications_since_timestamp_seconds gauge\nlapilli_serve_notifications_since_timestamp_seconds %d\n", p.first.Unix())
 		}
+		// Who the firings reached, worked out beside what was sent.
+		if s.notifies() {
+			if err := s.routedMetrics(ctx, &b, today); err != nil {
+				s.oops(w, r, err)
+				return
+			}
+		}
 		if s.checking() {
 			from, to := s.lastWeek()
 			checks, err := s.l.Checks(ctx, from, to)

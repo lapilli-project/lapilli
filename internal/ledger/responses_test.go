@@ -361,7 +361,7 @@ func TestMigrate034(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.Close()
-	back := slices.Clone(ledgertest.Undo034)
+	back := slices.Concat(ledgertest.Undo035, ledgertest.Undo034)
 	if strings.HasPrefix(where, "postgres") {
 		c, err := pgx.Connect(ctx, where)
 		if err != nil {

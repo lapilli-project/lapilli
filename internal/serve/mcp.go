@@ -386,6 +386,7 @@ type ruleOut struct {
 	OffHours    int            `json:"black_off_hours" jsonschema:"firings that caught nothing out of working hours, while people were awake"`
 	// What was sent for it, once notifications are taken.
 	Notifications *notifiedOut `json:"notifications,omitempty" jsonschema:"the notifications sent for it, as the alert manager sent them; not given before any told of it"`
+	Pages         *pagesOut    `json:"pages,omitempty" jsonschema:"the pages that went for it over the weeks shown, recorded where notifications were recorded and worked out from the alert manager's configuration where none were; basis says which. Not given where lapilli serve doesn't work the notifications out"`
 	ReplayDiffers bool         `json:"replay_differs,omitempty" jsonschema:"its replay differed from how it really fired over the last week checked: its stones rest on that replay, so check them"`
 	// What it says when it fires (docs/design/content.md).
 	ContentProblems int `json:"content_problems,omitempty" jsonschema:"problems with what it says when it fires, or how it is written: facts, and what was measured; rule lists them"`
@@ -412,6 +413,61 @@ type ruleEpisodesOut struct {
 	Precision *float64 `json:"precision,omitempty" jsonschema:"white over the episodes judged, 0 to 1; not given with none judged"`
 }
 
+// pagesOut are a rule's pages, and which kind they are.
+type pagesOut struct {
+	Unknown          bool   `json:"unknown,omitempty" jsonschema:"some of the hours weren't worked out, or the work stopped or failed: no count is given"`
+	Pages            int    `json:"pages"`
+	Recorded         int    `json:"recorded" jsonschema:"of them, those really sent and kept"`
+	WorkedOut        int    `json:"worked_out" jsonschema:"of them, those worked out from the alert manager's configuration, where no notification was recorded: not a record"`
+	Asleep           int    `json:"asleep" jsonschema:"while people slept"`
+	OffHours         int    `json:"off_hours" jsonschema:"out of working hours, while people were awake"`
+	ForNothing       int    `json:"for_nothing" jsonschema:"for firings that caught nothing, or, with responses, weren't useful"`
+	ForNothingAsleep int    `json:"for_nothing_asleep" jsonschema:"for nothing, while people slept"`
+	Basis            string `json:"basis" jsonschema:"recorded, worked out, or recorded and worked out; empty with no page"`
+}
+
+func pagesOutOf(l pagesLine) *pagesOut {
+	if !l.PagedOn {
+		return nil
+	}
+	if l.PagedUnknown {
+		return &pagesOut{Unknown: true}
+	}
+	return &pagesOut{Pages: l.Paged, Recorded: l.PagedRecorded, WorkedOut: l.PagedWorkedOut, Asleep: l.PagedAsleep, OffHours: l.PagedOffHours,
+		ForNothing: l.PagedNothing, ForNothingAsleep: l.PagedNothingAsleep, Basis: l.PagedBasis()}
+}
+
+// workedOutOut is what a firing is worked out to have reached: not a
+// record.
+type workedOutOut struct {
+	Notified  int          `json:"notified" jsonschema:"notifications that told of it, worked out"`
+	Paged     int          `json:"paged" jsonschema:"of them, pages"`
+	FirstPage time.Time    `json:"first_page,omitzero"`
+	Receivers []string     `json:"receivers" jsonschema:"the receivers its alert reached"`
+	Empty     []string     `json:"no_integrations,omitempty" jsonschema:"of them, those that send nothing"`
+	Muted     []mutedByOut `json:"muted,omitempty" jsonschema:"what kept it out of a notification: an inhibition, a silence or a time interval"`
+}
+
+type mutedByOut struct {
+	Kind       string `json:"kind"`
+	By         string `json:"by"`
+	SourceRule string `json:"source_rule,omitempty"`
+}
+
+func workedOutOutOf(r *routedShown) *workedOutOut {
+	if r == nil {
+		return nil
+	}
+	x := &workedOutOut{Notified: r.Notified, Paged: r.Paged, FirstPage: r.FirstPage, Receivers: r.Receivers, Empty: r.Empty}
+	if x.Receivers == nil {
+		x.Receivers = []string{}
+	}
+	for _, m := range r.Muted {
+		x.Muted = append(x.Muted, mutedByOut{m.Kind, m.By, m.SourceRule})
+	}
+	return x
+}
+
 type notifiedOut struct {
 	Since             time.Time      `json:"since" jsonschema:"counted from: the start of the first alert of it a notification told of"`
 	Sent              int            `json:"sent"`
@@ -432,7 +488,7 @@ func ruleOutOf(l ruleLine) ruleOut {
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: precision, Noisy: l.Noisy, NoRecord: l.NoRecord, NoisyWeeks: l.Streak,
 		Suggestion: l.Suggestion, Unrecorded: unrecordedOutOf(l.Unrecord), FiredOn: firedOnOutOf(l.FiredOn), NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
-		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), ReplayDiffers: l.Differs,
+		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), Pages: pagesOutOf(l.pagesLine), ReplayDiffers: l.Differs,
 		ContentProblems: l.Content.Facts + l.Content.Measured, ContentGuesses: l.Content.Guesses, Episodes: ruleEpisodesOutOf(l), NoisyEpisodes: noisyEpisodesOf(l),
 		Unrelated: l.Unrelated, PrecisionByLapilli: pctShare(l.PrecisionByLapilli), ActionYes: l.ActionYes, ActionNo: l.ActionNo, NotJudged: l.NotJudged,
 		Late: l.Late, LateCut: l.LateCut, Responses: l.Responses}
@@ -695,6 +751,9 @@ type firingOut struct {
 	Labels  map[string]string `json:"labels"`
 	Stone   string            `json:"stone" jsonschema:"white, black or excused"`
 	Refired bool              `json:"refired,omitempty"`
+	// WorkedOut is what the alert manager's routing is worked out to have
+	// done with it: not a record.
+	WorkedOut *workedOutOut `json:"worked_out,omitempty" jsonschema:"who it reached, worked out from the alert manager's configuration (not recorded): notifications, pages, receivers and what kept it out of one. Not given where lapilli serve doesn't work them out, or for a firing not worked out yet"`
 	// Notified, once notifications were counted for its rule when it started.
 	Notified *int `json:"notified,omitempty" jsonschema:"how many notifications told of it: 0 is a firing that paged no one; not given before notifications were counted for its rule"`
 	// Muted is what muted it, as Alertmanager's event recorder told of it
@@ -1049,6 +1108,7 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 			x.Notified = &f.Notified
 		}
 		x.Muted = mutedOutOf(f.Muted)
+		x.WorkedOut = workedOutOutOf(f.Routed)
 		out.Latest = append(out.Latest, x)
 	}
 	latest := make([]ledger.Firing, len(out.Latest))

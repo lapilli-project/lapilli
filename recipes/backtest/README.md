@@ -130,6 +130,12 @@ And, as wanted:
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
+- `ALERTMANAGER_CONFIG`, Alertmanager's configuration file in the repository,
+  read from both commits: the pull request's is `--alertmanager-config`, so the
+  comment starts with the pages before and after, and the commit it goes into's,
+  when it has the file and it differs, is `--alertmanager-config-before`, so that
+  a change to the routing shows in the pages
+  ([Who a firing reached, worked out](../../docs/notifications-worked-out.md))
 - `EXPECT`, an expectations file in the repository
   ([docs/design/expectations.md](../../docs/design/expectations.md)): the
   rules that differ are held to it, the pull request's file for the rules

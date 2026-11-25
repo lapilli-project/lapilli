@@ -1,0 +1,28 @@
+route:
+  receiver: slack-default
+  group_by: [alertname, namespace]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+  routes:
+    - matchers: [severity="critical", cluster="prod"]
+      receiver: oncall
+      continue: true
+    - matchers: [service="cart"]
+      receiver: cart-team
+    - matchers: [alertname="Latency"]
+      receiver: nobody
+inhibit_rules:
+  - name: api-errors-hide-disk
+    source_matchers: [alertname="ApiErrors"]
+    target_matchers: [alertname="DiskFull"]
+    equal: [namespace]
+receivers:
+  - name: slack-default
+    slack_configs: [{channel: "#alerts"}]
+  - name: oncall
+    pagerduty_configs: [{routing_key: "x"}]
+    slack_configs: [{channel: "#oncall"}]
+  - name: cart-team
+    webhook_configs: [{url: "http://example.invalid/hook"}]
+  - name: nobody

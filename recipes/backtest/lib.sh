@@ -95,6 +95,14 @@
 #                    agree on when both have them, comma-separated, such
 #                    as service or service,cluster: a --match each, beside
 #                    any among the arguments
+#   ALERTMANAGER_CONFIG
+#                    optional: Alertmanager's configuration file in the
+#                    repository, read from both commits: the pull request's
+#                    is --alertmanager-config, so the comment starts with the
+#                    pages before and after (docs/notifications-worked-out.md),
+#                    and the commit it goes into's, when it has the file and it
+#                    differs, is --alertmanager-config-before, so that a change
+#                    to the routing shows in the pages
 #   EXPECT           optional: an expectations file in the repository
 #                    (docs/design/expectations.md): the rules that differ
 #                    are held to it, the pull request's file for the rules
@@ -723,6 +731,10 @@ case $match in
 esac
 if [ -n "${EXPECT:-}" ] && { ! in_repo "$EXPECT" || [ "${EXPECT%/}" != "$EXPECT" ]; }; then
   say "EXPECT $EXPECT: want a file in the repository"
+  exit 1
+fi
+if [ -n "${ALERTMANAGER_CONFIG:-}" ] && { ! in_repo "$ALERTMANAGER_CONFIG" || [ "${ALERTMANAGER_CONFIG%/}" != "$ALERTMANAGER_CONFIG" ]; }; then
+  say "ALERTMANAGER_CONFIG $ALERTMANAGER_CONFIG: want a file in the repository"
   exit 1
 fi
 if [ -z "${EXPECT:-}" ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
@@ -1505,6 +1517,35 @@ incidents() {
     { trouble "INCIDENTS $INCIDENTS couldn't be read from the commit the pull request goes into"; return 1; }
 }
 
+# alertmanager_config: ALERTMANAGER_CONFIG, as each commit has it, into
+# $tmp/am.head.yml (the pull request's) and $tmp/am.base.yml (the commit it
+# goes into's), files of 8 MiB at most, for --alertmanager-config and
+# --alertmanager-config-before. The pull request's is required; the base's
+# may be missing (a file the pull request adds), and the before side is then
+# worked out with the pull request's.
+alertmanager_config() {
+  [ -n "${ALERTMANAGER_CONFIG:-}" ] || return 0
+  for side in head base; do
+    if [ "$side" = head ]; then commit=$head what="the pull request's commit"; else commit=$base what="the commit it goes into"; fi
+    mode=$(git -C "$repo" ls-tree "$commit" -- "$ALERTMANAGER_CONFIG" | awk '{ print $1 }')
+    case $mode in
+      100644 | 100755) ;;
+      '') [ "$side" = base ] && continue; trouble "ALERTMANAGER_CONFIG $ALERTMANAGER_CONFIG isn't in $what"; return 1 ;;
+      *) trouble "ALERTMANAGER_CONFIG $ALERTMANAGER_CONFIG isn't a file in $what"; return 1 ;;
+    esac
+    if [ "$(git -C "$repo" cat-file -s "$commit:$ALERTMANAGER_CONFIG")" -gt 8388608 ]; then
+      trouble "ALERTMANAGER_CONFIG $ALERTMANAGER_CONFIG is more than 8 MiB in $what"
+      return 1
+    fi
+    git -C "$repo" cat-file blob "$commit:$ALERTMANAGER_CONFIG" >"$tmp/am.$side.yml" ||
+      { trouble "ALERTMANAGER_CONFIG $ALERTMANAGER_CONFIG couldn't be read from $what"; return 1; }
+  done
+  # The same file twice is one: the before side is worked out with it anyway.
+  if [ -f "$tmp/am.base.yml" ] && cmp -s "$tmp/am.head.yml" "$tmp/am.base.yml"; then
+    rm -f "$tmp/am.base.yml"
+  fi
+}
+
 # expectations: EXPECT, as each commit has it, into
 # $tmp/expect.head.yaml (the pull request's, for the rules it proposes) and
 # $tmp/expect.base.yaml (the commit the rules are compared against's, for
@@ -1755,6 +1796,12 @@ run_lapilli() {
   fi
   if [ -n "${INCIDENTS:-}" ]; then
     set -- --incidents "$tmp/incidents.yaml" "$@"
+  fi
+  if [ -f "$tmp/am.head.yml" ]; then
+    set -- --alertmanager-config "$tmp/am.head.yml" "$@"
+    if [ -f "$tmp/am.base.yml" ]; then
+      set -- --alertmanager-config-before "$tmp/am.base.yml" "$@"
+    fi
   fi
   if [ -n "$missed_gate" ]; then
     set -- --fail-missed "$@"
@@ -2626,7 +2673,7 @@ main() {
   # comes last. Once the commits are found, the status says the backtest
   # runs, until it ends.
   if commits && status_start && fetch_lapilli && files "$base" "$tmp/base" "the commit it goes into" &&
-    files "$head" "$tmp/head" "the pull request's commit" && incidents && expectations; then
+    files "$head" "$tmp/head" "the pull request's commit" && incidents && expectations && alertmanager_config; then
     if [ -z "${RENDER:-}" ] || { render base "the commit it goes into" && render head "the pull request's commit"; }; then
       backtest "$@"
     fi

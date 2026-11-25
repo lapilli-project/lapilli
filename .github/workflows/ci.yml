@@ -82,17 +82,19 @@ jobs:
     # Postgres (docs/design/postgres.md): each test's in a schema of its
     # own. The oldest major the PostgreSQL project still supports, and the
     # latest; the images' own collation is en_US.utf8, not C, which the
-    # ledger's columns must not depend on. In two shards each
+    # ledger's columns must not depend on. In three shards each
     # (test/shard.sh), every test in one: serve's alone took some twenty
-    # minutes in one job. Not a required check: it pulls an image.
-    name: tests on Postgres ${{ matrix.major }}, shard ${{ matrix.shard }} of 2
+    # minutes in one job, and the ledger's and the command's with half of
+    # serve's came to go test's limit. Not a required check: it pulls an
+    # image.
+    name: tests on Postgres ${{ matrix.major }}, shard ${{ matrix.shard }} of 3
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         major: ["15", "18"]
-        shard: [1, 2]
+        shard: [1, 2, 3]
         include:
           - major: "15"
             image: postgres:15.19@sha256:1aac5b49cefd627f02816141ca4ad012d6cc19460dfe02a9b5168a105be3fc53
@@ -121,9 +123,10 @@ jobs:
         with:
           go-version-file: go.mod
       # In one job, serve's tests took seventeen to twenty-one minutes on
-      # Postgres (1,284 s on 15 in November 2026); a shard's job takes eight
-      # to eleven, fourteen on a slow runner. go test's own limit is still
-      # twenty-five, inside the job's thirty.
+      # Postgres (1,284 s on 15 in November 2026); in two shards the one
+      # with the ledger's and the command's came to 24 minutes on 15, and
+      # past go test's limit once more tests came. go test's own limit is
+      # still twenty-five, inside the job's thirty.
       - run: test/shard.sh "$SHARD" -timeout 25m
         env:
           SHARD: ${{ matrix.shard }}
@@ -152,6 +155,7 @@ jobs:
       e2e-compat: ${{ steps.reached.outputs.e2e-compat }}
       e2e-kubernetes: ${{ steps.reached.outputs.e2e-kubernetes }}
       e2e-rollouts: ${{ steps.reached.outputs.e2e-rollouts }}
+      e2e-routing: ${{ steps.reached.outputs.e2e-routing }}
     steps:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -466,6 +470,30 @@ jobs:
         with:
           go-version-file: go.mod
       - run: test/e2e/rollouts.sh
+
+  e2e-routing:
+    # Who a firing reached, worked out, held to what real Alertmanagers sent:
+    # a real Prometheus sending the alerts of rules that fire and resolve at
+    # known times to the newest Alertmanager and the oldest held to, with
+    # nested routes, continue, group_by, an inhibition rule, a mute time
+    # interval, a silence and a receiver of two integrations, every receiver
+    # a webhook of one keeper; `lapilli verdict --alertmanager-config` must
+    # work out the same notifications, each within a group_interval of its
+    # time (test/e2e/routing.sh). Not a required check: it pulls images, and
+    # the rules must fire and resolve over some minutes (about nine).
+    name: notifications worked out as real Alertmanagers sent them
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-routing == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/routing.sh
 
   vulnerabilities:
     name: govulncheck

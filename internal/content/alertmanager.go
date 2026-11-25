@@ -176,6 +176,7 @@ func ReadAlertmanager(config []byte, files []TemplateFile) (n *Notifications, sk
 	matchers := 0
 	n.route = amRoute(root, &count, &matchers, 0)
 	n.number()
+	n.routing, n.routingErr = readRouting(m, &doc)
 	return n, skipped, nil
 }
 

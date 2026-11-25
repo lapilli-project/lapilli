@@ -167,6 +167,9 @@ type NoisyAt struct {
 // not judged.
 type Judged struct {
 	firing.Firing
+	// FiringID is, in lapilli serve, the id the ledger keeps the firing
+	// under: what ties it to what was worked out of who it reached.
+	FiringID  int64    `json:"-"`
 	White     bool     `json:"white"`
 	Incidents []string `json:"incidents,omitempty"`
 	NoRecord  bool     `json:"no_record,omitempty"`
@@ -215,6 +218,9 @@ type Judged struct {
 	// Response is what was done about it and whether it was useful, with
 	// responses (Options.Responder).
 	Response *FiringResponse `json:"response,omitempty"`
+	// Notifications is who it reached, worked out from the alert
+	// manager's routing (docs/design/routing.md): nil when that wasn't.
+	Notifications *FiringNotifications `json:"notifications,omitempty"`
 }
 
 // RuleResult is one rule's stones.
@@ -310,6 +316,9 @@ type RuleResult struct {
 	// Responses are its firings counted by what was done about them, with
 	// responses (Options.Responder); nil for a rule that never fired.
 	Responses *RuleResponses `json:"responses,omitempty"`
+	// Notifications are its firings' notifications, worked out
+	// (WorkOutNotifications); nil when they weren't.
+	Notifications *RuleNotifications `json:"notifications,omitempty"`
 }
 
 // MarkedCount is a rule's firings during the windows of one kind: those
@@ -572,6 +581,9 @@ type Report struct {
 	// Responses are what was read of what people did, with responses
 	// (Options.Responder).
 	Responses *ResponseTotals `json:"responses,omitempty"`
+	// Notifications are what was worked out of the notifications the
+	// firings sent (WorkOutNotifications); nil when nothing was.
+	Notifications *ReportNotifications `json:"notifications,omitempty"`
 }
 
 // Settings are what a report's firings were judged by, as Options has

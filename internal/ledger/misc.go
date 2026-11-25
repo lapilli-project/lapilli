@@ -308,6 +308,9 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 		"DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE created < ?1 LIMIT 5000)",
 		// Their alerts go with them.
 		"DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE at < ?1 LIMIT 5000)",
+		// What the model worked out, as firings are (what each firing reached
+		// goes with it).
+		"DELETE FROM routed WHERE id IN (SELECT id FROM routed WHERE at < ?1 LIMIT 5000)",
 		// And the mutes, as the notifications.
 		"DELETE FROM mutes WHERE id IN (SELECT id FROM mutes WHERE last_at < ?1 LIMIT 5000)",
 		// A source nothing was written to since is forgotten.
@@ -352,6 +355,10 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 	}
 	err := l.write(ctx, func(t *txn) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM days WHERE day < ?", l.day(at)); err != nil {
+			return err
+		}
+		// The hours worked out begin where the firings do.
+		if err := l.trimCover(t, at); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week < ?", Week(l.day(at))); err != nil {

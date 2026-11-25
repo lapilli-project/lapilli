@@ -325,3 +325,13 @@ DIR`. See [How it judges](how-it-judges.md).
 
 A firing that caught an incident. See
 [The numbers](numbers.md#a-white-or-a-black-stone).
+
+### Worked out
+
+A number that is a model's, not a record: what the alert manager would have done
+with the firings, from its configuration (`--alertmanager-config`), not what it
+did. NOTIFIED, PAGED and the rest of [Who a firing reached, worked
+out](notifications-worked-out.md) are; `lapilli serve`'s notifications, kept as
+they were sent ([Notifications as they were sent](notifications.md)), aren't.
+Everything that shows one says so, and a field, a column or a metric of one has
+`worked_out` in its name or beside it.

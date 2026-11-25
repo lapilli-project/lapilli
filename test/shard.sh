@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# The ledger's, serve's and the command's tests in two shards, as CI runs
+# The ledger's, serve's and the command's tests in three shards, as CI runs
 # them on Postgres (.github/workflows/ci.yml, postgres), where serve's alone
-# take some twenty minutes in one job.
+# take some twenty minutes in one job, and the ledger's and the command's
+# with half of serve's came to the go test limit.
 #
-# Shard 2 runs every second of serve's tests, in name order. Shard 1 runs
-# the ledger's, the command's and serve's, skipping what shard 2 runs: a
-# name the ledger's or the command's tests have too stays in shard 1, or
-# the skip would take theirs. Before running, the shard checks that the
-# pattern shard 2 runs by lists exactly its tests among serve's and none of
-# the others': so every test runs in one shard, and one only.
+# Shard 1 runs the ledger's and the command's. Shard 2 runs every second of
+# serve's tests, in name order; shard 3 runs the rest of serve's, skipping
+# what shard 2 runs. Before running, the shard checks that the pattern shard
+# 2 runs by lists exactly its tests among serve's: so every test runs in one
+# shard, and one only.
 #
-#   test/shard.sh 1|2 [go test flags]
+#   test/shard.sh 1|2|3 [go test flags]
 #
 # With LAPILLI_TEST_POSTGRES naming a server, the ledgers are kept there
 # (CONTRIBUTING.md); without, in SQLite.
@@ -19,9 +19,9 @@ cd "$(dirname "$0")/.."
 
 shard=${1:-}
 case $shard in
-  1 | 2) shift ;;
+  1 | 2 | 3) shift ;;
   *)
-    echo "usage: test/shard.sh 1|2 [go test flags]" >&2
+    echo "usage: test/shard.sh 1|2|3 [go test flags]" >&2
     exit 2
     ;;
 esac
@@ -36,8 +36,7 @@ names() {
 }
 
 serve=$(names . ./internal/serve)
-others=$(names . ./internal/ledger ./cmd/lapilli)
-two=$(LC_ALL=C comm -23 <(printf '%s\n' "$serve") <(printf '%s\n' "$others") | awk 'NF && NR % 2 == 0')
+two=$(printf '%s\n' "$serve" | awk 'NF && NR % 2 == 0')
 re="^($(printf '%s\n' "$two" | paste -sd '|' -))\$"
 
 listed=$(names "$re" ./internal/serve)
@@ -46,18 +45,13 @@ if [ "$listed" != "$two" ]; then
   diff <(printf '%s\n' "$two") <(printf '%s\n' "$listed") >&2 || true
   exit 1
 fi
-taken=$(names "$re" ./internal/ledger ./cmd/lapilli)
-if [ -n "$taken" ]; then
-  echo "FAILED: shard 1 would skip these tests of the ledger's or the command's:" >&2
-  printf '%s\n' "$taken" >&2
-  exit 1
-fi
 
 total=$(printf '%s\n' "$serve" | grep -c . || true)
 n2=$(printf '%s\n' "$two" | grep -c . || true)
-echo "serve's $total tests: shard 1 runs $((total - n2)), and the ledger's and the command's; shard 2 runs $n2"
+echo "serve's $total tests: shard 2 runs $n2, shard 3 runs $((total - n2)); shard 1 runs the ledger's and the command's"
 
 case $shard in
-  1) exec go test -skip "$re" "$@" ./internal/ledger ./internal/serve ./cmd/lapilli ;;
+  1) exec go test "$@" ./internal/ledger ./cmd/lapilli ;;
   2) exec go test -run "$re" "$@" ./internal/serve ;;
+  3) exec go test -skip "$re" "$@" ./internal/serve ;;
 esac

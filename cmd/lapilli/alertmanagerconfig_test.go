@@ -95,7 +95,6 @@ func TestCheckContentAlertmanager(t *testing.T) {
 		t.Errorf("refused: exit %d: %s", code, stderr.String())
 	}
 	for _, args := range [][]string{
-		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--alertmanager-config", cfg},
 		{"verdict", "--rules", rulesFile, "--check-content", "--alertmanager-config", "ftp://x/api/v1/alerts"},
 	} {
 		stderr.Reset()

@@ -49,6 +49,30 @@ type paged struct {
 	from     time.Time
 	toldOnce sync.Once
 	told     map[int64]bool
+	// events are the pages of the weeks shown, recorded or worked out
+	// (routedview.go); routed says the notifications are worked out here and
+	// some hours are, cover saying which (and routedFrom where the first
+	// starts), routedMore that there were more firings with pages than are
+	// counted; recordedFrom is, by receiver, when the first notification was
+	// recorded; upTo is where the ledger's firings are up to: pages are
+	// known only for hours covered, up to there (known).
+	events       []pageEvent
+	routed       bool
+	routedMore   bool
+	routedCut    time.Time // when routedMore, the time of the last page read
+	routedFrom   time.Time
+	cover        ledger.RoutedCover
+	upTo         time.Time
+	recordedFrom map[string]time.Time
+	// recorded are, by receiver, the hours (Unix seconds of each start) in
+	// which a notification was recorded for it; pagers the receivers the
+	// configuration says page (nil where it isn't read): known decides an
+	// hour not worked out for each of them.
+	recorded map[string]map[int64]bool
+	pagers   map[string]bool
+	// cfgSum is the hash of the routing configuration the pages were
+	// counted with.
+	cfgSum string
 }
 
 // toldOf reports whether a notification read told of a firing.
@@ -84,6 +108,35 @@ func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
 	p.wokenOnce.Do(func() {
 		wokenWalks.Add(1)
 		p.woken, p.wokenDay = map[int64]map[string]int{}, map[int64]map[string]int{}
+		if s.notifies() {
+			// Pages, recorded or worked out, not every notification
+			// (routedview.go).
+			for _, ev := range p.events {
+				if !ev.Nothing {
+					continue
+				}
+				if h := sc.of(ev.Rule); h == nil || h.Of(ev.At) != verdict.Asleep {
+					continue
+				}
+				// On the day of its firing's start, as that is judged, not
+				// the day it was sent (as below).
+				at := ev.At
+				if !ev.Start.IsZero() {
+					at = ev.Start
+				}
+				d := s.l.Day(at)
+				w := ledger.Week(d)
+				if p.woken[w] == nil {
+					p.woken[w] = map[string]int{}
+				}
+				p.woken[w][ev.Rule]++
+				if p.wokenDay[d] == nil {
+					p.wokenDay[d] = map[string]int{}
+				}
+				p.wokenDay[d][ev.Rule]++
+			}
+			return
+		}
 		for _, pg := range p.pages {
 			if pg.Stone != ledger.PageBlack {
 				continue
@@ -124,7 +177,7 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 	gen := s.l.Gen()
 	s.paged.Lock()
 	defer s.paged.Unlock()
-	if s.paged.p != nil && s.paged.gen == gen && s.paged.from.Equal(from) {
+	if s.paged.p != nil && s.paged.gen == gen && s.paged.from.Equal(from) && s.paged.p.cfgSum == s.routingSum() {
 		return s.paged.p, nil
 	}
 	p := &paged{from: from}
@@ -146,6 +199,10 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 			return nil, err
 		}
 	}
+	if err = s.loadPageEvents(ctx, p, from, s.now().Add(time.Hour)); err != nil {
+		return nil, err
+	}
+	p.cfgSum = s.routingSum()
 	s.paged.gen, s.paged.from, s.paged.p = gen, from, p
 	return p, nil
 }
@@ -176,6 +233,9 @@ func (s *Server) within(ctx context.Context) (ledger.Within, error) {
 
 // pagedLine is what a rule's notifications came to over a span.
 type pagedLine struct {
+	// pagesLine is what its pages came to (routedview.go), where pages are
+	// counted.
+	pagesLine
 	// Notified says notifications are counted for it: some told of it, from
 	// NotifiedSince on.
 	Notified      bool
@@ -239,7 +299,7 @@ func (p *paged) lines(from, to time.Time, of func(rule string) *verdict.Hours) m
 // weeks they show.
 func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLine) error {
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() {
+	if err != nil || !p.any() {
 		return err
 	}
 	o, err := s.owners(ctx)
@@ -251,12 +311,26 @@ func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLin
 	if t.over {
 		to = t.to
 	}
-	by := p.lines(s.l.Midnight(t.weeks[len(t.weeks)-n]), to, sc.of)
+	shownFrom := s.l.Midnight(t.weeks[len(t.weeks)-n])
+	by := p.lines(shownFrom, to, sc.of)
+	pages := p.pageLines(shownFrom, to, sc.of)
 	for i := range lines {
 		if x := by[lines[i].Name]; x != nil {
 			lines[i].pagedLine = *x
 		} else if since, ok := p.since[lines[i].Name]; ok {
 			lines[i].Notified, lines[i].NotifiedSince = true, since
+		}
+		if x := pages[lines[i].Name]; x != nil {
+			lines[i].pagesLine = *x
+		} else if p.routed {
+			lines[i].PagedOn = true
+		}
+		if lines[i].PagedOn && !p.known(shownFrom, to) {
+			// Hours not worked out: the pages of the rest aren't the pages.
+			lines[i].pagesLine = pagesLine{PagedOn: true, PagedUnknown: true}
+		}
+		if lines[i].PagedOn {
+			lines[i].PagedFrom = p.countedFrom().In(s.cfg.Loc).Format("2006-01-02")
 		}
 	}
 	return nil
@@ -283,6 +357,11 @@ func (s *Server) notifiedFirings(ctx context.Context, lines []firingLine) error 
 			lines[i].Muted = muted[lines[i].ID]
 		}
 	}
+	if s.notifies() {
+		if err := s.routedFirings(ctx, lines); err != nil {
+			return err
+		}
+	}
 	if p.first.IsZero() {
 		return nil
 	}
@@ -304,13 +383,14 @@ func (s *Server) notifiedFirings(ctx context.Context, lines []firingLine) error 
 // uncounted.
 func (s *Server) woken(ctx context.Context, t *tallies, o *owners, team *ledger.Team, byWeek map[int64]*weekView) (time.Time, bool, error) {
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() {
+	if err != nil || !p.any() {
 		return time.Time{}, false, err
 	}
 	by := s.wokenBy(p, o.schedules(t.o.Hours))
+	from := p.countedFrom()
 	for w, wv := range byWeek {
 		wv.Asleep = 0
-		wv.Uncounted = !s.l.Midnight(w + 7).After(p.first)
+		wv.Uncounted = !s.l.Midnight(w+7).After(from) || s.notifies() && !p.known(s.l.Midnight(w), s.l.Midnight(w+7))
 		for rule, n := range by[w] {
 			if team == nil || o.rule[rule] == team.ID {
 				if t.split[w] && !t.o.Signals.Named() {
@@ -327,5 +407,5 @@ func (s *Server) woken(ctx context.Context, t *tallies, o *owners, team *ledger.
 			}
 		}
 	}
-	return p.first, true, nil
+	return from, true, nil
 }

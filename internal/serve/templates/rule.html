@@ -37,8 +37,12 @@
 <dd class="big">{{.Incidents}}{{template "delta" .IncidentsBy}}</dd>
 <dd>{{t "%d nearly caught" .Near}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Human cost"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Notifications sent for it, as the alert manager sent them, and of them those that came while people slept and off hours."}}</p></details></dt>
-<dd class="big">{{if .Notified}}{{.Notifications}}{{template "delta" .NotificationsBy}}{{else}}–{{end}}</dd>
-<dd>{{if .Notified}}{{t "notifications; %d while people slept, %d off hours" .Asleep .OffHours}}{{else}}{{t "no notification kept"}}{{end}}</dd></div>
+{{if $v.PagedOn}}{{if $v.PagedUnknown}}<dd class="big">–</dd>
+<dd>{{t "pages not known: some hours weren't worked out"}}</dd></div>{{else}}<dd class="big">{{$v.Paged}}</dd>
+<dd>{{if $v.Paged}}{{template "pagedcount" $v}}: {{t "%d while people slept, %d off hours" $v.PagedAsleep $v.PagedOffHours}}{{else}}{{t "no page"}}{{end}}</dd>
+{{if .Notified}}<dd>{{t "%d notifications recorded; %d while people slept, %d off hours" .Notifications .Asleep .OffHours}}</dd>{{end}}</div>{{end}}
+{{else}}<dd class="big">{{if .Notified}}{{.Notifications}}{{template "delta" .NotificationsBy}}{{else}}–{{end}}</dd>
+<dd>{{if .Notified}}{{t "notifications; %d while people slept, %d off hours" .Asleep .OffHours}}{{else}}{{t "no notification kept"}}{{end}}</dd></div>{{end}}
 <div><dt><details class="def"><summary>{{t "Backtest"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Of its firings, the share alike in its replay and in what really fired: how far its stones can be taken as they are."}}</p></details></dt>
 <dd class="big">{{.Backtest}}{{template "delta" .BacktestBy}}</dd>
 <dd>{{if .Either}}{{t "alike with what really fired, of %d" .Either}}{{else}}{{t "not set beside what really fired"}}{{end}}</dd></div>
@@ -209,6 +213,11 @@
 {{template "comments" .Comments}}
 
 {{else}}{{/* tab: overview */}}
+{{if .PagedOn}}<section class="card" id="pages">
+<h2>{{t "Pages sent"}}</h2>
+<p>{{if .PagedUnknown}}{{t "Pages are not known over these weeks: some hours weren't worked out, or the work stopped or failed."}}{{else if .Paged}}{{template "pagesline" .}}{{else}}{{t "No page was sent for it over these weeks."}}{{end}}
+<span class="quiet">{{template "pagesbasis" .}}</span></p>
+</section>{{end -}}
 {{/* Where the sections that moved to a tab were: an old link to one
 lands here, and is shown the way to it. */}}
 <p id="proposals" class="moved"><a href="{{$.Link (print .Path "#proposals") "tab" "proposals"}}">{{t "Its proposals are on the Proposals tab."}}</a></p>

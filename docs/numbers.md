@@ -887,6 +887,81 @@ Beyond the report:
 - `--compare` shows ACTIONABLE, before to after, beside precision, in its
   text.
 
+## Notifications worked out
+
+With the alert manager's configuration (`--alertmanager-config`, or `--grafana`
+with its notification policies; [Who a firing reached, worked
+out](notifications-worked-out.md) says what each reads), `lapilli verdict` has
+the fields below, unless `--notifications=false`. Without them a report has none
+of them, and every other number is what it was.
+
+**They are worked out, not recorded.** They are what the alert manager would
+have done with the firings, by a model of its routing, grouping, inhibition,
+silences and time intervals, not what it did. `lapilli serve`'s `notifications`
+are the record, of notifications really sent.
+
+A firing has `notifications`: `notified`, the notifications that told of it
+firing, one for each integration of each receiver it reached each time one went;
+`paged`, those of them that are pages (the notification that opens an incident on
+PagerDuty, Opsgenie, VictorOps and incident.io, which keep one for a group, so a
+repeat updates it; each on another integration of a paging kind, or of a receiver
+`--paging-receivers` matches); `on_paging`, those on an integration of a paging
+kind, the pages and the repeats and updates among them; `first_page`†, when the
+first page went; `sent`†, with `--json`, the first 100 of those notifications,
+each `at`, `receiver`, `kind`, `index` (among the receiver's integrations of that
+kind), `paging`, `page` and `reason` (`first`, `new`, `resolved` or `repeat`), and
+`sent_more`†, how many more there were;
+`receivers`, the receivers it reached; `no_integrations`†, those of them that
+send nothing; and `muted`†, what kept it out of a notification, each with `kind`
+(`inhibition`, `silence`, `mute_time_interval` or `active_time_interval`), `by`
+(the inhibition rule's name, or its number from 1 when it has none; the
+silence's id; the time interval's name) and, for an inhibition, `source_rule`†,
+the rule whose firing inhibited it.
+
+A rule has `notifications`, counted over its firings:
+
+| | |
+|---|---|
+| `notified`, `paged`, `on_paging` | the sum of its firings' `notified`, `paged` and `on_paging`: a notification of three of its firings counts three, so these can add up, over the rules, to more than the report's |
+| `paged_asleep`, `paged_off_hours` | its pages that went while people slept, and out of hours (`hours`, as firings are counted by); 0 without hours |
+| `paged_for_nothing` | its pages of firings that are black (`white` false); with [responses](responses.md), of firings whose `response.useful` is `false` (not those it is `null` of) |
+| `paged_for_nothing_asleep`, `paged_for_nothing_off_hours` | those of them while people slept, and out of hours |
+| `inhibited` | its firings that were never notified, every flush of them muted by an inhibition rule (a firing held at one flush and sent at the next isn't) |
+| `inhibited_by`† | the `source_rule` that most of those had, each firing weighing once |
+| `grouped` | its firings that went out in a notification with a firing of another rule |
+| `known`, `stopped`† | `known` is false when some hour of its firings wasn't worked out (the model stopped short, or no run reached the hour), and `stopped` says why, as the report's does: the counts above are then of the firings that were worked out, not of all of its firings. In `lapilli serve` it is set from the hours the ledger worked out, for each of the rule's firings from its start to its end |
+
+The report has `notifications`: `worked_out`, always `true`; `notified`,
+`paged` and `on_paging`, the notifications sent that told of a firing, the pages
+among them, and those on a paging integration, each counted once however many
+firings it told of; `groups`, the distinct groups (route and `group_by` values) the notifications were for, a group that goes on across stretches of hours counted once; `receivers`, the receivers that page and those the
+firings reached, each with `name`, `kinds`, `paging` and `why`; `known`, false
+when the model stopped short; `stopped`†, why it did (more than 100,000 groups, a
+spent work budget, a context that ended): the numbers are then of part of the
+period, and not known; and `warnings`†, what it changed without stopping (a
+timing under a second, read as one second).
+
+A firing's `notified` and `paged` can be counted again from the report as a
+rule's are: the sum of its firings'. The rest follows the model, which is not in
+the report: given the same configuration, silences, external labels and
+firings, `lapilli verdict` gives the same numbers.
+
+Beyond the report:
+
+- `--csv` has, after the columns above, `worked_out_notified`, `worked_out_paged`,
+  `worked_out_first_page` (RFC 3339 in UTC, empty for none), `worked_out_receivers`
+  (a JSON array) and `worked_out_muted` (a JSON array of `kind: by`).
+- `--metrics` has `lapilli_rule_notifications_worked_out` and
+  `lapilli_rule_pages_worked_out` a rule.
+- `--compare` has, in its summary, `notifications`: `worked_out`, `paged_before`,
+  `paged_after`, `notified_before`, `notified_after`, `known` and `stopped`†; it is
+  left out when the notifications weren't worked out. Its text and its Markdown
+  start with the pages before and after, and show PAGED for each rule that differs;
+  where either side stopped short they start with "Pages not known: the work-out
+  stopped: …" and show nothing as a number.
+- An expectation's budget `pages` is the most pages a week sends, counted as
+  `week` counts firings: by the firings' own weeks.
+
 ## The firings as CSV
 
 `lapilli verdict --csv`, and `/api/v1/report?from=&to=&format=csv` (31 days
@@ -967,19 +1042,24 @@ holds them, and this list.
 
 | Where | Fields |
 |---|---|
-| the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`† |
+| the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`†, `notifications`† |
 | `noisy_at` | `firings`, `precision` |
 | `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`†, `noisy_by`†, `routine`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |
 | `rules[].responses` | `changed`, `routine`, `acknowledged`, `unanswered`, `none`, `useful`, `not_useful`, `actionable` |
+| `rules[].notifications` | `notified`, `paged`, `on_paging`, `paged_asleep`, `paged_off_hours`, `paged_for_nothing`, `paged_for_nothing_asleep`, `paged_for_nothing_off_hours`, `inhibited`, `inhibited_by`†, `grouped`, `known`, `stopped`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |
 | `incidents[].alerts[]` | `rule`, `labels`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`† |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`†, `response`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`†, `response`†, `notifications`† |
+| `notifications` | `worked_out`, `notified`, `paged`, `on_paging`, `groups`, `receivers`, `known`, `stopped`†, `warnings`† |
+| `notifications.receivers[]` | `name`, `kinds`, `paging`, `why` |
+| `firings[].notifications` | `notified`, `paged`, `on_paging`, `first_page`†, `sent`†, `sent_more`†, `receivers`, `no_integrations`†, `muted`† |
+| `firings[].notifications.muted[]` | `kind`, `by`, `source_rule`† |
 | `responses` | `pages`, `pages_unmatched`, `changes`, `autoscalers_known` |
 | `firings[].response` | `kind`, `useful`, `change`†, `page`† |
 | `firings[].response.change` | `kind`, `at`, `labels`†, `routine` |
@@ -1011,6 +1091,8 @@ it, which only `lapilli serve` says.
 | `lapilli_rule_episodes_caught` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_responses` | `rule`, [`severity`], [`team`], `response` (`changed`, `routine`, `acknowledged`, `unanswered`, `none`) |
 | `lapilli_rule_actionable` | `rule`, [`severity`], [`team`] |
+| `lapilli_rule_notifications_worked_out` | `rule`, [`severity`], [`team`]: `lapilli verdict` alone, worked out, not recorded |
+| `lapilli_rule_pages_worked_out` | `rule`, [`severity`], [`team`]: `lapilli verdict` alone, worked out, not recorded |
 | `lapilli_rule_action` | `rule`, [`severity`], [`team`], `answer` (`yes`, `no`): `lapilli serve` alone |
 | `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`, and, in `lapilli serve`, `unreplayed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
@@ -1083,7 +1165,10 @@ a rule with no firing useful or not ([What people did](#what-people-did)).
 responses, these follow ([What people did](#what-people-did)): `response`,
 `useful`, `rule_changed`, `rule_routine`, `rule_acknowledged`,
 `rule_unanswered`, `rule_none`, `rule_useful`, `rule_not_useful`,
-`rule_actionable`.
+`rule_actionable`. With the notifications worked out ([Notifications worked
+out](#notifications-worked-out)), these follow those: `worked_out_notified`,
+`worked_out_paged`, `worked_out_first_page`, `worked_out_receivers`,
+`worked_out_muted`.
 `unrelated` is the JSON list of the incidents a person said the firing is
 unrelated to (`firings[].unrelated`), `action` their answer to whether it
 needed someone to act (`yes`, `no`, or empty).

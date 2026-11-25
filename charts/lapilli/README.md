@@ -136,6 +136,19 @@ subscriptions. Lapilli then counts each rule's notifications, repeats and
 pages while people slept beside its firings, a cloud's own alarms' among
 them.
 
+`notifications` (both modes) is for working out who each firing reached,
+from the alert manager's configuration (`serve.checkContent.alertmanager`, serve
+mode) or Grafana's policies (`rules.grafana.url`): `enabled: false` passes
+`--notifications=false`; `externalLabels` (name: value) are the labels
+Prometheus adds to each alert; `pagingReceivers` is a regular expression for
+the receivers whose notifications are pages whatever they send with (a webhook
+to a paging tool); `silences.secret` or `silences.configMap` hold the silences
+Alertmanager held, as `GET /api/v2/silences` lists them, read again each run
+in serve mode. The numbers are worked out, not recorded, and where
+`serve.notificationsAPI` records the notifications really sent, those count
+and the Notifications page says how far the two agree
+([Who a firing reached, worked out](https://github.com/lapilli-project/lapilli/blob/main/docs/notifications-worked-out.md#in-lapilli-serve)).
+
 `serve.rulesHistory` reads the rules' versions from the git repository they
 are kept in, so a first start's backfill replays each day with that day's
 rules. One init container clones the branch (`repository`, `branch`), with

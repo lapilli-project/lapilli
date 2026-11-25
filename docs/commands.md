@@ -251,7 +251,9 @@ What the rules say:
                       With --grafana, a Grafana that sends its alerts to an
                       external Alertmanager has its rules checked against it
                       too (Lapilli takes this configuration for the one)
-                      Only read: no field that holds a secret is parsed
+                      Only read: no field that holds a secret is parsed. In a
+                      run that judges firings it also says who each firing
+                      reached (see "Who a firing reached", below)
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -457,6 +459,34 @@ What people did when a rule fired (docs/responses.md):
                       its target changed so often that one falling in a
                       span as long as the firing is at least this likely
                       anyway (default 0.5, from above 0 to 1)
+
+Who a firing reached (docs/notifications-worked-out.md): the alert manager's
+routing worked out over the firings, as Alertmanager's dispatcher would
+have: which receivers each reached, in which notifications, which of them
+page someone, and what muted it. Worked out from the configuration, not
+recorded; it is on when --alertmanager-config is given, or --grafana, whose
+notification policies and contact points are read:
+  --notifications=false
+                      leave it out: the report is as it was without it
+  --external-labels NAME=VALUE
+                      a label Prometheus adds to each alert as it sends it
+                      (global.external_labels), which routes often match
+                      on, such as cluster=prod (repeatable)
+  --alertmanager-config-before FILE
+                      with --compare, the configuration as it was before the
+                      change, which the before side is worked out with (the
+                      one --alertmanager-config names, by default): a change to
+                      the routing is then a change in the pages
+  --silences FILE     the silences Alertmanager held, as it lists them
+                      (GET /api/v2/silences, or amtool silence query -o
+                      json), expired ones too: its matchers and times are
+                      read, not its comments
+  --paging-receivers REGEX
+                      every notification to a receiver whose name matches
+                      is a page, whatever it sends with (a webhook to a
+                      paging tool); by default pagerduty, opsgenie,
+                      victorops and pushover pages, and Grafana's oncall,
+                      and everything else is a message. Not anchored
 
 Output:
   --json              the whole report, every firing included
@@ -836,6 +866,22 @@ each history API (lapilli_serve_history_*). Off by default:
                       --grafana, where Grafana sends its alerts is asked
                       once an hour: to an external Alertmanager, its rules
                       are checked against this configuration too
+  --notifications=false, --external-labels NAME=VALUE, --silences FILE,
+  --paging-receivers REGEX
+                      as for lapilli verdict (docs/notifications-worked-out.md),
+                      with --alertmanager-config or --grafana, whose notification
+                      policies and contact points are read once an hour: each run
+                      works out which notifications they send for the firings of
+                      the hours it judges, and keeps them for each firing (the
+                      pages, which ring a phone; when the first went; what muted
+                      it). On by default then; the Notifications page, the rules,
+                      the overview's "woken for nothing", the summary, goals, the
+                      digest, MCP and /api/v1/report show them, saying they are
+                      worked out; where notifications were really recorded
+                      (--notify-listen), those count, and the Notifications page and
+                      lapilli_notifications_agreement say how far the two agree.
+                      --silences is read again each run; silences the alert
+                      manager's event recorder told of count too
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config

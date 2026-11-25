@@ -963,7 +963,7 @@ func (jd *judger) judge(f Firing) verdict.Judged {
 	if jd.named {
 		signals = jd.o.Signals.Names(jd.o.Signals.TiedOf(f.Rule, f.Signals))
 	}
-	j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !judged,
+	j := verdict.Judged{Firing: f.Firing, FiringID: f.ID, White: f.White, NoRecord: !f.White && !judged,
 		Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds, Signals: signals,
 		Day: f.Start.In(jd.l.loc).Format(time.DateOnly), Action: f.Action(), NotJudged: jd.o.NotJudged(f.Rule)}
 	j.Episode = jd.number(f.Episode)

@@ -110,6 +110,17 @@ func TestRedactEveryField(t *testing.T) {
 		"ResponseChange.Kind":      true, // rollout, rollback, scale, deploy
 		"ResponsePage.ResolvedBy":  true, // alert or person
 		"Settings.NoisyBy":         true, // caught or useful
+		// The notifications worked out: kinds of integrations, what muted
+		// a firing (inhibition, silence, ...), and why a receiver pages are
+		// Lapilli's words; the names they hold are aliased.
+		"NotificationReceiver.Why":     true,
+		"NotificationReceiver.Kinds":   true,
+		"NotificationMute.Kind":        true,
+		"ReportNotifications.Stopped":  true,
+		"RuleNotifications.Stopped":    true, // the same reason, for a rule
+		"SummaryNotifications.Stopped": true, // the reason a work-out stopped: Lapilli's own words
+		"NotificationSent.Kind":        true, // an integration's kind
+		"NotificationSent.Reason":      true, // first, new, resolved, repeat
 	}
 	for _, v := range []any{&Report{}, &Comparison{}} {
 		c := &canaries{texts: map[string]string{}}

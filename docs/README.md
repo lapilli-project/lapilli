@@ -37,6 +37,9 @@ Lapilli is, and how to install it.
   Monitor, Google Cloud and OCI alarms fired, and Datadog's monitors and
   New Relic's alert conditions
 - [Rules on logs: Loki](loki.md): LogQL rules replayed against Loki
+- [Who a firing reached, worked out](notifications-worked-out.md): given the
+  alert manager's configuration, which receivers each firing reached, which
+  notifications page someone, and what muted it; worked out, not recorded
 - [Is the replay right?](check-replay.md): `--check-replay`, the replay
   beside what really fired
 - [What an alert says](check-content.md): `--check-content`, what each rule

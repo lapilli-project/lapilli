@@ -75,6 +75,9 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		by = ", judged by lapilli serve's record"
 	}
 	text(fmt.Sprintf("### Lapilli backtest, %s → %s %s%s\n\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To), by))
+	if s := c.pagesLine(); s != "" {
+		text(fmt.Sprintf("**%s**\n\n", s))
+	}
 	text(fmt.Sprintf("Rules compared: **%d changed, %d added, %d taken away**, %d the same.", p.changed, p.added, p.gone, c.Same))
 	switch {
 	case c.noRecord():
@@ -100,6 +103,13 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		firings = "Firings of the changed rules"
 	}
 	totals.rows = append(totals.rows, fmt.Sprintf("| %s | %d | %d |\n", firings, len(c.Before.Firings), len(c.After.Firings)))
+	if c.pagesLine() != "" {
+		if c.pagesNotKnown() != "" {
+			totals.rows = append(totals.rows, "| Pages, worked out | not known | not known |\n")
+		} else {
+			totals.rows = append(totals.rows, fmt.Sprintf("| Pages, worked out | %d | %d |\n", c.Before.Notifications.Paged, c.After.Notifications.Paged))
+		}
+	}
 	for _, sev := range severityCounts(c.Before, c.After) {
 		name := "no severity"
 		if sev.name != "" {
@@ -154,7 +164,14 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 			}
 			return slices.Insert(row, len(row)-1, cell)
 		}
-		head := withActionable(judgedColumns(judged, withSeverity(sev, "Rule", "Severity", "Fired", "○ Caught", "● Nothing", "Precision", "Refired")), "Actionable")
+		pages := c.pagesLine() != ""
+		withPaged := func(row []string, cell string) []string {
+			if !pages {
+				return row
+			}
+			return slices.Insert(row, len(row)-1, cell)
+		}
+		head := withPaged(withActionable(judgedColumns(judged, withSeverity(sev, "Rule", "Severity", "Fired", "○ Caught", "● Nothing", "Precision", "Refired")), "Actionable"), "Paged")
 		align := []string{"---"}
 		if sev {
 			align = append(align, "---")
@@ -164,7 +181,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		rules := mdPart{head: "#### Rules that differ\n\n" + mdRow(head) + mdRow(align), foot: "\n", noun: "rules that differ"}
 		for _, rc := range p.shown {
-			rules.rows = append(rules.rows, mdRow(withActionable(judgedColumns(judged, withSeverity(sev, md(rc.Rule, 200, true), mdSeverities(rc), stones(rc)...)), actionables(rc))))
+			rules.rows = append(rules.rows, mdRow(withPaged(withActionable(judgedColumns(judged, withSeverity(sev, md(rc.Rule, 200, true), mdSeverities(rc), stones(rc)...)), actionables(rc)), pagedCells(c, rc))))
 		}
 		parts = append(parts, rules)
 	}
