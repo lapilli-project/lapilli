@@ -266,7 +266,7 @@ out=$("$work/lapilli" verdict --check-replay --json --grafana "$gf" --grafana-to
 check "Grafana on Loki" "$out"
 listed=$("$work/lapilli" verdict --check-replay --grafana "$gf" --grafana-token-file "$work/viewer" --prometheus "$pu" \
   --from "$from" --to "$to" --step 10s 2>/dev/null)
-for want in "LkSQL: its condition reads a mysql data source" "LkSeries: its condition B is a time series"; do
+for want in "LkSQL: its condition reads a mysql data source" "LkSeries: its condition B comes to query A's time series"; do
   if grep -qF "$want" <<<"$listed"; then echo "ok: listed: $want"; else echo "FAILED: not listed: $want"; fail=1; fi
 done
 # Grafana's own state for the rule the replay lists: an error, at each

@@ -2569,7 +2569,7 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 	// A condition that is still a time series isn't alertable: Grafana's
 	// evaluation errors.
 	if ref, ok := g.seriesCondition(queries); ok {
-		return nil, fmt.Errorf("its condition %s is a time series, which Grafana can't alert on: its evaluation errors with \"looks like time series data, only reduced data can be alerted on\" whenever its queries return something (a reduce, or a classic condition, makes the series one number), and errors aren't replayed", ref)
+		return nil, fmt.Errorf("its condition %s comes to query %s's time series, which Grafana can't alert on: its evaluation errors with \"looks like time series data, only reduced data can be alerted on\" whenever its queries return something (a reduce, or a classic condition, makes the series one number), and errors aren't replayed", g.Cond, ref)
 	}
 	return g, nil
 }

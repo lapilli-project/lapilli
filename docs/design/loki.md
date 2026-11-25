@@ -398,6 +398,19 @@ interval of a nanosecond, which a rule file may say, asked a day in
 requests of 1,440ns until the run's deadline; for PromQL, Prometheus
 refused such a step.
 
+**A condition that is a time series** is listed, for PromQL and LogQL alike
+(`Graph.seriesCondition`). Grafana 13.3.1 runs every query and expression, and
+`evaluateExecutionResult` (`pkg/services/ngalert/eval`) turns a condition
+frame with a time field into an error, "looks like time series data, only
+reduced data can be alerted on": seen, as the error state, in `test/e2e/loki.sh`
+(`LkSeries`, a threshold on a range query; so were the first beside rules,
+whose Prometheus query was a range query). A range query is a series, a
+threshold or math over one is a series, a reduce and classic conditions give a
+number, and so do Prometheus's and Loki's instant queries. Errors aren't
+replayed, so a replay of such a rule fired where Grafana errored; it is listed.
+Where a query returns nothing Grafana says NoData before it says the error;
+the rule is listed all the same, as its errors can't be told from the history.
+
 ## SQL and the rest stay out
 
 A SQL data source's query is a statement against a database Lapilli
