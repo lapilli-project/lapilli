@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Env is the variable that names the server, as a postgres:// URL.
@@ -109,8 +111,19 @@ func run(t testing.TB, conn, q string) {
 		t.Fatalf("%s: %v", Env, err)
 	}
 	defer c.Close(ctx)
-	if _, err := c.Exec(ctx, q); err != nil {
-		t.Fatalf("%s: %v", q, err)
+	// A deadlock is tried again: dropping a schema whose ledger's last
+	// session the server hasn't finished ending yet can deadlock with it
+	// (seen on Postgres 15 in CI), and the next try finds it gone.
+	for try := 1; ; try++ {
+		_, err := c.Exec(ctx, q)
+		var pe *pgconn.PgError
+		if err == nil {
+			return
+		}
+		if !errors.As(err, &pe) || pe.Code != "40P01" || try == 5 {
+			t.Fatalf("%s: %v", q, err)
+		}
+		time.Sleep(time.Duration(try) * 200 * time.Millisecond)
 	}
 }
 
