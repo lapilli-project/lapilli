@@ -30,6 +30,58 @@ Some areas need what the current maintainer doesn't have: an AWS or Azure
 account with a managed Prometheus, Loki alerts in real use, an incident
 tool. If you do, you are the person this needs.
 
+## Toward 1.0
+
+1.0 is when what Lapilli keeps stops changing in a minor release. While
+the version is 0.x, a minor release may change a flag or the API, its
+changelog entry saying how (GOVERNANCE.md); the numbers past 0.99 are
+0.100 and on, so 1.0 comes when what is below is done, not by counting.
+
+What 1.0 keeps, through every 1.x:
+
+- What [docs/numbers.md](docs/numbers.md#what-stays-the-same) lists (the
+  report's fields, the metrics and their labels, the CSV's columns, the
+  summary's and `--compare`'s schemas) changes only in a major release. A
+  minor release may add to it, as now, said in the changelog.
+- A command's flags, and serve's API ([docs/api.md](docs/api.md)), keep
+  their names and meaning. One renamed is still taken under its old name
+  until the next major release, a flag saying on stderr what it is now;
+  one taken away goes only in a major release.
+- The chart's values keep their names the same way.
+- A ledger a 1.x release wrote opens in every later 1.x, upgraded as it
+  opens. What it holds that was recorded (the firings, incidents,
+  notifications, notes, comments and what people set) is kept through each
+  schema step; what is worked out from it may be worked out again. Going
+  back to an earlier release after a schema step needs the copy kept
+  before it, as now ([docs/upgrading.md](docs/upgrading.md)).
+
+What comes before it, as it is what everyone starts from:
+
+- **Newer servers.** The replay checked against the latest Prometheus,
+  Grafana and Loki, not only the versions pinned here: their recordings
+  taken with the `measure` workflow and kept in `internal/replay/testdata`
+  beside the pinned ones, each real-server test passing on both
+  ([Replay fidelity](#replay-fidelity)).
+- **Pull request backtests through serve without a gap.** A rule serve
+  doesn't run backtested, not left out; and a Loki ruler's rules, Grafana's
+  rules and cloud alarms compared as parsed, not by their text, as
+  Prometheus's are ([Pull request backtests](#pull-request-backtests)).
+- **Several replicas held by CI.** The kind e2e of three replicas
+  (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)).
+- **The names looked at once more.** Every flag, API route, chart value
+  and report field read through as it will be kept; what 0.x left
+  misnamed, or doing two things, renamed or split in the last 0.x minor
+  releases, said in the changelog with what to do; and what takes a
+  renamed flag or route under its old name, which nothing does yet.
+
+Until then minor releases go on at most twice a week, each with what was
+merged since the last (GOVERNANCE.md); 1.0 is the release after the last
+of these is done. What needs an account or people the maintainer doesn't
+have (checking the clouds, the trackers, the incident tools and managed
+Postgres for real, a review by people who use a screen reader, the
+Homebrew tap) doesn't wait for 1.0 and doesn't hold it: each comes in a
+1.x minor release as someone brings it.
+
 ## A first look
 
 `cmd/lapilli`
