@@ -29,6 +29,8 @@ here.
 - [content.md](content.md): what an alert says, checked
 - [marked.md](marked.md): marked windows, shown and never excused
 - [mutes.md](mutes.md): why a firing paged no one
+- [routing.md](routing.md): who a firing reached, the alert manager's
+  routing worked out and held to what it really sent
 
 ## What comes in
 
