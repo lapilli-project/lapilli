@@ -120,6 +120,8 @@ type routedLimits struct {
 	budget   int
 	firings  int
 	silences int
+	// pageRows is how many pages a view reads (routedPageRows).
+	pageRows int
 	// inPiece is called by the catch-up as it begins a piece, for a test
 	// to use up the round's time in.
 	inPiece func()
@@ -149,6 +151,18 @@ func (s *Server) routedBounds() (time.Duration, int, int) {
 	defer s.routed.Unlock()
 	l := s.routed.limits
 	return cmp.Or(l.deadline, routedDeadline), cmp.Or(l.budget, routedBudget), cmp.Or(l.firings, MaxRoutedFirings)
+}
+
+// routedPageRows is how many pages, one row for each, a view of the weeks
+// shown reads: with more, what is read stops at a time, and from it on the
+// pages are not known (paged.known), not counted short.
+const routedPageRows = 500_000
+
+// pageRows is how many pages a view reads.
+func (s *Server) pageRows() int {
+	s.routed.Lock()
+	defer s.routed.Unlock()
+	return cmp.Or(s.routed.limits.pageRows, routedPageRows)
 }
 
 // maxSilences is how many silences a work-out takes: the model's bound.
@@ -568,11 +582,21 @@ func (s *Server) routeHours(ctx, run context.Context, cfg *routing.Config, from,
 		return "", false, err
 	}
 	lookFrom := begin.Add(-routedRepeatMax(cfg))
+	// holeLong says the look-back begins inside a stretch longer than the
+	// look-back that wasn't worked out: the notifications of the groups in
+	// it aren't kept, and what they were is taken on schedule.
+	holeLong := false
 	if first, ok := cover.First(); ok {
+		look := routedRepeatMax(cfg)
 		for _, g := range cover.Gaps(lookFrom, begin) {
 			if g[1].After(first) {
-				lookFrom = maxTime(g[0], first).Add(-routedRepeatMax(cfg))
+				lookFrom = maxTime(g[0], first).Add(-look)
 				break
+			}
+		}
+		for _, g := range cover.Gaps(first, begin) {
+			if !g[0].After(begin.Add(-look)) && g[1].After(begin.Add(-look)) && g[1].Sub(g[0]) > look {
+				holeLong = true
 			}
 		}
 	}
@@ -581,7 +605,11 @@ func (s *Server) routeHours(ctx, run context.Context, cfg *routing.Config, from,
 		return "", false, err
 	}
 	notified, advanced := notifiedBefore(cfg, last, cover, begin)
-	if advanced && caveat == "" {
+	switch {
+	case caveat != "":
+	case holeLong:
+		caveat = fmt.Sprintf("a stretch longer than %s before the hours wasn't worked out: a group that was notifying in it is counted as notified on schedule through it, from its last notification kept before it, and one with none kept is counted as first notified when its group flushes at the hours' start", routedRepeatMax(cfg))
+	case advanced:
 		caveat = "the repeats were counted from a notification before an hour that wasn't worked out, as if the group had repeated on schedule in it"
 	}
 	rctx, cancel := context.WithTimeout(run, deadline)
@@ -708,6 +736,16 @@ func (s *Server) firingsUpTo(ctx context.Context) (time.Time, error) {
 		return s.l.Cursor(ctx)
 	}
 	return s.now(), nil
+}
+
+// routedUpTo is where the hours a firing needs end: where the ledger's
+// firings are up to, or now where that isn't known.
+func (s *Server) routedUpTo(ctx context.Context) (time.Time, error) {
+	up, err := s.firingsUpTo(ctx)
+	if err == nil && up.IsZero() {
+		up = s.now()
+	}
+	return up, err
 }
 
 // routedCatchUpDays is how many days of gaps one round of the catch-up

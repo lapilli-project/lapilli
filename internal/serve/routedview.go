@@ -217,11 +217,17 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 	// Each page is a row of the notifications kept for a firing in an hour
 	// worked out: a firing's pages in a week are those of its hours in the
 	// week, whatever else of its life isn't known.
-	rows, more, err := s.l.RoutedPages(ctx, from, to, 500_000)
+	rows, more, err := s.l.RoutedPages(ctx, from, to, s.pageRows())
 	if err != nil {
 		return err
 	}
+	// The rows are the earliest first: where there were more than are read,
+	// the pages from the time of the last read on are cut short (those at
+	// that second may be only some), and no span reaching it is known.
 	p.routedMore = more
+	if more && len(rows) > 0 {
+		p.routedCut = rows[len(rows)-1].At
+	}
 	for _, r := range rows {
 		nothing := r.Black
 		if byUseful {
@@ -296,6 +302,9 @@ func (p *paged) known(from, to time.Time) bool {
 	lo, hi := maxTime(from, p.countedFrom()), minTime(to, p.upTo)
 	if !lo.Before(hi) {
 		return true
+	}
+	if p.routedMore && hi.After(p.routedCut) {
+		return false // the pages from there on were cut short
 	}
 	for _, gap := range p.cover.Gaps(lo, hi) {
 		// Before the first hour tried, the notifications really sent are
@@ -427,7 +436,11 @@ func (s *Server) routedFirings(ctx context.Context, lines []firingLine) error {
 	for i, l := range lines {
 		ids[i] = l.ID
 	}
-	got, err := s.l.RoutedOf(ctx, ids)
+	upTo, err := s.routedUpTo(ctx)
+	if err != nil {
+		return err
+	}
+	got, err := s.l.RoutedOf(ctx, ids, upTo)
 	if err != nil {
 		return err
 	}
@@ -801,7 +814,11 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 			ids = append(ids, j.FiringID)
 		}
 	}
-	got, err := s.l.RoutedOf(ctx, ids)
+	upTo, err := s.routedUpTo(ctx)
+	if err != nil {
+		return err
+	}
+	got, err := s.l.RoutedOf(ctx, ids, upTo)
 	if err != nil {
 		return err
 	}
@@ -822,7 +839,12 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 		j := &rep.Firings[i]
 		if ruleStopped[j.Rule] == "" {
 			end := j.End
-			if end.IsZero() || end.Before(j.Start) {
+			if end.IsZero() {
+				// One that is on needs every hour to the period's end, or to
+				// where the ledger's firings are, if that is sooner.
+				end = minTime(rep.To, upTo)
+			}
+			if end.Before(j.Start) {
 				end = j.Start
 			}
 			if !end.After(j.Start) {

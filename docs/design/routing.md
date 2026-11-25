@@ -330,13 +330,20 @@ What was decided building the second part, in `lapilli serve`
   written: `firing_routed` keeps only what a run says besides (grouped, the receivers that send
   nothing, the mutes), and the counts are made when read, from the rows of the hours worked
   out (`RoutedOf`; pages by hour, `RoutedPages`), so no missing row reads as none. A firing
-  some of whose life is in hours tried and not worked out has no totals (not known), but its
+  that needs an hour that isn't worked out (tried and not worked out, or not tried yet: the
+  catch-up goes oldest first, 14 days a round) has no totals (not known), and its week is not
+  known for a budget (`RoutedPagesByWeek`), whichever the reason: it needs every hour from its
+  start to its end, or, one that is on, to where the ledger's firings are up to (`upTo`; the
+  cover is read with the rows, in one transaction, so a write between can't make a firing known
+  with too few pages). Its
   pages in the hours that were worked out count where they went: one hour not worked out makes
   that hour's week not known and no other (`TestUnknownHourKeepsLaterWeeksOfALongFiring`,
   `TestHourlyRunsWithOneFailedHour`): the repeats after a hole stay on their schedule because
   a run that finds hours of its look-back not worked out looks back as far before the first of
   them, and takes a group as having repeated on its route's `repeat_interval` plus `group_interval`
-  through them (`notifiedBefore`), with a caveat on the hours it works out; without it the phase
+  through them (`notifiedBefore`), with a caveat on the hours it works out (a stretch longer than
+  the look-back that the look-back begins in has its own, saying the counts assume that schedule and
+  that a group with no notification kept is first notified at the hours' start); without it the phase
   of a group's repeats moved at the first run after the hole, and went on moving for good.
   `KeepRouted` reads no notification kept before: only the
   `firing_routed` rows of the firings it is given, 400 to a query. A clamped firing, one that
@@ -358,8 +365,18 @@ What was decided building the second part, in `lapilli serve`
   across the pieces: a configuration that holds the model up holds the run loop that long
   and no longer); a piece that didn't come out is tried again after an hour, then two, four,
   doubling to a day (`routedTry`); a piece that the shared 2 minutes cut off isn't one that
-  didn't come out, and is tried again at the next round.
-  `KeepRouted` replaces `at` between `from` and `to` only. Every page asks the cover:
+  didn't come out, and is tried again at the next round, but only when it began with less than
+  its own 2 minutes left: the oldest piece begins with the whole round, and when it runs out of
+  its own time the round has run out with it, so it backs off as a failure (else every round
+  would spend its 2 minutes on it and no later gap would be tried;
+  `TestCatchUpSlowOldestPieceDoesNotBlockLaterGap`).
+  `KeepRouted` replaces `at` between `from` and `to` only; marking hours not worked out also drops
+  what `firing_routed` says of the firings on in them (their mutes and receivers that send
+  nothing), so a firing recorded again isn't shown with what was said of it before; `routed_cover`
+  has an index on `to_at` for the overlap lookups, which failed stretches piling up would make
+  dear. A view reads at most 500,000 pages (`routedPageRows`), the earliest first: where there
+  are more, no span reaching the time of the last one read is known (`paged.routedCut`), never
+  a number counted short (`TestPagesPastTheRowLimitAreNotKnown`). Every page asks the cover:
   `paged.known(from, to)` is true when the hours from where counting starts to where the
   ledger's firings are all are known for each receiver that pages (`pagingReceivers`): the hours
   before the first one tried are what was recorded (the recording is what was sent); in an hour

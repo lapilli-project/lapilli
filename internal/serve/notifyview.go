@@ -56,6 +56,7 @@ type paged struct {
 	events       []pageEvent
 	routed       bool
 	routedMore   bool
+	routedCut    time.Time // when routedMore, the time of the last page read
 	routedFrom   time.Time
 	cover        ledger.RoutedCover
 	upTo         time.Time

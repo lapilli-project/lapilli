@@ -287,14 +287,17 @@ of the hours the run judged:
   the lead-in's start). What a firing reached is counted from the notifications kept
   by all the runs that saw it, so a firing on for a month has what one run over the month
   works out, give or take seconds in when its repeats went; where an hour of its life
-  wasn't worked out, it has no number. At most 300,000 firings go in at once, those of the run's
+  isn't worked out (it failed, or none has tried it yet), it has no number. At most 300,000 firings go in at once, those of the run's
   own hours first and then the lead-in's, the earliest first: with more in the
   hours themselves the hours are not worked out; with more only in the lead-in they
   are, with the caveat kept. A run is also bounded in time and in work: it
   stops after 2 minutes or 20,000,000 work units (a notification is 50, a flush 1 and
   each alert it holds, a silence or a regular expression matched 1 and more for a long
   value), whichever comes first. The catch-up takes 2 minutes in all across its pieces, and
-  a piece that didn't come out is tried again after an hour, then two, four, up to a day.
+  a piece that didn't come out is tried again after an hour, then two, four, up to a day:
+  a piece that used all of its own 2 minutes is one, so a slow oldest piece doesn't keep the later
+  gaps from being tried. Where the groups' last notifications are looked for in a stretch longer than
+  the look-back that wasn't worked out, the hours say so, and what their counts assume.
 - **Which hours are worked out** is kept as stretches of time (a cover): a stretch
   worked out, one tried and **not** (the work stopped, failed or hit a limit above,
   the routing configuration couldn't be read, its firings were recorded again, or
@@ -313,6 +316,10 @@ of the hours the run judged:
   as worked out when the hour is covered; otherwise, for a receiver that pages, the hour
   is not known, and so is the number, whatever another receiver (a Watchdog's)
   recorded there.
+  A firing's own pages and a budget of pages count every hour a firing was on (to
+  where the ledger's firings are, for one that is on): one that runs into an hour not yet tried
+  is not known, as for one that failed. A view that has more than 500,000 pages to count
+  stops at a time and says "not known" for what reaches past it.
 - **Silences** are `--silences` (read again each run) and the mutes the
   event recorder told of ([Notifications as they were sent](notifications.md)):
   an alert a silence muted is a silence of its labels from ten seconds before
