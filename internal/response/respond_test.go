@@ -118,11 +118,12 @@ func TestRespondMatching(t *testing.T) {
 			t.Errorf("%s: changed %q, want %q (%v)", c.name, got, c.want, r.Type)
 		}
 	}
-	// A deploy that names no label is everything's.
+	// A deploy that names no label is no firing's: it would make every firing
+	// that overlaps it useful (and covers nothing, as Known has it).
 	all := NewChangeSet(t0, t0.Add(period))
 	all.AddDeploys([]deploys.Deploy{{Start: mid, End: mid}})
 	r := Evidence{Changes: all, Routine: DefaultRoutine}.Respond(Firing{Rule: "R", Labels: map[string]string{"a": "b"}, Start: start, End: end}, 0, end)
-	if r.Type != Changed || r.Change.Kind != Deploy {
+	if r.Type == Changed || r.Change != nil {
 		t.Errorf("a deploy with no labels: %+v", r)
 	}
 }

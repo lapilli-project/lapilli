@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -381,85 +383,142 @@ func scanPages(rows *sql.Rows) ([]response.Page, error) {
 	return out, rows.Err()
 }
 
+// The bounds of reading the pages a judgement needs.
+const (
+	// pageCutsPerQuery is how many windows' cuts a statement asks for:
+	// judging a week of firings asks a statement for each 50 of them, not
+	// one for each.
+	pageCutsPerQuery = 50
+	// MaxJudgePages is how many pages a judgement loads in all, whatever its
+	// firings and windows: a window past it gets no page (its firings'
+	// pages unknown, which is the conservative side), and the count of such
+	// firings is kept (Ledger.PagesCapped) and logged. 20,000 pages of
+	// 16 KB alerts at most are 320 MB at the very most; pages are 1 KB or
+	// so.
+	MaxJudgePages = 20000
+)
+
+// judgePagesCap is MaxJudgePages, a variable for tests to lower.
+var judgePagesCap = MaxJudgePages
+
 // pageWindow is where the pages a firing may have been sent as are: those
-// that name rule, sent in [from, to].
+// that name rule, sent in [from, to]. firing says which firing asked, for
+// counting those a cap leaves without.
 type pageWindow struct {
 	rule     string
 	from, to int64
+	firing   int
 }
 
-// pagesNear are the pages judging firings reads: for each window, the first
-// response.MaxFindScan pages that name its rule and were sent in it (those
-// Index.Find looks at, which looks at no more), in order of their sent time
-// then source and id (ties at the cut may fall otherwise than Find's order
-// of sent time, id and source). The windows of a rule that meet are asked
+type pageKey struct{ source, id string }
+
+// pageCut is a rule's windows that meet (or one of them): the cut of the
+// pages that name the rule and were sent in [from, to].
+type pageCut struct {
+	rule     string
+	from, to int64
+	firings  []int
+}
+
+// pagesNear are the pages judging firings reads, and how many of the
+// firings were left without a page by the cap (MaxJudgePages). For each
+// window it loads what Index.Find, which looks at the first
+// response.MaxFindScan pages of a rule's name from the firing's start, in
+// order of their sent time, id and source, can choose from: the first
+// MaxFindScan of the API sources' pages in that same order (the order Find
+// walks them in, so a cut falls where Find's would), and, apart, the first
+// MaxFindScan of the file's, which Find prefers to any other. The union's
+// first MaxFindScan are the first of all the sources, so Find chooses among
+// them as it would among all. The windows of a rule that meet are asked
 // together, and again one by one only when more than MaxFindScan pages are in
-// them. The pages' alerts (16 KB each at most) are read for those only, so a
-// judgement reads, for a rule, at most MaxFindScan pages for each window of
-// its firings, and no more than the rule has in them: not every page of the
-// rule over the days the firings span, whoever wrote them. Returned in order
-// of their sent time, then id and source.
-func (l *Ledger) pagesNear(ctx context.Context, q queryer, ws []pageWindow) ([]response.Page, error) {
-	byRule := map[string][][2]int64{}
+// them; the cuts are asked pageCutsPerQuery to a statement. The pages'
+// alerts (16 KB each at most) are read for those only, and no more than
+// MaxJudgePages of them: a judgement reads, for a rule, at most MaxFindScan
+// pages of each kind for each window of its firings, and no more than the
+// rule has in them. Returned in order of their sent time, then id and source.
+func (l *Ledger) pagesNear(ctx context.Context, q queryer, ws []pageWindow) ([]response.Page, int, error) {
+	type span struct {
+		rule     string
+		from, to int64
+	}
+	byRule := map[string][]span{}
+	asked := map[span][]int{}
 	for _, w := range ws {
-		byRule[w.rule] = append(byRule[w.rule], [2]int64{w.from, w.to})
-	}
-	type key struct{ source, id string }
-	seen := map[key]bool{}
-	bySource := map[string][]string{}
-	keys := func(rule string, from, to int64, n int) ([]key, error) {
-		rows, err := q.QueryContext(ctx, `SELECT source, id FROM response_rules WHERE rule = ? AND sent_at >= ? AND sent_at <= ?
-			ORDER BY sent_at, source, id LIMIT ?`, rule, from, to, n)
-		if err != nil {
-			return nil, err
+		s := span{w.rule, w.from, w.to}
+		if _, ok := asked[s]; !ok {
+			byRule[w.rule] = append(byRule[w.rule], s)
 		}
-		defer rows.Close()
-		var got []key
-		for rows.Next() {
-			var k key
-			if err := rows.Scan(&k.source, &k.id); err != nil {
-				return nil, err
-			}
-			got = append(got, k)
-		}
-		return got, rows.Err()
+		asked[s] = append(asked[s], w.firing)
 	}
-	add := func(ks []key) {
-		for _, k := range ks {
-			if !seen[k] {
-				seen[k] = true
-				bySource[k.source] = append(bySource[k.source], k.id)
-			}
-		}
-	}
+	var groups [][]pageCut // a group: a merge of meeting windows and its windows
 	for _, rule := range slices.Sorted(maps.Keys(byRule)) {
 		wins := byRule[rule]
-		slices.SortFunc(wins, func(a, b [2]int64) int { return cmp.Or(cmp.Compare(a[0], b[0]), cmp.Compare(a[1], b[1])) })
-		wins = slices.Compact(wins)
+		slices.SortFunc(wins, func(a, b span) int { return cmp.Or(cmp.Compare(a.from, b.from), cmp.Compare(a.to, b.to)) })
 		for i := 0; i < len(wins); {
-			j, hi := i+1, wins[i][1]
-			for j < len(wins) && wins[j][0] <= hi {
-				hi = max(hi, wins[j][1])
+			j, hi := i+1, wins[i].to
+			for j < len(wins) && wins[j].from <= hi {
+				hi = max(hi, wins[j].to)
 				j++
 			}
-			// Every page of the windows together, unless there are more
-			// than one window's scan reads.
-			ks, err := keys(rule, wins[i][0], hi, response.MaxFindScan+1)
-			if err != nil {
-				return nil, err
+			var cuts []pageCut
+			var all []int
+			for _, w := range wins[i:j] {
+				cuts = append(cuts, pageCut{rule, w.from, w.to, asked[w]})
+				all = append(all, asked[w]...)
 			}
-			if len(ks) <= response.MaxFindScan {
-				add(ks)
-			} else {
-				for _, w := range wins[i:j] {
-					ks, err := keys(rule, w[0], w[1], response.MaxFindScan)
-					if err != nil {
-						return nil, err
-					}
-					add(ks)
+			// The whole first, then, if need be, the windows each.
+			groups = append(groups, append([]pageCut{{rule, wins[i].from, hi, all}}, cuts...))
+			i = j
+		}
+	}
+	seen := map[pageKey]bool{}
+	bySource := map[string][]string{}
+	capped := map[int]bool{}
+	full := false
+	accept := func(c pageCut, ks []pageKey) {
+		if !full {
+			n := 0
+			for _, k := range ks {
+				if !seen[k] {
+					n++
 				}
 			}
-			i = j
+			if len(seen)+n <= judgePagesCap {
+				for _, k := range ks {
+					if !seen[k] {
+						seen[k] = true
+						bySource[k.source] = append(bySource[k.source], k.id)
+					}
+				}
+				return
+			}
+			full = true
+		}
+		for _, f := range c.firings {
+			capped[f] = true
+		}
+	}
+	for _, file := range []bool{true, false} {
+		// First each group's whole span, then the windows of those with more
+		// pages in it than a window's scan reads.
+		var wholes []pageCut
+		for _, g := range groups {
+			wholes = append(wholes, g[0])
+		}
+		var again []pageCut
+		err := l.eachCut(ctx, q, wholes, file, response.MaxFindScan+1, &full, func(i int, ks []pageKey) {
+			if len(ks) <= response.MaxFindScan || len(groups[i]) == 2 {
+				accept(wholes[i], ks[:min(len(ks), response.MaxFindScan)])
+				return
+			}
+			again = append(again, groups[i][1:]...)
+		}, func(i int) { accept(wholes[i], nil) })
+		if err != nil {
+			return nil, 0, err
+		}
+		err = l.eachCut(ctx, q, again, file, response.MaxFindScan, &full, func(i int, ks []pageKey) { accept(again[i], ks) }, func(i int) { accept(again[i], nil) })
+		if err != nil {
+			return nil, 0, err
 		}
 	}
 	var out []response.Page
@@ -472,12 +531,12 @@ func (l *Ledger) pagesNear(ctx context.Context, q queryer, ws []pageWindow) ([]r
 			rows, err := q.QueryContext(ctx, `SELECT source, id, sent_at, acknowledged_at, resolved_at, resolved_by, alerts FROM responses
 				WHERE source = ? AND id IN (`+l.d.texts("?")+")", source, string(b))
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			got, err := scanPages(rows)
 			rows.Close()
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			l.pagesRead.Add(int64(len(got)))
 			out = append(out, got...)
@@ -492,7 +551,69 @@ func (l *Ledger) pagesNear(ctx context.Context, q queryer, ws []pageWindow) ([]r
 		}
 		return strings.Compare(a.Source, b.Source)
 	})
-	return out, nil
+	if len(capped) > 0 {
+		l.pagesCapped.Add(int64(len(capped)))
+		log.Printf("lapilli: judging read %d pages, the most it reads (%d); %d firings were judged with no page found for them", len(seen), judgePagesCap, len(capped))
+	}
+	return out, len(capped), nil
+}
+
+// eachCut asks the keys of the pages of each cut (at most limit of them, in
+// the order Index.Find walks, sent time, id, then source), the file's pages
+// or the others', pageCutsPerQuery cuts to a statement, and gives each cut's
+// to got by its index; once *full says the cap was reached, no more is asked,
+// and skip is told of each cut left.
+func (l *Ledger) eachCut(ctx context.Context, q queryer, cuts []pageCut, file bool, limit int, full *bool, got func(i int, ks []pageKey), skip func(i int)) error {
+	op := "<>"
+	if file {
+		op = "="
+	}
+	for i := 0; i < len(cuts); i += pageCutsPerQuery {
+		if *full {
+			for j := i; j < len(cuts); j++ {
+				skip(j)
+			}
+			return nil
+		}
+		part := cuts[i:min(len(cuts), i+pageCutsPerQuery)]
+		l.pageCuts.Add(1)
+		var sb strings.Builder
+		var args []any
+		for n, c := range part {
+			if n > 0 {
+				sb.WriteString(" UNION ALL ")
+			}
+			fmt.Fprintf(&sb, `SELECT %d AS n, source, id FROM (SELECT source, id FROM response_rules WHERE rule = ? AND sent_at >= ? AND sent_at <= ? AND source %s ?
+				ORDER BY sent_at, id, source LIMIT ?) AS t%d`, n, op, n)
+			args = append(args, c.rule, c.from, c.to, response.FileSource, limit)
+		}
+		rows, err := q.QueryContext(ctx, sb.String(), args...)
+		if err != nil {
+			return err
+		}
+		by := make([][]pageKey, len(part))
+		for rows.Next() {
+			var n int
+			var k pageKey
+			if err := rows.Scan(&n, &k.source, &k.id); err != nil {
+				rows.Close()
+				return err
+			}
+			by[n] = append(by[n], k)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for n := range part {
+			if *full {
+				skip(i + n)
+				continue
+			}
+			got(i+n, by[n])
+		}
+	}
+	return nil
 }
 
 // ResponseInputs says what the ledger keeps to find responses from: pages,
@@ -621,16 +742,17 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 			if len(olds) == 1 && olds[0][0] <= from && olds[0][1] >= to {
 				continue
 			}
-			// Known over more than it was: the firings that were on in it
-			// are judged again, though no change was found (a read made
-			// again, or a run that found none).
-			fresh = append(fresh, changeTarget{cover: true, namespace: w.Namespace, workloadKind: w.Kind, workload: w.Name, from: from, to: to})
+			// Known over more than it was: the firings whose changes were
+			// not known and now are are judged again, though no change was
+			// found (a read made again, or a run that found none), and not
+			// those that were known already (pendTargets).
 			for _, o := range olds {
 				from, to = min(from, o[0]), max(to, o[1])
 				if _, err := drop.ExecContext(t.ctx, w.Namespace, w.Kind, w.Name, o[0]); err != nil {
 					return err
 				}
 			}
+			fresh = append(fresh, changeTarget{cover: true, namespace: w.Namespace, workloadKind: w.Kind, workload: w.Name, from: from, to: to, was: olds})
 			if _, err := put.ExecContext(t.ctx, w.Namespace, w.Kind, w.Name, from, to); err != nil {
 				return err
 			}
@@ -666,8 +788,9 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 // changeTarget is a change that is new to the ledger and what it was made to:
 // a rollout's workload, or a deploy's labels, which a firing it is about
 // carries every one of (response.Carries, as Matching ties it). Or, when
-// cover is set, a workload whose changes became known over [from, to], which
-// the firings that were on in it are judged again for.
+// cover is set, a workload whose changes became known over [from, to] (the
+// whole span, with what was known of it before: was), which the firings whose
+// changes were not known and now are are judged again for.
 type changeTarget struct {
 	at                     int64
 	namespace              string
@@ -676,6 +799,9 @@ type changeTarget struct {
 	deploy                 bool
 	cover                  bool
 	from, to               int64
+	// was, of a cover, are the spans the workload's changes were known over
+	// before, which a firing in them is not judged again for.
+	was [][2]int64
 }
 
 // podOwners finds, and keeps, the workload a pod belongs to, as the runs saw.
@@ -709,7 +835,8 @@ func (o *podOwners) of(ns, pod string) (*response.Workload, error) {
 // which isn't known here, names one): too many are put back, never too few.
 func (c changeTarget) matches(labels map[string]string, own *podOwners) (bool, error) {
 	if c.deploy {
-		return response.Carries(labels, c.labels), nil
+		// A deploy that lists no label is no firing's (response.Matching).
+		return len(c.labels) > 0 && response.Carries(labels, c.labels), nil
 	}
 	if labels["namespace"] != c.namespace {
 		return false, nil
@@ -727,6 +854,25 @@ func (c changeTarget) matches(labels map[string]string, own *podOwners) (bool, e
 		return w.Kind == c.workloadKind && w.Name == c.workload, nil
 	}
 	return false, nil
+}
+
+// becameKnown reports whether a firing of the cover's workload, from start to
+// end (not valid: still on), had its changes unknown before and has them known
+// now: it lies in the span that is known now, and in none that was. A firing
+// still on is taken to end where the span does, as it was when it was judged
+// before. One in a span already known is not judged again for a run that
+// extended it.
+func (c changeTarget) becameKnown(start int64, end sql.NullInt64) bool {
+	in := func(a, b int64) bool { return start >= a && start <= b && (!end.Valid || end.Int64 <= b) }
+	if !in(c.from, c.to) {
+		return false
+	}
+	for _, w := range c.was {
+		if in(w[0], w[1]) {
+			return false
+		}
+	}
+	return true
 }
 
 // pendTargets puts firings back to be judged for changes new to the ledger
@@ -770,25 +916,21 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 		// firings of those that the changes are made to.
 		where := `f.start_at <= ? AND ((f.start_at >= ? AND f.start_at < ?) OR (f.start_at >= ? AND f.start_at < ? AND (f.end_at IS NULL OR f.end_at >= ?)))`
 		args := []any{hi, monday, next, first - reach, monday, first}
-		// One statement for the week: each firing and the series it is of.
-		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.labels, f.start_at FROM firings f JOIN series s ON s.id = f.series_id WHERE `+where+` ORDER BY s.id`, args...)
+		// The week's series, one row each with its labels once; the starts
+		// are read for the series the changes are made to only.
+		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.labels FROM series s WHERE s.id IN (SELECT f.series_id FROM firings f WHERE `+where+`) ORDER BY s.id`, args...)
 		if err != nil {
 			return err
 		}
-		type startRow struct {
-			series, start int64
-		}
-		var starts []startRow
 		labelsOf := map[int64]string{}
 		for rows.Next() {
-			var x startRow
+			var id int64
 			var text string
-			if err := rows.Scan(&x.series, &text, &x.start); err != nil {
+			if err := rows.Scan(&id, &text); err != nil {
 				rows.Close()
 				return err
 			}
-			labelsOf[x.series] = text
-			starts = append(starts, x)
+			labelsOf[id] = text
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -813,9 +955,26 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 				}
 			}
 		}
-		for _, x := range starts {
-			if matched[x.series] {
-				spans = append(spans, [2]int64{x.start, x.start})
+		ids := slices.Sorted(maps.Keys(matched))
+		for len(ids) > 0 {
+			part := ids[:min(len(ids), pgRows)]
+			ids = ids[len(part):]
+			b, _ := json.Marshal(part)
+			rows, err := t.QueryContext(t.ctx, `SELECT f.start_at FROM firings f WHERE `+where+` AND f.series_id IN (`+l.d.ints("?")+`)`, append(slices.Clone(args), string(b))...)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var start int64
+				if err := rows.Scan(&start); err != nil {
+					rows.Close()
+					return err
+				}
+				spans = append(spans, [2]int64{start, start})
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
 			}
 		}
 	}
@@ -869,7 +1028,7 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 				}
 			}
 			for _, c := range mine {
-				if x.start <= c.to && (!x.end.Valid || x.end.Int64 >= c.from) {
+				if c.becameKnown(x.start, x.end) {
 					spans = append(spans, [2]int64{x.start, x.start})
 					break
 				}
@@ -1002,14 +1161,14 @@ func (l *Ledger) newResponder(ctx context.Context, q queryer, rx interface {
 	}
 	var windows []pageWindow
 	pods := map[string]bool{}
-	for _, f := range fs {
+	for i, f := range fs {
 		end := f.End
 		if end.IsZero() {
 			end = now
 		}
 		// Where the page of a firing may have been sent: Evidence.Respond's.
 		for _, n := range response.RuleNames(f.Rule) {
-			windows = append(windows, pageWindow{n, f.Start.Unix(), end.Add(r.within(f.Rule)).Unix()})
+			windows = append(windows, pageWindow{n, f.Start.Unix(), end.Add(r.within(f.Rule)).Unix(), i})
 		}
 		w := Week(l.day(f.Start.Unix()))
 		if end.After(r.last[w]) {
@@ -1020,7 +1179,7 @@ func (l *Ledger) newResponder(ctx context.Context, q queryer, rx interface {
 		}
 	}
 	if r.in.Pages {
-		pages, err := l.pagesNear(ctx, q, windows)
+		pages, _, err := l.pagesNear(ctx, q, windows)
 		if err != nil {
 			return nil, err
 		}
@@ -1287,6 +1446,10 @@ func (l *Ledger) ResponsesOf(ctx context.Context, fs []Firing, o verdict.Options
 	}
 	return out, nil
 }
+
+// PagesCapped is how many firings, since the ledger was opened, were judged
+// with no page read for them because a judgement had read MaxJudgePages.
+func (l *Ledger) PagesCapped() int64 { return l.pagesCapped.Load() }
 
 // RolloutsKept says, of the changes read from the history, whether any was
 // and whether autoscalers' targets were found.

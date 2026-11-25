@@ -31,7 +31,7 @@ CREATE TABLE response_rules (
 	sent_at INTEGER NOT NULL,
 	source TEXT NOT NULL,
 	id TEXT NOT NULL,
-	PRIMARY KEY (rule, sent_at, source, id)
+	PRIMARY KEY (rule, sent_at, id, source)
 );
 CREATE INDEX response_rules_page ON response_rules (source, id);
 

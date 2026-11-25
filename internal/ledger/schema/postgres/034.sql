@@ -22,7 +22,7 @@ CREATE TABLE response_rules (
 	sent_at BIGINT NOT NULL,
 	source TEXT COLLATE "C" NOT NULL,
 	id TEXT COLLATE "C" NOT NULL,
-	PRIMARY KEY (rule, sent_at, source, id)
+	PRIMARY KEY (rule, sent_at, id, source)
 );
 CREATE INDEX response_rules_page ON response_rules (source, id);
 

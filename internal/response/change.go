@@ -330,9 +330,9 @@ func (cs *ChangeSet) Matching(labels map[string]string, match []string, from, to
 	}
 	// A deploy is a firing's only when the firing carries every label it lists
 	// (as Known holds), not by the looser tie of firings.deploy; one that lists
-	// no label is everything's.
+	// no label is no firing's, for a response (it covers nothing either).
 	out = append(out, within(cs.deploys, from, to, func(c Change) bool {
-		return carries(labels, c.Labels)
+		return len(c.Labels) > 0 && carries(labels, c.Labels)
 	})...)
 	slices.SortStableFunc(out, func(a, b Change) int { return a.At.Compare(b.At) })
 	return out
