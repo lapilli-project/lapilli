@@ -103,6 +103,9 @@ type Tally struct {
 	// have no response, and an unknown usefulness, which a week's record
 	// turns not useful for a firing that caught nothing and is judged.
 	RespChanged, RespRoutine, RespAcknowledged, RespUnanswered, Useful, NotUseful int
+	// WhiteDepends are of the White firings those white only by the service
+	// graph (verdict.RuleResult.WhiteByDependency).
+	WhiteDepends int
 }
 
 // On is the day or week, by its first day, the tally is judged by: its Day
@@ -138,6 +141,7 @@ func (t Tally) Add(x Tally) Tally {
 	t.RespUnanswered += x.RespUnanswered
 	t.Useful += x.Useful
 	t.NotUseful += x.NotUseful
+	t.WhiteDepends += x.WhiteDepends
 	return t
 }
 
@@ -147,7 +151,7 @@ func (t Tally) Black() int { return t.Firings - t.White }
 // Days are each rule's stones by day, from day to day, whatever signals
 // its alerts are tied to.
 func (l *Ledger) Days(ctx context.Context, from, to int64) ([]Tally, error) {
-	return l.tallies(ctx, `SELECT day, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white), sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful) FROM days
+	return l.tallies(ctx, `SELECT day, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white), sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful), sum(white_depends) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY day, rule_id ORDER BY day, rule_id`, from, to)
 }
 
@@ -155,7 +159,7 @@ func (l *Ledger) Days(ctx context.Context, from, to int64) ([]Tally, error) {
 // Monday to that starting on another, whatever signals its alerts are
 // tied to.
 func (l *Ledger) Weeks(ctx context.Context, from, to int64) ([]Tally, error) {
-	return l.tallies(ctx, `SELECT week, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white), sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful) FROM weeks
+	return l.tallies(ctx, `SELECT week, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), 0, sum(episodes), sum(episodes_white), sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white), sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful), sum(white_depends) FROM weeks
 		WHERE week >= ? AND week <= ? GROUP BY week, rule_id ORDER BY week, rule_id`, from, to)
 }
 
@@ -172,7 +176,7 @@ func (l *Ledger) WeeksBy(ctx context.Context, from, to int64) ([]Tally, error) {
 
 // peopleCols are the tallies' columns of people's verdicts, in Tally's
 // order.
-const peopleCols = "unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white, resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful"
+const peopleCols = "unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white, resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful, white_depends"
 
 func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally, error) {
 	var out []Tally
@@ -191,7 +195,7 @@ func (l *Ledger) eachTally(ctx context.Context, q string, from, to int64, f func
 	var t Tally
 	dest := []any{&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
 		&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite,
-		&t.RespChanged, &t.RespRoutine, &t.RespAcknowledged, &t.RespUnanswered, &t.Useful, &t.NotUseful}
+		&t.RespChanged, &t.RespRoutine, &t.RespAcknowledged, &t.RespUnanswered, &t.Useful, &t.NotUseful, &t.WhiteDepends}
 	for rows.Next() {
 		if err := rows.Scan(dest...); err != nil {
 			return err
@@ -642,10 +646,10 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 				var id, signals int64
 				var n, white, again, excused, deploy, deployWhite, episodes, episodesWhite int
 				var unrelated, unrelatedExcused, realWhite, realExcused, yes, no, yesBlack, noWhite int
-				var respChanged, respRoutine, respAck, respUnanswered, useful, notUseful int
+				var respChanged, respRoutine, respAck, respUnanswered, useful, notUseful, whiteDepends int
 				if err := rows.Scan(&id, &signals, &n, &white, &again, &excused, &deploy, &deployWhite, &episodes, &episodesWhite,
 					&unrelated, &unrelatedExcused, &realWhite, &realExcused, &yes, &no, &yesBlack, &noWhite,
-					&respChanged, &respRoutine, &respAck, &respUnanswered, &useful, &notUseful); err != nil {
+					&respChanged, &respRoutine, &respAck, &respUnanswered, &useful, &notUseful, &whiteDepends); err != nil {
 					rows.Close()
 					return err
 				}
@@ -681,6 +685,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 				}
 				rr.Firings += n
 				rr.White += white
+				rr.WhiteByDependency += whiteDepends
 				rr.Black += n - white
 				rr.Refired += again
 				rr.Excused += excused
@@ -1143,11 +1148,11 @@ type reportPart struct {
 const (
 	// By the signals the alerts are tied to, too.
 	countFirings = `SELECT f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white),
-		` + firstFirings + `, sum(f.episode_white), ` + personSums + `, ` + responseSums + `
+		` + firstFirings + `, sum(f.episode_white), ` + personSums + `, ` + responseSums + `, sum(f.white_depends)
 		FROM firings f JOIN series s ON s.id = f.series_id WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.rule_id, s.signals`
 	countDays = `SELECT rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), sum(episodes), sum(episodes_white),
 		sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white),
-		sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful)
+		sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful), sum(white_depends)
 		FROM days WHERE day >= ? AND day < ? GROUP BY rule_id, signals`
 	// By kind of marked window, from the firings and from the days.
 	countMarkedFirings = `SELECT f.rule_id, k.name, s.signals, count(*), sum(f.white), sum(f.refired) FROM firings f JOIN marked_kinds k ON ` + markedOn + `

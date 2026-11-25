@@ -2989,5 +2989,7 @@
  "--depends-direction %s: want down or both": "--depends-direction %s: down または both を指定してください",
  "the service graph couldn't be read over the last four weeks within --timeout (%s at most) and --max-samples, so nothing was saved: %v": "サービスグラフを --timeout（最大 %s）と --max-samples の範囲内で直近 4 週間分読み込めなかったため、何も保存していません: %v",
  "The services are values of the label %s.": "サービス名はラベル %s の値です。",
- "(by dependency, via %s)": "（依存関係による、経路 %s）"
+ "(by dependency, via %s)": "（依存関係による、経路 %s）",
+ "%d of them caught something only by the service graph (--depends): no labels or link did": "%d件はサービスの呼び出し関係(--depends)だけで検知になりました。ラベルやリンクでは検知になっていません",
+ "of firings caught something, %d of them only by the service graph": "検知の割合です。うち%d件はサービスの呼び出し関係だけで検知になりました"
 }

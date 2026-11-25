@@ -325,9 +325,12 @@ type ruleLine struct {
 	Name, Severity, Group                  string
 	Team, Status                           string // from teams and the rule's note
 	Firings, White, Black, Refired, Streak int
-	Excused                                int
-	Precision                              string
-	Noisy                                  bool
+	// WhiteDepends are of its White firings those white only by the service
+	// graph (--depends): no labels or link caught anything.
+	WhiteDepends int
+	Excused      int
+	Precision    string
+	Noisy        bool
 	// NoRecord says it fired over weeks whose record isn't kept: its
 	// precision isn't known, and it isn't noisy; Unrecorded, that it fired
 	// as often as a noisy rule fires, with no record to judge it by.
@@ -666,6 +669,7 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 			}
 			r.Firings += x.Firings
 			r.White += x.White
+			r.WhiteByDependency += x.WhiteDepends
 			u := t.unjudgedAll(w, id)
 			r.Unjudged += u.Firings - u.White
 			if t.o.NoisyBy == verdict.NoisyByUseful {
@@ -769,6 +773,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			}
 			l.Firings += x.Firings
 			l.White += x.White
+			l.WhiteDepends += x.WhiteDepends
 			l.Refired += x.Refired
 			l.Excused += x.Excused
 			l.Deploys += x.Deploy

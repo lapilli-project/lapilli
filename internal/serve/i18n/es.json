@@ -2989,5 +2989,7 @@
  "--depends-direction %s: want down or both": "--depends-direction %s: se espera down o both",
  "the service graph couldn't be read over the last four weeks within --timeout (%s at most) and --max-samples, so nothing was saved: %v": "el grafo de servicios no pudo leerse en las últimas cuatro semanas dentro de --timeout (%s como máximo) y --max-samples, así que no se guardó nada: %v",
  "The services are values of the label %s.": "Los servicios son valores de la etiqueta %s.",
- "(by dependency, via %s)": "(por dependencia, por %s)"
+ "(by dependency, via %s)": "(por dependencia, por %s)",
+ "%d of them caught something only by the service graph (--depends): no labels or link did": "%d solo se contaron como acierto por el grafo de servicios (--depends): ninguna etiqueta ni enlace lo logró",
+ "of firings caught something, %d of them only by the service graph": "de las alertas acertaron, %d de ellas solo por el grafo de servicios"
 }

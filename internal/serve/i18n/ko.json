@@ -2989,5 +2989,7 @@
  "--depends-direction %s: want down or both": "--depends-direction %s: down 또는 both 를 주세요",
  "the service graph couldn't be read over the last four weeks within --timeout (%s at most) and --max-samples, so nothing was saved: %v": "서비스 호출 관계를 --timeout(최대 %s)과 --max-samples 안에서 지난 4주 동안 읽지 못해서 아무것도 저장하지 않았어요: %v",
  "The services are values of the label %s.": "서비스 이름은 레이블 %s 의 값이에요.",
- "(by dependency, via %s)": "(의존 관계로, 경로 %s)"
+ "(by dependency, via %s)": "(의존 관계로, 경로 %s)",
+ "%d of them caught something only by the service graph (--depends): no labels or link did": "%d건은 서비스 호출 관계로만 정탐이 됐어요(--depends). 레이블이나 링크로는 정탐이 아니었어요",
+ "of firings caught something, %d of them only by the service graph": "정탐 비율이에요. 그중 %d건은 서비스 호출 관계로만 정탐이 됐어요"
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"lapilli.dev/internal/graph"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -295,7 +296,8 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 		"DELETE FROM rollout_owners WHERE seen_at < ?",
 		// The service graph, as firings are: its edges by their hour, and the
 		// spans it was read over and to be read again.
-		"DELETE FROM edges WHERE hour < ?",
+		l.d.pick("DELETE FROM edges WHERE rowid IN (SELECT rowid FROM edges WHERE hour < ? LIMIT 5000)",
+			"DELETE FROM edges WHERE (hour, from_svc, to_svc) IN (SELECT hour, from_svc, to_svc FROM edges WHERE hour < ? LIMIT 5000)"),
 		"DELETE FROM edge_spans WHERE to_at < ?",
 		"DELETE FROM edge_retries WHERE to_at < ?",
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
@@ -360,6 +362,15 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 	}
 	err := l.write(ctx, func(t *txn) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM days WHERE day < ?", l.day(at)); err != nil {
+			return err
+		}
+		// A span the graph was read over that began before the edges kept
+		// begins where they do: the hour after the last one pruned.
+		cut := graph.HourStart(graph.Hour(unix(at))).Unix()
+		if cut < at {
+			cut += 3600
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE edge_spans SET from_at = ? WHERE from_at < ? AND to_at >= ?", cut, cut, cut); err != nil {
 			return err
 		}
 		// The hours worked out begin where the firings do.

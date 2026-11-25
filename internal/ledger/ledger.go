@@ -45,6 +45,14 @@ type Ledger struct {
 		at   time.Time
 	}
 
+	// edgesIn is what EdgesIn counted, by the span asked, for one
+	// generation of the ledger.
+	edgesIn struct {
+		sync.Mutex
+		gen int64
+		by  map[[2]int64]int
+	}
+
 	w, r *sql.DB
 	loc  *time.Location
 	// d is the database's dialect; pg, for a Postgres ledger, its writer's

@@ -25,6 +25,7 @@
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
 <dd class="big">{{.Precision}}{{template "delta" .PrecisionBy}}</dd>
 <dd>{{if $v.NoRecord}}{{t "not known: no record"}}{{else if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd>
+{{- if $v.WhiteDepends}}<dd>{{t "%d of them caught something only by the service graph (--depends): no labels or link did" $v.WhiteDepends}}</dd>{{end}}
 {{- if $v.PrecisionByLapilli}}<dd>{{if and $v.Unrelated $v.Real}}{{t "%s as Lapilli judged it: people said %d firings were unrelated, and This was real turned %d white" $v.PrecisionByLapilli $v.Unrelated $v.Real}}{{else if $v.Unrelated}}{{t "%s as Lapilli judged it: people said %d firings were unrelated" $v.PrecisionByLapilli $v.Unrelated}}{{else}}{{t "%s as Lapilli judged it: This was real turned %d white" $v.PrecisionByLapilli $v.Real}}{{end}}</dd>{{end}}
 {{- if or $v.ActionYes $v.ActionNo}}<dd>{{t "Needed action: %d yes, %d no" $v.ActionYes $v.ActionNo}}</dd>{{end}}</div>
 {{if $v.Responding}}<div><dt><details class="def"><summary>{{t "Actionable"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that were useful, of those known to be useful or not: an incident caught or a change made to what the alert is about, and not a page nobody answered."}}</p></details></dt>
