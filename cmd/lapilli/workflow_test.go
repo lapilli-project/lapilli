@@ -141,11 +141,15 @@ func TestWorkflowReached(t *testing.T) {
 	}
 	_, all := reached(t)
 	slices.Sort(all)
-	lapilli := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" || j == "e2e-kubernetes" || j == "e2e-rollouts" })
+	lapilli := slices.DeleteFunc(slices.Clone(all), func(j string) bool {
+		return j == "e2e-compat" || j == "e2e-kubernetes" || j == "e2e-rollouts" || j == "e2e-routing"
+	})
 	checks := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" })
 	replays := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-rollouts" })
 	reads := append(slices.Clone(lapilli), "e2e-rollouts")
 	slices.Sort(reads)
+	routes := append(slices.Clone(lapilli), "e2e-routing")
+	slices.Sort(routes)
 	chart := []string{"e2e", "e2e-dashboard", "e2e-rendered", "e2e-replicas", "e2e-serve-lb", "e2e-service"}
 	for _, c := range []struct {
 		changed []string
@@ -163,6 +167,9 @@ func TestWorkflowReached(t *testing.T) {
 		{[]string{"internal/prom/prom.go", "internal/source/source.go"}, all},
 		{[]string{"internal/response/rollouts.go", "cmd/lapilli/responses.go"}, reads},
 		{[]string{"test/e2e/rollouts.sh"}, []string{"e2e-rollouts"}},
+		{[]string{"internal/routing/run.go", "internal/content/routing.go", "cmd/lapilli/notifications.go"}, routes},
+		{[]string{"internal/routing/run_test.go", "internal/content/testdata/a.yml"}, nil},
+		{[]string{"test/e2e/routing.sh", "test/e2e/routing/keeper/main.go", "test/e2e/routing/compare/main.go"}, []string{"e2e-routing"}},
 		{[]string{"test/e2e/compat.sh"}, []string{"e2e-compat"}},
 		{[]string{"test/e2e/kubernetes-rules.sh"}, []string{"e2e-kubernetes"}},
 		{[]string{"test/e2e/measure.sh", "test/e2e/measure-feed/main.go"}, nil},

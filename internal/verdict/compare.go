@@ -142,6 +142,11 @@ type Summary struct {
 	// RecordingChanged are the recording rules that differ (Recording):
 	// what the alerts that read them see changes, which no replay shows.
 	RecordingChanged int `json:"recording_changed"`
+	// Notifications are, when the notifications were worked out
+	// (--alertmanager-config), the pages and notifications before and
+	// after the change: worked out, not recorded. Left out when they
+	// weren't.
+	Notifications *SummaryNotifications `json:"notifications,omitempty"`
 	// FiringsBefore and FiringsAfter are the firings on each side: of the
 	// rules that differ alone, with --changed-only.
 	FiringsBefore int `json:"firings_before"`
@@ -197,6 +202,7 @@ func (c *Comparison) Summarize(incidents bool) {
 	if c.After != nil {
 		s.FiringsAfter = len(c.After.Firings)
 	}
+	s.Notifications = c.summaryNotifications()
 	c.Summary = s
 }
 
@@ -549,6 +555,9 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	alike, broken, shown := p.alike, p.broken, p.shown
 	judged := c.judged()
 	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To))
+	if s := c.pagesLine(); s != "" {
+		fmt.Fprintln(w, s)
+	}
 	fmt.Fprintf(w, "Rules compared: %d changed, %d added, %d taken away, %d the same\n", p.changed, p.added, p.gone, c.Same)
 	if len(c.Recording) > 0 {
 		var names []string
@@ -610,9 +619,17 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 			}
 			return slices.Insert(row, len(row)-1, cell)
 		}
-		rows := [][]string{withActionable(judgedColumns(judged, withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")), "ACTIONABLE")}
+		// And PAGED, as worked out, after it.
+		pages := c.pagesLine() != ""
+		withPaged := func(row []string, cell string) []string {
+			if !pages {
+				return row
+			}
+			return slices.Insert(row, len(row)-1, cell)
+		}
+		rows := [][]string{withPaged(withActionable(judgedColumns(judged, withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")), "ACTIONABLE"), "PAGED")}
 		for _, rc := range shown {
-			rows = append(rows, withActionable(judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)), actionables(rc)))
+			rows = append(rows, withPaged(withActionable(judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)), actionables(rc)), pagedCells(c, rc)))
 		}
 		if err := table(w, rows); err != nil {
 			return err

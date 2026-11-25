@@ -114,6 +114,13 @@ var GoalMeasures = map[string]GoalMeasure{
 	// The share of the firings that were useful, of those useful or not
 	// (docs/design/responses.md): by what was done about them.
 	"actionable.share": {Higher: true, Share: true},
+	// The pages that went in the week, recorded or worked out from the alert
+	// manager's configuration (docs/design/routing.md): all of them, those
+	// while people slept, and those for firings that caught nothing (or,
+	// with responses, weren't useful).
+	"pages":         {},
+	"pages.asleep":  {},
+	"pages.nothing": {Record: true},
 }
 
 // ByLapilli are the measures the summary gives as Lapilli judged them,
@@ -123,7 +130,7 @@ var ByLapilli = []string{"precision"}
 // GoalMeasureNames are the measures, in the order the design lists them.
 var GoalMeasureNames = []string{"firings", "precision", "critical.firings", "critical.share_caught", "refired.firings", "refired.share",
 	"asleep.firings", "off_hours.firings", "asleep.nothing", "off_hours.nothing", "incidents.missed", "impacts.missed",
-	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without", "episodes.total", "episodes.precision", "action.share", "actionable.share"}
+	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without", "episodes.total", "episodes.precision", "action.share", "actionable.share", "pages", "pages.asleep", "pages.nothing"}
 
 // Bounds on what --config declares of goals: 50 goals, and four lists of
 // severities counted as critical among them, as each is a count of its own

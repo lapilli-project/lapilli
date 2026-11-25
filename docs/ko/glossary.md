@@ -1,4 +1,4 @@
-<!-- translated from docs/glossary.md at blob 7de6ba0b88972dde4761e8a9e25ae71c3733e228 -->
+<!-- translated from docs/glossary.md at blob f6afadc2fed91860330e4c7c36e16a7fd4b964a6 -->
 
 # 용어
 
@@ -333,3 +333,13 @@ API의 가짜로, 문서에 나온 대로 응답합니다.
 
 장애를 잡은 알림입니다. [숫자의 의미 (영어)](../numbers.md#a-white-or-a-black-stone)를
 보세요.
+
+### 계산한 값 (worked out)
+
+기록이 아니라 모델이 계산한 숫자입니다. Alertmanager가 울린 알림으로 실제로 무엇을
+했는지가 아니라, 설정(`--alertmanager-config`)으로 보면 무엇을 했을지입니다.
+[알림이 누구에게 갔는지, 계산한 값 (영어)](../notifications-worked-out.md)의
+NOTIFIED, PAGED 등이 그렇고, 실제로 보낸 그대로 보관하는 `lapilli serve`의
+알림 전송 기록([실제로 보낸 알림 (영어)](../notifications.md))은 아닙니다. 이 숫자를
+보여 주는 곳은 모두 그렇다고 적고, 필드, 열, 메트릭 이름에는 `worked_out`이 들어
+있습니다.

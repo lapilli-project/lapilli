@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob 1b5802b621df32267e13789531b5df8e0c573971 -->
+<!-- translated from docs/README.md at blob 0e16095ae0cb6c9bd4da2085ca51a1d1a27666ff -->
 
 # Lapilli ドキュメント
 
@@ -28,6 +28,7 @@ docs/ を変更のたびに書き直して作る写しです。Lapilli とは何
 - [クラウド独自のアラーム](../cloud-alarms.md)：CloudWatch、Azure Monitor、Google Cloud、OCI
   のアラームが発火したもの、Datadog のモニター、New Relic のアラート条件の判定
 - [ログに対するルール（Loki）](../loki.md)：Loki に対してバックテストする LogQL のルール
+- [発火がだれに届いたか、計算した値](../notifications-worked-out.md)：Alertmanager の設定から、各発火がどのレシーバーに届き、どの通知がページになるか、何が止めたかを計算します。記録ではなく計算した値です
 - [バックテストは正しいか？](../check-replay.md)：`--check-replay`、バックテストと実際に発火したものの比較
 - [アラートが伝える内容](../check-content.md)：`--check-content`、各ルールが発火したときに何を伝えるか、どう書かれているか
 

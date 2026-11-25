@@ -300,6 +300,23 @@ func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (t
 	return templates, contactPoints, policies, nil
 }
 
+// GrafanaMuteTimings asks a Grafana for its mute timings (GET
+// /api/v1/provisioning/mute-timings), which the notification policies name
+// in their mute and active time intervals, as GrafanaNotifications asks for
+// the rest of what routing reads (docs/design/routing.md). A Grafana that
+// has no such endpoint (404) has none: the answer is empty, not an error.
+func GrafanaMuteTimings(ctx context.Context, base, tokenFile, agent string) ([]byte, error) {
+	get, err := grafanaGetter(ctx, base, tokenFile, agent)
+	if err != nil {
+		return nil, err
+	}
+	body, code, err := get("/api/v1/provisioning/mute-timings")
+	if code == http.StatusNotFound {
+		return nil, nil
+	}
+	return body, err
+}
+
 // grafanaGetter reads the token once and gives a read of a Grafana path:
 // the body and the HTTP status, with an error for any status but 2xx (the
 // status is still given). Each answer is 8 MB at most; no redirect is

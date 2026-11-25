@@ -1,0 +1,1 @@
+[{"id":"b1c2","matchers":[{"name":"service","value":"cart","isRegex":false,"isEqual":true}],"startsAt":"2026-10-09T04:00:00Z","endsAt":"2026-10-09T06:00:00Z","createdBy":"someone","comment":"cart maintenance"}]

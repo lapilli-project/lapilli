@@ -44,6 +44,7 @@ test/e2e/compat.sh       # verdict and --check-replay against a real Thanos, and
 test/e2e/kubernetes-rules.sh # --check-replay of kube-prometheus-stack's default rules beside what Prometheus fired, on kind; about 40 minutes; needs Docker, kubectl, helm, jq
 test/e2e/measure.sh      # the replay's measurements taken again at any version of Prometheus, Grafana and Loki (the images from the environment), into internal/replay/testdata; an hour; needs Docker, Go, curl, jq, yq
 test/e2e/rollouts.sh # --rollouts read from a real kube-state-metrics on kind: restarts, scales, a rollback, an autoscaled Deployment; about 35 minutes; same needs
+test/e2e/routing.sh  # the notifications worked out from an alert manager's configuration beside those two real Alertmanagers (newest, oldest held to) sent to a webhook; about nine minutes; needs Docker, jq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Go and Docker
 ```
 
@@ -57,10 +58,10 @@ LAPILLI_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:55432/postgres?sslmode=d
   go test ./internal/ledger ./internal/serve ./cmd/lapilli
 ```
 
-CI runs them in two shards on each of Postgres 15 and 18, as
-`test/shard.sh 1` and `test/shard.sh 2` do: the second every other of
-serve's tests, the first the rest, with the ledger's and the command's.
-Each checks first that every test is in one shard, and one only.
+CI runs them in three shards on each of Postgres 15 and 18, as
+`test/shard.sh 1`, `2` and `3` do: the first the ledger's and the
+command's, the second every other of serve's tests, the third the rest of
+serve's. Each checks first that every test is in one shard, and one only.
 
 A statement that Postgres takes otherwise than SQLite is given for both
 (`internal/ledger/dialect.go`); `TestDialectSeam` says where one isn't. A
@@ -135,7 +136,9 @@ firing fails on any machine.
   (`internal/prom`, `internal/replay`, `internal/rules`,
   `internal/source`), and `go.mod` and `go.sum`; `e2e-kubernetes` by
   those and by what sets the replay beside what really fired
-  (`internal/verdict`, `internal/firing`, the verdict command); `e2e-rollouts`
+  (`internal/verdict`, `internal/firing`, the verdict command); `e2e-routing`
+  by those, by `internal/routing`, `internal/content` and the notifications
+  command; `e2e-rollouts`
   by what reads the history (`internal/prom`, `internal/source`),
   `internal/response`, and the commands that use it. A change to the
   docs alone runs none of them. A new push to a pull request cancels the

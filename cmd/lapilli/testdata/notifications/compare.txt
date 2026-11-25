@@ -1,0 +1,8 @@
+Lapilli  2026-10-05 00:00 → 2026-10-12 00:00 UTC
+Pages 1 → 2 (worked out from the alert manager's configuration, not recorded)
+Rules compared: 0 changed, 1 added, 0 taken away, 1 the same
+Firings 1 → 2
+By severity: critical 1 → 2
+
+RULE      SEVERITY      FIRED  PAGED  REFIRED
+NightJob  – → critical  – → 1  – → 1  – → 0

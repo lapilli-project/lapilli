@@ -3,7 +3,7 @@ name: upstream
 # The real-server jobs of ci.yml, in Docker and on kind (the chart's
 # CronJob, the whole service), with the newest release of each server in
 # place of the pinned one: Prometheus, Grafana, Loki, Thanos,
-# VictoriaMetrics and vmalert, as test/e2e's scripts take them from the
+# VictoriaMetrics, vmalert and Alertmanager, as test/e2e's scripts take them from the
 # environment. A failure here is a server that changed how it evaluates or
 # answers, which is a finding for the replay's fidelity (ROADMAP.md,
 # "Replay fidelity"), or a script that leans on the version it pins. It is
@@ -36,6 +36,9 @@ on:
         type: string
       vmalert:
         description: vmalert image (default victoriametrics/vmalert:latest)
+        type: string
+      alertmanager:
+        description: Alertmanager image (default quay.io/prometheus/alertmanager:latest)
         type: string
 
 permissions:
@@ -80,6 +83,8 @@ jobs:
             minutes: 60
           - script: rollouts
             minutes: 60
+          - script: routing
+            minutes: 20
     env:
       PROMETHEUS_IMAGE: ${{ inputs.prometheus || 'prom/prometheus:latest' }}
       GRAFANA_IMAGE: ${{ inputs.grafana || 'grafana/grafana:latest' }}
@@ -87,6 +92,7 @@ jobs:
       THANOS_IMAGE: ${{ inputs.thanos }}
       VICTORIAMETRICS_IMAGE: ${{ inputs.victoriametrics || 'victoriametrics/victoria-metrics:latest' }}
       VMALERT_IMAGE: ${{ inputs.vmalert || 'victoriametrics/vmalert:latest' }}
+      ALERTMANAGER_IMAGE: ${{ inputs.alertmanager || 'quay.io/prometheus/alertmanager:latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

@@ -88,6 +88,7 @@ expectations:
     budget:
       week: 10       # firings in each whole week of the period
       asleep: 2      # of them, while people slept
+      pages: 3       # pages its firings send, worked out from the alert manager's configuration
     catches:
       - incident: INC-43
         within: 5m
@@ -95,8 +96,12 @@ expectations:
     budget: {week: 20}
 ```
 
-A budget is held to each whole week of the period, counted back from its
-end, and the week that fired most is shown; a period shorter than a week
+A `pages` budget counts the pages the rule's firings are worked out to send
+([Who a firing reached, worked out](notifications-worked-out.md)), by the weeks
+of the firings that sent them, and fails as a firings budget does; without
+`--alertmanager-config` or `--grafana` it is not known, and it is not known when the
+work-out stopped short (a budget it spent, a context that ended). A budget is held to each
+whole week of the period, counted back from its end, and the week that fired most is shown; a period shorter than a week
 is scaled to one, and says so. A catch is judged as the verdict judges
 incidents: an incident not in the period, or no incident given, is not
 known, never met or broken; a rule the change takes away catches nothing.

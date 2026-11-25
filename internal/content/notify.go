@@ -12,6 +12,7 @@ import (
 	"text/template/parse"
 	"time"
 
+	"lapilli.dev/internal/routing"
 	"lapilli.dev/internal/rules"
 )
 
@@ -43,6 +44,10 @@ type Notifications struct {
 	alertmanager bool
 	// read is what ReadAlertmanager read (Read).
 	read Read
+	// routing is Alertmanager's routing configuration as routing works with
+	// it, and why there is none when there isn't (ReadAlertmanager).
+	routing    *routing.Config
+	routingErr error
 }
 
 // Read is how much of Alertmanager's configuration ReadAlertmanager read:
@@ -58,6 +63,25 @@ func (n *Notifications) Read() Read {
 		return Read{}
 	}
 	return n.read
+}
+
+// Routing is Alertmanager's routing configuration as ReadAlertmanager read
+// it, for working out who an alert reaches; nil when it wasn't read, or
+// couldn't be (RoutingErr says why). Grafana's is ReadGrafanaRouting.
+func (n *Notifications) Routing() *routing.Config {
+	if n == nil {
+		return nil
+	}
+	return n.routing
+}
+
+// RoutingErr is why Routing is nil for a configuration ReadAlertmanager read:
+// what Alertmanager wouldn't load, though the templates could be read.
+func (n *Notifications) RoutingErr() error {
+	if n == nil {
+		return nil
+	}
+	return n.routingErr
 }
 
 // shown is what a template shows: the labels and annotations it names,
@@ -224,6 +248,14 @@ type policyJSON struct {
 	MatchRe  map[string]string `json:"match_re"`
 	Continue bool              `json:"continue"`
 	Routes   []policyJSON      `json:"routes"`
+	// What routing keeps of a policy (ReadGrafanaRouting): its grouping, its
+	// timings, which are text (30s, 4h), and its time intervals.
+	GroupBy             []string `json:"group_by"`
+	GroupWait           *string  `json:"group_wait"`
+	GroupInterval       *string  `json:"group_interval"`
+	RepeatInterval      *string  `json:"repeat_interval"`
+	MuteTimeIntervals   []string `json:"mute_time_intervals"`
+	ActiveTimeIntervals []string `json:"active_time_intervals"`
 }
 
 var matcherText = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*(.*?)\s*$`)

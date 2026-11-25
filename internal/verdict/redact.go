@@ -64,7 +64,7 @@ func (x *Redactor) mac(kind, name string) string {
 // a team label's value is never taken for a team's alias.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,39}$`)
 
-var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true, "kind": true, "page": true}
+var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true, "kind": true, "page": true, "receiver": true, "inhibition": true, "silence": true, "interval": true}
 
 func prefix(kind string) string {
 	if name, ok := strings.CutPrefix(kind, "label:"); ok {
@@ -185,12 +185,59 @@ type names struct {
 	// kinds are the kinds of marked window, which a team names.
 	kinds map[string]bool
 	// pages are the ids of the pages firings were sent as.
-	pages     map[string]bool
+	pages map[string]bool
+	// notified are the names the worked-out notifications carry, by kind:
+	// receivers, inhibition rules, silences and time intervals.
+	notified  map[string]map[string]bool
 	incidents []incident.Incident
 	records   map[string]bool
 	// expected are the incidents expectations name, numbered after those
 	// of the period.
 	expected map[string]bool
+}
+
+// notification gathers the names a firing's notifications carry.
+func (n *names) notification(fn *FiringNotifications) {
+	if fn == nil {
+		return
+	}
+	add := func(kind, name string) {
+		if name == "" {
+			return
+		}
+		if n.notified[kind] == nil {
+			n.notified[kind] = map[string]bool{}
+		}
+		n.notified[kind][name] = true
+	}
+	for _, name := range fn.Receivers {
+		add("receiver", name)
+	}
+	for _, name := range fn.NoIntegrations {
+		add("receiver", name)
+	}
+	for _, m := range fn.Muted {
+		n.rules[m.SourceRule] = true
+		switch kindOfMute(m.Kind) {
+		case "interval":
+			for _, part := range strings.Split(m.By, ",") {
+				add("interval", part)
+			}
+		default:
+			add(kindOfMute(m.Kind), m.By)
+		}
+	}
+}
+
+// kindOfMute is the kind of name a mute's By is.
+func kindOfMute(kind string) string {
+	switch kind {
+	case string(routingMutedInhibition):
+		return "inhibition"
+	case string(routingMutedSilence):
+		return "silence"
+	}
+	return "interval"
 }
 
 func (n *names) label(k, v string) {
@@ -261,8 +308,22 @@ func (n *names) report(r *Report) {
 			}
 		}
 	}
+	if r.Notifications != nil {
+		for _, rc := range r.Notifications.Receivers {
+			if n.notified["receiver"] == nil {
+				n.notified["receiver"] = map[string]bool{}
+			}
+			n.notified["receiver"][rc.Name] = true
+		}
+	}
+	for _, rr := range r.Rules {
+		if rr.Notifications != nil {
+			n.rules[rr.Notifications.InhibitedBy] = true
+		}
+	}
 	for _, f := range r.Firings {
 		n.rules[f.Rule] = true
+		n.notification(f.Notifications)
 		for _, sg := range f.Signals {
 			n.signals[sg] = true
 		}
@@ -308,7 +369,7 @@ func (n *names) report(r *Report) {
 // prepare numbers every name in the reports and the comparison.
 func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	n := &names{rules: map[string]bool{}, groups: map[string]bool{}, teams: map[string]bool{}, sources: map[string]bool{},
-		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}, kinds: map[string]bool{}, pages: map[string]bool{}}
+		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}, kinds: map[string]bool{}, pages: map[string]bool{}, notified: map[string]map[string]bool{}}
 	for _, r := range reps {
 		n.report(r)
 	}
@@ -353,6 +414,9 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	x.numberAnyhow("kind", n.kinds)
 	delete(n.pages, "")
 	x.numberAnyhow("page", n.pages)
+	for _, kind := range slices.Sorted(maps.Keys(n.notified)) {
+		x.numberAnyhow(kind, n.notified[kind])
+	}
 	x.numberAnyhow("record", n.records)
 	delete(n.signals, "")
 	x.numberAnyhow("signal", n.signals)
@@ -382,6 +446,11 @@ func (x *Redactor) ruleResult(rr RuleResult) RuleResult {
 	if rr.NoData != nil {
 		// Expressions: metrics' and labels' names.
 		rr.NoData = slices.Repeat([]string{Redacted}, len(rr.NoData))
+	}
+	if rr.Notifications != nil {
+		n := *rr.Notifications
+		n.InhibitedBy = x.alias("rule", n.InhibitedBy)
+		rr.Notifications = &n
 	}
 	if rr.Marked != nil {
 		m := make(map[string]MarkedCount, len(rr.Marked))
@@ -534,6 +603,7 @@ func (x *Redactor) report(r *Report) *Report {
 		place[in.ID] = i
 	}
 	out.Firings = x.firings(r.Firings)
+	out.Notifications = x.reportNotifications(r.Notifications)
 	if r.Suggestions != nil {
 		out.Suggestions = make([]Suggestion, len(r.Suggestions))
 		for i, s := range r.Suggestions {
@@ -675,6 +745,7 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 		slices.Sort(kinds)
 		f.Marked = kinds
 		f.Response = x.response(f.Response)
+		f.Notifications = x.firingNotifications(f.Notifications)
 		out[i] = f
 	}
 	slices.SortStableFunc(out, func(a, b Judged) int {
@@ -823,5 +894,72 @@ func (x *Redactor) response(fr *FiringResponse) *FiringResponse {
 		u := *fr.Useful
 		out.Useful = &u
 	}
+	return &out
+}
+
+// firingNotifications is a firing's notifications with the receivers, the
+// inhibition rules, silences and time intervals that muted it, and the rule
+// that inhibited it given their aliases.
+func (x *Redactor) firingNotifications(n *FiringNotifications) *FiringNotifications {
+	if n == nil {
+		return nil
+	}
+	out := *n
+	out.FirstPage = utc(n.FirstPage)
+	if n.Sent != nil {
+		out.Sent = make([]NotificationSent, len(n.Sent))
+		for i, sn := range n.Sent {
+			sn.At = utc(sn.At)
+			sn.Receiver = x.alias("receiver", sn.Receiver)
+			out.Sent[i] = sn
+		}
+	}
+	out.Receivers = make([]string, len(n.Receivers))
+	for i, name := range n.Receivers {
+		out.Receivers[i] = x.alias("receiver", name)
+	}
+	if n.NoIntegrations != nil {
+		out.NoIntegrations = make([]string, len(n.NoIntegrations))
+		for i, name := range n.NoIntegrations {
+			out.NoIntegrations[i] = x.alias("receiver", name)
+		}
+	}
+	if n.Muted != nil {
+		out.Muted = make([]NotificationMute, len(n.Muted))
+		for i, m := range n.Muted {
+			m.SourceRule = x.alias("rule", m.SourceRule)
+			kind := kindOfMute(m.Kind)
+			if kind == "interval" {
+				parts := strings.Split(m.By, ",")
+				for j, p := range parts {
+					parts[j] = x.alias(kind, p)
+				}
+				m.By = strings.Join(parts, ",")
+			} else {
+				m.By = x.alias(kind, m.By)
+			}
+			out.Muted[i] = m
+		}
+	}
+	return &out
+}
+
+// reportNotifications is what a report worked out of notifications with its
+// receivers given their aliases.
+func (x *Redactor) reportNotifications(n *ReportNotifications) *ReportNotifications {
+	if n == nil {
+		return nil
+	}
+	out := *n
+	// A warning names a receiver or a policy in free text: left out, as the
+	// reason a work-out stopped says no name.
+	out.Warnings = nil
+	out.Receivers = make([]NotificationReceiver, len(n.Receivers))
+	for i, rc := range n.Receivers {
+		rc.Name = x.alias("receiver", rc.Name)
+		rc.Kinds = slices.Clone(rc.Kinds)
+		out.Receivers[i] = rc
+	}
+	slices.SortStableFunc(out.Receivers, func(a, b NotificationReceiver) int { return strings.Compare(a.Name, b.Name) })
 	return &out
 }

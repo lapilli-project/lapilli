@@ -151,6 +151,17 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 			return nil
 		}
 		return row.Actionable.Share
+	case "pages", "pages.asleep", "pages.nothing":
+		if row.Paged == nil || row.Paged.Unknown || row.Paged.CountedFrom != "" {
+			return nil
+		}
+		switch g.Measure {
+		case "pages.asleep":
+			return n(row.Paged.Asleep)
+		case "pages.nothing":
+			return n(row.Paged.ForNothing)
+		}
+		return n(row.Paged.Pages)
 	case "critical.firings":
 		return n(crit.Firings)
 	case "critical.share_caught":
@@ -496,6 +507,9 @@ var goalMeasureNames = map[string]string{
 	"episodes.precision":               "precision by episodes",
 	"action.share":                     "the share that needed action",
 	"actionable.share":                 "the share of firings that were useful",
+	"pages":                            "pages",
+	"pages.asleep":                     "pages while people slept",
+	"pages.nothing":                    "pages for firings that caught nothing",
 }
 
 // episodesMeasure reports whether a measure is of the episodes, which the

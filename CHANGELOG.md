@@ -4,6 +4,77 @@
 
 ### Added
 
+- **Who a firing reached, in `lapilli serve`**
+  ([docs/notifications-worked-out.md](docs/notifications-worked-out.md#in-lapilli-serve),
+  [docs/design/routing.md](docs/design/routing.md)). Given `--alertmanager-config` or
+  `--grafana`, each run works out the notifications of the hours it judges, with the
+  longest `repeat_interval` of lead-in, from the firings in the ledger (so judging again
+  works them out again without asking the history), and keeps them for each firing and
+  each notification (schema 035): the receivers and integration kinds it reached, its
+  notifications and pages, when the first page and each went, and what muted it.
+  Silences are `--silences` (read again each run) and the mutes the event recorder told of.
+  Where notifications were really recorded, the recorded ones count, and the worked-out
+  ones are held to them: the new **Notifications** page lists, for each receiver, those
+  worked out and those recorded, and `lapilli_notifications_agreement` is, over the
+  receivers with both, the sum of the smaller of the two counts over the sum of the larger.
+  Where none were recorded, the worked-out ones count, and every page and API that shows
+  pages says "worked out", "recorded" or both: the rule page, the rules list, the overview's
+  "Woken for nothing" (pages, not every notification), `/api/v1/summary` (`paged`), goals
+  (`pages`, `pages.asleep`, `pages.nothing`), a budget of `N pages` (which
+  `lapilli serve` took as "not known" before), the weekly digest, MCP's rule and firing
+  tools, `/metrics` (`lapilli_rule_pages`) and `/api/v1/report` in the fields `lapilli
+  verdict` gives. The flags are `--notifications=false`, `--external-labels`, `--silences`
+  and `--paging-receivers`, which `lapilli serve` refused before; the chart's
+  `notifications` values (`enabled`, `externalLabels`, `pagingReceivers`, `silences`) pass
+  them in both modes. Schema 035 only adds tables. A work-out is bounded (2 minutes, 20,000,000
+  work units, 300,000 firings with the run's own hours first, 100,000 silences), takes a firing that
+  began before the lead-in as notified before it (no first page every hour; its repeats counted from
+  the last notification kept for its group), counts what a firing reached, when it is read, from the notifications kept for it in the hours worked out (so one hour not worked out, or not tried yet, in a firing's life, which no longer moves the phase of a group's repeats for the hours after it, makes that hour's week not known, and not the pages of a long firing's other weeks; a page is known for a receiver as recorded where it has recordings in the hour, otherwise as worked out where the hour is covered, and not otherwise, whatever another receiver recorded; the cover and the rows are read together, a view reads at most 500,000 pages and says "not known" past them, a catch-up piece that used all of its own 2 minutes backs off, and marking hours not worked out drops what was said of the firings in them), and records the hours of a run that stopped, failed, couldn't read the
+  configuration or whose firings were recorded again as not worked out (`routed_cover`),
+  which every page says as "not known" (a week touching one, `paged.unknown` in
+  `/api/v1/summary`, a budget of pages, a goal, the digest) and the catch-up works out
+  again; the catch-up takes 2 minutes in all and a piece that stopped waits an hour, then two, doubling to a day. A recorded page is a page by the model's rule: to PagerDuty, Opsgenie, VictorOps or incident.io only for a
+  firing notification after none or after all resolved, unless `--paging-receivers` matches the receiver; hours recorded before the first one worked out are known as recorded; a page worked out just before an hour and its recorded copy just after count once; recorded or worked out is decided for
+  each receiver and hour; a silence is tied to the firing it muted; an inhibition's
+  `source_rule` is kept; a receiver recorded by name alone is compared with its webhooks, and
+  one with only recorded notifications is shown apart; replicas read the configuration for their
+  pages; pruning takes the notifications worked out and their cover.
+- **A Grafana rule that names its own contact point** (`notification_settings`) is routed
+  there, past the notification policies, with its own `group_by`, `group_wait`,
+  `group_interval`, `repeat_interval` and mute and active timings, in `lapilli verdict`
+  and `lapilli serve`, as Grafana does; before, it was routed by the policies like the
+  others, so its pages could go to the wrong receiver.
+- **Who a firing reached, worked out**, in `lapilli verdict`
+  ([docs/notifications-worked-out.md](docs/notifications-worked-out.md),
+  [docs/design/routing.md](docs/design/routing.md)). Given the alert manager's
+  configuration (`--alertmanager-config`, or `--grafana`, whose notification
+  policies, contact points and mute timings are read), Lapilli plays the
+  firings of the period through the routes, the groups, the inhibition rules,
+  the silences and the time intervals as Alertmanager's dispatcher does, and
+  says for each firing which receivers it reached, in which notifications,
+  which of them page someone, and what muted it; and for each rule NOTIFIED,
+  PAGED, the pages while people slept and out of hours, **pages for nothing**
+  (of firings that caught nothing, or, with `--responses`, weren't useful),
+  how often an inhibition rule muted it and the rule that did most, and how
+  many firings went out grouped with other rules' alerts. `--external-labels
+  NAME=VALUE` (repeatable) are the labels Prometheus adds to each alert,
+  `--silences FILE` the silences Alertmanager held, `--paging-receivers REGEX`
+  the receivers that page whatever they send with (otherwise pagerduty,
+  opsgenie, victorops and pushover, and Grafana's oncall, page, and the rest are
+  messages), and `--notifications=false` leaves it all out. The text has a
+  NOTIFICATIONS table, and its out-of-hours section counts pages for nothing;
+  `--json` has `notifications` on the report, each rule and each firing,
+  `--csv` has `worked_out_*` columns after the others, `--metrics` has
+  `lapilli_rule_notifications_worked_out` and `lapilli_rule_pages_worked_out`, and
+  `--redact` gives receivers, inhibition rules, silences and time intervals an
+  alias. `--compare` and a pull request's backtest start with the pages before and
+  after, `Pages 12 → 15`, and show PAGED for each rule that differs; the summary
+  has `notifications` when they were worked out. An expectation's budget takes
+  `pages` beside `week`, `asleep` and `refires` (`lapilli verdict --compare`; not
+  known in `lapilli serve` yet). The numbers are worked out from the
+  configuration, not recorded, and every surface says so. With no
+  configuration, or `--notifications=false`, every output is what it was. Not in
+  `lapilli serve` yet.
 - **What people did when a rule fired**, in `lapilli verdict`
   ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
   a paging tool sent and whether a person acknowledged each; `--rollouts`

@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob 1b5802b621df32267e13789531b5df8e0c573971 -->
+<!-- translated from docs/README.md at blob 0e16095ae0cb6c9bd4da2085ca51a1d1a27666ff -->
 
 # Lapilli 문서
 
@@ -40,6 +40,9 @@ docs/를 변경할 때마다 다시 써서 만든 사본입니다. Lapilli가 �
   Cloud, OCI 알람이 울린 것과, Datadog 모니터와 New Relic 알림 조건의 정탐·오탐
   가리기
 - [로그 룰: Loki](../loki.md): Loki를 대상으로 LogQL 룰 백테스트
+- [알림이 누구에게 갔는지, 계산한 값](../notifications-worked-out.md): Alertmanager
+  설정으로, 울린 알림이 어느 리시버에 닿고 어떤 알림이 호출이 되는지, 무엇이
+  억제했는지 계산합니다. 기록이 아니라 계산한 값입니다
 - [백테스트가 맞는지 확인하기](../check-replay.md): `--check-replay`, 실제로 울린
   알림과 나란히 놓은 백테스트
 - [알림 내용 점검](../check-content.md): `--check-content`, 룰이 울릴 때 무엇을

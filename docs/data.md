@@ -25,6 +25,11 @@ data; each section links to where it is told in full.
   and run apart from Lapilli ([Incidents kept elsewhere](incidents.md)).
 - Firings: what Prometheus fired (`--alerts`), or firings recorded
   elsewhere (`--firings`).
+- With `--alertmanager-config` (or `--grafana`'s notification policies,
+  contact points and mute timings), the routing of the alert manager, and
+  `--silences`, a file of the silences it held: names, kinds, matchers,
+  durations and booleans only, no field that holds a secret
+  ([Who a firing reached, worked out](notifications-worked-out.md)).
 - With `--on-call`, the iCalendar feeds the file names, whose URLs hold
   their secret. With `--promtool`, it runs promtool on the test files an
   expectations file names.

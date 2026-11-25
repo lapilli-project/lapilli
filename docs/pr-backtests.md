@@ -79,6 +79,33 @@ Rules compared: **1 changed, 1 added, 0 taken away**, 42 the same.
 | `INC-43` `Batch stuck` | 2026-10-31 02:40 | ✗ nothing fired | `DiskFillingUp` +4m |
 ```
 
+With the alert manager's configuration (`--alertmanager-config`, or `--grafana`
+with its policies; a recipe passes it on as it passes any other flag), the
+comment starts with the pages before and after, in bold under the heading:
+**Pages 12 → 15 (worked out from the alert manager's configuration, not
+recorded)**. A change that would ring more phones says so before it is merged.
+The totals have a row for it, and the table of rules has a Paged column, before →
+after, beside Refired. The pages are worked out by a model of Alertmanager's
+routing, grouping, inhibition and silences, not recorded ([Who a firing reached,
+worked out](notifications-worked-out.md)). With `--changed-only`, which the
+recipes use, the pages are of the changed rules' firings alone, but the rules
+left alone are not ignored: those whose labels could match the source of an
+inhibition rule are replayed too, and counted in nothing, so that an inhibition by
+them is worked out; where a route groups by something other than `alertname`
+(so rules share a group), all of them are. What isn't known then is the rules left
+alone that no inhibition rule and no shared group touch: they change nothing about
+the changed rules' notifications, and their own pages aren't counted. The groups
+count (`notifications.groups`) is of all the groups, those too.
+
+The before side is worked out with the same configuration as the after side,
+unless the change is to the configuration: `--alertmanager-config-before FILE`
+works it out with the configuration as it was, and a change that moves a rule
+from a Slack channel to PagerDuty then shows as the pages it adds. A recipe is
+given the file's path with `ALERTMANAGER_CONFIG` and reads it from both commits,
+passing the base's as `--alertmanager-config-before`. A backtest through
+`lapilli serve` works the pages out as `lapilli serve` does, from its ledger's
+firings, with the configuration serve was given.
+
 When rules that differ couldn't be replayed, a line under the totals says
 how many, as `unreplayed` counts them, since the numbers leave them out;
 they are listed, with why, under the table. Those that differ but fire as
@@ -141,7 +168,8 @@ What a tool reads is stable:
 - The first line of `--markdown` is a link reference definition, which no
   host shows, holding the summary as JSON; `--json` gives the same object
   as `"summary"`, beside the rest of the report, whose fields are as they
-  were. Every field is always there:
+  were. Every field is always there, but `notifications`, which is there only
+  when the notifications were worked out:
 
   | Field | |
   |---|---|
@@ -151,6 +179,7 @@ What a tool reads is stable:
   | `unreplayed` | rules that differ that couldn't be replayed, on one side or both, for any reason: those of `--json`'s `"unreplayed"` list with a side, each counted once |
   | `recording_changed` | recording rules that differ, listed as `"recording"`: what the alerts that read them see, which no replay shows |
   | `firings_before`, `firings_after` | firings on each side; of the rules that differ alone with `--changed-only` |
+  | `notifications` | left out unless `--alertmanager-config` (or `--grafana`) was given: `worked_out` (always true), `paged_before`, `paged_after`, `notified_before`, `notified_after`, the pages and the notifications the alert manager is worked out to have sent for the firings on each side |
   | `incidents_given` | incidents were given, `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0. The firings were judged only when it is true and `no_record` false |
   | `incidents`, `incidents_changed` | incidents in the period, and those caught differently |
   | `no_record` | incidents were given, and none was on in the period or the two weeks before it (nor `--impact` read): nothing was judged, as without them |

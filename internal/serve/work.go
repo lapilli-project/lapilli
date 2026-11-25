@@ -575,6 +575,9 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		}
 	}
 	now := s.now().Truncate(s.cfg.Step)
+	// A ledger that has firings and began to work the notifications out
+	// since: the days it has, once.
+	s.catchUpRouted(ctx, now)
 	settle := s.cfg.Settle
 	if cursor.IsZero() {
 		cursor, settle = now.Add(-s.cfg.Backfill), 0
@@ -674,6 +677,9 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			return
 		}
 		s.count(kind, "ok")
+		// Who the firings reached, worked out from the ledger for the hours
+		// judged (routed.go).
+		s.workOutRouted(ctx, from, to)
 		s.status.Lock()
 		s.status.took = s.now().Sub(began)
 		// What is wrong with the incidents or deploys file is for reading
