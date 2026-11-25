@@ -36,10 +36,10 @@ services by the names firings and incidents carry: `label_replace` or
 | Stack | `--depends` | `--depends-labels` |
 |---|---|---|
 | Istio | `sum by (caller, callee) (label_join(label_join(rate(istio_requests_total{reporter="source"}[1h]), "caller", "/", "source_workload_namespace", "source_workload"), "callee", "/", "destination_workload_namespace", "destination_workload")) > 0` | `caller,callee` |
-| Linkerd | `sum by (caller, callee) (label_join(label_join(rate(response_total{direction="outbound"}[1h]), "caller", "/", "namespace", "deployment"), "callee", "/", "dst_namespace", "dst_deployment")) > 0` | `caller,callee` |
+| Linkerd | `sum by (caller, callee) (label_join(label_join(rate(response_total{direction="outbound", deployment!="", dst_deployment!=""}[1h]), "caller", "/", "namespace", "deployment"), "callee", "/", "dst_namespace", "dst_deployment")) > 0` | `caller,callee` |
 | An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0` | `client,server` |
 
-Istio's and Linkerd's expressions name a service `namespace/workload`
+Linkerd's selector drops the calls of a workload that isn't a Deployment (no `deployment` label), which `label_join` would otherwise name `shop/`. Istio's and Linkerd's expressions name a service `namespace/workload`
 (`shop/checkout`), joined from the series' namespace and workload labels, on
 both ends. Their own labels are the workload's alone, so `checkout` in `shop`
 and in `staging` would be one node, their calls would join, and a workload in
@@ -48,7 +48,7 @@ another namespace could be taken for the one an incident's service calls. The
 form**: `shop/checkout`, not `checkout`. In an alert rule:
 
 ```yaml
-expr: label_join(sum by (namespace, deployment) (rate(http_requests_total{code=~"5.."}[5m])) > 0.05, "service", "/", "namespace", "deployment")
+expr: label_join(sum by (namespace, deployment) (rate(http_requests_total{code=~"5..", deployment!=""}[5m])) > 0.05, "service", "/", "namespace", "deployment")
 ```
 
 or once, where the series are scraped:
@@ -57,10 +57,21 @@ or once, where the series are scraped:
 metric_relabel_configs:
   - source_labels: [namespace, deployment]
     separator: /
+    regex: (.+/.+)
     target_label: service
 ```
 
-and the same `service: shop/checkout` in the incidents' labels. A firing whose
+The `regex` matters: without it Prometheus's default, `(.*)`, matches the join
+of a series that has no `deployment` (`shop/`, or `/` with no namespace
+either), and writes that as `service`, replacing the `service` such a series
+already had. With it, `service` is written only where both the namespace and
+the workload are there, and every other series keeps its own. (The
+relabelling's `replacement` is `$1` by default, the whole matched join, which
+is what the group holds.) The same holds in the alert rule above: a series
+without `deployment` has no `service` worth the name, so filter it out
+(`deployment!=""` in the selector) rather than let it join as `shop/`.
+
+Give the incidents the same `service: shop/checkout` in their labels. A firing whose
 label is the plain `checkout` agrees with no node, and catches nothing by
 dependency. If that is too much to change, the **plain form** is an option,
 at the cost above (it is safe where each name is in one namespace only):
@@ -74,7 +85,7 @@ An OpenTelemetry or Tempo service graph names its services as the senders set
 them (`service.name`, and `peer.service` for a callee the sender names):
 whoever can send OTLP (or write the metric) shapes the graph, with any service
 they like on either end. That is why a catch made only by dependency doesn't
-count toward `--fail-missed` or a rule being spare unless
+count as a catch for `--fail-missed` or a rule being spare unless
 `--depends-count-missed` says so, and why the graph keeps names of a bounded
 kind (see [What bounds it](#what-bounds-it)).
 
@@ -275,7 +286,8 @@ and asked for from the Settings page on the site.
   incident by its labels would otherwise pass `--fail-missed` for another
   rule's catch by dependency, which whoever can write the graph's series can
   make; and a rule is not called spare for such a catch either, nor does it
-  take a rule's `FIRST` or `ALONE`. The comparison says how many incidents
-  were caught after the change only that way ("caught after it only by
-  dependency", `missed_by_dependency` in `--json`), and
+  take a rule's `FIRST` or `ALONE`. Such an incident is missed, and
+  `--fail-missed` fails; the comparison says how many of the missed were
+  caught after the change only that way ("caught after it only by
+  dependency", `missed_by_dependency` in `--json`, a subset of `missed`), and
   `--depends-count-missed` counts them as caught, as any catch.
