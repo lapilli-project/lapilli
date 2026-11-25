@@ -412,3 +412,60 @@ func TestGrafanaParsedRefused(t *testing.T) {
 		t.Errorf("a Graph read from nothing: %s", s)
 	}
 }
+
+// A Grafana rule on Loki: its LogQL written with other spacing is the same
+// rule, as parsedLogQL reads it, where its text is another.
+func TestGrafanaParsedLogQL(t *testing.T) {
+	b, err := os.ReadFile("../replay/testdata/grafana-13.3.1-loki/rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	spaced := 0
+	for _, g := range doc["groups"].([]any) {
+		for _, r := range g.(map[string]any)["rules"].([]any) {
+			for _, d := range r.(map[string]any)["data"].([]any) {
+				m := d.(map[string]any)["model"].(map[string]any)
+				if e, ok := m["expr"].(string); ok && strings.Contains(e, "{") {
+					m["expr"] = "  " + strings.ReplaceAll(e, ", ", " ,  ") + "\n"
+					spaced++
+				}
+			}
+		}
+	}
+	if spaced == 0 {
+		t.Fatal("no LogQL query to write otherwise")
+	}
+	out, _ := yaml.Marshal(doc)
+	was, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := Parse(out)
+	if err != nil || len(now) != len(was) {
+		t.Fatalf("%d rules, %v", len(now), err)
+	}
+	one, other := 0, 0
+	for i := range was {
+		if was[i].Graph == nil || was[i].Graph.Logs == "" {
+			continue
+		}
+		wp, wok := was[i].Parsed()
+		np, nok := now[i].Parsed()
+		if wok != nok || wp != np {
+			t.Errorf("%s: parsed %t, %t, one %t", was[i].Name, wok, nok, wp == np)
+		}
+		if wok {
+			one++
+		}
+		if was[i].Whole() != now[i].Whole() {
+			other++
+		}
+	}
+	if one == 0 || other == 0 {
+		t.Errorf("%d rules on Loki one as parsed, %d of them another by text", one, other)
+	}
+}

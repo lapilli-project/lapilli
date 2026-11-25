@@ -18,7 +18,7 @@ import (
 //
 // It holds the rule's name, uid, group, folder, for, keepFiringFor, its
 // group's interval and its labels as one map; and its Graph: the queries
-// (a PromQL one through parsedExpr, a LogQL one as its text), the asks the
+// (a PromQL one through parsedExpr, a LogQL one through parsedLogQL), the asks the
 // replay makes of them, the steps (threshold, math, reduce, classic
 // conditions) by value, the condition's ref, each query's end (Shift), its
 // data source's uid, what Grafana does on no data and on an error, how
@@ -72,23 +72,29 @@ func (r Rule) parsedGrafana() (string, bool) {
 		if _, ask := g.Asks[ref]; ask {
 			continue
 		}
-		text := g.Queries[ref]
+		text, ok := g.Queries[ref], false
+		// A Loki query beside a condition on Prometheus (Aside) is LogQL,
+		// as every query of a rule on Loki is.
 		if _, aside := g.Aside[ref]; g.Logs == "" && !aside {
-			var ok bool
-			if text, ok = parsedExpr(text); !ok {
-				return "", false
-			}
+			text, ok = parsedExpr(text)
+		} else {
+			text, ok = parsedLogQL(text)
+		}
+		if !ok {
+			return "", false
 		}
 		w("query", q(ref), q(text))
 	}
 	for _, ref := range slices.Sorted(maps.Keys(g.Asks)) {
 		a := g.Asks[ref]
-		text := a.Expr
-		if !a.Logs {
-			var ok bool
-			if text, ok = parsedExpr(text); !ok {
-				return "", false
-			}
+		text, ok := a.Expr, false
+		if a.Logs {
+			text, ok = parsedLogQL(text)
+		} else {
+			text, ok = parsedExpr(text)
+		}
+		if !ok {
+			return "", false
 		}
 		w("ask", q(ref), q(a.Fn), q(text), strconv.FormatBool(a.Numbers), strconv.FormatBool(a.Counts),
 			dur(a.Window), dur(a.Res), strconv.FormatBool(a.Logs), strconv.FormatBool(a.Classic))
