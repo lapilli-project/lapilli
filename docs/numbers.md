@@ -913,11 +913,12 @@ A rule has `notifications`, counted over its firings:
 | `inhibited` | its firings that were never notified, every flush of them muted by an inhibition rule (a firing held at one flush and sent at the next isn't) |
 | `inhibited_by`† | the `source_rule` that most of those had, each firing weighing once |
 | `grouped` | its firings that went out in a notification with a firing of another rule |
+| `known`, `stopped`† | `known` is false when some hour of its firings wasn't worked out (the model stopped short, or no run reached the hour), and `stopped` says why, as the report's does: the counts above are then of the firings that were worked out, not of all of its firings. In `lapilli serve` it is set from the hours the ledger worked out, for each of the rule's firings from its start to its end |
 
 The report has `notifications`: `worked_out`, always `true`; `notified`,
 `paged` and `on_paging`, the notifications sent that told of a firing, the pages
 among them, and those on a paging integration, each counted once however many
-firings it told of; `groups`; `receivers`, the receivers that page and those the
+firings it told of; `groups`, the distinct groups (route and `group_by` values) the notifications were for, a group that goes on across stretches of hours counted once; `receivers`, the receivers that page and those the
 firings reached, each with `name`, `kinds`, `paging` and `why`; `known`, false
 when the model stopped short; `stopped`†, why it did (more than 100,000 groups, a
 spent work budget, a context that ended): the numbers are then of part of the
@@ -1028,7 +1029,7 @@ holds them, and this list.
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |
 | `rules[].responses` | `changed`, `routine`, `acknowledged`, `unanswered`, `none`, `useful`, `not_useful`, `actionable` |
-| `rules[].notifications` | `notified`, `paged`, `on_paging`, `paged_asleep`, `paged_off_hours`, `paged_for_nothing`, `paged_for_nothing_asleep`, `paged_for_nothing_off_hours`, `inhibited`, `inhibited_by`†, `grouped` |
+| `rules[].notifications` | `notified`, `paged`, `on_paging`, `paged_asleep`, `paged_off_hours`, `paged_for_nothing`, `paged_for_nothing_asleep`, `paged_for_nothing_off_hours`, `inhibited`, `inhibited_by`†, `grouped`, `known`, `stopped`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |

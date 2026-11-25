@@ -24,7 +24,7 @@ var stableFields = map[string][]string{
 	"settings.impact_signals[]":       {"name", "for_ns", "match", "record", "start", "lead_ns"},
 	"settings.impact_rules[]":         {"rules", "labels", "signals", "match", "lead_ns", "require", "judged"},
 	"rules[]":                         {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged", "responses", "notifications"},
-	"rules[].notifications":           {"notified", "paged", "on_paging", "paged_asleep", "paged_off_hours", "paged_for_nothing", "paged_for_nothing_asleep", "paged_for_nothing_off_hours", "inhibited", "inhibited_by", "grouped"},
+	"rules[].notifications":           {"notified", "paged", "on_paging", "paged_asleep", "paged_off_hours", "paged_for_nothing", "paged_for_nothing_asleep", "paged_for_nothing_off_hours", "inhibited", "inhibited_by", "grouped", "known", "stopped"},
 	"rules[].responses":               {"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"},
 	"rules[].marked.*":                {"firings", "caught", "refired", "unjudged"},
 	"rules[].episodes":                {"total", "white", "unjudged", "noisy"},

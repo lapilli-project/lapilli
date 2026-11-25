@@ -116,6 +116,7 @@ func TestRedactEveryField(t *testing.T) {
 		"NotificationReceiver.Kinds":   true,
 		"NotificationMute.Kind":        true,
 		"ReportNotifications.Stopped":  true,
+		"RuleNotifications.Stopped":    true, // the same reason, for a rule
 		"SummaryNotifications.Stopped": true, // the reason a work-out stopped: Lapilli's own words
 		"NotificationSent.Kind":        true, // an integration's kind
 		"NotificationSent.Reason":      true, // first, new, resolved, repeat

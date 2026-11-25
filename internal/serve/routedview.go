@@ -755,8 +755,26 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 	byRule := map[string]*verdict.RuleNotifications{}
 	inhibitors := map[string]map[string]int{}
 	reached := map[string]bool{}
+	// Why a rule's numbers aren't known: some hour of one of its firings
+	// wasn't worked out, the firing from its start to its end (to the
+	// period's end while it still fires).
+	ruleStopped := map[string]string{}
 	for i := range rep.Firings {
 		j := &rep.Firings[i]
+		if ruleStopped[j.Rule] == "" {
+			end := j.End
+			if end.IsZero() || end.Before(j.Start) {
+				end = j.Start
+			}
+			if !end.After(j.Start) {
+				end = j.Start.Add(time.Nanosecond)
+			}
+			if why := cover.Unknown(j.Start, end); why != "" {
+				ruleStopped[j.Rule] = why
+			} else if len(cover.Gaps(j.Start, end)) > 0 {
+				ruleStopped[j.Rule] = "the notifications of some of these hours aren't worked out"
+			}
+		}
 		r, ok := got[j.FiringID]
 		if !ok {
 			continue
@@ -835,6 +853,8 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 		if !ok {
 			n = &verdict.RuleNotifications{}
 		}
+		n.Stopped = ruleStopped[rep.Rules[i].Rule]
+		n.Known = n.Stopped == ""
 		rep.Rules[i].Notifications = n
 	}
 	// The totals of the period, over the hours worked out: each stretch of
@@ -845,6 +865,7 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 	if gaps := cover.Gaps(rep.From, rep.To); len(gaps) > 0 && tot.Stopped == "" {
 		tot.Stopped = "the notifications of some of these hours aren't worked out"
 	}
+	groups := map[string]bool{}
 	for _, iv := range cover {
 		if !iv.Worked {
 			continue
@@ -853,19 +874,28 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 		if !from.Before(to) {
 			continue
 		}
-		n, pg, gr, err := s.l.RoutedTotals(ctx, from, to)
+		n, pg, _, err := s.l.RoutedTotals(ctx, from, to)
 		if err != nil {
 			return err
 		}
 		tot.Notified += n
 		tot.Paged += pg
-		tot.Groups += gr
+		// A group that spans two stretches is one group: count the keys over
+		// the whole period, not each stretch's.
+		keys, err := s.l.RoutedGroupKeys(ctx, from, to)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			groups[k] = true
+		}
 		if by, err := s.l.RoutedByReceiver(ctx, from, to); err == nil {
 			for name := range by {
 				reached[name] = true
 			}
 		}
 	}
+	tot.Groups = len(groups)
 	grafana := s.cfg.AlertmanagerConfig == ""
 	for _, name := range slices.Sorted(maps.Keys(reached)) {
 		rc, _ := cfg.Receiver(name)

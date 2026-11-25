@@ -630,6 +630,23 @@ func (l *Ledger) RoutedTotals(ctx context.Context, from, to time.Time) (notified
 	return
 }
 
+// RoutedGroupKeys are the groups (their stable keys) of the notifications
+// worked out that went in [from, to) and told of a firing. A group that goes
+// on across stretches is the same key in each, so callers join the keys of
+// several stretches and count them once.
+func (l *Ledger) RoutedGroupKeys(ctx context.Context, from, to time.Time) ([]string, error) {
+	var out []string
+	err := l.eachRow(ctx, func(r scanner) error {
+		var g string
+		if err := r.Scan(&g); err != nil {
+			return err
+		}
+		out = append(out, g)
+		return nil
+	}, "SELECT DISTINCT grp FROM routed WHERE at >= ? AND at < ? AND firings > 0", from.Unix(), to.Unix())
+	return out, err
+}
+
 // RoutedByReceiverKind are the notifications worked out that went in
 // [from, to), counted by receiver and the kind of integration.
 func (l *Ledger) RoutedByReceiverKind(ctx context.Context, from, to time.Time) (map[string]map[string]RoutedCount, error) {

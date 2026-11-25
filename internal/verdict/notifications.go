@@ -104,6 +104,12 @@ type RuleNotifications struct {
 	// Grouped are its firings that went out in a notification with other
 	// rules' alerts.
 	Grouped int `json:"grouped"`
+	// Known is false when some hour of its firings wasn't worked out (the
+	// model stopped short, or no run reached it): the numbers above are then
+	// of what was worked out, not of all its firings, and Stopped says why,
+	// as the report's does.
+	Known   bool   `json:"known"`
+	Stopped string `json:"stopped,omitempty"`
 }
 
 // NotificationReceiver is a receiver the report says something of: those
@@ -372,6 +378,7 @@ func (r *Report) WorkOutNotifications(o NotificationOptions) error {
 		if !ok {
 			n = &RuleNotifications{}
 		}
+		n.Known, n.Stopped = res.Stopped == "", res.Stopped
 		r.Rules[i].Notifications = n
 	}
 	rep := &ReportNotifications{WorkedOut: true, Groups: res.Groups, Known: res.Stopped == "", Stopped: res.Stopped,
