@@ -117,9 +117,18 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	// the ledger's days, or weeks.
 	rep.Settings = o.Settings()
 	if d := rep.Settings.Depends; d != nil {
-		// How big the graph it was judged by was, of the ledger's edges.
-		if d.Edges, err = s.l.EdgesIn(ctx, from, to); err != nil {
+		// How big the graph it was judged by was, of the ledger's edges, over
+		// the hours it was loaded for as lapilli verdict reads it: from the
+		// longest lead before the span's start.
+		if d.Edges, err = s.l.EdgesIn(ctx, from.Add(time.Hour-max(o.MaxLead(), time.Hour)), to); err != nil {
 			return nil, err
+		}
+		// And whether a judgement of it was made with none, its incidents'
+		// windows having more edges than are loaded (ledger.MaxJudgeEdges).
+		if over, err := s.l.EdgesOver(ctx, from, to); err != nil {
+			return nil, err
+		} else if over {
+			d.TooMany = true
 		}
 	}
 	if rep.Settings.RecordBy == "" {

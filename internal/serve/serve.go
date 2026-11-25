@@ -452,6 +452,17 @@ type Server struct {
 	log *slog.Logger
 	now func() time.Time
 
+	// depends is the service graph the last options were read with (dependsFor):
+	// what the runs read the graph by, and its key.
+	depends struct {
+		sync.Mutex
+		round dependsConf
+		key   string
+		// over says the last judgement of the runs' hours was made with no
+		// graph (noteGraphOver).
+		over bool
+	}
+
 	// linkedKnown is what this replica knew the ledger was last judged by,
 	// by --linked-only: as found at start, or as it last agreed with its
 	// flag (linkedAgain).

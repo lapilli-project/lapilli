@@ -18,7 +18,8 @@
 
 {{with .Signals}}<p class="rule-signals" id="signals">{{if and .Entry (not .Against)}}{{tbdi "Rule entry #%d names %s, not read: judged by incidents written down alone." .Entry (join .NotRead ", ")}}{{else}}{{if .Entry}}{{t "Rule entry #%d: judged against the windows of %s alone." .Entry (signalsOn .Against)}}{{else}}{{t "Judged against every impact signal's windows: %s." (signalsOn .Against)}}{{end}}
 {{if .NoAlert}} {{t "No alert yet: which of them its record waits for comes with each alert, by its labels."}}{{else if .Never}} {{t "No record by reading them: one of %s keeps none yet." (join .Waits ", ")}}{{else if .From}} {{t "No record by reading them before %s: it waits for %s." (day $loc .FromAt) (join .Waits ", ")}}{{else if not .Waits}} {{t "None of them keeps the record: no record by reading them."}}{{end}}{{end}}</p>
-{{end}}<p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if .Panel.Beside}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>{{if .NotJudged}}
+{{end}}<p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if .Panel.Beside}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>{{if .GraphOver}}
+<div class="notice status-warn"><p><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The last judgement of these hours was made with no graph: its incidents' windows have more edges than a judgement loads, so no catch in it is by dependency. Narrow the expression to the calls between services."}} <a href="{{$.Link "/settings"}}#service-graph">{{t "Service graph"}}</a></p></div>{{end}}{{if .NotJudged}}
 <div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "Judged by nothing, as rule entry #%d says: its firings are counted, never white nor black, and catch nothing." .NotJudgedEntry}}</p></div>{{else if .NoRecord}}
 <div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy."}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a></p>{{template "norecordwhy"}}</div>{{end}}
 {{with .Panel}}<dl class="panel">
@@ -269,7 +270,7 @@ lands here, and is shown the way to it. */}}
 <p class="quiet">{{t "A firing on a service the incident's service calls, by the service graph: its labels didn't agree with the incident's."}}</p>
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "Via"}}</th></tr></thead>
-<tbody>{{range .}}<tr><td><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td><bdi>{{.Via}}</bdi></td></tr>{{end}}</tbody>
+<tbody>{{range .}}<tr><td><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{hops .Path}}</td></tr>{{end}}</tbody>
 </table></div>{{end}}{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>
 

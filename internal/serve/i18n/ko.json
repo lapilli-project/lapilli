@@ -2991,5 +2991,12 @@
  "The services are values of the label %s.": "서비스 이름은 레이블 %s 의 값이에요.",
  "(by dependency, via %s)": "(의존 관계로, 경로 %s)",
  "%d of them caught something only by the service graph (--depends): no labels or link did": "%d건은 서비스 호출 관계로만 정탐이 됐어요(--depends). 레이블이나 링크로는 정탐이 아니었어요",
- "of firings caught something, %d of them only by the service graph": "정탐 비율이에요. 그중 %d건은 서비스 호출 관계로만 정탐이 됐어요"
+ "of firings caught something, %d of them only by the service graph": "정탐 비율이에요. 그중 %d건은 서비스 호출 관계로만 정탐이 됐어요",
+ "Tried %d times; tried again at %s.": "%d번 시도했고, %s에 다시 시도해요.",
+ "The last judgement of these hours was made with no graph: its incidents' windows have more edges than a judgement loads, so no catch in it is by dependency. Narrow the expression to the calls between services.": "이 시간대의 마지막 판정은 호출 관계 없이 이루어졌어요. 장애 시간대의 호출 관계가 한 번의 판정이 불러오는 양보다 많아서, 호출 관계로 잡은 알림이 없어요. 수식을 서비스 사이의 호출만 남기도록 좁혀 주세요.",
+ "Hours the graph wasn't read for: no firing in them is judged by it.": "호출 관계를 읽지 못한 시간대예요. 이 시간대의 알림은 호출 관계로 판정하지 않아요.",
+ "not read": "읽지 않음",
+ "failed to be read, read once more by the next run": "읽기에 실패했고, 다음 실행에서 한 번 더 읽어요",
+ "failed twice, and isn't read again": "두 번 실패해서 더 읽지 않아요",
+ "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "서비스 호출 관계의 각 시계열은 호출하는 쪽과 호출받는 쪽을 레이블로 가리켜요. 수식과 함께 --depends-labels에 호출하는 쪽 레이블과 호출받는 쪽 레이블을 주세요"
 }

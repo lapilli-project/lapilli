@@ -45,6 +45,14 @@ const (
 	MaxEdgesKept   = 5_000_000
 )
 
+// LowerJudgeEdges sets the most edges a judgement loads to n, for tests of
+// what a judgement past it says; the func it returns puts it back.
+func LowerJudgeEdges(n int) (restore func()) {
+	was := maxJudgeEdges
+	maxJudgeEdges = n
+	return func() { maxJudgeEdges = was }
+}
+
 // maxEdgesPerDay and maxEdgesKept are the bounds, which tests lower.
 var (
 	maxEdgesPerDay = MaxEdgesPerDay
@@ -68,6 +76,11 @@ const metaEdgesKey = "edges-key"
 type EdgesRead struct {
 	Graph    *graph.Graph
 	From, To time.Time
+	// Key is what it was read with, as the round that read it had it
+	// (EdgesKey): when the ledger holds another by the time it is kept,
+	// because the graph was changed meanwhile, it isn't kept. "" keeps it
+	// whatever the ledger holds.
+	Key string
 }
 
 // EdgesKey is what the graph the ledger holds was read with, as lapilli
@@ -88,10 +101,10 @@ func (l *Ledger) ReplaceEdges(ctx context.Context, key string, e *EdgesRead) err
 				return err
 			}
 		}
-		if err := l.keepEdges(t, e); err != nil {
+		if err := setMeta(t.ctx, t, metaEdgesKey, key); err != nil {
 			return err
 		}
-		return setMeta(t.ctx, t, metaEdgesKey, key)
+		return l.keepEdges(t, e)
 	})
 }
 
@@ -116,6 +129,13 @@ func (l *Ledger) EdgesKept(ctx context.Context) (rows int64, spans [][2]time.Tim
 	return rows, spans, r.Err()
 }
 
+// AddEdges keeps a graph read over a part of a span being read again after
+// ReplaceEdges, which judges nothing: the ledger is judged again as a whole
+// once the key it is judged by has changed.
+func (l *Ledger) AddEdges(ctx context.Context, e *EdgesRead) error {
+	return l.write(ctx, func(t *txn) error { return l.keepEdges(t, e) })
+}
+
 // KeepEdges keeps a graph read outside a run (a retry, or a read again
 // after a change of the expression), and judges the span again, which a
 // run's own judging doesn't reach.
@@ -126,6 +146,11 @@ func (l *Ledger) KeepEdges(ctx context.Context, e *EdgesRead, o verdict.Options)
 		}
 		if e == nil || e.Graph == nil || e.Graph.TooMany() {
 			return nil
+		}
+		if e.Key != "" {
+			if held, err := l.meta(t.ctx, t, metaEdgesKey); err != nil || held != e.Key {
+				return err
+			}
 		}
 		return pend(t, [][2]int64{{e.From.Unix() - int64(o.MaxLead()/time.Second), e.To.Unix()}})
 	})
@@ -142,6 +167,11 @@ func (l *Ledger) KeepEdges(ctx context.Context, e *EdgesRead, o verdict.Options)
 func (l *Ledger) keepEdges(t *txn, e *EdgesRead) error {
 	if e == nil || e.Graph == nil || e.Graph.TooMany() {
 		return nil
+	}
+	if e.Key != "" {
+		if held, err := l.meta(t.ctx, t, metaEdgesKey); err != nil || held != e.Key {
+			return err
+		}
 	}
 	// Many rows to a statement, in both databases: a four-week read has
 	// millions.

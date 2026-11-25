@@ -173,7 +173,10 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 {{if .On}}{{if .Label}}<p>{{tbdi "The services are values of the label %s." (code .Label)}} {{if .Edges}}{{t "%d edges kept, read over %s → %s." .Edges (at $loc .Since) (at $loc .Until)}}{{end}}</p>
 {{else}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The match in effect has no label to name the services by: no firing is judged by the graph."}}</p>{{end}}
 {{if .Waiting}}<p class="notice status-info"><span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read over the last four weeks, at the next round of the replica that leads."}}</p>{{end}}
-{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{flagsAsCode .}}</p>{{end}}{{end}}
+{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{flagsAsCode .}}{{if not $.V.Next.IsZero}} {{t "Tried %d times; tried again at %s." $.V.Tries (at $loc $.V.Next)}}{{end}}</p>{{end}}
+{{if .Over}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The last judgement of these hours was made with no graph: its incidents' windows have more edges than a judgement loads, so no catch in it is by dependency. Narrow the expression to the calls between services."}}</p>{{end}}
+{{if or .Holes .Failed .Gaps}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "Hours the graph wasn't read for: no firing in them is judged by it."}}</p><ul class="plain">
+{{range .Holes}}<li>{{at $loc (index . 0)}} → {{at $loc (index . 1)}}: {{t "not read"}}</li>{{end}}{{range .Failed}}<li>{{at $loc (index . 0)}} → {{at $loc (index . 1)}}: {{t "failed to be read, read once more by the next run"}}</li>{{end}}{{range .Gaps}}<li>{{at $loc (index . 0)}} → {{at $loc (index . 1)}}: {{t "failed twice, and isn't read again"}}</li>{{end}}</ul>{{if .More}}<p class="quiet">{{t "and %d more" .More}}</p>{{end}}</div>{{end}}{{end}}
 {{with .Tried}}{{template "dependstried" (on $p .)}}{{end}}
 {{end}}{{end}}
 
@@ -186,7 +189,7 @@ verdict in effect and with it. */}}
 {{if .Rules}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Catches it would add"}}"><table>
 <caption>{{t "Catches it would add"}}</caption>
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "By way of"}}</th></tr></thead>
-<tbody>{{range .Rules}}<tr><th scope="row"><bdi>{{.Rule}}</bdi></th><td class="n">{{.Incidents}}</td><td><bdi>{{.Path}}</bdi></td></tr>{{end}}</tbody>
+<tbody>{{range .Rules}}<tr><th scope="row"><bdi>{{.Rule}}</bdi></th><td class="n">{{.Incidents}}</td><td>{{hops .Hops}}</td></tr>{{end}}</tbody>
 </table></div>{{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "The verdict, in effect and with it"}}"><table>
 <caption>{{t "The verdict, in effect and with it"}}</caption>

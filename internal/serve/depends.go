@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"lapilli.dev/internal/graph"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -64,13 +66,28 @@ type dependsConf struct {
 func (c dependsConf) on() bool { return c.Expr != "" && c.From != "" && c.To != "" }
 
 // graphKey tells apart what the edges the ledger holds were read with: the
-// step, the labels and the expression. Not the depth or the direction,
-// which judge what is read and read nothing.
+// step, the labels and a digest of the expression, written in one form
+// (normalExpr), so that its spaces and the order of its matchers don't. Not the depth or the
+// direction, which judge what is read and read nothing. A key that changes,
+// as another expression, labels or step does, discards the edges the ledger
+// holds, which are read again over the last four weeks.
 func (c dependsConf) graphKey() string {
 	if !c.on() {
 		return ""
 	}
-	return verdict.Duration(c.Step) + " " + c.From + "," + c.To + " " + c.Expr
+	h := sha256.Sum256([]byte(normalExpr(c.Expr)))
+	return verdict.Duration(c.Step) + " " + c.From + "," + c.To + " #" + hex.EncodeToString(h[:8])
+}
+
+// normalExpr is an expression as Lapilli reads PromQL and writes it in one
+// form (rules.Rule.Parsed): spaces, comments, the order of matchers and the
+// like are not told apart. One that isn't read so is as it was typed, its
+// space trimmed.
+func normalExpr(expr string) string {
+	if p, ok := (rules.Rule{Name: "depends", Expr: expr}).Parsed(); ok {
+		return p
+	}
+	return strings.TrimSpace(expr)
 }
 
 // labelOf is the label of the match whose values are the graph's services:
@@ -154,7 +171,22 @@ func (s *Server) dependsFor(ctx context.Context, set map[string]ledger.Setting, 
 	if err != nil || held != c.graphKey() {
 		return nil, err
 	}
+	// What the round reads the graph with, by its key (roundDepends).
+	s.depends.Lock()
+	s.depends.round, s.depends.key = c, c.graphKey()
+	s.depends.Unlock()
 	return &verdict.Dependencies{Label: label, Depth: c.Depth, Direction: c.Direction, Key: c.graphKey()}, nil
+}
+
+// roundDepends is the service graph a round judges by, as its options had it
+// (dependsFor), when its key is key: ok false when it isn't, because the
+// graph was changed since, which the next round reads again. What a run
+// reads and keeps is of the round's graph, never of another a save made
+// meanwhile.
+func (s *Server) roundDepends(key string) (dependsConf, bool) {
+	s.depends.Lock()
+	defer s.depends.Unlock()
+	return s.depends.round, key != "" && s.depends.key == key
 }
 
 // dependsKey is what the ledger's stones are judged by of the service graph:
@@ -178,9 +210,9 @@ func dependsKey(o verdict.Options) string {
 var errDependsTooMany = fmt.Errorf("the service graph has more than %d edges in an hour: none of it is kept, and no firing is judged by it. Narrow --depends to the calls between services (sum by the two labels)", graph.MaxEdgesPerHour)
 
 // readGraph reads the graph c says over [from, to], with the lead before
-// from, as the verdict side reads it, within --timeout.
-func (s *Server) readGraph(parent context.Context, c dependsConf, from, to time.Time, lead time.Duration) (*ledger.EdgesRead, error) {
-	ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
+// from, as the verdict side reads it, within the time given.
+func (s *Server) readGraph(parent context.Context, c dependsConf, from, to time.Time, lead, within time.Duration) (*ledger.EdgesRead, error) {
+	ctx, cancel := context.WithTimeout(parent, within)
 	defer cancel()
 	from = from.Add(-max(lead, time.Hour))
 	g, err := graph.Read(ctx, s.h, c.query(), from, to)
@@ -190,21 +222,61 @@ func (s *Server) readGraph(parent context.Context, c dependsConf, from, to time.
 	if g.TooMany() {
 		return nil, errDependsTooMany
 	}
-	return &ledger.EdgesRead{Graph: g, From: from, To: to}, nil
+	return &ledger.EdgesRead{Graph: g, From: from, To: to, Key: c.graphKey()}, nil
 }
 
-// readEdges is the graph a run reads, over its hours: a read that fails is
-// kept as a span the next run reads once more (retryEdges), and until then
-// the incidents in it are judged by what the ledger holds.
+// edgesFailed keeps in the ledger that reading the graph failed, and why, for
+// the Settings page of any replica, until a read goes well (edgesWell). The
+// backoff of a read over the last four weeks it had is kept.
+func (s *Server) edgesFailed(ctx context.Context, key string, err error) {
+	s.fail("depends", err)
+	st, _ := s.l.EdgesStatus(ctx)
+	if st.Key != key {
+		st = ledger.EdgesStatus{Key: key}
+	}
+	st.Error, st.At = promText(err), s.now()
+	if err := s.l.SetEdgesStatus(context.WithoutCancel(ctx), st); err != nil {
+		s.log.Warn("why the service graph couldn't be read wasn't kept", "err", err)
+	}
+}
+
+// edgesWell clears what was kept of a failed read of the graph with that key:
+// it was read. What was kept of another's, a change not read yet, stays.
+func (s *Server) edgesWell(ctx context.Context, key string) {
+	if st, err := s.l.EdgesStatus(ctx); err == nil && st.Key != "" && st.Key != key {
+		return
+	}
+	if err := s.l.SetEdgesStatus(context.WithoutCancel(ctx), ledger.EdgesStatus{}); err != nil {
+		s.log.Warn("the service graph was read, and what was kept of a failed read stays", "err", err)
+	}
+}
+
+// readEdges is the graph a run reads, over its hours, of the graph the
+// round judges by (roundDepends): a read that fails is kept as a span the next
+// run reads once more (retryEdges), and until then the incidents in it are
+// judged by what the ledger holds. Not read while the ledger holds as many
+// edges as it keeps (ledger.MaxEdgesKept), and not kept when a day of it has
+// more than ledger.MaxEdgesPerDay: the status says so, and the hours are a
+// gap in the spans read.
 func (s *Server) readEdges(ctx context.Context, o verdict.Options, from, to time.Time) *ledger.EdgesRead {
-	c, err := s.currentDepends(ctx)
-	if err != nil || !c.on() || o.Depends == nil {
+	if o.Depends == nil {
 		return nil
 	}
-	e, err := s.readGraph(ctx, c, from, to, o.MaxLead())
+	c, ok := s.roundDepends(o.Depends.Key)
+	if !ok || !c.on() {
+		return nil
+	}
+	if have, _, err := s.l.EdgesKept(ctx); err == nil && have >= ledger.MaxEdgesKept {
+		s.edgesFailed(ctx, o.Depends.Key, ledger.ErrEdgesKept)
+		return nil
+	}
+	e, err := s.readGraph(ctx, c, from, to, o.MaxLead(), s.cfg.Timeout)
+	if err == nil {
+		err = s.l.EdgesFit(ctx, e, false)
+	}
 	if err != nil {
-		s.fail("depends", err)
-		if !errors.Is(err, errDependsTooMany) {
+		s.edgesFailed(ctx, o.Depends.Key, err)
+		if !errors.Is(err, errDependsTooMany) && !errors.Is(err, ledger.ErrEdgesPerDay) && !errors.Is(err, ledger.ErrEdgesKept) {
 			start := from.Add(-max(o.MaxLead(), time.Hour))
 			if err := s.l.EdgeFailed(context.WithoutCancel(ctx), start, to); err != nil {
 				s.log.Warn("a span whose service graph couldn't be read wasn't kept to be read again", "from", start, "to", to, "err", err)
@@ -212,12 +284,16 @@ func (s *Server) readEdges(ctx context.Context, o verdict.Options, from, to time
 		}
 		return nil
 	}
+	s.edgesWell(ctx, o.Depends.Key)
 	return e
 }
 
 // retryEdges reads once more the spans earlier runs couldn't read the graph
-// of, and keeps what it finds (judging them again). A span that fails again
-// is let go: it is tried once.
+// of, and keeps what it finds (judging them again), of the graph the round
+// judges by. A span that fails again is kept as a gap, a known hole in the
+// graph the Settings page shows, and isn't tried again. Each read is within
+// tryWithin, not --timeout, so that a history that fails holds the jobs of
+// the replica that leads for as little as it may.
 func (s *Server) retryEdges(ctx context.Context, o verdict.Options) {
 	if o.Depends == nil {
 		return
@@ -227,20 +303,26 @@ func (s *Server) retryEdges(ctx context.Context, o verdict.Options) {
 		s.log.Warn("the spans whose service graph wasn't read couldn't be listed", "err", err)
 		return
 	}
-	c, err := s.currentDepends(ctx)
-	if err != nil || !c.on() {
+	c, ok := s.roundDepends(o.Depends.Key)
+	if !ok || !c.on() {
 		return
 	}
 	for _, sp := range spans {
-		e, err := s.readGraph(ctx, c, sp[0], sp[1], 0)
+		e, err := s.readGraph(ctx, c, sp[0], sp[1], 0, min(s.cfg.Timeout, tryWithin))
 		if err == nil {
 			// readGraph reaches an hour back from the span's start, which
 			// the span already did.
 			e.From = sp[0]
-			err = s.l.KeepEdges(context.WithoutCancel(ctx), e, o)
+			if err = s.l.EdgesFit(ctx, e, false); err == nil {
+				err = s.l.KeepEdges(context.WithoutCancel(ctx), e, o)
+			}
 		}
 		if err != nil {
-			s.log.Warn("the service graph read again for a span a run couldn't read it for failed too, and isn't tried again", "from", sp[0], "to", sp[1], "err", err)
+			s.log.Warn("the service graph read again for a span a run couldn't read it for failed too: it is a known gap, and isn't tried again", "from", sp[0], "to", sp[1], "err", err)
+			if err := s.l.EdgeGaveUp(context.WithoutCancel(ctx), sp[0]); err != nil {
+				s.log.Warn("a span whose service graph failed to be read again wasn't kept as a gap", "from", sp[0], "err", err)
+			}
+			continue
 		}
 		if err := s.l.EdgeRetried(context.WithoutCancel(ctx), sp[0]); err != nil {
 			s.log.Warn("a span whose service graph was read again wasn't dropped", "from", sp[0], "err", err)
@@ -257,15 +339,30 @@ func (s *Server) currentDepends(ctx context.Context) (dependsConf, error) {
 	return s.dependsOf(set), nil
 }
 
+// dependsAgainPiece is how much of the last four weeks a read reads at once
+// (a variable for tests): a week, so that what a read couldn't reach is the weeks it failed over,
+// not all four.
+var dependsAgainPiece = 7 * 24 * time.Hour
+
+// dependsAgainBackoff is how long after its tries a read over the last four
+// weeks that failed isn't tried again: an hour, then two, four, up to a day,
+// as impactAgain's.
+func dependsAgainBackoff(tries int) time.Duration {
+	return min(time.Hour<<min(max(tries-1, 0), 5), 24*time.Hour)
+}
+
 // dependsAgain does what a change of the graph asks, at the leader's round,
 // before the options are read: the edges the ledger holds were read with
 // another expression, labels or step than the one in effect (started with,
 // or saved), so they are dropped and the graph is read over the last four
-// weeks, and the ledger judged again with it (its key changes what the
-// stones are judged by, linkedText); turned off, they are dropped. A read
-// that fails leaves the ledger as it was, judged with no graph, and is tried
-// again at the next round. Before the first run there is nothing to read:
-// the runs read it from their start.
+// weeks, a week at a time within tryWithin each, and the ledger judged again
+// with it (its key changes what the stones are judged by, linkedText);
+// turned off, they are dropped. The weeks that read are kept and those that
+// didn't are read once more by the next run, then a known gap. A read that
+// reaches none leaves the ledger as it was, judged with no graph, and is
+// tried again an hour later, then two, up to a day (ledger.EdgesStatus), so
+// that a history that fails isn't asked every round. Before the first run
+// there is nothing to read: the runs read it from their start.
 func (s *Server) dependsAgain(ctx context.Context) {
 	c, err := s.currentDepends(ctx)
 	if err != nil {
@@ -281,29 +378,95 @@ func (s *Server) dependsAgain(ctx context.Context) {
 	if held == want {
 		return
 	}
-	var e *ledger.EdgesRead
+	var cursor time.Time
 	if want != "" {
-		cursor, err := s.l.Cursor(ctx)
-		if err != nil {
+		if cursor, err = s.l.Cursor(ctx); err != nil {
 			s.fail("the ledger", err)
 			return
 		}
-		if !cursor.IsZero() {
-			from, err := s.againFrom(ctx, cursor)
-			if err != nil {
-				s.fail("the ledger", err)
+	}
+	if cursor.IsZero() {
+		if err := s.l.ReplaceEdges(ctx, want, nil); err != nil {
+			s.fail("depends", err)
+			return
+		}
+		s.edgesWell(ctx, want)
+		return
+	}
+	now := s.now()
+	st, err := s.l.EdgesStatus(ctx)
+	if err != nil {
+		s.fail("the ledger", err)
+		return
+	}
+	if st.Key == want && now.Before(st.Next) {
+		return
+	}
+	from, err := s.againFrom(ctx, cursor)
+	if err != nil {
+		s.fail("the ledger", err)
+		return
+	}
+	s.status.set("reading the service graph over the last four weeks")
+	within := min(s.cfg.Timeout, tryWithin)
+	replaced := false
+	var failed [][2]time.Time
+	var firstErr error
+	pieces := 0
+	for a := from; a.Before(cursor); a = a.Add(dependsAgainPiece) {
+		b := a.Add(dependsAgainPiece)
+		if b.After(cursor) {
+			b = cursor
+		}
+		lead := time.Duration(0)
+		if a.Equal(from) {
+			lead = s.cfg.Options.MaxLead()
+		}
+		pieces++
+		e, err := s.readGraph(ctx, c, a, b, lead, within)
+		if err == nil {
+			err = s.l.EdgesFit(ctx, e, !replaced)
+		}
+		if err == nil && !replaced {
+			if err = s.l.ReplaceEdges(ctx, want, e); err == nil {
+				replaced = true
+			}
+		} else if err == nil {
+			err = s.l.AddEdges(ctx, e)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
 				return
 			}
-			s.status.set("reading the service graph over the last four weeks")
-			if e, err = s.readGraph(ctx, c, from, cursor, s.cfg.Options.MaxLead()); err != nil {
-				s.fail("depends", fmt.Errorf("read again over the last four weeks, and tried again at the next round: %w", err))
-				return
+			if firstErr == nil {
+				firstErr = err
 			}
+			failed = append(failed, [2]time.Time{a, b})
 		}
 	}
-	if err := s.l.ReplaceEdges(ctx, want, e); err != nil {
-		s.fail("depends", err)
+	if !replaced {
+		// None read: as it was, and not again before a while.
+		tries := 1
+		if st.Key == want {
+			tries = st.Tries + 1
+		}
+		s.fail("depends", fmt.Errorf("read again over the last four weeks, and tried again in %s: %w", verdict.Duration(dependsAgainBackoff(tries)), firstErr))
+		next := ledger.EdgesStatus{Key: want, Error: promText(firstErr), At: now, Tries: tries, Next: now.Add(dependsAgainBackoff(tries))}
+		if err := s.l.SetEdgesStatus(context.WithoutCancel(ctx), next); err != nil {
+			s.log.Warn("why the service graph couldn't be read wasn't kept", "err", err)
+		}
+		return
 	}
+	for _, sp := range failed {
+		if err := s.l.EdgeFailed(context.WithoutCancel(ctx), sp[0], sp[1]); err != nil {
+			s.log.Warn("a span whose service graph couldn't be read wasn't kept to be read again", "from", sp[0], "to", sp[1], "err", err)
+		}
+	}
+	if len(failed) > 0 {
+		s.edgesFailed(ctx, want, fmt.Errorf("%d of %d parts of the last four weeks couldn't be read, and are read once more by the next run: %w", len(failed), pieces, firstErr))
+		return
+	}
+	s.edgesWell(ctx, want)
 }
 
 // dependsChanged says the Settings page changed any of the service graph's
@@ -331,4 +494,25 @@ func (s *Server) graphed(ctx context.Context, o verdict.Options, incs []incident
 		return o
 	}
 	return g
+}
+
+// noteGraphOver says in the log, once, when a judgement of the run's hours
+// was made with no graph, its incidents' windows having more edges than are
+// loaded (ledger.MaxJudgeEdges), and once more when it no longer is.
+func (s *Server) noteGraphOver(ctx context.Context, from, to time.Time) {
+	over, err := s.l.EdgesOver(ctx, from, to)
+	if err != nil {
+		return
+	}
+	s.depends.Lock()
+	was := s.depends.over
+	s.depends.over = over
+	s.depends.Unlock()
+	switch {
+	case over && !was:
+		s.log.Warn("the service graph of the incidents' windows has more edges than a judgement loads: the firings of these hours are judged by none, and no catch is by dependency",
+			"max", ledger.MaxJudgeEdges, "from", from, "to", to)
+	case !over && was:
+		s.log.Info("the service graph of the incidents' windows is loaded for a judgement again")
+	}
 }
