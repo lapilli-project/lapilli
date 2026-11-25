@@ -1114,7 +1114,6 @@ func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.O
 	if last, _ := l.UnitBounds(o, us[len(us)-1]); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
 		return true, nil
 	}
-	_ = ut
 	// With no named signal in effect, a named signal's window is one of a
 	// signal not in effect: it keeps no record.
 	var n int
