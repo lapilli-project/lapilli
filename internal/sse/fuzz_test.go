@@ -24,7 +24,7 @@ func FuzzParseMath(f *testing.F) {
 // find its comparisons, set one's number, and work out what one decides.
 // None of it panics, and what is written back parses again to the same.
 func FuzzComparisons(f *testing.F) {
-	for _, s := range []string{`$A > 0.9 && $B < 10`, `($A > 1 || 2 <= $B) && !($C >= 3)`, `abs($A) > 2 || $B ^ 2 <= -1`, `$A > $B && ${C D} < 1e3`} {
+	for _, s := range []string{`$A > 0.9 && $B < 10`, `($A > 1 || 2 <= $B) && !($C >= 3)`, `abs($A) > 2 || $B * 2 <= -1`, `$A > $B && ${C D} < 1e3`} {
 		f.Add(s, 1)
 	}
 	f.Fuzz(func(t *testing.T, s string, i int) {

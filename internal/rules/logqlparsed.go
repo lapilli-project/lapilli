@@ -2,6 +2,8 @@ package rules
 
 import (
 	"math"
+	"regexp"
+	"regexp/syntax"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,9 +46,16 @@ import (
 // before anything but a number, two numbers in a binary operation (which
 // Loki works out as it reads), a label named as one of its words, a
 // character in ' (which is no string in Loki), a // or /* comment (which
-// its scanner skips), and any space or comment inside a range's brackets or
-// between a function's name and its parenthesis, which Loki doesn't read
-// as it does elsewhere.
+// its scanner skips), and any space or comment inside a range's brackets
+// (a space between a function's name and its parenthesis is read, as Loki
+// does, but a comment there isn't). What Loki refuses (the checks of
+// parser.go and ast.go as well as the grammar) isn't read either: a
+// selector whose matchers all match an empty value, a regular expression
+// it can't compile, a grouping on a range aggregation that takes none, or
+// on approx_topk or on sort with labels, an unwrap where the aggregation
+// takes none or none where it needs one, an offset of a bare 0, a regexp
+// stage with no named group, a pattern with no named capture, and a - that
+// its lexer reads as a duration's (sum(x) > -0).
 //
 // It is held as Lapilli holds every expression: 16 KiB, 32 levels of
 // brackets at most.
@@ -98,6 +107,16 @@ var (
 		"first_over_time": true, "last_over_time": true, "absent_over_time": true}
 	lqVectorOps = map[string]bool{"sum": true, "avg": true, "max": true, "min": true, "count": true, "stddev": true,
 		"stdvar": true, "bottomk": true, "topk": true, "sort": true, "sort_desc": true, "approx_topk": true}
+	// What Loki 3.7.9 lets a range aggregation take (RangeAggregationExpr
+	// .validate): a grouping, an unwrap, and none.
+	lqRangeGrouped = map[string]bool{"avg_over_time": true, "stddev_over_time": true, "stdvar_over_time": true,
+		"quantile_over_time": true, "max_over_time": true, "min_over_time": true, "first_over_time": true,
+		"last_over_time": true}
+	lqRangeUnwrapped = map[string]bool{"avg_over_time": true, "sum_over_time": true, "max_over_time": true,
+		"min_over_time": true, "stddev_over_time": true, "stdvar_over_time": true, "quantile_over_time": true,
+		"rate": true, "rate_counter": true, "absent_over_time": true, "first_over_time": true, "last_over_time": true}
+	lqRangePlain = map[string]bool{"bytes_over_time": true, "bytes_rate": true, "count_over_time": true, "rate": true,
+		"absent_over_time": true}
 	lqFuncWords = map[string]bool{"vector": true, "bytes": true, "duration": true, "duration_seconds": true}
 )
 
@@ -131,6 +150,28 @@ func (p *lq) peek() byte {
 	return 0
 }
 
+// minusDuration says the - at i is, to Loki's lexer, the start of a
+// DURATION: it reads on past a - the digits, the letters of a duration's
+// units and dots that follow with no space, and takes the whole as a
+// duration when Go's time.ParseDuration does (-0, -5m, -1.5s), as the
+// fallback of lex.go's parseDuration. Where only a number may be, that is a
+// syntax error (sum(x) > -0, sum(x) -0); in a label filter it is a duration
+// filter (x > -0 is x>0s), where -0.0, -00 and - 0 are a number's.
+func (p *lq) minusDuration() bool {
+	if p.peek() != '-' {
+		return false
+	}
+	j := p.i + 1
+	for j < len(p.s) && (pqDigit(p.s[j]) || p.s[j] == '.' || strings.IndexByte("nushmdwy", p.s[j]) >= 0) {
+		j++
+	}
+	if j == p.i+1 {
+		return false
+	}
+	_, err := time.ParseDuration(p.s[p.i:j])
+	return err == nil
+}
+
 func (p *lq) expect(c byte) {
 	if p.peek() != c {
 		p.bad = true
@@ -158,7 +199,10 @@ func (p *lq) fnAhead(j int) bool {
 	if q.peek() == '(' {
 		return true
 	}
-	rest := strings.ToLower(q.s[q.i:])
+	// Only what a word needs of what follows: lowering all of it for each
+	// word would be quadratic. 32 bytes are at least 8 runes, and a rune
+	// lowers to a byte at least.
+	rest := strings.ToLower(q.s[q.i:min(len(q.s), q.i+32)])
 	for _, w := range []string{"by", "without"} {
 		if strings.HasPrefix(rest, w) {
 			q.i += len(w)
@@ -247,6 +291,11 @@ func lqFloat(v float64) string { return "n:" + strconv.FormatFloat(v, 'g', -1, 6
 // lqDuration is a duration's value as Loki reads one outside brackets
 // (lexer's parseDuration): Prometheus's, or else Go's (1.5s, 5m0s).
 func lqDuration(tok string) (time.Duration, bool) {
+	// A number with no unit (0 among them) is a NUMBER to Loki's lexer,
+	// which an offset refuses.
+	if pqDecimal(tok) {
+		return 0, false
+	}
 	if d, ok := pqDuration(tok); ok {
 		return d, true
 	}
@@ -312,6 +361,10 @@ func (p *lq) binop() (string, int) {
 	case '>', '<':
 		return string(c), 3
 	case '+', '-':
+		if p.minusDuration() {
+			p.bad = true
+			return "", 0
+		}
 		return string(c), 4
 	case '*', '%':
 		return string(c), 5
@@ -346,6 +399,10 @@ func (p *lq) operand() lqNode {
 		return n
 	case c == '+' || c == '-' || pqDigit(c) || c == '.':
 		neg := false
+		if p.minusDuration() {
+			p.bad = true
+			return lqNode{}
+		}
 		if c == '+' || c == '-' {
 			neg = c == '-'
 			p.i++
@@ -386,10 +443,10 @@ func (p *lq) operand() lqNode {
 
 // grouping reads by or without and its labels, if one is at i; as written:
 // none for by (), which is a vector's none; sorted, as a set of labels.
-func (p *lq) grouping() (string, bool) {
+func (p *lq) grouping() (string, int, bool) {
 	w := strings.ToLower(p.word())
 	if w != "by" && w != "without" {
-		return "", false
+		return "", 0, false
 	}
 	p.i += len(w)
 	p.space()
@@ -408,7 +465,7 @@ func (p *lq) grouping() (string, bool) {
 	}
 	p.expect(')')
 	slices.Sort(labels)
-	return " " + w + " (" + strings.Join(labels, ",") + ")", true
+	return " " + w + " (" + strings.Join(labels, ",") + ")", len(labels), true
 }
 
 // rangeAgg reads a range aggregation's arguments, after its (: quantile's
@@ -427,13 +484,19 @@ func (p *lq) rangeAgg(op string) string {
 	if (op == "quantile_over_time") != (param != "") {
 		p.bad = true
 	}
-	r := p.logRange()
+	r, unwrapped := p.logRange()
 	p.space()
 	p.expect(')')
 	g := ""
 	if !p.bad {
 		p.space()
-		g, _ = p.grouping()
+		var grouped bool
+		g, _, grouped = p.grouping()
+		// Loki's RangeAggregationExpr.validate: a grouping only on these,
+		// and an unwrap only on, and only without it on, these.
+		if grouped && !lqRangeGrouped[op] || unwrapped && !lqRangeUnwrapped[op] || !unwrapped && !lqRangePlain[op] {
+			p.bad = true
+		}
 	}
 	return op + "(" + param + r + ")" + g
 }
@@ -442,7 +505,7 @@ func (p *lq) rangeAgg(op string) string {
 // before its parentheses or after them, and its arguments, topk's number
 // among them.
 func (p *lq) vectorAgg(op string) string {
-	g, before := p.grouping()
+	g, n, before := p.grouping()
 	p.ws()
 	p.expect('(')
 	p.space()
@@ -460,9 +523,15 @@ func (p *lq) vectorAgg(op string) string {
 	e := p.expr(0)
 	p.space()
 	p.expect(')')
+	grouped := before
 	if !p.bad && !before {
 		p.space()
-		g, _ = p.grouping()
+		g, n, grouped = p.grouping()
+	}
+	// Loki refuses any grouping on approx_topk, and one with labels on
+	// sort and sort_desc (validateSortGrouping).
+	if grouped && op == "approx_topk" || n > 0 && (op == "sort" || op == "sort_desc") {
+		p.bad = true
 	}
 	if g == " by ()" {
 		g = ""
@@ -479,7 +548,14 @@ func (p *lq) labelReplace() string {
 		p.space()
 		p.expect(',')
 		p.space()
-		out += "," + strconv.Quote(p.str())
+		v := p.str()
+		if i == 3 {
+			// Loki compiles ^(?:re)$ (mustNewLabelReplaceExpr).
+			if _, err := regexp.Compile("^(?:" + v + ")$"); err != nil {
+				p.bad = true
+			}
+		}
+		out += "," + strconv.Quote(v)
 	}
 	p.space()
 	p.expect(')')
@@ -491,7 +567,7 @@ func (p *lq) labelReplace() string {
 // then the range and an offset; or the selector, the range and an offset,
 // then its pipeline and its unwrap. Written as the first. After an unwrap,
 // only label filters.
-func (p *lq) logRange() string {
+func (p *lq) logRange() (string, bool) {
 	p.space()
 	out := p.selector()
 	var stages []string
@@ -551,7 +627,7 @@ func (p *lq) logRange() string {
 	if unwrap != "" {
 		out += " " + unwrap + strings.Join(append([]string{""}, post...), " ")
 	}
-	return out + ranged
+	return out + ranged, unwrap != ""
 }
 
 // selector reads a stream selector: matchers in any order, written sorted.
@@ -559,30 +635,73 @@ func (p *lq) logRange() string {
 func (p *lq) selector() string {
 	p.expect('{')
 	var ms []string
+	anchored := false
 	for !p.bad {
 		p.space()
 		if len(ms) > 0 {
 			p.expect(',')
 			p.space()
 		}
-		ms = append(ms, p.matcher())
+		m, empty := p.matcher()
+		ms = append(ms, m)
+		anchored = anchored || !empty
 		p.space()
 		if p.peek() == '}' {
 			p.i++
 			break
 		}
 	}
+	// Loki refuses a selector whose matchers all match an empty value
+	// (validateMatchers: {a=~".*"}, {a!="b"}).
+	if !anchored {
+		p.bad = true
+	}
 	slices.Sort(ms)
 	return "{" + strings.Join(ms, ",") + "}"
 }
 
-// matcher reads a label, =, !=, =~ or !~ and a string.
-func (p *lq) matcher() string {
+// lqMatchesEmpty says whether a matcher matches an empty value, as Loki's
+// (Prometheus's labels.Matcher) does, and refuses one it can't make: a
+// regular expression it doesn't parse. Prometheus matches it as
+// ^(?s:re)$, from the expression parsed with Perl syntax and the dot
+// taking a newline (labels.NewFastRegexMatcher); a literal "a|b" and the
+// like aren't parsed, and are as good.
+func lqMatchesEmpty(op, v string) (empty, ok bool) {
+	switch op {
+	case "=":
+		return v == "", true
+	case "!=":
+		return v != "", true
+	}
+	re, ok := lqRegexp(v)
+	if !ok {
+		return false, false
+	}
+	m := re.MatchString("")
+	return m == (op == "=~"), true
+}
+
+// lqRegexp is a matcher's regular expression, as Prometheus compiles it.
+func lqRegexp(v string) (*regexp.Regexp, bool) {
+	parsed, err := syntax.Parse(v, syntax.Perl|syntax.DotNL)
+	if err != nil {
+		return nil, false
+	}
+	re, err := regexp.Compile("^(?s:" + parsed.String() + ")$")
+	return re, err == nil
+}
+
+// matcher reads a label, =, !=, =~ or !~ and a string, and says whether it
+// matches an empty value.
+func (p *lq) matcher() (string, bool) {
 	name := p.ident()
 	p.space()
 	op := p.matchOp()
 	p.space()
-	return name + op + strconv.Quote(p.str())
+	v := p.str()
+	empty, ok := lqMatchesEmpty(op, v)
+	p.bad = p.bad || !ok
+	return name + op + strconv.Quote(v), empty
 }
 
 func (p *lq) matchOp() string {
@@ -628,7 +747,11 @@ func (p *lq) stage() lqStage {
 	case "regexp", "pattern", "line_format":
 		p.i += len(w)
 		p.space()
-		return lqStage{'o', "| " + w + " " + strconv.Quote(p.str())}
+		v := p.str()
+		if w == "regexp" && !lqRegexpParser(v) || w == "pattern" && !lqPatternParser(v) {
+			p.bad = true
+		}
+		return lqStage{'o', "| " + w + " " + strconv.Quote(v)}
 	case "unpack", "decolorize":
 		p.i += len(w)
 		return lqStage{'o', "| " + w}
@@ -702,7 +825,11 @@ func (p *lq) namedMatchers() string {
 			p.space()
 			op := p.matchOp()
 			p.space()
-			return name + op + strconv.Quote(p.str())
+			v := p.str()
+			if _, ok := lqMatchesEmpty(op, v); !ok {
+				p.bad = true
+			}
+			return name + op + strconv.Quote(v)
 		}
 		return name
 	})
@@ -750,7 +877,11 @@ func (p *lq) labelFilter() string {
 		if op == "==" || op[0] == '>' || op[0] == '<' {
 			p.bad = true
 		}
-		return name + op + strconv.Quote(p.str())
+		v := p.str()
+		if _, ok := lqMatchesEmpty(op, v); !ok {
+			p.bad = true
+		}
+		return name + op + strconv.Quote(v)
 	}
 	if op == "=~" || op == "!~" {
 		p.bad = true
@@ -761,6 +892,12 @@ func (p *lq) labelFilter() string {
 	}
 	signed := p.peek() == '+' || p.peek() == '-'
 	neg := p.peek() == '-'
+	if p.minusDuration() {
+		// A duration filter to Loki (x > -0 is x>0s, a number filter's
+		// -0.0 and - 0 another): not told from a number's, so not read.
+		p.bad = true
+		return ""
+	}
 	if signed {
 		p.i++
 		p.space()
@@ -779,4 +916,58 @@ func (p *lq) labelFilter() string {
 		v = -v
 	}
 	return name + op + lqFloat(v)
+}
+
+// lqRegexpParser says Loki takes a regexp stage's expression
+// (log.NewRegexpParser): it compiles, with at least one named group, each
+// name once.
+func lqRegexpParser(v string) bool {
+	re, err := regexp.Compile(v)
+	if err != nil || re.NumSubexp() == 0 {
+		return false
+	}
+	named := map[string]bool{}
+	for _, n := range re.SubexpNames() {
+		if n != "" {
+			if named[n] {
+				return false
+			}
+			named[n] = true
+		}
+	}
+	return len(named) > 0
+}
+
+// lqPatternParser says Loki takes a pattern stage's expression
+// (pattern.New): literal text and captures, <name> or <_>, a named one at
+// least, none beside another, no name twice. A name is a letter or _ and then
+// letters, digits and _ (its lexer's identifier).
+func lqPatternParser(v string) bool {
+	named := map[string]bool{}
+	last := false // the last node was a capture
+	for i := 0; i < len(v); {
+		if v[i] == '<' {
+			j := i + 1
+			for j < len(v) && (lqLetter(v[j]) || j > i+1 && pqDigit(v[j])) {
+				j++
+			}
+			if j > i+1 && j < len(v) && v[j] == '>' {
+				if last {
+					return false
+				}
+				last = true
+				if name := v[i+1 : j]; name != "_" {
+					if named[name] {
+						return false
+					}
+					named[name] = true
+				}
+				i = j + 1
+				continue
+			}
+		}
+		last = false
+		i++
+	}
+	return len(named) > 0
 }

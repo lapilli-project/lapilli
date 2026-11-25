@@ -3,6 +3,7 @@ package rules
 import (
 	"encoding/json"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,7 +28,7 @@ import (
 // has from a query's node that the Graph folds away or doesn't keep: its
 // relativeTimeRange, instant and range, hide and format (and, of a query
 // on a data source not replayed, its whole model); a reduce's mode and
-// replacement; a threshold's unloadEvaluator. A field Grafana fills in
+// replacement (replaceWithValue); a threshold's unloadEvaluator. A field Grafana fills in
 // where the file leaves it out is read as it is filled in (intervalMs,
 // maxDataPoints, a reduce's mode, a query's range), and one that changes
 // nothing in the evaluation (a model's datasource, refId, legendFormat,
@@ -178,13 +179,34 @@ func (r Rule) parsedGrafana() (string, bool) {
 			}
 			switch str(model["type"]) {
 			case "reduce":
-				set, _ := model["settings"].(map[string]any)
-				switch mode := str(set["mode"]); mode {
-				case "", "strict", "dropNN":
-					w("reduce", q(ref), q(str(model["reducer"])), q(ifEmpty(mode, "strict")))
+				// Grafana 13.3 (pkg/expr UnmarshalReduceCommand): settings
+				// is a map or it is an error; a mode is "" (none), dropNN
+				// or replaceNN, any other an error ("strict" among them);
+				// replaceNN has replaceWithValue, a number. What Grafana
+				// refuses is no rule that fires.
+				set := map[string]any{}
+				if v, has := model["settings"]; has {
+					m, isMap := v.(map[string]any)
+					if !isMap {
+						return "", false
+					}
+					set = m
+				}
+				mode := ""
+				if v, has := set["mode"]; has {
+					var isStr bool
+					if mode, isStr = v.(string); !isStr {
+						return "", false
+					}
+				}
+				switch mode {
+				case "":
+					w("reduce", q(ref), q(str(model["reducer"])), q("strict"))
+				case "dropNN":
+					w("reduce", q(ref), q(str(model["reducer"])), q(mode))
 				case "replaceNN":
-					v, ok := toFloat(set["replaceWith"])
-					if _, has := set["replaceWith"]; has && !ok {
+					v, ok := jsonNumber(set["replaceWithValue"])
+					if !ok {
 						return "", false
 					}
 					w("reduce", q(ref), q(str(model["reducer"])), q(mode), flt(v))
@@ -257,10 +279,42 @@ func (r Rule) parsedGrafana() (string, bool) {
 		if v, has := model["range"]; has {
 			rng = truthy(v)
 		}
+		// Its range query's step is multiplied by intervalFactor, an integer
+		// (grafana-prometheus-datasource, pkg/promlib/models: 0 is 1).
+		factor := int64(1)
+		if v, has := model["intervalFactor"]; has && v != nil {
+			f, ok := jsonNumber(v)
+			if !ok || f != math.Trunc(f) || math.Abs(f) > 1<<53 {
+				return "", false
+			}
+			if factor = int64(f); factor == 0 {
+				factor = 1
+			}
+		}
 		w("shape", q(ref), "instant", strconv.FormatBool(instant), "range", strconv.FormatBool(rng),
-			"hide", strconv.FormatBool(truthy(model["hide"])), "format", q(ifEmpty(str(model["format"]), "time_series")))
+			"hide", strconv.FormatBool(truthy(model["hide"])), "format", q(ifEmpty(str(model["format"]), "time_series")),
+			"factor", strconv.FormatInt(factor, 10))
 	}
 	return o.String(), true
+}
+
+// jsonNumber is v as a number, only when it is one (a JSON number: a string
+// of digits is none, which Grafana refuses where it wants a number).
+func jsonNumber(v any) (float64, bool) {
+	switch x := v.(type) {
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case uint64:
+		return float64(x), true
+	case float64:
+		return x, !math.IsNaN(x) && !math.IsInf(x, 0)
+	case json.Number:
+		f, err := x.Float64()
+		return f, err == nil
+	}
+	return 0, false
 }
 
 // ifEmpty is v, or def when v is empty.
