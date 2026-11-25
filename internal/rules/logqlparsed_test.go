@@ -2,6 +2,7 @@ package rules
 
 import (
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -144,6 +145,14 @@ func TestParsedLogQLAlike(t *testing.T) {
 		{`sum(rate({a="b"}[5m])) > 5 and sum(rate({c="d"}[5m])) > 1`, `((sum(rate({a="b"}[5m])) > 5) and (sum(rate({c="d"}[5m])) > 1))`},
 		{`vector(2) ^ vector(3) ^ vector(2)`, `vector(2) ^ (vector(3) ^ vector(2))`},
 		{`vector(1) - vector(2) - vector(3)`, `(vector(1) - vector(2)) - vector(3)`},
+		{`rate({a="b"}[5m])`, `rate ({a="b"}[5m])`},
+		{`sum(rate({a="b"}[5m]))`, `sum (rate ({a="b"}[5m]))`},
+		{`rate({a="b"} | json | x > - 0.5 [5m])`, `rate({a="b"} | json | x > -.5 [5m])`},
+		{`rate({a="b"} | json | x > -0.0 [5m])`, `rate({a="b"} | json | x > - 0 [5m])`},
+		{`sum(rate({a="b"}[5m])) - 0`, `sum(rate({a="b"}[5m])) -0.0`},
+		{`sort(rate({a="b"}[5m]))`, `sort by () (rate({a="b"}[5m]))`},
+		{`rate({a="b", c=~"d|e"}[5m])`, `rate({c=~"d|e",a="b"}[5m])`},
+		{`rate({a="b"} | regexp "(?P<x>a)" | pattern "<_>:<y>" [5m])`, `rate({a="b"} | regexp ` + "`(?P<x>a)`" + ` | pattern "<_>:<y>" [5m])`},
 	} {
 		a, aok := parsedLogQL(c[0])
 		b, bok := parsedLogQL(c[1])
@@ -160,9 +169,9 @@ func TestParsedLogQLUnalike(t *testing.T) {
 		{`sum(rate({a="b"}[5m])) > 5`, `sum(rate({a="b"}[5m])) >= 5`},
 		{`sum(rate({a="b"}[5m])) > 5`, `sum(rate({a="b"}[5m])) > bool 5`},
 		{`sum(rate({a="b"}[5m]))`, `sum(rate({a="c"}[5m]))`},
-		{`sum(rate({a="b"}[5m]))`, `sum(rate({a!="b"}[5m]))`},
+		{`sum(rate({c="d", a="b"}[5m]))`, `sum(rate({c="d", a!="b"}[5m]))`},
 		{`sum(rate({a=~"b"}[5m]))`, `sum(rate({a="b"}[5m]))`},
-		{`sum(rate({a=~"b"}[5m]))`, `sum(rate({a!~"b"}[5m]))`},
+		{`sum(rate({c="d", a=~"b"}[5m]))`, `sum(rate({c="d", a!~"b"}[5m]))`},
 		{`sum(rate({a="b"}[5m]))`, `sum(rate({a="b", c="d"}[5m]))`},
 		{`sum(rate({a="b"}[5m]))`, `sum(rate({a="b"}[10m]))`},
 		{`sum(rate({a="b"}[5m]))`, `sum(rate({a="b"}[5m] offset 5m))`},
@@ -327,6 +336,58 @@ func TestParsedLogQLRefused(t *testing.T) {
 		`sum by (a) (rate({a="b"}[5m])) by (b)`,
 		`sum by (a,) (rate({a="b"}[5m]))`,
 		`sum(rate({a="b"}[5m])`,
+		// What Loki 3.7.9's lexer reads as a duration: a - and the digits
+		// and units after it (x > -0 is x>0s in a label filter, where -0.0,
+		// -00 and - 0 are x>-0, a number's), and where no duration may be
+		// it is a syntax error.
+		`rate({a="b"} | json | x > -0 [5m])`,
+		`rate({a="b"} | json | x == -0 [5m])`,
+		`rate({a="b"} | json | x > -0s [5m])`,
+		`rate({a="b"} | json | x > -0e0 [5m])`,
+		`rate({a="b"} | json | x > -5m [5m])`,
+		`sum(rate({a="b"}[5m])) -0`,
+		`sum(rate({a="b"}[5m])) > -0`,
+		`sum(rate({a="b"}[5m])) + -0`,
+		`sum(rate({a="b"}[5m])) * -0`,
+		`sum(rate({a="b"}[5m])) > -5m`,
+		`sum(rate({a="b"}[5m])) -5m`,
+		`rate({a="b"}[5m] offset 0)`,
+		// What Loki 3.7.9 refuses after it has read it (ParseExpr).
+		`approx_topk by () (2, rate({a="b"}[5m]))`,
+		`approx_topk by (a) (2, rate({a="b"}[5m]))`,
+		`approx_topk without () (2, rate({a="b"}[5m]))`,
+		`approx_topk(2, rate({a="b"}[5m])) by (a)`,
+		`sort by (a) (rate({a="b"}[5m]))`,
+		`sort(rate({a="b"}[5m])) without (a)`,
+		`sort_desc by (a) (rate({a="b"}[5m]))`,
+		`rate({a="b"}[5m]) by (a)`,
+		`rate({a="b"}[5m]) by ()`,
+		`count_over_time({a="b"}[5m]) by (a)`,
+		`bytes_rate({a="b"}[5m]) without (a)`,
+		`absent_over_time({a="b"}[5m]) by (a)`,
+		`sum_over_time({a="b"} | unwrap x [5m]) by (a)`,
+		`avg_over_time({a="b"}[5m])`,
+		`quantile_over_time(0.5, {a="b"}[5m])`,
+		`rate_counter({a="b"}[5m])`,
+		`count_over_time({a="b"} | unwrap x [5m])`,
+		`bytes_over_time({a="b"} | unwrap x [5m])`,
+		`rate({a=~".*"}[5m])`,
+		`rate({a!="b"}[5m])`,
+		`rate({a=""}[5m])`,
+		`rate({a=~"b|"}[5m])`,
+		`rate({a!~"b"}[5m])`,
+		`rate({a=~"b*", c!="d"}[5m])`,
+		`rate({a=~"("}[5m])`,
+		`rate({a="b"} | json | x =~ "(" [5m])`,
+		`rate({a="b"} | drop x=~"(" [5m])`,
+		`rate({a="b"} | regexp "(" [5m])`,
+		`rate({a="b"} | regexp ".*" [5m])`,
+		`rate({a="b"} | regexp "(.*)" [5m])`,
+		`rate({a="b"} | pattern "x" [5m])`,
+		`rate({a="b"} | pattern "<_>" [5m])`,
+		`rate({a="b"} | pattern "<a><b>" [5m])`,
+		`rate({a="b"} | pattern "<a> <a>" [5m])`,
+		`label_replace(vector(1), "a", "b", "c", "(")`,
 		`label_replace(rate({a="b"}[5m]), "x", "$1", "y")`,
 		`label_replace(rate({a="b"}[5m]), "x", "$1", "y", 5)`,
 		`vector(x)`,
@@ -515,4 +576,25 @@ func FuzzParsedLogQL(f *testing.F) {
 			}
 		}
 	})
+}
+
+// The words of a function's name read ahead of a space and a ( or by, and
+// no more of the expression than that: the work is linear in the
+// expression, as the bytes it allocates show (it lowered all that was left
+// for each word, 27 MB for 16 KiB).
+func TestParsedLogQLFunctionWordsAreLinear(t *testing.T) {
+	expr := `count_over_time({a="b"}` + strings.Repeat(` | RATE="x"`, 1300) + ` [5m])`
+	if len(expr) > 15<<10 || len(expr) < 13<<10 {
+		t.Fatalf("%d bytes", len(expr))
+	}
+	if _, ok := parsedLogQL(expr); !ok {
+		t.Fatal("not read")
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	parsedLogQL(expr)
+	runtime.ReadMemStats(&after)
+	if used := after.TotalAlloc - before.TotalAlloc; used > 2<<20 {
+		t.Errorf("%d bytes allocated for %d", used, len(expr))
+	}
 }
