@@ -22,6 +22,9 @@ own Prometheus first. Pick the threshold your users would notice, and
 
 ## Which of them your history has
 
+The same command says which stacks have their calls between services in the
+history, for `--depends` ([An alert on a dependency](dependencies.md)).
+
 `lapilli impact suggest` asks your Prometheus which of the stacks above
 it has the metrics of, and how many windows each one's `--impact` finds
 over the period:
@@ -47,6 +50,16 @@ Istio:
 ingress-nginx:
   --impact 'sum by (ingress) (rate(nginx_ingress_controller_requests{status=~"5.."}[5m])) / sum by (ingress) (rate(nginx_ingress_controller_requests[5m])) > 0.01'
 
+Who calls whom, for --depends (docs/dependencies.md): 1 of the 3 stacks have their metric in the history.
+
+Istio (istio_requests_total{reporter="source"}, 120 series at most at once):
+  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0' --depends-labels source_workload,destination_workload
+
+Not found: Linkerd, An OpenTelemetry or Tempo service graph.
+
+The services on its edges must be named as your firings and incidents name them, by the --match label:
+rename with label_replace where they differ, and give that label to --depends-match when --match has several.
+
 Label names depend on how each is scraped, and the threshold on what your users notice:
 check both before giving one to lapilli verdict (lapilli.dev/docs/impact).
 ```
@@ -55,6 +68,11 @@ check both before giving one to lapilli verdict (lapilli.dev/docs/impact).
   request by (`istio_requests_total{reporter="destination"}`), not only
   the failures, at an hour's step: one request a stack. A stack whose
   metric has none is on the "Not found" line.
+- **Who calls whom**, below the stacks, says which of Istio, Linkerd and an
+  OpenTelemetry or Tempo service graph have their calls between services in
+  the history (one count each of the metric `--depends` reads), with the
+  `--depends` and `--depends-labels` to give
+  ([An alert on a dependency](dependencies.md)).
 - **WINDOWS** are the windows of user impact its `--impact` finds over
   the period, as `lapilli verdict --impact` would, with `--impact-for` 5m:
   its 5xx share above 1% for five minutes or more. Read for the stacks

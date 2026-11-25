@@ -4,6 +4,26 @@
 
 ### Added
 
+- **An alert on a dependency catches its dependents' incidents**
+  ([docs/dependencies.md](docs/dependencies.md),
+  [docs/design/dependencies.md](docs/design/dependencies.md)). `--depends PROMQL`, with
+  `--depends-labels FROM,TO`, reads who calls whom (a service mesh's or an OpenTelemetry
+  service graph's calls by caller and callee) once, at `--depends-step` (1h, 10m at the
+  finest), and a firing whose `--match` label isn't the incident's catches it by dependency
+  when the incident's service calls the firing's, or one that does, up to `--depends-depth`
+  calls (1, at most 3) over the edges of the hours from an hour before the incident to its
+  end, and it agrees on every other `--match` label both carry; `--depends-direction both`
+  also lets a caller's alert catch what it calls, and `--depends-match` names the label whose
+  values are the services (the first `--match` label by default). Linked, then labels, then
+  dependency: a catch by dependency is a catch, marked `(via checkout → payments-db)`
+  (`dependency` on `caught_by[]` in `--json`, in `--compare`'s text and Markdown, aliased by
+  `--redact`), near misses and "after its end" follow it, and the report says after the
+  incidents table how many catches were so, by which rules, and how many edges the graph had
+  (`settings.depends`). The graph keeps no record and never takes a catch away; an hour with
+  more than 20,000 edges leaves it with none, which the report says. `lapilli impact suggest`
+  says which of Istio, Linkerd and an OpenTelemetry or Tempo service graph have their calls
+  in the history, and the `--depends` and `--depends-labels` to give. `lapilli serve` doesn't
+  take `--depends` yet. With no `--depends` every report is as it was.
 - **Who a firing reached, in `lapilli serve`**
   ([docs/notifications-worked-out.md](docs/notifications-worked-out.md#in-lapilli-serve),
   [docs/design/routing.md](docs/design/routing.md)). Given `--alertmanager-config` or

@@ -96,6 +96,76 @@ func TestImpactStacksDocumented(t *testing.T) {
 	}
 }
 
+// TestDependsStacksDocumented holds docs/dependencies.md's table and
+// dependsStacks alike: each row a stack, in the same order, with the same
+// name, --depends and --depends-labels; each stack's metric the one its
+// --depends reads, and the labels it names the caller and the callee by
+// the labels the expression is summed by.
+func TestDependsStacksDocumented(t *testing.T) {
+	parallel(t)
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "dependencies.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := regexp.MustCompile("^\\| ([^|`]+) \\| `([^`]+)` \\| `([^`]+)` \\|$")
+	_, table, ok := strings.Cut(string(b), "| Stack | `--depends` | `--depends-labels` |\n|---|---|---|\n")
+	if !ok {
+		t.Fatal("docs/dependencies.md has no table of --depends queries")
+	}
+	var names, queries, labels []string
+	for _, line := range strings.Split(table, "\n") {
+		if !strings.HasPrefix(line, "|") {
+			break
+		}
+		m := row.FindStringSubmatch(line)
+		if m == nil {
+			t.Fatalf("docs/dependencies.md: a row that doesn't read as a stack, its --depends and its --depends-labels: %s", line)
+		}
+		names, queries, labels = append(names, m[1]), append(queries, m[2]), append(labels, m[3])
+	}
+	var listed, depends, lbls, ids []string
+	for _, s := range dependsStacks {
+		listed, depends, lbls, ids = append(listed, s.Name), append(depends, s.Depends), append(lbls, s.Labels), append(ids, s.ID)
+	}
+	if !slices.Equal(names, listed) || !slices.Equal(queries, depends) || !slices.Equal(labels, lbls) {
+		t.Errorf("docs/dependencies.md's stacks\n  %q\n  %q\n  %q\ndependsStacks'\n  %q\n  %q\n  %q", names, queries, labels, listed, depends, lbls)
+	}
+	for i, s := range dependsStacks {
+		if !regexp.MustCompile(`^[a-z][a-z0-9-]*$`).MatchString(s.ID) || slices.Index(ids, s.ID) != i {
+			t.Errorf("%s: id %q isn't a lowercase name of its own", s.Name, s.ID)
+		}
+		sels, err := rules.Selectors(s.Depends)
+		if err != nil {
+			t.Fatalf("%s: %v", s.Name, err)
+		}
+		for _, sel := range sels {
+			if name, _, _ := strings.Cut(sel, "{"); name != s.Metric {
+				t.Errorf("%s: its --depends reads %s, its metric says %s", s.Name, name, s.Metric)
+			}
+		}
+		if _, err := s.counted(); err != nil {
+			t.Error(err)
+		}
+		// The two labels are those it sums by, the caller's then the callee's.
+		from, to, _ := strings.Cut(s.Labels, ",")
+		if !strings.Contains(s.Depends, "sum by ("+from+", "+to+")") {
+			t.Errorf("%s: --depends doesn't sum by %s, %s", s.Name, from, to)
+		}
+		// A Prometheus that parses it parses what the flag gives.
+		if f, err := parseVerdictFlags([]string{"--rules", "r.yaml", "--prometheus", "http://p", "--incidents", "i.yml", "--match", "service",
+			"--depends", s.Depends, "--depends-labels", s.Labels}); err != nil || f.dependsFrom != from || f.dependsTo != to {
+			t.Errorf("%s: %v", s.Name, err)
+		}
+	}
+	// What counts a stack's series is its metric's selector alone.
+	if sel, _ := dependsStacks[0].counted(); sel != `istio_requests_total{reporter="source"}` {
+		t.Errorf("Istio counted by %s", sel)
+	}
+	if sel, _ := dependsStacks[1].counted(); sel != `response_total{direction="outbound"}` {
+		t.Errorf("Linkerd counted by %s", sel)
+	}
+}
+
 // askedHistory is the verdict tests' fakeHistory, with what it was asked
 // kept, and a query that names fail failing: refused as written (HTTP
 // 400), or with status when it is given.
@@ -149,8 +219,20 @@ func TestImpactSuggest(t *testing.T) {
 			t.Errorf("asked %s", q)
 		}
 	}
-	if counts != len(impactStacks) || impacts != 2 {
-		t.Errorf("asked %d counts and %d --impact, want %d and 2", counts, impacts, len(impactStacks))
+	if want := len(impactStacks) + len(dependsStacks); counts != want || impacts != 2 {
+		t.Errorf("asked %d counts and %d --impact, want %d and 2", counts, impacts, want)
+	}
+	// And the stacks that count calls: Istio's has series, with the flags to
+	// give; the others are not found.
+	for _, want := range []string{
+		"\nWho calls whom, for --depends (docs/dependencies.md): 1 of the 3 stacks have their metric in the history.\n",
+		"\nIstio (istio_requests_total{reporter=\"source\"}, 120 series at most at once):\n  --depends '" + dependsStacks[0].Depends + "' --depends-labels source_workload,destination_workload\n",
+		"\nNot found: Linkerd, An OpenTelemetry or Tempo service graph.\n",
+		"by the --match label:\nrename with label_replace",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want %q in:\n%s", want, out)
+		}
 	}
 
 	// --json says the same.
@@ -166,6 +248,10 @@ func TestImpactSuggest(t *testing.T) {
 		rep.Found[0].Metrics[0].Selector != `istio_requests_total{reporter="destination"}` || rep.Found[0].Argument != "--impact '"+impactStacks[0].Impact+"'" ||
 		rep.Found[1].ID != "ingress-nginx" || rep.Found[1].Windows == nil || *rep.Found[1].Windows != 0 {
 		t.Errorf("found %+v", rep.Found)
+	}
+	if d := rep.Dependencies; len(d.Found) != 1 || d.Found[0].ID != "istio" || d.Found[0].Series != 120 || d.Found[0].Labels != "source_workload,destination_workload" ||
+		d.Found[0].Selector != `istio_requests_total{reporter="source"}` || d.Found[0].Argument != dependsStacks[0].argument() || len(d.NotFound) != 2 || len(d.NotKnown) != 0 {
+		t.Errorf("dependencies %+v", d)
 	}
 	var notFound []string
 	for _, s := range rep.NotFound {
@@ -363,8 +449,8 @@ func TestImpactSuggestReads(t *testing.T) {
 		}
 	}
 	// Three days at a minute: three requests of a day.
-	if counts != len(impactStacks) || impacts != 3 {
-		t.Errorf("asked %d counts and %d of --impact, want %d and 3", counts, impacts, len(impactStacks))
+	if want := len(impactStacks) + len(dependsStacks); counts != want || impacts != 3 {
+		t.Errorf("asked %d counts and %d of --impact, want %d and 3", counts, impacts, want)
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "s3cret") {
 		t.Error("the token was said")

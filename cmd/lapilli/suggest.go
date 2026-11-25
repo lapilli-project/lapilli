@@ -118,6 +118,76 @@ func (s impactStack) counted(metric string) (string, error) {
 	return best, nil
 }
 
+// dependsStack is a stack that counts calls between services, as
+// docs/dependencies.md's table lists it: its name there, the metric its
+// --depends reads and the labels it names the caller and the callee by.
+// TestDependsStacksDocumented holds the table and dependsStacks alike.
+type dependsStack struct {
+	// ID names it in --json, and stays.
+	ID      string
+	Name    string
+	Metric  string
+	Depends string
+	Labels  string
+}
+
+var dependsStacks = []dependsStack{
+	{"istio", "Istio", "istio_requests_total",
+		`sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0`, "source_workload,destination_workload"},
+	{"linkerd", "Linkerd", "response_total",
+		`sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[5m])) > 0`, "deployment,dst_deployment"},
+	{"otel-service-graph", "An OpenTelemetry or Tempo service graph", "traces_service_graph_request_total",
+		`sum by (client, server) (rate(traces_service_graph_request_total[5m])) > 0`, "client,server"},
+}
+
+// counted is the selector of the metric that s's --depends reads, which
+// its series are counted by: the shortest naming it.
+func (s dependsStack) counted() (string, error) {
+	sels, err := rules.Selectors(s.Depends)
+	if err != nil {
+		return "", err
+	}
+	best := ""
+	for _, sel := range sels {
+		if name, _, _ := strings.Cut(sel, "{"); name == s.Metric && (best == "" || len(sel) < len(best)) {
+			best = sel
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("%s's --depends reads no %s", s.Name, s.Metric)
+	}
+	return best, nil
+}
+
+// argument is the flags to give lapilli verdict for s, quoted for a POSIX
+// shell.
+func (s dependsStack) argument() string {
+	return "--depends '" + strings.ReplaceAll(s.Depends, "'", `'\''`) + "' --depends-labels " + s.Labels
+}
+
+// suggestDepends is what lapilli impact suggest found of the stacks that
+// count calls between services.
+type suggestDepends struct {
+	// Found are the stacks whose metric has series, NotFound those with
+	// none, and NotKnown those that couldn't be asked, with why; each in
+	// dependsStacks' order.
+	Found    []suggestGraph `json:"found"`
+	NotFound []suggestGraph `json:"not_found"`
+	NotKnown []suggestGraph `json:"not_known"`
+}
+
+type suggestGraph struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Selector string `json:"selector"`
+	// Series are the metric's, the most at once.
+	Series   int    `json:"series"`
+	Depends  string `json:"depends"`
+	Labels   string `json:"labels"`
+	Argument string `json:"argument"`
+	Error    string `json:"error,omitempty"`
+}
+
 // suggestReport is what lapilli impact suggest found, as --json writes it.
 type suggestReport struct {
 	From      time.Time `json:"from"`
@@ -130,6 +200,9 @@ type suggestReport struct {
 	Found    []suggestStack `json:"found"`
 	NotFound []suggestStack `json:"not_found"`
 	NotKnown []suggestStack `json:"not_known"`
+	// Dependencies are the stacks that count calls between services, for
+	// --depends.
+	Dependencies suggestDepends `json:"dependencies"`
 }
 
 type suggestStack struct {
@@ -256,7 +329,8 @@ func parseSuggestFlags(args []string) (*verdictFlags, error) {
 // the timeout), leaves every stack after it not known too, unasked.
 func suggest(ctx context.Context, h history, from, to time.Time, step, impactFor time.Duration) suggestReport {
 	rep := suggestReport{From: from, To: to, Step: verdict.Duration(step), ImpactFor: verdict.Duration(impactFor),
-		Found: []suggestStack{}, NotFound: []suggestStack{}, NotKnown: []suggestStack{}}
+		Found: []suggestStack{}, NotFound: []suggestStack{}, NotKnown: []suggestStack{},
+		Dependencies: suggestDepends{Found: []suggestGraph{}, NotFound: []suggestGraph{}, NotKnown: []suggestGraph{}}}
 	stopped := ""
 	why := func(err error) string {
 		said := verdict.Clean(err.Error())
@@ -310,6 +384,30 @@ func suggest(ctx context.Context, h history, from, to time.Time, step, impactFor
 			s.Error = why(err)
 		}
 		rep.Found = append(rep.Found, s)
+	}
+	// The stacks that count calls: one request each, asked as the others
+	// are, and none once the history failed.
+	for _, st := range dependsStacks {
+		g := suggestGraph{ID: st.ID, Name: st.Name, Depends: st.Depends, Labels: st.Labels, Argument: st.argument()}
+		if stopped != "" {
+			g.Error = stopped
+			rep.Dependencies.NotKnown = append(rep.Dependencies.NotKnown, g)
+			continue
+		}
+		sel, err := st.counted()
+		if err == nil {
+			g.Selector = sel
+			g.Series, err = source.SeriesCount(ctx, h, sel, from, to)
+		}
+		switch {
+		case err != nil:
+			g.Error = why(err)
+			rep.Dependencies.NotKnown = append(rep.Dependencies.NotKnown, g)
+		case g.Series == 0:
+			rep.Dependencies.NotFound = append(rep.Dependencies.NotFound, g)
+		default:
+			rep.Dependencies.Found = append(rep.Dependencies.Found, g)
+		}
 	}
 	return rep
 }
@@ -371,6 +469,7 @@ func (r suggestReport) text(w io.Writer, loc *time.Location) error {
 			fmt.Fprintf(w, "  its windows couldn't be read: %s\n", s.Error)
 		}
 	}
+	r.dependsText(w)
 	fmt.Fprintln(w)
 	if len(r.Found) > 0 {
 		fmt.Fprintln(w, "Label names depend on how each is scraped, and the threshold on what your users notice:")
@@ -379,4 +478,39 @@ func (r suggestReport) text(w io.Writer, loc *time.Location) error {
 		fmt.Fprintln(w, "Write an --impact of your own, from a signal your users would notice (lapilli.dev/docs/impact).")
 	}
 	return nil
+}
+
+// dependsText writes the stacks that count calls between services: those
+// found with the flags to give, then those not found, and those not known
+// with why.
+func (r suggestReport) dependsText(w io.Writer) {
+	d := r.Dependencies
+	all := len(d.Found) + len(d.NotFound) + len(d.NotKnown)
+	if all == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nWho calls whom, for --depends (docs/dependencies.md): %d of the %d stacks have their metric in the history.\n", len(d.Found), all)
+	for _, g := range d.Found {
+		fmt.Fprintf(w, "\n%s (%s, %d series at most at once):\n  %s\n", g.Name, g.Selector, g.Series, g.Argument)
+	}
+	if len(d.NotFound) > 0 {
+		names := make([]string, 0, len(d.NotFound))
+		for _, g := range d.NotFound {
+			names = append(names, g.Name)
+		}
+		fmt.Fprintf(w, "\nNot found: %s.\n", strings.Join(names, ", "))
+	}
+	for i := 0; i < len(d.NotKnown); {
+		names := []string{d.NotKnown[i].Name}
+		j := i + 1
+		for ; j < len(d.NotKnown) && d.NotKnown[j].Error == d.NotKnown[i].Error; j++ {
+			names = append(names, d.NotKnown[j].Name)
+		}
+		fmt.Fprintf(w, "Not known: %s, which couldn't be asked: %s\n", strings.Join(names, ", "), d.NotKnown[i].Error)
+		i = j
+	}
+	if len(d.Found) > 0 {
+		fmt.Fprintln(w, "\nThe services on its edges must be named as your firings and incidents name them, by the --match label:")
+		fmt.Fprintln(w, "rename with label_replace where they differ, and give that label to --depends-match when --match has several.")
+	}
 }
