@@ -314,31 +314,51 @@ What was decided building the second part, in `lapilli serve`
   costs no query.
 - **The hours and the lead-in.** The run's `from` to its `to`, with the firings that were
   on in the lead-in before `from` taken in as alerts: the longest `repeat_interval`
-  of the routes, clamped to 1 hour to 24 hours. A firing is started no earlier than
-  the lead-in's start (see "Bounds and the cover"), so its repeats before that aren't counted;
-  what the lead-in adds is the group's other alerts and the alerts that inhibit it. The notifications from `from` on replace those kept
-  from there; each firing on at or after `from` has its row replaced. At most 300,000
-  firings go in at once.
+  of the routes, clamped to 1 hour to 24 hours. A firing that began before the
+  lead-in is started an hour before it (`routedClamp`, more than any `group_wait`
+  there should be) and is `Carried`, and the run's `Options.From` is the lead-in's start: its
+  group's first flush is before `From`, so the group is taken as notified and has no `first`
+  (a page on PagerDuty) at the lead-in. A repeat is counted from the group's last notification
+  kept before the lead-in (`ledger.RoutedNotifiedBefore`, `Options.Notified`, looked for
+  `repeat_interval + group_interval` back), or from the lead-in's start where none is
+  kept. What the lead-in adds is the group's other alerts and the alerts that inhibit it.
+  The notifications from `from` on replace those kept from there. What a firing reached
+  is counted from all the notifications kept for it (`firing_routed_sent`, one row for
+  each firing and notification, replaced for the hours a run works out and no others), never
+  from one run's view: a firing on for a month, worked out by hourly runs, has what one run
+  over the month works out (`TestRoutedFiringForAMonth`). A firing some of whose life is in
+  hours not worked out has no row (not known). The repeats are those of the kept
+  notifications' times: they drift by seconds from the real ones where the flush grid of
+  the lead-in's start isn't the group's own. At most 300,000 firings go in at once.
 - **Bounds and the cover (a review's fixes).** A run is given `routedDeadline` (2 minutes)
-  and `routedBudget` (`routing.DefaultBudget`, 20,000,000 flushes), through
-  `RunContext`. A firing is started no earlier than `max(its start, from - lead)`:
-  its repeats before that are not counted (not known), so a firing's counts are those
-  since the lead-in began. The firings of the run's own hours come first within the
+  and `routedBudget` (20,000,000 work units, as `routing.DefaultBudget`: a notification 50,
+  a flush 1 and the alerts it holds, an alert in a notification 1, a silence,
+  an inhibition or a regular expression matched 1 and more for a long value), through
+  `RunContext`. The firings of the run's own hours come first within the
   300,000 (`FiringsOverlapping` takes `own`): more in the hours themselves is "not
   worked out"; more only in the lead-in is worked out, with the caveat kept. A run that
   stops, fails, can't read the configuration, or is over re-recorded firings (or
   `--notifications` was off) records its hours as **not worked out** (`routed_cover`,
   `ok` 0, why whole), dropping what was kept of them; the catch-up (`catchUpRouted`) works
-  out what isn't covered, up to 14 days a round, a failed piece after an hour.
+  out what isn't covered, up to 14 days a round and 2 minutes in all (`routedCatchUpDeadline`,
+  across the pieces: a configuration that holds the model up holds the run loop that long
+  and no longer); a piece that didn't come out is tried again after an hour, then two, four,
+  doubling to a day (`routedTry`).
   `KeepRouted` replaces `at` between `from` and `to` only. Every page asks the cover:
   `paged.known(from, to)` is true when the hours from where counting starts to where the
-  ledger's firings are all are covered; a week that isn't is "not known"
+  ledger's firings are all are covered or recorded: the hours before the first one tried
+  are what was recorded (the recording is what was sent), and an hour after it that wasn't worked out
+  and has a notification recorded in it, for any receiver, is known as recorded; one with none is not; a week that isn't is "not known"
   (`paged.unknown`, `PagedUnknown`, expectations' `pages_not_covered`), and the first,
   counted from part-way, is partial (`counted_from`). The configuration is read from the
   pages when none is kept (`routingForView`), cached by the hash of its text, so replicas
   agree. `PruneKeeping` deletes `routed` in batches of 5,000 and trims the cover.
-- **Recorded pages.** Where the integration's kind `DedupsByGroup`, a recorded notification
-  is a page only when its reason is first; recorded or worked out is decided for each receiver
+- **Recorded pages.** A recorded notification is a page by the model's own rule
+  (`routing.PageRule`, shared): where the integration's kind `DedupsByGroup` only when its
+  reason is first, unless `--paging-receivers` matches the receiver, which pages for each;
+  a worked-out page is dropped where its receiver has a notification recorded in the hour it
+  went in or in the hour of the minute before or after it (`recordedNear`), so a page just
+  before an hour and its copy just after count once; recorded or worked out is decided for each receiver
   and hour (`RecordedHours`). A mute's silence is tied to the ledger firing it is of and matches
   on its labels and `alertname`; an inhibition's mute keeps `source_rule`.
 - **Agreement.** Worked-out rows are for each integration; a receiver recorded by its bare
@@ -443,7 +463,10 @@ What the first review found, and what changed:
   (cache of 1,024) and are one zone by name; the time intervals list 20,000
   ranges, weekdays, days, months and years in all; a time interval's change is
   looked for 400 days ahead at most. Silences are found by their `=` matchers
-  instead of trying each, and a run takes 20,000. A matcher's name and value are
+  instead of trying each, and a run takes 100,000 (a file of 100,000 is read and worked out;
+  serve takes the recorded mutes that touch the run's hours and the lead-in, and when those and the
+  file's are more than that the hours are "not known" with the reason). Matching them is charged to the budget: each
+  silence a label set could match, and each time a flush asks which mutes it and when that changes. A matcher's name and value are
   4 KB at most, an interval's and an inhibition rule's names 1,024 bytes, a
   route's key (its matchers and its ancestors') 64 KB; a regular expression is
   compiled through `regexp/syntax` and refused over 10,000 instructions, 500,000
@@ -453,7 +476,15 @@ What the first review found, and what changed:
   `Config.GroupKey` writes it as Alertmanager does. `By` is 1,024 bytes at most;
   a route's interval lists lose their repeats.
 - **A firing on since before the period** (the report clamps its start to the
-  period's) is taken as notified at the period's start: its group's first flush
-  isn't a `first`, and a repeat is due a `repeat_interval` after the start.
+  period's) is `Carried`: taken as notified at the period's start, its group's first
+  flush isn't a `first`, and a repeat is due a `repeat_interval` after the start. For any
+  other alert `Options.From` is exact: a group whose first flush (its first alert's start and
+  `group_wait`) is at `From` or after isn't notified yet. `Page` is for a notification with an
+  alert firing: one of resolved alerts alone rings no one. Grafana OnCall/IRM isn't in
+  `DedupsByGroup`: the pages it reads document how an alert group is made (by a
+  grouping template) but not that a later notification from Alertmanager or Grafana
+  updates the group's page instead of making a new one, so each notification is a page.
+- **`--changed-only`'s rules left alone** are those each side's own routing needs
+  (`--alertmanager-config-before`'s for the before side).
 - **Inhibited** counts a firing never notified whose every flush was muted by
   inhibition; `inhibited_by` weighs each once.

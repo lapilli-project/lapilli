@@ -215,7 +215,8 @@ notification pipeline do, with these departures:
   user: a run spends at most 20,000,000 work units (a notification is 50, a flush
   1 and each alert it holds, each alert put in a notification 1) and stops when
   it has, or its context ends; more than 100,000 groups, or more than 20,000
-  silences (an error), stops it too. A run that stopped says why
+  silences (an error: 100,000, silences being found by their `=` matchers), stops it too; `lapilli serve` takes the silences of `--silences` and those the recorder told of that touch the hours,
+  and when they are more than that the hours are not known, with the reason. A run that stopped says why
   (`notifications.stopped`, and `known: false`): what it counted is of part of the
   period, and every surface says **not known** instead of a number, a budget of
   pages is neither held nor broken, and the report has no `*_worked_out` metrics.
@@ -280,14 +281,20 @@ of the hours the run judged:
   as a group is of many rules, with a lead-in before the hours: the longest
   `repeat_interval` of the routes, at least an hour and at most a day, so that a
   group that began before them, and an alert that inhibits one in them, is
-  there. A firing that began before the lead-in is taken as beginning where the
-  lead-in does: its repeats before it are **not counted, not known**, what it
-  reached is what it reached since then, and the phase of its repeats is that of
-  the lead-in's start. At most 300,000 firings go in at once, those of the run's
+  there. A firing that began before the lead-in is taken as already notified at
+  the lead-in's start (no first notification, no first page), and its repeats are
+  counted from the last notification kept for its group (or, where none is, from
+  the lead-in's start). What a firing reached is counted from the notifications kept
+  by all the runs that saw it, so a firing on for a month has what one run over the month
+  works out, give or take seconds in when its repeats went; where an hour of its life
+  wasn't worked out, it has no number. At most 300,000 firings go in at once, those of the run's
   own hours first and then the lead-in's, the earliest first: with more in the
   hours themselves the hours are not worked out; with more only in the lead-in they
-  are, with the caveat kept. A run is also bounded in time and in flushes: it
-  stops after 2 minutes or 20,000,000 flushes of the groups, whichever comes first.
+  are, with the caveat kept. A run is also bounded in time and in work: it
+  stops after 2 minutes or 20,000,000 work units (a notification is 50, a flush 1 and
+  each alert it holds, a silence or a regular expression matched 1 and more for a long
+  value), whichever comes first. The catch-up takes 2 minutes in all across its pieces, and
+  a piece that didn't come out is tried again after an hour, then two, four, up to a day.
 - **Which hours are worked out** is kept as stretches of time (a cover): a stretch
   worked out, one tried and **not** (the work stopped, failed or hit a limit above,
   the routing configuration couldn't be read, its firings were recorded again, or

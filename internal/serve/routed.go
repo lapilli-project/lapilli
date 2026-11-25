@@ -39,12 +39,23 @@ import (
 const MaxRoutedFirings = 300000
 
 // A run's work-out is bounded in two ways, and stops with either: it is given
-// routedDeadline to take, and routedBudget flushes of the alert manager's
-// groups to look at (routing.Options.Budget). The hours of a run that
-// stopped are recorded as not worked out, never as none.
+// routedDeadline to take, and routedBudget work units (routing.Options.Budget:
+// a notification is 50, a flush is 1 and each alert it holds 1, each alert in a
+// notification 1, and a silence, an inhibition or a regular expression
+// matched against a label set 1 and more for a long value). 20 million work
+// units are some 400,000 notifications, in about 100 MB, many times what a
+// busy cluster's hours send. The hours of a run that stopped are recorded as
+// not worked out, never as none.
+//
+// The catch-up, which works out the hours no run did, has routedCatchUpDeadline
+// to take in all, across its pieces, so that a configuration that holds the
+// model up holds the run loop for that long and no longer; a piece that
+// stopped is tried again after an hour, then after two, doubling to a day.
 const (
-	routedDeadline = 2 * time.Minute
-	routedBudget   = routing.DefaultBudget
+	routedDeadline        = 2 * time.Minute
+	routedBudget          = 20_000_000
+	routedCatchUpDeadline = 2 * time.Minute
+	routedBackoffMax      = 24 * time.Hour
 )
 
 // mutePad is how long before the first mute of an hour, and after the last,
@@ -58,13 +69,17 @@ const mutePad = 10 * time.Second
 // repeat_interval of the routes, so that a group that began before the
 // hours judged, and an alert that inhibits one in them, is there to be
 // seen; at least an hour, at most a day. A firing that began before it is
-// taken as beginning where it does, from there: its notifications and its
-// repeats before it are not counted (what a firing reached is then what it
-// reached since the lead-in began), and the phase of its repeats is that of
-// the lead-in's start.
+// taken as beginning an hour before it (routedClamp, which is more than any
+// group_wait there should be), and as carried: its group is taken as
+// notified before the lead-in (routing.Options.From is the lead-in's
+// start), so it gets no first notification, and its repeats are counted from
+// the last notification kept for its group, or, where none is, from the
+// lead-in's start. A run keeps the notifications of its own hours only; what
+// a firing reached is those of all the runs that saw it.
 const (
 	routedLeadMin = time.Hour
 	routedLeadMax = 24 * time.Hour
+	routedClamp   = time.Hour
 )
 
 // routedState is the routing configuration serve last read, and what the
@@ -91,7 +106,7 @@ type routedState struct {
 	// stretch was last worked out by the catch-up, by its start (Unix
 	// seconds), so that one that stopped isn't tried at every round.
 	reading sync.Mutex
-	tried   map[int64]time.Time
+	tried   map[int64]routedTry
 	// limits are the bounds of a work-out, for tests to lower: none is
 	// the constants above.
 	limits routedLimits
@@ -100,16 +115,50 @@ type routedState struct {
 // routedLimits are the bounds of a work-out; zero is the constant.
 type routedLimits struct {
 	deadline time.Duration
+	catchUp  time.Duration
 	budget   int
 	firings  int
+	silences int
 }
 
-// bounds are the limits in force: how long, how many flushes, how many firings.
+// routedTry is when the catch-up tried a stretch last, and how many times
+// in a row it didn't come out.
+type routedTry struct {
+	at     time.Time
+	failed int
+}
+
+// wait is how long after a try that failed the next is made: an hour, and
+// twice as long for each failure after the first, up to a day.
+func (t routedTry) wait() time.Duration {
+	d := notifyEvery
+	for i := 1; i < t.failed && d < routedBackoffMax; i++ {
+		d *= 2
+	}
+	return min(d, routedBackoffMax)
+}
+
+// bounds are the limits in force: how long, how many work units, how many
+// firings.
 func (s *Server) routedBounds() (time.Duration, int, int) {
 	s.routed.Lock()
 	defer s.routed.Unlock()
 	l := s.routed.limits
 	return cmp.Or(l.deadline, routedDeadline), cmp.Or(l.budget, routedBudget), cmp.Or(l.firings, MaxRoutedFirings)
+}
+
+// maxSilences is how many silences a work-out takes: the model's bound.
+func (s *Server) maxSilences() int {
+	s.routed.Lock()
+	defer s.routed.Unlock()
+	return cmp.Or(s.routed.limits.silences, routing.MaxSilences)
+}
+
+// catchUpDeadline is how long the catch-up of a run takes in all.
+func (s *Server) catchUpDeadline() time.Duration {
+	s.routed.Lock()
+	defer s.routed.Unlock()
+	return cmp.Or(s.routed.limits.catchUp, routedCatchUpDeadline)
 }
 
 // notifies reports whether serve works out the notifications.
@@ -302,33 +351,42 @@ func (s *Server) fileSilences() []routing.Silence {
 	return s.routed.silences
 }
 
-// mutedSilences are the silences the event recorder told of in [from, to),
-// tied to the ledger's firings: a mute of an alert by a silence is a silence
-// of the labels of the firing it is of (and its rule's name as alertname)
-// from the first time Alertmanager told of it in an hour to the last, which
-// is how long the silence is known to have muted it. The recorded alert's
-// labels aren't used: they hold the external labels and what a rule's
-// labels were as sent, which the firing's don't. A mute no firing is tied
-// to makes none. They are in addition to --silences, which says more,
-// silences that muted nothing included.
-func (s *Server) mutedSilences(ctx context.Context, from, to time.Time, fs []ledger.Firing) ([]routing.Silence, error) {
+// mutedSilences are the silences the event recorder told of that touch
+// [from, to], tied to the ledger's firings: a mute of an alert by a silence
+// is a silence of the labels of the firing it is of (what the model is given
+// of it: its labels and alertname, the name its alert carries) from the first
+// time Alertmanager told of it in an hour to the last, which is how long the
+// silence is known to have muted it. The recorded alert's labels aren't
+// used: they hold the external labels and what a rule's labels were as
+// sent, which the firing's don't. A mute no firing is tied to makes none.
+// They are in addition to --silences, which says more, silences that muted
+// nothing included. alerts are the firings' alerts, in their order. over
+// says there were more than most of them: what is given is
+// then not all there is.
+func (s *Server) mutedSilences(ctx context.Context, from, to time.Time, fs []ledger.Firing, alerts []routing.Alert, most int) (out []routing.Silence, over bool, err error) {
 	has, err := s.l.HasMutes(ctx)
 	if err != nil || !has {
-		return nil, err
+		return nil, false, err
 	}
-	ms, err := s.l.Mutes(ctx, from, to.Add(time.Hour))
+	ms, err := s.l.Mutes(ctx, from.Add(-mutePad), to.Add(time.Hour))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	byRule := map[string][]int{}
 	for i, f := range fs {
 		byRule[f.Rule] = append(byRule[f.Rule], i)
+		if i < len(alerts) {
+			if name := alerts[i].Labels["alertname"]; name != f.Rule {
+				byRule[name] = append(byRule[name], i)
+			}
+		}
 	}
 	within := 2 * max(s.cfg.Step, time.Minute)
-	var out []routing.Silence
 	seen := map[string]bool{}
 	for _, m := range ms {
-		if m.Kind != ledger.MutedSilence {
+		// One that begins after the hours, or ends before them, doesn't
+		// touch them.
+		if m.Kind != ledger.MutedSilence || m.At.Add(-mutePad).After(to) || m.Last.Add(mutePad).Before(from) {
 			continue
 		}
 		for _, i := range byRule[m.Rule] {
@@ -344,9 +402,12 @@ func (s *Server) mutedSilences(ctx context.Context, from, to time.Time, fs []led
 			if sil.ID == "" {
 				sil.ID = "recorded"
 			}
-			labels := map[string]string{"alertname": f.Rule}
-			for k, v := range f.Labels {
-				labels[k] = v
+			labels := map[string]string{}
+			if i < len(alerts) {
+				maps.Copy(labels, alerts[i].Labels)
+			} else {
+				labels["alertname"] = f.Rule
+				maps.Copy(labels, f.Labels)
 			}
 			key := fmt.Sprint(sil.ID, sil.Start.Unix(), sil.End.Unix(), labels)
 			if seen[key] {
@@ -360,13 +421,13 @@ func (s *Server) mutedSilences(ctx context.Context, from, to time.Time, fs []led
 				}
 				sil.Matchers = append(sil.Matchers, mt)
 			}
-			out = append(out, sil)
-			if len(out) >= routing.MaxSilences {
-				return out, nil
+			if len(out) >= most {
+				return out, true, nil
 			}
+			out = append(out, sil)
 		}
 	}
-	return out, nil
+	return out, false, nil
 }
 
 // labelsAmong reports whether every label of a is in b with its value.
@@ -400,6 +461,12 @@ func (s *Server) routedRules(ctx context.Context) []rules.Rule {
 // hours are then recorded as not worked out (their pages are not known, not
 // none), and the catch-up tries them again.
 func (s *Server) workOutRouted(ctx context.Context, from, to time.Time) {
+	s.workOutRoutedIn(ctx, ctx, from, to)
+}
+
+// workOutRoutedIn is workOutRouted whose model run ends with run (the
+// catch-up's time) as well as with its own deadline; ctx is for the ledger.
+func (s *Server) workOutRoutedIn(ctx, run context.Context, from, to time.Time) {
 	if !s.notifies() {
 		// The firings of these hours may have been recorded again: what was
 		// worked out of them isn't theirs now.
@@ -423,7 +490,7 @@ func (s *Server) workOutRouted(ctx context.Context, from, to time.Time) {
 		}
 		return
 	}
-	stopped, kept, err := s.routeHours(ctx, cfg, from, to)
+	stopped, kept, err := s.routeHours(ctx, run, cfg, from, to)
 	if err != nil {
 		stopped = "failed: " + err.Error()
 		s.log.Warn("the notifications of the hours judged weren't worked out", "from", from, "to", to, "err", err)
@@ -448,7 +515,7 @@ func (s *Server) workOutRouted(ctx context.Context, from, to time.Time) {
 // routeHours is the work of workOutRouted, for a configuration. It gives
 // why the hours weren't all worked out ("" when they were), or, with kept
 // set, a caveat on hours worked out and kept; an error is a failure.
-func (s *Server) routeHours(ctx context.Context, cfg *routing.Config, from, to time.Time) (string, bool, error) {
+func (s *Server) routeHours(ctx, run context.Context, cfg *routing.Config, from, to time.Time) (string, bool, error) {
 	lead := routedLead(cfg)
 	begin := from.Add(-lead)
 	deadline, budget, most := s.routedBounds()
@@ -467,19 +534,39 @@ func (s *Server) routeHours(ctx context.Context, cfg *routing.Config, from, to t
 	}
 	judged := make([]verdict.Judged, len(fs))
 	for i, f := range fs {
-		// A firing is taken as beginning no earlier than the lead-in.
-		judged[i] = verdict.Judged{Firing: firing.Firing{Rule: f.Rule, Labels: f.Labels, Start: maxTime(f.Start, begin), End: f.End}}
+		// A firing is taken as beginning no earlier than an hour before the
+		// lead-in.
+		judged[i] = verdict.Judged{Firing: firing.Firing{Rule: f.Rule, Labels: f.Labels, Start: maxTime(f.Start, begin.Add(-routedClamp)), End: f.End}}
 	}
 	alerts := verdict.NotificationAlerts(judged, s.routedRules(ctx))
+	for i, f := range fs {
+		// One that began before the lead-in was notified before it.
+		alerts[i].Carried = f.Start.Before(begin)
+	}
 	sils := s.fileSilences()
-	recorded, err := s.mutedSilences(ctx, begin, to, fs)
+	silMax := s.maxSilences()
+	recorded, over, err := s.mutedSilences(ctx, begin, to, fs, alerts, silMax)
 	if err != nil {
 		return "", false, err
 	}
+	if over || len(sils)+len(recorded) > silMax {
+		return fmt.Sprintf("more than %d silences to take into account: the %d of --silences and the %d the recorder told of that touch the hours: not worked out, as they would be worked out as if there were none", silMax, len(sils), len(recorded)), false, nil
+	}
 	sils = slices.Concat(sils, recorded)
-	rctx, cancel := context.WithTimeout(ctx, deadline)
+	// What the groups were last notified at, before the lead-in: repeats
+	// are counted from there.
+	last, err := s.l.RoutedNotifiedBefore(ctx, begin.Add(-routedRepeatMax(cfg)), begin)
+	if err != nil {
+		return "", false, err
+	}
+	notified := make([]routing.NotifiedAt, len(last))
+	for i, x := range last {
+		notified[i] = routing.NotifiedAt{Group: x.Group, Receiver: x.Receiver, Kind: x.Kind, At: x.At}
+	}
+	rctx, cancel := context.WithTimeout(run, deadline)
 	defer cancel()
-	res, err := cfg.RunContext(rctx, alerts, routing.Options{ExternalLabels: s.cfg.ExternalLabels, Silences: sils, PagingReceivers: s.cfg.PagingReceivers, Until: to, Budget: budget})
+	res, err := cfg.RunContext(rctx, alerts, routing.Options{ExternalLabels: s.cfg.ExternalLabels, Silences: sils, PagingReceivers: s.cfg.PagingReceivers,
+		From: begin, Notified: notified, Until: to, Budget: budget})
 	if err != nil {
 		return "", false, err
 	}
@@ -515,8 +602,9 @@ func (s *Server) routeHours(ctx context.Context, cfg *routing.Config, from, to t
 		if !f.End.IsZero() && f.End.Before(from) {
 			continue
 		}
-		x := routedOf(f.ID, res.Alerts[i], res.Notifications, ruleOf)
+		x := routedOf(f.ID, res.Alerts[i], res.Notifications, from, ruleOf)
 		x.Grouped = slices.ContainsFunc(res.Alerts[i].Notifications, func(k int) bool { return several[k] })
+		x.Whole = !f.Start.Before(from)
 		kept = append(kept, x)
 	}
 	if err := s.l.KeepRouted(ctx, from, to, caveat, ns, kept); err != nil {
@@ -525,26 +613,31 @@ func (s *Server) routeHours(ctx context.Context, cfg *routing.Config, from, to t
 	return caveat, true, nil
 }
 
-// routedOf is what a firing's alert reached, as the ledger keeps it; ruleOf
-// gives the rule of the alert at a position, for the one that inhibited it.
-func routedOf(id int64, a routing.AlertResult, all []routing.Notification, ruleOf func(int) string) ledger.RoutedFiring {
-	out := ledger.RoutedFiring{FiringID: id, Notified: a.Notified, Paged: a.Paged, FirstPage: a.FirstPage}
-	type key struct{ receiver, kind string }
-	idx := map[key]int{}
+// routedRepeatMax is the longest a group goes without a notification while
+// it fires, by the routes (a repeat_interval and the group_interval the next
+// flush is late by): how far before the lead-in a group's last notification
+// is looked for, as one before that would have been followed by a repeat.
+func routedRepeatMax(c *routing.Config) time.Duration {
+	d := routedLeadMin
+	for _, r := range c.Routes() {
+		d = max(d, r.RepeatInterval+r.GroupInterval)
+	}
+	return d
+}
+
+// routedOf is what a firing's alert reached in the hours from from on, as the
+// ledger is given it: the notifications that told of it (those before from
+// were kept by the runs of those hours), what muted it and the receivers that
+// send nothing; ruleOf gives the rule of the alert at a position, for the one
+// that inhibited it.
+func routedOf(id int64, a routing.AlertResult, all []routing.Notification, from time.Time, ruleOf func(int) string) ledger.RoutedFiring {
+	out := ledger.RoutedFiring{FiringID: id}
 	for _, k := range a.Notifications {
 		nt := all[k]
-		x := key{nt.Receiver, nt.Kind}
-		i, ok := idx[x]
-		if !ok {
-			i = len(out.Receivers)
-			idx[x] = i
-			out.Receivers = append(out.Receivers, ledger.RoutedReceiver{Receiver: nt.Receiver, Kind: nt.Kind})
+		if nt.At.Before(from) {
+			continue
 		}
-		out.Receivers[i].Notified++
-		if nt.Page {
-			out.Receivers[i].Paged++
-			out.PageAts = append(out.PageAts, ledger.RoutedPageAt{At: nt.At, Receiver: nt.Receiver})
-		}
+		out.Sent = append(out.Sent, ledger.RoutedSent{At: nt.At, Receiver: nt.Receiver, Kind: nt.Kind, Page: nt.Page})
 	}
 	for _, name := range a.Empty {
 		out.Receivers = append(out.Receivers, ledger.RoutedReceiver{Receiver: name, Empty: true})
@@ -602,24 +695,36 @@ func (s *Server) catchUpRouted(ctx context.Context, now time.Time) {
 	if err != nil {
 		return
 	}
+	// The pieces share the time the catch-up of a run has.
+	cctx, cancel := context.WithTimeout(ctx, s.catchUpDeadline())
+	defer cancel()
 	days := 0
 	for _, gap := range cover.Gaps(from, upTo) {
-		for at := maxTime(gap[0], gap[0].Truncate(24*time.Hour)); at.Before(gap[1]) && ctx.Err() == nil; {
+		for at := maxTime(gap[0], gap[0].Truncate(24*time.Hour)); at.Before(gap[1]) && cctx.Err() == nil && ctx.Err() == nil; {
 			// Pieces are whole days, or what is left of the gap.
 			end := minTime(at.Truncate(24*time.Hour).Add(24*time.Hour), gap[1])
 			if days >= routedCatchUpDays {
 				return
 			}
 			s.routed.Lock()
-			when, ok := s.routed.tried[at.Unix()]
-			if !ok || s.now().Sub(when) >= notifyEvery {
+			try, ok := s.routed.tried[at.Unix()]
+			if !ok || s.now().Sub(try.at) >= try.wait() {
 				if s.routed.tried == nil {
-					s.routed.tried = map[int64]time.Time{}
+					s.routed.tried = map[int64]routedTry{}
 				}
-				s.routed.tried[at.Unix()] = s.now()
+				s.routed.tried[at.Unix()] = routedTry{at: s.now(), failed: try.failed}
 				s.routed.Unlock()
-				s.workOutRouted(ctx, at, end)
+				s.workOutRoutedIn(ctx, cctx, at, end)
 				days++
+				// One that didn't come out waits longer each time.
+				c, err := s.l.RoutedCover(ctx)
+				s.routed.Lock()
+				if err == nil && c.Covers(at, end) {
+					delete(s.routed.tried, at.Unix())
+				} else {
+					s.routed.tried[at.Unix()] = routedTry{at: s.now(), failed: try.failed + 1}
+				}
+				s.routed.Unlock()
 			} else {
 				s.routed.Unlock()
 			}

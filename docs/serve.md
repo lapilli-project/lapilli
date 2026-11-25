@@ -191,7 +191,10 @@ notification; the summary has `paged`; goals take `pages`, `pages.asleep` and
 `--notifications=false`, `--external-labels`, `--silences` (read again each run) and
 `--paging-receivers`, and the chart's `notifications` values pass them in both modes.
 Hours whose work-out stopped, failed or couldn't read the configuration are not known,
-never none: a week touching one says so, and the next rounds work them out again.
+never none: a week touching one says so, and the next rounds work them out again
+(2 minutes a round in all, a piece that stopped waiting an hour, then two, doubling to a day);
+so are hours with more than 100,000 silences (`--silences` and the recorder's) to take into account.
+Hours recorded before the first worked out are known as recorded.
 How it is worked out, what it is held to and its limits:
 [Who a firing reached, worked out](notifications-worked-out.md#in-lapilli-serve).
 

@@ -56,7 +56,7 @@ func weeksPaged(t *testing.T, s *Server) (unknown, counted int) {
 	return
 }
 
-// A run that takes more flushes than its budget stops, and its hours are
+// A run that takes more work units than its budget stops, and its hours are
 // recorded as not worked out with the text kept whole: nothing is kept of
 // them, and every page says not known, never none.
 func TestRoutedBudgetStops(t *testing.T) {
@@ -69,7 +69,7 @@ func TestRoutedBudgetStops(t *testing.T) {
 	}
 	stopped := 0
 	for _, x := range c {
-		if !x.Worked && strings.Contains(x.Why, "more than 1 flushes") {
+		if !x.Worked && strings.Contains(x.Why, "spent its budget of 1 work units") {
 			stopped++
 		} else if !x.Worked || x.Why != "" {
 			t.Errorf("stretch: %+v", x)
@@ -84,7 +84,7 @@ func TestRoutedBudgetStops(t *testing.T) {
 	if unknown, _ := weeksPaged(t, s); unknown == 0 {
 		t.Errorf("the summary: no week not known")
 	}
-	if _, body, _ := get(t, s.Handler(), "/notifications"); !strings.Contains(body, "Not known:") || !strings.Contains(body, "more than 1 flushes") {
+	if _, body, _ := get(t, s.Handler(), "/notifications"); !strings.Contains(body, "Not known:") || !strings.Contains(body, "spent its budget of 1 work units") {
 		t.Errorf("/notifications doesn't say: %.300s", body)
 	}
 }
@@ -99,12 +99,14 @@ func TestRoutedFiringCap(t *testing.T) {
 	}
 }
 
-// A firing that has been on for a month is taken as beginning at the lead-in:
-// the work-out of a day takes the flushes of two days, not thirty-one.
+// A firing that has been on for a month is taken as beginning at the lead-in,
+// and as notified before it: the work-out of a day takes the work units of the
+// day and the lead-in (about 2,500 here, among the other firings'), not the
+// 8,600 flushes of the month; and it makes no first notification at the
+// lead-in's start.
 func TestRoutedLeadClamp(t *testing.T) {
 	parallel(t)
-	// 5 minute group_interval: 2 days is under 600 flushes, a month 8,600.
-	s := workedServerWith(t, routedLimits{budget: 700})
+	s := workedServerWith(t, routedLimits{budget: 6000})
 	ctx := context.Background()
 	to := now
 	from := to.Add(-24 * time.Hour)
@@ -120,6 +122,19 @@ func TestRoutedLeadClamp(t *testing.T) {
 	}
 	if by, _ := s.l.RoutedByReceiver(ctx, from, to); by["oncall"].Notifications == 0 {
 		t.Errorf("nothing worked out: %v", by)
+	}
+	// Its group was notified a month ago: none of what was worked out is a
+	// first notification, and none of its pages is a PagerDuty incident's.
+	for _, f := range []string{"old"} {
+		fs, _, _ := s.l.FiringsOverlapping(ctx, from, to, from, 1000)
+		for _, x := range fs {
+			if x.Labels["service"] != f {
+				continue
+			}
+			if got, _ := s.l.RoutedOf(ctx, []int64{x.ID}); got[x.ID].Paged != 0 || !got[x.ID].FirstPage.IsZero() {
+				t.Errorf("a firing on for a month got a first page: %+v", got[x.ID])
+			}
+		}
 	}
 }
 
@@ -184,7 +199,7 @@ func TestRecordedPagesDedup(t *testing.T) {
 func TestRoutedSourceRule(t *testing.T) {
 	parallel(t)
 	a := routing.AlertResult{Muted: []routing.Muting{{Kind: routing.MutedInhibition, By: "down", Source: 1}, {Kind: routing.MutedSilence, By: "s1", Source: -1}}}
-	x := routedOf(7, a, nil, func(i int) string { return []string{"A", "NodeDown"}[i] })
+	x := routedOf(7, a, nil, time.Time{}, func(i int) string { return []string{"A", "NodeDown"}[i] })
 	if len(x.Muted) != 2 || x.Muted[0].SourceRule != "NodeDown" || x.Muted[1].SourceRule != "" {
 		t.Errorf("muted: %+v", x.Muted)
 	}
@@ -206,8 +221,9 @@ func TestRoutedSilencesFromMutes(t *testing.T) {
 	}); err != nil || slices.ContainsFunc(errs, func(e error) bool { return e != nil }) {
 		t.Fatal(errs, err)
 	}
-	got, err := s.mutedSilences(ctx, at.Add(-time.Hour), now, fs)
-	if err != nil || len(got) != 1 || got[0].ID != "sil" {
+	alerts := []routing.Alert{{Labels: map[string]string{"alertname": "Errors", "service": "a"}, Start: fs[0].Start}}
+	got, over, err := s.mutedSilences(ctx, at.Add(-time.Hour), now, fs, alerts, 100)
+	if err != nil || over || len(got) != 1 || got[0].ID != "sil" {
 		t.Fatalf("silences: %+v %v", got, err)
 	}
 	names := map[string]string{}

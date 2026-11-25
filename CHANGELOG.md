@@ -27,13 +27,15 @@
   and `--paging-receivers`, which `lapilli serve` refused before; the chart's
   `notifications` values (`enabled`, `externalLabels`, `pagingReceivers`, `silences`) pass
   them in both modes. Schema 035 only adds tables. A work-out is bounded (2 minutes, 20,000,000
-  flushes, 300,000 firings with the run's own hours first), starts a firing no earlier than
-  the lead-in, and records the hours of a run that stopped, failed, couldn't read the
+  work units, 300,000 firings with the run's own hours first, 100,000 silences), takes a firing that
+  began before the lead-in as notified before it (no first page every hour; its repeats counted from
+  the last notification kept for its group), counts what a firing reached from the notifications of
+  all the runs that saw it, and records the hours of a run that stopped, failed, couldn't read the
   configuration or whose firings were recorded again as not worked out (`routed_cover`),
   which every page says as "not known" (a week touching one, `paged.unknown` in
   `/api/v1/summary`, a budget of pages, a goal, the digest) and the catch-up works out
-  again. A recorded page to PagerDuty, Opsgenie, VictorOps or incident.io counts only for a
-  firing notification after none or after all resolved; recorded or worked out is decided for
+  again; the catch-up takes 2 minutes in all and a piece that stopped waits an hour, then two, doubling to a day. A recorded page is a page by the model's rule: to PagerDuty, Opsgenie, VictorOps or incident.io only for a
+  firing notification after none or after all resolved, unless `--paging-receivers` matches the receiver; hours recorded before the first one worked out are known as recorded; a page worked out just before an hour and its recorded copy just after count once; recorded or worked out is decided for
   each receiver and hour; a silence is tied to the firing it muted; an inhibition's
   `source_rule` is kept; a receiver recorded by name alone is compared with its webhooks, and
   one with only recorded notifications is shown apart; replicas read the configuration for their

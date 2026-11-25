@@ -77,14 +77,16 @@ type pagesLine struct {
 func (l pagesLine) PagedBasis() string { return pagedBasis(l.PagedRecorded, l.PagedWorkedOut) }
 
 // pagingOfRecorded says whether a recorded notification to a receiver is a
-// page, by the configuration: an alert manager's recorder names the
-// integration too (receiver/kind, receiver/kind[1]); a webhook port names
-// the receiver alone, which pages when any of its integrations does. Where
-// the integration's kind is one whose tool dedups on the group key
+// page, by the configuration and by the model's own rule
+// (routing.PageRule): an alert manager's recorder names the integration too
+// (receiver/kind, receiver/kind[1]); a webhook port names the receiver
+// alone, which pages when any of its integrations does. Where the
+// integration's kind is one whose tool dedups on the group key
 // (routing.DedupsByGroup), a repeat or a "new alerts" notification isn't a
 // new page, and only a firing notification after none, or after all
-// resolved, is: the notification's reason is first. The notification of
-// resolved alerts alone is none.
+// resolved, is: the notification's reason is first; but a receiver
+// --paging-receivers matches pages for each notification, whatever its
+// kind. The notification of resolved alerts alone is none.
 func pagingOfRecorded(cfg *routing.Config, re *regexp.Regexp, grafana bool) func(name, reason string, resolved bool) bool {
 	return func(name, reason string, resolved bool) bool {
 		if resolved {
@@ -104,26 +106,19 @@ func pagingOfRecorded(cfg *routing.Config, re *regexp.Regexp, grafana bool) func
 			return false
 		}
 		matched := re != nil && re.MatchString(base)
-		first := reason == ledger.ReasonFirst
+		why := routing.Reason(reason)
 		if kind != "" {
-			switch {
-			case routing.DedupsByGroup(kind) && routing.PagingKind(kind, grafana):
-				return first
-			}
-			return matched || routing.PagingKind(kind, grafana)
+			_, page := routing.PageRule(kind, grafana, matched, true, why)
+			return page
 		}
 		// A name without an integration: it pages by any integration that
-		// does; those that dedup count a notification that is first alone.
-		dedup := false
+		// does.
 		for _, ig := range rc.Integrations {
-			switch {
-			case routing.DedupsByGroup(ig.Kind) && routing.PagingKind(ig.Kind, grafana):
-				dedup = true
-			case matched || routing.PagingKind(ig.Kind, grafana):
+			if _, page := routing.PageRule(ig.Kind, grafana, matched, true, why); page {
 				return true
 			}
 		}
-		return dedup && first
+		return false
 	}
 }
 
@@ -177,6 +172,7 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 	// hours.
 	first := map[string]time.Time{}
 	hours := map[string]map[int64]bool{}
+	p.recordedHours = map[int64]bool{}
 	if cfg != nil {
 		recFirst, err := s.l.RecordedFirst(ctx)
 		if err != nil {
@@ -203,6 +199,7 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 			}
 			for h := range hs {
 				hours[b][h] = true
+				p.recordedHours[h] = true
 			}
 		}
 		pages := pagingOfRecorded(cfg, s.cfg.PagingReceivers, grafana)
@@ -233,7 +230,7 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 			if !cover.Covers(pa.At, pa.At.Add(time.Second)) {
 				continue // not worked out for the hour it went in
 			}
-			if hours[pa.Receiver][pa.At.Truncate(time.Hour).Unix()] {
+			if recordedNear(hours[pa.Receiver], pa.At) {
 				continue // recorded: those count
 			}
 			p.events = append(p.events, pageEvent{Rule: r.Rule, At: pa.At, Nothing: nothing})
@@ -242,12 +239,31 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 	return nil
 }
 
+// pageWindow is how far from a worked-out page a recorded notification of
+// the same receiver is taken to be its copy: the model's flushes and the
+// real ones differ by seconds, and an hour boundary between them is no
+// reason to count both.
+const pageWindow = time.Minute
+
+// recordedNear reports whether a receiver recorded a notification in the
+// hour a page went in, or in the hour of the minute before it or after it
+// (hours are the unit the recordings are kept by), so that a page worked out
+// just before an hour and the one recorded just after it count once.
+func recordedNear(hours map[int64]bool, at time.Time) bool {
+	return hours[at.Truncate(time.Hour).Unix()] ||
+		hours[at.Add(-pageWindow).Truncate(time.Hour).Unix()] ||
+		hours[at.Add(pageWindow).Truncate(time.Hour).Unix()]
+}
+
 // known reports whether the pages over [from, to) are known: counted from
-// when the first notification was recorded or the first hour worked out (the
+// when the first notification was recorded or the first hour tried (the
 // part before that is counted from there, and shown as partial), and up to
-// where the ledger's firings are, every hour is worked out. An hour not
-// tried, or tried and not worked out (the work stopped or failed, the
-// configuration couldn't be read), makes the whole span not known, not none.
+// where the ledger's firings are, every hour is worked out, or recorded: the
+// hours before the first one tried are those of the recording alone, which
+// is what was sent, and an hour after it in which a notification was
+// recorded is known as recorded. An hour not tried, or tried and not worked
+// out (the work stopped or failed, the configuration couldn't be read), that
+// has no notification recorded makes the whole span not known, not none.
 // Where notifications are only recorded, pages are as recorded.
 func (p *paged) known(from, to time.Time) bool {
 	if !p.routed {
@@ -257,7 +273,23 @@ func (p *paged) known(from, to time.Time) bool {
 	if !lo.Before(hi) {
 		return true
 	}
-	return p.cover.Covers(lo, hi)
+	for _, gap := range p.cover.Gaps(lo, hi) {
+		// Before the first hour tried, the notifications really sent are
+		// what is counted, from when the first was recorded: nothing
+		// there needs working out.
+		if !gap[1].After(p.routedFrom) {
+			continue
+		}
+		gap[0] = maxTime(gap[0], p.routedFrom)
+		// An hour after it that has recorded notifications is known as
+		// recorded; one that has none and wasn't worked out isn't.
+		for h := gap[0].Truncate(time.Hour); h.Before(gap[1]); h = h.Add(time.Hour) {
+			if !p.recordedHours[h.Unix()] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // partialFrom reports whether the pages over [from, to) are counted from
