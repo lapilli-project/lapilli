@@ -1207,7 +1207,7 @@
  "want JSON, {\"responses\": [...]}, the pages as --responses reads them: %v": "JSON으로 보내 주세요, {\"responses\": [...]} 모양으로, --responses가 읽는 페이지 형식이에요: %v",
  "one write holds %d pages at most: send a shorter period": "한 번에 페이지 %d개까지 받아요. 기간을 줄여서 보내 주세요",
  "page %s was sent %s: a page is sent from 1970 until an hour from now": "페이지 %s의 발송 시각이 %s예요. 발송 시각은 1970년부터 지금부터 한 시간 뒤까지만 받아요",
- "the ledger keeps pages of %d sources at most": "원장은 페이지를 소스 %d개까지만 보관해요",
+ "the ledger keeps pages of %d sources at most": "페이지는 출처 %d개까지만 둘 수 있어요",
  "a source keeps %d pages at most": "소스 하나는 페이지를 %d개까지만 보관해요",
  "%d pages or more were sent in one week: a week keeps %d at most": "한 주에 페이지 %d개 이상이 발송됐어요. 한 주에는 %d개까지만 보관해요",
  "say which period the firings are of: from and to, as RFC 3339 times": "발화의 기간을 from과 to에 RFC 3339 시각으로 적어 주세요",
