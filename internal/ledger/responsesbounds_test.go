@@ -126,21 +126,29 @@ func TestResponsesReadByRule(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 	r, err := l.newResponder(ctx, l.r, l.r, o, []respFiring{f}, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read int
+	var page *response.Page
+	err = r.eachResponse([]respFiring{f}, func(_ respFiring, resp response.Response, _ response.Usefulness) error {
+		read, page = r.pages.Len(), resp.Page
+		return nil
+	})
 	runtime.ReadMemStats(&after)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := r.pages.Len(); got != 50*8 {
-		t.Errorf("pages read: %d, want %d, those naming Crash7", got, 50*8)
+	if read != 50*8 {
+		t.Errorf("pages read: %d, want %d, those naming Crash7", read, 50*8)
 	}
 	if got := after.TotalAlloc - before.TotalAlloc; got > 4<<20 {
 		t.Errorf("reading the pages of one rule allocated %d bytes, more than 4 MiB", got)
 	}
 	// The page this firing's labels name is found, from whichever source:
 	// the nearest by sent time, the source before another as far.
-	resp, _, err := r.respond(f)
-	if err != nil || resp.Page == nil || resp.Page.ID != "p007" || resp.Page.Source != "src-0" {
-		t.Errorf("the firing's page: %+v %v", resp.Page, err)
+	if page == nil || page.ID != "p007" || page.Source != "src-0" {
+		t.Errorf("the firing's page: %+v", page)
 	}
 }
 

@@ -76,10 +76,20 @@ func TestReadRolloutsEqualityMatcherIsNotRegexpQuoted(t *testing.T) {
 // capHistory answers the reads of ReplicaSets that all came back, counting the
 // samples a read by step would hold without building them.
 type capHistory struct {
-	n, dup  int
-	step    time.Duration
-	most    int
-	queries int
+	n, dup int
+	// specDup is how many series each ReplicaSet's spec replicas have (dup
+	// is its owner's), limit the client's sample cap (0: the default).
+	specDup, limit int
+	step           time.Duration
+	most           int
+	queries        int
+}
+
+func (h *capHistory) MaxSamples() int {
+	if h.limit > 0 {
+		return h.limit
+	}
+	return prom.DefaultMaxSamples
 }
 
 func (h *capHistory) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
@@ -96,11 +106,15 @@ func (h *capHistory) QueryRange(_ context.Context, expr string, start, end time.
 		for i := 0; i < h.n; i++ {
 			out = append(out, prom.Series{Labels: lb("namespace", "big", "replicaset", fmt.Sprint("rs", i)), Samples: []prom.Sample{{T: end, V: 1}}})
 		}
+	case strings.HasPrefix(expr, "count by (namespace, replicaset) ("):
+		for i := 0; i < h.n && h.specDup > 0; i++ {
+			out = append(out, prom.Series{Labels: lb("namespace", "big", "replicaset", fmt.Sprint("rs", i)), Samples: []prom.Sample{{T: end, V: float64(h.specDup)}}})
+		}
 	case strings.HasPrefix(expr, "kube_replicaset_spec_replicas{namespace="):
 		m := rsMatcher.FindStringSubmatch(expr)
 		text, _ := strconv.Unquote(m[1])
 		points := int(end.Sub(start)/step) + 1
-		samples := (strings.Count(text, "|") + 1) * points * h.dup
+		samples := (strings.Count(text, "|") + 1) * points * max(h.dup, h.specDup)
 		h.queries++
 		h.most = max(h.most, samples)
 	}

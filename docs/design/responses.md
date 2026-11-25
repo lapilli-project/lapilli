@@ -570,18 +570,22 @@ As above, except:
   [numbers.md](../numbers.md). A recipe's stderr says counts, not ids:
   `recipes/incidents/compass.sh` did name an alert, and now counts as
   `recipes/responses/compass.sh` does.
-- **The first read of the ReplicaSets that came back is of the series put
-  together.** `(max_over_time(...) > 0) and (min_over_time(...) == 0)` is asked
-  of `max by (namespace, replicaset)` of the spec replicas, as a subquery at
-  `--step`, not of each raw series: a 0 to more falling where a series ends
-  and its twin under another instance begins (kube-state-metrics restarted,
-  its `instance` changed) is found, as the step-by-step read, which puts the
-  series together too, would.
+- **The first read of the ReplicaSets that came back holds no subquery.**
+  `(max_over_time(M[P]) > 0) and (min_over_time(M[P]) == 0)` is asked of each
+  raw series (a subquery at `--step` holds its whole matrix inside Prometheus's
+  `--query.max-samples`, about 2 x the ReplicaSets x the points: measured, it
+  failed where the raw range passed, at 28 days and 1m past some 620
+  ReplicaSets in a query). A ReplicaSet with more than one series over the
+  period (`count by (namespace, replicaset) (last_over_time(M[P])) > 1`:
+  kube-state-metrics replicas, an `instance` that changed, a break between two
+  series) is read by step as well, its series put together there (the greatest
+  at each step), so a 0 to more falling where a series ends and its twin
+  begins is found.
 - **A query of ReplicaSets' replicas is sized from the sample cap.** Its names
-  are as many as four fifths of `prom.DefaultMaxSamples` holds at the period's
-  points (period over `--step`, and one) for as many series as the most any
-  ReplicaSet has in the owners' read (kube-state-metrics replicas, instances
-  that changed), at least one and 200 at most: at 28 days, 1m and two series
+  are as many as four fifths of the client's sample cap (`--max-samples`)
+  holds at the period's points (period over `--step`, and one) for as many
+  series as the most any ReplicaSet has, of its owner and of its spec
+  replicas (kube-state-metrics replicas, instances that changed), at least one and 200 at most: at 28 days, 1m and two series
   each, 99 names a query (80,642 samples a ReplicaSet), where 200 would hold
   16 million. The namespace in such a query is an equality matcher, quoted as
   a string, not as a regular expression.
@@ -591,23 +595,24 @@ As above, except:
   (changed). Serve's deploy stone (`firings.deploy`, `--deploy-before` and
   `--deploy-after`) is as it was: a deploy that lists no label is still
   everything's there.
-- **Pages are cut where `Find` cuts, and the file's are always read.**
-  `Index.Find` walks a rule's pages in order of sent time, id, then source;
-  the ledger's cut of a window (`response_rules`, whose key is now `(rule,
-  sent_at, id, source)`) is in that same order, 1,000 a window and rule name
-  (`MaxFindScan`), so a cut never drops a page Find would have chosen; and
-  the `file` source's first 1,000 are read apart from the other sources',
-  as Find prefers them, so that the union holds the first 1,000 of all.
-  The windows' cuts are asked 50 to a statement (`pageCutsPerQuery`, a union
-  of one limited subquery for each), the windows of a rule that meet in one,
-  and one by one only when more than 1,000 pages are in them: re-judging a
-  week of windows takes a few statements and not one for each.
-- **A judgement loads 20,000 pages at most** (`ledger.MaxJudgePages`). Past it
-  the windows left (the rules in name order, a rule's windows in time order,
-  the file's before the others') are given no page: their firings are judged
-  with none found, which leaves the usefulness unknown at worst (the
-  conservative side). The count of those firings is kept
-  (`Ledger.PagesCapped`) and logged each time it is not 0.
+- **Pages are cut where `Find` cuts, whatever their source.** `Index.Find`
+  walks a rule's pages in order of sent time, id, then source, and looks at
+  the first 1,000 of them from the firing's start (`MaxFindScan`), whatever
+  their source, the file's preferred among those. The ledger's cut of a window
+  (`response_rules`, whose key is `(rule, sent_at, id, source)`) is one, in
+  that same order (with an outer `ORDER BY` so a union keeps it), `LIMIT 1,001`
+  so a cut reads that many index entries and no more: it holds every page Find
+  can choose, and the file's precedence holds inside `Find`. The windows' cuts
+  are asked 50 to a statement (`pageCutsPerQuery`, a union of one limited
+  subquery for each), the windows of a rule that meet in one, and one by one
+  only when more than 1,000 pages are in them.
+- **A judgement holds 20,000 pages at most, and judges every firing.** The
+  firings are judged in batches (`ledger.MaxJudgePages`, a batch being a firing
+  at least, whose pages are 2,000 at most for the names it may carry): keys
+  are read 50 windows to a statement, the pages of a batch loaded when it is
+  full and dropped once it is judged. Nothing is skipped, so every firing gets
+  the page `Find` over all pages would give it, whatever its rule's name, and
+  memory is bounded by the batch.
 - **Coverage that grew judges only the firings it made known.** A run that
   extends a workload's known span puts back the firings in it whose changes
   were not known before and are now (the whole firing inside the new span, and

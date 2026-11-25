@@ -239,10 +239,10 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	if err != nil {
 		return err
 	}
-	// How many series one ReplicaSet's owner has (kube-state-metrics
-	// replicas, or an instance that changed): its replicas have as many, and
-	// a query for its replicas holds as many samples as the series have
-	// (rsChunks).
+	// How many series one ReplicaSet has (kube-state-metrics replicas, or an
+	// instance that changed), of its owner and of its spec replicas (the most
+	// of them): a query for its replicas holds as many samples as the series
+	// have (rsChunk).
 	dup := 1
 	copies := map[rsKey]int{}
 	for _, s := range owners {
@@ -304,12 +304,20 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	// ones too: they may begin at 0, or above), and only they are read by
 	// step, as many to a query as the sample cap holds (rsChunks). One created
 	// in the period is counted only once it has been above 0 and then 0, or
-	// its first scale up is its rollout's. The test is made of the series put
-	// together across kube-state-metrics' replicas and instances (max by
-	// namespace and ReplicaSet, at the step), so that a change falling where
-	// one series ends and its twin under another instance begins is found.
-	agg := "max by (namespace, replicaset) (kube_replicaset_spec_replicas{" + sel + "})[" + r.window + ":" + strconv.FormatInt(max(int64(r.step/time.Second), 1), 10) + "s]"
-	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+agg+") > 0) and (min_over_time("+agg+") == 0)")
+	// its first scale up is its rollout's. The test is made of each series
+	// by itself (a raw range per series, no subquery: a subquery holds its
+	// whole matrix inside --query.max-samples, 2 x the ReplicaSets x the
+	// points, where this holds none), and a ReplicaSet with more than one
+	// series over the period (kube-state-metrics' replicas, or an instance
+	// that changed, a break between two series) is read by step as well, its
+	// series put together there (the greatest at each step), so that a change
+	// falling where one series ends and its twin begins is found.
+	spec := "kube_replicaset_spec_replicas{" + sel + "}[" + r.window + "]"
+	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+spec+") > 0) and (min_over_time("+spec+") == 0)")
+	if err != nil {
+		return err
+	}
+	series, err := r.instant(ctx, "ReplicaSets' replicas series", "count by (namespace, replicaset) (last_over_time("+spec+"))")
 	if err != nil {
 		return err
 	}
@@ -317,6 +325,17 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	for _, s := range cand {
 		k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
 		if _, ok := r.rsOwner[k]; ok {
+			byNS[k.ns] = append(byNS[k.ns], k.rs)
+		}
+	}
+	for _, s := range series {
+		n, ok := lastValue(s)
+		if !ok {
+			continue
+		}
+		k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
+		dup = max(dup, int(n))
+		if _, owned := r.rsOwner[k]; owned && n > 1 {
 			byNS[k.ns] = append(byNS[k.ns], k.rs)
 		}
 	}
@@ -347,13 +366,18 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 }
 
 // rsChunk is how many ReplicaSets' replicas one query reads: as many as the
-// sample cap (prom.DefaultMaxSamples, --max-samples) holds, four fifths of it,
+// sample cap (the client's MaxSamples, --max-samples; prom.DefaultMaxSamples
+// of one that has none) holds, four fifths of it,
 // at the period's points a series and dup series a ReplicaSet; at least one,
 // and MaxNames at most. A period of 28 days at 1m with two series for each
 // holds 80,642 samples a ReplicaSet, so 99 to a query, not 200.
 func (r *reader) rsChunk(dup int) int {
 	points := int((r.to.Sub(r.from))/r.step) + 1
-	n := prom.DefaultMaxSamples / 5 * 4 / (points * max(dup, 1))
+	limit := prom.DefaultMaxSamples
+	if m, ok := r.h.(interface{ MaxSamples() int }); ok && m.MaxSamples() > 0 {
+		limit = m.MaxSamples()
+	}
+	n := limit / 5 * 4 / (points * max(dup, 1))
 	return min(max(n, 1), MaxNames)
 }
 

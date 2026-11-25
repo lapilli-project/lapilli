@@ -47,7 +47,6 @@ var (
 	podMatcher = regexp.MustCompile(`pod=~("(?:[^"\\]|\\.)*")`)
 	rsMatcher  = regexp.MustCompile(`replicaset=~("(?:[^"\\\\]|\\\\.)*")`)
 	geMatcher  = regexp.MustCompile(` >= (\d+)$`)
-	subMatcher = regexp.MustCompile(`\[(\d+)s:(\d+)s\]`)
 )
 
 func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -74,20 +73,11 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	inNS, inPod, inRS := filter(nsMatcher, "namespace"), filter(podMatcher, "pod"), filter(rsMatcher, "replicaset")
 	cameBack := strings.HasPrefix(expr, "(max_over_time(")
-	// The test of the ReplicaSets that came back is made of the series put
-	// together by namespace and ReplicaSet, over a subquery [window:step].
-	var sub struct {
-		on          bool
-		start, step int64
-	}
-	if m := subMatcher.FindStringSubmatch(expr); cameBack && m != nil {
-		w, _ := strconv.ParseInt(m[1], 10, 64)
-		st, _ := strconv.ParseInt(m[2], 10, 64)
-		sub.on, sub.step, sub.start = true, st, end-w+st
-	}
-	merged := map[string]map[int]float64{}
-	mergedLabels := map[string]map[string]string{}
-	instant := strings.HasPrefix(expr, "last_over_time(") || strings.HasPrefix(expr, "count(") || cameBack
+	// The count of a ReplicaSet's series is by namespace and ReplicaSet.
+	counted := strings.HasPrefix(expr, "count by (namespace, replicaset) (")
+	counts := map[string]int{}
+	countLabels := map[string]map[string]string{}
+	instant := strings.HasPrefix(expr, "last_over_time(") || strings.HasPrefix(expr, "count(") || cameBack || counted
 	min := -1.0
 	if m := geMatcher.FindStringSubmatch(expr); m != nil {
 		min, _ = strconv.ParseFloat(m[1], 64)
@@ -115,24 +105,10 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.ranged = append(s.ranged, f.labels["replicaset"])
 			s.mu.Unlock()
 		}
-		if sub.on {
+		if counted {
 			g := f.labels["namespace"] + "/" + f.labels["replicaset"]
-			if merged[g] == nil {
-				merged[g] = map[int]float64{}
-				mergedLabels[g] = map[string]string{"namespace": f.labels["namespace"], "replicaset": f.labels["replicaset"]}
-			}
-			for i := f.from; sub.start+int64(i)*sub.step <= end; i++ {
-				if f.stop && i-f.from >= len(f.vals) {
-					break
-				}
-				v := f.vals[len(f.vals)-1]
-				if i-f.from < len(f.vals) {
-					v = f.vals[i-f.from]
-				}
-				if old, ok := merged[g][i]; !ok || v > old {
-					merged[g][i] = v
-				}
-			}
+			counts[g]++
+			countLabels[g] = map[string]string{"namespace": f.labels["namespace"], "replicaset": f.labels["replicaset"]}
 			continue
 		}
 		if cameBack {
@@ -201,22 +177,12 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.samples += len(vals)
 		s.mu.Unlock()
 	}
-	for g, m := range merged {
-		lo, hi, first := 0.0, 0.0, true
-		for _, v := range m {
-			if first {
-				lo, hi, first = v, v, false
-			}
-			lo, hi = math.Min(lo, v), math.Max(hi, v)
+	for g, n := range counts {
+		var ls []string
+		for _, k := range sortedKeys(countLabels[g]) {
+			ls = append(ls, fmt.Sprintf("%q:%q", k, countLabels[g][k]))
 		}
-		if lo == 0 && hi > 0 {
-			var ls []string
-			for _, k := range sortedKeys(mergedLabels[g]) {
-				ls = append(ls, fmt.Sprintf("%q:%q", k, mergedLabels[g][k]))
-			}
-			out = append(out, fmt.Sprintf(`{"metric":{%s},"values":[[%d,"1"]]}`, strings.Join(ls, ","), end))
-			count++
-		}
+		out = append(out, fmt.Sprintf(`{"metric":{%s},"values":[[%d,"%d"]]}`, strings.Join(ls, ","), end, n))
 	}
 	for g, m := range groups {
 		var ats []int64
@@ -355,8 +321,9 @@ func TestReadRollouts(t *testing.T) {
 	}
 	web := Workload{"shop", KindDeployment, "web"}
 	slices.Sort(s.ranged)
-	// (three queries name the metric: the owners that have it, the candidates, and the read by step)
-	if len(s.queries("kube_replicaset_spec_replicas")) != 3 || !slices.Equal(s.ranged, []string{"web-6c1", "web-7d4"}) {
+	// (four queries name the metric: the owners that have it, the candidates,
+	// the count of series, and the read by step)
+	if len(s.queries("kube_replicaset_spec_replicas")) != 4 || !slices.Equal(s.ranged, []string{"web-6c1", "web-7d4"}) {
 		t.Errorf("only the ReplicaSets that came back are read by step, in one query: %v", s.ranged)
 	}
 	if c := find(r, Rollout, web); len(c) != 1 || !c[0].At.Equal(created) || c[0].Revision != "web-7d4" {
@@ -508,7 +475,7 @@ func TestReadRolloutsChunks(t *testing.T) {
 		}
 		want := 3
 		if m == "kube_replicaset_spec_replicas" {
-			want = 6 // and the owners that have it, in each
+			want = 9 // and the owners that have it, the candidates and the count of series, in each
 		}
 		if len(qs) != want {
 			t.Errorf("%s asked %d times, want %d", m, len(qs), want)

@@ -46,55 +46,22 @@ func TestPageCutIsFinds(t *testing.T) {
 }
 
 // A week of firings with windows apart is asked for in a few statements, not
-// one for each window: 300 firings of one rule, hours apart, take at most 2 x
-// 6 (50 windows a statement, the file's and the others'), not 600.
+// one for each window: 300 firings of one rule, hours apart, take at most 6
+// (50 windows a statement), not 300.
 func TestPageCutsAreBatched(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
 	var ws []pageWindow
 	for i := 0; i < 300; i++ {
 		s := t0.Add(time.Duration(i) * 3 * time.Hour).Unix()
-		ws = append(ws, pageWindow{"R", s, s + 600, i})
+		ws = append(ws, pageWindow{"R", s, s + 600})
 	}
 	before := l.pageCuts.Load()
-	if _, _, err := l.pagesNear(ctx, l.r, ws); err != nil {
+	if _, err := l.pageKeys(ctx, l.r, ws); err != nil {
 		t.Fatal(err)
 	}
-	if n := l.pageCuts.Load() - before; n > 12 {
-		t.Errorf("%d statements for 300 windows, want at most 12", n)
-	}
-}
-
-// A judgement loads no more than the cap in all: the windows past it get no
-// page, and the firings of them are counted.
-func TestJudgementPagesCap(t *testing.T) {
-	ctx := context.Background()
-	l := open(t, time.UTC)
-	o := opts
-	old := judgePagesCap
-	judgePagesCap = 100
-	defer func() { judgePagesCap = old }()
-	at := t0.Add(24 * time.Hour)
-	var pages []response.Page
-	for _, r := range []string{"R1", "R2", "R3"} {
-		for i := 0; i < 60; i++ {
-			pages = append(pages, page(fmt.Sprintf("%s-%d", r, i), r, "x", at.Add(time.Duration(i)*time.Second), time.Time{}, time.Time{}, ""))
-		}
-	}
-	if _, err := l.PutResponses(ctx, "pd", at, at.Add(time.Hour), pages, o); err != nil {
-		t.Fatal(err)
-	}
-	ws := []pageWindow{{"R1", at.Unix(), at.Unix() + 3600, 0}, {"R2", at.Unix(), at.Unix() + 3600, 1}, {"R3", at.Unix(), at.Unix() + 3600, 2}}
-	before := l.pagesRead.Load()
-	got, capped, err := l.pagesNear(ctx, l.r, ws)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := l.pagesRead.Load() - before; n > 100 || len(got) != 60 || capped != 2 {
-		t.Errorf("%d pages read, %d returned, %d firings capped; want at most 100, 60 and 2", n, len(got), capped)
-	}
-	if l.PagesCapped() != 2 {
-		t.Errorf("PagesCapped %d, want 2", l.PagesCapped())
+	if n := l.pageCuts.Load() - before; n > 6 {
+		t.Errorf("%d statements for 300 windows, want at most 6", n)
 	}
 }
 

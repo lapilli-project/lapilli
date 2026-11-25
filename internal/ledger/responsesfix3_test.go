@@ -52,6 +52,10 @@ func TestPagesReadNearTheirFirings(t *testing.T) {
 		runtime.GC()
 		runtime.ReadMemStats(&m0)
 		r, err := l.newResponder(ctx, l.r, l.r, o, fs, b.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = r.eachResponse(fs, func(respFiring, response.Response, response.Usefulness) error { return nil })
 		runtime.ReadMemStats(&m1)
 		if err != nil {
 			t.Fatal(err)
