@@ -1,0 +1,21 @@
+Lapilli  2026-10-05 00:00 → 2026-10-12 00:00 UTC
+5 firings, 1 incident written down
+
+RULE        SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+ApiErrors   critical  2      1         1          50%        0
+DiskFull    –         1      0         1          0%         0
+Latency     –         1      0         1          0%         0
+QueueDepth  –         1      0         1          0%         0
+
+Out of hours, in UTC (at work mon-fri 08:00-18:00, asleep 22:00-08:00):
+of the firings that caught nothing, 2 came while people slept, and 0 more off hours.
+RULE        ● ASLEEP  ● OFF HOURS  ● AT WORK
+Latency     1         0            0
+QueueDepth  1         0            0
+
+What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
+RULE       INCIDENTS  FIRST  ALONE
+ApiErrors  1          1      1
+
+INCIDENT      START             LASTED  CAUGHT BY
+INC-1 Errors  2026-10-06 10:00  30m     ApiErrors +0s

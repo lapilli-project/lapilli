@@ -1,0 +1,175 @@
+{
+ "count": 6,
+ "next": "https://oncall.example.com/oncall/api/v1/alert_groups/?page=2",
+ "previous": null,
+ "results": [
+  {
+   "id": "I1AAAAAAAAAA1",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "resolved",
+   "created_at": "2026-11-20T03:12:00.429805Z",
+   "alert_group_number": 201,
+   "resolved_at": "2026-11-20T03:20:00.429805Z",
+   "acknowledged_at": "2026-11-20T03:15:00.429805Z",
+   "acknowledged_by": "UCGEIXI1MR1NZ",
+   "resolved_by": null,
+   "title": "KubePodCrashLooping",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I1AAAAAAAAAA1",
+    "created_at": "2026-11-20T03:12:00.429805Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "KubePodCrashLooping"
+     },
+     "commonLabels": {
+      "namespace": "shop",
+      "pod": "cart-7f9c",
+      "alertname": "KubePodCrashLooping"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "namespace": "shop",
+        "pod": "cart-7f9c",
+        "alertname": "KubePodCrashLooping"
+       },
+       "annotations": {
+        "summary": "KubePodCrashLooping"
+       },
+       "startsAt": "2026-11-20T03:12:00.429805Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI1AAAAAAAAAA1"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "I2AAAAAAAAAA2",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "resolved",
+   "created_at": "2026-11-20T04:00:00Z",
+   "alert_group_number": 202,
+   "resolved_at": "2026-11-20T04:04:00Z",
+   "acknowledged_at": null,
+   "acknowledged_by": null,
+   "resolved_by": null,
+   "title": "NodeDiskFilling",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I2AAAAAAAAAA2",
+    "created_at": "2026-11-20T04:00:00Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "NodeDiskFilling"
+     },
+     "commonLabels": {
+      "instance": "node-4",
+      "service": "search",
+      "alertname": "NodeDiskFilling"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "instance": "node-4",
+        "service": "search",
+        "alertname": "NodeDiskFilling"
+       },
+       "annotations": {
+        "summary": "NodeDiskFilling"
+       },
+       "startsAt": "2026-11-20T04:00:00Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI2AAAAAAAAAA2"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "I3AAAAAAAAAA3",
+   "integration_id": "CFRBVMXH3RBE4",
+   "route_id": "RXL4ZMVRG5IQS",
+   "alerts_count": 1,
+   "state": "resolved",
+   "created_at": "2026-11-20T05:00:00Z",
+   "alert_group_number": 203,
+   "resolved_at": "2026-11-20T05:30:00Z",
+   "acknowledged_at": null,
+   "acknowledged_by": null,
+   "resolved_by": "UQ2WVHZPT6KD4",
+   "title": "CartLatency",
+   "permalinks": {
+    "slack": null,
+    "telegram": null
+   },
+   "silenced_at": null,
+   "root_alert_group_id": null,
+   "dependent_alert_group_ids": [],
+   "last_alert": {
+    "id": "AWJC9HN4DS5JT",
+    "alert_group_id": "I3AAAAAAAAAA3",
+    "created_at": "2026-11-20T05:00:00Z",
+    "payload": {
+     "receiver": "oncall",
+     "status": "firing",
+     "groupLabels": {
+      "alertname": "CartLatency"
+     },
+     "commonLabels": {
+      "namespace": "shop",
+      "service": "cart",
+      "alertname": "CartLatency"
+     },
+     "alerts": [
+      {
+       "status": "firing",
+       "labels": {
+        "namespace": "shop",
+        "service": "cart",
+        "alertname": "CartLatency"
+       },
+       "annotations": {
+        "summary": "CartLatency"
+       },
+       "startsAt": "2026-11-20T05:00:00Z",
+       "endsAt": "0001-01-01T00:00:00Z",
+       "generatorURL": "http://prometheus.example.com/graph",
+       "fingerprint": "fI3AAAAAAAAAA3"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "current_page_number": 1,
+ "page_size": 50,
+ "total_pages": 2
+}

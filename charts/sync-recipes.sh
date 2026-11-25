@@ -1,11 +1,13 @@
 #!/bin/sh
-# Copies the recipes the chart runs (recipes/incidents and recipes/changes,
+# Copies the recipes the chart runs (recipes/incidents, recipes/changes and
+# recipes/responses,
 # without their READMEs or testdata) into charts/lapilli/files/recipes, from
-# which serve.incidentsAPI.copy and serve.changes.pullRequests mount them.
+# which serve.incidentsAPI.copy (its responses/ recipes, which need ../incidents beside
+# them) and serve.changes.pullRequests mount them.
 # A test fails when the copies differ from recipes/. Run it from anywhere.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-for dir in incidents changes; do
+for dir in incidents changes responses; do
   dest=$root/charts/lapilli/files/recipes/$dir
   rm -rf "$dest"
   mkdir -p "$dest"

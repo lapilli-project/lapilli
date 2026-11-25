@@ -1,0 +1,17 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T14:30:00+09:00",
+   "logType": "close",
+   "log": "Closed by Ana",
+   "owner": "Ana"
+  },
+  {
+   "logTime": "2026-11-20T14:10:00+09:00",
+   "logType": "system",
+   "log": "Alert acknowledged via web",
+   "owner": "Ana"
+  }
+ ],
+ "links": {}
+}

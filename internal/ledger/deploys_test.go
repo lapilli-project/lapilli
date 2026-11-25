@@ -426,7 +426,10 @@ func TestDeploysPending(t *testing.T) {
 	if err := l.JudgePending(ctx, o); err != nil {
 		t.Fatal(err)
 	}
-	if writes := l.Gen() - gen; writes > 10 {
+	// Each deploy puts its firings' week back to be judged by what was done
+	// about them (pendTargets): the 300 days are 43 weeks, a write a week,
+	// not a write a span.
+	if writes := l.Gen() - gen; writes > 50 {
 		t.Errorf("1,000 spans judged in %d writes", writes)
 	}
 	var marked int

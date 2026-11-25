@@ -1,0 +1,54 @@
+{
+ "values": [
+  {
+   "id": "c1000000-0000-4000-8000-000000000003",
+   "tinyId": "4003",
+   "createdAt": "2026-11-20T14:00:00+09:00",
+   "updatedAt": "2026-11-20T14:30:00+09:00",
+   "message": "CartLatency",
+   "source": "Prometheus",
+   "status": "closed",
+   "alias": "CartLatency",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "CartLatency",
+    "service": "cart"
+   },
+   "acknowledged": true,
+   "count": 1,
+   "snoozed": false,
+   "integrationType": "Prometheus",
+   "integrationName": "Alertmanager",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": true
+  },
+  {
+   "id": "c1000000-0000-4000-8000-000000000004",
+   "tinyId": "4004",
+   "createdAt": "2026-11-20T09:15:00Z",
+   "updatedAt": "2026-11-20T09:15:00Z",
+   "message": "SearchTimeouts",
+   "source": "Prometheus",
+   "status": "open",
+   "alias": "SearchTimeouts",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "SearchTimeouts",
+    "service": "search"
+   },
+   "acknowledged": false,
+   "count": 1,
+   "snoozed": false,
+   "integrationType": "Prometheus",
+   "integrationName": "Alertmanager",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": false
+  }
+ ],
+ "count": 4,
+ "links": {}
+}

@@ -461,14 +461,39 @@ func (s *Server) MetricsHandler() http.Handler {
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cfg.IncidentsToken != "" {
-		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", append([]string{s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, s.cfg.ResponsesFiles()...), &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
 		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
 	}
 	if s.cfg.FiringsToken != "" {
-		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", append([]string{s.cfg.IncidentsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, s.cfg.ResponsesFiles()...), &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
 		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
+	}
+	if len(s.cfg.ResponsesTokens) > 0 {
+		// One token for each source, which writes that source's pages and no
+		// other's: a path's source picks the token its request must hold, and
+		// one that names a source no token is for is as one with no token.
+		bySource := make(map[string]http.HandlerFunc, len(s.cfg.ResponsesTokens))
+		for source, file := range s.cfg.ResponsesTokens {
+			// Every other token, another source's too.
+			others := []string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}
+			for other, f := range s.cfg.ResponsesTokens {
+				if other != source {
+					others = append(others, f)
+				}
+			}
+			tk := token{file, ledger.ResponsesCopier, "--responses-token-file " + source + "=FILE", others, &s.responsesWarned, maxResponsesBody, s.responsesRate, s.responsesBusy}
+			bySource[source] = s.withToken(tk, s.apiPutResponses)
+		}
+		mux.HandleFunc("PUT /api/v1/responses/{source}", func(w http.ResponseWriter, r *http.Request) {
+			if h, ok := bySource[r.PathValue("source")]; ok {
+				h(w, r)
+				return
+			}
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "this path takes the token in --responses-token-file SOURCE=FILE of its source, as a bearer token", http.StatusUnauthorized)
+		})
 	}
 	s.trackerPaths(mux)
 	s.changesTokenRoutes(mux)

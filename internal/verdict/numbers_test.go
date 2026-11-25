@@ -18,43 +18,52 @@ import (
 // stableFields are the report's fields docs/numbers.md promises keep their
 // names, by where they are: renaming one fails here first.
 var stableFields = map[string][]string{
-	"":                          {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings"},
+	"":                          {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings", "responses"},
 	"noisy_at":                  {"firings", "precision"},
-	"settings":                  {"lead_ns", "match", "linked_only", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by", "record_by_week", "impact_signals", "impact_rules", "zone"},
+	"settings":                  {"lead_ns", "match", "linked_only", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by", "record_by_week", "impact_signals", "impact_rules", "zone", "noisy_by", "routine"},
 	"settings.impact_signals[]": {"name", "for_ns", "match", "record", "start", "lead_ns"},
 	"settings.impact_rules[]":   {"rules", "labels", "signals", "match", "lead_ns", "require", "judged"},
-	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged"},
+	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged", "responses"},
+	"rules[].responses":         {"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"},
 	"rules[].marked.*":          {"firings", "caught", "refired", "unjudged"},
 	"rules[].episodes":          {"total", "white", "unjudged", "noisy"},
 	"incidents[]":               {"id", "title", "start", "end", "labels", "alerts", "candidate", "caught_by", "signal", "real", "not_known"},
 	"incidents[].alerts[]":      {"rule", "labels"},
 	"incidents[].caught_by[]":   {"rule", "delay_ns", "noisy", "linked"},
-	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals", "marked", "episode", "day", "unrelated", "action", "not_judged"},
+	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals", "marked", "episode", "day", "unrelated", "action", "not_judged", "response"},
+	"responses":                 {"pages", "pages_unmatched", "changes", "autoscalers_known"},
+	"firings[].response":        {"kind", "useful", "change", "page"},
+	"firings[].response.change": {"kind", "at", "labels", "routine"},
+	"firings[].response.page":   {"id", "sent", "acknowledged", "resolved", "resolved_by"},
 }
 
 // A report with every field docs/numbers.md promises set, none left out as
 // empty.
 func fullReport() *Report {
 	t0 := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
-	lead, no := 5*time.Minute, false
+	lead, no, yes, third := 5*time.Minute, false, true, 1.0/3
 	return &Report{
 		From: t0, To: t0.Add(7 * 24 * time.Hour), NoisyAt: NoisyAt{Firings: 10, Precision: 0.2}, NoRecord: true, Unjudged: 1, SomeRules: true,
 		Settings: &Settings{Lead: time.Minute, Match: []string{"service"}, LinkedOnly: true, Refire: time.Hour, UnknownLength: time.Hour, RecordLookback: RecordLookback,
 			ImpactFrom: t0, ImpactNoData: true, ByWeek: true, RecordBy: "week", // every field, though no data leaves impact_from out
 			ImpactSignals: []Signal{{Name: "probe", For: 2 * time.Minute, Match: []string{"service"}, Record: true, Start: t0, Lead: &lead}},
 			ImpactRules: []RuleEntry{{Rules: "^BackendMissing$", Labels: incident.Labels{"team": {"platform"}}, Signals: []string{"probe"}, Match: []string{"backend"},
-				Lead: &lead, Require: []string{"backend"}, Judged: &no}}, Zone: "Asia/Seoul"},
+				Lead: &lead, Require: []string{"backend"}, Judged: &no}}, Zone: "Asia/Seoul", NoisyBy: NoisyByUseful, Routine: 0.5},
 		Rules: []RuleResult{{Rule: "ApiErrors", Severity: "critical", Firings: 3, White: 1, Black: 2, Refired: 1, Noisy: true, Unjudged: 1, NoRecord: true,
 			Replayed: true, Unsupported: "x", Incidents: 1, First: 1, Alone: 1, Spare: true, OffHours: 1, OffHoursBlack: 1, Asleep: 1, AsleepBlack: 1,
 			Excused: 1, DuringDeploys: 1, DeploysCaught: 1, DeploysUnjudged: 1, ImpactRule: 1,
 			Marked:   map[string]MarkedCount{"sale": {Firings: 1, Caught: 1, Refired: 1, Unjudged: 1}},
-			Episodes: EpisodeCount{Total: 2, White: 1, Unjudged: 1, Noisy: true}, Unrelated: 1, ActionYes: 1, ActionNo: 1, NotJudged: 1}},
+			Episodes: EpisodeCount{Total: 2, White: 1, Unjudged: 1, Noisy: true}, Unrelated: 1, ActionYes: 1, ActionNo: 1, NotJudged: 1,
+			Responses: &RuleResponses{Changed: 1, Routine: 1, Acknowledged: 1, Unanswered: 1, None: 1, Useful: 1, NotUseful: 2, Actionable: &third}}},
 		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Title: "Errors", Start: t0, End: t0.Add(time.Hour),
 			Labels: incident.Labels{"service": {"api"}}, Alerts: []incident.Alert{{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}}},
 			Candidate: true, Signal: "probe"}, Real: true, NotKnown: true, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true, Linked: true}}}},
 		Firings: []Judged{{Firing: firing.Firing{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}, Start: t0, End: t0.Add(time.Hour)},
 			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true, Signals: []string{"probe"}, Marked: []string{"sale"},
-			Episode: 1, Day: "2026-11-02", Unrelated: []string{"INC-2"}, Action: ActionYes, NotJudged: true}},
+			Episode: 1, Day: "2026-11-02", Unrelated: []string{"INC-2"}, Action: ActionYes, NotJudged: true,
+			Response: &FiringResponse{Kind: ResponseChanged, Useful: &yes, Change: &ResponseChange{Kind: "rollout", At: t0, Labels: map[string]string{"namespace": "shop"}, Routine: true},
+				Page: &ResponsePage{ID: "PD-1", Sent: t0, Acknowledged: t0, Resolved: t0, ResolvedBy: "alert"}}}},
+		Responses: &ResponseTotals{Pages: 1, PagesUnmatched: 1, Changes: 1, AutoscalersKnown: true},
 	}
 }
 
@@ -149,6 +158,18 @@ func TestCSVColumns(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(strings.Fields(section), " "), strings.Join(quoted, ", ")) {
 		t.Errorf("docs/numbers.md doesn't list the columns in order: %s", strings.Join(quoted, ", "))
+	}
+	// With responses, more columns after them.
+	more := []string{"response", "useful", "rule_changed", "rule_routine", "rule_acknowledged", "rule_unanswered", "rule_none", "rule_useful", "rule_not_useful", "rule_actionable"}
+	if !slices.Equal(ResponseCSVColumns, more) {
+		t.Errorf("response columns %q, want %q", ResponseCSVColumns, more)
+	}
+	quoted = nil
+	for _, c := range more {
+		quoted = append(quoted, "`"+c+"`")
+	}
+	if !strings.Contains(strings.Join(strings.Fields(section), " "), strings.Join(quoted, ", ")) {
+		t.Errorf("docs/numbers.md doesn't list the columns with responses in order: %s", strings.Join(quoted, ", "))
 	}
 }
 
@@ -286,5 +307,50 @@ func TestVerdictMetricsStable(t *testing.T) {
 		if strings.Contains(b.String(), m.name) {
 			t.Errorf("no named signal, and %s", m.name)
 		}
+	}
+}
+
+// The metrics of responses keep their names and labels, and the document
+// lists each with them: they are there with responses, and not without.
+func TestResponseMetricsStable(t *testing.T) {
+	r := fullReport()
+	r.Rules[0].Unsupported = ""
+	var b bytes.Buffer
+	if err := Prometheus(&b, r, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := os.ReadFile("../../docs/numbers.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, _ := strings.Cut(string(doc), "### The metrics")
+	table, _, _ = strings.Cut(table, "\n### ")
+	for name, labels := range map[string][]string{
+		"lapilli_rule_responses":  {`rule="ApiErrors"`, `severity="critical"`, `response="`},
+		"lapilli_rule_actionable": {`rule="ApiErrors"`, `severity="critical"`},
+	} {
+		line := ""
+		for _, l := range strings.Split(b.String(), "\n") {
+			if strings.HasPrefix(l, name+"{") {
+				line = l
+			}
+		}
+		if line == "" {
+			t.Errorf("--metrics: no %s", name)
+		}
+		for _, l := range labels {
+			if !strings.Contains(line, l) {
+				t.Errorf("%s: no %s", line, l)
+			}
+		}
+		if !strings.Contains(table, "| `"+name+"` |") {
+			t.Errorf("docs/numbers.md doesn't list %s", name)
+		}
+	}
+	r.Responses = nil
+	b.Reset()
+	Prometheus(&b, r, time.Time{})
+	if strings.Contains(b.String(), "lapilli_rule_responses") || strings.Contains(b.String(), "lapilli_rule_actionable") {
+		t.Error("metrics of responses, and no responses")
 	}
 }

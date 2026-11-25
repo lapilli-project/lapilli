@@ -15,7 +15,10 @@
 # internal/source), not by the rest of lapilli; e2e-kubernetes, which checks
 # the replay of a real rule set against what Prometheus fired, by those and
 # by what sets the replay beside it (internal/verdict, internal/firing, and
-# the verdict command, cmd/lapilli/check.go and verdict.go). A path that reaches none
+# the verdict command, cmd/lapilli/check.go and verdict.go); e2e-rollouts,
+# which checks the changes read from a real kube-state-metrics, by what reads
+# the history (internal/prom, internal/source), internal/response and the
+# commands that use it (cmd/lapilli/responses.go, and those above). A path that reaches none
 # is named so (Markdown, docs/, site/, assets/, Go's tests and
 # test/shard.sh, other workflows); a path named nowhere here reaches every
 # job.
@@ -23,7 +26,7 @@
 set -euo pipefail
 
 lapilli="e2e e2e-replicas e2e-serve-lb e2e-service e2e-postgres e2e-signin e2e-changes e2e-backtest e2e-loki e2e-rendered e2e-dashboard e2e-ratelimit"
-jobs="$lapilli e2e-compat e2e-kubernetes"
+jobs="$lapilli e2e-compat e2e-kubernetes e2e-rollouts"
 chart="e2e e2e-replicas e2e-serve-lb e2e-service e2e-rendered e2e-dashboard"
 image="e2e e2e-replicas e2e-serve-lb e2e-service"
 
@@ -39,10 +42,14 @@ while IFS= read -r f || [ -n "$f" ]; do
     go.mod | go.sum | .github/workflows/ci.yml | test/e2e/reached.sh) to $jobs ;;
     *.md | docs/* | site/* | assets/* | .github/* | LICENSE | .gitignore) ;;
     *_test.go | */testdata/* | test/shard.sh | test/screenshots/*) ;;
-    # what reads the history and replays it, which e2e-compat checks too
-    internal/prom/* | internal/replay/* | internal/rules/* | internal/source/*) to $jobs ;;
+    # what reads the history, which e2e-compat and e2e-rollouts check too
+    internal/prom/* | internal/source/*) to $jobs ;;
+    # what replays it, which e2e-compat checks too
+    internal/replay/* | internal/rules/*) to $lapilli e2e-compat e2e-kubernetes ;;
     # what sets the replay beside what really fired
-    internal/verdict/* | internal/firing/* | cmd/lapilli/check.go | cmd/lapilli/verdict.go) to $lapilli e2e-kubernetes ;;
+    internal/verdict/* | internal/firing/* | cmd/lapilli/check.go | cmd/lapilli/verdict.go) to $lapilli e2e-kubernetes e2e-rollouts ;;
+    # what reads the changes made to workloads from the history
+    internal/response/* | cmd/lapilli/responses.go) to $lapilli e2e-rollouts ;;
     cmd/* | internal/*) to $lapilli ;;
     charts/*) to $chart ;;
     Dockerfile | .dockerignore) to $image ;;
@@ -68,6 +75,7 @@ while IFS= read -r f || [ -n "$f" ]; do
     test/e2e/kubernetes-rules.sh) to e2e-kubernetes ;;
     # the replay's measurements, taken by hand (.github/workflows/measure.yml)
     test/e2e/measure.sh | test/e2e/measure-feed/*) ;;
+    test/e2e/rollouts.sh) to e2e-rollouts ;;
     # the other recipes are run by Go's tests, against stand-ins
     recipes/firings/* | recipes/incidents/* | recipes/trackers/*) ;;
     *) to $jobs ;;

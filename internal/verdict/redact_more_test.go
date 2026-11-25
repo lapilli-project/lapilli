@@ -106,6 +106,10 @@ func TestRedactEveryField(t *testing.T) {
 		"Judged.Day":               true, // a date, which parts episodes
 		"Settings.RecordBy":        true, // day or week
 		"Judged.Action":            true, // yes or no: Lapilli's words
+		"FiringResponse.Kind":      true, // changed, routine, acknowledged, unanswered, none
+		"ResponseChange.Kind":      true, // rollout, rollback, scale, deploy
+		"ResponsePage.ResolvedBy":  true, // alert or person
+		"Settings.NoisyBy":         true, // caught or useful
 	}
 	for _, v := range []any{&Report{}, &Comparison{}} {
 		c := &canaries{texts: map[string]string{}}

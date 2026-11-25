@@ -421,6 +421,13 @@ it fires whatever happens, so its catches are likely chance. Over a report,
 noisy by the report's period; in `/api/v1/summary`, `/metrics` and the
 pages of `lapilli serve`, by the incident's week.
 
+With `--noisy-by useful` (`settings.noisy_by`), which is the default once
+`--responses` or `--rollouts` is given (not with `--deploys` alone), a rule is noisy when at least
+`noisy_at.firings` of its firings were useful or not useful, and under
+`noisy_at.precision` of them useful ([What people did](#what-people-did)). A
+rule with no record can then be noisy, from its responses alone. The jq
+below counts it by stones.
+
 ```jq
 # noisy: as the report has it
 [.rules[] | select(.firings > 0) | {rule, noisy}] | sort_by(.rule)
@@ -802,6 +809,84 @@ kind meet one week.
 | from_entries
 ```
 
+## What people did
+
+With `--responses`, `--rollouts` or `--deploys` (`lapilli verdict`, and
+[What people did when a rule fired](responses.md) says what each reads), a
+report has the fields below. Without them it has none of them, and every other
+number is what it was. A firing has one `response`, the first of these that
+holds, as `firings[].response.kind`:
+
+| `kind` | Which firings |
+|---|---|
+| `changed` | a change on its target started after it started, and no later than its end (the period's end, for one still on), and that change isn't routine |
+| `acknowledged` | its page was acknowledged by a person, or resolved by one |
+| `unanswered` | its page was not acknowledged, and its alert manager resolved it |
+| `routine` | no page, and only routine changes on its target |
+| `none` | nothing above is known, a page still open and unacknowledged included |
+
+`response.change` is the change `changed` rests on, the earliest that isn't
+routine; or, for the other kinds, the earliest routine one, shown and not
+relied on (`routine: true`). `response.page` is the firing's page whatever the
+kind. Its `labels` are the workload's `namespace` and its kind's name
+(`deployment`, `statefulset`, `daemonset`), or a deploy's labels.
+
+A change is routine when its target (a workload, all its rollouts, rollbacks
+and scales together; or a deploy's labels) made n changes over the period T,
+the firing lasted s, and 1 - e^(-(n-1)s/T) is at or above
+`settings.routine` (`--routine`, 0.5). One change alone is never routine.
+
+`response.useful` is `true`, `false` or `null`, as follows, the first that
+holds:
+
+| | `useful` |
+|---|---|
+| it caught an incident (`white`) | `true` |
+| `kind` is `changed` | `true` |
+| `kind` is `unanswered` | `false` |
+| `kind` is `acknowledged`, and its target's changes are known at its start | `false` |
+| it is black and judged (not `no_record`) | `false` |
+| none of these | `null` |
+
+A target's changes are known at a firing's start when the history had the
+workload's series by then (`--rollouts`), or the deploys file lists a deploy
+for the labels by then (`--deploys`). `lapilli verdict` has no person's
+answer; `lapilli serve`'s, "needed action", is taken over this table.
+
+`rules[].responses`, on each rule that fired, counts its firings:
+
+| Field | Counts |
+|---|---|
+| `changed`, `routine`, `acknowledged`, `unanswered`, `none` | its firings by `kind`; they add up to `firings` |
+| `useful`, `not_useful` | its firings with `useful` true, and false; the rest are unknown |
+| `actionable` | `useful / (useful + not_useful)`, `null` with none of either |
+
+The report's `responses` says what was read: `pages` read from the file;
+`pages_unmatched`, those that no firing had as its page (worked out by
+`lapilli verdict` alone: it is 0 in `lapilli serve`'s report); `changes`, the
+rollouts, rollbacks, scales and deploys read (all of them, not only those a
+firing had); `autoscalers_known`, whether `kube_horizontalpodautoscaler_info`
+was in the history, `false` also without `--rollouts`. Where it is false,
+every scale was counted, an autoscaler's too.
+
+A firing no record judged (`no_record`) can still be useful or not useful.
+The text says how many were so, the firings `no_record` with a `useful` that
+isn't `null`, and `--noisy-by useful` counts them: it is the only number that
+asks for no record.
+
+Beyond the report:
+
+- `--csv` has, after the columns above, `response` (the firing's `kind`),
+  `useful` (`true`, `false`, or empty for unknown), and its rule's
+  `rule_changed`, `rule_routine`, `rule_acknowledged`, `rule_unanswered`,
+  `rule_none`, `rule_useful`, `rule_not_useful` and `rule_actionable` (empty
+  for none), as in `rules[].responses`.
+- `--metrics` has `lapilli_rule_responses` a rule and a `response` (`changed`,
+  `routine`, `acknowledged`, `unanswered`, `none`) and `lapilli_rule_actionable`
+  a rule that has a share.
+- `--compare` shows ACTIONABLE, before to after, beside precision, in its
+  text.
+
 ## The firings as CSV
 
 `lapilli verdict --csv`, and `/api/v1/report?from=&to=&format=csv` (31 days
@@ -882,18 +967,23 @@ holds them, and this list.
 
 | Where | Fields |
 |---|---|
-| the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
+| the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`† |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
+| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`†, `noisy_by`†, `routine`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`† |
+| `rules[].responses` | `changed`, `routine`, `acknowledged`, `unanswered`, `none`, `useful`, `not_useful`, `actionable` |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |
 | `incidents[].alerts[]` | `rule`, `labels`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`† |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`†, `response`† |
+| `responses` | `pages`, `pages_unmatched`, `changes`, `autoscalers_known` |
+| `firings[].response` | `kind`, `useful`, `change`†, `page`† |
+| `firings[].response.change` | `kind`, `at`, `labels`†, `routine` |
+| `firings[].response.page` | `id`, `sent`, `acknowledged`†, `resolved`†, `resolved_by`† |
 
 ### The metrics
 
@@ -919,6 +1009,8 @@ it, which only `lapilli serve` says.
 | `lapilli_last_run_timestamp_seconds` | |
 | `lapilli_rule_episodes` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_episodes_caught` | `rule`, [`severity`], [`team`] |
+| `lapilli_rule_responses` | `rule`, [`severity`], [`team`], `response` (`changed`, `routine`, `acknowledged`, `unanswered`, `none`) |
+| `lapilli_rule_actionable` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_action` | `rule`, [`severity`], [`team`], `answer` (`yes`, `no`): `lapilli serve` alone |
 | `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`, and, in `lapilli serve`, `unreplayed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
@@ -978,13 +1070,20 @@ occurrences met that ended in those twelve weeks, so, of a kind more often
 than weekly, it can be over `lapilli_weeks_counted`. 500 series of each at
 most, the goals missed first, goals over a period among them. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
 are left out of a report of some of the rules (`--rule`), as what a rule
-adds to the others can't be said there.
+adds to the others can't be said there. `lapilli_rule_responses` and
+`lapilli_rule_actionable` are `lapilli verdict --metrics`' alone, and only
+with `--responses`, `--rollouts` or `--deploys`; the second has no series for
+a rule with no firing useful or not ([What people did](#what-people-did)).
 
 ### The CSV's columns
 
 `rule`, `severity`, `team`, `labels`, `start`, `end`, `stone`, `no_record`,
 `incidents`, `refired`, `during_deploy`, `excused`, `marked`, `episode`,
-`unrelated`, `action`, in that order. `TestCSVColumns` holds them.
+`unrelated`, `action`, in that order. `TestCSVColumns` holds them. With
+responses, these follow ([What people did](#what-people-did)): `response`,
+`useful`, `rule_changed`, `rule_routine`, `rule_acknowledged`,
+`rule_unanswered`, `rule_none`, `rule_useful`, `rule_not_useful`,
+`rule_actionable`.
 `unrelated` is the JSON list of the incidents a person said the firing is
 unrelated to (`firings[].unrelated`), `action` their answer to whether it
 needed someone to act (`yes`, `no`, or empty).

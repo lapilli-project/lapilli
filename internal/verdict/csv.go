@@ -43,7 +43,16 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 		return strings.Compare(a.Rule, b.Rule)
 	})
 	cw := csv.NewWriter(w)
-	if err := cw.Write(CSVColumns); err != nil {
+	header := CSVColumns
+	// With responses, the columns after the others.
+	byRule := map[string]RuleResult{}
+	if r.hasResponses() {
+		header = slices.Concat(CSVColumns, ResponseCSVColumns)
+		for _, rr := range r.Rules {
+			byRule[rr.Rule] = rr
+		}
+	}
+	if err := cw.Write(header); err != nil {
 		return err
 	}
 	for _, j := range rows {
@@ -95,6 +104,9 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 		row := []string{Cell(j.Rule), Cell(severity[j.Rule]), Cell(team), csvJSON(labels), csvTime(j.Start), end, stone,
 			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(refired), csvBool(j.DuringDeploy), csvBool(j.Excused), csvJSON(marked), episode,
 			csvJSON(unrelated), j.Action}
+		if r.hasResponses() {
+			row = append(row, responseCells(j, byRule)...)
+		}
 		if err := cw.Write(row); err != nil {
 			return err
 		}

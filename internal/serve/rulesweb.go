@@ -133,13 +133,17 @@ type rulesList struct {
 
 // Cols are how many columns the list has after the one to pick a rule
 // by: what the line of notes under a row spans. Eleven, and a column each
-// for the firings not judged and those during deploys, when shown.
+// for the firings not judged, those during deploys and the actionable share,
+// when shown.
 func (v rulesList) Cols() int {
 	n := 11 // rule, team, severity, fired, episodes, ○, ●, precision, refired, incidents, 12 weeks
 	if v.Sum.Unjudged > 0 {
 		n++
 	}
 	if v.Deploys {
+		n++
+	}
+	if v.Responding {
 		n++
 	}
 	return n
@@ -149,6 +153,11 @@ func (v rulesList) Cols() int {
 // list whose sum each is.
 type ruleSum struct {
 	Firings, White, Black, Refired, Deploys, Excused int
+	// Useful and NotUseful are the firings known to be, and not to be,
+	// useful (verdict.RuleResponses), Actionable their share, once responses
+	// show.
+	Useful, NotUseful int
+	Actionable        string
 	// Unjudged are those in weeks with no record, in no precision.
 	Unjudged                   int
 	AsleepBlack, OffHoursBlack int
@@ -601,8 +610,13 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x.Repeats += row.Repeats
 		x.Woken += row.Woken
 		x.WokenUnjudged += row.WokenUnjudged
+		if c := row.Responses; c != nil {
+			x.Useful += c.Useful
+			x.NotUseful += c.NotUseful
+		}
 	}
 	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings-v.Sum.Unjudged)
+	v.Sum.Actionable = pct(v.Sum.Useful, v.Sum.Useful+v.Sum.NotUseful)
 	for _, f := range facetsOf {
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := f.values, f.labels

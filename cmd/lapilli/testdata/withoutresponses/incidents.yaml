@@ -1,0 +1,2 @@
+incidents:
+  - {id: INC-1, title: Errors, start: 2026-10-06T10:00:00Z, end: 2026-10-06T10:30:00Z, labels: {namespace: shop}}

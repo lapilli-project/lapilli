@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"cmp"
 	"context"
 	"sort"
 	"strings"
@@ -118,6 +119,11 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	if rep.Settings.RecordBy == "" {
 		// Options with no unit are judged by the ledger's weeks.
 		rep.Settings.ByWeek, rep.Settings.RecordBy = true, "week"
+	}
+	// With responses kept, what rules are found noisy by is said, as it is
+	// when they are counted (docs/design/responses.md).
+	if rep.Responses != nil && rep.Settings.NoisyBy == "" {
+		rep.Settings.NoisyBy, rep.Settings.Routine = verdict.NoisyByCaught, cmp.Or(o.Routine, 0.5)
 	}
 	if sc.none() || to.Sub(from) > ledger.HoursLongest {
 		return rep, nil

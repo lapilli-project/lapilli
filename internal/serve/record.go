@@ -57,6 +57,10 @@ func (s *Server) only(ctx context.Context, t *tallies, o *owners, team ledger.Te
 	for w, rows := range t.jby {
 		t.jeveryone[w] = maps.Clone(rows)
 	}
+	t.ueveryone = make(map[int64]map[int64]ledger.Tally, len(t.ub))
+	for w, rows := range t.ub {
+		t.ueveryone[w] = maps.Clone(rows)
+	}
 	// Its weeks judged by the incidents it owns (teamKeeps); everyone's, by
 	// all.
 	t.keptAll, t.team = t.kept, &team
@@ -73,6 +77,7 @@ func (s *Server) only(ctx context.Context, t *tallies, o *owners, team ledger.Te
 			if o.rule[t.rules[id].Name] != team.ID {
 				delete(t.by[w], id)
 				delete(t.jby[w], id)
+				delete(t.ub[w], id)
 			}
 		}
 	}
@@ -221,10 +226,17 @@ func (t *tallies) record(keeps func(ledger.Incident) bool) {
 // day, a day's, or the week's first day's where all of its days are alike.
 func (t *tallies) judge() {
 	t.jby = make(map[int64]map[int64]ledger.Tally, len(t.weeks))
+	t.ub = make(map[int64]map[int64]ledger.Tally, len(t.weeks))
 	for _, w := range t.weeks {
 		t.jby[w] = map[int64]ledger.Tally{}
+		t.ub[w] = map[int64]ledger.Tally{}
 	}
 	if t.parts == nil {
+		for w, rows := range t.by {
+			for id, x := range rows {
+				t.countUseful(w, id, x, t.kept[w] && !t.o.NotJudged(t.rules[id].Name))
+			}
+		}
 		// Read whole, as before tallies were kept by signals: a week's
 		// all judged, or none; a rule an entry judges by nothing, none.
 		for w, rows := range t.by {
@@ -240,6 +252,7 @@ func (t *tallies) judge() {
 		if m == nil {
 			continue
 		}
+		t.countUseful(x.At, x.Rule, x, t.judgedPart(x.On(), x.Rule, x.Signals))
 		judged := x
 		if !t.judgedPart(x.On(), x.Rule, x.Signals) {
 			if !t.o.Signals.Named() {
@@ -255,6 +268,29 @@ func (t *tallies) judge() {
 		j.At, j.Day, j.Rule, j.Signals = x.At, 0, x.Rule, 0
 		m[x.Rule] = j
 	}
+}
+
+// countUseful adds to the week's useful and not useful firings of a rule
+// those of x, a tally of its firings that week (a part, or the whole): of
+// unknown use, black, and judged by the record, not useful.
+func (t *tallies) countUseful(w, id int64, x ledger.Tally, judged bool) {
+	if t.ub[w] == nil {
+		return
+	}
+	u := t.ub[w][id]
+	u.Useful += x.Useful
+	u.NotUseful += x.NotUseful
+	if judged {
+		u.NotUseful += x.Firings - x.Useful - x.NotUseful
+	}
+	t.ub[w][id] = u
+}
+
+// usefulOf are the firings of rule id in week w that were useful and not
+// useful.
+func (t *tallies) usefulOf(w, id int64) (useful, not int) {
+	u := t.ub[w][id]
+	return u.Useful, u.NotUseful
 }
 
 // judgedPart reports whether the firings of rule id in the unit that starts
@@ -393,6 +429,9 @@ func (s *Server) fillTallies(ctx context.Context, t *tallies, w1, w2 int64) erro
 		return err
 	}
 	if t.epFrom, t.epSome, err = s.l.EpisodesFrom(ctx); err != nil {
+		return err
+	}
+	if t.inputs, err = s.l.ResponseInputs(ctx); err != nil {
 		return err
 	}
 	t.parts = rows

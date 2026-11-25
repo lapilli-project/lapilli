@@ -282,7 +282,11 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 			}
 		}
 	}
-	inside = markedTotals(inRules, judged, d.at)
+	inWeeks := map[int64]bool{}
+	for day := s.l.Day(o.Start); day <= s.l.Day(o.End); day++ {
+		inWeeks[ledger.Week(day)] = true
+	}
+	inside = markedTotals(inRules, judged, d.noisyIn(t, slices.Sorted(maps.Keys(inWeeks))))
 	inside.Episodes, inside.EpisodesCaught, inside.episodesJudged = ep[0], ep[1], ep[2]
 	inside.episodesCounted = t.episodesCounted(ledger.Week(s.l.Day(o.Start)))
 	// Another of its kind on one of its days is counted with it.
@@ -316,7 +320,11 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 			ep[2] += en - (u.Episodes - u.EpisodesWhite - d.unjudgedEp[w][id][o.M.Kind])
 		}
 	}
-	before = markedTotals(beRules, judged, d.at)
+	var beWeeks []int64
+	for w := first - 7*markedBefore; w < first; w += 7 {
+		beWeeks = append(beWeeks, w)
+	}
+	before = markedTotals(beRules, judged, d.noisyIn(t, beWeeks))
 	before.Episodes, before.EpisodesCaught, before.episodesJudged = ep[0], ep[1], ep[2]
 	before.episodesCounted = t.episodesCounted(first - 7*markedBefore)
 	// The incidents: those during it, and those of the weeks before
@@ -338,16 +346,30 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 	return inside, before, shared
 }
 
+// noisyIn is the test of whether a rule is noisy in a period of weeks: of
+// the firings it has in it, judged and that caught something, as they are,
+// by what they caught; by what was done about the firings (--noisy-by
+// useful), those of the weeks whole, as the days of a marked window carry
+// no count of them, as the other pages decide it.
+func (d *markedData) noisyIn(t *tallies, weeks []int64) func(id int64, firings, caught int) bool {
+	return func(id int64, firings, caught int) bool {
+		if t.o.NoisyBy != verdict.NoisyByUseful {
+			return verdict.IsNoisy(firings, caught, d.at)
+		}
+		return t.noisyOver(weeks, id, firings, caught)
+	}
+}
+
 // markedTotals sums each rule's firings, those that caught something and
 // re-fired, of which judged were judged; the noisy are those of judged
 // firings enough, and too few caught.
-func markedTotals(rules map[int64][3]int, judged int, at verdict.NoisyAt) markedCount {
+func markedTotals(rules map[int64][3]int, judged int, noisy func(id int64, firings, caught int) bool) markedCount {
 	var c markedCount
-	for _, r := range rules {
+	for id, r := range rules {
 		c.Firings += r[0]
 		c.Caught += r[1]
 		c.Refired += r[2]
-		if verdict.IsNoisy(r[0], r[1], at) {
+		if noisy(id, r[0], r[1]) {
 			c.Noisy++
 		}
 	}

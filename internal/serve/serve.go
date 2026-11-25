@@ -172,6 +172,18 @@ type Config struct {
 	IncidentsListen string
 	IncidentsToken  string
 	FiringsToken    string
+	// ResponsesTokens let jobs send what a paging tool says of the pages
+	// sent in a period on the same port, PUT /api/v1/responses/SOURCE
+	// (docs/design/responses.md), each source with the token in its file,
+	// by source name: a token writes its source's pages and no other's.
+	// Responses is the file --responses reads
+	// again each run, Rollouts says --rollouts reads the changes made to
+	// the alerts' workloads from the history, RolloutMatch the labels
+	// --rollout-match names.
+	ResponsesTokens map[string]string
+	Responses       string
+	Rollouts        bool
+	RolloutMatch    []string
 	// TasksToken lets a job keep tasks in step with a tracker on the same
 	// port: read them, and set their link and status (docs/design/trackers.md).
 	TasksToken string
@@ -534,6 +546,11 @@ type Server struct {
 	firingsWarned atomic.Bool
 	firingsRate   *limiter
 	firingsBusy   chan struct{}
+	// responsesWarned, responsesRate and responsesBusy are the responses
+	// token's.
+	responsesWarned atomic.Bool
+	responsesRate   *limiter
+	responsesBusy   chan struct{}
 	// tasksWarned, tasksRate and tasksBusy are the tasks token's.
 	tasksWarned atomic.Bool
 	tasksRate   *limiter
@@ -728,7 +745,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,
 		// then one each five seconds at most.
-		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort(),
+		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1),
+		responsesRate: &limiter{rate: 0.2, burst: 20}, responsesBusy: make(chan struct{}, 1), port: newNotifyPort(),
 		// A tracker job reads a page of tasks, then makes an issue and
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l),
@@ -1268,6 +1286,7 @@ var settable = []struct{ key, flag string }{
 	{"lead", "--lead"}, {"match", "--match"}, {"refire", "--refire"},
 	{"noisy-firings", "--noisy-firings"}, {"noisy-precision", "--noisy-precision"},
 	{"linked-only", "--linked-only"},
+	{"noisy-by", "--noisy-by"},
 }
 
 // options are the judging settings in effect: the command line's, with
@@ -1286,6 +1305,22 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 		return o, err
 	}
 	o.SignalsGen = gen
+	// What people did when a rule fired is found from what the ledger keeps,
+	// with how far from its firing a page may have been sent
+	// (docs/design/responses.md).
+	o.ResponseStep, o.RolloutMatch = s.cfg.Step, s.cfg.RolloutMatch
+	// A ledger that holds pages or changes read from the history is read
+	// for them whatever this run is given: they were written by a token or
+	// an earlier run.
+	in, err := s.l.ResponseInputs(ctx)
+	if err != nil {
+		return o, err
+	}
+	if s.responsesOn() || in.Pages || in.Rollouts {
+		if o.Within, err = s.within(ctx); err != nil {
+			return o, err
+		}
+	}
 	// With an impact signal, the record is kept from when the runs read it,
 	// all of it, with the criterion in effect (verdict.Options.ImpactFrom,
 	// impactFrom); with named ones, each from its own start, a firing by
@@ -1367,6 +1402,11 @@ func apply(o *verdict.Options, key, v string) error {
 		default:
 			err = errors.New("want on or off")
 		}
+	case "noisy-by":
+		if v != verdict.NoisyByCaught && v != verdict.NoisyByUseful {
+			return errors.New("want caught or useful")
+		}
+		o.NoisyBy = v
 	default:
 		err = errors.New("not a setting")
 	}
@@ -1399,6 +1439,11 @@ func show(o verdict.Options, key string) string {
 		return percentOf(p)
 	case "linked-only":
 		return onOff(o.LinkedOnly)
+	case "noisy-by":
+		if o.NoisyBy == "" {
+			return verdict.NoisyByCaught
+		}
+		return o.NoisyBy
 	}
 	return ""
 }

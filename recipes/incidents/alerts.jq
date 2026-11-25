@@ -26,12 +26,30 @@ def as_alert:
       | if (.labels | length) > 32 then null elif .labels == {} then {rule} else {rule, labels} end
     end;
 
+# go_bytes: the bytes of a list of alerts as Lapilli counts them
+# (incident.CheckAlerts): as Go's JSON encoder writes them, <, > and & as they
+# are, the newline it ends with not counted. That is not what tojson writes:
+# U+2028 and U+2029 are six bytes in Go's and three in jq's, and DEL one in
+# Go's and six in jq's. Counted a codepoint at a time, so no jq's way of
+# writing one matters.
+def go_str: explode | map(
+    if . == 34 or . == 92 or . == 8 or . == 9 or . == 10 or . == 12 or . == 13 then 2
+    elif . < 32 or . == 8232 or . == 8233 then 6
+    elif . < 128 then 1 elif . < 2048 then 2 elif . < 65536 then 3 else 4 end) | add // 0 | . + 2;
+def go_alert:
+  8 + (.rule | go_str)
+  + (if (.labels | length) > 0
+     then 12 + ([.labels | to_entries[] | (.key | go_str) + 1 + (.value | go_str)] | add) + ((.labels | length) - 1)
+     else 0 end)
+  + 1;
+def go_bytes: 2 + ([.[] | go_alert] | add // 0) + (if length > 0 then length - 1 else 0 end);
+
 # linked: of an incident's alerts, each as_alert's, what Lapilli takes: each
-# once, 100 at most, 16 KB as JSON in all; and how many were left out, not
-# alerts Lapilli takes (skipped) or past those bounds (cut).
+# once, 100 at most, 16 KB as JSON in all (go_bytes); and how many were left
+# out, not alerts Lapilli takes (skipped) or past those bounds (cut).
 def linked:
   (map(select(. != null)) | unique) as $all
-  | (reduce $all[] as $a ([]; if length < 100 and ((. + [$a]) | tojson | utf8bytelength) <= 16000 then . + [$a] else . end)) as $kept
+  | (reduce $all[] as $a ([]; if length < 100 and ((. + [$a]) | go_bytes) <= 16384 then . + [$a] else . end)) as $kept
   | {alerts: $kept, skipped: (map(select(. == null)) | length), cut: (($all | length) - ($kept | length))};
 
 # said($script; $why): the lines for stderr of what was left out, of the

@@ -425,7 +425,7 @@ func (s *Server) shareLimits() {
 	if !s.l.Shared() {
 		return
 	}
-	for name, lim := range map[string]*limiter{"incidents-token": s.tokenRate, "firings-token": s.firingsRate, "tasks-token": s.tasksRate,
+	for name, lim := range map[string]*limiter{"incidents-token": s.tokenRate, "firings-token": s.firingsRate, "responses-token": s.responsesRate, "tasks-token": s.tasksRate,
 		"changes-token": s.changes.rate} {
 		lim.share(s, name)
 	}

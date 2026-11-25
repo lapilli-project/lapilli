@@ -1,0 +1,11 @@
+{"alerts": [
+  {"id": "PXR5", "type": "alert", "summary": "[FIRING:1] SearchTimeouts", "created_at": "2026-11-20T03:12:00Z", "status": "resolved", "alert_key": "k5",
+   "service": {"id": "P1", "type": "service_reference", "summary": "checkout"},
+   "body": {"type": "alert_body", "contexts": [],
+     "details": {"num_firing": 1, "num_resolved": 0, "resolved": [],
+       "firing": [{"status": "firing", "labels": {"alertname": "SearchTimeouts", "namespace": "shop", "service": "search"},
+         "annotations": {"summary": "SearchTimeouts"}, "startsAt": "2026-11-20T03:11:30Z", "endsAt": "0001-01-01T00:00:00Z",
+         "generatorURL": "http://prometheus.example.com/graph", "fingerprint": "c4a6d2e1f0b3a5"}]}},
+   "incident": {"type": "incident_reference"}, "suppressed": false, "severity": "critical",
+   "integration": {"id": "PQ12345", "type": "events_api_v2_inbound_integration_reference", "summary": "Alertmanager"}}
+], "limit": 100, "offset": 0, "more": false, "total": null}

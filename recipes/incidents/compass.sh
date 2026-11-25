@@ -173,10 +173,12 @@ done
 printf 'null' >"$closes.json"
 read=0
 over=0
+nocursor=0
 for id in $(jq -s -r --arg from "$from" --slurpfile closes "$closes.json" -f "$here/compass.jq" "$all"); do
   case $id in
     *[!0-9A-Za-z-]* | '')
-      printf 'compass.sh: an alert id %s that isn'"'"'t one; stopping, writing nothing\n' "$id" >&2
+      # Not said: it is Compass's text, and this goes to a job's log.
+      printf 'compass.sh: an alert id that isn'"'"'t one; stopping, writing nothing\n' >&2
       exit 1
       ;;
   esac
@@ -198,12 +200,13 @@ for id in $(jq -s -r --arg from "$from" --slurpfile closes "$closes.json" -f "$h
     [ -n "$next" ] || break
     after=$(printf '%s' "$next" | jq -Rr 'capture("[?&]after=(?<a>[0-9_]+)(&|$)").a // empty')
     if [ -z "$after" ]; then
-      printf 'compass.sh: the log of alert %s gives a next page without a cursor; its first pages are taken\n' "$id" >&2
+      nocursor=$((nocursor + 1))
       break
     fi
   done
   [ -z "$closed" ] || printf '%s\t%s\n' "$id" "$closed" >>"$closes"
 done
+[ "$nocursor" -eq 0 ] || printf 'compass.sh: %s alerts whose log gives a next page without a cursor: their first pages are taken\n' "$nocursor" >&2
 [ "$over" -eq 0 ] || printf 'compass.sh: %s closed alerts past MAX_LOGS (%s) end at their last update\n' "$over" "$maxlogs" >&2
 jq -R -s 'split("\n") | map(select(. != "") | split("\t") | {key: .[0], value: (.[1] | tonumber)}) | from_entries' "$closes" >"$closes.json"
 jq -s --arg from "$from" --slurpfile closes "$closes.json" -f "$here/compass.jq" "$all"

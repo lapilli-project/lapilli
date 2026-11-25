@@ -177,6 +177,72 @@ Settings page's tries and the digest's suggestions, carries them on both
 sides, so a change can't look better on the firings people called
 coincidences.
 
+## What was done about a firing
+
+What people did when a rule fired ([docs/responses.md](responses.md), the
+design in [docs/design/responses.md](design/responses.md)) shows once
+`lapilli serve` has something to say of it: it keeps pages (`--responses
+FILE`, read again each run, or `PUT /api/v1/responses/SOURCE?from=&to=` on
+the incidents port with `--responses-token-file SOURCE=FILE`, which replaces
+that source's pages sent in the period) or changes read from the history
+(`--rollouts`), or rules are found noisy by what was done about their firings
+(`--noisy-by useful`, where a person's "needed action" is one of the
+answers). The deploys file alone shows none while rules are noisy by what
+their firings caught: serve took `--deploys` before it took responses.
+
+- **Alert history** has a Response column: "Rolled out 12:04", "Rolled back
+  12:04", "Scaled 12:04" or "Deployed 12:04" with the change's labels, "Acknowledged",
+  "Nobody acknowledged; resolved by its alert manager", "Routine change" (said
+  to be chance, which isn't counted), and the page's id; nothing for a firing with
+  no response. `?response=changed`, `acknowledged`, `unanswered`, `routine`
+  or `none`, or the form's Response choice, picks by it; with no `day`, it
+  opens on the last day with such a firing.
+- **A rule's page** has Actionable beside Precision, in the same number
+  format and `–` when no firing is known to be useful or not, with the
+  counts of its firings by response; its latest firings are picked by
+  response from the firings tab (`?tab=firings&response=unanswered`), each
+  choice a link with its count.
+- **The rules list** has an Actionable column and total, and can be put in
+  order of it, the least actionable first.
+- **The overview** has a tile, "Pages nobody answered": last week's count
+  beside the week before's, fewer being better, linking to Alert history
+  picked by `unanswered`.
+- **Settings** has `noisy_by`, `caught` or `useful`. An admin tries it on
+  the last week first, as the noisy thresholds are tried, which lists the
+  rules whose state would change with their actionable share, and saves
+  it the same way, kept with who changed it. By default it is `useful` once
+  `--responses`, `--responses-token-file` or `--rollouts` is given, and
+  `caught` otherwise. Where responses show, every page and number that says a
+  rule is noisy asks the same test, the Settings value, by caught or by useful.
+- The summary, goals, `/metrics`, the digest and MCP say it too
+  ([docs/api.md](api.md), [docs/metrics.md](metrics.md)).
+
+The pages by `PUT` are held to bounds, as the firings are. There is a token
+for each source (`--responses-token-file pagerduty-prod=FILE`, once for each),
+and it writes that source's pages and no other's: so a source can't write over
+another's, nor over the `--responses` file's, which is the source `file` and
+which no token names. When several sources have a page for a firing, the
+file's is its page; among the others, the nearest to its start, as far apart
+the source first in order. A write is JSON, `{"responses": [...]}`, 16 MiB at
+most (the firings' bound, and the file's too), read a page at a time; its
+period is 31 days at most; no page is sent more than an hour ahead of the
+clock; at most 50 sources have pages; a source keeps 500,000 pages at most, and
+200,000 sent in any one week (each source apart, so a week holds 50 times that
+at most). Past any, the write is refused whole
+(400) and nothing of it is kept. Pages are read by their firings' rules: at most
+1,000 pages of a rule, from a firing's start on, are looked at for it. `--keep`
+drops pages as it drops firings, and a page dated past the hour ahead is dropped
+whenever the ledger is pruned. The changes read from the history that a run
+couldn't read are kept as a span, which the next run reads once more (once: a
+span that fails again is let go); until then a firing in it has no change
+known, and is neither called changed nor not useful for want of one.
+
+Firings written through `PUT /api/v1/firings/SOURCE` ([Firings recorded
+elsewhere](#firings-recorded-elsewhere)) get no changes read from the
+history, since a run, which reads them, didn't find those firings; the pages
+and the deploys the ledger keeps are tied to them as to any firing. All of
+it is in English, Korean, Japanese and Spanish.
+
 ## Rules judged by nothing
 
 A rule entry may say `judged: false` in place of signals, in
@@ -462,8 +528,10 @@ rules), and the incidents missed in each.
 The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
 (`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what
-reading one does, and a change gives stones again only to the firings near
-it. The tests hold it to budgets over twelve weeks of 200,000 firings: an
+reading one does, and a change gives stones and responses again to the
+firings of what it was made to (its workload's, or those a deploy's labels
+fit) in its week, and those on when it came, a firing at a time, not
+to every firing near it. The tests hold it to budgets over twelve weeks of 200,000 firings: an
 hourly run within two seconds, and each page to a few statements a rule,
 never one a firing.
 `LAPILLI_SCALE=10 go test ./internal/ledger ./internal/serve -run Scale -v`

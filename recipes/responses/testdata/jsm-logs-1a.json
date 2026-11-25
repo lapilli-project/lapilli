@@ -1,0 +1,19 @@
+{
+ "values": [
+  {
+   "logTime": "2026-11-20T03:20:00.958Z",
+   "logType": "system",
+   "log": "Alert closed via API by Alertmanager",
+   "owner": "System"
+  },
+  {
+   "logTime": "2026-11-20T03:15:00.958Z",
+   "logType": "system",
+   "log": "Alert acknowledged via web",
+   "owner": "Ana Kim"
+  }
+ ],
+ "links": {
+  "next": "/v1/alerts/a1000000-0000-4000-8000-000000000001/logs?after=1763608800958_1763608800958234593"
+ }
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -59,6 +60,13 @@ func (l *Ledger) columns(ctx context.Context, table string) ([]column, error) {
 		// Postgres writes a default with its type: ''::text.
 		if i := strings.LastIndex(c.def, "::"); i > 0 && strings.HasPrefix(c.def, "'") {
 			c.def = c.def[:i]
+			// A negative number's default is quoted ('-1'::bigint), where
+			// SQLite writes -1.
+			if n := strings.Trim(c.def, "'"); len(n) == len(c.def)-2 {
+				if _, err := strconv.ParseInt(n, 10, 64); err == nil {
+					c.def = n
+				}
+			}
 		}
 		out = append(out, c)
 	}

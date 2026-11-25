@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob 19643a206519dab4062ad36703b87301afcfeb33 -->
+<!-- translated from docs/README.md at blob 1b5802b621df32267e13789531b5df8e0c573971 -->
 
 # Lapilli ドキュメント
 
@@ -21,9 +21,10 @@ docs/ を変更のたびに書き直して作る写しです。Lapilli とは何
 
 ## 期間を判定する
 
-- [判定のしくみ](../how-it-judges.md)：発火とインシデントがどこから来るか、発火がインシデントを検知するのはいつか、ノイズルールと何を変えるべきか、ルールが何を加えるか、発火が来た時間帯、ニアミス、変更されたルール
+- [判定のしくみ](../how-it-judges.md)：発火とインシデントがどこから来るか、発火がインシデントを検知するのはいつか、ノイズルールと何を変えるべきか、人が何をしたか、ルールが何を加えるか、発火が来た時間帯、ニアミス、変更されたルール
 - [`lapilli verdict` を使う](../verdict.md)：コマンド、出力するレポート、読み取るデータソースとその速さ、失敗するとき
 - [数値の意味](../numbers.md)：各数値が何か、そして Lapilli を使わずにレポートから数え直す方法
+- [ルールが発火したときに人がしたこと](../responses.md)：`--responses`、`--rollouts`、`--deploys`、発火ごとの対応、発火が役に立ったかどうかで見つけるノイズルール
 - [クラウド独自のアラーム](../cloud-alarms.md)：CloudWatch、Azure Monitor、Google Cloud、OCI
   のアラームが発火したもの、Datadog のモニター、New Relic のアラート条件の判定
 - [ログに対するルール（Loki）](../loki.md)：Loki に対してバックテストする LogQL のルール

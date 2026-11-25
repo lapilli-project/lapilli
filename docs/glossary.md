@@ -3,6 +3,13 @@
 What each word means in these pages and in the UI of `lapilli serve`, as
 the code counts it, with a link to where it is explained.
 
+### Actionable
+
+The share of a rule's firings known to be useful or not that were useful:
+`useful / (useful + not_useful)`, `–` with none known. It is beside
+precision, with `--responses`, `--rollouts` or `--deploys`. See
+[The numbers](numbers.md#what-people-did).
+
 ### Approval
 
 What a person gives a proposal, on its page, in a browser, before the
@@ -172,7 +179,8 @@ whose firings is judged says so once. See
 
 A rule with 10 judged firings or more, under 20% of them catching anything
 (`--noisy-firings`, `--noisy-precision`): it fires whatever happens, so
-its catches are likely chance. They are marked `(noisy)`, not dropped. See
+its catches are likely chance. They are marked `(noisy)`, not dropped. With
+`--noisy-by useful`, the share is of the firings that were useful. See
 [The numbers](numbers.md#noisy).
 
 ### Notification
@@ -233,6 +241,13 @@ have, with their `for`, `interval` and `query_offset`, to find when they
 would have fired: new rules too, and history from before Lapilli. A replay
 of a change is a backtest. See [How it judges](how-it-judges.md).
 
+### Response
+
+What was done about a firing, from the pages a paging tool sent, the
+rollouts, rollbacks and scales of the alert's workload, and the deploys:
+changed, acknowledged, unanswered, routine or none. See
+[What people did when a rule fired](responses.md).
+
 ### Shifts and on call
 
 Hours that take turns, for a team on call in shifts or across time zones:
@@ -291,6 +306,13 @@ Owns rules, by a note, a name pattern or labels, in that order, and
 incidents, so the dashboard, the rules and the tasks can be shown for one
 team. A team can keep its own hours, time zone and shifts, and its own
 editors. See [Keep judging](serve.md) and [design/work.md](design/work.md).
+
+### Useful firing
+
+A firing that caught an incident, or that a change on the alert's target
+followed. One that a page nobody answered came of, or that someone looked at
+and nothing changed, is not useful. See
+[What people did when a rule fired](responses.md).
 
 ### Version of the rules
 
