@@ -124,23 +124,27 @@ Each firing has one, the first of these that holds:
      firing today (`ledger.Deploy.During`'s labels).
    A change is **routine** when its target changed so often in the period
    that one falling in a span as long as the firing's is likely anyway: with
-   n changes of the target over the period T and the firing lasting s,
-   1 − e^(−(n−1)·s/T) at or above `--routine` (0.5; both commands, the
-   chart's `routine`). A routine change is still shown; it doesn't make
-   the firing useful (below). A target a pipeline deploys every hour
-   changes in any two-hour firing.
+   n changes of the target over the period T (rollouts, rollbacks and
+   scales of a workload together; a deploy's target by its labels) and the
+   firing lasting s, 1 − e^(−(n−1)·s/T) at or above `--routine` (0.5; both
+   commands, the chart's `routine`). A target a pipeline deploys every hour
+   changes in any two-hour firing. A routine change is chance, not
+   evidence: it doesn't hold here, and the firing goes on to its page. It
+   is still kept with the response and shown. When the firing has
+   non-routine changes, the earliest is the one it rests on.
 2. **acknowledged**: its page was acknowledged by a person, or resolved by
    one.
 3. **unanswered**: its page was not acknowledged, and its alert manager
    resolved it.
-4. **none**: nothing above is known (a page still open and unacknowledged
+4. **changed, routine**: no page, and only routine changes.
+5. **none**: nothing above is known (a page still open and unacknowledged
    is none until it resolves).
 
 **Its page** is a response whose alerts list the firing (its rule and
 labels agreeing, as an incident's linked alerts are held to a firing,
 `incident.Alert.Links`), sent between the firing's start and its end plus
 two of its rule's evaluations (the window a notification is tied to a
-firing by, `Within`); the nearest sent, when several are. One page sent
+firing by, `Within`); the one sent nearest its start, when several are. One page sent
 for a group of alerts answers each firing it lists.
 
 A firing with a change and a page is `changed`; the page is still in the
@@ -148,19 +152,21 @@ report.
 
 ### Useful firings
 
-A firing is **useful** when:
+A person's answer comes first: "needed action" yes makes a firing
+**useful**, no makes it **not useful**, whatever else holds (a white
+firing a person says needed nothing is the coincidence "Unrelated" is
+offered for). With no answer, a firing is **useful** when:
 
 - it caught an incident (white), or
-- it is `changed` and the change isn't routine, or
-- a person said it needed action.
+- it is `changed` (by a change that isn't routine).
 
 It is **not useful** when:
 
-- a person said it didn't need action; or
 - it is `unanswered`; or
 - it is `acknowledged` and its target's changes are known at its time:
   someone looked, and nothing changed; or
-- it is black and judged (its record kept), and none of the above holds.
+- it is black and judged (its record kept), and neither of the above
+  makes it useful: an acknowledgement doesn't.
 
 Otherwise it is **unknown**: not judged by stones and nothing else known,
 `acknowledged` with its target's changes unknown, or a routine change with
@@ -227,7 +233,8 @@ tool cut), and, with `--rollouts`, whether autoscalers' targets were found.
   known over. Each run reads its hours' and keeps them, so judging the
   ledger again asks Prometheus nothing.
 - `firings.response` (0 none, 1 changed, 2 changed routine, 3 acknowledged,
-  4 unanswered) and `firings.useful` (−1 unknown, 0, 1): worked out as
+  4 unanswered) and `firings.routine` (1 when a routine change is kept
+  with an acknowledged or unanswered response) and `firings.useful` (−1 unknown, 0, 1): worked out as
   stones are, and again whenever stones are.
 - Day and week counts `resp_changed`, `resp_routine`,
   `resp_acknowledged`, `resp_unanswered`, `useful`, `not_useful`.
