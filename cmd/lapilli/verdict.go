@@ -392,6 +392,15 @@ Judging:
                       is noisy: it fires whatever happens. Its catches are
                       marked, and a longer "for" that would quiet it is
                       suggested when one keeps everything it caught
+  --noisy-by caught|useful
+                      what a rule is found noisy by (default useful with any
+                      of --responses, --rollouts and --deploys, else caught):
+                      caught, by the share of its firings that caught an
+                      incident; useful, by the share of its firings useful or
+                      not that were useful, an incident caught or a change
+                      made to the alert's target, and not a page nobody
+                      answered. useful keeps every useful firing when it
+                      suggests a longer "for"
   --work-hours DAYS@HH:MM-HH:MM, --sleep-hours HH:MM-HH:MM
                       when people are at work, and asleep, in --tz (default
                       mon-fri@08:00-18:00 and 22:00-08:00), or none: the
@@ -409,6 +418,29 @@ Judging:
                       all, like
                       "every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
                       tz=Europe/Berlin sleep=23:00-07:00"
+
+What people did when a rule fired (docs/responses.md):
+  --responses FILE    the pages a paging tool sent, and whether a person
+                      acknowledged each and who resolved it: a YAML file
+                      of responses: {id, alerts, sent, acknowledged,
+                      resolved, resolved_by}. recipes/responses writes one.
+                      Each firing gets a response, and is useful or not
+  --rollouts          also read, from the history at --prometheus, the
+                      rollouts, rollbacks and scales kube-state-metrics
+                      kept of the workloads the firings are about
+                      (namespaces the firings carry, pods they name)
+  --deploys FILE      deploys, as lapilli serve reads them: each a change
+                      to what its labels name, tied to the firings it
+                      concerns
+  --rollout-match LABEL
+                      a label whose value is the name of the workload a
+                      firing is about, such as service (repeatable); a
+                      firing names it by a deployment, statefulset or
+                      daemonset label, or a pod, without it
+  --routine P         a change is routine, chance and not a response, when
+                      its target changed so often that one falling in a
+                      span as long as the firing is at least this likely
+                      anyway (default 0.5, from above 0 to 1)
 
 Output:
   --json              the whole report, every firing included
@@ -689,6 +721,15 @@ type verdictFlags struct {
 	// redact is --redact, and redactKey --redact-key's key, read.
 	redact    bool
 	redactKey []byte
+
+	// responses is --responses, the file of pages; rollouts --rollouts;
+	// deploys --deploys; rolloutMatch each --rollout-match; routine
+	// --routine; noisyBy --noisy-by, "" for the default.
+	responses, deploys string
+	rollouts           bool
+	rolloutMatch       []string
+	routine            float64
+	noisyBy            string
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -738,6 +779,9 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 		"--changed-only": &f.changedOnly, "--fail-expectations": &f.failExpect, "--expect-required": &f.expectRequired,
 		"--fail-missed": &f.failMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
 		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly, "--match-strict": &f.opts.MatchStrict,
+	}
+	if serve == nil {
+		onOffs["--rollouts"] = &f.rollouts
 	}
 	// redactOff is --redact=false, which --redact-key can't go with.
 	redactOff := false
@@ -801,6 +845,13 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			} else if ok {
 				f.firingsToken = f.firingsToken || name == "--firings-token-file"
 				continue
+			}
+		}
+		if serve != nil {
+			// What serve takes of these is its own to add.
+			switch name {
+			case "--responses", "--rollout-match", "--routine", "--noisy-by":
+				return nil, fmt.Errorf("unknown flag %s", a)
 			}
 		}
 		dur := func(min time.Duration) (time.Duration, error) {
@@ -1019,6 +1070,29 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			if f.loc, err = time.LoadLocation(val); err != nil {
 				return nil, fmt.Errorf("--tz %s: %v", val, err)
 			}
+		case "--responses":
+			f.responses = val
+		case "--deploys":
+			f.deploys = val
+		case "--rollout-match":
+			if !annotationName.MatchString(val) {
+				return nil, fmt.Errorf("--rollout-match %q: want a label's name, like service", val)
+			}
+			f.rolloutMatch = append(f.rolloutMatch, val)
+		case "--routine":
+			p, perr := strconv.ParseFloat(strings.TrimSuffix(val, "%"), 64)
+			if strings.HasSuffix(val, "%") {
+				p /= 100
+			}
+			if perr != nil || !(p > 0) || p > 1 {
+				return nil, fmt.Errorf("--routine %s: want a chance above 0 and up to 1, like 0.5 or 50%%", val)
+			}
+			f.routine = p
+		case "--noisy-by":
+			if val != verdict.NoisyByCaught && val != verdict.NoisyByUseful {
+				return nil, fmt.Errorf("--noisy-by %s: want caught or useful", val)
+			}
+			f.noisyBy = val
 		case "--work-hours":
 			f.work = val
 		case "--sleep-hours":
@@ -1233,6 +1307,9 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		}
 		return f, validHistory(f)
 	}
+	if err := f.validResponses(); err != nil {
+		return nil, err
+	}
 	if f.checkContent {
 		return f, validContent(f, sources)
 	}
@@ -1313,13 +1390,15 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		return nil, errors.New("--json and --markdown don't go together")
 	case validHistory(f) != nil:
 		return nil, validHistory(f)
+	case f.rollouts && f.promURL == "" && f.gcpProj == "":
+		return nil, errors.New("--rollouts reads kube-state-metrics from the history: add " + historyAt)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
 		return nil, errors.New("replays, --alerts, --impact and --check-replay read history: add " + historyAt)
 	case f.from.IsZero() != f.to.IsZero():
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
 		return nil, errors.New("--to must be after --from")
-	case f.incidents == "" && !f.anyImpact() && !f.checkReplay && len(f.compare) == 0 && f.draft == "":
+	case f.incidents == "" && !f.anyImpact() && !f.checkReplay && len(f.compare) == 0 && f.draft == "" && !f.usesResponses():
 		// --compare counts the firings on each side even with nothing to
 		// judge them against: what a change to the rules does to how often
 		// they fire is worth knowing alone.
@@ -1740,7 +1819,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	}
 
 	var h history
-	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.anyImpact() {
+	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.anyImpact() || f.rollouts {
 		if f.promURL != "" || f.gcpProj != "" {
 			if sample != nil {
 				h = sample
@@ -1816,6 +1895,9 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		}
 		ran, fired := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: same}}, {{Rules: before}}, {{Rules: after}}},
 			f.opts.From, f.opts.To, f.step, f.parallel)
+		if err := f.readResponses(ctx, h, slices.Concat(fired[0], fired[1], fired[2])); err != nil {
+			return fail(err)
+		}
 		var changed []string
 		for _, r := range slices.Concat(before, after) {
 			changed = append(changed, r.Name)
@@ -1927,6 +2009,9 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			for _, v := range versions {
 				f.opts.Versions = append(f.opts.Versions, v.Rules...)
 			}
+		}
+		if err := f.readResponses(ctx, h, fs); err != nil {
+			return fail(err)
 		}
 		rep = verdict.Judge(known, fs, incs, f.opts)
 		for i := range rep.Rules {

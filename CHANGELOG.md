@@ -4,6 +4,25 @@
 
 ### Added
 
+- **What people did when a rule fired**, in `lapilli verdict`
+  ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
+  a paging tool sent and whether a person acknowledged each; `--rollouts`
+  reads rollouts, rollbacks and scales of the alert's workload from
+  kube-state-metrics in the same history (`--rollout-match LABEL` ties a
+  firing to a workload by a label); `--deploys FILE` reads the deploys file
+  `lapilli serve` takes. Any of them gives each firing a response (changed,
+  acknowledged, unanswered, routine or none) and says whether it was useful,
+  and each rule an actionable share beside its precision. `--routine P`
+  (0.5) sets when a change is chance. `--noisy-by caught|useful` says what a
+  rule is found noisy by, `useful` once any of the three is given, so a rule
+  whose pages nobody answered is noisy though no incident was written down;
+  the longer `for` suggested then keeps every useful firing. The text has a
+  RESPONSES table; `--json` has `response` on each firing, `responses` on each
+  rule and the report, and `settings.noisy_by` and `settings.routine`;
+  `--csv` has columns after the others, `--metrics` has
+  `lapilli_rule_responses` and `lapilli_rule_actionable`, `--compare` shows
+  ACTIONABLE beside precision, and `--redact` gives page ids an alias. With
+  none of the three, every output is what it was. No person's name is read.
 - **The backtest's report in the step's summary**: in GitHub Actions the
   recipe adds it to `GITHUB_STEP_SUMMARY`, shown on the run's page, the
   comment's Markdown without its hidden first line. A merge queue's run,

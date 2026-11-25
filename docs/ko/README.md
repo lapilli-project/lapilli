@@ -1,4 +1,4 @@
-<!-- translated from docs/README.md at blob 19643a206519dab4062ad36703b87301afcfeb33 -->
+<!-- translated from docs/README.md at blob 1b5802b621df32267e13789531b5df8e0c573971 -->
 
 # Lapilli 문서
 
@@ -28,12 +28,14 @@ docs/를 변경할 때마다 다시 써서 만든 사본입니다. Lapilli가 �
 ## 기간을 정해 가리기
 
 - [정탐·오탐을 가르는 기준](../how-it-judges.md): 알림과 장애가 어디서 오는지,
-  알림이 언제 장애를 잡은 것인지, 노이즈 룰과 바꿀 것, 룰이 더하는 것, 알림이
+  알림이 언제 장애를 잡은 것인지, 노이즈 룰과 바꿀 것, 사람이 한 일, 룰이 더하는 것, 알림이
   언제 울렸는지, 니어 미스, 바뀐 룰
 - [`lapilli verdict` 사용법](../verdict.md): 명령, 만들어 주는 리포트, 읽는 데이터
   소스와 속도, 실패하는 경우
 - [숫자의 의미](../numbers.md): 각 숫자가 무엇인지, 그리고 Lapilli 없이 리포트에서
   다시 세는 방법
+- [알림이 울렸을 때 사람이 한 일](../responses.md): `--responses`, `--rollouts`,
+  `--deploys`, 알림마다의 대응, 알림이 유용했는지로 노이즈 룰을 가리는 방법
 - [클라우드 자체 알람](../cloud-alarms.md): CloudWatch, Azure Monitor, Google
   Cloud, OCI 알람이 울린 것과, Datadog 모니터와 New Relic 알림 조건의 정탐·오탐
   가리기

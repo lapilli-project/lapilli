@@ -404,6 +404,15 @@ Judging:
                       is noisy: it fires whatever happens. Its catches are
                       marked, and a longer "for" that would quiet it is
                       suggested when one keeps everything it caught
+  --noisy-by caught|useful
+                      what a rule is found noisy by (default useful with any
+                      of --responses, --rollouts and --deploys, else caught):
+                      caught, by the share of its firings that caught an
+                      incident; useful, by the share of its firings useful or
+                      not that were useful, an incident caught or a change
+                      made to the alert's target, and not a page nobody
+                      answered. useful keeps every useful firing when it
+                      suggests a longer "for"
   --work-hours DAYS@HH:MM-HH:MM, --sleep-hours HH:MM-HH:MM
                       when people are at work, and asleep, in --tz (default
                       mon-fri@08:00-18:00 and 22:00-08:00), or none: the
@@ -421,6 +430,29 @@ Judging:
                       all, like
                       "every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
                       tz=Europe/Berlin sleep=23:00-07:00"
+
+What people did when a rule fired (docs/responses.md):
+  --responses FILE    the pages a paging tool sent, and whether a person
+                      acknowledged each and who resolved it: a YAML file
+                      of responses: {id, alerts, sent, acknowledged,
+                      resolved, resolved_by}. recipes/responses writes one.
+                      Each firing gets a response, and is useful or not
+  --rollouts          also read, from the history at --prometheus, the
+                      rollouts, rollbacks and scales kube-state-metrics
+                      kept of the workloads the firings are about
+                      (namespaces the firings carry, pods they name)
+  --deploys FILE      deploys, as lapilli serve reads them: each a change
+                      to what its labels name, tied to the firings it
+                      concerns
+  --rollout-match LABEL
+                      a label whose value is the name of the workload a
+                      firing is about, such as service (repeatable); a
+                      firing names it by a deployment, statefulset or
+                      daemonset label, or a pod, without it
+  --routine P         a change is routine, chance and not a response, when
+                      its target changed so often that one falling in a
+                      span as long as the firing is at least this likely
+                      anyway (default 0.5, from above 0 to 1)
 
 Output:
   --json              the whole report, every firing included
