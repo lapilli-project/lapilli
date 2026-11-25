@@ -54,6 +54,38 @@ func (f *verdictFlags) validNotifications() error {
 	return nil
 }
 
+// servesNotifications reports whether lapilli serve works out the
+// notifications: it is given the alert manager's configuration, or a
+// Grafana whose policies say where its alerts go, and --notifications=false
+// didn't turn it off.
+func (f *verdictFlags) servesNotifications() bool {
+	return !f.noNotifications && (f.amConfig != "" || f.grafana != "")
+}
+
+// validServeNotifications checks the flags of the notifications of lapilli
+// serve, which works them out for each run's hours: they need the alert
+// manager's configuration, or Grafana's policies, to work from.
+func (f *verdictFlags) validServeNotifications() error {
+	given := ""
+	switch {
+	case len(f.externalLabels) > 0:
+		given = "--external-labels"
+	case f.silences != "":
+		given = "--silences"
+	case f.pagingReceivers != nil:
+		given = "--paging-receivers"
+	}
+	switch {
+	case f.notificationsSet && !f.noNotifications && f.amConfig == "" && f.grafana == "":
+		return errors.New("--notifications works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
+	case given != "" && f.amConfig == "" && f.grafana == "":
+		return fmt.Errorf("%s goes with --alertmanager-config, or --grafana, whose policies say where an alert goes", given)
+	case given != "" && f.noNotifications:
+		return fmt.Errorf("%s works out who a firing reached, which --notifications=false turns off", given)
+	}
+	return nil
+}
+
 // notifier is the routing configuration of a run, read, with what the model
 // is given beside it.
 type notifier struct {

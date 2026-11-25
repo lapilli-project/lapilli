@@ -1316,7 +1316,6 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
-			{f.notificationsSet || len(f.externalLabels) > 0 || f.silences != "" || f.pagingReceivers != nil, "--notifications, --external-labels, --silences or --paging-receivers: it doesn't work out the notifications yet, lapilli verdict does"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
 			{f.failNothingSet, "--fail-nothing-replayed"}, {f.checkNoDataSet, "--check-no-data"},
 			{f.draft != "", "--draft-expectations: ask GET /api/v1/expectations/draft"},
@@ -1354,6 +1353,9 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			return nil, errors.New("say where the history is: " + historyAt)
 		case f.promURL == "" && f.gcpProj == "" && f.anyImpact():
 			return nil, errors.New("--impact reads history: add " + historyAt)
+		}
+		if err := f.validServeNotifications(); err != nil {
+			return nil, err
 		}
 		return f, validHistory(f)
 	}

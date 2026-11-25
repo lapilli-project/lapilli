@@ -261,6 +261,22 @@ each history API (lapilli_serve_history_*). Off by default:
                       checked beside each rule it is sent; a file that
                       can't be read, or an API that refuses, leaves the
                       check as it was, and the log says why once
+  --notifications=false, --external-labels NAME=VALUE, --silences FILE,
+  --paging-receivers REGEX
+                      as for lapilli verdict (docs/notifications-worked-out.md),
+                      with --alertmanager-config or --grafana, whose notification
+                      policies and contact points are read once an hour: each run
+                      works out which notifications they send for the firings of
+                      the hours it judges, and keeps them for each firing (the
+                      pages, which ring a phone; when the first went; what muted
+                      it). On by default then; the Notifications page, the rules,
+                      the overview's "woken for nothing", the summary, goals, the
+                      digest, MCP and /api/v1/report show them, saying they are
+                      worked out; where notifications were really recorded
+                      (--notify-listen), those count, and the Notifications page and
+                      lapilli_notifications_agreement say how far the two agree.
+                      --silences is read again each run; silences the alert
+                      manager's event recorder told of count too
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
@@ -1569,6 +1585,11 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	}
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval
 	cfg.AlertmanagerConfig = f.amConfig
+	// Who each firing reached, worked out for each run's hours from the
+	// configuration read (docs/design/routing.md).
+	if cfg.Notifications = f.servesNotifications(); cfg.Notifications {
+		cfg.ExternalLabels, cfg.Silences, cfg.PagingReceivers = f.externalLabels, f.silences, f.pagingReceivers
+	}
 	if ocSet {
 		if !oidcScopesGiven {
 			oc.Scopes = []string{"email", "profile"}
