@@ -36,13 +36,15 @@ func (f *verdictFlags) validResponses() error {
 	return nil
 }
 
-// noisyByOf is what rules are found noisy by: --noisy-by, or useful once
-// responses are read, else caught.
+// noisyByOf is what rules are found noisy by: --noisy-by when given, else
+// useful once --responses or --rollouts is, else caught. --deploys alone
+// keeps caught: serve took it before responses did, and an upgrade must not
+// change which rules a deployment that only gives it finds noisy.
 func (f *verdictFlags) noisyByOf() string {
 	switch {
 	case f.noisyBy != "":
 		return f.noisyBy
-	case f.usesResponses():
+	case f.responses != "" || f.rollouts:
 		return verdict.NoisyByUseful
 	}
 	return verdict.NoisyByCaught

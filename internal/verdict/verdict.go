@@ -125,9 +125,6 @@ type Options struct {
 	// from its firing a page may have been sent, by rule (two evaluations
 	// of it), where a ledger judges the firings it keeps by what was done
 	// about them: lapilli serve.
-	// ResponsesOn says what was done about a rule's firings is counted and
-	// shown whatever a ledger keeps: pages, changes or deploys are given.
-	ResponsesOn  bool                            `json:"-"`
 	RolloutMatch []string                        `json:"-"`
 	Within       func(rule string) time.Duration `json:"-"`
 }

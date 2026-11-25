@@ -291,8 +291,8 @@ rule's **actionable** share is its useful firings over those useful or not,
 beside its precision. Stones don't change.
 
 A rule is then noisy by what its firings caught (`--noisy-by caught`), or by
-how few of them were useful (`--noisy-by useful`, the default once any of the
-three is given). With `useful`, the longer `for` suggested keeps every useful
+how few of them were useful (`--noisy-by useful`, the default once `--responses` or
+`--rollouts` is given, not with `--deploys` alone). With `useful`, the longer `for` suggested keeps every useful
 firing, and a rule with no record can be noisy from its responses alone. No
 person's name is read. What each input is, and how a response is decided, is
 in [What people did when a rule fired](responses.md); how each number is

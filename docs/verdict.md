@@ -57,7 +57,8 @@ kube-state-metrics in the same history, and `--rollout-match LABEL` names a
 label whose value is a workload's name. `--deploys FILE` is the file
 `lapilli serve` takes. Any of them gives each firing a response, and says
 whether it was useful, and a RESPONSES table follows the rules. A rule is
-then found noisy by `--noisy-by useful`, unless `--noisy-by caught`. They
+then found noisy by `--noisy-by useful` when `--responses` or `--rollouts` is
+given, unless `--noisy-by caught`; `--deploys` alone leaves it `caught`. They
 need no `--incidents`. [What people did when a rule fired](responses.md)
 says what each reads, how a response is decided, and what the report adds
 (`--json`, `--csv`, `--metrics`, `--compare`, `--redact`).

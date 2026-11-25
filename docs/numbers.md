@@ -410,7 +410,7 @@ noisy by the report's period; in `/api/v1/summary`, `/metrics` and the
 pages of `lapilli serve`, by the incident's week.
 
 With `--noisy-by useful` (`settings.noisy_by`), which is the default once
-`lapilli verdict` reads responses, a rule is noisy when at least
+`--responses` or `--rollouts` is given (not with `--deploys` alone), a rule is noisy when at least
 `noisy_at.firings` of its firings were useful or not useful, and under
 `noisy_at.precision` of them useful ([What people did](#what-people-did)). A
 rule with no record can then be noisy, from its responses alone. The jq

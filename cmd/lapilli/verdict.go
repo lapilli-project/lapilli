@@ -393,8 +393,9 @@ Judging:
                       marked, and a longer "for" that would quiet it is
                       suggested when one keeps everything it caught
   --noisy-by caught|useful
-                      what a rule is found noisy by (default useful with any
-                      of --responses, --rollouts and --deploys, else caught):
+                      what a rule is found noisy by (default useful with
+                      --responses or --rollouts, else caught, with --deploys
+                      alone too):
                       caught, by the share of its firings that caught an
                       incident; useful, by the share of its firings useful or
                       not that were useful, an incident caught or a change

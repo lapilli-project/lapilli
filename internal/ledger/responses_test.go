@@ -371,3 +371,27 @@ func TestMigrate034(t *testing.T) {
 		t.Errorf("after the page: %+v", k)
 	}
 }
+
+// Responses show when the ledger keeps pages or changes read from the
+// history, or rules are found noisy by what was done about their firings:
+// deploys alone, serve's before responses, show none beside --noisy-by
+// caught.
+func TestResponseInputsShown(t *testing.T) {
+	useful := verdict.Options{NoisyBy: verdict.NoisyByUseful}
+	for _, c := range []struct {
+		in           ResponseInputs
+		caught, used bool
+	}{
+		{ResponseInputs{}, false, true},
+		{ResponseInputs{Deploys: true}, false, true},
+		{ResponseInputs{Pages: true}, true, true},
+		{ResponseInputs{Rollouts: true}, true, true},
+	} {
+		if got := c.in.Shown(verdict.Options{}); got != c.caught {
+			t.Errorf("%+v, caught: %v", c.in, got)
+		}
+		if got := c.in.Shown(useful); got != c.used {
+			t.Errorf("%+v, useful: %v", c.in, got)
+		}
+	}
+}
