@@ -1495,7 +1495,9 @@ func (l *Ledger) ForgetMarks(ctx context.Context, keep []string) error {
 // MarkedTally is a rule's firings marked with a kind over a day or a
 // week: those that caught something (White), and those that re-fired.
 type MarkedTally struct {
-	At      int64
+	At int64
+	// Day, of a tally of one day of the week At, is that day (Tally.Day).
+	Day     int64
 	Rule    int64
 	Kind    string
 	Firings int
@@ -1508,6 +1510,14 @@ type MarkedTally struct {
 	// kind (docs/design/judging.md, item 2), and EpisodesWhite those of
 	// them with a white firing.
 	Episodes, EpisodesWhite int
+}
+
+// On is the day or week the tally is judged by (Tally.On).
+func (x MarkedTally) On() int64 {
+	if x.Day != 0 {
+		return x.Day
+	}
+	return x.At
 }
 
 // MarkedDays are the firings marked with each kind by day and rule, from

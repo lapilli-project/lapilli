@@ -95,7 +95,7 @@ func namedOpts(t *testing.T, l *Ledger, entries []verdict.RuleEntry) verdict.Opt
 			list = append(list, verdict.Signal{Name: r.Name, For: r.For, Match: r.Match, Record: r.Record, Bit: r.Bit, Start: r.Kept.From(), Seen: verdict.NewSeen(r.MatchOr(o.Match))})
 		}
 	}
-	o.SignalsGen, o.RecordWeek, o.Signals = gen, l.WeekOf, verdict.NewSignals(list, entries)
+	o.SignalsGen, o.RecordUnit, o.Signals = gen, l.WeekOf, verdict.NewSignals(list, entries)
 	return o
 }
 

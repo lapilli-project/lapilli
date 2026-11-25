@@ -68,11 +68,21 @@ type Options struct {
 	// ImpactNoData says an impact signal with no name was read, and a
 	// selector it reads had no data: it keeps no record (ImpactFrom zero).
 	ImpactNoData bool
-	// RecordWeek, when not nil, is the week a time is in, [from, to), as
-	// lapilli serve aligns its weeks: a firing is judged when the record of
-	// its week is kept, as serve's stones are kept by week. Nil judges each
-	// firing by the record at its own time, as lapilli verdict does.
-	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
+	// RecordUnit, when not nil, is the day or week a time is in, [from,
+	// to), as lapilli serve aligns its days and weeks (RecordDay says
+	// which): a firing is judged when the record of its day, or its week,
+	// is kept. Nil judges each firing by the record at its own time, as
+	// lapilli verdict does.
+	RecordUnit func(t time.Time) (from, to time.Time) `json:"-"`
+	// RecordByWeek is --record-by-week, a flag of lapilli serve's: its
+	// firings are judged by the record of their week, not their day. Said
+	// here so that what the ledger was last judged by can be told
+	// (docs/design/replicas.md).
+	RecordByWeek bool `json:"-"`
+	// RecordDay says RecordUnit gives days, in lapilli serve's time zone:
+	// what serve does by default. False with a RecordUnit, weeks
+	// (--record-by week).
+	RecordDay bool `json:"-"`
 	// Versions are, when the rules replayed stood as several versions over
 	// the period (a rules history), every one of them: from when a
 	// firing's condition held (Judged.After) is its start less the least
@@ -537,9 +547,12 @@ type Settings struct {
 	// selector it reads had no data: it keeps no record, and ImpactFrom
 	// is missing.
 	ImpactNoData bool `json:"impact_no_data,omitempty"`
-	// ByWeek says a firing's record is its week's (lapilli serve), not its
-	// own time's.
-	ByWeek bool `json:"record_by_week,omitempty"`
+	// ByWeek says a firing's record is its week's (lapilli serve with
+	// --record-by week), not its own time's. RecordBy says by what unit a
+	// firing's record is kept: "day" or "week" (lapilli serve), missing for
+	// its own time's (lapilli verdict).
+	ByWeek   bool   `json:"record_by_week,omitempty"`
+	RecordBy string `json:"record_by,omitempty"`
 	// ImpactSignals are the named impact signals, each with its "for", its
 	// match (null for the match in effect), whether it keeps the record,
 	// and from when it does; ImpactRules the rule entries, in order. None
@@ -570,8 +583,15 @@ func (o Options) Settings() *Settings {
 		match = []string{}
 	}
 	s := &Settings{Lead: o.Lead, Match: match, MatchStrict: o.MatchStrict, LinkedOnly: o.LinkedOnly, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
-		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil,
+		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordUnit != nil && !o.RecordDay,
 		Zone: o.zone().String()}
+	switch {
+	case o.RecordUnit == nil:
+	case o.RecordDay:
+		s.RecordBy = "day"
+	default:
+		s.RecordBy = "week"
+	}
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
 	}

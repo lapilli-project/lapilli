@@ -407,10 +407,10 @@ func signalLeads(w io.Writer, r *Report) {
 // having no data, unless the period's no record says so below, as it does
 // when anything fired. Nothing
 // when it keeps the record of all of the period, nor in lapilli serve's
-// digest (ByWeek), whose record by it starts where its ledger says.
+// digest (RecordBy), whose record by it starts where its ledger says.
 func impactKept(w io.Writer, r *Report, loc *time.Location) {
 	switch s := r.Settings; {
-	case s == nil, s.ByWeek:
+	case s == nil, s.ByWeek, s.RecordBy != "":
 	case s.ImpactNoData:
 		if !r.NoRecord || !slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Firings > 0 }) {
 			fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")

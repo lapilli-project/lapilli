@@ -62,7 +62,7 @@ func TestRecordKept(t *testing.T) {
 		{"from midweek", Options{ImpactFrom: t0.Add(3 * day)}, true},
 		{"from its end", Options{ImpactFrom: week[1]}, false},
 		{"not read", Options{}, false},
-		{"from midweek, by week", Options{ImpactFrom: t0.Add(3 * day), RecordWeek: func(time.Time) (time.Time, time.Time) { return week[0], week[1] }}, false},
+		{"from midweek, by week", Options{ImpactFrom: t0.Add(3 * day), RecordUnit: func(time.Time) (time.Time, time.Time) { return week[0], week[1] }}, false},
 	} {
 		if got := RecordOf(nil, c.o).JudgesAny(week[0], week[1]); got != c.want {
 			t.Errorf("judges any, %s: %v", c.name, got)
@@ -272,7 +272,7 @@ func TestJudgeEachFiring(t *testing.T) {
 	}
 }
 
-// Judged by week (RecordWeek), as lapilli serve keeps its stones: an
+// Judged by week (RecordUnit), as lapilli serve keeps its stones: an
 // incident on in a week or the two before it judges all of the week's
 // firings, one on Monday's too, and none of the next week's past two weeks
 // from it; a period with no week kept has no record.
@@ -287,7 +287,7 @@ func TestJudgeByWeek(t *testing.T) {
 		return from, from.Add(7 * day)
 	}
 	o := opts()
-	o.To, o.RecordWeek = t0.Add(28*day), week
+	o.To, o.RecordUnit = t0.Add(28*day), week
 	var fs []firing.Firing
 	for d := range 28 {
 		at := t0.Add(time.Duration(d)*day + 12*time.Hour)

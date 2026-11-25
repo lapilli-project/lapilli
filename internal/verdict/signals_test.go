@@ -295,7 +295,7 @@ func TestRecordBySignal(t *testing.T) {
 	}
 	// Judged by week, as serve does: a signal's start by the week's start.
 	weekly := o
-	weekly.RecordWeek = func(t time.Time) (time.Time, time.Time) {
+	weekly.RecordUnit = func(t time.Time) (time.Time, time.Time) {
 		w := sigT0.Add(t.Sub(sigT0).Truncate(7 * 24 * time.Hour))
 		return w, w.Add(7 * 24 * time.Hour)
 	}
