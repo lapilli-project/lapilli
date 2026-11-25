@@ -20,6 +20,10 @@ import (
 // each firing's response and whether it was useful, worked out as stones
 // are (respond), so that judging the ledger again asks nothing outside it.
 
+// ResponsesCopier is who a job sending the pages of a paging tool writes as.
+// It isn't a person, so outcomes don't count it as use.
+const ResponsesCopier = "responses-token"
+
 // ResponsesFile is the source of the pages --responses reads.
 const ResponsesFile = "file"
 
@@ -267,6 +271,14 @@ type ResponseInputs struct {
 
 // Any reports whether the ledger keeps any of them.
 func (r ResponseInputs) Any() bool { return r.Pages || r.Rollouts || r.Deploys }
+
+// Shown reports whether what was done about the firings is counted and shown:
+// the ledger keeps pages or changes read from the history, or o says they are
+// given (verdict.Options.ResponsesOn), deploys among them. A ledger that
+// keeps deploys alone, as a release before this one counted them, shows none.
+func (r ResponseInputs) Shown(o verdict.Options) bool {
+	return r.Pages || r.Rollouts || o.ResponsesOn && r.Any()
+}
 
 // ResponseInputs is what the ledger keeps responses to be found from.
 func (l *Ledger) ResponseInputs(ctx context.Context) (ResponseInputs, error) {

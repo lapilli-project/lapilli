@@ -137,6 +137,11 @@ type summaryRow struct {
 	// (docs/design/judging.md, item 3), and the numbers as Lapilli's own
 	// judging would have them.
 	People summaryPeople `json:"people"`
+	// Responses are what was done about the week's firings (docs/design/
+	// responses.md), and Actionable the share of them that were useful: both
+	// left out until pages, changes or deploys are given.
+	Responses  *summaryResponses  `json:"responses,omitempty"`
+	Actionable *summaryActionable `json:"actionable,omitempty"`
 	// Goals are the goals --config declares of the row's team (everyone's,
 	// in a row for everyone; the team's own and each team's, in a team's),
 	// each with its value and the week's result (docs/design/goals.md); left
@@ -193,6 +198,28 @@ type summaryEpisodes struct {
 	Unjudged   int      `json:"unjudged"`
 	Precision  *float64 `json:"precision"`
 	NoisyRules int      `json:"noisy_rules"`
+}
+
+// summaryResponses are a row's firings counted by what was done about them.
+// The five kinds add up to its Firings: Changed, those a change on their
+// target followed; Routine, those with only routine changes; Acknowledged,
+// those whose page a person answered; Unanswered, those whose page nobody
+// acknowledged and its alert manager resolved; None, the rest.
+type summaryResponses struct {
+	Changed      int `json:"changed"`
+	Routine      int `json:"routine"`
+	Acknowledged int `json:"acknowledged"`
+	Unanswered   int `json:"unanswered"`
+	None         int `json:"none"`
+}
+
+// summaryActionable are a row's firings useful and not useful, as the
+// report counts them (verdict.RuleResponses), and Share, the useful over
+// both, null when none is known.
+type summaryActionable struct {
+	Useful    int      `json:"useful"`
+	NotUseful int      `json:"not_useful"`
+	Share     *float64 `json:"share"`
 }
 
 // summaryPeople are a row's people's verdicts: Unrelated, its firings
@@ -438,11 +465,21 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			unjudgedSev := map[string]int{}
 			unjudgedCrits := make([]int, len(lists))
 			var ep summaryEpisodes
+			var resp summaryResponses
+			var act summaryActionable
 			for id, x := range t.by[w] {
 				rule := t.rules[id]
 				if !mine(rule.Name) {
 					continue
 				}
+				resp.Changed += x.RespChanged
+				resp.Routine += x.RespRoutine
+				resp.Acknowledged += x.RespAcknowledged
+				resp.Unanswered += x.RespUnanswered
+				resp.None += x.Firings - x.RespChanged - x.RespRoutine - x.RespAcknowledged - x.RespUnanswered
+				uf, nu := t.usefulOf(w, id)
+				act.Useful += uf
+				act.NotUseful += nu
 				u := t.unjudged(w, id)
 				ub := u.Firings - u.White
 				ep.Total += x.Episodes
@@ -511,6 +548,10 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			}
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
 			row.People = t.people(w, mine, row, weekOf[w], realRule)
+			if t.shown() {
+				act.Share = share(act.Useful, act.Useful+act.NotUseful)
+				row.Responses, row.Actionable = &resp, &act
+			}
 			for i, x := range refired {
 				if mine(x.Rule) {
 					row.Refired.Worst = &refired[i]

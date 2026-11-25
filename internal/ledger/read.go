@@ -544,7 +544,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 	}
 	// With pages, changes or deploys, what was done about the firings is
 	// counted beside the stones (docs/design/responses.md).
-	withResponses := inputs.Any()
+	withResponses := inputs.Shown(o)
 	// judgedOf says whether a rule's firings tied to signals (as the
 	// ledger keeps them) were judged; one week's, or the span's when
 	// every week of it was judged alike.
@@ -1038,7 +1038,7 @@ func (l *Ledger) ReportFirings(ctx context.Context, from, to time.Time, o verdic
 	rows.Close()
 	if inputs, err := l.ResponseInputs(ctx); err != nil {
 		return nil, 0, err
-	} else if inputs.Any() {
+	} else if inputs.Shown(o) {
 		if err := l.respondJudged(ctx, out, o, to); err != nil {
 			return nil, 0, err
 		}

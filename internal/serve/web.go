@@ -461,14 +461,18 @@ func (s *Server) MetricsHandler() http.Handler {
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cfg.IncidentsToken != "" {
-		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.ResponsesToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
 		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
 	}
 	if s.cfg.FiringsToken != "" {
-		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.ResponsesToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
 		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
+	}
+	if s.cfg.ResponsesToken != "" {
+		responses := token{s.cfg.ResponsesToken, ledger.ResponsesCopier, "--responses-token-file", []string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}, &s.responsesWarned, maxResponsesBody, s.responsesRate, s.responsesBusy}
+		mux.HandleFunc("PUT /api/v1/responses/{source}", s.withToken(responses, s.apiPutResponses))
 	}
 	s.trackerPaths(mux)
 	s.changesTokenRoutes(mux)

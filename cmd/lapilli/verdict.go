@@ -780,9 +780,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 		"--fail-missed": &f.failMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
 		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly, "--match-strict": &f.opts.MatchStrict,
 	}
-	if serve == nil {
-		onOffs["--rollouts"] = &f.rollouts
-	}
+	onOffs["--rollouts"] = &f.rollouts
 	// redactOff is --redact=false, which --redact-key can't go with.
 	redactOff := false
 	for i := 0; i < len(args); i++ {
@@ -845,13 +843,6 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			} else if ok {
 				f.firingsToken = f.firingsToken || name == "--firings-token-file"
 				continue
-			}
-		}
-		if serve != nil {
-			// What serve takes of these is its own to add.
-			switch name {
-			case "--responses", "--rollout-match", "--routine", "--noisy-by":
-				return nil, fmt.Errorf("unknown flag %s", a)
 			}
 		}
 		dur := func(min time.Duration) (time.Duration, error) {

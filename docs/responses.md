@@ -191,8 +191,11 @@ as it gives labels. Each is defined in [The numbers](numbers.md#what-people-did)
 - Forged pages can make a rule look noisier, never better: a page can only
   make a firing `acknowledged` or `unanswered`, and neither is useful.
 - A change from the history or the deploys file is believed as it is read.
-- These flags are `lapilli verdict`'s. `lapilli serve` reading the same
-  inputs is a separate change ([the design](design/responses.md)).
+- `lapilli serve` reads the same inputs, with `--responses-token-file` and
+  `PUT /api/v1/responses/SOURCE` for the pages ([the API](api.md#the-incidents-port),
+  [the design](design/responses.md)); it works each firing's response out as
+  it judges the firing, from what its ledger keeps, and counts a rule's
+  changes over the firing's week, not the report's period.
 
 See [How it judges](how-it-judges.md#what-people-did) for where this sits
 beside stones, and the [design](design/responses.md) for why.

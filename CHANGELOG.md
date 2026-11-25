@@ -23,6 +23,24 @@
   `lapilli_rule_responses` and `lapilli_rule_actionable`, `--compare` shows
   ACTIONABLE beside precision, and `--redact` gives page ids an alias. With
   none of the three, every output is what it was. No person's name is read.
+- **`lapilli serve` reads what people did when a rule fired** (schema 034,
+  [docs/design/responses.md](docs/design/responses.md)). `--responses FILE` is
+  read again each run, and `--responses-token-file` takes pages on the
+  incidents port, `PUT /api/v1/responses/SOURCE?from=&to=`, replacing that
+  source's pages sent in the period. `--rollouts` reads the changes made to
+  the workloads of the firings' namespaces with each run and keeps them, as
+  `--deploys` does for deploys, so that judging the ledger again asks the
+  history nothing; `--rollout-match`, `--routine` and `--noisy-by` are as in
+  `lapilli verdict`, and the Settings page keeps `noisy-by` (`useful` by
+  default once `--responses`, `--rollouts` or `--deploys` is given). Each
+  firing's response and usefulness are worked out as its stones are, a
+  person's answer first, and counted by day and week; the report, the
+  summary rows (`responses`, `actionable`), the goals (`actionable.share`),
+  `/metrics` (`lapilli_rule_responses`, `lapilli_rule_actionable`), the
+  weekly digest and MCP's rule and firing tools say them. The first start
+  judges every firing again (`judgedBy` j3). The chart has `rollouts`,
+  `rolloutMatch`, `routine`, `noisyBy`, `serve.responses` (the token and the
+  file) and runs the `responses/` recipes beside `recipes/incidents`.
 - **The backtest's report in the step's summary**: in GitHub Actions the
   recipe adds it to `GITHUB_STEP_SUMMARY`, shown on the run's page, the
   comment's Markdown without its hidden first line. A merge queue's run,

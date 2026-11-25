@@ -125,6 +125,9 @@ type Options struct {
 	// from its firing a page may have been sent, by rule (two evaluations
 	// of it), where a ledger judges the firings it keeps by what was done
 	// about them: lapilli serve.
+	// ResponsesOn says what was done about a rule's firings is counted and
+	// shown whatever a ledger keeps: pages, changes or deploys are given.
+	ResponsesOn  bool                            `json:"-"`
 	RolloutMatch []string                        `json:"-"`
 	Within       func(rule string) time.Duration `json:"-"`
 }
@@ -608,8 +611,10 @@ func (o Options) Settings() *Settings {
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
 	}
-	if o.Responder != nil {
-		s.NoisyBy, s.Routine = cmp.Or(o.NoisyBy, NoisyByCaught), o.Routine
+	// With what people did when a rule fired counted: by a Responder, or by
+	// a ledger that keeps it (NoisyBy is then given).
+	if o.Responder != nil || o.NoisyBy != "" {
+		s.NoisyBy, s.Routine = cmp.Or(o.NoisyBy, NoisyByCaught), cmp.Or(o.Routine, 0.5)
 	}
 	return s
 }
