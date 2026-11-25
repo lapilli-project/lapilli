@@ -139,6 +139,41 @@ with the label, depth, direction and edges; `--compare` marks the same in its
 text and its Markdown (each service in a code span, as a rule's name is); `--redact` aliases the services on a path as it aliases
 the label's values. [The numbers](numbers.md) says how each is counted.
 
+## In lapilli serve
+
+`lapilli serve` takes the same flags (the chart's `depends`, `dependsLabels`,
+`dependsMatch`, `dependsDepth`, `dependsDirection` and `dependsStep`), and the
+Settings page's Incident criteria has a **Service graph** with the expression,
+its labels, depth and direction, as `--impact` has: an admin's to change, tried
+on the last four weeks first (the catches by dependency it would add, by rule,
+with the way each reached its incident, and how the verdict, its precision, its
+noisy rules and its missed incidents, would move), and read by the same
+bounds. A try is counted with the impact tries, twelve an hour for an admin,
+and asked for from the Settings page on the site.
+
+- Each run reads the graph for the hours it judges and the lead before them,
+  once, and keeps its edges by the hour in the ledger (`edges`), with the spans
+  it was read over. A read that fails is kept as a span the next run reads once
+  more; until then the incidents there are judged by what the ledger holds.
+- Judging, the first time and again, asks the history nothing. It loads the
+  ledger's edges for the hours of the incidents it judges against (from an hour
+  before the earliest start to the latest end), at most 1,000,000 edges in one
+  judgement; past that, that judgement is made with no graph, as one with too
+  many edges in an hour is.
+- A catch writes its path (`catches.dependency`), which the Incidents page
+  shows after the rule (`by dependency, via checkout → payments-db`), a rule's
+  page lists apart ("Caught by dependency"), and MCP and `/api/v1/incidents`
+  carry as `dependency`. `/api/v1/report` has it on `caught_by[]` and
+  `settings.depends` with the edges of the period.
+- Turning the graph on, off, or changing its expression, labels, step,
+  label, depth or direction judges every firing again, once, as a change of
+  `--linked-only` does. A new expression, labels or step is first read over the
+  last four weeks, by the replica that leads, which keeps those weeks' edges
+  in place of the ones before; one that can't be read is tried again at the
+  next round, and meanwhile the ledger is judged with no graph. Changing the
+  depth or direction reads nothing.
+- Edges are kept as long as the firings are. Turned off, they are dropped.
+
 ## What bounds it
 
 - An hour of the graph keeps 20,000 edges at most. Past that the read stops,

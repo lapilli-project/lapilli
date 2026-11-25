@@ -293,6 +293,11 @@ func (l *Ledger) PruneKeeping(ctx context.Context, before, activity time.Time) e
 		"DELETE FROM rollout_spans WHERE to_at < ?",
 		"DELETE FROM rollout_retries WHERE to_at < ?",
 		"DELETE FROM rollout_owners WHERE seen_at < ?",
+		// The service graph, as firings are: its edges by their hour, and the
+		// spans it was read over and to be read again.
+		"DELETE FROM edges WHERE hour < ?",
+		"DELETE FROM edge_spans WHERE to_at < ?",
+		"DELETE FROM edge_retries WHERE to_at < ?",
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
 		"DELETE FROM results WHERE id IN (SELECT id FROM results WHERE at < ? LIMIT 5000)",
 		pruneChanges,

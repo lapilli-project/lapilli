@@ -71,7 +71,11 @@ type Found struct {
 	// period (--rollouts): kept, so that the firings are judged by them,
 	// and judged again without asking the history.
 	Rollouts *response.Rollouts
-	Run      Run
+	// Edges is the service graph the run read over its period and the lead
+	// before it (--depends): kept, so that the incidents in its hours are
+	// judged by it, and judged again without asking the history.
+	Edges *EdgesRead
+	Run   Run
 }
 
 // SignalRead is a named impact signal as a run read it, with Criterion
@@ -389,6 +393,9 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			lo = min(lo, ilo)
 		}
 		if err := l.keepRollouts(t, f.Rollouts, to, lo-int64(o.MaxLead()/time.Second)); err != nil {
+			return err
+		}
+		if err := l.keepEdges(t, f.Edges); err != nil {
 			return err
 		}
 		if err := l.judge(t, lo-int64(o.MaxLead()/time.Second), to, o); err != nil {

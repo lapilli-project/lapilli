@@ -98,6 +98,13 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 			at := now.Add(-50*time.Hour + time.Duration(k)*time.Hour)
 			out = append(out, run(map[string]string{"service": "search"}, at, at.Add(10*time.Minute)))
 		}
+	case "payments > 1":
+		// A database's, over INC-1, whose service isn't checkout's.
+		out = append(out, run(map[string]string{"service": "payments-db"}, now.Add(-30*time.Hour-5*time.Minute), now.Add(-29*time.Hour)))
+	case "calls":
+		// Who calls whom: checkout calls payments-db, search calls checkout.
+		out = append(out, run(map[string]string{"caller": "checkout", "callee": "payments-db"}, start, end),
+			run(map[string]string{"caller": "search", "callee": "checkout"}, start, end))
 	case "disk > 1":
 		// A node's, with no service, over INC-1.
 		out = append(out, run(map[string]string{"node": "n1"}, now.Add(-30*time.Hour), now.Add(-29*time.Hour)))

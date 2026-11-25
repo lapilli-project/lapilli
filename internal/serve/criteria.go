@@ -166,7 +166,7 @@ func (s *Server) impactFrom(ctx context.Context, c criterion) (time.Time, error)
 func maxQueryOf(page string, r *http.Request) int {
 	switch q := r.URL.RawQuery; {
 	case page != "settings":
-	case strings.Contains(q, "impact-try=") || strings.Contains(q, "signal-try="):
+	case strings.Contains(q, "impact-try=") || strings.Contains(q, "signal-try=") || strings.Contains(q, "depends-try="):
 		return maxQuery + 8*maxImpactExpr
 	case strings.Contains(q, "rules-try="):
 		return maxQuery + 3*maxEntriesText
@@ -385,6 +385,8 @@ type criteriaView struct {
 	// last four weeks: when it last failed, why, and when it is tried again.
 	Again *againView `json:"read_again,omitempty"`
 	Tried *impactTry `json:"-"`
+	// Depends is the service graph (dependsweb.go), under the criteria.
+	Depends *dependsView `json:"-"`
 	// Named are the named impact signals in effect (docs/design/signals.md):
 	// those serve was started with and those an admin set here, by name;
 	// Removed, those serve was started with that an admin took away here;
@@ -526,6 +528,10 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 	c := s.criterionOf(set)
 	started := criterion{s.cfg.Impact, s.cfg.ImpactFor}
 	v := &criteriaView{NoHistory: s.h == nil, Expr: c.Expr, For: verdict.Duration(c.For)}
+	var err error
+	if v.Depends, err = s.dependsViewOf(ctx, set); err != nil {
+		return nil, err
+	}
 	// The match in effect, as a signal that follows it is matched on.
 	o := s.cfg.Options
 	if x, ok := set["match"]; ok {
@@ -1431,6 +1437,7 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 		return err
 	}
 	o.Verdicts, with.Verdicts = said, said
+	o, with = s.graphed(ctx, o, nowIncs), s.graphed(ctx, with, withIncs)
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
 	units := s.l.SpanUnits(o, from, to)

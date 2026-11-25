@@ -109,7 +109,7 @@ func TestMigrate016(t *testing.T) {
 	if err := l.SetProposalTask(ctx, pid, ids[2]); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(append(slices.Concat(undo035, undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022, undo021, undo020, undo019, undo018, undo017), undo016...), "PRAGMA user_version = 15") {
+	for _, q := range append(append(slices.Concat(undo036, undo035, undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022, undo021, undo020, undo019, undo018, undo017), undo016...), "PRAGMA user_version = 15") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}

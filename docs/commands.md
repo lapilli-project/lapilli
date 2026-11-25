@@ -693,6 +693,25 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       writes no other source's. Once for each source; the
                       --responses file's pages outrank an API source's;
                       recipes/responses/put.sh
+  --depends PROMQL    an expression whose series each name a caller and a
+                      callee (a service mesh's request rate by source and
+                      destination): an alert on a service an incident's
+                      service calls then catches it, though their --match
+                      labels differ. Each run reads it for its hours and
+                      keeps it in the ledger; the Settings page changes it
+                      and tries it on the last four weeks first
+                      (docs/dependencies.md)
+  --depends-labels FROM,TO
+                      the labels of its series that name the caller and the
+                      callee (goes with --depends)
+  --depends-match LABEL
+                      the label of --match whose values the services are
+                      (default: the first)
+  --depends-depth N   how many calls away still count: 1 (default) to 3
+  --depends-direction down|both
+                      down (default): an alert on a service the incident's
+                      service calls catches it; both: one on a caller too
+  --depends-step DUR  the step it is read at (default 1h, 10m at the finest)
   --rollouts          also read, from the history at --prometheus, the
                       rollouts, rollbacks and scales kube-state-metrics
                       shows for the namespaces the firings are in, each run

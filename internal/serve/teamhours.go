@@ -116,6 +116,12 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	// What judged it, for a reader counting it again (docs/numbers.md): by
 	// the ledger's days, or weeks.
 	rep.Settings = o.Settings()
+	if d := rep.Settings.Depends; d != nil {
+		// How big the graph it was judged by was, of the ledger's edges.
+		if d.Edges, err = s.l.EdgesIn(ctx, from, to); err != nil {
+			return nil, err
+		}
+	}
 	if rep.Settings.RecordBy == "" {
 		// Options with no unit are judged by the ledger's weeks.
 		rep.Settings.ByWeek, rep.Settings.RecordBy = true, "week"

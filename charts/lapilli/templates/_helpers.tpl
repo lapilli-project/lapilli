@@ -423,6 +423,19 @@ other's: its own Secret and key among every token's. */ -}}
 {{- if and .Values.rollouts (not (or .Values.prometheus.url .Values.gcpProject)) }}
 {{- fail "rollouts reads kube-state-metrics from the history: give prometheus.url or gcpProject" }}
 {{- end }}
+{{- if .Values.depends }}
+{{- if not .Values.dependsLabels }}
+{{- fail "depends needs dependsLabels (FROM,TO): the labels of its series that name the caller and the callee" }}
+{{- end }}
+{{- if not .Values.match }}
+{{- fail "depends needs match: the services' names are values of one of its labels" }}
+{{- end }}
+{{- if not (or .Values.prometheus.url .Values.gcpProject) }}
+{{- fail "depends reads history: give prometheus.url or gcpProject" }}
+{{- end }}
+{{- else if or .Values.dependsLabels .Values.dependsMatch .Values.dependsDepth .Values.dependsDirection .Values.dependsStep }}
+{{- fail "dependsLabels, dependsMatch, dependsDepth, dependsDirection and dependsStep go with depends" }}
+{{- end }}
 {{- if and (eq .Values.noisyBy "useful") (not (or .Values.rollouts $rs.configMap.name (and (eq .Values.mode "serve") (or $rs.tokenSecrets $s.deploys.configMap.name)))) }}
 {{- fail "noisyBy: useful finds a rule noisy by what was done about its firings: give rollouts, serve.responses.configMap, serve.responses.tokenSecrets or serve.deploys" }}
 {{- end }}
@@ -802,6 +815,22 @@ the rules and the incidents are, and how to judge. */}}
 {{- end }}
 {{- with .Values.noisyPrecision }}
 - {{ printf "--noisy-precision=%v" . | quote }}
+{{- end }}
+{{- if .Values.depends }}
+- {{ printf "--depends=%s" .Values.depends | quote }}
+- {{ printf "--depends-labels=%s" .Values.dependsLabels | quote }}
+{{- with .Values.dependsMatch }}
+- {{ printf "--depends-match=%s" . | quote }}
+{{- end }}
+{{- with .Values.dependsDepth }}
+- {{ printf "--depends-depth=%d" (int .) | quote }}
+{{- end }}
+{{- with .Values.dependsDirection }}
+- {{ printf "--depends-direction=%s" . | quote }}
+{{- end }}
+{{- with .Values.dependsStep }}
+- {{ printf "--depends-step=%s" . | quote }}
+{{- end }}
 {{- end }}
 {{- if .Values.rollouts }}
 - --rollouts

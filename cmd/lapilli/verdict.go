@@ -1261,7 +1261,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	if err := f.signalsRead(); err != nil {
 		return nil, err
 	}
-	if err := f.validDepends(serve != nil); err != nil {
+	if err := f.validDepends(); err != nil {
 		return nil, err
 	}
 	// The hours are read once the zone is known, wherever --tz came; and

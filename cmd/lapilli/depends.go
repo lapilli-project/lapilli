@@ -75,7 +75,7 @@ func (f *dependsFlags) dependsFlag(name, val string) error {
 
 // validDepends checks --depends against the flags it goes with, and fills
 // in its defaults: the label of the match, the step.
-func (f *verdictFlags) validDepends(serve bool) error {
+func (f *verdictFlags) validDepends() error {
 	if f.depends == "" {
 		if len(f.dependsGiven) > 0 {
 			return fmt.Errorf("%s goes with --depends: the expression that says who calls whom", f.dependsGiven[0])
@@ -91,8 +91,6 @@ func (f *verdictFlags) validDepends(serve bool) error {
 		return fmt.Errorf("--depends-match %s: want one of the labels --match gives (%s)", f.dependsMatch, strings.Join(f.opts.Match, ", "))
 	case f.promURL == "" && f.gcpProj == "":
 		return errors.New("--depends reads history: add " + historyAt)
-	case serve:
-		return errors.New("lapilli serve doesn't take --depends yet")
 	}
 	if f.dependsMatch == "" {
 		f.dependsMatch = f.opts.Match[0]

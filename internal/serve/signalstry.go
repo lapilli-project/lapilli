@@ -395,6 +395,7 @@ func (s *Server) judgeSignalsTried(ctx context.Context, l, who string, try *sign
 		return err
 	}
 	o.Verdicts, with.Verdicts = said, said
+	o, with = s.graphed(ctx, o, nowIncs), s.graphed(ctx, with, withIncs)
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
 	units := s.l.SpanUnits(o, from, to)
