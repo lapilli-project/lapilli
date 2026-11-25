@@ -614,6 +614,18 @@ type Server struct {
 		failing bool
 		notes   string
 	}
+	// listing is the groups the history's rules API, and --loki's, last
+	// listed, to place the groups read from rule files where they run
+	// (rules.Listing); each as last read when a read fails, failing for
+	// whether the last read of it did; unplaced collects what couldn't be
+	// placed by them, and said what of it was last logged.
+	listing struct {
+		sync.Mutex
+		prom, loki       *rules.Listing
+		promBad, lokiBad bool
+		unplaced         *rules.Unplaced
+		said             string
+	}
 	// picked is what reading the rule files last passed over, as said.
 	picked atomic.Value
 	// leaderSaid is the leader's status as it last said it, read, for a

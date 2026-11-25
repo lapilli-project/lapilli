@@ -100,6 +100,40 @@ func Loaded(ctx context.Context, h replay.History) ([]rules.Rule, rules.Doc, err
 	return rs, rules.Doc{Source: "api", API: true, Data: b}, nil
 }
 
+// ErrNoRulesAPI is what Listed answers for a history that has no rules API
+// to ask: a stand-in, or no Prometheus at all.
+var ErrNoRulesAPI = errors.New("this history has no rules API")
+
+// Listed asks the history's rules API once for the groups it lists, to place
+// a group read from a file where the history's server runs the group of
+// its name (rules.Listing). once asks as a read lapilli can do without
+// (prom's RulesOnce): not waited for, not heeding what the API said to
+// wait. An API that isn't there, or answers with an error, is an error to
+// say, and the groups are placed as without it.
+func Listed(ctx context.Context, h replay.History, once bool) (*rules.Listing, error) {
+	api, ok := replay.Base(h).(interface {
+		Rules(context.Context) ([]byte, error)
+	})
+	if !ok {
+		return nil, ErrNoRulesAPI
+	}
+	read := api.Rules
+	if o, ok := api.(interface {
+		RulesOnce(context.Context) ([]byte, error)
+	}); ok && once {
+		read = o.RulesOnce
+	}
+	b, err := read(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the history's rules API couldn't be read: %w", err)
+	}
+	l, err := rules.ReadListing(b)
+	if err != nil {
+		return nil, fmt.Errorf("the history's rules API: %w", err)
+	}
+	return l, nil
+}
+
 // client doesn't follow redirects, so a token goes nowhere it wasn't sent,
 // and gives up on a Grafana that doesn't answer: its headers within
 // grafanaHeaders, the whole within grafanaTimeout, whatever the context.

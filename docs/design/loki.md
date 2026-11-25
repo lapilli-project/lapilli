@@ -156,8 +156,14 @@ says it as `lastEvaluation`, as for `--loaded-rules` (states.md, section 5).
 It is a fact about the ruler now, not about the rules: kept beside them,
 read again each time the rules are, and put on each Loki ruler rule when it
 is replayed, by namespace and group (`Replaying.Places`). A group the API
-doesn't name is replayed on the grid. Rules read from files are replayed on
-the grid, as Prometheus rule files are.
+doesn't name is replayed on the grid. Rules read from files (`--loki-rules`)
+are placed by the ruler's API too, by the group's name alone, as a file
+has no namespace: where the one group of that name last ran, when the
+file gives the same interval (`rules.Listing`, states.md, section 5); a
+name in two namespaces, or none, is replayed on the grid, and the run says
+so. A placed group of Loki's, read from files or its API, is replayed from
+its last evaluation before the period, so a firing on when the period
+starts is seen (states.md, section 5).
 
 **A rule knows it is LogQL.** `rules.Rule.Logs` says which Loki a rule's
 queries are asked of: `loki` for `--loki`; for a Grafana rule, the uid of
@@ -417,15 +423,6 @@ Grafana gives, so a rule that isn't replayed says why.
   in that fraction of a second is counted one evaluation later by the
   replay than by Loki. Measured below, with log lines written so that they
   don't fall in it, and said in Questions for review.
-- **A firing on when a period starts** that ends before its group's first
-  evaluation in the period: Loki decided it at the evaluation before, which
-  the replay doesn't make, for Loki's groups as for Prometheus's read with
-  `--loaded-rules`. `test/e2e/loki.sh` first started its check on any
-  minute and found one such firing in three runs; it now starts on a minute
-  no firing ends near. Replaying a placed group from its last evaluation
-  before the period would see it, but asks the history for an interval
-  more, which the recordings kept as test data don't hold: left for after
-  this.
 - **Recording rules** in Loki's ruler, as in Prometheus's, aren't alerts,
   and aren't read.
 - **Changing Loki's rules** (changes.md). Loki's configuration API is
@@ -537,15 +534,18 @@ yet, so `TestRealLokiGrafana` says those rules' requests are not recorded
 until it is.
 
 Each firing starts and ends at the same evaluation as Loki's or Grafana's,
-but for one on when the period starts, which the replay has from its
-group's first evaluation in it (above). The recording is kept as test data
+but for one on when the period starts, which was seen only from its
+group's first evaluation in it: a placed group is now replayed from its
+last evaluation before the period (states.md, section 5), asking its query
+for the interval before. The recording is kept as test data
 (`internal/replay/testdata/loki-3.7.9`, `grafana-13.3.1-loki`) and replayed
 by `TestRealLoki` and `TestRealLokiGrafana` on every change.
 `test/e2e/loki.sh` runs a smaller set against real servers in CI: its
 first runs found that a SQL rule said "no PromQL expr", as a rule that
 couldn't be read never had its data sources' types asked (fixed: it is read
-again once they are), and the firing on at a period's start (its check now
-starts on a minute no firing ends near).
+again once they are), and the firing on at a period's start (its check
+starts on a minute no firing ends near, which the replay from the evaluation
+before the period no longer needs).
 
 ## A `for` one line can't outlast (0.70)
 

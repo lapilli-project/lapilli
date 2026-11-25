@@ -305,14 +305,36 @@ interval a whole number of `--step`s, is evaluated at its own times. The
 rules API of Prometheus, Thanos, Mimir and vmalert says `lastEvaluation`;
 where it doesn't, the group is evaluated on the steps' grid, as before.
 
-**Not for rule files, and no `--offset`.** The hash takes the path
-Prometheus loaded the file from, which a file on Lapilli's disk doesn't
-say (`/etc/prometheus/rules/prometheus-k8s-rulefiles-0/...` for the
-Prometheus Operator), and the hash is Prometheus's internal hash of a
-label set, which it doesn't promise to keep. A flag would ask a person for a
-number per group that the rules API already gives. Thanos Ruler, Mimir
-and the managed services may place groups their own way;
-`lastEvaluation` says where, whichever.
+**Rule files: from the rules API, by the group's name.** The hash takes
+the name and the path Prometheus loaded the file from, which a file on
+Lapilli's disk doesn't say (`/etc/prometheus/rules/prometheus-k8s-rulefiles-0/...`
+for the Prometheus Operator). The rules API does, for each group it runs.
+So, when rules are read from files and the history's server (or a Loki
+ruler) lists a group of the same name, the group is placed as the server
+places it: one request of the API for a run (`lapilli serve` asks it with
+each read of the rules, as a read it can do without, and keeps what it last
+read), not one a rule. Prometheus's hash is xxhash of the group's `file`
+and `name` labels, modulo the interval in nanoseconds, and which bytes of
+the label set it hashes depends on the build (Prometheus 3.5.0's, measured
+here, hashes the string labels' layout; the slice labels' is the other).
+Lapilli takes the layout that most of the listed groups' last evaluations
+agree with, to the second, and places the file's group by it, at the
+interval the file gives: so a group changed in a pull request is placed too.
+Where no layout agrees (Thanos Ruler, Mimir, and the managed services may
+place groups their own way, vmalert at random), it takes where the group of
+that name last ran, if the file's interval is the one it runs at. A group
+isn't placed, and is replayed on the steps' grid as before, when the API
+lists its name twice (two files), or not at all, when it hasn't run, or
+when no layout agrees and the interval differs. A group whose file gives no
+interval runs at the server's global `evaluation_interval`, which the API
+says for the group: it is placed at that, and replayed as often as the
+server runs it, by `Rule.Placed`, which is not the rule's `Interval` and
+is in neither its key nor its comparison with another version of it; the run says which, and why (`lapilli verdict` on stderr,
+`lapilli serve` in its log), and an API that isn't served, or can't be
+read, is said and doesn't fail the run. A Loki ruler's hash can't be checked
+(the `file` its API gives is the namespace), so its groups of rule files are
+placed by their last evaluation. There is no `--offset`: it would ask a
+person for a number per group that the API gives.
 
 vmalert is the exception, told apart by the `concurrency` only its groups
 say. It starts a group a while into its interval, at random by the group,
@@ -325,6 +347,29 @@ interval's own grid, whatever `lastEvaluation` says (Go's `Truncate`
 counts from the year 1: a seven-minute group falls six minutes past the
 Unix epoch's multiples). A group whose file turns `eval_alignment` off,
 which the API doesn't say, is taken as aligned.
+
+**A firing on when the period starts.** A placed group's last evaluation
+before the period decides the state the period starts in: a firing on then
+may end before the group's first evaluation in the period, and replayed
+from the first, it would be left out, though it was on, and a real
+`ALERTS` shows it. A placed group (read with `--loaded-rules` or placed
+from the rules API, Loki's too) is replayed from that evaluation, whole
+steps before the period's start; with a `for` or a `keep_firing_for`, from
+an interval before the evaluation that, so the alert pending or held on
+there is seen as it was. A firing from there that is on when the period
+starts is reported from the period's start, as one that held on into it
+is, and `--check-replay` sets both sides' so (its clamp); one that ended
+before the period isn't reported. Every replay of a firing starts so: `Run`,
+a longer or shorter `for` tried (`WithFor`, `Fired`), the stretches a
+condition held (`Held`), and the near misses and numbers that ask them; a
+firing on at the start that a `for` tried would still have fired is seen by
+it too, and one it would have quieted is quieted by the evaluations before
+the period, not by where the period starts. `Values` and `NoData` are of the evaluations in
+the period alone, and start at its start. What is reported in the period, and the
+period's bounds, are as before. The cost is a request for the interval
+before the period, and a `for` and a `keep_firing_for` more. A group on
+the steps' grid has no evaluation before the period that isn't the
+step before.
 
 Grafana places a rule on its interval's own grid, by default, which the
 replay already uses.
@@ -370,9 +415,11 @@ Taken while building; each is open to the review.
 
 ## Questions for review
 
-- Should a rule from a file be placed where the history's own rules API
-  says a group of the same name runs, when `serve` reads both? It would
-  place most Prometheus rules, but a group of that name may be another.
+- A rule from a file is placed where the history's rules API says a group
+  of the same name runs: built. It can place a group of that name that is
+  another one (a rule file Prometheus doesn't load, a group name reused in
+  two files, which is refused as listed twice, or a file that isn't the one
+  the server loaded); `--check-replay` says when a placement is wrong.
 - Should a Grafana rule whose `noDataState` is `NoData` and whose query
   filters (`x > 5`) be told, before anything is judged, that it pages
   whenever all is well? It is a fact about the rule, as the content check

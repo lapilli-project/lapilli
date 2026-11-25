@@ -307,7 +307,12 @@ func WithFor(ctx context.Context, h History, r rules.Rule, fors []time.Duration,
 		}
 		return out, nil
 	}
-	series, err := Condition(ctx, h, r, from.Add(-slices.Max(fors)), to, step)
+	st, early := asRun(r, from, to, step, slices.Max(fors))
+	start := from.Add(-slices.Max(fors))
+	if early {
+		start, _ = st.span(step)
+	}
+	series, err := Condition(ctx, h, r, start, to, step)
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +320,18 @@ func WithFor(ctx context.Context, h History, r rules.Rule, fors []time.Duration,
 		return nil, err
 	}
 	for _, d := range fors {
+		if early {
+			// As Run does: from the last evaluation before the period.
+			floor := st.floor(step)
+			at := func(pending time.Time) time.Time {
+				if t := pending.Add(d); t.After(floor) {
+					return t
+				}
+				return floor
+			}
+			out[d] = st.trim(fire(r, series, step, at, to), step)
+			continue
+		}
 		// As a replay does, an alert pending since before the period fires
 		// at its start at the earliest.
 		fireAt := func(pending time.Time) time.Time {
@@ -337,7 +354,12 @@ func Held(ctx context.Context, h History, r rules.Rule, from, to time.Time, step
 		return nil, nil
 	}
 	r.For, r.KeepFiringFor = 0, 0
-	series, err := Condition(ctx, h, r, from, to, step)
+	st, early := asRun(r, from, to, step, 0)
+	start := from
+	if early {
+		start, _ = st.span(step)
+	}
+	series, err := Condition(ctx, h, r, start, to, step)
 	if err != nil {
 		return nil, err
 	}
@@ -350,14 +372,14 @@ func Held(ctx context.Context, h History, r rules.Rule, from, to time.Time, step
 			fs[i].End = to
 		}
 	}
-	return fs, nil
+	return st.trim(fs, step), nil
 }
 
 // Every is how often a replay at step evaluates a rule: as often as its
 // group is when that is a whole number of steps, otherwise every step.
 func Every(r rules.Rule, step time.Duration) time.Duration {
-	if r.Interval > step && r.Interval%step == 0 {
-		return r.Interval
+	if iv := r.GroupEvery(); iv > step && iv%step == 0 {
+		return iv
 	}
 	return step
 }
@@ -368,7 +390,7 @@ func Every(r rules.Rule, step time.Duration) time.Duration {
 // whole number of steps. ok is false otherwise: its evaluations are on the
 // steps' grid.
 func placed(r rules.Rule, step time.Duration) (off time.Duration, ok bool) {
-	if r.Graph != nil || r.Phase <= 0 || r.Interval < step || r.Interval%step != 0 || r.Phase >= r.Interval {
+	if r.Graph != nil || r.Phase <= 0 || r.GroupEvery() < step || r.GroupEvery()%step != 0 || r.Phase >= r.GroupEvery() {
 		return 0, false
 	}
 	return r.Phase % step, true
@@ -404,12 +426,100 @@ func (st stint) warm(j int) bool { return j > 0 || st.before }
 // span is what a stint is replayed over: from when it took effect, or, if
 // that was before the period, from "for" and keep_firing_for earlier, so
 // alerts already pending, or held on, carry in.
+//
+// A rule whose group is placed within its interval starts from its last
+// evaluation before the period (early), whole steps back: what it decided
+// there, a firing on when the period starts, is the state the period starts
+// in, even where it ends before the group's first evaluation in the period.
 func (st stint) span(step time.Duration) (time.Time, time.Time) {
 	lo := st.lo
 	if st.before {
+		if _, ok := st.early(step); ok {
+			lo = lo.Add(-st.back(step))
+			if st.For+st.KeepFiringFor > 0 {
+				// One evaluation more, so the alert pending, or held on,
+				// for as long as it takes to be firing at that evaluation
+				// has a sample at or before where that began.
+				lo = lo.Add(-st.GroupEvery())
+			}
+		}
 		lo = lo.Add(-st.For - st.KeepFiringFor)
 	}
 	return lo, st.hi.Add(-step)
+}
+
+// gap is how long after lo the placed rule's first evaluation in the
+// period falls, 0 when it falls on lo or the rule isn't placed.
+func (st stint) gap(step time.Duration) time.Duration {
+	if _, ok := placed(st.Rule, step); !ok {
+		return 0
+	}
+	iv := int64(st.GroupEvery())
+	return time.Duration(((int64(st.Phase)-st.lo.UnixNano())%iv + iv) % iv)
+}
+
+// early is the last evaluation of a placed rule's group before the period,
+// for a stint in effect before it, when the group's first evaluation in
+// the period is later than its start. ok is false for any other.
+func (st stint) early(step time.Duration) (time.Time, bool) {
+	if !st.before {
+		return time.Time{}, false
+	}
+	g := st.gap(step)
+	if g == 0 {
+		return time.Time{}, false
+	}
+	return st.lo.Add(g - st.GroupEvery()), true
+}
+
+// back is how many whole steps before lo a placed rule's replay starts, to
+// reach its last evaluation before the period.
+func (st stint) back(step time.Duration) time.Duration {
+	return (st.GroupEvery() - st.gap(step) + step - 1) / step * step
+}
+
+// trim settles the firings of a stint replayed from the last evaluation
+// before the period (early): one there that is on when the period starts is
+// reported from its start, as one that held on into it is; one that ended
+// before it isn't reported. Any other stint's are as they are.
+func (st stint) trim(fs []firing.Firing, step time.Duration) []firing.Firing {
+	if _, ok := st.early(step); !ok {
+		return fs
+	}
+	fs = slices.DeleteFunc(fs, func(f firing.Firing) bool { return !f.End.IsZero() && !f.End.After(st.lo) })
+	for i := range fs {
+		if fs[i].Start.Before(st.lo) {
+			fs[i].Start = st.lo
+		}
+	}
+	return fs
+}
+
+// asRun is the stint a replay of one rule over [from, to] is, with the
+// "for" and keep_firing_for to look back by, set as Run sets them for a
+// rule in effect before the period: its replay starts where Run's does
+// (early), and ok says whether that is before from at all (a placed group
+// whose first evaluation isn't on from). Every replay of a placed group,
+// a longer "for" tried, a shorter one, a number, a window of a near miss,
+// is made from there, or what Run reports at the period's start is a
+// firing the others never see.
+func asRun(r rules.Rule, from, to time.Time, step time.Duration, forLook time.Duration) (st stint, ok bool) {
+	r.For = forLook
+	st = stint{Rule: r, lo: from, hi: to.Add(step), before: true}
+	_, ok = st.early(step)
+	return st, ok
+}
+
+// floor is the earliest a firing of the stint starts: its first step, or,
+// where it is replayed from before the period (early), where that starts,
+// so that an alert that fired before the evaluation it carries on at isn't
+// started later than the samples that held it.
+func (st stint) floor(step time.Duration) time.Time {
+	if _, ok := st.early(step); ok {
+		lo, _ := st.span(step)
+		return lo
+	}
+	return st.lo
 }
 
 // lineUp puts each rule's stints in order, in runs whose alerts carry over
@@ -512,7 +622,8 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 	if err := wide(h, last.Rule, series); err != nil {
 		return nil, err.Error(), nil
 	}
-	fs := fire(last.Rule, series, step, fireAt(run), to)
+	fs := fire(last.Rule, series, step, fireAt(run, step), to)
+	fs = run[0].trim(fs, step)
 	if !last.hi.After(to) {
 		// Taken away or started afresh: its alerts resolved then, whatever
 		// keep_firing_for would have held.
@@ -613,6 +724,12 @@ func evaluated(r rules.Rule, series []prom.Series, step, every time.Duration) ([
 	return thin, phase
 }
 
+// Values, and NoData below, are of the evaluations in [from, to] alone: a
+// number past a round one, or a count of series, at each. An evaluation
+// before from isn't one of theirs whatever the group's place, so they start
+// at from where the replays of firings (Run, WithFor, Held, Fired) start
+// from the last evaluation before it.
+//
 // Values is, of a rule whose condition compares a value with b, the value at
 // each of its evaluations over [from, to] past the furthest round number
 // within rules.NearBy of b: those a number that near would hold for. A
@@ -685,7 +802,16 @@ func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, ste
 	if r.Unsupported != "" {
 		return nil, nil, nil
 	}
-	series, err := Condition(ctx, h, r, from, to, step)
+	keepFor := r.KeepFiringFor
+	if r.Graph != nil {
+		keepFor = 0
+	}
+	st, early := asRun(r, from, to, step, r.For)
+	start := from
+	if early {
+		start, _ = st.span(step)
+	}
+	series, err := Condition(ctx, h, r, start, to, step)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -693,12 +819,27 @@ func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, ste
 		return nil, nil, err
 	}
 	every := Every(r, step)
-	thin, _ := evaluated(r, series, step, every)
-	keep := r.KeepFiringFor
-	if r.Graph != nil {
-		keep = 0
+	var seen []firing.Firing
+	if early {
+		// All of its firings, as Run has them; what is known to have
+		// started when it did is of the period alone, below.
+		floor := st.floor(step)
+		at := func(pending time.Time) time.Time {
+			if t := pending.Add(r.For); t.After(floor) {
+				return t
+			}
+			return floor
+		}
+		seen = st.trim(fire(r, series, step, at, to), step)
+		for i := range series {
+			series[i].Samples = slices.DeleteFunc(slices.Clone(series[i].Samples), func(x prom.Sample) bool { return x.T.Before(from) })
+		}
 	}
-	return fire(r, series, step, firing.For(r.For), to), fire(r, firing.After(thin, from, every, keep), step, firing.For(r.For), to), nil
+	thin, _ := evaluated(r, series, step, every)
+	if !early {
+		seen = fire(r, series, step, firing.For(r.For), to)
+	}
+	return seen, fire(r, firing.After(thin, from, every, keepFor), step, firing.For(r.For), to), nil
 }
 
 // firingLabel is what a label of a replayed firing takes: an entry of the
@@ -736,7 +877,7 @@ func wide(h History, r rules.Rule, series []prom.Series) error {
 // fireAt is when a label set pending since a time fires: once it has been
 // pending for the "for" of the stint in effect, and not before that stint
 // took over.
-func fireAt(run []stint) func(time.Time) time.Time {
+func fireAt(run []stint, step time.Duration) func(time.Time) time.Time {
 	return func(pending time.Time) time.Time {
 		i := 0
 		for i+1 < len(run) && !pending.Before(run[i+1].lo) {
@@ -744,8 +885,8 @@ func fireAt(run []stint) func(time.Time) time.Time {
 		}
 		for ; ; i++ {
 			t := pending.Add(run[i].For)
-			if t.Before(run[i].lo) {
-				t = run[i].lo
+			if f := run[i].floor(step); t.Before(f) {
+				t = f
 			}
 			if i+1 == len(run) || t.Before(run[i].hi) {
 				return t

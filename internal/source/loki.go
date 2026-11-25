@@ -232,6 +232,26 @@ func Placed(rs []rules.Rule, places map[rules.Place]time.Duration) {
 	}
 }
 
+// LokiListed asks a Loki's ruler's rules API once for the groups it lists
+// (rules.Listing), once as a read lapilli can do without when once is true
+// (LokiPlacesOnce).
+func LokiListed(ctx context.Context, l Loki, agent string, once bool) (*rules.Listing, error) {
+	c := l.History(agent)
+	read := c.Rules
+	if once {
+		read = c.RulesOnce
+	}
+	b, err := read(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("--loki's rules API couldn't be read: %w", err)
+	}
+	li, err := rules.ReadListing(b)
+	if err != nil {
+		return nil, fmt.Errorf("--loki's rules API: %w", err)
+	}
+	return li, nil
+}
+
 // LokiPlaces asks a Loki's ruler where it runs each group within its
 // interval: by l.Limit, as its queries are asked, and asked again as they
 // are.

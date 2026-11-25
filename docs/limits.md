@@ -30,9 +30,19 @@
   global `evaluation_interval` isn't in rule files, nor is the global
   `rule_query_offset`. An interval that isn't a whole number of steps is
   evaluated every step. Prometheus places a group within its interval by a
-  hash of the path it loaded the file from, which a file doesn't say: read
-  from a file, a firing can start up to an interval sooner or later than it
-  did. `--loaded-rules` knows where.
+  hash of its name and the path it loaded the file from, which a file
+  doesn't say. `--loaded-rules` knows where. For a group read from a file,
+  Lapilli asks the history's rules API (and `--loki`'s, for a Loki ruler's
+  file) once for the group of that name, and places it as the server does,
+  by the path the API gives, at the interval the API says where the file
+  gives none; a name the API lists twice or not at all, and an API that
+  isn't served leave
+  the group on the steps' grid, which the run says, with why: a firing
+  from such a group can start up to an interval sooner or later than it
+  did. A group placed within its interval is replayed from its last
+  evaluation before the period, so a firing on when the period starts
+  that ends before the group's first evaluation in it is replayed too,
+  from the period's start.
 - Grafana reduces a query's points as far apart as its `intervalMs` (1s by
   default) or more over a long window; lapilli asks for them so for
   `count`, `count_non_null` and `sum`, and for the rest at
