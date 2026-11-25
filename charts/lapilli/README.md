@@ -103,6 +103,12 @@ token: one that copies them from where they are kept. See `recipes/incidents`
 in the repository. `serve.firings.tokenSecret` lets the same port take firings
 recorded elsewhere, such as a cloud's own alarm history, with a token of its
 own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
+`serve.responses.tokenSecret` lets it take what a paging tool says of the pages
+it sent, with a token of its own, and `serve.responses.configMap` reads the same
+as a file; the jobs of `serve.incidentsAPI.copy` run the `responses/` recipes
+(`recipe: responses/pagerduty`, with `source`); `rollouts`, `rolloutMatch`,
+`routine` and `noisyBy` are what `lapilli verdict` takes too (see
+`recipes/responses` and `docs/responses.md`).
 `serve.trackers.tokenSecret` lets it read tasks and set their link and status,
 with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
 `jira`, `linear`, `azure-boards`, `shortcut`, `youtrack` or `jira-dc`), `image` (one with `sh`, `curl` and `jq`, by its digest,

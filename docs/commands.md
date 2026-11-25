@@ -624,6 +624,30 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       every --watch, beside the rest
   --incidents FILE    read again each run; optional, as incidents can be
                       written down in the UI
+  --responses FILE    the pages a paging tool sent, and whether a person
+                      acknowledged each and who resolved it, read again each
+                      run: responses: {id, alerts, sent, acknowledged,
+                      resolved, resolved_by}; recipes/responses writes one.
+                      A firing is answered, unanswered or changed, and
+                      useful by it (docs/responses.md)
+  --responses-token-file FILE
+                      a token (16 characters at least, not the others')
+                      that may PUT /api/v1/responses/SOURCE?from=&to= on
+                      --incidents-listen: replace what a source says of the
+                      pages sent in that period; recipes/responses/put.sh
+  --rollouts          also read, from the history at --prometheus, the
+                      rollouts, rollbacks and scales kube-state-metrics
+                      shows for the namespaces the firings are in, each run
+  --rollout-match LABEL
+                      a label whose value is the workload's name, tying a
+                      firing to it (repeatable; goes with --rollouts)
+  --routine P         a change is routine, chance and not a response, at or
+                      above this chance (default 0.5)
+  --noisy-by caught|useful
+                      what a rule is found noisy by, to start with: the
+                      Settings page changes it (default useful once
+                      --responses, --rollouts or --deploys is given, else
+                      caught)
   --deploys FILE      when services and namespaces were deployed, read again
                       each run: a list of deploys, each the labels that say
                       what was deployed (service, namespace) and either a

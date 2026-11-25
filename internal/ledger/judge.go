@@ -353,6 +353,12 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	if err := l.catches(t, lo, hi, incs, o); err != nil {
 		return err
 	}
+	// What was done about each firing, and whether it was useful, from
+	// what the ledger keeps of pages and changes, once its stones and its
+	// people's words are given (docs/design/responses.md).
+	if err := l.respond(t, lo, hi, o); err != nil {
+		return err
+	}
 	// The alerts new since, tied to the signals that could have seen
 	// them, before their firings are counted.
 	if err := l.tieUntied(t, o); err != nil {
@@ -710,6 +716,14 @@ const personSums = `sum((f.person & 1)), sum((f.person & 1) * f.excused), sum((f
 	sum(((f.person & 2) / 2) * (1 - f.excused)), sum(((f.person & 4) / 4) * (1 - f.excused)),
 	sum(((f.person & 2) / 2) * (1 - f.excused) * (1 - f.white)), sum(((f.person & 4) / 4) * f.white)`
 
+// responseSums are, of the firings a tally counts, those with each response
+// (firings.response: changed, changed routine, acknowledged, unanswered) and
+// those useful and not useful (firings.useful), not those excused. The rest
+// are none, and unknown.
+const responseSums = `sum(CASE WHEN f.response = 1 THEN 1 - f.excused ELSE 0 END), sum(CASE WHEN f.response = 2 THEN 1 - f.excused ELSE 0 END),
+	sum(CASE WHEN f.response = 3 THEN 1 - f.excused ELSE 0 END), sum(CASE WHEN f.response = 4 THEN 1 - f.excused ELSE 0 END),
+	sum(CASE WHEN f.useful = 1 THEN 1 - f.excused ELSE 0 END), sum(CASE WHEN f.useful = 0 THEN 1 - f.excused ELSE 0 END)`
+
 // tally counts each rule's stones again for the days and weeks [lo, hi]
 // falls in.
 func (l *Ledger) tally(t *txn, lo, hi int64) error {
@@ -721,9 +735,10 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	// the signals its alert is tied to, too, so that a rule's firings are
 	// judged by them apart (docs/design/signals.md, "In the ledger").
 	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white,
-			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white)
+			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white,
+			resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful)
 		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white),
-			`+firstFirings+`, sum(f.episode_white), `+personSums+`
+			`+firstFirings+`, sum(f.episode_white), `+personSums+`, `+responseSums+`
 		FROM firings f JOIN series s ON s.id = f.series_id
 		WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.day, f.rule_id, s.signals`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
@@ -740,9 +755,11 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 		return err
 	}
 	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white, episodes, episodes_white,
-			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white)
+			unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white,
+			resp_changed, resp_routine, resp_acknowledged, resp_unanswered, useful, not_useful)
 		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white), sum(episodes), sum(episodes_white),
-			sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white) FROM days
+			sum(unrelated), sum(unrelated_excused), sum(real_white), sum(real_excused), sum(action_yes), sum(action_no), sum(action_yes_black), sum(action_no_white),
+			sum(resp_changed), sum(resp_routine), sum(resp_acknowledged), sum(resp_unanswered), sum(useful), sum(not_useful) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY 1, 2, 3`, w1, w2+6); err != nil {
 		return err
 	}

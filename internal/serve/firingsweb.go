@@ -308,6 +308,9 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		lines = append(lines, s.firingLine(f))
 	}
 	judged(lines, judge, o)
+	if err := s.respondedOn(ctx, lines, judge, o); err != nil {
+		return nil, err
+	}
 	if err := s.notifiedFirings(ctx, lines); err != nil {
 		return nil, err
 	}

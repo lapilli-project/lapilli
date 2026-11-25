@@ -352,7 +352,7 @@ must stay. */}}
 {{- end }}
 {{- /* The chart's own trackers job is let in by the NetworkPolicy; a job of
 your own needs from. */ -}}
-{{- $others := or (and $s.incidentsAPI.tokenSecret.name (not $s.incidentsAPI.copy.enabled)) $s.firings.tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.tokenSecret.name (not $s.changes.pullRequests.enabled)) }}
+{{- $others := or (and $s.incidentsAPI.tokenSecret.name (not $s.incidentsAPI.copy.enabled)) $s.firings.tokenSecret.name ($s.responses).tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.tokenSecret.name (not $s.changes.pullRequests.enabled)) }}
 {{- if and (eq .Values.mode "serve") $others $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
 {{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, firings, tasks and changes, the jobs that copy them and the change recipes; with serve.networkPolicy, no one else can" }}
 {{- end }}
@@ -371,6 +371,23 @@ your own needs from. */ -}}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name (eq $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name) (eq $s.incidentsAPI.tokenSecret.key $s.firings.tokenSecret.key) }}
 {{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
+{{- end }}
+{{- $rs := $s.responses | default dict }}
+{{- $rt := $rs.tokenSecret | default dict }}
+{{- if and (eq .Values.mode "serve") $rt.name (or (and (eq $rt.name $s.incidentsAPI.tokenSecret.name) (eq ($rt.key | default "token") $s.incidentsAPI.tokenSecret.key)) (and (eq $rt.name $s.firings.tokenSecret.name) (eq ($rt.key | default "token") $s.firings.tokenSecret.key)) (and (eq $rt.name $s.trackers.tokenSecret.name) (eq ($rt.key | default "token") $s.trackers.tokenSecret.key)) (and (eq $rt.name $s.notificationsAPI.tokenSecret.name) (eq ($rt.key | default "token") $s.notificationsAPI.tokenSecret.key)) (and (eq $rt.name $s.changes.tokenSecret.name) (eq ($rt.key | default "token") $s.changes.tokenSecret.key))) }}
+{{- fail "serve.responses.tokenSecret is another port's token: give the jobs that send pages a token of their own" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $rt.name $s.readOnly }}
+{{- fail "serve.responses.tokenSecret takes writes, and serve.readOnly refuses them" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $rs.configMap.name (not (or $s.firings.tokenSecret.name .Values.prometheus.url .Values.gcpProject)) }}
+{{- fail "serve.responses.configMap needs prometheus.url or gcpProject, or serve.firings, to have firings to answer" }}
+{{- end }}
+{{- if and .Values.rollouts (not (or .Values.prometheus.url .Values.gcpProject)) }}
+{{- fail "rollouts reads kube-state-metrics from the history: give prometheus.url or gcpProject" }}
+{{- end }}
+{{- if and (eq .Values.noisyBy "useful") (not (or .Values.rollouts $rs.configMap.name (and $s.deploys.configMap.name (eq .Values.mode "serve")))) }}
+{{- fail "noisyBy: useful finds a rule noisy by what was done about its firings: give rollouts, serve.responses.configMap or serve.deploys" }}
 {{- end }}
 {{- $c := $s.changes }}
 {{- if and (eq .Values.mode "serve") $c.enabled (eq (int $signIns) 0) }}
@@ -554,7 +571,7 @@ your own needs from. */ -}}
 {{- /* A plain token is the entry's alone: another port's would let a job
 that may write there backtest too, and the reverse. */}}
 {{- $taken := list }}
-{{- range (list $s.incidentsAPI.tokenSecret $s.firings.tokenSecret $s.trackers.tokenSecret $s.notificationsAPI.tokenSecret $s.changes.tokenSecret) }}
+{{- range (list $s.incidentsAPI.tokenSecret $s.firings.tokenSecret ($s.responses | default dict).tokenSecret $s.trackers.tokenSecret $s.notificationsAPI.tokenSecret $s.changes.tokenSecret) }}
 {{- if .name }}{{ $taken = append $taken (printf "%s/%s" .name .key) }}{{ end }}
 {{- end }}
 {{- $seen := dict }}
@@ -745,6 +762,18 @@ the rules and the incidents are, and how to judge. */}}
 {{- end }}
 {{- with .Values.noisyPrecision }}
 - {{ printf "--noisy-precision=%v" . | quote }}
+{{- end }}
+{{- if .Values.rollouts }}
+- --rollouts
+{{- end }}
+{{- range .Values.rolloutMatch }}
+- {{ printf "--rollout-match=%s" . | quote }}
+{{- end }}
+{{- with .Values.routine }}
+- {{ printf "--routine=%v" . | quote }}
+{{- end }}
+{{- with .Values.noisyBy }}
+- {{ printf "--noisy-by=%s" . | quote }}
 {{- end }}
 {{- if .Values.matchStrict }}
 - --match-strict
@@ -1099,5 +1128,5 @@ app.kubernetes.io/component: {{ .Values.mode }}
 "true", or nothing. */}}
 {{- define "lapilli.incidentsPort" -}}
 {{- $s := .Values.serve -}}
-{{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name (and $s.changes.enabled $s.changes.tokenSecret.name) }}true{{ end -}}
+{{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name ($s.responses).tokenSecret.name $s.trackers.tokenSecret.name (and $s.changes.enabled $s.changes.tokenSecret.name) }}true{{ end -}}
 {{- end -}}

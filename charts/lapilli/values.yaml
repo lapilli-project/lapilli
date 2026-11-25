@@ -156,6 +156,21 @@ match: []
 # pages say the bar in effect.
 noisyFirings: null
 noisyPrecision: null
+# What people did when a rule fired (docs/responses.md), in both modes, each
+# passed only when set. rollouts: true passes --rollouts, which reads from the
+# history (prometheus.url or gcpProject), from kube-state-metrics, the
+# rollouts, rollbacks and scales of the workloads the firings' namespaces
+# hold. rolloutMatch is a list of labels, --rollout-match each, whose value is
+# the workload's name, for teams whose service is their Deployment's name.
+# routine is --routine, the chance at or above which a change is routine
+# (0.5 when unset). noisyBy is --noisy-by, caught or useful: by default
+# useful once serve.responses.configMap, rollouts or serve.deploys is given,
+# else caught; in serve mode it is the start's value, which the Settings page
+# can change.
+rollouts: false
+rolloutMatch: []
+routine: null
+noisyBy: ""
 # true passes --match-strict, in both modes: a firing that lacks a label of
 # match that the incident has doesn't catch it. By default it does, as it
 # has nothing to disagree with, and the report says how many catches were
@@ -687,6 +702,24 @@ serve:
     # source nothing has been copied in from for this long: the job copying
     # it may have stopped. Empty is 26h; a weekly job wants 8d.
     quietAfter: ""
+  # What a paging tool says of the pages it sent (docs/responses.md). Off when
+  # nothing is named. configMap holds --responses's file under key, mounted at
+  # /etc/lapilli/responses/ and read again each run (only when it changed).
+  # tokenSecret is its own token, on the incidentsAPI port, for a job that
+  # sends a source's pages with recipes/responses/put.sh, PUT
+  # /api/v1/responses/SOURCE: incidentsAPI.from names who may reach the port.
+  # The jobs in incidentsAPI.copy.jobs run those recipes too, with recipe:
+  # responses/NAME (pagerduty, jsm, compass or grafana-irm), source: the name
+  # the pages are kept under (lowercase letters, digits and dashes), and
+  # sinceDays: how long ago the period they send starts (1 when unset, 180 at
+  # most); they send with this token, not incidentsAPI.tokenSecret.
+  responses:
+    configMap:
+      name: ""
+      key: responses.yaml
+    tokenSecret:
+      name: ""
+      key: token
   # Tasks kept in step with issues in a tracker (see recipes/trackers): the
   # incidentsAPI port takes the tasks token in tokenSecret, its own, which
   # reads tasks and sets their link and status, and nothing else. With

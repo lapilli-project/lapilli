@@ -74,6 +74,17 @@ type tallies struct {
 	parts     []ledger.Tally
 	jby       map[int64]map[int64]ledger.Tally
 	jeveryone map[int64]map[int64]ledger.Tally
+	// ub and ueveryone are, of each rule's firings in each week, how many
+	// were useful and not useful, as what was done about them and the
+	// week's record say (docs/design/responses.md): a firing of unknown use
+	// that caught nothing is not useful where its record judges it. Every
+	// firing is counted, judged or not, as what was done about it is known
+	// without the record.
+	ub        map[int64]map[int64]ledger.Tally
+	ueveryone map[int64]map[int64]ledger.Tally
+	// inputs are what the ledger keeps responses to be found from: with
+	// any, what was done about the firings is counted and shown.
+	inputs ledger.ResponseInputs
 	// epFrom is the Monday from which on the ledger has counted the
 	// weeks' episodes, read with the tallies; epSome, that it hasn't
 	// counted them all (episodesCounted).
@@ -84,6 +95,10 @@ type tallies struct {
 	// "How reports count them"); rec itself with none.
 	recL verdict.Record
 }
+
+// shown reports whether what was done about the firings is counted and shown
+// (ledger.ResponseInputs.Shown).
+func (t *tallies) shown() bool { return t.inputs.Shown(t.o) }
 
 // episodesCounted reports whether the ledger has counted the episodes of
 // week w (docs/design/judging.md, item 2): not yet, after an upgrade or a
@@ -187,6 +202,10 @@ func (t *tallies) id(name string) int64 {
 // noisy reports whether a rule was noisy in a week: never in a week whose
 // record isn't kept.
 func (t *tallies) noisy(week, rule int64) bool {
+	if t.o.NoisyBy == verdict.NoisyByUseful {
+		u := t.ub[week][rule]
+		return noisy(u.Useful+u.NotUseful, u.Useful, t.o)
+	}
 	x := t.judged(week, rule)
 	return noisy(x.Firings, x.White, t.o)
 }
@@ -197,6 +216,10 @@ func (t *tallies) noisy(week, rule int64) bool {
 func (t *tallies) noisyAll(week, rule int64) bool {
 	if t.everyone == nil {
 		return t.noisy(week, rule)
+	}
+	if t.o.NoisyBy == verdict.NoisyByUseful {
+		u := t.ueveryone[week][rule]
+		return noisy(u.Useful+u.NotUseful, u.Useful, t.o)
 	}
 	x := t.jeveryone[week][rule]
 	return noisy(x.Firings, x.White, t.o)
@@ -263,6 +286,11 @@ func (s *Server) sparkOf(l string, t *tallies, id int64) []spark {
 }
 
 type ruleLine struct {
+	// Responses is what was done about its firings over the weeks shown,
+	// counted as the report counts them, with Actionable its useful firings
+	// over those useful or not (docs/design/responses.md); nil until pages,
+	// changes or deploys are kept.
+	Responses                              *verdict.RuleResponses
 	Name, Severity, Group                  string
 	Team, Status                           string // from teams and the rule's note
 	Firings, White, Black, Refired, Streak int
@@ -528,6 +556,17 @@ func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verd
 	return out, nil
 }
 
+// addUseful adds a week's useful and not useful firings of a rule to its
+// counts.
+func addUseful(c *verdict.RuleResponses, u ledger.Tally) *verdict.RuleResponses {
+	if c == nil {
+		c = &verdict.RuleResponses{}
+	}
+	c.Useful += u.Useful
+	c.NotUseful += u.NotUseful
+	return c
+}
+
 func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]verdict.RuleResult, error) {
 	by := t.by
 	if t.everyone != nil {
@@ -547,6 +586,13 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 			r.White += x.White
 			u := t.unjudgedAll(w, id)
 			r.Unjudged += u.Firings - u.White
+			if t.o.NoisyBy == verdict.NoisyByUseful {
+				ue := t.ub
+				if t.ueveryone != nil {
+					ue = t.ueveryone
+				}
+				r.Responses = addUseful(r.Responses, ue[w][id])
+			}
 		}
 	}
 	rs := make([]verdict.RuleResult, 0, len(sums))
@@ -554,6 +600,10 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 	at := noisyAt(t.o)
 	for _, r := range sums {
 		r.Noisy = verdict.IsNoisy(r.Firings-r.Unjudged, r.White, at)
+		if c := r.Responses; c != nil && t.o.NoisyBy == verdict.NoisyByUseful {
+			r.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
+			r.Responses = nil // only what noisy needed
+		}
 		noisyRule[r.Rule] = r.Noisy
 		rs = append(rs, *r)
 	}
@@ -655,6 +705,21 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Real += x.RealWhite
 			l.ActionYes += x.ActionYes
 			l.ActionNo += x.ActionNo
+			if t.shown() {
+				c := l.Responses
+				if c == nil {
+					c = &verdict.RuleResponses{}
+					l.Responses = c
+				}
+				c.Changed += x.RespChanged
+				c.Routine += x.RespRoutine
+				c.Acknowledged += x.RespAcknowledged
+				c.Unanswered += x.RespUnanswered
+				c.None += x.Firings - x.RespChanged - x.RespRoutine - x.RespAcknowledged - x.RespUnanswered
+				u, nu := t.usefulOf(w, id)
+				c.Useful += u
+				c.NotUseful += nu
+			}
 		}
 	}
 	credit, err := s.credit(ctx, t, n)
@@ -689,6 +754,17 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Black = l.Firings - l.White
 		judged := l.Firings - l.Unjudged
 		l.Noisy = verdict.IsNoisy(judged, l.White, at)
+		if c := l.Responses; c != nil {
+			if n := c.Useful + c.NotUseful; n > 0 {
+				p := float64(c.Useful) / float64(n)
+				c.Actionable = &p
+			}
+			// By what was done about its firings, a rule with no record may be
+			// noisy too.
+			if t.o.NoisyBy == verdict.NoisyByUseful {
+				l.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
+			}
+		}
 		l.NoisyFirings, l.NoisyShare = at.Firings, percentOf(at.Precision)
 		l.NoRecord = l.Firings > 0 && judged == 0
 		l.Unrecorded = !l.Noisy && l.Unjudged >= at.Firings
@@ -2163,6 +2239,11 @@ type firingLine struct {
 	// too); Old, that it started more than 14 days ago, an admin's alone.
 	Said                         *ledger.Verdict
 	MayUnrelated, MayAction, Old bool
+	// Response is what was done about it, and whether it was useful, with
+	// the page it was sent as and the change on its target it rests on
+	// (docs/design/responses.md); nil until pages, changes or deploys are
+	// kept, and for a firing a quiet window excused.
+	Response *verdict.FiringResponse
 }
 
 // MovedFormat is why what people said of it is to be looked at again, in
@@ -2261,6 +2342,36 @@ func (s *Server) episodesOf(ctx context.Context, lines []firingLine) error {
 		if e, ok := eps[lines[i].Episode]; ok {
 			lines[i].EpisodeStart, lines[i].EpisodeFirings = e.Start, e.Firings
 		}
+	}
+	return nil
+}
+
+// respondedOn gives each of lines what was done about it, once pages,
+// changes or deploys are kept.
+func (s *Server) respondedOn(ctx context.Context, lines []firingLine, j firingJudge, o verdict.Options) error {
+	if len(lines) == 0 {
+		return nil
+	}
+	in, err := s.l.ResponseInputs(ctx)
+	if err != nil || !in.Shown(o) {
+		return err
+	}
+	fs := make([]ledger.Firing, len(lines))
+	for i, l := range lines {
+		fs[i] = l.Firing
+	}
+	got, err := s.l.ResponsesOf(ctx, fs, o, s.now())
+	if err != nil {
+		return err
+	}
+	for i := range lines {
+		f := &lines[i]
+		resp, ok := got[f.ID]
+		if !ok {
+			continue
+		}
+		fr := ledger.ResponseOfJudged(resp, f.White, j(f.Rule, f.Start, f.Signals), f.Action())
+		f.Response = &fr
 	}
 	return nil
 }

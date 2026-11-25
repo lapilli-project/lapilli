@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/deploys"
 	"lapilli.dev/internal/incident"
-	"lapilli.dev/internal/ledger"
 )
 
 var (
@@ -77,7 +77,7 @@ func TestRespondMatching(t *testing.T) {
 			{"shop", "db-0"}:        db,
 		},
 	})
-	cs.AddDeploys([]ledger.Deploy{
+	cs.AddDeploys([]deploys.Deploy{
 		{Start: mid, End: mid, Labels: map[string]string{"service": "payments", "namespace": "pay"}, Revision: "abc1234"},
 	})
 	for _, c := range []struct {
@@ -120,7 +120,7 @@ func TestRespondMatching(t *testing.T) {
 	}
 	// A deploy that names no label is everything's.
 	all := NewChangeSet(t0, t0.Add(period))
-	all.AddDeploys([]ledger.Deploy{{Start: mid, End: mid}})
+	all.AddDeploys([]deploys.Deploy{{Start: mid, End: mid}})
 	r := Evidence{Changes: all, Routine: DefaultRoutine}.Respond(Firing{Rule: "R", Labels: map[string]string{"a": "b"}, Start: start, End: end}, 0, end)
 	if r.Type != Changed || r.Change.Kind != Deploy {
 		t.Errorf("a deploy with no labels: %+v", r)
@@ -193,7 +193,7 @@ func TestRoutineMaths(t *testing.T) {
 	// Of a routine workload's change and a deploy that isn't, the deploy is
 	// what the firing rests on.
 	cs := changes(many...)
-	cs.AddDeploys([]ledger.Deploy{{Start: start.Add(20 * time.Minute), End: start.Add(20 * time.Minute), Labels: map[string]string{"namespace": "shop"}, Revision: "r9"}})
+	cs.AddDeploys([]deploys.Deploy{{Start: start.Add(20 * time.Minute), End: start.Add(20 * time.Minute), Labels: map[string]string{"namespace": "shop"}, Revision: "r9"}})
 	r = Evidence{Changes: cs, Routine: 0.5}.Respond(f, 0, t0.Add(period))
 	if r.Type != Changed || r.Change.Kind != Deploy {
 		t.Errorf("a routine rollout and a deploy: %v %+v", r.Type, r.Change)
@@ -272,7 +272,7 @@ func TestKnown(t *testing.T) {
 	late := Workload{"shop", KindDeployment, "late"}
 	cs := NewChangeSet(t0, t0.Add(period))
 	cs.AddRollouts(&Rollouts{Coverage: map[Workload][]Span{late: {{t0.Add(4 * time.Hour), t0.Add(period)}}}})
-	cs.AddDeploys([]ledger.Deploy{
+	cs.AddDeploys([]deploys.Deploy{
 		{Start: t0.Add(2 * time.Hour), Labels: map[string]string{"service": "pay"}},
 		{Start: t0.Add(time.Hour), Labels: map[string]string{"service": "pay"}},
 	})

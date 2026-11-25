@@ -11,8 +11,8 @@ import (
 )
 
 // The chart mounts the recipes from its own copies, so that they travel in
-// the packaged chart: charts/lapilli/files/recipes/{incidents,changes} must
-// hold what recipes/incidents and recipes/changes do, their READMEs and
+// the packaged chart: charts/lapilli/files/recipes/{incidents,changes,responses} must
+// hold what recipes/incidents, recipes/changes and recipes/responses do, their READMEs and
 // testdata aside, and nothing else.
 func TestChartRecipesAreTheRepositorys(t *testing.T) {
 	list := func(dir string) map[string]string {
@@ -34,7 +34,7 @@ func TestChartRecipesAreTheRepositorys(t *testing.T) {
 		return got
 	}
 	const fix = "run charts/sync-recipes.sh and commit what it changes"
-	for _, kind := range []string{"incidents", "changes"} {
+	for _, kind := range []string{"incidents", "changes", "responses"} {
 		want := list(filepath.Join("..", "..", "recipes", kind))
 		got := list(filepath.Join("..", "..", "charts", "lapilli", "files", "recipes", kind))
 		if len(want) == 0 {
@@ -52,7 +52,7 @@ func TestChartRecipesAreTheRepositorys(t *testing.T) {
 				t.Errorf("charts/lapilli/files/recipes/%s/%s is not in recipes/%s: %s", kind, name, kind, fix)
 			}
 		}
-		core := map[string]string{"incidents": "put.sh", "changes": "lib.sh"}[kind]
+		core := map[string]string{"incidents": "put.sh", "changes": "lib.sh", "responses": "put.sh"}[kind]
 		if _, ok := got[core]; !ok {
 			t.Errorf("charts/lapilli/files/recipes/%s has no %s", kind, core)
 		}
@@ -249,5 +249,77 @@ func TestChartJobTmpSizeLimit(t *testing.T) {
 		if err == nil || !strings.Contains(out, "gitCredentialsSecret.key must be a Secret's key") {
 			t.Errorf("key %q: %v\n%s", key, err, out)
 		}
+	}
+}
+
+// serve.responses: the token is passed and mounted as its own file and
+// refused when it is another port's; the file is mounted and passed;
+// rollouts, rolloutMatch, routine and noisyBy are the flags; a job running a
+// recipe from responses/ sends with the responses token, with both recipe
+// directories mounted side by side, as the recipes need ../incidents.
+func TestChartResponses(t *testing.T) {
+	m, _ := render(t, serveValues...)
+	args := func(m manifest) []string {
+		var out []string
+		for _, a := range dig(m["Deployment/ops-lapilli"], "spec", "template", "spec", "containers", 0, "args").([]any) {
+			out = append(out, a.(string))
+		}
+		return out
+	}
+	for _, a := range args(m) {
+		for _, f := range []string{"--responses", "--rollout", "--routine", "--noisy-by"} {
+			if strings.HasPrefix(a, f) {
+				t.Errorf("by default: %s", a)
+			}
+		}
+	}
+	vals := slices.Concat(serveValues, []string{"--set", "serve.responses.tokenSecret.name=lapilli-responses", "--set", "serve.responses.configMap.name=pages",
+		"--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy", "--set", "serve.incidentsAPI.from[0].podSelector.matchLabels.app=job",
+		"--set", "serve.userHeader=X-Forwarded-Email",
+		"--set", "rollouts=true", "--set", "rolloutMatch={service,app}", "--set", "routine=0.7", "--set", "noisyBy=useful"})
+	m, _ = render(t, vals...)
+	got := args(m)
+	for _, want := range []string{"--responses-token-file=/var/run/lapilli/responses-token/token", "--responses=/etc/lapilli/responses/responses.yaml", "--rollouts",
+		"--rollout-match=service", "--rollout-match=app", "--routine=0.7", "--noisy-by=useful", "--incidents-listen=:8082"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("no %s in %v", want, got)
+		}
+	}
+	// Its own token.
+	if out, err := helmTemplate(t, slices.Concat(vals, []string{"--set", "serve.incidentsAPI.tokenSecret.name=lapilli-responses"})...); err == nil || !strings.Contains(out, "another port's token") {
+		t.Errorf("the incidents token as the responses token: %v\n%s", err, out)
+	}
+	if out, err := helmTemplate(t, slices.Concat(serveValues, []string{"--set", "noisyBy=useful"})...); err == nil || !strings.Contains(out, "noisyBy: useful") {
+		t.Errorf("noisyBy useful with nothing to find it by: %v\n%s", err, out)
+	}
+	// A job of the pages' recipes.
+	jobs := slices.Concat(vals, []string{"--set", "serve.incidentsAPI.copy.enabled=true", "--set", "serve.incidentsAPI.copy.image=example.com/tools/recipes:1.0",
+		"--set", "serve.incidentsAPI.copy.jobs[0].name=pd-pages", "--set", "serve.incidentsAPI.copy.jobs[0].recipe=responses/pagerduty",
+		"--set", "serve.incidentsAPI.copy.jobs[0].source=pagerduty-prod", "--set", "serve.incidentsAPI.copy.jobs[0].sinceDays=2",
+		"--set", "serve.incidentsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.name=pagerduty-read"})
+	m, _ = render(t, jobs...)
+	job := m["CronJob/ops-lapilli-incidents-pd-pages"]
+	c := dig(job, "spec", "jobTemplate", "spec", "template", "spec", "containers", 0)
+	cmd, _ := dig(c, "command", 2).(string)
+	if !strings.Contains(cmd, "sh /recipes/responses/pagerduty.sh") || !strings.Contains(cmd, "sh /recipes/responses/put.sh \"$LAPILLI_URL\" pagerduty-prod") || !strings.Contains(cmd, "2 * 86400") {
+		t.Errorf("the command: %s", cmd)
+	}
+	mounts := map[string]bool{}
+	for _, mt := range dig(c, "volumeMounts").([]any) {
+		mounts[dig(mt, "mountPath").(string)] = dig(mt, "readOnly") == true
+	}
+	for _, p := range []string{"/recipes/incidents", "/recipes/responses"} {
+		if !mounts[p] {
+			t.Errorf("%s isn't mounted read-only: %v", p, mounts)
+		}
+	}
+	data, _ := dig(m["ConfigMap/ops-lapilli-recipes-responses"], "data").(map[string]any)
+	for _, f := range []string{"pagerduty.sh", "pagerduty.jq", "put.sh", "responses.jq"} {
+		if data[f] == nil {
+			t.Errorf("the responses ConfigMap has no %s", f)
+		}
+	}
+	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.incidentsAPI.copy.jobs[0].source="})...); err == nil || !strings.Contains(out, "needs source") {
+		t.Errorf("no source: %v\n%s", err, out)
 	}
 }

@@ -64,6 +64,30 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       every --watch, beside the rest
   --incidents FILE    read again each run; optional, as incidents can be
                       written down in the UI
+  --responses FILE    the pages a paging tool sent, and whether a person
+                      acknowledged each and who resolved it, read again each
+                      run: responses: {id, alerts, sent, acknowledged,
+                      resolved, resolved_by}; recipes/responses writes one.
+                      A firing is answered, unanswered or changed, and
+                      useful by it (docs/responses.md)
+  --responses-token-file FILE
+                      a token (16 characters at least, not the others')
+                      that may PUT /api/v1/responses/SOURCE?from=&to= on
+                      --incidents-listen: replace what a source says of the
+                      pages sent in that period; recipes/responses/put.sh
+  --rollouts          also read, from the history at --prometheus, the
+                      rollouts, rollbacks and scales kube-state-metrics
+                      shows for the namespaces the firings are in, each run
+  --rollout-match LABEL
+                      a label whose value is the workload's name, tying a
+                      firing to it (repeatable; goes with --rollouts)
+  --routine P         a change is routine, chance and not a response, at or
+                      above this chance (default 0.5)
+  --noisy-by caught|useful
+                      what a rule is found noisy by, to start with: the
+                      Settings page changes it (default useful once
+                      --responses, --rollouts or --deploys is given, else
+                      caught)
   --deploys FILE      when services and namespaces were deployed, read again
                       each run: a list of deploys, each the labels that say
                       what was deployed (service, namespace) and either a
@@ -821,7 +845,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
 		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file",
-			"--changes-ruler-token-file", "--changes-loki-token-file":
+			"--changes-ruler-token-file", "--changes-loki-token-file", "--responses-token-file":
 			b, err := secret(val, 16)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
@@ -832,6 +856,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			switch name {
 			case "--firings-token-file":
 				cfg.FiringsToken = val
+			case "--responses-token-file":
+				cfg.ResponsesToken = val
 			case "--tasks-token-file":
 				cfg.TasksToken = val
 			case "--changes-token-file":
@@ -1268,6 +1294,9 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		}
 	}
 	signedIn := signIns > 0
+	// What people did when a rule fired is read from a file, the history or
+	// the deploys (docs/design/responses.md).
+	usesResponses := f != nil && (f.responses != "" || f.rollouts) || cfg.Deploys != ""
 	switch {
 	case err != nil:
 	case ledgerSet && cfg.LedgerURLFile != "":
@@ -1322,10 +1351,14 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--webhook-dest %s: --report-dest gives a destination of that name already: give each its own", webhookDestTwice(cfg))
 	case webhookSecretAlone(cfg) != "":
 		err = fmt.Errorf("--webhook-dest-secret %s signs the posts to --webhook-dest %s: give it too", webhookSecretAlone(cfg), webhookSecretAlone(cfg))
-	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "":
-		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file, --changes-token-file or more than one")
-	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != ""):
-		err = fmt.Errorf("--incidents-token-file, --firings-token-file, --tasks-token-file and --changes-token-file go with --incidents-listen, the port they are taken on")
+	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "" && cfg.ResponsesToken == "":
+		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --responses-token-file, --tasks-token-file, --changes-token-file or more than one")
+	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != "" || cfg.ResponsesToken != ""):
+		err = fmt.Errorf("--incidents-token-file, --firings-token-file, --responses-token-file, --tasks-token-file and --changes-token-file go with --incidents-listen, the port they are taken on")
+	case cfg.ResponsesToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.ResponsesToken, cfg.IncidentsToken) || cfg.FiringsToken != "" && sameFile(cfg.ResponsesToken, cfg.FiringsToken) ||
+		cfg.TasksToken != "" && sameFile(cfg.ResponsesToken, cfg.TasksToken) || cfg.NotifyToken != "" && sameFile(cfg.ResponsesToken, cfg.NotifyToken) ||
+		cfg.ChangesToken != "" && sameFile(cfg.ResponsesToken, cfg.ChangesToken)):
+		err = fmt.Errorf("--responses-token-file holds the same token as another token file: give each its own, so a job sending the pages of a paging tool can write nothing else")
 	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file hold the same token: give each its own, so a job that may copy one can't write the other")
 	case cfg.TasksToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.TasksToken, cfg.IncidentsToken) ||
@@ -1397,6 +1430,12 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--notify-token-file, --notify-grafana-secret-file and --notify-sns need --notify-listen")
 	case cfg.NotifyListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--notify-listen takes writes, and --read-only refuses them")
+	case f.noisyBy == verdict.NoisyByUseful && !usesResponses:
+		err = fmt.Errorf("--noisy-by useful finds a rule noisy by what was done about its firings: give --responses, --rollouts or --deploys")
+	case len(f.rolloutMatch) > 0 && !f.rollouts:
+		err = fmt.Errorf("--rollout-match names the label that ties a firing to the workload it is about: it goes with --rollouts")
+	case f.routine != 0 && !usesResponses:
+		err = fmt.Errorf("--routine is the chance a change was routine: it goes with --responses, --rollouts or --deploys")
 	case deployTimes && cfg.Deploys == "":
 		err = fmt.Errorf("--deploy-before and --deploy-after go with --deploys, the file deploys are read from")
 	case len(marks) > 0 && f.promURL == "" && f.gcpProj == "":
@@ -1471,6 +1510,15 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
+	// What people did when a rule fired (docs/design/responses.md): the pages,
+	// the changes read from the history, and the deploys; the Settings page
+	// changes what rules are found noisy by, which this is the start of.
+	cfg.Responses, cfg.Rollouts, cfg.RolloutMatch = f.responses, f.rollouts, f.rolloutMatch
+	cfg.Options.Routine, cfg.Options.RolloutMatch = f.routine, f.rolloutMatch
+	cfg.Options.NoisyBy = f.noisyBy
+	if cfg.Options.NoisyBy == "" && usesResponses {
+		cfg.Options.NoisyBy = verdict.NoisyByUseful
+	}
 	// The named impact signals, which serve keeps in its ledger, each with
 	// its own start: what judges by them is worked out from there.
 	cfg.Signals, cfg.ImpactRules = f.signalDefs()

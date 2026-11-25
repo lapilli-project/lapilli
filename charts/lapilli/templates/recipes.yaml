@@ -10,8 +10,17 @@ The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
 {{- if not $cp.image }}
 {{- fail "serve.incidentsAPI.copy.image is required: an image with sh, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
 {{- end }}
-{{- if not $s.incidentsAPI.tokenSecret.name }}
+{{- $rt := (($s.responses).tokenSecret | default dict) }}
+{{- $anyResponses := false }}
+{{- $anyIncidents := false }}
+{{- range $cp.jobs }}
+{{- if hasPrefix "responses/" (toString .recipe) }}{{ $anyResponses = true }}{{ else }}{{ $anyIncidents = true }}{{ end }}
+{{- end }}
+{{- if and (or $anyIncidents (not $anyResponses)) (not $s.incidentsAPI.tokenSecret.name) }}
 {{- fail "serve.incidentsAPI.copy needs serve.incidentsAPI.tokenSecret, the token the jobs write incidents with" }}
+{{- end }}
+{{- if and $anyResponses (not $rt.name) }}
+{{- fail "serve.incidentsAPI.copy.jobs: a recipe from responses/ needs serve.responses.tokenSecret, the token the jobs write pages with" }}
 {{- end }}
 {{- if not $cp.jobs }}
 {{- fail "serve.incidentsAPI.copy.jobs: name at least one job, each with a name, a recipe and the tool's token" }}
@@ -20,6 +29,11 @@ The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
 {{- range $path, $_ := .Files.Glob "files/recipes/incidents/*.sh" }}
 {{- $n := base $path | trimSuffix ".sh" }}
 {{- if ne $n "put" }}{{ $recipes = append $recipes $n }}{{ end }}
+{{- end }}
+{{- $responses := list }}
+{{- range $path, $_ := .Files.Glob "files/recipes/responses/*.sh" }}
+{{- $n := base $path | trimSuffix ".sh" }}
+{{- if ne $n "put" }}{{ $responses = append $responses (printf "responses/%s" $n) }}{{ end }}
 {{- end }}
 {{- $seen := dict }}
 apiVersion: v1
@@ -31,6 +45,21 @@ metadata:
 data:
   # recipes/incidents, as the jobs run them.
   {{- range $path, $_ := .Files.Glob "files/recipes/incidents/*" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | trimSuffix "\n" | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-recipes-responses
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  # recipes/responses, which read the alerts of a page as recipes/incidents
+  # read an incident's, from ../incidents beside them: mounted at
+  # /recipes/responses, next to /recipes/incidents.
+  {{- range $path, $_ := .Files.Glob "files/recipes/responses/*" }}
   {{ base $path }}: |
     {{- $.Files.Get $path | trimSuffix "\n" | nindent 4 }}
   {{- end }}
@@ -46,8 +75,15 @@ data:
 {{- if gt (len $cname) 52 }}
 {{- fail (printf "serve.incidentsAPI.copy.jobs: %s: the CronJob's name %s is over 52 characters: a shorter name" $j.name $cname) }}
 {{- end }}
-{{- if not (has $j.recipe $recipes) }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: recipe %q is not one of %s" $j.name (toString $j.recipe) (join ", " $recipes)) }}
+{{- $forPages := hasPrefix "responses/" (toString $j.recipe) }}
+{{- if not (or (has $j.recipe $recipes) (has $j.recipe $responses)) }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: recipe %q is not one of %s, %s" $j.name (toString $j.recipe) (join ", " $recipes) (join ", " $responses)) }}
+{{- end }}
+{{- if and $forPages (not (regexMatch "^[a-z0-9][a-z0-9-]{0,39}$" (toString ($j.source | default "")))) }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: a recipe from responses/ needs source, the name its pages are kept under: lowercase letters, digits and dashes, 40 at most" $j.name) }}
+{{- end }}
+{{- if and $forPages (or (lt (int ($j.sinceDays | default 1)) 1) (gt (int ($j.sinceDays | default 1)) 180)) }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: sinceDays is 1 to 180" $j.name) }}
 {{- end }}
 {{- range $k, $v := ($j.env | default dict) }}
 {{- if or (hasPrefix "LAPILLI_" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "TMPDIR") }}
@@ -98,12 +134,22 @@ spec:
               command:
                 - sh
                 - -c
+                {{- if $forPages }}
+                # The period sent: from sinceDays ago to now, as the pages' own
+                # script and put.sh are both given it.
+                - {{ printf "UNTIL=$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) && SINCE=$(date -u -d @$(( $(date +%%s) - %d * 86400 )) +%%Y-%%m-%%dT%%H:%%M:%%SZ) && export SINCE UNTIL && f=$(mktemp) && sh /recipes/%s.sh > \"$f\" && sh /recipes/responses/put.sh \"$LAPILLI_URL\" %s < \"$f\"" (int ($j.sinceDays | default 1)) $j.recipe $j.source | quote }}
+                {{- else }}
                 - {{ printf "f=$(mktemp) && sh /recipes/incidents/%s.sh > \"$f\" && sh /recipes/incidents/put.sh \"$LAPILLI_URL\" < \"$f\"" $j.recipe | quote }}
+                {{- end }}
               env:
                 - name: LAPILLI_URL
                   value: {{ $cp.url | default (printf "http://%s:%d" $full (int $s.incidentsAPI.port)) | quote }}
                 - name: LAPILLI_TOKEN_FILE
+                  {{- if $forPages }}
+                  value: {{ printf "/var/run/lapilli/incidents-token/%s" $rt.key | quote }}
+                  {{- else }}
                   value: {{ printf "/var/run/lapilli/incidents-token/%s" $s.incidentsAPI.tokenSecret.key | quote }}
+                  {{- end }}
                 - name: TMPDIR
                   value: /tmp
                 {{- range $k, $v := ($j.tokenFiles | default dict) }}
@@ -124,6 +170,9 @@ spec:
                 - name: recipes
                   mountPath: /recipes/incidents
                   readOnly: true
+                - name: recipes-responses
+                  mountPath: /recipes/responses
+                  readOnly: true
                 - name: incidents-token
                   mountPath: /var/run/lapilli/incidents-token
                   readOnly: true
@@ -138,13 +187,24 @@ spec:
             - name: recipes
               configMap:
                 name: {{ $full }}-recipes-incidents
+            - name: recipes-responses
+              configMap:
+                name: {{ $full }}-recipes-responses
             - name: incidents-token
               secret:
+                {{- if $forPages }}
+                secretName: {{ $rt.name }}
+                defaultMode: 0440
+                items:
+                  - key: {{ $rt.key | quote }}
+                    path: {{ $rt.key | quote }}
+                {{- else }}
                 secretName: {{ $s.incidentsAPI.tokenSecret.name }}
                 defaultMode: 0440
                 items:
                   - key: {{ $s.incidentsAPI.tokenSecret.key | quote }}
                     path: {{ $s.incidentsAPI.tokenSecret.key | quote }}
+                {{- end }}
             {{- range $k, $v := ($j.tokenFiles | default dict) }}
             - name: tool-token-{{ $k | lower | replace "_" "-" }}
               secret:

@@ -34,7 +34,7 @@ func TestMigrate021(t *testing.T) {
 	}
 	at := t0.Add(10 * time.Hour)
 	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: at, End: at.Add(time.Minute)}})
-	for _, q := range append(slices.Concat(undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022, undo021), "PRAGMA user_version = 20") {
+	for _, q := range append(slices.Concat(undo034, undo033, undo032, undo031, undo030, undo029, undo028, undo027, undo026, undo025, undo024, undo023, undo022, undo021), "PRAGMA user_version = 20") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}

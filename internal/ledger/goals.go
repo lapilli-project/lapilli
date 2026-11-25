@@ -111,6 +111,9 @@ var GoalMeasures = map[string]GoalMeasure{
 	// The share of the firings people answered that needed action
 	// (docs/design/judging.md, item 3): of a row with 80% answered.
 	"action.share": {Higher: true, Share: true},
+	// The share of the firings that were useful, of those useful or not
+	// (docs/design/responses.md): by what was done about them.
+	"actionable.share": {Higher: true, Share: true},
 }
 
 // ByLapilli are the measures the summary gives as Lapilli judged them,
@@ -120,7 +123,7 @@ var ByLapilli = []string{"precision"}
 // GoalMeasureNames are the measures, in the order the design lists them.
 var GoalMeasureNames = []string{"firings", "precision", "critical.firings", "critical.share_caught", "refired.firings", "refired.share",
 	"asleep.firings", "off_hours.firings", "asleep.nothing", "off_hours.nothing", "incidents.missed", "impacts.missed",
-	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without", "episodes.total", "episodes.precision", "action.share"}
+	"incidents.noisy_only", "incidents.median_lead_seconds", "during_deploys.precision_without", "episodes.total", "episodes.precision", "action.share", "actionable.share"}
 
 // Bounds on what --config declares of goals: 50 goals, and four lists of
 // severities counted as critical among them, as each is a count of its own

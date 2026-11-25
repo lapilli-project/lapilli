@@ -73,9 +73,30 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Episodes.White += d.EpisodesWhite
 			rr.ActionYes += d.ActionYes
 			rr.ActionNo += d.ActionNo
-			if !t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals) {
+			judgedDay := t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals)
+			if !judgedDay {
 				rr.Unjudged += d.Firings - d.White
 				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
+			}
+			// What was done about the firings (docs/design/responses.md), once
+			// pages, changes or deploys are kept: of unknown use, black and
+			// judged, not useful.
+			if t.shown() {
+				c := rr.Responses
+				if c == nil {
+					c = &verdict.RuleResponses{}
+					rr.Responses = c
+				}
+				c.Changed += d.RespChanged
+				c.Routine += d.RespRoutine
+				c.Acknowledged += d.RespAcknowledged
+				c.Unanswered += d.RespUnanswered
+				c.None += d.Firings - d.RespChanged - d.RespRoutine - d.RespAcknowledged - d.RespUnanswered
+				c.Useful += d.Useful
+				c.NotUseful += d.NotUseful
+				if judgedDay {
+					c.NotUseful += d.Firings - d.Useful - d.NotUseful
+				}
 			}
 		}
 		// By the weeks the seven days have some of, as their firings are.
@@ -86,6 +107,15 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		for _, rr := range sum {
 			rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
 			rr.Noisy = verdict.IsNoisy(rr.Firings-rr.Unjudged, rr.White, at)
+			if c := rr.Responses; c != nil {
+				if n := c.Useful + c.NotUseful; n > 0 {
+					p := float64(c.Useful) / float64(n)
+					c.Actionable = &p
+				}
+				if o.NoisyBy == verdict.NoisyByUseful {
+					rr.Noisy = verdict.IsNoisy(c.Useful+c.NotUseful, c.Useful, at)
+				}
+			}
 			rep.Unjudged += rr.Unjudged
 			rep.Rules = append(rep.Rules, *rr)
 			total += rr.Firings
@@ -117,6 +147,10 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rep.Incidents = append(rep.Incidents, ir)
 		}
 		rep.SomeRules = o.SomeRules
+		if t.shown() {
+			// lapilli_rule_responses and lapilli_rule_actionable.
+			rep.Responses = &verdict.ResponseTotals{}
+		}
 		if o.Signals.Named() {
 			// Each named signal's windows by state, and its start
 			// (lapilli_impact_windows, lapilli_impact_signal_start_timestamp_seconds).

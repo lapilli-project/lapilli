@@ -233,6 +233,12 @@ spec:
             - {{ printf "--source-quiet=%s" . | quote }}
             {{- end }}
             {{- end }}
+            {{- if ($s.responses).tokenSecret.name }}
+            - {{ printf "--responses-token-file=/var/run/lapilli/responses-token/%s" $s.responses.tokenSecret.key | quote }}
+            {{- end }}
+            {{- if ($s.responses).configMap.name }}
+            - {{ printf "--responses=/etc/lapilli/responses/%s" $s.responses.configMap.key | quote }}
+            {{- end }}
             {{- if $s.onCall.configMap.name }}
             - {{ printf "--on-call=/etc/lapilli/on-call/%s" $s.onCall.configMap.key | quote }}
             {{- end }}
@@ -483,6 +489,16 @@ spec:
               mountPath: /var/run/lapilli/firings-token
               readOnly: true
             {{- end }}
+            {{- if ($s.responses).tokenSecret.name }}
+            - name: responses-token
+              mountPath: /var/run/lapilli/responses-token
+              readOnly: true
+            {{- end }}
+            {{- if ($s.responses).configMap.name }}
+            - name: responses
+              mountPath: /etc/lapilli/responses
+              readOnly: true
+            {{- end }}
             {{- if $s.trackers.tokenSecret.name }}
             - name: tasks-token
               mountPath: /var/run/lapilli/tasks-token
@@ -666,6 +682,16 @@ spec:
         - name: firings-token
           secret:
             secretName: {{ $s.firings.tokenSecret.name }}
+        {{- end }}
+        {{- if ($s.responses).tokenSecret.name }}
+        - name: responses-token
+          secret:
+            secretName: {{ $s.responses.tokenSecret.name }}
+        {{- end }}
+        {{- if ($s.responses).configMap.name }}
+        - name: responses
+          configMap:
+            name: {{ $s.responses.configMap.name }}
         {{- end }}
         {{- if $s.trackers.tokenSecret.name }}
         - name: tasks-token
