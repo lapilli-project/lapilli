@@ -4,14 +4,14 @@
 # docs/design/routing.md), held to the ones real Alertmanagers sent: a real
 # Prometheus evaluating rules that fire and resolve at known times, sending
 # to two real Alertmanagers at once, the newest release and the oldest one
-# held to (the docs name no oldest for the model; 0.27.0, before which time
-# intervals and `matchers` weren't all there is to read, is taken), each with
+# held to (the docs name no oldest for the model; 0.27.0, which has the
+# matchers and time intervals it reads, is taken), each with
 # short timings and the same configuration, and every receiver a webhook of
 # one keeper (test/e2e/routing/keeper) that keeps each notification and the
 # time it got it. Nothing outside Docker is reached.
 #
 # The configuration, whose timings are group_wait 5s, group_interval 15s,
-# repeat_interval 1m:
+# repeat_interval 50s:
 #   - nested routes with `continue`: a db route that goes on to a later one,
 #     and a queue route whose child pages and goes on to another child;
 #   - group_by: the two db rules grouped into one notification by team, the
@@ -36,9 +36,18 @@
 # number, each within one group_interval (15s) of its time, with the same
 # status (firing, resolved) and the same alerts. The report's own numbers
 # (notifications, pages, and the kinds of mute found) are held to them too.
-# Prometheus and lapilli evaluate every 5s, each on its own clock, so a
+# Prometheus and lapilli evaluate every second, each on its own clock, so a
 # notification may be off by that and by the delivery; the tolerance is the
-# rest.
+# rest. The rules' times and the windows are set so that no alert starts or
+# ends, and no mute begins or ends, within some seconds of a group's flush:
+# a flush Alertmanager makes a few milliseconds either side of such an edge
+# is not a difference between it and the model. For the same reason
+# repeat_interval is 50s, not a multiple of group_interval: at exactly four
+# group_intervals Alertmanager repeats a notification at that flush or at the
+# next, which milliseconds decide (the notification log's timestamp is taken
+# after the send, the next flush a fraction of a millisecond late; in the
+# first run of this script it was the one in 17 of 28 repeats and the other in
+# 11, in both versions), and the model, which is exact, takes the later.
 #
 # Needs Docker, Go, curl and jq. Takes about nine minutes. Leaves everything
 # up when KEEP is set. PROMETHEUS_IMAGE, ALERTMANAGER_IMAGE (the newest)
@@ -111,27 +120,31 @@ mkdir -p "$work/prom" "$work/am-new" "$work/am-old"
 # cross midnight (UTC, which time intervals are in unless told another).
 t0=$((($(date +%s) + 120) / 5 * 5))
 while :; do
-  mute_from=$((($t0 + 90 + 59) / 60 * 60))
+  mute_from=$(((t0 + 90 + 59) / 60 * 60))
   [ $(((mute_from % 86400) + 120)) -le 86400 ] && break
   t0=$((t0 + 60))
 done
 mute_to=$((mute_from + 120))
 sil_from=$((t0 + 90))
-sil_to=$((t0 + 170))
+sil_to=$((t0 + 165))
+# NightJob's flushes fall 10s before the window begins and 5s after, and 5s
+# before it ends and after: its first at the window's start less 40s.
+nj_from=$((mute_from - t0 - 45))
+nj_to=$((nj_from + 250))
 end=$((t0 + 420))
 echo "T0 $(iso "$t0"): the mute window $(hhmm "$mute_from")-$(hhmm "$mute_to"), the silence from $(iso "$sil_from") to $(iso "$sil_to"), the period to $(iso "$end")"
 
 # The rules: NAME, LABELS, from and to in seconds after T0, and a for.
-# What each does, with the routes below (a time is T+seconds):
+# What each does (NJ_FROM and NJ_TO are nj_from and nj_to), with the routes below (a time is T+seconds):
 #   DiskCritical 20-200, DiskWarning 10-230   infra, grouped by svc; the
 #       warning is inhibited while the critical fires
 #   DbReplicaLag 30-150, DbConnections 70-130 db, grouped by team into one
 #       notification, and on to the warnings route (continue)
-#   QueueBacklog 40-330                       queue, then pager (two
+#   QueueBacklog 40-322                       queue, then pager (two
 #       webhooks) and on to gold, which sends no resolves; repeats each minute
 #   QueueStale 100-190                        queue, gold only
-#   NightJob 50-300                           batch, muted in the window
-#   Silenced 30-260                           sil, silenced 90-170
+#   NightJob NJ_FROM-NJ_TO                          batch, muted in the window
+#   Silenced 30-255                           sil, silenced 90-165
 #   MiscCrit 20-120, Misc 60-180              the root's receiver, and the
 #       warnings route, where Misc is inhibited while MiscCrit fires (neither
 #       has a svc: absent agrees with absent)
@@ -143,16 +156,16 @@ rule() { # name, labels, from, to, [for]
 {
   echo 'groups:'
   echo '  - name: routing'
-  echo '    interval: 5s'
+  echo '    interval: 1s'
   echo '    rules:'
   rule DiskCritical 'severity: critical, team: infra, svc: disk' 20 200
   rule DiskWarning 'severity: warning, team: infra, svc: disk' 10 230
   rule DbReplicaLag 'severity: warning, team: db' 30 150
   rule DbConnections 'severity: warning, team: db' 70 130 15s
-  rule QueueBacklog 'severity: page, team: queue, tier: gold' 40 330
+  rule QueueBacklog 'severity: page, team: queue, tier: gold' 40 322
   rule QueueStale 'severity: ticket, team: queue, tier: gold' 100 190
-  rule NightJob 'severity: ticket, team: batch' 50 300
-  rule Silenced 'severity: ticket, team: sil' 30 260
+  rule NightJob 'severity: ticket, team: batch' "$nj_from" "$nj_to"
+  rule Silenced 'severity: ticket, team: sil' 30 255
   rule MiscCrit 'severity: critical, team: other' 20 120
   rule Misc 'severity: warning, team: other' 60 180
 } >"$work/rules.yaml"
@@ -169,7 +182,7 @@ route:
   group_by: [alertname]
   group_wait: 5s
   group_interval: 15s
-  repeat_interval: 1m
+  repeat_interval: 50s
   routes:
     - matchers: ['team="db"']
       receiver: db-team
@@ -228,7 +241,7 @@ paging='^(pager|infra)$'
 
 cat >"$work/prom/prometheus.yml" <<YAML
 global:
-  evaluation_interval: 5s
+  evaluation_interval: 1s
 rule_files: [/etc/prometheus/rules.yaml]
 alerting:
   alertmanagers:
@@ -285,12 +298,15 @@ ok() { echo "ok: $1"; }
 failed() { echo "FAILED: $1"; fail=1; }
 from=$(iso $((t0 - 30)))
 to=$(iso "$end")
+# lapilli judges firings against incidents, which the notifications don't
+# depend on: one, over the disk alerts.
+printf 'incidents:\n  - id: INC-1\n    title: Disk\n    start: %s\n    end: %s\n' "$(iso $((t0 + 20)))" "$(iso $((t0 + 200)))" >"$work/incidents.yaml"
 check() { # instance, name, URL
   curl -sf "$3/api/v2/silences" >"$work/silences-$1.json"
   local code=0
   "$work/lapilli" verdict --json --rules "$work/rules.yaml" --prometheus "$pu" \
     --alertmanager-config "$work/am-$1/alertmanager.yml" --silences "$work/silences-$1.json" \
-    --paging-receivers "$paging" --from "$from" --to "$to" --step 5s \
+    --paging-receivers "$paging" --incidents "$work/incidents.yaml" --from "$from" --to "$to" --step 1s \
     >"$work/verdict-$1.json" 2>"$work/verdict-$1.err" || code=$?
   if [ "$code" != 0 ]; then
     failed "verdict (the configuration of $2) exited $code"

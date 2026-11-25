@@ -228,7 +228,7 @@ run in linear time.
 ## As built: `lapilli verdict`, `--compare` and expectations
 
 What was decided building the first part, where the text above left it open.
-`lapilli serve` and the end-to-end run come next.
+`lapilli serve` comes next. The end-to-end run is `test/e2e/routing.sh`.
 
 - **Flags.** `--notifications` is on by itself when `--alertmanager-config` or
   `--grafana` is given, and `--notifications=false` turns it off; `--external-labels
@@ -291,7 +291,9 @@ Where the model departs from Alertmanager, and what the first build of it found:
 3. An Alertmanager restart resets its groups; the model doesn't. Worth
    reading restarts from the history (`process_start_time_seconds` of the
    alert manager), or not?
-4. The oldest Alertmanager the end-to-end run holds the model to.
+4. The oldest Alertmanager the end-to-end run holds the model to: the docs name
+   none for the model, so it is 0.27.0, an older release than the recordings'
+   (0.33.1 and after) that has the matchers and time intervals the model reads.
 
 ## Sources
 

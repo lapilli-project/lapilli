@@ -149,6 +149,13 @@ notification pipeline do, with these departures:
   an alert whose start is old.
 - A mute or active time interval isn't inherited by a route's children, as in
   Alertmanager. A flush that every silence or inhibition empties logs nothing.
+- A `repeat_interval` that is a multiple of `group_interval` (Alertmanager's
+  defaults, 4h and 5m, are) puts the repeat on the edge: Alertmanager repeats at
+  the flush exactly that long after the last notification or at the next, which a
+  few milliseconds decide (against real Alertmanagers 0.27.0 and 0.35.1, 17 of 28
+  repeats were at the first and 11 at the next, at random). The model takes the
+  next, so a long-lived alert may be worked out one notification fewer, a
+  `group_interval` late, than it really got.
 - A cluster of Alertmanagers sends once. An integration that fails and retries
   sends once. The second each alert arrived, which Prometheus sets by its
   evaluation, is the time of its evaluation.
@@ -167,9 +174,27 @@ notification pipeline do, with these departures:
 ## How it is checked
 
 The model is held to what Alertmanager really did, as the replay is held to
-what Prometheus really fired ([Is the replay right?](check-replay.md)). Today
-that is a test over the recordings of Alertmanager 0.33.1, 0.34.2 and 0.35.0
-(their configuration, the alerts sent, and the notifications each receiver
-really got): given the same alerts at the same times, the model gives the same
-notifications to each receiver, with the same reasons. A run against a real
-Prometheus and Alertmanager, in CI and weekly, comes next.
+what Prometheus really fired ([Is the replay right?](check-replay.md)), in two
+ways:
+
+- A test over the recordings of Alertmanager 0.33.1, 0.34.2 and 0.35.0 (their
+  configuration, the alerts sent, and the notifications each receiver really
+  got): given the same alerts at the same times, the model gives the same
+  notifications to each receiver, with the same reasons.
+- A run against real servers, in CI and weekly
+  ([test/e2e/routing.sh](../test/e2e/routing.sh), CI's `e2e-routing`): a real
+  Prometheus sends the alerts of rules that fire and resolve at known times to
+  two real Alertmanagers, the newest release and 0.27.0 (the docs name no
+  oldest the model is held to; this is the oldest tried), with `group_wait` 5s,
+  `group_interval` 15s and `repeat_interval` 50s, nested routes with `continue`,
+  `group_by` (two rules in one group), an inhibition rule, a mute time interval,
+  a silence made through the API, a receiver with two integrations and one that
+  sends no resolves, every receiver a webhook of one keeper that keeps what it
+  gets and when. `lapilli verdict --alertmanager-config --silences` replays the
+  same rules over that Prometheus's history, and each integration's
+  notifications as worked out must be the ones it got: the same number, each
+  within one `group_interval` (15s) of its time, the same status (firing or
+  resolved) and the same alerts, so an alert muted by an inhibition rule, a
+  silence or a time interval is muted in both. The report's own notified and
+  paged counts are held to them too. It prints each notification of both sides,
+  and fails on any difference.

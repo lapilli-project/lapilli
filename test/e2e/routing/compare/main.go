@@ -241,15 +241,8 @@ func run(verdictFile, configFile, silencesFile, keeperFile, instance, paging, to
 			}
 		}
 	}) {
-		a, b := mm[k], rm[k]
-		for i := 0; i < max(len(a), len(b)); i++ {
-			var m, r *note
-			if i < len(a) {
-				m = &a[i]
-			}
-			if i < len(b) {
-				r = &b[i]
-			}
+		for _, row := range pair(mm[k], rm[k], tol) {
+			m, r := row.model, row.real
 			mark, status, alertsText, delta := "", "", "", "-"
 			switch {
 			case m == nil:
@@ -280,7 +273,7 @@ func run(verdictFile, configFile, silencesFile, keeperFile, instance, paging, to
 			if mark != "" {
 				diffs++
 			}
-			fmt.Printf("%-18s %-2d %-8s %-8s %-6s %-9s %s %s\n", k, i+1, rel(mt), rel(rt), delta, status, alertsText, mark)
+			fmt.Printf("%-18s %-2d %-8s %-8s %-6s %-9s %s %s\n", k, row.n, rel(mt), rel(rt), delta, status, alertsText, mark)
 		}
 	}
 	fmt.Printf("\nmodel: %d notifications (%d of them firing, %d to paging receivers); real: %d (%d firing, %d to paging receivers); largest time difference %s, tolerance %s\n",
@@ -329,4 +322,64 @@ func run(verdictFile, configFile, silencesFile, keeperFile, instance, paging, to
 	}
 	fmt.Println("\nno differences")
 	return nil
+}
+
+// A row is a notification of the model's and the one of the real
+// Alertmanager's it is taken to be; either may be missing.
+type row struct {
+	n           int
+	model, real *note
+}
+
+// pair sets one integration's notifications side by side. A notification of
+// the model's is taken to be the nearest real one, within tol, with the same
+// status and alerts that no other has been taken to be; what is left on each
+// side is paired in order of time, so that it is said how it differs, and
+// what is left after that is on its own. The rows are in order of time.
+func pair(model, real []note, tol time.Duration) []row {
+	taken := make([]*note, len(model))
+	used := make([]bool, len(real))
+	for i := range model {
+		best, bestD := -1, tol+1
+		for j := range real {
+			if used[j] || real[j].status != model[i].status || real[j].alerts != model[i].alerts {
+				continue
+			}
+			if d := real[j].at.Sub(model[i].at).Abs(); d <= tol && d < bestD {
+				best, bestD = j, d
+			}
+		}
+		if best >= 0 {
+			used[best] = true
+			taken[i] = &real[best]
+		}
+	}
+	var rest []int
+	for j := range real {
+		if !used[j] {
+			rest = append(rest, j)
+		}
+	}
+	var rows []row
+	for i := range model {
+		r := taken[i]
+		if r == nil && len(rest) > 0 {
+			r, rest = &real[rest[0]], rest[1:]
+		}
+		rows = append(rows, row{model: &model[i], real: r})
+	}
+	for _, j := range rest {
+		rows = append(rows, row{real: &real[j]})
+	}
+	at := func(r row) time.Time {
+		if r.model != nil {
+			return r.model.at
+		}
+		return r.real.at
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return at(rows[i]).Before(at(rows[j])) })
+	for i := range rows {
+		rows[i].n = i + 1
+	}
+	return rows
 }
