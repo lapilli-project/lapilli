@@ -658,9 +658,8 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		// the run without them: no change is known for those hours, and a
 		// firing in them is not called changed, nor not useful for want of one.
 		if s.cfg.Rollouts {
-			if found.Rollouts, err = s.rolloutsFor(asking, from, to, found.Firings); err != nil {
-				s.fail("rollouts", err)
-			}
+			s.retryRollouts(asking, o)
+			found.Rollouts = s.readRollouts(asking, from, to, found.Firings)
 		}
 		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed}
 		if err := s.l.Record(ctx, found, o); err != nil {

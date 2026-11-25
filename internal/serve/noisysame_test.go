@@ -18,7 +18,12 @@ func TestNoisyTestIsOneEverywhere(t *testing.T) {
 	ctx := context.Background()
 	from := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
 	for _, by := range []string{verdict.NoisyByCaught, verdict.NoisyByUseful} {
-		s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour; c.Impact = ""; keepRecord(c); c.Options.NoisyBy = by })
+		s, _ := server(t, func(c *Config) {
+			c.Backfill = 10 * 24 * time.Hour
+			c.Impact = ""
+			keepRecord(c)
+			c.Options.NoisyBy = by
+		})
 		raw := ""
 		if err := s.look(ctx, &raw); err != nil {
 			t.Fatal(err)

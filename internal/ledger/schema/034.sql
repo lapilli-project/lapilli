@@ -64,11 +64,11 @@ CREATE TABLE rollout_spans (
 CREATE INDEX rollout_spans_to ON rollout_spans (to_at);
 -- The spans a run could not read the changes of (the history failed), kept
 -- to be read once more by the next run, and dropped when that run has read
--- them or tried; until then the firings in them have changes not known.
+-- them or tried, not again; until then the firings in them have changes not
+-- known. A span that overlaps or touches another is one.
 CREATE TABLE rollout_retries (
 	from_at INTEGER NOT NULL PRIMARY KEY,
-	to_at INTEGER NOT NULL,
-	tried INTEGER NOT NULL DEFAULT 0
+	to_at INTEGER NOT NULL
 );
 CREATE TABLE rollout_owners (
 	namespace TEXT NOT NULL,

@@ -659,6 +659,68 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 	return pend(t, near(spans))
 }
 
+// RolloutFailed keeps a span a run could not read the changes of, for the
+// next run to read once (RolloutRetries, RolloutRetried). One that overlaps
+// or touches another is made one with it.
+func (l *Ledger) RolloutFailed(ctx context.Context, from, to time.Time) error {
+	return l.write(ctx, func(t *txn) error {
+		a, b := from.Unix(), to.Unix()
+		rows, err := t.QueryContext(t.ctx, "SELECT from_at, to_at FROM rollout_retries WHERE to_at >= ? AND from_at <= ?", a, b)
+		if err != nil {
+			return err
+		}
+		var olds []int64
+		for rows.Next() {
+			var x, y int64
+			if err := rows.Scan(&x, &y); err != nil {
+				rows.Close()
+				return err
+			}
+			olds = append(olds, x)
+			a, b = min(a, x), max(b, y)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, x := range olds {
+			if _, err := t.ExecContext(t.ctx, "DELETE FROM rollout_retries WHERE from_at = ?", x); err != nil {
+				return err
+			}
+		}
+		_, err = t.ExecContext(t.ctx, "INSERT INTO rollout_retries (from_at, to_at) VALUES (?, ?)", a, b)
+		return err
+	})
+}
+
+// RolloutRetries are the spans a run could not read the changes of, the
+// earliest first.
+func (l *Ledger) RolloutRetries(ctx context.Context) ([][2]time.Time, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT from_at, to_at FROM rollout_retries ORDER BY from_at")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]time.Time
+	for rows.Next() {
+		var a, b int64
+		if err := rows.Scan(&a, &b); err != nil {
+			return nil, err
+		}
+		out = append(out, [2]time.Time{unix(a), unix(b)})
+	}
+	return out, rows.Err()
+}
+
+// RolloutRetried drops the span that starts at from: it was read again, or
+// tried, and isn't again.
+func (l *Ledger) RolloutRetried(ctx context.Context, from time.Time) error {
+	return l.write(ctx, func(t *txn) error {
+		_, err := t.ExecContext(t.ctx, "DELETE FROM rollout_retries WHERE from_at = ?", from.Unix())
+		return err
+	})
+}
+
 // respFiring is a firing a response is found for.
 type respFiring struct {
 	ID      int64

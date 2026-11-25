@@ -210,6 +210,54 @@ func (s *Server) rolloutsFor(parent context.Context, from, to time.Time, fs []fi
 	return r, nil
 }
 
+// readRollouts is rolloutsFor, and a read that fails is kept as a span the
+// next run reads once more (retryRollouts): until then the firings in it have
+// no change known, and are neither called changed nor not useful for want of
+// one.
+func (s *Server) readRollouts(ctx context.Context, from, to time.Time, fs []firing.Firing) *response.Rollouts {
+	r, err := s.rolloutsFor(ctx, from, to, fs)
+	if err != nil {
+		s.fail("rollouts", err)
+		if err := s.l.RolloutFailed(context.WithoutCancel(ctx), from, to); err != nil {
+			s.log.Warn("a span whose rollouts couldn't be read wasn't kept to be read again", "from", from, "to", to, "err", err)
+		}
+		return nil
+	}
+	return r
+}
+
+// retryRollouts reads once more the spans earlier runs couldn't read the
+// changes of, with the firings the ledger has in each, and keeps what it
+// finds (judging them again). A span that fails again is let go: it is tried
+// once, as the history that failed twice is more than a hiccup.
+func (s *Server) retryRollouts(ctx context.Context, o verdict.Options) {
+	spans, err := s.l.RolloutRetries(ctx)
+	if err != nil {
+		s.log.Warn("the spans whose rollouts weren't read couldn't be listed", "err", err)
+		return
+	}
+	for _, sp := range spans {
+		from, to := sp[0], sp[1]
+		fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: from, To: to})
+		if err == nil {
+			plain := make([]firing.Firing, len(fs))
+			for i, f := range fs {
+				plain[i] = f.Firing
+			}
+			var r *response.Rollouts
+			if r, err = s.rolloutsFor(ctx, from, to, plain); err == nil {
+				err = s.l.KeepRollouts(context.WithoutCancel(ctx), r, s.now(), o)
+			}
+		}
+		if err != nil {
+			s.log.Warn("rollouts read again for a span a run couldn't read them for failed too, and aren't tried again", "from", from, "to", to, "err", err)
+		}
+		if err := s.l.RolloutRetried(context.WithoutCancel(ctx), from); err != nil {
+			s.log.Warn("a span whose rollouts were read again wasn't dropped", "from", from, "err", err)
+		}
+	}
+}
+
 // responseLabel is, by kind of response, what the pages call it, in English:
 // the filter's choices, and the chip that takes the filter away.
 var responseLabel = map[string]string{

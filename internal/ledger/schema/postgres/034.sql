@@ -47,8 +47,7 @@ CREATE TABLE rollout_spans (
 CREATE INDEX rollout_spans_to ON rollout_spans (to_at);
 CREATE TABLE rollout_retries (
 	from_at BIGINT NOT NULL PRIMARY KEY,
-	to_at BIGINT NOT NULL,
-	tried INTEGER NOT NULL DEFAULT 0
+	to_at BIGINT NOT NULL
 );
 CREATE TABLE rollout_owners (
 	namespace TEXT COLLATE "C" NOT NULL,

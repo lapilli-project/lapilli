@@ -1338,11 +1338,15 @@ func TestCompassLogsBounded(t *testing.T) {
 	if !strings.Contains(stderr, "without a cursor") {
 		t.Errorf("a next page without a cursor isn't said: %s", stderr)
 	}
+	// A count, not an alert's id: the id is Compass's, and this is a job's log.
+	if strings.Contains(stderr, "a-1") || !strings.Contains(stderr, "1 alerts whose log gives a next page without a cursor") {
+		t.Errorf("the next page without a cursor isn't a count: %s", stderr)
+	}
 
 	asked = nil
 	listing = alert("../../alerts")
-	if out, _, err := run(); err == nil || out != "" {
-		t.Errorf("an alert id that isn't one: %v, wrote %q", err, out)
+	if out, stderr, err := run(); err == nil || out != "" || strings.Contains(stderr, "../../alerts") {
+		t.Errorf("an alert id that isn't one: %v, wrote %q, said %q", err, out, stderr)
 	}
 	for _, a := range asked {
 		if strings.Contains(a, "logs") {
