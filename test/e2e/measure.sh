@@ -221,7 +221,7 @@ start_containers() {
   # The feed runs in the Prometheus image, which has a shell and nothing the
   # static binary needs.
   docker run -d --name "$p-feed" --network "$p" --entrypoint /feed -v "$state/feed:/feed:ro" \
-    "$prom" -loki "http://$p-loki:3100" >/dev/null
+    "$prom" -loki "http://$p-loki:3100" -ruler >/dev/null
 }
 
 stop_containers() {
