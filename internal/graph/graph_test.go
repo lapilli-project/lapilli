@@ -240,13 +240,17 @@ func TestReach(t *testing.T) {
 }
 
 func TestValidName(t *testing.T) {
-	for _, ok := range []string{"checkout", "payments-db", "ns/checkout", "서비스", "a b", "x.y_z"} {
+	// A Kubernetes namespace/name at its longest is kept; one more byte isn't.
+	if long := strings.Repeat("n", 63) + "/" + strings.Repeat("d", 253); len(long) != MaxName || !ValidName(long) {
+		t.Errorf("a Kubernetes namespace/name of %d bytes refused", len(long))
+	}
+	for _, ok := range []string{"checkout", "payments-db", "ns/checkout", "서비스", "x.y_z", "a-b>c", "a<b"} {
 		if !ValidName(ok) {
 			t.Errorf("%q refused", ok)
 		}
 	}
 	for _, bad := range []string{
-		"", "a\u202eb", "a\x00b", "a\nb", "a\tb", "a\u200bb", "a\u2066b", "a → b", "a,b", "a\u00a0b", "a\u2028b",
+		"", "a\u202eb", "a\x00b", "a\nb", "a\tb", "a\u200bb", "a\u2066b", "a → b", "a,b", "a\u00a0b", "a\u2028b", "a b", "a\u2003b", "a\u2192b", "a\u27f6b", "a\u2907b", "a\u2b95b", "a\uffebb", "a\u21ffb",
 		"bad\xffutf8", strings.Repeat("x", MaxName+1),
 	} {
 		if ValidName(bad) {

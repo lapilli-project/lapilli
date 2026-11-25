@@ -36,10 +36,10 @@ services by the names firings and incidents carry: `label_replace` or
 | Stack | `--depends` | `--depends-labels` |
 |---|---|---|
 | Istio | `sum by (caller, callee) (label_join(label_join(rate(istio_requests_total{reporter="source"}[1h]), "caller", "/", "source_workload_namespace", "source_workload"), "callee", "/", "destination_workload_namespace", "destination_workload")) > 0` | `caller,callee` |
-| Linkerd | `sum by (caller, callee) (label_join(label_join(rate(response_total{direction="outbound", deployment!="", dst_deployment!=""}[1h]), "caller", "/", "namespace", "deployment"), "callee", "/", "dst_namespace", "dst_deployment")) > 0` | `caller,callee` |
+| Linkerd | `sum by (caller, callee) (label_join(label_join(rate(response_total{direction="outbound"}[1h]), "caller", "/", "namespace", "deployment"), "callee", "/", "dst_namespace", "dst_deployment")) > 0` | `caller,callee` |
 | An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0` | `client,server` |
 
-Linkerd's selector drops the calls of a workload that isn't a Deployment (no `deployment` label), which `label_join` would otherwise name `shop/`. Istio's and Linkerd's expressions name a service `namespace/workload`
+Istio's and Linkerd's expressions name a service `namespace/workload`
 (`shop/checkout`), joined from the series' namespace and workload labels, on
 both ends. Their own labels are the workload's alone, so `checkout` in `shop`
 and in `staging` would be one node, their calls would join, and a workload in
@@ -273,14 +273,21 @@ and asked for from the Settings page on the site.
   incident, as dropping `--match` already could. The report's note counts the
   catches by dependency and names their rules, so it shows.
 - A name that isn't a service's is refused, and counted (`settings.depends.refused`
-  in `--json`): longer than 128 bytes (a Kubernetes `namespace/workload` is at
-  most 127), not valid UTF-8, with a character that isn't printable (a control
-  character, a format or bidirectional-control character such as U+202E, a
-  space but the plain one), or holding `→` or `,`, which the report writes a
-  path and its lists by: so a name can't forge a path's mark. A series with
+  in `--json`): longer than 317 bytes (a Kubernetes `namespace/name`: a namespace of at
+  most 63, a slash and a Deployment's name of at most 253), not valid UTF-8,
+  with a character that isn't printable (a control character, a format or
+  bidirectional-control character such as U+202E), a space of any kind, an
+  arrow (the Unicode arrow blocks U+2190 to U+21FF, U+27F0 to U+27FF, U+2900
+  to U+297F, U+2B00 to U+2BFF and the halfwidth arrows U+FFE9 to U+FFEC), or
+  holding `,`, which the report writes its lists by: so a name can't forge a
+  path's mark or look like a hop. A series with
   the same service on both sides, or without both labels, is no edge.
 - An hour of the graph names 5,000 services at most; past that the read stops
-  and the graph keeps none, as past 20,000 edges.
+  and the graph keeps none, as past 20,000 edges. The ledger's hour may hold
+  more than one read gave (reads overlap): past those bounds that hour alone
+  has no edges when a judgement loads the graph, the rest are kept, and the
+  report says some hours were judged with none. A judgement's walk keeps what
+  it worked out in about 100 MiB at most.
 - A catch made only by dependency doesn't count where a change is held to the
   incidents. A pull request that removes the only alert that caught an
   incident by its labels would otherwise pass `--fail-missed` for another

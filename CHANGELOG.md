@@ -35,10 +35,13 @@
   walk is made once for an incident, to every service it reaches, and each firing is a lookup
   (`graph.Reach`; the cost is the incidents, not the firings times the incidents; `Depends` is a
   lookup in it). A service name that isn't printable, holds a format or bidirectional-control
-  character, `→` or `,`, or is longer than 128 bytes (was 256) is refused and counted
+  character, a space or an arrow of any kind, or `,`, or is longer than 317 bytes (a Kubernetes `namespace/name`; was 256) is refused and counted
   (`settings.depends.refused`), so a path's text can't be forged, and an hour that names more than
   5,000 services leaves the graph with none, as 20,000 edges do; `verdict.DependsHops` writes a path
-  as separate escaped hops, each in its own `<bdi>`, for a page. `lapilli impact suggest`'s Istio
+  as separate escaped hops, each in its own `<bdi>`, for a page. An hour of the ledger's rows that
+  is too many (the union of overlapping reads) drops that hour alone and says so, not the whole
+  judgement's graph; the walk's cache is bounded (about 100 MiB with a judgement's edges), and the
+  adjacency of a window is kept, so incidents sharing one don't build it again. `lapilli impact suggest`'s Istio
   and Linkerd expressions name a service `namespace/workload` (labels `caller,callee`), so
   same-named workloads of two namespaces don't merge and another namespace's can't be named as the
   one a service calls: the firings' and incidents' `--match` label must carry that form

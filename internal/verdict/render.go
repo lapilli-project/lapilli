@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/text/width"
 
+	"lapilli.dev/internal/graph"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/rules"
 )
@@ -1279,12 +1280,19 @@ func LooseNote(r *Report) string {
 // DependencyMark is what a catch by dependency is marked with: via, then
 // its path in call order, checkout → payments-db.
 func DependencyMark(path []string) string {
-	// A name the graph keeps holds neither "→" nor "," (graph.ValidName);
+	// A name the graph keeps holds no arrow, space or "," (graph.ValidName);
 	// one from older records is written escaped, so no hop forges another.
-	esc := strings.NewReplacer("→", `\u{2192}`, ",", `\u{2c}`)
 	clean := make([]string, len(path))
 	for i, v := range path {
-		clean[i] = esc.Replace(Clean(v))
+		var b strings.Builder
+		for _, r := range Clean(v) {
+			if r == ' ' || graph.ValidName(string(r)) {
+				b.WriteRune(r)
+			} else {
+				fmt.Fprintf(&b, `\u{%x}`, r)
+			}
+		}
+		clean[i] = b.String()
 	}
 	return "via " + strings.Join(clean, " → ")
 }
@@ -1304,7 +1312,7 @@ func DependsNote(r *Report) string {
 		return fmt.Sprintf("! --depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency. (It keeps at most %d edges and %d services an hour.)\n", DependsMaxEdges, DependsMaxEdges, DependsMaxNodes)
 	}
 	if d.Over {
-		return "! --depends: some of the period was judged with no service graph: its incidents' windows held more edges than a judgement loads, and no catch there was by dependency.\n"
+		return "! --depends: some of the period was judged with no service graph, or with none for some of its hours: its incidents' windows held more edges than a judgement loads, or an hour more edges or services than are kept, and no catch there was by dependency.\n"
 	}
 	n := 0
 	seen := map[string]bool{}

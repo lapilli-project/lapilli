@@ -18,7 +18,7 @@ func fillerGraph(hours, perHour int, at ...time.Time) *graph.Graph {
 	b := graph.NewBuilder()
 	for h := range hours {
 		for p := range perHour {
-			b.Add(t0.Add(time.Duration(h)*time.Hour), fmt.Sprintf("filler-%d", p), fmt.Sprintf("filler-%d", p+1))
+			b.Add(t0.Add(time.Duration(h)*time.Hour), fmt.Sprintf("filler-%d", p%2500), fmt.Sprintf("filler-%d", 2500+p/2500))
 		}
 	}
 	for _, a := range at {

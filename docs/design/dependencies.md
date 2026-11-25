@@ -152,10 +152,10 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   stops, the graph keeps none (`Graph.TooMany`) and `settings.depends.too_many`
   says so. So is an hour that names more than 5,000 services
   (`graph.MaxNodesPerHour`). A name that isn't a service's (`graph.ValidName`:
-  empty, longer than 128 bytes (`MaxName`, a Kubernetes `namespace/workload`
-  at most), not UTF-8, with a character that isn't printable (control, format
-  or bidirectional-control such as U+202E, a space but the plain one), or with
-  `→` or `,`) is refused and counted (`Builder.Refused`, `Graph.Refused`,
+  empty, longer than 317 bytes (`MaxName`: a Kubernetes `namespace/name`, 63 + 1
+  + 253, at most), not UTF-8, with a character that isn't printable (control, format
+  or bidirectional-control such as U+202E), a space of any kind, an arrow
+  (the Unicode arrow blocks), or with `,`) is refused and counted (`Builder.Refused`, `Graph.Refused`,
   `settings.depends.refused`), and a call from a service to itself is no edge.
   A name's limits are what keep a path's text (`via a → b`) from being forged.
 - The expressions count calls over an hour (`rate(...[1h]) > 0`): a sample at T
@@ -240,7 +240,18 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   takes away: serve's report sets `settings.depends.too_many` from it. What
   loads is the ledger's, so judging again asks the history nothing, and a read
   that failed leaves its hours judged with what the ledger holds until the run
-  after reads them again.
+  after reads them again. An hour's rows in the ledger are the union of the
+  reads that overlapped it, so they may pass 20,000 edges or 5,000 services
+  though no read did: the judgement's builder (`Builder.PerHour`) makes only
+  that hour too many (no edges in it, `Graph.HoursTooMany`) and keeps the
+  other hours; it is said as `edges-over` is (a judgement made with no graph
+  for some hours), not as the whole graph being none.
+- Memory: `Reach` keeps its results to `maxReachNodes` (262,144 paths, about
+  250 bytes each, 64 MiB), and the adjacency of each window asked about, so
+  that incidents sharing a window don't build it again, to `maxAdjEdges`
+  (524,288 edges, about 50 bytes each, 25 MiB; a window past it is walked and
+  not kept); both are dropped whole when they would pass. With a judgement's
+  1,000,000 edges that is about 100 MiB at most.
 - A catch's delay and looseness in the ledger are, as `verdict.Judge`'s, those
   of the rule's direct firings when it has any. A firing white only by the graph
   is kept (`firings.white_depends`, and `days.white_depends` and

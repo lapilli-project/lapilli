@@ -41,30 +41,52 @@ const (
 	// graph of thousands of invented ones is no graph of a system.
 	MaxNodesPerHour = 5000
 	// MaxName is the longest name of a service kept: a longer one isn't a
-	// service's. 128 holds a Kubernetes "namespace/workload" (two DNS
-	// labels of at most 63 characters and a slash), and no more than that.
-	MaxName = 128
+	// service's. 317 holds any Kubernetes "namespace/name": a namespace is
+	// a DNS label of at most 63 characters, a Deployment's name a DNS
+	// subdomain of at most 253, and a slash (63 + 1 + 253); 128 refused real
+	// Deployments.
+	MaxName = 317
 	// maxReachNodes is how many services' paths the graph keeps worked out,
 	// summed over what it was asked about; past it they are dropped, and
-	// worked out again as asked.
-	maxReachNodes = 1 << 20
+	// worked out again as asked. A path is at most MaxDepth+1 names that
+	// share the graph's own strings (a slice of four string headers, 64
+	// bytes, and its map slot, about 250 bytes in all), so the cache is
+	// about 64 MiB at most.
+	maxReachNodes = 1 << 18
+	// maxAdjEdges is how many edges the adjacency of the windows asked about
+	// is kept for, summed (a window's edges count again for its reverse
+	// side): about 50 bytes each, 25 MiB at most. With maxReachNodes and a
+	// judgement's edges (ledger.MaxJudgeEdges, 1,000,000 at 8 bytes and
+	// the names), a graph's memory is about 100 MiB at most. A window
+	// larger than that is walked and not kept.
+	maxAdjEdges = 1 << 19
 )
 
 // ValidName reports whether a name may be a service's in the graph: not
 // empty, at most MaxName bytes, valid UTF-8 of printable characters only (no
-// control, format or bidirectional-control character, no space but the
-// plain one), and neither "→" nor ",", which the report writes a path and
-// its lists by: a name with one could forge a mark.
+// control, format or bidirectional-control character, no space of any kind,
+// the plain one too), no arrow-like symbol (isArrow), and not ",", which the
+// report writes a path and its lists by: a name with one could forge a hop,
+// or look like one.
 func ValidName(name string) bool {
 	if name == "" || len(name) > MaxName || !utf8.ValidString(name) {
 		return false
 	}
 	for _, r := range name {
-		if r == '→' || r == ',' || !unicode.IsPrint(r) || unicode.Is(unicode.Cf, r) {
+		if r == ',' || isArrow(r) || unicode.IsSpace(r) || !unicode.IsPrint(r) || unicode.Is(unicode.Cf, r) {
 			return false
 		}
 	}
 	return true
+}
+
+// isArrow reports whether r is an arrow that could draw a hop: the Arrows
+// block (U+2190 to U+21FF), the supplemental arrows A and B (U+27F0 to
+// U+27FF, U+2900 to U+297F), the miscellaneous symbols and arrows block
+// (U+2B00 to U+2BFF), and the halfwidth arrows (U+FFE9 to U+FFEC).
+func isArrow(r rune) bool {
+	return r >= 0x2190 && r <= 0x21FF || r >= 0x27F0 && r <= 0x27FF || r >= 0x2900 && r <= 0x297F ||
+		r >= 0x2B00 && r <= 0x2BFF || r >= 0xFFE9 && r <= 0xFFEC
 }
 
 // Hour is the hour a time is in, as a count of hours since the epoch.
@@ -102,12 +124,31 @@ type Graph struct {
 
 	// refused is how many names were refused (ValidName), each time offered.
 	refused int
+	// bigHours are the hours that had more than is kept and were dropped
+	// alone (Builder.PerHour).
+	bigHours int
 
 	mu    sync.Mutex
 	reach map[string]map[string][]string
 	// reachNodes is the services' paths reach holds; walks how many walks
 	// it took to fill it.
 	reachNodes, walks int
+	// adjs are the adjacency of the windows asked about, by window, so that
+	// incidents sharing one don't build it again; adjEdges the edges they
+	// hold, bounded by maxAdjEdges.
+	adjs     map[adjKey]adjEntry
+	adjEdges int
+	adjBuilt int // how many were built, for a test
+}
+
+type adjKey struct {
+	lo, hi int64
+	both   bool
+}
+
+type adjEntry struct {
+	adj, radj map[int32][]int32
+	edges     int
 }
 
 // Refused is how many names offered to the graph were refused as no
@@ -117,6 +158,15 @@ func (g *Graph) Refused() int {
 		return 0
 	}
 	return g.refused
+}
+
+// HoursTooMany is how many hours had more edges or services than are kept
+// and were left without edges alone, the rest kept (Builder.PerHour).
+func (g *Graph) HoursTooMany() int {
+	if g == nil {
+		return 0
+	}
+	return g.bigHours
 }
 
 // Walks is how many times the graph walked its calls from a set of services
@@ -226,7 +276,7 @@ func (g *Graph) Reach(values []string, w Window, depth int, both bool) map[strin
 		return r
 	}
 	g.walks++
-	adj, radj := g.adjacency(lo, hi, both)
+	adj, radj := g.cachedAdjacency(lo, hi, both)
 	best := map[string][]string{}
 	for _, v := range values {
 		src := g.id(v)
@@ -275,6 +325,34 @@ func (g *Graph) walk(adj map[int32][]int32, src int32, depth int, reverse bool, 
 		}
 		level = next
 	}
+}
+
+// cachedAdjacency is adjacency, kept for the next incident in the same
+// window while what is kept is within maxAdjEdges (dropped, all of it,
+// when it would pass). The caller holds g.mu.
+func (g *Graph) cachedAdjacency(lo, hi int64, both bool) (adj, radj map[int32][]int32) {
+	k := adjKey{lo, hi, both}
+	if e, ok := g.adjs[k]; ok {
+		return e.adj, e.radj
+	}
+	adj, radj = g.adjacency(lo, hi, both)
+	g.adjBuilt++
+	n := 0
+	for _, v := range adj {
+		n += len(v)
+	}
+	if both {
+		n *= 2
+	}
+	if n > maxAdjEdges {
+		return adj, radj
+	}
+	if g.adjs == nil || g.adjEdges+n > maxAdjEdges {
+		g.adjs, g.adjEdges = map[adjKey]adjEntry{}, 0
+	}
+	g.adjs[k] = adjEntry{adj, radj, n}
+	g.adjEdges += n
+	return adj, radj
 }
 
 func (g *Graph) id(name string) int32 {
@@ -350,6 +428,20 @@ type Builder struct {
 	nodes   map[int64]map[int32]bool
 	refused int
 	tooMany bool
+	// perHour says an hour past the bounds is dropped alone (PerHour); big
+	// are the hours dropped.
+	perHour bool
+	big     map[int64]bool
+}
+
+// PerHour makes an hour with more than MaxEdgesPerHour edges or
+// MaxNodesPerHour services made only that hour too many, not the graph:
+// the hour keeps none of its edges (HoursTooMany counts them), and what
+// is added to it is ignored, while the other hours are kept. For the
+// ledger, whose rows for an hour are the union of several reads.
+func (b *Builder) PerHour() *Builder {
+	b.perHour, b.big = true, map[int64]bool{}
+	return b
 }
 
 // NewBuilder returns a Builder with no edges.
@@ -386,6 +478,9 @@ func (b *Builder) Add(hour time.Time, from, to string) bool {
 		return true
 	}
 	h := Hour(hour)
+	if b.big[h] {
+		return true
+	}
 	es := b.hours[h]
 	if es == nil {
 		es = map[edge]bool{}
@@ -399,16 +494,27 @@ func (b *Builder) Add(hour time.Time, from, to string) bool {
 	e := edge{b.id(from), b.id(to)}
 	if !es[e] {
 		if len(es) >= MaxEdgesPerHour {
-			b.tooMany = true
-			return false
+			return b.tooManyIn(h)
 		}
 		es[e] = true
 	}
 	ns[e.from], ns[e.to] = true, true
 	if len(ns) > MaxNodesPerHour {
+		return b.tooManyIn(h)
+	}
+	return true
+}
+
+// tooManyIn is the hour h having more than is kept: the graph's, or, with
+// PerHour, the hour's alone, which is dropped. It reports Add's answer.
+func (b *Builder) tooManyIn(h int64) bool {
+	if !b.perHour {
 		b.tooMany = true
 		return false
 	}
+	b.big[h] = true
+	delete(b.hours, h)
+	delete(b.nodes, h)
 	return true
 }
 
@@ -425,7 +531,7 @@ func (b *Builder) id(name string) int32 {
 // Graph is the graph of what was added. With too many edges in an hour it
 // has none, and says so (TooMany).
 func (b *Builder) Graph() *Graph {
-	g := &Graph{hours: map[int64][]edge{}, refused: b.refused}
+	g := &Graph{hours: map[int64][]edge{}, refused: b.refused, bigHours: len(b.big)}
 	if b.tooMany {
 		g.tooMany = true
 		return g

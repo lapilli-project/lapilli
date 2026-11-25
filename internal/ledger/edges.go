@@ -361,7 +361,9 @@ func (l *Ledger) graphFor(ctx context.Context, q queryer, o verdict.Options, inc
 			merged = append(merged, w)
 		}
 	}
-	g := graph.NewBuilder()
+	// An hour whose rows (the union of several reads of it) pass what a graph
+	// keeps of one hour is too many alone: it keeps none, the others stay.
+	g := graph.NewBuilder().PerHour()
 	n, over := 0, false
 	for _, w := range merged {
 		rows, err := q.QueryContext(ctx, "SELECT hour, from_svc, to_svc FROM edges WHERE hour >= ? AND hour <= ? ORDER BY hour LIMIT ?", w[0], w[1], maxJudgeEdges-n+1)
@@ -395,7 +397,9 @@ func (l *Ledger) graphFor(ctx context.Context, q queryer, o verdict.Options, inc
 	d := *o.Depends
 	d.Graph = g.Graph()
 	o.Depends = &d
-	return o, over, nil
+	// An hour left without edges says the same as a graph too big to load:
+	// no catch there was by dependency (EdgesOver).
+	return o, over || d.Graph.HoursTooMany() > 0, nil
 }
 
 // metaEdgesOver is the meta key of the span a judgement was made with no

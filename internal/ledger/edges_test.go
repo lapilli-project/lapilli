@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -270,5 +271,54 @@ func TestMigrate036(t *testing.T) {
 	}
 	if rows, _, _ := l2.EdgesKept(ctx); rows != int64(g.Rows()) {
 		t.Errorf("edges after migrating: %d", rows)
+	}
+}
+
+// An hour whose rows are the union of several reads, each within the bounds,
+// and together past what a graph keeps of one hour is too many alone: the
+// judgement keeps the other hours' edges and says so, rather than judge the
+// whole period with no graph.
+func TestJudgmentGraphDropsOnlyTheHourTooMany(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	big, other := t0.Add(2*time.Hour), t0.Add(5*time.Hour)
+	// 4,000 services, 16,000 calls a read: under 20,000 and 5,000 each, 32,000 in union.
+	read := func(skip int, extra bool) *graph.Graph {
+		b := graph.NewBuilder()
+		for i := 0; i < 4000; i++ {
+			for j := skip; j < skip+4; j++ {
+				b.Add(big, fmt.Sprint("s", i), fmt.Sprint("s", (i+j)%4000))
+			}
+		}
+		if extra {
+			b.Add(other, "checkout", "payments-db")
+		}
+		if b.TooMany() {
+			t.Fatal("a read is too many on its own")
+		}
+		return b.Graph()
+	}
+	to := t0.Add(7 * 24 * time.Hour)
+	for i, g := range []*graph.Graph{read(1, false), read(5, true)} {
+		if err := l.KeepEdges(ctx, &EdgesRead{Graph: g, From: t0, To: to}, depended(opts, nil)); err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
+	}
+	incs := []incident.Incident{
+		{ID: "INC-1", Start: big, End: big.Add(10 * time.Minute), Labels: incident.Labels{"service": {"s1"}}},
+		{ID: "INC-2", Start: other, End: other.Add(10 * time.Minute), Labels: incident.Labels{"service": {"checkout"}}}}
+	o, over, err := l.graphFor(ctx, l.r, depended(opts, nil), incs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := o.Depends.Graph
+	if g.TooMany() || g.HoursTooMany() != 1 || !over {
+		t.Errorf("too many %v, hours too many %d, over %v: want the graph kept, one hour dropped and said", g.TooMany(), g.HoursTooMany(), over)
+	}
+	if _, ok := g.Depends("checkout", "payments-db", graph.Window{Start: other, End: other.Add(10 * time.Minute)}, 1); !ok {
+		t.Error("the other hour's edge is gone with the hour that was too many")
+	}
+	if _, ok := g.Depends("s1", "s2", graph.Window{Start: big, End: big.Add(10 * time.Minute)}, 1); ok {
+		t.Error("the hour too many kept an edge")
 	}
 }
