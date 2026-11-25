@@ -139,9 +139,6 @@ func TestGrafanaNotReplayed(t *testing.T) {
 		"a log query": {swap(`'sum(count_over_time({app="shop"} |= "error" [5m]))'`, `'{app="shop"} |= "error"'`), nil,
 			"query A is a log query"},
 		"SQL": {lokiGrafana, map[string]string{"lk": "mysql"}, "its condition reads a mysql data source: only PromQL and LogQL are replayed"},
-		"classic conditions": {swap(`model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [10]}}]}`,
-			`model: {type: classic_conditions, conditions: [{evaluator: {type: gt, params: [10]}, operator: {type: and}, query: {params: [A]}, reducer: {type: avg}}]}`), nil,
-			"classic conditions over a Loki query"},
 		"Loki and Prometheus": {swap(`          - refId: B
             datasourceUid: __expr__
             model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [10]}}]}`, `          - refId: P

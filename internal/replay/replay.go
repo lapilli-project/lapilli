@@ -85,6 +85,22 @@ func historyFor(h History, r rules.Rule) (History, error) {
 	return nil, errors.New("it is LogQL, and there is no Loki to ask")
 }
 
+// asideFor is the history the queries of r's beside its condition, on the
+// Loki data source uid, are asked of: the Loki WithLogs gives for it. An
+// asker already asks its rule's, in the askers Run made for each.
+func asideFor(h History, r rules.Rule, uid string) (History, error) {
+	switch x := h.(type) {
+	case *asker:
+		if a := x.sides[uid]; a != nil {
+			return a, nil
+		}
+	case *withLogs:
+		r.Logs = uid
+		return x.logs(r)
+	}
+	return nil, errors.New("its Loki query beside the condition has no Loki to ask")
+}
+
 // Version is a set of rules and when it took effect; it is in effect until
 // the next version does. A zero From is from before the period.
 type Version struct {
@@ -156,21 +172,55 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 			src = sh.srcOf(name, target)
 		}
 		srcs[i] = src
+		// The rule's history in two places at once: its Loki queries
+		// beside the condition are asked of the Lokis they are on, each
+		// with an asker of its own, as the rule's own history has one.
+		sides := map[string]History{}
+		if ran[i].Unsupported == "" {
+			for _, uid := range ran[i].Graph.AsideUIDs() {
+				side, err := asideFor(h, ran[i], uid)
+				if err != nil {
+					ran[i].Unsupported = err.Error()
+					for j := range run {
+						if run[j].Unsupported == "" {
+							run[j].Unsupported = ran[i].Unsupported
+						}
+					}
+					break
+				}
+				sides[uid] = side
+			}
+		}
 		var reqs []request
+		byUID := map[string][]request{}
 		exprs := map[string]bool{}
 		for j, st := range run {
 			if st.Unsupported != "" {
 				break
 			}
 			lo, hi := st.span(step)
-			for _, r := range queries(st.Rule, lo, hi, step, st.warm(j)) {
-				reqs = append(reqs, r)
-				exprs[r.expr] = true
+			for uid, rs := range queries(st.Rule, lo, hi, step, st.warm(j)) {
+				if uid == "" {
+					reqs = append(reqs, rs...)
+					for _, r := range rs {
+						exprs[r.expr] = true
+					}
+				} else {
+					byUID[uid] = append(byUID[uid], rs...)
+				}
 			}
 		}
 		askers[i] = sh.expect(target, src, reqs)
+		weighed := len(reqs)
+		for _, uid := range slices.Sorted(maps.Keys(sides)) {
+			if askers[i].sides == nil {
+				askers[i].sides = map[string]*asker{}
+			}
+			askers[i].sides[uid] = sh.expect(sides[uid], sh.srcOf("grafana\x00"+uid, sides[uid]), byUID[uid])
+			weighed += len(byUID[uid])
+		}
 		asks[i] = strconv.Itoa(src) + "\x00" + strings.Join(slices.Sorted(maps.Keys(exprs)), "\x00")
-		weight[asks[i]] = max(weight[asks[i]], len(reqs))
+		weight[asks[i]] = max(weight[asks[i]], weighed)
 	}
 	// Rules that ask for the same queries go together, so they ask at about
 	// the same time and an answer isn't held long; those that ask the most
@@ -746,12 +796,13 @@ func warmup(g *rules.Graph, step time.Duration) time.Duration {
 }
 
 // queries lists what Condition asks for over [from, to], request by
-// request.
-func queries(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []request {
-	var out []request
+// request: by the Loki data source the queries beside the rule's condition
+// are asked of, "" for the history the rule is replayed against.
+func queries(r rules.Rule, from, to time.Time, step time.Duration, warm bool) map[string][]request {
+	out := map[string][]request{}
 	for _, a := range ranges(r, from, to, step, warm) {
 		if !a.reduce {
-			out = append(out, request{expr: a.expr, start: a.start.Unix(), end: a.end.Unix()})
+			out[a.side] = append(out[a.side], request{expr: a.expr, start: a.start.Unix(), end: a.end.Unix()})
 		}
 	}
 	return out
@@ -765,6 +816,9 @@ type askedRange struct {
 	start, end time.Time
 	step       time.Duration
 	reduce     bool
+	// side is the Loki data source a query beside the rule's condition is
+	// asked of, by uid; "" for the history the rule is replayed against.
+	side string
 }
 
 // ranges lists what Condition asks for over [from, to], range by range:
@@ -781,22 +835,28 @@ func ranges(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []a
 		return out
 	}
 	start := grafanaStart(r, from, step, warm)
+	done := map[string]bool{}
 	for _, ref := range asked(r.Graph, false) {
 		lag := max(r.Graph.Shift[ref], r.Late)
 		if a := r.Graph.Asks[ref]; a.Logs {
 			// By evaluation chunk, each a batch at a time, as Condition
-			// asks.
+			// asks; reduces of one query's points, one range.
+			if k := logSame(a, lag, r.Graph.Aside[ref]); done[k] {
+				continue
+			} else {
+				done[k] = true
+			}
 			res, _, _ := logGrid(a)
 			for _, c := range chunks(start, to, step) {
 				for _, b := range logBatches(a, c[0], c[1], step, lag) {
-					out = append(out, askedRange{expr: a.Expr, start: b.lo, end: b.hi, step: res, reduce: true})
+					out = append(out, askedRange{expr: a.Expr, start: b.lo, end: b.hi, step: res, reduce: true, side: r.Graph.Aside[ref]})
 				}
 			}
 			continue
 		}
 		expr, _ := r.Graph.Expr(ref, r.AskStep(ref))
 		for _, c := range chunks(start, to, step) {
-			out = append(out, askedRange{expr: expr, start: c[0].Add(-lag), end: c[1].Add(-lag), step: step})
+			out = append(out, askedRange{expr: expr, start: c[0].Add(-lag), end: c[1].Add(-lag), step: step, side: r.Graph.Aside[ref]})
 		}
 	}
 	return out
@@ -842,16 +902,32 @@ func shifted(ctx context.Context, h History, expr string, start, end time.Time, 
 // stretch, asked for once and reduced here: LogQL has no subqueries.
 // A series with no point in a window has no value there.
 func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, step, lag time.Duration) ([]prom.Series, error) {
-	res, down, up := logGrid(a)
+	got, err := logReduceMany(ctx, h, []rules.Ask{a}, from, to, step, lag)
+	if err != nil {
+		return nil, err
+	}
+	return got[0], nil
+}
+
+// logReduceMany is logReduce for several reduces of one query's points,
+// which share its requests: as asks must be of the same expression, window
+// and step (logSame), each is answered from the one range asked for. A
+// classic condition's reducer and its series' presence are two of them.
+func logReduceMany(ctx context.Context, h History, as []rules.Ask, from, to time.Time, step, lag time.Duration) ([][]prom.Series, error) {
+	a0 := as[0]
+	res, down, up := logGrid(a0)
 	type kept struct {
 		labels  map[string]string
 		samples []prom.Sample
 	}
-	byKey := map[string]*kept{}
-	var keys []string
-	for _, b := range logBatches(a, from, to, step, lag) {
+	byKey := make([]map[string]*kept, len(as))
+	keys := make([][]string, len(as))
+	for i := range as {
+		byKey[i] = map[string]*kept{}
+	}
+	for _, b := range logBatches(a0, from, to, step, lag) {
 		first, last := b.first, b.last
-		got, err := h.QueryRange(ctx, a.Expr, b.lo, b.hi, res)
+		got, err := h.QueryRange(ctx, a0.Expr, b.lo, b.hi, res)
 		if err != nil {
 			return nil, err
 		}
@@ -859,7 +935,7 @@ func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, 
 			smp := s.Samples
 			k := key(s.Labels)
 			for at := first; !at.After(last); at = at.Add(step) {
-				lo, hi := down(at.Add(-lag-a.Window)), up(at.Add(-lag))
+				lo, hi := down(at.Add(-lag-a0.Window)), up(at.Add(-lag))
 				i := sort.Search(len(smp), func(i int) bool { return !smp[i].T.Before(lo) })
 				var vs []float64
 				for ; i < len(smp) && !smp[i].T.After(hi); i++ {
@@ -868,19 +944,45 @@ func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, 
 				if len(vs) == 0 {
 					continue
 				}
-				if byKey[k] == nil {
-					byKey[k] = &kept{labels: s.Labels}
-					keys = append(keys, k)
+				for n, a := range as {
+					v, ok := logReduced(a, vs)
+					if !ok {
+						continue
+					}
+					if byKey[n][k] == nil {
+						byKey[n][k] = &kept{labels: s.Labels}
+						keys[n] = append(keys[n], k)
+					}
+					byKey[n][k].samples = append(byKey[n][k].samples, prom.Sample{T: at, V: v})
 				}
-				byKey[k].samples = append(byKey[k].samples, prom.Sample{T: at, V: reduce(a.Fn, vs)})
 			}
 		}
 	}
-	out := make([]prom.Series, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, prom.Series{Labels: byKey[k].labels, Samples: byKey[k].samples})
+	out := make([][]prom.Series, len(as))
+	for n := range as {
+		out[n] = make([]prom.Series, 0, len(keys[n]))
+		for _, k := range keys[n] {
+			out[n] = append(out[n], prom.Series{Labels: byKey[n][k].labels, Samples: byKey[n][k].samples})
+		}
 	}
 	return out, nil
+}
+
+// logReduced is a window's points reduced as a: by Grafana's reduce
+// expression, or, for a classic condition's ask, by its reducer
+// (rules.ClassicReduce), which finds none in a series of NaN alone.
+func logReduced(a rules.Ask, vs []float64) (float64, bool) {
+	if a.Classic {
+		return rules.ClassicReduce(a.Fn, vs)
+	}
+	return reduce(a.Fn, vs), true
+}
+
+// logSame is the key of the LogQL asks that read the same points of one
+// query: its expression, window and step, how long before the evaluation
+// the window ends, and the Loki it is asked of (side, "" for the rule's).
+func logSame(a rules.Ask, lag time.Duration, side string) string {
+	return fmt.Sprintf("%s\x00%d\x00%d\x00%d\x00%s", a.Expr, a.Window, a.Res, lag, side)
 }
 
 // logGrid is the step a LogQL reduce's range is asked at, and the times on
@@ -961,6 +1063,7 @@ func Condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 // states. Without warm, a Grafana rule's alerts start afresh at from, as
 // Grafana starts them when the rule changes.
 func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration, values, warm bool) ([]prom.Series, error) {
+	both := h
 	h, err := historyFor(h, r)
 	if err != nil {
 		return nil, err
@@ -999,6 +1102,24 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 	}
 	g := r.Graph
 	refs := asked(g, values)
+	// The rule's history in two places at once: a query beside its
+	// condition, on a Loki, is asked of that Loki.
+	sides := map[string]History{}
+	for _, ref := range refs {
+		if uid := g.Aside[ref]; uid != "" && sides[uid] == nil {
+			side, err := asideFor(both, r, uid)
+			if err != nil {
+				return nil, err
+			}
+			sides[uid] = side
+		}
+	}
+	historyOf := func(ref string) History {
+		if side := sides[g.Aside[ref]]; side != nil {
+			return side
+		}
+		return h
+	}
 	under := map[string]bool{}
 	for _, ref := range queriesUnder(g, g.Cond) {
 		under[ref] = true
@@ -1034,16 +1155,41 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 		answers := make([][]prom.Series, len(refs))
 		errs := make([]error, len(refs))
 		var wg sync.WaitGroup
+		// LogQL reduces of one query's points are answered from one range:
+		// the first of each such group asks for all.
+		sameLogs := map[string][]int{}
+		for i, ref := range refs {
+			if a := g.Asks[ref]; a.Logs {
+				k := logSame(a, max(g.Shift[ref], r.Late), g.Aside[ref])
+				sameLogs[k] = append(sameLogs[k], i)
+			}
+		}
 		for i, ref := range refs {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				if a := g.Asks[ref]; a.Logs {
-					answers[i], errs[i] = logReduce(ctx, h, a, c[0], c[1], step, max(g.Shift[ref], r.Late))
+					lag := max(g.Shift[ref], r.Late)
+					group := sameLogs[logSame(a, lag, g.Aside[ref])]
+					if group[0] != i {
+						return
+					}
+					as := make([]rules.Ask, len(group))
+					for n, j := range group {
+						as[n] = g.Asks[refs[j]]
+					}
+					got, err := logReduceMany(ctx, historyOf(ref), as, c[0], c[1], step, lag)
+					for n, j := range group {
+						if err != nil {
+							errs[j] = err
+						} else {
+							answers[j] = got[n]
+						}
+					}
 					return
 				}
 				expr, _ := g.Expr(ref, r.AskStep(ref))
-				answers[i], errs[i] = shifted(ctx, h, expr, c[0], c[1], step, max(g.Shift[ref], r.Late))
+				answers[i], errs[i] = shifted(ctx, historyOf(ref), expr, c[0], c[1], step, max(g.Shift[ref], r.Late))
 			}()
 		}
 		wg.Wait()
@@ -1059,7 +1205,9 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 			case err == nil:
 			case under[refs[i]] || ctx.Err() != nil:
 				return nil, err
-			case errors.As(err, &api) && api.Status == http.StatusBadRequest:
+			case errors.As(err, &api) && api.Status == http.StatusBadRequest && g.Aside[refs[i]] == "":
+				// (A Loki query beside the condition that is refused is an
+				// error to Grafana, not no data: not known.)
 				refused[refs[i]] = true
 			default:
 				unasked[refs[i]] = true
@@ -1165,7 +1313,7 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 				}
 				continue
 			}
-			noData, unknown, err := known.noData(ctx, h, r, data, unasked, refused, at)
+			noData, unknown, err := known.noData(ctx, historyOf, r, data, unasked, refused, at)
 			if err != nil {
 				return nil, err
 			}
@@ -1203,7 +1351,7 @@ type dataSeen struct {
 // data source than the one read), and Grafana's NoData can't be told from
 // it. unknown says such a query returned nothing. A question about the day
 // before that fails fails the replay, as a query does.
-func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, failed, refused map[string]bool, at time.Time) (out []map[string]string, unknown bool, err error) {
+func (k *dataSeen) noData(ctx context.Context, historyOf func(string) History, r rules.Rule, data map[string]map[int64]sse.Set, failed, refused map[string]bool, at time.Time) (out []map[string]string, unknown bool, err error) {
 	g := r.Graph
 	t := at.Unix()
 	byUID := map[string][]string{}
@@ -1223,7 +1371,7 @@ func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map
 		}
 		if !k.seen[ref] && !k.probed[ref] {
 			k.probed[ref] = true
-			if k.seen[ref], err = before(ctx, h, r, ref, at); err != nil {
+			if k.seen[ref], err = before(ctx, historyOf(d.Present), r, ref, at); err != nil {
 				return nil, false, err
 			}
 		}
@@ -1295,7 +1443,8 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 	when := at.Add(-max(r.Graph.Shift[ref], r.Late))
 	q := probe(expr, ProbeStep(r))
 	from := when
-	if r.Logs != "" {
+	logs := r.Logs != "" || r.Graph.Aside[ref] != ""
+	if logs {
 		// LogQL has no subqueries: the query itself, over the day, at the
 		// probe's step, is asked whether it returned anything.
 		q, from = expr, when.Add(-24*time.Hour)
@@ -1312,7 +1461,7 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 	var series []prom.Series
 	var err error
 	pstep := time.Minute
-	if r.Logs != "" {
+	if logs {
 		pstep = ProbeStep(r)
 	}
 	if a, ok := h.(*asker); ok {
@@ -1323,7 +1472,7 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 	if err != nil {
 		return false, err
 	}
-	if r.Logs != "" {
+	if logs {
 		// The last time the query returned anything, as the probe's
 		// answer would be for PromQL.
 		var last time.Time

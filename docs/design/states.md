@@ -215,6 +215,10 @@ rule's replay ("query failed"), rather than reading as no data.
 An instant query's value is compared as it is; Grafana passes the reducer
 over.
 
+Over Loki, which has no subqueries, the reducers are worked out in Go from
+the points of the range query, as Grafana's are (`rules.ClassicReduce`):
+[loki.md](loki.md), section 2.
+
 What it costs: two or three subqueries for each condition, at Grafana's
 resolution only where points are counted (`count`, `count_non_null`, `sum`,
 and the percent diffs' count), as before; the rest at the scrape interval or
@@ -549,6 +553,8 @@ again on Grafana 13.3.1 (`TestRealGrafanaScraped`, `TestRealGrafanaChange`):
   not known, which doesn't fail the rule and is said. A query on another
   data source isn't asked, nor an expression over it: the rule is replayed
   in part, as whenever that returns nothing Grafana takes it as no data.
+  A Loki one is asked since, through Grafana's data source proxy, and the
+  rule is replayed whole ([loki.md](loki.md), section 2).
 - **F7. Any edit started a rule's alerts afresh**, its annotations too:
   Grafana carried a firing alert across an edit to what the rule says,
   where the replay split it with a gap. Grafana starts afresh only on what

@@ -219,9 +219,12 @@ func TestRealLoki(t *testing.T) {
 // instant query, with NoData, OK and KeepLast; range queries reduced by
 // last, max, mean, sum, count and min, at Grafana's step for each (1s,
 // 3s, a query's own 10s with $__auto); a math expression over two
-// queries; a for; series by level that come and go. A classic condition
-// over Loki, a condition reading Prometheus and Loki together and one
-// reading a MySQL data source are listed, not replayed. Each firing alike,
+// queries; a for; series by level that come and go; classic conditions over
+// Loki, each reducer of them, a range and no_value, and conditions joined by
+// and, or and logic-or; a condition on Prometheus with a Loki query beside
+// it, instant and range, asked through the proxy too. A condition reading
+// Prometheus and Loki together and one reading a MySQL data source are
+// listed, not replayed. Each firing alike,
 // starting and ending at the same evaluation.
 func TestRealLokiGrafana(t *testing.T) {
 	c := logsCase{realCase{dir: "grafana-13.3.1-loki", series: `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`,
@@ -278,7 +281,7 @@ func TestRealLokiGrafana(t *testing.T) {
 	c.save(t, rec)
 	c.saveLogs(t, logs)
 	listed := map[string]string{
-		"LkClassic": "classic conditions over a Loki query", "LkMixed": "Prometheus and Loki together", "LkSQL": "a mysql data source",
+		"LkMixed": "Prometheus and Loki together", "LkSQL": "a mysql data source",
 	}
 	for _, r := range ran {
 		want := listed[r.Name]

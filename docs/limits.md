@@ -51,7 +51,9 @@
   judged by the wrong history. Replay each data source's rules in a run of
   their own, against its Prometheus (`--rule` picks them by name).
 - A Grafana rule's query on another data source than its condition's (a
-  Loki query whose values an annotation shows) isn't replayed: when it
+  SQL query whose values an annotation shows; a Loki query too when it is a
+  log query, or Lapilli has no way to that Loki: a Loki one is otherwise
+  asked, through Grafana's data source proxy) isn't replayed: when it
   returns nothing, Grafana takes the rule as having no data, which the
   replay can't see, and the rule is marked "replayed in part".
 - Replays see the history as it is now. `--late DUR` replays as if metrics

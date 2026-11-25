@@ -569,3 +569,61 @@ func TestBacktestGrafanaProbePoints(t *testing.T) {
 		}
 	}
 }
+
+// A rule in effect whose condition reads Prometheus with a Loki query beside
+// it asks that Loki too, as a Loki data source is asked; so a pull request's
+// rule is taken on it, and not as PromQL.
+func TestBacktestReadsAsideLoki(t *testing.T) {
+	parallel(t)
+	beside := "apiVersion: 1\ngroups:\n  - orgId: 1\n    name: g2\n    folder: f\n    interval: 1m\n    rules:\n" +
+		gRule("b1", "Beside", "A", gQuery("A", "prom-b", `{expr: 'errors > 5', instant: true, datasource: {type: prometheus}}`),
+			gRange("L", "loki-b", 300, 0, `{expr: 'sum(count_over_time({app="checkout"}[5m]))', queryType: instant, datasource: {type: loki}}`))
+	b, _, _ := btGrafana(t, false, func(c *Config) {
+		os.WriteFile(filepath.Join(c.RulesPath, "beside.yaml"), []byte(beside), 0o644)
+	})
+	e, err := b.s.readsInEffect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.promql["prom-b"] || !e.logql["loki-b"] || e.promql["loki-b"] || e.logql["prom-b"] {
+		t.Fatalf("%+v", e)
+	}
+	rs, err := rules.Parse([]byte(strings.Replace(beside, "uid: b1", "uid: b2", 1)))
+	if err != nil || len(rs) != 1 {
+		t.Fatal(err, rs)
+	}
+	if why := taken(rs[0], e); why != "" {
+		t.Errorf("taken: %s", why)
+	}
+	// Not where it is asked as PromQL, nor where no rule in effect asks it.
+	e.logql["loki-b"] = false
+	if why := taken(rs[0], e); why == "" {
+		t.Error("a Loki no rule in effect asks was taken")
+	}
+	e.logql["loki-b"], e.promql["loki-b"] = true, false
+	if why := taken(rs[0], e); why != "" {
+		t.Errorf("taken: %s", why)
+	}
+}
+
+// A pull request's Grafana rule whose condition reads a data source in effect,
+// with a Loki query beside it on another in effect, is replayed whole: the
+// Loki query is held to what LogQL is held to, and asked of the Loki.
+func TestBacktestAsideTaken(t *testing.T) {
+	parallel(t)
+	b, _, logs := btGrafana(t, false, nil)
+	logs.Lock()
+	logs.asked = nil
+	logs.Unlock()
+	rule := gRule("p1", "Beside", "A", gRange("A", "prom-a", 600, 0, `{expr: 'errors', instant: true, datasource: {type: prometheus}}`),
+		gRange("L", "loki-a", 300, 0, `{expr: 'sum(count_over_time({app="checkout"}[5m]))', queryType: instant, datasource: {type: loki}}`))
+	_, rep := b.done(t, b.github(nil), btAdding(added("grafana.yaml", prGrafana(rule), false)))
+	if sum, _ := rep["summary"].(map[string]any); sum == nil || sum["added"] != float64(1) || sum["unreplayed"] != float64(0) {
+		t.Errorf("%v", rep["summary"])
+	}
+	logs.Lock()
+	if !slices.ContainsFunc(logs.asked, func(e string) bool { return strings.Contains(e, `{app="checkout"}[5m]`) }) {
+		t.Errorf("Loki asked %q", logs.asked)
+	}
+	logs.Unlock()
+}
