@@ -329,6 +329,10 @@ func grafanaTitlesTwice(data []byte) map[string]bool {
 // the git path: a Prometheus rule file Lapilli read under --rules, not an
 // API's answer, a Loki ruler's or a Grafana provisioning file.
 func (s *Server) gitPlace(r rules.Rule, d rules.Doc) bool {
+	// With --grafana or --ruler the rules in effect are read from that API
+	// (readRules takes the first of Grafana, --ruler, a followed history,
+	// --rules): a file under --rules isn't read, and isn't what runs, so a
+	// rule added to it would be in none.
 	if s.cfg.RulesPath == "" || s.cfg.Grafana != "" || s.ruler != nil || d.API || len(d.Data) == 0 || d.Logs != "" || d.Namespace != "" ||
 		r.Cloud != "" || r.UID != "" || r.Graph != nil || !r.Prometheus || r.Group == "" {
 		return false
@@ -347,6 +351,12 @@ func (s *Server) gitPlace(r rules.Rule, d rules.Doc) bool {
 // Prometheus rule file's: no recipe finds it, not being a document Lapilli
 // read (docs/design/expectations.md).
 func (s *Server) lokiFilePlace(r rules.Rule, d rules.Doc) bool {
+	// The same reason as gitPlace's holds for --loki-loaded-rules: Loki's
+	// rules in effect are then read from its API, and --loki-rules isn't
+	// read (extras), so its files aren't what Loki runs. It doesn't hold for
+	// --grafana and --ruler: they stand in for --rules, the Prometheus
+	// rules, and Loki's files are read beside them whatever they are, and
+	// are Loki's own.
 	if s.cfg.LokiRules == "" || s.cfg.LokiLoaded || d.Logs != rules.LokiFile || d.API || len(d.Data) == 0 || d.Namespace != "" ||
 		r.Cloud != "" || r.UID != "" || r.Graph != nil || r.Logs != rules.LokiRuler || r.Group == "" {
 		return false

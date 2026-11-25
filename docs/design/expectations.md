@@ -922,7 +922,7 @@ Step 5, adding a rule, as built:
   either. A Loki rule file read with `--loki-rules` is a place the same
   way (its groups, and a new group, named with `loki` on the place, so
   that it isn't the Prometheus file of the same path; its rule LogQL, and
-  no `keep_firing_for`, which Loki drops from a file), and so are the
+  no `keep_firing_for`, which Loki drops from a file; not with `--loki-loaded-rules`, which replaces the files as Loki's rules in effect, as `--grafana` and `--ruler` replace `--rules`, but beside `--grafana` and `--ruler`, which don't touch Loki's files), and so are the
   groups of a Loki ruler's namespace `--changes-in` names as
   `loki:NAMESPACE`, its path `loki` (v0.72.0). Grafana: a group of a folder whose rules
   Lapilli replays as PromQL, its query one of the data sources they read;

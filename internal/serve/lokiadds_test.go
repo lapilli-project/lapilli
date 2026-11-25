@@ -181,3 +181,54 @@ func TestAddInLokiFile(t *testing.T) {
 		t.Fatalf("the undo: %s %q", u.State, u.Reason)
 	}
 }
+
+// A Loki rule file is a place only while Loki's rules in effect are its
+// files: with --loki-loaded-rules they are read from its API and the files
+// aren't what Loki runs, so none is offered (as gitPlace's lock with
+// --grafana and --ruler, which replace --rules). --grafana and --ruler
+// don't touch Loki's files: they stay a place beside them.
+func TestLokiFilePlaceLocks(t *testing.T) {
+	parallel(t)
+	s, _ := lokiFilesServer(t)
+	rs, docs, err := s.readRules(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r rules.Rule
+	var d rules.Doc
+	for _, x := range rs {
+		if x.Name == "CheckoutLogErrors" {
+			r, d = x, docOf(x, docs)
+		}
+	}
+	if !s.lokiFilePlace(r, d) {
+		t.Fatal("a Loki rule file isn't a place")
+	}
+	s.cfg.LokiLoaded = true
+	if s.lokiFilePlace(r, d) {
+		t.Error("a Loki rule file is a place with --loki-loaded-rules")
+	}
+	s.cfg.LokiLoaded = false
+	s.cfg.Grafana = "http://grafana.example"
+	if !s.lokiFilePlace(r, d) {
+		t.Error("--grafana takes a Loki rule file's place away")
+	}
+}
+
+// With --ruler, a Loki rule file is still a place, and the Mimir's group
+// beside it.
+func TestLokiFilePlaceBesideRuler(t *testing.T) {
+	parallel(t)
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	dir := t.TempDir()
+	os.WriteFile(dir+"/logs.yaml", []byte(lokiFile), 0o644)
+	s := mimirServer(t, m, func(c *Config) { c.Loki, c.LokiRules = "http://loki:3100", dir })
+	var file, ruler bool
+	for _, o := range mustPlaces(t, s) {
+		file = file || o.Path == ledger.PathGit && o.Loki
+		ruler = ruler || o.Path == ledger.PathRuler
+	}
+	if !file || !ruler {
+		t.Errorf("a Loki file place %v, a ruler place %v", file, ruler)
+	}
+}
