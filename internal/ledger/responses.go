@@ -33,6 +33,21 @@ const ResponsesFile = "file"
 // changed has the firings that started this long before it judged again.
 const ResponseReach = 14 * 24 * time.Hour
 
+// Bounds on the pages kept, as the firings PUT's (MaxSources, MaxRecordedPeriod,
+// skew): a source may be written a period of 31 days at a time, pages sent
+// more than an hour ahead of this clock are refused, and every judge and
+// view reads the pages of a firing's rule and time only, so a token's writes
+// can't make them read more than these allow. Variables, so tests can make
+// them small.
+var (
+	// maxSourcePages is how many pages one source keeps (the firings'
+	// maxSourceSeries): 500 000, a page of an incident a minute for a year.
+	maxSourcePages = 500_000
+	// maxWeekPages is how many pages sent in one ledger week all sources
+	// keep: 200 000, 20 000 a day for each of 10 busy sources.
+	maxWeekPages = 200_000
+)
+
 // PutResponsesResult is what a write of pages changed.
 type PutResponsesResult struct {
 	// Pages are those the write held, and Added, Changed and Removed how
@@ -79,6 +94,20 @@ func (l *Ledger) SyncResponses(ctx context.Context, source, sum string, pages []
 // as PUT /api/v1/responses/SOURCE does; the pages it has from other times
 // stay. A page given must have been sent in the period.
 func (l *Ledger) PutResponses(ctx context.Context, source string, from, to time.Time, pages []response.Page, o verdict.Options) (PutResponsesResult, error) {
+	switch {
+	case !ValidSource(source):
+		return PutResponsesResult{}, invalid("a source is lowercase letters, digits and dashes, 40 at most, such as pagerduty-prod")
+	case from.IsZero() || to.IsZero():
+		return PutResponsesResult{}, invalid("say which period the pages were sent in: from and to, as RFC 3339 times")
+	case !to.After(from):
+		return PutResponsesResult{}, invalid("to must be after from")
+	case to.Sub(from) > MaxRecordedPeriod:
+		return PutResponsesResult{}, invalid("a period is 31 days at most")
+	case !sane(from) || !sane(to):
+		return PutResponsesResult{}, invalid("a period is from 1970 to 9999")
+	case from.After(time.Now().Add(skew)):
+		return PutResponsesResult{}, invalid("a period can't start in the future")
+	}
 	for _, p := range pages {
 		if p.Sent.Before(from) || !p.Sent.Before(to) {
 			return PutResponsesResult{}, invalid("page %s was sent %s, outside the period from %s to %s: send the pages sent in it", p.ID,
@@ -90,9 +119,22 @@ func (l *Ledger) PutResponses(ctx context.Context, source string, from, to time.
 
 func (l *Ledger) putResponses(ctx context.Context, source, sum string, span *[2]int64, pages []response.Page, o verdict.Options) (PutResponsesResult, error) {
 	res := PutResponsesResult{Pages: len(pages)}
+	if len(pages) > response.MaxPages {
+		return res, invalid("one write holds %d pages at most: send a shorter period", response.MaxPages)
+	}
+	ahead := time.Now().Add(skew).Unix()
 	want := make(map[string]pageRow, len(pages))
+	rulesOf := make(map[string][]string, len(pages))
 	for _, p := range pages {
+		if p.Sent.Unix() > ahead || !sane(p.Sent) {
+			return res, invalid("page %s was sent %s: a page is sent from 1970 until an hour from now", p.ID, p.Sent.UTC().Format(time.RFC3339))
+		}
 		want[p.ID] = pageRowOf(p)
+		for _, a := range p.Alerts {
+			if !slices.Contains(rulesOf[p.ID], a.Rule) {
+				rulesOf[p.ID] = append(rulesOf[p.ID], a.Rule)
+			}
+		}
 	}
 	var spans [][2]int64
 	err := l.write(ctx, func(t *txn) error {
@@ -160,11 +202,25 @@ func (l *Ledger) putResponses(ctx context.Context, source, sum string, span *[2]
 			return err
 		}
 		defer del.Close()
+		delRules, err := t.PrepareContext(t.ctx, "DELETE FROM response_rules WHERE source = ? AND id = ?")
+		if err != nil {
+			return err
+		}
+		defer delRules.Close()
+		putRule, err := t.PrepareContext(t.ctx, "INSERT INTO response_rules (rule, sent_at, source, id) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
+		if err != nil {
+			return err
+		}
+		defer putRule.Close()
+		var weeks []int64
 		for _, id := range slices.Sorted(maps.Keys(have)) {
 			if _, ok := want[id]; ok {
 				continue
 			}
 			if _, err := del.ExecContext(t.ctx, source, id); err != nil {
+				return err
+			}
+			if _, err := delRules.ExecContext(t.ctx, source, id); err != nil {
 				return err
 			}
 			mark(have[id].sent)
@@ -193,6 +249,17 @@ func (l *Ledger) putResponses(ctx context.Context, source, sum string, span *[2]
 			if _, err := up.ExecContext(t.ctx, source, id, w.sent, ack, rs, w.resBy, w.alerts); err != nil {
 				return err
 			}
+			if _, err := delRules.ExecContext(t.ctx, source, id); err != nil {
+				return err
+			}
+			for _, rule := range rulesOf[id] {
+				if _, err := putRule.ExecContext(t.ctx, rule, w.sent, source, id); err != nil {
+					return err
+				}
+			}
+			if wk := Week(l.day(w.sent)); !slices.Contains(weeks, wk) {
+				weeks = append(weeks, wk)
+			}
 			mark(w.sent)
 			if ok {
 				mark(h.sent)
@@ -209,6 +276,9 @@ func (l *Ledger) putResponses(ctx context.Context, source, sum string, span *[2]
 		if !res.Differs() {
 			return nil
 		}
+		if err := l.boundResponses(t, source, weeks); err != nil {
+			return err
+		}
 		return pend(t, near(slices.Clone(spans)))
 	})
 	if err != nil {
@@ -218,6 +288,44 @@ func (l *Ledger) putResponses(ctx context.Context, source, sum string, span *[2]
 		l.judgeSoon(ctx, o)
 	}
 	return res, nil
+}
+
+// boundResponses holds what a write left to the bounds: the sources there are
+// (a new one counts), the pages of the source, and the pages sent in each
+// week the write put a page in. The write is rolled back if it is over.
+func (l *Ledger) boundResponses(t *txn, source string, weeks []int64) error {
+	var known bool
+	if err := t.QueryRowContext(t.ctx, "SELECT EXISTS (SELECT 1 FROM response_sources WHERE source = ?)", source).Scan(&known); err != nil {
+		return err
+	}
+	if !known {
+		var n int
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM response_sources").Scan(&n); err != nil {
+			return err
+		}
+		if n >= MaxSources {
+			return invalid("the ledger keeps pages of %d sources at most", MaxSources)
+		}
+		if _, err := t.ExecContext(t.ctx, "INSERT INTO response_sources (source) VALUES (?) ON CONFLICT DO NOTHING", source); err != nil {
+			return err
+		}
+	}
+	var n int
+	if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM responses WHERE source = ?", source).Scan(&n); err != nil {
+		return err
+	}
+	if n > maxSourcePages {
+		return invalid("a source keeps %d pages at most", maxSourcePages)
+	}
+	for _, w := range weeks {
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM responses WHERE sent_at >= ? AND sent_at < ?", l.midnight(w), l.midnight(w+7)).Scan(&n); err != nil {
+			return err
+		}
+		if n > maxWeekPages {
+			return invalid("%d pages or more were sent in one week: a week keeps %d at most", n, maxWeekPages)
+		}
+	}
+	return nil
 }
 
 // ResponsesUnchanged reports whether a source's pages were last read from
@@ -237,20 +345,25 @@ func (l *Ledger) ResponsePages(ctx context.Context, from, to time.Time) ([]respo
 }
 
 // pagesBetween are the pages sent in [lo, hi], in order of their sent time
-// then their id.
+// then their id, as ResponsePages gives them: for tests and pages that
+// list them.
 func (l *Ledger) pagesBetween(ctx context.Context, q queryer, lo, hi int64) ([]response.Page, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, sent_at, acknowledged_at, resolved_at, resolved_by, alerts FROM responses
+	rows, err := q.QueryContext(ctx, `SELECT source, id, sent_at, acknowledged_at, resolved_at, resolved_by, alerts FROM responses
 		WHERE sent_at >= ? AND sent_at <= ? ORDER BY sent_at, id, source`, lo, hi)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanPages(rows)
+}
+
+func scanPages(rows *sql.Rows) ([]response.Page, error) {
 	var out []response.Page
 	for rows.Next() {
-		var id string
+		var source, id string
 		var r pageRow
 		var ack, rs sql.NullInt64
-		if err := rows.Scan(&id, &r.sent, &ack, &rs, &r.resBy, &r.alerts); err != nil {
+		if err := rows.Scan(&source, &id, &r.sent, &ack, &rs, &r.resBy, &r.alerts); err != nil {
 			return nil, err
 		}
 		r.ack, r.res = ack.Int64, rs.Int64
@@ -258,9 +371,50 @@ func (l *Ledger) pagesBetween(ctx context.Context, q queryer, lo, hi int64) ([]r
 		if err != nil {
 			return nil, err
 		}
+		p.Source = source
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// pagesOfRules are the pages that name one of the rules and were sent in
+// [lo, hi], in order of their sent time then source and id: what judging
+// firings of those rules reads, in place of every page sent in the span.
+func (l *Ledger) pagesOfRules(ctx context.Context, q queryer, rules []string, lo, hi int64) ([]response.Page, error) {
+	var out []response.Page
+	seen := map[[2]string]bool{}
+	for len(rules) > 0 {
+		part := rules[:min(len(rules), pgRows)]
+		rules = rules[len(part):]
+		b, _ := json.Marshal(part)
+		rows, err := q.QueryContext(ctx, `SELECT DISTINCT p.source, p.id, p.sent_at, p.acknowledged_at, p.resolved_at, p.resolved_by, p.alerts
+			FROM response_rules x JOIN responses p ON p.source = x.source AND p.id = x.id
+			WHERE x.rule IN (`+l.d.texts("?")+`) AND x.sent_at >= ? AND x.sent_at <= ?`, string(b), lo, hi)
+		if err != nil {
+			return nil, err
+		}
+		got, err := scanPages(rows)
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range got {
+			if k := [2]string{p.Source, p.ID}; !seen[k] {
+				seen[k] = true
+				out = append(out, p)
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b response.Page) int {
+		if c := a.Sent.Compare(b.Sent); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.ID, b.ID); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Source, b.Source)
+	})
+	return out, nil
 }
 
 // ResponseInputs says what the ledger keeps to find responses from: pages,
@@ -500,7 +654,11 @@ func (l *Ledger) newResponder(ctx context.Context, q queryer, rx interface {
 	lo, hi := fs[0].Start, time.Time{}
 	var maxWithin time.Duration
 	pods := map[string]bool{}
+	names := map[string]bool{}
 	for _, f := range fs {
+		for _, n := range response.RuleNames(f.Rule) {
+			names[n] = true
+		}
 		if f.Start.Before(lo) {
 			lo = f.Start
 		}
@@ -521,7 +679,7 @@ func (l *Ledger) newResponder(ctx context.Context, q queryer, rx interface {
 		}
 	}
 	if r.in.Pages {
-		pages, err := l.pagesBetween(ctx, q, lo.Unix(), hi.Add(maxWithin).Unix())
+		pages, err := l.pagesOfRules(ctx, q, slices.Sorted(maps.Keys(names)), lo.Unix(), hi.Add(maxWithin).Unix())
 		if err != nil {
 			return nil, err
 		}

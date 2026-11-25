@@ -158,7 +158,7 @@ func TestRespond(t *testing.T) {
 	// firing it answers is acknowledged, and judged again.
 	more := slices.Clone(pages)
 	more[1] = page("P2", "R", "unanswered", at.Add(time.Minute), at.Add(2*time.Minute), at.Add(3*time.Minute), response.ByPerson)
-	got2, err := l.PutResponses(ctx, "pagerduty", at, at.Add(time.Hour), more[1:2], o)
+	got2, err := l.PutResponses(ctx, "aaa-pd", at, at.Add(time.Hour), more[1:2], o)
 	if err != nil || got2.Added != 1 {
 		t.Fatalf("PutResponses: %+v %v", got2, err)
 	}
@@ -173,11 +173,11 @@ func TestRespond(t *testing.T) {
 		t.Errorf("after the page changed: %+v", k)
 	}
 	// A page sent outside its period is refused.
-	if _, err := l.PutResponses(ctx, "pagerduty", at, at.Add(time.Minute), more[2:3], o); err == nil {
+	if _, err := l.PutResponses(ctx, "aaa-pd", at, at.Add(time.Minute), more[2:3], o); err == nil {
 		t.Error("a page sent outside the period was taken")
 	}
 	// Replaced by span: the source's page in the span that isn't sent again goes.
-	got3, err := l.PutResponses(ctx, "pagerduty", at, at.Add(time.Hour), nil, o)
+	got3, err := l.PutResponses(ctx, "aaa-pd", at, at.Add(time.Hour), nil, o)
 	if err != nil || got3.Removed != 1 {
 		t.Errorf("replacing the span with none: %+v %v", got3, err)
 	}

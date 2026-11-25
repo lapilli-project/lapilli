@@ -172,16 +172,18 @@ type Config struct {
 	IncidentsListen string
 	IncidentsToken  string
 	FiringsToken    string
-	// ResponsesToken lets a job send what a paging tool says of the pages
+	// ResponsesTokens let jobs send what a paging tool says of the pages
 	// sent in a period on the same port, PUT /api/v1/responses/SOURCE
-	// (docs/design/responses.md); Responses is the file --responses reads
+	// (docs/design/responses.md), each source with the token in its file,
+	// by source name: a token writes its source's pages and no other's.
+	// Responses is the file --responses reads
 	// again each run, Rollouts says --rollouts reads the changes made to
 	// the alerts' workloads from the history, RolloutMatch the labels
 	// --rollout-match names.
-	ResponsesToken string
-	Responses      string
-	Rollouts       bool
-	RolloutMatch   []string
+	ResponsesTokens map[string]string
+	Responses       string
+	Rollouts        bool
+	RolloutMatch    []string
 	// TasksToken lets a job keep tasks in step with a tracker on the same
 	// port: read them, and set their link and status (docs/design/trackers.md).
 	TasksToken string
@@ -1291,7 +1293,14 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	// with how far from its firing a page may have been sent
 	// (docs/design/responses.md).
 	o.ResponseStep, o.RolloutMatch = s.cfg.Step, s.cfg.RolloutMatch
-	if s.responsesOn() {
+	// A ledger that holds pages or changes read from the history is read
+	// for them whatever this run is given: they were written by a token or
+	// an earlier run.
+	in, err := s.l.ResponseInputs(ctx)
+	if err != nil {
+		return o, err
+	}
+	if s.responsesOn() || in.Pages || in.Rollouts {
 		if o.Within, err = s.within(ctx); err != nil {
 			return o, err
 		}

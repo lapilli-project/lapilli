@@ -273,13 +273,13 @@ func TestChartResponses(t *testing.T) {
 			}
 		}
 	}
-	vals := slices.Concat(serveValues, []string{"--set", "serve.responses.tokenSecret.name=lapilli-responses", "--set", "serve.responses.configMap.name=pages",
+	vals := slices.Concat(serveValues, []string{"--set", "serve.responses.tokenSecrets.pagerduty-prod.name=lapilli-responses", "--set", "serve.responses.configMap.name=pages",
 		"--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy", "--set", "serve.incidentsAPI.from[0].podSelector.matchLabels.app=job",
 		"--set", "serve.userHeader=X-Forwarded-Email",
 		"--set", "rollouts=true", "--set", "rolloutMatch={service,app}", "--set", "routine=0.7", "--set", "noisyBy=useful"})
 	m, _ = render(t, vals...)
 	got := args(m)
-	for _, want := range []string{"--responses-token-file=/var/run/lapilli/responses-token/token", "--responses=/etc/lapilli/responses/responses.yaml", "--rollouts",
+	for _, want := range []string{"--responses-token-file=pagerduty-prod=/var/run/lapilli/responses-token/pagerduty-prod/token", "--responses=/etc/lapilli/responses/responses.yaml", "--rollouts",
 		"--rollout-match=service", "--rollout-match=app", "--routine=0.7", "--noisy-by=useful", "--incidents-listen=:8082"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("no %s in %v", want, got)
@@ -289,8 +289,23 @@ func TestChartResponses(t *testing.T) {
 	if out, err := helmTemplate(t, slices.Concat(vals, []string{"--set", "serve.incidentsAPI.tokenSecret.name=lapilli-responses"})...); err == nil || !strings.Contains(out, "another port's token") {
 		t.Errorf("the incidents token as the responses token: %v\n%s", err, out)
 	}
+	// A token for each source, and no two the same Secret and key.
+	if out, err := helmTemplate(t, slices.Concat(vals, []string{"--set", "serve.responses.tokenSecrets.ops.name=lapilli-responses"})...); err == nil || !strings.Contains(out, "give each source its own") {
+		t.Errorf("one token for two sources: %v\n%s", err, out)
+	}
+	if out, err := helmTemplate(t, slices.Concat(vals, []string{"--set", "serve.responses.tokenSecrets.file.name=other"})...); err == nil || !strings.Contains(out, "owns its pages") {
+		t.Errorf("a token for the file's source: %v\n%s", err, out)
+	}
+	two := slices.Concat(vals, []string{"--set", "serve.responses.tokenSecrets.ops.name=lapilli-ops"})
+	if m2, _ := render(t, two...); !slices.Contains(args(m2), "--responses-token-file=ops=/var/run/lapilli/responses-token/ops/token") {
+		t.Errorf("a second source's token isn't passed: %v", args(m2))
+	}
 	if out, err := helmTemplate(t, slices.Concat(serveValues, []string{"--set", "noisyBy=useful"})...); err == nil || !strings.Contains(out, "noisyBy: useful") {
 		t.Errorf("noisyBy useful with nothing to find it by: %v\n%s", err, out)
+	}
+	// Pages by PUT alone are an input to find a rule noisy by.
+	if out, err := helmTemplate(t, slices.Concat(serveValues, []string{"--set", "serve.responses.tokenSecrets.pd.name=pd-token", "--set", "noisyBy=useful"})...); err != nil {
+		t.Errorf("noisyBy useful with a responses token: %v\n%s", err, out)
 	}
 	// A job of the pages' recipes.
 	jobs := slices.Concat(vals, []string{"--set", "serve.incidentsAPI.copy.enabled=true", "--set", "serve.incidentsAPI.copy.image=example.com/tools/recipes:1.0",
@@ -318,6 +333,10 @@ func TestChartResponses(t *testing.T) {
 		if data[f] == nil {
 			t.Errorf("the responses ConfigMap has no %s", f)
 		}
+	}
+	// A job sends with the token of its source, and a source without one is refused.
+	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.incidentsAPI.copy.jobs[0].source=ops"})...); err == nil || !strings.Contains(out, "no token for the source ops") {
+		t.Errorf("a source with no token: %v\n%s", err, out)
 	}
 	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.incidentsAPI.copy.jobs[0].source="})...); err == nil || !strings.Contains(out, "needs source") {
 		t.Errorf("no source: %v\n%s", err, out)

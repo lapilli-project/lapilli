@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,14 +28,15 @@ import (
 // workloads, read with each run (--rollouts, rolloutsFor). The ledger works
 // each firing's response and usefulness out from what it keeps.
 
-// maxResponsesBody is how much one write of pages may send: the file's
-// bound.
-const maxResponsesBody = response.MaxFile
+// maxResponsesBody is how much one write of pages may send, as a write of
+// firings (maxFiringsBody): 16 MiB. The file's bound is larger (64 MiB), as
+// an operator makes it.
+const maxResponsesBody = 16 << 20
 
 // responsesOn reports whether what people did when a rule fired is read: a
-// file, the history, or the deploys file.
+// file, tokens that PUT pages, the history, or the deploys file.
 func (s *Server) responsesOn() bool {
-	return s.cfg.Responses != "" || s.cfg.Rollouts || s.cfg.Deploys != ""
+	return s.cfg.Responses != "" || len(s.cfg.ResponsesTokens) > 0 || s.cfg.Rollouts || s.cfg.Deploys != ""
 }
 
 // responseWrite is what PUT /api/v1/responses/SOURCE answers.
@@ -90,23 +92,18 @@ func (s *Server) apiPutResponses(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("%s is the source --responses is read as: it owns its pages, name another", source))
 		return
 	}
-	// Read whole first: cut off at the limit, the last page would read as a
-	// broken one.
-	body, err := io.ReadAll(r.Body)
+	// JSON only, read a page at a time and held to the bounds as it goes
+	// (response.ParseJSON), not the whole body parsed into a YAML tree.
+	pages, err := response.ParseJSON(r.Body, maxResponsesBody)
 	var tooBig *http.MaxBytesError
 	switch {
-	case errors.As(err, &tooBig):
+	case errors.As(err, &tooBig) || errors.Is(err, response.ErrTooLarge):
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		json.NewEncoder(w).Encode(map[string]string{"error": "a write is 64 MB at most: send a shorter period"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "a write is 16 MB at most: send a shorter period"})
 		return
 	case err != nil:
-		s.oops(w, r, err)
-		return
-	}
-	pages, err := response.Parse(body, "the pages")
-	if err != nil {
-		s.oops(w, r, bad("want {\"responses\": [...]}, the pages as --responses reads them: %v", err))
+		s.oops(w, r, bad("want JSON, {\"responses\": [...]}, the pages as --responses reads them: %v", err))
 		return
 	}
 	o, err := s.options(r.Context())
@@ -237,4 +234,15 @@ func responseAsked(q url.Values) string {
 func (s *Server) responsesShown(ctx context.Context, o verdict.Options) (bool, error) {
 	in, err := s.l.ResponseInputs(ctx)
 	return err == nil && in.Shown(o), err
+}
+
+// ResponsesFiles are the files of the tokens that write pages, in the order
+// of their sources; none when no source has one. A token's file holds no
+// other token's.
+func (c Config) ResponsesFiles() []string {
+	var out []string
+	for _, source := range slices.Sorted(maps.Keys(c.ResponsesTokens)) {
+		out = append(out, c.ResponsesTokens[source])
+	}
+	return out
 }

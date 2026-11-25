@@ -233,8 +233,8 @@ spec:
             - {{ printf "--source-quiet=%s" . | quote }}
             {{- end }}
             {{- end }}
-            {{- if ($s.responses).tokenSecret.name }}
-            - {{ printf "--responses-token-file=/var/run/lapilli/responses-token/%s" $s.responses.tokenSecret.key | quote }}
+            {{- range $src, $rt := (($s.responses).tokenSecrets | default dict) }}
+            - {{ printf "--responses-token-file=%s=/var/run/lapilli/responses-token/%s/%s" $src $src ($rt.key | default "token") | quote }}
             {{- end }}
             {{- if ($s.responses).configMap.name }}
             - {{ printf "--responses=/etc/lapilli/responses/%s" $s.responses.configMap.key | quote }}
@@ -489,9 +489,9 @@ spec:
               mountPath: /var/run/lapilli/firings-token
               readOnly: true
             {{- end }}
-            {{- if ($s.responses).tokenSecret.name }}
-            - name: responses-token
-              mountPath: /var/run/lapilli/responses-token
+            {{- range $src, $rt := (($s.responses).tokenSecrets | default dict) }}
+            - name: responses-token-{{ $src }}
+              mountPath: {{ printf "/var/run/lapilli/responses-token/%s" $src }}
               readOnly: true
             {{- end }}
             {{- if ($s.responses).configMap.name }}
@@ -683,10 +683,14 @@ spec:
           secret:
             secretName: {{ $s.firings.tokenSecret.name }}
         {{- end }}
-        {{- if ($s.responses).tokenSecret.name }}
-        - name: responses-token
+        {{- range $src, $rt := (($s.responses).tokenSecrets | default dict) }}
+        - name: responses-token-{{ $src }}
           secret:
-            secretName: {{ $s.responses.tokenSecret.name }}
+            secretName: {{ $rt.name }}
+            defaultMode: 0440
+            items:
+              - key: {{ ($rt.key | default "token") | quote }}
+                path: {{ ($rt.key | default "token") | quote }}
         {{- end }}
         {{- if ($s.responses).configMap.name }}
         - name: responses

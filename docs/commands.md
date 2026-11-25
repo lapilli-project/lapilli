@@ -631,11 +631,15 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       resolved, resolved_by}; recipes/responses writes one.
                       A firing is answered, unanswered or changed, and
                       useful by it (docs/responses.md)
-  --responses-token-file FILE
-                      a token (16 characters at least, not the others')
-                      that may PUT /api/v1/responses/SOURCE?from=&to= on
-                      --incidents-listen: replace what a source says of the
-                      pages sent in that period; recipes/responses/put.sh
+  --responses-token-file SOURCE=FILE
+                      a token (16 characters at least, not the others', not
+                      another source's) that may PUT
+                      /api/v1/responses/SOURCE?from=&to= on --incidents-listen:
+                      replace what that source says of the pages sent in
+                      that period (31 days at most, 16 MiB of JSON); it
+                      writes no other source's. Once for each source; the
+                      --responses file's pages outrank an API source's;
+                      recipes/responses/put.sh
   --rollouts          also read, from the history at --prometheus, the
                       rollouts, rollbacks and scales kube-state-metrics
                       shows for the namespaces the firings are in, each run

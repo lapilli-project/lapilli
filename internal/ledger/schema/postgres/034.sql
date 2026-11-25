@@ -14,6 +14,18 @@ CREATE TABLE responses (
 );
 CREATE INDEX responses_sent ON responses (sent_at);
 
+CREATE TABLE response_sources (
+	source TEXT COLLATE "C" NOT NULL PRIMARY KEY
+);
+CREATE TABLE response_rules (
+	rule TEXT COLLATE "C" NOT NULL,
+	sent_at BIGINT NOT NULL,
+	source TEXT COLLATE "C" NOT NULL,
+	id TEXT COLLATE "C" NOT NULL,
+	PRIMARY KEY (rule, sent_at, source, id)
+);
+CREATE INDEX response_rules_page ON response_rules (source, id);
+
 CREATE TABLE rollouts (
 	kind TEXT COLLATE "C" NOT NULL,
 	at BIGINT NOT NULL,
@@ -33,6 +45,11 @@ CREATE TABLE rollout_spans (
 	PRIMARY KEY (namespace, workload_kind, workload, from_at)
 );
 CREATE INDEX rollout_spans_to ON rollout_spans (to_at);
+CREATE TABLE rollout_retries (
+	from_at BIGINT NOT NULL PRIMARY KEY,
+	to_at BIGINT NOT NULL,
+	tried INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE rollout_owners (
 	namespace TEXT COLLATE "C" NOT NULL,
 	pod TEXT COLLATE "C" NOT NULL,

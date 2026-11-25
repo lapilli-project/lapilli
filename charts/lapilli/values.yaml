@@ -164,7 +164,7 @@ noisyPrecision: null
 # the workload's name, for teams whose service is their Deployment's name.
 # routine is --routine, the chance at or above which a change is routine
 # (0.5 when unset). noisyBy is --noisy-by, caught or useful: by default
-# useful once serve.responses.configMap or rollouts is given, else caught
+# useful once serve.responses.configMap, serve.responses.tokenSecrets or rollouts is given, else caught
 # (serve.deploys alone leaves it caught); in serve mode it is the start's value, which the Settings page
 # can change.
 rollouts: false
@@ -705,21 +705,25 @@ serve:
   # What a paging tool says of the pages it sent (docs/responses.md). Off when
   # nothing is named. configMap holds --responses's file under key, mounted at
   # /etc/lapilli/responses/ and read again each run (only when it changed).
-  # tokenSecret is its own token, on the incidentsAPI port, for a job that
-  # sends a source's pages with recipes/responses/put.sh, PUT
-  # /api/v1/responses/SOURCE: incidentsAPI.from names who may reach the port.
+  # tokenSecrets are tokens of their own, one for each source (the name its
+  # pages are kept under), on the incidentsAPI port, for a job that sends
+  # that source's pages with recipes/responses/put.sh, PUT
+  # /api/v1/responses/SOURCE: a token writes its source's pages and no other's,
+  # the file's pages (configMap) outrank an API source's, and no two sources
+  # share a Secret and key. incidentsAPI.from names who may reach the port.
+  # Each is {name: the Secret, key: token}, by source:
+  #   tokenSecrets:
+  #     pagerduty-prod: {name: lapilli-pd-token, key: token}
   # The jobs in incidentsAPI.copy.jobs run those recipes too, with recipe:
   # responses/NAME (pagerduty, jsm, compass or grafana-irm), source: the name
   # the pages are kept under (lowercase letters, digits and dashes), and
   # sinceDays: how long ago the period they send starts (1 when unset, 180 at
-  # most); they send with this token, not incidentsAPI.tokenSecret.
+  # most); they send with their source's token, not incidentsAPI.tokenSecret.
   responses:
     configMap:
       name: ""
       key: responses.yaml
-    tokenSecret:
-      name: ""
-      key: token
+    tokenSecrets: {}
   # Tasks kept in step with issues in a tracker (see recipes/trackers): the
   # incidentsAPI port takes the tasks token in tokenSecret, its own, which
   # reads tasks and sets their link and status, and nothing else. With

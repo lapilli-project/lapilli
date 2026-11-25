@@ -10,7 +10,7 @@ The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
 {{- if not $cp.image }}
 {{- fail "serve.incidentsAPI.copy.image is required: an image with sh, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
 {{- end }}
-{{- $rt := (($s.responses).tokenSecret | default dict) }}
+{{- $rts := (($s.responses).tokenSecrets | default dict) }}
 {{- $anyResponses := false }}
 {{- $anyIncidents := false }}
 {{- range $cp.jobs }}
@@ -19,8 +19,8 @@ The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
 {{- if and (or $anyIncidents (not $anyResponses)) (not $s.incidentsAPI.tokenSecret.name) }}
 {{- fail "serve.incidentsAPI.copy needs serve.incidentsAPI.tokenSecret, the token the jobs write incidents with" }}
 {{- end }}
-{{- if and $anyResponses (not $rt.name) }}
-{{- fail "serve.incidentsAPI.copy.jobs: a recipe from responses/ needs serve.responses.tokenSecret, the token the jobs write pages with" }}
+{{- if and $anyResponses (not $rts) }}
+{{- fail "serve.incidentsAPI.copy.jobs: a recipe from responses/ needs serve.responses.tokenSecrets, the token of its source the jobs write pages with" }}
 {{- end }}
 {{- if not $cp.jobs }}
 {{- fail "serve.incidentsAPI.copy.jobs: name at least one job, each with a name, a recipe and the tool's token" }}
@@ -81,6 +81,14 @@ data:
 {{- end }}
 {{- if and $forPages (not (regexMatch "^[a-z0-9][a-z0-9-]{0,39}$" (toString ($j.source | default "")))) }}
 {{- fail (printf "serve.incidentsAPI.copy.jobs: %s: a recipe from responses/ needs source, the name its pages are kept under: lowercase letters, digits and dashes, 40 at most" $j.name) }}
+{{- end }}
+{{- $rt := dict }}
+{{- if $forPages }}
+{{- $rt = (get $rts (toString ($j.source | default "")) | default dict) }}
+{{- if not $rt.name }}
+{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: serve.responses.tokenSecrets has no token for the source %s: a token writes its source's pages only" $j.name (toString ($j.source | default ""))) }}
+{{- end }}
+{{- $_ := set $rt "key" ($rt.key | default "token") }}
 {{- end }}
 {{- if and $forPages (or (lt (int ($j.sinceDays | default 1)) 1) (gt (int ($j.sinceDays | default 1)) 180)) }}
 {{- fail (printf "serve.incidentsAPI.copy.jobs: %s: sinceDays is 1 to 180" $j.name) }}

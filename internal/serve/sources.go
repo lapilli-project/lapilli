@@ -168,11 +168,14 @@ func (s *Server) filePaths() []filePath {
 		{c.GrafanaToken, "--grafana-token-file"}, {c.LokiToken, "--loki-token-file"}, {c.RulerToken, "--ruler-token-file"},
 		{c.Slack, "--slack-webhook-file"}, {c.NotifyWebhook, "--notify-webhook-file"}, {c.NotifyWebhookSecret, "--notify-webhook-secret-file"},
 		{c.SessionKey, "--session-key-file"},
-		{c.IncidentsToken, "--incidents-token-file"}, {c.FiringsToken, "--firings-token-file"}, {c.ResponsesToken, "--responses-token-file"}, {c.Responses, "--responses"}, {c.TasksToken, "--tasks-token-file"},
+		{c.IncidentsToken, "--incidents-token-file"}, {c.FiringsToken, "--firings-token-file"}, {c.Responses, "--responses"}, {c.TasksToken, "--tasks-token-file"},
 		{c.NotifyToken, "--notify-token-file"}, {c.NotifyGrafanaSecret, "--notify-grafana-secret-file"},
 		{c.ChangesToken, "--changes-token-file"}, {c.ChangesGrafanaToken, "--changes-grafana-token-file"},
 		{c.ChangesRulerToken, "--changes-ruler-token-file"}, {c.ChangesLokiToken, "--changes-loki-token-file"},
 		{c.ChangesPaused, "--changes-paused"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
+	for _, f := range c.ResponsesFiles() {
+		given = append(given, filePath{f, "--responses-token-file"})
+	}
 	for _, f := range c.TeamDigests {
 		given = append(given, filePath{f, "--team-digest"})
 	}

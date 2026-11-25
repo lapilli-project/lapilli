@@ -18,6 +18,23 @@ CREATE TABLE responses (
 );
 CREATE INDEX responses_sent ON responses (sent_at);
 
+-- The sources that have pages, to count them (at most 50, as firings')
+-- without counting every page.
+-- The rules each page's alerts name, and when it was sent: a firing's pages
+-- are read by its rule and its time, not every page of the span. One row for
+-- each rule a page names, kept with the page (made and dropped as it is).
+CREATE TABLE response_sources (
+	source TEXT NOT NULL PRIMARY KEY
+);
+CREATE TABLE response_rules (
+	rule TEXT NOT NULL,
+	sent_at INTEGER NOT NULL,
+	source TEXT NOT NULL,
+	id TEXT NOT NULL,
+	PRIMARY KEY (rule, sent_at, source, id)
+);
+CREATE INDEX response_rules_page ON response_rules (source, id);
+
 -- The changes made to the alerts' targets, read from kube-state-metrics'
 -- history by each run for the hours it judges: a rollout, rollback or scale
 -- of a workload, at when it showed. rollout_spans are the spans each
@@ -45,6 +62,14 @@ CREATE TABLE rollout_spans (
 	PRIMARY KEY (namespace, workload_kind, workload, from_at)
 );
 CREATE INDEX rollout_spans_to ON rollout_spans (to_at);
+-- The spans a run could not read the changes of (the history failed), kept
+-- to be read once more by the next run, and dropped when that run has read
+-- them or tried; until then the firings in them have changes not known.
+CREATE TABLE rollout_retries (
+	from_at INTEGER NOT NULL PRIMARY KEY,
+	to_at INTEGER NOT NULL,
+	tried INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE rollout_owners (
 	namespace TEXT NOT NULL,
 	pod TEXT NOT NULL,

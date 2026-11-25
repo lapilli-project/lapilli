@@ -28,7 +28,7 @@ const trackerBody = 64 << 10
 // others' files may hold the same.
 func (s *Server) tasksToken() token {
 	return token{s.cfg.TasksToken, ledger.TaskTracker, "--tasks-token-file",
-		[]string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.ResponsesToken, s.cfg.NotifyToken, s.cfg.ChangesToken}, &s.tasksWarned, trackerBody, s.tasksRate, s.tasksBusy}
+		append([]string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.ChangesToken}, s.cfg.ResponsesFiles()...), &s.tasksWarned, trackerBody, s.tasksRate, s.tasksBusy}
 }
 
 // trackerPaths adds what the tasks token may do to the incidents port.

@@ -23,6 +23,10 @@ func ParseJSON(r io.Reader, maxBytes int64) ([]Page, error) {
 	return parseJSON(r, maxBytes, "the pages")
 }
 
+// ErrTooLarge is what ParseJSON's error wraps when its input is more than
+// maxBytes.
+var ErrTooLarge = errors.New("too large")
+
 type limited struct {
 	r   io.Reader
 	max int64
@@ -51,7 +55,7 @@ func parseJSON(r io.Reader, maxBytes int64, name string) ([]Page, error) {
 	jp.dec.UseNumber()
 	pages, err := jp.responses(name)
 	if lim.n > maxBytes {
-		return nil, fmt.Errorf("%s: more than %d MiB: a file of responses is less", name, maxBytes>>20)
+		return nil, fmt.Errorf("%s: more than %d MiB: a file of responses is less: %w", name, maxBytes>>20, ErrTooLarge)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)

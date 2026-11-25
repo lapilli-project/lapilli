@@ -56,7 +56,26 @@ type Page struct {
 	Resolved     time.Time `json:"resolved,omitzero"`
 	// ResolvedBy is ByAlert or ByPerson, set with Resolved.
 	ResolvedBy string `json:"resolved_by,omitempty"`
+	// Source is who sent the page to the ledger: FileSource for the
+	// --responses file, and for a page read without a source (lapilli
+	// verdict), or the name a PUT's path gave. Never read from a page.
+	Source string `json:"-"`
 }
+
+// FileSource is the source of the pages --responses reads. When a firing has
+// a page from it and one from a source a token writes, the file's is its
+// page: what the operator keeps in a file outranks what a job writes over
+// the API.
+const FileSource = "file"
+
+// MaxFindScan is how many pages sharing a rule's name, from the firing's
+// start on, Index.Find looks at for one firing at most (per name it may carry,
+// see ruleNames). A rule whose alerts were paged more than that in a
+// firing's window, none of them for this firing, finds the page among the
+// first of them or none.
+const MaxFindScan = 1000
+
+func (p *Page) fromFile() bool { return p.Source == "" || p.Source == FileSource }
 
 // Lists reports whether the page was sent for a firing of rule with labels:
 // one of its alerts names the rule and agrees with the labels, as an
@@ -490,10 +509,12 @@ func (ix *Index) Pages() []Page {
 	return ix.pages
 }
 
-// Find is the page a firing of rule with labels was sent as: the nearest
-// to the firing's start of those that list it and were sent from from to
-// to, both included; nil for none. The earlier (then the lesser id) is
-// the nearer of two as far apart.
+// Find is the page a firing of rule with labels was sent as: of those that
+// list it and were sent from from to to, both included, the one the
+// --responses file sent if there is one, else the nearest to the firing's
+// start; nil for none. Of two as far apart the one of the lesser source,
+// then the lesser id is the nearer. At most MaxFindScan pages per name are
+// looked at.
 func (ix *Index) Find(rule string, labels map[string]string, from, to time.Time) *Page {
 	if ix == nil {
 		return nil
@@ -502,15 +523,23 @@ func (ix *Index) Find(rule string, labels map[string]string, from, to time.Time)
 	for _, name := range ruleNames(rule) {
 		list := ix.byRule[name]
 		lo, _ := slices.BinarySearchFunc(list, from, func(i int, t time.Time) int { return ix.pages[i].Sent.Compare(t) })
-		for _, i := range list[lo:] {
+		list = list[lo:]
+		if len(list) > MaxFindScan {
+			list = list[:MaxFindScan]
+		}
+		for _, i := range list {
 			p := &ix.pages[i]
 			if p.Sent.After(to) {
+				break
+			}
+			// Sent in order, so every later page is farther than a file's.
+			if best != nil && best.fromFile() && p.Sent.After(best.Sent) {
 				break
 			}
 			if !p.Lists(rule, labels) {
 				continue
 			}
-			if best == nil || nearer(p, best, from) {
+			if best == nil || preferred(p, best, from) {
 				best = p
 			}
 		}
@@ -518,10 +547,22 @@ func (ix *Index) Find(rule string, labels map[string]string, from, to time.Time)
 	return best
 }
 
+// preferred reports whether page p is the firing's page over q: a file's over
+// any other, then the nearer.
+func preferred(p, q *Page, at time.Time) bool {
+	if pf, qf := p.fromFile(), q.fromFile(); pf != qf {
+		return pf
+	}
+	return nearer(p, q, at)
+}
+
 func nearer(p, q *Page, at time.Time) bool {
 	dp, dq := p.Sent.Sub(at).Abs(), q.Sent.Sub(at).Abs()
 	if dp != dq {
 		return dp < dq
+	}
+	if p.Source != q.Source {
+		return p.Source < q.Source
 	}
 	return p.ID < q.ID
 }
@@ -529,7 +570,11 @@ func nearer(p, q *Page, at time.Time) bool {
 // ruleNames are the names a page's alert may carry for a firing of rule: its
 // own, and with a firing told apart from others of its name (HighErrorRate
 // [severity=critical]), the name alone (incident.Alert.Names).
-func ruleNames(rule string) []string {
+func ruleNames(rule string) []string { return RuleNames(rule) }
+
+// RuleNames are the names a page's alert may carry for a firing of rule: its
+// own, and the name alone of one told apart from others of its name.
+func RuleNames(rule string) []string {
 	names := []string{rule}
 	if !strings.HasSuffix(rule, "]") {
 		return names

@@ -41,7 +41,7 @@ const respBody = `{"responses": [
 func TestResponsesPort(t *testing.T) {
 	parallel(t)
 	s, _ := server(t, func(c *Config) {
-		c.IncidentsListen, c.IncidentsToken, c.ResponsesToken = "127.0.0.1:0", tokenFile(t, respIncTok), tokenFile(t, respTok)
+		c.IncidentsListen, c.IncidentsToken, c.ResponsesTokens = "127.0.0.1:0", tokenFile(t, respIncTok), map[string]string{"pd": tokenFile(t, respTok)}
 		c.UserHeader, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}
 	})
 	ctx := context.Background()
@@ -76,13 +76,20 @@ func TestResponsesPort(t *testing.T) {
 		{"PUT", "/api/v1/responses/pd?from=2026-11-09T00:00:00Z&to=2026-11-02T00:00:00Z", respTok, respBody, http.StatusBadRequest},
 		// The page was sent at 02:11 on the 3rd, which this period doesn't hold.
 		{"PUT", "/api/v1/responses/pd?from=2026-11-04T00:00:00Z&to=2026-11-09T00:00:00Z", respTok, respBody, http.StatusBadRequest},
-		{"PUT", "/api/v1/responses/PD" + respWeek, respTok, respBody, http.StatusBadRequest},
-		{"PUT", "/api/v1/responses/file" + respWeek, respTok, respBody, http.StatusBadRequest},
+		// A token writes its source's pages only: another's, or one that
+		// no token is for (a name the file owns too), isn't taken.
+		{"PUT", "/api/v1/responses/PD" + respWeek, respTok, respBody, http.StatusUnauthorized},
+		{"PUT", "/api/v1/responses/file" + respWeek, respTok, respBody, http.StatusUnauthorized},
+		{"PUT", "/api/v1/responses/ops" + respWeek, respTok, respBody, http.StatusUnauthorized},
 		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, "not json", http.StatusBadRequest},
 		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, `[]`, http.StatusBadRequest},
 		// A person named, or a key that isn't known: refused.
 		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, `{"responses": [{"id": "P", "alerts": [{"rule": "r"}], "sent": "2026-11-03T02:11:00Z", "acknowledged_by": "bo"}]}`, http.StatusBadRequest},
 		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, strings.Repeat(" ", 65<<20), http.StatusRequestEntityTooLarge},
+		// 16 MiB at most, as a write of firings; and JSON only.
+		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, `{"responses": [` + strings.Repeat(" ", 16<<20) + `]}`, http.StatusRequestEntityTooLarge},
+		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, "responses:\n  - id: P\n", http.StatusBadRequest},
+		{"PUT", "/api/v1/responses/pd" + respWeek, respTok, "responses: &a []\n", http.StatusBadRequest},
 	} {
 		if code, msg := send(port, c.method, c.path, c.tok, c.body); code != c.want {
 			t.Errorf("%s %s: %d %s, want %d", c.method, c.path, code, msg, c.want)

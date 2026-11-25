@@ -466,8 +466,8 @@ type tokenStat struct {
 // backtest port's own: none of them may hold a plain entry's token.
 func (s *Server) tokenFiles() []string {
 	c := s.cfg
-	return []string{c.IncidentsToken, c.FiringsToken, c.ResponsesToken, c.NotifyToken, c.TasksToken, c.ChangesToken, c.GrafanaToken, c.RulerToken,
-		c.LokiToken, c.ChangesGrafanaToken, c.ChangesRulerToken, c.NotifyGrafanaSecret}
+	return append([]string{c.IncidentsToken, c.FiringsToken, c.NotifyToken, c.TasksToken, c.ChangesToken, c.GrafanaToken, c.RulerToken,
+		c.LokiToken, c.ChangesGrafanaToken, c.ChangesRulerToken, c.NotifyGrafanaSecret}, c.ResponsesFiles()...)
 }
 
 func statOf(path string) tokenStat {
