@@ -249,7 +249,14 @@ EPOCH='def epoch: sub("\\.[0-9]+"; "") as $s | ($s[:19] + "Z" | fromdateiso8601)
 phases() {
   local u
   for u in "$pu/api/v1/rules" "$lu/prometheus/api/v1/rules"; do
-    curl -sf "$u" | jq -r "$EPOCH"' .data.groups[] | select(.interval > 0) | "\(.interval | floor) \(.lastEvaluation | epoch)"'
+    curl -sf "$u" | jq -r "$EPOCH"' .data.groups[] | select(.interval > 0 and (.lastEvaluation | startswith("0001") | not)) | "\(.interval | floor) \(.lastEvaluation | epoch)"'
+  done
+}
+# evaluated: every group of Prometheus's and Loki's has run once.
+evaluated() {
+  local u
+  for u in "$pu/api/v1/rules" "$lu/prometheus/api/v1/rules"; do
+    curl -sf "$u" | jq -e '(.data.groups | length) > 0 and all(.data.groups[]; .lastEvaluation | startswith("0001") | not)' || return 1
   done
 }
 # before_the_end TO: TO, or the nearest 10s before it that no group of
@@ -319,6 +326,7 @@ start_periods() {
   local folder
   folder=$(gcurl "$gu/api/folders?query=fid2" | jq -r '.[] | select(.title == "fid2") | .uid')
   [ -n "$folder" ] || die "Grafana has no folder fid2"
+  until_true 180 evaluated || die "a rule group has not been evaluated"
   r=$(date +%s)
   put_group "$folder" "$(source_of grafana change)/rules-before.yaml"
   plan
