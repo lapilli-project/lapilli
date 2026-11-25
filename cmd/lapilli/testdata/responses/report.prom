@@ -1,0 +1,114 @@
+# HELP lapilli_rule_firings Times the rule fired in the period.
+# TYPE lapilli_rule_firings gauge
+lapilli_rule_firings{rule="ApiErrors",severity="critical"} 2
+lapilli_rule_firings{rule="DiskFull"} 1
+lapilli_rule_firings{rule="Latency"} 1
+lapilli_rule_firings{rule="QueueDepth"} 1
+# HELP lapilli_rule_caught Firings that caught an incident (white stones).
+# TYPE lapilli_rule_caught gauge
+lapilli_rule_caught{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_caught{rule="DiskFull"} 0
+lapilli_rule_caught{rule="Latency"} 0
+lapilli_rule_caught{rule="QueueDepth"} 0
+# HELP lapilli_rule_nothing Firings with no incident (black stones).
+# TYPE lapilli_rule_nothing gauge
+lapilli_rule_nothing{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_nothing{rule="DiskFull"} 1
+lapilli_rule_nothing{rule="Latency"} 1
+lapilli_rule_nothing{rule="QueueDepth"} 1
+# HELP lapilli_rule_refired Firings that came soon after the same alert resolved.
+# TYPE lapilli_rule_refired gauge
+lapilli_rule_refired{rule="ApiErrors",severity="critical"} 0
+lapilli_rule_refired{rule="DiskFull"} 0
+lapilli_rule_refired{rule="Latency"} 0
+lapilli_rule_refired{rule="QueueDepth"} 0
+# HELP lapilli_rule_incidents Incidents the rule caught.
+# TYPE lapilli_rule_incidents gauge
+lapilli_rule_incidents{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_incidents{rule="DiskFull"} 0
+lapilli_rule_incidents{rule="Latency"} 0
+lapilli_rule_incidents{rule="QueueDepth"} 0
+# HELP lapilli_rule_episodes Episodes of the rule's firings: one problem, its alerts of the same match labels overlapping or re-firing within a day.
+# TYPE lapilli_rule_episodes gauge
+lapilli_rule_episodes{rule="ApiErrors",severity="critical"} 2
+lapilli_rule_episodes{rule="DiskFull"} 1
+lapilli_rule_episodes{rule="Latency"} 1
+lapilli_rule_episodes{rule="QueueDepth"} 1
+# HELP lapilli_rule_episodes_caught Episodes of which a firing caught an incident.
+# TYPE lapilli_rule_episodes_caught gauge
+lapilli_rule_episodes_caught{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_episodes_caught{rule="DiskFull"} 0
+lapilli_rule_episodes_caught{rule="Latency"} 0
+lapilli_rule_episodes_caught{rule="QueueDepth"} 0
+# HELP lapilli_rule_responses Firings by what was done about them: changed (a change on the alert's target), routine, acknowledged, unanswered, or none.
+# TYPE lapilli_rule_responses gauge
+lapilli_rule_responses{rule="ApiErrors",severity="critical",response="changed"} 1
+lapilli_rule_responses{rule="ApiErrors",severity="critical",response="routine"} 0
+lapilli_rule_responses{rule="ApiErrors",severity="critical",response="acknowledged"} 0
+lapilli_rule_responses{rule="ApiErrors",severity="critical",response="unanswered"} 1
+lapilli_rule_responses{rule="ApiErrors",severity="critical",response="none"} 0
+lapilli_rule_responses{rule="DiskFull",response="changed"} 0
+lapilli_rule_responses{rule="DiskFull",response="routine"} 0
+lapilli_rule_responses{rule="DiskFull",response="acknowledged"} 1
+lapilli_rule_responses{rule="DiskFull",response="unanswered"} 0
+lapilli_rule_responses{rule="DiskFull",response="none"} 0
+lapilli_rule_responses{rule="Latency",response="changed"} 0
+lapilli_rule_responses{rule="Latency",response="routine"} 0
+lapilli_rule_responses{rule="Latency",response="acknowledged"} 0
+lapilli_rule_responses{rule="Latency",response="unanswered"} 0
+lapilli_rule_responses{rule="Latency",response="none"} 1
+lapilli_rule_responses{rule="QueueDepth",response="changed"} 1
+lapilli_rule_responses{rule="QueueDepth",response="routine"} 0
+lapilli_rule_responses{rule="QueueDepth",response="acknowledged"} 0
+lapilli_rule_responses{rule="QueueDepth",response="unanswered"} 0
+lapilli_rule_responses{rule="QueueDepth",response="none"} 0
+# HELP lapilli_rule_actionable Share of the firings known to be useful or not that were useful: a change followed them, or they caught an incident.
+# TYPE lapilli_rule_actionable gauge
+lapilli_rule_actionable{rule="ApiErrors",severity="critical"} 0.5
+lapilli_rule_actionable{rule="DiskFull"} 0
+lapilli_rule_actionable{rule="Latency"} 0
+lapilli_rule_actionable{rule="QueueDepth"} 1
+# HELP lapilli_rule_nothing_by_hours Firings with no incident, by when they came: asleep, off hours or at work.
+# TYPE lapilli_rule_nothing_by_hours gauge
+lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="asleep"} 0
+lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="at_work"} 1
+lapilli_rule_nothing_by_hours{rule="DiskFull",hours="asleep"} 0
+lapilli_rule_nothing_by_hours{rule="DiskFull",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="DiskFull",hours="at_work"} 1
+lapilli_rule_nothing_by_hours{rule="Latency",hours="asleep"} 1
+lapilli_rule_nothing_by_hours{rule="Latency",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="Latency",hours="at_work"} 0
+lapilli_rule_nothing_by_hours{rule="QueueDepth",hours="asleep"} 1
+lapilli_rule_nothing_by_hours{rule="QueueDepth",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="QueueDepth",hours="at_work"} 0
+# HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_first gauge
+lapilli_rule_incidents_first{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_incidents_first{rule="DiskFull"} 0
+lapilli_rule_incidents_first{rule="Latency"} 0
+lapilli_rule_incidents_first{rule="QueueDepth"} 0
+# HELP lapilli_rule_incidents_alone Incidents no other rule caught; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_alone gauge
+lapilli_rule_incidents_alone{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_incidents_alone{rule="DiskFull"} 0
+lapilli_rule_incidents_alone{rule="Latency"} 0
+lapilli_rule_incidents_alone{rule="QueueDepth"} 0
+# HELP lapilli_incidents Incidents in the period: caught, caught only by noisy rules, or missed.
+# TYPE lapilli_incidents gauge
+lapilli_incidents{state="caught",source="written"} 1
+lapilli_incidents{state="caught",source="impact"} 0
+lapilli_incidents{state="noisy_only",source="written"} 0
+lapilli_incidents{state="noisy_only",source="impact"} 0
+lapilli_incidents{state="missed",source="written"} 0
+lapilli_incidents{state="missed",source="impact"} 0
+# HELP lapilli_incidents_not_known Of the missed incidents, those no rule replayed caught while a rule couldn't be replayed, which may have: missed isn't known.
+# TYPE lapilli_incidents_not_known gauge
+lapilli_incidents_not_known{source="written"} 0
+lapilli_incidents_not_known{source="impact"} 0
+# HELP lapilli_incident_detection_delay_seconds From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.
+# TYPE lapilli_incident_detection_delay_seconds gauge
+lapilli_incident_detection_delay_seconds{incident="INC-1"} 0
+# HELP lapilli_last_run_timestamp_seconds When lapilli last ran, in Unix seconds.
+# TYPE lapilli_last_run_timestamp_seconds gauge
+lapilli_last_run_timestamp_seconds 1791849600
