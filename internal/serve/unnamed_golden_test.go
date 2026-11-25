@@ -257,8 +257,8 @@ var (
 	// incident before what was replayed is counted in, apart from missed;
 	// 0 in a ledger with none.
 	addedUnreplayed = regexp.MustCompile(`(?m)^\s*"unreplayed": [0-9]+,?\n|,"unreplayed":[0-9]+|"unreplayed":[0-9]+,`)
-	addedUnjudged = regexp.MustCompile(`(?m)^\s*"unjudged": [0-9]+,\n|"unjudged":[0-9]+,|,"unjudged":[0-9]+`)
-	addedBySignal = regexp.MustCompile(`,\n\s*"by_signal": \{\}|,"by_signal":\{\}|"by_signal":\{\},`)
+	addedUnjudged   = regexp.MustCompile(`(?m)^\s*"unjudged": [0-9]+,\n|"unjudged":[0-9]+,|,"unjudged":[0-9]+`)
+	addedBySignal   = regexp.MustCompile(`,\n\s*"by_signal": \{\}|,"by_signal":\{\}|"by_signal":\{\},`)
 )
 
 func addedToSummary(s string) string {
