@@ -41,6 +41,22 @@ func (g GrafanaSends) External() bool { return g.Choice != "internal" && g.Activ
 // that is checked as an internal one is, as before.
 func (g GrafanaSends) Internal() bool { return g.Choice != "external" || g.Active == 0 }
 
+// Several says, when Grafana sends to more than one external Alertmanager,
+// that --alertmanager-config is taken for one of them, which Lapilli can't
+// tell from the others, and names the data sources that take Grafana's
+// alerts when they were read; "" for one or none, so a wrong match is seen.
+func (g GrafanaSends) Several() string {
+	if !g.External() || g.Active < 2 && len(g.Sources) < 2 {
+		return ""
+	}
+	n := max(g.Active, len(g.Sources))
+	s := fmt.Sprintf("Grafana sends its alerts to %d Alertmanagers", n)
+	if len(g.Sources) > 0 {
+		s += " (data sources " + strings.Join(g.Sources, ", ") + ")"
+	}
+	return s + ": its rules are checked against --alertmanager-config, which is taken for the one they go through, as Lapilli can't tell them apart"
+}
+
 // GrafanaAlertmanagers asks a Grafana where it sends its alerts:
 // GET /api/v1/ngalert/admin_config (alertmanagersChoice; 404 is a Grafana
 // with none, which sends to its own), GET /api/v1/ngalert/alertmanagers

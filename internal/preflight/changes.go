@@ -69,7 +69,7 @@ func (p *run) grafanaSends(ctx context.Context) {
 		if g.Internal() {
 			what += ", and against its own templates"
 		}
-		p.add(Item{ID: "grafana.alertmanagers", State: OK, What: what})
+		p.add(Item{ID: "grafana.alertmanagers", State: OK, What: what, Why: g.Several()})
 	default:
 		p.add(Item{ID: "grafana.alertmanagers", State: OK, What: "Grafana sends its alerts to its own Alertmanager: its rules are checked against its own templates"})
 	}

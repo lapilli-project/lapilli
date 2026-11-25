@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +92,22 @@ func TestGrafanaAlertmanagers(t *testing.T) {
 		f()
 		if _, err := ask(); err == nil {
 			t.Errorf("%s: read", name)
+		}
+	}
+}
+
+// Grafana sending to several Alertmanagers is said, naming the data
+// sources that take its alerts, so that a wrong match of --alertmanager-config
+// is seen; one or none says nothing.
+func TestGrafanaSendsSeveral(t *testing.T) {
+	g := GrafanaSends{Choice: "all", Active: 2, Sources: []string{"AM east", "AM west"}, SourcesRead: true}
+	got := g.Several()
+	if !strings.Contains(got, "2 Alertmanagers") || !strings.Contains(got, "AM east, AM west") || !strings.Contains(got, "--alertmanager-config") {
+		t.Errorf("%q", got)
+	}
+	for _, g := range []GrafanaSends{{Choice: "all", Active: 1, Sources: []string{"AM"}}, {Choice: "internal"}, {Choice: "external", Active: 0, Sources: []string{"a", "b"}}} {
+		if s := g.Several(); s != "" {
+			t.Errorf("%+v: %q", g, s)
 		}
 	}
 }

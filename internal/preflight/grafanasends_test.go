@@ -23,10 +23,7 @@ func TestGrafanaAlertmanagers(t *testing.T) {
 		case "/api/v1/ngalert/admin_config":
 			w.Write([]byte(`{"alertmanagersChoice":"` + choice + `"}`))
 		case "/api/v1/ngalert/alertmanagers":
-			list := ""
-			if active > 0 {
-				list = `{"url":"http://am.example:9093/api/v2/alerts"}`
-			}
+			list := strings.TrimSuffix(strings.Repeat(`{"url":"http://am.example:9093/api/v2/alerts"},`, active), ",")
 			w.Write([]byte(`{"status":"success","data":{"activeAlertManagers":[` + list + `],"droppedAlertManagers":[]}}`))
 		case "/api/datasources":
 			w.Write([]byte(`[]`))
@@ -46,6 +43,11 @@ func TestGrafanaAlertmanagers(t *testing.T) {
 	if it := item(); it == nil || it.State != OK || !strings.Contains(it.What, "1 external Alertmanager") || strings.Contains(it.What, "own templates") {
 		t.Errorf("external: %+v", it)
 	}
+	active = 2
+	if it := item(); it == nil || it.State != OK || !strings.Contains(it.Why, "2 Alertmanagers") {
+		t.Errorf("two Alertmanagers: %+v", it)
+	}
+	active = 1
 	choice = "all"
 	if it := item(); it == nil || it.State != OK || !strings.Contains(it.What, "and against its own templates") {
 		t.Errorf("all: %+v", it)
