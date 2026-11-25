@@ -11,7 +11,10 @@
 #
 #   test/e2e/measure.sh up       start the servers, provision the rules, feed them;
 #                                the change of rules made through Grafana's API is
-#                                part of it, so it returns some ten minutes in
+#                                part of it, so it returns an hour and a quarter in
+#   test/e2e/measure.sh reprovision  read the rules of the recordings' directories
+#                                into the running Grafana (one added), and plan the
+#                                periods from now
 #   test/e2e/measure.sh record   wait for the period to end, then record each
 #                                recording with LAPILLI_RECORD and the tests
 #   test/e2e/measure.sh down     remove the servers and what they kept
@@ -33,9 +36,11 @@
 # rules. Needs Docker, Go, curl, jq and yq (mikefarah's v4).
 #
 # PROMETHEUS_IMAGE, GRAFANA_IMAGE and LOKI_IMAGE run other images than the
-# pinned ones. MINUTES (default 60, at least 20) is how long they run: a
-# shorter run is a dry run, whose recordings may not hold enough firings for
-# the tests. PREFIX (lapilli-r73) names the containers and network;
+# pinned ones. Grafana's alerts are worked out from an hour before a period,
+# so no period starts before BEFORE minutes (65) after the rules came in;
+# MINUTES (60) is the longest a period is, each its own length up to that
+# (the first recordings': 46, 40, 17, 6). A run is two hours or so. A smaller
+# BEFORE or MINUTES is a dry run, whose recordings the tests may not accept. PREFIX (lapilli-r73) names the containers and network;
 # PROM_PORT, GRAFANA_PORT and LOKI_PORT (28391 to 28393, on 127.0.0.1) say
 # where they listen; STATE is where it keeps its files; MIN_FREE_GB (30) is
 # the free disk below which it stops.
