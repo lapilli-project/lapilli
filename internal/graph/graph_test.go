@@ -169,7 +169,7 @@ func TestEach(t *testing.T) {
 	b.Graph().Each(func(h time.Time, from, to string) {
 		got = append(got, fmt.Sprintf("%s %s>%s", h.Format("15:04"), from, to))
 	})
-	if want := []string{"00:00 b>c", "00:00 a>b", "01:00 b>c"}; !slices.Equal(got, want) {
+	if want := []string{"00:00 a>b", "00:00 b>c", "01:00 b>c"}; !slices.Equal(got, want) {
 		t.Errorf("each: %v, want %v", got, want)
 	}
 	var nilGraph *Graph

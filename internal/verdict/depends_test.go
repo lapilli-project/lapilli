@@ -238,6 +238,7 @@ func TestDependsTiming(t *testing.T) {
 	}{
 		{"at the lead", 85, 90, true},
 		{"before the lead", 84, 90, false},
+		{"already on before the lead", 60, 130, false},
 		{"at the end", 140, 150, true},
 		{"after the end", 141, 150, false},
 	} {
@@ -373,8 +374,27 @@ func TestAboutByDependency(t *testing.T) {
 	}
 	n := Nearly
 	nm, ok := n(in, []firing.Firing{{Rule: "R", Labels: l, Start: m(102), End: m(105)}}, 5*time.Minute, time.Minute, withGraph(opts(), g, 1, ""))
-	if !ok || nm.NewFor != 2*time.Minute {
+	if !ok || nm.NewFor != 2*time.Minute || !slices.Equal(nm.Dependency, []string{"checkout", "payments-db"}) {
 		t.Errorf("Nearly by dependency: %v %+v", ok, nm)
+	}
+	// By labels, no path.
+	same, ok := n(in, []firing.Firing{{Rule: "R", Labels: map[string]string{"service": "checkout"}, Start: m(102), End: m(105)}}, 5*time.Minute, time.Minute, withGraph(opts(), g, 1, ""))
+	if !ok || same.Dependency != nil {
+		t.Errorf("Nearly by labels: %v %+v", ok, same)
+	}
+	// The path is said in the text, and aliased when redacted.
+	nm.Rule = "R"
+	rep := &Report{Settings: &Settings{Depends: &DependsSettings{Label: "service"}}, NearMisses: []NearMiss{nm}}
+	var b bytes.Buffer
+	if err := nearMisses(&b, rep.NearMisses); err != nil || !strings.Contains(b.String(), "R (via checkout → payments-db)") {
+		t.Errorf("near miss text: %v\n%s", err, b.String())
+	}
+	if js, _ := json.Marshal(nm); !strings.Contains(string(js), `"dependency":["checkout","payments-db"]`) {
+		t.Errorf("json: %s", js)
+	}
+	red := NewRedactor(nil).Report(rep)
+	if p := red.NearMisses[0].Dependency; len(p) != 2 || slices.Contains(p, "checkout") || slices.Contains(p, "payments-db") {
+		t.Errorf("redacted path %v", p)
 	}
 	if _, ok := n(in, []firing.Firing{{Rule: "R", Labels: l, Start: m(102), End: m(105)}}, 5*time.Minute, time.Minute, opts()); ok {
 		t.Error("Nearly without the graph found it")
@@ -493,5 +513,25 @@ func TestDependencyMarkMarkdown(t *testing.T) {
 	}
 	if cell := (Catch{Dependency: evil}).marks(nil); !strings.Contains(cell, "via checkout → ") {
 		t.Errorf("text: %q", cell)
+	}
+}
+
+// --compare says when the graph kept none, in its text and its Markdown.
+func TestCompareSaysGraphKeptNone(t *testing.T) {
+	r := &Report{Settings: &Settings{Depends: &DependsSettings{Label: "service", TooMany: true}}}
+	c := &Comparison{From: t0, To: m(60), Before: r, After: r, Incidents: []IncidentChange{},
+		Rules: []RuleChange{{Rule: "R", Before: &RuleResult{Rule: "R", Firings: 1}, After: &RuleResult{Rule: "R", Firings: 2}}}}
+	var b bytes.Buffer
+	if err := CompareText(&b, c, time.UTC); err != nil || !strings.Contains(b.String(), "! --depends: the service graph had more than 20000 edges in an hour: it kept none") {
+		t.Errorf("text: %v\n%s", err, b.String())
+	}
+	b.Reset()
+	if err := CompareMarkdown(&b, c, time.UTC); err != nil || !strings.Contains(b.String(), "`--depends`: the service graph had more than 20000 edges in an hour: it kept none") {
+		t.Errorf("markdown: %v\n%s", err, b.String())
+	}
+	b.Reset()
+	r2 := &Report{Settings: &Settings{Depends: &DependsSettings{Label: "service", Edges: 3}}}
+	if err := CompareText(&b, &Comparison{From: t0, To: m(60), Before: r2, After: r2}, time.UTC); err != nil || strings.Contains(b.String(), "--depends") {
+		t.Errorf("a graph that kept its edges: %v\n%s", err, b.String())
 	}
 }

@@ -376,6 +376,11 @@ func (n *names) report(r *Report) {
 		for k, v := range nm.Labels {
 			n.label(k, v)
 		}
+		if r.Settings != nil && r.Settings.Depends != nil {
+			for _, v := range nm.Dependency {
+				n.label(r.Settings.Depends.Label, v)
+			}
+		}
 	}
 	if r.Hours != nil {
 		for _, t := range r.Hours.Teams {
@@ -664,6 +669,13 @@ func (x *Redactor) report(r *Report) *Report {
 			nm.Incident = x.alias("incident", nm.Incident)
 			nm.Rule = x.alias("rule", nm.Rule)
 			nm.Labels = x.labels(nm.Labels)
+			if nm.Dependency != nil {
+				path := make([]string, len(nm.Dependency))
+				for k, v := range nm.Dependency {
+					path[k] = x.alias("label:"+x.dependsLabel, v)
+				}
+				nm.Dependency = path
+			}
 			nm.Before = x.ruleResult(nm.Before)
 			nm.After = x.ruleResultPtr(nm.After)
 			if nm.Value != nil {

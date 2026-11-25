@@ -368,6 +368,17 @@ func (c *Comparison) noRecord() bool {
 	return (c.Summary == nil || c.Summary.IncidentsGiven) && c.Before != nil && c.Before.NoRecord
 }
 
+// dependsTooMany says, when the service graph (--depends) kept none on
+// either side, that no catch was by dependency and why; "" else.
+func (c *Comparison) dependsTooMany() string {
+	for _, r := range []*Report{c.Before, c.After} {
+		if r != nil && r.Settings != nil && r.Settings.Depends != nil && r.Settings.Depends.TooMany {
+			return fmt.Sprintf("--depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency.", DependsMaxEdges)
+		}
+	}
+	return ""
+}
+
 // noRecordText is NoRecordCompared, and why when --impact had no data.
 func (c *Comparison) noRecordText() string {
 	if c.Before != nil && c.Before.Settings != nil && c.Before.Settings.ImpactNoData {
@@ -574,6 +585,9 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	}
 	if c.noRecord() {
 		fmt.Fprintln(w, c.noRecordText())
+	}
+	if s := c.dependsTooMany(); s != "" {
+		fmt.Fprintln(w, "! "+s)
 	}
 	if c.ChangedOnly {
 		fmt.Fprintf(w, "Firings of the changed rules %d → %d\n", len(c.Before.Firings), len(c.After.Firings))

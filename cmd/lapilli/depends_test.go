@@ -195,3 +195,44 @@ type dependsFails struct{}
 func (dependsFails) QueryRange(context.Context, string, time.Time, time.Time, time.Duration) ([]prom.Series, error) {
 	return nil, fmt.Errorf("no")
 }
+
+// The graph's hours are UTC's whatever --tz says: in a zone a half hour
+// off, the same edges catch the same incidents, and the report is the same
+// but for the zone it writes its times in (golden, with LAPILLI_GOLDEN=update).
+func TestVerdictDependsZone(t *testing.T) {
+	alone(t)
+	now = func() time.Time { return time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC) }
+	var asked []string
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return dependsHistory{&asked}, nil }
+	catches := func(args []string) (string, string) {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d\n%s", code, stderr.String())
+		}
+		var rows []string
+		for _, ln := range strings.Split(stdout.String(), "\n") {
+			if strings.Contains(ln, "via ") || strings.Contains(ln, "nothing fired") {
+				// Everything after the start's time: what caught it.
+				if _, after, ok := strings.Cut(ln, "m  "); ok {
+					rows = append(rows, after)
+				}
+			}
+		}
+		return stdout.String(), strings.Join(rows, "\n")
+	}
+	_, utc := catches(dependsArgs())
+	args := dependsArgs()
+	for i, a := range args {
+		if a == "--tz" {
+			args[i+1] = "Asia/Kolkata"
+		}
+	}
+	out, kolkata := catches(args)
+	if utc == "" || utc != kolkata {
+		t.Errorf("UTC caught\n%s\nAsia/Kolkata caught\n%s", utc, kolkata)
+	}
+	if !strings.Contains(out, "2026-10-06 15:30") {
+		t.Errorf("times aren't in Asia/Kolkata:\n%s", out)
+	}
+	golden(t, filepath.Join(dependsDir, "report-kolkata.txt"), stripRunTime(out))
+}

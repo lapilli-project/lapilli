@@ -255,6 +255,9 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 			text("Rules left alone weren't replayed (`--changed-only`): incidents show the changed rules' catches alone.\n")
 		}
 	}
+	if s := c.dependsTooMany(); s != "" {
+		text("\n" + strings.Replace(s, "--depends:", "`--depends`:", 1) + "\n")
+	}
 	if said := passedOver(c.PassedOver); said != "" {
 		text("\nPassed over, reading the rules: " + said + ".\n")
 	}

@@ -608,7 +608,8 @@ service is the incident's, by the label `settings.depends.label`, and the
 other the rule's firing's. `settings.depends` says how many pairs of
 services held an edge in the period (`edges`), and `too_many`† when an hour
 of the graph had more than 20,000 edges: it kept none, and no catch is by
-dependency. A rule that also caught the incident by labels or a link has no
+dependency. A near miss found by the graph has `dependency` too, the same path.
+A rule that also caught the incident by labels or a link has no
 `dependency`: its `delay_ns` and `loose`† are those of the firings that did,
 and the firings by the graph add nothing to them. A rule's
 `white_by_dependency`† counts its white firings that are white only by the

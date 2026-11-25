@@ -108,8 +108,19 @@ func (g *Graph) Each(fn func(hour time.Time, from, to string)) {
 	}
 	slices.Sort(hs)
 	for _, h := range hs {
+		type pair struct{ from, to string }
+		es := make([]pair, 0, len(g.hours[h]))
 		for _, e := range g.hours[h] {
-			fn(HourStart(h), g.names[e.from], g.names[e.to])
+			es = append(es, pair{g.names[e.from], g.names[e.to]})
+		}
+		slices.SortFunc(es, func(a, b pair) int {
+			if c := cmpName(a.from, b.from); c != 0 {
+				return c
+			}
+			return cmpName(a.to, b.to)
+		})
+		for _, e := range es {
+			fn(HourStart(h), e.from, e.to)
 		}
 	}
 }

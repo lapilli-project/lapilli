@@ -171,6 +171,10 @@ refuses `--depends` until then.
   firing, and `--match-strict` drops it.
 - `--depends-match` must be one of the `--match` labels, so that what the
   graph names are the values firings and incidents carry.
+- A near miss found by the graph has the path too (`NearMiss.Dependency`,
+  `Options.AboutBy`): in `--json`, after the rule's name in the table, aliased
+  by `--redact`. `--compare`'s text and Markdown say when the graph kept none
+  (`too_many`). `Graph.Each` gives each hour's edges by name.
 - `settings.depends` has the label, depth, direction, edges and `too_many`; not
   the expression, which may hold what a report shouldn't show.
 - `--compare` shows the path in its text and Markdown, and counts a catch that

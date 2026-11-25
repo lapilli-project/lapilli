@@ -604,7 +604,11 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 		case nm.Late:
 			held = fmt.Sprintf("from %s, fired %s", Delay(nm.From), Delay(nm.Fired))
 		}
-		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held, Clean(change), Delay(nm.Delay), fired, black})
+		rule := Clean(nm.Rule)
+		if len(nm.Dependency) > 0 {
+			rule += " (" + DependencyMark(nm.Dependency) + ")"
+		}
+		rows = append(rows, []string{Clean(nm.Incident), rule, held, Clean(change), Delay(nm.Delay), fired, black})
 	}
 	return writeTable(w, rows)
 }

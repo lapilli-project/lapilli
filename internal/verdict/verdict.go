@@ -1122,21 +1122,28 @@ func MergeLacked(a, b []string) []string {
 // With a service graph (Options.Depends), one that reaches it through the
 // graph is about it too.
 func (o Options) About(rule string, labels map[string]string, in incident.Incident) bool {
+	about, _ := o.AboutBy(rule, labels, in)
+	return about
+}
+
+// AboutBy is About, and, of a firing that is about the incident only by the
+// service graph, the way from the caller to the callee (NearMiss.Dependency).
+func (o Options) AboutBy(rule string, labels map[string]string, in incident.Incident) (about bool, path []string) {
 	if o.Signals.NotJudgedRules() && o.NotJudged(rule) {
-		return false
+		return false, nil
 	}
 	if in.Links(rule, labels) {
-		return true
+		return true, nil
 	}
 	if o.LinkedOnly && len(in.Alerts) > 0 {
-		return false
+		return false, nil
 	}
 	j := o.judgingOf(rule, in)
 	if o.agrees(j, labels, in) {
-		return true
+		return true, nil
 	}
-	_, _, ok := o.dependsOn(j, labels, in)
-	return ok
+	path, _, ok := o.dependsOn(j, labels, in)
+	return ok, path
 }
 
 // Refired reports whether a firing that started at start came within

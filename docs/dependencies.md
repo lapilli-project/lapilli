@@ -44,6 +44,27 @@ where they differ.
 ([Incidents nobody wrote down](impact.md)). Label names depend on how each is
 scraped: check them against your own Prometheus first.
 
+Things that differ by stack, to check in your own Prometheus:
+
+- **Istio ambient mode.** Requests are counted by waypoint proxies, with
+  `reporter="waypoint"` rather than `"source"` (a mesh with no waypoint has
+  only ztunnel's TCP metrics, `istio_tcp_*`, which this expression doesn't
+  read). Give `reporter=~"source|waypoint"` for a mesh of both; the check
+  `lapilli impact suggest` makes looks for `reporter="source"` alone.
+- **Calls out of the mesh.** Istio names a destination it can't tell
+  `destination_workload="unknown"`: every service calling outside the mesh
+  then calls one `unknown`, and an alert whose `service` is `unknown` would
+  catch them all. Add `destination_workload!="unknown"` to the selector.
+- **Names that repeat across namespaces.** The expression groups by workload
+  name alone, so `checkout` in `shop` and in `staging` are one node, and
+  their calls join. Add the namespace to the selector
+  (`destination_workload_namespace="shop"`) when the names repeat, or give
+  the nodes the names firings carry with `label_replace`.
+- **Linkerd's StatefulSets.** A StatefulSet's calls carry `statefulset` and
+  `dst_statefulset`, not `deployment` and `dst_deployment`, so the table's
+  expression leaves them out; a run reads one pair of labels, so unify the
+  names first (`label_replace`) if services of both kinds call each other.
+
 Count the calls over an hour (`[1h]`), as the table does. A sample at 10:00
 is stored as the hour it covers, 09:00 to 10:00; with `[5m]` a sample would
 say only whether the last five minutes held a call, and the hour the incident
@@ -88,7 +109,9 @@ alert catching the payments database's outage, the symptom that told of it).
 The order holds: a firing the incident's tool linked catches it whatever the
 graph says; then one whose labels agree; then one by dependency. A catch by
 dependency is a catch: it counts toward precision as any other, and the
-noisy test is as before. Near misses are looked for by dependency too.
+noisy test is as before. Near misses are looked for by dependency too, and carry the path
+(`dependency` on a near miss in `--json`, `(via checkout → payments-db)` after
+the rule's name in the table, aliased by `--redact`).
 
 Edges are kept by the hour, in UTC: an edge held at any time in an hour holds
 for that hour, and an incident takes the hours from the one an hour before its
