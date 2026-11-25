@@ -237,7 +237,9 @@
   them again in minutes. Each recording's period is in its `period.json`,
   and the real-server tests replay every recording directory present. The
   recordings are taken again at the pinned versions, with the rules of the
-  shapes above among them. `record` says how many evaluations each server
+  shapes above among them, and kept at the latest too (Prometheus 3.16.0,
+  Grafana 13.3.2 and Loki 3.7.10, recorded by the workflow on a runner where
+  no server missed an evaluation). `record` says how many evaluations each server
   missed in the periods, as a host too busy to run them on time makes them
   miss, and a recording whose test then fails says to record again on a
   host less busy: what a server fired after a missed evaluation is unlike
