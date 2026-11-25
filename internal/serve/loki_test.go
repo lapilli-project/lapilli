@@ -306,9 +306,10 @@ func TestLokiLoadedProposal(t *testing.T) {
 // rules/loki/, as a repository with both kinds of rule file under one
 // directory would be given. A Loki rule whose LogQL is also PromQL is read
 // by both, and both documents have the same Source; current() took the
-// first document of that Source, --rules's, for the Loki rule too, whose
-// proposal was then left for a person only because its git change didn't
-// read back. It takes the Loki ruler's document, and says why.
+// first document of that Source, --rules's, for the Loki rule too. It takes
+// the Loki ruler's document, and the rule's change is a pull request to
+// that file, written by the Loki parser (a Loki rule file's rule is changed
+// by the git path as a Prometheus rule file's is).
 func TestLokiProposalSharedSource(t *testing.T) {
 	parallel(t)
 	ctx := context.Background()
@@ -346,9 +347,10 @@ func TestLokiProposalSharedSource(t *testing.T) {
 	if code != http.StatusSeeOther {
 		t.Fatalf("%d %s", code, zzMsg(body))
 	}
-	if p := state(t, s, locID(hd)); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathLoki {
-		t.Errorf("a Loki ruler's rule's proposal: path %q (source %s), why %q, want %q, for a person, as a Loki ruler's", p.Path, p.Source,
-			proposalEvidence(p).NoPath, ledger.PathNone)
+	if p := state(t, s, locID(hd)); p.Path != ledger.PathGit || proposalEvidence(p).NoPath != "" || !strings.Contains(p.Document, "for: 15m") ||
+		p.DocHash == "" || !strings.Contains(p.Diff, "+        for: 15m") {
+		t.Errorf("a Loki ruler's rule file's proposal: path %q (source %s), why %q, want %q: %s", p.Path, p.Source,
+			proposalEvidence(p).NoPath, ledger.PathGit, p.Diff)
 	}
 	// The same file's rule read with --rules is Prometheus's, and its
 	// proposal takes the git path.

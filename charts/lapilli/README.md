@@ -1048,6 +1048,9 @@ token Loki's writes carry, a token of their own, not `loki.tokenSecret`'s;
 its rules in an object store, or on the filesystem through its object
 store client (`storage_config.use_thanos_objstore`), not in local files
 (`ruler.storage.type: local`), which are read-only to its API.
+Rules from Loki's rule files (`rules.loki.configMaps`, `--loki-rules`) are
+changed by the git path, a pull request to where the files are kept, as
+any rule file's are.
 
 Without one, a Mimir's, a Cortex's or a Loki's writes are sent with no
 token, for a ruler reached only inside the cluster, and Amazon's and

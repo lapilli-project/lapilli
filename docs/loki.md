@@ -32,8 +32,11 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   `--loki-loaded-rules`, with its backtest, is written through Loki's
   ruler once approved, where `lapilli serve --changes-in` names its
   namespace as `loki:NAMESPACE`, with `--changes-loki-token-file`
-  ([changing rules](changing-rules.md)); otherwise, and for one read from
-  its files, it is for a person.
+  ([changing rules](changing-rules.md)); otherwise it is for a person. One
+  read from its files (`--loki-rules`) is a pull request to the file, by
+  the git path, as any rule file's is. A new rule can be added to a group
+  of a Loki rule file, or of a Loki ruler's namespace `--changes-in`
+  names, held to its expectations like any other.
 - **Grafana's rules.** With `--grafana`, the type of each data source a
   rule reads is asked of Grafana; a Loki one's queries are asked through
   Grafana's data source proxy (`/api/datasources/proxy/uid/UID`, a Viewer's

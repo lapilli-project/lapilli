@@ -659,7 +659,7 @@ const (
 	noPathLastGroup = "it is its rule group's last rule: a person deletes the rule group"
 	noPathEdit      = "the change can't be written into the ruler's group as it reads"
 	noPathUnread    = "the ruler gives its group in a form that can't be read back as written: change it in the ruler"
-	noPathLoki      = "it is from a Loki ruler's rule files, which Lapilli doesn't write: a person changes it where they are kept"
+	noPathLoki      = "it is a Loki ruler's rule whose group and namespace Lapilli can't name to write to: a person changes it where it is kept"
 	noPathLokiIn    = "its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE"
 )
 

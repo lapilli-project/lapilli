@@ -949,10 +949,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		if err := s.apiPropose(ctx, tg, &p, &ev, f, want, e, b, q.Value); err != nil {
 			return 0, err
 		}
-	case f.doc.Logs != "":
-		// A Loki ruler's rule from its files: Lapilli doesn't write a
-		// Loki's rule files, so the change, with its backtest, is for a
-		// person (docs/design/loki.md).
+	case f.doc.Logs != "" && f.doc.Logs != rules.LokiFile:
+		// A Loki ruler's rule from its API that isn't changed through it
+		// (no namespace to name): for a person (docs/design/loki.md).
 		ev.NoPath = noPathLoki
 	case s.grafanaKept(f):
 		if q.Kind != ledger.KindThreshold {
@@ -974,9 +973,12 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			out, err = rules.EditDoc(f.doc.Data, e)
 		}
 		if err == nil {
-			after, ok := readsAs(f.doc.Data, out, r, want, q.Kind == ledger.KindDelete)
+			// A Loki ruler's rule file is read as its rules are, LogQL: its
+			// change is a pull request as a Prometheus rule file's is.
+			parse := parserOf(f.doc.Logs)
+			after, ok := readsAsBy(parse, f.doc.Data, out, r, want, q.Kind == ledger.KindDelete)
 			if says {
-				after, ok = readsSaying(f.doc.Data, out, r, want)
+				after, ok = readsSayingBy(parse, f.doc.Data, out, r, want)
 			}
 			if ok {
 				p.Path, p.Document, p.DocHash = ledger.PathGit, string(out), rules.Hash(f.doc.Data)
@@ -1086,17 +1088,12 @@ func (s *Server) turnedOff(ctx context.Context, rule string, follows int64, graf
 // docName is a document's name in a diff: its path under --rules, or the
 // file's own name.
 func (s *Server) docName(source string) string {
-	if rel, err := filepath.Rel(s.cfg.RulesPath, source); s.cfg.RulesPath != "" && err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(rel)
+	for _, root := range []string{s.cfg.RulesPath, s.cfg.LokiRules} {
+		if rel, err := filepath.Rel(root, source); root != "" && err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
 	}
 	return filepath.Base(source)
-}
-
-// readsAs reports whether a document edited reads as the rules before
-// with want in place of r (none, for a deletion), and gives the rule as
-// read.
-func readsAs(before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, bool) {
-	return readsAsBy(rules.Parse, before, after, r, want, gone)
 }
 
 // parserOf reads a document as a rule file: Prometheus's, or, with logs, a
@@ -1108,7 +1105,9 @@ func parserOf(logs string) func([]byte) ([]rules.Rule, error) {
 	return func(b []byte) ([]rules.Rule, error) { return rules.FromDocs([]rules.Doc{{Data: b, Logs: logs}}) }
 }
 
-// readsAsBy is readsAs, the documents read by parse.
+// readsAsBy reports whether a document edited reads as the rules before
+// with want in place of r (none, for a deletion), the documents read by
+// parse, and gives the rule as read.
 func readsAsBy(parse func([]byte) ([]rules.Rule, error), before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, bool) {
 	a, err := parse(before)
 	if err != nil {
@@ -1145,17 +1144,13 @@ func readsAsBy(parse func([]byte) ([]rules.Rule, error), before, after []byte, r
 	return got, got != nil && shape(*got) == shape(want)
 }
 
-// readsSaying reports whether a document edited reads as the rules before,
+// readsSayingBy reports whether a document edited reads as the rules before,
 // every one firing as it did and saying what it said, but for r, which
 // fires as it did and says what want says; and gives r as read. r is
 // compared but for its digest: a Grafana rule's covers what it says, and
 // rules.Check has compared the rest of its tree whole. What it says now is
-// read back as a template, as saidOK reads it.
-func readsSaying(before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
-	return readsSayingBy(rules.Parse, before, after, r, want)
-}
-
-// readsSayingBy is readsSaying, the documents read by parse.
+// read back as a template, as saidOK reads it. The documents are read by
+// parse.
 func readsSayingBy(parse func([]byte) ([]rules.Rule, error), before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
 	a, err := parse(before)
 	if err != nil {
@@ -1665,11 +1660,23 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 	if p.BeforeHash != "" && now == nil {
 		return step, "", refusal{"the rule changed since it was proposed, or is gone: propose it again"}
 	}
-	i := slices.IndexFunc(docs, func(d rules.Doc) bool { return d.Source == p.Source })
-	if i < 0 {
-		return step, "", refusal{"the file the rule was read from is gone"}
+	// The document of the kind the rule is: a file read as a Loki ruler's
+	// and as a Prometheus's both (--rules and --loki-rules over one
+	// directory) is two.
+	doc := rules.Doc{}
+	if now != nil {
+		doc = docOf(*now, docs)
 	}
-	doc := docs[i]
+	if doc.Source != p.Source {
+		i := slices.IndexFunc(docs, func(d rules.Doc) bool {
+			return d.Source == p.Source && (now == nil || (d.Logs != "") == (doc.Logs != ""))
+		})
+		if i < 0 {
+			return step, "", refusal{"the file the rule was read from is gone"}
+		}
+		doc = docs[i]
+	}
+	parse := parserOf(doc.Logs)
 	step.Backup = string(doc.Data)
 	if rules.Hash(doc.Data) != p.DocHash {
 		// The rest of the file changed: the change is made afresh in it,
@@ -1702,9 +1709,9 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 		ok := false
 		if e.Annotation != "" {
 			want.Says = saysAfter(now.Says, e.Annotation, e.Value, e.Unset)
-			_, ok = readsSaying(doc.Data, out, *now, want)
+			_, ok = readsSayingBy(parse, doc.Data, out, *now, want)
 		} else {
-			_, ok = readsAs(doc.Data, out, *now, want, e.Delete)
+			_, ok = readsAsBy(parse, doc.Data, out, *now, want, e.Delete)
 		}
 		if !ok {
 			return step, "", refusal{"the change can't be written into the file as it is now: propose it again"}
@@ -2206,11 +2213,12 @@ type proposeIn struct {
 	Unset      bool   `json:"unset,omitempty" jsonschema:"take the annotation out instead: kind says"`
 	Check      string `json:"check,omitempty" jsonschema:"the content check's finding it answers, as the rule tool gives it, such as no_runbook: kind says"`
 	// A new rule: kind add.
-	Added        string            `json:"added,omitempty" jsonschema:"kind add: the new rule, one Prometheus alerting rule in YAML (alert, expr, for, keep_firing_for, labels, annotations): its alert is its name, apart from every rule's, and rule names it too"`
-	Path         string            `json:"path,omitempty" jsonschema:"kind add: where it goes, as places gives one: git, grafana, ruler or alarm"`
+	Added        string            `json:"added,omitempty" jsonschema:"kind add: the new rule, one Prometheus alerting rule in YAML (alert, expr, for, keep_firing_for, labels, annotations), its expr LogQL for a Loki place: its alert is its name, apart from every rule's, and rule names it too"`
+	Path         string            `json:"path,omitempty" jsonschema:"kind add: where it goes, as places gives one: git, grafana, ruler, loki or alarm"`
 	File         string            `json:"file,omitempty" jsonschema:"kind add, git: the rule file, as places names it"`
+	Loki         bool              `json:"loki,omitempty" jsonschema:"kind add, git: the file is a Loki ruler's rule file, as places says; the rule is LogQL, here and for path loki"`
 	Folder       string            `json:"folder,omitempty" jsonschema:"kind add, grafana: the folder's title"`
-	Namespace    string            `json:"namespace,omitempty" jsonschema:"kind add, ruler: the namespace"`
+	Namespace    string            `json:"namespace,omitempty" jsonschema:"kind add, ruler and loki: the namespace"`
 	Alarms       string            `json:"alarms,omitempty" jsonschema:"kind add, alarm: the --alarms source"`
 	Group        string            `json:"group,omitempty" jsonschema:"kind add: the group, as places gives it, or a new group's name with new_group"`
 	NewGroup     bool              `json:"new_group,omitempty" jsonschema:"kind add: a new group of that name, where places offers one"`
@@ -2223,7 +2231,7 @@ type proposeIn struct {
 
 type proposeOut struct {
 	ID   int64  `json:"id"`
-	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
+	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; loki, a Loki ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
 	// Outlasts warns of a for proposed that one event can't outlast.
 	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for as long as the range the rule's condition counts events over, or longer: one event alone could never fire it, only events that keep coming for all of it. Proposed all the same, and said on its page"`

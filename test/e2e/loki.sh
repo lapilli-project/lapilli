@@ -19,7 +19,7 @@
 # tenant, --changes-in loki:shop. A longer for is applied (Loki's ruler
 # loads it) and undone byte for byte; a rule changed in Loki since it was
 # proposed is refused as stale; a namespace --changes-in doesn't name is
-# left for a person.
+# left for a person; a new rule is added to a group and undone.
 #
 # Needs Docker, Go, curl and jq. Takes 17 to 24 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
@@ -393,6 +393,27 @@ id=$(propose bo@example.com rule=OtherErrors kind=for for=5m)
 check_line "a namespace --changes-in doesn't name is for a person, with why" \
   "$(proposal "$id" | jq -r '.path + ": " + (.evidence.no_path // "")')" \
   "^none: its namespace in Loki's ruler isn't one --changes-in names, as loki:NAMESPACE$"
+
+# A new rule, in LogQL, held to its expectations (a budget, which a rule
+# that fires nowhere in the twelve weeks meets), written into Loki's group
+# through its API, loaded by Loki's ruler, and undone by deleting it.
+until_true 120 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sl/proposals/new' | grep -q ': shop, api</option>'"
+place=$(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sl/proposals/new" | sed -nE 's|.*<option value="([0-9a-f]+)">[^<]*: shop, api</option>.*|\1|p' | head -1)
+added=$'alert: LogErrorsAdded\nexpr: sum(count_over_time({app="shop", level="error"}[1m])) > 5\nfor: 1m\n'
+held=$'expectations:\n  - rule: LogErrorsAdded\n    budget:\n      week: 100000\n'
+id=$(propose bo@example.com kind=add "place=$place" "rule=$added" "expectations=$held")
+check_line "a rule added to Loki's ruler, on its own path" "$(proposal "$id" | jq -r '.path')" '^loki$'
+act ana@example.com "$id" approve
+until_true 90 is "$id" applied || true
+check_line "a rule added, applied in Loki" "$(state "$id")" '^applied$'
+check_line "the group holds it beside the others" "$(lns shop/api | grep -cE 'alert: (LogErrorsAdded|LogErrors|LogSlow)$')" '^3$'
+until_true 60 sh -c "curl -s -H 'X-Scope-OrgID: acme' '$lw/prometheus/api/v1/rules' | jq -e '.data.groups[] | select(.file == \"shop\") | .rules[] | select(.name == \"LogErrorsAdded\")'" || true
+check_line "Loki's ruler loaded it" "$(lloaded shop LogErrorsAdded | jq -r .name)" '^LogErrorsAdded$'
+act ana@example.com "$id" undo
+undo=$(newest)
+until_true 90 is "$undo" applied || true
+check_line "a rule added, undone in Loki" "$(state "$id")" '^undone$'
+check_line "the group without it" "$(lns shop/api | grep -c LogErrorsAdded)" '^0$'
 
 if [ "$fail" != 0 ]; then
   echo "--- serve (Loki's ruler)"; tail -30 "$work/serve.log"
