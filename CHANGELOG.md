@@ -4,6 +4,20 @@
 
 ### Added
 
+- **A Loki ruler's rules and a cloud's PromQL alarms compared as parsed**, as
+  Prometheus's are ([docs/design/backtests.md](docs/design/backtests.md)).
+  Loki's rules API prints LogQL again, so a rule file's rule and the rule
+  serve reads from the ruler were never one by their text, and serve held
+  the catch of a pull request's rule left alone as not known. A rule's
+  LogQL is now read and written in one form (a binary operation between
+  parentheses, a stream selector's matchers sorted, strings, numbers and
+  durations by value, `by` before or after) for the forms Loki 3.7.9 reads
+  alike, and what it may read otherwise (`on`, `variants`, `ip`, a line
+  filter's `or`, several label filters in one stage) is compared by its
+  text as before; the rules of the recorded Loki and its API's answer are
+  one each. A CloudWatch, Google Cloud or Azure alarm in PromQL is read
+  as PromQL, with its cloud in the result: never one with another cloud's
+  or Prometheus's rule.
 - **What people did when a rule fired**, in `lapilli verdict`
   ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
   a paging tool sent and whether a person acknowledged each; `--rollouts`

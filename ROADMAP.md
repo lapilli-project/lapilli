@@ -63,9 +63,10 @@ What comes before it, as it is what everyone starts from:
   beside the pinned ones, each real-server test passing on both
   ([Replay fidelity](#replay-fidelity)).
 - **Pull request backtests through serve without a gap.** A rule serve
-  doesn't run backtested, not left out; and a Loki ruler's rules, Grafana's
-  rules and cloud alarms compared as parsed, not by their text, as
-  Prometheus's are ([Pull request backtests](#pull-request-backtests)).
+  doesn't run backtested, not left out; and Grafana's rules compared as
+  parsed, not by their text, as Prometheus's are, and a Loki ruler's rules
+  and cloud alarms are since 0.72 ([Pull request
+  backtests](#pull-request-backtests)).
 - **Several replicas held by CI.** The kind e2e of three replicas
   (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)).
 - **The names looked at once more.** Every flag, API route, chart value
@@ -321,8 +322,10 @@ of the one waiting (0.72). Still to do:
 - Through serve, a rule left alone that serve doesn't run: an incident
   only it may catch is not known, where it could be replayed. And a rule
   serve reads from an API that leaves out what its file says (a group's
-  `query_offset`, which Prometheus's rules API doesn't report); and a Loki
-  ruler's, a Grafana rule and a cloud alarm, still compared by their text.
+  `query_offset`, which Prometheus's rules API doesn't report); and a
+  Grafana rule, still compared by its text. A Loki ruler's rules, whose
+  API prints LogQL again, and a cloud alarm in PromQL are compared as
+  parsed (0.72).
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left
