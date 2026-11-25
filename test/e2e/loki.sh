@@ -306,7 +306,7 @@ lpost() { curl -sf "${tenant[@]}" -X POST -H 'Content-Type: application/yaml' --
 lput() { printf '%s' "$2" | lpost "$1"; } # namespace, group: retried as one
 lns() { curl -s "${tenant[@]}" "$lrules/$1"; }
 lloaded() { # namespace, alert: the rule as Loki's ruler has loaded it
-  curl -s "${tenant[@]}" "$lw/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.rule == $n)'
+  curl -s "${tenant[@]}" "$lw/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.name == $n)'
 }
 shop_api='name: api
 interval: 1m
