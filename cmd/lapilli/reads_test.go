@@ -198,8 +198,8 @@ func TestProgress(t *testing.T) {
 	// No 429, nothing said of one.
 	quiet.Store(true)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"verdict", "--rules", rs, "--prometheus", srv.URL, "--incidents", incidents, "--since", "2d", "--progress=false"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
-		t.Errorf("exit %d, stderr\n%s", code, stderr.String())
+	if code := run([]string{"verdict", "--rules", rs, "--prometheus", srv.URL, "--incidents", incidents, "--since", "2d", "--progress=false"}, &stdout, &stderr); code != 0 || strings.Count(stderr.String(), "\n") != 1 || !strings.Contains(stderr.String(), "the history's rules API couldn't be read") {
+		t.Errorf("exit %d, stderr (the rules API that isn't served alone)\n%s", code, stderr.String())
 	}
 }
 
