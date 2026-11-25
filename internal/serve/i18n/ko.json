@@ -2302,7 +2302,7 @@
  "No incident written down for these weeks or the two weeks before: precision isn't known, and no rule is called noisy.": "이 기간과 그 앞 2주에 기록된 인시던트가 없어 정탐률을 알 수 없고, 노이즈 규칙도 정하지 않아요.",
  "%d of the %d weeks shown had no incident written down for them or the two weeks before: their firings are counted, not judged.": "보이는 %[2]d주 중 %[1]d주는 그 주와 앞 2주에 기록된 인시던트가 없어요. 그 주의 발화는 세기만 하고 판정하지 않아요.",
  "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy.": "발화한 주와 그 앞 2주에 기록된 인시던트가 없어 정탐률을 알 수 없고, 노이즈 규칙인지도 정하지 않아요.",
- "A firing is judged by the incidents written down on its day or in the two weeks before it (its week and the two weeks before, with --record-by-week). With none, a firing that caught nothing can't be told from one nobody wrote down.": "발화는 그 날이나 그 전 2주 안에 기록된 인시던트로 판정해요(--record-by-week를 주면 그 주와 앞 2주). 기록이 없으면 정말 문제가 없었던 발화인지, 아무도 기록하지 않은 장애였는지 구분할 수 없어요.",
+ "A firing is judged by the incidents written down on its day or in the two weeks before it. With none, a firing that caught nothing can't be told from one nobody wrote down.": "발화는 그 날이나 그 전 2주 안에 기록된 인시던트로 판정해요. 기록이 없으면 정말 문제가 없었던 발화인지, 아무도 기록하지 않은 장애였는지 구분할 수 없어요.",
  "The week of %s.": "%s 주.",
  "None open.": "열린 작업이 없어요.",
  "caught nothing: %d asleep, %d off hours": "오탐 중 자는 시간 %d, 업무 외 %d",

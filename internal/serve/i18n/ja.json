@@ -2302,7 +2302,7 @@
  "No incident written down for these weeks or the two weeks before: precision isn't known, and no rule is called noisy.": "この期間とその前の 2 週にインシデントの記録がないため、適合率は分からず、ノイズのルールも決めません。",
  "%d of the %d weeks shown had no incident written down for them or the two weeks before: their firings are counted, not judged.": "表示中の %[2]d 週のうち %[1]d 週は、その週と前の 2 週にインシデントの記録がありません。その週の発火は数えるだけで判定しません。",
  "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy.": "発火した週とその前の 2 週にインシデントの記録がないため、適合率は分からず、ノイズかどうかも決めません。",
- "A firing is judged by the incidents written down on its day or in the two weeks before it (its week and the two weeks before, with --record-by-week). With none, a firing that caught nothing can't be told from one nobody wrote down.": "発火は、その日か前の 2 週間に記録されたインシデントで判定します(--record-by-week なら、その週と前の 2 週)。記録がなければ、本当に何もなかった発火か、誰も記録しなかった障害かを見分けられません。",
+ "A firing is judged by the incidents written down on its day or in the two weeks before it. With none, a firing that caught nothing can't be told from one nobody wrote down.": "発火は、その日か前の 2 週間に記録されたインシデントで判定します。記録がなければ、本当に何もなかった発火か、誰も記録しなかった障害かを見分けられません。",
  "The week of %s.": "%s の週。",
  "None open.": "未完了のタスクはありません。",
  "caught nothing: %d asleep, %d off hours": "検知なしのうち睡眠時間 %d、業務時間外 %d",
