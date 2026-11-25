@@ -1,0 +1,6 @@
+{"rule":"PaymentsDBConnections","labels":{"service":"payments-db","severity":"page"},"start":"2026-10-06T09:55:00Z","end":"2026-10-06T10:20:00Z"}
+{"rule":"CheckoutErrors","labels":{"service":"checkout","severity":"page"},"start":"2026-10-06T10:02:00Z","end":"2026-10-06T10:25:00Z"}
+{"rule":"SearchDown","labels":{"service":"search","severity":"ticket"},"start":"2026-10-06T10:01:00Z","end":"2026-10-06T10:10:00Z"}
+{"rule":"LedgerLag","labels":{"service":"ledger","severity":"ticket"},"start":"2026-10-06T10:03:00Z","end":"2026-10-06T10:12:00Z"}
+{"rule":"LedgerDBDisk","labels":{"service":"ledger-db","severity":"ticket"},"start":"2026-10-06T10:04:00Z","end":"2026-10-06T10:15:00Z"}
+{"rule":"CheckoutErrors","labels":{"service":"checkout","severity":"page"},"start":"2026-10-08T12:01:00Z","end":"2026-10-08T12:20:00Z"}

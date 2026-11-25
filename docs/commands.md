@@ -342,6 +342,26 @@ What went wrong (with --compare, if you have them):
   --impact-file FILE  the named signals in a file, and which rules are judged
                       against which (see below), in place of the flags above
 
+Which service depends on which (docs/dependencies.md):
+  --depends PROMQL    an expression whose series each name a caller and a
+                      callee, such as a service mesh's request rate by
+                      source and destination: an alert on a service an
+                      incident's service calls then catches it, though their
+                      --match labels differ. Read at an hour's step over the
+                      period; needs --depends-labels and a --match label
+  --depends-labels FROM,TO
+                      the labels of its series that name the caller and the
+                      callee
+  --depends-match LABEL
+                      the label of --match whose values the services are
+                      (default: the first --match)
+  --depends-depth N   how many calls away still count: 1 (default) to 3
+  --depends-direction down|both
+                      down (default): an alert on a service the incident's
+                      service calls catches it; both: an alert on a caller of
+                      it does too
+  --depends-step DUR  the step it is read at (default 1h, 10m at the finest)
+
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
                       VictoriaMetrics, or a cloud's managed Prometheus

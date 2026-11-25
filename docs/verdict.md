@@ -84,6 +84,17 @@ with the pages before and after. `--notifications=false` leaves it all out. Thes
 are worked out from the configuration, not recorded ([Who a firing reached, worked
 out](notifications-worked-out.md)).
 
+## Alerts on a dependency
+
+`--depends PROMQL`, with `--depends-labels FROM,TO`, gives a graph of who
+calls whom, read once from the history, so that an alert on a service an
+incident's service calls (a database's, a queue's) catches it though their
+`--match` labels differ; `--depends-match`, `--depends-depth`,
+`--depends-direction` and `--depends-step` say which label names the
+services, how many calls away count, in which direction, and how often the
+graph is read. The catch is marked `(via checkout → payments-db)` and the
+report says how many catches were so ([An alert on a dependency](dependencies.md)).
+
 ## How it asks the history
 
 A replay asks for each query a day at a time, once for every rule that needs

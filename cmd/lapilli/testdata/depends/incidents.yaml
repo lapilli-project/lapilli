@@ -1,0 +1,3 @@
+incidents:
+  - {id: INC-1, title: Checkout errors, start: 2026-10-06T10:00:00Z, end: 2026-10-06T10:30:00Z, labels: {service: checkout}}
+  - {id: INC-2, title: Payments database down, start: 2026-10-08T12:00:00Z, end: 2026-10-08T12:30:00Z, labels: {service: payments-db}}

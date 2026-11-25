@@ -1,0 +1,281 @@
+{
+  "from": "2026-10-05T00:00:00Z",
+  "to": "2026-10-12T00:00:00Z",
+  "noisy_at": {
+    "firings": 10,
+    "precision": 0.2
+  },
+  "rules": [
+    {
+      "rule": "CheckoutErrors",
+      "severity": "page",
+      "firings": 2,
+      "white": 1,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 1,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0,
+      "episodes": {
+        "total": 2,
+        "white": 1,
+        "noisy": false
+      }
+    },
+    {
+      "rule": "LedgerDBDisk",
+      "severity": "ticket",
+      "firings": 1,
+      "white": 0,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 0,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 0,
+        "noisy": false
+      }
+    },
+    {
+      "rule": "SearchDown",
+      "severity": "ticket",
+      "firings": 1,
+      "white": 0,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 0,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 0,
+        "noisy": false
+      }
+    },
+    {
+      "rule": "LedgerLag",
+      "severity": "ticket",
+      "firings": 1,
+      "white": 1,
+      "black": 0,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 1,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 1,
+        "noisy": false
+      }
+    },
+    {
+      "rule": "PaymentsDBConnections",
+      "severity": "page",
+      "firings": 1,
+      "white": 1,
+      "black": 0,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 1,
+      "first": 1,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0,
+      "episodes": {
+        "total": 1,
+        "white": 1,
+        "noisy": false
+      }
+    }
+  ],
+  "incidents": [
+    {
+      "id": "INC-1",
+      "title": "Checkout errors",
+      "start": "2026-10-06T10:00:00Z",
+      "end": "2026-10-06T10:30:00Z",
+      "labels": {
+        "service": [
+          "checkout"
+        ]
+      },
+      "candidate": false,
+      "caught_by": [
+        {
+          "rule": "PaymentsDBConnections",
+          "delay_ns": -300000000000,
+          "noisy": false,
+          "dependency": [
+            "checkout",
+            "payments-db"
+          ]
+        },
+        {
+          "rule": "CheckoutErrors",
+          "delay_ns": 120000000000,
+          "noisy": false
+        },
+        {
+          "rule": "LedgerLag",
+          "delay_ns": 180000000000,
+          "noisy": false,
+          "dependency": [
+            "checkout",
+            "ledger"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "INC-2",
+      "title": "Payments database down",
+      "start": "2026-10-08T12:00:00Z",
+      "end": "2026-10-08T12:30:00Z",
+      "labels": {
+        "service": [
+          "payments-db"
+        ]
+      },
+      "candidate": false,
+      "caught_by": []
+    }
+  ],
+  "firings": [
+    {
+      "rule": "PaymentsDBConnections",
+      "labels": {
+        "service": "payments-db",
+        "severity": "page"
+      },
+      "start": "2026-10-06T09:55:00Z",
+      "end": "2026-10-06T10:20:00Z",
+      "white": true,
+      "incidents": [
+        "INC-1"
+      ],
+      "episode": 1,
+      "day": "2026-10-06"
+    },
+    {
+      "rule": "SearchDown",
+      "labels": {
+        "service": "search",
+        "severity": "ticket"
+      },
+      "start": "2026-10-06T10:01:00Z",
+      "end": "2026-10-06T10:10:00Z",
+      "white": false,
+      "episode": 2,
+      "day": "2026-10-06"
+    },
+    {
+      "rule": "CheckoutErrors",
+      "labels": {
+        "service": "checkout",
+        "severity": "page"
+      },
+      "start": "2026-10-06T10:02:00Z",
+      "end": "2026-10-06T10:25:00Z",
+      "white": true,
+      "incidents": [
+        "INC-1"
+      ],
+      "episode": 3,
+      "day": "2026-10-06"
+    },
+    {
+      "rule": "LedgerLag",
+      "labels": {
+        "service": "ledger",
+        "severity": "ticket"
+      },
+      "start": "2026-10-06T10:03:00Z",
+      "end": "2026-10-06T10:12:00Z",
+      "white": true,
+      "incidents": [
+        "INC-1"
+      ],
+      "episode": 4,
+      "day": "2026-10-06"
+    },
+    {
+      "rule": "LedgerDBDisk",
+      "labels": {
+        "service": "ledger-db",
+        "severity": "ticket"
+      },
+      "start": "2026-10-06T10:04:00Z",
+      "end": "2026-10-06T10:15:00Z",
+      "white": false,
+      "episode": 5,
+      "day": "2026-10-06"
+    },
+    {
+      "rule": "CheckoutErrors",
+      "labels": {
+        "service": "checkout",
+        "severity": "page"
+      },
+      "start": "2026-10-08T12:01:00Z",
+      "end": "2026-10-08T12:20:00Z",
+      "white": false,
+      "episode": 6,
+      "day": "2026-10-08"
+    }
+  ],
+  "hours": {
+    "zone": "UTC",
+    "work": "mon-fri@08:00-18:00",
+    "sleep": "22:00-08:00"
+  },
+  "settings": {
+    "lead_ns": 900000000000,
+    "match": [
+      "service"
+    ],
+    "refire_ns": 3600000000000,
+    "unknown_length_ns": 3600000000000,
+    "record_lookback_ns": 1209600000000000,
+    "depends": {
+      "label": "service",
+      "depth": 1,
+      "direction": "down",
+      "edges": 4
+    },
+    "zone": "UTC"
+  }
+}
