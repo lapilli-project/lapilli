@@ -432,7 +432,7 @@ func TestCompareSeesDependency(t *testing.T) {
 	if err := CompareMarkdown(&b, c, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "(via checkout → payments-db)") {
+	if !strings.Contains(b.String(), "(via `checkout` → `payments-db`)") {
 		t.Errorf("compare markdown:\n%s", b.String())
 	}
 }
