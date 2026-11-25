@@ -334,12 +334,15 @@ func TestAloneTextParsed(t *testing.T) {
 	case aloneTextOf(metricsQL) == aloneTextOf(readable):
 		t.Error("a text not parsed and a parsed one are one")
 	}
-	// A Grafana rule, a Loki ruler's: by their text.
+	// A Loki ruler's rule is parsed as LogQL: as its API prints it again,
+	// it is the same; a rule of another matcher, not.
 	loki := rules.Rule{Name: "L", Group: "g", Expr: `sum(count_over_time({app="a"}[1m])) > 1`, Logs: rules.LokiRuler}
 	lokiAPI := loki
 	lokiAPI.Expr = `(sum(count_over_time({app="a"}[1m])) > 1)`
-	if aloneTextOf(loki) == aloneTextOf(lokiAPI) {
-		t.Error("a Loki ruler's rule parsed as PromQL")
+	lokiOther := loki
+	lokiOther.Expr = `sum(count_over_time({app="b"}[1m])) > 1`
+	if aloneTextOf(loki) != aloneTextOf(lokiAPI) || aloneTextOf(loki) == aloneTextOf(lokiOther) {
+		t.Error("a Loki ruler's rule isn't parsed as LogQL")
 	}
 }
 

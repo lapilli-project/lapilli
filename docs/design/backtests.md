@@ -703,7 +703,50 @@ A request with `fail_missed: true` is held so:
   `internal/replay/testdata` and its rules API's answer are one each, but
   the group with `query_offset`, which that API doesn't say.
 
-  An expression it doesn't read, and a rule that isn't PromQL, are
+  A Loki ruler's rule is read the same way as LogQL
+  (`rules.parsedLogQL`), and never is one with a PromQL rule of the same
+  text: its Parsed says it is LogQL and which Loki it is. Loki 3.7.9's
+  rules API prints LogQL again: a binary operation between parentheses
+  (`(sum(...) > 20)`), `by (app,level)` without a space, a range with no
+  space before it, `5m0s` for an offset, `1e+06` for a million, a line
+  filter's string quoted, a stream selector's matchers as written. The
+  forms read as one: comments and space aside; a stream selector's
+  matchers in any order; strings by value, in quotes or backticks;
+  numbers, and durations, by value (`300s` and `5m`, `1500ms` and `1.5s`
+  in a label filter or an offset); LogQL's words in any case; `by` and
+  `without` before or after an aggregation's parentheses, and a vector
+  aggregation's `by ()` as none (a range aggregation's not: it keeps the
+  labels); binary operations by their precedence (`+` and `-` before `*`,
+  `^` from the right), each as Loki prints it between parentheses, so
+  parentheses that change nothing are none; `=` and `==` in a label filter
+  on a number or a duration; and the order Loki's grammar lets a range be
+  written in, a pipeline and an unwrap before the range or after it, as
+  one. What is read is a metric query: range aggregations
+  (`rate`, `count_over_time`, `quantile_over_time`, `absent_over_time`...)
+  of a stream selector with line filters (`|=`, `!=`, `|~`, `!~`, `|>`,
+  `!>`), `json`, `logfmt`, `regexp`, `pattern`, `unpack`, `label_format`,
+  `line_format`, `decolorize`, `drop`, `keep`, one label filter a stage
+  (a string, a number or a duration) and `unwrap` (`bytes()`, `duration()`
+  and `duration_seconds()` too) with the filters after it; vector
+  aggregations, `label_replace`, `vector`, numbers and binary operations
+  with `bool`. Not read, so compared by their text: a log query, `variants`,
+  `on`, `ignoring`, `group_left` and `group_right`, a line filter's `or`,
+  `ip`, a parser's flags, several label filters in one stage, a size
+  (`5KB`), `0x10`, `010` and `1_000`, a sign before anything but a number,
+  two numbers in one operation (Loki works them out as it reads), a label
+  named as a word of LogQL, `'` and `//` or `/*` (which Loki's scanner
+  reads as a character and as comments), space inside a range's brackets or
+  between a function's name and its parenthesis, and what is past 16 KiB
+  or 32 levels of brackets. The rules of the Loki 3.7.9 recorded in
+  `internal/replay/testdata` and its rules API's answer are one each.
+
+  A cloud's alarm in PromQL (CloudWatch's `PromQLCriteria`, Google
+  Cloud's PromQL condition, Azure's Prometheus rule) is read as PromQL,
+  with its cloud in its Parsed: one cloud's rule is never another's, nor
+  Prometheus's. An alarm that isn't PromQL has no expression to read.
+
+  An expression it doesn't read, and a rule that isn't PromQL or LogQL
+  as above, are
   compared by their text (`rules.Rule.Whole`), as before: one only where
   it is the same, so the catch of one an API prints again isn't held by the
   record, and the rule is replayed.
@@ -714,14 +757,15 @@ A request with `fail_missed: true` is held so:
   which ends it for Prometheus and not for MetricsQL; MetricsQL's own
   words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
   a comma after a call's last argument), an expression past 16 KiB or 32
-  levels of brackets; a Loki ruler's, whose API prints LogQL again too;
-  and a cloud's alarm.
+  levels of brackets; a Grafana rule with no graph, or one parsedGrafana
+  refuses; a LogQL expression parsedLogQL refuses; and a cloud's alarm
+  that isn't PromQL.
 
   A Grafana rule is compared as parsed too (`rules.Rule.parsedGrafana`),
   by what the replay reads of it, so a rule as a provisioning file writes
   it and the same rule as Grafana's export gives it, which fills in
   fields on save, are one. Its `Graph` is held by value: each PromQL
-  query through the same reader (a LogQL one as its text, for now), the
+  query through the same reader (a LogQL one through `parsedLogQL`), the
   asks the replay makes of them, the thresholds, math expressions (by
   their parse, so spacing and `${A}` as `$A` are alike), reduces and
   classic conditions, the condition's ref, each query's end and data
