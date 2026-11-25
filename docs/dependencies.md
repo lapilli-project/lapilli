@@ -19,7 +19,7 @@ incident. How a firing catches an incident is in
 ```sh
 lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
   --incidents incidents.yaml --match service \
-  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0' \
+  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0' \
   --depends-labels source_workload,destination_workload
 ```
 
@@ -35,17 +35,25 @@ where they differ.
 
 | Stack | `--depends` | `--depends-labels` |
 |---|---|---|
-| Istio | `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0` | `source_workload,destination_workload` |
-| Linkerd | `sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[5m])) > 0` | `deployment,dst_deployment` |
-| An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[5m])) > 0` | `client,server` |
+| Istio | `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0` | `source_workload,destination_workload` |
+| Linkerd | `sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[1h])) > 0` | `deployment,dst_deployment` |
+| An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0` | `client,server` |
 
 `lapilli impact suggest` says which of them your history has, beside the
 `--impact` it already suggests, and the flags to give
 ([Incidents nobody wrote down](impact.md)). Label names depend on how each is
 scraped: check them against your own Prometheus first.
 
-The expression is read once a run, at an hour's step (`--depends-step`, 10m
-at the finest) over the period and the `--lead` before it, within
+Count the calls over an hour (`[1h]`), as the table does. A sample at 10:00
+is stored as the hour it covers, 09:00 to 10:00; with `[5m]` a sample would
+say only whether the last five minutes held a call, and the hour the incident
+fell in would be looked at for five of its sixty minutes. The step is at most
+1h, as a longer one leaves hours with no sample; a range shorter than the
+step does the same. An expression with a range that is the step or longer
+sees every minute.
+
+The expression is read once a run, at an hour's step (`--depends-step`, from
+10m to 1h) over the period and the `--lead` before it, within
 `--max-samples` and `--max-rate` as every query is. The graph keeps no
 record of its own: it says who calls whom, not whether users were hurt, so
 it only widens which firings catch an incident. Which firings are judged is
@@ -58,7 +66,7 @@ as before, and it never takes a catch away.
 | `--depends-match LABEL` | the label of `--match` whose values the services are |
 | `--depends-depth N` | how many calls away still count: 1 (the default) to 3 |
 | `--depends-direction down\|both` | `down` (the default), or `both` |
-| `--depends-step DUR` | the step it is read at: 1h (the default), 10m at the finest |
+| `--depends-step DUR` | the step it is read at: 1h (the default), 10m to 1h |
 
 ## A catch by dependency
 

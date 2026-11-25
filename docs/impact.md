@@ -53,7 +53,7 @@ ingress-nginx:
 Who calls whom, for --depends (docs/dependencies.md): 1 of the 3 stacks have their metric in the history.
 
 Istio (istio_requests_total{reporter="source"}, 120 series at most at once):
-  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0' --depends-labels source_workload,destination_workload
+  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0' --depends-labels source_workload,destination_workload
 
 Not found: Linkerd, An OpenTelemetry or Tempo service graph.
 

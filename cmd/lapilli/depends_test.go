@@ -16,7 +16,7 @@ const dependsDir = "testdata/depends"
 
 // dependsHistory is a stand-in for the history --depends reads: checkout
 // calls payments-db and ledger at the hours of the incidents, payments-db
-// calls ledger-db, and search calls nothing. Its sample times are in UTC,
+// calls ledger-db, and search calls nothing. Its samples are inside the hours they count (`[1h]` looks back), in UTC,
 // as the real client's are. It is asked nothing but the graph, and keeps
 // the queries asked.
 type dependsHistory struct{ asked *[]string }
@@ -40,17 +40,17 @@ func (h dependsHistory) QueryRange(_ context.Context, expr string, start, end ti
 		return s
 	}
 	return []prom.Series{
-		edge("checkout", "payments-db", "2026-10-06T10:00:00Z", "2026-10-08T12:00:00Z", "2026-09-01T00:00:00Z"),
-		edge("checkout", "ledger", "2026-10-06T09:00:00Z"),
-		edge("payments-db", "ledger-db", "2026-10-06T10:00:00Z"),
-		edge("cart", "search", "2026-10-06T10:00:00Z"),
+		edge("checkout", "payments-db", "2026-10-06T10:30:00Z", "2026-10-08T12:30:00Z", "2026-09-01T00:00:00Z"),
+		edge("checkout", "ledger", "2026-10-06T09:30:00Z"),
+		edge("payments-db", "ledger-db", "2026-10-06T10:30:00Z"),
+		edge("cart", "search", "2026-10-06T10:30:00Z"),
 	}, nil
 }
 
 func dependsArgs(extra ...string) []string {
 	args := []string{"verdict", "--firings", filepath.Join(dependsDir, "firings.jsonl"), "--incidents", filepath.Join(dependsDir, "incidents.yaml"),
 		"--from", "2026-10-05T00:00:00Z", "--to", "2026-10-12T00:00:00Z", "--match", "service", "--tz", "UTC", "--prometheus", "http://prometheus:9090",
-		"--depends", `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0`,
+		"--depends", `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0`,
 		"--depends-labels", "source_workload,destination_workload"}
 	return append(args, extra...)
 }
@@ -153,7 +153,8 @@ func TestDependsFlags(t *testing.T) {
 		{append([]string{"--depends-depth", "4"}, ok...), "1 to 3"},
 		{append([]string{"--depends-depth", "x"}, ok...), "1 to 3"},
 		{append([]string{"--depends-direction", "up"}, ok...), "want down or both"},
-		{append([]string{"--depends-step", "5m"}, ok...), "10m at the finest"},
+		{append([]string{"--depends-step", "5m"}, ok...), "from 10m to 1h"},
+		{append([]string{"--depends-step", "2h"}, ok...), "from 10m to 1h"},
 		{append([]string{"--depends-step", "x"}, ok...), "want a duration"},
 		{append([]string{"--depends-match", "team"}, ok...), "want one of the labels --match gives (service)"},
 		{append([]string{"--depends", "other"}, ok...), "--depends is given twice"},

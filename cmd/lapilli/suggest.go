@@ -133,11 +133,11 @@ type dependsStack struct {
 
 var dependsStacks = []dependsStack{
 	{"istio", "Istio", "istio_requests_total",
-		`sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0`, "source_workload,destination_workload"},
+		`sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0`, "source_workload,destination_workload"},
 	{"linkerd", "Linkerd", "response_total",
-		`sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[5m])) > 0`, "deployment,dst_deployment"},
+		`sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[1h])) > 0`, "deployment,dst_deployment"},
 	{"otel-service-graph", "An OpenTelemetry or Tempo service graph", "traces_service_graph_request_total",
-		`sum by (client, server) (rate(traces_service_graph_request_total[5m])) > 0`, "client,server"},
+		`sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0`, "client,server"},
 }
 
 // counted is the selector of the metric that s's --depends reads, which

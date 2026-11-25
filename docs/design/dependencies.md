@@ -44,15 +44,14 @@ does that where they differ.
 
 | Stack | `--depends` | `--depends-labels` |
 |---|---|---|
-| Istio | `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[5m])) > 0` | `source_workload,destination_workload` |
-| Linkerd | `sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[5m])) > 0` | `deployment,dst_deployment` |
-| An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[5m])) > 0` | `client,server` |
+| Istio | `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0` | `source_workload,destination_workload` |
+| Linkerd | `sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[1h])) > 0` | `deployment,dst_deployment` |
+| An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0` | `client,server` |
 
 `lapilli impact suggest` says which of them the history has, beside the
 `--impact` it already suggests, and the flags to give.
 
-The expression is read at an hour's step (`--depends-step`, 10m at the
-finest) over the period and the `--lead` before it. A graph keeps no record
+The expression is read at an hour's step (`--depends-step`, 10m to 1h) over the period and the `--lead` before it. A graph keeps no record
 of its own: it says who calls whom, not whether users were hurt, and so it
 only widens which firings catch an incident; which firings are judged is
 as before.
@@ -149,6 +148,12 @@ refuses `--depends` until then.
   stops, the graph keeps none (`Graph.TooMany`) and `settings.depends.too_many`
   says so. A name longer than 256 bytes, an empty one, and a call from a
   service to itself are no edge.
+- The expressions count calls over an hour (`rate(...[1h]) > 0`): a sample at T
+  is stored under the hour T less a nanosecond is in, the hour it covers, and
+  the read goes to `--to` plus a step to take the last hour whole. `--depends-step`
+  is refused over 1h (`graph.MaxStep`), as a longer one leaves hours with no
+  sample; with a short range such as `[5m]`, an hour's sample would see five
+  minutes of it. A value of 0 or less, as NaN, is no call.
 - The graph is read from the hour of `--from` less the longest lead (at least
   an hour) to `--to`, so an incident at the period's start has its hour before.
 - `verdict.CatchesBy` gives how a firing caught (`Caught`: linked, lacked,

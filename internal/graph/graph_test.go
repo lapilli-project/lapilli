@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -177,18 +178,20 @@ func TestEach(t *testing.T) {
 
 func TestRead(t *testing.T) {
 	h := &fakeHistory{series: []prom.Series{
-		edgeSeries("checkout", "payments-db", t0, t0.Add(time.Hour), t0.Add(90*time.Minute)),
-		edgeSeries("cart", "checkout", t0),
-		{Labels: map[string]string{"src": "lonely"}, Samples: []prom.Sample{{T: t0, V: 1}}}, // no callee
-		edgeSeries("same", "same", t0),
+		// Samples inside hours, as a 10m step gives: the hour each is in.
+		edgeSeries("checkout", "payments-db", t0.Add(30*time.Minute), t0.Add(90*time.Minute), t0.Add(100*time.Minute)),
+		edgeSeries("cart", "checkout", t0.Add(30*time.Minute)),
+		{Labels: map[string]string{"src": "lonely"}, Samples: []prom.Sample{{T: t0.Add(30 * time.Minute), V: 1}}}, // no callee
+		edgeSeries("same", "same", t0.Add(30*time.Minute)),
 	}}
 	q := Query{Expr: "up", From: "src", To: "dst", Step: time.Hour}
 	g, err := Read(context.Background(), h, q, t0.Add(10*time.Minute), t0.Add(3*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// From the hour the start is in.
-	if want := "up|2026-10-26T00:00:00Z|2026-10-26T03:00:00Z|1h0m0s"; len(h.asked) != 1 || h.asked[0] != want {
+	// From the hour the start is in, to the step past the end: the last
+	// sample covers the hour before it.
+	if want := "up|2026-10-26T00:00:00Z|2026-10-26T04:00:00Z|1h0m0s"; len(h.asked) != 1 || h.asked[0] != want {
 		t.Errorf("asked %v, want %q", h.asked, want)
 	}
 	if g.Edges() != 2 || g.Rows() != 3 {
@@ -198,7 +201,7 @@ func TestRead(t *testing.T) {
 		t.Errorf("path %v %v", p, ok)
 	}
 
-	for _, bad := range []Query{{From: "a", To: "b", Step: time.Hour}, {Expr: "x", From: "a", To: "a", Step: time.Hour}, {Expr: "x", From: "a", To: "b", Step: time.Minute}} {
+	for _, bad := range []Query{{From: "a", To: "b", Step: time.Hour}, {Expr: "x", From: "a", To: "a", Step: time.Hour}, {Expr: "x", From: "a", To: "b", Step: time.Minute}, {Expr: "x", From: "a", To: "b", Step: 2 * time.Hour}} {
 		if _, err := Read(context.Background(), h, bad, t0, t0); err == nil {
 			t.Errorf("%+v read", bad)
 		}
@@ -217,5 +220,43 @@ func TestReadTooMany(t *testing.T) {
 	g, err := Read(context.Background(), &fakeHistory{series: s}, Query{Expr: "up", From: "src", To: "dst", Step: time.Hour}, t0, t0.Add(time.Hour))
 	if err != nil || !g.TooMany() || g.Edges() != 0 {
 		t.Errorf("%v: too many %v edges %d", err, g.TooMany(), g.Edges())
+	}
+}
+
+// A sample is stored in the hour it covers: one at an hour's start, the
+// hour before; none for a value that isn't a call (NaN, zero, negative).
+func TestReadHourCovered(t *testing.T) {
+	zero := edgeSeries("z", "y", t0.Add(30*time.Minute))
+	zero.Samples[0].V = 0
+	neg := edgeSeries("n", "y", t0.Add(30*time.Minute))
+	neg.Samples[0].V = -1
+	nan := edgeSeries("m", "y", t0.Add(30*time.Minute))
+	nan.Samples[0].V = math.NaN()
+	h := &fakeHistory{series: []prom.Series{
+		edgeSeries("a", "b", t0.Add(time.Hour)),                  // 01:00 says 00:00 to 01:00
+		edgeSeries("c", "d", t0.Add(time.Hour+time.Nanosecond)),  // 01:00:00.000000001 is in 01:00
+		edgeSeries("e", "f", t0.Add(2*time.Hour+30*time.Minute)), // inside the hour of 02:00
+		zero, neg, nan,
+	}}
+	q := Query{Expr: "up", From: "src", To: "dst", Step: 10 * time.Minute}
+	g, err := Read(context.Background(), h, q, t0, t0.Add(4*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Edges() != 3 {
+		t.Errorf("edges %d, want 3 (no call has a value of 0, less, or NaN)", g.Edges())
+	}
+	hour := func(n int, from, to string) bool {
+		_, ok := g.Depends(from, to, Window{t0.Add(time.Duration(n) * time.Hour), t0.Add(time.Duration(n) * time.Hour)}, 1)
+		return ok
+	}
+	if !hour(0, "a", "b") || hour(1, "a", "b") {
+		t.Error("a sample at 01:00 is the hour of 00:00 alone")
+	}
+	if hour(0, "c", "d") || !hour(1, "c", "d") {
+		t.Error("a sample just past 01:00 is the hour of 01:00")
+	}
+	if !hour(2, "e", "f") || hour(3, "e", "f") {
+		t.Error("a sample at 02:30 is the hour of 02:00")
 	}
 }

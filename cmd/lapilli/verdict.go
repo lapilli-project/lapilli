@@ -348,7 +348,7 @@ Which service depends on which (docs/dependencies.md):
                       down (default): an alert on a service the incident's
                       service calls catches it; both: an alert on a caller of
                       it does too
-  --depends-step DUR  the step it is read at (default 1h, 10m at the finest)
+  --depends-step DUR  the step it is read at (default 1h; 10m to 1h)
 
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,

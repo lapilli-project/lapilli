@@ -25,6 +25,10 @@ const (
 	MaxDepth = 3
 	// MinStep is the finest step the graph is read at.
 	MinStep = 10 * time.Minute
+	// MaxStep is the coarsest: an expression counts calls over an hour
+	// (`rate(...[1h]) > 0`), and a step longer than that leaves hours
+	// with no sample to say what they held.
+	MaxStep = time.Hour
 	// DefaultStep is the step the graph is read at when none is given.
 	DefaultStep = time.Hour
 	// MaxName is the longest name of a service kept: a longer one isn't a
@@ -300,7 +304,7 @@ type Query struct {
 }
 
 // Validate checks a query: an expression, two different label names, a
-// step from MinStep on.
+// step from MinStep to MaxStep.
 func (q Query) Validate() error {
 	switch {
 	case q.Expr == "":
@@ -309,12 +313,18 @@ func (q Query) Validate() error {
 		return errors.New("want two different labels, the caller's and the callee's")
 	case q.Step < MinStep:
 		return fmt.Errorf("step %s: %s at the finest", q.Step, MinStep)
+	case q.Step > MaxStep:
+		return fmt.Errorf("step %s: %s at the coarsest, as the expression counts calls over the hour", q.Step, MaxStep)
 	}
 	return nil
 }
 
 // Read reads the graph over from to to (hours: from the hour from is in to
-// the hour to is in) as q says. An hour with more than MaxEdgesPerHour
+// the hour to is in) as q says. The expression counts calls over the hour
+// before each sample (`rate(...[1h]) > 0`), so a sample at T is stored in
+// the hour it covers, the one T less a nanosecond is in: a sample at 10:00
+// says 09:00 to 10:00, and one at 10:30 says what the hour of 10:00 held so
+// far. The read goes to the step past to, to take the hour to is in whole. An hour with more than MaxEdgesPerHour
 // edges stops the read: the graph keeps none, and says so (TooMany). A
 // series without both labels, or with the same service on both, is no edge.
 func Read(ctx context.Context, h History, q Query, from, to time.Time) (*Graph, error) {
@@ -322,7 +332,7 @@ func Read(ctx context.Context, h History, q Query, from, to time.Time) (*Graph, 
 		return nil, err
 	}
 	start := HourStart(Hour(from))
-	series, err := h.QueryRange(ctx, q.Expr, start, to, q.Step)
+	series, err := h.QueryRange(ctx, q.Expr, start, to.Add(q.Step), q.Step)
 	if err != nil {
 		return nil, err
 	}
@@ -330,10 +340,10 @@ func Read(ctx context.Context, h History, q Query, from, to time.Time) (*Graph, 
 	for _, s := range series {
 		f, t := s.Labels[q.From], s.Labels[q.To]
 		for _, p := range s.Samples {
-			if math.IsNaN(p.V) {
+			if math.IsNaN(p.V) || p.V <= 0 {
 				continue
 			}
-			if !b.Add(p.T, f, t) {
+			if !b.Add(p.T.Add(-time.Nanosecond), f, t) {
 				break
 			}
 		}

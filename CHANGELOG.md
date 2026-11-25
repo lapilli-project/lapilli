@@ -8,8 +8,8 @@
   ([docs/dependencies.md](docs/dependencies.md),
   [docs/design/dependencies.md](docs/design/dependencies.md)). `--depends PROMQL`, with
   `--depends-labels FROM,TO`, reads who calls whom (a service mesh's or an OpenTelemetry
-  service graph's calls by caller and callee) once, at `--depends-step` (1h, 10m at the
-  finest), and a firing whose `--match` label isn't the incident's catches it by dependency
+  service graph's calls by caller and callee, counted over the hour, `[1h]`) once, at
+  `--depends-step` (1h, 10m to 1h; a sample is stored as the hour it covers), and a firing whose `--match` label isn't the incident's catches it by dependency
   when the incident's service calls the firing's, or one that does, up to `--depends-depth`
   calls (1, at most 3) over the edges of the hours from an hour before the incident to its
   end, and it agrees on every other `--match` label both carry; `--depends-direction both`

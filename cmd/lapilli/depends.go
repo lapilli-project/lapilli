@@ -65,8 +65,8 @@ func (f *dependsFlags) dependsFlag(name, val string) error {
 		f.dependsDirection = val
 	case "--depends-step":
 		d, err := parseDuration(val)
-		if err != nil || d < graph.MinStep {
-			return fmt.Errorf("--depends-step %s: want a duration like 1h, %s at the finest", val, verdict.Duration(graph.MinStep))
+		if err != nil || d < graph.MinStep || d > graph.MaxStep {
+			return fmt.Errorf("--depends-step %s: want a duration like 1h, from %s to %s (the expression counts calls over the hour)", val, verdict.Duration(graph.MinStep), verdict.Duration(graph.MaxStep))
 		}
 		f.dependsStep = d
 	}
