@@ -387,7 +387,7 @@ Step 2, serve's checks after deploy, as built:
   them.
 - **The annotation** `lapilli.dev/budget` is the rule author's, not the
   operator's: read from the latest version's rules, strictly (parts
-  separated by commas, `N/week`, `N asleep`, `N refires` or `N re-fires`,
+  separated by commas, `N/week`, `N asleep`, `N refires`, `N re-fires` or `N pages`,
   each once, 0 to 1,000,000, 100 bytes), it holds the rule by its own name.
   A budget the file or `--config` give that rule by the same `rule:` wins,
   and the annotation's is passed over and said on the rule's tab as not
@@ -402,6 +402,10 @@ Step 2, serve's checks after deploy, as built:
   selector that selects every rule is refused, and one is kept as it reads,
   so the same selector written with other spaces is one entry.
   `refires` in a budget, the firings that re-fired (`--refire`), by week.
+  `pages` in a budget, the pages the firings are worked out to send
+  ([routing.md](routing.md)), by the week of the firing; in `lapilli verdict
+  --compare` alone (not known without `--alertmanager-config` or `--grafana`),
+  and not yet in `lapilli serve`, which says so.
   `scenarios:` stays refused, for step 4.
 - **Which rules, which weeks.** The rules of the latest version and those
   copied in; with no version, every rule the ledger has. A budget's week

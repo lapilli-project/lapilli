@@ -225,6 +225,64 @@ run in linear time.
   rule look as if it pages more or less; it changes no stone and no
   verdict, and a change to a rule still needs a person's approval.
 
+## As built: `lapilli verdict`, `--compare` and expectations
+
+What was decided building the first part, where the text above left it open.
+`lapilli serve` and the end-to-end run come next.
+
+- **Flags.** `--notifications` is on by itself when `--alertmanager-config` or
+  `--grafana` is given, and `--notifications=false` turns it off; `--external-labels
+  NAME=VALUE` (repeatable), `--silences FILE`, `--paging-receivers REGEX` need one of
+  those two (or are refused). `--alertmanager-config` also goes with a verdict run now,
+  not with `--check-content` alone; the configuration is read once, before anything
+  is replayed, and one that can't be read fails the run. Grafana's policies are read
+  because `--grafana` was given; if they can't be, the run says so on stderr and goes
+  on without them. `lapilli serve` refuses the four flags until it works the
+  notifications out.
+- **The alerts** are the report's firings, each with `alertname` (the rule's name as
+  written, before a rule was told apart from another), its labels, and for a Grafana
+  rule `grafana_folder`; the end is the firing's end, or the period's end. The
+  model's `Settled` and `TimerLate`, which exist only to hold it to a recording, are
+  left zero.
+- **JSON.** A firing has `notifications` `{notified, paged, first_page, receivers,
+  no_integrations, muted: [{kind, by, source_rule}]}`; a rule has `notifications`
+  `{notified, paged, paged_asleep, paged_off_hours, paged_for_nothing,
+  paged_for_nothing_asleep, paged_for_nothing_off_hours, inhibited, inhibited_by,
+  grouped}`; the report has `notifications` `{worked_out: true, notified, paged,
+  groups, receivers: [{name, kinds, paging, why}], stopped}`. CSV columns
+  `worked_out_notified`, `worked_out_paged`, `worked_out_first_page`,
+  `worked_out_receivers`, `worked_out_muted`, after the others. The comparison's
+  summary has `notifications` `{worked_out, paged_before, paged_after,
+  notified_before, notified_after}`, left out when nothing was worked out, so a
+  summary without them is what it was.
+- **Counting.** A rule's `notified` and `paged` count each notification for each of
+  its firings it told of, so they add up to more than the report's, which counts a
+  notification once. Pages while people slept and out of hours are counted at the
+  time the page went, by the hours firings are counted by. A page is for nothing when
+  its firing is black, or, with responses, when its `useful` is false. The receivers
+  listed are those that page and those the firings reached.
+- **`--compare`.** Each side's report works out its own notifications, from that
+  side's firings, so a change that adds a rule shows the groups it joins; with
+  `--changed-only` only the changed rules' firings are replayed, and the pages are of
+  those alone. The first line of the text, and the line under the Markdown's heading,
+  is `Pages 12 → 15`, and PAGED before → after is a column of the table of rules.
+- **Expectations.** `pages` is a budget beside `week`, `asleep` and `refires` (a rule's
+  annotation takes `N pages`): the most a week the firings' pages come to, counted by
+  the week of the firing, as `week` counts firings; not known where the notifications
+  weren't worked out; in `lapilli serve`, not known (`pages_not_yet`).
+
+Where the model departs from Alertmanager, and what the first build of it found:
+
+- Flushes are `group_wait` after the group's first alert, then each `group_interval`
+  after the previous timer, and a repeat needs `repeat_interval` to have strictly passed
+  (`ts < now - repeat`).
+- A route's mute and active time intervals aren't inherited by its children, as
+  Alertmanager's aren't.
+- A flush that the silences and inhibitions empty logs nothing.
+- The notification log's expiry, a restart of Alertmanager, and the shortcut for an
+  alert whose start is old aren't modelled.
+- Grafana's root policy's matchers are ignored.
+
 ## Questions for review
 
 1. Webhooks are messages unless `--paging-receivers` says otherwise.

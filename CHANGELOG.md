@@ -4,6 +4,37 @@
 
 ### Added
 
+- **Who a firing reached, worked out**, in `lapilli verdict`
+  ([docs/notifications-worked-out.md](docs/notifications-worked-out.md),
+  [docs/design/routing.md](docs/design/routing.md)). Given the alert manager's
+  configuration (`--alertmanager-config`, or `--grafana`, whose notification
+  policies, contact points and mute timings are read), Lapilli plays the
+  firings of the period through the routes, the groups, the inhibition rules,
+  the silences and the time intervals as Alertmanager's dispatcher does, and
+  says for each firing which receivers it reached, in which notifications,
+  which of them page someone, and what muted it; and for each rule NOTIFIED,
+  PAGED, the pages while people slept and out of hours, **pages for nothing**
+  (of firings that caught nothing, or, with `--responses`, weren't useful),
+  how often an inhibition rule muted it and the rule that did most, and how
+  many firings went out grouped with other rules' alerts. `--external-labels
+  NAME=VALUE` (repeatable) are the labels Prometheus adds to each alert,
+  `--silences FILE` the silences Alertmanager held, `--paging-receivers REGEX`
+  the receivers that page whatever they send with (otherwise pagerduty,
+  opsgenie, victorops and pushover, and Grafana's oncall, page, and the rest are
+  messages), and `--notifications=false` leaves it all out. The text has a
+  NOTIFICATIONS table, and its out-of-hours section counts pages for nothing;
+  `--json` has `notifications` on the report, each rule and each firing,
+  `--csv` has `worked_out_*` columns after the others, `--metrics` has
+  `lapilli_rule_notifications_worked_out` and `lapilli_rule_pages_worked_out`, and
+  `--redact` gives receivers, inhibition rules, silences and time intervals an
+  alias. `--compare` and a pull request's backtest start with the pages before and
+  after, `Pages 12 → 15`, and show PAGED for each rule that differs; the summary
+  has `notifications` when they were worked out. An expectation's budget takes
+  `pages` beside `week`, `asleep` and `refires` (`lapilli verdict --compare`; not
+  known in `lapilli serve` yet). The numbers are worked out from the
+  configuration, not recorded, and every surface says so. With no
+  configuration, or `--notifications=false`, every output is what it was. Not in
+  `lapilli serve` yet.
 - **What people did when a rule fired**, in `lapilli verdict`
   ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
   a paging tool sent and whether a person acknowledged each; `--rollouts`

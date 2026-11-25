@@ -1,4 +1,4 @@
-<!-- translated from docs/glossary.md at blob 7de6ba0b88972dde4761e8a9e25ae71c3733e228 -->
+<!-- translated from docs/glossary.md at blob f6afadc2fed91860330e4c7c36e16a7fd4b964a6 -->
 
 # 用語集
 
@@ -187,3 +187,7 @@ Lapilli が役に立っているかを、変更の効果のページ（`/outcome
 ### 白い石
 
 インシデントを検知した発火です。[数値の意味（英語）](../numbers.md#a-white-or-a-black-stone)を参照してください。
+
+### 計算した値（worked out）
+
+記録ではなく、モデルが計算した数値です。Alertmanager が発火に対して実際に何をしたかではなく、設定（`--alertmanager-config`）から見て何をしたはずかを表します。[発火がだれに届いたか、計算した値（英語）](../notifications-worked-out.md)の NOTIFIED や PAGED などがそうで、送られたとおりに保持する `lapilli serve` の通知（[送信された通知そのまま（英語）](../notifications.md)）は違います。この数値を表示する場所はすべてその旨を書き、フィールド、列、メトリクスの名前には `worked_out` が入っています。

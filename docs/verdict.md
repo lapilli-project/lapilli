@@ -63,6 +63,27 @@ need no `--incidents`. [What people did when a rule fired](responses.md)
 says what each reads, how a response is decided, and what the report adds
 (`--json`, `--csv`, `--metrics`, `--compare`, `--redact`).
 
+## Who each firing reached
+
+Given the alert manager's configuration, a report says who each firing reached:
+
+```sh
+lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
+  --incidents incidents.yaml --alertmanager-config alertmanager.yml \
+  --external-labels cluster=prod --silences silences.json
+```
+
+`--alertmanager-config` is the file (or Mimir's or Cortex's API) `--check-content`
+reads; with `--grafana`, its notification policies, contact points and mute
+timings are read too. `--external-labels NAME=VALUE` (repeatable) are the labels
+Prometheus adds to each alert as it sends it, `--silences FILE` the silences
+Alertmanager held, and `--paging-receivers REGEX` the receivers that page whatever
+they send with. A NOTIFICATIONS table follows the rules, with each rule's
+notifications, pages, pages for nothing and inhibited share; `--compare` starts
+with the pages before and after. `--notifications=false` leaves it all out. These
+are worked out from the configuration, not recorded ([Who a firing reached, worked
+out](notifications-worked-out.md)).
+
 ## How it asks the history
 
 A replay asks for each query a day at a time, once for every rule that needs

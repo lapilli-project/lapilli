@@ -366,7 +366,8 @@ in `--config`; a rule can carry its own budget in its annotation
 `lapilli.dev/budget: "10/week, 2 asleep, 3 refires"`. An expectation names
 its rules by `rule:`, `group:` or `labels:` (a selector, as
 `--rules-select` takes, of the rule's own labels), and holds them to a
-budget (`week`, `asleep`, `refires`), to incidents they must keep
+budget (`week`, `asleep`, `refires`; `pages` is worked out by `lapilli
+verdict` alone, and is not known here), to incidents they must keep
 catching (`catches`, `within`), or to scenarios they must pass
 (`scenarios`, promtool's own test files, paths relative to the file that
 declares them, inside its directory):

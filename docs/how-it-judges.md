@@ -298,6 +298,34 @@ person's name is read. What each input is, and how a response is decided, is
 in [What people did when a rule fired](responses.md); how each number is
 counted is in [The numbers](numbers.md#what-people-did).
 
+## Who a firing reached
+
+**Who a firing reached.** A firing isn't a notification, and a notification isn't
+a page. With the alert manager's configuration (`--alertmanager-config`, or
+`--grafana` with its notification policies), Lapilli works out, for each firing,
+which receivers it reached, in which notifications, which of them page someone,
+and what muted it: an inhibition rule, a silence or a time interval. A rule that a
+critical rule always inhibits then shows as inhibited, not as noisy and waking
+someone; thirty rules grouped into one notification are one page; a rule that
+stays on for eight hours with a `repeat_interval` of an hour pages eight times.
+
+Each rule gets NOTIFIED and PAGED counts, the pages that went while people slept
+and out of hours, and its **pages for nothing**: the pages of firings that caught
+nothing, or, with `--responses`, that weren't useful. The text's out-of-hours
+section then counts pages for nothing, saying so. `--compare` and a pull request's
+backtest start with the pages before and after.
+
+Stones don't change, and neither does anything else a report says: the report with
+the notifications is the report without them, and these. And they are **worked out,
+not recorded**: a model of what Alertmanager or Grafana would have done, from the
+configuration, the silences you give (`--silences`) and the labels Prometheus adds
+(`--external-labels`). A webhook is a message unless `--paging-receivers` says it
+pages. `lapilli verdict` leaves out the model's two inputs for holding it to a
+recording, so a flush is on its group's own clock to the second. What each flag
+reads, what is not modelled, and how the model is checked is in
+[Who a firing reached, worked out](notifications-worked-out.md); how each number is
+counted is in [The numbers](numbers.md#notifications-worked-out).
+
 ## What a rule adds
 
 **What a rule adds.** Precision doesn't say whether anyone would miss a rule:

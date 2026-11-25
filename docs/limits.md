@@ -84,15 +84,17 @@
   starts can catch an incident in that week, where
   `lapilli verdict` over that week alone sees only the week's firings.
 - It counts firings, and the notifications they became only where the alert
-  manager sends them to `--notify-listen`: Alertmanager's routing, grouping,
-  inhibition and silences, and a Grafana notification policy, aren't read
-  from their configuration. A firing that paged no one can't say why:
-  silenced, inhibited and routed nowhere look the same from the receiving
-  end. Notifications to PagerDuty, Slack and the like are seen only where the
-  alert manager also sends them to Lapilli, or, from Alertmanager 0.33.0 on,
-  its event recorder tells of them. The recorder's mutes say when a silence
-  or an inhibition kept a firing from a notification, and are kept; a
-  firing routed nowhere still can't say so, and 0.33 and 0.34 name the
+  manager sends them to `--notify-listen`, or, from Alertmanager 0.33.0 on,
+  its event recorder tells of them. Alertmanager's routing, grouping,
+  inhibition and silences, and a Grafana notification policy, are read from
+  their configuration by `lapilli verdict` alone (`--alertmanager-config`,
+  `--grafana`), which works out who each firing reached; the numbers are
+  worked out, not recorded, and what the model leaves out is listed in
+  [Who a firing reached, worked out](notifications-worked-out.md). `lapilli
+  serve` doesn't work them out yet: a firing that paged no one can't say why
+  unless the notification, or a mute, was recorded. The recorder's mutes say
+  when a silence or an inhibition kept a firing from a notification, and are
+  kept; a firing routed nowhere still can't say so, and 0.33 and 0.34 name the
   alerts a notification says were muted by a hash alone, so only their own
   mute events say which.
 
