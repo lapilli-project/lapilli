@@ -27,22 +27,31 @@
   none of the three, every output is what it was. No person's name is read.
 - **`lapilli serve` reads what people did when a rule fired** (schema 034,
   [docs/design/responses.md](docs/design/responses.md)). `--responses FILE` is
-  read again each run, and `--responses-token-file` takes pages on the
-  incidents port, `PUT /api/v1/responses/SOURCE?from=&to=`, replacing that
-  source's pages sent in the period. `--rollouts` reads the changes made to
+  read again each run, and `--responses-token-file SOURCE=FILE` (once for
+  each source: a token writes its source's pages only, and the file's pages
+  outrank an API source's) takes pages on the incidents port, `PUT
+  /api/v1/responses/SOURCE?from=&to=`, JSON of 16 MiB at most, replacing that
+  source's pages sent in the period (31 days at most, none sent more than an
+  hour ahead, 50 sources, 500,000 pages a source and 200,000 a week, read by
+  their firings' rules). A change new to the ledger judges its target's
+  firings of that week again, and a deploy that starts after a firing did
+  judges that firing again; a read of the changes that failed is read once
+  more by the next run. Every page that says a rule is noisy asks one test,
+  and a longer `for` keeps the useful firings serve's digest is given
+  judged. A paging recipe says counts, not ids, on stderr. `--rollouts` reads the changes made to
   the workloads of the firings' namespaces with each run and keeps them, as
   `--deploys` does for deploys, so that judging the ledger again asks the
   history nothing; `--rollout-match`, `--routine` and `--noisy-by` are as in
   `lapilli verdict`, and the Settings page keeps `noisy-by` (`useful` by
-  default once `--responses` or `--rollouts` is given). Each
+  default once `--responses`, `--responses-token-file` or `--rollouts` is given). Each
   firing's response and usefulness are worked out as its stones are, a
   person's answer first, and counted by day and week; the report, the
   summary rows (`responses`, `actionable`), the goals (`actionable.share`),
   `/metrics` (`lapilli_rule_responses`, `lapilli_rule_actionable`), the
   weekly digest and MCP's rule and firing tools say them. The first start
   judges every firing again (`judgedBy` j3). The chart has `rollouts`,
-  `rolloutMatch`, `routine`, `noisyBy`, `serve.responses` (the token and the
-  file) and runs the `responses/` recipes beside `recipes/incidents`.
+  `rolloutMatch`, `routine`, `noisyBy`, `serve.responses` (a token for each source,
+  `tokenSecrets`, and the file) and runs the `responses/` recipes beside `recipes/incidents`.
 - **The web UI says what was done about a firing**
   ([docs/serve.md](docs/serve.md#what-was-done-about-a-firing)), once serve
   keeps pages or changes read from the history, or rules are found noisy by

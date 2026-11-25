@@ -846,7 +846,8 @@ answer; `lapilli serve`'s, "needed action", is taken over this table.
 | `actionable` | `useful / (useful + not_useful)`, `null` with none of either |
 
 The report's `responses` says what was read: `pages` read from the file;
-`pages_unmatched`, those that no firing had as its page; `changes`, the
+`pages_unmatched`, those that no firing had as its page (worked out by
+`lapilli verdict` alone: it is 0 in `lapilli serve`'s report); `changes`, the
 rollouts, rollbacks, scales and deploys read (all of them, not only those a
 firing had); `autoscalers_known`, whether `kube_horizontalpodautoscaler_info`
 was in the history, `false` also without `--rollouts`. Where it is false,

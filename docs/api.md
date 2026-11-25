@@ -378,7 +378,7 @@ checked as on `--listen`.
 |---|---|---|---|
 | `--incidents-token-file` | `POST /api/v1/incidents`, `PUT /api/v1/incidents/{id}`, `DELETE /api/v1/incidents/{id}` | 20 a second, bursts of 40 | 1 MB |
 | `--firings-token-file` | `PUT /api/v1/firings/{source}` | 20 at once, then one each 5 seconds | 16 MB |
-| `--responses-token-file` | `PUT /api/v1/responses/{source}` | 20 at once, then one each 5 seconds | 64 MB |
+| `--responses-token-file SOURCE=FILE` | `PUT /api/v1/responses/{source}`, for that source alone | 20 at once, then one each 5 seconds | 16 MB |
 | `--tasks-token-file` | `GET /api/v1/tasks`, `PATCH /api/v1/tasks/{id}`, `GET /api/v1/tasks/{id}/comments`, `POST /api/v1/tasks/{id}/comments`, `PATCH /api/v1/tasks/{id}/comments/{comment}` | 5 a second, bursts of 100 | 64 KB |
 | `--changes-token-file` | `GET /api/v1/changes`, `PATCH /api/v1/changes/{id}`, `PATCH /api/v1/changes/expectations/{id}` | 1 a second, bursts of 30 | 64 KB |
 
@@ -401,16 +401,25 @@ the one request at a time stays each replica's
   ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)).
 - **Responses.** `PUT /api/v1/responses/{source}?from=&to=` takes what a
   paging tool says of the pages sent in `[from, to)`, `{"responses": [...]}`
-  as `--responses` reads it (JSON is YAML), in place of the pages the ledger
-  has from that source sent then; the pages it has from other times stay.
-  The source is named as a firings' is, and is not `file`, which
-  `--responses` owns; a page sent outside the period is refused (400), as is
-  a bound broken in the pages (an id twice, a person named, a value that
-  isn't text). It gives `source`, `from`, `to`, `pages`, `added`, `changed`,
+  as `--responses` reads it, JSON only (a YAML body is refused), in place of
+  the pages the ledger has from that source sent then; the pages it has from
+  other times stay. The body is 16 MB at most (413 past it), read a page at a
+  time, as a write of firings is. Each source has a token of its own
+  (`--responses-token-file SOURCE=FILE`), which writes that source's pages
+  and no other's: a request with another source's token, or for a source no
+  token is for, is 401. The source is named as a firings' is, and is not
+  `file`, which `--responses` owns, and whose pages outrank an API source's for
+  a firing. A page sent outside the period is refused (400), as is a period
+  over 31 days or one that starts, or a page sent, more than an hour ahead of
+  the clock, a 51st source, a source with 500,000 pages or a week with
+  200,000 (the write is refused whole), and a bound broken in the pages (an id
+  twice, a person named, a value that isn't text). It gives `source`, `from`, `to`, `pages`, `added`, `changed`,
   `removed` and `changed_ledger`: sent again as it is, it changes nothing.
-  The firings the pages answer are judged again. The token writes pages
-  alone, which can make a firing acknowledged or unanswered and no other
-  firing look better ([Responses](responses.md),
+  The firings the pages answer are judged again. The token writes its
+  source's pages alone, which can make a firing acknowledged or unanswered;
+  an acknowledged page can turn an unanswered firing, not useful, into one
+  of unknown use, which raises a rule's actionable share, within what its
+  source's token and the file's precedence allow ([Responses](responses.md),
   [docs/design/responses.md](design/responses.md)).
 - **Tasks.** `GET /api/v1/tasks` takes `linked` (`false` unless given),
   `status` (`open,doing` unless given), `updated_after` (an RFC 3339

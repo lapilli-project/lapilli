@@ -179,8 +179,8 @@ What people did when a rule fired ([docs/responses.md](responses.md), the
 design in [docs/design/responses.md](design/responses.md)) shows once
 `lapilli serve` has something to say of it: it keeps pages (`--responses
 FILE`, read again each run, or `PUT /api/v1/responses/SOURCE?from=&to=` on
-the incidents port with `--responses-token-file`, which replaces that
-source's pages sent in the period) or changes read from the history
+the incidents port with `--responses-token-file SOURCE=FILE`, which replaces
+that source's pages sent in the period) or changes read from the history
 (`--rollouts`), or rules are found noisy by what was done about their firings
 (`--noisy-by useful`, where a person's "needed action" is one of the
 answers). The deploys file alone shows none while rules are noisy by what
@@ -207,9 +207,30 @@ their firings caught: serve took `--deploys` before it took responses.
   the last week first, as the noisy thresholds are tried, which lists the
   rules whose state would change with their actionable share, and saves
   it the same way, kept with who changed it. By default it is `useful` once
-  `--responses` or `--rollouts` is given, and `caught` otherwise.
+  `--responses`, `--responses-token-file` or `--rollouts` is given, and
+  `caught` otherwise. Where responses show, every page and number that says a
+  rule is noisy asks the same test, the Settings value, by caught or by useful.
 - The summary, goals, `/metrics`, the digest and MCP say it too
   ([docs/api.md](api.md), [docs/metrics.md](metrics.md)).
+
+The pages by `PUT` are held to bounds, as the firings are. There is a token
+for each source (`--responses-token-file pagerduty-prod=FILE`, once for each),
+and it writes that source's pages and no other's: so a source can't write over
+another's, nor over the `--responses` file's, which is the source `file` and
+which no token names. When several sources have a page for a firing, the
+file's is its page; among the others, the nearest to its start, as far apart
+the source first in order. A write is JSON, `{"responses": [...]}`, 16 MiB at
+most (the firings' bound; the file may be 64 MiB), read a page at a time; its
+period is 31 days at most; no page is sent more than an hour ahead of the
+clock; at most 50 sources have pages; a source keeps 500,000 pages at most, and
+all sources 200,000 sent in any one week. Past any, the write is refused whole
+(400) and nothing of it is kept. Pages are read by their firings' rules: at most
+1,000 pages of a rule, from a firing's start on, are looked at for it. `--keep`
+drops pages as it drops firings, and a page dated past the hour ahead is dropped
+whenever the ledger is pruned. The changes read from the history that a run
+couldn't read are kept as a span, which the next run reads once more (once: a
+span that fails again is let go); until then a firing in it has no change
+known, and is neither called changed nor not useful for want of one.
 
 Firings written through `PUT /api/v1/firings/SOURCE` ([Firings recorded
 elsewhere](#firings-recorded-elsewhere)) get no changes read from the

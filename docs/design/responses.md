@@ -312,7 +312,10 @@ tool documents, and is tested against that, with a server standing in:
 ## Cost and bounds
 
 - A file or a write holds 100,000 pages at most; each is matched against
-  the firings of its alerts' rules, by rule.
+  the firings of its alerts' rules, by rule. A write is 16 MiB of JSON at most,
+  its period 31 days, its pages sent no later than an hour from now; the
+  ledger keeps 50 sources, 500,000 pages a source and 200,000 sent in a week
+  (all in "As built").
 - `--rollouts` reads, each run (or once for `lapilli verdict`), a handful
   of queries for the namespaces the firings carry, at most 200 to a
   query's regular expression, each name quoted: an instant query of the
@@ -326,10 +329,17 @@ tool documents, and is tested against that, with a server standing in:
 ## Attacker's look
 
 - **Who writes responses.** The file is whoever runs Lapilli; the PUT
-  takes the incidents port's token for responses, which writes only the
-  pages of its source. A response can only make a firing `acknowledged` or
-  `unanswered`, not useful: forged pages can make a rule look noisy, never
-  look better. A noisy rule gets a suggestion, and a change to it is made
+  takes the incidents port's token for responses of that source, which writes
+  only the pages of its source. A response can only make a firing
+  `acknowledged` or `unanswered`, not useful: forged pages make a rule look
+  noisier, and can make it look less so by one means: an acknowledged page
+  turns an unanswered firing, not useful, into one of unknown use (when its
+  target's changes aren't known), which leaves the count of the firings that
+  are known and raises the actionable share. That is bounded by its source's
+  token, which writes that source's pages and no other's, and by the file's
+  precedence: the `--responses` file's page for a firing wins over an API
+  source's, so a token can't override what the operator wrote. A noisy rule
+  gets a suggestion, and a change to it is made
   only once a person approves it ([changes.md](changes.md)). No stone
   changes.
 - **What can make a firing useful.** A change on its target: from the
@@ -420,3 +430,89 @@ As above, except:
   from the ledger, while the filter and the counts read what the ledger
   worked out of each firing when it judged it: a page written brings the firings
   it answers up to date at once.
+- **Pages written by `PUT` are held to bounds, as the firings are.** The body
+  is JSON, 16 MiB at most (the firings' bound, and not the file's 64 MiB),
+  read a page at a time by `response.ParseJSON`, not parsed into a YAML tree;
+  a YAML body is refused. A write's period is 31 days at most
+  (`ledger.MaxRecordedPeriod`), and from 1970 to 9999; its pages are sent no
+  later than an hour ahead of the clock (the firings' `skew`), the file's too.
+  The ledger keeps pages of 50 sources at most (the firings' `MaxSources`, a
+  table `response_sources`), 500,000 pages a source (`maxSourcePages`) and
+  200,000 sent in any one ledger week, all sources (`maxWeekPages`): past any,
+  the write is refused whole (400), kept in none of it. `--keep` drops pages
+  with the firings, and, whenever the ledger is pruned, those dated more than
+  an hour ahead, which a write would have refused. The numbers are chosen
+  as the firings' are (`maxSourceSeries` is 500,000).
+- **Pages are read by their rules.** Each page's alerts' rules are kept in
+  `response_rules (rule, sent_at, source, id)`, indexed, so that judging or
+  showing firings reads the pages that name the firings' rules (and their
+  names told apart: `HighErrorRate [severity=critical]` also reads
+  `HighErrorRate`), sent when they may answer, not every page of the span: a
+  crash loop of 50 sources paging 400 times in an hour, 20,000 pages, costs
+  judging one rule's firing the 400 pages that name it (a test holds it under
+  4 MiB allocated). `Index.Find` looks at 1,000 pages of a rule's name at most
+  for a firing, from its start on; a rule with more pages in a firing's
+  window, none its own, finds the page among those or none. That is the
+  conservative end of what the bound allows: with no page found, nothing is
+  said of the firing's page.
+- **A token writes one source; the file's page wins.** `--responses-token-file`
+  is `SOURCE=FILE`, once for each source: a token writes the pages of its
+  source and no other's, a source is named once, and two sources may not
+  hold the same token, nor one that another port's token file holds (refused
+  at start, and, as the other tokens are, at each request). A request for
+  a source no token is for is 401. When several sources have a page for a
+  firing, `response.Index.Find` takes the `file` source's, and among the
+  API sources' the nearest to the firing's start, as far apart the lesser
+  source and then the lesser id, whichever were written first. The chart's
+  `serve.responses.tokenSecrets` is a Secret and key for each source, a
+  recipe job sending with the token of its `source`.
+- **A new change judges its target's firings of its week again.** Routine
+  counts are by ledger week, so a change that comes in a later run, and
+  changes the week's count, may flip a firing judged before it, though it fell
+  after the firing or on another day. When a run keeps changes new to the
+  ledger (a rollout, or a deploy new or taken away), the firings of that
+  week whose labels fit what each was made to (a rollout's namespace, a
+  deploy's labels as `deploys.TiedLabels` ties them), and those that started up
+  to 14 days before it and were on when it was made, are judged again
+  (`ledger.pendTargets`); a deploy that starts after a firing began, with
+  `--deploy-before` 0, did not judge it again before, and so left its response
+  stale. The span judged is from the first to the last such firing's start,
+  which also judges the others between them: more than the target's, and
+  not less.
+- **Inputs: `--responses-token-file` counts.** Pages arriving only by `PUT`
+  are a responses input: `--noisy-by` is `useful` by default with them,
+  `--noisy-by useful` and `--routine` are accepted with them, the chart's
+  `noisyBy: useful` check takes `serve.responses.tokenSecrets`, and the pages'
+  window (`Options.Within`) is set whenever the server is given any of the
+  inputs or the ledger already holds pages or changes read from the history,
+  whatever it was started with: they came from a token or an earlier run.
+  `--deploys` alone still keeps `caught`.
+- **One noisy test.** Every place that says a rule is noisy asks
+  `verdict.RuleNoisy` (the report, a week's tallies, the rules list, the
+  summary and `/metrics`, the digest, the content check's noisy rules, the
+  marked windows' counts), by caught or by useful as `noisy_by` says. A
+  marked window's counts hold no useful counts of their own: by useful, a
+  rule is noisy in it when it is noisy in the weeks it touches (and the four
+  before).
+- **Excused firings have no response.** A firing a quiet window excused gets
+  none, in the ledger (response none, useful unknown, in no count), in
+  `ResponsesOf`, and in a report's judged firings (`Response` nil), as the
+  tallies have it.
+- **A longer `for` keeps the useful firings serve gives it.** `Suggest` checks
+  a longer `for` against the useful firings of the report it is given, and the
+  digest's report holds no firings; the digest now reads the judged firings of
+  the noisy rules (`ReportFirings`, 200,000 at most: past it nothing is
+  suggested) when rules are noisy by useful. It was the one place serve
+  suggests a longer `for`; the others read what it kept.
+- **A failed read of the changes is read once more.** A run whose read of the
+  history for rollouts fails keeps that run's span in `rollout_retries` (spans
+  that touch are one); the next run reads each such span again, with the
+  firings the ledger has in it, keeps what it finds (judging them again), and
+  lets the span go, read or failed: it is tried once. Until then the firings
+  in it have no change known (a gap in a firing's changes makes the response
+  known only as far as the page says, and usefulness unknown), which is the
+  conservative reading.
+- **`pages_unmatched` stays verdict's alone**, also said in
+  [numbers.md](../numbers.md). A recipe's stderr says counts, not ids:
+  `recipes/incidents/compass.sh` did name an alert, and now counts as
+  `recipes/responses/compass.sh` does.

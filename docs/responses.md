@@ -148,8 +148,8 @@ beside its precision. Unknown firings are in neither.
 - `useful`: at least `--noisy-firings` firings useful or not, and under
   `--noisy-precision` of them useful.
 
-It is `useful` once `--responses` or `--rollouts` is given, and `caught`
-otherwise. `--deploys` alone doesn't change it: `lapilli serve` took
+It is `useful` once `--responses` or `--rollouts` is given (in `lapilli
+serve`, `--responses-token-file` too), and `caught` otherwise. `--deploys` alone doesn't change it: `lapilli serve` took
 `--deploys` before it took responses, and an upgrade must not change which
 rules are noisy for a deployment that gives only that. Give `--noisy-by
 useful` to find rules noisy by what was done about them with the deploys
@@ -192,11 +192,18 @@ as it gives labels. Each is defined in [The numbers](numbers.md#what-people-did)
 ## What it does not do
 
 - It reads no person's name, and keeps none.
-- Forged pages can make a rule look noisier, never better: a page can only
-  make a firing `acknowledged` or `unanswered`, and neither is useful.
+- A page can only make a firing `acknowledged` or `unanswered`, and neither is
+  useful, so forged pages make a rule look noisier. They can, though, make it
+  look less so: an acknowledged page turns an unanswered firing, which is not
+  useful, into one of unknown use when the changes of its target aren't
+  known, and unknown firings are in neither count of the actionable share. In
+  `lapilli serve` that is bounded by the page's source: its token writes its
+  own source's pages and no other's, and the `--responses` file's page for a
+  firing outranks any other source's.
 - A change from the history or the deploys file is believed as it is read.
-- `lapilli serve` reads the same inputs, with `--responses-token-file` and
-  `PUT /api/v1/responses/SOURCE` for the pages ([the API](api.md#the-incidents-port),
+- `lapilli serve` reads the same inputs, with `--responses-token-file
+  SOURCE=FILE` and `PUT /api/v1/responses/SOURCE` for the pages (JSON, 16 MiB
+  at most, a token for each source) ([the API](api.md#the-incidents-port),
   [the design](design/responses.md)); it works each firing's response out as
   it judges the firing, from what its ledger keeps, and counts a rule's
   changes over the firing's week, not the report's period.
@@ -216,8 +223,8 @@ keeps pages or changes read from the history, or rules are found noisy by
   week before.
 - The Settings page has `noisy_by`, `caught` or `useful`, tried on the last
   week first as the noisy thresholds are, and saved the same way. The
-  default is `useful` with `--responses` or `--rollouts`, not with
-  `--deploys` alone.
+  default is `useful` with `--responses`, `--responses-token-file` or
+  `--rollouts`, not with `--deploys` alone.
 
 Firings written through `PUT /api/v1/firings/SOURCE` get no changes read from
 the history. [Keep judging](serve.md#what-was-done-about-a-firing) says
