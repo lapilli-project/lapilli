@@ -576,7 +576,7 @@ are sent. Grafana-managed rules in `paths`, and a Loki ruler's in
 rules serve runs read already: any other is refused, naming none of
 serve's. The comment's heading says it was judged by lapilli serve's
 record, and reads differently where that record does: catches judged
-against the incidents and impact windows serve keeps, firings by its weeks
-and settings. The recipes' README has each CI's token, what is sent, and
+against the incidents and impact windows serve keeps, firings by its days
+(or weeks, with `--record-by-week`) and settings. The recipes' README has each CI's token, what is sent, and
 what is refused ([Through lapilli
 serve](../recipes/backtest/README.md#through-lapilli-serve)).

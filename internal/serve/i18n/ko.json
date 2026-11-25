@@ -2302,7 +2302,7 @@
  "No incident written down for these weeks or the two weeks before: precision isn't known, and no rule is called noisy.": "이 기간과 그 앞 2주에 기록된 인시던트가 없어 정탐률을 알 수 없고, 노이즈 규칙도 정하지 않아요.",
  "%d of the %d weeks shown had no incident written down for them or the two weeks before: their firings are counted, not judged.": "보이는 %[2]d주 중 %[1]d주는 그 주와 앞 2주에 기록된 인시던트가 없어요. 그 주의 발화는 세기만 하고 판정하지 않아요.",
  "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy.": "발화한 주와 그 앞 2주에 기록된 인시던트가 없어 정탐률을 알 수 없고, 노이즈 규칙인지도 정하지 않아요.",
- "A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can't be told from one nobody wrote down.": "발화는 그 주와 앞 2주에 기록된 인시던트로 판정해요. 기록이 없으면 정말 문제가 없었던 발화인지, 아무도 기록하지 않은 장애였는지 구분할 수 없어요.",
+ "A firing is judged by the incidents written down on its day or in the two weeks before it. With none, a firing that caught nothing can't be told from one nobody wrote down.": "발화는 그 날이나 그 전 2주 안에 기록된 인시던트로 판정해요. 기록이 없으면 정말 문제가 없었던 발화인지, 아무도 기록하지 않은 장애였는지 구분할 수 없어요.",
  "The week of %s.": "%s 주.",
  "None open.": "열린 작업이 없어요.",
  "caught nothing: %d asleep, %d off hours": "오탐 중 자는 시간 %d, 업무 외 %d",
@@ -2840,5 +2840,9 @@
  "On: a firing that lacks a --match label the incident has doesn't catch it.": "켜짐: 인시던트에 있는 --match 라벨이 없는 알림은 그 인시던트를 탐지한 것으로 세지 않아요.",
  "Off: a firing that lacks a --match label the incident has catches it, marked with the label it lacks.": "꺼짐: 인시던트에 있는 --match 라벨이 없는 알림도 그 인시던트를 탐지한 것으로 세고, 없는 라벨을 표시해요.",
  "Caught nothing": "정탐 없음",
- "noisy at %d firings or more with under %s caught": "알림 %d건 이상에 정탐률 %s 미만이면 노이즈"
+ "noisy at %d firings or more with under %s caught": "알림 %d건 이상에 정탐률 %s 미만이면 노이즈",
+ "On: a firing that caught nothing is judged by the record of its week.": "켬: 아무것도 잡지 못한 알림은 그 주의 기록으로 판정합니다.",
+ "Off: a firing that caught nothing is judged by the record of its day.": "끔: 아무것도 잡지 못한 알림은 그 날의 기록으로 판정합니다.",
+ "Days with a record": "기록 있는 날",
+ "Days before them with a record": "그 전 날 중 기록 있는 날"
 }

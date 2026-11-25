@@ -248,33 +248,42 @@ isn't a failure. The digest and the incident's page show near misses only
 for incidents still not caught. A week from before this was kept,
 with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
-**No record.** `serve` judges a firing by its week: a week's firings are
-judged when the record of the week is kept, an incident (written down, or
-an impact window that counts) on at some time in it or in the two weeks
-before it, one with no end taken to last an hour, as it is caught for; or the impact signal read, by the runs, over all of it (`impact_since`
-in `meta`, the earliest a run read `--impact` from, with no run since that
-didn't: a run without it sets it to `none`; after an upgrade it starts
-with the first run that reads it, from that run's start, as an earlier
-lapilli kept no word of when its runs did: `verdict.Options.ImpactFrom`;
-"The impact criterion", below). A span that isn't whole weeks
-is judged by its weeks' records, whole, and has no record only when none
-of its weeks has. What `serve` replays (a change's backtest, the try page,
-the digest's suggestions and near misses) is judged by the same weeks
-(`verdict.Options.RecordWeek`, the ledger's own weeks), given the
-incidents that keep them, so that it compares like with like. Precision
-everywhere is of the firings judged: the rules list's and a rule's, the
-span before a rule's period, the outcomes' then and now, during deploys,
-and MCP's. The incidents that keep the record are read by when they ended
-(schema 018's `incidents_end`), so a page reads those near its weeks
-alone. Any other week's firings
+**No record.** `serve` judges a firing by its day, in `--tz`: a day's
+firings are judged when the record of the day is kept, an incident
+(written down, or an impact window that counts) on at some time in it or in
+the two weeks before it, one with no end taken to last an hour, as it is
+caught for; or the impact signal read, by the runs, over all of it
+(`impact_since` in `meta`, the earliest a run read `--impact` from, with no
+run since that didn't: a run without it sets it to `none`; after an upgrade
+it starts with the first run that reads it, from that run's start, as an
+earlier lapilli kept no word of when its runs did:
+`verdict.Options.ImpactFrom`; "The impact criterion", below). With
+`--record-by-week` it judges by the week as it did before 0.72: a week's
+firings are judged when the week's record is kept, the same, of the week.
+A span that isn't whole days (weeks) is judged by its days' (weeks')
+records, whole, and has no record only when none of them has. What `serve`
+replays (a change's backtest, the try page, the digest's suggestions and
+near misses) is judged by the same days (`verdict.Options.RecordUnit`, the
+ledger's own days, from `Ledger.DayOf`), given the incidents that keep
+them, so that it compares like with like. Precision everywhere is of the
+firings judged: the rules list's and a rule's, the span before a rule's
+period, the outcomes' then and now, during deploys, and MCP's. The
+incidents that keep the record are read by when they ended (schema 018's
+`incidents_end`), so a page reads those near its days alone. The days of
+a week are read from the daily tallies only for a week whose days aren't
+all judged alike, where an incident starts or its two weeks end in it
+(`verdict.Record.Edges`, `splitDays`); every other week is read from the
+weekly tallies, as before, and judged by its first day. The design is
+"The record, by day" in [judging.md](judging.md). Any other day's firings
 are counted, and not judged: a firing that caught nothing can't be told from
 one nobody wrote down. They are in no precision and make no rule noisy, and
 the stored suggestions of such a week are shown nowhere: not on the pages,
 the rule's form, a report, nor the digest worked out again. `lapilli
 verdict` judges each firing by the record at its own time, the two weeks
-before it; `serve`, by the week, so that what the rules list and a rule's
+before it; `serve`, by the day, so that what the rules list and a rule's
 page say of four or twelve weeks is the sum of what the overview says of
-each. With a team picked, and in its digest and reports, by the incidents
+each of the days; where the two differ is in judging.md, "The record, by
+day". With a team picked, and in its digest and reports, by the incidents
 it owns; a team with no labels, which owns an incident only when its rules
 caught it, by everyone's, or its rules' firings that caught nothing would
 never have a record. What keeps the record is read once with the weekly tallies
@@ -645,8 +654,8 @@ digest's results kept by week (the suggestions, the rules that fired as
 often as a noisy one with no record) are worked out by replaying the
 rules, and aren't worked out again on a save: the overview's weekly panels
 that read them catch up at the next digest, which the Settings page and
-the try say. A week with no record is shown no suggestion, whatever was
-kept for it.
+the try say. A week with no record, no day of which is kept, is shown no suggestion,
+whatever was kept for it.
 
 **An upgrade.** A ledger 0.41 to 0.48 kept, whose `impact_since` is
 earlier than its expression's data: at the first round of the replica that

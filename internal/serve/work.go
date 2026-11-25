@@ -72,9 +72,12 @@ const linkedMeta = "linked-only"
 // change of a flag does.
 const judgedBy = "j2"
 
-// linkedText is judgedBy, then --linked-only as "1" and --match-strict as
-// "m", in that order, as meta keeps them: a ledger before they were judged
-// has "", and one judged before judgedBy has the flags alone.
+// linkedText is judgedBy, then --linked-only as "1", --match-strict as "m"
+// and --record-by-week as "w", in that order, as meta keeps them: a ledger
+// before they were judged has "", and one judged before judgedBy has the
+// flags alone. A ledger judged before --record-by-week was, by week, has
+// none of "w", as one judged by day has none: that a start with it given
+// judges every firing again, once, is its change.
 func linkedText(o verdict.Options) string {
 	v := judgedBy
 	if o.LinkedOnly {
@@ -83,12 +86,24 @@ func linkedText(o verdict.Options) string {
 	if o.MatchStrict {
 		v += "m"
 	}
+	if o.RecordByWeek {
+		v += "w"
+	}
 	return v
 }
 
 // linkedSaid is linkedText's --linked-only as the log says it.
 func linkedSaid(v string) string {
 	return onOff(strings.Contains(strings.TrimPrefix(v, judgedBy), "1"))
+}
+
+// recordSaid is linkedText's --record-by-week as the log says it: "week",
+// or "day".
+func recordSaid(v string) string {
+	if strings.Contains(strings.TrimPrefix(v, judgedBy), "w") {
+		return "week"
+	}
+	return "day"
 }
 
 // strictSaid is linkedText's --match-strict as the log says it.
@@ -137,11 +152,13 @@ func (s *Server) logLinked(ctx context.Context) {
 	switch {
 	case err != nil || was == own:
 	case again:
-		s.log.Info("--linked-only or --match-strict isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
-			"linked_only", linkedSaid(own), "ledger", linkedSaid(was), "match_strict", strictSaid(own), "ledger_match_strict", strictSaid(was))
+		s.log.Info("--linked-only, --match-strict or --record-by-week isn't what the ledger was last judged by: every firing is judged again with this replica's, once, as it leads",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was), "match_strict", strictSaid(own), "ledger_match_strict", strictSaid(was),
+			"record_by", recordSaid(own), "ledger_record_by", recordSaid(was))
 	default:
-		s.log.Warn("--linked-only or --match-strict isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same, and start this one again once they have it, which judges every firing again if the ledger's is still the other",
-			"linked_only", linkedSaid(own), "ledger", linkedSaid(was), "match_strict", strictSaid(own), "ledger_match_strict", strictSaid(was))
+		s.log.Warn("--linked-only, --match-strict or --record-by-week isn't what the ledger was last judged by, which another replica judged every firing with since this one started: leading, this replica judges what it runs with its own and nothing again; give the replicas the same, and start this one again once they have it, which judges every firing again if the ledger's is still the other",
+			"linked_only", linkedSaid(own), "ledger", linkedSaid(was), "match_strict", strictSaid(own), "ledger_match_strict", strictSaid(was),
+			"record_by", recordSaid(own), "ledger_record_by", recordSaid(was))
 	}
 }
 

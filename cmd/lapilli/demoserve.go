@@ -86,10 +86,12 @@ func demoServe(s *demoSample, loc *time.Location, tz, listen string, stdout, std
 	}
 	week := demoWeek(loc)
 	if err == nil {
-		// The week's incidents alone: serve judges a week by its own and the
-		// two weeks' before, and the week's keep its record. The week
-		// before's would be shown missed, nothing replayed over them.
-		err = os.WriteFile(incidentsFile, s.incidents(week, week.AddDate(0, 0, 7), loc), 0o600)
+		// The week's incidents and the week before's (INC-38 to INC-43, as
+		// lapilli demo judges by): serve judges a day by the incidents on in
+		// it or the two weeks before it, and the week before's keep the
+		// record of the week's first days. Nothing is replayed over them, so
+		// the week before shows them missed.
+		err = os.WriteFile(incidentsFile, s.incidents(week.AddDate(0, 0, -7), week.AddDate(0, 0, 7), loc), 0o600)
 	}
 	if err != nil {
 		return fail(err)

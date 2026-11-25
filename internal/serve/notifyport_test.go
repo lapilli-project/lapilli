@@ -436,6 +436,7 @@ func TestNotifySNS(t *testing.T) {
 func TestNotificationsShown(t *testing.T) {
 	ctx := context.Background()
 	s := notifyServer(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s.cfg.RecordByWeek = true
 	h, nh := s.Handler(), s.NotifyHandler()
 	_, reportBefore, _ := get(t, h, "/api/v1/report?from=2026-10-31T00:00:00Z&to=2026-11-03T12:00:00Z")
 
@@ -579,6 +580,7 @@ func TestNotificationsShown(t *testing.T) {
 func TestNoNotificationsShown(t *testing.T) {
 	parallel(t)
 	s := notifyServer(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s.cfg.RecordByWeek = true
 	h := s.Handler()
 	for _, p := range []string{"/rules", "/rules/Errors", "/firings?day=2026-11-01"} {
 		if _, body, _ := get(t, h, p); strings.Contains(body, "notifications") || strings.Contains(body, "paged no one") {

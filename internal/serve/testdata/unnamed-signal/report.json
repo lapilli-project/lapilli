@@ -389,6 +389,7 @@
     "record_lookback_ns": 1209600000000000,
     "impact_from": "2026-10-31T11:00:00Z",
     "record_by_week": true,
+    "record_by": "week",
     "zone": "UTC"
   }
 }

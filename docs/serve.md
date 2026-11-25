@@ -42,9 +42,10 @@ ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds,
 `--linked-only`, which has an incident that lists the alerts its tool
 linked to it caught by those alone) can be changed there and tried on the
 last week first; a change of `--linked-only` judges every firing again,
-once. `--match-strict` is a flag the Settings page says is on or off: given
-or taken away at a start, every firing is judged again with it. So can the
-impact signal,
+once. `--match-strict` and `--record-by-week` (which judges a firing by
+its week's record, not its day's) are flags the Settings page says are on
+or off: given or taken away at a start, every firing is judged again with
+them. So can the impact signal,
 `--impact` and `--impact-for`, by an admin, under Incident criteria, tried
 on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,

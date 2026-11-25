@@ -41,7 +41,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
+`impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
 and the zone days are counted in (`zone`†, which parts episodes, below):
 the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
@@ -241,27 +241,36 @@ the two weeks before it as `--argjson earlier '[{"start": "...", "end":
 "..."}]'`, from your incidents file or from `lapilli serve`'s
 `/api/v1/incidents?from=&to=`.
 
-`lapilli serve` (`record_by_week: true`) judges a firing by its week, from
-Monday in its `--tz`, as it keeps its stones: a week is judged when an
-incident was on at some time from two weeks before the week's Monday to
-the week's end, or the impact signal was read over all of the week. The
-firings of a week are judged by the signals tied to them: every firing of
-a week tied to the same signals, of a rule no entry names, or of the same
-rule entry, is judged, or none; with no named signal, every firing of the
-week. A window keeps the record of the firings tied to its signal alone;
+`lapilli serve` (`record_by: "day"`) judges a firing by its day, midnight to
+midnight in its `--tz`, as it keeps its tallies: a day is judged when an
+incident was on at some time from two weeks before the day's start to the
+day's end, or the impact signal was read over all of the day. With
+`--record-by-week` (`record_by: "week"`, and `record_by_week: true`) it
+judges by the week, from its Monday: the same, of the week, as serve did
+before 0.72. A firing is judged by the day it started in, one crossing
+midnight by its start. The firings of a day are judged by the signals tied
+to them: every firing of a day tied to the same signals, of a rule no entry
+names, or of the same rule entry, is judged, or none; with no named
+signal, every firing of the day. A window keeps the record of the firings
+tied to its signal alone;
 an incident written down, or written by confirming a window, keeps
 everyone's. A window of a signal not in effect (its `signal` none of the
 names in `settings.impact_signals`: taken away, dropped by a start, or set
 aside past eight; [design/judging.md](design/judging.md), item 5) keeps no
 rule's record, with named signals in effect or none, as no firing is
-tied to its signal: a rule's record in its weeks is what the signals in
+tied to its signal: a rule's record in its days is what the signals in
 effect and the incidents written down keep, as `lapilli verdict`, which
 never read that signal, judges it, and the block below leaves it out.
-Confirmed, it is written down, and keeps everyone's. With named signals,
-a signal's start is the first whole week
+Confirmed, it is written down, and keeps everyone's.
+With named signals, a signal's start is the first whole week
 after where its data begins (`settings.impact_signals[].start`), and a
 firing is read as judged when each of its `signals` that keeps the record
-had started by its week's Monday. Give the time zone's offset from UTC, in
+had started by its day's start (its week's Monday, by week). It differs
+from `lapilli verdict`, which judges a firing by the record at its own
+time, where an incident starts later in the firing's day, which keeps the
+day's, and where the two weeks end in its day, which are kept from the
+day's start ([design/judging.md](design/judging.md), "The record, by
+day"). Give the time zone's offset from UTC, in
 seconds, as `--argjson offset`, and the incidents of the two weeks before
 the period as `earlier` (above):
 
@@ -279,8 +288,11 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 | (($s.impact_signals // []) | map({key: .name, value: .}) | from_entries) as $sig
 | (.incidents + ($ARGS.named.earlier // [])) as $incs
 | ($ARGS.named.offset // 0) as $off
+| ($s.record_by == "week") as $weekly
+| (if $weekly then 7 else 1 end) as $unit
 | [.firings[] | (.start | epoch) as $at
-   | ((($at + $off) / 86400 | floor) as $d | ($d - ($d + 3) % 7) * 86400 - $off) as $w
+   | ((($at + $off) / 86400 | floor) as $d
+      | (if $weekly then $d - ($d + 3) % 7 else $d end) * 86400 - $off) as $w
    | (.signals // []) as $ties
    | [$ties[] | $sig[.] | select(.record)] as $waits
    | (.white | not)
@@ -288,7 +300,7 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
      and ($waits == [] or any($waits[]; .start == null or (.start | epoch) > $w))
      and (any($incs[];
             (.candidate != true or .signal == null or (.signal as $x | any($ties[]; . == $x)))
-            and (.start | epoch) < $w + 7 * 86400
+            and (.start | epoch) < $w + $unit * 86400
             and (if .end then .end | epoch else (.start | epoch) + $s.unknown_length_ns / 1e9 end)
                 >= $w - $s.record_lookback_ns / 1e9)
           | not)]
@@ -864,7 +876,7 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
+| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† |

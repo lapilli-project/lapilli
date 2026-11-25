@@ -36,16 +36,73 @@ type markedSpan struct {
 	parts []ledger.MarkedTally
 }
 
+// markedWeeksBy are the firings marked with each kind by week from Monday
+// w1 to Monday w2, apart by the signals their alerts are tied to: those of
+// a week t judges by day (tallies.split), by day, each with its Day.
+func (s *Server) markedWeeksBy(ctx context.Context, t *tallies, w1, w2 int64) ([]ledger.MarkedTally, error) {
+	ts, err := s.l.MarkedWeeksBy(ctx, w1, w2)
+	if err != nil {
+		return nil, err
+	}
+	var split []int64
+	for w := range t.split {
+		if w >= w1 && w <= w2 {
+			split = append(split, w)
+		}
+	}
+	if len(split) == 0 {
+		return ts, nil
+	}
+	slices.Sort(split)
+	out := make([]ledger.MarkedTally, 0, len(ts))
+	for _, m := range ts {
+		if !t.split[m.At] {
+			out = append(out, m)
+		}
+	}
+	// The days of a week judged alike put together as they are read, as
+	// splitDays does.
+	type key struct {
+		w, rule, signals int64
+		kind, class      string
+	}
+	at := map[key]int{}
+	for _, run := range runsOf(split) {
+		err := s.l.EachMarkedDayBy(ctx, run[0], run[1]+6, func(m ledger.MarkedTally) error {
+			w := ledger.Week(m.At)
+			k := key{w, m.Rule, m.Signals, m.Kind, t.classOf(m.At)}
+			i, ok := at[k]
+			if !ok {
+				at[k] = len(out)
+				m.Day, m.At = m.At, w
+				out = append(out, m)
+				return nil
+			}
+			x := &out[i]
+			x.Firings += m.Firings
+			x.White += m.White
+			x.Refired += m.Refired
+			x.Episodes += m.Episodes
+			x.EpisodesWhite += m.EpisodesWhite
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // markedWeeks reads the marked windows meeting the weeks from Monday w1 to
 // Monday w2, and their tallies.
-func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*markedSpan, error) {
+func (s *Server) markedWeeks(ctx context.Context, t *tallies, w1, w2 int64, own *owners) (*markedSpan, error) {
 	x := &markedSpan{s: s, own: own, tally: map[int64]map[int64]map[string]ledger.MarkedTally{}}
 	ms, err := s.l.MarkedMeeting(ctx, s.l.Midnight(w1), s.l.Midnight(w2+7).Add(-time.Second))
 	if err != nil || len(ms) == 0 {
 		return x, err
 	}
 	x.ms = ms
-	ts, err := s.l.MarkedWeeksBy(ctx, w1, w2)
+	ts, err := s.markedWeeksBy(ctx, t, w1, w2)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +132,7 @@ func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*m
 // marked with kind, those not judged likewise.
 func (x *markedSpan) unjudgedBoth(w int64, kind string, mine func(string) bool, t *tallies) (firings, episodes int) {
 	for _, m := range x.parts {
-		if m.At == w && m.Kind == kind && mine(t.rules[m.Rule].Name) && !t.judgedPart(w, m.Rule, m.Signals) {
+		if m.At == w && m.Kind == kind && mine(t.rules[m.Rule].Name) && !t.judgedPart(m.On(), m.Rule, m.Signals) {
 			firings += m.Firings - m.White
 			episodes += m.Episodes - m.EpisodesWhite
 		}
@@ -403,7 +460,7 @@ func (s *Server) ruleKinds(ctx context.Context, t *tallies, id int64, n int, l r
 		return nil, nil
 	}
 	recent := t.weeks[len(t.weeks)-n:]
-	ms, err := s.l.MarkedWeeksBy(ctx, recent[0], recent[len(recent)-1])
+	ms, err := s.markedWeeksBy(ctx, t, recent[0], recent[len(recent)-1])
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +478,7 @@ func (s *Server) ruleKinds(ctx context.Context, t *tallies, id int64, n int, l r
 		k.Firings += m.Firings
 		k.Caught += m.White
 		k.Refired += m.Refired
-		if t.judgedPart(m.At, m.Rule, m.Signals) {
+		if t.judgedPart(m.On(), m.Rule, m.Signals) {
 			judged[m.Kind] += m.Firings
 		} else {
 			judged[m.Kind] += m.White

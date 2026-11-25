@@ -110,6 +110,13 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       it is caught by those alone; the default, as the
                       others are: an admin can change it on the Settings
                       page, and every firing is judged again with it, once
+  --record-by-week    judge a firing that caught nothing by the record of
+                      its week, as before 0.72, not of its day: a week's
+                      firings are judged when an incident was on in it or
+                      in the two weeks before it, or the impact signal was
+                      read over all of it, so a day's are judged by the
+                      week's record. Changed at a start, every firing is
+                      judged again with it
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)
@@ -972,6 +979,8 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			}
 		case "--yield-on-429":
 			cfg.Yield = val == "true"
+		case "--record-by-week":
+			cfg.RecordByWeek = val == "true"
 		case "--guard":
 			if strings.TrimSpace(val) == "" {
 				return true, fmt.Errorf("--guard: want a PromQL expression, such as rate(prometheus_rule_evaluation_failures_total[5m]) > 0")

@@ -30,6 +30,7 @@ func drillServer(t *testing.T, notify bool) *Server {
 	t.Helper()
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s.cfg.RecordByWeek = true // its fixture is built by the week
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil { // Errors, in effect, never fired
 		t.Fatal(err)

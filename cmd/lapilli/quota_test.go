@@ -1,8 +1,10 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestServeQuotaFlags: the flags that keep Lapilli off the alerts' quota
@@ -42,5 +44,33 @@ func TestServeQuotaFlags(t *testing.T) {
 		if !strings.Contains(out.String(), flag) {
 			t.Errorf("serve -h doesn't say %s", flag)
 		}
+	}
+}
+
+// --record-by-week is lapilli serve's: said in its -h, on by itself,
+// refused by lapilli verdict, which judges each firing by its own time.
+func TestServeRecordByWeekFlag(t *testing.T) {
+	parallel(t)
+	dir := t.TempDir()
+	for given, want := range map[string]bool{"": false, "--record-by-week": true, "--record-by-week=false": false} {
+		args := demoServeArgs(dir, demoListen, "UTC", time.UTC)
+		args = slices.DeleteFunc(args, func(a string) bool { return a == "--record-by-week" })
+		if given != "" {
+			args = append(args, given)
+		}
+		st, err := readServe(args, false)
+		if err != nil || st.cfg.RecordByWeek != want {
+			t.Errorf("%q: RecordByWeek %v, %v", given, st.cfg.RecordByWeek, err)
+		}
+	}
+	rules := write(t, "rules.yaml", "groups: []\n")
+	var out, errs strings.Builder
+	if code := run([]string{"verdict", "--prometheus", "http://127.0.0.1:1", "--rules", rules, "--record-by-week", "x"}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "unknown flag") {
+		t.Errorf("verdict --record-by-week: %d %s", code, errs.String())
+	}
+	out.Reset()
+	run([]string{"serve", "-h"}, &out, &errs)
+	if !strings.Contains(out.String(), "--record-by-week") {
+		t.Error("serve -h doesn't say --record-by-week")
 	}
 }

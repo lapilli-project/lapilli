@@ -1495,7 +1495,9 @@ func (l *Ledger) ForgetMarks(ctx context.Context, keep []string) error {
 // MarkedTally is a rule's firings marked with a kind over a day or a
 // week: those that caught something (White), and those that re-fired.
 type MarkedTally struct {
-	At      int64
+	At int64
+	// Day, of a tally of one day of the week At, is that day (Tally.Day).
+	Day     int64
 	Rule    int64
 	Kind    string
 	Firings int
@@ -1508,6 +1510,14 @@ type MarkedTally struct {
 	// kind (docs/design/judging.md, item 2), and EpisodesWhite those of
 	// them with a white firing.
 	Episodes, EpisodesWhite int
+}
+
+// On is the day or week the tally is judged by (Tally.On).
+func (x MarkedTally) On() int64 {
+	if x.Day != 0 {
+		return x.Day
+	}
+	return x.At
 }
 
 // MarkedDays are the firings marked with each kind by day and rule, from
@@ -1546,20 +1556,34 @@ func (l *Ledger) RuleMarked(ctx context.Context, rule string, from, to int64) ([
 }
 
 func (l *Ledger) markedTallies(ctx context.Context, q string, args ...any) ([]MarkedTally, error) {
+	var out []MarkedTally
+	err := l.eachMarked(ctx, q, args, func(x MarkedTally) error { out = append(out, x); return nil })
+	return out, err
+}
+
+func (l *Ledger) eachMarked(ctx context.Context, q string, args []any, f func(MarkedTally) error) error {
 	rows, err := l.r.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []MarkedTally
+	var x MarkedTally
+	dest := []any{&x.At, &x.Rule, &x.Kind, &x.Firings, &x.White, &x.Refired, &x.Signals, &x.Episodes, &x.EpisodesWhite}
 	for rows.Next() {
-		var x MarkedTally
-		if err := rows.Scan(&x.At, &x.Rule, &x.Kind, &x.Firings, &x.White, &x.Refired, &x.Signals, &x.Episodes, &x.EpisodesWhite); err != nil {
-			return nil, err
+		if err := rows.Scan(dest...); err != nil {
+			return err
 		}
-		out = append(out, x)
+		if err := f(x); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
+}
+
+// EachMarkedDayBy calls f on each tally MarkedDaysBy gives, one at a time.
+func (l *Ledger) EachMarkedDayBy(ctx context.Context, from, to int64, f func(MarkedTally) error) error {
+	return l.eachMarked(ctx, `SELECT d.day, d.rule_id, k.name, d.firings, d.white, d.refired, d.signals, d.episodes, d.episodes_white FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
+		WHERE d.day >= ? AND d.day <= ? ORDER BY d.day, d.rule_id, k.name, d.signals`, []any{from, to}, f)
 }
 
 // kindBit is the bit of the kind named by a parameter, NULL for none: a

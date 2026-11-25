@@ -664,7 +664,7 @@ N of the M firings came with no incident written down in the two weeks before th
 A firing that caught nothing is judged only when the record was kept at
 its time: an incident on in the two weeks before it, or `--impact` read
 over it. Any other is counted, not judged, and a rule none of whose firings
-is judged has a precision of `–`. `lapilli serve` judges by the week: its
+is judged has a precision of `–`. `lapilli serve` judges by the day (by the week with `--record-by-week`): its
 rules list marks such a rule No record, its tables count `? Not judged`,
 and a firing's stone is `? not judged`. Write incidents down, copy them in
 ([Incidents kept elsewhere](incidents.md)), or give `--impact`.

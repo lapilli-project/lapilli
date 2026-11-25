@@ -93,12 +93,12 @@ func TestNotInEffectKeepsNoRecord(t *testing.T) {
 	}
 	// Judged by week, as serve judges: the record of no week.
 	weekly := plain
-	weekly.RecordWeek = func(t time.Time) (time.Time, time.Time) { return sigT0, sigT0.Add(7 * 24 * time.Hour) }
+	weekly.RecordUnit = func(t time.Time) (time.Time, time.Time) { return sigT0, sigT0.Add(7 * 24 * time.Hour) }
 	if rec := RecordOf([]incident.Incident{probe}, weekly); rec.Judges(sigAt(20)) || rec.JudgesAny(sigT0, sigT0.Add(7*24*time.Hour)) {
 		t.Error("by week, a window of probe keeps the record")
 	}
 	named := o
-	named.RecordWeek = weekly.RecordWeek
+	named.RecordUnit = weekly.RecordUnit
 	if rec := RecordOf([]incident.Incident{probe}, named); rec.JudgesTied(sigAt(20), nil) || rec.JudgesTied(sigAt(20), []int{1}) {
 		t.Error("by week, with named signals, a window of probe keeps the record")
 	}

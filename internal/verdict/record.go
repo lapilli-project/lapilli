@@ -19,11 +19,15 @@ import (
 // rule none of whose firings is judged has no precision at all
 // (RuleResult.NoRecord).
 //
-// lapilli verdict judges each firing so. lapilli serve keeps its stones by
-// week, and judges by week (Options.RecordWeek): a week's firings are
-// judged when the record of the week is kept, an incident on in it or in
-// the two weeks before it, so that what it replays is judged as what it
-// keeps is.
+// lapilli verdict judges each firing so. lapilli serve judges by day
+// (Options.RecordUnit, by default) or by week (--record-by week): a day's
+// firings are judged when the record of the day is kept, an incident on in
+// it or in the two weeks before it, or the impact signal read over all of
+// it, and by week, the same of the week, so that what it replays is judged
+// as what it keeps is. By day, it differs from verdict where an incident
+// starts later in the day than a firing, which keeps the day's record, and
+// where one ended two weeks before the day began and not two weeks before
+// the firing (docs/design/judging.md, "The record, by day").
 
 // RecordLookback is how long before a firing an incident still keeps its
 // record: two weeks, the gap lapilli serve's outcomes page asks about ("No
@@ -36,7 +40,7 @@ func RecordFrom(from, to time.Time) time.Time { return from.Add(-RecordLookback)
 
 // A Record is what keeps the record: when each incident firings are judged
 // against was on, and from when an impact signal was read, all of it; and,
-// in lapilli serve, the weeks it is judged by (Options.RecordWeek).
+// in lapilli serve, the days or weeks it is judged by (Options.RecordUnit).
 //
 // With named impact signals (Options.Signals), a firing's record is kept by
 // what could have seen the incident it would catch (JudgesTied): an
@@ -48,8 +52,11 @@ type Record struct {
 	// latest end of any incident up to each. With named signals, of the
 	// incidents with no signal alone.
 	starts, ends []time.Time
-	impactFrom   time.Time
-	week         func(time.Time) (time.Time, time.Time)
+	// edges are where the record may change: each incident's start, and
+	// two weeks after its own end, not only the latest of them (Edges).
+	edges      []time.Time
+	impactFrom time.Time
+	unit       func(time.Time) (time.Time, time.Time)
 	// sig are the named signals, and windows the record each one's windows
 	// keep, in sig.List's order.
 	sig     *Signals
@@ -58,7 +65,7 @@ type Record struct {
 
 // RecordOf is the record incidents keep, by o: one with no end lasting
 // o.UnknownLen, an impact signal read from o.ImpactFrom on (zero for none),
-// and judged by o.RecordWeek's weeks, when it has them; with named signals,
+// and judged by o.RecordUnit's days or weeks, when it has them; with named signals,
 // each signal's windows apart from the rest, and each signal read from its
 // start. A window of a signal not in effect (Options.NotInEffect) keeps no
 // rule's record, with named signals in effect or none.
@@ -100,7 +107,7 @@ func RecordOf(incs []incident.Incident, o Options) Record {
 func recordOf(incs []incident.Incident, o Options, impactFrom time.Time) Record {
 	sorted := slices.Clone(incs)
 	slices.SortFunc(sorted, func(a, b incident.Incident) int { return a.Start.Compare(b.Start) })
-	r := Record{impactFrom: impactFrom, week: o.RecordWeek}
+	r := Record{impactFrom: impactFrom, unit: o.RecordUnit}
 	var end time.Time
 	for _, in := range sorted {
 		if e := in.EndOr(o.UnknownLen); e.After(end) {
@@ -108,6 +115,7 @@ func recordOf(incs []incident.Incident, o Options, impactFrom time.Time) Record 
 		}
 		r.starts = append(r.starts, in.Start)
 		r.ends = append(r.ends, end)
+		r.edges = append(r.edges, in.Start, in.EndOr(o.UnknownLen).Add(RecordLookback))
 	}
 	return r
 }
@@ -144,12 +152,12 @@ func (r Record) At(t time.Time) bool {
 }
 
 // Judges reports whether a firing that started at t is judged by the
-// record: kept at its time, or, judged by week, over its week.
+// record: kept at its time, or, judged by day or week, over its day or week.
 func (r Record) Judges(t time.Time) bool {
-	if r.week == nil {
+	if r.unit == nil {
 		return r.At(t)
 	}
-	from, to := r.week(t)
+	from, to := r.unit(t)
 	return r.Kept(from, to)
 }
 
@@ -158,7 +166,8 @@ func (r Record) Judges(t time.Time) bool {
 // judged by the record: an incident with no signal keeps it, as Judges
 // says; or a window of a signal tied to it does, as an incident would; or
 // it was read: one of the signals tied to it keeps the record, and every
-// one of those had started by t, or, judged by week, by its week's start.
+// one of those had started by t, or, judged by day or week, by its unit's
+// start.
 func (r Record) JudgesTied(t time.Time, ties []int) bool {
 	if r.Judges(t) {
 		return true
@@ -178,8 +187,8 @@ func (r Record) read(t time.Time, ties []int) bool {
 		return false
 	}
 	at := t
-	if r.week != nil {
-		at, _ = r.week(t)
+	if r.unit != nil {
+		at, _ = r.unit(t)
 	}
 	waits := false
 	for _, i := range ties {
@@ -201,9 +210,9 @@ func (r Record) read(t time.Time, ties []int) bool {
 // record of some time in it, or a signal that keeps the record started
 // before its end.
 //
-// Judged by week (lapilli serve), a signal is read over a week only from
-// the week its start is on or before the Monday of: one that started in
-// the middle of the span's last week judges nothing of it.
+// Judged by day or week (lapilli serve), a signal is read over a unit only
+// from the unit its start is on or before the start of: one that started
+// in the middle of the span's last day, or week, judges nothing of it.
 func (r Record) JudgesAny(from, to time.Time) bool {
 	if r.sig != nil {
 		if r.judgesAny(from, to) {
@@ -215,9 +224,9 @@ func (r Record) JudgesAny(from, to time.Time) bool {
 			}
 		}
 		by := to
-		if r.week != nil {
-			by, _ = r.week(to.Add(-time.Nanosecond))
-			by = by.Add(time.Nanosecond) // on the last week's Monday, or before it
+		if r.unit != nil {
+			by, _ = r.unit(to.Add(-time.Nanosecond))
+			by = by.Add(time.Nanosecond) // on the last unit's start, or before it
 		}
 		return slices.ContainsFunc(r.sig.List, func(s Signal) bool { return s.Record && !s.Start.IsZero() && s.Start.Before(by) })
 	}
@@ -228,13 +237,13 @@ func (r Record) JudgesAny(from, to time.Time) bool {
 func (r Record) Named() bool { return r.sig != nil }
 
 func (r Record) judgesAny(from, to time.Time) bool {
-	if r.week == nil {
+	if r.unit == nil {
 		// The impact signal read from some time in it on, where its data
 		// begins (lapilli verdict), keeps the record of the rest.
 		return r.Kept(from, to) || !r.impactFrom.IsZero() && r.impactFrom.Before(to)
 	}
 	for at, n := from, 0; n == 0 || at.Before(to); n++ {
-		a, b := r.week(at)
+		a, b := r.unit(at)
 		if r.Kept(a, b) {
 			return true
 		}
@@ -271,3 +280,54 @@ const SomeUnjudgedSignalsText = `%d of the %d firings came with no incident writ
 // SomeUnjudgedText says, for a person, how many of a period's firings had
 // no record at their time.
 const SomeUnjudgedText = `%d of the %d firings came with no incident written down in the two weeks before them, and caught none: they are counted, not judged, and are in no rule's precision.`
+
+// Edges are the times at which what keeps the record may change: where an
+// incident starts, two weeks after its end, and where an impact signal's
+// reading starts, a window's or a signal's. A span of time with none in it
+// is kept, or not, all alike: lapilli serve reads a week's days apart only
+// where there is one. They are of every incident, not of the latest to
+// end up to each.
+func (r Record) Edges() []time.Time {
+	out := slices.Clone(r.edges)
+	if !r.impactFrom.IsZero() {
+		out = append(out, r.impactFrom)
+	}
+	if r.sig != nil {
+		for _, s := range r.sig.List {
+			if s.Record && !s.Start.IsZero() {
+				out = append(out, s.Start)
+			}
+		}
+	}
+	for _, w := range r.windows {
+		out = append(out, w.Edges()...)
+	}
+	return out
+}
+
+// Key says what judges the firings in [from, to), a unit: two units with
+// the same key are judged alike, whatever signals a firing is tied to.
+// With no named signal, whether the record of the unit is kept (Kept);
+// with them, whether one of an incident's is, as Judges says it at from,
+// and, apart for each window of a signal and each signal that keeps the
+// record, whether it keeps it, or has started, by from.
+func (r Record) Key(from, to time.Time) string {
+	if r.sig == nil {
+		return string('0' + btoi(r.Kept(from, to)))
+	}
+	b := []byte{'0' + btoi(r.Judges(from))}
+	for _, w := range r.windows {
+		b = append(b, '0'+btoi(w.Judges(from)))
+	}
+	for _, s := range r.sig.List {
+		b = append(b, '0'+btoi(s.Record && !s.Start.IsZero() && !s.Start.After(from)))
+	}
+	return string(b)
+}
+
+func btoi(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
+}

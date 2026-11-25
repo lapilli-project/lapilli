@@ -49,7 +49,8 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		// A catch by a rule noisy in the incident's week, as /incidents,
 		// the overview and the summary judge it: not by the seven days to
 		// now, so an incident is in the same state everywhere. Each day's
-		// firings are judged by its week's record, as the tallies have it.
+		// firings are judged by its day's record (its week's, with
+		// --record-by-week), as the tallies have it.
 		t, err := s.tallies(ctx, weeks)
 		if err != nil {
 			s.oops(w, r, err)
@@ -73,7 +74,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Episodes.White += d.EpisodesWhite
 			rr.ActionYes += d.ActionYes
 			rr.ActionNo += d.ActionNo
-			if !t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals) {
+			if !t.judgedDay(d.At, d.Rule, d.Signals) {
 				rr.Unjudged += d.Firings - d.White
 				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
 			}
