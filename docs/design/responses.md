@@ -136,7 +136,7 @@ Each firing has one, the first of these that holds:
    one.
 3. **unanswered**: its page was not acknowledged, and its alert manager
    resolved it.
-4. **changed, routine**: no page, and only routine changes.
+4. **routine**: no page, and only routine changes.
 5. **none**: nothing above is known (a page still open and unacknowledged
    is none until it resolves).
 
@@ -210,11 +210,19 @@ and NONE; then how many pages matched no firing (a renamed rule, labels the
 tool cut), and, with `--rollouts`, whether autoscalers' targets were found.
 
 - `--json`: each firing's `response`
-  `{"kind", "useful", "change": {"kind", "at", "labels", "routine"}, "page": {"id", "sent", "acknowledged", "resolved", "resolved_by"}}`
-  (`useful` true, false or null); each rule's `responses`
-  `{"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"}`;
-  the report's `responses` `{"pages", "pages_unmatched", "changes", "autoscalers_known"}`;
-  `settings.noisy_by` and `settings.routine`.
+  `{"kind", "useful", "change": {"kind", "at", "labels", "routine"}, "page": {"id", "sent", "acknowledged", "resolved", "resolved_by"}}`.
+  `kind` is `changed`, `routine`, `acknowledged`, `unanswered` or `none`;
+  `useful` is true, false or null. `change` (its `kind` is `rollout`,
+  `rollback`, `scale` or `deploy`; `labels` left out when it has none) is
+  there for a firing with a change (a routine one is kept too), and `page`
+  for one with a page;
+  `acknowledged`, `resolved` and `resolved_by` are left out when the page
+  has none. Each rule's `responses`
+  `{"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"}`
+  (the five kinds add up to its firings; `actionable` is null when no firing
+  is known useful or not); the report's `responses`
+  `{"pages", "pages_unmatched", "changes", "autoscalers_known"}`;
+  `settings.noisy_by` (`caught` or `useful`) and `settings.routine`.
 - CSV: the rule's counts and actionable as columns after the others.
 - `--metrics`: `lapilli_rule_responses{rule, response}` and
   `lapilli_rule_actionable{rule}`.
@@ -232,7 +240,7 @@ tool cut), and, with `--rollouts`, whether autoscalers' targets were found.
   `revision`; and `rollout_spans`, the spans each workload's changes are
   known over. Each run reads its hours' and keeps them, so judging the
   ledger again asks Prometheus nothing.
-- `firings.response` (0 none, 1 changed, 2 changed routine, 3 acknowledged,
+- `firings.response` (0 none, 1 changed, 2 routine, 3 acknowledged,
   4 unanswered) and `firings.routine` (1 when a routine change is kept
   with an acknowledged or unanswered response) and `firings.useful` (−1 unknown, 0, 1): worked out as
   stones are, and again whenever stones are.
